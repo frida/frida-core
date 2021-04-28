@@ -14,6 +14,10 @@ namespace Frida {
 		GLIB,
 		OTHER;
 
+		public static Runtime from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Runtime> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<Runtime> (this);
 		}
@@ -1450,6 +1454,10 @@ namespace Frida {
 		LOCAL,
 		REMOTE,
 		USB;
+
+		public static DeviceType from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<DeviceType> (nick);
+		}
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<DeviceType> (this);

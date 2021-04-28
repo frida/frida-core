@@ -217,19 +217,19 @@ frida_system_enumerate_processes (int * result_length)
     FridaHostProcessInfo info = { 0, };
     gboolean still_alive = TRUE;
 
-    info._pid = e->kp_proc.p_pid;
+    info.pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info._pid);
+    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info.pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
       app_name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-      info._name = g_strdup ([app_name UTF8String]);
+      info.name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
-      extract_icons_from_identifier (identifier, &info._small_icon, &info._large_icon);
+      extract_icons_from_identifier (identifier, &info.small_icon, &info.large_icon);
 
       [identifier release];
     }
@@ -237,26 +237,26 @@ frida_system_enumerate_processes (int * result_length)
 #endif
     {
 #ifdef HAVE_MACOS
-      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info._pid];
+      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info.pid];
       if (app.icon != nil)
       {
-        info._name = g_strdup ([app.localizedName UTF8String]);
+        info.name = g_strdup ([app.localizedName UTF8String]);
 
-        extract_icons_from_image (app.icon, &info._small_icon, &info._large_icon);
+        extract_icons_from_image (app.icon, &info.small_icon, &info.large_icon);
       }
       else
 #endif
       {
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
-        still_alive = proc_pidpath (info._pid, path, sizeof (path)) > 0;
+        still_alive = proc_pidpath (info.pid, path, sizeof (path)) > 0;
         if (still_alive)
         {
-          info._name = g_path_get_basename (path);
+          info.name = g_path_get_basename (path);
         }
 
-        frida_image_data_init_empty (&info._small_icon);
-        frida_image_data_init_empty (&info._large_icon);
+        frida_image_data_init_empty (&info.small_icon);
+        frida_image_data_init_empty (&info.large_icon);
       }
     }
 

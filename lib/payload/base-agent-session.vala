@@ -186,28 +186,27 @@ namespace Frida {
 			child_gating_enabled = false;
 		}
 
-		public async AgentScriptId create_script (string source, AgentScriptOptions options,
+		public async AgentScriptId create_script (string source, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
+			var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options));
 			return instance.script_id;
 		}
 
-		public async AgentScriptId create_script_from_bytes (uint8[] bytes, AgentScriptOptions options,
+		public async AgentScriptId create_script_from_bytes (uint8[] bytes, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			var instance = yield script_engine.create_script (null, new Bytes (bytes),
-				ScriptOptions._deserialize (options.data));
+			var instance = yield script_engine.create_script (null, new Bytes (bytes), ScriptOptions._deserialize (options));
 			return instance.script_id;
 		}
 
-		public async uint8[] compile_script (string source, AgentScriptOptions options,
+		public async uint8[] compile_script (string source, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
+			var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options));
 			return bytes.get_data ();
 		}
 
@@ -255,9 +254,9 @@ namespace Frida {
 			script_engine.post_to_debugger (message);
 		}
 
-		public async PortalMembershipId join_portal (string address, AgentPortalOptions options,
+		public async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			return yield invader.join_portal (parse_cluster_address (address), PortalOptions._deserialize (options.data),
+			return yield invader.join_portal (parse_cluster_address (address), PortalOptions._deserialize (options),
 				cancellable);
 		}
 
@@ -266,7 +265,7 @@ namespace Frida {
 		}
 
 #if HAVE_NICE
-		public async void offer_peer_connection (string offer_sdp, AgentPeerOptions peer_options, string cert_pem,
+		public async void offer_peer_connection (string offer_sdp, HashTable<string, Variant> peer_options, string cert_pem,
 				Cancellable? cancellable, out string answer_sdp) throws Error, IOError {
 			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, RELIABLE | ICE_TRICKLE);
 			agent.controlling_mode = false;
@@ -277,7 +276,7 @@ namespace Frida {
 			uint component_id = 1;
 			agent.set_stream_name (stream_id, "application");
 
-			var peer_opts = PeerOptions._deserialize (peer_options.data);
+			var peer_opts = PeerOptions._deserialize (peer_options);
 
 			string? stun_server = peer_opts.stun_server;
 			if (stun_server != null) {
@@ -579,7 +578,7 @@ namespace Frida {
 			assert_not_reached ();
 		}
 #else
-		public async void offer_peer_connection (string offer_sdp, AgentPeerOptions peer_options, string cert_pem,
+		public async void offer_peer_connection (string offer_sdp, HashTable<string, Variant> peer_options, string cert_pem,
 				Cancellable? cancellable, out string answer_sdp) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Peer-to-peer support not available due to build configuration");
 		}

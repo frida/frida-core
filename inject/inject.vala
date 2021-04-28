@@ -61,13 +61,12 @@ namespace Frida.Inject {
 		var options = new SessionOptions ();
 
 		if (realm_str != null) {
-			var klass = (EnumClass) typeof (Realm).class_ref ();
-			var v = klass.get_value_by_nick (realm_str);
-			if (v == null) {
-				printerr ("Invalid realm\n");
+			try {
+				options.realm = Realm.from_nick (realm_str);
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
 				return 3;
 			}
-			options.realm = (Realm) v.value;
 		}
 
 		if (script_path == null || script_path == "") {
@@ -83,13 +82,12 @@ namespace Frida.Inject {
 
 		ScriptRuntime script_runtime = DEFAULT;
 		if (script_runtime_str != null) {
-			var klass = (EnumClass) typeof (ScriptRuntime).class_ref ();
-			var v = klass.get_value_by_nick (script_runtime_str);
-			if (v == null) {
-				printerr ("Invalid script runtime\n");
+			try {
+				script_runtime = ScriptRuntime.from_nick ();
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
 				return 5;
 			}
-			script_runtime = (ScriptRuntime) v.value;
 		}
 
 		var parameters = new Json.Node.alloc ().init_object (new Json.Object ());

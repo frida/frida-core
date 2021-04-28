@@ -1917,7 +1917,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   if (blob != NULL)
   {
     mapper = gum_darwin_mapper_new_take_blob (path_or_name,
-        g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->_address), blob->_size,
+        g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->address), blob->size,
             (GDestroyNotify) frida_mapper_library_blob_deallocate, frida_mapped_library_blob_dup (blob)),
         resolver, &io_error);
   }
@@ -4954,7 +4954,7 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
 static void
 frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self)
 {
-  mach_vm_deallocate (mach_task_self (), self->_address, self->_allocated_size);
+  mach_vm_deallocate (mach_task_self (), self->address, self->allocated_size);
 
   frida_mapped_library_blob_free (self);
 }

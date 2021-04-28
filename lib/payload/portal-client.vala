@@ -248,8 +248,9 @@ namespace Frida {
 				on_connection_event ();
 		}
 
-		private async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
-			var opts = SessionOptions._deserialize (options.data);
+		private async void open (AgentSessionId id, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var opts = SessionOptions._deserialize (options);
 
 			if (opts.realm == EMULATED)
 				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported by frida-gadget");

@@ -13,7 +13,7 @@ namespace Frida {
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentSessionId attach (uint pid, AgentSessionOptions options,
+		public abstract async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void reattach (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
@@ -33,7 +33,8 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentSessionProvider16")]
 	public interface AgentSessionProvider : Object {
-		public abstract async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void open (AgentSessionId id, HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
 #if !WINDOWS
 		public abstract async void migrate (AgentSessionId id, GLib.Socket to_socket, Cancellable? cancellable) throws GLib.Error;
 #endif
@@ -57,11 +58,11 @@ namespace Frida {
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async AgentScriptId create_script (string source, AgentScriptOptions options,
+		public abstract async AgentScriptId create_script (string source, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes, AgentScriptOptions options,
+		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async uint8[] compile_script (string source, AgentScriptOptions options,
+		public abstract async uint8[] compile_script (string source, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
@@ -73,12 +74,12 @@ namespace Frida {
 		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async PortalMembershipId join_portal (string address, AgentPortalOptions options,
+		public abstract async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void offer_peer_connection (string offer_sdp, AgentPeerOptions peer_options, string cert_pem,
-			Cancellable? cancellable, out string answer_sdp) throws GLib.Error;
+		public abstract async void offer_peer_connection (string offer_sdp, HashTable<string, Variant> peer_options,
+			string cert_pem, Cancellable? cancellable, out string answer_sdp) throws GLib.Error;
 		public abstract async void add_candidates (string[] candidate_sdps, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void notify_candidate_gathering_done (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void begin_migration (Cancellable? cancellable) throws GLib.Error;
@@ -235,7 +236,8 @@ namespace Frida {
 			throw_not_authorized ();
 		}
 
-		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
@@ -276,6 +278,10 @@ namespace Frida {
 		NATIVE,
 		EMULATED;
 
+		public static Realm from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Realm> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<Realm> (this);
 		}
@@ -284,6 +290,10 @@ namespace Frida {
 	public enum SpawnStartState {
 		RUNNING,
 		SUSPENDED;
+
+		public static SpawnStartState from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<SpawnStartState> (nick);
+		}
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<SpawnStartState> (this);
@@ -295,16 +305,17 @@ namespace Frida {
 		RESIDENT,
 		DEFERRED;
 
+		public static UnloadPolicy from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<UnloadPolicy> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<UnloadPolicy> (this);
 		}
 	}
 
 	public struct InjectorPayloadId {
-		public uint handle {
-			get;
-			private set;
-		}
+		public uint handle;
 
 		public InjectorPayloadId (uint handle) {
 			this.handle = handle;
@@ -320,20 +331,9 @@ namespace Frida {
 	}
 
 	public struct MappedLibraryBlob {
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public uint size {
-			get;
-			private set;
-		}
-
-		public uint allocated_size {
-			get;
-			private set;
-		}
+		public uint64 address;
+		public uint size;
+		public uint allocated_size;
 
 		public MappedLibraryBlob (uint64 address, uint size, uint allocated_size) {
 			this.address = address;
@@ -360,6 +360,10 @@ namespace Frida {
 		PROCESS_TERMINATED,
 		CONNECTION_TERMINATED,
 		DEVICE_LOST;
+
+		public static SessionDetachReason from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<SessionDetachReason> (nick);
+		}
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<SessionDetachReason> (this);
@@ -414,30 +418,11 @@ namespace Frida {
 	}
 
 	public struct HostApplicationInfo {
-		public string identifier {
-			get;
-			private set;
-		}
-
-		public string name {
-			get;
-			private set;
-		}
-
-		public uint pid {
-			get;
-			private set;
-		}
-
-		public ImageData small_icon {
-			get;
-			private set;
-		}
-
-		public ImageData large_icon {
-			get;
-			private set;
-		}
+		public string identifier;
+		public string name;
+		public uint pid;
+		public ImageData small_icon;
+		public ImageData large_icon;
 
 		public HostApplicationInfo (string identifier, string name, uint pid, ImageData small_icon, ImageData large_icon) {
 			this.identifier = identifier;
@@ -457,25 +442,10 @@ namespace Frida {
 	}
 
 	public struct HostProcessInfo {
-		public uint pid {
-			get;
-			private set;
-		}
-
-		public string name {
-			get;
-			private set;
-		}
-
-		public ImageData small_icon {
-			get;
-			private set;
-		}
-
-		public ImageData large_icon {
-			get;
-			private set;
-		}
+		public uint pid;
+		public string name;
+		public ImageData small_icon;
+		public ImageData large_icon;
 
 		public HostProcessInfo (uint pid, string name, ImageData small_icon, ImageData large_icon) {
 			this.pid = pid;
@@ -500,25 +470,10 @@ namespace Frida {
 	}
 
 	public struct ImageData {
-		public int width {
-			get;
-			private set;
-		}
-
-		public int height {
-			get;
-			private set;
-		}
-
-		public int rowstride {
-			get;
-			private set;
-		}
-
-		public string pixels {
-			get;
-			private set;
-		}
+		public int width;
+		public int height;
+		public int rowstride;
+		public string pixels;
 
 		public ImageData (int width, int height, int rowstride, string pixels) {
 			this.width = width;
@@ -536,50 +491,20 @@ namespace Frida {
 	}
 
 	public struct HostSpawnOptions {
-		public bool has_argv {
-			get;
-			set;
-		}
+		public bool has_argv;
+		public string[] argv;
 
-		public string[] argv {
-			get;
-			set;
-		}
+		public bool has_envp;
+		public string[] envp;
 
-		public bool has_envp {
-			get;
-			set;
-		}
+		public bool has_env;
+		public string[] env;
 
-		public string[] envp {
-			get;
-			set;
-		}
+		public string cwd;
 
-		public bool has_env {
-			get;
-			set;
-		}
+		public Stdio stdio;
 
-		public string[] env {
-			get;
-			set;
-		}
-
-		public string cwd {
-			get;
-			set;
-		}
-
-		public Stdio stdio {
-			get;
-			set;
-		}
-
-		public uint8[] aux {
-			get;
-			set;
-		}
+		public HashTable<string, Variant> aux;
 
 		public HostSpawnOptions () {
 			this.argv = {};
@@ -587,11 +512,7 @@ namespace Frida {
 			this.env = {};
 			this.cwd = "";
 			this.stdio = INHERIT;
-			this.aux = {};
-		}
-
-		public VariantDict load_aux () {
-			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (aux), false));
+			this.aux = make_options_dict ();
 		}
 
 		public string[] compute_argv (string path) {
@@ -639,17 +560,6 @@ namespace Frida {
 		}
 	}
 
-	public struct AgentSessionOptions {
-		public uint8[] data {
-			get;
-			set;
-		}
-
-		public AgentSessionOptions () {
-			this.data = {};
-		}
-	}
-
 	public class SessionOptions : Object {
 		public Realm realm {
 			get;
@@ -660,32 +570,37 @@ namespace Frida {
 		public uint persist_timeout {
 			get;
 			set;
+			default = 0;
 		}
 
-		public Bytes _serialize () {
-			var dict = new VariantDict ();
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_options_dict ();
 
 			if (realm != NATIVE)
-				dict.insert_value ("realm", new Variant.byte (realm));
+				dict["realm"] = new Variant.string (realm.to_nick ());
 
 			if (persist_timeout != 0)
-				dict.insert_value ("persist-timeout", new Variant.uint32 (persist_timeout));
+				dict["persistTimeout"] = new Variant.uint32 (persist_timeout);
 
-			return dict.end ().get_data_as_bytes ();
+			return dict;
 		}
 
-		public static SessionOptions _deserialize (uint8[] data) {
-			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
-
+		public static SessionOptions _deserialize (HashTable<string, Variant> dict) throws Error {
 			var options = new SessionOptions ();
 
-			uint8 raw_realm = Realm.NATIVE;
-			dict.lookup ("realm", "y", out raw_realm);
-			options.realm = (Realm) raw_realm;
+			Variant? realm = dict["realm"];
+			if (realm != null) {
+				if (!realm.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'realm' option must be a string");
+				options.realm = Realm.from_nick (realm.get_string ());
+			}
 
-			uint32 raw_persist_timeout = 0;
-			dict.lookup ("persist-timeout", "u", out raw_persist_timeout);
-			options.persist_timeout = raw_persist_timeout;
+			Variant? persist_timeout = dict["persistTimeout"];
+			if (persist_timeout != null) {
+				if (!realm.is_of_type (VariantType.UINT32))
+					throw new Error.INVALID_ARGUMENT ("The 'persistTimeout' option must be a uint32");
+				options.persist_timeout = realm.get_uint32 ();
+			}
 
 			return options;
 		}
@@ -695,21 +610,18 @@ namespace Frida {
 		INHERIT,
 		PIPE;
 
+		public static Stdio from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Stdio> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<Stdio> (this);
 		}
 	}
 
 	public struct HostSpawnInfo {
-		public uint pid {
-			get;
-			private set;
-		}
-
-		public string identifier {
-			get;
-			private set;
-		}
+		public uint pid;
+		public string identifier;
 
 		public HostSpawnInfo (uint pid, string identifier) {
 			this.pid = pid;
@@ -718,10 +630,7 @@ namespace Frida {
 	}
 
 	public struct HostChildId {
-		public uint handle {
-			get;
-			private set;
-		}
+		public uint handle;
 
 		public HostChildId (uint handle) {
 			this.handle = handle;
@@ -737,50 +646,19 @@ namespace Frida {
 	}
 
 	public struct HostChildInfo {
-		public uint pid {
-			get;
-			private set;
-		}
+		public uint pid;
+		public uint parent_pid;
 
-		public uint parent_pid {
-			get;
-			private set;
-		}
+		public ChildOrigin origin;
 
-		public ChildOrigin origin {
-			get;
-			private set;
-		}
+		public string identifier;
+		public string path;
 
-		public string identifier {
-			get;
-			set;
-		}
+		public bool has_argv;
+		public string[] argv;
 
-		public string path {
-			get;
-			set;
-		}
-
-		public bool has_argv {
-			get;
-			set;
-		}
-
-		public string[] argv {
-			get;
-			set;
-		}
-
-		public bool has_envp {
-			get;
-			set;
-		}
-
-		public string[] envp {
-			get;
-			set;
-		}
+		public bool has_envp;
+		public string[] envp;
 
 		public HostChildInfo (uint pid, uint parent_pid, ChildOrigin origin) {
 			this.pid = pid;
@@ -798,48 +676,33 @@ namespace Frida {
 		EXEC,
 		SPAWN;
 
+		public static ChildOrigin from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<ChildOrigin> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<ChildOrigin> (this);
 		}
 	}
 
 	public struct CrashInfo {
-		public uint pid {
-			get;
-			set;
-		}
+		public uint pid;
+		public string process_name;
 
-		public string process_name {
-			get;
-			set;
-		}
+		public string summary;
+		public string report;
 
-		public string summary {
-			get;
-			set;
-		}
+		public HashTable<string, Variant> parameters;
 
-		public string report {
-			get;
-			set;
-		}
-
-		public uint8[] parameters {
-			get;
-			set;
-		}
-
-		public CrashInfo (uint pid, string process_name, string summary, string report, Variant? parameters = null) {
+		public CrashInfo (uint pid, string process_name, string summary, string report,
+				HashTable<string, Variant>? parameters = null) {
 			this.pid = pid;
 			this.process_name = process_name;
 
 			this.summary = summary;
 			this.report = report;
 
-			if (parameters != null)
-				this.parameters = parameters.get_data_as_bytes ().get_data ();
-			else
-				this.parameters = {};
+			this.parameters = (parameters != null) ? parameters : make_options_dict ();
 		}
 
 		public CrashInfo.empty () {
@@ -847,15 +710,12 @@ namespace Frida {
 			this.process_name = "";
 			this.summary = "";
 			this.report = "";
-			this.parameters = {};
+			this.parameters = make_options_dict ();
 		}
 	}
 
 	public struct AgentSessionId {
-		public string handle {
-			get;
-			private set;
-		}
+		public string handle;
 
 		public AgentSessionId (string handle) {
 			this.handle = handle;
@@ -875,10 +735,7 @@ namespace Frida {
 	}
 
 	public struct AgentScriptId {
-		public uint handle {
-			get;
-			private set;
-		}
+		public uint handle;
 
 		public AgentScriptId (uint handle) {
 			this.handle = handle;
@@ -890,17 +747,6 @@ namespace Frida {
 
 		public static bool equal (AgentScriptId? a, AgentScriptId? b) {
 			return a.handle == b.handle;
-		}
-	}
-
-	public struct AgentScriptOptions {
-		public uint8[] data {
-			get;
-			set;
-		}
-
-		public AgentScriptOptions () {
-			this.data = {};
 		}
 	}
 
@@ -916,30 +762,34 @@ namespace Frida {
 			default = DEFAULT;
 		}
 
-		public Bytes _serialize () {
-			var dict = new VariantDict ();
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_options_dict ();
 
 			if (name != null)
-				dict.insert_value ("name", new Variant.string (name));
+				dict["name"] = new Variant.string (name);
 
 			if (runtime != DEFAULT)
-				dict.insert_value ("runtime", new Variant.byte (runtime));
+				dict["runtime"] = new Variant.string (runtime.to_nick ());
 
-			return dict.end ().get_data_as_bytes ();
+			return dict;
 		}
 
-		public static ScriptOptions _deserialize (uint8[] data) {
-			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
-
+		public static ScriptOptions _deserialize (HashTable<string, Variant> dict) throws Error {
 			var options = new ScriptOptions ();
 
-			string? name = null;
-			dict.lookup ("name", "s", out name);
-			options.name = name;
+			Variant? name = dict["name"];
+			if (name != null) {
+				if (!name.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'name' option must be a string");
+				options.name = name.get_string ();
+			}
 
-			uint8 raw_runtime = ScriptRuntime.DEFAULT;
-			dict.lookup ("runtime", "y", out raw_runtime);
-			options.runtime = (ScriptRuntime) raw_runtime;
+			Variant? runtime = dict["runtime"];
+			if (runtime != null) {
+				if (!runtime.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'runtime' option must be a string");
+				options.runtime = ScriptRuntime.from_nick (runtime.get_string ());
+			}
 
 			return options;
 		}
@@ -950,16 +800,17 @@ namespace Frida {
 		QJS,
 		V8;
 
+		public static ScriptRuntime from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<ScriptRuntime> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<ScriptRuntime> (this);
 		}
 	}
 
 	public struct PortalMembershipId {
-		public uint handle {
-			get;
-			private set;
-		}
+		public uint handle;
 
 		public PortalMembershipId (uint handle) {
 			this.handle = handle;
@@ -974,17 +825,6 @@ namespace Frida {
 		}
 	}
 
-	public struct AgentPortalOptions {
-		public uint8[] data {
-			get;
-			set;
-		}
-
-		public AgentPortalOptions () {
-			this.data = {};
-		}
-	}
-
 	public class PortalOptions : Object {
 		public TlsCertificate? certificate {
 			get;
@@ -996,48 +836,40 @@ namespace Frida {
 			set;
 		}
 
-		public Bytes _serialize () {
-			var dict = new VariantDict ();
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_options_dict ();
 
 			if (certificate != null)
-				dict.insert_value ("certificate", new Variant.string (certificate.certificate_pem));
+				dict["certificate"] = new Variant.string (certificate.certificate_pem);
 
 			if (token != null)
-				dict.insert_value ("token", new Variant.string (token));
+				dict["token"] = new Variant.string (token);
 
-			return dict.end ().get_data_as_bytes ();
+			return dict;
 		}
 
-		public static PortalOptions _deserialize (uint8[] data) {
-			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
-
+		public static PortalOptions _deserialize (HashTable<string, Variant> dict) throws Error {
 			var options = new PortalOptions ();
 
-			string? cert_pem = null;
-			dict.lookup ("certificate", "s", out cert_pem);
+			Variant? cert_pem = dict["certificate"];
 			if (cert_pem != null) {
+				if (!cert_pem.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'certificate' option must be a string");
 				try {
-					options.certificate = new TlsCertificate.from_pem (cert_pem, -1);
+					options.certificate = new TlsCertificate.from_pem (cert_pem.get_string (), -1);
 				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("%s", e.message);
 				}
 			}
 
-			string? token = null;
-			dict.lookup ("token", "s", out token);
-			options.token = token;
+			Variant? token = dict["token"];
+			if (token != null) {
+				if (!token.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'token' option must be a string");
+				options.token = token.get_string ();
+			}
 
 			return options;
-		}
-	}
-
-	public struct AgentPeerOptions {
-		public uint8[] data {
-			get;
-			set;
-		}
-
-		public AgentPeerOptions () {
-			this.data = {};
 		}
 	}
 
@@ -1062,33 +894,36 @@ namespace Frida {
 				func (relay);
 		}
 
-		public Bytes _serialize () {
-			var dict = new VariantDict ();
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_options_dict ();
 
 			if (stun_server != null)
-				dict.insert_value ("stun-server", new Variant.string (stun_server));
+				dict["stunServer"] = new Variant.string (stun_server);
 
 			if (!relays.is_empty) {
 				var builder = new VariantBuilder (new VariantType.array (Relay.get_variant_type ()));
 				foreach (var relay in relays)
 					builder.add_value (relay.to_variant ());
-				dict.insert_value ("relays", builder.end ());
+				dict["relays"] = builder.end ();
 			}
 
-			return dict.end ().get_data_as_bytes ();
+			return dict;
 		}
 
-		public static PeerOptions _deserialize (uint8[] data) {
-			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
-
+		public static PeerOptions _deserialize (HashTable<string, Variant> dict) throws Error {
 			var options = new PeerOptions ();
 
-			string? stun_server = null;
-			dict.lookup ("stun-server", "s", out stun_server);
-			options.stun_server = stun_server;
+			Variant? stun_server = dict["stunServer"];
+			if (stun_server != null) {
+				if (!stun_server.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'stunServer' option must be a string");
+				options.stun_server = stun_server.get_string ();
+			}
 
-			Variant? relays_val = dict.lookup_value ("relays", new VariantType.array (Relay.get_variant_type ()));
+			Variant? relays_val = dict["relays"];
 			if (relays_val != null) {
+				if (!relays_val.is_of_type (new VariantType.array (Relay.get_variant_type ())))
+					throw new Error.INVALID_ARGUMENT ("The 'relays' option must be an array of tuples");
 				var iter = relays_val.iterator ();
 				Variant? val;
 				while ((val = iter.next_value ()) != null) {
@@ -1147,6 +982,10 @@ namespace Frida {
 		}
 	}
 
+	public HashTable<string, Variant> make_options_dict () {
+		return new HashTable<string, Variant> (str_hash, str_equal);
+	}
+
 	public enum RelayKind {
 		TURN_UDP,
 		TURN_TCP,
@@ -1180,6 +1019,14 @@ namespace Frida {
 	}
 
 	namespace Marshal {
+		public static T enum_from_nick<T> (string nick) throws Error {
+			var klass = (EnumClass) typeof (T).class_ref ();
+			var v = klass.get_value_by_nick (nick);
+			if (v == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid %s", klass.get_type ().name ());
+			return (Realm) v.value;
+		}
+
 		public static string enum_to_nick<T> (int val) {
 			var klass = (EnumClass) typeof (T).class_ref ();
 			return klass.get_value (val).value_nick;

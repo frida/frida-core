@@ -17,7 +17,11 @@ namespace Frida.Server {
 
 	private enum PolicySoftenerFlavor {
 		SYSTEM,
-		INTERNAL
+		INTERNAL;
+
+		public static PolicySoftenerFlavor from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<PolicySoftenerFlavor> (nick);
+		}
 	}
 
 	private delegate void ReadyHandler (bool success);
@@ -81,13 +85,12 @@ namespace Frida.Server {
 
 		PolicySoftenerFlavor softener_flavor = SYSTEM;
 		if (softener_flavor_str != null) {
-			var klass = (EnumClass) typeof (PolicySoftenerFlavor).class_ref ();
-			var v = klass.get_value_by_nick (softener_flavor_str);
-			if (v == null) {
-				printerr ("Invalid policy softener flavor\n");
+			try {
+				softener_flavor = PolicySoftenerFlavor.from_nick (softener_flavor_str);
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
 				return 3;
 			}
-			softener_flavor = (PolicySoftenerFlavor) v.value;
 		}
 
 #if IOS
