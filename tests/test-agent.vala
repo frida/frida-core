@@ -553,7 +553,8 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages)
 				message_queue.offer (m);
 		}

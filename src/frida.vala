@@ -1922,7 +1922,7 @@ namespace Frida {
 
 		private Debugger? debugger;
 
-		private uint64 last_message_serial = 0;
+		private uint last_batch_id = 0;
 
 #if HAVE_NICE
 		private Nice.Agent? nice_agent;
@@ -1992,7 +1992,7 @@ namespace Frida {
 			commit_migration (agent_session);
 
 			try {
-				yield agent_session.resume (cancellable);
+				yield agent_session.resume (last_batch_id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2616,13 +2616,9 @@ namespace Frida {
 			}
 		}
 
-		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages) {
-				uint64 serial = m.serial;
-				if (serial <= last_message_serial && last_message_serial - serial < uint32.MAX / 2) {
-					continue;
-				}
-
 				switch (m.kind) {
 					case SCRIPT: {
 						var script = scripts[m.script_id];
@@ -2634,9 +2630,9 @@ namespace Frida {
 						debugger.handle_message_from_backend (m.text);
 						break;
 				}
-
-				last_message_serial = serial;
 			}
+
+			last_batch_id = batch_id;
 		}
 
 		public void _release_script (AgentScriptId script_id) {

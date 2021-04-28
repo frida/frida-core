@@ -1270,7 +1270,8 @@ namespace Frida {
 			unloaded ();
 		}
 
-		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages) {
 				if (m.kind == SCRIPT && m.script_id == script)
 					on_message_from_script (m.text);

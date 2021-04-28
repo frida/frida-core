@@ -43,7 +43,9 @@ namespace Frida {
 		private Promise<bool>? delivery_request;
 		private Cancellable delivery_cancellable = new Cancellable ();
 		private Gee.Queue<AgentMessage?> pending_messages = new Gee.ArrayQueue<AgentMessage?> ();
-		private uint32 next_serial = 1;
+		private uint pending_batch_id = 0;
+		private uint pending_batch_size = 0;
+		private uint next_batch_id = 1;
 
 		private bool child_gating_enabled = false;
 
@@ -125,9 +127,12 @@ namespace Frida {
 			expiry_timer.attach (frida_context);
 		}
 
-		public async void resume (Cancellable? cancellable) throws Error, IOError {
+		public async void resume (uint last_batch_id, Cancellable? cancellable) throws Error, IOError {
 			if (persist_timeout == 0 || expiry_timer == null)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			if (last_batch_id == pending_batch_id)
+				flush_pending_batch ();
 
 			expiry_timer.destroy ();
 			expiry_timer = null;
@@ -604,22 +609,13 @@ namespace Frida {
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
 			bool has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			pending_messages.offer (
-				AgentMessage (generate_next_serial (), AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
+			pending_messages.offer (AgentMessage (AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_messages.offer (
-				AgentMessage (generate_next_serial (), AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
+			pending_messages.offer (AgentMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
 			maybe_deliver_pending_messages ();
-		}
-
-		private uint32 generate_next_serial () {
-			uint32 serial = next_serial++;
-			if (serial == 0)
-				serial = next_serial++;
-			return serial;
 		}
 
 		private void maybe_deliver_pending_messages () {
@@ -656,14 +652,34 @@ namespace Frida {
 					if (msg == null)
 						break;
 
-					yield sink.post_messages ({ msg }, delivery_cancellable);
-					pending_messages.poll ();
+					uint batch_id = generate_next_batch_id ();
+
+					pending_batch_id = batch_id;
+					pending_batch_size = 1;
+
+					yield sink.post_messages ({ msg }, batch_id, delivery_cancellable);
+
+					flush_pending_batch ();
 				}
 			} catch (GLib.Error e) {
 			} finally {
 				delivery_request.resolve (true);
 				delivery_request = null;
 			}
+		}
+
+		private void flush_pending_batch () {
+			for (uint i = 0; i != pending_batch_size; i++)
+				pending_messages.poll ();
+			pending_batch_id = 0;
+			pending_batch_size = 0;
+		}
+
+		private uint generate_next_batch_id () {
+			uint serial = next_batch_id++;
+			if (serial == 0)
+				serial = next_batch_id++;
+			return serial;
 		}
 	}
 }

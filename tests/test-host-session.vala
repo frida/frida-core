@@ -3140,7 +3140,8 @@ namespace Frida.HostSessionTest {
 			return key;
 		}
 
-		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages) {
 				message_from_script (m.script_id, m.text, m.has_data ? new Bytes (m.data) : null);
 			}

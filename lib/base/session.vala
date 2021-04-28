@@ -50,7 +50,7 @@ namespace Frida {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void interrupt (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void resume (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume (uint last_batch_id, Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
@@ -104,15 +104,11 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentMessageSink16")]
 	public interface AgentMessageSink : Object {
-		public abstract async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_messages (AgentMessage[] messages, uint batch_id,
+			Cancellable? cancellable) throws GLib.Error;
 	}
 
 	public struct AgentMessage {
-		public uint32 serial {
-			get;
-			private set;
-		}
-
 		public AgentMessageKind kind {
 			get;
 			private set;
@@ -138,9 +134,7 @@ namespace Frida {
 			private set;
 		}
 
-		public AgentMessage (uint32 serial, AgentMessageKind kind, AgentScriptId script_id, string text, bool has_data,
-				uint8[] data) {
-			this.serial = serial;
+		public AgentMessage (AgentMessageKind kind, AgentScriptId script_id, string text, bool has_data, uint8[] data) {
 			this.kind = kind;
 			this.script_id = script_id;
 			this.text = text;
