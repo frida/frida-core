@@ -131,7 +131,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
 			if (last_batch_id != 0)
-				ack_up_to_and_including (last_batch_id);
+				flush_pending_messages_covered_by (last_batch_id);
 			pending_cursor = 0;
 
 			expiry_timer.destroy ();
@@ -144,7 +144,7 @@ namespace Frida {
 		}
 
 		public async void ack (uint batch_id, Cancellable? cancellable) throws Error, IOError {
-			ack_up_to_and_including (batch_id);
+			flush_pending_messages_covered_by (batch_id);
 		}
 
 		public async void flush () {
@@ -669,7 +669,7 @@ namespace Frida {
 
 					if (persist_timeout == 0) {
 						pending_size -= n_items;
-						flush_n_pending (n_items);
+						flush_n_pending_messages (n_items);
 					} else {
 						pending_cursor += n_items;
 						unacked_batches.offer (new UnackedBatch (batch_id, n_items));
@@ -680,10 +680,10 @@ namespace Frida {
 			}
 		}
 
-		private void ack_up_to_and_including (uint id) {
+		private void flush_pending_messages_covered_by (uint batch_id) {
 			bool found = false;
 			foreach (UnackedBatch b in unacked_batches) {
-				if (b.id == id) {
+				if (b.id == batch_id) {
 					found = true;
 					break;
 				}
@@ -695,15 +695,15 @@ namespace Frida {
 			UnackedBatch? b;
 			while ((b = unacked_batches.poll ()) != null) {
 				total_acked += b.length;
-				if (b.id == id)
+				if (b.id == batch_id)
 					break;
 			}
 
-			flush_n_pending (total_acked);
+			flush_n_pending_messages (total_acked);
 			pending_cursor -= total_acked;
 		}
 
-		private void flush_n_pending (int n) {
+		private void flush_n_pending_messages (int n) {
 			uint pending_size = pending_messages.size;
 			if (n == pending_size) {
 				pending_messages.clear ();
