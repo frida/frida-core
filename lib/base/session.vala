@@ -52,6 +52,8 @@ namespace Frida {
 		public abstract async void interrupt (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint last_batch_id, Cancellable? cancellable) throws GLib.Error;
 
+		public abstract async void ack (uint batch_id, Cancellable? cancellable) throws GLib.Error;
+
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
 
@@ -140,6 +142,10 @@ namespace Frida {
 			this.text = text;
 			this.has_data = has_data;
 			this.data = data;
+		}
+
+		public size_t estimate_size_in_bytes () {
+			return sizeof (AgentMessage) + text.length  + 1 + data.length;
 		}
 	}
 

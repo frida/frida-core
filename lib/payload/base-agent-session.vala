@@ -40,11 +40,10 @@ namespace Frida {
 
 		private TimeoutSource? expiry_timer;
 
-		private Promise<bool>? delivery_request;
 		private Cancellable delivery_cancellable = new Cancellable ();
-		private Gee.Queue<AgentMessage?> pending_messages = new Gee.ArrayQueue<AgentMessage?> ();
-		private uint pending_batch_id = 0;
-		private uint pending_batch_size = 0;
+		private Gee.ArrayList<AgentMessage?> pending_messages = new Gee.ArrayList<AgentMessage?> ();
+		private int pending_cursor = 0;
+		private Gee.Queue<UnackedBatch> unacked_batches = new Gee.ArrayQueue<UnackedBatch> ();
 		private uint next_batch_id = 1;
 
 		private bool child_gating_enabled = false;
@@ -131,8 +130,9 @@ namespace Frida {
 			if (persist_timeout == 0 || expiry_timer == null)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
-			if (last_batch_id == pending_batch_id)
-				flush_pending_batch ();
+			if (last_batch_id != 0)
+				ack_up_to_and_including (last_batch_id);
+			pending_cursor = 0;
 
 			expiry_timer.destroy ();
 			expiry_timer = null;
@@ -141,6 +141,10 @@ namespace Frida {
 			state = LIVE;
 
 			maybe_deliver_pending_messages ();
+		}
+
+		public async void ack (uint batch_id, Cancellable? cancellable) throws Error, IOError {
+			ack_up_to_and_including (batch_id);
 		}
 
 		public async void flush () {
@@ -598,7 +602,7 @@ namespace Frida {
 		public async void commit_migration (Cancellable? cancellable) throws Error, IOError {
 			state = LIVE;
 
-			yield process_pending_message_deliveries (cancellable);
+			maybe_deliver_pending_messages ();
 		}
 
 		private void check_open () throws Error {
@@ -609,77 +613,95 @@ namespace Frida {
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
 			bool has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			pending_messages.offer (AgentMessage (AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
+			pending_messages.add (AgentMessage (AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_messages.offer (AgentMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
+			pending_messages.add (AgentMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void maybe_deliver_pending_messages () {
 			if (state != LIVE)
 				return;
-			if (delivery_request != null)
+
+			AgentMessageSink? sink = message_sink;
+			if (sink == null)
 				return;
-			if (pending_messages.is_empty)
-				return;
-			process_pending_message_deliveries.begin (delivery_cancellable);
-		}
 
-		private async void process_pending_message_deliveries (Cancellable? cancellable) throws IOError {
-			while (delivery_request != null) {
-				try {
-					yield delivery_request.future.wait_async (cancellable);
-					return;
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			delivery_request = new Promise<bool> ();
-
-			try {
-				while (state == LIVE) {
-					AgentMessageSink? sink = message_sink;
-					if (sink == null)
+			int pending_size = pending_messages.size;
+			while (pending_cursor != pending_size) {
+				var items = new Gee.ArrayList<AgentMessage?> ();
+				size_t total_size = 0;
+				size_t max_size = 4 * 1024 * 1024;
+				for (int i = pending_cursor; i != pending_size; i++) {
+					AgentMessage? m = pending_messages[i];
+					size_t message_size = m.estimate_size_in_bytes ();
+					if (total_size + message_size <= max_size || items.is_empty) {
+						items.add (m);
+						total_size += message_size;
+					} else {
 						break;
-
-					// TODO: Batch and deliver in parallel.
-
-					AgentMessage? msg = pending_messages.peek ();
-					if (msg == null)
-						break;
-
-					uint batch_id = generate_next_batch_id ();
-
-					pending_batch_id = batch_id;
-					pending_batch_size = 1;
-
-					yield sink.post_messages ({ msg }, batch_id, delivery_cancellable);
-
-					flush_pending_batch ();
+					}
 				}
-			} catch (GLib.Error e) {
-			} finally {
-				delivery_request.resolve (true);
-				delivery_request = null;
+
+				int n = items.size;
+				var raw_items = new AgentMessage[n];
+				for (int i = 0; i != n; i++)
+					raw_items[i] = items[i];
+
+				pending_cursor += n;
+
+				var batch = new UnackedBatch (generate_next_batch_id (), n);
+				unacked_batches.offer (batch);
+
+				sink.post_messages.begin (raw_items, batch.id, delivery_cancellable);
 			}
 		}
 
-		private void flush_pending_batch () {
-			for (uint i = 0; i != pending_batch_size; i++)
-				pending_messages.poll ();
-			pending_batch_id = 0;
-			pending_batch_size = 0;
+		private void ack_up_to_and_including (uint id) {
+			bool found = false;
+			foreach (UnackedBatch b in unacked_batches) {
+				if (b.id == id) {
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				return;
+
+			int total_acked = 0;
+			UnackedBatch? b;
+			while ((b = unacked_batches.poll ()) != null) {
+				total_acked += b.length;
+				if (b.id == id)
+					break;
+			}
+
+			var new_pending = new Gee.ArrayList<AgentMessage?> ();
+			uint pending_size = pending_messages.size;
+			for (int i = total_acked; i != pending_size; i++)
+				new_pending.add (pending_messages[i]);
+			pending_messages = new_pending;
+			pending_cursor -= total_acked;
 		}
 
 		private uint generate_next_batch_id () {
-			uint serial = next_batch_id++;
-			if (serial == 0)
-				serial = next_batch_id++;
-			return serial;
+			uint id = next_batch_id++;
+			if (id == 0)
+				id = next_batch_id++;
+			return id;
+		}
+
+		private class UnackedBatch {
+			public uint id;
+			public int length;
+
+			public UnackedBatch (uint id, int length) {
+				this.id = id;
+				this.length = length;
+			}
 		}
 	}
 }
