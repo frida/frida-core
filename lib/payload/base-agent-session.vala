@@ -44,7 +44,7 @@ namespace Frida {
 		private Cancellable delivery_cancellable = new Cancellable ();
 		private Gee.Queue<AgentScriptMessage?> pending_script_messages = new Gee.ArrayQueue<AgentScriptMessage?> ();
 		private Gee.Queue<AgentDebuggerMessage?> pending_debugger_messages = new Gee.ArrayQueue<AgentDebuggerMessage?> ();
-		private uint next_serial = 1;
+		private uint32 next_serial = 1;
 
 		private bool child_gating_enabled = false;
 
@@ -605,13 +605,21 @@ namespace Frida {
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
 			bool has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			pending_script_messages.offer (AgentScriptMessage (next_serial++, script_id, message, has_data, data_param));
+			pending_script_messages.offer (
+				AgentScriptMessage (generate_next_serial (), script_id, message, has_data, data_param));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_debugger_messages.offer (AgentDebuggerMessage (next_serial++, message));
+			pending_debugger_messages.offer (AgentDebuggerMessage (generate_next_serial (), message));
 			maybe_deliver_pending_messages ();
+		}
+
+		private uint32 generate_next_serial () {
+			uint32 serial = next_serial++;
+			if (serial == 0)
+				serial = next_serial++;
+			return serial;
 		}
 
 		private void maybe_deliver_pending_messages () {

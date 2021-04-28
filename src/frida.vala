@@ -1922,6 +1922,9 @@ namespace Frida {
 
 		private Debugger? debugger;
 
+		private uint64 last_script_message_serial = 0;
+		private uint64 last_debugger_message_serial = 0;
+
 #if HAVE_NICE
 		private Nice.Agent? nice_agent;
 		private uint nice_stream_id;
@@ -2617,9 +2620,16 @@ namespace Frida {
 		protected async void post_script_messages (AgentScriptMessage[] messages,
 				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages) {
+				uint64 serial = m.serial;
+				if (serial <= last_script_message_serial && last_script_message_serial - serial < uint32.MAX / 2) {
+					continue;
+				}
+
 				var script = scripts[m.script_id];
 				if (script != null)
 					script.message (m.json, m.has_data ? new Bytes (m.data) : null);
+
+				last_script_message_serial = serial;
 			}
 		}
 
@@ -2627,8 +2637,16 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			if (debugger == null)
 				return;
+
 			foreach (var m in messages) {
+				uint64 serial = m.serial;
+				if (serial <= last_debugger_message_serial && last_debugger_message_serial - serial < uint32.MAX / 2) {
+					continue;
+				}
+
 				debugger.handle_message_from_backend (m.payload);
+
+				last_debugger_message_serial = serial;
 			}
 		}
 

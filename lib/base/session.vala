@@ -111,7 +111,7 @@ namespace Frida {
 	}
 
 	public struct AgentScriptMessage {
-		public uint serial {
+		public uint32 serial {
 			get;
 			set;
 		}
@@ -136,7 +136,7 @@ namespace Frida {
 			set;
 		}
 
-		public AgentScriptMessage (uint serial, AgentScriptId script_id, string json, bool has_data, uint8[] data) {
+		public AgentScriptMessage (uint32 serial, AgentScriptId script_id, string json, bool has_data, uint8[] data) {
 			this.serial = serial;
 			this.script_id = script_id;
 			this.json = json;
@@ -146,7 +146,7 @@ namespace Frida {
 	}
 
 	public struct AgentDebuggerMessage {
-		public uint serial {
+		public uint32 serial {
 			get;
 			set;
 		}
@@ -156,7 +156,7 @@ namespace Frida {
 			set;
 		}
 
-		public AgentDebuggerMessage (uint serial, string payload) {
+		public AgentDebuggerMessage (uint32 serial, string payload) {
 			this.serial = serial;
 			this.payload = payload;
 		}
