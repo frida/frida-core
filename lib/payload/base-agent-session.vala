@@ -651,12 +651,17 @@ namespace Frida {
 				for (int i = 0; i != n; i++)
 					raw_items[i] = items[i];
 
-				pending_cursor += n;
+				uint batch_id = generate_next_batch_id ();
 
-				var batch = new UnackedBatch (generate_next_batch_id (), n);
-				unacked_batches.offer (batch);
+				sink.post_messages.begin (raw_items, batch_id, delivery_cancellable);
 
-				sink.post_messages.begin (raw_items, batch.id, delivery_cancellable);
+				if (persist_timeout == 0) {
+					pending_size -= n;
+					flush_n_pending (n);
+				} else {
+					pending_cursor += n;
+					unacked_batches.offer (new UnackedBatch (batch_id, n));
+				}
 			}
 		}
 
@@ -679,12 +684,20 @@ namespace Frida {
 					break;
 			}
 
-			var new_pending = new Gee.ArrayList<AgentMessage?> ();
-			uint pending_size = pending_messages.size;
-			for (int i = total_acked; i != pending_size; i++)
-				new_pending.add (pending_messages[i]);
-			pending_messages = new_pending;
+			flush_n_pending (total_acked);
 			pending_cursor -= total_acked;
+		}
+
+		private void flush_n_pending (int n) {
+			uint pending_size = pending_messages.size;
+			if (n == pending_size) {
+				pending_messages.clear ();
+			} else {
+				var new_pending = new Gee.ArrayList<AgentMessage?> ();
+				for (int i = n; i != pending_size; i++)
+					new_pending.add (pending_messages[i]);
+				pending_messages = new_pending;
+			}
 		}
 
 		private uint generate_next_batch_id () {
