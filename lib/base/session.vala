@@ -69,7 +69,7 @@ namespace Frida {
 
 		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_message_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async PortalMembershipId join_portal (string address, AgentPortalOptions options,
 			Cancellable? cancellable) throws GLib.Error;

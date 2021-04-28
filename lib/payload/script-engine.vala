@@ -202,7 +202,7 @@ namespace Frida {
 			debugger_enabled = false;
 		}
 
-		public void post_message_to_debugger (string message) {
+		public void post_to_debugger (string message) {
 			Gum.ScriptBackend backend;
 			try {
 				backend = invader.get_script_backend (V8);

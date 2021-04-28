@@ -65,7 +65,7 @@ namespace Frida {
 		}
 
 		private void on_message_from_frontend (string message) {
-			agent_session.post_message_to_debugger.begin (message, io_cancellable);
+			agent_session.post_to_debugger.begin (message, io_cancellable);
 		}
 
 		public void handle_message_from_backend (string message) {

@@ -240,10 +240,10 @@ namespace Frida {
 			script_engine.disable_debugger ();
 		}
 
-		public async void post_message_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
+		public async void post_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			script_engine.post_message_to_debugger (message);
+			script_engine.post_to_debugger (message);
 		}
 
 		public async PortalMembershipId join_portal (string address, AgentPortalOptions options,
