@@ -111,30 +111,14 @@ namespace Frida {
 	}
 
 	public struct AgentMessage {
-		public AgentMessageKind kind {
-			get;
-			private set;
-		}
+		public AgentMessageKind kind;
 
-		public AgentScriptId script_id {
-			get;
-			private set;
-		}
+		public AgentScriptId script_id;
 
-		public string text {
-			get;
-			private set;
-		}
+		public string text;
 
-		public bool has_data {
-			get;
-			private set;
-		}
-
-		public uint8[] data {
-			get;
-			private set;
-		}
+		public bool has_data;
+		public uint8[] data;
 
 		public AgentMessage (AgentMessageKind kind, AgentScriptId script_id, string text, bool has_data, uint8[] data) {
 			this.kind = kind;
@@ -142,10 +126,6 @@ namespace Frida {
 			this.text = text;
 			this.has_data = has_data;
 			this.data = data;
-		}
-
-		public size_t estimate_size_in_bytes () {
-			return sizeof (AgentMessage) + text.length  + 1 + data.length;
 		}
 	}
 

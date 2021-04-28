@@ -41,7 +41,7 @@ namespace Frida {
 		private TimeoutSource? expiry_timer;
 
 		private Cancellable delivery_cancellable = new Cancellable ();
-		private Gee.ArrayList<AgentMessage?> pending_messages = new Gee.ArrayList<AgentMessage?> ();
+		private Gee.ArrayList<PendingMessage> pending_messages = new Gee.ArrayList<PendingMessage> ();
 		private int pending_cursor = 0;
 		private Gee.Queue<UnackedBatch> unacked_batches = new Gee.ArrayQueue<UnackedBatch> ();
 		private uint next_batch_id = 1;
@@ -611,14 +611,12 @@ namespace Frida {
 		}
 
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
-			bool has_data = data != null;
-			var data_param = has_data ? data.get_data () : new uint8[0];
-			pending_messages.add (AgentMessage (AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
+			pending_messages.add (new PendingMessage (AgentMessageKind.SCRIPT, script_id, message, data));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_messages.add (AgentMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
+			pending_messages.add (new PendingMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message));
 			maybe_deliver_pending_messages ();
 		}
 
@@ -632,35 +630,52 @@ namespace Frida {
 
 			int pending_size = pending_messages.size;
 			while (pending_cursor != pending_size) {
-				var items = new Gee.ArrayList<AgentMessage?> ();
-				size_t total_size = 0;
-				size_t max_size = 4 * 1024 * 1024;
-				for (int i = pending_cursor; i != pending_size; i++) {
-					AgentMessage? m = pending_messages[i];
-					size_t message_size = m.estimate_size_in_bytes ();
-					if (total_size + message_size <= max_size || items.is_empty) {
-						items.add (m);
-						total_size += message_size;
-					} else {
-						break;
+				void * items = null;
+				int n_items = 0;
+				try {
+					size_t total_size = 0;
+					size_t max_size = 4 * 1024 * 1024;
+					for (int i = pending_cursor; i != pending_size; i++) {
+						PendingMessage m = pending_messages[i];
+						size_t message_size = m.estimate_size_in_bytes ();
+						if (total_size + message_size <= max_size || n_items == 0) {
+							n_items++;
+							items = realloc (items, n_items * sizeof (AgentMessage));
+
+							AgentMessage * am = (AgentMessage *) items + n_items - 1;
+
+							am->kind = m.kind;
+							am->script_id = m.script_id;
+
+							*((void **) &am->text) = m.text;
+
+							unowned Bytes? data = m.data;
+							am->has_data = data != null;
+							*((void **) &am->data) = am->has_data ? data.get_data () : null;
+							am->data.length = am->has_data ? data.length : 0;
+
+							total_size += message_size;
+						} else {
+							break;
+						}
 					}
-				}
 
-				int n = items.size;
-				var raw_items = new AgentMessage[n];
-				for (int i = 0; i != n; i++)
-					raw_items[i] = items[i];
+					unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+					items_arr.length = n_items;
 
-				uint batch_id = generate_next_batch_id ();
+					uint batch_id = generate_next_batch_id ();
 
-				sink.post_messages.begin (raw_items, batch_id, delivery_cancellable);
+					sink.post_messages.begin (items_arr, batch_id, delivery_cancellable);
 
-				if (persist_timeout == 0) {
-					pending_size -= n;
-					flush_n_pending (n);
-				} else {
-					pending_cursor += n;
-					unacked_batches.offer (new UnackedBatch (batch_id, n));
+					if (persist_timeout == 0) {
+						pending_size -= n_items;
+						flush_n_pending (n_items);
+					} else {
+						pending_cursor += n_items;
+						unacked_batches.offer (new UnackedBatch (batch_id, n_items));
+					}
+				} finally {
+					free (items);
 				}
 			}
 		}
@@ -693,7 +708,7 @@ namespace Frida {
 			if (n == pending_size) {
 				pending_messages.clear ();
 			} else {
-				var new_pending = new Gee.ArrayList<AgentMessage?> ();
+				var new_pending = new Gee.ArrayList<PendingMessage> ();
 				for (int i = n; i != pending_size; i++)
 					new_pending.add (pending_messages[i]);
 				pending_messages = new_pending;
@@ -705,6 +720,24 @@ namespace Frida {
 			if (id == 0)
 				id = next_batch_id++;
 			return id;
+		}
+
+		private class PendingMessage {
+			public AgentMessageKind kind;
+			public AgentScriptId script_id;
+			public string text;
+			public Bytes? data;
+
+			public PendingMessage (AgentMessageKind kind, AgentScriptId script_id, string text, Bytes? data = null) {
+				this.kind = kind;
+				this.script_id = script_id;
+				this.text = text;
+				this.data = data;
+			}
+
+			public size_t estimate_size_in_bytes () {
+				return sizeof (AgentMessage) + text.length + 1 + ((data != null) ? data.length : 0);
+			}
 		}
 
 		private class UnackedBatch {
