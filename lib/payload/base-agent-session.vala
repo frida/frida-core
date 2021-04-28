@@ -118,7 +118,7 @@ namespace Frida {
 			state = INTERRUPTED;
 			delivery_cancellable.cancel ();
 
-			expiry_timer = new TimeoutSource (persist_timeout * 1000);
+			expiry_timer = new TimeoutSource.seconds (persist_timeout);
 			expiry_timer.set_callback (() => {
 				close.begin (null);
 				return false;
