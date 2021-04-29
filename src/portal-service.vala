@@ -138,33 +138,41 @@ namespace Frida {
 			}
 		}
 
-		public async void post (uint connection_id, string json, Bytes? data = null,
-				Cancellable? cancellable = null) throws Error, IOError {
+		public void post (uint connection_id, string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_post (connection_id, json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_post (connection_id, json, data);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_post (uint connection_id, string json, Bytes? data) {
 			ConnectionEntry? entry = connections[connection_id];
 			if (entry != null)
 				entry.post (json, data);
 		}
 
-		public void post_sync (uint connection_id, string json, Bytes? data = null,
-				Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<PostTask> ();
-			task.connection_id = connection_id;
-			task.json = json;
-			task.data = data;
-			task.execute (cancellable);
-		}
-
-		private class PostTask : PortalServiceTask<void> {
-			public uint connection_id;
-			public string json;
-			public Bytes? data;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (connection_id, json, data, cancellable);
+		public void broadcast (string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_broadcast (json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_broadcast (json, data);
+					return false;
+				});
+				source.attach (context);
 			}
 		}
 
-		public async void broadcast (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		private void do_broadcast (string json, Bytes? data) {
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
 
@@ -172,22 +180,6 @@ namespace Frida {
 				ControlChannel? channel = peer as ControlChannel;
 				if (channel != null && channel.status == SUBSCRIBED)
 					channel.message (json, has_data, data_param);
-			}
-		}
-
-		public void broadcast_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<BroadcastTask> ();
-			task.json = json;
-			task.data = data;
-			task.execute (cancellable);
-		}
-
-		private class BroadcastTask : PortalServiceTask<void> {
-			public string json;
-			public Bytes? data;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.broadcast (json, data, cancellable);
 			}
 		}
 
