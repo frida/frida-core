@@ -939,7 +939,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
@@ -963,7 +963,7 @@ namespace Frida.HostSessionTest {
 					    break;
 					  }
 					}
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -1171,7 +1171,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
-				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
@@ -1198,7 +1198,7 @@ namespace Frida.HostSessionTest {
 					    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });
 					  }
 					});
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -1573,7 +1573,7 @@ namespace Frida.HostSessionTest {
 
 					var host_session = yield prov.create (null, cancellable);
 
-					var id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
+					var id = yield host_session.attach (pid, make_options_dict (), cancellable);
 					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
 
 					string received_message = null;
@@ -1584,7 +1584,7 @@ namespace Frida.HostSessionTest {
 							cross_arch.callback ();
 					});
 
-					var script_id = yield session.create_script ("send('hello');", AgentScriptOptions (), cancellable);
+					var script_id = yield session.create_script ("send('hello');", make_options_dict (), cancellable);
 					yield session.load_script (script_id, cancellable);
 
 					if (received_message == null) {
@@ -1651,8 +1651,8 @@ namespace Frida.HostSessionTest {
 					options.envp = { "OS_ACTIVITY_DT_MODE=YES", "NSUnbufferedIO=YES" };
 					options.stdio = PIPE;
 					if (url != null)
-						options.aux.insert ("url", "s", url);
-					// options.aux.insert ("aslr", "s", "disable");
+						options.aux["url"] = new Variant.string (url);
+					// options.aux["aslr"] = new Variant.string ("disable");
 
 					printerr ("device.spawn(\"%s\")\n", app_id);
 					var pid = yield device.spawn (app_id, options);
@@ -2384,7 +2384,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
@@ -2407,7 +2407,7 @@ namespace Frida.HostSessionTest {
 					    send('GetMessage');
 					  }
 					});
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -2650,7 +2650,7 @@ namespace Frida.HostSessionTest {
 				assert_nonnull ((void *) process);
 
 				stdout.printf ("attaching to target process\n");
-				var session_id = yield host_session.attach (process.pid, AgentSessionOptions (), cancellable);
+				var session_id = yield host_session.attach (process.pid, make_options_dict (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 				string received_message = null;
 				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
@@ -2664,7 +2664,7 @@ namespace Frida.HostSessionTest {
 					  recv(onMessage);
 					}
 					recv(onMessage);
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				stdout.printf ("loading script\n");
 				yield session.load_script (script_id, cancellable);
 				var steps = new uint[] { 1024, 4096, 8192, 16384, 32768 };

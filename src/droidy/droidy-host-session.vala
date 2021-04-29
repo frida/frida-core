@@ -430,14 +430,16 @@ namespace Frida {
 
 			unowned string package = program;
 
-			var aux_options = options.load_aux ();
+			HashTable<string, Variant> aux = options.aux;
 
 			string? user_gadget_path = null;
-			if (aux_options.contains ("gadget")) {
-				if (!aux_options.lookup ("gadget", "s", out user_gadget_path)) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'gadget' option must be a string pointing at the frida-gadget.so to use");
+			Variant? user_gadget_value = aux["gadget"];
+			if (user_gadget_value != null) {
+				if (!user_gadget_value.is_of_type (VariantType.STRING)) {
+					throw new Error.INVALID_ARGUMENT ("The 'gadget' option must be a string pointing at the " +
+						"frida-gadget.so to use");
 				}
+				user_gadget_path = user_gadget_value.get_string ();
 			}
 
 			string gadget_path;
@@ -500,7 +502,8 @@ namespace Frida {
 			}
 		}
 
-		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var gadget = gadgets[pid];
 			if (gadget != null)
 				return yield attach_via_gadget (pid, options, gadget, cancellable);
@@ -517,8 +520,8 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
-		private async AgentSessionId attach_via_gadget (uint pid, AgentSessionOptions options, Droidy.Injector.GadgetDetails gadget,
-				Cancellable? cancellable) throws Error, IOError {
+		private async AgentSessionId attach_via_gadget (uint pid, HashTable<string, Variant> options,
+				Droidy.Injector.GadgetDetails gadget, Cancellable? cancellable) throws Error, IOError {
 			try {
 				var stream = yield channel_provider.open_channel ("localabstract:" + gadget.unix_socket_path, cancellable);
 
@@ -548,7 +551,7 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSessionId attach_via_remote (uint pid, AgentSessionOptions options, RemoteServer server,
+		private async AgentSessionId attach_via_remote (uint pid, HashTable<string, Variant> options, RemoteServer server,
 				Cancellable? cancellable) throws Error, IOError {
 			AgentSessionId remote_session_id;
 			try {

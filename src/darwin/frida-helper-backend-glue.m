@@ -725,7 +725,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
     if (strcmp (str, "disable") == 0)
       flags |= _POSIX_SPAWN_DISABLE_ASLR;
-    else if (strcmp (str, "enable") != 0)
+    else if (strcmp (str, "auto") != 0)
       goto invalid_aslr_value;
   }
 
@@ -778,7 +778,7 @@ invalid_aslr_value:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
-        "The 'aslr' option must be set to either 'enable' or 'disable'");
+        "The 'aslr' option must be set to either 'auto' or 'disable'");
 
     goto early_failure;
   }

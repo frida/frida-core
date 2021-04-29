@@ -480,7 +480,7 @@ namespace Frida {
 			this.message (sender.connection_id, message, data);
 		}
 
-		private async AgentSessionId attach (uint pid, AgentSessionOptions options, ControlChannel requester,
+		private async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
 				Cancellable? cancellable) throws Error, IOError {
 			var node = node_by_pid[pid];
 			if (node == null)
@@ -492,7 +492,7 @@ namespace Frida {
 
 			requester.sessions.add (id);
 
-			var opts = SessionOptions._deserialize (options.data);
+			var opts = SessionOptions._deserialize (options);
 
 			var entry = new AgentSessionEntry (node, requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
@@ -917,7 +917,7 @@ namespace Frida {
 				parent.kill (pid);
 			}
 
-			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
+			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
 				return yield parent.attach (pid, options, this, cancellable);
 			}
@@ -1020,7 +1020,7 @@ namespace Frida {
 					out next_state);
 			}
 
-			public async void open_session (AgentSessionId id, AgentSessionOptions options,
+			public async void open_session (AgentSessionId id, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
 				try {
 					yield session_provider.open (id, options, cancellable);

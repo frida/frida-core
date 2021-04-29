@@ -321,7 +321,8 @@ namespace Frida {
 
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws Error, IOError;
 
-		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var entry = yield establish (pid, cancellable);
 
 			var id = AgentSessionId.generate ();
@@ -1195,7 +1196,7 @@ namespace Frida {
 				uint target_pid = yield get_target_pid (cancellable);
 
 				try {
-					session_id = yield host_session.attach (target_pid, AgentSessionOptions (), cancellable);
+					session_id = yield host_session.attach (target_pid, make_options_dict (), cancellable);
 
 					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 
@@ -1204,10 +1205,7 @@ namespace Frida {
 						options.name = "internal-agent";
 						options.runtime = script_runtime;
 
-						var raw_options = AgentScriptOptions ();
-						raw_options.data = options._serialize ().get_data ();
-
-						script = yield session.create_script (script_source, raw_options, cancellable);
+						script = yield session.create_script (script_source, options._serialize (), cancellable);
 
 						yield session.load_script (script, cancellable);
 					}

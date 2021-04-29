@@ -923,7 +923,7 @@ namespace Frida {
 
 				raw_options.stdio = options.stdio;
 
-				raw_options.aux = options.get_aux_bytes ().get_data ();
+				raw_options.aux = options.aux;
 			}
 
 			var host_session = yield get_host_session (cancellable);
@@ -1050,8 +1050,7 @@ namespace Frida {
 			try {
 				var host_session = yield get_host_session (cancellable);
 
-				var raw_options = AgentSessionOptions ();
-				raw_options.data = opts._serialize ().get_data ();
+				var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 				AgentSessionId id;
 				try {
@@ -1603,18 +1602,10 @@ namespace Frida {
 			default = INHERIT;
 		}
 
-		public VariantDict aux {
-			get {
-				return _aux;
-			}
-		}
-		private VariantDict _aux = new VariantDict ();
-
-		internal Bytes get_aux_bytes () {
-			var variant = _aux.end ();
-			var bytes = variant.get_data_as_bytes ();
-			_aux = new VariantDict (variant);
-			return bytes;
+		public HashTable<string, Variant> aux {
+			get;
+			set;
+			default = make_options_dict ();
 		}
 	}
 
@@ -1759,20 +1750,19 @@ namespace Frida {
 			construct;
 		}
 
-		private Bytes raw_parameters;
+		public HashTable<string, Variant> parameters {
+			get;
+			construct;
+		}
 
-		internal Crash (uint pid, string process_name, string summary, string report, Bytes raw_parameters) {
+		internal Crash (uint pid, string process_name, string summary, string report, HashTable<string, Variant> parameters) {
 			Object (
 				pid: pid,
 				process_name: process_name,
 				summary: summary,
-				report: report
+				report: report,
+				parameters: parameters
 			);
-			this.raw_parameters = raw_parameters;
-		}
-
-		public VariantDict load_parameters () {
-			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, raw_parameters, false));
 		}
 
 		internal static Crash? from_info (CrashInfo info) {
@@ -1783,7 +1773,7 @@ namespace Frida {
 				info.process_name,
 				info.summary,
 				info.report,
-				new Bytes (info.parameters)
+				info.parameters
 			);
 		}
 	}
@@ -2062,9 +2052,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			AgentScriptId script_id;
 			try {
@@ -2102,9 +2090,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			AgentScriptId script_id;
 			try {
@@ -2143,9 +2129,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			uint8[] data;
 			try {
@@ -2281,9 +2265,7 @@ namespace Frida {
 
 			string offer_sdp = agent.generate_local_sdp ();
 
-			var raw_options = AgentPeerOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			// TODO: generate on separate thread
 			string cert_pem, key_pem;
@@ -2593,9 +2575,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentPortalOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			PortalMembershipId membership_id;
 			try {

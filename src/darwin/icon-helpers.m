@@ -43,35 +43,35 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
   NSBitmapImageRep * rep;
   NSGraphicsContext * context;
 
-  data->_width = target_width;
-  data->_height = target_height;
-  data->_rowstride = target_width * 4;
+  data->width = target_width;
+  data->height = target_height;
+  data->rowstride = target_width * 4;
 
   rep = [[NSBitmapImageRep alloc]
       initWithBitmapDataPlanes:nil
-                    pixelsWide:data->_width
-                    pixelsHigh:data->_height
+                    pixelsWide:data->width
+                    pixelsHigh:data->height
                  bitsPerSample:8
                samplesPerPixel:4
                       hasAlpha:YES
                       isPlanar:NO
                 colorSpaceName:NSCalibratedRGBColorSpace
                   bitmapFormat:0
-                   bytesPerRow:data->_rowstride
+                   bytesPerRow:data->rowstride
                   bitsPerPixel:32];
 
   context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
 
   [NSGraphicsContext saveGraphicsState];
   [NSGraphicsContext setCurrentContext:context];
-  [image drawInRect:NSMakeRect (0, 0, data->_width, data->_height)
+  [image drawInRect:NSMakeRect (0, 0, data->width, data->height)
            fromRect:NSZeroRect
           operation:NSCompositingOperationCopy
            fraction:1.0];
   [context flushGraphics];
   [NSGraphicsContext restoreGraphicsState];
 
-  data->_pixels = g_base64_encode ([rep bitmapData], data->_rowstride * data->_height);
+  data->pixels = g_base64_encode ([rep bitmapData], data->rowstride * data->height);
 
   [rep release];
 #else
@@ -86,9 +86,9 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
   CGContextRef cgctx;
   CGRect target_rect = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
 
-  data->_width = target_width;
-  data->_height = target_height;
-  data->_rowstride = target_width * 4;
+  data->width = target_width;
+  data->height = target_height;
+  data->rowstride = target_width * 4;
 
   cgimage = [image CGImage];
 
@@ -106,7 +106,7 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
     scaled.height = (CGFloat) full.height * ((CGFloat) target_width / full.width);
   }
 
-  pixel_buf_size = data->_width * data->_rowstride;
+  pixel_buf_size = data->width * data->rowstride;
   pixel_buf = g_malloc (pixel_buf_size);
 
   /*
@@ -116,11 +116,11 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
    * those usually rendered onto by the frida GUI... ICK!
    */
   pixels = (guint32 *) pixel_buf;
-  for (i = 0; i != data->_width * data->_height; i++)
+  for (i = 0; i != data->width * data->height; i++)
     pixels[i] = GUINT32_TO_BE (0xf0f0f0ff);
 
   colorspace = CGColorSpaceCreateDeviceRGB ();
-  cgctx = CGBitmapContextCreate (pixel_buf, data->_width, data->_height, 8, data->_rowstride, colorspace,
+  cgctx = CGBitmapContextCreate (pixel_buf, data->width, data->height, 8, data->rowstride, colorspace,
       kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast);
   g_assert (cgctx != NULL);
 
@@ -128,7 +128,7 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
 
   CGContextDrawImage (cgctx, target_rect, cgimage);
 
-  data->_pixels = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
+  data->pixels = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
 
   CGContextRelease (cgctx);
   CGColorSpaceRelease (colorspace);

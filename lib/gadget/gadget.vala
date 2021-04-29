@@ -1595,9 +1595,9 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private async AgentSessionId attach (AgentSessionOptions options, ControlChannel requester,
+		private async AgentSessionId attach (HashTable<string, Variant> options, ControlChannel requester,
 				Cancellable? cancellable) throws Error, IOError {
-			var opts = SessionOptions._deserialize (options.data);
+			var opts = SessionOptions._deserialize (options);
 			if (opts.realm != NATIVE)
 				throw new Error.NOT_SUPPORTED ("Only native realm is supported when embedded");
 
@@ -1847,7 +1847,7 @@ namespace Frida.Gadget {
 				Frida.Gadget.kill ();
 			}
 
-			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
+			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 

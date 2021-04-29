@@ -689,23 +689,23 @@ namespace Frida {
 			if (options.cwd.length > 0)
 				throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning iOS apps");
 
-			var aux_options = options.load_aux ();
+			HashTable<string, Variant> aux = options.aux;
 
-			if (aux_options.contains ("aslr")) {
-				string? aslr = null;
-				if (!aux_options.lookup ("aslr", "s", out aslr) || (aslr != "auto" && aslr != "disable")) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'aslr' option must be a string set to either 'auto' or 'disable'");
-				}
-				launch_options.aslr = (aslr == "auto") ? LLDB.ASLR.AUTO : LLDB.ASLR.DISABLE;
+			Variant? aslr = aux["aslr"];
+			if (aslr != null) {
+				if (!aslr.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'aslr' option must be a string");
+				launch_options.aslr = LLDB.ASLR.from_nick (aslr.get_string ());
 			}
 
 			string? gadget_path = null;
-			if (aux_options.contains ("gadget")) {
-				if (!aux_options.lookup ("gadget", "s", out gadget_path)) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'gadget' option must be a string pointing at the frida-gadget.dylib to use");
+			Variant? gadget_value = aux["gadget"];
+			if (gadget_value != null) {
+				if (!gadget_value.is_of_type (VariantType.STRING)) {
+					throw new Error.INVALID_ARGUMENT ("The 'gadget' option must be a string pointing at the " +
+						"frida-gadget.dylib to use");
 				}
+				gadget_path = gadget_value.get_string ();
 			}
 
 			try {
@@ -809,7 +809,8 @@ namespace Frida {
 			}
 		}
 
-		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var lldb_session = lldb_sessions[pid];
 			if (lldb_session != null) {
 				var gadget_details = yield lldb_session.query_gadget_details (cancellable);
@@ -868,7 +869,7 @@ namespace Frida {
 				"run Xcode briefly or use ideviceimagemounter to mount one manually");
 		}
 
-		private async AgentSessionId attach_via_gadget (uint pid, AgentSessionOptions options,
+		private async AgentSessionId attach_via_gadget (uint pid, HashTable<string, Variant> options,
 				Fruity.Injector.GadgetDetails gadget_details, Cancellable? cancellable) throws Error, IOError {
 			try {
 				var stream = yield channel_provider.open_channel (
@@ -901,7 +902,7 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSessionId attach_via_remote (uint pid, AgentSessionOptions options, RemoteServer server,
+		private async AgentSessionId attach_via_remote (uint pid, HashTable<string, Variant> options, RemoteServer server,
 				Cancellable? cancellable) throws Error, IOError {
 			AgentSessionId remote_session_id;
 			try {

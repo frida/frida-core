@@ -304,7 +304,7 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSessionId attach (uint pid, AgentSessionOptions options, ControlChannel requester,
+		private async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
 				Cancellable? cancellable) throws Error, IOError {
 			AgentSessionId id;
 			try {
@@ -315,7 +315,7 @@ namespace Frida {
 
 			requester.sessions.add (id);
 
-			var opts = SessionOptions._deserialize (options.data);
+			var opts = SessionOptions._deserialize (options);
 
 			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
@@ -621,7 +621,7 @@ namespace Frida {
 				yield parent.host_session.kill (pid, cancellable);
 			}
 
-			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
+			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws GLib.Error {
 				return yield parent.attach (pid, options, this, cancellable);
 			}

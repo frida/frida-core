@@ -83,7 +83,7 @@ namespace Frida.Inject {
 		ScriptRuntime script_runtime = DEFAULT;
 		if (script_runtime_str != null) {
 			try {
-				script_runtime = ScriptRuntime.from_nick ();
+				script_runtime = ScriptRuntime.from_nick (script_runtime_str);
 			} catch (Error e) {
 				printerr ("%s\n", e.message);
 				return 5;

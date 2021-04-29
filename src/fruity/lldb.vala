@@ -1523,7 +1523,11 @@ namespace Frida.LLDB {
 
 	public enum ASLR {
 		AUTO,
-		DISABLE
+		DISABLE;
+
+		public static ASLR from_nick (string nick) throws Frida.Error {
+			return Marshal.enum_from_nick<ASLR> (nick);
+		}
 	}
 
 	public enum DarwinCpuArchType {
@@ -1905,7 +1909,7 @@ namespace Frida.LLDB {
 		TARGET_EXC_SOFTWARE,
 		TARGET_EXC_BREAKPOINT;
 
-		public static Signal from_nick (string nick) throws Error {
+		public static Signal from_nick (string nick) throws Frida.Error {
 			return Marshal.enum_from_nick<Signal> (nick);
 		}
 
@@ -1934,7 +1938,7 @@ namespace Frida.LLDB {
 		EXC_GUARD,
 		EXC_CORPSE_NOTIFY;
 
-		public static MachExceptionType from_nick (string nick) throws Error {
+		public static MachExceptionType from_nick (string nick) throws Frida.Error {
 			return Marshal.enum_from_nick<MachExceptionType> (nick);
 		}
 
