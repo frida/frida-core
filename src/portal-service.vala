@@ -9,7 +9,9 @@ namespace Frida {
 		public signal void controller_disconnected (uint connection_id, SocketAddress remote_address);
 
 		public signal void authenticated (uint connection_id, string session_info);
-		public signal void message (uint connection_id, string message, Bytes? data);
+		public signal void subscribe (uint connection_id);
+		public signal void unsubscribe (uint connection_id);
+		public signal void message (uint connection_id, string json, Bytes? data);
 
 		public Device device {
 			get {
@@ -136,56 +138,56 @@ namespace Frida {
 			}
 		}
 
-		public async void post (uint connection_id, string message, Bytes? data = null,
+		public async void post (uint connection_id, string json, Bytes? data = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			ConnectionEntry? entry = connections[connection_id];
 			if (entry != null)
-				entry.post (message, data);
+				entry.post (json, data);
 		}
 
-		public void post_sync (uint connection_id, string message, Bytes? data = null,
+		public void post_sync (uint connection_id, string json, Bytes? data = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<PostTask> ();
 			task.connection_id = connection_id;
-			task.message = message;
+			task.json = json;
 			task.data = data;
 			task.execute (cancellable);
 		}
 
 		private class PostTask : PortalServiceTask<void> {
 			public uint connection_id;
-			public string message;
+			public string json;
 			public Bytes? data;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (connection_id, message, data, cancellable);
+				yield parent.post (connection_id, json, data, cancellable);
 			}
 		}
 
-		public async void broadcast (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		public async void broadcast (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
 
 			foreach (Peer peer in peers.values) {
 				ControlChannel? channel = peer as ControlChannel;
-				if (channel != null)
-					channel.message (message, has_data, data_param);
+				if (channel != null && channel.status == SUBSCRIBED)
+					channel.message (json, has_data, data_param);
 			}
 		}
 
-		public void broadcast_sync (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		public void broadcast_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<BroadcastTask> ();
-			task.message = message;
+			task.json = json;
 			task.data = data;
 			task.execute (cancellable);
 		}
 
 		private class BroadcastTask : PortalServiceTask<void> {
-			public string message;
+			public string json;
 			public Bytes? data;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.broadcast (message, data, cancellable);
+				yield parent.broadcast (json, data, cancellable);
 			}
 		}
 
@@ -475,8 +477,16 @@ namespace Frida {
 			node.kill ();
 		}
 
-		private void handle_bus_message (ControlChannel sender, string message, Bytes? data) {
-			this.message (sender.connection_id, message, data);
+		private void handle_bus_subscribe (ControlChannel requester) {
+			subscribe (requester.connection_id);
+		}
+
+		private void handle_bus_unsubscribe (ControlChannel requester) {
+			unsubscribe (requester.connection_id);
+		}
+
+		private void handle_bus_message (ControlChannel sender, string json, Bytes? data) {
+			message (sender.connection_id, json, data);
 		}
 
 		private async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
@@ -725,7 +735,7 @@ namespace Frida {
 				this.parameters = parameters;
 			}
 
-			public void post (string message, Bytes? data) {
+			public void post (string json, Bytes? data) {
 				if (peer == null)
 					return;
 
@@ -735,7 +745,7 @@ namespace Frida {
 
 				bool has_data = data != null;
 				var data_param = has_data ? data.get_data () : new uint8[0];
-				channel.message (message, has_data, data_param);
+				channel.message (json, has_data, data_param);
 			}
 		}
 
@@ -833,6 +843,13 @@ namespace Frida {
 				get;
 				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
+
+			public SubscriptionStatus status {
+				get {
+					return _status;
+				}
+			}
+			private SubscriptionStatus _status = UNSUBSCRIBED;
 
 			private Gee.Set<uint> registrations = new Gee.HashSet<uint> ();
 
@@ -935,10 +952,28 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}
 
-			public async void post (string message, bool has_data, uint8[] data,
-					Cancellable? cancellable) throws Error, IOError {
-				parent.handle_bus_message (this, message, has_data ? new Bytes (data) : null);
+			public async void subscribe (Cancellable? cancellable) throws Error, IOError {
+				if (_status == SUBSCRIBED)
+					return;
+				_status = SUBSCRIBED;
+				parent.handle_bus_subscribe (this);
 			}
+
+			public async void unsubscribe (Cancellable? cancellable) throws Error, IOError {
+				if (_status == UNSUBSCRIBED)
+					return;
+				_status = UNSUBSCRIBED;
+				parent.handle_bus_unsubscribe (this);
+			}
+
+			public async void post (string json, bool has_data, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+				parent.handle_bus_message (this, json, has_data ? new Bytes (data) : null);
+			}
+		}
+
+		private enum SubscriptionStatus {
+			UNSUBSCRIBED,
+			SUBSCRIBED
 		}
 
 		private class ClusterNode : Object, Peer, PortalSession {

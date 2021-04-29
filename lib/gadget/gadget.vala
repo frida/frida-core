@@ -1178,7 +1178,7 @@ namespace Frida.Gadget {
 			RELOAD
 		}
 
-		public signal void message (string message, Bytes? data);
+		public signal void message (string json, Bytes? data);
 
 		public string path {
 			get;
@@ -1333,17 +1333,17 @@ namespace Frida.Gadget {
 			unchanged_timeout = source;
 		}
 
-		private void on_message (AgentScriptId script_id, string raw_message, Bytes? data) {
+		private void on_message (AgentScriptId script_id, string json, Bytes? data) {
 			if (script_id != id)
 				return;
 
-			bool handled = rpc_client.try_handle_message (raw_message);
+			bool handled = rpc_client.try_handle_message (json);
 			if (handled)
 				return;
 
 			var parser = new Json.Parser ();
 			try {
-				parser.load_from_data (raw_message);
+				parser.load_from_data (json);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -1354,7 +1354,7 @@ namespace Frida.Gadget {
 				handled = try_handle_log_message (message);
 
 			if (!handled) {
-				stdout.puts (raw_message);
+				stdout.puts (json);
 				stdout.putc ('\n');
 			}
 		}
@@ -1378,8 +1378,8 @@ namespace Frida.Gadget {
 			return true;
 		}
 
-		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
-			engine.post_to_script (id, raw_message);
+		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
+			engine.post_to_script (id, json);
 		}
 	}
 

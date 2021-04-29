@@ -656,14 +656,14 @@ namespace Frida.Inject {
 			script_unchanged_timeout = source;
 		}
 
-		private void on_message (string raw_message, Bytes? data) {
-			bool handled = rpc_client.try_handle_message (raw_message);
+		private void on_message (string json, Bytes? data) {
+			bool handled = rpc_client.try_handle_message (json);
 			if (handled)
 				return;
 
 			var parser = new Json.Parser ();
 			try {
-				parser.load_from_data (raw_message);
+				parser.load_from_data (json);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -683,7 +683,7 @@ namespace Frida.Inject {
 			}
 
 			if (!handled) {
-				stdout.puts (raw_message);
+				stdout.puts (json);
 				stdout.putc ('\n');
 			}
 		}
@@ -762,8 +762,8 @@ namespace Frida.Inject {
 			}
 		}
 
-		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
-			yield script.post (raw_message, null, cancellable);
+		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
+			yield script.post (json, null, cancellable);
 		}
 	}
 

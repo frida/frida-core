@@ -1822,7 +1822,7 @@ namespace Frida {
 	}
 
 	public class Bus : Object {
-		public signal void message (string message, Bytes? data);
+		public signal void message (string json, Bytes? data);
 
 		public BusSession session {
 			get;
@@ -1837,35 +1837,71 @@ namespace Frida {
 			session.message.connect (on_message);
 		}
 
-		public async void post (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var has_data = data != null;
-			var data_param = has_data ? data.get_data () : new uint8[0];
-
+		public async void subscribe (Cancellable? cancellable = null) throws Error, IOError {
 			try {
-				yield session.post (message, has_data, data_param, cancellable);
+				yield session.subscribe (cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		public void post_sync (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		public void subscribe_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<SubscribeTask> ().execute (cancellable);
+		}
+
+		private class SubscribeTask : BusTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.subscribe (cancellable);
+			}
+		}
+
+		public async void unsubscribe (Cancellable? cancellable = null) throws Error, IOError {
+			try {
+				yield session.unsubscribe (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void unsubscribe_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<UnsubscribeTask> ().execute (cancellable);
+		}
+
+		private class UnsubscribeTask : BusTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.unsubscribe (cancellable);
+			}
+		}
+
+		public async void post (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+			var has_data = data != null;
+			var data_param = has_data ? data.get_data () : new uint8[0];
+
+			try {
+				yield session.post (json, has_data, data_param, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void post_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<PostTask> ();
-			task.message = message;
+			task.json = json;
 			task.data = data;
 			task.execute (cancellable);
 		}
 
 		private class PostTask : BusTask<void> {
-			public string message;
+			public string json;
 			public Bytes? data;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (message, data, cancellable);
+				yield parent.post (json, data, cancellable);
 			}
 		}
 
-		private void on_message (string message, bool has_data, uint8[] data) {
-			this.message (message, has_data ? new Bytes (data) : null);
+		private void on_message (string json, bool has_data, uint8[] data) {
+			message (json, has_data ? new Bytes (data) : null);
 		}
 
 		private T create<T> () {
@@ -2745,7 +2781,7 @@ namespace Frida {
 
 	public class Script : Object {
 		public signal void destroyed ();
-		public signal void message (string message, Bytes? data);
+		public signal void message (string json, Bytes? data);
 
 		public uint id {
 			get;
@@ -2825,32 +2861,32 @@ namespace Frida {
 			}
 		}
 
-		public async void post (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		public async void post (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
 
 			try {
-				yield session.session.post_to_script (AgentScriptId (id), message, has_data, data_param, cancellable);
+				yield session.session.post_to_script (AgentScriptId (id), json, has_data, data_param, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		public void post_sync (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		public void post_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<PostTask> ();
-			task.message = message;
+			task.json = json;
 			task.data = data;
 			task.execute (cancellable);
 		}
 
 		private class PostTask : ScriptTask<void> {
-			public string message;
+			public string json;
 			public Bytes? data;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (message, data, cancellable);
+				yield parent.post (json, data, cancellable);
 			}
 		}
 

@@ -229,11 +229,11 @@ namespace Frida {
 			script_eternalized (script);
 		}
 
-		public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
+		public async void post_to_script (AgentScriptId script_id, string json, bool has_data, uint8[] data,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
+			script_engine.post_to_script (script_id, json, has_data ? new Bytes (data) : null);
 		}
 
 		public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
@@ -609,8 +609,8 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is closing");
 		}
 
-		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
-			pending_messages.add (new PendingMessage (AgentMessageKind.SCRIPT, script_id, message, data));
+		private void on_message_from_script (AgentScriptId script_id, string json, Bytes? data) {
+			pending_messages.add (new PendingMessage (AgentMessageKind.SCRIPT, script_id, json, data));
 			maybe_deliver_pending_messages ();
 		}
 

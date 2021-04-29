@@ -1276,14 +1276,14 @@ namespace Frida {
 			}
 		}
 
-		private void on_message_from_script (string raw_message) {
-			bool handled = rpc_client.try_handle_message (raw_message);
+		private void on_message_from_script (string json) {
+			bool handled = rpc_client.try_handle_message (json);
 			if (handled)
 				return;
 
 			var parser = new Json.Parser ();
 			try {
-				parser.load_from_data (raw_message);
+				parser.load_from_data (json);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -1304,12 +1304,12 @@ namespace Frida {
 			}
 
 			if (!handled)
-				printerr ("%s\n", raw_message);
+				printerr ("%s\n", json);
 		}
 
-		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
+		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield session.post_to_script (script, raw_message, false, new uint8[0], cancellable);
+				yield session.post_to_script (script, json, false, new uint8[0], cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

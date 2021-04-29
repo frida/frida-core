@@ -69,13 +69,13 @@ namespace Frida {
 			return pending.result;
 		}
 
-		public bool try_handle_message (string raw_message) {
-			if (raw_message.index_of ("\"frida:rpc\"") == -1)
+		public bool try_handle_message (string json) {
+			if (json.index_of ("\"frida:rpc\"") == -1)
 				return false;
 
 			var parser = new Json.Parser ();
 			try {
-				parser.load_from_data (raw_message);
+				parser.load_from_data (json);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -156,6 +156,6 @@ namespace Frida {
 	}
 
 	public interface RpcPeer : Object {
-		public abstract async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError;
 	}
 }

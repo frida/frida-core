@@ -1,6 +1,6 @@
 namespace Frida {
 	public class ScriptEngine : Object {
-		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
+		public signal void message_from_script (AgentScriptId script_id, string json, Bytes? data);
 		public signal void message_from_debugger (string message);
 
 		public weak ProcessInvader invader {
@@ -176,20 +176,20 @@ namespace Frida {
 			return script;
 		}
 
-		public void post_to_script (AgentScriptId script_id, string message, Bytes? data = null) throws Error {
+		public void post_to_script (AgentScriptId script_id, string json, Bytes? data = null) throws Error {
 			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 
-			instance.post (message, data);
+			instance.post (json, data);
 		}
 
 		private void on_instance_closed (ScriptInstance instance) {
 			detach_instance (instance);
 		}
 
-		private void on_instance_message (ScriptInstance instance, string message, GLib.Bytes? data) {
-			message_from_script (instance.script_id, message, data);
+		private void on_instance_message (ScriptInstance instance, string json, GLib.Bytes? data) {
+			message_from_script (instance.script_id, json, data);
 		}
 
 		public void enable_debugger () throws Error {
@@ -225,7 +225,7 @@ namespace Frida {
 
 		public class ScriptInstance : Object, RpcPeer {
 			public signal void closed ();
-			public signal void message (string message, Bytes? data);
+			public signal void message (string json, Bytes? data);
 
 			public AgentScriptId script_id {
 				get;
@@ -425,29 +425,28 @@ namespace Frida {
 				dispose_request.resolve (true);
 			}
 
-			public void post (string message, Bytes? data) throws Error {
+			public void post (string json, Bytes? data) throws Error {
 				switch (state) {
 					case LOADING:
 					case LOADED:
 					case DISPOSED:
-						script.post (message, data);
+						script.post (json, data);
 						break;
 					default:
 						throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
 				}
 			}
 
-			private void on_message (Gum.Script script, string raw_message, Bytes? data) {
-				bool handled = rpc_client.try_handle_message (raw_message);
+			private void on_message (Gum.Script script, string json, Bytes? data) {
+				bool handled = rpc_client.try_handle_message (json);
 				if (!handled)
-					this.message (raw_message, data);
+					this.message (json, data);
 			}
 
-			private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
+			private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
 				if (script == null)
 					throw new Error.INVALID_OPERATION ("Script is destroyed");
-
-				script.post (raw_message);
+				script.post (json);
 			}
 		}
 	}

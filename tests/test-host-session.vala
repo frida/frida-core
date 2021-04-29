@@ -2388,8 +2388,8 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
-					received_message = message;
+				var message_handler = h.message_from_script.connect ((script_id, json, data) => {
+					received_message = json;
 					if (waiting)
 						spawn.callback ();
 				});
@@ -2653,8 +2653,8 @@ namespace Frida.HostSessionTest {
 				var session_id = yield host_session.attach (process.pid, make_options_dict (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 				string received_message = null;
-				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
-					received_message = message;
+				var message_handler = h.message_from_script.connect ((script_id, json, data) => {
+					received_message = json;
 					large_messages.callback ();
 				});
 				stdout.printf ("creating script\n");
@@ -3010,10 +3010,10 @@ namespace Frida.HostSessionTest {
 		}
 	}
 
-	private static string parse_string_message_payload (string raw_message) {
+	private static string parse_string_message_payload (string json) {
 		Json.Object message;
 		try {
-			message = Json.from_string (raw_message).get_object ();
+			message = Json.from_string (json).get_object ();
 		} catch (GLib.Error e) {
 			assert_not_reached ();
 		}
