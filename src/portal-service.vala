@@ -32,6 +32,7 @@ namespace Frida {
 		private SocketService server = new SocketService ();
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
+		private Gee.MultiMap<string, ConnectionEntry> tags = new Gee.HashMultiMap<string, ConnectionEntry> ();
 		private uint next_connection_id = 1;
 
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
@@ -157,6 +158,25 @@ namespace Frida {
 				entry.post (json, data);
 		}
 
+		public void narrowcast (string tag, string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_narrowcast (tag, json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_narrowcast (tag, json, data);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_narrowcast (string tag, string json, Bytes? data) {
+			foreach (ConnectionEntry entry in tags[tag])
+				entry.post (json, data);
+		}
+
 		public void broadcast (string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -186,6 +206,50 @@ namespace Frida {
 
 				bus.message (json, has_data, data_param);
 			}
+		}
+
+		public void tag (uint connection_id, string tag) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_tag (connection_id, tag);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_tag (connection_id, tag);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_tag (uint connection_id, string tag) {
+			ConnectionEntry? entry = connections[connection_id];
+			if (entry == null)
+				return;
+			tags[tag] = entry;
+			entry.tags.add (tag);
+		}
+
+		public void untag (uint connection_id, string tag) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_untag (connection_id, tag);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_untag (connection_id, tag);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_untag (uint connection_id, string tag) {
+			ConnectionEntry? entry = connections[connection_id];
+			if (entry == null)
+				return;
+			tags.remove (tag, entry);
+			entry.tags.remove (tag);
 		}
 
 		private T create<T> () {
@@ -257,13 +321,16 @@ namespace Frida {
 
 				uint id = peer.connection_id;
 
-				ConnectionEntry meta;
-				connections.unset (id, out meta);
+				ConnectionEntry entry;
+				connections.unset (id, out entry);
 
-				if (meta.parameters == cluster_params)
-					node_disconnected (id, meta.address);
+				foreach (string tag in entry.tags)
+					tags.remove (tag, entry);
+
+				if (entry.parameters == cluster_params)
+					node_disconnected (id, entry.address);
 				else
-					controller_disconnected (id, meta.address);
+					controller_disconnected (id, entry.address);
 			}
 		}
 
@@ -721,6 +788,11 @@ namespace Frida {
 			public Peer? peer {
 				get;
 				set;
+			}
+
+			public Gee.Set<string> tags {
+				get;
+				default = new Gee.HashSet<string> ();
 			}
 
 			public ConnectionEntry (SocketAddress address, EndpointParameters parameters) {
