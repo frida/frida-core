@@ -564,11 +564,12 @@ namespace Frida.Agent {
 			return (v8_backend != null) ? v8_backend : qjs_backend;
 		}
 
-		private async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+		private async void open (AgentSessionId id, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
-			var opts = SessionOptions._deserialize (options.data);
+			var opts = SessionOptions._deserialize (options);
 
 			if (opts.realm == EMULATED) {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
@@ -576,11 +577,8 @@ namespace Frida.Agent {
 				var emulated_opts = new SessionOptions ();
 				emulated_opts.persist_timeout = opts.persist_timeout;
 
-				var raw_emulated_opts = AgentSessionOptions ();
-				raw_emulated_opts.data = emulated_opts._serialize ().get_data ();
-
 				try {
-					yield emulated_provider.open (id, raw_emulated_opts, cancellable);
+					yield emulated_provider.open (id, emulated_opts._serialize (), cancellable);
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
 				}

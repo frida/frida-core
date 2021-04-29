@@ -664,15 +664,12 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   pid_t pid;
   FridaSpawnInstance * instance;
   gchar ** argv, ** envp;
-  GVariantDict * aux_options;
   posix_spawn_file_actions_t file_actions;
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   short flags;
-  FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
-  gchar * aslr = NULL;
-  const gchar * cwd;
+  GVariant * aslr;
   gchar * old_cwd = NULL;
   int result, spawn_errno;
 
@@ -680,8 +677,6 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   argv = frida_host_spawn_options_compute_argv (options, path, NULL);
   envp = frida_host_spawn_options_compute_envp (options, NULL);
-
-  aux_options = frida_host_spawn_options_load_aux (options);
 
   posix_spawn_file_actions_init (&file_actions);
 
@@ -691,8 +686,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED;
 
-  stdio = frida_host_spawn_options_get_stdio (options);
-  switch (stdio)
+  switch (options->stdio)
   {
     case FRIDA_STDIO_INHERIT:
       *pipes = NULL;
@@ -720,18 +714,27 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
       g_assert_not_reached ();
   }
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
+  aslr = g_hash_table_lookup (options->aux, "aslr");
+  if (aslr != NULL)
   {
-    flags |= _POSIX_SPAWN_DISABLE_ASLR;
+    const gchar * str;
+
+    if (!g_variant_is_of_type (aslr, G_VARIANT_TYPE_STRING))
+      goto invalid_aslr_type;
+    str = g_variant_get_string (aslr, NULL);
+
+    if (strcmp (str, "disable") == 0)
+      flags |= _POSIX_SPAWN_DISABLE_ASLR;
+    else if (strcmp (str, "enable") != 0)
+      goto invalid_aslr_value;
   }
 
   posix_spawnattr_setflags (&attributes, flags);
 
-  cwd = frida_host_spawn_options_get_cwd (options);
-  if (strlen (cwd) > 0)
+  if (strlen (options->cwd) > 0)
   {
     old_cwd = g_get_current_dir ();
-    if (chdir (cwd) != 0)
+    if (chdir (options->cwd) != 0)
       goto chdir_failed;
   }
 
@@ -741,7 +744,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   if (old_cwd != NULL)
     chdir (old_cwd);
 
-  if (stdio == FRIDA_STDIO_PIPE)
+  if (options->stdio == FRIDA_STDIO_PIPE)
   {
     close (stdin_pipe[0]);
     close (stdout_pipe[1]);
@@ -761,18 +764,33 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   goto beach;
 
+invalid_aslr_type:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'aslr' option must be a string");
+
+    goto early_failure;
+  }
+invalid_aslr_value:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'aslr' option must be set to either 'enable' or 'disable'");
+
+    goto early_failure;
+  }
 chdir_failed:
   {
-    posix_spawnattr_destroy (&attributes);
-    posix_spawn_file_actions_destroy (&file_actions);
-
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to change directory to '%s'",
-        cwd);
+        options->cwd);
 
-    goto failure;
+    goto early_failure;
   }
 spawn_failed:
   {
@@ -793,9 +811,16 @@ spawn_failed:
           path, g_strerror (spawn_errno));
     }
 
-    goto failure;
+    goto any_failure;
   }
-failure:
+early_failure:
+  {
+    posix_spawnattr_destroy (&attributes);
+    posix_spawn_file_actions_destroy (&file_actions);
+
+    goto any_failure;
+  }
+any_failure:
   {
     if (instance->pid != 0)
       kill (instance->pid, SIGKILL);
@@ -808,8 +833,6 @@ failure:
 beach:
   {
     g_free (old_cwd);
-    g_free (aslr);
-    g_variant_dict_unref (aux_options);
     g_strfreev (envp);
     g_strfreev (argv);
 
