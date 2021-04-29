@@ -29,7 +29,6 @@ namespace Frida {
 		}
 
 		private SocketService server = new SocketService ();
-		private string guid = DBus.generate_guid ();
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
 		private uint next_connection_id = 1;
@@ -224,7 +223,7 @@ namespace Frida {
 				stream = tc;
 			}
 
-			var connection = yield new DBusConnection (stream, guid, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
+			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			uint connection_id = register_connection (socket_connection, parameters);

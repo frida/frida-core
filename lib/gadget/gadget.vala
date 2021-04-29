@@ -1405,7 +1405,6 @@ namespace Frida.Gadget {
 		}
 
 		private SocketService server = new SocketService ();
-		private string guid = DBus.generate_guid ();
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
 		private Gee.Map<AgentSessionId?, LiveAgentSession> sessions =
@@ -1539,7 +1538,7 @@ namespace Frida.Gadget {
 				stream = tc;
 			}
 
-			var connection = yield new DBusConnection (stream, guid, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
+			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			Peer peer;
