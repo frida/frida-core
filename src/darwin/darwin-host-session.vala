@@ -1054,7 +1054,7 @@ namespace Frida {
 			var raw_header = tokens[0];
 			var report = tokens[1];
 
-			var parameters = new VariantDict ();
+			var parameters = make_options_dict ();
 			try {
 				var header = new Json.Reader (Json.from_string (raw_header));
 				foreach (string member in header.list_members ()) {
@@ -1073,7 +1073,7 @@ namespace Frida {
 					}
 
 					if (val != null)
-						parameters.insert_value (canonicalize_parameter_name (member), val);
+						parameters[canonicalize_parameter_name (member)] = val;
 
 					header.end_member ();
 				}
@@ -1081,13 +1081,14 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
-			string? process_name = null;
-			parameters.lookup ("name", "s", out process_name);
+			Variant? name_val = parameters["name"];
+			assert (name_val != null && name_val.is_of_type (VariantType.STRING));
+			string process_name = name_val.get_string ();
 			assert (process_name != null);
 
 			string summary = summarize (report);
 
-			return CrashInfo (pid, process_name, summary, report, parameters.end ());
+			return CrashInfo (pid, process_name, summary, report, parameters);
 		}
 
 		private static string summarize (string report) {
