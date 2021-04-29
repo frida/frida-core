@@ -10,7 +10,6 @@ namespace Frida {
 
 		public signal void authenticated (uint connection_id, string session_info);
 		public signal void subscribe (uint connection_id);
-		public signal void unsubscribe (uint connection_id);
 		public signal void message (uint connection_id, string json, Bytes? data);
 
 		public Device device {
@@ -178,8 +177,14 @@ namespace Frida {
 
 			foreach (Peer peer in peers.values) {
 				ControlChannel? channel = peer as ControlChannel;
-				if (channel != null && channel.status == SUBSCRIBED)
-					channel.message (json, has_data, data_param);
+				if (channel == null)
+					continue;
+
+				BusService bus = channel.bus;
+				if (bus.status != ATTACHED)
+					continue;
+
+				bus.message (json, has_data, data_param);
 			}
 		}
 
@@ -469,16 +474,12 @@ namespace Frida {
 			node.kill ();
 		}
 
-		private void handle_bus_subscribe (ControlChannel requester) {
-			subscribe (requester.connection_id);
+		private void handle_bus_attach (uint connection_id) {
+			subscribe (connection_id);
 		}
 
-		private void handle_bus_unsubscribe (ControlChannel requester) {
-			unsubscribe (requester.connection_id);
-		}
-
-		private void handle_bus_message (ControlChannel sender, string json, Bytes? data) {
-			message (sender.connection_id, json, data);
+		private void handle_bus_message (uint connection_id, string json, Bytes? data) {
+			message (connection_id, json, data);
 		}
 
 		private async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
@@ -735,9 +736,13 @@ namespace Frida {
 				if (channel == null)
 					return;
 
+				BusService bus = channel.bus;
+				if (bus.status != ATTACHED)
+					return;
+
 				bool has_data = data != null;
 				var data_param = has_data ? data.get_data () : new uint8[0];
-				channel.message (json, has_data, data_param);
+				bus.message (json, has_data, data_param);
 			}
 		}
 
@@ -815,7 +820,7 @@ namespace Frida {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession, BusSession {
+		private class ControlChannel : Object, Peer, HostSession {
 			public weak PortalService parent {
 				get;
 				construct;
@@ -836,13 +841,13 @@ namespace Frida {
 				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
 
-			public SubscriptionStatus status {
+			public BusService? bus {
 				get {
-					return _status;
+					return _bus;
 				}
 			}
-			private SubscriptionStatus _status = UNSUBSCRIBED;
 
+			private BusService? _bus;
 			private Gee.Set<uint> registrations = new Gee.HashSet<uint> ();
 
 			public ControlChannel (PortalService parent, uint connection_id = 0, DBusConnection? connection = null) {
@@ -855,12 +860,14 @@ namespace Frida {
 
 			construct {
 				if (connection != null) {
+					_bus = new BusService (parent, connection_id);
+
 					try {
 						registrations.add (
 							connection.register_object (ObjectPath.HOST_SESSION, (HostSession) this));
 
 						registrations.add (
-							connection.register_object (ObjectPath.BUS_SESSION, (BusSession) this));
+							connection.register_object (ObjectPath.BUS_SESSION, (BusSession) _bus));
 
 						AuthenticationService null_auth = new NullAuthenticationService ();
 						registrations.add (
@@ -943,29 +950,45 @@ namespace Frida {
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}
+		}
 
-			public async void subscribe (Cancellable? cancellable) throws Error, IOError {
-				if (_status == SUBSCRIBED)
-					return;
-				_status = SUBSCRIBED;
-				parent.handle_bus_subscribe (this);
+		private class BusService : Object, BusSession {
+			public weak PortalService parent {
+				get;
+				construct;
 			}
 
-			public async void unsubscribe (Cancellable? cancellable) throws Error, IOError {
-				if (_status == UNSUBSCRIBED)
+			public uint connection_id {
+				get;
+				construct;
+			}
+
+			public BusStatus status {
+				get {
+					return _status;
+				}
+			}
+			private BusStatus _status = DETACHED;
+
+			public BusService (PortalService parent, uint connection_id) {
+				Object (parent: parent, connection_id: connection_id);
+			}
+
+			public async void attach (Cancellable? cancellable) throws Error, IOError {
+				if (_status == ATTACHED)
 					return;
-				_status = UNSUBSCRIBED;
-				parent.handle_bus_unsubscribe (this);
+				_status = ATTACHED;
+				parent.handle_bus_attach (connection_id);
 			}
 
 			public async void post (string json, bool has_data, uint8[] data, Cancellable? cancellable) throws Error, IOError {
-				parent.handle_bus_message (this, json, has_data ? new Bytes (data) : null);
+				parent.handle_bus_message (connection_id, json, has_data ? new Bytes (data) : null);
 			}
 		}
 
-		private enum SubscriptionStatus {
-			UNSUBSCRIBED,
-			SUBSCRIBED
+		private enum BusStatus {
+			DETACHED,
+			ATTACHED
 		}
 
 		private class ClusterNode : Object, Peer, PortalSession {

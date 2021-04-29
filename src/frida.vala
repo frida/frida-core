@@ -490,6 +490,12 @@ namespace Frida {
 			construct;
 		}
 
+		public Bus bus {
+			get {
+				return _bus;
+			}
+		}
+
 		public HostSessionProvider provider {
 			get;
 			construct;
@@ -512,6 +518,7 @@ namespace Frida {
 		private Gee.HashSet<Promise<Session>> pending_attach_requests = new Gee.HashSet<Promise<Session>> ();
 		private Gee.HashMap<AgentSessionId?, Promise<bool>> pending_detach_requests =
 			new Gee.HashMap<AgentSessionId?, Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
+		private Bus _bus;
 
 		internal Device (DeviceManager? manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider,
 				HostSessionOptions? options = null) {
@@ -545,6 +552,8 @@ namespace Frida {
 		construct {
 			provider.host_session_detached.connect (on_host_session_detached);
 			provider.agent_session_detached.connect (on_agent_session_detached);
+
+			_bus = new Bus (this);
 		}
 
 		public bool is_lost () {
@@ -1194,36 +1203,6 @@ namespace Frida {
 			}
 		}
 
-		public async Bus get_bus (Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
-
-			var host_session = yield get_host_session (cancellable);
-
-			DBusProxy proxy = host_session as DBusProxy;
-			if (proxy == null)
-				throw new Error.NOT_SUPPORTED ("Bus is not available on this device");
-
-			BusSession session;
-			try {
-				session = yield proxy.g_connection.get_proxy (null, ObjectPath.BUS_SESSION, DO_NOT_LOAD_PROPERTIES,
-					cancellable);
-			} catch (IOError e) {
-				throw_dbus_error (e);
-			}
-
-			return new Bus (session);
-		}
-
-		public Bus get_bus_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return create<GetBusTask> ().execute (cancellable);
-		}
-
-		private class GetBusTask : DeviceTask<Bus> {
-			protected override async Bus perform_operation () throws Error, IOError {
-				return yield parent.get_bus (cancellable);
-			}
-		}
-
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Device is gone");
@@ -1270,6 +1249,8 @@ namespace Frida {
 		private void on_host_session_detached (HostSession session) {
 			if (session != current_host_session)
 				return;
+
+			_bus._detach.begin (session);
 
 			detach_host_session (session);
 
@@ -1822,49 +1803,96 @@ namespace Frida {
 	}
 
 	public class Bus : Object {
+		public signal void detached ();
 		public signal void message (string json, Bytes? data);
 
-		public BusSession session {
+		public weak Device device {
 			get;
 			construct;
 		}
 
+		private Promise<BusSession>? attach_request;
+
+		private BusSession? active_session;
 		private Cancellable io_cancellable = new Cancellable ();
 
-		internal Bus (BusSession session) {
-			Object (session: session);
+		internal Bus (Device device) {
+			Object (device: device);
 		}
 
-		construct {
-			session.message.connect (on_message);
-		}
+		public async void attach (Cancellable? cancellable = null) throws Error, IOError {
+			while (attach_request != null) {
+				try {
+					yield attach_request.future.wait_async (cancellable);
+					return;
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			attach_request = new Promise<BusSession> ();
 
-		public void subscribe () {
-			MainContext context = get_main_context ();
-			if (context.is_owner ()) {
-				session.subscribe.begin (io_cancellable);
-			} else {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					session.subscribe.begin (io_cancellable);
-					return false;
-				});
-				source.attach (context);
+			try {
+				var host_session = yield device.get_host_session (cancellable);
+
+				DBusProxy proxy = host_session as DBusProxy;
+				if (proxy == null)
+					throw new Error.NOT_SUPPORTED ("Bus is not available on this device");
+
+				try {
+					active_session = yield proxy.g_connection.get_proxy (null, ObjectPath.BUS_SESSION,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+					active_session.message.connect (on_message);
+
+					yield active_session.attach (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+
+				attach_request.resolve (active_session);
+			} catch (GLib.Error e) {
+				attach_request.reject (e);
+				attach_request = null;
+
+				throw_api_error (e);
 			}
 		}
 
-		public void unsubscribe () {
-			MainContext context = get_main_context ();
-			if (context.is_owner ()) {
-				session.unsubscribe.begin (io_cancellable);
-			} else {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					session.unsubscribe.begin (io_cancellable);
-					return false;
-				});
-				source.attach (context);
+		public void attach_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<AttachTask> ().execute (cancellable);
+		}
+
+		private class AttachTask : BusTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.attach (cancellable);
 			}
+		}
+
+		internal async void _detach (HostSession dead_host_session) {
+			if (attach_request == null)
+				return;
+
+			DBusConnection dead_connection = ((DBusProxy) dead_host_session).g_connection;
+
+			io_cancellable.cancel ();
+			io_cancellable = new Cancellable ();
+
+			while (attach_request != null) {
+				try {
+					var some_session = yield attach_request.future.wait_async (null);
+					if (((DBusProxy) some_session).g_connection == dead_connection) {
+						some_session.message.disconnect (on_message);
+						active_session = null;
+						attach_request = null;
+					} else {
+						return;
+					}
+				} catch (GLib.Error e) {
+				}
+			}
+
+			detached ();
 		}
 
 		public void post (string json, Bytes? data = null) {
@@ -1882,13 +1910,26 @@ namespace Frida {
 		}
 
 		private void do_post (string json, Bytes? data) {
+			if (active_session == null)
+				return;
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			session.post.begin (json, has_data, data_param, io_cancellable);
+			active_session.post.begin (json, has_data, data_param, io_cancellable);
 		}
 
 		private void on_message (string json, bool has_data, uint8[] data) {
 			message (json, has_data ? new Bytes (data) : null);
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class BusTask<T> : AsyncTask<T> {
+			public weak Bus parent {
+				get;
+				construct;
+			}
 		}
 	}
 

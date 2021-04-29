@@ -151,8 +151,7 @@ namespace Frida {
 
 	[DBus (name = "re.frida.BusSession16")]
 	public interface BusSession : Object {
-		public abstract async void subscribe (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void unsubscribe (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void attach (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post (string json, bool has_data, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public signal void message (string json, bool has_data, uint8[] data);
 	}
@@ -266,11 +265,7 @@ namespace Frida {
 	}
 
 	public class UnauthorizedBusSession : Object, BusSession {
-		public async void subscribe (Cancellable? cancellable) throws Error, IOError {
-			throw_not_authorized ();
-		}
-
-		public async void unsubscribe (Cancellable? cancellable) throws Error, IOError {
+		public async void attach (Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
