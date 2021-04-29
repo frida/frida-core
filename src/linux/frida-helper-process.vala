@@ -297,19 +297,25 @@ namespace Frida {
 				return helper;
 			}
 
-			SuperSU.Process pending_superprocess = null;
+			SuperSU.Process? pending_superprocess = null;
 			Pid pending_pid = 0;
+			IOStream? pending_stream = null;
 			DBusConnection pending_connection = null;
-			LinuxRemoteHelper pending_proxy = null;
+			LinuxRemoteHelper? pending_proxy = null;
 			GLib.Error? pending_error = null;
 
-			DBusServer server = null;
-			TimeoutSource timeout_source = null;
+			SocketService? service = null;
+			TimeoutSource? timeout_source = null;
 
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusConnectionFlags.NONE,
-					DBus.generate_guid (), null, cancellable);
-				server.start ();
+				string socket_path = Path.build_filename (resource_store.tempdir.path, Uuid.string_random ());
+				string socket_address = "unix:abstract=" + socket_path;
+
+				service = new SocketService ();
+				SocketAddress effective_address;
+				service.add_address (new UnixSocketAddress.with_type (socket_path, -1, ABSTRACT),
+					SocketType.STREAM, SocketProtocol.DEFAULT, null, out effective_address);
+				service.start ();
 
 				var idle_source = new IdleSource ();
 				idle_source.set_callback (() => {
@@ -320,12 +326,8 @@ namespace Frida {
 
 				yield;
 
-				var tokens = server.client_address.split ("=", 2);
-
-				resource_store.manage (new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir));
-
-				var connection_handler = server.new_connection.connect ((c) => {
-					pending_connection = c;
+				var incoming_handler = service.incoming.connect ((c) => {
+					pending_stream = c;
 					obtain.callback ();
 					return true;
 				});
@@ -342,11 +344,11 @@ namespace Frida {
 
 				try {
 					string cwd = "/";
-					string[] argv = new string[] { "su", "-c", helper_file.path, server.client_address };
+					string[] argv = new string[] { "su", "-c", helper_file.path, socket_address };
 					bool capture_output = false;
 					pending_superprocess = yield SuperSU.spawn (cwd, argv, envp, capture_output, cancellable);
 				} catch (Error e) {
-					string[] argv = { helper_file.path, server.client_address };
+					string[] argv = { helper_file.path, socket_address };
 
 					GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
 					GLib.Process.spawn_async (null, argv, envp, flags, null, out pending_pid);
@@ -354,24 +356,28 @@ namespace Frida {
 
 				yield;
 
-				server.disconnect (connection_handler);
-				server.stop ();
-				server = null;
+				service.disconnect (incoming_handler);
+				service.stop ();
+				service = null;
 				timeout_source.destroy ();
 				timeout_source = null;
 
 				if (pending_error == null) {
-					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
+					pending_connection = yield new DBusConnection (pending_stream, null, DBusConnectionFlags.NONE, null,
 						cancellable);
+					pending_proxy = yield connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
+						cancellable);
+					if (pending_connection.is_closed ())
+						throw new Error.NOT_SUPPORTED ("Helper terminated prematurely");
 				}
 			} catch (GLib.Error e) {
 				if (timeout_source != null)
 					timeout_source.destroy ();
 
-				if (server != null)
-					server.stop ();
+				if (service != null)
+					service.stop ();
 
-				if (e is IOError.CANCELLED)
+				if (e is Error || e is IOError.CANCELLED)
 					pending_error = e;
 				else
 					pending_error = new Error.PERMISSION_DENIED ("%s", e.message);
@@ -570,8 +576,6 @@ namespace Frida {
 			private set;
 		}
 
-		private Gee.Collection<TemporaryFile> files = new Gee.ArrayList<TemporaryFile> ();
-
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
 			this.tempdir = tempdir;
 
@@ -600,10 +604,6 @@ namespace Frida {
 			else
 				helper32 = file;
 #endif
-		}
-
-		public void manage (TemporaryFile file) {
-			files.add (file);
 		}
 	}
 }

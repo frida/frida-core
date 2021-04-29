@@ -1033,7 +1033,7 @@ namespace Frida.HostSessionTest {
 
 					var options = new SpawnOptions ();
 					if (activity_name != null)
-						options.aux.insert ("activity", "s", activity_name);
+						options.aux["activity"] = new Variant.string (activity_name);
 
 					printerr ("device.spawn(\"%s\")\n", package_name);
 					var pid = yield device.spawn (package_name, options);

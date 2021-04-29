@@ -341,9 +341,7 @@ _frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gcha
 {
   FridaSpawnInstance * instance;
   gchar ** argv, ** envp;
-  FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
-  const gchar * cwd;
   gchar * old_cwd = NULL;
   int status;
   long ret;
@@ -355,8 +353,7 @@ _frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gcha
   argv = frida_host_spawn_options_compute_argv (options, path, NULL);
   envp = frida_host_spawn_options_compute_envp (options, NULL);
 
-  stdio = frida_host_spawn_options_get_stdio (options);
-  switch (stdio)
+  switch (options->stdio)
   {
     case FRIDA_STDIO_INHERIT:
       *pipes = NULL;
@@ -375,11 +372,10 @@ _frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gcha
       g_assert_not_reached ();
   }
 
-  cwd = frida_host_spawn_options_get_cwd (options);
-  if (strlen (cwd) > 0)
+  if (strlen (options->cwd) > 0)
   {
     old_cwd = g_get_current_dir ();
-    if (chdir (cwd) != 0)
+    if (chdir (options->cwd) != 0)
       goto chdir_failed;
   }
 
@@ -388,7 +384,7 @@ _frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gcha
   {
     setsid ();
 
-    if (stdio == FRIDA_STDIO_PIPE)
+    if (options->stdio == FRIDA_STDIO_PIPE)
     {
       dup2 (stdin_pipe[0], 0);
       dup2 (stdout_pipe[1], 1);
@@ -410,7 +406,7 @@ _frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gcha
       g_warning ("Failed to restore working directory");
   }
 
-  if (stdio == FRIDA_STDIO_PIPE)
+  if (options->stdio == FRIDA_STDIO_PIPE)
   {
     close (stdin_pipe[0]);
     close (stdout_pipe[1]);
@@ -438,7 +434,7 @@ chdir_failed:
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to change directory to '%s'",
-        cwd);
+        options->cwd);
     goto failure;
   }
 os_failure:
