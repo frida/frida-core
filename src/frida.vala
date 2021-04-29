@@ -1829,6 +1829,8 @@ namespace Frida {
 			construct;
 		}
 
+		private Cancellable io_cancellable = new Cancellable ();
+
 		internal Bus (BusSession session) {
 			Object (session: session);
 		}
@@ -1837,82 +1839,56 @@ namespace Frida {
 			session.message.connect (on_message);
 		}
 
-		public async void subscribe (Cancellable? cancellable = null) throws Error, IOError {
-			try {
-				yield session.subscribe (cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+		public void subscribe () {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				session.subscribe.begin (io_cancellable);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					session.subscribe.begin (io_cancellable);
+					return false;
+				});
+				source.attach (context);
 			}
 		}
 
-		public void subscribe_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<SubscribeTask> ().execute (cancellable);
-		}
-
-		private class SubscribeTask : BusTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.subscribe (cancellable);
+		public void unsubscribe () {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				session.unsubscribe.begin (io_cancellable);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					session.unsubscribe.begin (io_cancellable);
+					return false;
+				});
+				source.attach (context);
 			}
 		}
 
-		public async void unsubscribe (Cancellable? cancellable = null) throws Error, IOError {
-			try {
-				yield session.unsubscribe (cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+		public void post (string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_post (json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_post (json, data);
+					return false;
+				});
+				source.attach (context);
 			}
 		}
 
-		public void unsubscribe_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<UnsubscribeTask> ().execute (cancellable);
-		}
-
-		private class UnsubscribeTask : BusTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.unsubscribe (cancellable);
-			}
-		}
-
-		public async void post (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
+		private void do_post (string json, Bytes? data) {
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-
-			try {
-				yield session.post (json, has_data, data_param, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public void post_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<PostTask> ();
-			task.json = json;
-			task.data = data;
-			task.execute (cancellable);
-		}
-
-		private class PostTask : BusTask<void> {
-			public string json;
-			public Bytes? data;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (json, data, cancellable);
-			}
+			session.post.begin (json, has_data, data_param, io_cancellable);
 		}
 
 		private void on_message (string json, bool has_data, uint8[] data) {
 			message (json, has_data ? new Bytes (data) : null);
-		}
-
-		private T create<T> () {
-			return Object.new (typeof (T), parent: this);
-		}
-
-		private abstract class BusTask<T> : AsyncTask<T> {
-			public weak Bus parent {
-				get;
-				construct;
-			}
 		}
 	}
 
