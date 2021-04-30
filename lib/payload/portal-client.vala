@@ -111,7 +111,8 @@ namespace Frida {
 					waiting = false;
 				} catch (GLib.Error e) {
 					if (start_request != null) {
-						GLib.Error start_error = (e is IOError.CANCELLED)
+						DBusError.strip_remote_error (e);
+						GLib.Error start_error = (e is Error || e is IOError.CANCELLED)
 							? e
 							: new Error.TRANSPORT ("%s", e.message);
 						start_request.reject (start_error);
