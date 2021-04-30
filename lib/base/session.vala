@@ -144,7 +144,8 @@ namespace Frida {
 	[DBus (name = "re.frida.PortalSession16")]
 	public interface PortalSession : Object {
 		public abstract async void join (HostApplicationInfo app, SpawnStartState current_state,
-			AgentSessionId[] interrupted_sessions, Cancellable? cancellable, out SpawnStartState next_state) throws GLib.Error;
+			AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options, Cancellable? cancellable,
+			out SpawnStartState next_state) throws GLib.Error;
 		public signal void resume ();
 		public signal void kill ();
 	}
@@ -258,7 +259,8 @@ namespace Frida {
 	}
 
 	public class UnauthorizedPortalSession : Object, PortalSession {
-		public async void join (HostApplicationInfo app, SpawnStartState current_state, AgentSessionId[] interrupted_sessions,
+		public async void join (HostApplicationInfo app, SpawnStartState current_state,
+				AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options,
 				Cancellable? cancellable, out SpawnStartState next_state) throws Error, IOError {
 			throw_not_authorized ();
 		}
@@ -841,6 +843,11 @@ namespace Frida {
 			set;
 		}
 
+		public string[]? acl {
+			get;
+			set;
+		}
+
 		public HashTable<string, Variant> _serialize () {
 			var dict = make_options_dict ();
 
@@ -849,6 +856,9 @@ namespace Frida {
 
 			if (token != null)
 				dict["token"] = new Variant.string (token);
+
+			if (acl != null)
+				dict["acl"] = new Variant.strv (acl);
 
 			return dict;
 		}
@@ -872,6 +882,13 @@ namespace Frida {
 				if (!token.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'token' option must be a string");
 				options.token = token.get_string ();
+			}
+
+			Variant? acl = dict["acl"];
+			if (acl != null) {
+				if (!acl.is_of_type (VariantType.STRING_ARRAY))
+					throw new Error.INVALID_ARGUMENT ("The 'acl' option must be a string array");
+				options.acl = acl.get_strv ();
 			}
 
 			return options;

@@ -293,6 +293,10 @@ namespace Frida.Gadget {
 	}
 
 	private class ConnectInteraction : SocketInteraction {
+		public string[]? acl {
+			get;
+			set;
+		}
 	}
 
 	private class Location : Object {
@@ -850,7 +854,8 @@ namespace Frida.Gadget {
 
 		protected async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
 				Cancellable? cancellable) throws Error, IOError {
-			var client = new PortalClient (this, connectable, options.certificate, options.token, compute_app_info ());
+			var client = new PortalClient (this, connectable, options.certificate, options.token, options.acl,
+				compute_app_info ());
 			client.eternalized.connect (on_eternalized);
 			client.resume.connect (Frida.Gadget.resume);
 			client.kill.connect (Frida.Gadget.kill);
@@ -1928,6 +1933,11 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public string[]? acl {
+			get;
+			construct;
+		}
+
 		private PortalClient client;
 
 		public ClusterClient (Config config, Location location) throws Error {
@@ -1937,12 +1947,13 @@ namespace Frida.Gadget {
 				location: location,
 				connectable: parse_cluster_address (interaction.address, interaction.port),
 				certificate: parse_certificate (interaction.certificate),
-				token: interaction.token
+				token: interaction.token,
+				acl: interaction.acl
 			);
 		}
 
 		construct {
-			client = new PortalClient (this, connectable, certificate, token, compute_app_info ());
+			client = new PortalClient (this, connectable, certificate, token, acl, compute_app_info ());
 			client.eternalized.connect (on_eternalized);
 			client.resume.connect (Frida.Gadget.resume);
 			client.kill.connect (Frida.Gadget.kill);

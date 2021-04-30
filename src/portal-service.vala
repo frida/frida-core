@@ -208,6 +208,46 @@ namespace Frida {
 			}
 		}
 
+		public string[]? enumerate_tags (uint connection_id) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				return do_enumerate_tags (connection_id);
+			} else {
+				string[]? result = null;
+				bool completed = false;
+				var mutex = Mutex ();
+				var cond = Cond ();
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					result = do_enumerate_tags (connection_id);
+					mutex.lock ();
+					completed = true;
+					cond.signal ();
+					mutex.unlock ();
+					return false;
+				});
+				source.attach (context);
+
+				mutex.lock ();
+				while (!completed)
+					cond.wait (mutex);
+				mutex.unlock ();
+
+				return result;
+			}
+		}
+
+		private string[]? do_enumerate_tags (uint connection_id) {
+			ConnectionEntry? entry = connections[connection_id];
+			if (entry == null)
+				return null;
+			Gee.Set<string>? tags = entry.tags;
+			if (tags == null)
+				return null;
+			return tags.to_array ();
+		}
+
 		public void tag (uint connection_id, string tag) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -226,7 +266,11 @@ namespace Frida {
 			ConnectionEntry? entry = connections[connection_id];
 			if (entry == null)
 				return;
+
 			tags[tag] = entry;
+
+			if (entry.tags == null)
+				entry.tags = new Gee.HashSet<string> ();
 			entry.tags.add (tag);
 		}
 
@@ -248,8 +292,12 @@ namespace Frida {
 			ConnectionEntry? entry = connections[connection_id];
 			if (entry == null)
 				return;
-			tags.remove (tag, entry);
+
+			if (entry.tags == null)
+				return;
 			entry.tags.remove (tag);
+
+			tags.remove (tag, entry);
 		}
 
 		private T create<T> () {
@@ -324,8 +372,11 @@ namespace Frida {
 				ConnectionEntry entry;
 				connections.unset (id, out entry);
 
-				foreach (string tag in entry.tags)
-					tags.remove (tag, entry);
+				Gee.Set<string> tags_to_remove = entry.tags;
+				if (tags_to_remove != null) {
+					foreach (string tag in tags_to_remove)
+						tags.remove (tag, entry);
+				}
 
 				if (entry.parameters == cluster_params)
 					node_disconnected (id, entry.address);
@@ -468,8 +519,8 @@ namespace Frida {
 			}
 		}
 
-		private HostApplicationInfo[] enumerate_applications () {
-			Gee.Collection<ClusterNode> nodes = node_by_identifier.values;
+		private HostApplicationInfo[] enumerate_applications (ControlChannel requester) {
+			var nodes = query_nodes_accessible_by (requester);
 			var result = new HostApplicationInfo[nodes.size];
 			int i = 0;
 			foreach (var node in nodes) {
@@ -481,8 +532,8 @@ namespace Frida {
 			return result;
 		}
 
-		private HostProcessInfo[] enumerate_processes () {
-			Gee.Collection<ClusterNode> nodes = node_by_identifier.values;
+		private HostProcessInfo[] enumerate_processes (ControlChannel requester) {
+			var nodes = query_nodes_accessible_by (requester);
 			var result = new HostProcessInfo[nodes.size];
 			int i = 0;
 			foreach (var node in nodes) {
@@ -492,6 +543,21 @@ namespace Frida {
 					Icon.to_image_data (app.large_icon));
 			}
 			return result;
+		}
+
+		private Gee.ArrayList<ClusterNode> query_nodes_accessible_by (ControlChannel requester) {
+			var nodes = new Gee.ArrayList<ClusterNode> ();
+			Gee.Set<string> requester_tags = connections[requester.connection_id].tags;
+			nodes.add_all_iterator (node_by_identifier.values.filter (node => {
+				ConnectionEntry entry = connections[node.connection_id];
+				Gee.Set<string>? tags = entry.tags;
+				if (tags == null)
+					return true;
+				if (requester_tags == null)
+					return false;
+				return tags.any_match (tag => requester_tags.contains (tag));
+			}));
+			return nodes;
 		}
 
 		private void enable_spawn_gating (ControlChannel requester) {
@@ -622,12 +688,27 @@ namespace Frida {
 		}
 
 		private async void handle_join_request (ClusterNode node, HostApplicationInfo app, SpawnStartState current_state,
-				AgentSessionId[] interrupted_sessions, Cancellable? cancellable,
+				AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options, Cancellable? cancellable,
 				out SpawnStartState next_state) throws Error, IOError {
 			if (node.application != null)
 				throw new Error.PROTOCOL ("Already joined");
 			if (node.session_provider == null)
 				throw new Error.PROTOCOL ("Missing session provider");
+
+			Variant? acl = options["acl"];
+			if (acl != null) {
+				if (!acl.is_of_type (VariantType.STRING_ARRAY))
+					throw new Error.INVALID_ARGUMENT ("The 'acl' option must be a string array");
+
+				ConnectionEntry entry = connections[node.connection_id];
+
+				Gee.Set<string>? tags = entry.tags;
+				if (tags == null) {
+					tags = new Gee.HashSet<string> ();
+					entry.tags = tags;
+				}
+				tags.add_all_array (acl.get_strv ());
+			}
 
 			foreach (AgentSessionId id in interrupted_sessions) {
 				AgentSessionEntry? entry = sessions[id];
@@ -790,9 +871,9 @@ namespace Frida {
 				set;
 			}
 
-			public Gee.Set<string> tags {
+			public Gee.Set<string>? tags {
 				get;
-				default = new Gee.HashSet<string> ();
+				set;
 			}
 
 			public ConnectionEntry (SocketAddress address, EndpointParameters parameters) {
@@ -965,11 +1046,11 @@ namespace Frida {
 			}
 
 			public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-				return parent.enumerate_applications ();
+				return parent.enumerate_applications (this);
 			}
 
 			public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-				return parent.enumerate_processes ();
+				return parent.enumerate_processes (this);
 			}
 
 			public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -1135,10 +1216,10 @@ namespace Frida {
 			}
 
 			public async void join (HostApplicationInfo app, SpawnStartState current_state,
-					AgentSessionId[] interrupted_sessions, Cancellable? cancellable,
-					out SpawnStartState next_state) throws Error, IOError {
-				yield parent.handle_join_request (this, app, current_state, interrupted_sessions, cancellable,
-					out next_state);
+					AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options,
+					Cancellable? cancellable, out SpawnStartState next_state) throws Error, IOError {
+				yield parent.handle_join_request (this, app, current_state, interrupted_sessions, options,
+					cancellable, out next_state);
 			}
 
 			public async void open_session (AgentSessionId id, HashTable<string, Variant> options,

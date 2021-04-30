@@ -895,7 +895,7 @@ namespace Frida.Agent {
 			var no_icon = ImageData.empty ();
 			var app_info = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 
-			var client = new PortalClient (this, connectable, options.certificate, options.token, app_info);
+			var client = new PortalClient (this, connectable, options.certificate, options.token, options.acl, app_info);
 			client.kill.connect (on_kill);
 			yield client.start (cancellable);
 

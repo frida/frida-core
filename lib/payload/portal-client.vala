@@ -23,6 +23,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string[]? acl {
+			get;
+			construct;
+		}
+
 		public HostApplicationInfo app_info {
 			get;
 			construct;
@@ -42,12 +47,13 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public PortalClient (ProcessInvader invader, SocketConnectable connectable, TlsCertificate? certificate, string? token,
-				HostApplicationInfo app_info) {
+				string[]? acl, HostApplicationInfo app_info) {
 			Object (
 				invader: invader,
 				connectable: connectable,
 				certificate: certificate,
 				token: token,
+				acl: acl,
 				app_info: app_info
 			);
 		}
@@ -207,7 +213,11 @@ namespace Frida {
 				}
 			}
 
-			yield portal_session.join (app_info, current_state, interrupted_sessions, io_cancellable, out next_state);
+			HashTable<string, Variant> options = make_options_dict ();
+			if (acl != null)
+				options["acl"] = new Variant.strv (acl);
+
+			yield portal_session.join (app_info, current_state, interrupted_sessions, options, io_cancellable, out next_state);
 
 			if (next_state == RUNNING)
 				resume ();
