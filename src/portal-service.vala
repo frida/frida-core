@@ -196,11 +196,11 @@ namespace Frida {
 			var data_param = has_data ? data.get_data () : new uint8[0];
 
 			foreach (Peer peer in peers.values) {
-				ControlChannel? channel = peer as ControlChannel;
-				if (channel == null)
+				ControlChannel? controller = peer as ControlChannel;
+				if (controller == null)
 					continue;
 
-				BusService bus = channel.bus;
+				BusService bus = controller.bus;
 				if (bus.status != ATTACHED)
 					continue;
 
@@ -520,50 +520,40 @@ namespace Frida {
 		}
 
 		private HostApplicationInfo[] enumerate_applications (ControlChannel requester) {
-			var nodes = query_nodes_accessible_by (requester);
-			var result = new HostApplicationInfo[nodes.size];
+			var result = new HostApplicationInfo[node_by_pid.size];
 			int i = 0;
-			foreach (var node in nodes) {
+			all_nodes_accessible_by (requester).foreach (node => {
 				Application app = node.application;
 				result[i++] = HostApplicationInfo (app.identifier, app.name, app.pid,
 					Icon.to_image_data (app.small_icon),
 					Icon.to_image_data (app.large_icon));
-			}
+				return true;
+			});
+			result.length = i;
 			return result;
 		}
 
 		private HostProcessInfo[] enumerate_processes (ControlChannel requester) {
-			var nodes = query_nodes_accessible_by (requester);
-			var result = new HostProcessInfo[nodes.size];
+			var result = new HostProcessInfo[node_by_pid.size];
 			int i = 0;
-			foreach (var node in nodes) {
+			all_nodes_accessible_by (requester).foreach (node => {
 				Application app = node.application;
 				result[i++] = HostProcessInfo (app.pid, app.name,
 					Icon.to_image_data (app.small_icon),
 					Icon.to_image_data (app.large_icon));
-			}
+				return true;
+			});
+			result.length = i;
 			return result;
-		}
-
-		private Gee.ArrayList<ClusterNode> query_nodes_accessible_by (ControlChannel requester) {
-			var nodes = new Gee.ArrayList<ClusterNode> ();
-			Gee.Set<string> requester_tags = connections[requester.connection_id].tags;
-			nodes.add_all_iterator (node_by_identifier.values.filter (node => {
-				ConnectionEntry entry = connections[node.connection_id];
-				Gee.Set<string>? tags = entry.tags;
-				if (tags == null)
-					return true;
-				if (requester_tags == null)
-					return false;
-				return tags.any_match (tag => requester_tags.contains (tag));
-			}));
-			return nodes;
 		}
 
 		private void enable_spawn_gating (ControlChannel requester) {
 			spawn_gaters.add (requester);
-			foreach (var spawn in pending_spawn.values)
-				spawn.pending_approvers.add (requester);
+			foreach (PendingSpawn spawn in pending_spawn.values) {
+				bool requester_has_access = find_node_accessible_by (requester, spawn.info.pid) != null;
+				if (requester_has_access)
+					spawn.pending_approvers.add (requester);
+			}
 		}
 
 		private void disable_spawn_gating (ControlChannel requester) {
@@ -573,11 +563,14 @@ namespace Frida {
 			}
 		}
 
-		private HostSpawnInfo[] enumerate_pending_spawn () {
+		private HostSpawnInfo[] enumerate_pending_spawn (ControlChannel requester) {
 			var result = new HostSpawnInfo[pending_spawn.size];
-			var i = 0;
-			foreach (var spawn in pending_spawn.values)
-				result[i++] = spawn.info;
+			int i = 0;
+			foreach (PendingSpawn spawn in pending_spawn.values) {
+				if (spawn.pending_approvers.contains (requester))
+					result[i++] = spawn.info;
+			}
+			result.length = i;
 			return result;
 		}
 
@@ -591,7 +584,7 @@ namespace Frida {
 			if (approvers.is_empty) {
 				pending_spawn.unset (pid);
 
-				var node = node_by_pid[pid];
+				ClusterNode? node = node_by_pid[pid];
 				assert (node != null);
 				node.resume ();
 
@@ -599,8 +592,8 @@ namespace Frida {
 			}
 		}
 
-		private void kill (uint pid) {
-			var node = node_by_pid[pid];
+		private void kill (uint pid, ControlChannel requester) {
+			ClusterNode? node = find_node_accessible_by (requester, pid);
 			if (node == null)
 				return;
 
@@ -617,7 +610,7 @@ namespace Frida {
 
 		private async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
 				Cancellable? cancellable) throws Error, IOError {
-			var node = node_by_pid[pid];
+			ClusterNode? node = find_node_accessible_by (requester, pid);
 			if (node == null)
 				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 
@@ -741,19 +734,22 @@ namespace Frida {
 			node_joined (node.connection_id, node.application);
 
 			if (current_state == SUSPENDED && !spawn_gaters.is_empty) {
-				next_state = SUSPENDED;
+				var eligible_gaters = all_spawn_gaters_with_access_to (node);
+				if (eligible_gaters.has_next ()) {
+					next_state = SUSPENDED;
 
-				var spawn = new PendingSpawn (pid, identifier, spawn_gaters.iterator ());
-				pending_spawn[pid] = spawn;
-				notify_spawn_added (spawn.info);
+					var spawn = new PendingSpawn (pid, identifier, eligible_gaters);
+					pending_spawn[pid] = spawn;
+
+					eligible_gaters.foreach (controller => {
+						controller.spawn_added (info);
+					});
+				} else {
+					next_state = RUNNING;
+				}
 			} else {
 				next_state = RUNNING;
 			}
-		}
-
-		private void notify_spawn_added (HostSpawnInfo info) {
-			foreach (ControlChannel channel in spawn_gaters)
-				channel.spawn_added (info);
 		}
 
 		private void notify_spawn_removed (HostSpawnInfo info) {
@@ -775,6 +771,53 @@ namespace Frida {
 						CrashInfo.empty ());
 				}
 			}
+		}
+
+		private Gee.Iterator<ClusterNode> all_nodes_accessible_by (ControlChannel requester) {
+			Gee.Set<string>? requester_tags = connections[requester.connection_id].tags;
+			return node_by_identifier.values.filter (node => {
+				ConnectionEntry entry = connections[node.connection_id];
+				Gee.Set<string>? acl = entry.tags;
+				if (acl == null)
+					return true;
+				if (requester_tags == null)
+					return false;
+				return acl.any_match (tag => requester_tags.contains (tag));
+			});
+		}
+
+		private ClusterNode? find_node_accessible_by (ControlChannel requester, uint pid) {
+			ClusterNode? node = node_by_pid[pid];
+			if (node == null)
+				return null;
+
+			return can_access (node, requester) ? node : null;
+		}
+
+		private Gee.Iterator<ControlChannel> all_spawn_gaters_with_access_to (ClusterNode node) {
+			Gee.Set<string>? acl = connections[node.connection_id].tags;
+			if (acl == null)
+				return spawn_gaters.iterator ();
+
+			return spawn_gaters.filter (controller => {
+				Gee.Set<string> tags = connections[controller.connection_id].tags;
+				if (tags == null)
+					return false;
+
+				return acl.any_match (tag => tags.contains (tag));
+			});
+		}
+
+		private bool can_access (ClusterNode node, ControlChannel requester) {
+			Gee.Set<string>? acl = connections[node.connection_id].tags;
+			if (acl == null)
+				return true;
+
+			Gee.Set<string> requester_tags = connections[requester.connection_id].tags;
+			if (requester_tags == null)
+				return false;
+
+			return acl.any_match (tag => requester_tags.contains (tag));
 		}
 
 		private class PortalHostSessionProvider : Object, HostSessionProvider {
@@ -885,11 +928,11 @@ namespace Frida {
 				if (peer == null)
 					return;
 
-				ControlChannel? channel = peer as ControlChannel;
-				if (channel == null)
+				ControlChannel? controller = peer as ControlChannel;
+				if (controller == null)
 					return;
 
-				BusService bus = channel.bus;
+				BusService bus = controller.bus;
 				if (bus.status != ATTACHED)
 					return;
 
@@ -1062,7 +1105,7 @@ namespace Frida {
 			}
 
 			public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
-				return parent.enumerate_pending_spawn ();
+				return parent.enumerate_pending_spawn (this);
 			}
 
 			public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
@@ -1082,7 +1125,7 @@ namespace Frida {
 			}
 
 			public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
-				parent.kill (pid);
+				parent.kill (pid, this);
 			}
 
 			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
