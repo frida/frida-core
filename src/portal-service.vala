@@ -777,7 +777,7 @@ namespace Frida {
 
 		private Gee.Iterator<ClusterNode> all_nodes_accessible_by (ControlChannel requester) {
 			Gee.Set<string>? requester_tags = connections[requester.connection_id].tags;
-			return node_by_identifier.values.filter (node => {
+			return node_by_pid.values.filter (node => {
 				ConnectionEntry entry = connections[node.connection_id];
 				Gee.Set<string>? acl = entry.tags;
 				if (acl == null)
@@ -805,7 +805,6 @@ namespace Frida {
 				Gee.Set<string> tags = connections[controller.connection_id].tags;
 				if (tags == null)
 					return false;
-
 				return acl.any_match (tag => tags.contains (tag));
 			});
 		}
