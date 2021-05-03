@@ -515,7 +515,7 @@ namespace Frida {
 
 				PendingSpawn spawn;
 				if (pending_spawn.unset (pid, out spawn))
-					notify_spawn_removed (spawn.info);
+					notify_spawn_removed (spawn);
 			}
 		}
 
@@ -588,7 +588,7 @@ namespace Frida {
 				assert (node != null);
 				node.resume ();
 
-				notify_spawn_removed (spawn.info);
+				notify_spawn_removed (spawn);
 			}
 		}
 
@@ -738,12 +738,12 @@ namespace Frida {
 				if (eligible_gaters.has_next ()) {
 					next_state = SUSPENDED;
 
-					var spawn = new PendingSpawn (pid, identifier, eligible_gaters);
+					var spawn = new PendingSpawn (node, pid, identifier, eligible_gaters);
 					pending_spawn[pid] = spawn;
 
-					eligible_gaters.foreach (controller => {
-						controller.spawn_added (info);
-					});
+					foreach (ControlChannel controller in spawn.pending_approvers) {
+						controller.spawn_added (spawn.info);
+					}
 				} else {
 					next_state = RUNNING;
 				}
@@ -752,9 +752,11 @@ namespace Frida {
 			}
 		}
 
-		private void notify_spawn_removed (HostSpawnInfo info) {
-			foreach (ControlChannel channel in spawn_gaters)
-				channel.spawn_removed (info);
+		private void notify_spawn_removed (PendingSpawn spawn) {
+			all_spawn_gaters_with_access_to (spawn.node).foreach (controller => {
+				controller.spawn_removed (spawn.info);
+				return true;
+			});
 		}
 
 		private void on_agent_session_expired (AgentSessionEntry entry) {
@@ -1283,17 +1285,12 @@ namespace Frida {
 		}
 
 		private class PendingSpawn {
-			public HostSpawnInfo info {
-				get;
-				private set;
-			}
+			public ClusterNode node;
+			public HostSpawnInfo info;
+			public Gee.Set<ControlChannel> pending_approvers = new Gee.HashSet<ControlChannel> ();
 
-			public Gee.Set<ControlChannel> pending_approvers {
-				get;
-				default = new Gee.HashSet<ControlChannel> ();
-			}
-
-			public PendingSpawn (uint pid, string identifier, Gee.Iterator<ControlChannel> gaters) {
+			public PendingSpawn (ClusterNode n, uint pid, string identifier, Gee.Iterator<ControlChannel> gaters) {
+				node = n;
 				info = HostSpawnInfo (pid, identifier);
 				pending_approvers.add_all_iterator (gaters);
 			}
