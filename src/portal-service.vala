@@ -29,7 +29,7 @@ namespace Frida {
 			construct;
 		}
 
-		private SocketService server = new SocketService ();
+		private SocketService service = new SocketService ();
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
 		private Gee.MultiMap<string, ConnectionEntry> tags = new Gee.HashMultiMap<string, ConnectionEntry> ();
@@ -55,7 +55,7 @@ namespace Frida {
 			_device = new Device (null, "portal", "Portal", HostSessionProviderKind.LOCAL,
 				new PortalHostSessionProvider (this));
 
-			server.incoming.connect (on_incoming_connection);
+			service.incoming.connect (on_incoming_connection);
 		}
 
 		public override void dispose () {
@@ -91,7 +91,7 @@ namespace Frida {
 				throw new Error.ADDRESS_IN_USE ("%s", e.message);
 			}
 
-			server.start ();
+			service.start ();
 		}
 
 		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -110,12 +110,12 @@ namespace Frida {
 			SocketAddress? address;
 			while ((address = yield enumerator.next_async (cancellable)) != null) {
 				SocketAddress effective_address;
-				server.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, parameters, out effective_address);
+				service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, parameters, out effective_address);
 			}
 		}
 
 		public async void stop (Cancellable? cancellable = null) throws IOError {
-			server.stop ();
+			service.stop ();
 
 			io_cancellable.cancel ();
 

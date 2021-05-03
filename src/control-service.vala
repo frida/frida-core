@@ -15,7 +15,7 @@ namespace Frida {
 			construct;
 		}
 
-		private SocketService server = new SocketService ();
+		private SocketService service = new SocketService ();
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
 		private Gee.Set<ControlChannel> spawn_gaters = new Gee.HashSet<ControlChannel> ();
@@ -73,7 +73,7 @@ namespace Frida {
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
-			server.incoming.connect (on_server_connection);
+			service.incoming.connect (on_server_connection);
 
 			broker_service.incoming.connect (on_broker_service_connection);
 		}
@@ -85,14 +85,14 @@ namespace Frida {
 			try {
 				while ((address = yield enumerator.next_async (io_cancellable)) != null) {
 					SocketAddress effective_address;
-					server.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+					service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
 						out effective_address);
 				}
 			} catch (GLib.Error e) {
 				throw new Error.ADDRESS_IN_USE ("%s", e.message);
 			}
 
-			server.start ();
+			service.start ();
 
 			if (enable_preload) {
 				var base_host_session = host_session as BaseDBusHostSession;
@@ -113,7 +113,7 @@ namespace Frida {
 
 		public async void stop (Cancellable? cancellable = null) throws IOError {
 			broker_service.stop ();
-			server.stop ();
+			service.stop ();
 
 			io_cancellable.cancel ();
 
