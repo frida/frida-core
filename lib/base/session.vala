@@ -604,7 +604,7 @@ namespace Frida {
 
 			Variant? persist_timeout = dict["persistTimeout"];
 			if (persist_timeout != null) {
-				if (!realm.is_of_type (VariantType.UINT32))
+				if (!persist_timeout.is_of_type (VariantType.UINT32))
 					throw new Error.INVALID_ARGUMENT ("The 'persistTimeout' option must be a uint32");
 				options.persist_timeout = realm.get_uint32 ();
 			}
