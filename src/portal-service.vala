@@ -138,6 +138,27 @@ namespace Frida {
 			}
 		}
 
+		public void kick (uint connection_id) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_kick (connection_id);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_kick (connection_id);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_kick (uint connection_id) {
+			ConnectionEntry? entry = connections[connection_id];
+			if (entry == null)
+				return;
+			entry.connection.close.begin (io_cancellable);
+		}
+
 		public void post (uint connection_id, string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -337,7 +358,7 @@ namespace Frida {
 			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
-			uint connection_id = register_connection (socket_connection, parameters);
+			uint connection_id = register_connection (connection, socket_connection.get_remote_address (), parameters);
 
 			Peer peer;
 			if (parameters.auth_service != null)
@@ -347,11 +368,11 @@ namespace Frida {
 			peers[connection] = peer;
 		}
 
-		private uint register_connection (SocketConnection connection, EndpointParameters parameters) throws GLib.Error {
+		private uint register_connection (DBusConnection connection, SocketAddress address,
+				EndpointParameters parameters) throws GLib.Error {
 			uint id = next_connection_id++;
-			SocketAddress address = connection.get_remote_address ();
 
-			var entry = new ConnectionEntry (address, parameters);
+			var entry = new ConnectionEntry (connection, address, parameters);
 			connections[id] = entry;
 
 			if (parameters == cluster_params)
@@ -900,27 +921,14 @@ namespace Frida {
 		}
 
 		private class ConnectionEntry {
-			public SocketAddress address {
-				get;
-				private set;
-			}
+			public DBusConnection connection;
+			public SocketAddress address;
+			public EndpointParameters parameters;
+			public Peer? peer;
+			public Gee.Set<string>? tags;
 
-			public EndpointParameters parameters {
-				get;
-				private set;
-			}
-
-			public Peer? peer {
-				get;
-				set;
-			}
-
-			public Gee.Set<string>? tags {
-				get;
-				set;
-			}
-
-			public ConnectionEntry (SocketAddress address, EndpointParameters parameters) {
+			public ConnectionEntry (DBusConnection connection, SocketAddress address, EndpointParameters parameters) {
+				this.connection = connection;
 				this.address = address;
 				this.parameters = parameters;
 			}
