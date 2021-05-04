@@ -257,6 +257,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/unreliable-connectivity", () => {
+			var h = new Harness ((h) => unreliable_connectivity.begin (h as Harness));
+			h.run ();
+		});
+
 	}
 
 	namespace Service {
@@ -862,6 +867,228 @@ namespace Frida.HostSessionTest {
 		}
 
 		h.done ();
+	}
+
+	private static async void unreliable_connectivity (Harness h) {
+		try {
+			uint seen_disruptions = 0;
+			uint seen_messages = 0;
+			var messages_summary = new StringBuilder ();
+			bool waiting = false;
+
+			ControlService control_service;
+			uint16 control_port = 27042;
+			while (true) {
+				var ep = new EndpointParameters ("127.0.0.1", control_port);
+				control_service = new ControlService (ep);
+				try {
+					yield control_service.start ();
+					break;
+				} catch (Error e) {
+					if (e is Error.ADDRESS_IN_USE) {
+						control_port++;
+						continue;
+					}
+					throw e;
+				}
+			}
+
+			var proxy = new ChaosProxy (control_port, (message, direction) => {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						seen_disruptions == 0) {
+					return FORWARD_THEN_DISRUPT;
+				}
+				return FORWARD;
+			});
+
+			var device_manager = new DeviceManager ();
+			var device = yield device_manager.add_remote_device ("127.0.0.1:%u".printf (proxy.proxy_port));
+
+			var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+			var options = new SessionOptions ();
+			options.persist_timeout = 5;
+			var session = yield device.attach (process.id, options);
+			session.detached.connect ((reason, crash) => {
+				if (reason == CONNECTION_TERMINATED) {
+					seen_disruptions++;
+					Idle.add (() => {
+						session.resume.begin ();
+						return false;
+					});
+				} else {
+					assert (reason == APPLICATION_REQUESTED);
+				}
+			});
+
+			var script = yield session.create_script ("""
+				recv(onMessage);
+				function onMessage(message) {
+				  const { serial, count } = message;
+				  for (let i = 0; i !== count; i++) {
+				    send({ id: serial + i });
+				  }
+				  recv(onMessage);
+				}
+				""");
+			script.message.connect ((json, data) => {
+				var parser = new Json.Parser ();
+				try {
+					parser.load_from_data (json);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				var reader = new Json.Reader (parser.get_root ());
+
+				assert (reader.read_member ("type") && reader.get_string_value () == "send");
+				reader.end_member ();
+
+				assert (reader.read_member ("payload") && reader.read_member ("id"));
+				int64 id = reader.get_int_value ();
+
+				if (messages_summary.len != 0)
+					messages_summary.append_c (',');
+				messages_summary.append (id.to_string ());
+				seen_messages++;
+
+				if (waiting)
+					unreliable_connectivity.callback ();
+			});
+			yield script.load ();
+
+			yield script.post ("""{"serial":10,"count":3}""");
+
+			while (seen_messages < 3) {
+				waiting = true;
+				yield;
+				waiting = false;
+			}
+
+			assert (seen_disruptions == 1);
+			assert (seen_messages == 3);
+			assert (messages_summary.str == "10,11,12");
+
+			yield device_manager.close ();
+		} catch (GLib.Error e) {
+			printerr ("Oops: %s\n", e.message);
+		}
+
+		h.done ();
+	}
+
+	private class ChaosProxy : Object {
+		public uint16 proxy_port {
+			get {
+				return _proxy_port;
+			}
+		}
+
+		public uint16 target_port {
+			get;
+			construct;
+		}
+
+		private Inducer on_message;
+
+		private SocketService service = new SocketService ();
+		private uint16 _proxy_port;
+		private SocketAddress target_address;
+
+		public delegate Action Inducer (DBusMessage message, Direction direction);
+
+		public enum Action {
+			FORWARD,
+			FORWARD_THEN_DISRUPT,
+			DISRUPT,
+		}
+
+		public enum Direction {
+			IN,
+			OUT
+		}
+
+		public ChaosProxy (uint16 target_port, owned Inducer on_message) {
+			Object (target_port: target_port);
+
+			this.on_message = (owned) on_message;
+		}
+
+		construct {
+			try {
+				_proxy_port = service.add_any_inet_port (null);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			target_address = new InetSocketAddress.from_string ("127.0.0.1", target_port);
+
+			service.incoming.connect (on_incoming_connection);
+			service.start ();
+
+		}
+
+		private bool on_incoming_connection (SocketConnection proxy_connection, Object? source_object) {
+			handle_incoming_connection.begin (proxy_connection);
+			return true;
+		}
+
+		private async void handle_incoming_connection (SocketConnection proxy_connection) throws GLib.Error {
+			var cancellable = new Cancellable ();
+
+			Tcp.enable_nodelay (proxy_connection.socket);
+
+			var client = new SocketClient ();
+			var target_connection = yield client.connect_async (target_address, cancellable);
+			Tcp.enable_nodelay (target_connection.socket);
+
+			handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_connection.output_stream, cancellable);
+			yield handle_io (Direction.IN, target_connection.input_stream, proxy_connection.output_stream, cancellable);
+		}
+
+		private async void handle_io (Direction direction, InputStream raw_input, OutputStream output,
+				Cancellable cancellable) throws GLib.Error {
+			var input = new BufferedInputStream (raw_input);
+
+			ssize_t header_size = 16;
+			int io_priority = Priority.DEFAULT;
+
+			while (true) {
+				ssize_t available = (ssize_t) input.get_available ();
+
+				if (available < header_size) {
+					available = yield input.fill_async (header_size - available, io_priority, cancellable);
+					if (available < header_size)
+						break;
+				}
+
+				ssize_t needed = DBusMessage.bytes_needed (input.peek_buffer ());
+
+				ssize_t missing = needed - available;
+				if (missing > 0)
+					available = yield input.fill_async (missing, io_priority, cancellable);
+
+				var blob = input.read_bytes (needed);
+				unowned uint8[] data = blob.get_data ();
+
+				var message = new DBusMessage.from_blob (data, DBusCapabilityFlags.NONE);
+
+				Action action = on_message (message, direction);
+
+				if (action == DISRUPT) {
+					cancellable.cancel ();
+					break;
+				}
+
+				size_t bytes_written;
+				yield output.write_all_async (data, io_priority, cancellable, out bytes_written);
+
+				if (action == FORWARD_THEN_DISRUPT) {
+					cancellable.cancel ();
+					break;
+				}
+			}
+		}
 	}
 
 #if LINUX
