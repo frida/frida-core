@@ -273,7 +273,7 @@ def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, bas
             if method_cname_lc not in seen_cfunctions:
                 seen_cfunctions.add(method_cname_lc)
                 if method_name not in ('construct', 'construct_with_host_session', 'get_main_context', 'get_provider', 'get_session') \
-                        and not (object_type.name == "Session" and method_name == 'get_id'):
+                        and not (object_type.name in ("Session", "Script") and method_name == 'get_id'):
                     if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new' or method_name.startswith('new_'):
                             object_type.c_constructors.append(method_cprototype)

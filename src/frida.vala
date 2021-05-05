@@ -1968,12 +1968,16 @@ namespace Frida {
 		internal AgentSession active_session;
 		private AgentSession? obsolete_session;
 
+		private uint last_rx_batch_id = 0;
+		private Gee.LinkedList<PendingMessage> pending_messages = new Gee.LinkedList<PendingMessage> ();
+		private int next_serial = 1;
+		private uint pending_deliveries = 0;
+		private Cancellable delivery_cancellable = new Cancellable ();
+
 		private Gee.HashMap<AgentScriptId?, Script> scripts =
 			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
 
-		private Debugger? debugger;
-
-		private uint last_batch_id = 0;
+		private Gum.InspectorServer? inspector_server;
 
 #if HAVE_NICE
 		private Nice.Agent? nice_agent;
@@ -2042,13 +2046,24 @@ namespace Frida {
 			begin_migration (agent_session);
 			commit_migration (agent_session);
 
+			uint last_tx_batch_id;
 			try {
-				yield agent_session.resume (last_batch_id, cancellable);
+				yield agent_session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 
+			if (last_tx_batch_id != 0) {
+				PendingMessage? m;
+				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= last_tx_batch_id) {
+					pending_messages.poll ();
+				}
+			}
+
+			delivery_cancellable = new Cancellable ();
 			state = ATTACHED;
+
+			maybe_deliver_pending_messages ();
 		}
 
 		public void resume_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -2214,17 +2229,35 @@ namespace Frida {
 		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			if (debugger != null)
+			if (inspector_server != null)
 				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
 
-			debugger = new Debugger (port, session);
-			var enabled = false;
+			inspector_server = (port != 0)
+				? new Gum.InspectorServer.with_port (port)
+				: new Gum.InspectorServer ();
+			inspector_server.message.connect (on_debugger_message_from_frontend);
+
 			try {
-				yield debugger.enable (cancellable);
-				enabled = true;
-			} finally {
-				if (!enabled)
-					debugger = null;
+				yield session.enable_debugger (cancellable);
+			} catch (GLib.Error e) {
+				inspector_server = null;
+
+				throw_dbus_error (e);
+			}
+
+			if (inspector_server != null) {
+				try {
+					inspector_server.start ();
+				} catch (IOError e) {
+					inspector_server = null;
+
+					try {
+						yield session.disable_debugger (cancellable);
+					} catch (GLib.Error e) {
+					}
+
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
+				}
 			}
 		}
 
@@ -2245,11 +2278,18 @@ namespace Frida {
 		public async void disable_debugger (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			if (debugger == null)
+			if (inspector_server == null)
 				return;
 
-			yield debugger.disable (cancellable);
-			debugger = null;
+			inspector_server.message.disconnect (on_debugger_message_from_frontend);
+			inspector_server.stop ();
+			inspector_server = null;
+
+			try {
+				yield session.disable_debugger (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 		}
 
 		public void disable_debugger_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -2260,6 +2300,10 @@ namespace Frida {
 			protected override async void perform_operation () throws Error, IOError {
 				yield parent.disable_debugger (cancellable);
 			}
+		}
+
+		private void on_debugger_message_from_frontend (string message) {
+			_post_to_agent (AgentMessageKind.DEBUGGER, AgentScriptId (0), message);
 		}
 
 #if HAVE_NICE
@@ -2668,12 +2712,114 @@ namespace Frida {
 						break;
 					}
 					case DEBUGGER:
-						debugger.handle_message_from_backend (m.text);
+						if (inspector_server != null)
+							inspector_server.post_message (m.text);
 						break;
 				}
 			}
 
-			last_batch_id = batch_id;
+			last_rx_batch_id = batch_id;
+		}
+
+		internal void _post_to_agent (AgentMessageKind kind, AgentScriptId script_id, string text, Bytes? data = null) {
+			if (state == DETACHED)
+				return;
+			pending_messages.offer (new PendingMessage (next_serial++, kind, script_id, text, data));
+			maybe_deliver_pending_messages ();
+		}
+
+		private void maybe_deliver_pending_messages () {
+			if (state != ATTACHED)
+				return;
+
+			AgentSession sink = active_session;
+
+			if (pending_messages.is_empty)
+				return;
+
+			var batch = new Gee.ArrayList<PendingMessage> ();
+			void * items = null;
+			int n_items = 0;
+			size_t total_size = 0;
+			size_t max_size = 4 * 1024 * 1024;
+			PendingMessage? m;
+			while ((m = pending_messages.peek ()) != null) {
+				size_t message_size = m.estimate_size_in_bytes ();
+				if (total_size + message_size > max_size && !batch.is_empty)
+					break;
+				pending_messages.poll ();
+				batch.add (m);
+
+				n_items++;
+				items = realloc (items, n_items * sizeof (AgentMessage));
+
+				AgentMessage * am = (AgentMessage *) items + n_items - 1;
+
+				am->kind = m.kind;
+				am->script_id = m.script_id;
+
+				*((void **) &am->text) = m.text;
+
+				unowned Bytes? data = m.data;
+				am->has_data = data != null;
+				*((void **) &am->data) = am->has_data ? data.get_data () : null;
+				am->data.length = am->has_data ? data.length : 0;
+
+				total_size += message_size;
+			}
+
+			deliver_batch.begin (sink, batch, items);
+		}
+
+		private async void deliver_batch (AgentSession sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			bool success = false;
+			pending_deliveries++;
+			try {
+				int n = messages.size;
+
+				foreach (var message in messages)
+					message.delivery_attempts++;
+
+				unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+				items_arr.length = n;
+
+				uint batch_id = messages[n - 1].serial;
+
+				yield sink.post_messages (items_arr, batch_id, delivery_cancellable);
+
+				success = true;
+			} catch (GLib.Error e) {
+				pending_messages.add_all (messages);
+				pending_messages.sort ((a, b) => a.serial - b.serial);
+			} finally {
+				pending_deliveries--;
+				if (pending_deliveries == 0 && success)
+					next_serial = 1;
+
+				free (items);
+			}
+		}
+
+		private class PendingMessage {
+			public int serial;
+			public AgentMessageKind kind;
+			public AgentScriptId script_id;
+			public string text;
+			public Bytes? data;
+			public uint delivery_attempts;
+
+			public PendingMessage (int serial, AgentMessageKind kind, AgentScriptId script_id, string text,
+					Bytes? data = null) {
+				this.serial = serial;
+				this.kind = kind;
+				this.script_id = script_id;
+				this.text = text;
+				this.data = data;
+			}
+
+			public size_t estimate_size_in_bytes () {
+				return sizeof (AgentMessage) + text.length + 1 + ((data != null) ? data.length : 0);
+			}
 		}
 
 		public void _release_script (AgentScriptId script_id) {
@@ -2695,6 +2841,7 @@ namespace Frida {
 		internal void _on_detached (SessionDetachReason reason, CrashInfo crash) {
 			if (persist_timeout != 0 && reason == CONNECTION_TERMINATED) {
 				state = INTERRUPTED;
+				delivery_cancellable.cancel ();
 				detached (reason, null);
 			} else {
 				_do_close.begin (reason, crash, false, null);
@@ -2717,12 +2864,10 @@ namespace Frida {
 			state = DETACHED;
 
 			try {
-				if (debugger != null) {
-					try {
-						yield debugger.disable (cancellable);
-					} catch (Error e) {
-					}
-					debugger = null;
+				if (inspector_server != null) {
+					inspector_server.message.disconnect (on_debugger_message_from_frontend);
+					inspector_server.stop ();
+					inspector_server = null;
 				}
 
 				foreach (var script in scripts.values.to_array ())
@@ -2751,9 +2896,6 @@ namespace Frida {
 			obsolete_session = active_session;
 
 			active_session = new_session;
-
-			if (debugger != null)
-				debugger.begin_migration (new_session);
 		}
 
 		private void commit_migration (AgentSession new_session) {
@@ -2761,9 +2903,6 @@ namespace Frida {
 			assert (obsolete_session != null);
 
 			obsolete_session = null;
-
-			if (debugger != null)
-				debugger.commit_migration (new_session);
 		}
 
 #if HAVE_NICE
@@ -2773,9 +2912,6 @@ namespace Frida {
 
 			active_session = obsolete_session;
 			obsolete_session = null;
-
-			if (debugger != null)
-				debugger.cancel_migration (new_session);
 		}
 #endif
 
@@ -2797,7 +2933,7 @@ namespace Frida {
 		public signal void destroyed ();
 		public signal void message (string json, Bytes? data);
 
-		public uint id {
+		public AgentScriptId id {
 			get;
 			construct;
 		}
@@ -2810,7 +2946,7 @@ namespace Frida {
 		private Promise<bool> close_request;
 
 		internal Script (Session session, AgentScriptId script_id) {
-			Object (id: script_id.handle, session: session);
+			Object (id: script_id, session: session);
 		}
 
 		public bool is_destroyed () {
@@ -2821,7 +2957,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.load_script (AgentScriptId (id), cancellable);
+				yield session.session.load_script (id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2857,7 +2993,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.eternalize_script (AgentScriptId (id), cancellable);
+				yield session.session.eternalize_script (id, cancellable);
 
 				yield _do_close (false, cancellable);
 			} catch (GLib.Error e) {
@@ -2890,9 +3026,10 @@ namespace Frida {
 		}
 
 		private void do_post (string json, Bytes? data) {
-			var has_data = data != null;
-			var data_param = has_data ? data.get_data () : new uint8[0];
-			session.session.post_to_script.begin (AgentScriptId (id), json, has_data, data_param, null);
+			if (close_request != null)
+				return;
+
+			session._post_to_agent (AgentMessageKind.SCRIPT, id, json, data);
 		}
 
 		private void check_open () throws Error {
@@ -2913,13 +3050,12 @@ namespace Frida {
 			close_request = new Promise<bool> ();
 
 			var parent = session;
-			var script_id = AgentScriptId (id);
 
-			parent._release_script (script_id);
+			parent._release_script (id);
 
 			if (may_block) {
 				try {
-					yield parent.session.destroy_script (script_id, cancellable);
+					yield parent.session.destroy_script (id, cancellable);
 				} catch (GLib.Error e) {
 				}
 			}

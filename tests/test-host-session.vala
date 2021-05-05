@@ -880,7 +880,7 @@ namespace Frida.HostSessionTest {
 			uint disruptions = 0;
 			yield run_connectivity_scenario (h, (message, direction) => {
 				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
-						disruptions == 0) {
+						direction == IN && disruptions == 0) {
 					disruptions++;
 					return FORWARD_THEN_DISRUPT;
 				}
@@ -891,8 +891,8 @@ namespace Frida.HostSessionTest {
 		private static async void tx_failure_initially (Harness h) {
 			uint disruptions = 0;
 			yield run_connectivity_scenario (h, (message, direction) => {
-				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostToScript" &&
-						disruptions == 0) {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						direction == OUT && disruptions == 0) {
 					disruptions++;
 					return DISRUPT;
 				}
@@ -2933,7 +2933,8 @@ namespace Frida.HostSessionTest {
 						builder.append ("s");
 					}
 					builder.append ("\"");
-					yield session.post_to_script (script_id, builder.str, false, new uint8[0], cancellable);
+					yield session.post_messages ({ AgentMessage (SCRIPT, script_id, builder.str, false, {}) }, 1,
+						cancellable);
 					yield;
 					stdout.printf ("received message: '%s'\n", received_message);
 				}

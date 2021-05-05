@@ -228,7 +228,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 						.end_array ()
 						.end_array ();
 					var raw_request = Json.to_string (request.get_root (), false);
-					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {}, cancellable);
+					yield session.post_messages ({ AgentMessage (SCRIPT, script_id, raw_request, false, {}) }, 1,
+						cancellable);
 
 					while (true) {
 						var message = yield h.wait_for_message ();

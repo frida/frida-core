@@ -1309,7 +1309,7 @@ namespace Frida {
 
 		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield session.post_to_script (script, json, false, new uint8[0], cancellable);
+				yield session.post_messages ({ AgentMessage (SCRIPT, script, json, false, {}) }, 1, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

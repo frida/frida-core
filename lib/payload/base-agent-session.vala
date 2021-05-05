@@ -40,10 +40,11 @@ namespace Frida {
 
 		private TimeoutSource? expiry_timer;
 
-		private Cancellable delivery_cancellable = new Cancellable ();
+		private uint last_rx_batch_id = 0;
 		private Gee.LinkedList<PendingMessage> pending_messages = new Gee.LinkedList<PendingMessage> ();
-		private uint pending_deliveries = 0;
 		private int next_serial = 1;
+		private uint pending_deliveries = 0;
+		private Cancellable delivery_cancellable = new Cancellable ();
 
 		private bool child_gating_enabled = false;
 
@@ -125,13 +126,13 @@ namespace Frida {
 			expiry_timer.attach (frida_context);
 		}
 
-		public async void resume (uint last_batch_id, Cancellable? cancellable) throws Error, IOError {
+		public async void resume (uint rx_batch_id, Cancellable? cancellable, out uint tx_batch_id) throws Error, IOError {
 			if (persist_timeout == 0 || expiry_timer == null)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
-			if (last_batch_id != 0) {
+			if (rx_batch_id != 0) {
 				PendingMessage? m;
-				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= last_batch_id) {
+				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= rx_batch_id) {
 					pending_messages.poll ();
 				}
 			}
@@ -143,6 +144,8 @@ namespace Frida {
 			state = LIVE;
 
 			maybe_deliver_pending_messages ();
+
+			tx_batch_id = last_rx_batch_id;
 		}
 
 		public async void flush () {
@@ -227,13 +230,6 @@ namespace Frida {
 			script_eternalized (script);
 		}
 
-		public async void post_to_script (AgentScriptId script_id, string json, bool has_data, uint8[] data,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.post_to_script (script_id, json, has_data ? new Bytes (data) : null);
-		}
-
 		public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
@@ -246,10 +242,20 @@ namespace Frida {
 			script_engine.disable_debugger ();
 		}
 
-		public async void post_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+		public async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages) {
+				switch (m.kind) {
+					case SCRIPT:
+						script_engine.post_to_script (m.script_id, m.text, m.has_data ? new Bytes (m.data) : null);
+						break;
+					case DEBUGGER:
+						script_engine.post_to_debugger (m.text);
+						break;
+				}
+			}
 
-			script_engine.post_to_debugger (message);
+			last_rx_batch_id = batch_id;
 		}
 
 		public async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,

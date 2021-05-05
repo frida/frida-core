@@ -51,7 +51,7 @@ namespace Frida {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void interrupt (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void resume (uint last_batch_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume (uint rx_batch_id, Cancellable? cancellable, out uint tx_batch_id) throws GLib.Error;
 
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
@@ -65,12 +65,12 @@ namespace Frida {
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_to_script (AgentScriptId script_id, string json, bool has_data, uint8[] data,
-			Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
+
+		public abstract async void post_messages (AgentMessage[] messages, uint batch_id,
+			Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
