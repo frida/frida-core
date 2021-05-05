@@ -257,15 +257,28 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Connectivity/rx-without-ack", () => {
-			var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness));
-			h.run ();
-		});
+		var strategies = new Connectivity.Strategy[] {
+			SERVER,
+			PEER
+		};
+		foreach (var strategy in strategies) {
+			string prefix = "/HostSession/Connectivity/" + ((strategy == SERVER) ? "Server" : "Peer");
 
-		GLib.Test.add_func ("/HostSession/Connectivity/tx-failure-initially", () => {
-			var h = new Harness ((h) => Connectivity.tx_failure_initially.begin (h as Harness));
-			h.run ();
-		});
+			GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
+				var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
+		}
 
 	}
 
@@ -876,9 +889,9 @@ namespace Frida.HostSessionTest {
 
 	namespace Connectivity {
 
-		private static async void rx_without_ack (Harness h) {
+		private static async void rx_without_ack (Harness h, Strategy strategy) {
 			uint disruptions = 0;
-			yield run_connectivity_scenario (h, (message, direction) => {
+			yield run_connectivity_scenario (h, strategy, (message, direction) => {
 				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
 						direction == IN && disruptions == 0) {
 					disruptions++;
@@ -888,9 +901,9 @@ namespace Frida.HostSessionTest {
 			});
 		}
 
-		private static async void tx_failure_initially (Harness h) {
+		private static async void tx_not_sent (Harness h, Strategy strategy) {
 			uint disruptions = 0;
-			yield run_connectivity_scenario (h, (message, direction) => {
+			yield run_connectivity_scenario (h, strategy, (message, direction) => {
 				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
 						direction == OUT && disruptions == 0) {
 					disruptions++;
@@ -900,7 +913,24 @@ namespace Frida.HostSessionTest {
 			});
 		}
 
-		private static async void run_connectivity_scenario (Harness h, owned ChaosProxy.Inducer on_message) {
+		private static async void tx_without_ack (Harness h, Strategy strategy) {
+			uint disruptions = 0;
+			yield run_connectivity_scenario (h, strategy, (message, direction) => {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						direction == OUT && disruptions == 0) {
+					disruptions++;
+					return FORWARD_THEN_DISRUPT;
+				}
+				return FORWARD;
+			});
+		}
+
+		private enum Strategy {
+			SERVER,
+			PEER
+		}
+
+		private static async void run_connectivity_scenario (Harness h, Strategy strategy, owned ChaosProxy.Inducer on_message) {
 			try {
 				uint seen_disruptions = 0;
 				uint seen_messages = 0;
@@ -946,6 +976,10 @@ namespace Frida.HostSessionTest {
 					}
 				});
 
+				if (strategy == PEER) {
+					yield session.setup_peer_connection ();
+				}
+
 				var script = yield session.create_script ("""
 					recv(onMessage);
 					function onMessage(message) {
@@ -990,7 +1024,8 @@ namespace Frida.HostSessionTest {
 					waiting = false;
 				}
 
-				Idle.add (run_connectivity_scenario.callback);
+				// In case some unexpected messages show up...
+				Timeout.add (100, run_connectivity_scenario.callback);
 				yield;
 
 				assert (seen_disruptions == 1);
