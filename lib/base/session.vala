@@ -53,8 +53,6 @@ namespace Frida {
 		public abstract async void interrupt (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint last_batch_id, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void ack (uint batch_id, Cancellable? cancellable) throws GLib.Error;
-
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
 

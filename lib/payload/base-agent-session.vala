@@ -41,10 +41,9 @@ namespace Frida {
 		private TimeoutSource? expiry_timer;
 
 		private Cancellable delivery_cancellable = new Cancellable ();
-		private Gee.ArrayList<PendingMessage> pending_messages = new Gee.ArrayList<PendingMessage> ();
-		private int pending_cursor = 0;
-		private Gee.Queue<UnackedBatch> unacked_batches = new Gee.ArrayQueue<UnackedBatch> ();
-		private uint next_batch_id = 1;
+		private Gee.LinkedList<PendingMessage> pending_messages = new Gee.LinkedList<PendingMessage> ();
+		private uint pending_deliveries = 0;
+		private int next_serial = 1;
 
 		private bool child_gating_enabled = false;
 
@@ -130,9 +129,12 @@ namespace Frida {
 			if (persist_timeout == 0 || expiry_timer == null)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
-			if (last_batch_id != 0)
-				flush_pending_messages_covered_by (last_batch_id);
-			pending_cursor = 0;
+			if (last_batch_id != 0) {
+				PendingMessage? m;
+				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= last_batch_id) {
+					pending_messages.poll ();
+				}
+			}
 
 			expiry_timer.destroy ();
 			expiry_timer = null;
@@ -141,10 +143,6 @@ namespace Frida {
 			state = LIVE;
 
 			maybe_deliver_pending_messages ();
-		}
-
-		public async void ack (uint batch_id, Cancellable? cancellable) throws Error, IOError {
-			flush_pending_messages_covered_by (batch_id);
 		}
 
 		public async void flush () {
@@ -610,12 +608,14 @@ namespace Frida {
 		}
 
 		private void on_message_from_script (AgentScriptId script_id, string json, Bytes? data) {
-			pending_messages.add (new PendingMessage (AgentMessageKind.SCRIPT, script_id, json, data));
+			pending_messages.offer (
+				new PendingMessage (next_serial++, AgentMessageKind.SCRIPT, script_id, json, data));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_messages.add (new PendingMessage (AgentMessageKind.DEBUGGER, AgentScriptId (0), message));
+			pending_messages.offer (
+				new PendingMessage (next_serial++, AgentMessageKind.DEBUGGER, AgentScriptId (0), message));
 			maybe_deliver_pending_messages ();
 		}
 
@@ -627,107 +627,83 @@ namespace Frida {
 			if (sink == null)
 				return;
 
-			int pending_size = pending_messages.size;
-			while (pending_cursor != pending_size) {
-				void * items = null;
-				int n_items = 0;
-				try {
-					size_t total_size = 0;
-					size_t max_size = 4 * 1024 * 1024;
-					for (int i = pending_cursor; i != pending_size; i++) {
-						PendingMessage m = pending_messages[i];
-						size_t message_size = m.estimate_size_in_bytes ();
-						if (total_size + message_size <= max_size || n_items == 0) {
-							n_items++;
-							items = realloc (items, n_items * sizeof (AgentMessage));
-
-							AgentMessage * am = (AgentMessage *) items + n_items - 1;
-
-							am->kind = m.kind;
-							am->script_id = m.script_id;
-
-							*((void **) &am->text) = m.text;
-
-							unowned Bytes? data = m.data;
-							am->has_data = data != null;
-							*((void **) &am->data) = am->has_data ? data.get_data () : null;
-							am->data.length = am->has_data ? data.length : 0;
-
-							total_size += message_size;
-						} else {
-							break;
-						}
-					}
-
-					unowned AgentMessage[] items_arr = (AgentMessage[]) items;
-					items_arr.length = n_items;
-
-					uint batch_id = generate_next_batch_id ();
-
-					sink.post_messages.begin (items_arr, batch_id, delivery_cancellable);
-
-					if (persist_timeout == 0) {
-						pending_size -= n_items;
-						flush_n_pending_messages (n_items);
-					} else {
-						pending_cursor += n_items;
-						unacked_batches.offer (new UnackedBatch (batch_id, n_items));
-					}
-				} finally {
-					free (items);
-				}
-			}
-		}
-
-		private void flush_pending_messages_covered_by (uint batch_id) {
-			bool found = false;
-			foreach (UnackedBatch b in unacked_batches) {
-				if (b.id == batch_id) {
-					found = true;
-					break;
-				}
-			}
-			if (!found)
+			if (pending_messages.is_empty)
 				return;
 
-			int total_acked = 0;
-			UnackedBatch? b;
-			while ((b = unacked_batches.poll ()) != null) {
-				total_acked += b.length;
-				if (b.id == batch_id)
+			var batch = new Gee.ArrayList<PendingMessage> ();
+			void * items = null;
+			int n_items = 0;
+			size_t total_size = 0;
+			size_t max_size = 4 * 1024 * 1024;
+			PendingMessage? m;
+			while ((m = pending_messages.peek ()) != null) {
+				size_t message_size = m.estimate_size_in_bytes ();
+				if (total_size + message_size > max_size && !batch.is_empty)
 					break;
+				pending_messages.poll ();
+				batch.add (m);
+
+				n_items++;
+				items = realloc (items, n_items * sizeof (AgentMessage));
+
+				AgentMessage * am = (AgentMessage *) items + n_items - 1;
+
+				am->kind = m.kind;
+				am->script_id = m.script_id;
+
+				*((void **) &am->text) = m.text;
+
+				unowned Bytes? data = m.data;
+				am->has_data = data != null;
+				*((void **) &am->data) = am->has_data ? data.get_data () : null;
+				am->data.length = am->has_data ? data.length : 0;
+
+				total_size += message_size;
 			}
 
-			flush_n_pending_messages (total_acked);
-			pending_cursor -= total_acked;
+			deliver_batch.begin (sink, batch, items);
 		}
 
-		private void flush_n_pending_messages (int n) {
-			uint pending_size = pending_messages.size;
-			if (n == pending_size) {
-				pending_messages.clear ();
-			} else {
-				var new_pending = new Gee.ArrayList<PendingMessage> ();
-				for (int i = n; i != pending_size; i++)
-					new_pending.add (pending_messages[i]);
-				pending_messages = new_pending;
+		private async void deliver_batch (AgentMessageSink sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			bool success = false;
+			pending_deliveries++;
+			try {
+				int n = messages.size;
+
+				foreach (var message in messages)
+					message.delivery_attempts++;
+
+				unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+				items_arr.length = n;
+
+				uint batch_id = messages[n - 1].serial;
+
+				yield sink.post_messages (items_arr, batch_id, delivery_cancellable);
+
+				success = true;
+			} catch (GLib.Error e) {
+				pending_messages.add_all (messages);
+				pending_messages.sort ((a, b) => a.serial - b.serial);
+			} finally {
+				pending_deliveries--;
+				if (pending_deliveries == 0 && success)
+					next_serial = 1;
+
+				free (items);
 			}
-		}
-
-		private uint generate_next_batch_id () {
-			uint id = next_batch_id++;
-			if (id == 0)
-				id = next_batch_id++;
-			return id;
 		}
 
 		private class PendingMessage {
+			public int serial;
 			public AgentMessageKind kind;
 			public AgentScriptId script_id;
 			public string text;
 			public Bytes? data;
+			public uint delivery_attempts;
 
-			public PendingMessage (AgentMessageKind kind, AgentScriptId script_id, string text, Bytes? data = null) {
+			public PendingMessage (int serial, AgentMessageKind kind, AgentScriptId script_id, string text,
+					Bytes? data = null) {
+				this.serial = serial;
 				this.kind = kind;
 				this.script_id = script_id;
 				this.text = text;
@@ -736,16 +712,6 @@ namespace Frida {
 
 			public size_t estimate_size_in_bytes () {
 				return sizeof (AgentMessage) + text.length + 1 + ((data != null) ? data.length : 0);
-			}
-		}
-
-		private class UnackedBatch {
-			public uint id;
-			public int length;
-
-			public UnackedBatch (uint id, int length) {
-				this.id = id;
-				this.length = length;
 			}
 		}
 	}

@@ -990,6 +990,9 @@ namespace Frida.HostSessionTest {
 					waiting = false;
 				}
 
+				Idle.add (run_connectivity_scenario.callback);
+				yield;
+
 				assert (seen_disruptions == 1);
 				assert (seen_messages == 3);
 				assert (messages_summary.str == "10,11,12");

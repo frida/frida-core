@@ -2674,9 +2674,6 @@ namespace Frida {
 			}
 
 			last_batch_id = batch_id;
-
-			if (persist_timeout != 0)
-				session.ack.begin (batch_id, null);
 		}
 
 		public void _release_script (AgentScriptId script_id) {
