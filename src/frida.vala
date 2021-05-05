@@ -2875,33 +2875,24 @@ namespace Frida {
 			}
 		}
 
-		public async void post (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
+		public void post (string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_post (json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_post (json, data);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
 
+		private void do_post (string json, Bytes? data) {
 			var has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-
-			try {
-				yield session.session.post_to_script (AgentScriptId (id), json, has_data, data_param, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public void post_sync (string json, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<PostTask> ();
-			task.json = json;
-			task.data = data;
-			task.execute (cancellable);
-		}
-
-		private class PostTask : ScriptTask<void> {
-			public string json;
-			public Bytes? data;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (json, data, cancellable);
-			}
+			session.session.post_to_script.begin (AgentScriptId (id), json, has_data, data_param, null);
 		}
 
 		private void check_open () throws Error {

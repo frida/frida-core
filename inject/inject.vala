@@ -763,7 +763,7 @@ namespace Frida.Inject {
 		}
 
 		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
-			yield script.post (json, null, cancellable);
+			script.post (json, null);
 		}
 	}
 

@@ -982,7 +982,7 @@ namespace Frida.HostSessionTest {
 				});
 				yield script.load ();
 
-				yield script.post ("""{"serial":10,"count":3}""");
+				script.post ("""{"serial":10,"count":3}""");
 
 				while (seen_messages < 3) {
 					waiting = true;
