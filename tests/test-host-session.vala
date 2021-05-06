@@ -976,9 +976,8 @@ namespace Frida.HostSessionTest {
 					}
 				});
 
-				if (strategy == PEER) {
+				if (strategy == PEER)
 					yield session.setup_peer_connection ();
-				}
 
 				var script = yield session.create_script ("""
 					recv(onMessage);
@@ -1105,8 +1104,10 @@ namespace Frida.HostSessionTest {
 				var target_connection = yield client.connect_async (target_address, cancellable);
 				Tcp.enable_nodelay (target_connection.socket);
 
-				handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_connection.output_stream, cancellable);
-				yield handle_io (Direction.IN, target_connection.input_stream, proxy_connection.output_stream, cancellable);
+				handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_connection.output_stream,
+					cancellable);
+				yield handle_io (Direction.IN, target_connection.input_stream, proxy_connection.output_stream,
+					cancellable);
 			}
 
 			private async void handle_io (Direction direction, InputStream raw_input, OutputStream output,
