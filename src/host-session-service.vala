@@ -345,6 +345,29 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
+		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			#if DARWIN && !IOS
+				GVariant *platform = g_variant_new ("s", "macos");
+			#elif IOS
+				GVariant *platform = g_variant_new ("s", "ios");
+			#elif LINUX
+				GVariant *platform = g_variant_new ("s", "linux");
+			#elif ANDROID && (X86 || X86_64)
+				GVariant *platform = g_variant_new ("s", "android_emulated");
+			#elif ANDROID
+				GVariant *platform = g_variant_new ("s", "android");
+			#elif WINDOWS
+				GVariant *platform = g_variant_new ("s", "windows");
+			#else
+				GVariant *platform = g_variant_new ("s", "unknown");
+			#endif
+			
+			var system_parameters = new HashTable<string, uint> (str_hash, str_equal);
+			system_parameters.insert("platform", platform);
+			
+			return system_parameters;
+		}
+
 		private async AgentEntry establish (uint pid, Cancellable? cancellable) throws Error, IOError {
 			while (agent_entries.has_key (pid)) {
 				var future = agent_entries[pid];

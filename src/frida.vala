@@ -1379,6 +1379,11 @@ namespace Frida {
 				}
 			}
 		}
+		
+		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			var system_parameters = session.query_system_parameters();
+			return system_parameters;
+		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];
