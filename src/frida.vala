@@ -1987,6 +1987,7 @@ namespace Frida {
 		private DBusConnection? nice_connection;
 		private Cancellable? nice_cancellable;
 
+		private MainContext? frida_context;
 		private MainContext? dbus_context;
 #endif
 
@@ -2313,6 +2314,7 @@ namespace Frida {
 
 			AgentSession server_session = active_session;
 
+			frida_context = get_main_context ();
 			dbus_context = yield get_dbus_context ();
 
 			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, RELIABLE | ICE_TRICKLE);
@@ -2624,7 +2626,7 @@ namespace Frida {
 		private void schedule_on_frida_thread (owned SourceFunc function) {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
-			source.attach (get_main_context ());
+			source.attach (frida_context);
 		}
 
 		private void schedule_on_dbus_thread (owned SourceFunc function) {
