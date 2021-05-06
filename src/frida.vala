@@ -1980,6 +1980,7 @@ namespace Frida {
 		private Gum.InspectorServer? inspector_server;
 
 #if HAVE_NICE
+		private PeerOptions? nice_options;
 		private Nice.Agent? nice_agent;
 		private uint nice_stream_id;
 		private uint nice_component_id;
@@ -2034,25 +2035,51 @@ namespace Frida {
 					throw new Error.INVALID_OPERATION ("Session is gone");
 			}
 
-			var host_session = yield device.get_host_session (cancellable);
+			printerr ("resume() A\n");
 
-			try {
-				yield host_session.reattach (id, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+			DBusConnection old_connection = ((DBusProxy) active_session).g_connection;
+			if (old_connection.is_closed ()) {
+				var host_session = yield device.get_host_session (cancellable);
+
+				printerr ("resume() B\n");
+
+				try {
+					printerr ("1\n");
+					yield host_session.reattach (id, cancellable);
+					printerr ("2\n");
+				} catch (GLib.Error e) {
+					printerr ("3: %s\n", e.message);
+					throw_dbus_error (e);
+				}
+
+				printerr ("resume() C\n");
+
+				var agent_session = yield device.provider.link_agent_session (host_session, id, this, cancellable);
+
+				begin_migration (agent_session);
 			}
 
-			var agent_session = yield device.provider.link_agent_session (host_session, id, this, cancellable);
+			printerr ("resume() D\n");
 
-			begin_migration (agent_session);
-			commit_migration (agent_session);
+			if (nice_options != null) {
+				try {
+					printerr ("1\n");
+				yield do_setup_peer_connection (nice_options, cancellable);
+					printerr ("2\n");
+				} catch (Error e) {
+					printerr ("E: %s\n", e.message);
+					throw e;
+				}
+			}
 
 			uint last_tx_batch_id;
 			try {
-				yield agent_session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
+				yield session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+
+			printerr ("resume() E\n");
 
 			if (last_tx_batch_id != 0) {
 				PendingMessage? m;
@@ -2060,6 +2087,8 @@ namespace Frida {
 					pending_messages.poll ();
 				}
 			}
+
+			printerr ("resume() F\n");
 
 			delivery_cancellable = new Cancellable ();
 			state = ATTACHED;
@@ -2312,6 +2341,10 @@ namespace Frida {
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
+			yield do_setup_peer_connection (options, cancellable);
+		}
+
+		private async void do_setup_peer_connection (PeerOptions? options, Cancellable? cancellable) throws Error, IOError {
 			AgentSession server_session = active_session;
 
 			frida_context = get_main_context ();
@@ -2442,7 +2475,8 @@ namespace Frida {
 				cancel_migration (peer_session);
 				throw_dbus_error (e);
 			}
-			commit_migration (peer_session);
+
+			nice_options = (options != null) ? options : new PeerOptions ();
 		}
 
 		private async void teardown_peer_connection (Cancellable? cancellable) {
@@ -2620,7 +2654,24 @@ namespace Frida {
 		}
 
 		private void on_nice_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			_do_close.begin (SessionDetachReason.PROCESS_TERMINATED, CrashInfo.empty (), false, null);
+			nice_cancellable = null;
+			nice_connection = null;
+			nice_stream = null;
+			nice_component_id = 0;
+			nice_stream_id = 0;
+			nice_agent = null;
+
+			if (persist_timeout != 0) {
+				if (state != ATTACHED)
+					return;
+				state = INTERRUPTED;
+				active_session = obsolete_session;
+				obsolete_session = null;
+				delivery_cancellable.cancel ();
+				detached (CONNECTION_TERMINATED, null);
+			} else {
+				_do_close.begin (CONNECTION_TERMINATED, CrashInfo.empty (), false, null);
+			}
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -2842,6 +2893,8 @@ namespace Frida {
 
 		internal void _on_detached (SessionDetachReason reason, CrashInfo crash) {
 			if (persist_timeout != 0 && reason == CONNECTION_TERMINATED) {
+				if (state != ATTACHED)
+					return;
 				state = INTERRUPTED;
 				delivery_cancellable.cancel ();
 				detached (reason, null);
@@ -2893,25 +2946,12 @@ namespace Frida {
 		}
 
 		private void begin_migration (AgentSession new_session) {
-			assert (obsolete_session == null);
-
 			obsolete_session = active_session;
-
 			active_session = new_session;
-		}
-
-		private void commit_migration (AgentSession new_session) {
-			assert (new_session == active_session);
-			assert (obsolete_session != null);
-
-			obsolete_session = null;
 		}
 
 #if HAVE_NICE
 		private void cancel_migration (AgentSession new_session) {
-			assert (new_session == active_session);
-			assert (obsolete_session != null);
-
 			active_session = obsolete_session;
 			obsolete_session = null;
 		}

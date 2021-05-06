@@ -965,6 +965,7 @@ namespace Frida.HostSessionTest {
 				options.persist_timeout = 5;
 				var session = yield device.attach (process.id, options);
 				session.detached.connect ((reason, crash) => {
+					printerr ("detached() reason=%s\n", reason.to_string ());
 					if (reason == CONNECTION_TERMINATED) {
 						seen_disruptions++;
 						Idle.add (() => {
@@ -976,8 +977,43 @@ namespace Frida.HostSessionTest {
 					}
 				});
 
-				if (strategy == PEER)
+				if (strategy == PEER) {
 					yield session.setup_peer_connection ();
+
+					DBusConnection connection = ((DBusProxy) session.session).g_connection;
+					bool disrupting = false;
+					var main_context = MainContext.ref_thread_default ();
+					connection.add_filter ((conn, message, incoming) => {
+						printerr ("[FILTER] %s %s\n", (incoming ? "IN" : "OUT"), message.print ());
+						if (disrupting)
+							return null;
+
+						var direction = incoming ? ChaosProxy.Direction.IN : ChaosProxy.Direction.OUT;
+
+						switch (proxy.on_message (message, direction)) {
+							case FORWARD:
+								break;
+							case FORWARD_THEN_DISRUPT:
+								disrupting = true;
+								break;
+							case DISRUPT:
+								disrupting = true;
+								message = null;
+								break;
+						}
+
+						if (disrupting) {
+							var source = new IdleSource ();
+							source.set_callback (() => {
+								connection.close.begin ();
+								return false;
+							});
+							source.attach (main_context);
+						}
+
+						return message;
+					});
+				}
 
 				var script = yield session.create_script ("""
 					recv(onMessage);
@@ -1052,7 +1088,7 @@ namespace Frida.HostSessionTest {
 				construct;
 			}
 
-			private Inducer on_message;
+			public Inducer on_message;
 
 			private SocketService service = new SocketService ();
 			private uint16 _proxy_port;

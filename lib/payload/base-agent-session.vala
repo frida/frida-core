@@ -57,7 +57,7 @@ namespace Frida {
 		private IOStream? nice_stream;
 		private DBusConnection? nice_connection;
 		private uint nice_registration_id;
-		private AgentMessageSink nice_message_sink;
+		private AgentMessageSink? nice_message_sink;
 #endif
 		private Cancellable? nice_cancellable;
 
@@ -74,9 +74,16 @@ namespace Frida {
 			script_engine = new ScriptEngine (invader);
 			script_engine.message_from_script.connect (on_message_from_script);
 			script_engine.message_from_debugger.connect (on_message_from_debugger);
+
+			printerr ("Session %p\n", this);
+		}
+
+		~BaseAgentSession () {
+			printerr ("~Session %p\n", this);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			printerr ("close!!!\n");
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -558,7 +565,26 @@ namespace Frida {
 		}
 
 		private void on_nice_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			close.begin (null);
+			nice_cancellable = null;
+			nice_message_sink = null;
+			if (nice_registration_id != 0) {
+				nice_connection.unregister_object (nice_registration_id);
+				nice_registration_id = 0;
+			}
+			nice_connection.on_closed.disconnect (on_nice_connection_closed);
+			nice_connection = null;
+			nice_stream = null;
+			nice_component_id = 0;
+			nice_stream_id = 0;
+			nice_agent = null;
+
+			if (persist_timeout != 0) {
+				printerr ("on_nice_connection_closed() A\n");
+				interrupt.begin (null);
+			} else {
+				printerr ("on_nice_connection_closed() B\n");
+				close.begin (null);
+			}
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -603,6 +629,9 @@ namespace Frida {
 		}
 
 		public async void commit_migration (Cancellable? cancellable) throws Error, IOError {
+			if (expiry_timer != null)
+				return;
+
 			state = LIVE;
 
 			maybe_deliver_pending_messages ();
