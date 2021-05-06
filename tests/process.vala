@@ -37,8 +37,12 @@ namespace Frida.Test {
 		}
 
 		~Process () {
-			if (handle != null && auto_kill)
-				kill ();
+			if (handle != null && auto_kill) {
+				try {
+					kill ();
+				} catch (Error e) {
+				}
+			}
 		}
 
 		public static Process create (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
