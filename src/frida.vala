@@ -1363,6 +1363,11 @@ namespace Frida {
 			}
 		}
 
+		public string get_platform_name (Session session, bool may_block, Cancellable? cancellable) throws Error {
+			var system_parameters = session.query_system_parameters();
+			return system_parameters.get("platform");
+		}
+
 		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
 			var session = agent_sessions[id];
 			if (session != null)
