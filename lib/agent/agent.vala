@@ -633,6 +633,7 @@ namespace Frida.Agent {
 
 		private async void close_all_sessions () {
 			uint pending = 1;
+			var handlers = new Gee.HashMap<BaseAgentSession, ulong> ();
 
 			CompletionNotify on_complete = () => {
 				pending--;
@@ -642,7 +643,11 @@ namespace Frida.Agent {
 
 			foreach (var session in sessions.values.to_array ()) {
 				pending++;
-				close_session.begin (session, on_complete);
+				handlers[session] = session.closed.connect (session => {
+					session.disconnect (handlers[session]);
+					on_complete ();
+				});
+				session.close.begin (null);
 			}
 
 			on_complete ();
@@ -650,16 +655,6 @@ namespace Frida.Agent {
 			yield;
 
 			assert (sessions.is_empty);
-		}
-
-		private async void close_session (LiveAgentSession session, CompletionNotify on_complete) {
-			try {
-				yield session.close (null);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-
-			on_complete ();
 		}
 
 		private async void flush_all_sessions () {
