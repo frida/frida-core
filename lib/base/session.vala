@@ -1,6 +1,7 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession16")]
 	public interface HostSession : Object {
+		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error;
@@ -20,7 +21,6 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws GLib.Error;
 
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
@@ -185,14 +185,18 @@ namespace Frida {
 			return "{}";
 		}
 	}
-
+	
 	public class NullAuthenticationService : Object, AuthenticationService {
 		public async string authenticate (string token, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.INVALID_OPERATION ("Authentication not expected");
 		}
 	}
-
+	
 	public class UnauthorizedHostSession : Object, HostSession {
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+			throw_not_authorized ();
+		}
+
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
@@ -256,9 +260,6 @@ namespace Frida {
 			throw_not_authorized ();
 		}
 
-		public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
-			throw_not_authorized ();
-		}
 	}
 
 	public class UnauthorizedPortalSession : Object, PortalSession {

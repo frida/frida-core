@@ -552,12 +552,27 @@ namespace Frida {
 		construct {
 			provider.host_session_detached.connect (on_host_session_detached);
 			provider.agent_session_detached.connect (on_agent_session_detached);
-
+			
 			_bus = new Bus (this);
 		}
-
+		
 		public bool is_lost () {
 			return close_request != null;
+		}
+		
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable = null) throws GLib.Error {
+			var host_session = yield get_host_session (cancellable);
+			return yield host_session.query_system_parameters (cancellable);
+		}
+
+		public HashTable<string, Variant> query_system_parameters_sync (Cancellable? cancellable = null) throws GLib.Error {
+			return create<QuerySystemParametersTask> ().execute (cancellable);
+		}
+		
+		private class QuerySystemParametersTask : DeviceTask<HashTable<string, Variant>> {
+			protected override async HashTable<string, Variant> perform_operation () throws Error {
+				return yield parent.query_system_parameters (cancellable);
+			}
 		}
 
 		public async Application? get_frontmost_application (Cancellable? cancellable = null) throws Error, IOError {
@@ -1137,17 +1152,12 @@ namespace Frida {
 			public string path;
 			public string entrypoint;
 			public string data;
-
+			
 			protected override async uint perform_operation () throws Error, IOError {
 				return yield parent.inject_library_file (pid, path, entrypoint, data, cancellable);
 			}
 		}
-
-		private class QuerySystemParametersTask : DeviceTask<HashTable<string, Variant>?> {
-			protected override async HashTable<string, Variant>? perform_operation () throws Error, IOError {
-				return yield parent.query_system_parameters (cancellable);
-			}
-		}
+		
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
@@ -1386,19 +1396,6 @@ namespace Frida {
 			}
 		}
 		
-		public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable = null) throws Error, IOError {
-			try {
-				var host_session = yield get_host_session (cancellable);
-				return yield host_session.query_system_parameters (cancellable);
-			} catch (GLib.Error e) {
-				return null;
-			}
-		}
-
-		public HashTable<string, Variant>? query_system_parameters_sync (Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<QuerySystemParametersTask> ();
-			return task.execute (cancellable);
-		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];

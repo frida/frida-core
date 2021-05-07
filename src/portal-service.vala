@@ -1155,6 +1155,10 @@ namespace Frida {
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}
+
+			public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+				throw new Error.NOT_SUPPORTED ("Not supported");
+			}
 		}
 
 		private class BusService : Object, BusSession {

@@ -1880,13 +1880,9 @@ namespace Frida.Gadget {
 					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
 			}
 
-			public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
 				HostSession host_session = this;
-				try {
-					return yield host_session.query_system_parameters (cancellable);
-				} catch (GLib.Error e) {
-					return null;
-				}
+				return yield host_session.query_system_parameters (cancellable);
 			}
 		}
 

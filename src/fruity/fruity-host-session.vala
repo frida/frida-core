@@ -471,6 +471,11 @@ namespace Frida {
 			io_cancellable.cancel ();
 		}
 
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.query_system_parameters (cancellable);
+		}
+
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {

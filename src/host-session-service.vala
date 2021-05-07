@@ -345,25 +345,29 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
-		public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+			string os_string;
 			#if DARWIN && !IOS
-				Variant? platform = new Variant ("s", "macos");
+				os_string = "macos";
 			#elif IOS
-				Variant? platform = new Variant ("s", "ios");
-			#elif ANDROID && (X86 || X86_64)
-				Variant? platform = new Variant ("s", "android_emulated");
+				os_string = "ios";
+			#elif ANDROID && X86
+				os_string = "android_x86";
+			#elif ANDROID && X86_64
+				os_string = "android_x86_64";
 			#elif ANDROID
-				Variant? platform = new Variant ("s", "android");
+				os_string = "android";
 			#elif LINUX
-				Variant? platform = new Variant ("s", "linux");
+				os_string = "linux";
 			#elif WINDOWS
-				Variant? platform = new Variant ("s", "windows");
+				os_string = "windows";
 			#else
-				Variant? platform = new Variant ("s", "unknown");
+				os_string = "unknown";
 			#endif
 			
 			var system_parameters = new HashTable<string, Variant> (str_hash, str_equal);
-			system_parameters.insert ("platform", platform);
+			Variant os = new Variant ("s", os_string);
+			system_parameters["os"] = os;
 			
 			return system_parameters;
 		}
