@@ -77,13 +77,6 @@ struct _FridaChainedStartsInSegment
   uint16_t page_start[1];
 };
 
-enum _FridaChainedPtrStart
-{
-  FRIDA_CHAINED_PTR_START_NONE  = 0xffff,
-  FRIDA_CHAINED_PTR_START_MULTI = 0x8000,
-  FRIDA_CHAINED_PTR_START_LAST  = 0x8000,
-};
-
 struct _FridaChainedPtrArm64eRebase
 {
   uint64_t target : 43,
@@ -599,14 +592,8 @@ frida_process_chained_fixups (const FridaChainedFixupsHeader * fixups_header, st
 
     for (page_index = 0; page_index != seg_starts->page_count; page_index++)
     {
-      uint16_t start;
-      void * cursor;
-
-      start = seg_starts->page_start[page_index];
-      if (start == FRIDA_CHAINED_PTR_START_NONE)
-        continue;
-
-      cursor = (void *) mach_header + seg_starts->segment_offset + (page_index * seg_starts->page_size) + start;
+      void * cursor = (void *) mach_header + seg_starts->segment_offset + (page_index * seg_starts->page_size) +
+          seg_starts->page_start[page_index];
 
       while (TRUE)
       {
