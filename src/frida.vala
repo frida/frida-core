@@ -2081,18 +2081,16 @@ namespace Frida {
 
 			printerr ("resume() D\n");
 
-			#if HAVE_NICE
-				if (nice_options != null) {
-					try {
-						printerr ("1\n");
-					yield do_setup_peer_connection (nice_options, cancellable);
-						printerr ("2\n");
-					} catch (Error e) {
-						printerr ("E: %s\n", e.message);
-						throw e;
-					}
+			if (nice_options != null) {
+				try {
+					printerr ("1\n");
+				yield do_setup_peer_connection (nice_options, cancellable);
+					printerr ("2\n");
+				} catch (Error e) {
+					printerr ("E: %s\n", e.message);
+					throw e;
 				}
-			#endif
+			}
 
 			uint last_tx_batch_id;
 			try {
