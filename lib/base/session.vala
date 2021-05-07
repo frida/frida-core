@@ -185,13 +185,13 @@ namespace Frida {
 			return "{}";
 		}
 	}
-	
+
 	public class NullAuthenticationService : Object, AuthenticationService {
 		public async string authenticate (string token, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.INVALID_OPERATION ("Authentication not expected");
 		}
 	}
-	
+
 	public class UnauthorizedHostSession : Object, HostSession {
 		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
 			throw_not_authorized ();

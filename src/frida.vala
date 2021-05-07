@@ -552,10 +552,10 @@ namespace Frida {
 		construct {
 			provider.host_session_detached.connect (on_host_session_detached);
 			provider.agent_session_detached.connect (on_agent_session_detached);
-			
+
 			_bus = new Bus (this);
 		}
-		
+
 		public bool is_lost () {
 			return close_request != null;
 		}
@@ -1152,12 +1152,12 @@ namespace Frida {
 			public string path;
 			public string entrypoint;
 			public string data;
-			
+
 			protected override async uint perform_operation () throws Error, IOError {
 				return yield parent.inject_library_file (pid, path, entrypoint, data, cancellable);
 			}
 		}
-		
+
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
