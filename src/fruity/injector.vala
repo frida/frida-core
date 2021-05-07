@@ -601,7 +601,7 @@ namespace Frida.Fruity.Injector {
 					.add (LIBSYSTEM, "_dlsym")
 					.add (LIBSYSTEM, "_mprotect")
 					.add (LIBSYSTEM, "_close")
-					.add (LIBSYSTEM, "__error")
+					.add (LIBSYSTEM, "___error")
 					;
 			}
 
@@ -623,7 +623,7 @@ namespace Frida.Fruity.Injector {
 				dlsym                 = symbols.get (LIBSYSTEM, "_dlsym");
 				mprotect              = symbols.get (LIBSYSTEM, "_mprotect");
 				close                 = symbols.get (LIBSYSTEM, "_close");
-				get_errno_storage     = symbols.get (LIBSYSTEM, "__error");
+				get_errno_storage     = symbols.get (LIBSYSTEM, "___error");
 			}
 		}
 
