@@ -269,6 +269,7 @@ struct _FridaAgentContext
   mach_port_t task;
   mach_port_t mach_thread;
   mach_port_t posix_thread;
+  uint64_t posix_tid;
   gboolean constructed;
   gpointer module_handle;
 
@@ -289,6 +290,8 @@ struct _FridaAgentContext
   GumAddress message_that_never_arrives;
 
   /* POSIX thread */
+  GumAddress pthread_threadid_np_impl;
+
   GumAddress dlopen_impl;
   GumAddress dylib_path;
   int dlopen_mode;
@@ -382,6 +385,7 @@ static gboolean frida_agent_context_init_functions (FridaAgentContext * self, Gu
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 
+static mach_port_t frida_obtain_thread_port_for_thread_id (mach_port_t task, uint64_t thread_id);
 static kern_return_t frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state,
     mach_msg_type_number_t * count);
 static kern_return_t frida_set_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gconstpointer state,
@@ -2198,6 +2202,7 @@ _frida_darwin_helper_backend_recreate_injectee_thread (FridaDarwinHelperBackend 
   agent_context->task = MACH_PORT_NULL;
   agent_context->mach_thread = MACH_PORT_NULL;
   agent_context->posix_thread = MACH_PORT_NULL;
+  agent_context->posix_tid = 0;
 
   self_task = mach_task_self ();
 
@@ -2294,9 +2299,22 @@ frida_inject_instance_on_mach_thread_dead (void * context)
 
   if (posix_thread_right_in_remote_task != MACH_PORT_NULL)
   {
+    kern_return_t kr;
     mach_msg_type_name_t acquired_type;
+    gboolean denied_by_modern_xnu;
 
-    mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_right_in_local_task, &acquired_type);
+    self->agent_context->posix_thread = MACH_PORT_NULL;
+
+    kr = mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_right_in_local_task,
+        &acquired_type);
+
+    denied_by_modern_xnu = kr == KERN_INVALID_CAPABILITY;
+    if (denied_by_modern_xnu)
+    {
+      posix_thread_right_in_local_task = frida_obtain_thread_port_for_thread_id (self->task, self->agent_context->posix_tid);
+
+      mach_port_deallocate (self->task, posix_thread_right_in_remote_task);
+    }
 
     if (posix_thread_right_in_local_task == MACH_PORT_DEAD)
       posix_thread_right_in_local_task = MACH_PORT_NULL;
@@ -3633,6 +3651,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   self->task = MACH_PORT_NULL;
   self->mach_thread = MACH_PORT_NULL;
   self->posix_thread = MACH_PORT_NULL;
+  self->posix_tid = 0;
   self->constructed = FALSE;
   self->module_handle = NULL;
 
@@ -3708,6 +3727,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
     self->pthread_create_impl = self->pthread_create_from_mach_thread_impl;
   else
     FRIDA_AGENT_CONTEXT_RESOLVE (pthread_create);
+  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_threadid_np);
   FRIDA_AGENT_CONTEXT_RESOLVE (pthread_detach);
   FRIDA_AGENT_CONTEXT_RESOLVE (pthread_self);
 
@@ -3876,6 +3896,15 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
   EMIT_CALL (mach_thread_self_impl, 0);
   EMIT_STORE (posix_thread, EAX);
+
+  if (self->pthread_threadid_np_impl != 0)
+  {
+    EMIT_LOAD_ADDRESS_OF (XSI, posix_tid);
+    EMIT_CALL (pthread_threadid_np_impl,
+        2,
+        GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+        GUM_ARG_REGISTER, GUM_REG_XSI);
+  }
 
   EMIT_LOAD (EDI, task);
   EMIT_LOAD (ESI, receive_port);
@@ -4125,6 +4154,14 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
   EMIT_ARM_CALL (R4);
   EMIT_ARM_STORE (posix_thread, R0);
 
+  if (self->pthread_threadid_np_impl != 0)
+  {
+    EMIT_ARM_LOAD_U32 (R0, 0);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, posix_tid);
+    EMIT_ARM_LOAD (R4, pthread_threadid_np_impl);
+    EMIT_ARM_CALL (R4);
+  }
+
   EMIT_ARM_LOAD (R0, task);
   EMIT_ARM_LOAD (R1, receive_port);
   EMIT_ARM_LOAD (R4, mach_port_destroy_impl);
@@ -4371,6 +4408,14 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
   EMIT_ARM64_CALL (X8);
   EMIT_ARM64_STORE (posix_thread, W0);
 
+  if (self->pthread_threadid_np_impl != 0)
+  {
+    EMIT_ARM64_LOAD_U64 (X0, 0);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, posix_tid);
+    EMIT_ARM64_LOAD (X8, pthread_threadid_np_impl);
+    EMIT_ARM64_CALL (X8);
+  }
+
   EMIT_ARM64_LOAD (W0, task);
   EMIT_ARM64_LOAD (W1, receive_port);
   EMIT_ARM64_LOAD (X8, mach_port_destroy_impl);
@@ -4466,6 +4511,46 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 }
 
 #endif
+
+static mach_port_t
+frida_obtain_thread_port_for_thread_id (mach_port_t task, uint64_t thread_id)
+{
+  mach_port_t result = MACH_PORT_NULL;
+  kern_return_t kr;
+  thread_act_array_t threads;
+  mach_msg_type_number_t thread_count;
+  mach_port_t self_task;
+  int i;
+
+  kr = task_threads (task, &threads, &thread_count);
+  if (kr != KERN_SUCCESS)
+    return MACH_PORT_NULL;
+
+  self_task = mach_task_self ();
+
+  /* Walk backwards as younger threads typically end up towards the end... */
+  for (i = thread_count - 1; i >= 0; i--)
+  {
+    thread_act_t thread = threads[i];
+    thread_identifier_info_data_t info;
+    mach_msg_type_number_t info_count = THREAD_IDENTIFIER_INFO_COUNT;
+
+    if (result == MACH_PORT_NULL &&
+        thread_info (thread, THREAD_IDENTIFIER_INFO, (thread_info_t) &info, &info_count) == KERN_SUCCESS &&
+        info.thread_id == thread_id)
+    {
+      result = thread;
+    }
+    else
+    {
+      mach_port_deallocate (self_task, thread);
+    }
+  }
+
+  vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
+
+  return result;
+}
 
 static kern_return_t
 frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state, mach_msg_type_number_t * count)
