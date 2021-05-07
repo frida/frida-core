@@ -638,6 +638,14 @@ namespace Frida {
 					Cancellable? cancellable) throws GLib.Error {
 				return yield parent.host_session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
 			}
+
+			public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+				try {
+					return yield parent.host_session.query_system_parameters (cancellable);
+				} catch (GLib.Error e) {
+					return null;
+				}
+			}
 		}
 
 		private class PendingSpawn {

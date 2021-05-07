@@ -19,7 +19,7 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws GLib.Error;
 
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);

@@ -1879,6 +1879,15 @@ namespace Frida.Gadget {
 				if (pid != this_process.pid)
 					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
 			}
+
+			public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+				HostSession host_session = this;
+				try {
+					return yield host_session.query_system_parameters (cancellable);
+				} catch (GLib.Error e) {
+					return null;
+				}
+			}
 		}
 
 		private class LiveAgentSession : BaseAgentSession {

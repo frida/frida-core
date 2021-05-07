@@ -1143,6 +1143,12 @@ namespace Frida {
 			}
 		}
 
+		private class QuerySystemParametersTask : DeviceTask<HashTable<string, Variant>?> {
+			protected override async HashTable<string, Variant>? perform_operation () throws Error, IOError {
+				return yield parent.query_system_parameters (cancellable);
+			}
+		}
+
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -1380,9 +1386,18 @@ namespace Frida {
 			}
 		}
 		
-		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
-			var system_parameters = session.query_system_parameters();
-			return system_parameters;
+		public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable = null) throws Error, IOError {
+			try {
+				var host_session = yield get_host_session (cancellable);
+				return yield host_session.query_system_parameters (cancellable);
+			} catch (GLib.Error e) {
+				return null;
+			}
+		}
+
+		public HashTable<string, Variant>? query_system_parameters_sync (Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<QuerySystemParametersTask> ();
+			return task.execute (cancellable);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -2066,16 +2081,18 @@ namespace Frida {
 
 			printerr ("resume() D\n");
 
-			if (nice_options != null) {
-				try {
-					printerr ("1\n");
-				yield do_setup_peer_connection (nice_options, cancellable);
-					printerr ("2\n");
-				} catch (Error e) {
-					printerr ("E: %s\n", e.message);
-					throw e;
+			#if HAVE_NICE
+				if (nice_options != null) {
+					try {
+						printerr ("1\n");
+					yield do_setup_peer_connection (nice_options, cancellable);
+						printerr ("2\n");
+					} catch (Error e) {
+						printerr ("E: %s\n", e.message);
+						throw e;
+					}
 				}
-			}
+			#endif
 
 			uint last_tx_batch_id;
 			try {

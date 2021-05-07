@@ -1184,7 +1184,7 @@ namespace Frida {
 				.end_object ();
 			string raw_stanza = Json.to_string (stanza.get_root (), false);
 
-			session.post_to_script.begin (script, raw_stanza, false, new uint8[0], io_cancellable);
+			//  session.post_to_script.begin (script, raw_stanza, false, new uint8[0], io_cancellable);
 		}
 
 		private static string canonicalize_parameter_name (string name) {

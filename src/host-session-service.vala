@@ -345,25 +345,25 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
-		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+		public async HashTable<string, Variant>? query_system_parameters (Cancellable? cancellable) throws Error, IOError {
 			#if DARWIN && !IOS
-				GVariant *platform = g_variant_new ("s", "macos");
+				Variant? platform = new Variant ("s", "macos");
 			#elif IOS
-				GVariant *platform = g_variant_new ("s", "ios");
-			#elif LINUX
-				GVariant *platform = g_variant_new ("s", "linux");
+				Variant? platform = new Variant ("s", "ios");
 			#elif ANDROID && (X86 || X86_64)
-				GVariant *platform = g_variant_new ("s", "android_emulated");
+				Variant? platform = new Variant ("s", "android_emulated");
 			#elif ANDROID
-				GVariant *platform = g_variant_new ("s", "android");
+				Variant? platform = new Variant ("s", "android");
+			#elif LINUX
+				Variant? platform = new Variant ("s", "linux");
 			#elif WINDOWS
-				GVariant *platform = g_variant_new ("s", "windows");
+				Variant? platform = new Variant ("s", "windows");
 			#else
-				GVariant *platform = g_variant_new ("s", "unknown");
+				Variant? platform = new Variant ("s", "unknown");
 			#endif
 			
-			var system_parameters = new HashTable<string, uint> (str_hash, str_equal);
-			system_parameters.insert("platform", platform);
+			var system_parameters = new HashTable<string, Variant> (str_hash, str_equal);
+			system_parameters.insert ("platform", platform);
 			
 			return system_parameters;
 		}
