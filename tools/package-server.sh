@@ -91,11 +91,11 @@ chmod 644 "$tmpdir/DEBIAN/control"
 cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
-if [[ \$1 == upgrade ]]; then
+if [ "\$1" = upgrade ]; then
   launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
-if [[ \$1 == install || \$1 == upgrade ]]; then
+if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
   launchctl load /Library/LaunchDaemons/re.frida.server.plist
 fi
 
@@ -105,7 +105,7 @@ chmod 755 "$tmpdir/DEBIAN/extrainst_"
 cat >"$tmpdir/DEBIAN/prerm" <<EOF
 #!/bin/sh
 
-if [[ \$1 == remove || \$1 == purge ]]; then
+if [ "\$1" = remove ] || [ "\$1" = purge ]; then
   launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
