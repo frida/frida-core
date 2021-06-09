@@ -29,6 +29,8 @@ namespace Frida {
 			construct;
 		}
 
+		private State state = STOPPED;
+
 		private SocketService service = new SocketService ();
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
@@ -45,7 +47,13 @@ namespace Frida {
 		private Gee.Map<AgentSessionId?, AgentSessionEntry> sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
-		private Cancellable io_cancellable;
+		private Cancellable? io_cancellable;
+
+		private enum State {
+			STOPPED,
+			STARTING,
+			STARTED
+		}
 
 		public PortalService (EndpointParameters cluster_params, EndpointParameters? control_params = null) {
 			Object (cluster_params: cluster_params, control_params: control_params);
@@ -77,6 +85,10 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
+			if (state != STOPPED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+			state = STARTING;
+
 			io_cancellable = new Cancellable ();
 
 			try {
@@ -87,11 +99,16 @@ namespace Frida {
 					yield add_endpoint (parse_control_address (control_params.address, control_params.port),
 						control_params, cancellable);
 				}
+
+				service.start ();
+
+				state = STARTED;
 			} catch (GLib.Error e) {
 				throw new Error.ADDRESS_IN_USE ("%s", e.message);
+			} finally {
+				if (state != STARTED)
+					state = STOPPED;
 			}
-
-			service.start ();
 		}
 
 		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -114,26 +131,28 @@ namespace Frida {
 			}
 		}
 
-		public async void stop (Cancellable? cancellable = null) throws IOError {
+		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+			if (state != STARTED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
 			service.stop ();
 
-			io_cancellable.cancel ();
+			if (io_cancellable != null)
+				io_cancellable.cancel ();
 
 			foreach (var peer in peers.values.to_array ())
 				peer.close ();
 			peers.clear ();
+
+			state = STOPPED;
 		}
 
-		public void stop_sync (Cancellable? cancellable = null) throws IOError {
-			try {
-				create<StopTask> ().execute (cancellable);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
+		public void stop_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<StopTask> ().execute (cancellable);
 		}
 
 		private class StopTask : PortalServiceTask<void> {
-			protected override async void perform_operation () throws IOError {
+			protected override async void perform_operation () throws Error, IOError {
 				yield parent.stop (cancellable);
 			}
 		}

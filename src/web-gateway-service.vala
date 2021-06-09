@@ -20,12 +20,20 @@ namespace Frida {
 			construct;
 		}
 
+		private State state = STOPPED;
+
 		private Soup.Server server;
 		private SocketAddress? target_address;
 
 		private Gee.Map<Soup.WebsocketConnection, Peer> peers = new Gee.HashMap<Soup.WebsocketConnection, Peer> ();
 
-		private Cancellable io_cancellable;
+		private Cancellable? io_cancellable;
+
+		private enum State {
+			STOPPED,
+			STARTING,
+			STARTED
+		}
 
 		public WebGatewayService (EndpointParameters gateway_params, EndpointParameters target_params, File? root = null,
 				string? origin = null) {
@@ -48,32 +56,43 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
+			if (state != STOPPED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+			state = STARTING;
+
 			io_cancellable = new Cancellable ();
 
-			SocketAddress? address;
-
-			bool tls = gateway_params.certificate != null;
-			uint16 default_port = tls ? 443 : 80;
-			SocketConnectable gateway_connectable =
-				parse_socket_address (gateway_params.address, gateway_params.port, "127.0.0.1", default_port);
 			try {
-				var enumerator = gateway_connectable.enumerate ();
-				while ((address = yield enumerator.next_async (cancellable)) != null) {
-					server.listen (address, tls ? Soup.ServerListenOptions.HTTPS : 0);
+				SocketAddress? address;
+
+				bool tls = gateway_params.certificate != null;
+				uint16 default_port = tls ? 443 : 80;
+				SocketConnectable gateway_connectable =
+					parse_socket_address (gateway_params.address, gateway_params.port, "127.0.0.1", default_port);
+				try {
+					var enumerator = gateway_connectable.enumerate ();
+					while ((address = yield enumerator.next_async (cancellable)) != null) {
+						server.listen (address, tls ? Soup.ServerListenOptions.HTTPS : 0);
+					}
+				} catch (GLib.Error e) {
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
 				}
-			} catch (GLib.Error e) {
-				throw new Error.ADDRESS_IN_USE ("%s", e.message);
-			}
 
-			try {
-				var enumerator = parse_control_address (target_params.address, target_params.port).enumerate ();
-				address = yield enumerator.next_async (cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Invalid target endpoint: %s", e.message);
+				try {
+					var enumerator = parse_control_address (target_params.address, target_params.port).enumerate ();
+					address = yield enumerator.next_async (cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Invalid target endpoint: %s", e.message);
+				}
+				if (address == null)
+					throw new Error.INVALID_ARGUMENT ("Invalid target endpoint");
+				target_address = address;
+
+				state = STARTED;
+			} finally {
+				if (state != STARTED)
+					state = STOPPED;
 			}
-			if (address == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid target endpoint");
-			target_address = address;
 		}
 
 		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -86,26 +105,28 @@ namespace Frida {
 			}
 		}
 
-		public async void stop (Cancellable? cancellable = null) throws IOError {
+		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+			if (state != STARTED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
 			server.disconnect ();
 
-			io_cancellable.cancel ();
+			if (io_cancellable != null)
+				io_cancellable.cancel ();
 
 			foreach (var peer in peers.values.to_array ())
 				peer.close ();
 			peers.clear ();
+
+			state = STOPPED;
 		}
 
-		public void stop_sync (Cancellable? cancellable = null) throws IOError {
-			try {
-				create<StopTask> ().execute (cancellable);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
+		public void stop_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<StopTask> ().execute (cancellable);
 		}
 
 		private class StopTask : WebGatewayServiceTask<void> {
-			protected override async void perform_operation () throws IOError {
+			protected override async void perform_operation () throws Error, IOError {
 				yield parent.stop (cancellable);
 			}
 		}

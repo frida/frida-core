@@ -15,6 +15,8 @@ namespace Frida {
 			construct;
 		}
 
+		private State state = STOPPED;
+
 		private SocketService service = new SocketService ();
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
@@ -30,6 +32,13 @@ namespace Frida {
 		private Gee.Map<string, Transport> transports = new Gee.HashMap<string, Transport> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private enum State {
+			STOPPED,
+			STARTING,
+			STARTED,
+			STOPPING
+		}
 
 		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) {
 			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
@@ -79,25 +88,36 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
-			SocketConnectable connectable = parse_control_address (endpoint_params.address, endpoint_params.port);
-			var enumerator = connectable.enumerate ();
-			SocketAddress? address;
+			if (state != STOPPED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+			state = STARTING;
+
 			try {
-				while ((address = yield enumerator.next_async (io_cancellable)) != null) {
-					SocketAddress effective_address;
-					service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
-						out effective_address);
+				SocketConnectable connectable = parse_control_address (endpoint_params.address, endpoint_params.port);
+				var enumerator = connectable.enumerate ();
+				SocketAddress? address;
+				try {
+					while ((address = yield enumerator.next_async (io_cancellable)) != null) {
+						SocketAddress effective_address;
+						service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+							out effective_address);
+					}
+				} catch (GLib.Error e) {
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
 				}
-			} catch (GLib.Error e) {
-				throw new Error.ADDRESS_IN_USE ("%s", e.message);
-			}
 
-			service.start ();
+				service.start ();
 
-			if (enable_preload) {
-				var base_host_session = host_session as BaseDBusHostSession;
-				if (base_host_session != null)
-					base_host_session.preload.begin (io_cancellable);
+				if (enable_preload) {
+					var base_host_session = host_session as BaseDBusHostSession;
+					if (base_host_session != null)
+						base_host_session.preload.begin (io_cancellable);
+				}
+
+				state = STARTED;
+			} finally {
+				if (state != STARTED)
+					state = STOPPED;
 			}
 		}
 
@@ -111,7 +131,11 @@ namespace Frida {
 			}
 		}
 
-		public async void stop (Cancellable? cancellable = null) throws IOError {
+		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+			if (state != STARTED)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+			state = STOPPING;
+
 			broker_service.stop ();
 			service.stop ();
 
@@ -131,18 +155,16 @@ namespace Frida {
 			var base_host_session = host_session as BaseDBusHostSession;
 			if (base_host_session != null)
 				yield base_host_session.close (cancellable);
+
+			state = STOPPED;
 		}
 
-		public void stop_sync (Cancellable? cancellable = null) throws IOError {
-			try {
-				create<StopTask> ().execute (cancellable);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
+		public void stop_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<StopTask> ().execute (cancellable);
 		}
 
 		private class StopTask : ControlServiceTask<void> {
-			protected override async void perform_operation () throws IOError {
+			protected override async void perform_operation () throws Error, IOError {
 				yield parent.stop (cancellable);
 			}
 		}

@@ -272,8 +272,7 @@ namespace Frida.Server {
 
 			try {
 				yield service.stop ();
-			} catch (IOError e) {
-				assert_not_reached ();
+			} catch (GLib.Error e) {
 			}
 
 			Idle.add (() => {

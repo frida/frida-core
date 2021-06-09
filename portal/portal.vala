@@ -200,8 +200,7 @@ namespace Frida.Portal {
 
 			try {
 				yield service.stop ();
-			} catch (IOError e) {
-				assert_not_reached ();
+			} catch (GLib.Error e) {
 			}
 
 			Idle.add (() => {
