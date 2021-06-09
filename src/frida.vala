@@ -1830,6 +1830,10 @@ namespace Frida {
 			Object (device: device);
 		}
 
+		public bool is_detached () {
+			return attach_request == null;
+		}
+
 		public async void attach (Cancellable? cancellable = null) throws Error, IOError {
 			while (attach_request != null) {
 				try {
