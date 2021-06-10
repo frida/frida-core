@@ -815,14 +815,20 @@ namespace Frida {
 		}
 
 		private Gee.Iterator<ClusterNode> all_nodes_accessible_by (ControlChannel requester) {
+			if (requester.is_local)
+				return node_by_pid.values.iterator ();
+
 			Gee.Set<string>? requester_tags = connections[requester.connection_id].tags;
 			return node_by_pid.values.filter (node => {
 				ConnectionEntry entry = connections[node.connection_id];
+
 				Gee.Set<string>? acl = entry.tags;
 				if (acl == null)
 					return true;
+
 				if (requester_tags == null)
 					return false;
+
 				return acl.any_match (tag => requester_tags.contains (tag));
 			});
 		}
@@ -841,14 +847,21 @@ namespace Frida {
 				return spawn_gaters.iterator ();
 
 			return spawn_gaters.filter (controller => {
+				if (controller.is_local)
+					return true;
+
 				Gee.Set<string> tags = connections[controller.connection_id].tags;
 				if (tags == null)
 					return false;
+
 				return acl.any_match (tag => tags.contains (tag));
 			});
 		}
 
 		private bool can_access (ClusterNode node, ControlChannel requester) {
+			if (requester.is_local)
+				return true;
+
 			Gee.Set<string>? acl = connections[node.connection_id].tags;
 			if (acl == null)
 				return true;
@@ -1067,6 +1080,12 @@ namespace Frida {
 			public BusService? bus {
 				get {
 					return _bus;
+				}
+			}
+
+			public bool is_local {
+				get {
+					return connection == null;
 				}
 			}
 
