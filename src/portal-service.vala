@@ -282,10 +282,17 @@ namespace Frida {
 			ConnectionEntry? entry = connections[connection_id];
 			if (entry == null)
 				return null;
+
 			Gee.Set<string>? tags = entry.tags;
 			if (tags == null)
 				return null;
-			return tags.to_array ();
+
+			string[] elements = tags.to_array ();
+			string[] strv = new string[elements.length + 1];
+			for (int i = 0; i != elements.length; i++)
+				strv[i] = elements[i];
+			strv.length = elements.length;
+			return strv;
 		}
 
 		public void tag (uint connection_id, string tag) {
