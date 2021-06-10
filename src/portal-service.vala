@@ -521,10 +521,10 @@ namespace Frida {
 			var node = new ClusterNode (this, connection_id, connection);
 			node.session_closed.connect (on_agent_session_closed);
 
-			connection.start_message_processing ();
-
 			node.session_provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 				io_cancellable);
+
+			connection.start_message_processing ();
 
 			return node;
 		}
