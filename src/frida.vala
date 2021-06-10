@@ -2022,6 +2022,10 @@ namespace Frida {
 			);
 		}
 
+		public bool is_detached () {
+			return state != ATTACHED;
+		}
+
 		public async void detach (Cancellable? cancellable = null) throws IOError {
 			yield _do_close (APPLICATION_REQUESTED, CrashInfo.empty (), true, cancellable);
 		}
