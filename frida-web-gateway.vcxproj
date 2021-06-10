@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{C21A9593-4BE8-4BE5-A7E6-39A1612FA569}</ProjectGuid>
+    <ProjectGuid>{4833DE5B-FDC7-4CD5-8F72-EAF2F964B813}</ProjectGuid>
     <RootNamespace>frida-web-gateway</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
