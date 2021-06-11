@@ -1018,6 +1018,10 @@ namespace Frida {
 		TURN_TLS
 	}
 
+	namespace ServerGuid {
+		public const string HOST_SESSION_SERVICE = "6769746875622e636f6d2f6672696461";
+	}
+
 	namespace ObjectPath {
 		public const string HOST_SESSION = "/re/frida/HostSession";
 		public const string AGENT_SESSION_PROVIDER = "/re/frida/AgentSessionProvider";

@@ -398,8 +398,9 @@ namespace Frida {
 
 					uint controller_registration_id;
 					try {
-						connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null,
-							io_cancellable);
+						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+							AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+							null, io_cancellable);
 
 						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
 							(AgentController) this);
@@ -682,7 +683,9 @@ namespace Frida {
 			uint controller_registration_id;
 			try {
 				var stream = SocketConnection.factory_create_connection (local_socket);
-				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, cancellable);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+					null, cancellable);
 
 				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
 					(AgentController) this);
