@@ -402,7 +402,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		private PipeTransport transport;
 		private Thread<bool> main_thread;
 		private DBusConnection connection;
-		private uint controller_registration_id;
+		private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 		private AgentSessionProvider provider;
 		private AgentSession session;
 
@@ -463,15 +463,18 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				var stream = yield stream_request.wait_async (cancellable);
 				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, cancellable);
 
-				AgentController controller = this;
-				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+				var session_id = AgentSessionId.generate ();
+
+				registrations.add_all_array ({
+					connection.register_object (ObjectPath.AGENT_CONTROLLER, (AgentController) this),
+					connection.register_object (ObjectPath.for_agent_message_sink (session_id), (AgentMessageSink) this)
+				});
 
 				connection.start_message_processing ();
 
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
-				var session_id = AgentSessionId.generate ();
 				yield provider.open (session_id, make_options_dict (), cancellable);
 
 				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (session_id),
@@ -496,7 +499,9 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				yield connection.close ();
 			} catch (GLib.Error connection_error) {
 			}
-			connection.unregister_object (controller_registration_id);
+			foreach (var id in registrations)
+				connection.unregister_object (id);
+			registrations.clear ();
 			connection = null;
 
 			Thread<bool> t = main_thread;
