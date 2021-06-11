@@ -325,7 +325,6 @@ namespace Frida.Agent {
 			Gum.prepare_to_fork ();
 			GIOFork.prepare_to_fork ();
 			GLibFork.prepare_to_fork ();
-
 #endif
 
 			fdt_padder = null;
