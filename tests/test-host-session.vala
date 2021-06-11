@@ -1451,7 +1451,7 @@ namespace Frida.HostSessionTest {
 					waiting = false;
 				}
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
-				session.disconnect (message_handler);
+				h.disconnect (message_handler);
 
 				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
@@ -1686,7 +1686,7 @@ namespace Frida.HostSessionTest {
 					waiting = false;
 				}
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60,\"initialized\":true}}");
-				session.disconnect (message_handler);
+				h.disconnect (message_handler);
 
 				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
@@ -2064,7 +2064,7 @@ namespace Frida.HostSessionTest {
 
 					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
 
-					session.disconnect (message_handler);
+					h.disconnect (message_handler);
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
@@ -2895,7 +2895,7 @@ namespace Frida.HostSessionTest {
 					waiting = false;
 				}
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
-				session.disconnect (message_handler);
+				h.disconnect (message_handler);
 
 				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
@@ -3150,7 +3150,7 @@ namespace Frida.HostSessionTest {
 					yield;
 					stdout.printf ("received message: '%s'\n", received_message);
 				}
-				session.disconnect (message_handler);
+				h.disconnect (message_handler);
 
 				yield session.destroy_script (script_id, cancellable);
 				yield session.close (cancellable);
