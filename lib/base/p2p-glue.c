@@ -47,7 +47,7 @@ _frida_generate_certificate (guint8 ** cert_der, gint * cert_der_length, gchar *
   e = BN_new ();
   BN_set_word (e, RSA_F4);
   rsa = RSA_new ();
-  RSA_generate_key_ex (rsa, 1024, e, NULL);
+  RSA_generate_key_ex (rsa, 2048, e, NULL);
   EVP_PKEY_set1_RSA (pkey, g_steal_pointer (&rsa));
   BN_free (e);
   X509_set_pubkey (x509, pkey);
