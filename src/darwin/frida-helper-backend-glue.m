@@ -389,8 +389,10 @@ static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaA
 static gboolean frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper,
     GError ** error);
 
-static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
-static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
+static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
 
 static mach_port_t frida_obtain_thread_port_for_thread_id (mach_port_t task, uint64_t thread_id);
 static kern_return_t frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state,
@@ -1960,9 +1962,9 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, resolver, mapper, error))
     goto failure;
 
-  frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
+  frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, resolver, mapper);
 
-  frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type, mapper);
+  frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, resolver, mapper);
 
   if (gum_query_is_rwx_supported () || !gum_code_segment_is_supported ())
   {
@@ -3740,13 +3742,14 @@ static void frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, F
 static void frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
-frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
+frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
   ctx.code = code;
   gum_x86_writer_init (&ctx.cw, ctx.code);
-  gum_x86_writer_set_target_cpu (&ctx.cw, cpu_type);
+  gum_x86_writer_set_target_cpu (&ctx.cw, resolver->cpu_type);
   ctx.mapper = mapper;
 
   frida_agent_context_emit_mach_stub_body (self, &ctx);
@@ -3756,14 +3759,15 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
 }
 
 static void
-frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
+frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
   guint locals_size;
 
   ctx.code = code;
   gum_x86_writer_init (&ctx.cw, ctx.code);
-  gum_x86_writer_set_target_cpu (&ctx.cw, cpu_type);
+  gum_x86_writer_set_target_cpu (&ctx.cw, resolver->cpu_type);
   ctx.mapper = mapper;
 
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
@@ -3988,34 +3992,40 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
  * ARM 32- and 64-bit
  */
 
-static void frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
-static void frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw);
 static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw);
 
-static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
-static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
-frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
+frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
-  if (cpu_type == GUM_CPU_ARM)
-    frida_agent_context_emit_arm_mach_stub_code (self, code, mapper);
+  if (resolver->cpu_type == GUM_CPU_ARM)
+    frida_agent_context_emit_arm_mach_stub_code (self, code, resolver, mapper);
   else
-    frida_agent_context_emit_arm64_mach_stub_code (self, code, mapper);
+    frida_agent_context_emit_arm64_mach_stub_code (self, code, resolver, mapper);
 }
 
 static void
-frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
+frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
-  if (cpu_type == GUM_CPU_ARM)
-    frida_agent_context_emit_arm_pthread_stub_code (self, code, mapper);
+  if (resolver->cpu_type == GUM_CPU_ARM)
+    frida_agent_context_emit_arm_pthread_stub_code (self, code, resolver, mapper);
   else
-    frida_agent_context_emit_arm64_pthread_stub_code (self, code, mapper);
+    frida_agent_context_emit_arm64_pthread_stub_code (self, code, resolver, mapper);
 }
 
 
@@ -4024,7 +4034,8 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
  */
 
 static void
-frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
+frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4038,7 +4049,8 @@ frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * 
 }
 
 static void
-frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
+frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4249,18 +4261,16 @@ frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg
  */
 
 static void
-frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
+frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
-  GumDarwinModuleResolver * resolver;
 
   ctx.code = code;
   gum_arm64_writer_init (&ctx.aw, ctx.code);
   ctx.mapper = mapper;
 
-  g_object_get (mapper, "resolver", &resolver, NULL);
   ctx.aw.ptrauth_support = resolver->ptrauth_support;
-  g_object_unref (resolver);
 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
@@ -4276,18 +4286,16 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
 }
 
 static void
-frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
+frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
+    GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
-  GumDarwinModuleResolver * resolver;
 
   ctx.code = code;
   gum_arm64_writer_init (&ctx.aw, ctx.code);
   ctx.mapper = mapper;
 
-  g_object_get (mapper, "resolver", &resolver, NULL);
   ctx.aw.ptrauth_support = resolver->ptrauth_support;
-  g_object_unref (resolver);
 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
