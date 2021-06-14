@@ -257,6 +257,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Local/latency-should-be-nominal", () => {
+			var h = new Harness ((h) => Local.latency_should_be_nominal.begin (h as Harness));
+			h.run ();
+		});
+
 		var strategies = new Connectivity.Strategy[] {
 			SERVER,
 			PEER
@@ -897,6 +902,28 @@ namespace Frida.HostSessionTest {
 		h.done ();
 	}
 
+	namespace Local {
+
+		private static async void latency_should_be_nominal (Harness h) {
+			h.disable_timeout ();
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				yield Connectivity.measure_latency (h, device, SERVER);
+
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+	}
+
 	namespace Connectivity {
 
 		private static async void flawless (Harness h, Strategy strategy) {
@@ -1268,58 +1295,7 @@ namespace Frida.HostSessionTest {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.add_remote_device ("127.0.0.1:%u".printf (control_port));
 
-				var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("sleeper"));
-
-				var session = yield device.attach (process.id);
-
-				if (strategy == PEER)
-					yield session.setup_peer_connection ();
-
-				var script = yield session.create_script ("""
-					recv('ping', onPing);
-					function onPing(message) {
-					  send({ type: 'pong' });
-					  recv('ping', onPing);
-					}
-					""");
-				var message_handler = script.message.connect ((json, data) => {
-					var parser = new Json.Parser ();
-					try {
-						parser.load_from_data (json);
-					} catch (GLib.Error e) {
-						assert_not_reached ();
-					}
-
-					var reader = new Json.Reader (parser.get_root ());
-
-					assert (reader.read_member ("type") && reader.get_string_value () == "send");
-					reader.end_member ();
-
-					assert (reader.read_member ("payload") && reader.read_member ("type") && reader.get_string_value () == "pong");
-					reader.end_member ();
-
-					latency_should_be_nominal.callback ();
-				});
-				yield script.load ();
-
-				var timer = new Timer ();
-				for (int i = 0; i != 100; i++) {
-					timer.reset ();
-					script.post ("""{"type":"ping"}""");
-					yield;
-					printerr (" [%d: %u ms]", i + 1, (uint) (timer.elapsed () * 1000.0));
-
-					Idle.add (latency_should_be_nominal.callback);
-					yield;
-
-					if ((i + 1) % 10 == 0) {
-						printerr ("\n");
-						if (GLib.Test.verbose ())
-							yield h.prompt_for_key ("Hit a key to do 10 more: ");
-					}
-				}
-
-				script.disconnect (message_handler);
+				yield measure_latency (h, device, strategy);
 
 				yield device_manager.close ();
 				yield control_service.stop ();
@@ -1329,6 +1305,69 @@ namespace Frida.HostSessionTest {
 			}
 
 			h.done ();
+		}
+
+		private async void measure_latency (Harness h, Device device, Strategy strategy) throws GLib.Error {
+			h.disable_timeout ();
+
+			var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+			var session = yield device.attach (process.id);
+
+			if (strategy == PEER)
+				yield session.setup_peer_connection ();
+
+			var script = yield session.create_script ("""
+				recv('ping', onPing);
+				function onPing(message) {
+				  send({ type: 'pong' });
+				  recv('ping', onPing);
+				}
+				""");
+			var message_handler = script.message.connect ((json, data) => {
+				var parser = new Json.Parser ();
+				try {
+					parser.load_from_data (json);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				var reader = new Json.Reader (parser.get_root ());
+
+				assert (reader.read_member ("type") && reader.get_string_value () == "send");
+				reader.end_member ();
+
+				assert (reader.read_member ("payload") && reader.read_member ("type") && reader.get_string_value () == "pong");
+				reader.end_member ();
+
+				measure_latency.callback ();
+			});
+			try {
+				yield script.load ();
+
+				var timer = new Timer ();
+				for (int i = 0; i != 100; i++) {
+					timer.reset ();
+					script.post ("""{"type":"ping"}""");
+					yield;
+					printerr (" [%d: %u ms]", i + 1, (uint) (timer.elapsed () * 1000.0));
+
+					Idle.add (measure_latency.callback);
+					yield;
+
+					if ((i + 1) % 10 == 0) {
+						printerr ("\n");
+						if (GLib.Test.verbose ())
+							yield h.prompt_for_key ("Hit a key to do 10 more: ");
+					}
+				}
+			} finally {
+				script.disconnect (message_handler);
+			}
+
+			yield script.unload ();
+
+			yield session.detach ();
 		}
 
 	}
