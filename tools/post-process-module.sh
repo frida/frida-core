@@ -35,6 +35,7 @@ case $host_os in
 esac
 
 intermediate_path=$output_path.tmp
+rm -f "$intermediate_path"
 cp -a "$input_path" "$intermediate_path"
 
 if [ "$strip_enabled" = "true" ]; then

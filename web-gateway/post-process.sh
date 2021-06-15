@@ -31,6 +31,7 @@ case $host_os in
 esac
 
 intermediate_path=$output_webgw_path.tmp
+rm -f "$intermediate_path"
 cp -a "$input_webgw_path" "$intermediate_path"
 
 if [ "$strip_enabled" = "true" ]; then
