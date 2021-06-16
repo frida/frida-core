@@ -591,7 +591,7 @@ namespace Frida {
 				dict["realm"] = new Variant.string (realm.to_nick ());
 
 			if (persist_timeout != 0)
-				dict["persistTimeout"] = new Variant.uint32 (persist_timeout);
+				dict["persist-timeout"] = new Variant.uint32 (persist_timeout);
 
 			return dict;
 		}
@@ -606,10 +606,10 @@ namespace Frida {
 				options.realm = Realm.from_nick (realm.get_string ());
 			}
 
-			Variant? persist_timeout = dict["persistTimeout"];
+			Variant? persist_timeout = dict["persist-timeout"];
 			if (persist_timeout != null) {
 				if (!persist_timeout.is_of_type (VariantType.UINT32))
-					throw new Error.INVALID_ARGUMENT ("The 'persistTimeout' option must be a uint32");
+					throw new Error.INVALID_ARGUMENT ("The 'persist-timeout' option must be a uint32");
 				options.persist_timeout = persist_timeout.get_uint32 ();
 			}
 
@@ -924,7 +924,7 @@ namespace Frida {
 			var dict = make_options_dict ();
 
 			if (stun_server != null)
-				dict["stunServer"] = new Variant.string (stun_server);
+				dict["stun-server"] = new Variant.string (stun_server);
 
 			if (!relays.is_empty) {
 				var builder = new VariantBuilder (new VariantType.array (Relay.get_variant_type ()));
@@ -939,10 +939,10 @@ namespace Frida {
 		public static PeerOptions _deserialize (HashTable<string, Variant> dict) throws Error {
 			var options = new PeerOptions ();
 
-			Variant? stun_server = dict["stunServer"];
+			Variant? stun_server = dict["stun-server"];
 			if (stun_server != null) {
 				if (!stun_server.is_of_type (VariantType.STRING))
-					throw new Error.INVALID_ARGUMENT ("The 'stunServer' option must be a string");
+					throw new Error.INVALID_ARGUMENT ("The 'stun-server' option must be a string");
 				options.stun_server = stun_server.get_string ();
 			}
 
