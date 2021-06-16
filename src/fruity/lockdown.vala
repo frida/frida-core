@@ -79,6 +79,20 @@ namespace Frida.Fruity {
 			closed ();
 		}
 
+		public async Plist get_value (string? domain, string? key, Cancellable? cancellable = null) throws LockdownError, IOError {
+			try {
+				var request = create_request ("GetValue");
+				if (domain != null)
+					request.set_string ("Domain", domain);
+				if (key != null)
+					request.set_string ("Key", key);
+
+				return yield service.query (request, cancellable);
+			} catch (PlistServiceError e) {
+				throw error_from_service (e);
+			}
+		}
+
 		public async IOStream start_service (string name_with_options, Cancellable? cancellable = null) throws LockdownError, IOError {
 			var tokens = name_with_options.split ("?", 2);
 			unowned string name = tokens[0];
