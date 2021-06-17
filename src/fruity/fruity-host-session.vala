@@ -143,41 +143,45 @@ namespace Frida {
 			string? name = null;
 			ImageData? icon_data = null;
 
-			bool got_details = false;
-			for (int i = 1; !got_details && devices.contains (raw_id); i++) {
-				try {
-					_extract_details_for_device (details.product_id.raw_value, details.udid.raw_value,
-						out name, out icon_data);
-					got_details = true;
-				} catch (Error e) {
-					if (i != 20) {
-						var main_context = MainContext.get_thread_default ();
+			if (details.connection_type == USB) {
+				bool got_details = false;
+				for (int i = 1; !got_details && devices.contains (raw_id); i++) {
+					try {
+						_extract_details_for_device (details.product_id.raw_value, details.udid.raw_value,
+							out name, out icon_data);
+						got_details = true;
+					} catch (Error e) {
+						if (i != 20) {
+							var main_context = MainContext.get_thread_default ();
 
-						var delay_source = new TimeoutSource.seconds (1);
-						delay_source.set_callback (add_device.callback);
-						delay_source.attach (main_context);
+							var delay_source = new TimeoutSource.seconds (1);
+							delay_source.set_callback (add_device.callback);
+							delay_source.attach (main_context);
 
-						var cancel_source = new CancellableSource (io_cancellable);
-						cancel_source.set_callback (add_device.callback);
-						cancel_source.attach (main_context);
+							var cancel_source = new CancellableSource (io_cancellable);
+							cancel_source.set_callback (add_device.callback);
+							cancel_source.attach (main_context);
 
-						yield;
+							yield;
 
-						cancel_source.destroy ();
-						delay_source.destroy ();
+							cancel_source.destroy ();
+							delay_source.destroy ();
 
-						if (io_cancellable.is_cancelled ())
-							return;
-					} else {
-						break;
+							if (io_cancellable.is_cancelled ())
+								return;
+						} else {
+							break;
+						}
 					}
 				}
-			}
-			if (!devices.contains (raw_id))
-				return;
-			if (!got_details) {
-				remove_device (id);
-				return;
+				if (!devices.contains (raw_id))
+					return;
+				if (!got_details) {
+					remove_device (id);
+					return;
+				}
+			} else {
+				name = "iOS Device [%s]".printf (details.network_address.address.to_string ());
 			}
 
 			var icon = Image.from_data (icon_data);
@@ -219,7 +223,11 @@ namespace Frida {
 		}
 
 		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.USB; }
+			get {
+				return (device_details.connection_type == USB)
+					? HostSessionProviderKind.USB
+					: HostSessionProviderKind.REMOTE;
+			}
 		}
 
 		public string device_name {
@@ -307,21 +315,45 @@ namespace Frida {
 					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
 				uint16 port = (uint16) raw_port;
 
-				Fruity.UsbmuxClient client = null;
-				try {
-					client = yield Fruity.UsbmuxClient.open (cancellable);
+				if (device_details.connection_type == USB) {
+					Fruity.UsbmuxClient client = null;
+					try {
+						client = yield Fruity.UsbmuxClient.open (cancellable);
 
-					yield client.connect_to_port (device_details.id, port, cancellable);
+						yield client.connect_to_port (device_details.id, port, cancellable);
 
-					return client.connection;
-				} catch (GLib.Error e) {
-					if (client != null)
-						client.close.begin ();
+						return client.connection;
+					} catch (GLib.Error e) {
+						if (client != null)
+							client.close.begin ();
 
-					if (e is Fruity.UsbmuxError.CONNECTION_REFUSED)
-						throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
+						if (e is Fruity.UsbmuxError.CONNECTION_REFUSED)
+							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
 
-					throw new Error.TRANSPORT ("%s", e.message);
+						throw new Error.TRANSPORT ("%s", e.message);
+					}
+				} else {
+					try {
+						InetSocketAddress device_address = device_details.network_address;
+						var target_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+							address: device_address.address,
+							port: port,
+							flowinfo: device_address.flowinfo,
+							scope_id: device_address.scope_id
+						);
+
+						var client = new SocketClient ();
+						var connection = yield client.connect_async (target_address, cancellable);
+
+						Tcp.enable_nodelay (connection.socket);
+
+						return connection;
+					} catch (GLib.Error e) {
+						if (e is IOError.CONNECTION_REFUSED)
+							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
+
+						throw new Error.TRANSPORT ("%s", e.message);
+					}
 				}
 			}
 

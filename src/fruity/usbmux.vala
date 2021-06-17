@@ -194,6 +194,7 @@ namespace Frida.Fruity {
 
 		private Plist create_request (string message_type) {
 			var request = new Plist ();
+			request.set_integer ("kLibUSBMuxVersion", 3);
 			request.set_string ("ClientVersionString", "usbmuxd-423.50.204");
 			request.set_string ("ProgName", "Xcode");
 			request.set_string ("BundleID", "com.apple.dt.Xcode");
@@ -229,11 +230,27 @@ namespace Frida.Fruity {
 					var message_type = body.get_string ("MessageType");
 					if (message_type == "Attached") {
 						var props = body.get_dict ("Properties");
-						var details = new DeviceDetails (
-							DeviceId ((uint) body.get_integer ("DeviceID")),
-							ProductId ((int) props.get_integer ("ProductID")),
-							Udid (props.get_string ("SerialNumber"))
-						);
+
+						ConnectionType connection_type = USB;
+						if (props.has ("ConnectionType") && props.get_string ("ConnectionType") == "Network")
+							connection_type = NETWORK;
+
+						var device_id = DeviceId ((uint) body.get_integer ("DeviceID"));
+
+						ProductId product_id;
+						if (connection_type == USB)
+							product_id = ProductId ((int) props.get_integer ("ProductID"));
+						else
+							product_id = ProductId (-1);
+
+						var udid = Udid (props.get_string ("SerialNumber"));
+
+						InetSocketAddress? network_address = null;
+						if (connection_type == NETWORK)
+							network_address = parse_network_address (props.get_bytes ("NetworkAddress"));
+
+						var details =
+							new DeviceDetails (connection_type, device_id, product_id, udid, network_address);
 						device_attached (details);
 					} else if (message_type == "Detached") {
 						device_detached (DeviceId ((uint) body.get_integer ("DeviceID")));
@@ -331,6 +348,64 @@ namespace Frida.Fruity {
 			yield output.write_all_async (blob, Priority.DEFAULT, io_cancellable, out bytes_written);
 		}
 
+		private static InetSocketAddress parse_network_address (Bytes bytes) throws UsbmuxError {
+			uint8[] data = bytes.get_data ();
+			if (data.length < 8)
+				throw new UsbmuxError.PROTOCOL ("Invalid network address");
+
+			uint8 raw_family = data[1];
+			switch (raw_family) {
+				case 0x02: {
+					/*
+					 *    \
+					 *    | struct sockaddr_in {
+					 *  0 |   __uint8_t       sin_len;
+					 *  1 |   sa_family_t     sin_family;
+					 *  2 |   in_port_t       sin_port;
+					 *  4 |   struct  in_addr sin_addr;
+					 *  8 |   char            sin_zero[8];
+					 * 16 | };
+					 *    /
+					 */
+
+					uint16 port = uint16.from_big_endian (*((uint16 *) ((uint8 *) data + 2)));
+					var address = new InetAddress.from_bytes (data[4:8], IPV4);
+
+					return new InetSocketAddress (address, port);
+				}
+				case 0x1e: {
+					/*
+					 *     \ struct sockaddr_in6 {
+					 *  0  |   __uint8_t       sin6_len;
+					 *  1  |   sa_family_t     sin6_family;
+					 *  2  |   in_port_t       sin6_port;
+					 *  4  |   __uint32_t      sin6_flowinfo;
+					 *  8  |   struct in6_addr sin6_addr;
+					 * 24  |   __uint32_t      sin6_scope_id;
+					 * 28  | };
+					 *     /
+					 */
+
+					if (data.length < 28)
+						throw new UsbmuxError.PROTOCOL ("Invalid network address");
+
+					uint16 port = uint16.from_big_endian (*((uint16 *) ((uint8 *) data + 2)));
+					uint32 flowinfo = uint32.from_big_endian (*((uint32 *) ((uint8 *) data + 4)));
+					var address = new InetAddress.from_bytes (data[8:24], IPV6);
+					uint32 scope_id = uint32.from_little_endian (*((uint32 *) ((uint8 *) data + 24)));
+
+					return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+						address: address,
+						port: port,
+						flowinfo: flowinfo,
+						scope_id: scope_id
+					);
+				}
+				default:
+					throw new UsbmuxError.PROTOCOL ("Unsupported address family: 0x%02x", raw_family);
+			}
+		}
+
 		private static void throw_local_error (GLib.Error e) throws UsbmuxError, IOError {
 			if (e is UsbmuxError)
 				throw (UsbmuxError) e;
@@ -425,6 +500,11 @@ namespace Frida.Fruity {
 	}
 
 	public class DeviceDetails : Object {
+		public ConnectionType connection_type {
+			get;
+			construct;
+		}
+
 		public DeviceId id {
 			get;
 			construct;
@@ -440,9 +520,26 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public DeviceDetails (DeviceId id, ProductId product_id, Udid udid) {
-			Object (id: id, product_id: product_id, udid: udid);
+		public InetSocketAddress? network_address {
+			get;
+			construct;
 		}
+
+		public DeviceDetails (ConnectionType connection_type, DeviceId id, ProductId product_id, Udid udid,
+				InetSocketAddress? network_address) {
+			Object (
+				connection_type: connection_type,
+				id: id,
+				product_id: product_id,
+				udid: udid,
+				network_address: network_address
+			);
+		}
+	}
+
+	public enum ConnectionType {
+		USB,
+		NETWORK
 	}
 
 	public struct DeviceId {
