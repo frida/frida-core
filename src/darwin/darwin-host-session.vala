@@ -1191,17 +1191,17 @@ namespace Frida {
 			var result = new StringBuilder ();
 
 			unichar c;
-			bool need_underscore = true;
+			bool need_dash = true;
 			for (int i = 0; name.get_next_char (ref i, out c);) {
 				if (c.isupper ()) {
-					if (i != 0 && need_underscore) {
-						result.append_c ('_');
-						need_underscore = false;
+					if (i != 0 && need_dash) {
+						result.append_c ('-');
+						need_dash = false;
 					}
 
 					c = c.tolower ();
 				} else {
-					need_underscore = true;
+					need_dash = true;
 				}
 
 				result.append_unichar (c);
