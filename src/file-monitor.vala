@@ -7,15 +7,10 @@ namespace Frida {
 			construct;
 		}
 
-		public MainContext main_context {
-			get;
-			construct;
-		}
-
 		private GLib.FileMonitor monitor;
 
 		public FileMonitor (string path) {
-			Object (path: path, main_context: get_main_context ());
+			Object (path: path);
 		}
 
 		~FileMonitor () {
@@ -79,7 +74,7 @@ namespace Frida {
 		}
 
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class FileMonitorTask<T> : AsyncTask<T> {
