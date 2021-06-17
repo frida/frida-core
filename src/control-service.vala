@@ -622,6 +622,10 @@ namespace Frida {
 				return false;
 			}
 
+			public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+				return yield parent.host_session.query_system_parameters (cancellable);
+			}
+
 			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error {
 				return yield parent.host_session.get_frontmost_application (cancellable);
 			}

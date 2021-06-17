@@ -235,6 +235,72 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null && server.flavor == REGULAR) {
+				try {
+					return yield server.session.query_system_parameters (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
+
+			var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+
+			parameters["platform"] = "linux";
+
+			var os = new HashTable<string, Variant> (str_hash, str_equal);
+			os["id"] = "android";
+			os["name"] = "Android";
+
+			string properties = yield Droidy.ShellCommand.run ("getprop", device_details.serial, cancellable);
+			var property_pattern = /\[(.+?)\]: \[(.*?)\]/s;
+			try {
+				MatchInfo info;
+				for (property_pattern.match (properties, 0, out info); info.matches (); info.next ()) {
+					string key = info.fetch (1);
+					string val = info.fetch (2);
+					switch (key) {
+						case "ro.build.version.release":
+							os["version"] = val;
+							break;
+						case "ro.build.version.sdk":
+							parameters["api-level"] = int64.parse (val);
+							break;
+						case "ro.product.cpu.abi":
+							parameters["arch"] = infer_arch_from_abi (val);
+							break;
+						default:
+							break;
+					}
+				}
+			} catch (RegexError e) {
+			}
+
+			parameters["os"] = os;
+
+			return parameters;
+		}
+
+		private static string infer_arch_from_abi (string abi) throws Error {
+			switch (abi) {
+				case "x86":
+					return "ia32";
+				case "x86_64":
+					return "x64";
+				case "armeabi":
+				case "armeabi-v7a":
+					return "arm";
+				case "arm64-v8a":
+					return "arm64";
+				case "mips":
+				case "mips64":
+					return "mips";
+				default:
+					throw new Error.NOT_SUPPORTED ("Unsupported ABI: “%s”; please file a bug", abi);
+			}
+		}
+
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {

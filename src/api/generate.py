@@ -374,7 +374,15 @@ def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, bas
 def function_is_public(name):
     return not name.startswith("_") and \
             not name.startswith("throw_") and \
-            name not in ("generate_certificate", "get_dbus_context", "make_options_dict", "parse_control_address", "parse_cluster_address", "parse_socket_address")
+            name not in [
+                "generate_certificate",
+                "get_dbus_context",
+                "make_options_dict",
+                "compute_system_parameters",
+                "parse_control_address",
+                "parse_cluster_address",
+                "parse_socket_address"
+            ]
 
 def parse_vala_object_types(source):
     return [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]

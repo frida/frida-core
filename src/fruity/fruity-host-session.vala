@@ -475,6 +475,50 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null && server.flavor == REGULAR) {
+				try {
+					return yield server.session.query_system_parameters (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
+
+			var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+
+			parameters["platform"] = "darwin";
+
+			try {
+				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var response = yield lockdown.get_value (null, null, cancellable);
+				var properties = response.get_dict ("Value");
+
+				var os = new HashTable<string, Variant> (str_hash, str_equal);
+				os["id"] = "ios";
+				os["name"] = properties.get_string ("ProductName");
+				os["version"] = properties.get_string ("ProductVersion");
+				parameters["os"] = os;
+
+				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
+
+				parameters["name"] = properties.get_string ("DeviceName");
+				parameters["udid"] = properties.get_string ("UniqueDeviceID");
+
+				if (properties.has ("PhoneNumber"))
+					parameters["phone-number"] = properties.get_string ("PhoneNumber");
+				parameters["ethernet-address"] = properties.get_string ("EthernetAddress");
+				parameters["wifi-address"] = properties.get_string ("WiFiAddress");
+				parameters["bluetooth-address"] = properties.get_string ("BluetoothAddress");
+			} catch (Fruity.LockdownError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			} catch (Fruity.PlistError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			return parameters;
+		}
+
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {

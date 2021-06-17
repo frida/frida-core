@@ -564,6 +564,28 @@ namespace Frida {
 			return close_request != null;
 		}
 
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			var host_session = yield get_host_session (cancellable);
+
+			try {
+				return yield host_session.query_system_parameters (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public HashTable<string, Variant> query_system_parameters_sync (Cancellable? cancellable = null) throws Error, IOError {
+			return create<QuerySystemParametersTask> ().execute (cancellable);
+		}
+
+		private class QuerySystemParametersTask : DeviceTask<HashTable<string, Variant>> {
+			protected override async HashTable<string, Variant> perform_operation () throws Error, IOError {
+				return yield parent.query_system_parameters (cancellable);
+			}
+		}
+
 		public async Application? get_frontmost_application (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 

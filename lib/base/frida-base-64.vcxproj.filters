@@ -45,6 +45,9 @@
     <ClCompile Include="socket-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="session-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="session.vala">

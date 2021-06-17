@@ -1822,6 +1822,10 @@ namespace Frida.Gadget {
 				return false;
 			}
 
+			public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+				return compute_system_parameters ();
+			}
+
 			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 				return this_app;
 			}

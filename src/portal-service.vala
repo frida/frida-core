@@ -1162,6 +1162,10 @@ namespace Frida {
 				return false;
 			}
 
+			public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error {
+				throw new Error.NOT_SUPPORTED ("Not supported");
+			}
+
 			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}

@@ -3,6 +3,7 @@ namespace Frida {
 	public interface HostSession : Object {
 		public abstract async void ping (uint interval_seconds, Cancellable? cancellable) throws GLib.Error;
 
+		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error;
@@ -195,6 +196,10 @@ namespace Frida {
 
 	public class UnauthorizedHostSession : Object, HostSession {
 		public async void ping (uint interval_seconds, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
@@ -1008,15 +1013,145 @@ namespace Frida {
 		}
 	}
 
-	public HashTable<string, Variant> make_options_dict () {
-		return new HashTable<string, Variant> (str_hash, str_equal);
-	}
-
 	public enum RelayKind {
 		TURN_UDP,
 		TURN_TCP,
 		TURN_TLS
 	}
+
+	public HashTable<string, Variant> make_options_dict () {
+		return new HashTable<string, Variant> (str_hash, str_equal);
+	}
+
+	public HashTable<string, Variant> compute_system_parameters () {
+		var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+
+		string platform;
+#if WINDOWS
+		platform = "windows";
+#elif DARWIN
+		platform = "darwin";
+#elif LINUX
+		platform = "linux";
+#elif QNX
+		platform = "qnx";
+#else
+		platform = FIXME;
+#endif
+		parameters["platform"] = platform;
+
+		var os = new HashTable<string, Variant> (str_hash, str_equal);
+		string id;
+#if WINDOWS
+		id = "windows";
+#elif MACOS
+		id = "macos";
+#elif LINUX && !ANDROID
+		id = "linux";
+#elif IOS
+		id = "ios";
+#elif ANDROID
+		id = "android";
+#elif QNX
+		id = "qnx";
+#else
+		id = FIXME;
+#endif
+		os["id"] = id;
+#if WINDOWS
+		os["name"] = "Windows";
+		os["version"] = _query_windows_version ();
+#elif DARWIN
+		try {
+			string plist;
+			FileUtils.get_contents ("/System/Library/CoreServices/SystemVersion.plist", out plist);
+
+			MatchInfo info;
+			if (/<key>ProductName<\/key>.*?<string>(.+?)<\/string>/s.match (plist, 0, out info)) {
+				os["name"] = info.fetch (1);
+			}
+			if (/<key>ProductVersion<\/key>.*?<string>(.+?)<\/string>/s.match (plist, 0, out info)) {
+				os["version"] = info.fetch (1);
+			}
+		} catch (FileError e) {
+		}
+#elif LINUX && !ANDROID
+		try {
+			string details;
+			FileUtils.get_contents ("/etc/os-release", out details);
+
+			MatchInfo info;
+			if (/^ID=(.+)$/m.match (details, 0, out info)) {
+				os["id"] = Shell.unquote (info.fetch (1));
+			}
+			if (/^NAME=(.+)$/m.match (details, 0, out info)) {
+				os["name"] = Shell.unquote (info.fetch (1));
+			}
+			if (/^VERSION_ID=(.+)$/m.match (details, 0, out info)) {
+				os["version"] = Shell.unquote (info.fetch (1));
+			}
+		} catch (GLib.Error e) {
+		}
+#elif ANDROID
+		os["name"] = "Android";
+		os["version"] = _query_android_system_property ("ro.build.version.release");
+#elif QNX
+		os["name"] = "QNX";
+#endif
+		parameters["os"] = os;
+
+		string arch;
+#if X86
+		arch = "ia32";
+#elif X86_64
+		arch = "x64";
+#elif ARM
+		arch = "arm";
+#elif ARM64
+		arch = "arm64";
+#elif MIPS
+		arch = "mips";
+#else
+		arch = FIXME;
+#endif
+		parameters["arch"] = arch;
+
+#if WINDOWS
+		parameters["name"] = _query_windows_computer_name ();
+#elif IOS
+		import_mg_property (parameters, "name", "UserAssignedDeviceName");
+		import_mg_property (parameters, "udid", "UniqueDeviceID");
+
+		import_mg_property (parameters, "phone-number", "PhoneNumber");
+		import_mg_property (parameters, "ethernet-address", "EthernetMacAddress");
+		import_mg_property (parameters, "wifi-address", "WifiAddress");
+		import_mg_property (parameters, "bluetooth-address", "BluetoothAddress");
+#elif ANDROID
+		parameters["api-level"] = int64.parse (_query_android_system_property ("ro.build.version.sdk"));
+#else
+		parameters["name"] = Environment.get_host_name ();
+#endif
+
+		return parameters;
+	}
+
+#if WINDOWS
+	public extern string _query_windows_version ();
+	public extern string _query_windows_computer_name ();
+#elif IOS
+	private void import_mg_property (HashTable<string, Variant> target, string key, string query) {
+		var answer = _query_mobile_gestalt (query);
+		if (answer == null)
+			return;
+		if (answer.is_of_type (VariantType.STRING) && answer.get_string ().length == 0)
+			return;
+		target[key] = answer;
+	}
+
+	public extern Variant? _query_mobile_gestalt (string query);
+#elif ANDROID
+	public extern string _query_android_system_property (string name);
+#endif
 
 	namespace ServerGuid {
 		public const string HOST_SESSION_SERVICE = "6769746875622e636f6d2f6672696461";
