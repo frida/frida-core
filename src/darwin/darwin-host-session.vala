@@ -1054,7 +1054,7 @@ namespace Frida {
 			var raw_header = tokens[0];
 			var report = tokens[1];
 
-			var parameters = make_options_dict ();
+			var parameters = make_parameters_dict ();
 			try {
 				var header = new Json.Reader (Json.from_string (raw_header));
 				foreach (string member in header.list_members ()) {

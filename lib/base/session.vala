@@ -528,7 +528,7 @@ namespace Frida {
 			this.env = {};
 			this.cwd = "";
 			this.stdio = INHERIT;
-			this.aux = make_options_dict ();
+			this.aux = make_parameters_dict ();
 		}
 
 		public string[] compute_argv (string path) {
@@ -590,7 +590,7 @@ namespace Frida {
 		}
 
 		public HashTable<string, Variant> _serialize () {
-			var dict = make_options_dict ();
+			var dict = make_parameters_dict ();
 
 			if (realm != NATIVE)
 				dict["realm"] = new Variant.string (realm.to_nick ());
@@ -718,7 +718,7 @@ namespace Frida {
 			this.summary = summary;
 			this.report = report;
 
-			this.parameters = (parameters != null) ? parameters : make_options_dict ();
+			this.parameters = (parameters != null) ? parameters : make_parameters_dict ();
 		}
 
 		public CrashInfo.empty () {
@@ -726,7 +726,7 @@ namespace Frida {
 			this.process_name = "";
 			this.summary = "";
 			this.report = "";
-			this.parameters = make_options_dict ();
+			this.parameters = make_parameters_dict ();
 		}
 	}
 
@@ -779,7 +779,7 @@ namespace Frida {
 		}
 
 		public HashTable<string, Variant> _serialize () {
-			var dict = make_options_dict ();
+			var dict = make_parameters_dict ();
 
 			if (name != null)
 				dict["name"] = new Variant.string (name);
@@ -858,7 +858,7 @@ namespace Frida {
 		}
 
 		public HashTable<string, Variant> _serialize () {
-			var dict = make_options_dict ();
+			var dict = make_parameters_dict ();
 
 			if (certificate != null)
 				dict["certificate"] = new Variant.string (certificate.certificate_pem);
@@ -926,7 +926,7 @@ namespace Frida {
 		}
 
 		public HashTable<string, Variant> _serialize () {
-			var dict = make_options_dict ();
+			var dict = make_parameters_dict ();
 
 			if (stun_server != null)
 				dict["stun-server"] = new Variant.string (stun_server);
@@ -1019,7 +1019,7 @@ namespace Frida {
 		TURN_TLS
 	}
 
-	public HashTable<string, Variant> make_options_dict () {
+	public HashTable<string, Variant> make_parameters_dict () {
 		return new HashTable<string, Variant> (str_hash, str_equal);
 	}
 

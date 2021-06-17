@@ -214,7 +214,7 @@ namespace Frida {
 				}
 			}
 
-			HashTable<string, Variant> options = make_options_dict ();
+			HashTable<string, Variant> options = make_parameters_dict ();
 			if (acl != null)
 				options["acl"] = new Variant.strv (acl);
 

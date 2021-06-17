@@ -1085,7 +1085,7 @@ namespace Frida {
 			try {
 				var host_session = yield get_host_session (cancellable);
 
-				var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+				var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 				AgentSessionId id;
 				try {
@@ -1618,7 +1618,7 @@ namespace Frida {
 		public HashTable<string, Variant> aux {
 			get;
 			set;
-			default = make_options_dict ();
+			default = make_parameters_dict ();
 		}
 	}
 
@@ -2169,7 +2169,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			AgentScriptId script_id;
 			try {
@@ -2207,7 +2207,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			AgentScriptId script_id;
 			try {
@@ -2246,7 +2246,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			uint8[] data;
 			try {
@@ -2401,7 +2401,7 @@ namespace Frida {
 
 			string offer_sdp = offer.to_sdp ();
 
-			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			IOStream stream = null;
 			server_session.new_candidates.connect (on_new_candidates);
@@ -2732,7 +2732,7 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			PortalMembershipId membership_id;
 			try {

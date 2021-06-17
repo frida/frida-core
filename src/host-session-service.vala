@@ -1210,7 +1210,7 @@ namespace Frida {
 				uint target_pid = yield get_target_pid (cancellable);
 
 				try {
-					session_id = yield host_session.attach (target_pid, make_options_dict (), cancellable);
+					session_id = yield host_session.attach (target_pid, make_parameters_dict (), cancellable);
 
 					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 

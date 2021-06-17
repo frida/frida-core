@@ -37,7 +37,7 @@ namespace Frida.AgentTest {
 					 "  onEnter(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
-					 "});").printf ((size_t) func), make_options_dict (), cancellable);
+					 "});").printf ((size_t) func), make_parameters_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
@@ -76,7 +76,7 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "};" +
 					 "sendNext();"
-					).printf ((size_t) buf, size), make_options_dict (), cancellable);
+					).printf ((size_t) buf, size), make_parameters_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
@@ -204,7 +204,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     send([event, identifier, pidPtr.readU32()]);
   }
 });
-""", make_options_dict (), cancellable);
+""", make_parameters_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				h.disable_timeout ();
@@ -339,7 +339,7 @@ console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () => {
 });
-""", make_options_dict (), cancellable);
+""", make_parameters_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				var thread_id = get_current_thread_id ();
@@ -477,7 +477,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
-				yield provider.open (session_id, make_options_dict (), cancellable);
+				yield provider.open (session_id, make_parameters_dict (), cancellable);
 
 				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (session_id),
 					DO_NOT_LOAD_PROPERTIES, cancellable);
