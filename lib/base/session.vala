@@ -1026,20 +1026,6 @@ namespace Frida {
 	public HashTable<string, Variant> compute_system_parameters () {
 		var parameters = new HashTable<string, Variant> (str_hash, str_equal);
 
-		string platform;
-#if WINDOWS
-		platform = "windows";
-#elif DARWIN
-		platform = "darwin";
-#elif LINUX
-		platform = "linux";
-#elif QNX
-		platform = "qnx";
-#else
-		platform = FIXME;
-#endif
-		parameters["platform"] = platform;
-
 		var os = new HashTable<string, Variant> (str_hash, str_equal);
 		string id;
 #if WINDOWS
@@ -1099,6 +1085,20 @@ namespace Frida {
 		os["name"] = "QNX";
 #endif
 		parameters["os"] = os;
+
+		string platform;
+#if WINDOWS
+		platform = "windows";
+#elif DARWIN
+		platform = "darwin";
+#elif LINUX
+		platform = "linux";
+#elif QNX
+		platform = "qnx";
+#else
+		platform = FIXME;
+#endif
+		parameters["platform"] = platform;
 
 		string arch;
 #if X86

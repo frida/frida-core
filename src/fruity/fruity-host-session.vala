@@ -487,8 +487,6 @@ namespace Frida {
 
 			var parameters = new HashTable<string, Variant> (str_hash, str_equal);
 
-			parameters["platform"] = "darwin";
-
 			try {
 				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
 				var response = yield lockdown.get_value (null, null, cancellable);
@@ -499,6 +497,8 @@ namespace Frida {
 				os["name"] = properties.get_string ("ProductName");
 				os["version"] = properties.get_string ("ProductVersion");
 				parameters["os"] = os;
+
+				parameters["platform"] = "darwin";
 
 				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
 

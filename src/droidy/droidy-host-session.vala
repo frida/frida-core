@@ -247,8 +247,6 @@ namespace Frida {
 
 			var parameters = new HashTable<string, Variant> (str_hash, str_equal);
 
-			parameters["platform"] = "linux";
-
 			var os = new HashTable<string, Variant> (str_hash, str_equal);
 			os["id"] = "android";
 			os["name"] = "Android";
@@ -278,6 +276,8 @@ namespace Frida {
 			}
 
 			parameters["os"] = os;
+
+			parameters["platform"] = "linux";
 
 			return parameters;
 		}
