@@ -45,7 +45,7 @@ rpc.exports = {
           const topActivity = runningTaskInfo.topActivity.value;
           const app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
           const pkg = app.packageName.value;
-          const name = app.loadLabel(packageManager).toString();
+          const name = loadAppLabel.call(app, packageManager).toString();
 
           const processes = activityManager.getRunningAppProcesses();
           const numProcesses = processes.size();
