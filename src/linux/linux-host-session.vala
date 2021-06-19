@@ -684,6 +684,20 @@ namespace Frida {
 			}
 		}
 
+		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+			var app = yield call ("getFrontmostApplication", new Json.Node[] {}, cancellable);
+			if (app != null) {
+				var item = app.get_array ();
+				var identifier = item.get_string_element (0);
+				var name = item.get_string_element (1);
+				var pid = (uint) item.get_int_element (2);
+				var no_icon = ImageData.empty ();
+				return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+			} else {
+				return HostApplicationInfo.empty ();
+			}
+		}
+
 		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 			var apps = yield call ("enumerateApplications", new Json.Node[] {}, cancellable);
 
@@ -702,20 +716,6 @@ namespace Frida {
 			}
 
 			return result;
-		}
-
-		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
-			var app = yield call ("getFrontmostApplication", new Json.Node[] {}, cancellable);
-			if (app != null) {
-				var item = app.get_array ();
-				var identifier = item.get_string_element (0);
-				var name = item.get_string_element (1);
-				var pid = (uint) item.get_int_element (2);
-				var no_icon = ImageData.empty ();
-				return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
-			} else {
-				return HostApplicationInfo.empty ();
-			}
 		}
 
 		public async string get_process_name (string package, int uid, Cancellable? cancellable) throws Error, IOError {
