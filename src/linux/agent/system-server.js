@@ -45,20 +45,22 @@ rpc.exports = {
           const topActivity = runningTaskInfo.topActivity.value;
           const app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
           const pkg = app.packageName.value;
-          const name = loadAppLabel.call(app, packageManager).toString();
+          if (pkg !== 'com.google.android.apps.nexuslauncher') {
+            const name = loadAppLabel.call(app, packageManager).toString();
 
-          const processes = activityManager.getRunningAppProcesses();
-          const numProcesses = processes.size();
-          let pid = 0;
-          for (let i = 0; i !== numProcesses; i++) {
-            const process = Java.cast(processes.get(i), RunningAppProcessInfo);
-            if (process.pkgList.value.includes(pkg)) {
-              pid = process.pid.value;
-              break;
+            const processes = activityManager.getRunningAppProcesses();
+            const numProcesses = processes.size();
+            let pid = 0;
+            for (let i = 0; i !== numProcesses; i++) {
+              const process = Java.cast(processes.get(i), RunningAppProcessInfo);
+              if (process.pkgList.value.includes(pkg)) {
+                pid = process.pid.value;
+                break;
+              }
             }
-          }
 
-          result = [pkg, name, pid];
+            result = [pkg, name, pid];
+          }
         }
       }
 
