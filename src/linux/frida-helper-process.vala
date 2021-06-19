@@ -365,7 +365,7 @@ namespace Frida {
 				if (pending_error == null) {
 					pending_connection = yield new DBusConnection (pending_stream, null, DBusConnectionFlags.NONE, null,
 						cancellable);
-					pending_proxy = yield connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
+					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 						cancellable);
 					if (pending_connection.is_closed ())
 						throw new Error.NOT_SUPPORTED ("Helper terminated prematurely");
