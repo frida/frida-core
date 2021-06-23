@@ -49,10 +49,10 @@ namespace Frida.Fruity {
 
 				request.set_dict ("ClientOptions", make_client_options ());
 
-				var reader = yield service.begin_query (request, cancellable);
+				service.write_message (request);
 				string status = "";
 				do {
-					var response = yield reader.read (cancellable);
+					var response = yield service.read_message (cancellable);
 
 					status = response.get_string ("Status");
 					if (status == "BrowsingApplications") {
@@ -87,10 +87,10 @@ namespace Frida.Fruity {
 					options.set_value (key, (owned) val_copy);
 				}
 
-				var reader = yield service.begin_query (request, cancellable);
+				service.write_message (request);
 				string status = "";
 				do {
-					var response = yield reader.read (cancellable);
+					var response = yield service.read_message (cancellable);
 
 					var result_dict = response.get_dict ("LookupResult");
 					foreach (var identifier in result_dict.keys)
@@ -119,10 +119,10 @@ namespace Frida.Fruity {
 				options.set_array ("ReturnAttributes", attributes);
 				attributes.add_string ("Path");
 
-				var reader = yield service.begin_query (request, cancellable);
+				service.write_message (request);
 				string status = "";
 				do {
-					var response = yield reader.read (cancellable);
+					var response = yield service.read_message (cancellable);
 
 					var result_dict = response.get_dict ("LookupResult");
 					if (result == null) {
