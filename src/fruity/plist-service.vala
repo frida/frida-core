@@ -57,18 +57,17 @@ namespace Frida.Fruity {
 		}
 
 		public void write_message (Plist message) {
-			var xml = message.to_xml ();
-			unowned uint8[] body = ((uint8[]) xml)[0:xml.length];
+			uint8[] message_data = message.to_binary ();
 
 			uint offset = pending_output.len;
-			pending_output.set_size ((uint) (offset + sizeof (uint32) + body.length));
+			pending_output.set_size ((uint) (offset + sizeof (uint32) + message_data.length));
 
 			uint8 * blob = (uint8 *) pending_output.data + offset;
 
 			uint32 * size = blob;
-			*size = body.length.to_big_endian ();
+			*size = message_data.length.to_big_endian ();
 
-			Memory.copy (blob + 4, body, body.length);
+			Memory.copy (blob + 4, message_data, message_data.length);
 
 			if (!writing) {
 				writing = true;
