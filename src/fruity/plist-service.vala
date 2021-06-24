@@ -9,13 +9,15 @@ namespace Frida.Fruity {
 			}
 			set {
 				_stream = value;
-				input = stream.get_input_stream ();
+				input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+					"base-stream", stream.get_input_stream (),
+					"buffer-size", 128 * 1024);
 				output = stream.get_output_stream ();
 			}
 		}
 
 		private IOStream _stream;
-		private InputStream input;
+		private BufferedInputStream input;
 		private OutputStream output;
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -81,26 +83,83 @@ namespace Frida.Fruity {
 		}
 
 		public async Plist read_message (Cancellable? cancellable) throws PlistServiceError, IOError {
-			uint32 size = 0;
-			unowned uint8[] size_buf = ((uint8[]) &size)[0:4];
-			yield read (size_buf, cancellable);
-			size = uint32.from_big_endian (size);
-			if (size < 1 || size > MAX_MESSAGE_SIZE)
-				throw new PlistServiceError.PROTOCOL ("Invalid message size");
+			var messages = yield read_messages (1, cancellable);
+			return messages[0];
+		}
 
-			var body_buf = new uint8[size + 1];
-			body_buf[size] = 0;
-			unowned uint8[] body = body_buf[0:size];
-			yield read (body, cancellable);
+		public async Gee.AbstractList<Plist> read_messages (size_t limit,
+				Cancellable? cancellable) throws PlistServiceError, IOError {
+			var result = new Gee.ArrayList<Plist> ();
 
-			try {
-				unowned string body_str = (string) body_buf;
-				if (body_str.has_prefix ("bplist"))
-					return new Plist.from_binary (body);
-				else
-					return new Plist.from_xml (body_str);
-			} catch (PlistError e) {
-				throw new PlistServiceError.PROTOCOL ("Malformed message: %s", e.message);
+			do {
+				size_t header_size = sizeof (uint32);
+				if (input.get_available () < header_size) {
+					if (result.is_empty)
+						yield fill_until_n_bytes_available (header_size, cancellable);
+					else
+						break;
+				}
+
+				uint32 message_size = 0;
+				unowned uint8[] size_buf = ((uint8[]) &message_size)[0:4];
+				input.peek (size_buf);
+				message_size = uint32.from_big_endian (message_size);
+				if (message_size < 1 || message_size > MAX_MESSAGE_SIZE)
+					throw new PlistServiceError.PROTOCOL ("Invalid message size");
+
+				size_t frame_size = header_size + message_size;
+				if (input.get_available () < frame_size) {
+					if (result.is_empty)
+						yield fill_until_n_bytes_available (frame_size, cancellable);
+					else
+						break;
+				}
+
+				var message_buf = new uint8[message_size + 1];
+				unowned uint8[] message_data = message_buf[0:message_size];
+				input.peek (message_data, header_size);
+
+				input.skip (frame_size, cancellable);
+
+				Plist message;
+				try {
+					unowned string message_str = (string) message_buf;
+					if (message_str.has_prefix ("bplist"))
+						message = new Plist.from_binary (message_data);
+					else
+						message = new Plist.from_xml (message_str);
+				} catch (PlistError e) {
+					throw new PlistServiceError.PROTOCOL ("Malformed message: %s", e.message);
+				}
+
+				result.add (message);
+			} while (limit == 0 || result.size != limit);
+
+			return result;
+		}
+
+		private async void fill_until_n_bytes_available (size_t minimum,
+				Cancellable? cancellable) throws PlistServiceError, IOError {
+			size_t available = input.get_available ();
+			while (available < minimum) {
+				if (input.get_buffer_size () < minimum)
+					input.set_buffer_size (minimum);
+
+				ssize_t n;
+				try {
+					n = yield input.fill_async ((ssize_t) (input.get_buffer_size () - available), Priority.DEFAULT,
+						cancellable);
+				} catch (GLib.Error e) {
+					ensure_closed ();
+					throw new PlistServiceError.CONNECTION_CLOSED ("%s", e.message);
+				}
+
+				if (n == 0) {
+					ensure_closed ();
+					throw new PlistServiceError.CONNECTION_CLOSED ("Connection closed");
+				}
+
+				available += n;
 			}
 		}
 
@@ -118,20 +177,6 @@ namespace Frida.Fruity {
 			}
 
 			writing = false;
-		}
-
-		private async void read (uint8[] buffer, Cancellable? cancellable) throws PlistServiceError, IOError {
-			size_t bytes_read;
-			try {
-				yield input.read_all_async (buffer, Priority.DEFAULT, cancellable, out bytes_read);
-			} catch (GLib.Error e) {
-				ensure_closed ();
-				throw new PlistServiceError.CONNECTION_CLOSED ("%s", e.message);
-			}
-			if (bytes_read == 0) {
-				ensure_closed ();
-				throw new PlistServiceError.CONNECTION_CLOSED ("Connection closed");
-			}
 		}
 
 		private void ensure_closed () {
