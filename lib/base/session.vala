@@ -957,9 +957,8 @@ namespace Frida {
 					throw new Error.INVALID_ARGUMENT ("The 'relays' option must be an array of tuples");
 				var iter = relays_val.iterator ();
 				Variant? val;
-				while ((val = iter.next_value ()) != null) {
+				while ((val = iter.next_value ()) != null)
 					options.add_relay (Relay.from_variant (val));
-				}
 			}
 
 			return options;
