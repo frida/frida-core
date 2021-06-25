@@ -927,16 +927,12 @@ namespace Frida {
 		}
 
 		private static string summarize_java_report (string report) throws Error {
-			MatchInfo info;
-
 			string? last_cause = null;
+			var cause_pattern = /^Caused by: (.+)$/m;
 			try {
-				var cause_pattern = /^Caused by: (.+)$/m;
-				cause_pattern.match (report, 0, out info);
-				while (info.matches ()) {
+				MatchInfo info;
+				for (cause_pattern.match (report, 0, out info); info.matches (); info.next ())
 					last_cause = info.fetch (1);
-					info.next ();
-				}
 			} catch (RegexError e) {
 			}
 			if (last_cause != null)

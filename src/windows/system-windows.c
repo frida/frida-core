@@ -11,8 +11,6 @@ static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_c
 void
 frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
 {
-  (void) result;
-
   g_set_error (error,
       FRIDA_ERROR,
       FRIDA_ERROR_NOT_SUPPORTED,
