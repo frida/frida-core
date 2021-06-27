@@ -203,6 +203,426 @@ namespace Frida.Droidy {
 		}
 	}
 
+	public class ShellSession : Object {
+		public signal void output (StdioPipe pipe, Bytes bytes);
+		public signal void closed ();
+
+		private IOStream stream;
+		private BufferedInputStream input_stream;
+		private OutputStream output_stream;
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private State state = CLOSED;
+		private string session_id = Uuid.string_random ();
+		private Gee.Queue<PendingCommand> pending_commands = new Gee.ArrayQueue<PendingCommand> ();
+
+		private ByteArray pending_output = new ByteArray ();
+		private bool writing = false;
+
+		private enum State {
+			CLOSED,
+			IDLE,
+			BUSY
+		}
+
+		private const uint32 MAX_PAYLOAD_SIZE = 1024 * 1024;
+
+		public async void open (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
+			assert (state == CLOSED);
+
+			var client = yield Client.open (cancellable);
+
+			try {
+				yield client.request ("host:transport:" + device_serial, cancellable);
+				yield client.request_protocol_change ("shell,v2,raw:", cancellable);
+
+				stream = client.stream;
+				input_stream = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+					"base-stream", stream.get_input_stream (),
+					"buffer-size", 128 * 1024);
+				output_stream = stream.get_output_stream ();
+
+				state = IDLE;
+
+				process_incoming_packets.begin ();
+			} catch (GLib.Error e) {
+				yield client.close (cancellable);
+			}
+		}
+
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			if (state == CLOSED)
+				return;
+
+			io_cancellable.cancel ();
+
+			var source = new IdleSource ();
+			source.set_callback (close.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
+			try {
+				yield stream.close_async (Priority.DEFAULT, cancellable);
+			} catch (IOError e) {
+			}
+		}
+
+		public async void check_call (string command, Cancellable? cancellable) throws Error, IOError {
+			var result = yield run (command, cancellable);
+			if (result.status != 0)
+				throw new Error.INVALID_ARGUMENT ("Shell command failed (%s)", command);
+		}
+
+		public async string check_output (string command, Cancellable? cancellable) throws Error, IOError {
+			var result = yield run (command, cancellable);
+			if (result.status != 0)
+				throw new Error.INVALID_ARGUMENT ("Shell command failed (%s)", command);
+			return result.stdout_text;
+		}
+
+		public async ShellCommandResult run (string command, Cancellable? cancellable) throws Error, IOError {
+			if (state == CLOSED)
+				throw new Error.INVALID_OPERATION ("Shell session is closed");
+
+			var pending = new PendingCommand (command, run.callback);
+			schedule (pending);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
+
+			yield;
+
+			cancel_source.destroy ();
+
+			cancellable.set_error_if_cancelled ();
+
+			GLib.Error? e = pending.error;
+			if (e != null) {
+				if (e is Error)
+					throw (Error) e;
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			return pending.result;
+		}
+
+		public void send_command (string command) {
+			string full_command = command + "\n";
+			write_packet (new Packet (STDIN, new Bytes (full_command.data)));
+		}
+
+		private void schedule (PendingCommand command) {
+			pending_commands.offer (command);
+			maybe_write_next_command ();
+		}
+
+		private void move_to_next_command () {
+			pending_commands.poll ();
+			state = IDLE;
+			maybe_write_next_command ();
+		}
+
+		private void maybe_write_next_command () {
+			if (state != IDLE)
+				return;
+
+			PendingCommand? c = pending_commands.peek ();
+			if (c == null)
+				return;
+
+			state = BUSY;
+
+			string command = "%s; echo -n x$?%s 1>&2\n".printf (c.command, session_id);
+			write_packet (new Packet (STDIN, new Bytes (command.data)));
+		}
+
+		private async void process_incoming_packets () {
+			while (true) {
+				try {
+					var packet = yield read_packet ();
+
+					dispatch_packet (packet);
+				} catch (GLib.Error e) {
+					state = CLOSED;
+
+					foreach (PendingCommand c in pending_commands)
+						c.complete_with_error (e);
+					pending_commands.clear ();
+
+					closed ();
+
+					return;
+				}
+			}
+		}
+
+		private void dispatch_packet (Packet packet) throws Error {
+			PendingCommand? c = pending_commands.peek ();
+			if (c != null) {
+				switch (packet.id) {
+					case STDOUT: {
+						c.stdout_buffer.append (packet.payload.get_data ());
+						break;
+					}
+					case STDERR: {
+						c.stderr_buffer.append (packet.payload.get_data ());
+
+						unowned uint8[] data = c.stderr_buffer.data;
+
+						int minimum_status_size = 2;
+
+						unowned uint8[] term = session_id.data;
+						int term_start_offset = data.length - term.length;
+
+						if (data.length >= minimum_status_size + term.length &&
+								Memory.cmp ((uint8 *) data + term_start_offset, term, term.length) == 0) {
+							int offset = term_start_offset - minimum_status_size;
+							while (data[offset] != 'x') {
+								offset--;
+								if (offset == -1)
+									throw new Error.PROTOCOL ("Malformed reply");
+							}
+							data[term_start_offset] = 0;
+							unowned string status_str = (string) ((uint8 *) data + offset + 1);
+
+							uint8 status;
+							try {
+								uint64 val;
+								uint64.from_string (status_str, out val, 10, uint8.MIN, uint8.MAX);
+								status = (uint8) val;
+							} catch (NumberParserError e) {
+								throw new Error.PROTOCOL ("Malformed reply");
+							}
+
+							c.stderr_buffer.set_size (offset);
+
+							c.complete_with_status (status);
+							move_to_next_command ();
+						}
+
+						break;
+					}
+					default: {
+						c.complete_with_error (new Error.PROTOCOL ("Unexpected reply"));
+						move_to_next_command ();
+						break;
+					}
+				}
+			} else {
+				switch (packet.id) {
+					case STDOUT:
+						output (STDOUT, packet.payload);
+						break;
+					case STDERR:
+						output (STDERR, packet.payload);
+						break;
+					default:
+						break;
+				}
+			}
+		}
+
+		private async Packet read_packet () throws GLib.Error {
+			size_t header_size = sizeof (uint8) + sizeof (uint32);
+			if (input_stream.get_available () < header_size)
+				yield fill_until_n_bytes_available (header_size, io_cancellable);
+
+			uint8 id = 0;
+			unowned uint8[] id_buf = ((uint8[]) &id)[0:1];
+			input_stream.peek (id_buf);
+
+			uint32 payload_size = 0;
+			unowned uint8[] payload_size_buf = ((uint8[]) &payload_size)[0:4];
+			input_stream.peek (payload_size_buf, sizeof (uint8));
+
+			payload_size = uint32.from_little_endian (payload_size);
+			if (payload_size < 1 || payload_size > MAX_PAYLOAD_SIZE)
+				throw new Error.PROTOCOL ("Invalid message size");
+
+			size_t frame_size = header_size + payload_size;
+			if (input_stream.get_available () < frame_size)
+				yield fill_until_n_bytes_available (frame_size, io_cancellable);
+
+			var payload_buf = new uint8[payload_size + 1];
+			payload_buf.length = (int) payload_size;
+			input_stream.peek (payload_buf, header_size);
+
+			input_stream.skip (frame_size, io_cancellable);
+
+			return new Packet ((PacketId) id, new Bytes.take ((owned) payload_buf));
+		}
+
+		private void write_packet (Packet packet) {
+			size_t header_size = sizeof (uint8) + sizeof (uint32);
+			size_t payload_size = packet.payload.get_size ();
+
+			uint offset = pending_output.len;
+			pending_output.set_size ((uint) (offset + header_size + payload_size));
+
+			uint8 * packet_buf = (uint8 *) pending_output.data + offset;
+			packet_buf[0] = packet.id;
+			*((uint32 *) (packet_buf + 1)) = ((uint32) payload_size).to_little_endian ();
+			Memory.copy (packet_buf + header_size, packet.payload.get_data (), payload_size);
+
+			if (!writing) {
+				writing = true;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					process_pending_output.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private async void process_pending_output () {
+			while (pending_output.len > 0) {
+				uint8[] batch = pending_output.steal ();
+
+				size_t bytes_written;
+				try {
+					yield output_stream.write_all_async (batch, Priority.DEFAULT, io_cancellable, out bytes_written);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+
+		private async void fill_until_n_bytes_available (size_t minimum, Cancellable? cancellable) throws GLib.Error {
+			size_t available = input_stream.get_available ();
+			while (available < minimum) {
+				if (input_stream.get_buffer_size () < minimum)
+					input_stream.set_buffer_size (minimum);
+
+				ssize_t n = yield input_stream.fill_async ((ssize_t) (input_stream.get_buffer_size () - available),
+					Priority.DEFAULT, cancellable);
+				if (n == 0)
+					throw new IOError.CONNECTION_CLOSED ("Connection closed");
+
+				available += n;
+			}
+		}
+
+		private class PendingCommand {
+			public string command;
+			private SourceFunc? handler;
+
+			public ShellCommandResult? result;
+			public GLib.Error? error;
+
+			public ByteArray stdout_buffer = new ByteArray ();
+			public ByteArray stderr_buffer = new ByteArray ();
+
+			public PendingCommand (string command, owned SourceFunc handler) {
+				this.command = command;
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_status (uint8 status) {
+				if (handler == null)
+					return;
+
+				stdout_buffer.append ({ 0 });
+				uint8[] stdout_terminated = stdout_buffer.steal ();
+				stdout_terminated.length--;
+
+				stderr_buffer.append ({ 0 });
+				uint8[] stderr_terminated = stderr_buffer.steal ();
+				stderr_terminated.length--;
+
+				Bytes stdout_bytes = new Bytes.take ((owned) stdout_terminated);
+				Bytes stderr_bytes = new Bytes.take ((owned) stderr_terminated);
+
+				result = new ShellCommandResult (status, stdout_bytes, stderr_bytes);
+
+				handler ();
+				handler = null;
+			}
+
+			public void complete_with_error (GLib.Error e) {
+				if (handler == null)
+					return;
+
+				error = e;
+
+				handler ();
+				handler = null;
+			}
+		}
+
+		private enum PacketId {
+			STDIN,
+			STDOUT,
+			STDERR,
+			EXIT,
+
+			CLOSE_STDIN,
+
+			WINDOW_SIZE_CHANGE
+		}
+
+		private class Packet {
+			public PacketId id;
+			public Bytes payload;
+
+			public Packet (PacketId id, Bytes payload) {
+				this.id = id;
+				this.payload = payload;
+			}
+		}
+	}
+
+	public enum StdioPipe {
+		STDOUT,
+		STDERR
+	}
+
+	public class ShellCommandResult : Object {
+		public uint8 status {
+			get;
+			construct;
+		}
+
+		public unowned string stdout_text {
+			get {
+				return (string) stdout_bytes.get_data ();
+			}
+		}
+
+		public Bytes stdout_bytes {
+			get;
+			construct;
+		}
+
+		public unowned string stderr_text {
+			get {
+				return (string) stderr_bytes.get_data ();
+			}
+		}
+
+		public Bytes stderr_bytes {
+			get;
+			construct;
+		}
+
+		public ShellCommandResult (uint8 status, Bytes stdout_bytes, Bytes stderr_bytes) {
+			Object (
+				status: status,
+				stdout_bytes: stdout_bytes,
+				stderr_bytes: stderr_bytes
+			);
+		}
+	}
+
 	namespace FileSync {
 		private const size_t MAX_DATA_SIZE = 65536;
 
