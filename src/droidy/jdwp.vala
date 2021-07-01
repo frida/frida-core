@@ -316,8 +316,6 @@ namespace Frida.JDWP {
 
 					dispatch_packet (packet);
 				} catch (GLib.Error error) {
-					printerr ("!!! Oops: %s\n", error.message);
-
 					change_state (CLOSED);
 
 					foreach (var pending in pending_replies.values)
