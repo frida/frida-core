@@ -33,8 +33,7 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public async Gee.ArrayList<ProcessInfo> enumerate_processes (Cancellable? cancellable = null)
-				throws Error, IOError {
+		public async Gee.List<ProcessInfo> enumerate_processes (Cancellable? cancellable = null) throws Error, IOError {
 			var result = new Gee.ArrayList<ProcessInfo> ();
 
 			var response = yield channel.invoke ("runningProcesses", null, cancellable);
@@ -104,7 +103,7 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public async Gee.ArrayList<ApplicationInfo> enumerate_applications (NSDictionary? query = null,
+		public async Gee.List<ApplicationInfo> enumerate_applications (NSDictionary? query = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			var result = new Gee.ArrayList<ApplicationInfo> ();
 

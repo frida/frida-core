@@ -86,8 +86,7 @@ namespace Frida.Fruity {
 			return messages[0];
 		}
 
-		public async Gee.AbstractList<Plist> read_messages (size_t limit,
-				Cancellable? cancellable) throws PlistServiceError, IOError {
+		public async Gee.List<Plist> read_messages (size_t limit, Cancellable? cancellable) throws PlistServiceError, IOError {
 			var result = new Gee.ArrayList<Plist> ();
 
 			do {
