@@ -250,6 +250,9 @@
     <ClCompile Include="$(IntDir)src\web-gateway-service.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\springboard-services.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\droidy\injector.vala">
@@ -275,6 +278,9 @@
     </None>
     <None Include="src\web-gateway-service.vala">
       <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\fruity\springboard-services.vala">
+      <Filter>Source Files\fruity</Filter>
     </None>
   </ItemGroup>
 </Project>

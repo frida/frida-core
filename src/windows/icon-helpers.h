@@ -15,12 +15,12 @@ enum _FridaIconSize
   FRIDA_ICON_LARGE
 };
 
-FridaImageData * _frida_image_data_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSize size);
+GVariant * _frida_icon_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSize size);
 
-FridaImageData * _frida_image_data_from_process (DWORD pid, FridaIconSize size);
-FridaImageData * _frida_image_data_from_file (WCHAR * filename, FridaIconSize size);
-FridaImageData * _frida_image_data_from_resource_url (WCHAR * resource_url, FridaIconSize size);
+GVariant * _frida_icon_from_process (DWORD pid, FridaIconSize size);
+GVariant * _frida_icon_from_file (WCHAR * filename, FridaIconSize size);
+GVariant * _frida_icon_from_resource_url (WCHAR * resource_url, FridaIconSize size);
 
-FridaImageData * _frida_image_data_from_native_icon_handle (HICON icon, FridaIconSize size);
+GVariant * _frida_icon_from_native_icon_handle (HICON icon, FridaIconSize size);
 
 #endif

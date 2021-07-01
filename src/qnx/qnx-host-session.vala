@@ -25,7 +25,7 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public Image? icon {
+		public Variant? icon {
 			get { return null; }
 		}
 
@@ -81,6 +81,9 @@ namespace Frida {
 
 		private AgentDescriptor agent_desc;
 
+		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
+		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
+
 		construct {
 			injector = new Qinjector ();
 			injector.uninjected.connect (on_uninjected);
@@ -121,16 +124,19 @@ namespace Frida {
 			return system_session_container;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
-			return System.get_frontmost_application ();
+		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return System.get_frontmost_application (FrontmostQueryOptions._deserialize (options));
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-			return System.enumerate_applications ();
+		public override async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield application_enumerator.enumerate_applications (ApplicationQueryOptions._deserialize (options));
 		}
 
-		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-			return System.enumerate_processes ();
+		public override async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield process_enumerator.enumerate_processes (ProcessQueryOptions._deserialize (options));
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

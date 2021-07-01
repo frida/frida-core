@@ -71,7 +71,8 @@ static gpointer frida_read_registry_value (HKEY key, WCHAR * value_name, DWORD e
 static GUID GUID_APPLE_USB = { 0xF0B32BE3, 0x6678, 0x4879, 0x92, 0x30, 0x0E4, 0x38, 0x45, 0xD8, 0x05, 0xEE };
 
 void
-_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, FridaImageData ** icon, GError ** error)
+_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, GVariant ** icon,
+    GError ** error)
 {
   gboolean result = FALSE;
   GString * udid_plain;
@@ -79,7 +80,7 @@ _frida_fruity_host_session_backend_extract_details_for_device (gint product_id, 
   WCHAR * udid_utf16 = NULL;
   FridaMobileDeviceInfo * mdev = NULL;
   FridaImageDeviceInfo * idev = NULL;
-  FridaImageData * idev_icon = NULL;
+  GVariant * idev_icon = NULL;
 
   udid_plain = g_string_sized_new (40);
   for (cursor = udid; *cursor != '\0'; cursor++)
@@ -98,7 +99,7 @@ _frida_fruity_host_session_backend_extract_details_for_device (gint product_id, 
   idev = find_image_device_by_location (mdev->location);
   if (idev != NULL)
   {
-    idev_icon = _frida_image_data_from_resource_url (idev->icon_url, FRIDA_ICON_SMALL);
+    idev_icon = _frida_icon_from_resource_url (idev->icon_url, FRIDA_ICON_SMALL);
   }
 
   if (idev_icon != NULL)

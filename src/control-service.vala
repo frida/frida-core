@@ -626,16 +626,19 @@ namespace Frida {
 				return yield parent.host_session.query_system_parameters (cancellable);
 			}
 
-			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error {
-				return yield parent.host_session.get_frontmost_application (cancellable);
+			public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws GLib.Error {
+				return yield parent.host_session.get_frontmost_application (options, cancellable);
 			}
 
-			public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error {
-				return yield parent.host_session.enumerate_applications (cancellable);
+			public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws GLib.Error {
+				return yield parent.host_session.enumerate_applications (options, cancellable);
 			}
 
-			public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error {
-				return yield parent.host_session.enumerate_processes (cancellable);
+			public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws GLib.Error {
+				return yield parent.host_session.enumerate_processes (options, cancellable);
 			}
 
 			public async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error {

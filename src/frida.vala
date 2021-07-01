@@ -484,7 +484,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Icon? icon {
+		public Variant? icon {
 			get;
 			construct;
 		}
@@ -544,7 +544,7 @@ namespace Frida {
 			Object (
 				id: id,
 				name: name,
-				icon: icon_from_image (provider.icon),
+				icon: provider.icon,
 				dtype: dtype,
 				provider: provider,
 				manager: manager
@@ -586,98 +586,105 @@ namespace Frida {
 			}
 		}
 
-		public async Application? get_frontmost_application (Cancellable? cancellable = null) throws Error, IOError {
+		public async Application? get_frontmost_application (FrontmostQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
+
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			var host_session = yield get_host_session (cancellable);
 
 			try {
-				var app = yield host_session.get_frontmost_application (cancellable);
+				var app = yield host_session.get_frontmost_application (raw_options, cancellable);
 
 				if (app.pid == 0)
 					return null;
 
-				return new Application (
-					app.identifier,
-					app.name,
-					app.pid,
-					Icon.from_image_data (app.small_icon),
-					Icon.from_image_data (app.large_icon));
+				return new Application (app.identifier, app.name, app.pid, app.parameters);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		public Application? get_frontmost_application_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return create<GetFrontmostApplicationTask> ().execute (cancellable);
+		public Application? get_frontmost_application_sync (FrontmostQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<GetFrontmostApplicationTask> ();
+			task.options = options;
+			return task.execute (cancellable);
 		}
 
 		private class GetFrontmostApplicationTask : DeviceTask<Application?> {
+			public FrontmostQueryOptions? options;
+
 			protected override async Application? perform_operation () throws Error, IOError {
-				return yield parent.get_frontmost_application (cancellable);
+				return yield parent.get_frontmost_application (options, cancellable);
 			}
 		}
 
-		public async ApplicationList enumerate_applications (Cancellable? cancellable = null) throws Error, IOError {
+		public async ApplicationList enumerate_applications (ApplicationQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
+
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			var host_session = yield get_host_session (cancellable);
 
 			HostApplicationInfo[] applications;
 			try {
-				applications = yield host_session.enumerate_applications (cancellable);
+				applications = yield host_session.enumerate_applications (raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 
 			var result = new Gee.ArrayList<Application> ();
-			foreach (var p in applications) {
-				result.add (new Application (
-					p.identifier,
-					p.name,
-					p.pid,
-					Icon.from_image_data (p.small_icon),
-					Icon.from_image_data (p.large_icon)));
-			}
+			foreach (var app in applications)
+				result.add (new Application (app.identifier, app.name, app.pid, app.parameters));
 			return new ApplicationList (result);
 		}
 
-		public ApplicationList enumerate_applications_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return create<EnumerateApplicationsTask> ().execute (cancellable);
+		public ApplicationList enumerate_applications_sync (ApplicationQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<EnumerateApplicationsTask> ();
+			task.options = options;
+			return task.execute (cancellable);
 		}
 
 		private class EnumerateApplicationsTask : DeviceTask<ApplicationList> {
+			public ApplicationQueryOptions? options;
+
 			protected override async ApplicationList perform_operation () throws Error, IOError {
-				return yield parent.enumerate_applications (cancellable);
+				return yield parent.enumerate_applications (options, cancellable);
 			}
 		}
 
-		public async Process get_process_by_pid (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			return check_process (yield find_process_by_pid (pid, cancellable));
+		public async Process get_process_by_pid (uint pid, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (yield find_process_by_pid (pid, options, cancellable));
 		}
 
-		public Process get_process_by_pid_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			return check_process (find_process_by_pid_sync (pid, cancellable));
+		public Process get_process_by_pid_sync (uint pid, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (find_process_by_pid_sync (pid, options, cancellable));
 		}
 
-		public async Process get_process_by_name (string name, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
-			return check_process (yield find_process_by_name (name, timeout, cancellable));
+		public async Process get_process_by_name (string name, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (yield find_process_by_name (name, options, cancellable));
 		}
 
-		public Process get_process_by_name_sync (string name, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
-			return check_process (find_process_by_name_sync (name, timeout, cancellable));
+		public Process get_process_by_name_sync (string name, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (find_process_by_name_sync (name, options, cancellable));
 		}
 
-		public async Process get_process (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
-			return check_process (yield find_process (predicate, timeout, cancellable));
+		public async Process get_process (ProcessPredicate predicate, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (yield find_process (predicate, options, cancellable));
 		}
 
-		public Process get_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
-			return check_process (find_process_sync (predicate, timeout, cancellable));
+		public Process get_process_sync (ProcessPredicate predicate, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return check_process (find_process_sync (predicate, options, cancellable));
 		}
 
 		private Process check_process (Process? process) throws Error {
@@ -686,32 +693,40 @@ namespace Frida {
 			return process;
 		}
 
-		public async Process? find_process_by_pid (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			return yield find_process ((process) => { return process.pid == pid; }, 0, cancellable);
+		public async Process? find_process_by_pid (uint pid, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return yield find_process ((process) => { return process.pid == pid; }, options, cancellable);
 		}
 
-		public Process? find_process_by_pid_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			return find_process_sync ((process) => { return process.pid == pid; }, 0, cancellable);
+		public Process? find_process_by_pid_sync (uint pid, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			return find_process_sync ((process) => { return process.pid == pid; }, options, cancellable);
 		}
 
-		public async Process? find_process_by_name (string name, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public async Process? find_process_by_name (string name, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var folded_name = name.casefold ();
-			return yield find_process ((process) => { return process.name.casefold () == folded_name; }, timeout, cancellable);
+			return yield find_process ((process) => { return process.name.casefold () == folded_name; }, options, cancellable);
 		}
 
-		public Process? find_process_by_name_sync (string name, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public Process? find_process_by_name_sync (string name, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var folded_name = name.casefold ();
-			return find_process_sync ((process) => { return process.name.casefold () == folded_name; }, timeout, cancellable);
+			return find_process_sync ((process) => { return process.name.casefold () == folded_name; }, options, cancellable);
 		}
 
-		public async Process? find_process (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public async Process? find_process (ProcessPredicate predicate, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			Process? process = null;
 			bool done = false;
 			bool waiting = false;
 			var main_context = MainContext.get_thread_default ();
+
+			ProcessMatchOptions opts = (options != null) ? options : new ProcessMatchOptions ();
+			int timeout = opts.timeout;
+
+			ProcessQueryOptions enumerate_options = new ProcessQueryOptions ();
+			enumerate_options.scope = opts.scope;
 
 			Source? timeout_source = null;
 			if (timeout > 0) {
@@ -736,7 +751,7 @@ namespace Frida {
 
 			try {
 				while (!done) {
-					var processes = yield enumerate_processes (cancellable);
+					var processes = yield enumerate_processes (enumerate_options, cancellable);
 
 					var num_processes = processes.size ();
 					for (var i = 0; i != num_processes; i++) {
@@ -770,62 +785,59 @@ namespace Frida {
 			return process;
 		}
 
-		public Process? find_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public Process? find_process_sync (ProcessPredicate predicate, ProcessMatchOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<FindProcessTask> ();
 			task.predicate = (process) => {
 				return predicate (process);
 			};
-			task.timeout = timeout;
+			task.options = options;
 			return task.execute (cancellable);
 		}
 
 		private class FindProcessTask : DeviceTask<Process?> {
 			public ProcessPredicate predicate;
-			public int timeout;
+			public ProcessMatchOptions? options;
 
 			protected override async Process? perform_operation () throws Error, IOError {
-				return yield parent.find_process (predicate, timeout, cancellable);
+				return yield parent.find_process (predicate, options, cancellable);
 			}
 		}
 
-		public async ProcessList enumerate_processes (Cancellable? cancellable = null) throws Error, IOError {
+		public async ProcessList enumerate_processes (ProcessQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
+
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			var host_session = yield get_host_session (cancellable);
 
 			HostProcessInfo[] processes;
 			try {
-				processes = yield host_session.enumerate_processes (cancellable);
+				processes = yield host_session.enumerate_processes (raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 
 			var result = new Gee.ArrayList<Process> ();
-			foreach (var p in processes) {
-				result.add (new Process (
-					p.pid,
-					p.name,
-					Icon.from_image_data (p.small_icon),
-					Icon.from_image_data (p.large_icon)));
-			}
+			foreach (var p in processes)
+				result.add (new Process (p.pid, p.name, p.parameters));
 			return new ProcessList (result);
 		}
 
-		public ProcessList enumerate_processes_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return create<EnumerateProcessesTask> ().execute (cancellable);
+		public ProcessList enumerate_processes_sync (ProcessQueryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<EnumerateProcessesTask> ();
+			task.options = options;
+			return task.execute (cancellable);
 		}
 
 		private class EnumerateProcessesTask : DeviceTask<ProcessList> {
-			protected override async ProcessList perform_operation () throws Error, IOError {
-				return yield parent.enumerate_processes (cancellable);
-			}
-		}
+			public ProcessQueryOptions? options;
 
-		private static Icon? icon_from_image (Image? image) {
-			if (image == null)
-				return null;
-			return Icon.from_image_data (image.data);
+			protected override async ProcessList perform_operation () throws Error, IOError {
+				return yield parent.enumerate_processes (options, cancellable);
+			}
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
@@ -1520,24 +1532,13 @@ namespace Frida {
 			construct;
 		}
 
-		public Icon? small_icon {
+		public HashTable<string, Variant> parameters {
 			get;
 			construct;
 		}
 
-		public Icon? large_icon {
-			get;
-			construct;
-		}
-
-		internal Application (string identifier, string name, uint pid, Icon? small_icon, Icon? large_icon) {
-			Object (
-				identifier: identifier,
-				name: name,
-				pid: pid,
-				small_icon: small_icon,
-				large_icon: large_icon
-			);
+		internal Application (string identifier, string name, uint pid, HashTable<string, Variant> parameters) {
+			Object (identifier: identifier, name: name, pid: pid, parameters: parameters);
 		}
 	}
 
@@ -1568,23 +1569,27 @@ namespace Frida {
 			construct;
 		}
 
-		public Icon? small_icon {
+		public HashTable<string, Variant> parameters {
 			get;
 			construct;
 		}
 
-		public Icon? large_icon {
+		internal Process (uint pid, string name, HashTable<string, Variant> parameters) {
+			Object (pid: pid, name: name, parameters: parameters);
+		}
+	}
+
+	public class ProcessMatchOptions : Object {
+		public int timeout {
 			get;
-			construct;
+			set;
+			default = 0;
 		}
 
-		internal Process (uint pid, string name, Icon? small_icon, Icon? large_icon) {
-			Object (
-				pid: pid,
-				name: name,
-				small_icon: small_icon,
-				large_icon: large_icon
-			);
+		public Scope scope {
+			get;
+			set;
+			default = MINIMAL;
 		}
 	}
 
@@ -1788,49 +1793,6 @@ namespace Frida {
 				info.report,
 				info.parameters
 			);
-		}
-	}
-
-	public class Icon : Object {
-		public int width {
-			get;
-			construct;
-		}
-
-		public int height {
-			get;
-			construct;
-		}
-
-		public int rowstride {
-			get;
-			construct;
-		}
-
-		public Bytes pixels {
-			get;
-			construct;
-		}
-
-		internal Icon (int width, int height, int rowstride, Bytes pixels) {
-			Object (
-				width: width,
-				height: height,
-				rowstride: rowstride,
-				pixels: pixels
-			);
-		}
-
-		internal static Icon? from_image_data (ImageData image) {
-			if (image.width == 0)
-				return null;
-			return new Icon (image.width, image.height, image.rowstride, new Bytes.take (Base64.decode (image.pixels)));
-		}
-
-		internal static ImageData to_image_data (Icon? icon) {
-			if (icon == null)
-				return ImageData.empty ();
-			return ImageData (icon.width, icon.height, icon.rowstride, Base64.encode (icon.pixels.get_data ()));
 		}
 	}
 

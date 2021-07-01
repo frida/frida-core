@@ -25,7 +25,7 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public Image? icon {
+		public Variant? icon {
 			get { return null; }
 		}
 
@@ -103,6 +103,11 @@ namespace Frida {
 		internal SystemServerAgent system_server_agent;
 		private CrashMonitor? crash_monitor;
 #endif
+
+#if !ANDROID
+		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
+#endif
+		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
 		public LinuxHostSession (owned LinuxHelper helper, owned TemporaryDirectory tempdir, bool report_crashes = true) {
 			Object (
@@ -214,24 +219,110 @@ namespace Frida {
 			return system_session_container;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var opts = FrontmostQueryOptions._deserialize (options);
 #if ANDROID
-			return yield system_server_agent.get_frontmost_application (cancellable);
+			var app = yield system_server_agent.get_frontmost_application (opts, cancellable);
+			if (app.pid == 0)
+				return app;
+
+			if (opts.scope != MINIMAL) {
+				var process_opts = new ProcessQueryOptions ();
+				process_opts.select_pid (app.pid);
+				process_opts.scope = METADATA;
+
+				var processes = yield process_enumerator.enumerate_processes (process_opts);
+				if (processes.length == 0)
+					return HostApplicationInfo.empty ();
+
+				add_app_process_state (app, processes[0].parameters);
+			}
+
+			return app;
 #else
-			return System.get_frontmost_application ();
+			return System.get_frontmost_application (opts);
 #endif
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+		public override async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var opts = ApplicationQueryOptions._deserialize (options);
 #if ANDROID
-			return yield system_server_agent.enumerate_applications (cancellable);
+			var apps = yield system_server_agent.enumerate_applications (opts, cancellable);
+
+			if (opts.scope != MINIMAL) {
+				var app_index_by_pid = new Gee.HashMap<uint, uint> ();
+				int i = 0;
+				foreach (var app in apps) {
+					if (app.pid != 0)
+						app_index_by_pid[app.pid] = i;
+					i++;
+				}
+
+				if (!app_index_by_pid.is_empty) {
+					var process_opts = new ProcessQueryOptions ();
+					foreach (uint pid in app_index_by_pid.keys)
+						process_opts.select_pid (pid);
+					process_opts.scope = METADATA;
+
+					var processes = yield process_enumerator.enumerate_processes (process_opts);
+
+					foreach (var process in processes) {
+						add_app_process_state (apps[app_index_by_pid[process.pid]], process.parameters);
+						app_index_by_pid.unset (process.pid);
+					}
+
+					foreach (uint index in app_index_by_pid.values)
+						apps[index].pid = 0;
+				}
+			}
+
+			return apps;
 #else
-			return System.enumerate_applications ();
+			return yield application_enumerator.enumerate_applications (opts);
 #endif
 		}
 
-		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-			return System.enumerate_processes ();
+#if ANDROID
+		private void add_app_process_state (HostApplicationInfo app, HashTable<string, Variant> process_params) {
+			var app_params = app.parameters;
+			app_params["user"] = process_params["user"];
+			app_params["ppid"] = process_params["ppid"];
+			app_params["started"] = process_params["started"];
+		}
+#endif
+
+		public override async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var opts = ProcessQueryOptions._deserialize (options);
+			var processes = yield process_enumerator.enumerate_processes (opts);
+
+#if ANDROID
+			var process_index_by_pid = new Gee.HashMap<uint, uint> ();
+			int i = 0;
+			foreach (var process in processes)
+				process_index_by_pid[process.pid] = i++;
+
+			var extra = yield system_server_agent.get_process_parameters (process_index_by_pid.keys.to_array (), opts.scope,
+				cancellable);
+
+			foreach (var entry in extra.entries) {
+				uint pid = entry.key;
+				HashTable<string, Variant> extra_parameters = entry.value;
+
+				uint index = process_index_by_pid[pid];
+				HashTable<string, Variant> parameters = processes[index].parameters;
+				extra_parameters.foreach ((key, val) => {
+					if (key == "$name")
+						processes[index].name = val.get_string ();
+					else
+						parameters[key] = val;
+				});
+			}
+#endif
+
+			return processes;
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -582,7 +673,7 @@ namespace Frida {
 			ensure_request = new Promise<bool> ();
 
 			try {
-				foreach (HostProcessInfo info in System.enumerate_processes ()) {
+				foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
 					var name = info.name;
 					if (name == "zygote" || name == "zygote64") {
 						var pid = info.pid;
@@ -671,7 +762,7 @@ namespace Frida {
 		}
 
 		public async void preload (Cancellable? cancellable) throws Error, IOError {
-			yield enumerate_applications (cancellable);
+			yield enumerate_applications (new ApplicationQueryOptions (), cancellable);
 
 			try {
 				yield get_process_name ("", 0, cancellable);
@@ -684,8 +775,12 @@ namespace Frida {
 			}
 		}
 
-		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
-			var result = yield call ("getFrontmostApplication", new Json.Node[] {}, cancellable);
+		public async HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options,
+				Cancellable? cancellable) throws Error, IOError {
+			var scope = options.scope;
+			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
+
+			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, cancellable);
 
 			if (result.get_node_type () == NULL)
 				return HostApplicationInfo.empty ();
@@ -694,88 +789,182 @@ namespace Frida {
 			var identifier = item.get_string_element (0);
 			var name = item.get_string_element (1);
 			var pid = (uint) item.get_int_element (2);
-			var no_icon = ImageData.empty ();
-			return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+			var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			if (scope != MINIMAL)
+				add_parameters_from_json (info.parameters, item.get_object_element (3));
+			return info;
 		}
 
-		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-			var apps = yield call ("enumerateApplications", new Json.Node[] {}, cancellable);
+		public async HostApplicationInfo[] enumerate_applications (ApplicationQueryOptions options,
+				Cancellable? cancellable) throws Error, IOError {
+			var identifiers_array = new Json.Array ();
+			options.enumerate_selected_identifiers (identifier => {
+				identifiers_array.add_string_element (identifier);
+			});
+			var identifiers_node = new Json.Node.alloc ().init_array (identifiers_array);
+
+			var scope = options.scope;
+			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
+
+			Json.Node apps = yield call ("enumerateApplications", new Json.Node[] { identifiers_node, scope_node },
+				cancellable);
 
 			var items = apps.get_array ();
 			var length = items.get_length ();
 
 			var result = new HostApplicationInfo[length];
-			var no_icon = ImageData.empty ();
 
 			for (var i = 0; i != length; i++) {
 				var item = items.get_array_element (i);
 				var identifier = item.get_string_element (0);
 				var name = item.get_string_element (1);
 				var pid = (uint) item.get_int_element (2);
-				result[i] = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+				var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+				if (scope != MINIMAL)
+					add_parameters_from_json (info.parameters, item.get_object_element (3));
+				result[i] = info;
 			}
 
 			return result;
 		}
 
 		public async string get_process_name (string package, int uid, Cancellable? cancellable) throws Error, IOError {
-			var package_name_value = new Json.Node.alloc ().init_string (package);
-			var uid_value = new Json.Node.alloc ().init_int (uid);
+			var package_name_node = new Json.Node.alloc ().init_string (package);
+			var uid_node = new Json.Node.alloc ().init_int (uid);
 
-			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value, uid_value }, cancellable);
+			Json.Node name = yield call ("getProcessName", new Json.Node[] { package_name_node, uid_node }, cancellable);
 
-			return process_name.get_string ();
+			return name.get_string ();
+		}
+
+		public async Gee.Map<uint, HashTable<string, Variant>> get_process_parameters (uint[] pids, Scope scope,
+				Cancellable? cancellable) throws Error, IOError {
+			var pids_array = new Json.Array ();
+			foreach (uint pid in pids)
+				pids_array.add_int_element ((int64) pid);
+			var pids_node = new Json.Node.alloc ().init_array (pids_array);
+
+			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
+
+			Json.Node by_pid = yield call ("getProcessParameters", new Json.Node[] { pids_node, scope_node }, cancellable);
+
+			var result = new Gee.HashMap<uint, HashTable<string, Variant>> ();
+			by_pid.get_object ().foreach_member ((object, pid_str, parameters_node) => {
+				uint pid = uint.parse (pid_str);
+
+				var parameters = make_parameters_dict ();
+				add_parameters_from_json (parameters, parameters_node.get_object ());
+
+				result[pid] = parameters;
+			});
+			return result;
 		}
 
 		public async void start_package (string package, PackageEntrypoint entrypoint, Cancellable? cancellable)
 				throws Error, IOError {
-			var package_value = new Json.Node.alloc ().init_string (package);
-			var uid_value = new Json.Node.alloc ().init_int (entrypoint.uid);
+			var package_node = new Json.Node.alloc ().init_string (package);
+			var uid_node = new Json.Node.alloc ().init_int (entrypoint.uid);
 
 			if (entrypoint is DefaultActivityEntrypoint) {
-				var activity_value = new Json.Node.alloc ();
-				activity_value.init_null ();
+				var activity_node = new Json.Node.alloc ().init_null ();
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value, uid_value }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, cancellable);
 			} else if (entrypoint is ActivityEntrypoint) {
 				var e = entrypoint as ActivityEntrypoint;
 
-				var activity_value = new Json.Node.alloc ();
-				activity_value.init_string (e.activity);
+				var activity_node = new Json.Node.alloc ().init_string (e.activity);
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value, uid_value }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, cancellable);
 			} else if (entrypoint is BroadcastReceiverEntrypoint) {
 				var e = entrypoint as BroadcastReceiverEntrypoint;
 
-				var receiver_value = new Json.Node.alloc ();
-				receiver_value.init_string (e.receiver);
+				var receiver_node = new Json.Node.alloc ().init_string (e.receiver);
+				var action_node = new Json.Node.alloc ().init_string (e.action);
 
-				var action_value = new Json.Node.alloc ();
-				action_value.init_string (e.action);
-
-				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value, uid_value }, cancellable);
+				yield call ("sendBroadcast", new Json.Node[] { package_node, receiver_node, action_node, uid_node },
+					cancellable);
 			} else {
 				assert_not_reached ();
 			}
 		}
 
 		public async void stop_package (string package, int uid, Cancellable? cancellable) throws Error, IOError {
-			var package_value = new Json.Node.alloc ().init_string (package);
-			var uid_value = new Json.Node.alloc ().init_int (uid);
+			var package_node = new Json.Node.alloc ().init_string (package);
+			var uid_node = new Json.Node.alloc ().init_int (uid);
 
-			yield call ("stopPackage", new Json.Node[] { package_value, uid_value }, cancellable);
+			yield call ("stopPackage", new Json.Node[] { package_node, uid_node }, cancellable);
 		}
 
 		public async bool try_stop_package_by_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
-			var pid_value = new Json.Node.alloc ().init_int (pid);
+			var pid_node = new Json.Node.alloc ().init_int (pid);
 
-			var success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_value }, cancellable);
+			Json.Node success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_node }, cancellable);
 
 			return success.get_boolean ();
 		}
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return LocalProcesses.get_pid ("system_server");
+		}
+
+		private static void add_parameters_from_json (HashTable<string, Variant> parameters, Json.Object object) {
+			var iter = Json.ObjectIter ();
+			unowned string name;
+			unowned Json.Node val;
+			iter.init (object);
+			while (iter.next (out name, out val)) {
+				if (name == "$icon") {
+					var png = new Bytes.take (Base64.decode (val.get_string ()));
+
+					var icons = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+					icons.open (VariantType.VARDICT);
+					icons.add ("{sv}", "format", new Variant.string ("png"));
+					icons.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), png.get_data (), true,
+						png));
+					icons.close ();
+
+					parameters["icons"] = icons.end ();
+
+					continue;
+				}
+
+				parameters[name] = variant_from_json (val);
+			}
+		}
+
+		private static Variant variant_from_json (Json.Node node) {
+			switch (node.get_node_type ()) {
+				case ARRAY: {
+					Json.Array array = node.get_array ();
+
+					uint length = array.get_length ();
+					assert (length >= 1);
+
+					var first_element = variant_from_json (array.get_element (0));
+					var builder = new VariantBuilder (new VariantType.array (first_element.get_type ()));
+					builder.add_value (first_element);
+					for (uint i = 1; i != length; i++)
+						builder.add_value (variant_from_json (array.get_element (i)));
+					return builder.end ();
+				}
+				case VALUE: {
+					Type type = node.get_value_type ();
+
+					if (type == typeof (string))
+						return new Variant.string (node.get_string ());
+
+					if (type == typeof (int64))
+						return new Variant.int64 (node.get_int ());
+
+					if (type == typeof (bool))
+						return new Variant.boolean (node.get_boolean ());
+
+					assert_not_reached ();
+				}
+				default:
+					assert_not_reached ();
+			}
 		}
 	}
 
@@ -1302,7 +1491,7 @@ namespace Frida {
 
 	namespace LocalProcesses {
 		internal uint find_pid (string name) {
-			foreach (HostProcessInfo info in System.enumerate_processes ()) {
+			foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
 				if (info.name == name)
 					return info.pid;
 			}

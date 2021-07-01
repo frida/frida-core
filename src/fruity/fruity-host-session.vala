@@ -141,14 +141,14 @@ namespace Frida {
 			devices.add (raw_id);
 
 			string? name = null;
-			ImageData? icon_data = null;
+			Variant? icon = null;
 
 			if (details.connection_type == USB) {
 				bool got_details = false;
 				for (int i = 1; !got_details && devices.contains (raw_id); i++) {
 					try {
 						_extract_details_for_device (details.product_id.raw_value, details.udid.raw_value,
-							out name, out icon_data);
+							out name, out icon);
 						got_details = true;
 					} catch (Error e) {
 						if (i != 20) {
@@ -184,8 +184,6 @@ namespace Frida {
 				name = "iOS Device [%s]".printf (details.network_address.address.to_string ());
 			}
 
-			var icon = Image.from_data (icon_data);
-
 			var provider = new FruityHostSessionProvider (name, icon, details);
 			providers[raw_id] = provider;
 
@@ -205,8 +203,8 @@ namespace Frida {
 			}
 		}
 
-		public extern static void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon)
-			throws Error;
+		public extern static void _extract_details_for_device (int product_id, string udid, out string name,
+			out Variant? icon) throws Error;
 	}
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider, ChannelProvider, FruityLockdownProvider {
@@ -218,7 +216,7 @@ namespace Frida {
 			get { return device_name; }
 		}
 
-		public Image? icon {
+		public Variant? icon {
 			get { return device_icon; }
 		}
 
@@ -235,7 +233,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Image? device_icon {
+		public Variant? device_icon {
 			get;
 			construct;
 		}
@@ -251,7 +249,7 @@ namespace Frida {
 
 		private const double MAX_LOCKDOWN_CLIENT_AGE = 30.0;
 
-		public FruityHostSessionProvider (string name, Image? icon, Fruity.DeviceDetails details) {
+		public FruityHostSessionProvider (string name, Variant? icon, Fruity.DeviceDetails details) {
 			Object (
 				device_name: name,
 				device_icon: icon,
@@ -551,71 +549,300 @@ namespace Frida {
 			return parameters;
 		}
 
-		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+		public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {
 				try {
-					return yield server.session.get_frontmost_application (cancellable);
+					return yield server.session.get_frontmost_application (options, cancellable);
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
 				}
 			}
 
-			var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
-			var processes = yield device_info.enumerate_processes (cancellable);
+			var opts = FrontmostQueryOptions._deserialize (options);
+			var scope = opts.scope;
 
-			var process = processes.first_match (p => p.foreground_running && p.is_application &&
-					!p.real_app_name.contains (".appex"));
+			var processes_request = new Promise<Gee.List<Fruity.ProcessInfo>> ();
+			var apps_request = new Promise<Gee.List<Fruity.ApplicationDetails>> ();
+			fetch_processes.begin (processes_request, cancellable);
+			fetch_apps.begin (apps_request, cancellable);
+
+			Gee.List<Fruity.ProcessInfo> processes = yield processes_request.future.wait_async (cancellable);
+			Fruity.ProcessInfo? process = null;
+			string? app_path = null;
+			foreach (Fruity.ProcessInfo candidate in processes) {
+				if (!candidate.foreground_running)
+					continue;
+
+				if (!candidate.is_application)
+					continue;
+
+				bool is_main_process;
+				string path = compute_app_path_from_executable_path (candidate.real_app_name, out is_main_process);
+				if (!is_main_process)
+					continue;
+
+				process = candidate;
+				app_path = path;
+				break;
+			}
 			if (process == null)
 				return HostApplicationInfo.empty ();
 
-			string app_path = compute_app_path_from_executable_path (process.real_app_name);
+			Gee.List<Fruity.ApplicationDetails> apps = yield apps_request.future.wait_async (cancellable);
+			Fruity.ApplicationDetails? app = apps.first_match (app => app.path == app_path);
+			if (app == null)
+				return HostApplicationInfo.empty ();
 
-			var application_listing = yield Fruity.ApplicationListingService.open (channel_provider, cancellable);
-			var query = new Fruity.NSDictionary ();
-			query.set_value ("BundlePath", new Fruity.NSString (app_path));
-			var apps = yield application_listing.enumerate_applications (query, cancellable);
-			if (apps.is_empty)
-				throw new Error.NOT_SUPPORTED ("Unable to resolve bundle path to bundle ID");
-			unowned string identifier = apps[0].bundle_identifier;
-			var no_icon = ImageData.empty ();
+			unowned string identifier = app.identifier;
 
-			return HostApplicationInfo (identifier, process.name, process.pid, no_icon, no_icon);
+			var info = HostApplicationInfo (identifier, app.name, process.pid, make_parameters_dict ());
+
+			if (scope != MINIMAL) {
+				add_app_metadata (info.parameters, app);
+
+				add_process_metadata (info.parameters, process);
+
+				if (scope == FULL) {
+					try {
+						var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+						var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
+
+						Bytes png = yield springboard.get_icon_png_data (identifier);
+						add_app_icons (info.parameters, png);
+					} catch (Fruity.SpringboardServicesError e) {
+						throw new Error.NOT_SUPPORTED ("%s", e.message);
+					}
+				}
+			}
+
+			return info;
 		}
 
-		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {
 				try {
-					return yield server.session.enumerate_applications (cancellable);
+					return yield server.session.enumerate_applications (options, cancellable);
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
 				}
 			}
 
-			var apps_request = new Promise<Gee.ArrayList<Fruity.ApplicationDetails>> ();
+			var opts = ApplicationQueryOptions._deserialize (options);
+			var scope = opts.scope;
+
+			var apps_request = new Promise<Gee.List<Fruity.ApplicationDetails>> ();
+			var processes_request = new Promise<Gee.List<Fruity.ProcessInfo>> ();
 			fetch_apps.begin (apps_request, cancellable);
+			fetch_processes.begin (processes_request, cancellable);
 
-			var pids_request = new Promise<Gee.HashMap<string, uint>> ();
-			fetch_pids.begin (pids_request, cancellable);
+			Gee.List<Fruity.ApplicationDetails> apps = yield apps_request.future.wait_async (cancellable);
+			apps = maybe_filter_apps (apps, opts);
 
-			var apps = yield apps_request.future.wait_async (cancellable);
-			var pids = yield pids_request.future.wait_async (cancellable);
+			Gee.Map<string, Bytes>? icons = null;
+			if (scope == FULL) {
+				try {
+					var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
 
-			var no_icon = ImageData.empty ();
+					var app_ids = new Gee.ArrayList<string> ();
+					foreach (var app in apps)
+						app_ids.add (app.identifier);
+
+					icons = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
+				} catch (Fruity.SpringboardServicesError e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+			}
+
+			Gee.List<Fruity.ProcessInfo> processes = yield processes_request.future.wait_async (cancellable);
+			var process_by_app_path = new Gee.HashMap<string, Fruity.ProcessInfo> ();
+			foreach (Fruity.ProcessInfo process in processes) {
+				bool is_main_process;
+				string app_path = compute_app_path_from_executable_path (process.real_app_name, out is_main_process);
+				if (is_main_process)
+					process_by_app_path[app_path] = process;
+			}
 
 			var result = new HostApplicationInfo[apps.size];
 			int i = 0;
-			foreach (var app in apps) {
-				uint pid = pids[app.path];
-				result[i] = HostApplicationInfo (app.identifier, app.name, pid, no_icon, no_icon);
+			foreach (Fruity.ApplicationDetails app in apps) {
+				unowned string identifier = app.identifier;
+				Fruity.ProcessInfo? process = process_by_app_path[app.path];
+
+				var info = HostApplicationInfo (identifier, app.name, (process != null) ? process.pid : 0,
+					make_parameters_dict ());
+
+				if (scope != MINIMAL) {
+					add_app_metadata (info.parameters, app);
+
+					if (process != null) {
+						add_app_state (info.parameters, process);
+
+						add_process_metadata (info.parameters, process);
+					}
+				}
+
+				if (scope == FULL)
+					add_app_icons (info.parameters, icons[identifier]);
+
+				result[i] = info;
 				i++;
 			}
 
 			if (server != null && server.flavor == GADGET) {
+				bool gadget_is_selected = true;
+				if (opts.has_selected_identifiers ()) {
+					gadget_is_selected = false;
+					opts.enumerate_selected_identifiers (identifier => {
+						if (identifier == "re.frida.Gadget")
+							gadget_is_selected = true;
+					});
+				}
+
+				if (gadget_is_selected) {
+					try {
+						foreach (var app in yield server.session.enumerate_applications (options, cancellable))
+							result += app;
+					} catch (GLib.Error e) {
+					}
+				}
+			}
+
+			return result;
+		}
+
+		public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null && server.flavor == REGULAR) {
 				try {
-					foreach (var app in yield server.session.enumerate_applications (cancellable))
-						result += app;
+					return yield server.session.enumerate_processes (options, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
+
+			var opts = ProcessQueryOptions._deserialize (options);
+			var scope = opts.scope;
+
+			var processes_request = new Promise<Gee.List<Fruity.ProcessInfo>> ();
+			var apps_request = new Promise<Gee.List<Fruity.ApplicationDetails>> ();
+			fetch_processes.begin (processes_request, cancellable);
+			fetch_apps.begin (apps_request, cancellable);
+
+			Gee.List<Fruity.ProcessInfo> processes = yield processes_request.future.wait_async (cancellable);
+			processes = maybe_filter_processes (processes, opts);
+
+			Gee.List<Fruity.ApplicationDetails> apps = yield apps_request.future.wait_async (cancellable);
+			var app_by_path = new Gee.HashMap<string, Fruity.ApplicationDetails> ();
+			foreach (var app in apps)
+				app_by_path[app.path] = app;
+
+			var app_ids = new Gee.ArrayList<string> ();
+			var app_pids = new Gee.ArrayList<uint> ();
+			var app_by_main_pid = new Gee.HashMap<uint, Fruity.ApplicationDetails> ();
+			var app_by_related_pid = new Gee.HashMap<uint, Fruity.ApplicationDetails> ();
+			foreach (Fruity.ProcessInfo process in processes) {
+				unowned string executable_path = process.real_app_name;
+
+				bool is_main_process;
+				string app_path = compute_app_path_from_executable_path (executable_path, out is_main_process);
+
+				Fruity.ApplicationDetails? app = app_by_path[app_path];
+				if (app != null) {
+					uint pid = process.pid;
+
+					if (is_main_process) {
+						app_ids.add (app.identifier);
+						app_pids.add (pid);
+						app_by_main_pid[pid] = app;
+					} else {
+						app_by_related_pid[pid] = app;
+					}
+				}
+			}
+
+			Gee.Map<uint, Bytes>? icon_by_pid = null;
+			if (scope == FULL) {
+				icon_by_pid = new Gee.HashMap<uint, Bytes> ();
+
+				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				try {
+					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
+
+					var pngs = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
+
+					int i = 0;
+					foreach (string app_id in app_ids) {
+						icon_by_pid[app_pids[i]] = pngs[app_id];
+						i++;
+					}
+				} catch (Fruity.SpringboardServicesError e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+			}
+
+			var result = new HostProcessInfo[processes.size];
+			int i = 0;
+			foreach (Fruity.ProcessInfo process in processes) {
+				uint pid = process.pid;
+				if (pid == 0)
+					continue;
+
+				Fruity.ApplicationDetails? app = app_by_main_pid[pid];
+				string name = (app != null) ? app.name : process.name;
+
+				var info = HostProcessInfo (pid, name, make_parameters_dict ());
+
+				if (scope != MINIMAL) {
+					var parameters = info.parameters;
+
+					add_process_metadata (parameters, process);
+
+					parameters["path"] = process.real_app_name;
+
+					Fruity.ApplicationDetails? related_app = (app != null) ? app : app_by_related_pid[pid];
+					if (related_app != null) {
+						string[] applications = { related_app.identifier };
+						parameters["applications"] = applications;
+					}
+
+					if (process.foreground_running)
+						parameters["frontmost"] = true;
+				}
+
+				if (scope == FULL) {
+					Bytes? png = icon_by_pid[pid];
+					if (png != null)
+						add_app_icons (info.parameters, png);
+				}
+
+				result[i] = info;
+				i++;
+			}
+			if (i < processes.size)
+				result.resize (i);
+
+			if (server != null && server.flavor == GADGET) {
+				try {
+					foreach (var process in yield server.session.enumerate_processes (options, cancellable)) {
+						bool gadget_is_selected = true;
+						if (opts.has_selected_pids ()) {
+							gadget_is_selected = false;
+							uint gadget_pid = process.pid;
+							opts.enumerate_selected_pids (pid => {
+								if (pid == gadget_pid)
+									gadget_is_selected = true;
+							});
+						}
+
+						if (gadget_is_selected)
+							result += process;
+					}
 				} catch (GLib.Error e) {
 				}
 			}
@@ -623,7 +850,7 @@ namespace Frida {
 			return result;
 		}
 
-		private async void fetch_apps (Promise<Gee.ArrayList<Fruity.ApplicationDetails>> promise, Cancellable? cancellable) {
+		private async void fetch_apps (Promise<Gee.List<Fruity.ApplicationDetails>> promise, Cancellable? cancellable) {
 			try {
 				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
 				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
@@ -640,17 +867,13 @@ namespace Frida {
 			}
 		}
 
-		private async void fetch_pids (Promise<Gee.HashMap<string, uint>> promise, Cancellable? cancellable) {
+		private async void fetch_processes (Promise<Gee.List<Fruity.ProcessInfo>> promise, Cancellable? cancellable) {
 			try {
 				var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
 
 				var processes = yield device_info.enumerate_processes (cancellable);
 
-				var pids = new Gee.HashMap<string, uint> ();
-				foreach (var process in processes)
-					pids[compute_app_path_from_executable_path (process.real_app_name)] = process.pid;
-
-				promise.resolve (pids);
+				promise.resolve (processes);
 			} catch (Error e) {
 				promise.reject (e);
 			} catch (IOError e) {
@@ -658,55 +881,103 @@ namespace Frida {
 			}
 		}
 
-		private static string compute_app_path_from_executable_path (string executable_path) {
+		private Gee.List<Fruity.ApplicationDetails> maybe_filter_apps (Gee.List<Fruity.ApplicationDetails> apps,
+				ApplicationQueryOptions options) {
+			if (!options.has_selected_identifiers ())
+				return apps;
+
+			var app_by_identifier = new Gee.HashMap<string, Fruity.ApplicationDetails> ();
+			foreach (Fruity.ApplicationDetails app in apps)
+				app_by_identifier[app.identifier] = app;
+
+			var filtered_apps = new Gee.ArrayList<Fruity.ApplicationDetails> ();
+			options.enumerate_selected_identifiers (identifier => {
+				Fruity.ApplicationDetails? app = app_by_identifier[identifier];
+				if (app != null)
+					filtered_apps.add (app);
+			});
+
+			return filtered_apps;
+		}
+
+		private Gee.List<Fruity.ProcessInfo> maybe_filter_processes (Gee.List<Fruity.ProcessInfo> processes,
+				ProcessQueryOptions options) {
+			if (!options.has_selected_pids ())
+				return processes;
+
+			var process_by_pid = new Gee.HashMap<uint, Fruity.ProcessInfo> ();
+			foreach (Fruity.ProcessInfo process in processes)
+				process_by_pid[process.pid] = process;
+
+			var filtered_processes = new Gee.ArrayList<Fruity.ProcessInfo> ();
+			options.enumerate_selected_pids (pid => {
+				Fruity.ProcessInfo? process = process_by_pid[pid];
+				if (process != null)
+					filtered_processes.add (process);
+			});
+
+			return filtered_processes;
+		}
+
+		private static string compute_app_path_from_executable_path (string executable_path, out bool is_main_process) {
 			string app_path = executable_path;
-			if (app_path.has_prefix ("/var/containers"))
-				app_path = "/private" + app_path;
 
 			int dot_app_start = app_path.last_index_of (".app/");
-			if (dot_app_start != -1)
+			if (dot_app_start != -1) {
 				app_path = app_path[0:dot_app_start + 4];
+
+				string subpath = executable_path[app_path.length + 1:];
+				is_main_process = !("/" in subpath);
+			} else {
+				is_main_process = false;
+			}
 
 			return app_path;
 		}
 
-		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-			var server = yield try_get_remote_server (cancellable);
-			if (server != null && server.flavor == REGULAR) {
-				try {
-					return yield server.session.enumerate_processes (cancellable);
-				} catch (GLib.Error e) {
-					throw_dbus_error (e);
-				}
+		private void add_app_metadata (HashTable<string, Variant> parameters, Fruity.ApplicationDetails app) {
+			string? version = app.version;
+			if (version != null)
+				parameters["version"] = version;
+
+			string? build = app.build;
+			if (build != null)
+				parameters["build"] = build;
+
+			parameters["path"] = app.path;
+
+			Gee.Map<string, string> containers = app.containers;
+			if (!containers.is_empty) {
+				var containers_dict = new VariantBuilder (VariantType.VARDICT);
+				foreach (var entry in containers.entries)
+					containers_dict.add ("{sv}", entry.key, new Variant.string (entry.value));
+				parameters["containers"] = containers_dict.end ();
 			}
 
-			var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
+			if (app.debuggable)
+				parameters["debuggable"] = true;
+		}
 
-			var processes = yield device_info.enumerate_processes (cancellable);
+		private void add_app_state (HashTable<string, Variant> parameters, Fruity.ProcessInfo process) {
+			if (process.foreground_running)
+				parameters["frontmost"] = true;
+		}
 
-			var no_icon = ImageData.empty ();
+		private void add_app_icons (HashTable<string, Variant> parameters, Bytes png) {
+			var icons = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
 
-			var result = new HostProcessInfo[processes.size];
-			int i = 0;
-			foreach (var process in processes) {
-				var pid = process.pid;
-				if (pid == 0)
-					continue;
-				result[i] = HostProcessInfo (pid, process.name, no_icon, no_icon);
-				i++;
-			}
-			if (i < processes.size)
-				result.resize (i);
+			icons.open (VariantType.VARDICT);
+			icons.add ("{sv}", "format", new Variant.string ("png"));
+			icons.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), png.get_data (), true, png));
+			icons.close ();
 
-			if (server != null && server.flavor == GADGET) {
-				try {
-					foreach (var process in yield server.session.enumerate_processes (cancellable))
-						result += process;
-				} catch (GLib.Error e) {
-				}
-			}
+			parameters["icons"] = icons.end ();
+		}
 
-			return result;
+		private void add_process_metadata (HashTable<string, Variant> parameters, Fruity.ProcessInfo? process) {
+			DateTime? started = process.start_date;
+			if (started != null)
+				parameters["started"] = started.format_iso8601 ();
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -1125,7 +1396,7 @@ namespace Frida {
 
 				RemoteServer.Flavor flavor = REGULAR;
 				try {
-					var app = yield session.get_frontmost_application (cancellable);
+					var app = yield session.get_frontmost_application (make_parameters_dict (), cancellable);
 					if (app.identifier == GADGET_APP_ID)
 						flavor = GADGET;
 				} catch (GLib.Error e) {

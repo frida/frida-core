@@ -3,12 +3,9 @@
 #include "frida-base.h"
 
 void
-_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, FridaImageData ** icon, GError ** error)
+_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, GVariant ** icon,
+    GError ** error)
 {
-  FridaImageData no_icon = { 0, };
-
-  no_icon.pixels = "";
-
   *name = g_strdup ("iOS Device");
-  *icon = frida_image_data_dup (&no_icon);
+  *icon = NULL;
 }

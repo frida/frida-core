@@ -370,7 +370,7 @@ namespace Frida.HostSessionTest {
 				get { return "Stub"; }
 			}
 
-			public Image? icon {
+			public Variant? icon {
 				get { return null; }
 			}
 
@@ -1387,8 +1387,8 @@ namespace Frida.HostSessionTest {
 
 				var session = yield prov.create (null, cancellable);
 
-				var applications = yield session.enumerate_applications (cancellable);
-				var processes = yield session.enumerate_processes (cancellable);
+				var applications = yield session.enumerate_applications (make_parameters_dict (), cancellable);
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -1606,12 +1606,17 @@ namespace Frida.HostSessionTest {
 			assert_true (prov.name == "Local System");
 
 			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
-				var icon = prov.icon;
+				Variant? icon = prov.icon;
 				assert_nonnull (icon);
-				var icon_data = icon.data;
-				assert_true (icon_data.width == 16 && icon_data.height == 16);
-				assert_true (icon_data.rowstride == icon_data.width * 4);
-				assert_true (icon_data.pixels.length > 0);
+				var dict = new VariantDict (icon);
+				int64 width, height;
+				assert_true (dict.lookup ("width", "x", out width));
+				assert_true (dict.lookup ("height", "x", out height));
+				assert_true (width == 16);
+				assert_true (height == 16);
+				VariantIter image;
+				assert_true (dict.lookup ("image", "ay", out image));
+				assert_true (image.n_children () == width * height * 4);
 			}
 
 			try {
@@ -1619,8 +1624,8 @@ namespace Frida.HostSessionTest {
 
 				var session = yield prov.create (null, cancellable);
 
-				var applications = yield session.enumerate_applications (cancellable);
-				var processes = yield session.enumerate_processes (cancellable);
+				var applications = yield session.enumerate_applications (make_parameters_dict (), cancellable);
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -2833,19 +2838,24 @@ namespace Frida.HostSessionTest {
 
 			assert_true (prov.name == "Local System");
 
-			var icon = prov.icon;
+			Variant? icon = prov.icon;
 			assert_nonnull (icon);
-			var icon_data = icon.data;
-			assert_true (icon_data.width == 16 && icon_data.height == 16);
-			assert_true (icon_data.rowstride == icon_data.width * 4);
-			assert_true (icon_data.pixels.length > 0);
+			var dict = new VariantDict (icon);
+			int64 width, height;
+			assert_true (dict.lookup ("width", "x", out width));
+			assert_true (dict.lookup ("height", "x", out height));
+			assert_true (width == 16);
+			assert_true (height == 16);
+			VariantIter image;
+			assert_true (dict.lookup ("image", "ay", out image));
+			assert_true (image.n_children () == width * height * 4);
 
 			try {
 				Cancellable? cancellable = null;
 
 				var session = yield prov.create (null, cancellable);
 
-				var processes = yield session.enumerate_processes (cancellable);
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -3101,18 +3111,23 @@ namespace Frida.HostSessionTest {
 			assert_true (prov.name != "iOS Device"); /* should manage to extract a user-defined name */
 #endif
 
-			var icon = prov.icon;
+			Variant? icon = prov.icon;
 			assert_nonnull (icon);
-			var icon_data = icon.data;
-			assert_true (icon_data.width == 16 && icon_data.height == 16);
-			assert_true (icon_data.rowstride == icon_data.width * 4);
-			assert_true (icon_data.pixels.length > 0);
+			var dict = new VariantDict (icon);
+			int64 width, height;
+			assert_true (dict.lookup ("width", "x", out width));
+			assert_true (dict.lookup ("height", "x", out height));
+			assert_true (width == 16);
+			assert_true (height == 16);
+			VariantIter image;
+			assert_true (dict.lookup ("image", "ay", out image));
+			assert_true (image.n_children () == width * height * 4);
 
 			try {
 				Cancellable? cancellable = null;
 
 				var session = yield prov.create (null, cancellable);
-				var processes = yield session.enumerate_processes (cancellable);
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -3146,7 +3161,7 @@ namespace Frida.HostSessionTest {
 				stdout.printf ("connecting to frida-server\n");
 				var host_session = yield prov.create (null, cancellable);
 				stdout.printf ("enumerating processes\n");
-				var processes = yield host_session.enumerate_processes (cancellable);
+				var processes = yield host_session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				HostProcessInfo? process = null;
@@ -3465,18 +3480,23 @@ namespace Frida.HostSessionTest {
 
 			assert_true (prov.name != "Android Device");
 
-			var icon = prov.icon;
+			Variant? icon = prov.icon;
 			assert_nonnull (icon);
-			var icon_data = icon.data;
-			assert_true (icon_data.width == 16 && icon_data.height == 16);
-			assert_true (icon_data.rowstride == icon_data.width * 4);
-			assert_true (icon_data.pixels.length > 0);
+			var dict = new VariantDict (icon);
+			int64 width, height;
+			assert_true (dict.lookup ("width", "x", out width));
+			assert_true (dict.lookup ("height", "x", out height));
+			assert_true (width == 16);
+			assert_true (height == 16);
+			VariantIter image;
+			assert_true (dict.lookup ("image", "ay", out image));
+			assert_true (image.n_children () == width * height * 4);
 
 			try {
 				Cancellable? cancellable = null;
 
 				var session = yield prov.create (null, cancellable);
-				var processes = yield session.enumerate_processes (cancellable);
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {

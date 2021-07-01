@@ -17,28 +17,22 @@ struct _FindMainWindowCtx
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 
-FridaImageData *
-_frida_image_data_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSize size)
+GVariant *
+_frida_icon_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSize size)
 {
-  FridaImageData * icon;
+  GVariant * icon;
 
-  icon = _frida_image_data_from_process (pid, size);
+  icon = _frida_icon_from_process (pid, size);
   if (icon == NULL)
-    icon = _frida_image_data_from_file (filename, size);
-
-  if (icon == NULL)
-  {
-    icon = g_new (FridaImageData, 1);
-    frida_image_data_init_empty (icon);
-  }
+    icon = _frida_icon_from_file (filename, size);
 
   return icon;
 }
 
-FridaImageData *
-_frida_image_data_from_process (DWORD pid, FridaIconSize size)
+GVariant *
+_frida_icon_from_process (DWORD pid, FridaIconSize size)
 {
-  FridaImageData * result = NULL;
+  GVariant * result = NULL;
   HICON icon = NULL;
   HWND main_window;
 
@@ -85,15 +79,15 @@ _frida_image_data_from_process (DWORD pid, FridaIconSize size)
   }
 
   if (icon != NULL)
-    result = _frida_image_data_from_native_icon_handle (icon, size);
+    result = _frida_icon_from_native_icon_handle (icon, size);
 
   return result;
 }
 
-FridaImageData *
-_frida_image_data_from_file (WCHAR * filename, FridaIconSize size)
+GVariant *
+_frida_icon_from_file (WCHAR * filename, FridaIconSize size)
 {
-  FridaImageData * result = NULL;
+  GVariant * result = NULL;
   SHFILEINFO shfi = { 0, };
   UINT flags;
 
@@ -107,18 +101,22 @@ _frida_image_data_from_file (WCHAR * filename, FridaIconSize size)
 
   SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi), flags);
   if (shfi.hIcon != NULL)
-    result = _frida_image_data_from_native_icon_handle (shfi.hIcon, size);
+  {
+    result = _frida_icon_from_native_icon_handle (shfi.hIcon, size);
+
+    DestroyIcon (shfi.hIcon);
+  }
 
   return result;
 }
 
-FridaImageData *
-_frida_image_data_from_resource_url (WCHAR * resource_url, FridaIconSize size)
+GVariant *
+_frida_icon_from_resource_url (WCHAR * resource_url, FridaIconSize size)
 {
   static gboolean api_initialized = FALSE;
   static Wow64DisableWow64FsRedirectionFunc Wow64DisableWow64FsRedirectionImpl = NULL;
   static Wow64RevertWow64FsRedirectionFunc Wow64RevertWow64FsRedirectionImpl = NULL;
-  FridaImageData * result = NULL;
+  GVariant * result = NULL;
   WCHAR * resource_file = NULL;
   DWORD resource_file_length;
   WCHAR * p;
@@ -166,7 +164,7 @@ _frida_image_data_from_resource_url (WCHAR * resource_url, FridaIconSize size)
   if (ret != 1)
     goto beach;
 
-  result = _frida_image_data_from_native_icon_handle (icon, size);
+  result = _frida_icon_from_native_icon_handle (icon, size);
 
 beach:
   if (icon != NULL)
@@ -176,18 +174,18 @@ beach:
   return result;
 }
 
-FridaImageData *
-_frida_image_data_from_native_icon_handle (HICON icon, FridaIconSize size)
+GVariant *
+_frida_icon_from_native_icon_handle (HICON icon, FridaIconSize size)
 {
-  FridaImageData * result;
+  GVariant * result;
   HDC dc;
   gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };
   guint rowstride;
   guchar * data = NULL;
-  gchar * data_base64;
   HBITMAP bm;
   guint i;
+  GVariantBuilder builder;
 
   dc = CreateCompatibleDC (NULL);
 
@@ -234,10 +232,13 @@ _frida_image_data_from_native_icon_handle (HICON icon, FridaIconSize size)
     data[i + 2] = hold;
   }
 
-  result = g_new (FridaImageData, 1);
-  data_base64 = g_base64_encode (data, rowstride * height);
-  frida_image_data_init (result, width, height, width * 4, data_base64);
-  g_free (data_base64);
+  g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
+  g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (height));
+  g_variant_builder_add (&builder, "{sv}", "image",
+      g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, data, rowstride * height, sizeof (guint8)));
+  result = g_variant_ref_sink (g_variant_builder_end (&builder));
 
   DeleteObject (bm);
 

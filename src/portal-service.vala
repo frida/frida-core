@@ -565,28 +565,24 @@ namespace Frida {
 			}
 		}
 
-		private HostApplicationInfo[] enumerate_applications (ControlChannel requester) {
+		private HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options, ControlChannel requester) {
 			var result = new HostApplicationInfo[node_by_pid.size];
 			int i = 0;
 			all_nodes_accessible_by (requester).foreach (node => {
 				Application app = node.application;
-				result[i++] = HostApplicationInfo (app.identifier, app.name, app.pid,
-					Icon.to_image_data (app.small_icon),
-					Icon.to_image_data (app.large_icon));
+				result[i++] = HostApplicationInfo (app.identifier, app.name, app.pid, app.parameters);
 				return true;
 			});
 			result.length = i;
 			return result;
 		}
 
-		private HostProcessInfo[] enumerate_processes (ControlChannel requester) {
+		private HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options, ControlChannel requester) {
 			var result = new HostProcessInfo[node_by_pid.size];
 			int i = 0;
 			all_nodes_accessible_by (requester).foreach (node => {
 				Application app = node.application;
-				result[i++] = HostProcessInfo (app.pid, app.name,
-					Icon.to_image_data (app.small_icon),
-					Icon.to_image_data (app.large_icon));
+				result[i++] = HostProcessInfo (app.pid, app.name, app.parameters);
 				return true;
 			});
 			result.length = i;
@@ -770,9 +766,7 @@ namespace Frida {
 				candidate = "%s[%u]".printf (real_identifier, serial++);
 			string identifier = candidate;
 
-			node.application = new Application (identifier, app.name, pid,
-				Icon.from_image_data (app.small_icon),
-				Icon.from_image_data (app.large_icon));
+			node.application = new Application (identifier, app.name, pid, app.parameters);
 
 			node_by_pid[pid] = node;
 			node_by_identifier[identifier] = node;
@@ -895,10 +889,10 @@ namespace Frida {
 			}
 			private string _name = "Portal";
 
-			public Image? icon {
+			public Variant? icon {
 				get { return _icon; }
 			}
-			private Image _icon = new Image (ImageData (16, 16, 16 * 4, "AAAAAAAAAAAAAAAAOjo6Dzo6OhQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6TZCHbvlycnL4Ojo6iTo6OhMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6aa6fdv7878f/+/Te/93d3f9xcXH3Ojo6gTo6Og8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6F4KAfv//5Hn//fHK//r6+v/39/f/9/f3/9LS0v9kZGTzOjo6eDo6OgsAAAAAAAAAAAAAAAAAAAAAAAAAADo6Og6Tk5P/zc3N//z8/P/6+vr/8PDw/+7u7v/p6en/9PT0/8jIyP9XV1f2Ojo6SgAAAAAAAAAAAAAAAAAAAAA6OjoIb29v/8HBwf+5ubn/9/f3/+/v7//p6en/+Pj4/+np6f/o6Oj/4ODg/z09PcsAAAAAAAAAAAAAAAAAAAAAAAAAAjMzM1p8fHz/wsLC/7CwsP/x8fH/8/P0/9zc3f/09PT/+vr6/8vLy/9AQEDFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALS0tV2pqav7BwcH/rq6u/+bm5v/09PT/s7Oz/93d3f/R0dL/VVVVygAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAjIyNRWlpa+7+/v/+wsLD/oaGh/4iIiP9NTU7/VVVW/0BAQf89PT61Pj4/BgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABsbG09NTU32urq6/4yMjP9ycnL/Pj4//1BQUf9tbW7/XFxd/z4+P8M+Pj8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAExMTTD09PfBzc3P/LCwsvDAwMbVEREX/f3+A/6ioqf9tbW7zPj4/lAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANDQ0vGRkZggAAAAAAAAAAJycnh0NDRP2GhojujIyP4EtLS4k/Pz8YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAjIyRoRUVFq21tbp5TU1ZUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACkpK10AAAAWAAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
+			private Variant _icon;
 
 			public HostSessionProviderKind kind {
 				get { return HostSessionProviderKind.LOCAL; }
@@ -908,6 +902,16 @@ namespace Frida {
 
 			public PortalHostSessionProvider (PortalService parent) {
 				Object (parent: parent);
+			}
+
+			construct {
+				var builder = new VariantBuilder (VariantType.VARDICT);
+				builder.add ("{sv}", "format", new Variant.string ("rgba"));
+				builder.add ("{sv}", "width", new Variant.int64 (16));
+				builder.add ("{sv}", "height", new Variant.int64 (16));
+				var image = new Bytes (Base64.decode ("AAAAAAAAAAAAAAAAOjo6Dzo6OhQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6TZCHbvlycnL4Ojo6iTo6OhMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6aa6fdv7878f/+/Te/93d3f9xcXH3Ojo6gTo6Og8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOjo6F4KAfv//5Hn//fHK//r6+v/39/f/9/f3/9LS0v9kZGTzOjo6eDo6OgsAAAAAAAAAAAAAAAAAAAAAAAAAADo6Og6Tk5P/zc3N//z8/P/6+vr/8PDw/+7u7v/p6en/9PT0/8jIyP9XV1f2Ojo6SgAAAAAAAAAAAAAAAAAAAAA6OjoIb29v/8HBwf+5ubn/9/f3/+/v7//p6en/+Pj4/+np6f/o6Oj/4ODg/z09PcsAAAAAAAAAAAAAAAAAAAAAAAAAAjMzM1p8fHz/wsLC/7CwsP/x8fH/8/P0/9zc3f/09PT/+vr6/8vLy/9AQEDFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALS0tV2pqav7BwcH/rq6u/+bm5v/09PT/s7Oz/93d3f/R0dL/VVVVygAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAjIyNRWlpa+7+/v/+wsLD/oaGh/4iIiP9NTU7/VVVW/0BAQf89PT61Pj4/BgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABsbG09NTU32urq6/4yMjP9ycnL/Pj4//1BQUf9tbW7/XFxd/z4+P8M+Pj8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAExMTTD09PfBzc3P/LCwsvDAwMbVEREX/f3+A/6ioqf9tbW7zPj4/lAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANDQ0vGRkZggAAAAAAAAAAJycnh0NDRP2GhojujIyP4EtLS4k/Pz8YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAjIyRoRUVFq21tbp5TU1ZUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACkpK10AAAAWAAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
+				builder.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), image.get_data (), true, image));
+				_icon = builder.end ();
 			}
 
 			public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
@@ -1166,16 +1170,19 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}
 
-			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+			public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
 			}
 
-			public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-				return parent.enumerate_applications (this);
+			public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
+				return parent.enumerate_applications (options, this);
 			}
 
-			public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-				return parent.enumerate_processes (this);
+			public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
+				return parent.enumerate_processes (options, this);
 			}
 
 			public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

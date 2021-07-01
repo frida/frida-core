@@ -330,6 +330,7 @@ fruity_sources = [
   'fruity/dtx.vala',
   'fruity/lockdown.vala',
   'fruity/installation-proxy.vala',
+  'fruity/springboard-services.vala',
   'fruity/lldb.vala',
   'fruity/injector.vala',
   'fruity/usbmux.vala',

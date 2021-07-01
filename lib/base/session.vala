@@ -4,9 +4,12 @@ namespace Frida {
 		public abstract async void ping (uint interval_seconds, Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws GLib.Error;
-		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error;
-		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error;
-		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
@@ -203,15 +206,18 @@ namespace Frida {
 			throw_not_authorized ();
 		}
 
-		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+		public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
-		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
-		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
+		public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
@@ -437,72 +443,192 @@ namespace Frida {
 		public string identifier;
 		public string name;
 		public uint pid;
-		public ImageData small_icon;
-		public ImageData large_icon;
+		public HashTable<string, Variant> parameters;
 
-		public HostApplicationInfo (string identifier, string name, uint pid, ImageData small_icon, ImageData large_icon) {
+		public HostApplicationInfo (string identifier, string name, uint pid, owned HashTable<string, Variant> parameters) {
 			this.identifier = identifier;
 			this.name = name;
 			this.pid = pid;
-			this.small_icon = small_icon;
-			this.large_icon = large_icon;
+			this.parameters = parameters;
 		}
 
 		public HostApplicationInfo.empty () {
 			this.identifier = "";
 			this.name = "";
 			this.pid = 0;
-			this.small_icon = ImageData.empty ();
-			this.large_icon = ImageData.empty ();
+			this.parameters = make_parameters_dict ();
 		}
 	}
 
 	public struct HostProcessInfo {
 		public uint pid;
 		public string name;
-		public ImageData small_icon;
-		public ImageData large_icon;
+		public HashTable<string, Variant> parameters;
 
-		public HostProcessInfo (uint pid, string name, ImageData small_icon, ImageData large_icon) {
+		public HostProcessInfo (uint pid, string name, owned HashTable<string, Variant> parameters) {
 			this.pid = pid;
 			this.name = name;
-			this.small_icon = small_icon;
-			this.large_icon = large_icon;
+			this.parameters = parameters;
 		}
 	}
 
-	public class Image : Object {
-		public ImageData data;
-
-		public Image (ImageData data) {
-			this.data = data;
+	public class FrontmostQueryOptions : Object {
+		public Scope scope {
+			get;
+			set;
+			default = MINIMAL;
 		}
 
-		public static Image? from_data (ImageData? data) {
-			if (data == null)
-				return null;
-			return new Image (data);
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_parameters_dict ();
+
+			if (scope != MINIMAL)
+				dict["scope"] = new Variant.string (scope.to_nick ());
+
+			return dict;
+		}
+
+		public static FrontmostQueryOptions _deserialize (HashTable<string, Variant> dict) throws Error {
+			var options = new FrontmostQueryOptions ();
+
+			Variant? scope = dict["scope"];
+			if (scope != null) {
+				if (!scope.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'scope' option must be a string");
+				options.scope = Scope.from_nick (scope.get_string ());
+			}
+
+			return options;
 		}
 	}
 
-	public struct ImageData {
-		public int width;
-		public int height;
-		public int rowstride;
-		public string pixels;
-
-		public ImageData (int width, int height, int rowstride, string pixels) {
-			this.width = width;
-			this.height = height;
-			this.rowstride = rowstride;
-			this.pixels = pixels;
+	public class ApplicationQueryOptions : Object {
+		public Scope scope {
+			get;
+			set;
+			default = MINIMAL;
 		}
 
-		public ImageData.empty () {
-			this.width = 0;
-			this.height = 0;
-			this.rowstride = 0;
-			this.pixels = "";
+		private Gee.List<string> identifiers = new Gee.ArrayList<string> ();
+
+		public void select_identifier (string identifier) {
+			identifiers.add (identifier);
+		}
+
+		public bool has_selected_identifiers () {
+			return !identifiers.is_empty;
+		}
+
+		public void enumerate_selected_identifiers (Func<string> func) {
+			foreach (var identifier in identifiers)
+				func (identifier);
+		}
+
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_parameters_dict ();
+
+			if (!identifiers.is_empty)
+				dict["identifiers"] = identifiers.to_array ();
+
+			if (scope != MINIMAL)
+				dict["scope"] = new Variant.string (scope.to_nick ());
+
+			return dict;
+		}
+
+		public static ApplicationQueryOptions _deserialize (HashTable<string, Variant> dict) throws Error {
+			var options = new ApplicationQueryOptions ();
+
+			Variant? identifiers = dict["identifiers"];
+			if (identifiers != null) {
+				if (!identifiers.is_of_type (VariantType.STRING_ARRAY))
+					throw new Error.INVALID_ARGUMENT ("The 'identifiers' option must be a string array");
+				var iter = identifiers.iterator ();
+				Variant? val;
+				while ((val = iter.next_value ()) != null)
+					options.select_identifier (val.get_string ());
+			}
+
+			Variant? scope = dict["scope"];
+			if (scope != null) {
+				if (!scope.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'scope' option must be a string");
+				options.scope = Scope.from_nick (scope.get_string ());
+			}
+
+			return options;
+		}
+	}
+
+	public class ProcessQueryOptions : Object {
+		public Scope scope {
+			get;
+			set;
+			default = MINIMAL;
+		}
+
+		private Gee.List<uint> pids = new Gee.ArrayList<uint> ();
+
+		public void select_pid (uint pid) {
+			pids.add (pid);
+		}
+
+		public bool has_selected_pids () {
+			return !pids.is_empty;
+		}
+
+		public void enumerate_selected_pids (Func<uint> func) {
+			foreach (var pid in pids)
+				func (pid);
+		}
+
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_parameters_dict ();
+
+			if (!pids.is_empty)
+				dict["pids"] = pids.to_array ();
+
+			if (scope != MINIMAL)
+				dict["scope"] = new Variant.string (scope.to_nick ());
+
+			return dict;
+		}
+
+		public static ProcessQueryOptions _deserialize (HashTable<string, Variant> dict) throws Error {
+			var options = new ProcessQueryOptions ();
+
+			Variant? pids = dict["pids"];
+			if (pids != null) {
+				if (!pids.is_of_type (new VariantType.array (VariantType.UINT32)))
+					throw new Error.INVALID_ARGUMENT ("The 'pids' option must be a uint32 array");
+				var iter = pids.iterator ();
+				Variant? val;
+				while ((val = iter.next_value ()) != null)
+					options.select_pid (val.get_uint32 ());
+			}
+
+			Variant? scope = dict["scope"];
+			if (scope != null) {
+				if (!scope.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'scope' option must be a string");
+				options.scope = Scope.from_nick (scope.get_string ());
+			}
+
+			return options;
+		}
+	}
+
+	public enum Scope {
+		MINIMAL,
+		METADATA,
+		FULL;
+
+		public static Scope from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Scope> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Scope> (this);
 		}
 	}
 

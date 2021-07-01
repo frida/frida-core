@@ -9,11 +9,11 @@
 # import <UIKit/UIKit.h>
 #endif
 
-FridaImageData *
-_frida_image_data_from_file (const gchar * filename, guint target_width, guint target_height)
+GVariant *
+_frida_icon_from_file (const gchar * filename, guint target_width, guint target_height)
 {
 #ifdef HAVE_MACOS
-  FridaImageData * result = NULL;
+  GVariant * result = NULL;
   NSAutoreleasePool * pool;
   NSImage * image;
 
@@ -22,8 +22,7 @@ _frida_image_data_from_file (const gchar * filename, guint target_width, guint t
   image = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:filename]];
   if (image != nil)
   {
-    result = g_new (FridaImageData, 1);
-    _frida_image_data_init_from_native_image_scaled_to (result, image, target_width, target_height);
+    result = _frida_icon_from_native_image_scaled_to (image, target_width, target_height);
     [image release];
   }
 
@@ -35,47 +34,55 @@ _frida_image_data_from_file (const gchar * filename, guint target_width, guint t
 #endif
 }
 
-void
-_frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, FridaNativeImage native_image, guint target_width, guint target_height)
+GVariant *
+_frida_icon_from_native_image_scaled_to (FridaNativeImage native_image, guint target_width, guint target_height)
 {
+  GVariant * result;
 #ifdef HAVE_MACOS
   NSImage * image = (NSImage *) native_image;
+  guint rowstride;
   NSBitmapImageRep * rep;
   NSGraphicsContext * context;
+  GVariantBuilder builder;
 
-  data->width = target_width;
-  data->height = target_height;
-  data->rowstride = target_width * 4;
+  rowstride = target_width * 4;
 
   rep = [[NSBitmapImageRep alloc]
       initWithBitmapDataPlanes:nil
-                    pixelsWide:data->width
-                    pixelsHigh:data->height
+                    pixelsWide:target_width
+                    pixelsHigh:target_height
                  bitsPerSample:8
                samplesPerPixel:4
                       hasAlpha:YES
                       isPlanar:NO
                 colorSpaceName:NSCalibratedRGBColorSpace
                   bitmapFormat:0
-                   bytesPerRow:data->rowstride
+                   bytesPerRow:rowstride
                   bitsPerPixel:32];
 
   context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
 
   [NSGraphicsContext saveGraphicsState];
   [NSGraphicsContext setCurrentContext:context];
-  [image drawInRect:NSMakeRect (0, 0, data->width, data->height)
+  [image drawInRect:NSMakeRect (0, 0, target_width, target_height)
            fromRect:NSZeroRect
           operation:NSCompositingOperationCopy
            fraction:1.0];
   [context flushGraphics];
   [NSGraphicsContext restoreGraphicsState];
 
-  data->pixels = g_base64_encode ([rep bitmapData], data->rowstride * data->height);
+  g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
+  g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (target_width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (target_height));
+  g_variant_builder_add (&builder, "{sv}", "image",
+      g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, rep.bitmapData, rowstride * target_height, sizeof (guint8)));
+  result = g_variant_ref_sink (g_variant_builder_end (&builder));
 
   [rep release];
 #else
   UIImage * image = (UIImage *) native_image;
+  guint rowstride;
   CGImageRef cgimage;
   CGSize full, scaled;
   guint pixel_buf_size;
@@ -85,10 +92,9 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
   CGColorSpaceRef colorspace;
   CGContextRef cgctx;
   CGRect target_rect = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
+  GVariantBuilder builder;
 
-  data->width = target_width;
-  data->height = target_height;
-  data->rowstride = target_width * 4;
+  rowstride = target_width * 4;
 
   cgimage = [image CGImage];
 
@@ -106,21 +112,21 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
     scaled.height = (CGFloat) full.height * ((CGFloat) target_width / full.width);
   }
 
-  pixel_buf_size = data->width * data->rowstride;
+  pixel_buf_size = rowstride * target_height;
   pixel_buf = g_malloc (pixel_buf_size);
 
   /*
    * HACK ALERT:
    *
    * CoreGraphics does not yet support non-premultiplied, so we make sure it multiplies with the same pixels as
-   * those usually rendered onto by the frida GUI... ICK!
+   * those usually rendered onto by the Frida GUI... ICK!
    */
   pixels = (guint32 *) pixel_buf;
-  for (i = 0; i != data->width * data->height; i++)
+  for (i = 0; i != target_width * target_height; i++)
     pixels[i] = GUINT32_TO_BE (0xf0f0f0ff);
 
   colorspace = CGColorSpaceCreateDeviceRGB ();
-  cgctx = CGBitmapContextCreate (pixel_buf, data->width, data->height, 8, data->rowstride, colorspace,
+  cgctx = CGBitmapContextCreate (pixel_buf, target_width, target_height, 8, rowstride, colorspace,
       kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast);
   g_assert (cgctx != NULL);
 
@@ -128,10 +134,18 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
 
   CGContextDrawImage (cgctx, target_rect, cgimage);
 
-  data->pixels = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
+  g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
+  g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (target_width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (target_height));
+  g_variant_builder_add (&builder, "{sv}", "image",
+      g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, CGBitmapContextGetData (cgctx), pixel_buf_size, sizeof (guint8)));
+  result = g_variant_ref_sink (g_variant_builder_end (&builder));
 
   CGContextRelease (cgctx);
   CGColorSpaceRelease (colorspace);
   g_free (pixel_buf);
 #endif
+
+  return result;
 }

@@ -58,8 +58,11 @@ namespace Frida.Fruity {
 					if (status == "BrowsingApplications") {
 						var entries = response.get_array ("CurrentList");
 						var length = entries.length;
-						for (int i = 0; i != length; i++)
-							result.add (parse_application_details (entries.get_dict (i)));
+						for (int i = 0; i != length; i++) {
+							PlistDict app = entries.get_dict (i);
+							if (is_springboard_visible_app (app))
+								result.add (parse_application_details (app));
+						}
 					}
 				} while (status != "Complete");
 
@@ -118,21 +121,64 @@ namespace Frida.Fruity {
 
 			var attributes = new PlistArray ();
 			options.set_array ("ReturnAttributes", attributes);
+			attributes.add_string ("ApplicationType");
+			attributes.add_string ("IsAppClip");
+			attributes.add_string ("SBAppTags");
 			attributes.add_string ("CFBundleIdentifier");
 			attributes.add_string ("CFBundleDisplayName");
+			attributes.add_string ("CFBundleShortVersionString");
+			attributes.add_string ("CFBundleVersion");
 			attributes.add_string ("Path");
 			attributes.add_string ("Container");
+			attributes.add_string ("GroupContainers");
 			attributes.add_string ("Entitlements");
 
 			return options;
 		}
 
+		private static bool is_springboard_visible_app (PlistDict details) {
+			try {
+				unowned string application_type = details.get_string ("ApplicationType");
+				if (application_type == "Hidden")
+					return false;
+
+				if (details.has ("IsAppClip") && details.get_boolean ("IsAppClip"))
+					return false;
+
+				if (details.has ("SBAppTags")) {
+					PlistArray tags = details.get_array ("SBAppTags");
+					int n = tags.length;
+					for (int i = 0; i != n; i++) {
+						unowned string tag = tags.get_string (i);
+						if (tag == "hidden" || tag == "SBInternalAppTag" || tag == "watch-companion")
+							return false;
+					}
+				}
+
+				return true;
+			} catch (PlistError e) {
+				assert_not_reached ();
+			}
+		}
+
 		private static ApplicationDetails parse_application_details (PlistDict details) throws PlistError {
 			unowned string identifier = details.get_string ("CFBundleIdentifier");
 			unowned string name = details.get_string ("CFBundleDisplayName");
-
+			unowned string? version = details.has ("CFBundleShortVersionString") ? details.get_string ("CFBundleShortVersionString") : null;
+			unowned string? build = details.has ("CFBundleVersion") ? details.get_string ("CFBundleVersion") : null;
 			unowned string path = details.get_string ("Path");
-			unowned string? container = details.has ("Container") ? details.get_string ("Container") : null;
+
+			var containers = new Gee.HashMap<string, string> ();
+			if (details.has ("Container"))
+				containers["data"] = details.get_string ("Container");
+			if (details.has ("GroupContainers")) {
+				foreach (var entry in details.get_dict ("GroupContainers").entries) {
+					unowned string group = entry.key;
+					Value * value = entry.value;
+					if (value->holds (typeof (string)))
+						containers[group] = (string) *value;
+				}
+			}
 
 			bool debuggable = false;
 			if (details.has ("Entitlements")) {
@@ -140,7 +186,7 @@ namespace Frida.Fruity {
 				debuggable = entitlements.has ("get-task-allow") && entitlements.get_boolean ("get-task-allow");
 			}
 
-			return new ApplicationDetails (identifier, name, path, container, debuggable);
+			return new ApplicationDetails (identifier, name, version, build, path, containers, debuggable);
 		}
 
 		private static void throw_local_error (GLib.Error e) throws InstallationProxyError, IOError {
@@ -178,12 +224,22 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public string? version {
+			get;
+			construct;
+		}
+
+		public string? build {
+			get;
+			construct;
+		}
+
 		public string path {
 			get;
 			construct;
 		}
 
-		public string? container {
+		public Gee.Map<string, string> containers {
 			get;
 			construct;
 		}
@@ -193,12 +249,15 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public ApplicationDetails (string identifier, string name, string path, string? container, bool debuggable) {
+		public ApplicationDetails (string identifier, string name, string? version, string? build, string path,
+				Gee.Map<string, string> containers, bool debuggable) {
 			Object (
 				identifier: identifier,
 				name: name,
+				version: version,
+				build: build,
 				path: path,
-				container: container,
+				containers: containers,
 				debuggable: debuggable
 			);
 		}

@@ -25,10 +25,10 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public Image? icon {
+		public Variant? icon {
 			get { return _icon; }
 		}
-		private Image? _icon;
+		private Variant? _icon;
 
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL; }
@@ -37,7 +37,7 @@ namespace Frida {
 		private WindowsHostSession host_session;
 
 		construct {
-			_icon = Image.from_data (_try_extract_icon ());
+			_icon = _try_extract_icon ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -82,7 +82,7 @@ namespace Frida {
 			agent_session_detached (id, reason, crash);
 		}
 
-		public extern static ImageData? _try_extract_icon ();
+		public extern static Variant? _try_extract_icon ();
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
@@ -173,16 +173,19 @@ namespace Frida {
 			return system_session_container;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
-			return System.get_frontmost_application ();
+		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return System.get_frontmost_application (FrontmostQueryOptions._deserialize (options));
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-			return yield application_enumerator.enumerate_applications ();
+		public override async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield application_enumerator.enumerate_applications (ApplicationQueryOptions._deserialize (options));
 		}
 
-		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-			return yield process_enumerator.enumerate_processes ();
+		public override async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield process_enumerator.enumerate_processes (ProcessQueryOptions._deserialize (options));
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

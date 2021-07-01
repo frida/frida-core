@@ -4,8 +4,18 @@
 #include <fcntl.h>
 #include <sys/procfs.h>
 
+typedef struct _FridaEnumerateProcessesOperation FridaEnumerateProcessesOperation;
+
+struct _FridaEnumerateProcessesOperation
+{
+  FridaScope scope;
+  GArray * result;
+};
+
+static void frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op);
+
 void
-frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+frida_system_get_frontmost_application (FridaFrontmostQueryOptions * options, FridaHostApplicationInfo * result, GError ** error)
 {
   g_set_error (error,
       FRIDA_ERROR,
@@ -14,7 +24,7 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
 }
 
 FridaHostApplicationInfo *
-frida_system_enumerate_applications (int * result_length)
+frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int * result_length)
 {
   *result_length = 0;
 
@@ -22,60 +32,80 @@ frida_system_enumerate_applications (int * result_length)
 }
 
 FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length)
+frida_system_enumerate_processes (FridaProcessQueryOptions * options, int * result_length)
 {
-  GArray * processes;
-  FridaImageData no_icon;
-  GDir * proc_dir;
-  const gchar * proc_name;
+  FridaEnumerateProcessesOperation op;
 
-  static struct
+  op.scope = frida_process_query_options_get_scope (options);
+  op.result = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
+
+  if (frida_process_query_options_has_selected_pids (options))
   {
-    procfs_debuginfo    info;
-    char                buff [PATH_MAX];
-  } procfs_name;
-
-  processes = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
-  frida_image_data_init_empty (&no_icon);
-
-  proc_dir = g_dir_open ("/proc", 0, NULL);
-  g_assert (proc_dir != NULL);
-
-  while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
+    frida_process_query_options_enumerate_selected_pids (options, (GFunc) frida_collect_process_info, &op);
+  }
+  else
   {
-    guint pid;
-    gchar * tmp = NULL, * name;
-    gint fd;
-    FridaHostProcessInfo * process_info;
+    GDir * proc_dir;
+    const gchar * proc_name;
 
-    pid = strtoul (proc_name, &tmp, 10);
-    if (*tmp != '\0')
-      continue;
+    proc_dir = g_dir_open ("/proc", 0, NULL);
 
-    tmp = g_build_filename ("/proc", proc_name, "as", NULL);
-    fd = open(tmp, O_RDONLY);
-    g_free (tmp);
-    g_assert (fd != -1);
+    while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
+    {
+      guint pid;
+      gchar * end;
 
-    if (devctl (fd, DCMD_PROC_MAPDEBUG_BASE, &procfs_name, sizeof (procfs_name), 0) != EOK)
-      continue;
+      pid = strtoul (proc_name, &end, 10);
+      if (*end == '\0')
+        frida_collect_process_info (pid, &op);
+    }
 
-    name = g_path_get_basename (procfs_name.info.path);
-
-    g_array_set_size (processes, processes->len + 1);
-    process_info = &g_array_index (processes, FridaHostProcessInfo, processes->len - 1);
-    frida_host_process_info_init (process_info, pid, name, &no_icon, &no_icon);
-
-    g_free (name);
+    g_dir_close (proc_dir);
   }
 
-  g_dir_close (proc_dir);
+  *result_length = op.result->len;
 
-  frida_image_data_destroy (&no_icon);
+  return (FridaHostProcessInfo *) g_array_free (op.result, FALSE);
+}
 
-  *result_length = processes->len;
+static void
+frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
+{
+  FridaHostProcessInfo info = { 0, };
+  gchar * as_path;
+  gint fd;
+  static struct
+  {
+    procfs_debuginfo info;
+    char buff[PATH_MAX];
+  } procfs_name;
 
-  return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
+  as_path = g_strdup_printf ("/proc/%u/as", pid);
+
+  fd = open (as_path, O_RDONLY);
+  if (fd == -1)
+    goto beach;
+
+  if (devctl (fd, DCMD_PROC_MAPDEBUG_BASE, &procfs_name, sizeof (procfs_name), 0) != EOK)
+    goto beach;
+
+  info.pid = pid;
+  info.name = g_path_get_basename (procfs_name.info.path);
+
+  info.parameters = frida_make_parameters_dict ();
+
+  if (op->scope != FRIDA_SCOPE_MINIMAL)
+  {
+    g_hash_table_insert (info.parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (procfs_name.info.path)));
+  }
+
+  g_array_append_val (op->result, info);
+
+beach:
+  if (fd != -1)
+    close (fd);
+
+  g_free (as_path);
 }
 
 void

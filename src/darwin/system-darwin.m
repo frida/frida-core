@@ -2,225 +2,381 @@
 
 #include "icon-helpers.h"
 
+#include <pwd.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 
-static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
-
 #ifdef HAVE_MACOS
-
 # include <libproc.h>
 # import <AppKit/AppKit.h>
-
-static void extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon);
-
+# if __MAC_OS_X_VERSION_MIN_REQUIRED < __MAC_10_12
+#  define NSBitmapImageFileTypePNG NSPNGFileType
+# endif
 #endif
 
 #ifdef HAVE_IOS
-
 # import "springboard.h"
-
-static void extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon);
-
-extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
-
 #endif
 
 #ifndef PROC_PIDPATHINFO_MAXSIZE
 # define PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN)
 #endif
 
-typedef struct _FridaIconPair FridaIconPair;
+typedef struct _FridaEnumerateApplicationsOperation FridaEnumerateApplicationsOperation;
+typedef struct _FridaEnumerateProcessesOperation FridaEnumerateProcessesOperation;
 
-struct _FridaIconPair
+struct _FridaEnumerateApplicationsOperation
 {
-  FridaImageData small_icon;
-  FridaImageData large_icon;
+  FridaScope scope;
+  GHashTable * process_by_identifier;
+#ifdef HAVE_IOS
+  FridaSpringboardApi * api;
+#endif
+
+  GArray * result;
 };
 
-static void frida_icon_pair_free (FridaIconPair * pair);
-
-static GHashTable * icon_pair_by_identifier = NULL;
-
-static void
-frida_system_init (void)
+struct _FridaEnumerateProcessesOperation
 {
-  if (icon_pair_by_identifier == NULL)
-  {
-    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_icon_pair_free);
-  }
-}
+  FridaScope scope;
+#ifdef HAVE_IOS
+  FridaSpringboardApi * api;
+#endif
+
+  GArray * result;
+};
+
+#ifdef HAVE_IOS
+static void frida_collect_application_info_from_id_cstring (const gchar * identifier, FridaEnumerateApplicationsOperation * op);
+static void frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnumerateApplicationsOperation * op);
+#endif
+
+static void frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation * op);
+static void frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumerateProcessesOperation * op);
+
+static void frida_add_app_id (GHashTable * parameters, NSString * identifier);
+
+#if defined (HAVE_MACOS)
+static void frida_add_app_icons (GHashTable * parameters, NSImage * image);
+#elif defined (HAVE_IOS)
+static void frida_add_app_metadata (GHashTable * parameters, NSString * identifier, FridaSpringboardApi * api);
+static void frida_add_app_state (GHashTable * parameters, guint pid, FridaSpringboardApi * api);
+static void frida_add_app_icons (GHashTable * parameters, NSString * identifier);
+
+extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
+#endif
+
+static void frida_add_process_metadata (GHashTable * parameters, struct kinfo_proc * process);
+
+static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
+static GVariant * frida_uid_to_name (uid_t uid);
+
+#if defined (HAVE_MACOS)
 
 void
-frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+frida_system_get_frontmost_application (FridaFrontmostQueryOptions * options, FridaHostApplicationInfo * result, GError ** error)
 {
-#ifdef HAVE_IOS
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented");
+}
+
+FridaHostApplicationInfo *
+frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int * result_length)
+{
+  *result_length = 0;
+
+  return NULL;
+}
+
+#elif defined (HAVE_IOS)
+
+void
+frida_system_get_frontmost_application (FridaFrontmostQueryOptions * options, FridaHostApplicationInfo * result, GError ** error)
+{
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
-  NSString * identifier;
-
-  frida_system_init ();
+  NSString * identifier = nil;
+  NSString * name = nil;
+  FridaScope scope;
+  struct kinfo_proc * processes = NULL;
+  guint count, i;
 
   pool = [[NSAutoreleasePool alloc] init];
 
   api = _frida_get_springboard_api ();
 
   identifier = api->SBSCopyFrontmostApplicationDisplayIdentifier ();
-  if (identifier != nil && [identifier length] > 1)
+  if (identifier == nil || identifier.length <= 1)
+    goto no_frontmost_app;
+
+  name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+  if (name == nil)
+    goto no_frontmost_app;
+
+  result->identifier = g_strdup ([identifier UTF8String]);
+  result->name = g_strdup ([name UTF8String]);
+  result->parameters = frida_make_parameters_dict ();
+  result->pid = 0;
+
+  scope = frida_frontmost_query_options_get_scope (options);
+
+  processes = frida_system_query_kinfo_procs (&count);
+
+  for (i = 0; i != count && result->pid == 0; i++)
   {
-    NSString * name;
-    struct kinfo_proc * entries;
-    guint count, i;
+    struct kinfo_proc * process = &processes[i];
+    guint pid;
+    NSString * cur_identifier;
 
-    name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-    if (name != nil)
+    pid = process->kp_proc.p_pid;
+
+    cur_identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
+    if (cur_identifier != nil)
     {
-      result->identifier = g_strdup ([identifier UTF8String]);
-      result->name = g_strdup ([name UTF8String]);
-      [name release];
-
-      entries = frida_system_query_kinfo_procs (&count);
-      for (result->pid = 0, i = 0; result->pid == 0 && i != count; i++)
+      if ([cur_identifier isEqualToString:identifier])
       {
-        guint pid = entries[i].kp_proc.p_pid;
-        NSString * cur_identifier;
+        result->pid = pid;
 
-        cur_identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
-        if (cur_identifier != nil)
-        {
-          if ([cur_identifier isEqualToString:identifier])
-            result->pid = pid;
-          [cur_identifier release];
-        }
+        if (scope != FRIDA_SCOPE_MINIMAL)
+          frida_add_process_metadata (result->parameters, process);
       }
-      g_free (entries);
 
-      extract_icons_from_identifier (identifier, &result->small_icon, &result->large_icon);
-    }
-    else
-    {
-      frida_host_application_info_init_empty (result);
+      [cur_identifier release];
     }
   }
-  else
+
+  if (scope != FRIDA_SCOPE_MINIMAL)
+    frida_add_app_metadata (result->parameters, identifier, api);
+
+  if (scope == FRIDA_SCOPE_FULL)
+    frida_add_app_icons (result->parameters, identifier);
+
+  goto beach;
+
+no_frontmost_app:
   {
     frida_host_application_info_init_empty (result);
+    goto beach;
   }
+beach:
+  {
+    g_free (processes);
 
-  [identifier release];
-  [pool release];
-#else
-  g_set_error (error,
-      FRIDA_ERROR,
-      FRIDA_ERROR_NOT_SUPPORTED,
-      "Not implemented");
-#endif
+    [name release];
+    [identifier release];
+
+    [pool release];
+  }
 }
 
 FridaHostApplicationInfo *
-frida_system_enumerate_applications (int * result_length)
+frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int * result_length)
 {
-#ifdef HAVE_IOS
+  FridaEnumerateApplicationsOperation op;
   NSAutoreleasePool * pool;
-  FridaSpringboardApi * api;
-  GHashTable * pid_by_identifier;
-  struct kinfo_proc * entries;
-  NSArray * identifiers;
+  struct kinfo_proc * processes;
   guint count, i;
-  FridaHostApplicationInfo * result;
 
-  frida_system_init ();
+  op.scope = frida_application_query_options_get_scope (options);
+  op.process_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, NULL);
+  op.api = _frida_get_springboard_api ();
+
+  op.result = g_array_new (FALSE, FALSE, sizeof (FridaHostApplicationInfo));
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  api = _frida_get_springboard_api ();
-
-  pid_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-
-  entries = frida_system_query_kinfo_procs (&count);
-
+  processes = frida_system_query_kinfo_procs (&count);
   for (i = 0; i != count; i++)
   {
-    struct kinfo_proc * e = &entries[i];
-    guint pid = e->kp_proc.p_pid;
+    struct kinfo_proc * process = &processes[i];
     NSString * identifier;
 
-    identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
+    identifier = op.api->SBSCopyDisplayIdentifierForProcessID (process->kp_proc.p_pid);
     if (identifier != nil)
     {
-      g_hash_table_insert (pid_by_identifier, g_strdup ([identifier UTF8String]), GUINT_TO_POINTER (pid));
-      [identifier release];
+      g_hash_table_insert (op.process_by_identifier, (gpointer) [identifier UTF8String], process);
+      [identifier autorelease];
     }
   }
 
-  g_free (entries);
-
-  identifiers = api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
-
-  count = [identifiers count];
-  result = g_new0 (FridaHostApplicationInfo, count);
-  *result_length = count;
-
-  for (i = 0; i != count; i++)
+  if (frida_application_query_options_has_selected_identifiers (options))
   {
-    NSString * identifier, * name;
-    FridaHostApplicationInfo * info = &result[i];
+    frida_application_query_options_enumerate_selected_identifiers (options, (GFunc) frida_collect_application_info_from_id_cstring, &op);
+  }
+  else
+  {
+    NSArray * identifiers = op.api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
 
-    identifier = [identifiers objectAtIndex:i];
-    name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-    info->identifier = g_strdup ([identifier UTF8String]);
-    info->name = g_strdup ([name UTF8String]);
-    info->pid = GPOINTER_TO_UINT (g_hash_table_lookup (pid_by_identifier, info->identifier));
-    [name release];
+    count = [identifiers count];
+    for (i = 0; i != count; i++)
+      frida_collect_application_info_from_id_nsstring ([identifiers objectAtIndex:i], &op);
 
-    extract_icons_from_identifier (identifier, &info->small_icon, &info->large_icon);
+    [identifiers release];
   }
 
-  [identifiers release];
-
-  g_hash_table_unref (pid_by_identifier);
+  g_free (processes);
+  g_hash_table_unref (op.process_by_identifier);
 
   [pool release];
 
-  return result;
-#else
-  *result_length = 0;
+  *result_length = op.result->len;
 
-  return NULL;
-#endif
+  return (FridaHostApplicationInfo *) g_array_free (op.result, FALSE);
 }
 
-FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length)
+static void
+frida_collect_application_info_from_id_cstring (const gchar * identifier, FridaEnumerateApplicationsOperation * op)
 {
-  GArray * result;
-  NSAutoreleasePool * pool;
-  struct kinfo_proc * entries;
-  guint count, i;
+  frida_collect_application_info_from_id_nsstring ([NSString stringWithUTF8String:identifier], op);
+}
 
-  frida_system_init ();
+static void
+frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnumerateApplicationsOperation * op)
+{
+  FridaHostApplicationInfo info;
+  FridaScope scope = op->scope;
+  FridaSpringboardApi * api = op->api;
+  NSString * name;
+  struct kinfo_proc * process;
+
+  name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+
+  info.identifier = g_strdup (identifier.UTF8String);
+  info.name = g_strdup (name.UTF8String);
+  info.pid = 0;
+  info.parameters = frida_make_parameters_dict ();
+
+  process = g_hash_table_lookup (op->process_by_identifier, info.identifier);
+  if (process != NULL)
+    info.pid = process->kp_proc.p_pid;
+
+  if (scope != FRIDA_SCOPE_MINIMAL)
+  {
+    frida_add_app_metadata (info.parameters, identifier, api);
+
+    if (process != NULL)
+    {
+      frida_add_app_state (info.parameters, process->kp_proc.p_pid, api);
+
+      frida_add_process_metadata (info.parameters, process);
+    }
+  }
+
+  if (scope == FRIDA_SCOPE_FULL)
+    frida_add_app_icons (info.parameters, identifier);
+
+  [name release];
+
+  g_array_append_val (op->result, info);
+}
+
+#endif
+
+FridaHostProcessInfo *
+frida_system_enumerate_processes (FridaProcessQueryOptions * options, int * result_length)
+{
+  FridaEnumerateProcessesOperation op;
+  NSAutoreleasePool * pool;
+
+  op.scope = frida_process_query_options_get_scope (options);
+#ifdef HAVE_IOS
+  op.api = _frida_get_springboard_api ();
+#endif
+
+  op.result = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  entries = frida_system_query_kinfo_procs (&count);
-
-  result = g_array_sized_new (FALSE, TRUE, sizeof (FridaHostProcessInfo), count);
-
-#ifdef HAVE_IOS
-  FridaSpringboardApi * api = _frida_get_springboard_api ();
-#endif
-
-  for (i = 0; i != count; i++)
+  if (frida_process_query_options_has_selected_pids (options))
   {
-    struct kinfo_proc * e = &entries[i];
-    FridaHostProcessInfo info = { 0, };
-    gboolean still_alive = TRUE;
+    frida_process_query_options_enumerate_selected_pids (options, (GFunc) frida_collect_process_info_from_pid, &op);
+  }
+  else
+  {
+    struct kinfo_proc * processes;
+    guint count, i;
 
-    info.pid = e->kp_proc.p_pid;
+    processes = frida_system_query_kinfo_procs (&count);
 
-#ifdef HAVE_IOS
-    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info.pid);
+    for (i = 0; i != count; i++)
+      frida_collect_process_info_from_kinfo (&processes[i], &op);
+
+    g_free (processes);
+  }
+
+  [pool release];
+
+  *result_length = op.result->len;
+
+  return (FridaHostProcessInfo *) g_array_free (op.result, FALSE);
+}
+
+static void
+frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation * op)
+{
+  struct kinfo_proc process;
+  size_t size;
+  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid, 0 };
+  gint err;
+
+  size = sizeof (process);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, &process, &size, NULL, 0);
+  g_assert (err != -1);
+
+  if (size == 0)
+    return;
+
+  frida_collect_process_info_from_kinfo (&process, op);
+}
+
+static void
+frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumerateProcessesOperation * op)
+{
+  FridaHostProcessInfo info = { 0, };
+  FridaScope scope = op->scope;
+  gboolean still_alive;
+  gchar path[PROC_PIDPATHINFO_MAXSIZE];
+
+  info.pid = process->kp_proc.p_pid;
+
+  info.parameters = frida_make_parameters_dict ();
+
+  if (scope != FRIDA_SCOPE_MINIMAL)
+    frida_add_process_metadata (info.parameters, process);
+
+#if defined (HAVE_MACOS)
+  {
+    NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info.pid];
+    if (app.icon != nil)
+    {
+      NSString * name = app.localizedName;
+      if (name.length > 0)
+        info.name = g_strdup (name.UTF8String);
+
+      if (scope != FRIDA_SCOPE_MINIMAL)
+      {
+        NSString * identifier = app.bundleIdentifier;
+        if (identifier != nil)
+          frida_add_app_id (info.parameters, identifier);
+
+        if (app.active)
+          g_hash_table_insert (info.parameters, g_strdup ("frontmost"), g_variant_ref_sink (g_variant_new_boolean (TRUE)));
+      }
+
+      if (scope == FRIDA_SCOPE_FULL)
+        frida_add_app_icons (info.parameters, app.icon);
+    }
+  }
+#elif defined (HAVE_IOS)
+  {
+    FridaSpringboardApi * api = op->api;
+    NSString * identifier;
+
+    identifier = api->SBSCopyDisplayIdentifierForProcessID (info.pid);
     if (identifier != nil)
     {
       NSString * app_name;
@@ -229,71 +385,35 @@ frida_system_enumerate_processes (int * result_length)
       info.name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
-      extract_icons_from_identifier (identifier, &info.small_icon, &info.large_icon);
+      if (scope != FRIDA_SCOPE_MINIMAL)
+      {
+        frida_add_app_id (info.parameters, identifier);
+
+        frida_add_app_state (info.parameters, info.pid, api);
+      }
+
+      if (scope == FRIDA_SCOPE_FULL)
+        frida_add_app_icons (info.parameters, identifier);
 
       [identifier release];
     }
-    else
+  }
 #endif
-    {
-#ifdef HAVE_MACOS
-      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info.pid];
-      if (app.icon != nil)
-      {
-        info.name = g_strdup ([app.localizedName UTF8String]);
 
-        extract_icons_from_image (app.icon, &info.small_icon, &info.large_icon);
-      }
-      else
-#endif
-      {
-        gchar path[PROC_PIDPATHINFO_MAXSIZE];
+  still_alive = proc_pidpath (info.pid, path, sizeof (path)) > 0;
+  if (still_alive)
+  {
+    if (info.name == NULL)
+      info.name = g_path_get_basename (path);
 
-        still_alive = proc_pidpath (info.pid, path, sizeof (path)) > 0;
-        if (still_alive)
-        {
-          info.name = g_path_get_basename (path);
-        }
-
-        frida_image_data_init_empty (&info.small_icon);
-        frida_image_data_init_empty (&info.large_icon);
-      }
-    }
-
-    if (still_alive)
-      g_array_append_val (result, info);
-    else
-      frida_host_process_info_destroy (&info);
+    if (scope != FRIDA_SCOPE_MINIMAL)
+      g_hash_table_insert (info.parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (path)));
   }
 
-  g_free (entries);
-
-  [pool release];
-
-  *result_length = result->len;
-
-  return (FridaHostProcessInfo *) g_array_free (result, FALSE);
-}
-
-static struct kinfo_proc *
-frida_system_query_kinfo_procs (guint * count)
-{
-  struct kinfo_proc * entries;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-  size_t size;
-  gint err;
-
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &size, NULL, 0);
-  g_assert (err != -1);
-
-  entries = g_malloc0 (size);
-
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &size, NULL, 0);
-  g_assert (err != -1);
-
-  *count = size / sizeof (struct kinfo_proc);
-
-  return entries;
+  if (still_alive)
+    g_array_append_val (op->result, info);
+  else
+    frida_host_process_info_destroy (&info);
 }
 
 void
@@ -325,51 +445,219 @@ frida_temporary_directory_get_system_tmp (void)
   }
 }
 
-#ifdef HAVE_MACOS
-
 static void
-extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon)
+frida_add_app_id (GHashTable * parameters, NSString * identifier)
 {
-  _frida_image_data_init_from_native_image_scaled_to (small_icon, image, 16, 16);
-  _frida_image_data_init_from_native_image_scaled_to (large_icon, image, 32, 32);
+  GVariantBuilder builder;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE_STRING_ARRAY);
+  g_variant_builder_add_value (&builder, g_variant_new_string (identifier.UTF8String));
+  g_hash_table_insert (parameters, g_strdup ("applications"), g_variant_ref_sink (g_variant_builder_end (&builder)));
 }
 
-#endif
-
-#ifdef HAVE_IOS
+#if defined (HAVE_MACOS)
 
 static void
-extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon)
+frida_add_app_icons (GHashTable * parameters, NSImage * image)
 {
-  FridaIconPair * pair;
+  GVariantBuilder builder;
+  const guint sizes[] = { 16, 32 };
+  guint i;
 
-  pair = g_hash_table_lookup (icon_pair_by_identifier, [identifier UTF8String]);
-  if (pair == NULL)
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("aa{sv}"));
+
+  for (i = 0; i != G_N_ELEMENTS (sizes); i++)
   {
-    NSData * png_data;
-    UIImage * image;
+    guint size = sizes[i];
+    NSBitmapImageRep * rep;
+    NSGraphicsContext * context;
+    NSData * png;
 
-    png_data = _frida_get_springboard_api ()->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
+    rep = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:nil
+                      pixelsWide:size
+                      pixelsHigh:size
+                   bitsPerSample:8
+                 samplesPerPixel:4
+                        hasAlpha:YES
+                        isPlanar:NO
+                  colorSpaceName:NSCalibratedRGBColorSpace
+                    bitmapFormat:0
+                     bytesPerRow:size * 4
+                    bitsPerPixel:32];
 
-    pair = g_new (FridaIconPair, 1);
-    image = [UIImage imageWithData:png_data];
-    _frida_image_data_init_from_native_image_scaled_to (&pair->small_icon, image, 16, 16);
-    _frida_image_data_init_from_native_image_scaled_to (&pair->large_icon, image, 32, 32);
-    g_hash_table_insert (icon_pair_by_identifier, g_strdup ([identifier UTF8String]), pair);
+    context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
 
-    [png_data release];
+    [NSGraphicsContext saveGraphicsState];
+    [NSGraphicsContext setCurrentContext:context];
+    [image drawInRect:NSMakeRect (0, 0, size, size)
+             fromRect:NSZeroRect
+            operation:NSCompositingOperationCopy
+             fraction:1.0];
+    [context flushGraphics];
+    [NSGraphicsContext restoreGraphicsState];
+
+    png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+
+    g_variant_builder_open (&builder, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("png"));
+    g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (size));
+    g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (size));
+    g_variant_builder_add (&builder, "{sv}", "image",
+        g_variant_new_from_data (G_VARIANT_TYPE ("ay"), png.bytes, png.length, TRUE, (GDestroyNotify) CFRelease, [png retain]));
+    g_variant_builder_close (&builder);
+
+    [rep release];
   }
 
-  frida_image_data_copy (&pair->small_icon, small_icon);
-  frida_image_data_copy (&pair->large_icon, large_icon);
+  g_hash_table_insert (parameters, g_strdup ("icons"), g_variant_ref_sink (g_variant_builder_end (&builder)));
+}
+
+#elif defined (HAVE_IOS)
+
+static void
+frida_add_app_metadata (GHashTable * parameters, NSString * identifier, FridaSpringboardApi * api)
+{
+  LSApplicationProxy * app;
+  const char * version, * build, * data_path;
+  NSDictionary<NSString *, NSURL *> * container_urls;
+  NSNumber * get_task_allow;
+
+  app = [api->LSApplicationProxy applicationProxyForIdentifier:identifier];
+  if (app == nil)
+    return;
+
+  version = app.shortVersionString.UTF8String;
+  if (version != NULL)
+    g_hash_table_insert (parameters, g_strdup ("version"), g_variant_ref_sink (g_variant_new_string (version)));
+
+  build = app.bundleVersion.UTF8String;
+  if (build != NULL)
+    g_hash_table_insert (parameters, g_strdup ("build"), g_variant_ref_sink (g_variant_new_string (build)));
+
+  g_hash_table_insert (parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (app.bundleURL.path.UTF8String)));
+
+  data_path = app.dataContainerURL.path.UTF8String;
+  container_urls = app.groupContainerURLs;
+  if (data_path != NULL || container_urls.count > 0)
+  {
+    GVariantBuilder containers;
+
+    g_variant_builder_init (&containers, G_VARIANT_TYPE_VARDICT);
+
+    if (data_path != NULL)
+      g_variant_builder_add (&containers, "{sv}", "data", g_variant_new_string (data_path));
+
+    for (NSString * group in container_urls)
+      g_variant_builder_add (&containers, "{sv}", group.UTF8String, g_variant_new_string (container_urls[group].path.UTF8String));
+
+    g_hash_table_insert (parameters, g_strdup ("containers"), g_variant_ref_sink (g_variant_builder_end (&containers)));
+  }
+
+  get_task_allow = [app entitlementValueForKey:@"get-task-allow" ofClass:NSNumber.class];
+  if (get_task_allow.boolValue)
+    g_hash_table_insert (parameters, g_strdup ("debuggable"), g_variant_ref_sink (g_variant_new_boolean (TRUE)));
+}
+
+static void
+frida_add_app_state (GHashTable * parameters, guint pid, FridaSpringboardApi * api)
+{
+  NSDictionary * info;
+  NSNumber * is_frontmost;
+
+  info = api->SBSCopyInfoForApplicationWithProcessID (pid);
+
+  is_frontmost = info[@"BKSApplicationStateAppIsFrontmost"];
+  if (is_frontmost.boolValue)
+    g_hash_table_insert (parameters, g_strdup ("frontmost"), g_variant_ref_sink (g_variant_new_boolean (TRUE)));
+
+  [info release];
+}
+
+static void
+frida_add_app_icons (GHashTable * parameters, NSString * identifier)
+{
+  NSData * png;
+  GVariantBuilder builder;
+
+  png = _frida_get_springboard_api ()->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
+  if (png == nil)
+    return;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("aa{sv}"));
+
+  g_variant_builder_open (&builder, G_VARIANT_TYPE_VARDICT);
+  g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("png"));
+  g_variant_builder_add (&builder, "{sv}", "image",
+      g_variant_new_from_data (G_VARIANT_TYPE ("ay"), png.bytes, png.length, TRUE, (GDestroyNotify) CFRelease, png));
+  g_variant_builder_close (&builder);
+
+  g_hash_table_insert (parameters, g_strdup ("icons"), g_variant_ref_sink (g_variant_builder_end (&builder)));
 }
 
 #endif /* HAVE_IOS */
 
 static void
-frida_icon_pair_free (FridaIconPair * pair)
+frida_add_process_metadata (GHashTable * parameters, struct kinfo_proc * process)
 {
-  frida_image_data_destroy (&pair->small_icon);
-  frida_image_data_destroy (&pair->large_icon);
-  g_free (pair);
+  struct timeval * started = &process->kp_proc.p_un.__p_starttime;
+  GDateTime * t0, * t1;
+
+  g_hash_table_insert (parameters, g_strdup ("user"), frida_uid_to_name (process->kp_eproc.e_ucred.cr_uid));
+
+  g_hash_table_insert (parameters, g_strdup ("ppid"), g_variant_ref_sink (g_variant_new_int64 (process->kp_eproc.e_ppid)));
+
+  t0 = g_date_time_new_from_unix_utc (started->tv_sec);
+  t1 = g_date_time_add (t0, started->tv_usec);
+  g_hash_table_insert (parameters, g_strdup ("started"), g_variant_ref_sink (g_variant_new_take_string (g_date_time_format_iso8601 (t1))));
+  g_date_time_unref (t1);
+  g_date_time_unref (t0);
+}
+
+static struct kinfo_proc *
+frida_system_query_kinfo_procs (guint * count)
+{
+  struct kinfo_proc * processes;
+  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+  size_t size;
+  gint err;
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &size, NULL, 0);
+  g_assert (err != -1);
+
+  processes = g_malloc (size);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, processes, &size, NULL, 0);
+  g_assert (err != -1);
+
+  *count = size / sizeof (struct kinfo_proc);
+
+  return processes;
+}
+
+static GVariant *
+frida_uid_to_name (uid_t uid)
+{
+  GVariant * name;
+  static size_t buffer_size = 0;
+  char * buffer;
+  struct passwd pwd, * entry;
+
+  if (buffer_size == 0)
+    buffer_size = sysconf (_SC_GETPW_R_SIZE_MAX);
+
+  buffer = g_malloc (buffer_size);
+
+  entry = NULL;
+  getpwuid_r (uid, &pwd, buffer, buffer_size, &entry);
+
+  if (entry != NULL)
+    name = g_variant_new_string (entry->pw_name);
+  else
+    name = g_variant_new_take_string (g_strdup_printf ("%u", uid));
+  name = g_variant_ref_sink (name);
+
+  g_free (buffer);
+
+  return name;
 }

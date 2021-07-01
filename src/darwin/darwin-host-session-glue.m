@@ -27,16 +27,16 @@ static const FridaMacModel mac_models[] =
 
 #endif
 
-FridaImageData *
+GVariant *
 _frida_darwin_host_session_provider_try_extract_icon (void)
 {
 #ifdef HAVE_MACOS
+  GVariant * icon;
   size_t size;
   gchar * model_name;
   const FridaMacModel * model;
   guint i;
   gchar * filename;
-  FridaImageData * icon;
 
   size = 0;
   sysctlbyname ("hw.model", NULL, &size, NULL, 0);
@@ -52,7 +52,7 @@ _frida_darwin_host_session_provider_try_extract_icon (void)
     model = &mac_models[0];
 
   filename = g_strconcat ("/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/", model->icon, ".icns", NULL);
-  icon = _frida_image_data_from_file (filename, 16, 16);
+  icon = _frida_icon_from_file (filename, 16, 16);
   g_free (filename);
 
   g_free (model_name);

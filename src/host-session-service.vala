@@ -115,7 +115,7 @@ namespace Frida {
 			get;
 		}
 
-		public abstract Image? icon {
+		public abstract Variant? icon {
 			get;
 		}
 
@@ -230,11 +230,14 @@ namespace Frida {
 			return compute_system_parameters ();
 		}
 
-		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError;
+		public abstract async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError;
+		public abstract async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError;
+		public abstract async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws Error, IOError;
 
 		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 

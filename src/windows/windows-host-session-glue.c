@@ -25,10 +25,10 @@ static void frida_append_n_backslashes (GString * str, guint n);
 static void frida_make_pipe (HANDLE * read, HANDLE * write);
 static void frida_ensure_not_inherited (HANDLE handle);
 
-FridaImageData *
+GVariant *
 _frida_windows_host_session_provider_try_extract_icon (void)
 {
-  FridaImageData * result = NULL;
+  GVariant * result = NULL;
   OLECHAR my_computer_parse_string[PARSE_STRING_MAX_LENGTH];
   IShellFolder * desktop_folder = NULL;
   IEnumIDList * children = NULL;
@@ -59,7 +59,7 @@ _frida_windows_host_session_provider_try_extract_icon (void)
     if (SHGetFileInfoW ((LPCWSTR) child, 0, &file_info, sizeof (file_info), SHGFI_PIDL | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_ADDOVERLAYS) == 0)
       goto next_child;
 
-    result = _frida_image_data_from_native_icon_handle (file_info.hIcon, FRIDA_ICON_SMALL);
+    result = _frida_icon_from_native_icon_handle (file_info.hIcon, FRIDA_ICON_SMALL);
 
     DestroyIcon (file_info.hIcon);
 

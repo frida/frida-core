@@ -45,6 +45,19 @@ enum _FBProcessKillReason
 
 @end
 
+@interface LSApplicationProxy : NSObject
+
++ (LSApplicationProxy *)applicationProxyForIdentifier:(NSString *)identifier;
+
+- (NSString *)shortVersionString;
+- (NSString *)bundleVersion;
+- (NSURL *)bundleURL;
+- (NSURL *)dataContainerURL;
+- (NSDictionary<NSString *, NSURL *> *)groupContainerURLs;
+- (id)entitlementValueForKey:(NSString *)key ofClass:(Class)klass;
+
+@end
+
 struct _FridaSpringboardApi
 {
   void * sbs;
@@ -55,6 +68,7 @@ struct _FridaSpringboardApi
   NSString * (* SBSCopyDisplayIdentifierForProcessID) (UInt32 pid);
   NSString * (* SBSCopyLocalizedApplicationNameForDisplayIdentifier) (NSString * identifier);
   NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
+  NSDictionary * (* SBSCopyInfoForApplicationWithProcessID) (UInt32 pid);
   UInt32 (* SBSLaunchApplicationWithIdentifierAndLaunchOptions) (NSString * identifier, NSDictionary * options, BOOL suspended);
   UInt32 (* SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions) (NSString * identifier, NSURL * url, NSDictionary * params, NSDictionary * options, BOOL suspended);
   NSString * (* SBSApplicationLaunchingErrorString) (UInt32 error);
@@ -71,6 +85,7 @@ struct _FridaSpringboardApi
   NSString * FBSDebugOptionKeyDisableASLR;
 
   id FBSSystemService;
+  id LSApplicationProxy;
 };
 
 G_GNUC_INTERNAL FridaSpringboardApi * _frida_get_springboard_api (void);

@@ -1,57 +1,62 @@
 namespace Frida {
 	namespace System {
-		public extern static Frida.HostApplicationInfo get_frontmost_application () throws Error;
-		public extern static Frida.HostApplicationInfo[] enumerate_applications ();
-		public extern static Frida.HostProcessInfo[] enumerate_processes ();
+		public extern static Frida.HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options) throws Error;
+		public extern static Frida.HostApplicationInfo[] enumerate_applications (ApplicationQueryOptions options);
+		public extern static Frida.HostProcessInfo[] enumerate_processes (ProcessQueryOptions options);
 		public extern static void kill (uint pid);
 	}
 
-	public class ApplicationEnumerator {
-		private MainContext current_main_context;
-		private Gee.ArrayList<EnumerateRequest> pending_requests = new Gee.ArrayList<EnumerateRequest> ();
+	public class ApplicationEnumerator : Object {
+		private ThreadPool<EnumerateRequest> pool;
+		private MainContext main_context;
 
-		public async HostApplicationInfo[] enumerate_applications () {
-			bool is_first_request = pending_requests.is_empty;
-
-			var request = new EnumerateRequest (enumerate_applications.callback);
-			if (is_first_request) {
-				current_main_context = MainContext.get_thread_default ();
-				new Thread<bool> ("frida-enumerate-applications", enumerate_applications_worker);
+		construct {
+			try {
+				pool = new ThreadPool<EnumerateRequest>.with_owned_data (handle_request, 1, false);
+			} catch (ThreadError e) {
+				assert_not_reached ();
 			}
-			pending_requests.add (request);
-			yield;
 
+			main_context = MainContext.ref_thread_default ();
+		}
+
+		public async HostApplicationInfo[] enumerate_applications (ApplicationQueryOptions options) {
+			var request = new EnumerateRequest (options, enumerate_applications.callback);
+			try {
+				pool.add (request);
+			} catch (ThreadError e) {
+				assert_not_reached ();
+			}
+			yield;
 			return request.result;
 		}
 
-		private bool enumerate_applications_worker () {
-			var applications = System.enumerate_applications ();
+		private void handle_request (owned EnumerateRequest request) {
+			var applications = System.enumerate_applications (request.options);
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				current_main_context = null;
-				var requests = pending_requests;
-				pending_requests = new Gee.ArrayList<EnumerateRequest> ();
-
-				foreach (var request in requests)
-					request.complete (applications);
-
+				request.complete (applications);
 				return false;
 			});
-			source.attach (current_main_context);
-
-			return true;
+			source.attach (main_context);
 		}
 
 		private class EnumerateRequest {
-			private SourceFunc handler;
+			public ApplicationQueryOptions options {
+				get;
+				private set;
+			}
 
 			public HostApplicationInfo[] result {
 				get;
 				private set;
 			}
 
-			public EnumerateRequest (owned SourceFunc handler) {
+			private SourceFunc handler;
+
+			public EnumerateRequest (ApplicationQueryOptions options, owned SourceFunc handler) {
+				this.options = options;
 				this.handler = (owned) handler;
 			}
 
@@ -62,52 +67,57 @@ namespace Frida {
 		}
 	}
 
-	public class ProcessEnumerator {
-		private MainContext current_main_context;
-		private Gee.ArrayList<EnumerateRequest> pending_requests = new Gee.ArrayList<EnumerateRequest> ();
+	public class ProcessEnumerator : Object {
+		private ThreadPool<EnumerateRequest> pool;
+		private MainContext main_context;
 
-		public async HostProcessInfo[] enumerate_processes () {
-			bool is_first_request = pending_requests.is_empty;
-
-			var request = new EnumerateRequest (enumerate_processes.callback);
-			if (is_first_request) {
-				current_main_context = MainContext.get_thread_default ();
-				new Thread<bool> ("frida-enumerate-processes", enumerate_processes_worker);
+		construct {
+			try {
+				pool = new ThreadPool<EnumerateRequest>.with_owned_data (handle_request, 1, false);
+			} catch (ThreadError e) {
+				assert_not_reached ();
 			}
-			pending_requests.add (request);
-			yield;
 
+			main_context = MainContext.ref_thread_default ();
+		}
+
+		public async HostProcessInfo[] enumerate_processes (ProcessQueryOptions options) {
+			var request = new EnumerateRequest (options, enumerate_processes.callback);
+			try {
+				pool.add (request);
+			} catch (ThreadError e) {
+				assert_not_reached ();
+			}
+			yield;
 			return request.result;
 		}
 
-		private bool enumerate_processes_worker () {
-			var processes = System.enumerate_processes ();
+		private void handle_request (owned EnumerateRequest request) {
+			var processes = System.enumerate_processes (request.options);
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				current_main_context = null;
-				var requests = pending_requests;
-				pending_requests = new Gee.ArrayList<EnumerateRequest> ();
-
-				foreach (var request in requests)
-					request.complete (processes);
-
+				request.complete (processes);
 				return false;
 			});
-			source.attach (current_main_context);
-
-			return true;
+			source.attach (main_context);
 		}
 
 		private class EnumerateRequest {
-			private SourceFunc handler;
+			public ProcessQueryOptions options {
+				get;
+				private set;
+			}
 
 			public HostProcessInfo[] result {
 				get;
 				private set;
 			}
 
-			public EnumerateRequest (owned SourceFunc handler) {
+			private SourceFunc handler;
+
+			public EnumerateRequest (ProcessQueryOptions options, owned SourceFunc handler) {
+				this.options = options;
 				this.handler = (owned) handler;
 			}
 

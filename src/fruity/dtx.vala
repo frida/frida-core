@@ -52,7 +52,7 @@ namespace Frida.Fruity {
 				info.pid = (uint) process.get_value<NSNumber> ("pid").integer;
 
 				info.name = process.get_value<NSString> ("name").str;
-				info.real_app_name = process.get_value<NSString> ("realAppName").str;
+				info.real_app_name = resolve_real_app_name (process.get_value<NSString> ("realAppName").str);
 				info.is_application = process.get_value<NSNumber> ("isApplication").boolean;
 
 				NSNumber? foreground_running;
@@ -67,6 +67,12 @@ namespace Frida.Fruity {
 			}
 
 			return result;
+		}
+
+		private static string resolve_real_app_name (string name) {
+			if (name.has_prefix ("/var/"))
+				return "/private" + name;
+			return name;
 		}
 	}
 
@@ -127,12 +133,14 @@ namespace Frida.Fruity {
 				info.display_name = app.get_value<NSString> ("DisplayName").str;
 				info.bundle_identifier = app.get_value<NSString> ("CFBundleIdentifier").str;
 				info.bundle_path = app.get_value<NSString> ("BundlePath").str;
-				info.version = app.get_value<NSString> ("Version").str;
 				info.restricted = app.get_value<NSNumber> ("Restricted").boolean;
 
 				NSNumber num_val;
 				NSString? str_val;
 				NSArray arr_val;
+
+				if (app.get_optional_value<NSString> ("Version", out str_val))
+					info.version = str_val.str;
 
 				if (app.get_optional_value<NSNumber> ("Placeholder", out num_val))
 					info.placeholder = num_val.boolean;
@@ -265,7 +273,7 @@ namespace Frida.Fruity {
 			set;
 		}
 
-		public string version {
+		public string? version {
 			get;
 			set;
 		}

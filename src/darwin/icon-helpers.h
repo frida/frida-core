@@ -5,8 +5,7 @@
 
 typedef gpointer FridaNativeImage;
 
-FridaImageData * _frida_image_data_from_file (const gchar * filename, guint target_width, guint target_height);
-
-void _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, FridaNativeImage native_image, guint target_width, guint target_height);
+GVariant * _frida_icon_from_file (const gchar * filename, guint target_width, guint target_height);
+GVariant * _frida_icon_from_native_image_scaled_to (FridaNativeImage native_image, guint target_width, guint target_height);
 
 #endif

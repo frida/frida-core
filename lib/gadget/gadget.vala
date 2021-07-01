@@ -896,9 +896,7 @@ namespace Frida.Gadget {
 
 			uint pid = get_process_id ();
 
-			var no_icon = ImageData.empty ();
-
-			return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+			return HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
 		}
 	}
 
@@ -1785,9 +1783,9 @@ namespace Frida.Gadget {
 				uint pid = get_process_id ();
 				string identifier = "re.frida.Gadget";
 				string name = "Gadget";
-				var no_icon = ImageData.empty ();
-				this_app = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
-				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
+				var no_parameters = make_parameters_dict ();
+				this_app = HostApplicationInfo (identifier, name, pid, no_parameters);
+				this_process = HostProcessInfo (pid, name, no_parameters);
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
@@ -1826,15 +1824,18 @@ namespace Frida.Gadget {
 				return compute_system_parameters ();
 			}
 
-			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+			public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
 				return this_app;
 			}
 
-			public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+			public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
 				return new HostApplicationInfo[] { this_app };
 			}
 
-			public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
+			public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
 				return new HostProcessInfo[] { this_process };
 			}
 

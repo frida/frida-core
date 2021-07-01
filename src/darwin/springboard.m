@@ -37,17 +37,18 @@ _frida_get_springboard_api (void)
     FRIDA_ASSIGN_SBS_FUNC (SBSCopyDisplayIdentifierForProcessID);
     FRIDA_ASSIGN_SBS_FUNC (SBSCopyLocalizedApplicationNameForDisplayIdentifier);
     FRIDA_ASSIGN_SBS_FUNC (SBSCopyIconImagePNGDataForDisplayIdentifier);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyInfoForApplicationWithProcessID);
     FRIDA_ASSIGN_SBS_FUNC (SBSLaunchApplicationWithIdentifierAndLaunchOptions);
     FRIDA_ASSIGN_SBS_FUNC (SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions);
     FRIDA_ASSIGN_SBS_FUNC (SBSApplicationLaunchingErrorString);
 
     FRIDA_ASSIGN_SBS_CONSTANT (SBSApplicationLaunchOptionUnlockDeviceKey);
 
+    objc_get_class_impl = dlsym (RTLD_DEFAULT, "objc_getClass");
+    g_assert (objc_get_class_impl != NULL);
+
     if (api->fbs != NULL)
     {
-      objc_get_class_impl = dlsym (RTLD_DEFAULT, "objc_getClass");
-      g_assert (objc_get_class_impl != NULL);
-
       api->FBSSystemService = objc_get_class_impl ("FBSSystemService");
       g_assert (api->FBSSystemService != nil);
 
@@ -60,6 +61,9 @@ _frida_get_springboard_api (void)
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyStandardErrorPath);
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyDisableASLR);
     }
+
+    api->LSApplicationProxy = objc_get_class_impl ("LSApplicationProxy");
+    g_assert (api->LSApplicationProxy != nil);
 
     frida_springboard_api = api;
   }

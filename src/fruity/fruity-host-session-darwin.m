@@ -40,7 +40,7 @@ static const FridaFruityModel fruity_models[] =
 };
 
 void
-_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, FridaImageData ** icon, GError ** error)
+_frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, GVariant ** icon, GError ** error)
 {
   const FridaFruityModel * model;
   guint i;
@@ -56,6 +56,6 @@ _frida_fruity_host_session_backend_extract_details_for_device (gint product_id, 
 
   filename = g_strconcat ("/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/", model->icon, ".icns", NULL);
   *name = g_strdup (model->name);
-  *icon = _frida_image_data_from_file (filename, 16, 16);
+  *icon = _frida_icon_from_file (filename, 16, 16);
   g_free (filename);
 }
