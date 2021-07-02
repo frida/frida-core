@@ -811,7 +811,7 @@ namespace Frida {
 						parameters["applications"] = applications;
 					}
 
-					if (process.foreground_running)
+					if (app != null && process.foreground_running)
 						parameters["frontmost"] = true;
 				}
 
