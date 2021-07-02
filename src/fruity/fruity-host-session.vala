@@ -667,8 +667,8 @@ namespace Frida {
 					process_by_app_path[app_path] = process;
 			}
 
-			var result = new HostApplicationInfo[apps.size];
-			int i = 0;
+			var result = new HostApplicationInfo[0];
+
 			foreach (Fruity.ApplicationDetails app in apps) {
 				unowned string identifier = app.identifier;
 				Fruity.ProcessInfo? process = process_by_app_path[app.path];
@@ -689,8 +689,7 @@ namespace Frida {
 				if (scope == FULL)
 					add_app_icons (info.parameters, icons[identifier]);
 
-				result[i] = info;
-				i++;
+				result += info;
 			}
 
 			if (server != null && server.flavor == GADGET) {
@@ -786,8 +785,8 @@ namespace Frida {
 				}
 			}
 
-			var result = new HostProcessInfo[processes.size];
-			int i = 0;
+			var result = new HostProcessInfo[0];
+
 			foreach (Fruity.ProcessInfo process in processes) {
 				uint pid = process.pid;
 				if (pid == 0)
@@ -821,11 +820,8 @@ namespace Frida {
 						add_app_icons (info.parameters, png);
 				}
 
-				result[i] = info;
-				i++;
+				result += info;
 			}
-			if (i < processes.size)
-				result.resize (i);
 
 			if (server != null && server.flavor == GADGET) {
 				try {
