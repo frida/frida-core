@@ -29,16 +29,17 @@ frida_init_with_runtime (FridaRuntime rt)
 
   g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
-  gio_init ();
-  gum_init ();
-  frida_error_quark (); /* Initialize early so GDBus will pick it up */
-
-#ifdef HAVE_GIOOPENSSL
-  g_io_module_openssl_register ();
-#endif
 
   if (g_once_init_enter (&frida_initialized))
   {
+    gio_init ();
+    gum_init ();
+    frida_error_quark (); /* Initialize early so GDBus will pick it up */
+
+#ifdef HAVE_GIOOPENSSL
+    g_io_module_openssl_register ();
+#endif
+
     g_set_prgname ("frida");
 
     if (runtime == FRIDA_RUNTIME_OTHER)
