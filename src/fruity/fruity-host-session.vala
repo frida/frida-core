@@ -520,7 +520,7 @@ namespace Frida {
 			try {
 				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
 				var response = yield lockdown.get_value (null, null, cancellable);
-				var properties = response.get_dict ("Value");
+				Fruity.PlistDict properties = response.get_dict ("Value");
 
 				var os = new HashTable<string, Variant> (str_hash, str_equal);
 				os["id"] = "ios";
@@ -537,11 +537,7 @@ namespace Frida {
 				parameters["name"] = properties.get_string ("DeviceName");
 				parameters["udid"] = properties.get_string ("UniqueDeviceID");
 
-				if (properties.has ("PhoneNumber"))
-					parameters["phone-number"] = properties.get_string ("PhoneNumber");
-				parameters["ethernet-address"] = properties.get_string ("EthernetAddress");
-				parameters["wifi-address"] = properties.get_string ("WiFiAddress");
-				parameters["bluetooth-address"] = properties.get_string ("BluetoothAddress");
+				add_interfaces (parameters, properties);
 			} catch (Fruity.LockdownError e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (Fruity.PlistError e) {
@@ -549,6 +545,31 @@ namespace Frida {
 			}
 
 			return parameters;
+		}
+
+		private static void add_interfaces (HashTable<string, Variant> parameters,
+				Fruity.PlistDict properties) throws Fruity.PlistError {
+			var ifaces = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+			if (properties.has ("PhoneNumber")) {
+				ifaces.open (VariantType.VARDICT);
+				ifaces.add ("{sv}", "type", new Variant.string ("cellular"));
+				ifaces.add ("{sv}", "phone-number", new Variant.string (properties.get_string ("PhoneNumber")));
+				ifaces.close ();
+			}
+
+			add_network_interface (ifaces, "ethernet", properties.get_string ("EthernetAddress"));
+			add_network_interface (ifaces, "wifi", properties.get_string ("WiFiAddress"));
+			add_network_interface (ifaces, "bluetooth", properties.get_string ("BluetoothAddress"));
+
+			parameters["interfaces"] = ifaces.end ();
+		}
+
+		private static void add_network_interface (VariantBuilder ifaces, string type, string address) {
+			ifaces.open (VariantType.VARDICT);
+			ifaces.add ("{sv}", "type", new Variant.string (type));
+			ifaces.add ("{sv}", "address", new Variant.string (address));
+			ifaces.close ();
 		}
 
 		public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,

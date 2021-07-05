@@ -1249,10 +1249,7 @@ namespace Frida {
 		import_mg_property (parameters, "name", "UserAssignedDeviceName");
 		import_mg_property (parameters, "udid", "UniqueDeviceID");
 
-		import_mg_property (parameters, "phone-number", "PhoneNumber");
-		import_mg_property (parameters, "ethernet-address", "EthernetMacAddress");
-		import_mg_property (parameters, "wifi-address", "WifiAddress");
-		import_mg_property (parameters, "bluetooth-address", "BluetoothAddress");
+		add_interfaces (parameters);
 #elif ANDROID
 		parameters["api-level"] = int64.parse (_query_android_system_property ("ro.build.version.sdk"));
 #else
@@ -1266,13 +1263,50 @@ namespace Frida {
 	public extern string _query_windows_version ();
 	public extern string _query_windows_computer_name ();
 #elif IOS
-	private void import_mg_property (HashTable<string, Variant> target, string key, string query) {
+	private void import_mg_property (HashTable<string, Variant> parameters, string key, string query) {
+		string? val = try_resolve_mg_property (query);
+		if (val != null)
+			parameters[key] = val;
+	}
+
+	private void add_interfaces (HashTable<string, Variant> parameters) {
+		var ifaces = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+		string? phone = try_resolve_mg_property ("PhoneNumber");
+		if (phone != null) {
+			ifaces.open (VariantType.VARDICT);
+			ifaces.add ("{sv}", "type", new Variant.string ("cellular"));
+			ifaces.add ("{sv}", "phone-number", new Variant.string (phone));
+			ifaces.close ();
+		}
+
+		maybe_add_network_interface (ifaces, "ethernet", "EthernetMacAddress");
+		maybe_add_network_interface (ifaces, "wifi", "WifiAddress");
+		maybe_add_network_interface (ifaces, "bluetooth", "BluetoothAddress");
+
+		parameters["interfaces"] = ifaces.end ();
+	}
+
+	private void maybe_add_network_interface (VariantBuilder ifaces, string type, string query) {
+		string? address = try_resolve_mg_property (query);
+		if (address == null)
+			return;
+		ifaces.open (VariantType.VARDICT);
+		ifaces.add ("{sv}", "type", new Variant.string (type));
+		ifaces.add ("{sv}", "address", new Variant.string (address));
+		ifaces.close ();
+	}
+
+	private string? try_resolve_mg_property (string query) {
 		var answer = _query_mobile_gestalt (query);
-		if (answer == null)
-			return;
-		if (answer.is_of_type (VariantType.STRING) && answer.get_string ().length == 0)
-			return;
-		target[key] = answer;
+		if (answer == null || !answer.is_of_type (VariantType.STRING))
+			return null;
+
+		string val = answer.get_string ();
+		if (val.length == 0)
+			return null;
+
+		return val;
 	}
 
 	public extern Variant? _query_mobile_gestalt (string query);
