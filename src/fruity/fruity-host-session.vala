@@ -532,6 +532,8 @@ namespace Frida {
 
 				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
 
+				parameters["access"] = "jailed";
+
 				parameters["name"] = properties.get_string ("DeviceName");
 				parameters["udid"] = properties.get_string ("UniqueDeviceID");
 

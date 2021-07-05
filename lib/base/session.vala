@@ -1241,6 +1241,8 @@ namespace Frida {
 #endif
 		parameters["arch"] = arch;
 
+		parameters["access"] = "full";
+
 #if WINDOWS
 		parameters["name"] = _query_windows_computer_name ();
 #elif IOS

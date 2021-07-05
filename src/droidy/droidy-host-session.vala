@@ -310,6 +310,8 @@ namespace Frida {
 
 			parameters["platform"] = "linux";
 
+			parameters["access"] = "jailed";
+
 			return parameters;
 		}
 
