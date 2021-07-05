@@ -565,28 +565,81 @@ namespace Frida {
 			}
 		}
 
-		private HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options, ControlChannel requester) {
-			var result = new HostApplicationInfo[node_by_pid.size];
-			int i = 0;
+		private HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
+				ControlChannel requester) throws Error {
+			var opts = ApplicationQueryOptions._deserialize (options);
+			var scope = opts.scope;
+
+			Gee.List<Application> apps = new Gee.ArrayList<Application> ();
 			all_nodes_accessible_by (requester).foreach (node => {
-				Application app = node.application;
-				result[i++] = HostApplicationInfo (app.identifier, app.name, app.pid, app.parameters);
+				apps.add (node.application);
 				return true;
 			});
-			result.length = i;
+			apps = maybe_filter_apps_using_ids (apps, opts);
+
+			var result = new HostApplicationInfo[apps.size];
+			int i = 0;
+			foreach (var app in apps) {
+				result[i++] = HostApplicationInfo (app.identifier, app.name, app.pid,
+					(scope != MINIMAL) ? app.parameters : make_parameters_dict ());
+			}
 			return result;
 		}
 
-		private HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options, ControlChannel requester) {
-			var result = new HostProcessInfo[node_by_pid.size];
-			int i = 0;
+		private HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options, ControlChannel requester) throws Error {
+			var opts = ProcessQueryOptions._deserialize (options);
+			var scope = opts.scope;
+
+			Gee.List<Application> apps = new Gee.ArrayList<Application> ();
 			all_nodes_accessible_by (requester).foreach (node => {
-				Application app = node.application;
-				result[i++] = HostProcessInfo (app.pid, app.name, app.parameters);
+				apps.add (node.application);
 				return true;
 			});
-			result.length = i;
+			apps = maybe_filter_apps_using_pids (apps, opts);
+
+			var result = new HostProcessInfo[apps.size];
+			int i = 0;
+			foreach (var app in apps) {
+				result[i++] = HostProcessInfo (app.pid, app.name,
+					(scope != MINIMAL) ? app.parameters : make_parameters_dict ());
+			}
 			return result;
+		}
+
+		private Gee.List<Application> maybe_filter_apps_using_ids (Gee.List<Application> apps, ApplicationQueryOptions options) {
+			if (!options.has_selected_identifiers ())
+				return apps;
+
+			var app_by_identifier = new Gee.HashMap<string, Application> ();
+			foreach (var app in apps)
+				app_by_identifier[app.identifier] = app;
+
+			var filtered_apps = new Gee.ArrayList<Application> ();
+			options.enumerate_selected_identifiers (identifier => {
+				Application? app = app_by_identifier[identifier];
+				if (app != null)
+					filtered_apps.add (app);
+			});
+
+			return filtered_apps;
+		}
+
+		private Gee.List<Application> maybe_filter_apps_using_pids (Gee.List<Application> apps, ProcessQueryOptions options) {
+			if (!options.has_selected_pids ())
+				return apps;
+
+			var app_by_pid = new Gee.HashMap<uint, Application> ();
+			foreach (Application app in apps)
+				app_by_pid[app.pid] = app;
+
+			var filtered_apps = new Gee.ArrayList<Application> ();
+			options.enumerate_selected_pids (pid => {
+				Application? app = app_by_pid[pid];
+				if (app != null)
+					filtered_apps.add (app);
+			});
+
+			return filtered_apps;
 		}
 
 		private void enable_spawn_gating (ControlChannel requester) {
