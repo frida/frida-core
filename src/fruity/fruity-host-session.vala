@@ -716,21 +716,10 @@ namespace Frida {
 			}
 
 			if (server != null && server.flavor == GADGET) {
-				bool gadget_is_selected = true;
-				if (opts.has_selected_identifiers ()) {
-					gadget_is_selected = false;
-					opts.enumerate_selected_identifiers (identifier => {
-						if (identifier == "re.frida.Gadget")
-							gadget_is_selected = true;
-					});
-				}
-
-				if (gadget_is_selected) {
-					try {
-						foreach (var app in yield server.session.enumerate_applications (options, cancellable))
-							result += app;
-					} catch (GLib.Error e) {
-					}
+				try {
+					foreach (var app in yield server.session.enumerate_applications (options, cancellable))
+						result += app;
+				} catch (GLib.Error e) {
 				}
 			}
 
@@ -848,20 +837,8 @@ namespace Frida {
 
 			if (server != null && server.flavor == GADGET) {
 				try {
-					foreach (var process in yield server.session.enumerate_processes (options, cancellable)) {
-						bool gadget_is_selected = true;
-						if (opts.has_selected_pids ()) {
-							gadget_is_selected = false;
-							uint gadget_pid = process.pid;
-							opts.enumerate_selected_pids (pid => {
-								if (pid == gadget_pid)
-									gadget_is_selected = true;
-							});
-						}
-
-						if (gadget_is_selected)
-							result += process;
-					}
+					foreach (var process in yield server.session.enumerate_processes (options, cancellable))
+						result += process;
 				} catch (GLib.Error e) {
 				}
 			}

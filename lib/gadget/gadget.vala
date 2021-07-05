@@ -1834,11 +1834,35 @@ namespace Frida.Gadget {
 
 			public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
+				var opts = ApplicationQueryOptions._deserialize (options);
+
+				if (opts.has_selected_identifiers ()) {
+					bool gadget_is_selected = false;
+					opts.enumerate_selected_identifiers (identifier => {
+						if (identifier == this_app.identifier)
+							gadget_is_selected = true;
+					});
+					if (!gadget_is_selected)
+						return {};
+				}
+
 				return new HostApplicationInfo[] { this_app };
 			}
 
 			public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
+				var opts = ProcessQueryOptions._deserialize (options);
+
+				if (opts.has_selected_pids ()) {
+					bool gadget_is_selected = false;
+					opts.enumerate_selected_pids (pid => {
+						if (pid == this_process.pid)
+							gadget_is_selected = true;
+					});
+					if (!gadget_is_selected)
+						return {};
+				}
+
 				return new HostProcessInfo[] { this_process };
 			}
 
