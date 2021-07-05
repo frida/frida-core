@@ -551,16 +551,16 @@ namespace Frida {
 				Fruity.PlistDict properties) throws Fruity.PlistError {
 			var ifaces = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
 
+			add_network_interface (ifaces, "ethernet", properties.get_string ("EthernetAddress"));
+			add_network_interface (ifaces, "wifi", properties.get_string ("WiFiAddress"));
+			add_network_interface (ifaces, "bluetooth", properties.get_string ("BluetoothAddress"));
+
 			if (properties.has ("PhoneNumber")) {
 				ifaces.open (VariantType.VARDICT);
 				ifaces.add ("{sv}", "type", new Variant.string ("cellular"));
 				ifaces.add ("{sv}", "phone-number", new Variant.string (properties.get_string ("PhoneNumber")));
 				ifaces.close ();
 			}
-
-			add_network_interface (ifaces, "ethernet", properties.get_string ("EthernetAddress"));
-			add_network_interface (ifaces, "wifi", properties.get_string ("WiFiAddress"));
-			add_network_interface (ifaces, "bluetooth", properties.get_string ("BluetoothAddress"));
 
 			parameters["interfaces"] = ifaces.end ();
 		}

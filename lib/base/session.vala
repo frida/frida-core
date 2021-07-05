@@ -1272,6 +1272,10 @@ namespace Frida {
 	private void add_interfaces (HashTable<string, Variant> parameters) {
 		var ifaces = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
 
+		maybe_add_network_interface (ifaces, "ethernet", "EthernetMacAddress");
+		maybe_add_network_interface (ifaces, "wifi", "WifiAddress");
+		maybe_add_network_interface (ifaces, "bluetooth", "BluetoothAddress");
+
 		string? phone = try_resolve_mg_property ("PhoneNumber");
 		if (phone != null) {
 			ifaces.open (VariantType.VARDICT);
@@ -1279,10 +1283,6 @@ namespace Frida {
 			ifaces.add ("{sv}", "phone-number", new Variant.string (phone));
 			ifaces.close ();
 		}
-
-		maybe_add_network_interface (ifaces, "ethernet", "EthernetMacAddress");
-		maybe_add_network_interface (ifaces, "wifi", "WifiAddress");
-		maybe_add_network_interface (ifaces, "bluetooth", "BluetoothAddress");
 
 		parameters["interfaces"] = ifaces.end ();
 	}
