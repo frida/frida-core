@@ -891,6 +891,7 @@ namespace Frida.Agent {
 			string name = Path.get_basename (executable_path); // TODO: Detect app name
 			uint pid = get_process_id ();
 			var app_info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			app_info.parameters["system"] = compute_system_parameters ();
 
 			var client = new PortalClient (this, connectable, options.certificate, options.token, options.acl, app_info);
 			client.kill.connect (on_kill);

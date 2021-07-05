@@ -896,7 +896,10 @@ namespace Frida.Gadget {
 
 			uint pid = get_process_id ();
 
-			return HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			info.parameters["system"] = compute_system_parameters ();
+
+			return info;
 		}
 	}
 
