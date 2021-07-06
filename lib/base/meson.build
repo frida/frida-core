@@ -18,7 +18,7 @@ endif
 base = static_library('frida-base', base_sources,
   c_args: frida_component_cflags,
   vala_header: 'frida-base.h',
-  dependencies: [glib_dep, gobject_dep, gio_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep] + extra_deps,
+  dependencies: [glib_dep, gobject_dep, gio_dep, libsoup_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep] + extra_deps,
 )
 
 base_dep = declare_dependency(

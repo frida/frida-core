@@ -281,14 +281,19 @@ namespace Frida.Gadget {
 			default = LoadBehavior.WAIT;
 		}
 
-		public enum PortConflictBehavior {
-			FAIL,
-			PICK_NEXT
-		}
-
 		public enum LoadBehavior {
 			RESUME,
 			WAIT
+		}
+
+		public string? origin {
+			get;
+			set;
+		}
+
+		public string? asset_root {
+			get;
+			set;
 		}
 	}
 
@@ -1390,27 +1395,19 @@ namespace Frida.Gadget {
 	}
 
 	private class ControlServer : BaseController {
+		public EndpointParameters endpoint_params {
+			get;
+			construct;
+		}
+
 		public SocketAddress? listen_address {
-			get;
-			set;
+			get {
+				return (service != null) ? service.listen_address : null;
+			}
 		}
 
-		public TlsCertificate? certificate {
-			get;
-			construct;
-		}
-
-		public AuthenticationService? auth_service {
-			get;
-			construct;
-		}
-
-		public ListenInteraction.PortConflictBehavior on_port_conflict {
-			get;
-			construct;
-		}
-
-		private SocketService server = new SocketService ();
+		private WebService? service;
+		private AuthenticationService? auth_service;
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
 		private Gee.Map<AgentSessionId?, LiveAgentSession> sessions =
@@ -1420,73 +1417,27 @@ namespace Frida.Gadget {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public ControlServer (Config config, Location location) throws Error {
-			var interaction = (ListenInteraction) config.interaction;
-			string? token = interaction.token;
-			Object (
-				config: config,
-				location: location,
-				certificate: parse_certificate (interaction.certificate),
-				auth_service: (token != null) ? new StaticAuthenticationService (token) : null,
-				on_port_conflict: interaction.on_port_conflict
-			);
+			Object (config: config, location: location);
 		}
 
 		construct {
-			server.incoming.connect (on_incoming_connection);
 		}
 
 		protected override async void on_start () throws Error, IOError {
 			var interaction = (ListenInteraction) config.interaction;
 
-			SocketConnectable connectable = parse_control_address (interaction.address, interaction.port);
-			var enumerator = connectable.enumerate ();
-			while (true) {
-				SocketAddress? address;
-				try {
-					address = yield enumerator.next_async (io_cancellable);
-				} catch (GLib.Error e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
-				if (address == null)
-					break;
+			string? token = interaction.token;
+			auth_service = (token != null) ? new StaticAuthenticationService (token) : null;
 
-				SocketAddress? effective_address = null;
-				InetSocketAddress? inet_address = address as InetSocketAddress;
-				if (inet_address != null) {
-					uint16 start_port = inet_address.get_port ();
-					uint16 candidate_port = start_port;
-					do {
-						try {
-							server.add_address (inet_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
-								out effective_address);
-						} catch (GLib.Error e) {
-							if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
-								candidate_port++;
-								if (candidate_port == start_port)
-									throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
-								if (candidate_port == 0)
-									candidate_port = 1024;
-								inet_address = new InetSocketAddress (inet_address.get_address (),
-									candidate_port);
-							} else {
-								throw_listen_error (e);
-							}
-						}
-					} while (effective_address == null);
-				} else {
-					try {
-						server.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
-							out effective_address);
-					} catch (GLib.Error e) {
-						throw_listen_error (e);
-					}
-				}
+			string? asset_root_path = interaction.asset_root;
+			File? asset_root = (asset_root_path != null) ? File.new_for_path (asset_root_path) : null;
 
-				if (listen_address == null)
-					listen_address = effective_address;
-			}
+			var endpoint_params = new EndpointParameters (interaction.address, interaction.port,
+				parse_certificate (interaction.certificate), interaction.origin, auth_service, asset_root);
 
-			server.start ();
+			service = new WebService (endpoint_params, CONTROL, interaction.on_port_conflict);
+			service.incoming.connect (on_incoming_connection);
+			yield service.start (io_cancellable);
 		}
 
 		protected override async void on_terminate (TerminationReason reason) {
@@ -1502,10 +1453,7 @@ namespace Frida.Gadget {
 		}
 
 		protected override async void on_stop () {
-			if (server == null)
-				return;
-
-			server.stop ();
+			service.stop ();
 
 			io_cancellable.cancel ();
 
@@ -1524,26 +1472,12 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
+		private void on_incoming_connection (IOStream connection, SocketAddress remote_address) {
 			handle_incoming_connection.begin (connection);
-			return true;
 		}
 
-		private async void handle_incoming_connection (SocketConnection socket_connection) throws GLib.Error {
-			var socket = socket_connection.socket;
-			if (socket.get_family () != UNIX)
-				Tcp.enable_nodelay (socket);
-
-			IOStream stream = socket_connection;
-
-			if (certificate != null) {
-				var tc = TlsServerConnection.new (stream, certificate);
-				tc.set_database (null);
-				yield tc.handshake_async (Priority.DEFAULT, io_cancellable);
-				stream = tc;
-			}
-
-			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
+		private async void handle_incoming_connection (IOStream raw_connection) throws GLib.Error {
+			var connection = yield new DBusConnection (raw_connection, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			Peer peer;
@@ -1959,17 +1893,6 @@ namespace Frida.Gadget {
 					dbus_context: dbus_context
 				);
 			}
-		}
-
-		[NoReturn]
-		private static void throw_listen_error (GLib.Error e) throws Error {
-			if (e is IOError.ADDRESS_IN_USE)
-				throw new Error.ADDRESS_IN_USE ("%s", e.message);
-
-			if (e is IOError.PERMISSION_DENIED)
-				throw new Error.PERMISSION_DENIED ("%s", e.message);
-
-			throw new Error.NOT_SUPPORTED ("%s", e.message);
 		}
 	}
 

@@ -228,6 +228,10 @@ namespace Frida {
 				if (cert != null)
 					opts["certificate"] = cert;
 
+				string? origin = options.origin;
+				if (origin != null)
+					opts["origin"] = origin;
+
 				string? token = options.token;
 				if (token != null)
 					opts["token"] = token;
@@ -1484,6 +1488,11 @@ namespace Frida {
 
 	public class RemoteDeviceOptions : Object {
 		public TlsCertificate? certificate {
+			get;
+			set;
+		}
+
+		public string? origin {
 			get;
 			set;
 		}

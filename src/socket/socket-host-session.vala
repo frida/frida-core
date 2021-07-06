@@ -64,6 +64,7 @@ namespace Frida {
 		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			string? raw_address = null;
 			TlsCertificate? certificate = null;
+			string? origin = null;
 			string? token = null;
 			int keepalive_interval = -1;
 			if (options != null) {
@@ -76,6 +77,10 @@ namespace Frida {
 				Value? cert_val = opts["certificate"];
 				if (cert_val != null)
 					certificate = (TlsCertificate) cert_val.get_object ();
+
+				Value? origin_val = opts["origin"];
+				if (origin_val != null)
+					origin = origin_val.get_string ();
 
 				Value? token_val = opts["token"];
 				if (token_val != null)
@@ -126,6 +131,8 @@ namespace Frida {
 					throw new Error.TRANSPORT ("%s", e.message);
 				}
 			}
+
+			stream = yield negotiate_connection (stream, origin, cancellable);
 
 			DBusConnection connection;
 			try {

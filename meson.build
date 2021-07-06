@@ -283,7 +283,6 @@ subdir('lib')
 subdir('src')
 subdir('server')
 subdir('portal')
-subdir('web-gateway')
 subdir('inject')
 
 if get_option('tests')

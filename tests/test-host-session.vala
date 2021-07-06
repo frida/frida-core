@@ -1005,6 +1005,7 @@ namespace Frida.HostSessionTest {
 				}
 
 				var proxy = new ChaosProxy (control_port, (owned) on_message);
+				yield proxy.start ();
 
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.add_remote_device ("127.0.0.1:%u".printf (proxy.proxy_port));
@@ -1147,7 +1148,7 @@ namespace Frida.HostSessionTest {
 
 			public Inducer on_message;
 
-			private SocketService service = new SocketService ();
+			private WebService service;
 			private uint16 _proxy_port;
 			private SocketAddress target_address;
 			private Gee.Set<Cancellable> cancellables = new Gee.HashSet<Cancellable> ();
@@ -1172,16 +1173,21 @@ namespace Frida.HostSessionTest {
 			}
 
 			construct {
+				service = new WebService (new EndpointParameters ("127.0.0.1", 1337), CONTROL,
+					PortConflictBehavior.PICK_NEXT);
+				service.incoming.connect (on_incoming_connection);
+
+				target_address = new InetSocketAddress.from_string ("127.0.0.1", target_port);
+			}
+
+			public async void start () {
 				try {
-					_proxy_port = service.add_any_inet_port (null);
+					yield service.start (null);
 				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
 
-				target_address = new InetSocketAddress.from_string ("127.0.0.1", target_port);
-
-				service.incoming.connect (on_incoming_connection);
-				service.start ();
+				_proxy_port = (uint16) ((InetSocketAddress) service.listen_address).port;
 			}
 
 			public void close () {
@@ -1192,34 +1198,34 @@ namespace Frida.HostSessionTest {
 				service.stop ();
 			}
 
-			private bool on_incoming_connection (SocketConnection proxy_connection, Object? source_object) {
+			private void on_incoming_connection (IOStream proxy_connection, SocketAddress remote_address) {
 				handle_incoming_connection.begin (proxy_connection);
-				return true;
 			}
 
-			private async void handle_incoming_connection (SocketConnection proxy_connection) throws GLib.Error {
+			private async void handle_incoming_connection (IOStream proxy_connection) throws GLib.Error {
 				var cancellable = new Cancellable ();
 				cancellables.add (cancellable);
 
-				SocketConnection? target_connection = null;
+				IOStream? target_stream = null;
 				try {
-					Tcp.enable_nodelay (proxy_connection.socket);
-
 					var client = new SocketClient ();
-					target_connection = yield client.connect_async (target_address, cancellable);
+					SocketConnection target_connection = yield client.connect_async (target_address, cancellable);
 					Tcp.enable_nodelay (target_connection.socket);
+					target_stream = target_connection;
 
-					handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_connection.output_stream,
+					target_stream = yield negotiate_connection (target_stream, null, cancellable);
+
+					handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_stream.output_stream,
 						cancellable);
-					yield handle_io (Direction.IN, target_connection.input_stream, proxy_connection.output_stream,
+					yield handle_io (Direction.IN, target_stream.input_stream, proxy_connection.output_stream,
 						cancellable);
 				} finally {
 					cancellable.cancel ();
 					cancellables.remove (cancellable);
 
 					Idle.add (() => {
-						if (target_connection != null)
-							target_connection.close_async.begin ();
+						if (target_stream != null)
+							target_stream.close_async.begin ();
 						proxy_connection.close_async.begin ();
 						return false;
 					});

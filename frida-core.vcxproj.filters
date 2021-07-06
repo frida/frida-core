@@ -238,16 +238,10 @@
     <ClCompile Include="$(IntDir)src\control-service.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\endpoint.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)src\file-monitor.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\portal-service.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\web-gateway-service.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\springboard-services.c">
@@ -267,16 +261,10 @@
     <None Include="src\control-service.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="src\endpoint.vala">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="src\file-monitor.vala">
       <Filter>Source Files</Filter>
     </None>
     <None Include="src\portal-service.vala">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="src\web-gateway-service.vala">
       <Filter>Source Files</Filter>
     </None>
     <None Include="src\fruity\springboard-services.vala">

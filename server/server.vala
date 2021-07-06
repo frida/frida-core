@@ -5,7 +5,9 @@ namespace Frida.Server {
 	private static bool output_version = false;
 	private static string? listen_address = null;
 	private static string? certpath = null;
+	private static string? origin = null;
 	private static string? token = null;
+	private static string? asset_root = null;
 	private static string? directory = null;
 #if !WINDOWS
 	private static bool daemonize = false;
@@ -30,7 +32,11 @@ namespace Frida.Server {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
 		{ "certificate", 0, 0, OptionArg.FILENAME, ref certpath, "Enable TLS using CERTIFICATE", "CERTIFICATE" },
+		{ "origin", 0, 0, OptionArg.STRING, ref origin, "Only accept requests with “Origin” header matching ORIGIN " +
+			"(by default any origin will be accepted)", "ORIGIN" },
 		{ "token", 0, 0, OptionArg.STRING, ref token, "Require authentication using TOKEN", "TOKEN" },
+		{ "asset-root", 0, 0, OptionArg.FILENAME, ref asset_root, "Serve static files inside ROOT (by default no files are served)",
+			"ROOT" },
 		{ "directory", 'd', 0, OptionArg.STRING, ref directory, "Store binaries in DIRECTORY", "DIRECTORY" },
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
@@ -72,8 +78,9 @@ namespace Frida.Server {
 
 		EndpointParameters endpoint_params;
 		try {
-			endpoint_params = new EndpointParameters (listen_address, 0, parse_certificate (certpath),
-				(token != null) ? new StaticAuthenticationService (token) : null);
+			endpoint_params = new EndpointParameters (listen_address, 0, parse_certificate (certpath), origin,
+				(token != null) ? new StaticAuthenticationService (token) : null,
+				(asset_root != null) ? File.new_for_path (asset_root) : null);
 		} catch (GLib.Error e) {
 			printerr ("%s\n", e.message);
 			return 2;

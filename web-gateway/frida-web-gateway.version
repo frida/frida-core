@@ -1,4 +1,0 @@
-FRIDA_WEB_GATEWAY {
-  local:
-    *;
-};

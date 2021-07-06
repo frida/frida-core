@@ -31,7 +31,8 @@ namespace Frida {
 
 		private State state = STOPPED;
 
-		private SocketService service = new SocketService ();
+		private WebService cluster_service;
+		private WebService? control_service;
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
 		private Gee.MultiMap<string, ConnectionEntry> tags = new Gee.HashMultiMap<string, ConnectionEntry> ();
@@ -63,7 +64,13 @@ namespace Frida {
 			_device = new Device (null, "portal", "Portal", HostSessionProviderKind.LOCAL,
 				new PortalHostSessionProvider (this));
 
-			service.incoming.connect (on_incoming_connection);
+			cluster_service = new WebService (cluster_params, CLUSTER);
+			cluster_service.incoming.connect (on_incoming_cluster_connection);
+
+			if (control_params != null) {
+				control_service = new WebService (control_params, CONTROL);
+				control_service.incoming.connect (on_incoming_control_connection);
+			}
 		}
 
 		public override void dispose () {
@@ -92,15 +99,10 @@ namespace Frida {
 			io_cancellable = new Cancellable ();
 
 			try {
-				yield add_endpoint (parse_cluster_address (cluster_params.address, cluster_params.port),
-					cluster_params, cancellable);
+				yield cluster_service.start (cancellable);
 
-				if (control_params != null) {
-					yield add_endpoint (parse_control_address (control_params.address, control_params.port),
-						control_params, cancellable);
-				}
-
-				service.start ();
+				if (control_service != null)
+					yield control_service.start (cancellable);
 
 				state = STARTED;
 			} catch (GLib.Error e) {
@@ -121,21 +123,14 @@ namespace Frida {
 			}
 		}
 
-		private async void add_endpoint (SocketConnectable connectable, EndpointParameters parameters,
-				Cancellable? cancellable) throws GLib.Error {
-			var enumerator = connectable.enumerate ();
-			SocketAddress? address;
-			while ((address = yield enumerator.next_async (cancellable)) != null) {
-				SocketAddress effective_address;
-				service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, parameters, out effective_address);
-			}
-		}
-
 		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STARTED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
-			service.stop ();
+			if (control_service != null)
+				control_service.stop ();
+
+			cluster_service.stop ();
 
 			if (io_cancellable != null)
 				io_cancellable.cancel ();
@@ -358,32 +353,20 @@ namespace Frida {
 			}
 		}
 
-		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
-			var parameters = (EndpointParameters) source_object;
-			handle_incoming_connection.begin (connection, parameters);
-			return true;
+		private void on_incoming_cluster_connection (IOStream connection, SocketAddress remote_address) {
+			handle_incoming_connection.begin (connection, remote_address, cluster_params);
 		}
 
-		private async void handle_incoming_connection (SocketConnection socket_connection,
+		private void on_incoming_control_connection (IOStream connection, SocketAddress remote_address) {
+			handle_incoming_connection.begin (connection, remote_address, control_params);
+		}
+
+		private async void handle_incoming_connection (IOStream web_connection, SocketAddress remote_address,
 				EndpointParameters parameters) throws GLib.Error {
-			var socket = socket_connection.socket;
-			if (socket.get_family () != UNIX)
-				Tcp.enable_nodelay (socket);
-
-			IOStream stream = socket_connection;
-
-			TlsCertificate? certificate = parameters.certificate;
-			if (certificate != null) {
-				var tc = TlsServerConnection.new (stream, certificate);
-				tc.set_database (null);
-				yield tc.handshake_async (Priority.DEFAULT, io_cancellable);
-				stream = tc;
-			}
-
-			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
+			var connection = yield new DBusConnection (web_connection, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
-			uint connection_id = register_connection (connection, socket_connection.get_remote_address (), parameters);
+			uint connection_id = register_connection (connection, remote_address, parameters);
 
 			Peer peer;
 			if (parameters.auth_service != null)

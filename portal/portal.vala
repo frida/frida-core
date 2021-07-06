@@ -7,7 +7,9 @@ namespace Frida.Portal {
 	private static string? cluster_token = null;
 	private static string? control_address = null;
 	private static string? control_certpath = null;
+	private static string? control_origin = null;
 	private static string? control_token = null;
+	private static string? control_asset_root = null;
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
@@ -24,8 +26,12 @@ namespace Frida.Portal {
 		{ "control-endpoint", 0, 0, OptionArg.STRING, ref control_address, "Expose control endpoint on ADDRESS", "ADDRESS" },
 		{ "control-certificate", 0, 0, OptionArg.FILENAME, ref control_certpath, "Enable TLS on control endpoint using CERTIFICATE",
 			"CERTIFICATE" },
+		{ "control-origin", 0, 0, OptionArg.STRING, ref control_origin, "Only accept control endpoint requests with “Origin” " +
+			"header matching ORIGIN (by default any origin will be accepted)", "ORIGIN" },
 		{ "control-token", 0, 0, OptionArg.STRING, ref control_token, "Require authentication on control endpoint using TOKEN",
 			"TOKEN" },
+		{ "control-asset-root", 0, 0, OptionArg.FILENAME, ref control_asset_root, "Serve static files inside ROOT on control " +
+			"endpoint by default no files are served)", "ROOT" },
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
@@ -55,10 +61,11 @@ namespace Frida.Portal {
 
 		EndpointParameters cluster_params, control_params;
 		try {
-			cluster_params = new EndpointParameters (cluster_address, 0, parse_certificate (cluster_certpath),
+			cluster_params = new EndpointParameters (cluster_address, 0, parse_certificate (cluster_certpath), null,
 				(cluster_token != null) ? new StaticAuthenticationService (cluster_token) : null);
-			control_params = new EndpointParameters (control_address, 0, parse_certificate (control_certpath),
-				(control_token != null) ? new StaticAuthenticationService (control_token) : null);
+			control_params = new EndpointParameters (control_address, 0, parse_certificate (control_certpath), control_origin,
+				(control_token != null) ? new StaticAuthenticationService (control_token) : null,
+				(control_asset_root != null) ? File.new_for_path (control_asset_root) : null);
 		} catch (GLib.Error e) {
 			printerr ("%s\n", e.message);
 			return 2;

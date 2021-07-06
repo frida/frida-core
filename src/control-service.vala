@@ -10,14 +10,14 @@ namespace Frida {
 			construct;
 		}
 
-		public bool enable_preload {
+		public ControlServiceOptions options {
 			get;
 			construct;
 		}
 
 		private State state = STOPPED;
 
-		private SocketService service = new SocketService ();
+		private WebService service;
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
 		private Gee.Set<ControlChannel> spawn_gaters = new Gee.HashSet<ControlChannel> ();
@@ -63,18 +63,16 @@ namespace Frida {
 			Object (
 				host_session: host_session,
 				endpoint_params: endpoint_params,
-				enable_preload: opts.enable_preload
+				options: opts
 			);
 		}
 
 		public ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
 				ControlServiceOptions? options = null) {
-			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
-
 			Object (
 				host_session: host_session,
 				endpoint_params: endpoint_params,
-				enable_preload: opts.enable_preload
+				options: (options != null) ? options : new ControlServiceOptions ()
 			);
 		}
 
@@ -82,6 +80,7 @@ namespace Frida {
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
+			service = new WebService (endpoint_params, CONTROL);
 			service.incoming.connect (on_server_connection);
 
 			broker_service.incoming.connect (on_broker_service_connection);
@@ -93,22 +92,9 @@ namespace Frida {
 			state = STARTING;
 
 			try {
-				SocketConnectable connectable = parse_control_address (endpoint_params.address, endpoint_params.port);
-				var enumerator = connectable.enumerate ();
-				SocketAddress? address;
-				try {
-					while ((address = yield enumerator.next_async (io_cancellable)) != null) {
-						SocketAddress effective_address;
-						service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
-							out effective_address);
-					}
-				} catch (GLib.Error e) {
-					throw new Error.ADDRESS_IN_USE ("%s", e.message);
-				}
+				yield service.start (cancellable);
 
-				service.start ();
-
-				if (enable_preload) {
+				if (options.enable_preload) {
 					var base_host_session = host_session as BaseDBusHostSession;
 					if (base_host_session != null)
 						base_host_session.preload.begin (io_cancellable);
@@ -180,7 +166,7 @@ namespace Frida {
 			}
 		}
 
-		private bool on_server_connection (SocketConnection connection, Object? source_object) {
+		private void on_server_connection (IOStream connection, SocketAddress remote_address) {
 #if IOS
 			/*
 			 * We defer the launchd injection until the first connection is established in order
@@ -192,25 +178,10 @@ namespace Frida {
 #endif
 
 			handle_server_connection.begin (connection);
-			return true;
 		}
 
-		private async void handle_server_connection (SocketConnection socket_connection) throws GLib.Error {
-			var socket = socket_connection.socket;
-			if (socket.get_family () != UNIX)
-				Tcp.enable_nodelay (socket);
-
-			IOStream stream = socket_connection;
-
-			TlsCertificate? certificate = endpoint_params.certificate;
-			if (certificate != null) {
-				var tc = TlsServerConnection.new (stream, certificate);
-				tc.set_database (null);
-				yield tc.handshake_async (Priority.DEFAULT, io_cancellable);
-				stream = tc;
-			}
-
-			var connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
+		private async void handle_server_connection (IOStream raw_connection) throws GLib.Error {
+			var connection = yield new DBusConnection (raw_connection, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			Peer peer;

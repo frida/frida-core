@@ -30,8 +30,6 @@ def main():
         "frida.vala",
         "control-service.vala",
         "portal-service.vala",
-        "web-gateway-service.vala",
-        "endpoint.vala",
         "file-monitor.vala",
     ]
     toplevel_sources = []
@@ -204,7 +202,8 @@ def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, bas
         "PortalOptions": "Relay",
         "RpcClient": "PortalMembership",
         "RpcPeer": "RpcClient",
-        "AuthenticationService": "PortalService",
+        "EndpointParameters": "PortalService",
+        "AuthenticationService": "EndpointParameters",
         "StaticAuthenticationService": "AuthenticationService",
     }
     internal_type_prefixes = [
@@ -384,7 +383,8 @@ def function_is_public(name):
                 "compute_system_parameters",
                 "parse_control_address",
                 "parse_cluster_address",
-                "parse_socket_address"
+                "parse_socket_address",
+                "negotiate_connection"
             ]
 
 def parse_vala_object_types(source):

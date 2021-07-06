@@ -169,6 +169,8 @@ namespace Frida {
 				stream = tc;
 			}
 
+			stream = yield negotiate_connection (stream, null, io_cancellable);
+
 			connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 

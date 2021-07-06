@@ -12,3 +12,9 @@ frida_tcp_enable_nodelay (GSocket * socket)
 {
   g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
+
+const gchar *
+_frida_version_string (void)
+{
+  return FRIDA_VERSION;
+}
