@@ -878,6 +878,11 @@ namespace Frida {
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 
+				WebServiceTransport transport = PLAIN;
+				string? origin = null;
+
+				stream = yield negotiate_connection (stream, transport, origin, cancellable);
+
 				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DO_NOT_LOAD_PROPERTIES,

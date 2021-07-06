@@ -1223,6 +1223,11 @@ namespace Frida {
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (gadget_details.port),
 					cancellable);
 
+				WebServiceTransport transport = PLAIN;
+				string? origin = null;
+
+				stream = yield negotiate_connection (stream, transport, origin, cancellable);
+
 				var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
