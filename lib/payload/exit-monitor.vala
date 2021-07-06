@@ -17,7 +17,7 @@ namespace Frida {
 		private PreparationState preparation_state = UNPREPARED;
 		private Mutex mutex;
 		private Cond cond;
-		private MainContext blocked_main_context;
+		private MainContext? blocked_main_context;
 		private MainLoop loop;
 
 		private enum PreparationState {

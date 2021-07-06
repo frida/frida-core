@@ -17,7 +17,7 @@ namespace Frida {
 		}
 
 		construct {
-			main_context = MainContext.get_thread_default ();
+			main_context = MainContext.ref_thread_default ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -240,14 +240,14 @@ namespace Frida {
 
 		private HelperFile? helper_file;
 		private ResourceStore? resource_store;
-		private MainContext? main_context;
+		private MainContext main_context;
 		private SuperSU.Process superprocess;
 		private Pid process_pid;
 		private DBusConnection connection;
 		private LinuxHelper helper;
 		private Promise<LinuxHelper> obtain_request;
 
-		public HelperFactory (HelperFile? helper_file, ResourceStore resource_store, MainContext? main_context) {
+		public HelperFactory (HelperFile? helper_file, ResourceStore resource_store, MainContext main_context) {
 			this.helper_file = helper_file;
 			this.resource_store = resource_store;
 			this.main_context = main_context;

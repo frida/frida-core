@@ -18,7 +18,7 @@ namespace Frida {
 		}
 
 		construct {
-			main_context = MainContext.get_thread_default ();
+			main_context = MainContext.ref_thread_default ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

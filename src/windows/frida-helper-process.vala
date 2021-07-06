@@ -127,7 +127,7 @@ namespace Frida {
 
 		public HelperFactory (PrivilegeLevel level) {
 			this.level = level;
-			this.main_context = MainContext.get_thread_default ();
+			this.main_context = MainContext.ref_thread_default ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

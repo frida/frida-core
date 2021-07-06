@@ -13,7 +13,6 @@ namespace Frida {
 
 		private ResourceStore _resource_store;
 
-		private MainContext main_context;
 		private Pid process_pid;
 		private TaskPort task;
 		private DBusConnection connection;
@@ -22,10 +21,6 @@ namespace Frida {
 
 		public DarwinHelperProcess (TemporaryDirectory tempdir) {
 			Object (tempdir: tempdir);
-		}
-
-		construct {
-			main_context = MainContext.get_thread_default ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

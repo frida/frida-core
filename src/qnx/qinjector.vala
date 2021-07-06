@@ -32,7 +32,7 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		construct {
-			main_context = MainContext.get_thread_default ();
+			main_context = MainContext.ref_thread_default ();
 		}
 
 		~Qinjector () {
