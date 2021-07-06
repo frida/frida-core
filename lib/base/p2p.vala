@@ -562,15 +562,10 @@ namespace Frida {
 			}
 		}
 
-		public bool is_readable {
+		public IOCondition pending_io {
 			get {
-				return (sctp_events & IOCondition.IN) != 0;
-			}
-		}
-
-		public bool is_writable {
-			get {
-				return (sctp_events & IOCondition.OUT) != 0;
+				lock (state)
+					return sctp_events;
 			}
 		}
 
@@ -586,6 +581,8 @@ namespace Frida {
 		private SctpTimerSource sctp_source;
 		private uint16 stream_id;
 		private ByteArray dcep_message = new ByteArray ();
+
+		private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -696,6 +693,16 @@ namespace Frida {
 			}
 		}
 
+		public void register_source (Source source, IOCondition condition) {
+			lock (state)
+				sources[source] = condition;
+		}
+
+		public void unregister_source (Source source) {
+			lock (state)
+				sources.unset (source);
+		}
+
 		private bool on_transport_socket_readable (DatagramBased datagram_based, IOCondition condition) {
 			var v = InputVector ();
 			v.buffer = transport_buffer;
@@ -771,13 +778,20 @@ namespace Frida {
 		}
 
 		private void update_sctp_events () {
-			var new_events = _query_sctp_socket_events (sctp_socket);
-			if (new_events != sctp_events) {
-				sctp_events = new_events;
-				event ();
-			}
+			IOCondition new_events = _query_sctp_socket_events (sctp_socket);
 
-			sctp_source.invalidate ();
+			lock (state) {
+				sctp_events = new_events;
+
+				foreach (var entry in sources.entries) {
+					Source source = entry.key;
+					IOCondition c = entry.value;
+					if ((new_events & c) != 0)
+						source.set_ready_time (0);
+				}
+
+				sctp_source.invalidate ();
+			}
 		}
 
 		protected extern static IOCondition _query_sctp_socket_events (void * sock);
@@ -872,11 +886,11 @@ namespace Frida {
 		}
 
 		public bool is_readable () {
-			return connection.is_readable;
+			return (connection.pending_io & IOCondition.IN) != 0;
 		}
 
 		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new SctpIOSource (this, connection, IOCondition.IN), cancellable);
+			return new PollableSource.full (this, new SctpIOSource (connection, IOCondition.IN), cancellable);
 		}
 
 		public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
@@ -920,11 +934,11 @@ namespace Frida {
 		}
 
 		public bool is_writable () {
-			return connection.is_writable;
+			return (connection.pending_io & IOCondition.OUT) != 0;
 		}
 
 		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new SctpIOSource (this, connection, IOCondition.OUT), cancellable);
+			return new PollableSource.full (this, new SctpIOSource (connection, IOCondition.OUT), cancellable);
 		}
 
 		public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
@@ -940,24 +954,24 @@ namespace Frida {
 		public SctpConnection connection;
 		public IOCondition condition;
 
-		public SctpIOSource (Object stream, SctpConnection connection, IOCondition condition) {
+		public SctpIOSource (SctpConnection connection, IOCondition condition) {
 			this.connection = connection;
 			this.condition = condition;
 
-			connection.event.connect (on_connection_event);
+			connection.register_source (this, condition);
 		}
 
 		~SctpIOSource () {
-			connection.event.disconnect (on_connection_event);
+			connection.unregister_source (this);
 		}
 
 		protected override bool prepare (out int timeout) {
 			timeout = -1;
-			return query_pending () != 0;
+			return (connection.pending_io & condition) != 0;
 		}
 
 		protected override bool check () {
-			return query_pending () != 0;
+			return (connection.pending_io & condition) != 0;
 		}
 
 		protected override bool dispatch (SourceFunc? callback) {
@@ -975,19 +989,6 @@ namespace Frida {
 			closure.invoke (out return_value, {}, null);
 
 			return return_value.get_boolean ();
-		}
-
-		private IOCondition query_pending () {
-			IOCondition c = 0;
-			if ((condition & IOCondition.IN) != 0 && connection.is_readable)
-				c |= IN;
-			if ((condition & IOCondition.OUT) != 0 && connection.is_writable)
-				c |= OUT;
-			return c;
-		}
-
-		private void on_connection_event () {
-			set_ready_time (0);
 		}
 	}
 
