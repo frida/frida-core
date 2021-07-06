@@ -634,16 +634,16 @@ namespace Frida {
 		}
 
 		public override bool close (GLib.Cancellable? cancellable) throws IOError {
-			_do_close ();
+			do_close ();
 			return true;
 		}
 
 		public override async bool close_async (int io_priority, GLib.Cancellable? cancellable) throws IOError {
-			_do_close ();
+			do_close ();
 			return true;
 		}
 
-		private void _do_close () {
+		private void do_close () {
 			_close (sctp_socket);
 			sctp_socket = null;
 		}
