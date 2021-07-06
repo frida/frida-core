@@ -132,7 +132,9 @@ namespace Frida {
 				}
 			}
 
-			stream = yield negotiate_connection (stream, origin, cancellable);
+			var transport = (certificate != null) ? WebServiceTransport.TLS : WebServiceTransport.PLAIN;
+
+			stream = yield negotiate_connection (stream, transport, origin, cancellable);
 
 			DBusConnection connection;
 			try {

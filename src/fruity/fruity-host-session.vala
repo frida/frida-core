@@ -1385,7 +1385,10 @@ namespace Frida {
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 
-				stream = yield negotiate_connection (stream, null, cancellable);
+				WebServiceTransport transport = PLAIN;
+				string? origin = null;
+
+				stream = yield negotiate_connection (stream, transport, origin, cancellable);
 
 				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 

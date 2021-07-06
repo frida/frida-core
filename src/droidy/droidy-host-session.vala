@@ -733,7 +733,10 @@ namespace Frida {
 			try {
 				var stream = yield channel_provider.open_channel ("localabstract:" + gadget.unix_socket_path, cancellable);
 
-				stream = yield negotiate_connection (stream, null, cancellable);
+				WebServiceTransport transport = PLAIN;
+				string? origin = null;
+
+				stream = yield negotiate_connection (stream, transport, origin, cancellable);
 
 				var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 

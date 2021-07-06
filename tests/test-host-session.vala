@@ -1213,7 +1213,10 @@ namespace Frida.HostSessionTest {
 					Tcp.enable_nodelay (target_connection.socket);
 					target_stream = target_connection;
 
-					target_stream = yield negotiate_connection (target_stream, null, cancellable);
+					WebServiceTransport transport = PLAIN;
+					string? origin = null;
+
+					target_stream = yield negotiate_connection (target_stream, transport, origin, cancellable);
 
 					handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_stream.output_stream,
 						cancellable);

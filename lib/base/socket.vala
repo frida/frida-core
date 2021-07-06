@@ -84,15 +84,18 @@ namespace Frida {
 		}
 	}
 
-	public async IOStream negotiate_connection (IOStream stream, string? origin, Cancellable? cancellable) throws Error, IOError {
+	public async IOStream negotiate_connection (IOStream stream, WebServiceTransport transport, string? origin,
+			Cancellable? cancellable) throws Error, IOError {
 		var input = (DataInputStream) Object.new (typeof (DataInputStream),
 			"base-stream", stream.get_input_stream (),
+			"close-base-stream", false,
 			"newline-type", DataStreamNewlineType.CR_LF);
 		OutputStream output = stream.get_output_stream ();
 
 		var request = new StringBuilder ();
-		request.append ("GET ws://server/ws HTTP/1.1\r\n");
-		var msg = new Soup.Message ("GET", "ws://server/ws");
+		string uri = "%s://server/ws".printf ((transport == TLS) ? "wss" : "ws");
+		request.append_printf ("GET %s HTTP/1.1\r\n", uri);
+		var msg = new Soup.Message ("GET", uri);
 		Soup.websocket_client_prepare_handshake (msg, origin, null);
 		msg.request_headers.replace ("User-Agent", "Frida/" + _version_string ());
 		msg.request_headers.foreach ((name, val) => {
@@ -404,6 +407,11 @@ namespace Frida {
 			bool uncertain;
 			return ContentType.guess (path, null, out uncertain);
 		}
+	}
+
+	public enum WebServiceTransport {
+		PLAIN,
+		TLS
 	}
 
 	public enum WebServiceFlavor {
