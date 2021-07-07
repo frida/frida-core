@@ -50,7 +50,11 @@ namespace Frida {
 		return dbus_context;
 	}
 
-	private Promise<MainContext> get_context_request;
+	public void invalidate_dbus_context () {
+		get_context_request = null;
+	}
+
+	private Promise<MainContext>? get_context_request;
 
 	private async HostSession do_get_proxy (DBusConnection connection, Cancellable cancellable) throws IOError {
 		return yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);

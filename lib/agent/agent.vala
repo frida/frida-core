@@ -226,6 +226,8 @@ namespace Frida.Agent {
 			exit_monitor = null;
 
 			interceptor.end_transaction ();
+
+			invalidate_dbus_context ();
 		}
 
 		private void run (owned FileDescriptorTablePadder padder) throws Error {

@@ -532,6 +532,8 @@ namespace Frida.Gadget {
 		if (config.teardown == TeardownRequirement.FULL) {
 			config = null;
 
+			invalidate_dbus_context ();
+
 			Environment.deinit ();
 		}
 	}

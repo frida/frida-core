@@ -379,6 +379,7 @@ def function_is_public(name):
             name not in [
                 "generate_certificate",
                 "get_dbus_context",
+                "invalidate_dbus_context",
                 "make_parameters_dict",
                 "compute_system_parameters",
                 "parse_control_address",

@@ -108,6 +108,8 @@ frida_deinit (void)
     main_context = NULL;
   }
 
+  frida_invalidate_dbus_context ();
+
   gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
