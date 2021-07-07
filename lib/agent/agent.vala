@@ -738,19 +738,24 @@ namespace Frida.Agent {
 			var dc = new DirectConnection (session);
 
 			DBusConnection connection;
+			AgentMessageSink sink;
 			try {
 				connection = yield new DBusConnection (SocketConnection.factory_create_connection (to_socket), null,
 					DELAY_MESSAGE_PROCESSING, null, cancellable);
+				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}
 			dc.connection = connection;
 
 			try {
-				dc.registration_id = connection.register_object (ObjectPath.AGENT_SESSION, (AgentSession) session);
+				dc.registration_id = connection.register_object (ObjectPath.for_agent_session (id), (AgentSession) session);
 			} catch (IOError io_error) {
 				assert_not_reached ();
 			}
+
+			session.message_sink = sink;
 
 			connection.start_message_processing ();
 

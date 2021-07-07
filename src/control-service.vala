@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ControlService : Object, TransportBroker {
+	public class ControlService : Object {
 		public HostSession host_session {
 			get;
 			construct;
@@ -398,8 +398,8 @@ namespace Frida {
 			}
 		}
 
-		private async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port, out string token)
-				throws Error {
+		private void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
+				out string token) throws Error {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
 #else
@@ -526,7 +526,7 @@ namespace Frida {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession {
+		private class ControlChannel : Object, Peer, HostSession, TransportBroker {
 			public weak ControlService parent {
 				get;
 				construct;
@@ -556,6 +556,9 @@ namespace Frida {
 
 					AuthenticationService null_auth = new NullAuthenticationService ();
 					registrations.add (connection.register_object (Frida.ObjectPath.AUTHENTICATION_SERVICE, null_auth));
+
+					TransportBroker broker = this;
+					registrations.add (connection.register_object (Frida.ObjectPath.TRANSPORT_BROKER, broker));
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -661,6 +664,11 @@ namespace Frida {
 			public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 					Cancellable? cancellable) throws GLib.Error {
 				return yield parent.host_session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
+			}
+
+			private async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
+					out string token) throws Error {
+				parent.open_tcp_transport (id, cancellable, out port, out token);
 			}
 		}
 
