@@ -457,7 +457,7 @@ namespace Frida.Fruity {
 				private set;
 			}
 
-			private SourceFunc handler;
+			private SourceFunc? handler;
 
 			private Plist? response;
 			private GLib.Error? error;
@@ -470,11 +470,13 @@ namespace Frida.Fruity {
 			public void complete_with_response (Plist? response) {
 				this.response = response;
 				handler ();
+				handler = null;
 			}
 
 			public void complete_with_error (GLib.Error error) {
 				this.error = error;
 				handler ();
+				handler = null;
 			}
 
 			public Plist get_response () throws UsbmuxError, IOError {

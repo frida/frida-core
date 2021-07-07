@@ -53,7 +53,7 @@ namespace Frida {
 				private set;
 			}
 
-			private SourceFunc handler;
+			private SourceFunc? handler;
 
 			public EnumerateRequest (ApplicationQueryOptions options, owned SourceFunc handler) {
 				this.options = options;
@@ -63,6 +63,7 @@ namespace Frida {
 			public void complete (HostApplicationInfo[] applications) {
 				this.result = applications;
 				handler ();
+				handler = null;
 			}
 		}
 	}
@@ -114,7 +115,7 @@ namespace Frida {
 				private set;
 			}
 
-			private SourceFunc handler;
+			private SourceFunc? handler;
 
 			public EnumerateRequest (ProcessQueryOptions options, owned SourceFunc handler) {
 				this.options = options;
@@ -124,6 +125,7 @@ namespace Frida {
 			public void complete (HostProcessInfo[] processes) {
 				this.result = processes;
 				handler ();
+				handler = null;
 			}
 		}
 	}

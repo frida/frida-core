@@ -121,7 +121,7 @@ namespace Frida {
 		}
 
 		private class PendingResponse {
-			private SourceFunc handler;
+			private SourceFunc? handler;
 
 			public bool completed {
 				get {
@@ -146,11 +146,13 @@ namespace Frida {
 			public void complete_with_result (Json.Node result) {
 				this.result = result;
 				handler ();
+				handler = null;
 			}
 
 			public void complete_with_error (GLib.Error error) {
 				this.error = error;
 				handler ();
+				handler = null;
 			}
 		}
 	}
