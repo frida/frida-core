@@ -52,15 +52,16 @@ namespace Frida.Agent {
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Promise<bool> pending_close;
-		private Gee.HashMap<AgentSessionId?, LiveAgentSession> sessions =
+		private Gee.Map<AgentSessionId?, LiveAgentSession> sessions =
 			new Gee.HashMap<AgentSessionId?, LiveAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
-		private Gee.HashMap<DBusConnection, DirectConnection> direct_connections =
+		private Gee.Map<AgentSessionId?, EmulatedAgentSession> emulated_sessions =
+			new Gee.HashMap<AgentSessionId?, EmulatedAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.Map<DBusConnection, DirectConnection> direct_connections =
 			new Gee.HashMap<DBusConnection, DirectConnection> ();
 		private Gee.Map<PortalMembershipId?, PortalClient> portal_clients =
 			new Gee.HashMap<PortalMembershipId?, PortalClient> (PortalMembershipId.hash, PortalMembershipId.equal);
 		private uint next_portal_membership_id = 1;
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
-		private Gee.HashMap<AgentSessionId?, uint> emulated_session_registrations = new Gee.HashMap<AgentSessionId?, uint> ();
 
 		private Gum.MemoryRange agent_range;
 		private Gum.ScriptBackend? qjs_backend;
@@ -572,6 +573,14 @@ namespace Frida.Agent {
 
 			var opts = SessionOptions._deserialize (options);
 
+			AgentMessageSink sink;
+			try {
+				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+			} catch (IOError e) {
+				throw_dbus_error (e);
+			}
+
 			if (opts.realm == EMULATED) {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 
@@ -586,33 +595,29 @@ namespace Frida.Agent {
 
 				var emulated_connection = ((DBusProxy) emulated_provider).get_connection ();
 
-				string path = ObjectPath.for_agent_session (id);
+				var emulated_session = new EmulatedAgentSession (emulated_connection);
 
-				AgentSession emulated_session;
+				string session_path = ObjectPath.for_agent_session (id);
+				string sink_path = ObjectPath.for_agent_message_sink (id);
+
+				AgentSession session;
 				try {
-					emulated_session = yield emulated_connection.get_proxy (null, path, DO_NOT_LOAD_PROPERTIES,
+					session = yield emulated_connection.get_proxy (null, session_path, DO_NOT_LOAD_PROPERTIES,
 						cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
 				}
 
-				uint registration_id;
 				try {
-					registration_id = connection.register_object (path, emulated_session);
+					emulated_session.session_registration_id = connection.register_object (session_path, session);
+					emulated_session.sink_registration_id = emulated_connection.register_object (sink_path, sink);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
-				emulated_session_registrations[id] = registration_id;
+
+				emulated_sessions[id] = emulated_session;
 
 				return;
-			}
-
-			AgentMessageSink sink;
-			try {
-				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
-					cancellable);
-			} catch (IOError e) {
-				throw_dbus_error (e);
 			}
 
 			MainContext dbus_context = yield get_dbus_context ();
@@ -630,6 +635,11 @@ namespace Frida.Agent {
 			}
 
 			opened (id);
+		}
+
+		private void detach_emulated_session (EmulatedAgentSession session) {
+			connection.unregister_object (session.session_registration_id);
+			session.connection.unregister_object (session.sink_registration_id);
 		}
 
 		private async void close_all_sessions () {
@@ -721,7 +731,7 @@ namespace Frida.Agent {
 
 #if !WINDOWS
 		private async void migrate (AgentSessionId id, Socket to_socket, Cancellable? cancellable) throws Error, IOError {
-			if (emulated_session_registrations.has_key (id)) {
+			if (emulated_sessions.has_key (id)) {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 				try {
 					yield emulated_provider.migrate (id, to_socket, cancellable);
@@ -1017,9 +1027,9 @@ namespace Frida.Agent {
 		}
 
 		private void unregister_connection () {
-			foreach (var id in emulated_session_registrations.values)
-				connection.unregister_object (id);
-			emulated_session_registrations.clear ();
+			foreach (EmulatedAgentSession s in emulated_sessions.values)
+				detach_emulated_session (s);
+			emulated_sessions.clear ();
 
 			foreach (var session in sessions.values) {
 				var id = session.registration_id;
@@ -1269,9 +1279,9 @@ namespace Frida.Agent {
 		}
 
 		private void on_emulated_session_closed (AgentSessionId id) {
-			uint registration_id;
-			if (emulated_session_registrations.unset (id, out registration_id))
-				connection.unregister_object (registration_id);
+			EmulatedAgentSession s;
+			if (emulated_sessions.unset (id, out s))
+				detach_emulated_session (s);
 
 			closed (id);
 		}
@@ -1428,6 +1438,16 @@ namespace Frida.Agent {
 				frida_context: MainContext.ref_thread_default (),
 				dbus_context: dbus_context
 			);
+		}
+	}
+
+	private class EmulatedAgentSession {
+		public DBusConnection connection;
+		public uint session_registration_id;
+		public uint sink_registration_id;
+
+		public EmulatedAgentSession (DBusConnection connection) {
+			this.connection = connection;
 		}
 	}
 
