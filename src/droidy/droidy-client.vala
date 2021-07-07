@@ -1056,7 +1056,7 @@ namespace Frida.Droidy {
 
 		private class PendingResponse {
 			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private CompletionHandler? handler;
 
 			public RequestType request_type {
 				get;
