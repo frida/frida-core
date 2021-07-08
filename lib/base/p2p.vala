@@ -634,11 +634,6 @@ namespace Frida {
 
 		protected extern void _connect_sctp_socket (void * sock, uint16 port);
 
-		~SctpConnection () {
-			sctp_source.destroy ();
-			transport_source.destroy ();
-		}
-
 		public override bool close (GLib.Cancellable? cancellable) throws IOError {
 			do_close ();
 			return true;
@@ -650,6 +645,9 @@ namespace Frida {
 		}
 
 		private void do_close () {
+			sctp_source.destroy ();
+			transport_source.destroy ();
+
 			_close (sctp_socket);
 			sctp_socket = null;
 		}
