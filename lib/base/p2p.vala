@@ -74,7 +74,7 @@ namespace Frida {
 		public string? fingerprint;
 		public PeerSetup setup = HOLDCONN;
 		public uint16 sctp_port = 5000;
-		public size_t max_message_size = 262144;
+		public size_t max_message_size = 256 * 1024;
 
 		public static PeerSessionDescription parse (string sdp) throws Error {
 			var description = new PeerSessionDescription ();
@@ -544,6 +544,11 @@ namespace Frida {
 			construct;
 		}
 
+		public size_t max_message_size {
+			get;
+			construct;
+		}
+
 		public State state {
 			get {
 				return _state;
@@ -593,11 +598,12 @@ namespace Frida {
 			CLOSED
 		}
 
-		public SctpConnection (DatagramBased transport_socket, PeerSetup setup, uint16 port) {
+		public SctpConnection (DatagramBased transport_socket, PeerSetup setup, uint16 port, size_t max_message_size) {
 			Object (
 				transport_socket: transport_socket,
 				setup: setup,
-				port: port
+				port: port,
+				max_message_size: max_message_size
 			);
 		}
 
@@ -686,8 +692,10 @@ namespace Frida {
 			if (_state != OPENED)
 				throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 
+			ssize_t n = ssize_t.min (buffer.length, (ssize_t) max_message_size);
+
 			try {
-				return _send (sctp_socket, stream_id, WEBRTC_BINARY, buffer);
+				return _send (sctp_socket, stream_id, WEBRTC_BINARY, buffer[0:n]);
 			} finally {
 				update_sctp_events ();
 			}

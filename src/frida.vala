@@ -2565,7 +2565,7 @@ namespace Frida {
 				});
 				yield tc.handshake_async (Priority.DEFAULT, nice_cancellable);
 
-				nice_iostream = new SctpConnection (tc, answer.setup, answer.sctp_port);
+				nice_iostream = new SctpConnection (tc, answer.setup, answer.sctp_port, answer.max_message_size);
 
 				schedule_on_frida_thread (() => {
 					promise.resolve (nice_iostream);

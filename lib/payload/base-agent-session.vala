@@ -463,7 +463,7 @@ namespace Frida {
 				});
 				yield tc.handshake_async (Priority.DEFAULT, nice_cancellable);
 
-				nice_iostream = new SctpConnection (tc, offer.setup, offer.sctp_port);
+				nice_iostream = new SctpConnection (tc, offer.setup, offer.sctp_port, offer.max_message_size);
 
 				schedule_on_frida_thread (() => {
 					complete_peer_connection.begin ();

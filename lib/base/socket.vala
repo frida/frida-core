@@ -457,6 +457,7 @@ namespace Frida {
 		private Soup.WebsocketState state;
 		private IOCondition _pending_io;
 		private ByteArray recv_queue = new ByteArray ();
+		private ByteArray send_queue = new ByteArray ();
 
 		private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
@@ -467,6 +468,8 @@ namespace Frida {
 		}
 
 		construct {
+			websocket.max_incoming_payload_size = (256 * 1024) + 1; // XXX: There's an off-by-one error in libsoup
+
 			_input_stream = new WebInputStream (this);
 			_output_stream = new WebOutputStream (this);
 
@@ -535,25 +538,41 @@ namespace Frida {
 		}
 
 		public ssize_t send (uint8[] buffer) {
+			lock (state)
+				send_queue.append (buffer);
+
 			if (main_context.is_owner ()) {
-				do_send (buffer);
+				process_send_queue ();
 			} else {
-				var bytes = new Bytes (buffer);
 				var source = new IdleSource ();
 				source.set_callback (() => {
-					do_send (bytes.get_data ());
+					process_send_queue ();
 					return false;
 				});
 				source.attach (main_context);
 			}
+
 			return buffer.length;
 		}
 
-		private void do_send (uint8[] buffer) {
+		private void process_send_queue () {
 			if (websocket.state != OPEN)
 				return;
 
-			websocket.send_binary (buffer);
+			size_t max_message_size = (size_t) websocket.max_incoming_payload_size - 1;
+
+			while (true) {
+				uint8[]? chunk = null;
+				lock (state) {
+					size_t n = size_t.min (send_queue.len, max_message_size);
+					if (n == 0)
+						return;
+					chunk = send_queue.data[0:n];
+					send_queue.remove_range (0, (uint) n);
+				}
+
+				websocket.send_binary (chunk);
+			}
 		}
 
 		public void register_source (Source source, IOCondition condition) {
