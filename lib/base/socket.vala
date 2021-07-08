@@ -139,9 +139,24 @@ namespace Frida {
 				throw new Error.PROTOCOL ("%s", reason_phrase);
 		}
 
-		var websocket = new Soup.WebsocketConnection (stream, msg.uri, CLIENT, origin, null);
+		WebConnection connection = null;
+		var frida_context = MainContext.ref_thread_default ();
+		var dbus_context = yield get_dbus_context ();
+		var dbus_source = new IdleSource ();
+		dbus_source.set_callback (() => {
+			var websocket = new Soup.WebsocketConnection (stream, msg.uri, CLIENT, origin, null);
+			connection = new WebConnection (websocket);
 
-		return new WebConnection (websocket);
+			var frida_source = new IdleSource ();
+			frida_source.set_callback (negotiate_connection.callback);
+			frida_source.attach (frida_context);
+
+			return false;
+		});
+		dbus_source.attach (dbus_context);
+		yield;
+
+		return connection;
 	}
 
 	public class WebService : Object {
@@ -169,13 +184,16 @@ namespace Frida {
 			}
 		}
 
-		private Soup.Server server;
+		private Soup.Server? server;
 		private SocketAddress? _listen_address;
 
 		private Gee.Map<Soup.WebsocketConnection, WebConnection> peers =
 			new Gee.HashMap<Soup.WebsocketConnection, WebConnection> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private MainContext? frida_context;
+		private MainContext? dbus_context;
 
 		public WebService (EndpointParameters endpoint_params, WebServiceFlavor flavor,
 				PortConflictBehavior on_port_conflict = FAIL) {
@@ -186,7 +204,38 @@ namespace Frida {
 			);
 		}
 
-		construct {
+		public async void start (Cancellable? cancellable) throws Error, IOError {
+			frida_context = MainContext.ref_thread_default ();
+			dbus_context = yield get_dbus_context ();
+
+			cancellable.set_error_if_cancelled ();
+
+			var start_request = new Promise<SocketAddress> ();
+			schedule_on_dbus_thread (() => {
+				handle_start_request.begin (start_request, cancellable);
+				return false;
+			});
+
+			_listen_address = yield start_request.future.wait_async (cancellable);
+		}
+
+		private async void handle_start_request (Promise<SocketAddress> start_request, Cancellable? cancellable) {
+			try {
+				SocketAddress effective_address = yield do_start (cancellable);
+				schedule_on_frida_thread (() => {
+					start_request.resolve (effective_address);
+					return false;
+				});
+			} catch (GLib.Error e) {
+				GLib.Error start_error = e;
+				schedule_on_frida_thread (() => {
+					start_request.reject (start_error);
+					return false;
+				});
+			}
+		}
+
+		private async SocketAddress do_start (Cancellable? cancellable) throws Error, IOError {
 			server = (Soup.Server) Object.new (typeof (Soup.Server),
 				"tls-certificate", endpoint_params.certificate);
 
@@ -194,9 +243,7 @@ namespace Frida {
 
 			if (endpoint_params.asset_root != null)
 				server.add_handler ("/", on_asset_request);
-		}
 
-		public async void start (Cancellable? cancellable) throws Error, IOError {
 			SocketConnectable connectable = (flavor == CONTROL)
 				? parse_control_address (endpoint_params.address, endpoint_params.port)
 				: parse_cluster_address (endpoint_params.address, endpoint_params.port);
@@ -205,6 +252,7 @@ namespace Frida {
 				? Soup.ServerListenOptions.HTTPS
 				: 0;
 
+			SocketAddress? first_effective_address = null;
 			var enumerator = connectable.enumerate ();
 			while (true) {
 				SocketAddress? address;
@@ -248,9 +296,14 @@ namespace Frida {
 					}
 				}
 
-				if (_listen_address == null)
-					_listen_address = effective_address;
+				if (first_effective_address == null)
+					first_effective_address = effective_address;
 			}
+
+			if (first_effective_address == null)
+				throw new Error.NOT_SUPPORTED ("Unable to resolve listening address");
+
+			return first_effective_address;
 		}
 
 		[NoReturn]
@@ -265,7 +318,8 @@ namespace Frida {
 		}
 
 		public void stop () {
-			server.disconnect ();
+			if (server != null)
+				server.disconnect ();
 
 			io_cancellable.cancel ();
 
@@ -286,7 +340,12 @@ namespace Frida {
 
 			connection.closed.connect (on_websocket_closed);
 
-			incoming (peer, client.get_remote_address ());
+			SocketAddress remote_address = client.get_remote_address ();
+
+			schedule_on_frida_thread (() => {
+				incoming (peer, remote_address);
+				return false;
+			});
 		}
 
 		private void on_websocket_closed (Soup.WebsocketConnection connection) {
@@ -406,6 +465,22 @@ namespace Frida {
 
 			bool uncertain;
 			return ContentType.guess (path, null, out uncertain);
+		}
+
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			assert (frida_context != null);
+
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (frida_context);
+		}
+
+		private void schedule_on_dbus_thread (owned SourceFunc function) {
+			assert (dbus_context != null);
+
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (dbus_context);
 		}
 	}
 
