@@ -187,9 +187,6 @@ namespace Frida {
 		private Soup.Server? server;
 		private SocketAddress? _listen_address;
 
-		private Gee.Map<Soup.WebsocketConnection, WebConnection> peers =
-			new Gee.HashMap<Soup.WebsocketConnection, WebConnection> ();
-
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private MainContext? frida_context;
@@ -322,34 +319,17 @@ namespace Frida {
 				server.disconnect ();
 
 			io_cancellable.cancel ();
-
-			foreach (var peer in peers.values.to_array ()) {
-				try {
-					peer.close ();
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-			}
-			peers.clear ();
 		}
 
 		private void on_websocket_opened (Soup.Server server, Soup.WebsocketConnection connection, string path,
 				Soup.ClientContext client) {
 			var peer = new WebConnection (connection);
-			peers[connection] = peer;
-
-			connection.closed.connect (on_websocket_closed);
-
 			SocketAddress remote_address = client.get_remote_address ();
 
 			schedule_on_frida_thread (() => {
 				incoming (peer, remote_address);
 				return false;
 			});
-		}
-
-		private void on_websocket_closed (Soup.WebsocketConnection connection) {
-			peers.unset (connection);
 		}
 
 		private void on_asset_request (Soup.Server server, Soup.Message msg, string path, HashTable<string, string>? query,
