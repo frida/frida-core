@@ -797,7 +797,7 @@ namespace Frida {
 		protected static bool closure_callback (Closure closure) {
 			var return_value = Value (typeof (bool));
 
-			closure.invoke (out return_value, {}, null);
+			closure.invoke (ref return_value, {});
 
 			return return_value.get_boolean ();
 		}
