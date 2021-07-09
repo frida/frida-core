@@ -47,6 +47,7 @@ namespace Frida.Agent {
 		private MainLoop main_loop;
 		private DBusConnection connection;
 		private AgentController controller;
+		private Error? start_error = null;
 		private bool unloading = false;
 		private uint filter_id = 0;
 		private uint registration_id = 0;
@@ -133,7 +134,7 @@ namespace Frida.Agent {
 				try {
 					shared_instance.run ((owned) fdt_padder);
 				} catch (Error e) {
-					printerr ("Unable to start agent: %s\n", e.message);
+					GLib.info ("Unable to start agent: %s", e.message);
 				}
 
 				if (shared_instance.stop_reason == FORK) {
@@ -239,6 +240,9 @@ namespace Frida.Agent {
 			main_loop.run ();
 
 			main_context.pop_thread_default ();
+
+			if (start_error != null)
+				throw start_error;
 		}
 
 		private async void start (owned FileDescriptorTablePadder padder) {
@@ -268,7 +272,13 @@ namespace Frida.Agent {
 				interceptor.end_transaction ();
 			}
 
-			yield setup_connection_with_transport_uri (transport_uri);
+			try {
+				yield setup_connection_with_transport_uri (transport_uri);
+			} catch (Error e) {
+				start_error = e;
+				main_loop.quit ();
+				return;
+			}
 
 			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
 				schedule_idle (start.callback);
@@ -428,7 +438,11 @@ namespace Frida.Agent {
 
 				if (fork_child_socket != null) {
 					var stream = SocketConnection.factory_create_connection (fork_child_socket);
-					yield setup_connection_with_stream (stream);
+					try {
+						yield setup_connection_with_stream (stream);
+					} catch (Error e) {
+						assert_not_reached ();
+					}
 				}
 
 				pid = fork_child_pid;
@@ -946,7 +960,7 @@ namespace Frida.Agent {
 			source.attach (main_context);
 		}
 
-		private async void setup_connection_with_transport_uri (string transport_uri) {
+		private async void setup_connection_with_transport_uri (string transport_uri) throws Error {
 			IOStream stream;
 			try {
 				if (transport_uri.has_prefix ("socket:")) {
@@ -955,27 +969,23 @@ namespace Frida.Agent {
 				} else if (transport_uri.has_prefix ("pipe:")) {
 					stream = yield Pipe.open (transport_uri, null).wait_async (null);
 				} else {
-					error ("Invalid transport URI: %s", transport_uri);
+					throw new Error.INVALID_ARGUMENT ("Invalid transport URI: %s", transport_uri);
 				}
 			} catch (GLib.Error e) {
-				assert_not_reached ();
+				if (e is Error)
+					throw (Error) e;
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 
 			yield setup_connection_with_stream (stream);
 		}
 
-		private async void setup_connection_with_stream (IOStream stream) {
+		private async void setup_connection_with_stream (IOStream stream) throws Error {
 			try {
 				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
-			} catch (GLib.Error connection_error) {
-				printerr ("Unable to create connection: %s\n", connection_error.message);
-				return;
-			}
+				connection.on_closed.connect (on_connection_closed);
+				filter_id = connection.add_filter (on_connection_message);
 
-			connection.on_closed.connect (on_connection_closed);
-			filter_id = connection.add_filter (on_connection_message);
-
-			try {
 				AgentSessionProvider provider = this;
 				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
 
@@ -983,7 +993,7 @@ namespace Frida.Agent {
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
-				assert_not_reached ();
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 		}
 
