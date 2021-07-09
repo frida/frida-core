@@ -141,10 +141,10 @@ namespace Frida {
 			var promise = new Promise<SocketConnection> ();
 
 			MatchInfo info;
-			var valid_address = /^pipe:role=(.+?),path=(.+?)$/.match (address, 0, out info);
+			bool valid_address = /^pipe:role=(.+?),path=(.+?)$/.match (address, 0, out info);
 			assert (valid_address);
-			var role = info.fetch (1);
-			var path = info.fetch (2);
+			string role = info.fetch (1);
+			string path = info.fetch (2);
 
 			try {
 				var server_address = new UnixSocketAddress (path);
