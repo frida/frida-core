@@ -57,22 +57,22 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
   CHECK_BSD_RESULT (status, ==, 0, "socketpair");
 
   status = fileport_makeport (sockets[0], &local_wrapper);
-  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport local");
+  CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport local");
 
   status = fileport_makeport (sockets[1], &remote_wrapper);
-  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport remote");
+  CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport remote");
 
   kr = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
-  CHECK_MACH_RESULT (kr, ==, 0, "mach_port_allocate local_rx");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
 
   kr = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
-  CHECK_MACH_RESULT (kr, ==, 0, "mach_port_allocate remote_rx");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
 
   kr = mach_port_extract_right (self_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
-  CHECK_MACH_RESULT (kr, ==, 0, "mach_port_extract_right remote_tx");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right remote_tx");
 
   kr = mach_port_extract_right (self_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
-  CHECK_MACH_RESULT (kr, ==, 0, "mach_port_extract_right local_tx");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right local_tx");
 
   init.msgh_size = sizeof (init);
   init.msgh_reserved = 0;
@@ -169,11 +169,11 @@ _frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GErro
   g_assert (assigned == 1);
 
   kr = mach_msg (&init.header, MACH_RCV_MSG, 0, sizeof (init), port, 1, MACH_PORT_NULL);
-  CHECK_MACH_RESULT (kr, ==, 0, "mach_msg");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg");
   wrapper = init.header.msgh_remote_port;
 
   fd = fileport_makefd (wrapper);
-  CHECK_BSD_RESULT (fd, !=, -1, "socketpair");
+  CHECK_BSD_RESULT (fd, !=, -1, "fileport_makefd");
 
   goto beach;
 

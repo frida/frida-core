@@ -447,10 +447,10 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   CHECK_BSD_RESULT (status, ==, 0, "socketpair");
 
   status = fileport_makeport (sockets[0], &local_wrapper);
-  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport local");
+  CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport local");
 
   status = fileport_makeport (sockets[1], &remote_wrapper);
-  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport remote");
+  CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport remote");
 
   kr = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
