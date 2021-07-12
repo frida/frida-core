@@ -60,8 +60,8 @@ frida_policyd_main (void)
     handled = frida_policyd_server (header_in, header_out);
     if (handled)
       mach_msg_send (header_out);
-
-    mach_msg_destroy (header_in);
+    else
+      mach_msg_destroy (header_in);
   }
 
   return 0;
