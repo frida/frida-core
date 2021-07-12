@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <gio/gio.h>
+#include <gum/gumdarwin.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <unistd.h>
@@ -54,9 +55,14 @@ static gboolean
 frida_is_platformized (void)
 {
   gboolean result;
+  gboolean system_has_guarded_ports;
   mach_port_t self_task, launchd_task, launchd_rx;
   const gint launchd_pid = 1;
   kern_return_t kr;
+
+  system_has_guarded_ports = gum_darwin_check_xnu_version (7938, 0, 0);
+  if (system_has_guarded_ports)
+    return TRUE;
 
   self_task = mach_task_self ();
 
