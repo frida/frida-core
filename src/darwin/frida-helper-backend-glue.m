@@ -555,8 +555,8 @@ frida_darwin_helper_backend_make_pipe_endpoints (FridaDarwinHelperBackend * self
   if (ctx->piped_name != NULL)
   {
     gboolean allowed_by_sandbox;
-    const gchar * uuid;
     char * token = NULL;
+    const gchar * uuid;
 
     allowed_by_sandbox =
         sandbox_check (remote_pid, "mach-lookup", FRIDA_SANDBOX_FILTER_GLOBAL_NAME | SANDBOX_CHECK_NO_REPORT, ctx->piped_name) == 0;
