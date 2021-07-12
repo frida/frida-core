@@ -147,7 +147,10 @@ namespace Frida {
 			string path = info.fetch (2);
 
 			try {
-				var server_address = new UnixSocketAddress (path);
+				UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
+					? UnixSocketAddressType.ABSTRACT
+					: UnixSocketAddressType.PATH;
+				var server_address = new UnixSocketAddress.with_type (path, -1, type);
 
 				if (role == "server") {
 					var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);
