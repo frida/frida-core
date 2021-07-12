@@ -162,7 +162,7 @@ namespace Frida {
 					SELinux.setfilecon (path, "u:object_r:frida_file:s0");
 #endif
 
-					establish_server.begin (socket, promise, cancellable);
+					establish_server.begin (socket, server_address, promise, cancellable);
 				} else {
 					establish_client.begin (server_address, promise, cancellable);
 				}
@@ -173,7 +173,8 @@ namespace Frida {
 			return promise.future;
 		}
 
-		private async void establish_server (Socket socket, Promise<SocketConnection> promise, Cancellable? cancellable) {
+		private async void establish_server (Socket socket, UnixSocketAddress address, Promise<SocketConnection> promise,
+				Cancellable? cancellable) {
 			var listener = new SocketListener ();
 			try {
 				listener.add_socket (socket, null);
@@ -183,6 +184,8 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			} finally {
+				if (address.get_address_type () == PATH)
+					Posix.unlink (address.get_path ());
 				listener.close ();
 			}
 		}
