@@ -29,6 +29,15 @@
 #include <unistd.h>
 #include <util.h>
 
+#define FRIDA_HELPER_CONTEXT_LOCK(ctx) g_mutex_lock (&(ctx)->mutex)
+#define FRIDA_HELPER_CONTEXT_UNLOCK(ctx) g_mutex_unlock (&(ctx)->mutex)
+
+#ifdef HAVE_MACOS
+# define FRIDA_MACH_LOOKUP_EXCEPTION "com.apple.app-sandbox.mach"
+#else
+# define FRIDA_MACH_LOOKUP_EXCEPTION "com.apple.security.exception.mach-lookup.global-name"
+#endif
+
 #ifndef _POSIX_SPAWN_DISABLE_ASLR
 # define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 #endif
@@ -80,6 +89,9 @@
 #endif
 
 typedef struct _FridaHelperContext FridaHelperContext;
+typedef struct _FridaStashedPipe FridaStashedPipe;
+typedef struct _FridaPipedRecvOperation FridaPipedRecvOperation;
+typedef struct _FridaPipedRequest FridaPipedRequest;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
 typedef guint FridaBreakpointPhase;
@@ -101,6 +113,35 @@ typedef guint FridaAslr;
 struct _FridaHelperContext
 {
   dispatch_queue_t dispatch_queue;
+
+  gchar * piped_name;
+  mach_port_t piped_port;
+  dispatch_source_t piped_source;
+  GHashTable * stashed_pipes;
+
+  GMutex mutex;
+};
+
+struct _FridaStashedPipe
+{
+  mach_port_t port;
+  gint64 created_at;
+};
+
+#define frida_piped_fetch_file_descriptor frida_piped_do_fetch_file_descriptor
+typedef char frida_pipe_uuid_t[36 + 1];
+#include "piped-server.c"
+
+struct _FridaPipedRecvOperation
+{
+  FridaHelperContext * context;
+  FridaStashedPipe * fetched_pipe;
+};
+
+struct _FridaPipedRequest
+{
+  union __RequestUnion__frida_piped_subsystem body;
+  mach_msg_trailer_t trailer;
 };
 
 struct _FridaExceptionPortSet
@@ -316,7 +357,7 @@ struct _FridaAgentContext
   mach_msg_empty_rcv_t message_that_never_arrives_storage;
   gchar dylib_path_storage[256];
   gchar entrypoint_name_storage[256];
-  gchar entrypoint_data_storage[256];
+  gchar entrypoint_data_storage[4096];
   GumMemoryRange mapped_range_storage;
 };
 
@@ -343,6 +384,12 @@ enum _FridaAslr
   FRIDA_ASLR_AUTO,
   FRIDA_ASLR_DISABLE
 };
+
+static void frida_darwin_helper_backend_stash_pipe_fileport (FridaDarwinHelperBackend * self, mach_port_t * port, const gchar ** uuid);
+static void frida_darwin_helper_backend_on_piped_recv (void * context);
+
+static FridaStashedPipe * frida_stashed_pipe_new (mach_port_t port);
+static void frida_stashed_pipe_free (FridaStashedPipe * pipe);
 
 static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
@@ -418,12 +465,28 @@ static gboolean frida_parse_aslr_option (GVariant * value, FridaAslr * aslr, GEr
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
-extern int fileport_makeport (int fd, mach_port_t * port);
-extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
+static GPrivate frida_helper_backend_key;
+
+typedef guint FridaSandboxFilterType;
+
+enum _FridaSandboxFilterType
+{
+  FRIDA_SANDBOX_FILTER_GLOBAL_NAME = 2,
+};
+
+extern kern_return_t bootstrap_register (mach_port_t bp, const char * service_name, mach_port_t sp);
+extern int fileport_makeport (pid_t fd, mach_port_t * port);
+extern int proc_pidpath (pid_t pid, void * buffer, uint32_t buffer_size);
+extern int sandbox_check (pid_t pid, const char * operation, FridaSandboxFilterType type, ...);
+extern char * sandbox_extension_issue_mach_to_process_by_pid (const char * extension_class, const char * name, uint32_t flags, pid_t pid);
+
+extern FridaSandboxFilterType SANDBOX_CHECK_NO_REPORT;
 
 void
-frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
+frida_darwin_helper_backend_make_pipe_endpoints (FridaDarwinHelperBackend * self, guint local_task, guint remote_pid, guint remote_task,
+    FridaPipeEndpoints * result, GError ** error)
 {
+  FridaHelperContext * ctx = self->context;
   mach_port_t self_task;
   int status, sockets[2] = { -1, -1 };
   mach_port_t local_wrapper = MACH_PORT_NULL;
@@ -437,6 +500,23 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   gchar * local_address, * remote_address;
   kern_return_t kr;
   const gchar * failed_operation;
+
+  if (remote_pid == 1)
+  {
+    gchar * pipe_id;
+
+    pipe_id = g_uuid_string_random ();
+    local_address = g_strconcat ("pipe:role=server,path=/tmp/pipe-", pipe_id, NULL);
+    remote_address = g_strconcat ("pipe:role=client,path=/tmp/pipe-", pipe_id, NULL);
+
+    frida_pipe_endpoints_init (result, local_address, remote_address);
+
+    g_free (remote_address);
+    g_free (local_address);
+    g_free (pipe_id);
+
+    return;
+  }
 
   self_task = mach_task_self ();
 
@@ -455,14 +535,8 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   kr = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
 
-  kr = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
-
   kr = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right local_rx");
-
-  kr = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right remote_rx");
 
   init.msgh_size = sizeof (init);
   init.msgh_reserved = 0;
@@ -476,19 +550,54 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   local_tx = MACH_PORT_NULL;
   local_wrapper = MACH_PORT_NULL;
 
-  init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
-  init.msgh_remote_port = remote_tx;
-  init.msgh_local_port = remote_wrapper;
-  kr = mach_msg_send (&init);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg_send remote_tx");
-  remote_tx = MACH_PORT_NULL;
-  remote_wrapper = MACH_PORT_NULL;
-
   local_address = g_strdup_printf ("pipe:port=0x%x", local_rx);
-  remote_address = g_strdup_printf ("pipe:port=0x%x", remote_rx);
+
+  if (ctx->piped_name != NULL)
+  {
+    gboolean allowed_by_sandbox;
+    const gchar * uuid;
+    char * token = NULL;
+
+    allowed_by_sandbox =
+        sandbox_check (remote_pid, "mach-lookup", FRIDA_SANDBOX_FILTER_GLOBAL_NAME | SANDBOX_CHECK_NO_REPORT, ctx->piped_name) == 0;
+    if (!allowed_by_sandbox)
+    {
+      token = sandbox_extension_issue_mach_to_process_by_pid (FRIDA_MACH_LOOKUP_EXCEPTION, ctx->piped_name, 0, remote_pid);
+    }
+
+    frida_darwin_helper_backend_stash_pipe_fileport (self, &remote_wrapper, &uuid);
+
+    if (token != NULL)
+      remote_address = g_strdup_printf ("pipe:service=%s,uuid=%s,token=%s", ctx->piped_name, uuid, token);
+    else
+      remote_address = g_strdup_printf ("pipe:service=%s,uuid=%s", ctx->piped_name, uuid);
+
+    free (token);
+  }
+  else
+  {
+    kr = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
+
+    kr = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right remote_rx");
+
+    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
+    init.msgh_remote_port = remote_tx;
+    init.msgh_local_port = remote_wrapper;
+    kr = mach_msg_send (&init);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg_send remote_tx");
+    remote_tx = MACH_PORT_NULL;
+    remote_wrapper = MACH_PORT_NULL;
+
+    remote_address = g_strdup_printf ("pipe:port=0x%x", remote_rx);
+  }
+
   local_rx = MACH_PORT_NULL;
   remote_rx = MACH_PORT_NULL;
+
   frida_pipe_endpoints_init (result, local_address, remote_address);
+
   g_free (remote_address);
   g_free (local_address);
 
@@ -644,11 +753,38 @@ void
 _frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx;
+  kern_return_t kr;
 
   ctx = g_slice_new (FridaHelperContext);
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", DISPATCH_QUEUE_SERIAL);
 
+  ctx->piped_name = g_strdup_printf ("re.frida.piped.%u", getpid ());
+  mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &ctx->piped_port);
+  ctx->stashed_pipes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_stashed_pipe_free);
+
+  g_mutex_init (&ctx->mutex);
+
   self->context = ctx;
+
+  kr = bootstrap_register (bootstrap_port, ctx->piped_name, ctx->piped_port);
+  if (kr == KERN_SUCCESS)
+  {
+    dispatch_source_t source;
+
+    source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, ctx->piped_port, 0, ctx->dispatch_queue);
+    ctx->piped_source = source;
+    dispatch_set_context (source, self);
+    dispatch_source_set_event_handler_f (source, frida_darwin_helper_backend_on_piped_recv);
+    dispatch_resume (source);
+  }
+  else
+  {
+    mach_port_deallocate (mach_task_self (), ctx->piped_port);
+    ctx->piped_port = MACH_PORT_NULL;
+
+    g_free (ctx->piped_name);
+    ctx->piped_name = NULL;
+  }
 }
 
 void
@@ -656,9 +792,139 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx = self->context;
 
+  g_clear_pointer (&ctx->piped_source, dispatch_release);
+
+  g_hash_table_unref (ctx->stashed_pipes);
+
+  if (ctx->piped_port != MACH_PORT_NULL)
+    mach_port_deallocate (mach_task_self (), ctx->piped_port);
+
+  g_free (ctx->piped_name);
+
   dispatch_release (ctx->dispatch_queue);
 
+  g_mutex_clear (&ctx->mutex);
+
   g_slice_free (FridaHelperContext, ctx);
+}
+
+static void
+frida_darwin_helper_backend_stash_pipe_fileport (FridaDarwinHelperBackend * self, mach_port_t * port, const gchar ** uuid)
+{
+  FridaHelperContext * ctx = self->context;
+  FridaStashedPipe * entry;
+  gchar * associated_uuid;
+  gint64 now;
+  GHashTableIter iter;
+  FridaStashedPipe * cur;
+
+  entry = frida_stashed_pipe_new (*port);
+  *port = MACH_PORT_NULL;
+
+  associated_uuid = g_uuid_string_random ();
+  *uuid = associated_uuid;
+
+  now = g_get_monotonic_time ();
+
+  FRIDA_HELPER_CONTEXT_LOCK (ctx);
+
+  g_hash_table_iter_init (&iter, ctx->stashed_pipes);
+  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &cur))
+  {
+    gint64 age = cur->created_at - now;
+    if (age > 20 * G_USEC_PER_SEC)
+      g_hash_table_iter_remove (&iter);
+  }
+
+  g_hash_table_insert (ctx->stashed_pipes, associated_uuid, entry);
+
+  FRIDA_HELPER_CONTEXT_UNLOCK (ctx);
+}
+
+static void
+frida_darwin_helper_backend_on_piped_recv (void * context)
+{
+  FridaDarwinHelperBackend * self = context;
+  FridaHelperContext * ctx = self->context;
+  FridaPipedRequest request;
+  union __ReplyUnion__frida_piped_subsystem reply;
+  mach_msg_header_t * header_in, * header_out;
+  kern_return_t kr;
+  FridaPipedRecvOperation op;
+  boolean_t handled;
+
+  bzero (&request, sizeof (request));
+
+  header_in = (mach_msg_header_t *) &request;
+  header_in->msgh_size = sizeof (request);
+  header_in->msgh_local_port = ctx->piped_port;
+
+  kr = mach_msg_receive (header_in);
+  if (kr != KERN_SUCCESS)
+    return;
+
+  header_out = (mach_msg_header_t *) &reply;
+
+  op.context = ctx;
+  op.fetched_pipe = NULL;
+
+  g_private_set (&frida_helper_backend_key, &op);
+
+  handled = frida_piped_server (header_in, header_out);
+
+  g_private_set (&frida_helper_backend_key, NULL);
+
+  if (handled)
+    mach_msg_send (header_out);
+  else
+    mach_msg_destroy (header_in);
+
+  g_clear_pointer (&op.fetched_pipe, frida_stashed_pipe_free);
+}
+
+kern_return_t
+frida_piped_do_fetch_file_descriptor (mach_port_t server, frida_pipe_uuid_t uuid, mach_port_t * wrapper)
+{
+  FridaPipedRecvOperation * op;
+  FridaHelperContext * ctx;
+  gchar * key = NULL;
+  FridaStashedPipe * p = NULL;
+
+  op = g_private_get (&frida_helper_backend_key);
+  ctx = op->context;
+
+  FRIDA_HELPER_CONTEXT_LOCK (ctx);
+  g_hash_table_steal_extended (ctx->stashed_pipes, uuid, (gpointer *) &key, (gpointer *) &p);
+  FRIDA_HELPER_CONTEXT_UNLOCK (ctx);
+  if (key == NULL)
+    return KERN_FAILURE;
+
+  *wrapper = p->port;
+
+  op->fetched_pipe = p;
+  g_free (key);
+
+  return KERN_SUCCESS;
+}
+
+static FridaStashedPipe *
+frida_stashed_pipe_new (mach_port_t port)
+{
+  FridaStashedPipe * p;
+
+  p = g_slice_new (FridaStashedPipe);
+  p->port = port;
+  p->created_at = g_get_monotonic_time ();
+
+  return p;
+}
+
+static void
+frida_stashed_pipe_free (FridaStashedPipe * pipe)
+{
+  mach_port_deallocate (mach_task_self (), pipe->port);
+
+  g_slice_free (FridaStashedPipe, pipe);
 }
 
 void

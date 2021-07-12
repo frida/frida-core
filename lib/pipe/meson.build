@@ -10,10 +10,12 @@ if host_os_family == 'windows'
     'pipe-windows.c',
     'pipe-sddl.c',
   ]
-elif host_os_family == 'darwin'
-  pipe_sources += ['pipe-darwin.c']
 else
-  pipe_sources += ['pipe-unix.c']
+  if host_os_family == 'darwin'
+    pipe_sources += ['pipe-darwin.c']
+  else
+    pipe_sources += ['pipe-unix.c']
+  endif
 
   system_deps += [gio_unix_dep]
   vala_args += ['--pkg=posix']

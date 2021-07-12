@@ -221,7 +221,7 @@ namespace Frida {
 		public async PipeEndpoints make_pipe_endpoints (uint remote_pid, Cancellable? cancellable) throws Error, IOError {
 			var remote_task = backend.borrow_task_for_remote_pid (remote_pid);
 
-			return DarwinHelperBackend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
+			return backend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
 		}
 
 		private void on_backend_output (uint pid, int fd, uint8[] data) {

@@ -1,0 +1,23 @@
+/*
+ * Regenerate with:
+ *
+ * $(xcrun --sdk macosx -f mig) \
+ *     -isysroot $(xcrun --sdk macosx --show-sdk-path) \
+ *     -sheader piped-server.h \
+ *     -server piped-server.c \
+ *     -header piped-client.h \
+ *     -user piped-client.c \
+ *     piped.defs
+ */
+
+subsystem frida_piped 42050;
+
+#include <mach/std_types.defs>
+#include <mach/mach_types.defs>
+
+type frida_pipe_uuid_t = c_string[37];
+
+routine frida_piped_fetch_file_descriptor(
+		server	: mach_port_t;
+	in	uuid	: frida_pipe_uuid_t;
+	out	wrapper	: mach_port_t);

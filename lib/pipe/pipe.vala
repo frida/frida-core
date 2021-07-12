@@ -33,8 +33,6 @@ namespace Frida {
 		public Future<IOStream> open (string address, Cancellable? cancellable) {
 #if WINDOWS
 			return WindowsPipe.open (address, cancellable);
-#elif DARWIN
-			return DarwinPipe.open (address, cancellable);
 #else
 			return UnixPipe.open (address, cancellable);
 #endif
@@ -116,29 +114,39 @@ namespace Frida {
 		protected extern static InputStream _make_input_stream (void * backend);
 		protected extern static OutputStream _make_output_stream (void * backend);
 	}
-#elif DARWIN
-	namespace DarwinPipe {
-		public static Future<SocketConnection> open (string address, Cancellable? cancellable) {
-			var promise = new Promise<SocketConnection> ();
-
-			try {
-				var fd = _consume_stashed_file_descriptor (address);
-				var socket = new Socket.from_fd (fd);
-				var connection = SocketConnection.factory_create_connection (socket);
-				promise.resolve (connection);
-			} catch (GLib.Error e) {
-				promise.reject (e);
-			}
-
-			return promise.future;
-		}
-
-		public extern int _consume_stashed_file_descriptor (string address) throws Error;
-	}
 #else
 	namespace UnixPipe {
 		public static Future<SocketConnection> open (string address, Cancellable? cancellable) {
 			var promise = new Promise<SocketConnection> ();
+
+#if DARWIN
+			try {
+				int fd = -1;
+				uint port;
+				MatchInfo info;
+				if (address.scanf ("pipe:port=0x%x", out port) == 1) {
+					fd = _consume_stashed_file_descriptor (port);
+				} else if (/^pipe:service=(.+?),uuid=(.+?)(,token=(.+))?$/.match (address, 0, out info)) {
+					string service = info.fetch (1);
+					string uuid = info.fetch (2);
+					string? token = null;
+					if (info.get_match_count () == 5)
+						token = info.fetch (4);
+
+					fd = _fetch_file_descriptor_from_service (service, uuid, token);
+				}
+
+				if (fd != -1) {
+					var socket = new Socket.from_fd (fd);
+					var connection = SocketConnection.factory_create_connection (socket);
+					promise.resolve (connection);
+					return promise.future;
+				}
+			} catch (GLib.Error e) {
+				promise.reject (e);
+				return promise.future;
+			}
+#endif
 
 			MatchInfo info;
 			bool valid_address = /^pipe:role=(.+?),path=(.+?)$/.match (address, 0, out info);
@@ -199,6 +207,11 @@ namespace Frida {
 				promise.reject (e);
 			}
 		}
+
+#if DARWIN
+		public extern int _consume_stashed_file_descriptor (uint port) throws Error;
+		public extern int _fetch_file_descriptor_from_service (string service, string uuid, string? token) throws Error;
+#endif
 	}
 #endif
 }
