@@ -3050,7 +3050,7 @@ next_phase:
       {
         memcpy (state, &self->previous_thread_state, sizeof (GumDarwinUnifiedThreadState));
 
-        if (pc != self->modern_entry_address)
+        if (self->dyld_flavor == FRIDA_DYLD_V3_MINUS && pc != self->modern_entry_address)
           frida_spawn_instance_unset_nth_breakpoint (self, 1);
 
         frida_spawn_instance_call_cf_initialize (self, state);
