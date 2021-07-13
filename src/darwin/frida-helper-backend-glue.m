@@ -2052,10 +2052,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   memcpy (&instance->breakpoint_debug_state, &instance->previous_debug_state, sizeof (instance->breakpoint_debug_state));
   i = 0;
-  if (modern_entry_address != 0)
-    frida_spawn_instance_set_nth_breakpoint (instance, i++, modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (legacy_entry_address != 0)
     frida_spawn_instance_set_nth_breakpoint (instance, i++, legacy_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+  if (modern_entry_address != 0)
+    frida_spawn_instance_set_nth_breakpoint (instance, i++, modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
   kr = frida_set_debug_state (child_thread, &instance->breakpoint_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_set_debug_state");
