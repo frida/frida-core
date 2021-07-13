@@ -48,7 +48,8 @@ frida_fetch_dyld_symbols (char * output_buffer, const void * dyld_load_address)
     const struct nlist_64 * sym = &symbols[i];
     const char * name = strings + sym->n_un.n_strx;
 
-    if (frida_str_contains (name, "launchWithClosure") ||
+    if (frida_str_contains (name, "libdyld_initialize") ||
+        frida_str_contains (name, "launchWithClosure") ||
         frida_str_contains (name, "initializeMainExecutable") ||
         frida_str_contains (name, "registerThreadHelpers") ||
         frida_str_has_prefix (name, "_dlopen") ||
