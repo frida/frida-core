@@ -2218,7 +2218,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   layout.mach_code_offset = 0;
   layout.pthread_code_offset = 512;
   layout.data_offset = page_size;
-  layout.data_size = MAX (page_size, gum_query_page_size ());
+  layout.data_size = GUM_ALIGN_SIZE (sizeof (FridaAgentContext), page_size);
   layout.stack_guard_offset = layout.data_offset + layout.data_size;
   layout.stack_bottom_offset = layout.stack_guard_offset + layout.stack_guard_size;
   layout.stack_top_offset = layout.stack_bottom_offset + layout.stack_size;
