@@ -64,7 +64,7 @@ namespace Frida.Fruity.Injector {
 
 		private LLDB.AppleDyldFields? dyld_fields;
 		private uint64 dyld_base;
-		private Gee.HashMap<string, uint64?>? dyld_symbols;
+		private Gee.Map<string, uint64?>? dyld_symbols;
 
 		private bool libsystem_initialized;
 
@@ -1053,7 +1053,7 @@ namespace Frida.Fruity.Injector {
 			}
 		}
 
-		private async Gee.HashMap<string, uint64?> fetch_dyld_symbols (Cancellable? cancellable) throws GLib.Error {
+		private async Gee.Map<string, uint64?> fetch_dyld_symbols (Cancellable? cancellable) throws GLib.Error {
 			var symbols = new Gee.HashMap<string, uint64?> ();
 
 			uint64 code = jit_page;
@@ -1186,7 +1186,7 @@ namespace Frida.Fruity.Injector {
 					dyld_fields.all_image_info
 				}, null, cancellable);
 
-			var symbols = new Gee.HashMap<string, Gee.HashMap<string, uint64?>> ();
+			var symbols = new Gee.HashMap<string, Gee.Map<string, uint64?>> ();
 			var output_vector = yield lldb.read_buffer (output_vector_address, output_vector_size, cancellable);
 			size_t offset = 0;
 			foreach (var group in query.groups) {
@@ -1265,7 +1265,7 @@ namespace Frida.Fruity.Injector {
 		}
 
 		private class SymbolQueryBuilder {
-			private Gee.HashMap<string, Gee.HashSet<string>> symbols = new Gee.HashMap<string, Gee.HashSet<string>> ();
+			private Gee.Map<string, Gee.HashSet<string>> symbols = new Gee.HashMap<string, Gee.HashSet<string>> ();
 
 			public unowned SymbolQueryBuilder add (string module_name, string symbol_name) {
 				var group = symbols[module_name];
@@ -1327,10 +1327,10 @@ namespace Frida.Fruity.Injector {
 		}
 
 		private class SymbolSet {
-			private Gee.HashMap<string, Gee.HashMap<string, uint64?>> symbols =
-				new Gee.HashMap<string, Gee.HashMap<string, uint64?>> ();
+			private Gee.Map<string, Gee.Map<string, uint64?>> symbols =
+				new Gee.HashMap<string, Gee.Map<string, uint64?>> ();
 
-			public SymbolSet (Gee.HashMap<string, Gee.HashMap<string, uint64?>> symbols) {
+			public SymbolSet (Gee.Map<string, Gee.Map<string, uint64?>> symbols) {
 				this.symbols = symbols;
 			}
 
