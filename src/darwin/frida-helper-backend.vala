@@ -337,17 +337,24 @@ namespace Frida {
 
 		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+			yield prepare_target (pid, cancellable);
+
+			var task = borrow_task_for_remote_pid (pid);
+
+			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
+		}
+
+		public async void prepare_target (uint pid, Cancellable? cancellable) throws Error, IOError {
 			policy_softener.soften (pid);
 
 			var task = borrow_task_for_remote_pid (pid);
 
 			var spawn_instance = spawn_instances[pid];
-			if (spawn_instance == null && _is_suspended (task) && is_booting (task))
+			bool not_yet_booted = _is_suspended (task) && is_booting (task);
+			if (spawn_instance == null && not_yet_booted)
 				spawn_instance = _create_spawn_instance (pid);
 
-			var main_context = MainContext.get_thread_default ();
-
-			if (spawn_instance != null) {
+			if (not_yet_booted) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
 
 				if (kernel_agent == null || !kernel_agent.try_resume (pid))
@@ -356,15 +363,15 @@ namespace Frida {
 				bool timed_out = false;
 				var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
 					if (ready_pid == pid)
-						_inject.callback ();
+						prepare_target.callback ();
 				});
 				var timeout_source = new TimeoutSource.seconds (10);
 				timeout_source.set_callback (() => {
 					timed_out = true;
-					_inject.callback ();
+					prepare_target.callback ();
 					return false;
 				});
-				timeout_source.attach (main_context);
+				timeout_source.attach (MainContext.get_thread_default ());
 
 				yield;
 
@@ -374,8 +381,6 @@ namespace Frida {
 				if (timed_out)
 					throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
 			}
-
-			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
 		}
 
 		private bool is_booting (uint task) throws Error {
@@ -413,7 +418,7 @@ namespace Frida {
 
 		public async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable, out string remote_address)
 				throws Error, IOError {
-			policy_softener.soften (remote_pid);
+			yield prepare_target (remote_pid, cancellable);
 
 			var remote_task = borrow_task_for_remote_pid (remote_pid);
 
