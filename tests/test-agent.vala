@@ -538,6 +538,11 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		}
 #endif
 
+		public async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,
+				out uint specialized_injectee_id, out string specialized_pipe_address) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
 		private async void recreate_agent_thread (uint pid, uint injectee_id, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}

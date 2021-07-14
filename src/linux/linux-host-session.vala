@@ -498,6 +498,8 @@ namespace Frida {
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
+		private delegate void CompletionNotify (GLib.Error? error);
+
 		public RoboLauncher (LinuxHostSession host_session, Cancellable io_cancellable) {
 			Object (
 				host_session: host_session,
@@ -618,16 +620,22 @@ namespace Frida {
 			if (agent == null)
 				return false;
 
-			var pid = info.pid;
+			uint pid = info.pid;
+			string identifier = info.identifier;
+
+			if (identifier == "usap32" || identifier == "usap64") {
+				handle_usap_child.begin (pid, identifier);
+				return true;
+			}
 
 			Promise<uint> spawn_request;
-			if (spawn_requests.unset (info.identifier, out spawn_request)) {
+			if (spawn_requests.unset (identifier, out spawn_request)) {
 				spawn_request.resolve (pid);
 				return true;
 			}
 
 			if (spawn_gating_enabled) {
-				var spawn_info = HostSpawnInfo (pid, info.identifier);
+				var spawn_info = HostSpawnInfo (pid, identifier);
 				pending_spawn[pid] = spawn_info;
 				spawn_added (spawn_info);
 				return true;
@@ -672,42 +680,89 @@ namespace Frida {
 			}
 			ensure_request = new Promise<bool> ();
 
-			try {
-				foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
-					var name = info.name;
-					if (name == "zygote" || name == "zygote64") {
-						var pid = info.pid;
-						if (zygote_agents.has_key (pid))
-							continue;
+			uint pending = 1;
+			GLib.Error? first_error = null;
 
-						var agent = new ZygoteAgent (host_session, pid);
-						zygote_agents[pid] = agent;
-						agent.unloaded.connect (on_zygote_agent_unloaded);
+			CompletionNotify on_complete = error => {
+				pending--;
+				if (error != null && first_error == null)
+					first_error = error;
 
-						try {
-							yield agent.load (cancellable);
-						} catch (GLib.Error e) {
-							agent.unloaded.disconnect (on_zygote_agent_unloaded);
-							zygote_agents.unset (pid);
-
-							if (e is Error.PERMISSION_DENIED) {
-								throw new Error.NOT_SUPPORTED (
-									"Unable to access %s while preparing for app launch; " +
-									"try disabling Magisk Hide in case it is active",
-									name);
-							} else {
-								throw e;
-							}
-						}
-					}
+				if (pending == 0) {
+					var source = new IdleSource ();
+					source.set_callback (ensure_loaded.callback);
+					source.attach (MainContext.get_thread_default ());
 				}
+			};
 
+			foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
+				var name = info.name;
+				if (name == "zygote" || name == "zygote64" || name == "usap32" || name == "usap64") {
+					uint pid = info.pid;
+					if (zygote_agents.has_key (pid))
+						continue;
+
+					pending++;
+					do_inject_zygote_agent.begin (pid, name, cancellable, on_complete);
+				}
+			}
+
+			on_complete (null);
+
+			yield;
+
+			on_complete = null;
+
+			if (first_error == null) {
 				ensure_request.resolve (true);
-			} catch (GLib.Error e) {
-				ensure_request.reject (e);
+			} else {
+				ensure_request.reject (first_error);
 				ensure_request = null;
 
-				throw_api_error (e);
+				throw_api_error (first_error);
+			}
+		}
+
+		private async void do_inject_zygote_agent (uint pid, string name, Cancellable? cancellable, CompletionNotify on_complete) {
+			try {
+				yield inject_zygote_agent (pid, name, cancellable);
+
+				on_complete (null);
+			} catch (GLib.Error e) {
+				on_complete (e);
+			}
+		}
+
+		private async void inject_zygote_agent (uint pid, string name, Cancellable? cancellable) throws Error, IOError {
+			var agent = new ZygoteAgent (host_session, pid, name);
+			zygote_agents[pid] = agent;
+			agent.unloaded.connect (on_zygote_agent_unloaded);
+
+			try {
+				yield agent.load (cancellable);
+			} catch (GLib.Error e) {
+				agent.unloaded.disconnect (on_zygote_agent_unloaded);
+				zygote_agents.unset (pid);
+
+				if (e is Error.PERMISSION_DENIED) {
+					throw new Error.NOT_SUPPORTED (
+						"Unable to access PID %u (%s) while preparing for app launch; " +
+						"try disabling Magisk Hide in case it is active",
+						pid, name);
+				}
+
+				if (e is IOError)
+					throw (IOError) e;
+
+				throw (Error) e;
+			}
+		}
+
+		private async void handle_usap_child (uint pid, string name) throws GLib.Error {
+			try {
+				yield inject_zygote_agent (pid, name, io_cancellable);
+			} finally {
+				host_session.resume.begin (pid, io_cancellable);
 			}
 		}
 
@@ -716,7 +771,7 @@ namespace Frida {
 			dead_agent.unloaded.disconnect (on_zygote_agent_unloaded);
 			zygote_agents.unset (dead_agent.pid);
 
-			if (ensure_request != null && ensure_request.future.ready)
+			if (dead_agent.name.has_prefix ("zygote") && ensure_request != null && ensure_request.future.ready)
 				ensure_request = null;
 		}
 	}
@@ -727,13 +782,23 @@ namespace Frida {
 			construct;
 		}
 
+		public string name {
+			get;
+			construct;
+		}
+
 		public bool child_gating_only_used_by_us {
 			get;
 			set;
 		}
 
-		public ZygoteAgent (LinuxHostSession host_session, uint pid) {
-			Object (host_session: host_session, script_source: null, pid: pid);
+		public ZygoteAgent (LinuxHostSession host_session, uint pid, string name) {
+			Object (
+				host_session: host_session,
+				script_source: null,
+				pid: pid,
+				name: name
+			);
 		}
 
 		public async void load (Cancellable? cancellable) throws Error, IOError {

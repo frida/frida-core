@@ -98,6 +98,10 @@ namespace Frida {
 		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
 			out uint child_injectee_id, out GLib.Socket child_socket) throws GLib.Error;
 #endif
+
+		public abstract async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,
+			out uint specialized_injectee_id, out string specialized_pipe_address) throws GLib.Error;
+
 		public abstract async void recreate_agent_thread (uint pid, uint injectee_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info,
 			Cancellable? cancellable) throws GLib.Error;

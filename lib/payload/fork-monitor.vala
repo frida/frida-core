@@ -35,7 +35,8 @@ namespace Frida {
 
 		private enum HookId {
 			FORK,
-			SET_ARGV0
+			SET_ARGV0,
+			SET_CTX
 		}
 
 		public ForkMonitor (ForkHandler handler) {
@@ -58,12 +59,16 @@ namespace Frida {
 				try {
 					string cmdline;
 					FileUtils.get_contents ("/proc/self/cmdline", out cmdline);
-					if (cmdline == "zygote" || cmdline == "zygote64") {
+					if (cmdline == "zygote" || cmdline == "zygote64" || cmdline == "usap32" || cmdline == "usap64") {
 						var set_argv0 = Gum.Module.find_export_by_name ("libandroid_runtime.so", "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring");
 						if (set_argv0 != null) {
 							interceptor.attach (set_argv0, listener, (void *) HookId.SET_ARGV0);
 							child_recovery_behavior = DEFERRED_UNTIL_SET_ARGV0;
 						}
+
+						var setcontext = Gum.Module.find_export_by_name ("libselinux.so", "selinux_android_setcontext");
+						if (setcontext != null)
+							interceptor.attach (setcontext, listener, (void *) HookId.SET_CTX);
 					}
 				} catch (FileError e) {
 				}
@@ -88,6 +93,7 @@ namespace Frida {
 			switch (hook_id) {
 				case FORK:	on_fork_enter (context);	break;
 				case SET_ARGV0:	on_set_argv0_enter (context);	break;
+				case SET_CTX:   on_set_ctx_enter (context);	break;
 				default:	assert_not_reached ();
 			}
 		}
@@ -97,6 +103,7 @@ namespace Frida {
 			switch (hook_id) {
 				case FORK:	on_fork_leave (context);	break;
 				case SET_ARGV0:	on_set_argv0_leave (context);	break;
+				case SET_CTX:   on_set_ctx_leave (context);	break;
 				default:	assert_not_reached ();
 			}
 		}
@@ -153,6 +160,27 @@ namespace Frida {
 			public void * name_obj;
 		}
 
+		public void on_set_ctx_enter (Gum.InvocationContext context) {
+			if (state != IDLE)
+				return;
+
+			SetCtxInvocation * invocation = context.get_listener_invocation_data (sizeof (SetCtxInvocation));
+			invocation.nice_name = context.get_nth_argument (3);
+			handler.prepare_to_specialize (invocation.nice_name);
+		}
+
+		public void on_set_ctx_leave (Gum.InvocationContext context) {
+			if (state != IDLE)
+				return;
+
+			SetCtxInvocation * invocation = context.get_listener_invocation_data (sizeof (SetCtxInvocation));
+			handler.recover_from_specialization (invocation.nice_name);
+		}
+
+		private struct SetCtxInvocation {
+			public string * nice_name;
+		}
+
 		[CCode (has_target = false)]
 		private delegate string * GetStringUTFCharsFunc (void * env, void * str_obj, out uint8 is_copy = null);
 
@@ -165,5 +193,8 @@ namespace Frida {
 		public abstract void prepare_to_fork ();
 		public abstract void recover_from_fork_in_parent ();
 		public abstract void recover_from_fork_in_child (string? identifier);
+
+		public abstract void prepare_to_specialize (string identifier);
+		public abstract void recover_from_specialization (string identifier);
 	}
 }

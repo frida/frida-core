@@ -3,12 +3,12 @@ namespace Frida.Agent {
 		if (Runner.shared_instance == null)
 			Runner.create_and_run (agent_parameters, ref unload_policy, injector_state);
 		else
-			Runner.resume_after_fork (ref unload_policy, injector_state);
+			Runner.resume_after_transition (ref unload_policy, injector_state);
 	}
 
 	private enum StopReason {
 		UNLOAD,
-		FORK
+		PROCESS_TRANSITION
 	}
 
 	private class Runner : Object, ProcessInvader, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
@@ -41,12 +41,12 @@ namespace Frida.Agent {
 		private bool stop_thread_on_unload = true;
 
 		private void * agent_pthread;
-		private Thread<bool> agent_gthread;
+		private Thread<bool>? agent_gthread;
 
 		private MainContext main_context;
 		private MainLoop main_loop;
 		private DBusConnection connection;
-		private AgentController controller;
+		private AgentController? controller;
 		private Error? start_error = null;
 		private bool unloading = false;
 		private uint filter_id = 0;
@@ -82,15 +82,18 @@ namespace Frida.Agent {
 		private uint fork_parent_injectee_id;
 		private uint fork_child_injectee_id;
 		private Socket fork_child_socket;
-		private ForkRecoveryState fork_recovery_state;
-		private Mutex fork_mutex;
-		private Cond fork_cond;
+		private HostChildId specialized_child_id;
+		private uint specialized_injectee_id;
+		private string? specialized_pipe_address;
+		private TransitionRecoveryState transition_recovery_state;
+		private Mutex transition_mutex;
+		private Cond transition_cond;
 		private SpawnMonitor? spawn_monitor;
 		private ThreadSuspendMonitor? thread_suspend_monitor;
 
 		private delegate void CompletionNotify ();
 
-		private enum ForkRecoveryState {
+		private enum TransitionRecoveryState {
 			RECOVERING,
 			RECOVERED
 		}
@@ -137,7 +140,7 @@ namespace Frida.Agent {
 					GLib.info ("Unable to start agent: %s", e.message);
 				}
 
-				if (shared_instance.stop_reason == FORK) {
+				if (shared_instance.stop_reason == PROCESS_TRANSITION) {
 #if LINUX
 					if (injector_state != null)
 						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
@@ -158,7 +161,7 @@ namespace Frida.Agent {
 			Environment._deinit ();
 		}
 
-		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
+		public static void resume_after_transition (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			{
 #if LINUX
 				var injector_state = (LinuxInjectorState *) opaque_injector_state;
@@ -170,9 +173,9 @@ namespace Frida.Agent {
 
 				var ignore_scope = new ThreadIgnoreScope ();
 
-				shared_instance.run_after_fork ();
+				shared_instance.run_after_transition ();
 
-				if (shared_instance.stop_reason == FORK) {
+				if (shared_instance.stop_reason == PROCESS_TRANSITION) {
 #if LINUX
 					if (injector_state != null)
 						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
@@ -306,9 +309,9 @@ namespace Frida.Agent {
 			yield prepare_for_termination (TerminationReason.EXIT);
 		}
 
-		private void run_after_fork () {
-			fork_mutex.lock ();
-			fork_mutex.unlock ();
+		private void run_after_transition () {
+			transition_mutex.lock ();
+			transition_mutex.unlock ();
 
 			stop_reason = UNLOAD;
 			agent_pthread = get_current_pthread ();
@@ -325,26 +328,15 @@ namespace Frida.Agent {
 				do_prepare_to_fork.begin ();
 				return false;
 			});
-			if (agent_gthread != null) {
-				agent_gthread.join ();
-				agent_gthread = null;
-			} else {
-				join_pthread (agent_pthread);
-			}
-			agent_pthread = null;
+			stop_agent_thread ();
 
-#if !WINDOWS
-			GumJS.prepare_to_fork ();
-			Gum.prepare_to_fork ();
-			GIOFork.prepare_to_fork ();
-			GLibFork.prepare_to_fork ();
-#endif
+			suspend_subsystems ();
 
 			fdt_padder = null;
 		}
 
 		private async void do_prepare_to_fork () {
-			stop_reason = FORK;
+			stop_reason = PROCESS_TRANSITION;
 
 #if !WINDOWS
 			if (controller != null) {
@@ -377,19 +369,9 @@ namespace Frida.Agent {
 			var fdt_padder = FileDescriptorTablePadder.obtain ();
 
 			if (actor == PARENT) {
-#if !WINDOWS
-				GLibFork.recover_from_fork_in_parent ();
-				GIOFork.recover_from_fork_in_parent ();
-				Gum.recover_from_fork_in_parent ();
-				GumJS.recover_from_fork_in_parent ();
-#endif
+				resume_subsystems ();
 			} else if (actor == CHILD) {
-#if !WINDOWS
-				GLibFork.recover_from_fork_in_child ();
-				GIOFork.recover_from_fork_in_child ();
-				Gum.recover_from_fork_in_child ();
-				GumJS.recover_from_fork_in_child ();
-#endif
+				resume_subsystems_in_child ();
 
 				fork_child_pid = get_process_id ();
 
@@ -402,12 +384,12 @@ namespace Frida.Agent {
 				discard_connections ();
 			}
 
-			fork_mutex.lock ();
+			transition_mutex.lock ();
 
-			fork_recovery_state = RECOVERING;
+			transition_recovery_state = RECOVERING;
 
 			schedule_idle (() => {
-				recreate_agent_thread.begin (actor);
+				recreate_agent_thread_after_fork.begin (actor);
 				return false;
 			});
 
@@ -420,15 +402,52 @@ namespace Frida.Agent {
 				return false;
 			});
 
-			while (fork_recovery_state != RECOVERED)
-				fork_cond.wait (fork_mutex);
+			while (transition_recovery_state != RECOVERED)
+				transition_cond.wait (transition_mutex);
 
-			fork_mutex.unlock ();
+			transition_mutex.unlock ();
 
 			fdt_padder = null;
 		}
 
-		private async void recreate_agent_thread (ForkActor actor) {
+		private static void suspend_subsystems () {
+#if !WINDOWS
+			GumJS.prepare_to_fork ();
+			Gum.prepare_to_fork ();
+			GIOFork.prepare_to_fork ();
+			GLibFork.prepare_to_fork ();
+#endif
+		}
+
+		private static void resume_subsystems () {
+#if !WINDOWS
+			GLibFork.recover_from_fork_in_parent ();
+			GIOFork.recover_from_fork_in_parent ();
+			Gum.recover_from_fork_in_parent ();
+			GumJS.recover_from_fork_in_parent ();
+#endif
+		}
+
+		private static void resume_subsystems_in_child () {
+#if !WINDOWS
+			GLibFork.recover_from_fork_in_child ();
+			GIOFork.recover_from_fork_in_child ();
+			Gum.recover_from_fork_in_child ();
+			GumJS.recover_from_fork_in_child ();
+#endif
+		}
+
+		private void stop_agent_thread () {
+			if (agent_gthread != null) {
+				agent_gthread.join ();
+				agent_gthread = null;
+			} else if (agent_pthread != null) {
+				join_pthread (agent_pthread);
+			}
+			agent_pthread = null;
+		}
+
+		private async void recreate_agent_thread_after_fork (ForkActor actor) {
 			uint pid, injectee_id;
 			if (actor == PARENT) {
 				pid = fork_parent_pid;
@@ -460,7 +479,7 @@ namespace Frida.Agent {
 			} else {
 				agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
 					var ignore_scope = new ThreadIgnoreScope ();
-					run_after_fork ();
+					run_after_transition ();
 					ignore_scope = null;
 
 					return true;
@@ -497,10 +516,113 @@ namespace Frida.Agent {
 			fork_child_injectee_id = 0;
 			fork_child_socket = null;
 
-			fork_mutex.lock ();
-			fork_recovery_state = RECOVERED;
-			fork_cond.signal ();
-			fork_mutex.unlock ();
+			transition_mutex.lock ();
+			transition_recovery_state = RECOVERED;
+			transition_cond.signal ();
+			transition_mutex.unlock ();
+		}
+
+		private void prepare_to_specialize (string identifier) {
+			schedule_idle (() => {
+				do_prepare_to_specialize.begin (identifier);
+				return false;
+			});
+			stop_agent_thread ();
+
+			discard_connections ();
+
+			suspend_subsystems ();
+		}
+
+		private async void do_prepare_to_specialize (string identifier) {
+			stop_reason = PROCESS_TRANSITION;
+
+			if (controller != null) {
+				try {
+					specialized_child_id = yield controller.prepare_to_specialize (get_process_id (), identifier, null,
+						out specialized_injectee_id, out specialized_pipe_address);
+				} catch (GLib.Error e) {
+					error ("%s", e.message);
+				}
+			}
+
+			main_loop.quit ();
+		}
+
+		private void recover_from_specialization (string identifier) {
+			resume_subsystems ();
+
+			transition_mutex.lock ();
+
+			transition_recovery_state = RECOVERING;
+
+			schedule_idle (() => {
+				recreate_agent_thread_after_specialization.begin ();
+				return false;
+			});
+
+			main_context.push_thread_default ();
+			main_loop.run ();
+			main_context.pop_thread_default ();
+
+			schedule_idle (() => {
+				finish_recovery_from_specialization.begin (identifier);
+				return false;
+			});
+
+			while (transition_recovery_state != RECOVERED)
+				transition_cond.wait (transition_mutex);
+
+			transition_mutex.unlock ();
+		}
+
+		private async void recreate_agent_thread_after_specialization () {
+			if (specialized_pipe_address != null) {
+				try {
+					yield setup_connection_with_transport_uri (specialized_pipe_address);
+					yield controller.recreate_agent_thread (get_process_id (), specialized_injectee_id, null);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+			} else {
+				agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
+					var ignore_scope = new ThreadIgnoreScope ();
+					run_after_transition ();
+					ignore_scope = null;
+
+					return true;
+				});
+			}
+
+			main_loop.quit ();
+		}
+
+		private async void finish_recovery_from_specialization (string identifier) {
+			if (controller != null) {
+				uint pid = get_process_id ();
+				uint parent_pid = pid;
+				var info = HostChildInfo (pid, parent_pid, ChildOrigin.EXEC);
+				info.identifier = identifier;
+
+				var controller_proxy = controller as DBusProxy;
+				var previous_timeout = controller_proxy.get_default_timeout ();
+				controller_proxy.set_default_timeout (int.MAX);
+				try {
+					yield controller.wait_for_permission_to_resume (specialized_child_id, info, null);
+				} catch (GLib.Error e) {
+					// The connection will/did get closed and we will unload...
+				}
+				controller_proxy.set_default_timeout (previous_timeout);
+			}
+
+			specialized_child_id = HostChildId (0);
+			specialized_injectee_id = 0;
+			specialized_pipe_address = null;
+
+			transition_mutex.lock ();
+			transition_recovery_state = RECOVERED;
+			transition_cond.signal ();
+			transition_mutex.unlock ();
 		}
 
 		private async void prepare_to_exec (HostChildInfo * info) {

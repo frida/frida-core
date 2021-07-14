@@ -226,6 +226,22 @@ namespace Frida {
 			yield establish_session (id, pid);
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			var instance = inject_instances[id];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			RemoteThreadSession session;
+			if (inject_sessions.unset (id, out session)) {
+				session.ended.disconnect (on_remote_thread_session_ended);
+				yield session.cancel ();
+			}
+
+			_demonitor (instance);
+
+			schedule_inject_expiry_for_id (id);
+		}
+
 		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
@@ -358,6 +374,7 @@ namespace Frida {
 		protected extern void _free_exec_instance (void * instance);
 
 		protected extern void _do_inject (uint pid, string path, string entrypoint, string data, string temp_path, uint id) throws Error;
+		protected extern void _demonitor (void * instance);
 		protected extern uint _demonitor_and_clone_injectee_state (void * instance, uint clone_id);
 		protected extern void _recreate_injectee_thread (void * instance, uint pid) throws Error;
 		protected extern InputStream _get_fifo_for_inject_instance (void * instance);

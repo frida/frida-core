@@ -85,6 +85,10 @@ namespace Frida {
 			return id;
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			yield helper.demonitor (id, cancellable);
+		}
+
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			return yield helper.demonitor_and_clone_injectee_state (id, cancellable);
 		}

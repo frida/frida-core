@@ -3277,6 +3277,22 @@ namespace Frida {
 			}
 		}
 
+		public abstract async void demonitor (uint id, Cancellable? cancellable = null) throws Error, IOError;
+
+		public void demonitor_sync (uint id, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<DemonitorTask> () as DemonitorTask;
+			task.id = id;
+			task.execute (cancellable);
+		}
+
+		private class DemonitorTask : InjectorTask<void> {
+			public uint id;
+
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.demonitor (id, cancellable);
+			}
+		}
+
 		public abstract async uint demonitor_and_clone_state (uint id, Cancellable? cancellable = null) throws Error, IOError;
 
 		public uint demonitor_and_clone_state_sync (uint id, Cancellable? cancellable = null) throws Error, IOError {

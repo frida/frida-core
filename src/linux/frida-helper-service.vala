@@ -152,6 +152,10 @@ namespace Frida {
 			yield backend.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.demonitor (id, cancellable);
+		}
+
 		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
 				throws Error, IOError {
 			yield backend.demonitor_and_clone_injectee_state (id, clone_id, cancellable);

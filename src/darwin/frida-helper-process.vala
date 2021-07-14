@@ -194,6 +194,15 @@ namespace Frida {
 			}
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
+			try {
+				yield helper.demonitor (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
 		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain (cancellable);
 			try {

@@ -652,6 +652,14 @@ premature_termination:
   }
 }
 
+void
+_frida_linux_helper_backend_demonitor (FridaLinuxHelperBackend * self, void * raw_instance)
+{
+  FridaInjectInstance * instance = raw_instance;
+
+  frida_inject_instance_recreate_fifo (instance);
+}
+
 guint
 _frida_linux_helper_backend_demonitor_and_clone_injectee_state (FridaLinuxHelperBackend * self, void * raw_instance, guint clone_id)
 {

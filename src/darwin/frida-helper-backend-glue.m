@@ -2445,6 +2445,18 @@ beach:
   }
 }
 
+void
+_frida_darwin_helper_backend_demonitor (FridaDarwinHelperBackend * self, void * raw_instance)
+{
+  FridaInjectInstance * instance = raw_instance;
+
+  dispatch_release (instance->thread_monitor_source);
+  instance->thread_monitor_source = NULL;
+
+  mach_port_deallocate (mach_task_self (), instance->thread);
+  instance->thread = MACH_PORT_NULL;
+}
+
 guint
 _frida_darwin_helper_backend_demonitor_and_clone_injectee_state (FridaDarwinHelperBackend * self, void * raw_instance)
 {

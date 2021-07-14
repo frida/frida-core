@@ -660,8 +660,6 @@ namespace Frida {
 #if !WINDOWS
 		public async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
 				out uint child_injectee_id, out GLib.Socket child_socket) throws Error, IOError {
-			var id = HostChildId (next_host_child_id++);
-
 			if (!injectee_by_pid.has_key (parent_pid))
 				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
 			parent_injectee_id = injectee_by_pid[parent_pid];
@@ -671,42 +669,68 @@ namespace Frida {
 			Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds);
 
 			Socket local_socket, remote_socket;
+			IOStream local_stream;
 			try {
 				local_socket = new Socket.from_fd (fds[0]);
 				remote_socket = new Socket.from_fd (fds[1]);
+
+				local_stream = SocketConnection.factory_create_connection (local_socket);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
-			start_child_connection.begin (id, local_socket, cancellable);
+			var id = HostChildId (next_host_child_id++);
+
+			start_child_connection.begin (id, local_stream);
 
 			child_socket = remote_socket;
 
 			return id;
 		}
+#endif
 
-		private async void start_child_connection (HostChildId id, Socket local_socket, Cancellable? cancellable) throws IOError {
-			DBusConnection connection;
-			uint controller_registration_id;
-			try {
-				var stream = SocketConnection.factory_create_connection (local_socket);
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
-					null, cancellable);
+		public async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,
+				out uint specialized_injectee_id, out string specialized_pipe_address) throws Error, IOError {
+			Future<AgentEntry>? request = agent_entries[pid];
+			if (request == null || !request.ready || !injectee_by_pid.has_key (pid))
+				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", pid);
 
-				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
-					(AgentController) this);
+			specialized_injectee_id = injectee_by_pid[pid];
 
-				connection.start_message_processing ();
-			} catch (GLib.Error e) {
-				return;
-			}
+			yield injector.demonitor (specialized_injectee_id, cancellable);
+
+			var transport = new PipeTransport ();
+			var stream_request = Pipe.open (transport.local_address, cancellable);
+
+			var id = HostChildId (next_host_child_id++);
+
+			start_specialized_connection.begin (id, transport, stream_request);
+
+			specialized_pipe_address = transport.remote_address;
+
+			return id;
+		}
+
+		private async void start_specialized_connection (HostChildId id, PipeTransport transport,
+				Future<IOStream> stream_request) throws GLib.Error {
+			IOStream stream = yield stream_request.wait_async (io_cancellable);
+
+			yield start_child_connection (id, stream);
+		}
+
+		private async void start_child_connection (HostChildId id, IOStream stream) throws GLib.Error {
+			var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+				AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+				null, io_cancellable);
+
+			uint controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, (AgentController) this);
+
+			connection.start_message_processing ();
 
 			var entry = new ChildEntry (connection, controller_registration_id);
 			child_entries[id] = entry;
 			connection.on_closed.connect (on_child_connection_closed);
 		}
-#endif
 
 		private void on_child_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			ChildEntry entry_to_remove = null;
@@ -739,7 +763,7 @@ namespace Frida {
 			if (child_entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
-			var pid = info.pid;
+			uint pid = info.pid;
 			var connection = child_entry.connection;
 
 			var promise = new Promise<AgentEntry> ();

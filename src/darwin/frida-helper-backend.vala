@@ -391,6 +391,16 @@ namespace Frida {
 			return !infos.libsystem_initialized;
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			var instance = inject_instances[id];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			_demonitor (instance);
+
+			schedule_inject_expiry_for_id (id);
+		}
+
 		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
@@ -637,6 +647,7 @@ namespace Frida {
 		protected extern void _free_spawn_instance (void * instance);
 
 		protected extern uint _inject_into_task (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
+		protected extern void _demonitor (void * instance);
 		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
 		protected extern void _recreate_injectee_thread (void * instance, uint pid, uint task) throws Error;
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
