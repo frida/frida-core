@@ -169,9 +169,7 @@ namespace Frida {
 
 		private Gee.HashMap<HostChildId?, ChildEntry> child_entries =
 			new Gee.HashMap<HostChildId?, ChildEntry> (HostChildId.hash, HostChildId.equal);
-#if !WINDOWS
 		private uint next_host_child_id = 1;
-#endif
 		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
 		private Gee.HashMap<uint, SpawnAckRequest> pending_acks = new Gee.HashMap<uint, SpawnAckRequest> ();
 		private Promise<bool> pending_children_gc_request;
