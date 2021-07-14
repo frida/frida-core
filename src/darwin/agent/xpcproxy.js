@@ -109,7 +109,7 @@ function findSubstrateProxyer() {
 }
 
 function resolveSubstrateExec(base, size) {
-  const matches = Memory.scanSync(base, size, 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 ff 03 01 d1 f3 03 03 aa');
+  const matches = Memory.scanSync(base, size, 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 ff c3 00 d1 f3 03 02 aa');
   if (matches.length !== 1) {
     throw new Error('Unsupported version of Substrate; please file a bug');
   }
