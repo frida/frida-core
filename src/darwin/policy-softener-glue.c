@@ -3,6 +3,7 @@
 #ifdef HAVE_IOS
 # include "policyd.h"
 # include "substituted-client.h"
+# include "substituted2-client.h"
 
 # include <errno.h>
 # include <mach/mach.h>
@@ -128,6 +129,7 @@ void
 _frida_unc0ver_policy_softener_internal_substitute_setup_process (guint service_port, guint pid)
 {
   kern_return_t kr;
+  static gboolean using_new_substituted = FALSE;
 
   if (service_port == MACH_PORT_NULL)
     return;
@@ -138,9 +140,19 @@ _frida_unc0ver_policy_softener_internal_substitute_setup_process (guint service_
    * Frida use case and may change in the future. Instead, just
    * drop your stuff in /Library/MobileSubstrate/DynamicLibraries
    */
-  kr = substitute_setup_process (service_port, pid, FALSE, FALSE);
+
+  if (!using_new_substituted)
+  {
+    kr = substitute_setup_process (service_port, pid, FALSE, FALSE);
+    if (kr == MIG_BAD_ARGUMENTS)
+      using_new_substituted = TRUE;
+  }
+
+  if (using_new_substituted)
+    kr = substitute2_setup_process (service_port, pid, FALSE, FALSE);
+
   if (kr != KERN_SUCCESS)
-    g_warning ("substitute_setup_process failed for pid %u", pid);
+    g_warning ("substitute_setup_process() failed for PID %u", pid);
 }
 
 #endif
