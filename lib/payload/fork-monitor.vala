@@ -19,6 +19,7 @@ namespace Frida {
 
 		private State state = IDLE;
 		private ChildRecoveryBehavior child_recovery_behavior = NORMAL;
+		private string? identifier;
 
 		private static void * fork_impl;
 		private static void * vfork_impl;
@@ -110,6 +111,7 @@ namespace Frida {
 
 		public void on_fork_enter (Gum.InvocationContext context) {
 			state = FORKING;
+			identifier = null;
 			handler.prepare_to_fork ();
 		}
 
@@ -129,56 +131,41 @@ namespace Frida {
 		}
 
 		public void on_set_argv0_enter (Gum.InvocationContext context) {
-			SetArgV0Invocation * invocation = context.get_listener_invocation_data (sizeof (SetArgV0Invocation));
-			invocation.env = context.get_nth_argument (0);
-			invocation.name_obj = context.get_nth_argument (2);
+			if (identifier == null) {
+				void *** env = context.get_nth_argument (0);
+				void * name_obj = context.get_nth_argument (2);
+
+				var env_vtable = *env;
+
+				var get_string_utf_chars = (GetStringUTFCharsFunc) env_vtable[169];
+				var release_string_utf_chars = (ReleaseStringUTFCharsFunc) env_vtable[170];
+
+				var name_utf8 = get_string_utf_chars (env, name_obj);
+
+				identifier = name_utf8;
+
+				release_string_utf_chars (env, name_obj, name_utf8);
+			}
 		}
 
 		public void on_set_argv0_leave (Gum.InvocationContext context) {
-			SetArgV0Invocation * invocation = context.get_listener_invocation_data (sizeof (SetArgV0Invocation));
-
-			if (state != FORKING)
-				return;
-
-			var env = invocation.env;
-			var env_vtable = *env;
-
-			var get_string_utf_chars = (GetStringUTFCharsFunc) env_vtable[169];
-			var release_string_utf_chars = (ReleaseStringUTFCharsFunc) env_vtable[170];
-
-			var name_obj = invocation.name_obj;
-			var name_utf8 = get_string_utf_chars (env, name_obj);
-
-			handler.recover_from_fork_in_child (name_utf8);
-			state = IDLE;
-
-			release_string_utf_chars (env, name_obj, name_utf8);
-		}
-
-		private struct SetArgV0Invocation {
-			public void *** env;
-			public void * name_obj;
+			if (state == FORKING) {
+				handler.recover_from_fork_in_child (identifier);
+				state = IDLE;
+			}
 		}
 
 		public void on_set_ctx_enter (Gum.InvocationContext context) {
-			if (state != IDLE)
-				return;
+			string * nice_name = context.get_nth_argument (3);
+			identifier = nice_name;
 
-			SetCtxInvocation * invocation = context.get_listener_invocation_data (sizeof (SetCtxInvocation));
-			invocation.nice_name = context.get_nth_argument (3);
-			handler.prepare_to_specialize (invocation.nice_name);
+			if (state == IDLE)
+				handler.prepare_to_specialize (identifier);
 		}
 
 		public void on_set_ctx_leave (Gum.InvocationContext context) {
-			if (state != IDLE)
-				return;
-
-			SetCtxInvocation * invocation = context.get_listener_invocation_data (sizeof (SetCtxInvocation));
-			handler.recover_from_specialization (invocation.nice_name);
-		}
-
-		private struct SetCtxInvocation {
-			public string * nice_name;
+			if (state == IDLE)
+				handler.recover_from_specialization (identifier);
 		}
 
 		[CCode (has_target = false)]
