@@ -62,6 +62,7 @@ struct _FridaSpringboardApi
 {
   void * sbs;
   void * fbs;
+  void * mcs;
 
   NSString * (* SBSCopyFrontmostApplicationDisplayIdentifier) (void);
   NSArray * (* SBSCopyApplicationDisplayIdentifiers) (BOOL active, BOOL debuggable);

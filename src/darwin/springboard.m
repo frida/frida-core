@@ -62,6 +62,9 @@ _frida_get_springboard_api (void)
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyDisableASLR);
     }
 
+    api->mcs = dlopen ("/System/Library/Frameworks/MobileCoreServices.framework/MobileCoreServices", RTLD_GLOBAL | RTLD_LAZY);
+    g_assert (api->mcs != NULL);
+
     api->LSApplicationProxy = objc_get_class_impl ("LSApplicationProxy");
     g_assert (api->LSApplicationProxy != nil);
 
