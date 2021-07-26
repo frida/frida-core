@@ -242,12 +242,7 @@ namespace Frida {
 			}
 
 			if (helper_client_request != null) {
-				HelperClient? helper = null;
-				try {
-					helper = yield get_helper_client (cancellable);
-				} catch (Error e) {
-				}
-
+				HelperClient? helper = yield try_get_helper_client (cancellable);
 				if (helper != null) {
 					on_helper_client_closed (helper);
 					yield helper.close (cancellable);
@@ -345,9 +340,18 @@ namespace Frida {
 				}
 			}
 
-			var opts = FrontmostQueryOptions._deserialize (options);
+			var helper = yield try_get_helper_client (cancellable);
+			if (helper == null) {
+				if (server == null)
+					server = yield get_remote_server (cancellable);
+				try {
+					return yield server.session.get_frontmost_application (options, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
 
-			var helper = yield get_helper_client (cancellable);
+			var opts = FrontmostQueryOptions._deserialize (options);
 
 			var request = new Json.Builder ();
 			request
@@ -407,9 +411,18 @@ namespace Frida {
 				}
 			}
 
-			var opts = ApplicationQueryOptions._deserialize (options);
+			var helper = yield try_get_helper_client (cancellable);
+			if (helper == null) {
+				if (server == null)
+					server = yield get_remote_server (cancellable);
+				try {
+					return yield server.session.enumerate_applications (options, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
 
-			var helper = yield get_helper_client (cancellable);
+			var opts = ApplicationQueryOptions._deserialize (options);
 
 			var request = new Json.Builder ();
 			request
@@ -505,9 +518,18 @@ namespace Frida {
 				}
 			}
 
-			var opts = ProcessQueryOptions._deserialize (options);
+			var helper = yield try_get_helper_client (cancellable);
+			if (helper == null) {
+				if (server == null)
+					server = yield get_remote_server (cancellable);
+				try {
+					return yield server.session.enumerate_processes (options, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
 
-			var helper = yield get_helper_client (cancellable);
+			var opts = ProcessQueryOptions._deserialize (options);
 
 			var request = new Json.Builder ();
 			request
@@ -1097,6 +1119,14 @@ namespace Frida {
 			throw new Error.PROTOCOL ("Unexpected JSON type: %s", type.name ());
 		}
 
+		private async HelperClient? try_get_helper_client (Cancellable? cancellable) throws IOError {
+			try {
+				return yield get_helper_client (cancellable);
+			} catch (Error e) {
+				return null;
+			}
+		}
+
 		private async HelperClient get_helper_client (Cancellable? cancellable) throws Error, IOError {
 			while (helper_client_request != null) {
 				try {
@@ -1172,7 +1202,6 @@ namespace Frida {
 				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
 
 				helper_client_request.reject (api_error);
-				helper_client_request = null;
 
 				throw_api_error (api_error);
 			}
