@@ -498,7 +498,6 @@ extern kern_return_t bootstrap_register (mach_port_t bp, const char * service_na
 extern int fileport_makeport (pid_t fd, mach_port_t * port);
 extern int proc_pidpath (pid_t pid, void * buffer, uint32_t buffer_size);
 extern int sandbox_check (pid_t pid, const char * operation, FridaSandboxFilterType type, ...);
-extern char * sandbox_extension_issue_mach_to_process_by_pid (const char * extension_class, const char * name, uint32_t flags, pid_t pid);
 
 extern FridaSandboxFilterType SANDBOX_CHECK_NO_REPORT;
 
@@ -582,7 +581,27 @@ frida_darwin_helper_backend_make_pipe_endpoints (FridaDarwinHelperBackend * self
         sandbox_check (remote_pid, "mach-lookup", FRIDA_SANDBOX_FILTER_GLOBAL_NAME | SANDBOX_CHECK_NO_REPORT, ctx->piped_name) == 0;
     if (!allowed_by_sandbox)
     {
-      token = sandbox_extension_issue_mach_to_process_by_pid (FRIDA_MACH_LOOKUP_EXCEPTION, ctx->piped_name, 0, remote_pid);
+      static gsize apis_initialized = 0;
+      static char * (* sandbox_extension_issue_mach_to_process_by_pid) (const char * extension_class, const char * name, uint32_t flags, pid_t pid);
+      static char * (* sandbox_extension_issue_mach) (const char * extension_class, const char * name, int reserved, uint32_t flags);
+
+      if (g_once_init_enter (&apis_initialized))
+      {
+        void * sandbox;
+
+        sandbox = dlopen ("/usr/lib/system/libsystem_sandbox.dylib", RTLD_GLOBAL | RTLD_LAZY);
+
+        sandbox_extension_issue_mach_to_process_by_pid = dlsym (sandbox, "sandbox_extension_issue_mach_to_process_by_pid");
+        if (sandbox_extension_issue_mach_to_process_by_pid == NULL)
+          sandbox_extension_issue_mach = dlsym (sandbox, "sandbox_extension_issue_mach");
+
+        g_once_init_leave (&apis_initialized, TRUE);
+      }
+
+      if (sandbox_extension_issue_mach_to_process_by_pid != NULL)
+        token = sandbox_extension_issue_mach_to_process_by_pid (FRIDA_MACH_LOOKUP_EXCEPTION, ctx->piped_name, 0, remote_pid);
+      else
+        token = sandbox_extension_issue_mach (FRIDA_MACH_LOOKUP_EXCEPTION, ctx->piped_name, 0, 0);
     }
 
     frida_darwin_helper_backend_stash_pipe_fileport (self, &remote_wrapper, &uuid);
