@@ -243,7 +243,10 @@ namespace Frida.Fruity {
 						else
 							product_id = ProductId (-1);
 
-						var udid = Udid (props.get_string ("SerialNumber"));
+						string raw_udid = props.get_string ("SerialNumber");
+						if (raw_udid.length == 24)
+							raw_udid = raw_udid[:8] + "-" + raw_udid[8:];
+						var udid = Udid (raw_udid);
 
 						InetSocketAddress? network_address = null;
 						if (connection_type == NETWORK)
