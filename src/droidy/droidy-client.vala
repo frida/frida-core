@@ -239,6 +239,7 @@ namespace Frida.Droidy {
 				stream = client.stream;
 				input_stream = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
 					"base-stream", stream.get_input_stream (),
+					"close-base-stream", false,
 					"buffer-size", 128 * 1024);
 				output_stream = stream.get_output_stream ();
 

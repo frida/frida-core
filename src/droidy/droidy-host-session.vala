@@ -1278,6 +1278,7 @@ namespace Frida {
 				stream = client.stream;
 				input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
 					"base-stream", stream.get_input_stream (),
+					"close-base-stream", false,
 					"buffer-size", 128 * 1024);
 				output = stream.get_output_stream ();
 
