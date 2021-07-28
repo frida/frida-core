@@ -317,7 +317,10 @@ namespace Frida.Droidy {
 			return pending.result;
 		}
 
-		public void send_command (string command) {
+		public void send_command (string command) throws Error {
+			if (state == CLOSED)
+				throw new Error.INVALID_OPERATION ("Shell session is closed");
+
 			string full_command = command + "\n";
 			write_packet (new Packet (STDIN, new Bytes (full_command.data)));
 		}
