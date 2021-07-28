@@ -27,6 +27,8 @@ namespace Frida.Droidy {
 			} catch (GLib.Error e) {
 				if (client != null)
 					yield client.close (cancellable);
+
+				throw_api_error (e);
 			}
 		}
 
@@ -248,6 +250,8 @@ namespace Frida.Droidy {
 				process_incoming_packets.begin ();
 			} catch (GLib.Error e) {
 				yield client.close (cancellable);
+
+				throw_api_error (e);
 			}
 		}
 
@@ -711,6 +715,8 @@ namespace Frida.Droidy {
 				update_pids (pids_encoded, cancellable);
 			} catch (GLib.Error e) {
 				yield client.close (cancellable);
+
+				throw_api_error (e);
 			}
 		}
 
