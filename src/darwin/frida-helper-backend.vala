@@ -107,7 +107,7 @@ namespace Frida {
 
 		private DTraceAgent get_dtrace_agent () throws Error {
 			if (dtrace_agent == null)
-				throw new Error.NOT_SUPPORTED ("Need root access to use DTrace");
+				throw new Error.NOT_SUPPORTED ("Spawn gating requires additional privileges");
 			return dtrace_agent;
 		}
 
