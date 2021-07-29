@@ -655,14 +655,16 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Already enabled");
 
 			string? predicate = Environment.get_variable ("FRIDA_DTRACE_PREDICATE");
-			if (predicate == null)
-				throw new Error.NOT_SUPPORTED ("Set FRIDA_DTRACE_PREDICATE to use this feature");
+			string predicate_clause;
+			if (predicate != null)
+				predicate_clause = "/" + predicate + "/";
+			else
+				predicate_clause = "";
 
 			try {
 				dtrace = new Subprocess.newv ({
 					"dtrace", "-x", "switchrate=100hz", "-w", "-n", """
-						syscall::getpid:entry
-						/""" + predicate + """/ {
+						syscall::getpid:entry """ + predicate_clause + """ {
 							printf("pid=%u caller=%p", pid, ucaller);
 							stop();
 						}
