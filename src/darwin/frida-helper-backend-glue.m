@@ -42,6 +42,10 @@
 # define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 #endif
 
+#ifndef PROC_PIDPATHINFO_MAXSIZE
+# define PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN)
+#endif
+
 #define FRIDA_PSR_THUMB                  0x20
 #define FRIDA_MAX_BREAKPOINTS            4
 #define FRIDA_MAX_PAGE_POOL              8
@@ -691,7 +695,7 @@ beach:
 }
 
 guint
-frida_darwin_helper_backend_task_for_pid_fallback (guint pid, GError ** error)
+frida_darwin_helper_backend_task_for_pid (guint pid, GError ** error)
 {
   gboolean remote_pid_exists;
   mach_port_t task;
@@ -1131,6 +1135,27 @@ beach:
     g_strfreev (argv);
 
     return pid;
+  }
+}
+
+gchar *
+frida_darwin_helper_backend_path_for_pid (guint pid, GError ** error)
+{
+  gchar path[PROC_PIDPATHINFO_MAXSIZE];
+
+  if (proc_pidpath (pid, path, sizeof (path)) <= 0)
+    goto invalid_pid;
+
+  return g_strdup (path);
+
+invalid_pid:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "%s",
+        strerror (errno));
+    return NULL;
   }
 }
 
@@ -1662,7 +1687,6 @@ frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
   return result;
 }
 
-
 static void
 frida_configure_terminal_attributes (gint fd)
 {
@@ -1681,7 +1705,7 @@ gboolean
 frida_darwin_helper_backend_is_application_process (guint pid)
 {
   gboolean is_app;
-  gchar path[4 * MAXPATHLEN];
+  gchar path[PROC_PIDPATHINFO_MAXSIZE];
   GumDarwinModule * module;
 
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
@@ -1818,7 +1842,7 @@ process_not_suspended:
 }
 
 void
-_frida_darwin_helper_backend_resume_process_fast (FridaDarwinHelperBackend * self, guint task, GError ** error)
+frida_darwin_helper_backend_resume_process_fast (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {
   kern_return_t kr;
 

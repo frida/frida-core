@@ -37,17 +37,17 @@ namespace Frida {
 		public uint next_id = 1;
 
 		private PolicySoftener policy_softener;
-		private KernelAgent kernel_agent;
+		private DTraceAgent dtrace_agent;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
 		construct {
 			_create_context ();
 
-			kernel_agent = KernelAgent.try_open ();
-			if (kernel_agent != null) {
-				kernel_agent.spawn_added.connect (on_kernel_agent_spawn_added);
-				kernel_agent.spawn_removed.connect (on_kernel_agent_spawn_removed);
+			dtrace_agent = DTraceAgent.try_open (this);
+			if (dtrace_agent != null) {
+				dtrace_agent.spawn_added.connect (on_dtrace_agent_spawn_added);
+				dtrace_agent.spawn_removed.connect (on_dtrace_agent_spawn_removed);
 			}
 
 #if IOS
@@ -92,11 +92,11 @@ namespace Frida {
 				deallocate_port (task);
 			remote_tasks.clear ();
 
-			if (kernel_agent != null) {
-				kernel_agent.spawn_added.disconnect (on_kernel_agent_spawn_added);
-				kernel_agent.spawn_removed.disconnect (on_kernel_agent_spawn_removed);
-				kernel_agent.close ();
-				kernel_agent = null;
+			if (dtrace_agent != null) {
+				dtrace_agent.spawn_added.disconnect (on_dtrace_agent_spawn_added);
+				dtrace_agent.spawn_removed.disconnect (on_dtrace_agent_spawn_removed);
+				yield dtrace_agent.close (cancellable);
+				dtrace_agent = null;
 			}
 		}
 
@@ -104,21 +104,22 @@ namespace Frida {
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			get_kernel_agent ().enable_spawn_gating ();
+			get_dtrace_agent ().enable_spawn_gating ();
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			get_kernel_agent ().disable_spawn_gating ();
+			var agent = get_dtrace_agent ();
+			yield agent.disable_spawn_gating (cancellable);
 		}
 
 		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
-			return get_kernel_agent ().enumerate_pending_spawn ();
+			return get_dtrace_agent ().enumerate_pending_spawn ();
 		}
 
-		private KernelAgent get_kernel_agent () throws Error {
-			if (kernel_agent == null)
-				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
-			return kernel_agent;
+		private DTraceAgent get_dtrace_agent () throws Error {
+			if (dtrace_agent == null)
+				throw new Error.NOT_SUPPORTED ("Need root access to use DTrace");
+			return dtrace_agent;
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
@@ -263,7 +264,7 @@ namespace Frida {
 					var task = borrow_task_for_remote_pid (pid);
 
 					try {
-						if (_is_suspended (task)) {
+						if (is_suspended (task)) {
 							wait_request.resolve (true);
 							return;
 						}
@@ -295,20 +296,29 @@ namespace Frida {
 			}
 		}
 
+		private bool is_suspended (uint pid) throws Error {
+			if (dtrace_agent != null && dtrace_agent.has_pending_spawn (pid))
+				return true;
+
+			return _is_suspended (pid);
+		}
+
 		public async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError {
 			suspension_waiters.unset (pid);
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			if (kernel_agent != null && kernel_agent.try_resume (pid))
-				return;
-
-			void * instance;
-			if (spawn_instances.unset (pid, out instance)) {
-				_resume_spawn_instance (instance);
-				_free_spawn_instance (instance);
-			} else {
-				_resume_process (borrow_task_for_remote_pid (pid));
+			try {
+				void * instance;
+				if (spawn_instances.unset (pid, out instance)) {
+					_resume_spawn_instance (instance);
+					_free_spawn_instance (instance);
+				} else {
+					_resume_process (borrow_task_for_remote_pid (pid));
+				}
+			} finally {
+				if (dtrace_agent != null)
+					dtrace_agent.on_resume (pid);
 			}
 
 			process_resumed (pid);
@@ -350,15 +360,14 @@ namespace Frida {
 			var task = borrow_task_for_remote_pid (pid);
 
 			var spawn_instance = spawn_instances[pid];
-			bool not_yet_booted = _is_suspended (task) && is_booting (task);
+			bool not_yet_booted = is_suspended (task) && is_booting (task);
 			if (spawn_instance == null && not_yet_booted)
 				spawn_instance = _create_spawn_instance (pid);
 
 			if (not_yet_booted) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
 
-				if (kernel_agent == null || !kernel_agent.try_resume (pid))
-					_resume_process_fast (task);
+				resume_process_fast (task);
 
 				bool timed_out = false;
 				var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
@@ -383,7 +392,7 @@ namespace Frida {
 			}
 		}
 
-		private bool is_booting (uint task) throws Error {
+		public bool is_booting (uint task) throws Error {
 			Gum.Darwin.AllImageInfos infos;
 			if (!Gum.Darwin.query_all_image_infos (task, out infos))
 				throw new Error.PROCESS_NOT_FOUND ("Target process died unexpectedly");
@@ -599,18 +608,11 @@ namespace Frida {
 			policy_softener.forget (pid);
 		}
 
-		public uint task_for_pid (uint pid) throws Error {
-			if (kernel_agent != null)
-				return kernel_agent.task_for_pid (pid);
-
-			return task_for_pid_fallback (pid);
-		}
-
-		private void on_kernel_agent_spawn_added (HostSpawnInfo info) {
+		private void on_dtrace_agent_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
 
-		private void on_kernel_agent_spawn_removed (HostSpawnInfo info) {
+		private void on_dtrace_agent_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
 		}
 
@@ -623,7 +625,7 @@ namespace Frida {
 
 		public extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
-		public extern static uint task_for_pid_fallback (uint pid) throws Error;
+		public extern static uint task_for_pid (uint pid) throws Error;
 		public extern static void deallocate_port (uint port);
 
 		public extern static bool is_mmap_available ();
@@ -637,9 +639,10 @@ namespace Frida {
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;
-		protected extern void _resume_process_fast (uint task) throws Error;
+		public extern void resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
 		protected extern static uint _kill_application (string identifier);
+		public extern static string path_for_pid (uint pid) throws Error;
 		public extern static bool is_application_process (uint pid);
 		protected extern void * _create_spawn_instance (uint pid);
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
@@ -655,68 +658,110 @@ namespace Frida {
 		protected extern void _free_inject_instance (void * instance);
 	}
 
-	public class KernelAgent : Object {
+	public class DTraceAgent : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
-		public int fd {
+		public weak DarwinHelperBackend backend {
 			get;
 			construct;
 		}
 
-		private bool spawn_gating_enabled = false;
+		private Subprocess? dtrace;
+		private DataInputStream input;
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		private DataInputStream input;
-		private Cancellable input_cancellable = new Cancellable ();
+		private Cancellable io_cancellable = new Cancellable ();
 
-		private const ulong IOCTL_ENABLE_SPAWN_GATING  = 0x20005201U;
-		private const ulong IOCTL_DISABLE_SPAWN_GATING = 0x20005202U;
-		private const ulong IOCTL_RESUME               = 0x80045203U;
-		private const ulong IOCTL_TASK_FOR_PID         = 0xc0085204U;
-
-		public static KernelAgent? try_open () {
-			var fd = Posix.open ("/dev/frida", Posix.O_RDONLY);
-			if (fd == -1)
+		public static DTraceAgent? try_open (DarwinHelperBackend backend) {
+			if (Posix.getuid () != 0)
 				return null;
 
-			return new KernelAgent (fd);
+			return new DTraceAgent (backend);
 		}
 
-		private KernelAgent (int fd) {
-			Object (fd: fd);
+		private DTraceAgent (DarwinHelperBackend backend) {
+			Object (backend: backend);
 		}
 
-		construct {
-			var fd = this.fd;
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (dtrace != null) {
+				try {
+					yield disable_spawn_gating (cancellable);
+				} catch (Error e) {
+					assert_not_reached ();
+				}
+			}
+		}
+
+		public void enable_spawn_gating () throws Error {
+			if (dtrace != null)
+				throw new Error.INVALID_OPERATION ("Already enabled");
+
+			string? predicate = Environment.get_variable ("FRIDA_DTRACE_PREDICATE");
+			if (predicate == null)
+				throw new Error.NOT_SUPPORTED ("Set FRIDA_DTRACE_PREDICATE to use this feature");
 
 			try {
-				Unix.set_fd_nonblocking (fd, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
+				dtrace = new Subprocess.newv ({
+					"dtrace", "-x", "switchrate=100hz", "-w", "-n", """
+						syscall::getpid:entry
+						/""" + predicate + """/ {
+							printf("pid=%u", pid);
+							umod(ucaller);
+							stop();
+						}
+					"""
+					}, STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
 
-			input = new DataInputStream (new UnixInputStream (fd, true));
+				input = (DataInputStream) Object.new (typeof (DataInputStream),
+					"base-stream", dtrace.get_stdout_pipe (),
+					"close-base-stream", false,
+					"newline-type", DataStreamNewlineType.LF);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
 
 			process_incoming_messages.begin ();
 		}
 
-		public void close () {
-			input_cancellable.cancel ();
-		}
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			if (dtrace == null)
+				throw new Error.INVALID_OPERATION ("Already disabled");
 
-		public void enable_spawn_gating () throws Error {
-			var status = ioctl (fd, IOCTL_ENABLE_SPAWN_GATING);
-			if (status != 0)
-				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
-			spawn_gating_enabled = true;
-		}
+			dtrace.send_signal (Posix.Signal.TERM);
 
-		public void disable_spawn_gating () throws Error {
-			var status = ioctl (fd, IOCTL_DISABLE_SPAWN_GATING);
-			if (status != 0)
-				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
-			spawn_gating_enabled = false;
+			try {
+				yield dtrace.wait_async (cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			dtrace = null;
+
+			io_cancellable.cancel ();
+
+			var source = new IdleSource ();
+			source.set_callback (disable_spawn_gating.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
+			io_cancellable = new Cancellable ();
+
+			yield process_incoming_messages ();
+
+			foreach (var e in pending_spawn.entries) {
+				uint pid = e.key;
+				HostSpawnInfo? info = e.value;
+
+				try {
+					backend.resume_process_fast (backend.borrow_task_for_remote_pid (pid));
+				} catch (Error e) {
+				}
+
+				spawn_removed (info);
+			}
+			pending_spawn.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawn () {
@@ -727,58 +772,56 @@ namespace Frida {
 			return result;
 		}
 
-		public bool try_resume (uint pid) throws Error {
-			HostSpawnInfo? info;
-			if (!pending_spawn.unset (pid, out info))
-				return false;
-			spawn_removed (info);
-
-			var status = ioctl (fd, IOCTL_RESUME, ref pid);
-			if (status != 0)
-				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
-
-			return true;
+		public bool has_pending_spawn (uint pid) {
+			return pending_spawn.has_key (pid);
 		}
 
-		public uint task_for_pid (uint pid) throws Error {
-			uint val = pid;
-			var status = ioctl (fd, IOCTL_TASK_FOR_PID, ref val);
-			if (status != 0) {
-				var error = Posix.errno;
-				if (error == Posix.ESRCH)
-					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
-				else
-					throw new Error.INVALID_OPERATION ("%s", strerror (error));
-			}
-			return val;
+		public void on_resume (uint pid) {
+			HostSpawnInfo? info;
+			if (pending_spawn.unset (pid, out info))
+				spawn_removed (info);
 		}
 
 		private async void process_incoming_messages () {
 			try {
 				while (true) {
-					var line = yield input.read_line_async (Priority.DEFAULT, input_cancellable);
+					var line = yield input.read_line_async (Priority.DEFAULT, io_cancellable);
 					if (line == null)
 						break;
 
-					var tokens = line.split (":");
-
-					var state = tokens[2];
-					if (state != "suspended" || !spawn_gating_enabled)
+					MatchInfo m;
+					if (!/\s*(\d)\s+(\d+)\s+getpid:entry\s+pid=(\d+)\s+(\S+)/.match (line, 0, out m))
 						continue;
 
-					var pid = int.parse (tokens[0]);
-					var executable_path = tokens[1];
+					uint pid = (uint) uint64.parse (m.fetch (3));
+					string module_name = m.fetch (4);
 
-					var info = HostSpawnInfo (pid, executable_path);
+					string? path = null;
+					bool handled = false;
+
+					if (module_name == "dyld") {
+						try {
+							path = DarwinHelperBackend.path_for_pid (pid);
+							handled = true;
+						} catch (Error e) {
+						}
+					}
+
+					if (!handled) {
+						try {
+							backend.resume_process_fast (backend.borrow_task_for_remote_pid (pid));
+						} catch (Error e) {
+						}
+						continue;
+					}
+
+					var info = HostSpawnInfo (pid, path);
 					pending_spawn[pid] = info;
 					spawn_added (info);
 				}
 			} catch (IOError e) {
 			}
 		}
-
-		[CCode (cheader_filename = "sys/ioctl.h", cname = "ioctl", sentinel = "")]
-		private extern static int ioctl (int fildes, ulong request, ...);
 	}
 
 	private class PendingLaunch : Object {
