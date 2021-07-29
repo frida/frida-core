@@ -31,9 +31,6 @@ namespace Frida {
 		private Gee.HashMap<void *, uint> inject_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
 		private Gee.HashMap<uint, uint> inject_expiry_timers = new Gee.HashMap<uint, uint> ();
 
-		private Gee.HashMap<uint, uint> remote_tasks = new Gee.HashMap<uint, uint> ();
-		private Gee.HashMap<uint, uint> task_expiry_timers = new Gee.HashMap<uint, uint> ();
-
 		public uint next_id = 1;
 
 		private PolicySoftener policy_softener;
@@ -83,14 +80,6 @@ namespace Frida {
 				Source.remove (entry.value);
 			}
 			inject_cleaner_by_instance.clear ();
-
-			foreach (var id in task_expiry_timers.values)
-				Source.remove (id);
-			task_expiry_timers.clear ();
-
-			foreach (var task in remote_tasks.values)
-				deallocate_port (task);
-			remote_tasks.clear ();
 
 			if (dtrace_agent != null) {
 				dtrace_agent.spawn_added.disconnect (on_dtrace_agent_spawn_added);
@@ -261,19 +250,17 @@ namespace Frida {
 				var timer = new Timer ();
 
 				do {
-					var task = borrow_task_for_remote_pid (pid);
-
+					var task = task_for_pid (pid);
 					try {
-						if (is_suspended (task)) {
+						if (_is_suspended (task)) {
 							wait_request.resolve (true);
 							return;
 						}
 					} catch (Error e) {
-						if (e is Error.PROCESS_NOT_FOUND) {
-							deallocate_port (steal_task_for_remote_pid (pid));
-						} else {
+						if (!(e is Error.PROCESS_NOT_FOUND))
 							throw e;
-						}
+					} finally {
+						deallocate_port (task);
 					}
 
 					var delay_source = new TimeoutSource (20);
@@ -296,13 +283,6 @@ namespace Frida {
 			}
 		}
 
-		private bool is_suspended (uint pid) throws Error {
-			if (dtrace_agent != null && dtrace_agent.has_pending_spawn (pid))
-				return true;
-
-			return _is_suspended (pid);
-		}
-
 		public async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError {
 			suspension_waiters.unset (pid);
 		}
@@ -314,7 +294,7 @@ namespace Frida {
 					_resume_spawn_instance (instance);
 					_free_spawn_instance (instance);
 				} else {
-					_resume_process (borrow_task_for_remote_pid (pid));
+					resume_with_validation (pid);
 				}
 			} finally {
 				if (dtrace_agent != null)
@@ -322,6 +302,30 @@ namespace Frida {
 			}
 
 			process_resumed (pid);
+		}
+
+		public static void resume_with_validation (uint pid) {
+			uint task = 0;
+			try {
+				task = task_for_pid (pid);
+				resume_process (task);
+			} catch (Error e) {
+			} finally {
+				if (task != 0)
+					deallocate_port (task);
+			}
+		}
+
+		public static void resume_without_validation (uint pid) {
+			uint task = 0;
+			try {
+				task = task_for_pid (pid);
+				resume_process_fast (task);
+			} catch (Error e) {
+			} finally {
+				if (task != 0)
+					deallocate_port (task);
+			}
 		}
 
 		public async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -349,50 +353,56 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			yield prepare_target (pid, cancellable);
 
-			var task = borrow_task_for_remote_pid (pid);
-
-			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
+			var task = task_for_pid (pid);
+			try {
+				return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
+			} finally {
+				deallocate_port (task);
+			}
 		}
 
 		public async void prepare_target (uint pid, Cancellable? cancellable) throws Error, IOError {
 			policy_softener.soften (pid);
 
-			var task = borrow_task_for_remote_pid (pid);
+			var task = task_for_pid (pid);
+			try {
+				var spawn_instance = spawn_instances[pid];
+				bool not_yet_booted = _is_suspended (task) && is_booting (task);
+				if (spawn_instance == null && not_yet_booted)
+					spawn_instance = _create_spawn_instance (pid);
 
-			var spawn_instance = spawn_instances[pid];
-			bool not_yet_booted = is_suspended (task) && is_booting (task);
-			if (spawn_instance == null && not_yet_booted)
-				spawn_instance = _create_spawn_instance (pid);
+				if (not_yet_booted) {
+					_prepare_spawn_instance_for_injection (spawn_instance, task);
 
-			if (not_yet_booted) {
-				_prepare_spawn_instance_for_injection (spawn_instance, task);
+					resume_process_fast (task);
 
-				resume_process_fast (task);
-
-				bool timed_out = false;
-				var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
-					if (ready_pid == pid)
+					bool timed_out = false;
+					var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
+						if (ready_pid == pid)
+							prepare_target.callback ();
+					});
+					var timeout_source = new TimeoutSource.seconds (10);
+					timeout_source.set_callback (() => {
+						timed_out = true;
 						prepare_target.callback ();
-				});
-				var timeout_source = new TimeoutSource.seconds (10);
-				timeout_source.set_callback (() => {
-					timed_out = true;
-					prepare_target.callback ();
-					return false;
-				});
-				timeout_source.attach (MainContext.get_thread_default ());
+						return false;
+					});
+					timeout_source.attach (MainContext.get_thread_default ());
 
-				yield;
+					yield;
 
-				timeout_source.destroy ();
-				disconnect (ready_handler);
+					timeout_source.destroy ();
+					disconnect (ready_handler);
 
-				if (timed_out)
-					throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+					if (timed_out)
+						throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+				}
+			} finally {
+				deallocate_port (task);
 			}
 		}
 
-		public bool is_booting (uint task) throws Error {
+		private bool is_booting (uint task) throws Error {
 			Gum.Darwin.AllImageInfos infos;
 			if (!Gum.Darwin.query_all_image_infos (task, out infos))
 				throw new Error.PROCESS_NOT_FOUND ("Target process died unexpectedly");
@@ -428,24 +438,32 @@ namespace Frida {
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
-			var task = borrow_task_for_remote_pid (pid);
+			var task = task_for_pid (pid);
+			try {
+				cancel_inject_expiry_for_id (id);
 
-			cancel_inject_expiry_for_id (id);
-
-			_recreate_injectee_thread (instance, pid, task);
+				_recreate_injectee_thread (instance, pid, task);
+			} finally {
+				deallocate_port (task);
+			}
 		}
 
 		public async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable, out string remote_address)
 				throws Error, IOError {
+			remote_address = null;
+
 			yield prepare_target (remote_pid, cancellable);
 
-			var remote_task = borrow_task_for_remote_pid (remote_pid);
+			var remote_task = task_for_pid (remote_pid);
+			try {
+				PipeEndpoints endpoints = make_pipe_endpoints (0, remote_pid, remote_task);
 
-			var endpoints = make_pipe_endpoints (0, remote_pid, remote_task);
+				remote_address = endpoints.remote_address;
 
-			remote_address = endpoints.remote_address;
-
-			return Pipe.open (endpoints.local_address, cancellable);
+				return Pipe.open (endpoints.local_address, cancellable);
+			} finally {
+				deallocate_port (remote_task);
+			}
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
@@ -453,59 +471,6 @@ namespace Frida {
 				return null;
 
 			return mmap (0, blob);
-		}
-
-		public uint borrow_task_for_remote_pid (uint pid) throws Error {
-			uint task = remote_tasks[pid];
-			if (task != 0) {
-				schedule_task_expiry_for_remote_pid (pid);
-				return task;
-			}
-
-			task = task_for_pid (pid);
-			remote_tasks[pid] = task;
-			schedule_task_expiry_for_remote_pid (pid);
-
-			return task;
-		}
-
-		public uint steal_task_for_remote_pid (uint pid) throws Error {
-			uint task;
-			if (remote_tasks.unset (pid, out task)) {
-				cancel_task_expiry_for_remote_pid (pid);
-				return task;
-			}
-
-			return task_for_pid (pid);
-		}
-
-		private void schedule_task_expiry_for_remote_pid (uint pid) {
-			uint previous_timer;
-			if (task_expiry_timers.unset (pid, out previous_timer))
-				Source.remove (previous_timer);
-
-			var expiry_source = new TimeoutSource.seconds (2);
-			expiry_source.set_callback (() => {
-				var removed = task_expiry_timers.unset (pid);
-				assert (removed);
-
-				uint task;
-				removed = remote_tasks.unset (pid, out task);
-				assert (removed);
-
-				deallocate_port (task);
-
-				return false;
-			});
-			task_expiry_timers[pid] = expiry_source.attach (MainContext.get_thread_default ());
-		}
-
-		private void cancel_task_expiry_for_remote_pid (uint pid) {
-			uint timer;
-			var found = task_expiry_timers.unset (pid, out timer);
-			assert (found);
-
-			Source.remove (timer);
 		}
 
 		public void _on_spawn_instance_ready (uint pid) {
@@ -638,7 +603,7 @@ namespace Frida {
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern static bool _is_suspended (uint task) throws Error;
-		protected extern static void _resume_process (uint task) throws Error;
+		public extern static void resume_process (uint task) throws Error;
 		public extern static void resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
 		protected extern static uint _kill_application (string identifier);
@@ -741,7 +706,7 @@ namespace Frida {
 			yield process_incoming_messages ();
 
 			foreach (var e in pending_spawn.entries) {
-				resume (e.key);
+				DarwinHelperBackend.resume_without_validation (e.key);
 				spawn_removed (e.value);
 			}
 			pending_spawn.clear ();
@@ -753,10 +718,6 @@ namespace Frida {
 			foreach (var spawn in pending_spawn.values)
 				result[index++] = spawn;
 			return result;
-		}
-
-		public bool has_pending_spawn (uint pid) {
-			return pending_spawn.has_key (pid);
 		}
 
 		public void on_resume (uint pid) {
@@ -806,7 +767,7 @@ namespace Frida {
 					try {
 						path = DarwinHelperBackend.path_for_pid (pid);
 					} catch (Error e) {
-						resume (pid);
+						DarwinHelperBackend.resume_without_validation (pid);
 						continue;
 					}
 
@@ -815,18 +776,6 @@ namespace Frida {
 					spawn_added (info);
 				}
 			} catch (IOError e) {
-			}
-		}
-
-		private static void resume (uint pid) {
-			uint task = 0;
-			try {
-				task = DarwinHelperBackend.task_for_pid (pid);
-				DarwinHelperBackend.resume_process_fast (task);
-			} catch (Error e) {
-			} finally {
-				if (task != 0)
-					DarwinHelperBackend.deallocate_port (task);
 			}
 		}
 	}

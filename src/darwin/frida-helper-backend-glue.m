@@ -1808,7 +1808,7 @@ mach_failure:
 }
 
 void
-_frida_darwin_helper_backend_resume_process (guint task, GError ** error)
+frida_darwin_helper_backend_resume_process (guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
@@ -2783,10 +2783,10 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     guint task;
     GError * error = NULL;
 
-    task = frida_darwin_helper_backend_steal_task_for_remote_pid (self->backend, self->pid, &error);
+    task = frida_darwin_helper_backend_task_for_pid (self->pid, &error);
     if (error == NULL)
     {
-      _frida_darwin_helper_backend_resume_process (task, &error);
+      frida_darwin_helper_backend_resume_process (task, &error);
 
       mach_port_deallocate (mach_task_self (), task);
     }
