@@ -44,7 +44,7 @@ namespace Frida {
 		construct {
 			_create_context ();
 
-			dtrace_agent = DTraceAgent.try_open (this);
+			dtrace_agent = DTraceAgent.try_open ();
 			if (dtrace_agent != null) {
 				dtrace_agent.spawn_added.connect (on_dtrace_agent_spawn_added);
 				dtrace_agent.spawn_removed.connect (on_dtrace_agent_spawn_removed);
@@ -662,26 +662,17 @@ namespace Frida {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
-		public weak DarwinHelperBackend backend {
-			get;
-			construct;
-		}
-
 		private Subprocess? dtrace;
 		private DataInputStream input;
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		public static DTraceAgent? try_open (DarwinHelperBackend backend) {
+		public static DTraceAgent? try_open () {
 			if (Posix.getuid () != 0)
 				return null;
 
-			return new DTraceAgent (backend);
-		}
-
-		private DTraceAgent (DarwinHelperBackend backend) {
-			Object (backend: backend);
+			return new DTraceAgent ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -707,8 +698,7 @@ namespace Frida {
 					"dtrace", "-x", "switchrate=100hz", "-w", "-n", """
 						syscall::getpid:entry
 						/""" + predicate + """/ {
-							printf("pid=%u", pid);
-							umod(ucaller);
+							printf("pid=%u caller=%p", pid, ucaller);
 							stop();
 						}
 					"""
@@ -751,15 +741,8 @@ namespace Frida {
 			yield process_incoming_messages ();
 
 			foreach (var e in pending_spawn.entries) {
-				uint pid = e.key;
-				HostSpawnInfo? info = e.value;
-
-				try {
-					backend.resume_process_fast (backend.borrow_task_for_remote_pid (pid));
-				} catch (Error e) {
-				}
-
-				spawn_removed (info);
+				resume (e.key);
+				spawn_removed (e.value);
 			}
 			pending_spawn.clear ();
 		}
@@ -790,28 +773,40 @@ namespace Frida {
 						break;
 
 					MatchInfo m;
-					if (!/\s*(\d)\s+(\d+)\s+getpid:entry\s+pid=(\d+)\s+(\S+)/.match (line, 0, out m))
+					if (!/\s*(\d)\s+(\d+)\s+getpid:entry\s+pid=(\d+)\s+caller=(.+)/.match (line, 0, out m))
 						continue;
 
 					uint pid = (uint) uint64.parse (m.fetch (3));
-					string module_name = m.fetch (4);
+					Gum.Address caller = uint64.parse (m.fetch (4), 16);
 
-					string? path = null;
-					bool handled = false;
+					uint task = 0;
+					try {
+						task = DarwinHelperBackend.task_for_pid (pid);
 
-					if (module_name == "dyld") {
-						try {
-							path = DarwinHelperBackend.path_for_pid (pid);
-							handled = true;
-						} catch (Error e) {
+						bool caller_is_dyld = false;
+
+						Gum.Darwin.MappingDetails mapping;
+						if (Gum.Darwin.query_mapped_address (task, caller, out mapping)) {
+							if (mapping.path == "/usr/lib/dyld")
+								caller_is_dyld = true;
 						}
+
+						if (!caller_is_dyld) {
+							DarwinHelperBackend.resume_process_fast (task);
+							continue;
+						}
+					} catch (Error e) {
+						continue;
+					} finally {
+						if (task != 0)
+							DarwinHelperBackend.deallocate_port (task);
 					}
 
-					if (!handled) {
-						try {
-							backend.resume_process_fast (backend.borrow_task_for_remote_pid (pid));
-						} catch (Error e) {
-						}
+					string path;
+					try {
+						path = DarwinHelperBackend.path_for_pid (pid);
+					} catch (Error e) {
+						resume (pid);
 						continue;
 					}
 
@@ -820,6 +815,18 @@ namespace Frida {
 					spawn_added (info);
 				}
 			} catch (IOError e) {
+			}
+		}
+
+		private static void resume (uint pid) {
+			uint task = 0;
+			try {
+				task = DarwinHelperBackend.task_for_pid (pid);
+				DarwinHelperBackend.resume_process_fast (task);
+			} catch (Error e) {
+			} finally {
+				if (task != 0)
+					DarwinHelperBackend.deallocate_port (task);
 			}
 		}
 	}
