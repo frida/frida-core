@@ -2846,6 +2846,15 @@ frida_spawn_instance_on_server_recv (void * context)
   if (self->single_stepping >= 0)
   {
     FridaBreakpoint * bp = &self->breakpoints[self->single_stepping];
+    gboolean step_still_being_enabled;
+
+    step_still_being_enabled = self->pending_request.exception == EXC_BREAKPOINT && self->pending_request.code[1] != 0;
+    if (step_still_being_enabled)
+    {
+      frida_spawn_instance_send_breakpoint_response (self);
+      return;
+    }
+
     self->last_single_step_address = pc;
 
     frida_set_hardware_single_step (&self->breakpoint_debug_state, &state, FALSE, self->cpu_type);
