@@ -1767,7 +1767,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 #endif
 
 gboolean
-_frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guint task, GError ** error)
+_frida_darwin_helper_backend_is_suspended (guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
@@ -1808,7 +1808,7 @@ mach_failure:
 }
 
 void
-_frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint task, GError ** error)
+_frida_darwin_helper_backend_resume_process (guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
@@ -1842,7 +1842,7 @@ process_not_suspended:
 }
 
 void
-frida_darwin_helper_backend_resume_process_fast (FridaDarwinHelperBackend * self, guint task, GError ** error)
+frida_darwin_helper_backend_resume_process_fast (guint task, GError ** error)
 {
   kern_return_t kr;
 
@@ -2786,7 +2786,7 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     task = frida_darwin_helper_backend_steal_task_for_remote_pid (self->backend, self->pid, &error);
     if (error == NULL)
     {
-      _frida_darwin_helper_backend_resume_process (self->backend, task, &error);
+      _frida_darwin_helper_backend_resume_process (task, &error);
 
       mach_port_deallocate (mach_task_self (), task);
     }

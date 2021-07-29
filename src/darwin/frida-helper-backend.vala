@@ -637,9 +637,9 @@ namespace Frida {
 
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
-		protected extern bool _is_suspended (uint task) throws Error;
-		protected extern void _resume_process (uint task) throws Error;
-		public extern void resume_process_fast (uint task) throws Error;
+		protected extern static bool _is_suspended (uint task) throws Error;
+		protected extern static void _resume_process (uint task) throws Error;
+		public extern static void resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
 		protected extern static uint _kill_application (string identifier);
 		public extern static string path_for_pid (uint pid) throws Error;
