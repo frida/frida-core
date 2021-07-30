@@ -117,7 +117,7 @@ namespace Frida.Fruity {
 
 			var request = create_request ("Connect");
 			request.set_integer ("DeviceID", device_id.raw_value);
-			request.set_integer ("PortNumber", ((uint32) port << 16).to_big_endian ());
+			request.set_integer ("PortNumber", port.to_big_endian ());
 
 			var response = yield query (request, MODE_SWITCH, cancellable);
 			try {
