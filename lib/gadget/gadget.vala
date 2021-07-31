@@ -859,10 +859,10 @@ namespace Frida.Gadget {
 		protected void release_child_gating () {
 		}
 
-		protected async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+		protected async PortalMembershipId join_portal (string address, PortalOptions options,
 				Cancellable? cancellable) throws Error, IOError {
-			var client = new PortalClient (this, connectable, options.certificate, options.token, options.acl,
-				compute_app_info ());
+			var client = new PortalClient (this, parse_cluster_address (address), address, options.certificate, options.token,
+				options.acl, compute_app_info ());
 			client.eternalized.connect (on_eternalized);
 			client.resume.connect (Frida.Gadget.resume);
 			client.kill.connect (Frida.Gadget.kill);
@@ -1904,6 +1904,11 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public string host {
+			get;
+			construct;
+		}
+
 		public TlsCertificate? certificate {
 			get;
 			construct;
@@ -1923,10 +1928,12 @@ namespace Frida.Gadget {
 
 		public ClusterClient (Config config, Location location) throws Error {
 			var interaction = (ConnectInteraction) config.interaction;
+			string? address = interaction.address;
 			Object (
 				config: config,
 				location: location,
-				connectable: parse_cluster_address (interaction.address, interaction.port),
+				connectable: parse_cluster_address (address, interaction.port),
+				host: (address != null) ? address : "lolcathost",
 				certificate: parse_certificate (interaction.certificate),
 				token: interaction.token,
 				acl: interaction.acl
@@ -1934,7 +1941,7 @@ namespace Frida.Gadget {
 		}
 
 		construct {
-			client = new PortalClient (this, connectable, certificate, token, acl, compute_app_info ());
+			client = new PortalClient (this, connectable, host, certificate, token, acl, compute_app_info ());
 			client.eternalized.connect (on_eternalized);
 			client.resume.connect (Frida.Gadget.resume);
 			client.kill.connect (Frida.Gadget.kill);

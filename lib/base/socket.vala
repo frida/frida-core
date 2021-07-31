@@ -84,7 +84,7 @@ namespace Frida {
 		}
 	}
 
-	public async IOStream negotiate_connection (IOStream stream, WebServiceTransport transport, string? origin,
+	public async IOStream negotiate_connection (IOStream stream, WebServiceTransport transport, string host, string? origin,
 			Cancellable? cancellable) throws Error, IOError {
 		var input = (DataInputStream) Object.new (typeof (DataInputStream),
 			"base-stream", stream.get_input_stream (),
@@ -92,18 +92,21 @@ namespace Frida {
 			"newline-type", DataStreamNewlineType.CR_LF);
 		OutputStream output = stream.get_output_stream ();
 
-		var request = new StringBuilder ();
-		string uri = "%s://server/ws".printf ((transport == TLS) ? "wss" : "ws");
-		request.append_printf ("GET %s HTTP/1.1\r\n", uri);
+		var request = new StringBuilder.sized (256);
+		request.append ("GET /ws HTTP/1.1\r\n");
+		string protocol = (transport == TLS) ? "wss" : "ws";
+		string canonical_host = canonicalize_host (host);
+		string uri = protocol + "://" + canonical_host + "/ws";
 		var msg = new Soup.Message ("GET", uri);
 		Soup.websocket_client_prepare_handshake (msg, origin, null);
+		msg.request_headers.replace ("Host", canonical_host);
 		msg.request_headers.replace ("User-Agent", "Frida/" + _version_string ());
 		msg.request_headers.foreach ((name, val) => {
 			request.append (name + ": " + val + "\r\n");
 		});
 		request.append ("\r\n");
 
-		var response = new StringBuilder ();
+		var response = new StringBuilder.sized (256);
 		try {
 			size_t bytes_written;
 			yield output.write_all_async (request.str.data, Priority.DEFAULT, cancellable, out bytes_written);
@@ -157,6 +160,15 @@ namespace Frida {
 		yield;
 
 		return connection;
+	}
+
+	private string canonicalize_host (string raw_host) {
+		if (raw_host.has_suffix (":80") || raw_host.has_suffix (":443")) {
+			string[] tokens = raw_host.split (":", 2);
+			return tokens[0];
+		}
+
+		return raw_host;
 	}
 
 	public class WebService : Object {

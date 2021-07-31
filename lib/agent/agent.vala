@@ -1037,7 +1037,7 @@ namespace Frida.Agent {
 			interceptor.end_transaction ();
 		}
 
-		public async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+		public async PortalMembershipId join_portal (string address, PortalOptions options,
 				Cancellable? cancellable) throws Error, IOError {
 			string executable_path = get_executable_path ();
 			string identifier = executable_path; // TODO: Detect app ID
@@ -1046,7 +1046,8 @@ namespace Frida.Agent {
 			var app_info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
 			app_info.parameters["system"] = compute_system_parameters ();
 
-			var client = new PortalClient (this, connectable, options.certificate, options.token, options.acl, app_info);
+			var client = new PortalClient (this, parse_cluster_address (address), address, options.certificate, options.token,
+				options.acl, app_info);
 			client.kill.connect (on_kill);
 			yield client.start (cancellable);
 

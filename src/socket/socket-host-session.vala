@@ -116,7 +116,7 @@ namespace Frida {
 
 			if (certificate != null) {
 				try {
-					var tc = TlsClientConnection.new (stream, null);
+					var tc = TlsClientConnection.new (stream, connectable);
 					tc.set_database (null);
 					var accept_handler = tc.accept_certificate.connect ((peer_cert, errors) => {
 						return peer_cert.verify (null, certificate) == 0;
@@ -133,8 +133,9 @@ namespace Frida {
 			}
 
 			var transport = (certificate != null) ? WebServiceTransport.TLS : WebServiceTransport.PLAIN;
+			string host = (raw_address != null) ? raw_address : "lolcathost";
 
-			stream = yield negotiate_connection (stream, transport, origin, cancellable);
+			stream = yield negotiate_connection (stream, transport, host, origin, cancellable);
 
 			DBusConnection connection;
 			try {

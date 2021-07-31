@@ -63,7 +63,7 @@ namespace Frida {
 		public abstract void acquire_child_gating () throws Error;
 		public abstract void release_child_gating ();
 
-		public abstract async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+		public abstract async PortalMembershipId join_portal (string address, PortalOptions options,
 			Cancellable? cancellable) throws Error, IOError;
 		public abstract async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws Error, IOError;
 	}

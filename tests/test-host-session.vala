@@ -1216,7 +1216,8 @@ namespace Frida.HostSessionTest {
 					WebServiceTransport transport = PLAIN;
 					string? origin = null;
 
-					target_stream = yield negotiate_connection (target_stream, transport, origin, cancellable);
+					target_stream = yield negotiate_connection (target_stream, transport, "lolcathost", origin,
+						cancellable);
 
 					handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_stream.output_stream,
 						cancellable);

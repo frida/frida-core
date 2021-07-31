@@ -269,8 +269,7 @@ namespace Frida {
 
 		public async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			return yield invader.join_portal (parse_cluster_address (address), PortalOptions._deserialize (options),
-				cancellable);
+			return yield invader.join_portal (address, PortalOptions._deserialize (options), cancellable);
 		}
 
 		public async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws Error, IOError {

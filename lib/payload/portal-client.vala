@@ -13,6 +13,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string host {
+			get;
+			construct;
+		}
+
 		public TlsCertificate? certificate {
 			get;
 			construct;
@@ -46,11 +51,12 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		public PortalClient (ProcessInvader invader, SocketConnectable connectable, TlsCertificate? certificate, string? token,
+		public PortalClient (ProcessInvader invader, SocketConnectable connectable, string host, TlsCertificate? certificate, string? token,
 				string[]? acl, HostApplicationInfo app_info) {
 			Object (
 				invader: invader,
 				connectable: connectable,
+				host: host,
 				certificate: certificate,
 				token: token,
 				acl: acl,
@@ -156,7 +162,7 @@ namespace Frida {
 			IOStream stream = socket_connection;
 
 			if (certificate != null) {
-				var tc = TlsClientConnection.new (stream, null);
+				var tc = TlsClientConnection.new (stream, connectable);
 				tc.set_database (null);
 				var accept_handler = tc.accept_certificate.connect ((peer_cert, errors) => {
 					return peer_cert.verify (null, certificate) == 0;
@@ -172,7 +178,7 @@ namespace Frida {
 			var transport = (certificate != null) ? WebServiceTransport.TLS : WebServiceTransport.PLAIN;
 			string? origin = null;
 
-			stream = yield negotiate_connection (stream, transport, origin, io_cancellable);
+			stream = yield negotiate_connection (stream, transport, host, origin, io_cancellable);
 
 			connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
