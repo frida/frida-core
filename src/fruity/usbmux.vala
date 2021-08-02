@@ -99,7 +99,11 @@ namespace Frida.Fruity {
 		public async void enable_listen_mode (Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			assert (is_processing_messages);
 
-			var response = yield query (create_request ("Listen"), REGULAR, cancellable);
+			var request = create_request ("Listen");
+			request.set_integer ("kLibUSBMuxVersion", 3);
+			request.set_integer ("ConnType", 0);
+
+			var response = yield query (request, REGULAR, cancellable);
 			try {
 				if (response.get_string ("MessageType") != "Result")
 					throw new UsbmuxError.PROTOCOL ("Unexpected response message type");
@@ -194,10 +198,12 @@ namespace Frida.Fruity {
 
 		private Plist create_request (string message_type) {
 			var request = new Plist ();
-			request.set_integer ("kLibUSBMuxVersion", 3);
-			request.set_string ("ClientVersionString", "usbmuxd-423.50.204");
+			request.set_string ("ClientVersionString", "usbmuxd-509");
 			request.set_string ("ProgName", "Xcode");
 			request.set_string ("BundleID", "com.apple.dt.Xcode");
+#if !WINDOWS
+			request.set_integer ("ProcessID", Posix.getpid ());
+#endif
 			request.set_string ("MessageType", message_type);
 			return request;
 		}
