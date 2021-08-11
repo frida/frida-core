@@ -69,7 +69,7 @@ namespace Frida.Agent {
 		private Gum.ScriptBackend? v8_backend;
 		private ExitMonitor? exit_monitor;
 		private Gum.Interceptor interceptor;
-		private Gum.Exceptor exceptor;
+		private Gum.Exceptor? exceptor;
 
 		private uint child_gating_subscriber_count = 0;
 		private ForkMonitor? fork_monitor;
