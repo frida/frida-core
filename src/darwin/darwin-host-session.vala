@@ -288,14 +288,14 @@ namespace Frida {
 			yield helper.kill_process (pid, cancellable);
 		}
 
-		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
-				throws Error, IOError {
+		protected override async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable, out Object? transport) throws Error, IOError {
 			transport = null;
 
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var id = yield inject_agent (pid, remote_address, cancellable);
+			var id = yield inject_agent (pid, make_agent_parameters (remote_address, options), cancellable);
 			injectee_by_pid[pid] = id;
 
 			return stream_future;
@@ -329,14 +329,15 @@ namespace Frida {
 		}
 #endif
 
-		private async uint inject_agent (uint pid, string remote_address, Cancellable? cancellable) throws Error, IOError {
+		private async uint inject_agent (uint pid, string agent_parameters, Cancellable? cancellable) throws Error, IOError {
 			uint id;
 
 			unowned string entrypoint = "frida_agent_main";
 #if HAVE_EMBEDDED_ASSETS
-			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, remote_address, cancellable);
+			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);
 #else
-			id = yield fruitjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, remote_address, cancellable);
+			id = yield fruitjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, agent_parameters,
+				cancellable);
 #endif
 
 			return id;

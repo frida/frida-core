@@ -336,7 +336,7 @@ namespace Frida {
 
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			var entry = yield establish (pid, cancellable);
+			var entry = yield establish (pid, options, cancellable);
 
 			var id = AgentSessionId.generate ();
 			entry.sessions.add (id);
@@ -358,7 +358,8 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
-		private async AgentEntry establish (uint pid, Cancellable? cancellable) throws Error, IOError {
+		private async AgentEntry establish (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			while (agent_entries.has_key (pid)) {
 				var future = agent_entries[pid];
 				try {
@@ -397,7 +398,7 @@ namespace Frida {
 					cancel_source.attach (MainContext.get_thread_default ());
 
 					Object transport;
-					var stream_request = yield perform_attach_to (pid, io_cancellable, out transport);
+					var stream_request = yield perform_attach_to (pid, options, io_cancellable, out transport);
 
 					IOStream stream = yield stream_request.wait_async (io_cancellable);
 
@@ -467,8 +468,27 @@ namespace Frida {
 			uninjected (InjectorPayloadId (id));
 		}
 
-		protected abstract async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
-			throws Error, IOError;
+		protected abstract async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
+			Cancellable? cancellable, out Object? transport) throws Error, IOError;
+
+		protected string make_agent_parameters (string remote_address, HashTable<string, Variant> options) throws Error {
+			var parameters = new StringBuilder (remote_address);
+
+			string[] features = { "exceptor", "exit-monitor", "thread-suspend-monitor" };
+			foreach (string feature in features) {
+				Variant? val = options[feature];
+				if (val != null) {
+					if (!val.is_of_type (VariantType.STRING) || val.get_string () != "off")
+						throw new Error.INVALID_ARGUMENT ("The '%s' option is invalid", feature);
+					parameters
+						.append_c ('|')
+						.append (feature)
+						.append (":off");
+				}
+			}
+
+			return parameters.str;
+		}
 
 		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
@@ -1179,6 +1199,7 @@ namespace Frida {
 		private Promise<bool> ensure_request;
 		private Promise<bool> _unloaded = new Promise<bool> ();
 
+		protected HashTable<string, Variant> attach_options = make_parameters_dict ();
 		protected AgentSessionId session_id;
 		protected AgentSession session;
 		protected AgentScriptId script;
@@ -1235,7 +1256,7 @@ namespace Frida {
 				uint target_pid = yield get_target_pid (cancellable);
 
 				try {
-					session_id = yield host_session.attach (target_pid, make_parameters_dict (), cancellable);
+					session_id = yield host_session.attach (target_pid, attach_options, cancellable);
 
 					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 

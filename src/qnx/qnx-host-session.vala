@@ -172,8 +172,8 @@ namespace Frida {
 			System.kill (pid);
 		}
 
-		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
-				throws Error, IOError {
+		protected override async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable, out Object? transport) throws Error, IOError {
 			var qinjector = injector as Qinjector;
 
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
@@ -182,8 +182,8 @@ namespace Frida {
 
 			var stream_request = Pipe.open (t.local_address, cancellable);
 
-			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address,
-				cancellable);
+			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main",
+				make_agent_parameters (t.remote_address, options), cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;

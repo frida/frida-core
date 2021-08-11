@@ -412,8 +412,8 @@ namespace Frida {
 			yield helper.kill (pid, cancellable);
 		}
 
-		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
-				throws Error, IOError {
+		protected override async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable, out Object? transport) throws Error, IOError {
 			PipeTransport.set_temp_directory (tempdir.path);
 
 			var t = new PipeTransport ();
@@ -422,11 +422,12 @@ namespace Frida {
 
 			uint id;
 			string entrypoint = "frida_agent_main";
+			string agent_parameters = make_agent_parameters (t.remote_address, options);
 			var linjector = injector as Linjector;
 #if HAVE_EMBEDDED_ASSETS
-			id = yield linjector.inject_library_resource (pid, agent, entrypoint, t.remote_address, cancellable);
+			id = yield linjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);
 #else
-			id = yield linjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, t.remote_address, cancellable);
+			id = yield linjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, agent_parameters, cancellable);
 #endif
 			injectee_by_pid[pid] = id;
 
