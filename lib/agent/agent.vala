@@ -253,6 +253,7 @@ namespace Frida.Agent {
 			unowned string transport_uri = tokens[0];
 			bool enable_exceptor = true;
 			bool enable_exit_monitor = true;
+			bool enable_thread_suspend_monitor = true;
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
@@ -262,6 +263,8 @@ namespace Frida.Agent {
 					enable_exceptor = false;
 				else if (option == "exit-monitor:off")
 					enable_exit_monitor = false;
+				else if (option == "thread-suspend-monitor:off")
+					enable_thread_suspend_monitor = false;
 			}
 
 			if (!enable_exceptor)
@@ -273,7 +276,9 @@ namespace Frida.Agent {
 
 				if (enable_exit_monitor)
 					exit_monitor = new ExitMonitor (this, main_context);
-				thread_suspend_monitor = new ThreadSuspendMonitor (this);
+
+				if (enable_thread_suspend_monitor)
+					thread_suspend_monitor = new ThreadSuspendMonitor (this);
 
 				this.interceptor = interceptor;
 				this.exceptor = Gum.Exceptor.obtain ();
