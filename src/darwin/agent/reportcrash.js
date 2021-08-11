@@ -292,7 +292,7 @@ function applyInstrumentation() {
 
     const procInfoInvocations = new Map();
 
-    Interceptor.attach(libdyld['dyld_process_info_base::make'], {
+    Interceptor.attach(libdyld['dyld_process_info_base::make'].implementation, {
       onEnter(args) {
         const session = findSession(this.threadId);
         if (session === null)
@@ -335,7 +335,9 @@ function applyInstrumentation() {
       }
     });
 
-    Interceptor.attach(libdyld.withRemoteBuffer, {
+    const { withRemoteBuffer } = libdyld;
+    const blockArgIndex = withRemoteBuffer.arity - 1;
+    Interceptor.attach(withRemoteBuffer.implementation, {
       onEnter(args) {
         const invocation = procInfoInvocations.get(this.threadId);
         if (invocation === undefined)
@@ -350,7 +352,7 @@ function applyInstrumentation() {
 
           args[2] = ptr(realSize);
 
-          this.block = wrapBlock(args[6], (impl, buffer, size) => {
+          this.block = wrapBlock(args[blockArgIndex], (impl, buffer, size) => {
             const copy = Memory.alloc(invocation.fakeSize);
             Memory.copy(copy, buffer, realSize);
 
@@ -386,7 +388,7 @@ function applyInstrumentation() {
 
         const agent = invocation.paths.get(remoteAddress.toString());
         if (agent !== undefined) {
-          this.block = wrapBlock(args[6], (impl, buffer, size) => {
+          this.block = wrapBlock(args[blockArgIndex], (impl, buffer, size) => {
             const copy = Memory.dup(buffer, size);
             copy.writeUtf8String(agent.path);
             return impl(copy, size);
@@ -456,7 +458,7 @@ function findCrashReportClass() {
     const rawName = classGetName(classHandle);
     if (rawName.compare(reporterStart) >= 0 && rawName.compare(reporterEnd) < 0) {
       const name = rawName.readUtf8String();
-      if (name === 'CrashReport')
+      if (name === 'LegacyCrashReport' || name === 'CrashReport')
         return new ObjC.Object(classHandle);
     }
   }
@@ -470,55 +472,78 @@ function findLibdyldInternals() {
 
   const { base, size } = Process.getModuleByName('/usr/lib/system/libdyld.dylib');
 
-  const {
-    NSAutoreleasePool,
-    NSProcessInfo,
-  } = ObjC.classes;
-
   /*
    * Verified on:
    * - 12.4
    * - 13.2.2
    * - 13.3
+   * - 13.5
    * - 14.0
+   * - 14.7.1
    */
-  const prologue = [];
+  const signatures = {
+    'dyld_process_info_base::make': [
+      [
+        // make(unsigned int, dyld_all_image_infos_64 const &, unsigned long long, int *)
+        '28 e0 02 91', // add x8, x1, 0xb8
+        { arity: 4 }
+      ],
+    ],
+    'withRemoteBuffer': [
+      [
+        // New: withRemoteBuffer(unsigned int, unsigned long long, unsigned long, bool, int *, void (void *, unsigned long) block_pointer)
+        '9f 00 00 f1 ?? ?? ?? ?? 15 00 84 9a : ff ff ff ff ff ff ff ff 1f fc ff ff', // cmp x4, 0; <any instruction>; csel x21, $reg, x4, eq
+        { arity: 6 }
+      ],
+      [
+        // Old: withRemoteBuffer(unsigned int, unsigned long long, unsigned long, bool, bool, int *, void (void *, unsigned long) block_pointer)
+        'bf 00 00 f1 ?? ?? ?? ?? 14 00 85 9a : ff ff ff ff ff ff ff ff 1f fc ff ff', // cmp x5, 0; <any instruction>; csel x20, $reg, x5, eq
+        { arity: 7 }
+      ],
+    ],
+  };
 
+  let prologPattern;
   const isArm64e = !ptr(1).sign().equals(1);
   if (isArm64e) {
     const pacibsp = '7f 23 03 d5';
-    prologue.push(pacibsp);
+    prologPattern = pacibsp;
+  } else {
+    const subSpSpImm = 'ff 03 00 d1 : ff 03 e0 ff';
+    prologPattern = subSpSpImm;
   }
 
-  let makeProcessInfoTailSize = isArm64e ? 35 : 33;
-  const pool = NSAutoreleasePool.alloc().init();
-  try {
-    if (NSProcessInfo.processInfo().isOperatingSystemAtLeastVersion_([14, 0, 0])) {
-      makeProcessInfoTailSize -= 2;
+  const result = {};
+  const missing = [];
+  for (const [name, candidates] of Object.entries(signatures)) {
+    let found = false;
+
+    for (const [pattern, details] of candidates) {
+      const matches = Memory.scanSync(base, size, pattern);
+      if (matches.length !== 1)
+        continue;
+      const match = matches[0].address;
+
+      const prologs = Memory.scanSync(match.sub(256), 256, prologPattern);
+      if (prologs.length === 0)
+        continue;
+
+      result[name] = Object.assign({ implementation: prologs[prologs.length - 1].address }, details);
+
+      found = true;
+      break;
     }
-  } finally {
-    pool.release();
+
+    if (!found)
+      missing.push(name);
   }
 
-  const signatures = {
-    'dyld_process_info_base::make': prologue.concat(['ff ?? ?? d1', '?? ?? ?? ?? '.repeat(makeProcessInfoTailSize), '28 e0 02 91']).join(' '),
-    'withRemoteBuffer': prologue.concat(['ff ?? 01 d1 f4 4f ?? a9 fd 7b ?? a9 fd ?? ?? 91 f3 03 06 aa']).join(' '),
-  };
-
-  const result = Object.keys(signatures)
-      .reduce((result, name) => {
-        const matches = Memory.scanSync(base, size, signatures[name]);
-        if (matches.length === 1)
-          result.api[name] = matches[0].address;
-        else
-          result.missing.push(name);
-        return result;
-      }, { api: {}, missing: [] });
-  if (result.missing.length !== 0) {
-    console.error(`Unsupported version of libdyld.dylib; missing:\n\t${result.missing.join('\n\t')}`);
+  if (missing.length !== 0) {
+    console.error(`Unsupported version of libdyld.dylib; missing:\n\t${missing.join('\n\t')}`);
     return null;
   }
-  return result.api;
+
+  return result;
 }
 
 function pidForTask(task) {
