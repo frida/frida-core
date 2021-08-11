@@ -251,15 +251,21 @@ namespace Frida.Agent {
 		private async void start (owned FileDescriptorTablePadder padder) {
 			string[] tokens = agent_parameters.split ("|");
 			unowned string transport_uri = tokens[0];
+			bool enable_exceptor = true;
 			bool enable_exit_monitor = true;
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
 				else if (option == "sticky")
 					stop_thread_on_unload = false;
+				else if (option == "exceptor:off")
+					enable_exceptor = false;
 				else if (option == "exit-monitor:off")
 					enable_exit_monitor = false;
 			}
+
+			if (!enable_exceptor)
+				Gum.Exceptor.disable ();
 
 			{
 				var interceptor = Gum.Interceptor.obtain ();
