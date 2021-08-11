@@ -881,6 +881,11 @@ namespace Frida {
 			);
 		}
 
+		construct {
+			attach_options["exit-monitor"] = "off";
+			attach_options["thread-suspend-monitor"] = "off";
+		}
+
 		public void activate_crash_reporter_integration () {
 			ensure_loaded.begin (io_cancellable);
 		}
@@ -978,6 +983,12 @@ namespace Frida {
 			Object (host_session: host_session, script_source: source, identifier: identifier, pid: pid);
 		}
 
+		construct {
+			attach_options["exceptor"] = "off";
+			attach_options["exit-monitor"] = "off";
+			attach_options["thread-suspend-monitor"] = "off";
+		}
+
 		public async void run_until_exec (Cancellable? cancellable) throws Error, IOError {
 			yield ensure_loaded (cancellable);
 
@@ -1024,6 +1035,12 @@ namespace Frida {
 				mapped_agent_container: mapped_agent_container,
 				io_cancellable: io_cancellable
 			);
+		}
+
+		construct {
+			attach_options["exceptor"] = "off";
+			attach_options["exit-monitor"] = "off";
+			attach_options["thread-suspend-monitor"] = "off";
 		}
 
 		public async void start (Cancellable? cancellable) throws Error, IOError {
@@ -1238,6 +1255,12 @@ namespace Frida {
 				pid: pid,
 				io_cancellable: io_cancellable
 			);
+		}
+
+		construct {
+			attach_options["exceptor"] = "off";
+			attach_options["exit-monitor"] = "off";
+			attach_options["thread-suspend-monitor"] = "off";
 		}
 
 		public async void start (Cancellable? cancellable) throws Error, IOError {
