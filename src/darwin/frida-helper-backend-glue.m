@@ -2958,6 +2958,22 @@ unexpected_exception:
         break;
     }
 
+    if (request->codeCnt != 0)
+    {
+      mach_msg_type_number_t i;
+
+      g_string_append (message, " with codes [");
+
+      for (i = 0; i != request->codeCnt; i++)
+      {
+        if (i != 0)
+          g_string_append_c (message, ',');
+        g_string_append_printf (message, " 0x%x", request->code[i]);
+      }
+
+      g_string_append (message, " ]");
+    }
+
 #ifdef HAVE_I386
     if (self->cpu_type == GUM_CPU_AMD64)
       pc = state.uts.ts64.__rip;
