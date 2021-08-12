@@ -3009,10 +3009,7 @@ unexpected_exception:
 
     g_string_append (message, " while initializing suspended process");
 
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        message->str);
+    error = g_error_new_literal (FRIDA_ERROR, FRIDA_ERROR_NOT_SUPPORTED, message->str);
 
     _frida_darwin_helper_backend_on_spawn_instance_error (self->backend, self->pid, error);
 
