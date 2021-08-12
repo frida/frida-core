@@ -3,6 +3,7 @@ namespace Frida {
 		public signal void idle ();
 		public signal void child_dead (uint pid);
 		public signal void spawn_instance_ready (uint pid);
+		public signal void spawn_instance_error (uint pid, Error error);
 
 		public uint pid {
 			get {
@@ -367,35 +368,55 @@ namespace Frida {
 			var task = task_for_pid (pid);
 			try {
 				var spawn_instance = spawn_instances[pid];
+				bool instance_created_here = false;
 				bool not_yet_booted = _is_suspended (task) && is_booting (task);
-				if (spawn_instance == null && not_yet_booted)
+				if (spawn_instance == null && not_yet_booted) {
 					spawn_instance = _create_spawn_instance (pid);
+					instance_created_here = true;
+				}
 
 				if (not_yet_booted) {
-					_prepare_spawn_instance_for_injection (spawn_instance, task);
+					try {
+						_prepare_spawn_instance_for_injection (spawn_instance, task);
 
-					resume_process_fast (task);
+						resume_process_fast (task);
 
-					bool timed_out = false;
-					var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
-						if (ready_pid == pid)
+						Error? pending_error = null;
+						var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
+							if (ready_pid != pid)
+								return;
 							prepare_target.callback ();
-					});
-					var timeout_source = new TimeoutSource.seconds (10);
-					timeout_source.set_callback (() => {
-						timed_out = true;
-						prepare_target.callback ();
-						return false;
-					});
-					timeout_source.attach (MainContext.get_thread_default ());
+						});
+						var error_handler = spawn_instance_error.connect ((error_pid, error_value) => {
+							if (error_pid != pid)
+								return;
+							pending_error = error_value;
+							prepare_target.callback ();
+						});
+						var timeout_source = new TimeoutSource.seconds (10);
+						timeout_source.set_callback (() => {
+							pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+							prepare_target.callback ();
+							return false;
+						});
+						timeout_source.attach (MainContext.get_thread_default ());
 
-					yield;
+						yield;
 
-					timeout_source.destroy ();
-					disconnect (ready_handler);
+						timeout_source.destroy ();
+						disconnect (error_handler);
+						disconnect (ready_handler);
 
-					if (timed_out)
-						throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+						if (pending_error != null)
+							throw pending_error;
+					} catch (GLib.Error e) {
+						if (instance_created_here) {
+							spawn_instances.unset (pid);
+							_free_spawn_instance (spawn_instance);
+						}
+
+						throw_api_error (e);
+					}
 				}
 			} finally {
 				deallocate_port (task);
@@ -476,6 +497,13 @@ namespace Frida {
 		public void _on_spawn_instance_ready (uint pid) {
 			Idle.add (() => {
 				spawn_instance_ready (pid);
+				return false;
+			});
+		}
+
+		public void _on_spawn_instance_error (uint pid, Error error) {
+			Idle.add (() => {
+				spawn_instance_error (pid, error);
 				return false;
 			});
 		}

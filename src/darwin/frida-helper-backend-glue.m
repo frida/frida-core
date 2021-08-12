@@ -203,6 +203,7 @@ struct _FridaSpawnInstance
 
   __Request__exception_raise_state_identity_t pending_request;
 
+  GumDarwinModule * dyld;
   FridaDyldFlavor dyld_flavor;
 
   FridaBreakpointPhase breakpoint_phase;
@@ -1897,7 +1898,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
     "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_",
   };
-  GumDarwinModule * dyld = NULL;
+  GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
 
@@ -2024,6 +2025,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   }
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  instance->dyld = dyld;
 
   modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
   instance->dyld_flavor = (modern_entry_address != 0) ? FRIDA_DYLD_V4_PLUS : FRIDA_DYLD_V3_MINUS;
@@ -2084,8 +2086,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     if (instance->cpu_type == GUM_CPU_ARM)
       instance->ret_gadget |= 1;
   }
-
-  g_clear_object (&dyld);
 
   instance->ret_state = FRIDA_RET_FROM_HELPER;
 
@@ -2168,13 +2168,6 @@ mach_failure:
   }
 failure:
   {
-    g_clear_object (&dyld);
-
-    kill (instance->pid, SIGKILL);
-
-    gee_abstract_map_unset (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (instance->pid), NULL);
-    frida_spawn_instance_free (instance);
-
     return;
   }
 }
@@ -2762,6 +2755,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
 
+  if (instance->dyld != NULL)
+    g_object_unref (instance->dyld);
+
   g_slice_free (FridaSpawnInstance, instance);
 }
 
@@ -2877,11 +2873,8 @@ frida_spawn_instance_on_server_recv (void * context)
     }
   }
 
-  /*
-   * May have hit an assertion failure. For now we will just let the operation time out.
-   */
   if (breakpoint == NULL)
-    return;
+    goto unexpected_exception;
 
   carry_on = frida_spawn_instance_handle_breakpoint (self, breakpoint, &state);
   if (!carry_on)
@@ -2917,6 +2910,89 @@ frida_spawn_instance_on_server_recv (void * context)
   frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
 
   frida_spawn_instance_send_breakpoint_response (self);
+
+  return;
+
+unexpected_exception:
+  {
+    __Request__exception_raise_state_identity_t * request = &self->pending_request;
+    GString * message;
+    GumAddress pc;
+    GError * error;
+
+    message = g_string_sized_new (128);
+
+    g_string_append (message, "Unexpectedly hit ");
+
+    switch (request->exception)
+    {
+      case EXC_BAD_ACCESS:
+        g_string_append (message, "an invalid memory address");
+        break;
+      case EXC_BAD_INSTRUCTION:
+        g_string_append (message, "a bad instruction");
+        break;
+      case EXC_ARITHMETIC:
+        g_string_append (message, "an arithmetic error");
+        break;
+      case EXC_EMULATION:
+        g_string_append (message, "an emulation error");
+        break;
+      case EXC_SOFTWARE:
+        g_string_append (message, "a software exception");
+        break;
+      case EXC_BREAKPOINT:
+        g_string_append (message, "an unknown breakpoint");
+        break;
+      case EXC_CRASH:
+        g_string_append (message, "a crash");
+        break;
+      case EXC_RESOURCE:
+        g_string_append (message, "a resource limit");
+        break;
+      case EXC_GUARD:
+        g_string_append (message, "a guard");
+        break;
+      default:
+        g_string_append_printf (message, "exception %d", request->exception);
+        break;
+    }
+
+#ifdef HAVE_I386
+    if (self->cpu_type == GUM_CPU_AMD64)
+      pc = state.uts.ts64.__rip;
+    else
+      pc = state.uts.ts32.__eip;
+#else
+    if (self->cpu_type == GUM_CPU_ARM64)
+      pc = __darwin_arm_thread_state64_get_pc (state.ts_64);
+    else
+      pc = state.ts_32.__pc;
+#endif
+
+    if (gum_darwin_module_is_address_in_text_section (self->dyld, pc))
+    {
+      g_string_append_printf (message, " at dyld!0x%zx", (size_t) (pc - self->dyld->base_address));
+    }
+    else
+    {
+      g_string_append_printf (message, " at 0x%zx", (size_t) pc);
+    }
+
+    g_string_append (message, " while initializing suspended process");
+
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        message->str);
+
+    _frida_darwin_helper_backend_on_spawn_instance_error (self->backend, self->pid, error);
+
+    g_error_free (error);
+    g_string_free (message, TRUE);
+
+    return;
+  }
 }
 
 static gboolean
