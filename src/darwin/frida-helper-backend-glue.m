@@ -2942,7 +2942,6 @@ unexpected_exception:
   {
     __Request__exception_raise_state_identity_t * request = &self->pending_request;
     GString * message;
-    GumAddress pc;
     GError * error;
 
     message = g_string_sized_new (128);
@@ -2998,18 +2997,6 @@ unexpected_exception:
 
       g_string_append (message, " ]");
     }
-
-#ifdef HAVE_I386
-    if (self->cpu_type == GUM_CPU_AMD64)
-      pc = state.uts.ts64.__rip;
-    else
-      pc = state.uts.ts32.__eip;
-#else
-    if (self->cpu_type == GUM_CPU_ARM64)
-      pc = __darwin_arm_thread_state64_get_pc (state.ts_64);
-    else
-      pc = state.ts_32.__pc;
-#endif
 
     if (gum_darwin_module_is_address_in_text_section (self->dyld, pc))
     {
