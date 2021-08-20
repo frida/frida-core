@@ -335,6 +335,25 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public string? asset_dir {
+			get {
+				if (!did_compute_asset_dir) {
+					string? gadget_path = path;
+					if (gadget_path != null) {
+						string? dir = null;
+#if DARWIN
+						dir = try_derive_framework_resource_dir_from_module_path (gadget_path);
+#endif
+						if (dir == null)
+							dir = Path.get_dirname (gadget_path);
+						cached_asset_dir = dir;
+					}
+					did_compute_asset_dir = true;
+				}
+				return cached_asset_dir;
+			}
+		}
+
 		public Gum.MemoryRange range {
 			get;
 			construct;
@@ -345,6 +364,9 @@ namespace Frida.Gadget {
 
 		private bool did_fetch_bundle_name = false;
 		private string? cached_bundle_name = null;
+
+		private bool did_compute_asset_dir = false;
+		private string? cached_asset_dir = null;
 
 		public Location (string executable_name, string? path, Gum.MemoryRange range) {
 			Object (
@@ -373,6 +395,16 @@ namespace Frida.Gadget {
 			}
 		}
 #endif
+
+		public string resolve_asset_path (string asset_path) {
+			if (!Path.is_absolute (asset_path)) {
+				string? dir = asset_dir;
+				if (dir != null)
+					return Path.build_filename (dir, asset_path);
+			}
+
+			return asset_path;
+		}
 	}
 
 	private enum State {
@@ -662,10 +694,17 @@ namespace Frida.Gadget {
 		if (gadget_path == null)
 			return new Config ();
 
-		var config_path = derive_config_path_from_file_path (gadget_path);
+		string? config_path = null;
+#if DARWIN
+		string? resource_dir = try_derive_framework_resource_dir_from_module_path (gadget_path);
+		if (resource_dir != null)
+			config_path = Path.build_filename (resource_dir, "config.json");
+#endif
+		if (config_path == null)
+			config_path = derive_config_path_from_file_path (gadget_path);
 
 #if IOS
-		if (!FileUtils.test (config_path, FileTest.EXISTS)) {
+		if (resource_dir == null && !FileUtils.test (config_path, FileTest.EXISTS)) {
 			var config_dir = Path.get_dirname (config_path);
 			if (Path.get_basename (config_dir) == "Frameworks") {
 				var app_dir = Path.get_dirname (config_dir);
@@ -952,15 +991,9 @@ namespace Frida.Gadget {
 					if (FileUtils.test (script_path, FileTest.EXISTS))
 						return script_path;
 				}
-
-				unowned string? gadget_path = location.path;
-				if (gadget_path != null) {
-					var base_dir = Path.get_dirname (gadget_path);
-					return Path.build_filename (base_dir, raw_path);
-				}
 			}
 
-			return raw_path;
+			return location.resolve_asset_path (raw_path);
 		}
 	}
 
@@ -980,7 +1013,7 @@ namespace Frida.Gadget {
 			Object (
 				config: config,
 				location: location,
-				directory_path: parse_script_directory_path (config, location)
+				directory_path: location.resolve_asset_path (((ScriptDirectoryInteraction) config.interaction).path)
 			);
 		}
 
@@ -1149,20 +1182,6 @@ namespace Frida.Gadget {
 			if (unchanged_timeout != null)
 				unchanged_timeout.destroy ();
 			unchanged_timeout = source;
-		}
-
-		private static string parse_script_directory_path (Config config, Location location) {
-			var raw_path = ((ScriptDirectoryInteraction) config.interaction).path;
-
-			if (!Path.is_absolute (raw_path)) {
-				unowned string? gadget_path = location.path;
-				if (gadget_path != null) {
-					var base_dir = Path.get_dirname (gadget_path);
-					return Path.build_filename (base_dir, raw_path);
-				}
-			}
-
-			return raw_path;
 		}
 
 		private ScriptConfig load_config (string path) throws Error {
@@ -1431,11 +1450,13 @@ namespace Frida.Gadget {
 			string? token = interaction.token;
 			auth_service = (token != null) ? new StaticAuthenticationService (token) : null;
 
+			File? asset_root = null;
 			string? asset_root_path = interaction.asset_root;
-			File? asset_root = (asset_root_path != null) ? File.new_for_path (asset_root_path) : null;
+			if (asset_root_path != null)
+				asset_root = File.new_for_path (location.resolve_asset_path (asset_root_path));
 
 			var endpoint_params = new EndpointParameters (interaction.address, interaction.port,
-				parse_certificate (interaction.certificate), interaction.origin, auth_service, asset_root);
+				parse_certificate (interaction.certificate, location), interaction.origin, auth_service, asset_root);
 
 			service = new WebService (endpoint_params, CONTROL, interaction.on_port_conflict);
 			service.incoming.connect (on_incoming_connection);
@@ -1934,7 +1955,7 @@ namespace Frida.Gadget {
 				location: location,
 				connectable: parse_cluster_address (address, interaction.port),
 				host: (address != null) ? address : "lolcathost",
-				certificate: parse_certificate (interaction.certificate),
+				certificate: parse_certificate (interaction.certificate, location),
 				token: interaction.token,
 				acl: interaction.acl
 			);
@@ -1981,11 +2002,25 @@ namespace Frida.Gadget {
 		return Path.build_filename (dirname, stem + ".config");
 	}
 
+#if DARWIN
+	private string? try_derive_framework_resource_dir_from_module_path (string module_path) {
+		string[] parts = module_path.split ("/");
+		int n = parts.length;
+
+		bool is_framework = (n >= 2 && parts[n - 2].has_suffix (".framework")) ||
+			(n >= 4 && parts[n - 4].has_suffix (".framework") && parts[n - 3] == "Versions");
+		if (!is_framework)
+			return null;
+
+		return Path.build_filename (Path.get_dirname (module_path), "Resources");
+	}
+#endif
+
 	private Json.Node make_empty_json_object () {
 		return new Json.Node.alloc ().init_object (new Json.Object ());
 	}
 
-	private TlsCertificate? parse_certificate (string? str) throws Error {
+	private TlsCertificate? parse_certificate (string? str, Location location) throws Error {
 		if (str == null)
 			return null;
 
@@ -1993,7 +2028,7 @@ namespace Frida.Gadget {
 			if (str.index_of_char ('\n') != -1)
 				return new TlsCertificate.from_pem (str, -1);
 			else
-				return new TlsCertificate.from_file (str);
+				return new TlsCertificate.from_file (location.resolve_asset_path (str));
 		} catch (GLib.Error e) {
 			throw new Error.INVALID_ARGUMENT ("%s", e.message);
 		}
