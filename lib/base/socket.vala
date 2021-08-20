@@ -455,6 +455,9 @@ namespace Frida {
 			if (path.has_suffix (".png"))
 				return "image/png";
 
+			if (path.has_suffix (".gif"))
+				return "image/gif";
+
 			bool uncertain;
 			return ContentType.guess (path, null, out uncertain);
 		}
