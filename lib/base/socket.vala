@@ -354,30 +354,148 @@ namespace Frida {
 				return;
 			}
 
-			File asset_root = endpoint_params.asset_root;
-
-			File location = (path != "/")
-				? asset_root.resolve_relative_path (path.next_char ())
-				: asset_root.resolve_relative_path ("index.html");
+			File location = endpoint_params.asset_root.resolve_relative_path (path.next_char ());
 
 			server.pause_message (msg);
-			handle_asset_request.begin (location, msg);
+			handle_asset_request.begin (path, location, msg);
 		}
 
-		private async void handle_asset_request (File file, Soup.Message msg) {
+		private async void handle_asset_request (string path, File file, Soup.Message msg) {
 			int priority = Priority.DEFAULT;
 
-			FileInputStream stream;
+			string attributes = FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE;
+
 			FileInfo info;
+			FileInputStream? stream = null;
 			try {
-				stream = yield file.read_async (priority, io_cancellable);
-				info = yield stream.query_info_async (FileAttribute.STANDARD_SIZE, priority, io_cancellable);
+				info = yield file.query_info_async (attributes, FileQueryInfoFlags.NONE, priority, io_cancellable);
+
+				FileType type = info.get_file_type ();
+				if (type == DIRECTORY) {
+					if (!path.has_suffix ("/")) {
+						handle_misplaced_request (path + "/", msg);
+						return;
+					}
+
+					File index_file = file.get_child ("index.html");
+					try {
+						var index_info = yield index_file.query_info_async (attributes, FileQueryInfoFlags.NONE,
+							priority, io_cancellable);
+						file = index_file;
+						info = index_info;
+						type = index_info.get_file_type ();
+					} catch (GLib.Error e) {
+					}
+				}
+
+				if (type != DIRECTORY)
+					stream = yield file.read_async (priority, io_cancellable);
 			} catch (GLib.Error e) {
 				msg.set_status (Soup.Status.NOT_FOUND);
 				server.unpause_message (msg);
 				return;
 			}
 
+			if (stream == null)
+				yield handle_directory_request (path, file, msg);
+			else
+				yield handle_file_request (file, info, stream, msg);
+		}
+
+		private async void handle_directory_request (string path, File file, Soup.Message msg) {
+			var listing = new StringBuilder.sized (1024);
+
+			string escaped_path = Markup.escape_text (path);
+			listing.append ("""<html>
+<head><title>Index of %s</title></head>
+<body>
+<h1>Index of %s</h1><hr><pre>""".printf (escaped_path, escaped_path));
+
+			if (path != "/")
+				listing.append ("<a href=\"../\">../</a>");
+
+			listing.append_c ('\n');
+
+			string attributes =
+				FileAttribute.STANDARD_DISPLAY_NAME + "," +
+				FileAttribute.STANDARD_TYPE + "," +
+				FileAttribute.TIME_MODIFIED + "," +
+				FileAttribute.STANDARD_SIZE;
+			int priority = Priority.DEFAULT;
+
+			try {
+				var enumerator = yield file.enumerate_children_async (attributes, FileQueryInfoFlags.NONE, priority,
+					io_cancellable);
+
+				List<FileInfo> files = yield enumerator.next_files_async (int.MAX, priority, io_cancellable);
+
+				files.sort ((a, b) => {
+					bool a_is_dir = a.get_file_type () == DIRECTORY;
+					bool b_is_dir = b.get_file_type () == DIRECTORY;
+					if (a_is_dir == b_is_dir)
+						return strcmp (a.get_display_name (), b.get_display_name ());
+					else if (a_is_dir)
+						return -1;
+					else
+						return 1;
+				});
+
+				foreach (FileInfo info in files) {
+					string display_name = info.get_display_name ();
+					FileType type = info.get_file_type ();
+					DateTime modified = info.get_modification_date_time ().to_local ();
+
+					string link = Markup.escape_text (display_name);
+					if (type == DIRECTORY)
+						link += "/";
+
+					listing
+						.append ("<a href=\"")
+						.append (link)
+						.append ("\">")
+						.append (link)
+						.append ("</a>");
+
+					int padding_needed = 50 - link.length;
+					while (padding_needed > 0) {
+						listing.append_c (' ');
+						padding_needed--;
+					}
+
+					listing
+						.append_c (' ')
+						.append (modified.format ("%d-%b-%Y %H:%M"))
+						.append ("            ");
+
+					string size_info;
+					if (type != DIRECTORY)
+						size_info = info.get_size ().to_string ();
+					else
+						size_info = "-";
+					listing.append_printf ("%8s\n", size_info);
+				}
+			} catch (GLib.Error e) {
+				msg.set_status (Soup.Status.NOT_FOUND);
+				server.unpause_message (msg);
+				return;
+			}
+
+			listing.append ("</pre><hr></body>\n</html>");
+
+			msg.set_status (Soup.Status.OK);
+
+			if (msg.method == "HEAD") {
+				var headers = msg.response_headers;
+				headers.replace ("Content-Type", "text/html");
+				headers.replace ("Content-Length", listing.len.to_string ());
+			} else {
+				msg.set_response ("text/html", Soup.MemoryUse.COPY, listing.str.data);
+			}
+
+			server.unpause_message (msg);
+		}
+
+		private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.Message msg) {
 			msg.set_status (Soup.Status.OK);
 
 			var headers = msg.response_headers;
@@ -397,18 +515,18 @@ namespace Frida {
 			ulong finished_handler = msg.finished.connect (() => {
 				finished = true;
 				if (waiting)
-					handle_asset_request.callback ();
+					handle_file_request.callback ();
 			});
 			ulong write_handler = msg.wrote_body_data.connect (chunk => {
 				if (waiting)
-					handle_asset_request.callback ();
+					handle_file_request.callback ();
 			});
 			try {
 				var buffer = new uint8[64 * 1024];
 				while (true) {
 					ssize_t n;
 					try {
-						n = yield stream.read_async (buffer, priority, io_cancellable);
+						n = yield stream.read_async (buffer, Priority.DEFAULT, io_cancellable);
 					} catch (IOError e) {
 						break;
 					}
@@ -434,6 +552,28 @@ namespace Frida {
 				if (!finished)
 					server.unpause_message (msg);
 			}
+		}
+
+		private void handle_misplaced_request (string redirect_uri, Soup.Message msg) {
+			msg.set_redirect (Soup.Status.MOVED_PERMANENTLY, redirect_uri);
+
+			string body = """<html>
+<head><title>301 Moved Permanently</title></head>
+<body>
+<center><h1>301 Moved Permanently</h1></center>
+<hr><center>%s</center>
+</body>
+</html>""".printf ("Frida/" + _version_string ());
+
+			if (msg.method == "HEAD") {
+				var headers = msg.response_headers;
+				headers.replace ("Content-Type", "text/html");
+				headers.replace ("Content-Length", body.length.to_string ());
+			} else {
+				msg.set_response ("text/html", Soup.MemoryUse.COPY, body.data);
+			}
+
+			server.unpause_message (msg);
 		}
 
 		private static string guess_mime_type_for (string path) {
