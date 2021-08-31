@@ -2004,6 +2004,7 @@ namespace Frida.Gadget {
 
 #if DARWIN
 	private string? try_derive_framework_resource_dir_from_module_path (string module_path) {
+#if MACOS
 		string[] parts = module_path.split ("/");
 		int n = parts.length;
 
@@ -2013,6 +2014,12 @@ namespace Frida.Gadget {
 			return null;
 
 		return Path.build_filename (Path.get_dirname (module_path), "Resources");
+#else
+		string module_dir = Path.get_dirname (module_path);
+		if (!module_dir.has_suffix (".framework"))
+			return null;
+		return module_dir;
+#endif
 	}
 #endif
 
