@@ -31,6 +31,7 @@ typedef char frida_pipe_uuid_t[36 + 1];
 #include "piped-client.c"
 
 extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, const char * service_name, mach_port_t * service_port);
+extern const char *bootstrap_strerror (kern_return_t r);
 extern int fileport_makeport (int fd, mach_port_t * port);
 extern int fileport_makefd (mach_port_t port);
 extern int64_t sandbox_extension_consume (const char * extension_token);
@@ -239,7 +240,7 @@ mach_failure:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to fetch file descriptor from %s (%s returned '%s')",
-        service, failed_operation, mach_error_string (kr));
+        service, failed_operation, bootstrap_strerror (kr));
     goto beach;
   }
 bsd_failure:
