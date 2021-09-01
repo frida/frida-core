@@ -6,6 +6,12 @@
 #include <sys/socket.h>
 #include <mach/mach.h>
 
+#define CHECK_BOOTSTRAP_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto bootstrap_failure; \
+  }
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -222,7 +228,7 @@ _frida_unix_pipe_fetch_file_descriptor_from_service (const gchar * service, cons
     extension_handle = sandbox_extension_consume (token);
 
   kr = bootstrap_look_up (bootstrap_port, service, &server);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "bootstrap_look_up");
+  CHECK_BOOTSTRAP_RESULT (kr, ==, KERN_SUCCESS, "bootstrap_look_up");
 
   g_strlcpy (uuid_buf, uuid, sizeof (uuid_buf));
 
@@ -234,13 +240,22 @@ _frida_unix_pipe_fetch_file_descriptor_from_service (const gchar * service, cons
 
   goto beach;
 
-mach_failure:
+bootstrap_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to fetch file descriptor from %s (%s returned '%s')",
         service, failed_operation, bootstrap_strerror (kr));
+    goto beach;
+  }
+mach_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to fetch file descriptor from %s (%s returned '%s')",
+        service, failed_operation, mach_error_string (kr));
     goto beach;
   }
 bsd_failure:
