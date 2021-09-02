@@ -49,7 +49,7 @@ namespace Frida {
 			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 #endif
 #if DARWIN
-			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory (),
+			host_session = new DarwinHostSession (new DarwinHelperBackend (opts.use_bootstrap_service), new TemporaryDirectory (),
 				opts.report_crashes);
 #endif
 #if LINUX
@@ -818,5 +818,14 @@ namespace Frida {
 			set;
 			default = true;
 		}
+
+#if DARWIN
+		public bool use_bootstrap_service {
+			get;
+			set;
+			default = true;
+		}
+#endif
+
 	}
 }

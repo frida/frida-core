@@ -17,6 +17,11 @@ namespace Frida {
 			}
 		}
 
+		public bool use_bootstrap_service {
+			get;
+			construct;
+		}
+
 		protected delegate void DispatchWorker ();
 		protected delegate void LaunchCompletionHandler (owned StdioPipes? pipes, owned Error? error);
 
@@ -39,8 +44,12 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
+		public DarwinHelperBackend (bool use_bootstrap_service = true) {
+			Object (use_bootstrap_service: use_bootstrap_service);
+		}
+
 		construct {
-			_create_context ();
+			_create_context (use_bootstrap_service);
 
 			dtrace_agent = DTraceAgent.try_open ();
 			if (dtrace_agent != null) {
@@ -624,7 +633,7 @@ namespace Frida {
 		public extern static bool is_mmap_available ();
 		public extern static MappedLibraryBlob mmap (uint task, Bytes blob) throws Error;
 
-		protected extern void _create_context ();
+		protected extern void _create_context (bool use_bootstrap_service);
 		protected extern void _destroy_context ();
 		protected extern void _schedule_on_dispatch_queue (DispatchWorker worker);
 

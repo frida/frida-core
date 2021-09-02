@@ -9,6 +9,9 @@ namespace Frida.Server {
 	private static string? token = null;
 	private static string? asset_root = null;
 	private static string? directory = null;
+#if DARWIN
+	private static bool use_bootstrap_service = true; 
+#endif
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
@@ -38,6 +41,9 @@ namespace Frida.Server {
 		{ "asset-root", 0, 0, OptionArg.FILENAME, ref asset_root, "Serve static files inside ROOT (by default no files are served)",
 			"ROOT" },
 		{ "directory", 'd', 0, OptionArg.STRING, ref directory, "Store binaries in DIRECTORY", "DIRECTORY" },
+#if DARWIN
+		{ "no-bootstrap-service", 0, OptionFlags.REVERSE, OptionArg.NONE, ref use_bootstrap_service, "Do not create a bootstrap service for IPC", null },
+#endif
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
@@ -89,6 +95,9 @@ namespace Frida.Server {
 		var options = new ControlServiceOptions ();
 		options.enable_preload = enable_preload;
 		options.report_crashes = report_crashes;
+#if DARWIN
+		options.use_bootstrap_service = use_bootstrap_service;
+#endif
 
 		PolicySoftenerFlavor softener_flavor = SYSTEM;
 		if (softener_flavor_str != null) {
