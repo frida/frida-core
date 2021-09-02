@@ -797,7 +797,7 @@ _frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx;
   kern_return_t kr;
-  const gchar * no_bootstrap_service = g_getenv("NO_BOOTSTRAP_SERVICE");
+  const gchar * no_bootstrap_service = g_getenv ("NO_BOOTSTRAP_SERVICE");
 
   ctx = g_slice_new (FridaHelperContext);
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", DISPATCH_QUEUE_SERIAL);
@@ -809,7 +809,7 @@ _frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
   self->context = ctx;
 
   if (no_bootstrap_service == NULL ||
-      !(g_strcmp0(no_bootstrap_service, "true") == 0 || g_strcmp0(no_bootstrap_service, "TRUE") == 0))
+      !(g_strcmp0 (no_bootstrap_service, "true") == 0 || g_strcmp0 (no_bootstrap_service, "TRUE") == 0))
   {
     ctx->piped_name = g_strdup_printf ("re.frida.piped.%u", getpid ());
     mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &ctx->piped_port);
