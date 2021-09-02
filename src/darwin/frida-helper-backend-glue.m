@@ -797,36 +797,42 @@ _frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx;
   kern_return_t kr;
+  const gchar * no_bootstrap_service = g_getenv("NO_BOOTSTRAP_SERVICE");
 
   ctx = g_slice_new (FridaHelperContext);
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", DISPATCH_QUEUE_SERIAL);
-
-  ctx->piped_name = g_strdup_printf ("re.frida.piped.%u", getpid ());
-  mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &ctx->piped_port);
   ctx->stashed_pipes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_stashed_pipe_free);
-
+  ctx->piped_port = MACH_PORT_NULL;
+  ctx->piped_name = NULL;
   g_mutex_init (&ctx->mutex);
 
   self->context = ctx;
 
-  kr = bootstrap_register (bootstrap_port, ctx->piped_name, ctx->piped_port);
-  if (kr == KERN_SUCCESS)
+  if (no_bootstrap_service == NULL ||
+      !(g_strcmp0(no_bootstrap_service, "true") == 0 || g_strcmp0(no_bootstrap_service, "TRUE") == 0))
   {
-    dispatch_source_t source;
+    ctx->piped_name = g_strdup_printf ("re.frida.piped.%u", getpid ());
+    mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &ctx->piped_port);
 
-    source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, ctx->piped_port, 0, ctx->dispatch_queue);
-    ctx->piped_source = source;
-    dispatch_set_context (source, self);
-    dispatch_source_set_event_handler_f (source, frida_darwin_helper_backend_on_piped_recv);
-    dispatch_resume (source);
-  }
-  else
-  {
-    mach_port_deallocate (mach_task_self (), ctx->piped_port);
-    ctx->piped_port = MACH_PORT_NULL;
+    kr = bootstrap_register (bootstrap_port, ctx->piped_name, ctx->piped_port);
+    if (kr == KERN_SUCCESS)
+    {
+      dispatch_source_t source;
 
-    g_free (ctx->piped_name);
-    ctx->piped_name = NULL;
+      source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, ctx->piped_port, 0, ctx->dispatch_queue);
+      ctx->piped_source = source;
+      dispatch_set_context (source, self);
+      dispatch_source_set_event_handler_f (source, frida_darwin_helper_backend_on_piped_recv);
+      dispatch_resume (source);
+    }
+    else
+    {
+      mach_port_deallocate (mach_task_self (), ctx->piped_port);
+      ctx->piped_port = MACH_PORT_NULL;
+
+      g_free (ctx->piped_name);
+      ctx->piped_name = NULL;
+    }
   }
 }
 
