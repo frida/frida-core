@@ -6,6 +6,12 @@
 #include <sys/socket.h>
 #include <mach/mach.h>
 
+#define CHECK_BOOTSTRAP_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto bootstrap_failure; \
+  }
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -31,6 +37,7 @@ typedef char frida_pipe_uuid_t[36 + 1];
 #include "piped-client.c"
 
 extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, const char * service_name, mach_port_t * service_port);
+extern const char * bootstrap_strerror (kern_return_t kr);
 extern int fileport_makeport (int fd, mach_port_t * port);
 extern int fileport_makefd (mach_port_t port);
 extern int64_t sandbox_extension_consume (const char * extension_token);
@@ -221,7 +228,7 @@ _frida_unix_pipe_fetch_file_descriptor_from_service (const gchar * service, cons
     extension_handle = sandbox_extension_consume (token);
 
   kr = bootstrap_look_up (bootstrap_port, service, &server);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "bootstrap_look_up");
+  CHECK_BOOTSTRAP_RESULT (kr, ==, KERN_SUCCESS, "bootstrap_look_up");
 
   g_strlcpy (uuid_buf, uuid, sizeof (uuid_buf));
 
@@ -233,6 +240,15 @@ _frida_unix_pipe_fetch_file_descriptor_from_service (const gchar * service, cons
 
   goto beach;
 
+bootstrap_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to fetch file descriptor from %s (%s returned '%s')",
+        service, failed_operation, bootstrap_strerror (kr));
+    goto beach;
+  }
 mach_failure:
   {
     g_set_error (error,
