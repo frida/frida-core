@@ -2007,7 +2007,7 @@ namespace Frida.Gadget {
 			var interaction = config.interaction as ConnectInteraction;
 
 			try {
-				info.parameters["parameters"] = Json.gvariant_deserialize (interaction.parameters, null);
+				info.parameters["config"] = Json.gvariant_deserialize (interaction.parameters, null);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
