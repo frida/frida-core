@@ -297,10 +297,44 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ConnectInteraction : SocketInteraction {
+	private class ConnectInteraction : SocketInteraction, Json.Serializable {
 		public string[]? acl {
 			get;
 			set;
+		}
+
+		public Json.Node parameters {
+			get;
+			set;
+			default = make_empty_json_object ();
+		}
+
+		private ObjectClass klass = (ObjectClass) typeof (ConnectInteraction).class_ref ();
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
+				var v = Value (typeof (Json.Node));
+				v.set_boxed (property_node);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		public unowned ParamSpec? find_property (string name) {
+			return klass.find_property (name);
+		}
+
+		public new Value get_property (ParamSpec pspec) {
+			var val = Value (pspec.value_type);
+			base.get_property (pspec.name, ref val);
+			return val;
+		}
+
+		public new void set_property (ParamSpec pspec, Value value) {
+			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -931,7 +965,7 @@ namespace Frida.Gadget {
 			yield on_terminate (TerminationReason.EXIT);
 		}
 
-		protected HostApplicationInfo compute_app_info () {
+		protected virtual HostApplicationInfo compute_app_info () {
 			string identifier = location.bundle_id;
 			if (identifier == null)
 				identifier = get_executable_path ();
@@ -1966,6 +2000,19 @@ namespace Frida.Gadget {
 			client.eternalized.connect (on_eternalized);
 			client.resume.connect (Frida.Gadget.resume);
 			client.kill.connect (Frida.Gadget.kill);
+		}
+
+		protected override HostApplicationInfo compute_app_info () {
+			var info = base.compute_app_info ();
+			var interaction = config.interaction as ConnectInteraction;
+
+			try {
+				info.parameters["config"] = Json.gvariant_deserialize (interaction.parameters, null);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			return info;
 		}
 
 		protected override async void on_start () throws Error, IOError {
