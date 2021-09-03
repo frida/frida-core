@@ -227,7 +227,7 @@ namespace Frida {
 
 			var remote_task = DarwinHelperBackend.task_for_pid (remote_pid);
 			try {
-				return backend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
+				return DarwinHelperBackend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
 			} finally {
 				DarwinHelperBackend.deallocate_port (remote_task);
 			}

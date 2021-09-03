@@ -616,7 +616,7 @@ namespace Frida {
 			yield;
 		}
 
-		public extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
+		public extern static PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
 		public extern static uint task_for_pid (uint pid) throws Error;
 		public extern static void deallocate_port (uint port);

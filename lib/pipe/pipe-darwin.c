@@ -6,12 +6,6 @@
 #include <sys/socket.h>
 #include <mach/mach.h>
 
-#define CHECK_BOOTSTRAP_RESULT(n1, cmp, n2, op) \
-  if (!(n1 cmp n2)) \
-  { \
-    failed_operation = op; \
-    goto bootstrap_failure; \
-  }
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -33,15 +27,8 @@ struct _FridaInitMessage
   mach_msg_trailer_t trailer;
 };
 
-typedef char frida_pipe_uuid_t[36 + 1];
-#include "piped-client.c"
-
-extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, const char * service_name, mach_port_t * service_port);
-extern const char * bootstrap_strerror (kern_return_t kr);
 extern int fileport_makeport (int fd, mach_port_t * port);
 extern int fileport_makefd (mach_port_t port);
-extern int64_t sandbox_extension_consume (const char * extension_token);
-extern int sandbox_extension_release (int64_t extension_handle);
 
 void
 frida_pipe_transport_set_temp_directory (const gchar * path)
@@ -168,13 +155,18 @@ _frida_pipe_transport_destroy_backend (void * backend)
 }
 
 gint
-_frida_unix_pipe_consume_stashed_file_descriptor (mach_port_t port, GError ** error)
+_frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GError ** error)
 {
   gint fd = -1;
+  gint assigned;
+  mach_port_t port = MACH_PORT_NULL;
   FridaInitMessage init = { { 0, }, { 0, } };
   kern_return_t kr;
   const gchar * failed_operation;
   mach_port_t wrapper;
+
+  assigned = sscanf (address, "pipe:port=0x%x", &port);
+  g_assert (assigned == 1);
 
   kr = mach_msg (&init.header, MACH_RCV_MSG, 0, sizeof (init), port, 1, MACH_PORT_NULL);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg");
@@ -208,75 +200,6 @@ beach:
     mach_msg_destroy (&init.header);
 
     mach_port_mod_refs (mach_task_self (), port, MACH_PORT_RIGHT_RECEIVE, -1);
-
-    return fd;
-  }
-}
-
-gint
-_frida_unix_pipe_fetch_file_descriptor_from_service (const gchar * service, const gchar * uuid, const gchar * token, GError ** error)
-{
-  gint fd = -1;
-  int64_t extension_handle = -1;
-  kern_return_t kr;
-  const gchar * failed_operation;
-  mach_port_t server = MACH_PORT_NULL;
-  frida_pipe_uuid_t uuid_buf;
-  mach_port_t wrapper = MACH_PORT_NULL;
-
-  if (token != NULL)
-    extension_handle = sandbox_extension_consume (token);
-
-  kr = bootstrap_look_up (bootstrap_port, service, &server);
-  CHECK_BOOTSTRAP_RESULT (kr, ==, KERN_SUCCESS, "bootstrap_look_up");
-
-  g_strlcpy (uuid_buf, uuid, sizeof (uuid_buf));
-
-  kr = frida_piped_fetch_file_descriptor (server, uuid_buf, &wrapper);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "fetch_file_descriptor");
-
-  fd = fileport_makefd (wrapper);
-  CHECK_BSD_RESULT (fd, !=, -1, "fileport_makefd");
-
-  goto beach;
-
-bootstrap_failure:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to fetch file descriptor from %s (%s returned '%s')",
-        service, failed_operation, bootstrap_strerror (kr));
-    goto beach;
-  }
-mach_failure:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to fetch file descriptor from %s (%s returned '%s')",
-        service, failed_operation, mach_error_string (kr));
-    goto beach;
-  }
-bsd_failure:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to fetch file descriptor from %s (%s returned '%s')",
-        service, failed_operation, strerror (errno));
-    goto beach;
-  }
-beach:
-  {
-    if (wrapper != MACH_PORT_NULL)
-      mach_port_deallocate (mach_task_self (), wrapper);
-
-    if (server != MACH_PORT_NULL)
-      mach_port_deallocate (mach_task_self (), server);
-
-    if (extension_handle != -1)
-      sandbox_extension_release (extension_handle);
 
     return fd;
   }
