@@ -3,6 +3,7 @@ namespace Frida.Inject {
 
 	private static string? device_id;
 	private static string? spawn_file;
+	private static string? activity_name;
 	private static int target_pid = -1;
 	private static string? target_name;
 	private static string? realm_str;
@@ -17,6 +18,7 @@ namespace Frida.Inject {
 	const OptionEntry[] options = {
 		{ "device", 'D', 0, OptionArg.STRING, ref device_id, "connect to device with the given ID", "ID" },
 		{ "file", 'f', 0, OptionArg.STRING, ref spawn_file, "spawn FILE", "FILE" },
+		{ "activity", 'a', 0, OptionArg.STRING, ref activity_name, "Android activity to be started", "ACTIVITY" },
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, "attach to PID", "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
 		{ "realm", 'r', 0, OptionArg.STRING, ref realm_str, "attach in REALM", "REALM" },
@@ -116,7 +118,7 @@ namespace Frida.Inject {
 			return 9;
 		}
 
-		application = new Application (device_id, spawn_file, target_pid, target_name, options, script_path, script_source,
+		application = new Application (device_id, spawn_file, activity_name, target_pid, target_name, options, script_path, script_source,
 			script_runtime, parameters, enable_development);
 
 #if !WINDOWS
@@ -154,6 +156,11 @@ namespace Frida.Inject {
 		}
 
 		public string? spawn_file {
+			get;
+			construct;
+		}
+
+		public string? activity_name {
 			get;
 			construct;
 		}
@@ -206,12 +213,13 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name,
+		public Application (string? device_id, string? spawn_file, string? activity_name, int target_pid, string? target_name,
 				SessionOptions? session_options, string? script_path, string? script_source, ScriptRuntime script_runtime,
 				Json.Node parameters, bool enable_development) {
 			Object (
 				device_id: device_id,
 				spawn_file: spawn_file,
+				activity_name: activity_name,
 				target_pid: target_pid,
 				target_name: target_name,
 				session_options: session_options,
@@ -249,7 +257,13 @@ namespace Frida.Inject {
 
 				uint pid;
 				if (spawn_file != null) {
-					pid = yield device.spawn (spawn_file, null, io_cancellable);
+					var options = new SpawnOptions ();
+					if (activity_name != null) {
+						options.aux["activity"] = new Variant.string (activity_name);
+					} else {
+						options = null;
+					}
+					pid = yield device.spawn (spawn_file, options, io_cancellable);
 				} else if (target_name != null) {
 					var proc = yield device.get_process_by_name (target_name, null, io_cancellable);
 					pid = proc.pid;
