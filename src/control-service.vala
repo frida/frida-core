@@ -79,6 +79,10 @@ namespace Frida {
 		construct {
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
+			host_session.child_added.connect (notify_child_added);
+			host_session.child_removed.connect (notify_child_removed);
+			host_session.process_crashed.connect (notify_process_crashed);
+			host_session.output.connect (notify_output);
 
 			service = new WebService (endpoint_params, CONTROL);
 			service.incoming.connect (on_server_connection);
@@ -249,6 +253,12 @@ namespace Frida {
 			}
 		}
 
+		private Gee.Iterator<ControlChannel> all_control_channels () {
+			return (Gee.Iterator<ControlChannel>) peers.values.filter (peer => {
+				return (peer as ControlChannel) != null;
+			});
+		}
+
 		private async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
 			bool is_first = spawn_gaters.is_empty;
 			spawn_gaters.add (requester);
@@ -381,6 +391,34 @@ namespace Frida {
 		private void notify_spawn_removed (HostSpawnInfo info) {
 			foreach (ControlChannel channel in spawn_gaters)
 				channel.spawn_removed (info);
+		}
+
+		private void notify_output (uint pid, int fd, uint8[] data) {
+			all_control_channels ().foreach (channel => {
+				channel.output (pid, fd, data);
+				return true;
+			});
+		}
+
+		private void notify_child_added (HostChildInfo info) {
+			all_control_channels ().foreach (channel => {
+				channel.child_added (info);
+				return true;
+			});
+		}
+
+		private void notify_child_removed (HostChildInfo info) {
+			all_control_channels ().foreach (channel => {
+				channel.child_removed (info);
+				return true;
+			});
+		}
+
+		private void notify_process_crashed (CrashInfo crash) {
+			all_control_channels ().foreach (channel => {
+				channel.process_crashed (crash);
+				return true;
+			});
 		}
 
 		private void on_agent_session_expired (AgentSessionEntry entry) {
