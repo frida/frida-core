@@ -254,9 +254,7 @@ namespace Frida {
 		}
 
 		private Gee.Iterator<ControlChannel> all_control_channels () {
-			return (Gee.Iterator<ControlChannel>) peers.values.filter (peer => {
-				return (peer as ControlChannel) != null;
-			});
+			return (Gee.Iterator<ControlChannel>) peers.values.filter (peer => peer is ControlChannel);
 		}
 
 		private async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
