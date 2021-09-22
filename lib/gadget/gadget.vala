@@ -12,10 +12,10 @@ namespace Frida.Gadget {
 			default = TeardownRequirement.MINIMAL;
 		}
 
-		public RuntimeFlavor runtime {
+		public ScriptRuntime runtime {
 			get;
 			set;
-			default = RuntimeFlavor.INTERPRETER;
+			default = ScriptRuntime.DEFAULT;
 		}
 
 		public Gum.CodeSigningPolicy code_signing {
@@ -96,11 +96,6 @@ namespace Frida.Gadget {
 	private enum TeardownRequirement {
 		MINIMAL,
 		FULL
-	}
-
-	protected enum RuntimeFlavor {
-		INTERPRETER,
-		JIT
 	}
 
 	private class ScriptInteraction : Object, Json.Serializable {
@@ -894,6 +889,9 @@ namespace Frida.Gadget {
 		protected Gum.ScriptBackend get_script_backend (ScriptRuntime runtime) throws Error {
 			switch (runtime) {
 				case DEFAULT:
+					var config_runtime = config.runtime;
+					if (config_runtime != DEFAULT)
+						return get_script_backend (config_runtime);
 					break;
 				case QJS:
 					if (qjs_backend == null) {
@@ -915,9 +913,10 @@ namespace Frida.Gadget {
 					return v8_backend;
 			}
 
-			if (config.runtime == INTERPRETER)
+			try {
 				return get_script_backend (QJS);
-
+			} catch (Error e) {
+			}
 			return get_script_backend (V8);
 		}
 
