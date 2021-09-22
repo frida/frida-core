@@ -78,11 +78,12 @@ namespace Frida {
 
 		construct {
 			host_session.spawn_added.connect (notify_spawn_added);
-			host_session.agent_session_detached.connect (on_agent_session_detached);
 			host_session.child_added.connect (notify_child_added);
 			host_session.child_removed.connect (notify_child_removed);
 			host_session.process_crashed.connect (notify_process_crashed);
 			host_session.output.connect (notify_output);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
+			host_session.uninjected.connect (notify_uninjected);
 
 			service = new WebService (endpoint_params, CONTROL);
 			service.incoming.connect (on_server_connection);
@@ -391,13 +392,6 @@ namespace Frida {
 				channel.spawn_removed (info);
 		}
 
-		private void notify_output (uint pid, int fd, uint8[] data) {
-			all_control_channels ().foreach (channel => {
-				channel.output (pid, fd, data);
-				return true;
-			});
-		}
-
 		private void notify_child_added (HostChildInfo info) {
 			all_control_channels ().foreach (channel => {
 				channel.child_added (info);
@@ -419,8 +413,11 @@ namespace Frida {
 			});
 		}
 
-		private void on_agent_session_expired (AgentSessionEntry entry) {
-			sessions.unset (entry.id);
+		private void notify_output (uint pid, int fd, uint8[] data) {
+			all_control_channels ().foreach (channel => {
+				channel.output (pid, fd, data);
+				return true;
+			});
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -432,6 +429,17 @@ namespace Frida {
 					controller.agent_session_detached (id, reason, crash);
 				}
 			}
+		}
+
+		private void notify_uninjected (InjectorPayloadId id) {
+			all_control_channels ().foreach (channel => {
+				channel.uninjected (id);
+				return true;
+			});
+		}
+
+		private void on_agent_session_expired (AgentSessionEntry entry) {
+			sessions.unset (entry.id);
 		}
 
 		private void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
