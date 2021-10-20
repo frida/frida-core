@@ -790,14 +790,38 @@ namespace Frida.Droidy {
 			PROTOCOL_CHANGE
 		}
 
-		private const uint16 ADB_SERVER_PORT = 5037;
+		private const uint16 ADB_SERVER_DEFAULT_PORT = 5037;
 		private const uint16 MAX_MESSAGE_LENGTH = 1024;
 
 		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
+			string? server_host = null;
+			uint16 server_port = ADB_SERVER_DEFAULT_PORT;
+
+			string? server_socket = Environment.get_variable ("ADB_SERVER_SOCKET");
+			if (server_socket != null) {
+				MatchInfo info;
+				if (/^tcp:([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
+					server_host = info.fetch (1);
+					server_port = (uint16) uint.parse (info.fetch (2));
+				} else if (/^tcp:([\d]+)$/.match (server_socket, 0, out info)) {
+					server_port = (uint16) uint.parse (info.fetch (1));
+				} else {
+					throw new Error.INVALID_ARGUMENT ("Bad ADB_SERVER_SOCKET environment variable (%s)", server_socket);
+				}
+			} else {
+				server_host = Environment.get_variable ("ANDROID_ADB_SERVER_ADDRESS");
+				string? server_port_str = Environment.get_variable ("ANDROID_ADB_SERVER_PORT");
+				if (server_port_str != null)
+					server_port = (uint16) uint.parse (server_port_str);
+			}
+
 			IOStream stream;
 			try {
 				var client = new SocketClient ();
-				var connection = yield client.connect_async (new NetworkAddress.loopback (ADB_SERVER_PORT), cancellable);
+				NetworkAddress address = (server_host != null)
+					? new NetworkAddress (server_host, server_port)
+					: new NetworkAddress.loopback (server_port);
+				var connection = yield client.connect_async (address, cancellable);
 
 				Tcp.enable_nodelay (connection.socket);
 
