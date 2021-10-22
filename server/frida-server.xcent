@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>research.com.apple.license-to-operate</key>
+	<true/>
 	<key>abs-client</key>
 	<string>143531244</string>
 	<key>adi-client</key>
@@ -295,6 +301,8 @@
 	<key>com.apple.seld.cm</key>
 	<true/>
 	<key>com.apple.sh</key>
+	<true/>
+	<key>com.apple.private.cs.debugger</key>
 	<true/>
 	<key>com.apple.springboard.debugapplications</key>
 	<true/>
