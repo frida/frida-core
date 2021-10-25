@@ -8,6 +8,10 @@
 # include <errno.h>
 # include <mach/mach.h>
 
+# ifndef TASK_SEATBELT_PORT
+# define TASK_SEATBELT_PORT 7
+# endif
+
 typedef int (* JbdCallFunc) (mach_port_t service_port, guint command, guint pid);
 
 extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, char * service_name, mach_port_t * service_port);
