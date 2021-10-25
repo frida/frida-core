@@ -336,8 +336,13 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);
 #else
-			id = yield fruitjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, agent_parameters,
-				cancellable);
+			string agent_path = Config.FRIDA_AGENT_PATH;
+#if IOS
+			unowned string? cryptex_path = Environment.get_variable ("CRYPTEX_MOUNT_PATH");
+			if (cryptex_path != null)
+				agent_path = cryptex_path + agent_path;
+#endif
+			id = yield fruitjector.inject_library_file (pid, agent_path, entrypoint, agent_parameters, cancellable);
 #endif
 
 			return id;
