@@ -515,7 +515,9 @@ namespace Frida {
 		private void teardown_cluster_node (ClusterNode node) {
 			var no_crash = CrashInfo.empty ();
 			foreach (var id in node.sessions) {
-				AgentSessionEntry entry = sessions[id];
+				AgentSessionEntry? entry = sessions[id];
+				if (entry == null)
+					continue;
 
 				ControlChannel? c = entry.controller;
 				if (c != null)
