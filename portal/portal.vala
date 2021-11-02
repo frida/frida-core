@@ -31,7 +31,7 @@ namespace Frida.Portal {
 		{ "control-token", 0, 0, OptionArg.STRING, ref control_token, "Require authentication on control endpoint using TOKEN",
 			"TOKEN" },
 		{ "control-asset-root", 0, 0, OptionArg.FILENAME, ref control_asset_root, "Serve static files inside ROOT on control " +
-			"endpoint by default no files are served)", "ROOT" },
+			"endpoint (by default no files are served)", "ROOT" },
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
