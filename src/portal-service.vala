@@ -489,12 +489,13 @@ namespace Frida {
 				AgentSession? session = entry.session;
 				if (entry.persist_timeout == 0 || session == null) {
 					sessions.unset (id);
-					if (session != null)
-						session.close.begin (io_cancellable);
 
 					ClusterNode? node = entry.node;
 					if (node != null)
 						node.sessions.remove (id);
+
+					if (session != null)
+						session.close.begin (io_cancellable);
 				} else {
 					entry.detach_controller ();
 					session.interrupt.begin (io_cancellable);
@@ -845,10 +846,6 @@ namespace Frida {
 			ClusterNode? node = entry.node;
 			if (node != null)
 				node.sessions.remove (entry.id);
-
-			ControlChannel? controller = entry.controller;
-			if (controller != null)
-				controller.sessions.remove (entry.id);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {
