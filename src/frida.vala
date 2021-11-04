@@ -2343,6 +2343,7 @@ namespace Frida {
 			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, ICE_TRICKLE);
 			agent.set_software ("Frida");
 			agent.controlling_mode = true;
+			agent.ice_tcp = false;
 
 			uint stream_id = agent.add_stream (1);
 			if (stream_id == 0)
