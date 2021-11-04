@@ -525,9 +525,8 @@ namespace Frida {
 				var candidates = new SList<Nice.Candidate> ();
 				foreach (unowned string sdp in candidate_sdps_copy) {
 					var candidate = agent.parse_remote_candidate_sdp (nice_stream_id, sdp);
-					if (candidate == null)
-						return false;
-					candidates.append (candidate);
+					if (candidate != null)
+						candidates.append (candidate);
 				}
 
 				agent.set_remote_candidates (nice_stream_id, nice_component_id, candidates);
