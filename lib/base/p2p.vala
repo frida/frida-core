@@ -527,8 +527,6 @@ namespace Frida {
 	}
 
 	public class SctpConnection : IOStream {
-		public signal void event ();
-
 		public DatagramBased transport_socket {
 			get;
 			construct;
