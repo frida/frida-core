@@ -170,8 +170,6 @@ namespace Frida {
 	}
 
 	public class PeerSocket : Object, DatagramBased {
-		public signal void received (Bytes packet);
-
 		public Nice.Agent agent {
 			get;
 			construct;
@@ -192,17 +190,23 @@ namespace Frida {
 			construct;
 		}
 
-		public uint recv_queue_size {
+		public IOCondition pending_io {
 			get {
-				return recv_queue.size;
+				mutex.lock ();
+				IOCondition result = _pending_io;
+				mutex.unlock ();
+				return result;
 			}
 		}
 
 		private Nice.ComponentState component_state;
 		private RecvState recv_state = NOT_RECEIVING;
 		private Gee.Queue<Bytes> recv_queue = new Gee.ArrayQueue<Bytes> ();
+		private IOCondition _pending_io = 0;
 		private Mutex mutex = Mutex ();
 		private Cond cond = Cond ();
+
+		private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
 		private enum RecvState {
 			NOT_RECEIVING,
@@ -238,6 +242,7 @@ namespace Frida {
 			while (received != messages.length && io_error == null) {
 				mutex.lock ();
 				Bytes? bytes = recv_queue.poll ();
+				update_pending_io ();
 				mutex.unlock ();
 
 				if (bytes != null) {
@@ -385,12 +390,25 @@ namespace Frida {
 			assert_not_reached ();
 		}
 
+		public void register_source (Source source, IOCondition condition) {
+			mutex.lock ();
+			sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
+			mutex.unlock ();
+		}
+
+		public void unregister_source (Source source) {
+			mutex.lock ();
+			sources.unset (source);
+			mutex.unlock ();
+		}
+
 		private void on_component_state_changed (uint stream_id, uint component_id, Nice.ComponentState state) {
 			if (stream_id != this.stream_id || component_id != this.component_id)
 				return;
 
 			mutex.lock ();
 			component_state = state;
+			update_pending_io ();
 			cond.broadcast ();
 			mutex.unlock ();
 		}
@@ -400,10 +418,40 @@ namespace Frida {
 
 			mutex.lock ();
 			recv_queue.offer (packet);
+			update_pending_io ();
 			cond.broadcast ();
 			mutex.unlock ();
+		}
 
-			received (packet);
+		private void update_pending_io () {
+			IOCondition condition = 0;
+
+			if (!recv_queue.is_empty)
+				condition |= IOCondition.IN;
+
+			switch (component_state) {
+				case CONNECTED:
+				case READY:
+					condition |= IOCondition.OUT;
+					break;
+				case FAILED:
+					condition |= IOCondition.ERR;
+					break;
+				default:
+					break;
+			}
+
+			if (condition == _pending_io)
+				return;
+
+			_pending_io = condition;
+
+			foreach (var entry in sources.entries) {
+				Source source = entry.key;
+				IOCondition c = entry.value;
+				if ((_pending_io & c) != 0)
+					source.set_ready_time (0);
+			}
 		}
 
 		private void prepare_for_io (int64 timeout, Cancellable? cancellable, out int64 deadline) throws IOError {
@@ -488,20 +536,20 @@ namespace Frida {
 			this.condition = condition;
 			this.cancellable = cancellable;
 
-			socket.received.connect (on_packet_received);
+			socket.register_source (this, condition);
 		}
 
 		~PeerSocketSource () {
-			socket.received.disconnect (on_packet_received);
+			socket.unregister_source (this);
 		}
 
 		protected override bool prepare (out int timeout) {
 			timeout = -1;
-			return query_pending () != 0;
+			return (socket.pending_io & condition) != 0;
 		}
 
 		protected override bool check () {
-			return query_pending () != 0;
+			return (socket.pending_io & condition) != 0;
 		}
 
 		protected override bool dispatch (SourceFunc? callback) {
@@ -511,18 +559,7 @@ namespace Frida {
 				return Source.REMOVE;
 
 			DatagramBasedSourceFunc f = (DatagramBasedSourceFunc) callback;
-			return f (socket, query_pending ());
-		}
-
-		private IOCondition query_pending () {
-			IOCondition c = 0;
-			if ((condition & IOCondition.IN) != 0 && socket.recv_queue_size > 0)
-				c |= IN;
-			return c;
-		}
-
-		private void on_packet_received (Bytes packet) {
-			set_ready_time (0);
+			return f (socket, socket.pending_io);
 		}
 	}
 
@@ -699,7 +736,7 @@ namespace Frida {
 
 		public void register_source (Source source, IOCondition condition) {
 			lock (state)
-				sources[source] = condition;
+				sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
 		}
 
 		public void unregister_source (Source source) {
