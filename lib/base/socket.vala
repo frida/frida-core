@@ -327,10 +327,23 @@ namespace Frida {
 		}
 
 		public void stop () {
-			if (server != null)
-				server.disconnect ();
-
 			io_cancellable.cancel ();
+
+			schedule_on_dbus_thread (() => {
+				do_stop ();
+				return false;
+			});
+		}
+
+		private void do_stop () {
+			if (server == null)
+				return;
+
+			if (endpoint_params.asset_root != null)
+				server.remove_handler ("/");
+			server.remove_handler ("/ws");
+
+			server.disconnect ();
 		}
 
 		private void on_websocket_opened (Soup.Server server, Soup.WebsocketConnection connection, string path,
