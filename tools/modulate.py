@@ -137,6 +137,22 @@ class ModuleEditor(object):
                 (value,) = struct.unpack(pointer_format, data[i:i + pointer_size])
                 values.append(value)
 
+            if layout.file_format == 'elf' and pointer_size == 8:
+                pending = {}
+                for i, val in enumerate(values):
+                    pending[section.virtual_address + (i * pointer_size)] = i
+
+                reloc_section = layout.sections['.rela.dyn']
+                for offset, r_offset in self._enumerate_rela_dyn_entries(reloc_section):
+                    index = pending.pop(r_offset, None)
+                    if index is not None:
+                        r_addend_offset = reloc_section.file_offset + offset + (2 * pointer_size)
+                        self.module.seek(r_addend_offset)
+                        (value,) = struct.unpack(pointer_format, self.module.read(pointer_size))
+                        values[index] = value
+
+                assert len(pending) == 0
+
         elements = []
         is_macho = layout.file_format == 'mach-o'
         is_arm = layout.arch_name == 'arm'
@@ -214,24 +230,30 @@ class ModuleEditor(object):
                     pending[vector.virtual_address + (i * pointer_size)] = pointer
 
                 reloc_section = layout.sections['.rela.dyn']
-                reloc_data = self._read_section_data(reloc_section)
-
-                offset = 0
-                size = len(reloc_data)
-                rela_item_size = 3 * pointer_size
-
-                while offset != size:
-                    (r_offset,) = struct.unpack(pointer_format, reloc_data[offset:offset + pointer_size])
-
+                for offset, r_offset in self._enumerate_rela_dyn_entries(reloc_section):
                     pointer = pending.pop(r_offset, None)
                     if pointer is not None:
                         r_addend_offset = reloc_section.file_offset + offset + (2 * pointer_size)
                         destination.seek(r_addend_offset)
                         destination.write(struct.pack(pointer_format, pointer.value))
 
-                    offset += rela_item_size
-
                 assert len(pending) == 0
+
+    def _enumerate_rela_dyn_entries(self, section):
+        layout = self.layout
+        pointer_format = layout.pointer_format
+        pointer_size = layout.pointer_size
+
+        data = self._read_section_data(section)
+        offset = 0
+        size = len(data)
+        rela_item_size = 3 * pointer_size
+
+        while offset != size:
+            (r_offset,) = struct.unpack(pointer_format, data[offset:offset + pointer_size])
+            yield (offset, r_offset)
+
+            offset += rela_item_size
 
 
 class Toolchain(object):
