@@ -9,8 +9,9 @@ import subprocess
 import sys
 
 
-elf_format_pattern = re.compile(r"file format ([\w-]+).+architecture: (\w+)", re.DOTALL)
-elf_section_pattern = re.compile(r"^\s*\d+\s+([\w\.-]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+2\*\*(\d+)$", re.MULTILINE)
+elf_class_pattern = re.compile(r"^\s+Class:\s+(.+)$", re.MULTILINE)
+elf_machine_pattern = re.compile(r"^\s+Machine:\s+(.+)$", re.MULTILINE)
+elf_section_pattern = re.compile(r"^\s+\[\s*\d+]\s+(\S+)?\s+[A-Z]\S+\s+(\S+)\s+(\S+)\s+(\S+)", re.MULTILINE)
 macho_section_pattern = re.compile(r"^\s+sectname\s+(\w+)\n\s+segname\s+(\w+)\n\s+addr\s+0x([0-9a-f]+)\n\s+size\s+0x([0-9a-f]+)\n\s+offset\s+(\d+)$", re.MULTILINE)
 
 
@@ -27,7 +28,7 @@ def main():
     parser.add_argument("--output", metavar="/path/to/output/module", type=str)
 
     parser.add_argument("--nm", metavar="/path/to/nm", type=str, default=None)
-    parser.add_argument("--objdump", metavar="/path/to/objdump", type=str, default=None)
+    parser.add_argument("--readelf", metavar="/path/to/readelf", type=str, default=None)
     parser.add_argument("--otool", metavar="/path/to/otool", type=str, default=None)
     parser.add_argument("--strip", metavar="/path/to/strip", type=str, default=None)
 
@@ -236,7 +237,7 @@ class ModuleEditor(object):
 class Toolchain(object):
     def __init__(self):
         self.nm = "nm"
-        self.objdump = "objdump"
+        self.readelf = "readelf"
         self.otool = "otool"
         self.strip = None
 
@@ -252,15 +253,20 @@ class Layout(object):
         file_format = 'elf' if magic == b"\x7fELF" else 'mach-o'
 
         if file_format == 'elf':
-            output = subprocess.check_output([toolchain.objdump, "-fh", binary_path]).decode('utf-8')
+            output = subprocess.check_output([toolchain.readelf, "--file-header", "--section-headers", binary_path]).decode('utf-8')
 
-            elf_format, arch_name = elf_format_pattern.search(output).groups()
-            pointer_size = 4 if elf_format.startswith("elf32") else 8
+            elf_class = elf_class_pattern.search(output).group(1)
+            elf_machine = elf_machine_pattern.search(output).group(1)
+
+            pointer_size = 8 if elf_class == "ELF64" else 4
+            arch_name = elf_machine.split(" ")[-1].replace("-", "_").lower()
+            if arch_name == "aarch64":
+                arch_name = "arm64"
 
             sections = {}
             for m in elf_section_pattern.finditer(output):
-                name, size, vma, lma, file_offset, alignment = m.groups()
-                sections[name] = Section(name, int(size, 16), int(vma, 16), int(lma, 16), int(file_offset, 16))
+                name, address, offset, size = m.groups()
+                sections[name] = Section(name, int(size, 16), int(address, 16), int(offset, 16))
         else:
             output = subprocess.check_output([toolchain.otool, "-l", binary_path]).decode('utf-8')
 
@@ -273,7 +279,7 @@ class Layout(object):
             for m in macho_section_pattern.finditer(output):
                 section_name, segment_name, address, size, offset = m.groups()
                 name = segment_name + "." + section_name
-                sections[name] = Section(name, int(size, 16), int(address, 16), None, int(offset, 10))
+                sections[name] = Section(name, int(size, 16), int(address, 16), int(offset, 10))
 
         symbols = Symbols.from_file(binary_path, pointer_size, toolchain)
 
@@ -363,11 +369,10 @@ class SymbolNotFound(ValueError):
 
 
 class Section(object):
-    def __init__(self, name, size, virtual_address, load_address, file_offset):
+    def __init__(self, name, size, virtual_address, file_offset):
         self.name = name
         self.size = size
         self.virtual_address = virtual_address
-        self.load_address = load_address
         self.file_offset = file_offset
 
     def __repr__(self):

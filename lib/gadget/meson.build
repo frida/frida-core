@@ -82,7 +82,7 @@ modulated_gadget = custom_target('frida-gadget-modulated',
     ] + operations + endian_option + [
     '--output', '@OUTPUT@',
     '--nm', meson.get_cross_binary('nm', 'nm'),
-    '--objdump', meson.get_cross_binary('objdump', 'objdump'),
+    '--readelf', meson.get_cross_binary('readelf', 'readelf'),
     '--otool', meson.get_cross_binary('otool', 'otool'),
   ],
 )
