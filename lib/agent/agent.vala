@@ -1213,7 +1213,7 @@ namespace Frida.Agent {
 		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
 			switch (message.get_message_type ()) {
 				case DBusMessageType.METHOD_CALL:
-					if (incoming) {
+					if (incoming && (message.get_flags () & DBusMessageFlags.NO_REPLY_EXPECTED) == 0) {
 						lock (pending_calls) {
 							pending_calls++;
 						}
