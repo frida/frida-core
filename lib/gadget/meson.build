@@ -64,7 +64,7 @@ if host_os_family != 'darwin'
   ]
 endif
 if get_option('strip')
-  operations += ['--strip', meson.get_cross_binary('strip', 'strip')]
+  operations += ['--strip', strip]
 endif
 
 if host_machine.endian() == 'little'
@@ -81,9 +81,9 @@ modulated_gadget = custom_target('frida-gadget-modulated',
     '@INPUT@',
     ] + operations + endian_option + [
     '--output', '@OUTPUT@',
-    '--nm', meson.get_cross_binary('nm', 'nm'),
-    '--readelf', meson.get_cross_binary('readelf', 'readelf'),
-    '--otool', meson.get_cross_binary('otool', 'otool'),
+    '--nm', nm,
+    '--readelf', readelf,
+    '--otool', otool,
   ],
 )
 
@@ -104,7 +104,7 @@ custom_target('frida-gadget',
     '@OUTPUT@',
     identity,
     host_os,
-    meson.get_cross_binary('strip', 'strip'),
+    strip,
     get_option('strip').to_string(),
   ],
   install: true,

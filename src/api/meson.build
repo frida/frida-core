@@ -43,8 +43,8 @@ custom_target('frida-core-library',
   output: 'libfrida-core-@0@.a'.format(api_version),
   command: [
     files('merge.sh'),
-    meson.get_cross_binary('ar', ''),
-    meson.get_cross_binary('libtool', ''),
+    ar,
+    libtool,
     meson.current_build_dir(),
     '@OUTPUT@',
     '@INPUT@'

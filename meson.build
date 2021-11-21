@@ -232,6 +232,28 @@ endif
 
 resource_compiler = find_program('frida-resource-compiler')
 
+if host_os_family != 'windows'
+  ar = find_program('ar')
+  nm = find_program('nm')
+  if host_os_family == 'darwin'
+    readelf = ''
+    otool = find_program('otool')
+    libtool = find_program('libtool')
+  else
+    readelf = find_program('readelf')
+    otool = ''
+    libtool = ''
+  endif
+  strip = find_program('strip')
+else
+  ar = ''
+  nm = ''
+  readelf = ''
+  otool = ''
+  libtool = ''
+  strip = ''
+endif
+
 modulate = files('tools/modulate.py')
 post_process_module = files('tools/post-process-module.sh')
 
