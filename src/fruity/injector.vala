@@ -844,8 +844,8 @@ namespace Frida.Fruity.Injector {
 			yield init_breakpoint.remove (cancellable);
 
 			uint64 frame_pointer = exception.context["fp"];
-
 			frame_pointer = yield lldb.read_pointer (frame_pointer, cancellable);
+
 			uint64 libsystem_initializer_caller = yield lldb.read_pointer (frame_pointer + 8, cancellable);
 			libsystem_initializer_caller = lldb.strip_code_address (libsystem_initializer_caller);
 
