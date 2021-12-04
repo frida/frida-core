@@ -108,10 +108,15 @@ gadget_name = 'frida-gadget' + shlib_suffix
 
 if host_os_family == 'darwin'
   asset_dir = get_option('libdir') / 'frida'
-  asset_path_template = get_option('prefix') / get_option('libdir') / 'frida'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida'
 else
   asset_dir = get_option('libdir') / 'frida' / host_cpu_mode
-  asset_path_template = get_option('prefix') / get_option('libdir') / 'frida' / '<arch>'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida' / '<arch>'
+endif
+
+asset_path_template = get_option('asset_path_template')
+if asset_path_template == ''
+  asset_path_template = default_asset_path_template
 endif
 
 if get_option('assets') == 'embedded'

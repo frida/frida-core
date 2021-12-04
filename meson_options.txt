@@ -5,6 +5,12 @@ option('assets',
   description: 'Whether assets such as frida-agent should be embedded vs installed and loaded at runtime'
 )
 
+option('asset_path_template',
+  type: 'string',
+  value: '',
+  description: 'Override the default installed asset path template'
+)
+
 option('mapper',
   type: 'feature',
   value: 'auto',
