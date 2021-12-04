@@ -169,7 +169,7 @@ frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_na
   gchar ** cursor;
   gchar * stat_path = NULL;
   gchar * stat_data = NULL;
-  int n, ppid;
+  int ppid;
   guint64 start_time_delta_in_jiffies;
   static gsize caches_initialized = 0;
   static GDateTime * boot_time = NULL;
@@ -189,8 +189,7 @@ frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_na
     {
       uid_t uid;
 
-      n = sscanf (line + 4, "%*u %u %*u %*u", &uid);
-      g_assert (n == 1);
+      sscanf (line + 4, "%*u %u %*u %*u", &uid);
 
       g_hash_table_insert (parameters, g_strdup ("user"), frida_uid_to_name (uid));
 
@@ -202,7 +201,7 @@ frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_na
   if (!g_file_get_contents (stat_path, &stat_data, NULL, NULL))
     goto beach;
 
-  n = sscanf (stat_data,
+  sscanf (stat_data,
       "%*d "                       /* ( 1) pid         */
       "(%*[^)]) "                  /* ( 2) comm        */
       "%*c "                       /* ( 3) state       */
@@ -227,7 +226,6 @@ frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_na
       "%" G_GINT64_MODIFIER "u ",  /* (22) starttime   */
       &ppid,
       &start_time_delta_in_jiffies);
-  g_assert (n == 2);
 
   g_hash_table_insert (parameters, g_strdup ("ppid"), g_variant_ref_sink (g_variant_new_int64 (ppid)));
 
@@ -275,10 +273,8 @@ frida_query_boot_time (void)
     if (g_str_has_prefix (line, "btime "))
     {
       gint64 unix_utc_time;
-      gboolean valid;
 
-      valid = g_ascii_string_to_signed (line + 6, 10, G_MININT64, G_MAXINT64, &unix_utc_time, NULL);
-      g_assert (valid);
+      g_ascii_string_to_signed (line + 6, 10, G_MININT64, G_MAXINT64, &unix_utc_time, NULL);
 
       boot_time = g_date_time_new_from_unix_utc (unix_utc_time);
 
