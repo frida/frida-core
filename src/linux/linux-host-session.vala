@@ -209,7 +209,7 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 			tpl = agent.get_path_template ();
 #else
-			tpl = new PathTemplate (Config.FRIDA_AGENT_PATH);
+			tpl = PathTemplate (Config.FRIDA_AGENT_PATH);
 #endif
 			string path = tpl.expand (sizeof (void *) == 8 ? "64" : "32");
 			system_session_container = yield AgentContainer.create (path, cancellable);
