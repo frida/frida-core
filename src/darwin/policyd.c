@@ -17,7 +17,7 @@ struct _FridaPolicydRequest
   mach_msg_trailer_t trailer;
 };
 
-extern kern_return_t bootstrap_register (mach_port_t bp, const char * service_name, mach_port_t sp);
+extern kern_return_t bootstrap_check_in (mach_port_t bp, const char * service_name, mach_port_t * sp);
 extern int ptrace (int request, pid_t pid, void * addr, int data);
 
 #define frida_policyd_soften frida_policyd_do_soften
@@ -31,10 +31,7 @@ frida_policyd_main (void)
 
   signal (SIGCHLD, SIG_IGN);
 
-  kr = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &listening_port);
-  g_assert (kr == KERN_SUCCESS);
-
-  kr = bootstrap_register (bootstrap_port, FRIDA_POLICYD_SERVICE_NAME, listening_port);
+  kr = bootstrap_check_in (bootstrap_port, FRIDA_POLICYD_SERVICE_NAME, &listening_port);
   if (kr != KERN_SUCCESS)
     goto checkin_error;
 
