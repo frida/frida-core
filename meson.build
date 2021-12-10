@@ -205,14 +205,14 @@ if host_os == 'android'
   backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
-tls_provider_dep = dependency('gioopenssl', required: false)
+tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
 if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
   backend_deps_private += tls_provider_dep
 endif
 
-nice_dep = dependency('nice', required: false)
+nice_dep = dependency('nice', required: get_option('connectivity'))
 if nice_dep.found()
   openssl_dep = dependency('openssl')
   usrsctp_dep = dependency('usrsctp')

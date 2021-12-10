@@ -47,6 +47,12 @@ option('agent_emulated_legacy',
   description: 'Prebuilt agent to embed for use on legacy emulated targets'
 )
 
+option('connectivity',
+  type: 'feature',
+  value: 'auto',
+  description: 'Internet connectivity features (TLS and ICE support)'
+)
+
 option('mapper',
   type: 'feature',
   value: 'auto',
