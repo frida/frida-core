@@ -211,7 +211,7 @@ namespace Frida {
 #else
 			tpl = PathTemplate (Config.FRIDA_AGENT_PATH);
 #endif
-			string path = tpl.expand (sizeof (void *) == 8 ? "64" : "32");
+			string path = tpl.expand ((sizeof (void *) == 8) ? "64" : "32");
 			system_session_container = yield AgentContainer.create (path, cancellable);
 
 			connection = system_session_container.connection;
