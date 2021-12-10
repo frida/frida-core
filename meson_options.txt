@@ -11,12 +11,6 @@ option('asset_path_template',
   description: 'Override the default installed asset path template'
 )
 
-option('mapper',
-  type: 'feature',
-  value: 'auto',
-  description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
-)
-
 option('helper_modern',
   type: 'string',
   value: '',
@@ -51,6 +45,12 @@ option('agent_emulated_legacy',
   type: 'string',
   value: '',
   description: 'Prebuilt agent to embed for use on legacy emulated targets'
+)
+
+option('mapper',
+  type: 'feature',
+  value: 'auto',
+  description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
 )
 
 option('tests',
