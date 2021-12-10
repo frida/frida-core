@@ -615,11 +615,13 @@ namespace Frida {
 				FileUtils.chmod (helper64.path, 0700);
 			}
 #else
-			HelperFile file = new InstalledHelperFile.for_path (Config.FRIDA_HELPER_PATH);
+			var tpl = PathTemplate (Config.FRIDA_HELPER_PATH);
+			string path = tpl.expand ((sizeof (void *) == 8) ? "32" : "64");
+			HelperFile file = new InstalledHelperFile.for_path (path);
 			if (sizeof (void *) == 8)
-				helper64 = file;
-			else
 				helper32 = file;
+			else
+				helper64 = file;
 #endif
 		}
 	}
