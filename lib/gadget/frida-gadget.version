@@ -1,4 +1,4 @@
-LIBFRIDA_GADGET_1.0 {
+{
   local:
     *;
 };
