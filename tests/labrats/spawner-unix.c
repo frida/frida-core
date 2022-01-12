@@ -16,6 +16,8 @@
 #ifdef __APPLE__
 # define environ (* _NSGetEnviron ())
 extern char *** _NSGetEnviron (void);
+#else
+extern char ** environ;
 #endif
 #ifdef HAVE_POSIX_SPAWN
 # include <spawn.h>
