@@ -13,6 +13,7 @@ base_sources = [
 windows_sources = []
 darwin_sources = []
 linux_sources = []
+freebsd_sources = []
 qnx_sources = []
 
 backend_vala_args = []
@@ -275,6 +276,16 @@ if host_os_family == 'linux'
   backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0']
 endif
 
+if host_os_family == 'freebsd'
+  freebsd_sources = [
+    'freebsd/freebsd-host-session.vala',
+    'freebsd/binjector.vala',
+    'freebsd/binjector-glue.c',
+    'freebsd/system-freebsd.c',
+  ]
+  backend_vala_args += ['--pkg=posix']
+endif
+
 if host_os_family == 'qnx'
   qnx_sources = [
     'qnx/qnx-host-session.vala',
@@ -352,7 +363,7 @@ droidy_sources = [
   'droidy/injector.vala',
 ]
 
-local_sources = windows_sources + darwin_sources + linux_sources + qnx_sources + [agent_data]
+local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sources + qnx_sources + [agent_data]
 remote_sources = socket_sources + fruity_sources + droidy_sources
 
 core_sources = base_sources + local_sources + remote_sources

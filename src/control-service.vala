@@ -56,6 +56,9 @@ namespace Frida {
 			var tempdir = new TemporaryDirectory ();
 			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir, opts.report_crashes);
 #endif
+#if FREEBSD
+			host_session = new FreebsdHostSession ();
+#endif
 #if QNX
 			host_session = new QnxHostSession ();
 #endif

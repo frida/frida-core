@@ -92,6 +92,9 @@ namespace Frida.Test {
 			case OS.ANDROID:
 				os_name = "android";
 				break;
+			case OS.FREEBSD:
+				os_name = "freebsd";
+				break;
 			case OS.QNX:
 				os_name = "qnx";
 				break;
@@ -138,6 +141,7 @@ namespace Frida.Test {
 			case OS.LINUX:
 			case OS.IOS:
 			case OS.ANDROID:
+			case OS.FREEBSD:
 			case OS.QNX:
 				return "";
 			default:
@@ -154,6 +158,7 @@ namespace Frida.Test {
 				return ".dylib";
 			case OS.LINUX:
 			case OS.ANDROID:
+			case OS.FREEBSD:
 			case OS.QNX:
 				return ".so";
 			default:
@@ -167,6 +172,7 @@ namespace Frida.Test {
 		LINUX,
 		IOS,
 		ANDROID,
+		FREEBSD,
 		QNX
 	}
 
@@ -190,6 +196,7 @@ namespace Frida.Test {
 		GLIBC,
 		UCLIBC,
 		BIONIC,
+		FREEBSD,
 		QNX
 	}
 }

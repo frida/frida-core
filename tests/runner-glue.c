@@ -82,6 +82,8 @@ frida_test_os (void)
   return FRIDA_TEST_OS_ANDROID;
 #elif defined (HAVE_LINUX)
   return FRIDA_TEST_OS_LINUX;
+#elif defined (HAVE_FREEBSD)
+  return FRIDA_TEST_OS_FREEBSD;
 #elif defined (HAVE_QNX)
   return FRIDA_TEST_OS_QNX;
 #endif
@@ -120,6 +122,8 @@ frida_test_libc (void)
   return FRIDA_TEST_LIBC_UCLIBC;
 #elif defined (HAVE_ANDROID)
   return FRIDA_TEST_LIBC_BIONIC;
+#elif defined (HAVE_FREEBSD)
+  return FRIDA_TEST_LIBC_FREEBSD;
 #elif defined (HAVE_QNX)
   return FRIDA_TEST_LIBC_QNX;
 #endif

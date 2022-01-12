@@ -50,7 +50,7 @@ case $host_os in
 
     exec "$resource_compiler" --toolchain=apple -c "$resource_config" -o "$output_dir/frida-data-agent" "$embedded_agent"
     ;;
-  qnx)
+  freebsd|qnx)
     embedded_agent="$priv_dir/frida-agent.so"
 
     if [ -f "$agent_modern" ]; then

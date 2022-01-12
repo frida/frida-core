@@ -1167,6 +1167,8 @@ namespace Frida {
 		id = "ios";
 #elif ANDROID
 		id = "android";
+#elif FREEBSD
+		id = "freebsd";
 #elif QNX
 		id = "qnx";
 #else
@@ -1222,6 +1224,8 @@ namespace Frida {
 		platform = "darwin";
 #elif LINUX
 		platform = "linux";
+#elif FREEBSD
+		platform = "freebsd";
 #elif QNX
 		platform = "qnx";
 #else

@@ -216,6 +216,23 @@ frida_collect_file_descriptors (guint pid, FridaProcessHandle process)
 
 #endif
 
+#ifdef HAVE_FREEBSD
+
+static FridaProcessHandle
+frida_open_process (guint pid, guint * real_pid)
+{
+  *real_pid = (pid != 0) ? pid : getpid ();
+
+  return NULL;
+}
+
+static void
+frida_close_process (FridaProcessHandle process, guint pid)
+{
+}
+
+#endif
+
 static const FridaMetricCollectorEntry frida_metric_collectors[] =
 {
 #ifdef HAVE_WINDOWS

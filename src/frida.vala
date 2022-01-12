@@ -3185,6 +3185,9 @@ namespace Frida {
 			var helper = new LinuxHelperProcess (tempdir);
 			return new Linjector (helper, true, tempdir);
 #endif
+#if FREEBSD
+			return new Binjector ();
+#endif
 #if QNX
 			return new Qinjector ();
 #endif
@@ -3205,6 +3208,9 @@ namespace Frida {
 			var tempdir = new TemporaryDirectory ();
 			var helper = new LinuxHelperBackend ();
 			return new Linjector (helper, true, tempdir);
+#endif
+#if FREEBSD
+			return new Binjector ();
 #endif
 #if QNX
 			return new Qinjector ();
