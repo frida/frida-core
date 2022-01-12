@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 input_path="$1"
 output_path="$2"

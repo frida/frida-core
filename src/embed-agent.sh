@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 agent_modern="$1"
 agent_legacy="$2"

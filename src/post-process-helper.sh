@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 input_helper_path="$1"
 input_entitlements_path="$2"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 helper_modern="$1"
 helper_legacy="$2"
