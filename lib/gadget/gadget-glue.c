@@ -80,6 +80,7 @@ void
 frida_gadget_environment_init (void)
 {
   gum_init_embedded ();
+  gio_init ();
 
   g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
 
@@ -124,6 +125,9 @@ frida_gadget_environment_deinit (void)
   g_main_context_unref (main_context);
   main_context = NULL;
 
+  gum_shutdown ();
+  gio_shutdown ();
+  gio_deinit ();
   gum_deinit_embedded ();
 
   frida_run_atexit_handlers ();

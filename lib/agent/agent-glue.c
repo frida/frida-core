@@ -17,6 +17,7 @@ void
 _frida_agent_environment_init (void)
 {
   gum_init_embedded ();
+  gio_init ();
 
   g_thread_set_garbage_handler (_frida_agent_on_pending_thread_garbage, NULL);
 
@@ -39,6 +40,9 @@ _frida_agent_environment_init (void)
 void
 _frida_agent_environment_deinit (void)
 {
+  gum_shutdown ();
+  gio_shutdown ();
+  gio_deinit ();
   gum_deinit_embedded ();
 
   frida_run_atexit_handlers ();
