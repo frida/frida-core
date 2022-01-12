@@ -51,6 +51,16 @@ if host_os == 'android'
   ]
 endif
 
+if host_os == 'freebsd'
+  labrat_files += [
+    'sleeper-freebsd-' + host_abi,
+    'forker-freebsd-' + host_abi,
+    'spawner-freebsd-' + host_abi,
+    'simple-agent-freebsd-' + host_abi + '.so',
+    'resident-agent-freebsd-' + host_abi + '.so',
+  ]
+endif
+
 if host_os == 'qnx'
   labrat_files += [
     'sleeper-qnx-arm',
