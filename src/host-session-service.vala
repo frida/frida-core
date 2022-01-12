@@ -34,6 +34,9 @@ namespace Frida {
 #if LINUX
 			add_backend (new LinuxHostSessionBackend ());
 #endif
+#if FREEBSD
+			add_backend (new FreebsdHostSessionBackend ());
+#endif
 #if QNX
 			add_backend (new QnxHostSessionBackend ());
 #endif
