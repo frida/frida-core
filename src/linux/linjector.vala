@@ -47,15 +47,19 @@ namespace Frida {
 		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
 			ensure_tempdir_prepared ();
+
 			uint id = next_injectee_id++;
 			yield helper.inject_library_file (pid, path_template, entrypoint, data, tempdir.path, id, cancellable);
+
 			pid_by_id[id] = pid;
+
 			return id;
 		}
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
 			ensure_tempdir_prepared ();
+
 			var name = "blob%u.so".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
 			var path = file.path;
