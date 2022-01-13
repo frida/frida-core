@@ -76,7 +76,7 @@ softening_failed:
           FRIDA_ERROR,
           FRIDA_ERROR_PERMISSION_DENIED,
           "%s while attempting to soften target process",
-          strerror (error_code));
+          g_strerror (error_code));
     }
 
     return;

@@ -533,7 +533,7 @@ bsd_failure:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
-        remote_pid, failed_operation, strerror (errno));
+        remote_pid, failed_operation, g_strerror (errno));
     goto beach;
   }
 beach:
@@ -869,7 +869,7 @@ invalid_pid:
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "%s",
-        strerror (errno));
+        g_strerror (errno));
     return NULL;
   }
 }

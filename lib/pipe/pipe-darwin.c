@@ -116,7 +116,7 @@ bsd_failure:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up mach ports (%s returned '%s')",
-        failed_operation, strerror (errno));
+        failed_operation, g_strerror (errno));
     goto beach;
   }
 beach:
@@ -192,7 +192,7 @@ bsd_failure:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up pipe (%s returned '%s')",
-        failed_operation, strerror (errno));
+        failed_operation, g_strerror (errno));
     goto beach;
   }
 beach:

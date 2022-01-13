@@ -440,7 +440,7 @@ error:
     int e;
 
     e = errno;
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (e), "%s", strerror (e));
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (e), "%s", g_strerror (e));
 
     if (fd != -1)
       close (fd);

@@ -230,7 +230,7 @@ _frida_sctp_connection_shutdown (void * sock, FridaSctpShutdownType type, GError
 {
   if (usrsctp_shutdown (sock, type) == -1)
   {
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", strerror (errno));
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
   }
 }
 
@@ -304,7 +304,7 @@ _frida_sctp_connection_recv (void * sock, guint8 * buffer, gint buffer_length, g
 
 propagate_usrsctp_error:
   {
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", strerror (errno));
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
     return -1;
   }
 }
@@ -334,7 +334,7 @@ _frida_sctp_connection_send (void * sock, guint16 stream_id, FridaPayloadProtoco
 
 propagate_usrsctp_error:
   {
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", strerror (errno));
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "%s", g_strerror (errno));
     return -1;
   }
 }
