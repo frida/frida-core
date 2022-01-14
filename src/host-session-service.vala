@@ -621,18 +621,30 @@ namespace Frida {
 			try {
 				yield entry.provider.unload (io_cancellable);
 			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					return;
+				if (e is IOError.CANCELLED) {
+					entry.detach ();
+					throw (IOError) e;
+				}
 			}
 
-			yield teardown (entry, reason, io_cancellable);
+			try {
+				yield teardown (entry, reason, io_cancellable);
+			} catch (IOError e) {
+				entry.detach ();
+				throw e;
+			}
 		}
 
 		private async void destroy (AgentEntry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 			if (!prepare_teardown (entry))
 				return;
 
-			yield teardown (entry, reason, cancellable);
+			try {
+				yield teardown (entry, reason, cancellable);
+			} catch (IOError e) {
+				entry.detach ();
+				throw e;
+			}
 		}
 
 		private bool prepare_teardown (AgentEntry entry) {
@@ -984,6 +996,7 @@ namespace Frida {
 			}
 
 			private bool closing = false;
+			private bool registered = true;
 			private Promise<bool> close_request = new Promise<bool> ();
 
 			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider,
@@ -999,6 +1012,17 @@ namespace Frida {
 
 			construct {
 				provider.child_gating_changed.connect (on_child_gating_changed);
+			}
+
+			public void detach () {
+				if (!registered)
+					return;
+
+				var id = controller_registration_id;
+				if (id != 0)
+					connection.unregister_object (id);
+
+				registered = false;
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
@@ -1017,9 +1041,7 @@ namespace Frida {
 					}
 				}
 
-				var id = controller_registration_id;
-				if (id != 0)
-					connection.unregister_object (id);
+				detach ();
 
 				close_request.resolve (true);
 			}
