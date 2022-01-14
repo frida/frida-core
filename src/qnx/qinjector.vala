@@ -42,6 +42,8 @@ namespace Frida {
 
 		public async void close (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
+
+			_resource_store = null;
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
