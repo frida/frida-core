@@ -10,6 +10,9 @@
 # include <spawn.h>
 # include <sys/types.h>
 #endif
+#ifdef HAVE_FREEBSD
+# include <gum/gumfreebsd.h>
+#endif
 
 #ifdef HAVE_QNX
 # include <dlfcn.h>
@@ -62,11 +65,10 @@ static void frida_test_wait_context_unref (FridaTestWaitContext * context);
 
 static int frida_magic_self_handle = -1;
 
-#ifdef HAVE_DARWIN
-
 char *
 frida_test_process_backend_filename_of (void * handle)
 {
+#if defined (HAVE_DARWIN)
   guint image_count, image_idx;
 
   g_assert_true (handle == &frida_magic_self_handle);
@@ -82,26 +84,23 @@ frida_test_process_backend_filename_of (void * handle)
 
   g_assert_not_reached ();
   return NULL;
-}
+#elif defined (HAVE_LINUX)
+  g_assert_true (handle == &frida_magic_self_handle);
 
-#else
+  return g_file_read_link ("/proc/self/exe", NULL);
+#elif defined (HAVE_FREEBSD)
+  g_assert_true (handle == &frida_magic_self_handle);
 
-char *
-frida_test_process_backend_filename_of (void * handle)
-{
-#ifdef HAVE_QNX
+  return gum_freebsd_query_program_path (getpid (), NULL);
+#elif defined (HAVE_QNX)
   g_assert_true (handle == &frida_magic_self_handle);
 
   struct dlopen_handle ** _handle = dlopen (NULL, RTLD_LAZY);
   struct dlopen_handle * p_u = *(_handle);
 
   return g_strdup (p_u->p_lm->l_path);
-#else
-  return g_file_read_link ("/proc/self/exe", NULL);
 #endif
 }
-
-#endif
 
 void *
 frida_test_process_backend_self_handle (void)

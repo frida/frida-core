@@ -283,7 +283,7 @@ if host_os_family == 'freebsd'
     'freebsd/binjector-glue.c',
     'freebsd/system-freebsd.c',
   ]
-  backend_vala_args += ['--pkg=posix']
+  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-freebsd-1.0', '--pkg=frida-gum-elf-1.0']
 endif
 
 if host_os_family == 'qnx'

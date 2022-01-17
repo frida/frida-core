@@ -230,6 +230,55 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+#if FREEBSD
+		GLib.Test.add_func ("/HostSession/FreeBSD/backend", () => {
+			var h = new Harness ((h) => FreeBSD.backend.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/FreeBSD/spawn", () => {
+			var h = new Harness ((h) => FreeBSD.spawn.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/FreeBSD/ChildGating/fork", () => {
+			var h = new Harness ((h) => FreeBSD.fork.begin (h as Harness));
+			h.run ();
+		});
+
+		var fork_symbol_names = new string[] {
+			"fork",
+			"vfork",
+		};
+		var exec_symbol_names = new string[] {
+			"execl",
+			"execlp",
+			"execle",
+			"execv",
+			"execvp",
+			"execve",
+		};
+		foreach (var fork_symbol_name in fork_symbol_names) {
+			foreach (var exec_symbol_name in exec_symbol_names) {
+				var method = "%s+%s".printf (fork_symbol_name, exec_symbol_name);
+				GLib.Test.add_data_func ("/HostSession/FreeBSD/ChildGating/" + method, () => {
+					var h = new Harness ((h) => FreeBSD.fork_plus_exec.begin (h as Harness, method));
+					h.run ();
+				});
+			}
+		}
+
+		GLib.Test.add_func ("/HostSession/FreeBSD/ChildGating/bad-exec", () => {
+			var h = new Harness ((h) => FreeBSD.bad_exec.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/FreeBSD/ChildGating/bad-then-good-exec", () => {
+			var h = new Harness ((h) => FreeBSD.bad_then_good_exec.begin (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if WINDOWS
 		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
 			var h = new Harness ((h) => Windows.backend.begin (h as Harness));
@@ -2226,6 +2275,145 @@ namespace Frida.HostSessionTest {
 				h.done ();
 			}
 
+		}
+
+	}
+#endif
+
+#if FREEBSD
+	namespace FreeBSD {
+
+		private static async void backend (Harness h) {
+			var backend = new FreebsdHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			assert_true (prov.name == "Local System");
+
+			try {
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+
+				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
+				assert_true (processes.length > 0);
+
+				if (GLib.Test.verbose ()) {
+					foreach (var process in processes)
+						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				}
+			} catch (GLib.Error e) {
+				printerr ("ERROR: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
+		private static async void spawn (Harness h) {
+			var backend = new FreebsdHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			try {
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
+
+				uint pid = 0;
+				bool waiting = false;
+
+				string received_output = null;
+				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
+					assert_true (source_pid == pid);
+					assert_true (fd == 1);
+
+					var buf = new uint8[data.length + 1];
+					Memory.copy (buf, data, data.length);
+					buf[data.length] = '\0';
+					char * chars = buf;
+					received_output = (string) chars;
+
+					if (waiting)
+						spawn.callback ();
+				});
+
+				var options = HostSpawnOptions ();
+				options.stdio = PIPE;
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
+
+				var session_id = yield host_session.attach (pid, make_parameters_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
+
+				string received_message = null;
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					if (waiting)
+						spawn.callback ();
+				});
+
+				var script_id = yield session.create_script ("""
+					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
+					var message = Memory.allocUtf8String('Hello stdout');
+					write(1, message, 12);
+					for (const m of Process.enumerateModules()) {
+					  if (m.name.startsWith('libc')) {
+					    Interceptor.attach (Module.getExportByName(m.name, 'sleep'), {
+					      onEnter(args) {
+					        send({ seconds: args[0].toInt32() });
+					      }
+					    });
+					    break;
+					  }
+					}
+					""", make_parameters_dict (), cancellable);
+				yield session.load_script (script_id, cancellable);
+
+				if (received_output == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert_true (received_output == "Hello stdout");
+				host_session.disconnect (output_handler);
+
+				yield host_session.resume (pid, cancellable);
+
+				if (received_message == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				h.disconnect (message_handler);
+
+				yield host_session.kill (pid, cancellable);
+			} catch (GLib.Error e) {
+				printerr ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
+		private static async void fork (Harness h) {
+			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_executable ("forker"));
+		}
+
+		private static async void fork_plus_exec (Harness h, string method) {
+			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
+		}
+
+		private static async void bad_exec (Harness h) {
+			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
+		}
+
+		private static async void bad_then_good_exec (Harness h) {
+			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
 		}
 
 	}
