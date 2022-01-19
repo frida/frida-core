@@ -10,8 +10,9 @@ elif host_os_family != 'windows'
   extra_link_depends += [symscript]
 endif
 
-built_resource_compiler = executable('frida-resource-compiler', 'resource-compiler.vala',
+resource_compiler = executable('frida-resource-compiler', 'resource-compiler.vala',
   link_args: extra_link_args,
   link_depends: extra_link_depends,
-  dependencies: [glib_dep, gio_dep, gee_dep],
+  dependencies: [native_glib_dep, native_gio_dep, native_gee_dep],
+  native: true,
 )

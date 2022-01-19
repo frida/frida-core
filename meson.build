@@ -192,6 +192,10 @@ libsoup_dep = dependency('libsoup-2.4')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 
+native_glib_dep = dependency('glib-2.0', version: '>=2.56', native: true)
+native_gio_dep = dependency('gio-2.0', native: true)
+native_gee_dep = dependency('gee-0.8', native: true)
+
 if host_os_family != 'windows'
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
@@ -234,8 +238,6 @@ endif
 if host_os == 'ios'
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
-
-resource_compiler = find_program('frida-resource-compiler')
 
 if host_os_family != 'windows'
   ar = find_program('ar')
