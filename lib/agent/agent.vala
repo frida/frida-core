@@ -122,8 +122,8 @@ namespace Frida.Agent {
 
 				var fdt_padder = FileDescriptorTablePadder.obtain ();
 
-#if LINUX
-				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+#if LINUX || FREEBSD
+				var injector_state = (PosixInjectorState *) opaque_injector_state;
 				if (injector_state != null) {
 					fdt_padder.move_descriptor_if_needed (ref injector_state.fifo_fd);
 					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
@@ -141,7 +141,7 @@ namespace Frida.Agent {
 				}
 
 				if (shared_instance.stop_reason == PROCESS_TRANSITION) {
-#if LINUX
+#if LINUX || FREEBSD
 					if (injector_state != null)
 						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
 #endif
@@ -163,8 +163,8 @@ namespace Frida.Agent {
 
 		public static void resume_after_transition (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			{
-#if LINUX
-				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+#if LINUX || FREEBSD
+				var injector_state = (PosixInjectorState *) opaque_injector_state;
 				if (injector_state != null) {
 					FileDescriptorTablePadder.obtain ().move_descriptor_if_needed (ref injector_state.fifo_fd);
 					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
@@ -176,7 +176,7 @@ namespace Frida.Agent {
 				shared_instance.run_after_transition ();
 
 				if (shared_instance.stop_reason == PROCESS_TRANSITION) {
-#if LINUX
+#if LINUX || FREEBSD
 					if (injector_state != null)
 						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
 #endif
@@ -1557,7 +1557,7 @@ namespace Frida.Agent {
 	public class BridgeState {
 		public string agent_parameters;
 		public UnloadPolicy unload_policy;
-		public LinuxInjectorState * injector_state;
+		public PosixInjectorState * injector_state;
 
 		public BridgeState (string agent_parameters) {
 			this.agent_parameters = agent_parameters;

@@ -374,8 +374,8 @@ namespace Frida {
 	}
 #endif
 
-#if LINUX
-	public struct LinuxInjectorState {
+#if LINUX || FREEBSD
+	public struct PosixInjectorState {
 		public int fifo_fd;
 	}
 #endif
