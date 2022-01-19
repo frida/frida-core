@@ -79,7 +79,7 @@ frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation
   struct kinfo_proc process;
   size_t size;
   int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
-  gint err;
+  gint err G_GNUC_UNUSED;
 
   size = sizeof (process);
 
