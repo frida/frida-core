@@ -2,6 +2,7 @@
 
 #include "icon-helpers.h"
 
+#include <errno.h>
 #include <pwd.h>
 #include <signal.h>
 #include <unistd.h>
@@ -67,7 +68,7 @@ static void frida_add_app_icons (GHashTable * parameters, NSString * identifier)
 extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
 #endif
 
-static void frida_add_process_metadata (GHashTable * parameters, struct kinfo_proc * process);
+static void frida_add_process_metadata (GHashTable * parameters, const struct kinfo_proc * process);
 
 static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
 static GVariant * frida_uid_to_name (uid_t uid);
@@ -319,12 +320,12 @@ frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation
 {
   struct kinfo_proc process;
   size_t size;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid, 0 };
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
   gint err;
 
   size = sizeof (process);
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, &process, &size, NULL, 0);
+  err = sysctl (mib, G_N_ELEMENTS (mib), &process, &size, NULL, 0);
   g_assert (err != -1);
 
   if (size == 0)
@@ -598,9 +599,9 @@ frida_add_app_icons (GHashTable * parameters, NSString * identifier)
 #endif /* HAVE_IOS */
 
 static void
-frida_add_process_metadata (GHashTable * parameters, struct kinfo_proc * process)
+frida_add_process_metadata (GHashTable * parameters, const struct kinfo_proc * process)
 {
-  struct timeval * started = &process->kp_proc.p_un.__p_starttime;
+  const struct timeval * started = &process->kp_proc.p_un.__p_starttime;
   GDateTime * t0, * t1;
 
   g_hash_table_insert (parameters, g_strdup ("user"), frida_uid_to_name (process->kp_eproc.e_ucred.cr_uid));
@@ -617,22 +618,43 @@ frida_add_process_metadata (GHashTable * parameters, struct kinfo_proc * process
 static struct kinfo_proc *
 frida_system_query_kinfo_procs (guint * count)
 {
-  struct kinfo_proc * processes;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+  struct kinfo_proc * processes = NULL;
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL };
   size_t size;
-  gint err;
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &size, NULL, 0);
-  g_assert (err != -1);
+  if (sysctl (mib, G_N_ELEMENTS (mib), NULL, &size, NULL, 0) != 0)
+    goto sysctl_failed;
 
-  processes = g_malloc (size);
+  while (TRUE)
+  {
+    size_t previous_size;
+    gboolean still_too_small;
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, processes, &size, NULL, 0);
-  g_assert (err != -1);
+    processes = g_realloc (processes, size);
+
+    previous_size = size;
+    if (sysctl (mib, G_N_ELEMENTS (mib), processes, &size, NULL, 0) == 0)
+      break;
+
+    still_too_small = errno == ENOMEM;
+    if (!still_too_small)
+      goto sysctl_failed;
+
+    size = previous_size * 11 / 10;
+  }
 
   *count = size / sizeof (struct kinfo_proc);
 
   return processes;
+
+sysctl_failed:
+  {
+    g_free (processes);
+
+    *count = 0;
+
+    return NULL;
+  }
 }
 
 static GVariant *

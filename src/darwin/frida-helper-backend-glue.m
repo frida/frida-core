@@ -1268,6 +1268,7 @@ frida_kill_application (NSString * identifier)
   FridaSpringboardApi * api;
   GTimer * timer;
   const double kill_timeout = 3.0;
+  struct kinfo_proc * processes = NULL;
 
   api = _frida_get_springboard_api ();
 
@@ -1295,26 +1296,38 @@ frida_kill_application (NSString * identifier)
   }
   else
   {
-    int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-    struct kinfo_proc * entries;
-    size_t length;
-    gint err;
+    int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL };
+    size_t size;
     gboolean found;
     guint count, i;
 
-    err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
-    g_assert (err != -1);
+    if (sysctl (mib, G_N_ELEMENTS (mib), NULL, &size, NULL, 0) != 0)
+      goto beach;
 
-    entries = g_malloc0 (length);
+    while (TRUE)
+    {
+      size_t previous_size;
+      gboolean still_too_small;
 
-    err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
-    g_assert (err != -1);
-    count = length / sizeof (struct kinfo_proc);
+      processes = g_realloc (processes, size);
+
+      previous_size = size;
+      if (sysctl (mib, G_N_ELEMENTS (mib), processes, &size, NULL, 0) == 0)
+        break;
+
+      still_too_small = errno == ENOMEM;
+      if (!still_too_small)
+        goto beach;
+
+      size = previous_size * 11 / 10;
+    }
+
+    count = size / sizeof (struct kinfo_proc);
 
     for (i = 0, found = FALSE; i != count && !found; i++)
     {
-      struct kinfo_proc * e = &entries[i];
-      UInt32 pid = e->kp_proc.p_pid;
+      struct kinfo_proc * p = &processes[i];
+      UInt32 pid = p->kp_proc.p_pid;
       NSString * cur;
 
       cur = api->SBSCopyDisplayIdentifierForProcessID (pid);
@@ -1341,9 +1354,10 @@ frida_kill_application (NSString * identifier)
         [cur release];
       }
     }
-
-    g_free (entries);
   }
+
+beach:
+  g_free (processes);
 
   return killed_pid;
 }
