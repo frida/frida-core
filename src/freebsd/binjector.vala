@@ -675,8 +675,7 @@ namespace Frida {
 
 					yield input.read_async (byte_buf, Priority.DEFAULT, cancellable);
 
-					var thread_path = "/proc/%u/task/%u".printf (pid, tid);
-					while (FileUtils.test (thread_path, EXISTS)) {
+					while (_process_has_thread (pid, tid)) {
 						Timeout.add (50, monitor.callback);
 						yield;
 					}
@@ -691,6 +690,8 @@ namespace Frida {
 			cancel_request.resolve (true);
 		}
 	}
+
+	public extern bool _process_has_thread (uint pid, long tid);
 
 	protected enum ProgressMessageType {
 		HELLO = 0xff

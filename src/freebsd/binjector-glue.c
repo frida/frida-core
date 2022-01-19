@@ -584,6 +584,12 @@ _frida_binjector_free_inject_instance (FridaBinjector * self, void * instance, F
   frida_inject_instance_free (instance, unload_policy);
 }
 
+gboolean
+_frida_process_has_thread (guint pid, glong tid)
+{
+  return thr_kill2 (pid, tid, 0) == 0;
+}
+
 static FridaSpawnInstance *
 frida_spawn_instance_new (FridaBinjector * binjector)
 {
