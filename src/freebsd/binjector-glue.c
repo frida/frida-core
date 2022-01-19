@@ -1339,7 +1339,20 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_arm64_writer_init (&cw, code->cur);
   cw.pc = remote_address + params->code.offset + code->size;
 
-  EMIT_LDR_ADDRESS (X5, api->pthread_create_impl);
+  EMIT_LDR_ADDRESS (X20, remote_address + params->data.offset);
+
+  EMIT_CALL_IMM (api->dlopen_impl,
+      2,
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
+      ARG_IMM (RTLD_GLOBAL | RTLD_LAZY));
+  EMIT_STORE_FIELD (pthread_so, X0);
+
+  EMIT_CALL_IMM (api->dlsym_impl,
+      2,
+      ARG_REG (X0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_create_string)));
+  EMIT_MOVE (X5, X0);
+
   EMIT_CALL_REG (X5,
       4,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
@@ -1360,6 +1373,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_PUSH (FP, LR);
   EMIT_MOVE (FP, SP);
+  EMIT_PUSH (X23, X24);
   EMIT_PUSH (X21, X22);
   EMIT_PUSH (X19, X20);
 
@@ -1422,13 +1436,31 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CMP (W22, W1);
   EMIT_B_COND (EQ, skip_detach);
   {
-    EMIT_LDR_ADDRESS (X5, api->pthread_detach_impl);
+    EMIT_LOAD_FIELD (X0, pthread_so);
+    EMIT_CALL_IMM (api->dlsym_impl,
+        2,
+        ARG_REG (X0),
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
+    EMIT_MOVE (X5, X0);
     EMIT_LOAD_FIELD (X0, worker_thread);
     EMIT_CALL_REG (X5,
         1,
         ARG_REG (X0));
   }
   EMIT_LABEL (skip_detach);
+
+  EMIT_LOAD_FIELD (X0, pthread_so);
+  EMIT_CALL_IMM (api->dlsym_impl,
+      2,
+      ARG_REG (X0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_getthreadid_np_string)));
+  gum_arm64_writer_put_blr_reg (&cw, ARM64_REG_X0);
+  EMIT_MOVE (W23, W0);
+
+  EMIT_LOAD_FIELD (X0, pthread_so);
+  EMIT_CALL_IMM (api->dlclose_impl,
+      1,
+      ARG_REG (X0));
 
   EMIT_MOVE (X1, SP);
   EMIT_CALL_IMM (api->write_impl,
@@ -1439,15 +1471,14 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_POP (X0, X1);
 
-  gum_arm64_writer_put_call_address (&cw, api->pthread_getthreadid_np_impl);
-  EMIT_PUSH (X0, X1);
+  EMIT_PUSH (X23, X24);
   EMIT_MOVE (X1, SP);
   EMIT_CALL_IMM (api->write_impl,
       3,
       ARG_REG (W21),
       ARG_REG (X1),
       ARG_IMM (4));
-  EMIT_POP (X0, X1);
+  EMIT_POP (X23, X24);
 
   EMIT_CALL_IMM (api->close_impl,
       1,
@@ -1455,6 +1486,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_POP (X19, X20);
   EMIT_POP (X21, X22);
+  EMIT_POP (X23, X24);
   EMIT_POP (FP, LR);
   EMIT_RET ();
 
@@ -1591,7 +1623,7 @@ frida_run_to_entrypoint (pid_t pid, GError ** error)
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rip = entrypoint;
 #elif defined (HAVE_ARM64)
-  regs.r_pc = entrypoint;
+  regs.elr = entrypoint;
 #else
 # error Unsupported architecture
 #endif
@@ -1842,15 +1874,15 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
       goto propagate_error;
   }
 #elif defined (HAVE_ARM64)
-  regs.r_sp -= regs.sp % FRIDA_STACK_ALIGNMENT;
+  regs.sp -= regs.sp % FRIDA_STACK_ALIGNMENT;
 
-  regs.r_pc = func;
+  regs.elr = func;
 
   g_assert (args_length <= 8);
   for (i = 0; i != args_length; i++)
-    regs.r_regs[i] = args[i];
+    regs.x[i] = args[i];
 
-  regs.r_regs[30] = FRIDA_DUMMY_RETURN_ADDRESS;
+  regs.lr = FRIDA_DUMMY_RETURN_ADDRESS;
 #else
 # error Unsupported architecture
 #endif
@@ -1870,7 +1902,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   *retval = regs.r_rax;
 #elif defined (HAVE_ARM64)
-  *retval = regs.r_regs[0];
+  *retval = regs.x[0];
 #else
 # error Unsupported architecture
 #endif
@@ -1886,10 +1918,12 @@ os_failure:
         failed_operation, g_strerror (errno));
     return FALSE;
   }
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
 propagate_error:
   {
     return FALSE;
   }
+#endif
 }
 
 static gboolean
@@ -1907,8 +1941,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   regs.r_rip = remote_address;
   regs.r_rsp = remote_stack;
 #elif defined (HAVE_ARM64)
-  regs.r_pc = remote_address;
-  regs.r_sp = remote_stack;
+  regs.elr = remote_address;
+  regs.sp = remote_stack;
 #else
 # error Unsupported architecture
 #endif
@@ -1930,7 +1964,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
     *result = regs.r_rax;
 #elif defined (HAVE_ARM64)
-    *result = regs.r_regs[0];
+    *result = regs.x[0];
 #else
 # error Unsupported architecture
 #endif
