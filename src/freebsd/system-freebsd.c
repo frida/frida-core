@@ -78,12 +78,12 @@ frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation
 {
   struct kinfo_proc process;
   size_t size;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid, 0 };
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
   gint err;
 
   size = sizeof (process);
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, &process, &size, NULL, 0);
+  err = sysctl (mib, G_N_ELEMENTS (mib), &process, &size, NULL, 0);
   g_assert (err != -1);
 
   if (size == 0)
