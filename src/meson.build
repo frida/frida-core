@@ -361,6 +361,7 @@ droidy_sources = [
   'droidy/droidy-client.vala',
   'droidy/jdwp.vala',
   'droidy/injector.vala',
+  'droidy/axml.vala',
 ]
 
 local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sources + qnx_sources + [agent_data]
