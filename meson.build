@@ -6,6 +6,12 @@ project('frida-core', 'vala', 'c', 'cpp',
 
 api_version = '1.0'
 
+build_os = build_machine.system()
+if build_os == 'android'
+  build_os_family = 'linux'
+else
+  build_os_family = build_os
+endif
 host_os = host_machine.system()
 if host_os == 'android'
   host_os_family = 'linux'
