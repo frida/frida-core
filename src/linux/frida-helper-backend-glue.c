@@ -242,6 +242,7 @@ struct _FridaInjectParams
   GumAddress syscall_impl;
 
   GumAddress dlopen_impl;
+  gint dlopen_flags;
   GumAddress dlclose_impl;
   GumAddress dlsym_impl;
 };
@@ -591,15 +592,28 @@ _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid
     goto no_libc;
 
 #if defined (HAVE_GLIBC)
-  params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
-  params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
-  params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
+  params.dlopen_impl = frida_resolve_libc_function (pid, "dlopen");
+  if (params.dlopen_impl != 0)
+  {
+    params.dlopen_flags = RTLD_GLOBAL | RTLD_LAZY;
+    params.dlclose_impl = frida_resolve_libc_function (pid, "dlclose");
+    params.dlsym_impl = frida_resolve_libc_function (pid, "dlsym");
+  }
+  else
+  {
+    params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
+    params.dlopen_flags = FRIDA_RTLD_DLOPEN | RTLD_LAZY;
+    params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
+    params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
+  }
 #elif defined (HAVE_UCLIBC)
   params.dlopen_impl = frida_resolve_linker_address (params.pid, dlopen);
+  params.dlopen_flags = RTLD_LAZY;
   params.dlclose_impl = frida_resolve_linker_address (params.pid, dlclose);
   params.dlsym_impl = frida_resolve_linker_address (params.pid, dlsym);
 #elif defined (HAVE_ANDROID)
   params.dlopen_impl = frida_resolve_android_dlopen (pid);
+  params.dlopen_flags = RTLD_LAZY;
   params.dlclose_impl = frida_resolve_linker_address (pid, dlclose);
   params.dlsym_impl = frida_resolve_linker_address (pid, dlsym);
 #endif
@@ -1263,7 +1277,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->dlopen_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
-      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+      ARG_IMM (params->dlopen_flags));
   EMIT_STORE_FIELD (pthread_so, XAX);
 
   EMIT_CALL_IMM (params->dlsym_impl,
@@ -1318,13 +1332,13 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
     EMIT_CALL_IMM (params->dlopen_impl,
         3,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->dlopen_flags),
         ARG_IMM (params->open_impl));
 #else
     EMIT_CALL_IMM (params->dlopen_impl,
         2,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+        ARG_IMM (params->dlopen_flags));
 #endif
     EMIT_STORE_FIELD (module_handle, XAX);
   }
@@ -1484,7 +1498,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->dlopen_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
-      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+      ARG_IMM (params->dlopen_flags));
   EMIT_STORE_FIELD (pthread_so, R0);
 
   EMIT_CALL_IMM (params->dlsym_impl,
@@ -1535,13 +1549,13 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
     EMIT_CALL_IMM (params->dlopen_impl,
         3,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->dlopen_flags),
         ARG_IMM (params->open_impl));
 #else
     EMIT_CALL_IMM (params->dlopen_impl,
         2,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+        ARG_IMM (params->dlopen_flags));
 #endif
     EMIT_MOVE (R5, R0);
     EMIT_STORE_FIELD (module_handle, R5);
@@ -1706,7 +1720,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->dlopen_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
-      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+      ARG_IMM (params->dlopen_flags));
   EMIT_STORE_FIELD (pthread_so, X0);
 
   EMIT_CALL_IMM (params->dlsym_impl,
@@ -1759,13 +1773,13 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
     EMIT_CALL_IMM (params->dlopen_impl,
         3,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->dlopen_flags),
         ARG_IMM (params->open_impl));
 #else
     EMIT_CALL_IMM (params->dlopen_impl,
         2,
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+        ARG_IMM (params->dlopen_flags));
 #endif
     EMIT_MOVE (X19, X0);
     EMIT_STORE_FIELD (module_handle, X19);
@@ -1905,7 +1919,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->dlopen_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
-      ARG_IMM (RTLD_LAZY));
+      ARG_IMM (params->dlopen_flags));
   EMIT_MOVE (S0, V0);
 
   EMIT_CALL_IMM (params->dlsym_impl,
@@ -1969,7 +1983,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->dlopen_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      ARG_IMM (RTLD_LAZY));
+      ARG_IMM (params->dlopen_flags));
   EMIT_MOVE (S1, V0);
 
   EMIT_CALL_IMM (params->dlsym_impl,
@@ -2978,18 +2992,23 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
 static GumAddress
 frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name)
 {
-  gchar * local_library_path, * remote_library_path, * canonical_library_name;
-  GumAddress local_base, remote_base, remote_address;
-  gpointer module, local_address;
+  GumAddress remote_address = 0;
+  gchar * local_library_path = NULL;
+  gchar * remote_library_path = NULL;
+  gchar * canonical_library_name = NULL;
+  GumAddress local_base, remote_base;
+  gpointer module = NULL;
+  gpointer local_address;
 
   local_base = frida_find_library_base (getpid (), library_name, &local_library_path);
   g_assert (local_base != 0);
 
   remote_base = frida_find_library_base (pid, local_library_path, &remote_library_path);
   if (remote_base == 0)
-    return 0;
+    goto beach;
 
-  g_assert (g_strcmp0 (local_library_path, remote_library_path) == 0);
+  if (g_strcmp0 (local_library_path, remote_library_path) != 0)
+    goto beach;
 
   canonical_library_name = g_path_get_basename (local_library_path);
 
@@ -2997,17 +3016,23 @@ frida_resolve_library_function (pid_t pid, const gchar * library_name, const gch
   g_assert (module != NULL);
 
   local_address = dlsym (module, function_name);
-  g_assert (local_address != NULL);
+  if (local_address == NULL)
+    goto beach;
 
   remote_address = remote_base + (GUM_ADDRESS (local_address) - local_base);
 
-  dlclose (module);
+  goto beach;
 
-  g_free (local_library_path);
-  g_free (remote_library_path);
-  g_free (canonical_library_name);
+beach:
+  {
+    g_clear_pointer (&module, dlclose);
 
-  return remote_address;
+    g_free (canonical_library_name);
+    g_free (remote_library_path);
+    g_free (local_library_path);
+
+    return remote_address;
+  }
 }
 
 static GumAddress
