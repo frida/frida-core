@@ -42,6 +42,8 @@ _frida_agent_environment_deinit (void)
 {
   gum_shutdown ();
   gio_shutdown ();
+  glib_shutdown ();
+
   gio_deinit ();
   gum_deinit_embedded ();
 
