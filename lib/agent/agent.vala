@@ -40,6 +40,7 @@ namespace Frida.Agent {
 
 		private bool stop_thread_on_unload = true;
 
+		private Gum.ThreadId agent_tid;
 		private void * agent_pthread;
 		private Thread<bool>? agent_gthread;
 
@@ -212,6 +213,7 @@ namespace Frida.Agent {
 		}
 
 		construct {
+			agent_tid = Gum.Process.get_current_thread_id ();
 			agent_pthread = get_current_pthread ();
 
 			main_context = MainContext.default ();
@@ -306,6 +308,8 @@ namespace Frida.Agent {
 			agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
 				var ignore_scope = new ThreadIgnoreScope ();
 
+				agent_tid = Gum.Process.get_current_thread_id ();
+
 				main_context.push_thread_default ();
 				main_loop.run ();
 				main_context.pop_thread_default ();
@@ -316,16 +320,25 @@ namespace Frida.Agent {
 			});
 		}
 
+		private bool supports_async_exit () {
+			// Avoid deadlocking in case a fork() happened that we weren't made aware of.
+			return Gum.Process.has_thread (agent_tid);
+		}
+
 		private async void prepare_to_exit () {
 			yield prepare_for_termination (TerminationReason.EXIT);
 		}
 
+		public void prepare_to_exit_sync () {
+		}
+
 		private void run_after_transition () {
+			agent_tid = Gum.Process.get_current_thread_id ();
+			agent_pthread = get_current_pthread ();
+			stop_reason = UNLOAD;
+
 			transition_mutex.lock ();
 			transition_mutex.unlock ();
-
-			stop_reason = UNLOAD;
-			agent_pthread = get_current_pthread ();
 
 			main_context.push_thread_default ();
 			main_loop.run ();

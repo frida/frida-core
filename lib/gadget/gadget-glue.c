@@ -20,6 +20,7 @@ static void frida_parse_apple_parameters (const gchar * apple[], gboolean * foun
 static gpointer run_worker_loop (gpointer data);
 static gboolean stop_worker_loop (gpointer data);
 
+static GumThreadId worker_tid;
 static GThread * worker_thread;
 static GMainLoop * worker_loop;
 static GMainContext * worker_context;
@@ -118,6 +119,7 @@ frida_gadget_environment_deinit (void)
   g_source_unref (source);
 
   g_thread_join (worker_thread);
+  worker_tid = 0;
   worker_thread = NULL;
 
   g_main_loop_unref (worker_loop);
@@ -148,6 +150,12 @@ frida_gadget_environment_can_block_at_load_time (void)
 #else
   return TRUE;
 #endif
+}
+
+GumThreadId
+frida_gadget_environment_get_worker_tid (void)
+{
+  return worker_tid;
 }
 
 GMainContext *
@@ -193,6 +201,8 @@ frida_gadget_environment_set_thread_name (const gchar * name)
 static gpointer
 run_worker_loop (gpointer data)
 {
+  worker_tid = gum_process_get_current_thread_id ();
+
   g_main_context_push_thread_default (worker_context);
   g_main_loop_run (worker_loop);
   g_main_context_pop_thread_default (worker_context);

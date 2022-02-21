@@ -73,7 +73,13 @@ namespace Frida {
 			if (preparation_state == UNPREPARED) {
 				preparation_state = PREPARING;
 
-				schedule_prepare ();
+				if (handler.supports_async_exit ()) {
+					schedule_prepare ();
+				} else {
+					handler.prepare_to_exit_sync ();
+					preparation_state = PREPARED;
+					return;
+				}
 			}
 
 			blocked_main_context = MainContext.get_thread_default ();
@@ -123,6 +129,8 @@ namespace Frida {
 	}
 
 	public interface ExitHandler : Object {
+		public abstract bool supports_async_exit ();
 		public abstract async void prepare_to_exit ();
+		public abstract void prepare_to_exit_sync ();
 	}
 }

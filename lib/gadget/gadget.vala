@@ -960,8 +960,16 @@ namespace Frida.Gadget {
 			_is_eternal = true;
 		}
 
+		private bool supports_async_exit () {
+			// Avoid deadlocking in case a fork() happened that we weren't made aware of.
+			return Gum.Process.has_thread (Environment.get_worker_tid ());
+		}
+
 		protected async void prepare_to_exit () {
 			yield on_terminate (TerminationReason.EXIT);
+		}
+
+		protected void prepare_to_exit_sync () {
 		}
 
 		protected virtual HostApplicationInfo compute_app_info () {
@@ -2093,6 +2101,7 @@ namespace Frida.Gadget {
 
 		private extern bool can_block_at_load_time ();
 
+		private extern Gum.ThreadId get_worker_tid ();
 		private extern unowned MainContext get_worker_context ();
 
 		private extern string? detect_bundle_id ();
