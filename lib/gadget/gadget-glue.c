@@ -17,12 +17,12 @@
 static void frida_parse_apple_parameters (const gchar * apple[], gboolean * found_range, GumMemoryRange * range, gchar ** config_data);
 #endif
 
-static gpointer run_main_loop (gpointer data);
-static gboolean stop_main_loop (gpointer data);
+static gpointer run_worker_loop (gpointer data);
+static gboolean stop_worker_loop (gpointer data);
 
-static GThread * main_thread;
-static GMainLoop * main_loop;
-static GMainContext * main_context;
+static GThread * worker_thread;
+static GMainLoop * worker_loop;
+static GMainContext * worker_context;
 
 #if defined (HAVE_WINDOWS)
 
@@ -99,9 +99,9 @@ frida_gadget_environment_init (void)
   bsd_signal (G_MAXINT32, SIG_DFL);
 #endif
 
-  main_context = g_main_context_ref (g_main_context_default ());
-  main_loop = g_main_loop_new (main_context, FALSE);
-  main_thread = g_thread_new ("frida-gadget", run_main_loop, NULL);
+  worker_context = g_main_context_ref (g_main_context_default ());
+  worker_loop = g_main_loop_new (worker_context, FALSE);
+  worker_thread = g_thread_new ("frida-gadget", run_worker_loop, NULL);
 }
 
 void
@@ -109,21 +109,21 @@ frida_gadget_environment_deinit (void)
 {
   GSource * source;
 
-  g_assert (main_loop != NULL);
+  g_assert (worker_loop != NULL);
 
   source = g_idle_source_new ();
   g_source_set_priority (source, G_PRIORITY_LOW);
-  g_source_set_callback (source, stop_main_loop, NULL, NULL);
-  g_source_attach (source, main_context);
+  g_source_set_callback (source, stop_worker_loop, NULL, NULL);
+  g_source_attach (source, worker_context);
   g_source_unref (source);
 
-  g_thread_join (main_thread);
-  main_thread = NULL;
+  g_thread_join (worker_thread);
+  worker_thread = NULL;
 
-  g_main_loop_unref (main_loop);
-  main_loop = NULL;
-  g_main_context_unref (main_context);
-  main_context = NULL;
+  g_main_loop_unref (worker_loop);
+  worker_loop = NULL;
+  g_main_context_unref (worker_context);
+  worker_context = NULL;
 
   gum_shutdown ();
   gio_shutdown ();
@@ -151,9 +151,9 @@ frida_gadget_environment_can_block_at_load_time (void)
 }
 
 GMainContext *
-frida_gadget_environment_get_main_context (void)
+frida_gadget_environment_get_worker_context (void)
 {
-  return main_context;
+  return worker_context;
 }
 
 #ifndef HAVE_DARWIN
@@ -191,19 +191,19 @@ frida_gadget_environment_set_thread_name (const gchar * name)
 #endif
 
 static gpointer
-run_main_loop (gpointer data)
+run_worker_loop (gpointer data)
 {
-  g_main_context_push_thread_default (main_context);
-  g_main_loop_run (main_loop);
-  g_main_context_pop_thread_default (main_context);
+  g_main_context_push_thread_default (worker_context);
+  g_main_loop_run (worker_loop);
+  g_main_context_pop_thread_default (worker_context);
 
   return NULL;
 }
 
 static gboolean
-stop_main_loop (gpointer data)
+stop_worker_loop (gpointer data)
 {
-  g_main_loop_quit (main_loop);
+  g_main_loop_quit (worker_loop);
 
   return FALSE;
 }

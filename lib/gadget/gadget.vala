@@ -577,7 +577,7 @@ namespace Frida.Gadget {
 				stop.begin ();
 				return false;
 			});
-			source.attach (Environment.get_main_context ());
+			source.attach (Environment.get_worker_context ());
 		}
 
 		State final_state;
@@ -639,7 +639,7 @@ namespace Frida.Gadget {
 			perform_start.begin (request);
 			return false;
 		});
-		source.attach (Environment.get_main_context ());
+		source.attach (Environment.get_worker_context ());
 	}
 
 	private async void perform_start (Gee.Promise<int>? request) {
@@ -1210,7 +1210,7 @@ namespace Frida.Gadget {
 				scan.begin ();
 				return false;
 			});
-			source.attach (Environment.get_main_context ());
+			source.attach (Environment.get_worker_context ());
 
 			if (unchanged_timeout != null)
 				unchanged_timeout.destroy ();
@@ -1391,7 +1391,7 @@ namespace Frida.Gadget {
 				try_reload.begin ();
 				return false;
 			});
-			source.attach (Environment.get_main_context ());
+			source.attach (Environment.get_worker_context ());
 
 			if (unchanged_timeout != null)
 				unchanged_timeout.destroy ();
@@ -2093,7 +2093,7 @@ namespace Frida.Gadget {
 
 		private extern bool can_block_at_load_time ();
 
-		private extern unowned MainContext get_main_context ();
+		private extern unowned MainContext get_worker_context ();
 
 		private extern string? detect_bundle_id ();
 		private extern string? detect_bundle_name ();
