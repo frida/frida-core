@@ -65,7 +65,3 @@
 
 /* Define to 1 if gioopenssl is available. */
 #mesondefine HAVE_GIOOPENSSL
-
-#if defined (HAVE_QNX) && !defined (__cplusplus)
-# define NULL ((void *) 0)
-#endif
