@@ -142,7 +142,7 @@ frida_injection_instance_new (FridaQinjector * qinjector, guint id, pid_t pid, c
 {
   FridaInjectionInstance * instance;
   const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  int ret;
+  int ret G_GNUC_UNUSED;
 
   instance = g_slice_new0 (FridaInjectionInstance);
   instance->qinjector = g_object_ref (qinjector);
@@ -712,7 +712,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
 {
   GumAddress result = 0;
   gchar * as_path;
-  int fd, res;
+  int fd, res G_GNUC_UNUSED;
   procfs_mapinfo * mapinfos;
   gint num_mapinfos;
   procfs_debuginfo * debuginfo;
