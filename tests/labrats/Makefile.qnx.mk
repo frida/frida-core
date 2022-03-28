@@ -41,18 +41,18 @@ $(eval $(call declare-executable,forker,forker.c))
 
 $(eval $(call declare-executable,spawner,spawner-unix.c))
 
-simple-agent-qnx-arm.so: simple-agent.c simple-agent-qnx-arm.version
+%-agent-qnx-arm.so: %-agent.c %-agent-qnx-arm.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
-		-Wl,-soname,simple-agent-qnx-arm.so \
-		-Wl,--version-script=simple-agent-qnx-arm.version \
+		-Wl,-soname,$*-agent-qnx-arm.so \
+		-Wl,--version-script=$*-agent-qnx-arm.version \
 		$< \
 		-o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-simple-agent-qnx-arm.version:
-	echo "SIMPLE_AGENT_QNX_ARM_1.0 {"     > $@.tmp
+%-agent-qnx-arm.version:
+	echo "{"     > $@.tmp
 	echo "  global:"             >> $@.tmp
 	echo "    frida_agent_main;" >> $@.tmp
 	echo ""                      >> $@.tmp
