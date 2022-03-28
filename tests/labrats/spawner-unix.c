@@ -48,29 +48,25 @@ main (int argc, char * argv[])
   else if (strcmp (operation, "spawn-bad-path") == 0)
   {
     const char * good_path = argv[0];
-    char * bad_path;
+    char bad_path[PATH_MAX + 1];
     const char * method = argv[2];
     const bool exit_on_failure = true;
 
-    asprintf (&bad_path, "%s-does-not-exist", good_path);
+    sprintf (bad_path, "%s-does-not-exist", good_path);
 
     result = spawn_child (bad_path, method, exit_on_failure);
-
-    free (bad_path);
   }
   else if (strcmp (operation, "spawn-bad-then-good-path") == 0)
   {
     const char * good_path = argv[0];
-    char * bad_path;
+    char bad_path[PATH_MAX + 1];
     const char * method = argv[2];
     const bool bad_exit_on_failure = false;
     const bool good_exit_on_failure = true;
 
-    asprintf (&bad_path, "%s-does-not-exist", good_path);
+    sprintf (bad_path, "%s-does-not-exist", good_path);
 
     spawn_child (bad_path, method, bad_exit_on_failure);
-
-    free (bad_path);
 
     result = spawn_child (good_path, method, good_exit_on_failure);
   }
