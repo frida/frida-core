@@ -216,7 +216,7 @@ frida_collect_file_descriptors (guint pid, FridaProcessHandle process)
 
 #endif
 
-#ifdef HAVE_FREEBSD
+#if defined (HAVE_QNX) || defined (HAVE_FREEBSD)
 
 static FridaProcessHandle
 frida_open_process (guint pid, guint * real_pid)
