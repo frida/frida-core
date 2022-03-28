@@ -293,6 +293,7 @@ if host_os_family == 'qnx'
     'qnx/qinjector-glue.c',
     'qnx/system-qnx.c',
   ]
+  backend_vala_args += ['--pkg=posix']
 endif
 
 if get_option('assets') == 'embedded'
