@@ -15,17 +15,11 @@
 #endif
 
 #ifdef HAVE_QNX
-# include <dlfcn.h>
-# include <sys/link.h>
-struct dlopen_handle
-{
-  struct unk0 * p_next;
-  struct unk0 * p_prev;
-  Link_map * p_lm;
-};
+# include <spawn.h>
+# include <gum/gumqnx.h>
 #endif
 
-#ifndef HAVE_DARWIN
+#if !(defined (HAVE_DARWIN) || defined (HAVE_QNX))
 
 typedef struct _FridaTestWaitContext FridaTestWaitContext;
 
@@ -93,12 +87,7 @@ frida_test_process_backend_filename_of (void * handle)
 
   return gum_freebsd_query_program_path (getpid (), NULL);
 #elif defined (HAVE_QNX)
-  g_assert_true (handle == &frida_magic_self_handle);
-
-  struct dlopen_handle ** _handle = dlopen (NULL, RTLD_LAZY);
-  struct dlopen_handle * p_u = *(_handle);
-
-  return g_strdup (p_u->p_lm->l_path);
+  return gum_qnx_query_program_path_for_self (NULL);
 #endif
 }
 
@@ -127,7 +116,7 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
   }
   else
   {
-#ifdef HAVE_DARWIN
+#if defined (HAVE_DARWIN)
     posix_spawn_file_actions_t actions;
     const gchar * stdio_output_path;
     posix_spawnattr_t attr;
@@ -198,6 +187,23 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
           "Unable to spawn executable at '%s': %s",
           path, g_strerror (errno));
       g_free (special_path);
+      return;
+    }
+
+    *handle = GSIZE_TO_POINTER (pid);
+    *id = pid;
+#elif defined (HAVE_QNX)
+    int result;
+    pid_t pid;
+
+    result = posix_spawn (&pid, path, NULL, NULL, argv, envp);
+    if (result != 0)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_INVALID_ARGUMENT,
+          "Unable to spawn executable at '%s': %s",
+          path, g_strerror (errno));
       return;
     }
 
@@ -274,7 +280,7 @@ frida_test_process_backend_join (void * handle, guint timeout_msec,
 {
   int status = -1;
 
-#ifdef HAVE_DARWIN
+#if defined (HAVE_DARWIN) || defined (HAVE_QNX)
   GTimer * timer;
 
   timer = g_timer_new ();
@@ -383,7 +389,7 @@ frida_test_process_backend_join (void * handle, guint timeout_msec,
 void
 frida_test_process_backend_resume (void * handle, GError ** error)
 {
-#ifdef HAVE_DARWIN
+#if defined (HAVE_DARWIN) || defined (HAVE_QNX)
   kill (GPOINTER_TO_SIZE (handle), SIGCONT);
 #else
   (void) handle;
@@ -398,14 +404,14 @@ frida_test_process_backend_resume (void * handle, GError ** error)
 void
 frida_test_process_backend_kill (void * handle)
 {
-#ifdef HAVE_DARWIN
+#if defined (HAVE_DARWIN) || defined (HAVE_QNX)
   kill (GPOINTER_TO_SIZE (handle), SIGKILL);
 #else
   g_object_unref (handle);
 #endif
 }
 
-#ifndef HAVE_DARWIN
+#if !(defined (HAVE_DARWIN) || defined (HAVE_QNX))
 
 # ifdef HAVE_ANDROID
 
