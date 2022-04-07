@@ -23,10 +23,11 @@ namespace Frida {
 		/* these should be private, but must be accessible to glue code */
 		private MainContext main_context;
 
-		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
+		public Gee.HashMap<uint, void *> instances = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, RemoteThreadSession> sessions = new Gee.HashMap<uint, RemoteThreadSession> ();
 		public uint next_instance_id = 1;
 
-		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
+		private Gee.HashMap<uint, TemporaryFile> blob_files = new Gee.HashMap<uint, TemporaryFile> ();
 		private uint next_blob_id = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -36,8 +37,8 @@ namespace Frida {
 		}
 
 		~Qinjector () {
-			foreach (var instance in instance_by_id.values)
-				_free_instance (instance);
+			foreach (var instance in instances.values)
+				_free_instance (instance, RESIDENT);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -50,56 +51,7 @@ namespace Frida {
 				throws Error, IOError {
 			var id = _do_inject (pid, path, entrypoint, data, resource_store.tempdir.path);
 
-			var fifo = _get_fifo_for_instance (instance_by_id[id]);
-
-			var read_cancellable = new Cancellable ();
-
-			var timeout_source = new TimeoutSource (2000);
-			timeout_source.set_callback (() => {
-				read_cancellable.cancel ();
-				return false;
-			});
-			timeout_source.attach (main_context);
-
-			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (() => {
-				read_cancellable.cancel ();
-				return false;
-			});
-			cancel_source.attach (main_context);
-
-			ssize_t size = 0;
-			try {
-				var buf = new uint8[1];
-				while (size == 0) {
-					try {
-						size = yield fifo.read_async (buf, Priority.DEFAULT, read_cancellable);
-					} catch (IOError e) {
-						if (e is IOError.CANCELLED) {
-							throw new Error.TIMED_OUT (
-								"Unexpectedly timed out while waiting for FIFO to establish");
-						} else {
-							throw new Error.NOT_SUPPORTED (
-								"Unexpected error while waiting for FIFO to establish " +
-								"(child process crashed?)");
-						}
-					}
-				}
-			} finally {
-				cancel_source.destroy ();
-				timeout_source.destroy ();
-			}
-
-			if (size == 0) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					_on_uninject (id);
-					return false;
-				});
-				source.attach (main_context);
-			} else {
-				_monitor_instance.begin (id);
-			}
+			yield establish_session (id, pid);
 
 			return id;
 		}
@@ -113,7 +65,7 @@ namespace Frida {
 
 			var id = yield inject_library_file (pid, path, entrypoint, data, cancellable);
 
-			blob_file_by_id[id] = file;
+			blob_files[id] = file;
 
 			return id;
 		}
@@ -122,6 +74,40 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			var path = resource_store.ensure_copy_of (descriptor);
 			return yield inject_library_file (pid, path, entrypoint, data, cancellable);
+		}
+
+		private async void establish_session (uint id, uint pid) throws Error {
+			var session = new RemoteThreadSession (id, pid, instances[id]);
+			try {
+				yield session.establish ();
+			} catch (Error e) {
+				_destroy_instance (id, IMMEDIATE);
+				throw e;
+			}
+
+			sessions[id] = session;
+			session.ended.connect (on_remote_thread_session_ended);
+		}
+
+		private void on_remote_thread_session_ended (RemoteThreadSession session, UnloadPolicy unload_policy) {
+			var id = session.id;
+
+			session.ended.disconnect (on_remote_thread_session_ended);
+			sessions.unset (id);
+
+			_destroy_instance (id, unload_policy);
+		}
+
+		protected void _destroy_instance (uint id, UnloadPolicy unload_policy) {
+			void * instance;
+			bool found = instances.unset (id, out instance);
+			assert (found);
+
+			_free_instance (instance, unload_policy);
+
+			blob_files.unset (id);
+
+			uninjected (id);
 		}
 
 		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
@@ -136,54 +122,15 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		private async void _monitor_instance (uint id) {
-			var fifo = _get_fifo_for_instance (instance_by_id[id]);
-			while (true) {
-				var buf = new uint8[1];
-				try {
-					var size = yield fifo.read_async (buf, Priority.DEFAULT, io_cancellable);
-					if (size == 0) {
-						/*
-						 * Give it some time to execute its final instructions before we free the memory being
-						 * executed. Should consider to instead signal the remote thread id and poll /proc until
-						 * it's gone.
-						 */
-						var timeout_source = new TimeoutSource (50);
-						timeout_source.set_callback (() => {
-							_on_uninject (id);
-							return false;
-						});
-						timeout_source.attach (main_context);
-						return;
-					}
-				} catch (IOError e) {
-					_on_uninject (id);
-					return;
-				}
-			}
-		}
-
-		private void _on_uninject (uint id) {
-			void * instance;
-			bool found = instance_by_id.unset (id, out instance);
-			assert (found);
-			_free_instance (instance);
-
-			blob_file_by_id.unset (id);
-
-			uninjected (id);
-		}
-
 		public bool any_still_injected () {
-			return !instance_by_id.is_empty;
+			return !instances.is_empty;
 		}
 
 		public bool is_still_injected (uint id) {
-			return instance_by_id.has_key (id);
+			return instances.has_key (id);
 		}
 
-		public extern InputStream _get_fifo_for_instance (void * instance);
-		public extern void _free_instance (void * instance);
+		public extern void _free_instance (void * instance, UnloadPolicy unload_policy);
 		public extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
 
 		public class ResourceStore {
@@ -248,5 +195,161 @@ namespace Frida {
 				assert_not_reached ();
 			}
 		}
+	}
+
+	private class RemoteThreadSession : Object {
+		public signal void ended (UnloadPolicy unload_policy);
+
+		public uint id {
+			get;
+			construct;
+		}
+
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public void * instance {
+			get;
+			construct;
+		}
+
+		private Thread<void>? worker;
+		private PendingHello? pending_hello;
+		private uint tid;
+		private UnloadPolicy unload_policy = IMMEDIATE;
+
+		private MainContext? main_context;
+
+		public RemoteThreadSession (uint id, uint pid, void * instance) {
+			Object (id: id, pid: pid, instance: instance);
+		}
+
+		construct {
+			main_context = MainContext.get_thread_default ();
+		}
+
+		public async void establish () throws Error {
+			assert (pending_hello == null);
+			pending_hello = new PendingHello (establish.callback);
+
+			bool timed_out = false;
+			var timeout_source = new TimeoutSource.seconds (2);
+			timeout_source.set_callback (() => {
+				timed_out = true;
+				establish.callback ();
+				return false;
+			});
+			timeout_source.attach (main_context);
+
+			assert (worker == null);
+			worker = new Thread<void> ("pulse-reader", process_io);
+
+			yield;
+
+			timeout_source.destroy ();
+			pending_hello = null;
+
+			if (timed_out)
+				throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for pulse to arrive");
+		}
+
+		private void process_io () {
+			while (true) {
+				try {
+					QnxPulseCode code;
+					int val;
+					_receive_pulse (instance, out code, out val);
+
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						switch (code) {
+							case HELLO:
+								on_hello_received (val);
+								break;
+							case BYE:
+								on_bye_received ((UnloadPolicy) val);
+								break;
+							case DISCONNECT:
+								on_disconnect_received ();
+								break;
+						}
+						return false;
+					});
+					source.attach (main_context);
+				} catch (Error e) {
+					break;
+				}
+			}
+		}
+
+		private void on_hello_received (uint tid) {
+			this.tid = tid;
+
+			if (pending_hello != null)
+				pending_hello.complete ();
+		}
+
+		private void on_bye_received (UnloadPolicy unload_policy) {
+			this.unload_policy = unload_policy;
+		}
+
+		private void on_disconnect_received () {
+			if (pending_hello != null) {
+				// The DISCONNECT pulse is higher priority than HELLO, so defer handling a bit.
+				var source = new TimeoutSource (50);
+				source.set_callback (() => {
+					join_and_end.begin ();
+					return false;
+				});
+				source.attach (main_context);
+			} else {
+				join_and_end.begin ();
+			}
+		}
+
+		private async void join_and_end () {
+			if (tid != 0) {
+				while (_thread_is_alive (pid, tid)) {
+					var source = new TimeoutSource (50);
+					source.set_callback (join_and_end.callback);
+					source.attach (main_context);
+					yield;
+				}
+			}
+
+			ended (unload_policy);
+		}
+
+		private class PendingHello {
+			private SourceFunc? handler;
+			private bool _received = false;
+
+			public bool received {
+				get {
+					return _received;
+				}
+			}
+
+			public PendingHello (owned SourceFunc handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete () {
+				_received = true;
+				handler ();
+				handler = null;
+			}
+		}
+
+		public extern static void _receive_pulse (void * instance, out QnxPulseCode code, out int val) throws Error;
+		public extern static bool _thread_is_alive (uint pid, uint tid);
+	}
+
+	public enum QnxPulseCode {
+		DISCONNECT = -33,
+		HELLO = 0,
+		BYE = 1,
 	}
 }
