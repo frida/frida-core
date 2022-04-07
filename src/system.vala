@@ -131,12 +131,15 @@ namespace Frida {
 	}
 
 	public class TemporaryDirectory {
-		private string name;
+		private string? name;
 
 		public string path {
 			owned get {
 				if (file == null) {
-					file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+					if (name != null)
+						file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+					else
+						file = File.new_for_path (get_system_tmp ());
 
 					try {
 						file.make_directory_with_parents ();
@@ -148,7 +151,7 @@ namespace Frida {
 				return file.get_path ();
 			}
 		}
-		private File file;
+		private File? file;
 
 		public bool is_ours {
 			get;
@@ -164,6 +167,7 @@ namespace Frida {
 		private static string? fixed_name = null;
 
 		public TemporaryDirectory () {
+#if !QNX
 			this.name = (fixed_name != null) ? fixed_name : make_name ();
 			this.is_ours = true;
 
@@ -179,6 +183,7 @@ namespace Frida {
 				} catch (FileError e) {
 				}
 			}
+#endif
 		}
 
 		public TemporaryDirectory.with_file (File file, bool is_ours) {

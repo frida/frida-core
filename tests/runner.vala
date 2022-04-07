@@ -61,8 +61,12 @@ namespace Frida.Test {
 	}
 
 	public static string path_to_temporary_file (string name) {
+#if QNX
+		return Path.build_filename (GLib.Environment.get_tmp_dir (), name);
+#else
 		var tests_dir = Path.get_dirname (Process.current.filename);
 		return Path.build_filename (tests_dir, name);
+#endif
 	}
 
 	public extern OS os ();
