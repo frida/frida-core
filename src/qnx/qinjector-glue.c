@@ -755,14 +755,14 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
   gpointer module, local_address;
 
   local_base = frida_find_library_base (getpid (), library_name, &local_library_path);
-  if (local_base == -1)
-    return -1;
   g_assert (local_base != 0);
 
   remote_base = frida_find_library_base (remote_pid, library_name, &remote_library_path);
-  if (remote_base == -1)
-    return -1;
-  g_assert (remote_base != 0);
+  if (remote_base == 0)
+  {
+    g_free (local_library_path);
+    return 0;
+  }
 
   g_assert (g_strcmp0 (local_library_path, remote_library_path) == 0);
 
@@ -789,11 +789,12 @@ static GumAddress
 frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path)
 {
   GumAddress result = 0;
-  gchar * as_path;
-  int fd, res G_GNUC_UNUSED;
-  procfs_mapinfo * mapinfos;
+  gchar * as_path = NULL;
+  int fd = -1;
+  int res;
+  procfs_mapinfo * mapinfos = NULL;
   gint num_mapinfos;
-  procfs_debuginfo * debuginfo;
+  procfs_debuginfo * debuginfo = NULL;
   gint i;
   gchar * path;
 
@@ -803,28 +804,28 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   as_path = g_strdup_printf ("/proc/%d/as", pid);
 
   fd = open (as_path, O_RDONLY);
-
-  g_free (as_path);
-
   if (fd == -1)
-    return -1;
+    goto beach;
 
   res = devctl (fd, DCMD_PROC_PAGEDATA, 0, 0, &num_mapinfos);
-  g_assert (res == 0);
+  if (res != 0)
+    goto beach;
 
   mapinfos = g_malloc (num_mapinfos * sizeof (procfs_mapinfo));
   debuginfo = g_malloc (sizeof (procfs_debuginfo) + 0x100);
 
   res = devctl (fd, DCMD_PROC_PAGEDATA, mapinfos,
       num_mapinfos * sizeof (procfs_mapinfo), &num_mapinfos);
-  g_assert (res == 0);
+  if (res != 0)
+    goto beach;
 
   for (i = 0; i != num_mapinfos; i++)
   {
     debuginfo->vaddr = mapinfos[i].vaddr;
     res = devctl (fd, DCMD_PROC_MAPDEBUG, debuginfo,
         sizeof (procfs_debuginfo) + 0x100, NULL);
-    g_assert (res == 0);
+    if (res != 0)
+      goto beach;
     path = debuginfo->path;
 
     if (strcmp (path, library_name) == 0)
@@ -866,9 +867,14 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
     }
   }
 
-  close (fd);
-  g_free (mapinfos);
+beach:
   g_free (debuginfo);
+  g_free (mapinfos);
+
+  if (fd != -1)
+    close (fd);
+
+  g_free (as_path);
 
   return result;
 }
