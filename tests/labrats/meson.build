@@ -67,6 +67,7 @@ if host_os == 'qnx'
     'forker-qnx-arm',
     'spawner-qnx-arm',
     'simple-agent-qnx-arm.so',
+    'resident-agent-qnx-arm.so',
   ]
 endif
 
