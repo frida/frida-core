@@ -287,8 +287,10 @@ namespace Frida {
 		private void on_hello_received (uint tid) {
 			this.tid = tid;
 
-			if (pending_hello != null)
-				pending_hello.complete ();
+			if (pending_hello != null) {
+				var hello = pending_hello;
+				hello.complete ();
+			}
 		}
 
 		private void on_bye_received (UnloadPolicy unload_policy) {
