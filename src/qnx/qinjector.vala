@@ -324,20 +324,12 @@ namespace Frida {
 
 		private class PendingHello {
 			private SourceFunc? handler;
-			private bool _received = false;
-
-			public bool received {
-				get {
-					return _received;
-				}
-			}
 
 			public PendingHello (owned SourceFunc handler) {
 				this.handler = (owned) handler;
 			}
 
 			public void complete () {
-				_received = true;
 				handler ();
 				handler = null;
 			}
