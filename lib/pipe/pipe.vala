@@ -227,19 +227,17 @@ namespace Frida {
 			private Endpoint resolve_own_endpoint (void * handle) {
 				if (a != null && a.handle == handle)
 					return a;
-				else if (b != null && b.handle == handle)
+				if (b != null && b.handle == handle)
 					return b;
-				else
-					assert_not_reached ();
+				assert_not_reached ();
 			}
 
 			private Endpoint? find_other_endpoint (void * handle) {
 				if (a != null && a.handle == handle)
 					return b;
-				else if (b != null && b.handle == handle)
+				if (b != null && b.handle == handle)
 					return a;
-				else
-					return null;
+				return null;
 			}
 
 			public class Endpoint {
