@@ -196,7 +196,10 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
     frida_worker = frida_pipe_worker_new ();
 
   session_id = g_uuid_string_random ();
+
+  g_mutex_lock (&frida_worker->mutex);
   g_hash_table_replace (frida_worker->sessions, session_id, frida_qnx_pipe_session_new ());
+  g_mutex_unlock (&frida_worker->mutex);
 
   *local_address = g_strdup_printf ("pipe:pid=%u,chid=%d,lnid=%d,sid=%s",
       getpid (),
@@ -214,11 +217,16 @@ void
 _frida_pipe_transport_destroy_backend (void * opaque_backend)
 {
   const gchar * session_id = opaque_backend;
+  gboolean no_sessions_left;
 
   G_LOCK (frida_worker);
 
+  g_mutex_lock (&frida_worker->mutex);
   g_hash_table_remove (frida_worker->sessions, session_id);
-  if (g_hash_table_size (frida_worker->sessions) == 0)
+  no_sessions_left = g_hash_table_size (frida_worker->sessions) == 0;
+  g_mutex_unlock (&frida_worker->mutex);
+
+  if (no_sessions_left)
   {
     frida_pipe_worker_free (frida_worker);
     frida_worker = NULL;
@@ -362,7 +370,7 @@ frida_pipe_device_on_open (resmgr_context_t * ctp, io_open_t * msg, FridaPipeDev
     return status;
 
   handle = resmgr_ocb (ctp);
-  handle->session = session;
+  handle->session = g_object_ref (session);
 
   frida_qnx_pipe_session_add (session, handle);
 
@@ -383,6 +391,9 @@ frida_pipe_handle_new (resmgr_context_t * ctp, FridaPipeDevice * device)
 static void
 frida_pipe_handle_free (FridaPipeHandle * handle)
 {
+  if (handle->session != NULL)
+    g_object_unref (handle->session);
+
   g_slice_free (FridaPipeHandle, handle);
 }
 
