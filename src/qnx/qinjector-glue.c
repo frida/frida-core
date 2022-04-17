@@ -445,7 +445,6 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
     return -1;
   }
 
-
   if (!frida_remote_call (pid, function, args, G_N_ELEMENTS (args), &retval, error))
     return 0;
 
