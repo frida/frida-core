@@ -275,6 +275,8 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   strcpy (data->so_path, params->so_path);
   strcpy (data->entrypoint_name, params->entrypoint_name);
   strcpy (data->entrypoint_data, params->entrypoint_data);
+  data->worker_thread = 0;
+  data->module_handle = NULL;
 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
