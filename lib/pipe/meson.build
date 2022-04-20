@@ -12,10 +12,6 @@ if host_os_family == 'windows'
   ]
 elif host_os_family == 'darwin'
   pipe_sources += ['pipe-darwin.c']
-elif host_os_family == 'qnx'
-  pipe_sources += ['pipe-qnx.c']
-
-  system_deps += [gio_unix_dep]
 else
   pipe_sources += ['pipe-unix.c']
 
