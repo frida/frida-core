@@ -655,6 +655,9 @@ frida_qnx_pipe_session_endpoint_notify (FridaQnxPipeSessionEndpoint * self)
 {
   FridaPipeHandle * handle = self->handle;
 
+  if (self->state != FRIDA_QNX_PIPE_ENDPOINT_STATE_OPEN)
+    return;
+
   if (IOFUNC_NOTIFY_INPUT_CHECK (handle->notify, 1, 0))
     iofunc_notify_trigger (handle->notify, 1, IOFUNC_NOTIFY_INPUT);
 }
