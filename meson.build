@@ -280,7 +280,7 @@ if have_mapper
   cdata.set('HAVE_MAPPER', 1)
 endif
 
-configure_file(input: 'config.h.in',
+configure_file(
   output: 'config.h',
   configuration: cdata)
 
