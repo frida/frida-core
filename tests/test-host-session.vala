@@ -3766,7 +3766,7 @@ namespace Frida.HostSessionTest {
 			private set;
 		}
 
-		private uint timeout = 20;
+		private uint timeout = 90;
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
