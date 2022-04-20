@@ -199,7 +199,7 @@ _frida_sctp_connection_connect_sctp_socket (FridaSctpConnection * self, void * s
 {
   struct sockaddr_conn addr;
 
-#ifdef HAVE_DARWIN
+#ifdef HAVE_SCONN_LEN
   addr.sconn_len = sizeof (addr);
 #endif
   addr.sconn_family = AF_CONN;

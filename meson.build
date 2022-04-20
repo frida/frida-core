@@ -230,6 +230,12 @@ if nice_dep.found()
   cdata.set('HAVE_NICE', 1)
   vala_flags += ['--define=HAVE_NICE']
   backend_deps_private += [nice_dep, openssl_dep, usrsctp_dep]
+
+  if cc.has_member('struct sockaddr_conn', 'sconn_len',
+                   dependencies: [usrsctp_dep],
+                   prefix: '#include <usrsctp.h>')
+    cdata.set('HAVE_SCONN_LEN', 1)
+  endif
 else
   openssl_dep = []
   usrsctp_dep = []
