@@ -318,25 +318,32 @@ namespace Frida.HostSessionTest {
 		foreach (var strategy in strategies) {
 			string prefix = "/HostSession/Connectivity/" + ((strategy == SERVER) ? "Server" : "Peer");
 
+			bool enable_peer_loss_tests = true;
+#if QNX
+			enable_peer_loss_tests = false;
+#endif
+
 			GLib.Test.add_data_func (prefix + "/flawless", () => {
 				var h = new Harness ((h) => Connectivity.flawless.begin (h as Harness, strategy));
 				h.run ();
 			});
 
-			GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
-				var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
-				h.run ();
-			});
+			if (strategy != PEER || enable_peer_loss_tests) {
+				GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
+					var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
+					h.run ();
+				});
 
-			GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
-				var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
-				h.run ();
-			});
+				GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
+					var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
+					h.run ();
+				});
 
-			GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
-				var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
-				h.run ();
-			});
+				GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
+					var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
+					h.run ();
+				});
+			}
 
 			GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
 				var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
