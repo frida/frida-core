@@ -475,7 +475,7 @@ namespace Frida {
 	public Gum.Address _find_entrypoint (uint pid) throws Error {
 		string program_path;
 		try {
-			program_path = Gum.Freebsd.query_program_path ((Posix.pid_t) pid);
+			program_path = Gum.Freebsd.query_program_path_for_pid ((Posix.pid_t) pid);
 		} catch (Gum.Error e) {
 			throw new Error.NOT_SUPPORTED ("Unable to detect entrypoint: %s", e.message);
 		}

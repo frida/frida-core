@@ -85,7 +85,7 @@ frida_test_process_backend_filename_of (void * handle)
 #elif defined (HAVE_FREEBSD)
   g_assert_true (handle == &frida_magic_self_handle);
 
-  return gum_freebsd_query_program_path (getpid (), NULL);
+  return gum_freebsd_query_program_path_for_self (NULL);
 #elif defined (HAVE_QNX)
   return gum_qnx_query_program_path_for_self (NULL);
 #endif

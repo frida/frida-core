@@ -752,7 +752,7 @@ frida_inject_instance_new (FridaBinjector * binjector, guint id, guint pid, cons
 
   instance->pid = pid;
   instance->api = *api;
-  instance->executable_path = gum_freebsd_query_program_path (pid, NULL);
+  instance->executable_path = gum_freebsd_query_program_path_for_pid (pid, NULL);
   instance->already_attached = FALSE;
   instance->exec_pending = FALSE;
 
@@ -859,7 +859,7 @@ frida_inject_instance_did_not_exec (FridaInjectInstance * self)
   gchar * executable_path;
   gboolean probably_did_not_exec;
 
-  executable_path = gum_freebsd_query_program_path (self->pid, NULL);
+  executable_path = gum_freebsd_query_program_path_for_pid (self->pid, NULL);
   if (executable_path == NULL)
     return FALSE;
 
