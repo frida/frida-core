@@ -319,8 +319,10 @@ namespace Frida.HostSessionTest {
 			string prefix = "/HostSession/Connectivity/" + ((strategy == SERVER) ? "Server" : "Peer");
 
 			bool enable_peer_loss_tests = true;
+			bool enable_peer_latency_test = true;
 #if QNX
 			enable_peer_loss_tests = false;
+			enable_peer_latency_test = false;
 #endif
 
 			GLib.Test.add_data_func (prefix + "/flawless", () => {
@@ -345,10 +347,12 @@ namespace Frida.HostSessionTest {
 				});
 			}
 
-			GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
-				var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
-				h.run ();
-			});
+			if (strategy != PEER || enable_peer_latency_test) {
+				GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
+					var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
+					h.run ();
+				});
+			}
 		}
 
 	}
