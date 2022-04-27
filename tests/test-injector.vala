@@ -181,7 +181,9 @@ namespace Frida.InjectorTest {
 			private set;
 		}
 
-		private Injector injector;
+		private Injector? injector;
+		private Gee.Queue<uint> uninjections = new Gee.ArrayQueue<uint> ();
+		private PendingUninject? pending_uninject;
 
 		public Labrat (string name, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
 			try {
@@ -222,6 +224,7 @@ namespace Frida.InjectorTest {
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
+				injector.uninjected.disconnect (on_uninjected);
 				injector = null;
 			}
 			process = null;
@@ -243,8 +246,10 @@ namespace Frida.InjectorTest {
 		}
 
 		private async void perform_injection (string name, string data, Frida.Test.Arch arch, MainLoop loop) {
-			if (injector == null)
+			if (injector == null) {
 				injector = Injector.new ();
+				injector.uninjected.connect (on_uninjected);
+			}
 
 			try {
 				var path = Frida.Test.Labrats.path_to_library (name, arch);
@@ -265,13 +270,17 @@ namespace Frida.InjectorTest {
 		}
 
 		public bool try_wait_for_uninject (uint timeout) {
+			if (!uninjections.is_empty) {
+				uninjections.poll ();
+				return true;
+			}
+
 			var loop = new MainLoop ();
 
-			var handler_id = injector.uninjected.connect ((id) => {
-				loop.quit ();
-			});
+			assert (pending_uninject == null);
+			pending_uninject = new PendingUninject (loop);
 
-			var timed_out = false;
+			bool timed_out = false;
 			var timeout_id = Timeout.add (timeout, () => {
 				timed_out = true;
 				loop.quit ();
@@ -280,9 +289,13 @@ namespace Frida.InjectorTest {
 
 			loop.run ();
 
-			if (!timed_out)
+			if (!timed_out) {
+				uninjections.poll ();
+
 				Source.remove (timeout_id);
-			injector.disconnect (handler_id);
+			}
+
+			pending_uninject = null;
 
 			return !timed_out;
 		}
@@ -310,6 +323,25 @@ namespace Frida.InjectorTest {
 			}
 
 			return exitcode;
+		}
+
+		private void on_uninjected (uint id) {
+			uninjections.offer (id);
+
+			if (pending_uninject != null)
+				pending_uninject.complete ();
+		}
+
+		private class PendingUninject {
+			private MainLoop loop;
+
+			public PendingUninject (MainLoop loop) {
+				this.loop = loop;
+			}
+
+			public void complete () {
+				loop.quit ();
+			}
 		}
 	}
 }
