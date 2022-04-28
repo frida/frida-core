@@ -311,48 +311,39 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		var strategies = new Connectivity.Strategy[] {
+		Connectivity.Strategy[] strategies = new Connectivity.Strategy[] {
 			SERVER,
-			PEER
 		};
+		if (GLib.Test.slow ())
+			strategies += Connectivity.Strategy.PEER;
+
 		foreach (var strategy in strategies) {
 			string prefix = "/HostSession/Connectivity/" + ((strategy == SERVER) ? "Server" : "Peer");
-
-			bool enable_peer_loss_tests = true;
-			bool enable_peer_latency_test = true;
-#if QNX
-			enable_peer_loss_tests = false;
-			enable_peer_latency_test = false;
-#endif
 
 			GLib.Test.add_data_func (prefix + "/flawless", () => {
 				var h = new Harness ((h) => Connectivity.flawless.begin (h as Harness, strategy));
 				h.run ();
 			});
 
-			if (strategy != PEER || enable_peer_loss_tests) {
-				GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
-					var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
-					h.run ();
-				});
+			GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
 
-				GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
-					var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
-					h.run ();
-				});
+			GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
+				var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
+				h.run ();
+			});
 
-				GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
-					var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
-					h.run ();
-				});
-			}
+			GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
 
-			if (strategy != PEER || enable_peer_latency_test) {
-				GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
-					var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
-					h.run ();
-				});
-			}
+			GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
+				var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
+				h.run ();
+			});
 		}
 
 	}
