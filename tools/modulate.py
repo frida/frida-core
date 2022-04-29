@@ -137,7 +137,7 @@ class ModuleEditor(object):
                 (value,) = struct.unpack(pointer_format, data[i:i + pointer_size])
                 values.append(value)
 
-            if layout.file_format == 'elf' and pointer_size == 8:
+            if layout.file_format == 'elf' and '.rela.dyn' in layout.sections:
                 pending = {}
                 for i, val in enumerate(values):
                     pending[section.virtual_address + (i * pointer_size)] = i
@@ -222,7 +222,7 @@ class ModuleEditor(object):
             for pointer in vector.elements:
                 destination.write(struct.pack(element_format, pointer.value))
 
-            if layout.file_format == 'elf' and pointer_size == 8:
+            if layout.file_format == 'elf' and '.rela.dyn' in layout.sections:
                 assert vector.encoding == 'pointers'
 
                 pending = {}
