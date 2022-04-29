@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+# include <linux/limits.h>
+#endif
 #ifdef __APPLE__
 # define environ (* _NSGetEnviron ())
 extern char *** _NSGetEnviron (void);
