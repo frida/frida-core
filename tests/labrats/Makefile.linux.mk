@@ -10,6 +10,8 @@ all: \
 	sleeper-linux-arm64 \
 	sleeper-linux-mips \
 	sleeper-linux-mipsel \
+	sleeper-linux-mips64 \
+	sleeper-linux-mips64el \
 	forker-linux-x86 \
 	forker-linux-x86_64 \
 	forker-linux-arm \
@@ -17,6 +19,8 @@ all: \
 	forker-linux-arm64 \
 	forker-linux-mips \
 	forker-linux-mipsel \
+	forker-linux-mips64 \
+	forker-linux-mips64el \
 	spawner-linux-x86 \
 	spawner-linux-x86_64 \
 	spawner-linux-arm \
@@ -24,6 +28,8 @@ all: \
 	spawner-linux-arm64 \
 	spawner-linux-mips \
 	spawner-linux-mipsel \
+	spawner-linux-mips64 \
+	spawner-linux-mips64el \
 	simple-agent-linux-x86.so \
 	simple-agent-linux-x86_64.so \
 	simple-agent-linux-arm.so \
@@ -31,6 +37,8 @@ all: \
 	simple-agent-linux-arm64.so \
 	simple-agent-linux-mips.so \
 	simple-agent-linux-mipsel.so \
+	simple-agent-linux-mips64.so \
+	simple-agent-linux-mips64el.so \
 	resident-agent-linux-x86.so \
 	resident-agent-linux-x86_64.so \
 	resident-agent-linux-arm.so \
@@ -38,6 +46,8 @@ all: \
 	resident-agent-linux-arm64.so \
 	resident-agent-linux-mips.so \
 	resident-agent-linux-mipsel.so \
+	resident-agent-linux-mips64.so \
+	resident-agent-linux-mips64el.so \
 	$(NULL)
 
 define declare-executable
@@ -74,6 +84,16 @@ $1-linux-mips: $2
 $1-linux-mipsel: $2
 	mipsel-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
 	mipsel-linux-gnu-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
+$1-linux-mips64: $2
+	mips64-linux-gnuabi64-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mips64-linux-gnuabi64-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
+$1-linux-mips64el: $2
+	mips64el-linux-gnuabi64-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mips64el-linux-gnuabi64-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 endef
 
@@ -116,6 +136,16 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 %-agent-linux-mipsel.so: %-agent.c
 	mipsel-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	mipsel-linux-gnu-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+%-agent-linux-mips64.so: %-agent.c
+	mips64-linux-gnuabi64-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mips64-linux-gnuabi64-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+%-agent-linux-mips64el.so: %-agent.c
+	mips64el-linux-gnuabi64-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mips64el-linux-gnuabi64-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 .PHONY: all
