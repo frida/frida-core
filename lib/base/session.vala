@@ -1244,6 +1244,8 @@ namespace Frida {
 		arch = "arm64";
 #elif MIPS
 		arch = "mips";
+#elif MIPS64
+		arch = "mips64";
 #else
 		arch = FIXME;
 #endif
