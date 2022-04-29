@@ -67,13 +67,13 @@ $1-linux-arm64: $2
 	mv $$@.tmp $$@
 
 $1-linux-mips: $2
-	mips-unknown-linux-uclibc-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
-	mips-unknown-linux-uclibc-strip --strip-all $$@.tmp
+	mips-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mips-linux-gnu-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
 $1-linux-mipsel: $2
-	mipsel-unknown-linux-uclibc-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
-	mipsel-unknown-linux-uclibc-strip --strip-all $$@.tmp
+	mipsel-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mipsel-linux-gnu-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 endef
 
@@ -109,13 +109,13 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 	mv $@.tmp $@
 
 %-agent-linux-mips.so: %-agent.c
-	mips-unknown-linux-uclibc-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
-	mips-unknown-linux-uclibc-strip --strip-all $@.tmp
+	mips-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mips-linux-gnu-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-mipsel.so: %-agent.c
-	mipsel-unknown-linux-uclibc-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
-	mipsel-unknown-linux-uclibc-strip --strip-all $@.tmp
+	mipsel-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mipsel-linux-gnu-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 .PHONY: all
