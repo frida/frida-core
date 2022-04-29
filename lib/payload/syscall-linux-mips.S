@@ -60,7 +60,11 @@ ENTRY_PRIVATE(syscall)
   j       $ra
   nop
 1:
+#ifdef __mips64
+  dla     $t9, _frida_set_errno
+#else
   la      $t9, _frida_set_errno
+#endif
   j       $t9
   nop
   .set reorder
