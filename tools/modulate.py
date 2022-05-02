@@ -274,8 +274,11 @@ class Layout(object):
             magic = f.read(4)
         file_format = 'elf' if magic == b"\x7fELF" else 'mach-o'
 
+        env = make_non_localized_env()
+
         if file_format == 'elf':
-            output = subprocess.check_output([toolchain.readelf, "--file-header", "--section-headers", binary_path]).decode('utf-8')
+            output = subprocess.check_output([toolchain.readelf, "--file-header", "--section-headers", binary_path],
+                                             env=env).decode('utf-8')
 
             elf_class = elf_class_pattern.search(output).group(1)
             elf_machine = elf_machine_pattern.search(output).group(1)
@@ -290,9 +293,11 @@ class Layout(object):
                 name, address, offset, size = m.groups()
                 sections[name] = Section(name, int(size, 16), int(address, 16), int(offset, 16))
         else:
-            output = subprocess.check_output([toolchain.otool, "-l", binary_path]).decode('utf-8')
+            output = subprocess.check_output([toolchain.otool, "-l", binary_path],
+                                             env=env).decode('utf-8')
 
-            arch_name = subprocess.check_output(["file", binary_path]).decode('utf-8').rstrip().split(" ")[-1]
+            arch_name = subprocess.check_output(["file", binary_path],
+                                                env=env).decode('utf-8').rstrip().split(" ")[-1]
             if arch_name.startswith("arm_"):
                 arch_name = 'arm'
             pointer_size = 8 if "64" in arch_name else 4
@@ -345,7 +350,8 @@ class Symbols(object):
     @classmethod
     def from_file(cls, binary_path, pointer_size, toolchain):
         raw_items = {}
-        for line in subprocess.check_output([toolchain.nm, "--format=posix", binary_path]).decode('utf-8').split("\n"):
+        for line in subprocess.check_output([toolchain.nm, "--format=posix", binary_path],
+                                            env=make_non_localized_env()).decode('utf-8').split("\n"):
             tokens = line.rstrip().split(" ", 3)
             if len(tokens) < 3:
                 continue
@@ -448,6 +454,13 @@ class FunctionPointer(object):
 
     def __repr__(self):
         return "FunctionPointer(value=0x{:x}, name=\"{}\")".format(self.value, self.name)
+
+
+def make_non_localized_env():
+    env = {}
+    env.update(os.environ)
+    env["LC_ALL"] = "C"
+    return env
 
 
 main()
