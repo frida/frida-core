@@ -63,7 +63,7 @@ frida_selinux_patch_policy (void)
   gchar * db_data;
   sidtab_t sidtab;
   GError * error = NULL;
-  int res;
+  int res G_GNUC_UNUSED;
   guint rule_index;
 
   sepol_set_policydb (&db);
@@ -188,7 +188,7 @@ frida_save_policy (const gchar * filename, policydb_t * db, GError ** error)
 {
   void * data;
   size_t size;
-  int res;
+  int res G_GNUC_UNUSED;
 
   res = policydb_to_image (NULL, db, &data, &size);
   g_assert (res == 0);
@@ -307,7 +307,7 @@ static gboolean
 frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** error)
 {
   type_datum_t * type;
-  int res;
+  int res G_GNUC_UNUSED;
 
   type = hashtab_search (db->p_types.table, (char *) type_name);
   if (type == NULL)
@@ -392,7 +392,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
   av = avtab_search (&db->te_avtab, &key);
   if (av == NULL)
   {
-    int res;
+    int res G_GNUC_UNUSED;
 
     av = malloc (sizeof (avtab_datum_t));
     av->data = perm_bit;
