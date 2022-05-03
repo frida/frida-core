@@ -112,7 +112,12 @@ namespace Frida {
 			} catch (IOError e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
-			script.get_stalker ().exclude (invader.get_memory_range ());
+
+			var invader_range = invader.get_memory_range ();
+			schedule_on_js_thread (() => {
+				script.get_stalker ().exclude (invader_range);
+				return Source.REMOVE;
+			});
 
 			var instance = new ScriptInstance (script_id, script);
 			instances[script_id] = instance;
@@ -225,6 +230,12 @@ namespace Frida {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
 			source.attach (MainContext.get_thread_default ());
+		}
+
+		private static void schedule_on_js_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (Gum.ScriptBackend.get_scheduler ().get_js_context ());
 		}
 
 		public class ScriptInstance : Object, RpcPeer {
@@ -383,8 +394,12 @@ namespace Frida {
 			}
 
 			public async void prepare_for_termination (TerminationReason reason) {
-				if (state == LOADED)
-					script.get_stalker ().flush ();
+				if (state == LOADED) {
+					schedule_on_js_thread (() => {
+						script.get_stalker ().flush ();
+						return Source.REMOVE;
+					});
+				}
 
 				yield ensure_dispose_called (reason);
 			}
