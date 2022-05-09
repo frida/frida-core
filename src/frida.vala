@@ -2268,7 +2268,7 @@ namespace Frida {
 			if (inspector_server != null) {
 				try {
 					inspector_server.start ();
-				} catch (IOError e) {
+				} catch (Gum.Error e) {
 					inspector_server = null;
 
 					try {

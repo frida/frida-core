@@ -109,7 +109,7 @@ namespace Frida {
 					script = yield backend.create (name, source);
 				else
 					script = yield backend.create_from_bytes (bytes);
-			} catch (IOError e) {
+			} catch (Gum.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
@@ -144,7 +144,7 @@ namespace Frida {
 
 			try {
 				return yield backend.compile (name, source);
-			} catch (IOError e) {
+			} catch (Gum.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 		}
