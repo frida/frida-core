@@ -2116,6 +2116,7 @@ frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited)
   int status = 0;
   pid_t res;
 
+retry:
   res = waitpid (pid, &status, 0);
   if (res != pid || WIFEXITED (status))
     goto beach;
@@ -2142,6 +2143,12 @@ frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited)
   else
   {
     success = WSTOPSIG (status) == signal;
+  }
+
+  if (!success)
+  {
+    ptrace (PTRACE_CONT, pid, NULL, GINT_TO_POINTER (WSTOPSIG (status)));
+    goto retry;
   }
 
 beach:
