@@ -51,6 +51,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "$self", "tcp_socket", { "read", "write", "getattr", "getopt", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
   { { "?app_zygote", NULL }, "zygote_exec", "file", { "read", NULL } },
+  { { "system_server", NULL, }, "?apex_art_data_file", "file", { "execute", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
