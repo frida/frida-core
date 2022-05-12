@@ -92,10 +92,17 @@ frida_selinux_patch_policy (void)
   for (rule_index = 0; rule_index != G_N_ELEMENTS (frida_selinux_rules); rule_index++)
   {
     const FridaSELinuxRule * rule = &frida_selinux_rules[rule_index];
+    const gchar * target = rule->target;
     const gchar * const * source_cursor;
     const gchar * const * perm_entry;
 
+    if (target[0] == '?')
     {
+      target++;
+
+      if (hashtab_search (db.p_types.table, (char *) target) == NULL)
+        continue;
+    }
 
     for (source_cursor = rule->sources; *source_cursor != NULL; source_cursor++)
     {
@@ -120,7 +127,7 @@ frida_selinux_patch_policy (void)
           perm++;
         }
 
-        if (frida_ensure_rule (&db, source, rule->target, rule->klass, perm, &error) == NULL)
+        if (frida_ensure_rule (&db, source, target, rule->klass, perm, &error) == NULL)
         {
           if (!g_error_matches (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND) || is_important)
             g_printerr ("Unable to add SELinux rule: %s\n", error->message);
