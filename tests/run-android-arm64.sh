@@ -6,7 +6,7 @@ remote_prefix=/data/local/tmp/frida-tests-$arch
 
 core_tests=$(dirname "$0")
 cd "$core_tests/../../build/tmp-android-$arch/frida-core" || exit 1
-. ../../frida-meson-env-macos-x86_64.rc
+. ../../frida-env-macos-x86_64.rc
 ninja || exit 1
 cd tests
 adb shell "mkdir $remote_prefix"
