@@ -334,7 +334,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
   gum_arm_writer_init (&cw, code->cur);
 
-  gum_arm_writer_put_push_registers (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
+  gum_arm_writer_put_push_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
 
   EMIT_CALL_IMM (frida_resolve_remote_libc_function (params->pid, "ConnectAttach_r"),
       5,
@@ -375,7 +375,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   gum_arm_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
 
   EMIT_LDR_U32 (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-  gum_arm_writer_put_push_registers (&cw, 2, ARM_REG_R0, ARM_REG_R7);
+  gum_arm_writer_put_push_regs (&cw, 2, ARM_REG_R0, ARM_REG_R7);
   EMIT_MOVE (R1, SP);
   EMIT_ADD (R2, SP, 4);
   EMIT_CALL_REG (R5,
@@ -417,9 +417,9 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
       1,
       ARG_REG (R7));
 
-  gum_arm_writer_put_pop_registers (&cw, 2, ARM_REG_R0, ARM_REG_R7);
+  gum_arm_writer_put_pop_regs (&cw, 2, ARM_REG_R0, ARM_REG_R7);
 
-  gum_arm_writer_put_pop_registers (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
+  gum_arm_writer_put_pop_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   gum_arm_writer_flush (&cw);
   code->cur = gum_arm_writer_cur (&cw);
