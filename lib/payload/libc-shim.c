@@ -408,6 +408,8 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #  define __NR_dup3 330
 # elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
 #  define __NR_dup3 292
+# elif defined (HAVE_ARM)
+#  define __NR_dup3 (__NR_SYSCALL_BASE + 358)
 # endif
 #endif
 
