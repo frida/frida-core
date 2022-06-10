@@ -1072,46 +1072,46 @@ beach:
 #if defined (HAVE_I386)
 
 #define EMIT_MOVE(dst, src) \
-    gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_##dst, GUM_REG_##src)
+    gum_x86_writer_put_mov_reg_reg (&cw, GUM_X86_##dst, GUM_X86_##src)
 #define EMIT_LEA(dst, src, offset) \
-    gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_##dst, GUM_REG_##src, offset)
+    gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_##dst, GUM_X86_##src, offset)
 #define EMIT_SUB(reg, value) \
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_##reg, value)
+    gum_x86_writer_put_sub_reg_imm (&cw, GUM_X86_##reg, value)
 #define EMIT_PUSH(reg) \
-    gum_x86_writer_put_push_reg (&cw, GUM_REG_##reg)
+    gum_x86_writer_put_push_reg (&cw, GUM_X86_##reg)
 #define EMIT_POP(reg) \
-    gum_x86_writer_put_pop_reg (&cw, GUM_REG_##reg)
+    gum_x86_writer_put_pop_reg (&cw, GUM_X86_##reg)
 #define EMIT_LOAD_FIELD(reg, field) \
-    gum_x86_writer_put_mov_reg_near_ptr (&cw, GUM_REG_##reg, FRIDA_REMOTE_DATA_FIELD (field))
+    gum_x86_writer_put_mov_reg_near_ptr (&cw, GUM_X86_##reg, FRIDA_REMOTE_DATA_FIELD (field))
 #define EMIT_STORE_FIELD(field, reg) \
-    gum_x86_writer_put_mov_near_ptr_reg (&cw, FRIDA_REMOTE_DATA_FIELD (field), GUM_REG_##reg)
+    gum_x86_writer_put_mov_near_ptr_reg (&cw, FRIDA_REMOTE_DATA_FIELD (field), GUM_X86_##reg)
 #define EMIT_LOAD_IMM(reg, value) \
-    gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_##reg, value)
+    gum_x86_writer_put_mov_reg_address (&cw, GUM_X86_##reg, value)
 #define EMIT_LOAD_REG(dst, src, offset) \
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_##dst, GUM_REG_##src, offset)
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_##dst, GUM_X86_##src, offset)
 #define EMIT_LOAD_REGV(dst, src, offset) \
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, dst, GUM_REG_##src, offset)
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, dst, GUM_X86_##src, offset)
 #define EMIT_STORE_IMM(dst, offset, value) \
-    gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_REG_##dst, offset, value)
+    gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_X86_##dst, offset, value)
 #define EMIT_STORE_REG(dst, offset, src) \
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_##dst, offset, GUM_REG_##src)
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_X86_##dst, offset, GUM_X86_##src)
 #define EMIT_CALL_IMM(func, n_args, ...) \
     gum_x86_writer_put_call_address_with_aligned_arguments (&cw, GUM_CALL_CAPI, func, n_args, __VA_ARGS__)
 #define EMIT_CALL_REG(reg, n_args, ...) \
-    gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_##reg, n_args, __VA_ARGS__)
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_X86_##reg, n_args, __VA_ARGS__)
 #define EMIT_RET() \
     gum_x86_writer_put_ret (&cw)
 #define EMIT_LABEL(name) \
     gum_x86_writer_put_label (&cw, name)
 #define EMIT_CMP(reg, value) \
-    gum_x86_writer_put_cmp_reg_i32 (&cw, GUM_REG_##reg, value)
+    gum_x86_writer_put_cmp_reg_i32 (&cw, GUM_X86_##reg, value)
 #define EMIT_JE(label) \
     gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JE, label, GUM_NO_HINT)
 #define EMIT_JNE(label) \
     gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, label, GUM_NO_HINT)
 
 #define ARG_REG(reg) \
-    GUM_ARG_REGISTER, GUM_REG_##reg
+    GUM_ARG_REGISTER, GUM_X86_##reg
 #define ARG_REGV(reg) \
     GUM_ARG_REGISTER, reg
 
@@ -1133,7 +1133,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   const gchar * skip_dlopen = "skip_dlopen";
   const gchar * skip_dlclose = "skip_dlclose";
   const gchar * skip_detach = "skip_detach";
-  GumCpuReg fd_reg;
+  GumX86Reg fd_reg;
 
   gum_x86_writer_init (&cw, code->cur);
   cw.pc = remote_address + params->code.offset + code->size;
@@ -1246,7 +1246,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       2,
       ARG_REG (XAX),
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_getthreadid_np_string)));
-  gum_x86_writer_put_call_reg (&cw, GUM_REG_XAX);
+  gum_x86_writer_put_call_reg (&cw, GUM_X86_XAX);
   EMIT_STORE_REG (XBP, tid_offset, EAX);
 
   EMIT_LOAD_FIELD (XAX, pthread_so);
@@ -1254,7 +1254,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       1,
       ARG_REG (XAX));
 
-  fd_reg = (cw.target_cpu == GUM_CPU_IA32) ? GUM_REG_EDX : GUM_REG_EDI;
+  fd_reg = (cw.target_cpu == GUM_CPU_IA32) ? GUM_X86_EDX : GUM_X86_EDI;
 
   EMIT_LOAD_REGV (fd_reg, XBP, fd_offset);
   EMIT_LEA (XCX, XBP, unload_policy_offset);

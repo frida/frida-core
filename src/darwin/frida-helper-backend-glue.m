@@ -3974,27 +3974,27 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
   gum_x86_writer_set_target_cpu (&ctx.cw, resolver->cpu_type);
   ctx.mapper = mapper;
 
-  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
-  gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XSP);
-  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBX);
-  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XDI);
-  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XSI);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_X86_XBP);
+  gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_X86_XBP, GUM_X86_XSP);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_X86_XBX);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_X86_XDI);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_X86_XSI);
 
   locals_size = (ctx.cw.target_cpu == GUM_CPU_IA32) ? 12 : 8;
-  gum_x86_writer_put_sub_reg_imm (&ctx.cw, GUM_REG_XSP, locals_size);
+  gum_x86_writer_put_sub_reg_imm (&ctx.cw, GUM_X86_XSP, locals_size);
 
   if (ctx.cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx.cw, GUM_REG_XBX, GUM_REG_XBP, 8);
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx.cw, GUM_X86_XBX, GUM_X86_XBP, 8);
   else
-    gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBX, GUM_REG_XDI);
+    gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_X86_XBX, GUM_X86_XDI);
 
   frida_agent_context_emit_pthread_stub_body (self, &ctx);
 
-  gum_x86_writer_put_add_reg_imm (&ctx.cw, GUM_REG_XSP, locals_size);
+  gum_x86_writer_put_add_reg_imm (&ctx.cw, GUM_X86_XSP, locals_size);
 
-  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XSI);
-  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XDI);
-  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBX);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_X86_XSI);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_X86_XDI);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_X86_XBX);
   gum_x86_writer_put_leave (&ctx.cw);
   gum_x86_writer_put_ret (&ctx.cw);
 
@@ -4002,17 +4002,17 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
 }
 
 #define EMIT_MOVE(dstreg, srcreg) \
-    gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
+    gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_X86_##dstreg, GUM_X86_##srcreg)
 #define EMIT_LEA(dst, src, offset) \
-    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_REG_##dst, GUM_REG_##src, offset)
+    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_X86_##dst, GUM_X86_##src, offset)
 #define EMIT_LOAD(reg, field) \
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_X86_##reg, GUM_X86_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_LOAD_ADDRESS_OF(reg, field) \
-    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
+    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_X86_##reg, GUM_X86_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_STORE(field, reg) \
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field), GUM_REG_##reg)
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_X86_XBX, G_STRUCT_OFFSET (FridaAgentContext, field), GUM_X86_##reg)
 #define EMIT_CALL(fun, ...) \
-    gum_x86_writer_put_call_reg_offset_ptr_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
+    gum_x86_writer_put_call_reg_offset_ptr_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
 
 static void
 frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
@@ -4025,39 +4025,39 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
   EMIT_CALL (mach_thread_self_impl, 0);
   EMIT_STORE (mach_thread, EAX);
 
-  gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+  gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_X86_XSP, 16);
 
   EMIT_LOAD (EDI, task);
   EMIT_LOAD (ESI, mach_port_allocate_right);
-  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XDX, GUM_REG_XSP);
+  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_X86_XDX, GUM_X86_XSP);
   EMIT_CALL (mach_port_allocate_impl,
       3,
-      GUM_ARG_REGISTER, GUM_REG_EDI,
-      GUM_ARG_REGISTER, GUM_REG_ESI,
-      GUM_ARG_REGISTER, GUM_REG_XDX);
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_EAX, GUM_REG_XSP, 0);
+      GUM_ARG_REGISTER, GUM_X86_EDI,
+      GUM_ARG_REGISTER, GUM_X86_ESI,
+      GUM_ARG_REGISTER, GUM_X86_XDX);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_X86_EAX, GUM_X86_XSP, 0);
   EMIT_STORE (receive_port, EAX);
   EMIT_LOAD (XDI, message_that_never_arrives);
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XDI, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port), GUM_REG_EAX);
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_X86_XDI, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port), GUM_X86_EAX);
 
-  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP);
+  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_X86_XDI, GUM_X86_XSP);
   EMIT_LOAD (XDX, pthread_create_start_routine);
   EMIT_LOAD (XCX, pthread_create_arg);
   EMIT_CALL (pthread_create_impl,
       4,
-      GUM_ARG_REGISTER, GUM_REG_XDI,
+      GUM_ARG_REGISTER, GUM_X86_XDI,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_REGISTER, GUM_REG_XDX,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
+      GUM_ARG_REGISTER, GUM_X86_XDX,
+      GUM_ARG_REGISTER, GUM_X86_XCX);
 
-  gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+  gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_X86_XSP, 16);
 
   gum_x86_writer_put_label (&ctx->cw, again);
 
   EMIT_LOAD (XAX, message_that_never_arrives);
   EMIT_CALL (mach_msg_receive_impl,
       1,
-      GUM_ARG_REGISTER, GUM_REG_XAX);
+      GUM_ARG_REGISTER, GUM_X86_XAX);
 
   gum_x86_writer_put_jmp_short_label (&ctx->cw, again);
 }
@@ -4080,64 +4080,64 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     EMIT_CALL (pthread_threadid_np_impl,
         2,
         GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-        GUM_ARG_REGISTER, GUM_REG_XSI);
+        GUM_ARG_REGISTER, GUM_X86_XSI);
   }
 
   EMIT_LOAD (EDI, task);
   EMIT_LOAD (ESI, receive_port);
   EMIT_CALL (mach_port_destroy_impl,
       2,
-      GUM_ARG_REGISTER, GUM_REG_EDI,
-      GUM_ARG_REGISTER, GUM_REG_ESI);
+      GUM_ARG_REGISTER, GUM_X86_EDI,
+      GUM_ARG_REGISTER, GUM_X86_ESI);
 
   EMIT_LOAD (EDI, mach_thread);
   EMIT_CALL (thread_terminate_impl,
       1,
-      GUM_ARG_REGISTER, GUM_REG_EDI);
+      GUM_ARG_REGISTER, GUM_X86_EDI);
 
   pointer_size = (ctx->cw.target_cpu == GUM_CPU_IA32) ? 4 : 8;
 
   injector_state_offset = -(3 + 1) * pointer_size;
   EMIT_LOAD (XDX, mapped_range);
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw,
-      GUM_REG_XBP, injector_state_offset + G_STRUCT_OFFSET (FridaDarwinInjectorState, mapped_range),
-      GUM_REG_XDX);
+      GUM_X86_XBP, injector_state_offset + G_STRUCT_OFFSET (FridaDarwinInjectorState, mapped_range),
+      GUM_X86_XDX);
 
   if (ctx->mapper != NULL)
   {
     EMIT_LOAD (EAX, constructed);
-    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_X86_EAX, GUM_X86_EAX);
     gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_construction, GUM_NO_HINT);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_constructor (ctx->mapper));
-    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 0);
-    gum_x86_writer_put_mov_reg_u32 (&ctx->cw, GUM_REG_EAX, TRUE);
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX, 0);
+    gum_x86_writer_put_mov_reg_u32 (&ctx->cw, GUM_X86_EAX, TRUE);
     EMIT_STORE (constructed, EAX);
 
     gum_x86_writer_put_label (&ctx->cw, skip_construction);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_LOAD (XDI, entrypoint_data);
     EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
     EMIT_LEA (XDX, XBP, injector_state_offset);
-    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX,
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX,
         3,
-        GUM_ARG_REGISTER, GUM_REG_XDI,
-        GUM_ARG_REGISTER, GUM_REG_XSI,
-        GUM_ARG_REGISTER, GUM_REG_XDX);
+        GUM_ARG_REGISTER, GUM_X86_XDI,
+        GUM_ARG_REGISTER, GUM_X86_XSI,
+        GUM_ARG_REGISTER, GUM_X86_XDX);
   }
   else
   {
     EMIT_LOAD (XAX, module_handle);
-    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_XAX, GUM_REG_XAX);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_X86_XAX, GUM_X86_XAX);
     gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_dlopen, GUM_NO_HINT);
 
     EMIT_LOAD (XDI, dylib_path);
     EMIT_LOAD (ESI, dlopen_mode);
     EMIT_CALL (dlopen_impl,
         2,
-        GUM_ARG_REGISTER, GUM_REG_XDI,
-        GUM_ARG_REGISTER, GUM_REG_ESI);
+        GUM_ARG_REGISTER, GUM_X86_XDI,
+        GUM_ARG_REGISTER, GUM_X86_ESI);
     EMIT_STORE (module_handle, XAX);
 
     gum_x86_writer_put_label (&ctx->cw, skip_dlopen);
@@ -4145,47 +4145,47 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     EMIT_LOAD (XSI, entrypoint_name);
     EMIT_CALL (dlsym_impl,
         2,
-        GUM_ARG_REGISTER, GUM_REG_XAX,
-        GUM_ARG_REGISTER, GUM_REG_XSI);
+        GUM_ARG_REGISTER, GUM_X86_XAX,
+        GUM_ARG_REGISTER, GUM_X86_XSI);
 
     EMIT_LOAD (XDI, entrypoint_data);
     EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
     EMIT_LEA (XDX, XBP, injector_state_offset);
-    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX,
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX,
         3,
-        GUM_ARG_REGISTER, GUM_REG_XDI,
-        GUM_ARG_REGISTER, GUM_REG_XSI,
-        GUM_ARG_REGISTER, GUM_REG_XDX);
+        GUM_ARG_REGISTER, GUM_X86_XDI,
+        GUM_ARG_REGISTER, GUM_X86_XSI,
+        GUM_ARG_REGISTER, GUM_X86_XDX);
   }
 
   EMIT_LOAD (EAX, unload_policy);
-  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_REG_EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_X86_EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
   gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_destruction, GUM_NO_HINT);
 
   if (ctx->mapper != NULL)
   {
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
-    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 0);
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX, 0);
   }
   else
   {
     EMIT_LOAD (XDI, module_handle);
     EMIT_CALL (dlclose_impl,
         1,
-        GUM_ARG_REGISTER, GUM_REG_XDI);
+        GUM_ARG_REGISTER, GUM_X86_XDI);
   }
 
   gum_x86_writer_put_label (&ctx->cw, skip_destruction);
 
   EMIT_LOAD (EAX, unload_policy);
-  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_REG_EAX, FRIDA_UNLOAD_POLICY_DEFERRED);
+  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_X86_EAX, FRIDA_UNLOAD_POLICY_DEFERRED);
   gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JE, skip_detach, GUM_NO_HINT);
 
   EMIT_CALL (pthread_self_impl, 0);
 
   EMIT_CALL (pthread_detach_impl,
       1,
-      GUM_ARG_REGISTER, GUM_REG_XAX);
+      GUM_ARG_REGISTER, GUM_X86_XAX);
 
   gum_x86_writer_put_label (&ctx->cw, skip_detach);
 }

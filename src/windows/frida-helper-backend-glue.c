@@ -316,77 +316,77 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   gum_x86_writer_init (&cw, code);
 
   /* Will clobber these */
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XSI);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XDI); /* Alignment padding */
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XBX);
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XSI);
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XDI); /* Alignment padding */
 
   /* xbx = (FridaRemoteWorkerContext *) lpParameter */
 #if GLIB_SIZEOF_VOID_P == 4
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EBX, GUM_REG_ESP, (3 + 1) * sizeof (gpointer));
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EBX, GUM_X86_ESP, (3 + 1) * sizeof (gpointer));
 #else
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_RBX, GUM_REG_RCX);
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_X86_RBX, GUM_X86_RCX);
 #endif
 
   /* xsi = LoadLibrary (xbx->dll_path) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, dll_path));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XCX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, dll_path));
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, load_library_impl),
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, load_library_impl),
       1,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
-  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
+      GUM_ARG_REGISTER, GUM_X86_XCX);
+  gum_x86_writer_put_test_reg_reg (&cw, GUM_X86_XAX, GUM_X86_XAX);
   gum_x86_writer_put_jcc_near_label (&cw, X86_INS_JE, loadlibrary_failed, GUM_UNLIKELY);
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_X86_XSI, GUM_X86_XAX);
 
   /* xax = GetProcAddress (xsi, xbx->entrypoint_name) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_name));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_name));
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_proc_address_impl),
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_proc_address_impl),
       2,
-      GUM_ARG_REGISTER, GUM_REG_XSI,
-      GUM_ARG_REGISTER, GUM_REG_XDX);
+      GUM_ARG_REGISTER, GUM_X86_XSI,
+      GUM_ARG_REGISTER, GUM_X86_XDX);
 
   /* xax (xbx->entrypoint_data, &stay_resident, NULL) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_data));
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XCX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_data));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_X86_XAX,
       3,
-      GUM_ARG_REGISTER, GUM_REG_XCX,
-      GUM_ARG_REGISTER, GUM_REG_XDX,
+      GUM_ARG_REGISTER, GUM_X86_XCX,
+      GUM_ARG_REGISTER, GUM_X86_XDX,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
   /* if (!stay_resident) { */
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
-  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EAX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
+  gum_x86_writer_put_test_reg_reg (&cw, GUM_X86_EAX, GUM_X86_EAX);
   gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload, GUM_NO_HINT);
 
   /* FreeLibrary (xsi) */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, free_library_impl),
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, free_library_impl),
       1,
-      GUM_ARG_REGISTER, GUM_REG_XSI);
+      GUM_ARG_REGISTER, GUM_X86_XSI);
 
   /* } */
   gum_x86_writer_put_label (&cw, skip_unload);
 
   /* result = ERROR_SUCCESS */
-  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_X86_EAX, GUM_X86_EAX);
   gum_x86_writer_put_jmp_short_label (&cw, return_result);
 
   gum_x86_writer_put_label (&cw, loadlibrary_failed);
   /* result = GetLastError() */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_last_error_impl),
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_last_error_impl),
       0);
 
   gum_x86_writer_put_label (&cw, return_result);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XDI);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XSI);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XDI);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XSI);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XBX);
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
