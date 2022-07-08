@@ -47,7 +47,30 @@ namespace Frida.Fruity {
 #if WINDOWS
 			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), USBMUX_SERVER_PORT);
 #else
-			connectable = new UnixSocketAddress ("/var/run/usbmuxd");
+			string? server_host = null;
+			uint16 server_port = USBMUX_SERVER_PORT;
+
+			string? server_socket = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
+			if (server_socket != null) {
+				MatchInfo info;
+				if (/^([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
+					server_host = info.fetch (1);
+					server_port = (uint16) uint.parse (info.fetch (2));
+				} else {
+					throw new Error.INVALID_ARGUMENT ("Bad USBMUXD_SOCKET_ADDRESS environment variable (%s)",
+						server_socket);
+				}
+			} else {
+				server_host = Environment.get_variable ("USBMUXD_SERVER_ADDRESS");
+				string? server_port_str = Environment.get_variable ("USBMUXD_SERVER_PORT");
+				if (server_port_str != null)
+					server_port = (uint16) uint.parse (server_port_str);
+			}
+
+			if (server_host != null)
+				connectable = new NetworkAddress (server_host, server_port);
+			else
+				connectable = new UnixSocketAddress ("/var/run/usbmuxd");
 #endif
 
 			try {
