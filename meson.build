@@ -214,6 +214,8 @@ if host_os_family != 'windows'
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
 
+minizip_dep = dependency('minizip')
+
 backend_deps_private = []
 backend_libs_private = []
 

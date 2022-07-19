@@ -31,6 +31,7 @@ def main():
         "control-service.vala",
         "portal-service.vala",
         "file-monitor.vala",
+        Path("compiler") / "compiler.vala",
     ]
     toplevel_sources = []
     src_dir = Path(__file__).parent.parent.resolve()
