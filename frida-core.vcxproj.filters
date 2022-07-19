@@ -52,6 +52,15 @@
     <Filter Include="Resource Files\windows">
       <UniqueIdentifier>{c619adbc-c722-4220-8c57-9d40ce4e94ee}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\compiler">
+      <UniqueIdentifier>{440a7aec-8571-44e1-b100-6983d61a26ef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\compiler">
+      <UniqueIdentifier>{977f662a-1dea-4141-b63c-a71768cc07cf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\compiler">
+      <UniqueIdentifier>{56aeb7fc-6443-41fd-8bad-d5e3dd174f5c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\windows\frida-windows.resources">
@@ -120,6 +129,9 @@
     <None Include="src\droidy\droidy-client.vala">
       <Filter>Source Files\droidy</Filter>
     </None>
+    <CustomBuild Include="src\compiler\compiler.resources">
+      <Filter>Resource Files\compiler</Filter>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-core.h">
@@ -247,6 +259,15 @@
     <ClCompile Include="$(IntDir)src\fruity\springboard-services.c">
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\compiler\compiler.c">
+      <Filter>Source Files\generated\compiler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compiler\compiler-glue.c">
+      <Filter>Source Files\compiler</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\frida-data-compiler.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\droidy\injector.vala">
@@ -269,6 +290,9 @@
     </None>
     <None Include="src\fruity\springboard-services.vala">
       <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\compiler\compiler.vala">
+      <Filter>Source Files\compiler</Filter>
     </None>
   </ItemGroup>
 </Project>

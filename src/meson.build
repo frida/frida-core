@@ -365,10 +365,12 @@ droidy_sources = [
   'droidy/axml.vala',
 ]
 
+subdir('compiler')
+
 local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sources + qnx_sources + [agent_data]
 remote_sources = socket_sources + fruity_sources + droidy_sources
 
-core_sources = base_sources + local_sources + remote_sources
+core_sources = base_sources + local_sources + remote_sources + compiler_sources
 
 if host_os_family != 'windows'
   backend_deps += [gio_unix_dep]
@@ -383,7 +385,7 @@ core = library('frida-core', core_sources,
   vala_gir: 'Frida-' + api_version + '.gir',
   link_args: backend_libs_private,
   link_with: backend_libs,
-  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, tls_provider_dep] + backend_deps + internal_deps,
+  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, minizip_dep, tls_provider_dep] + backend_deps + internal_deps,
 )
 
 core_dep = declare_dependency(

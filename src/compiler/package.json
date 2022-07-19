@@ -1,0 +1,19 @@
+{
+  "name": "frida-compiler-agent",
+  "version": "1.0.0",
+  "description": "Agent used by Frida's compiler",
+  "main": "agent.ts",
+  "scripts": {
+    "build": "frida-compile agent.ts -S -o dist/agent.js",
+    "watch": "frida-compile agent.ts -w -o dist/agent.js"
+  },
+  "dependencies": {
+    "@frida/crosspath": "3.0.0",
+    "frida-compile": "15.1.0",
+    "frida-fs": "5.2.0"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "18.1.0",
+    "@types/node": "18.0.6"
+  }
+}

@@ -2,5 +2,6 @@
 /lib/xnu/build/
 /lib/xnu/FridaKernelAgent.xcodeproj/project.xcworkspace/xcuserdata/
 /lib/xnu/FridaKernelAgent.xcodeproj/xcuserdata/
+/src/compiler/node_modules/
 /src/droidy/helper/build/
 /src/fruity/helpers/build/
