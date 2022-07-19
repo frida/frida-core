@@ -1262,6 +1262,18 @@ namespace Frida {
 			return yield rpc_client.call (method, args, cancellable);
 		}
 
+		protected async void post (Json.Node message, Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
+
+			string json = Json.to_string (message, false);
+
+			try {
+				yield session.post_messages ({ AgentMessage (SCRIPT, script, json, false, {}) }, 0, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
 		protected async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
 			while (ensure_request != null) {
 				try {
