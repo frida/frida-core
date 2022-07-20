@@ -206,6 +206,11 @@ libsoup_dep = dependency('libsoup-2.4')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 
+have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
+if have_v8
+  vala_flags += ['--define=HAVE_V8']
+endif
+
 native_glib_dep = dependency('glib-2.0', version: '>=2.56', native: true)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true)

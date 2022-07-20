@@ -3,7 +3,7 @@ agent_sources = [
   'agent-glue.c',
 ]
 
-force_cpp_linking = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
+force_cpp_linking = have_v8
 if force_cpp_linking
   agent_sources += ['dummy.cpp']
 endif
