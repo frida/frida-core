@@ -25,8 +25,8 @@ rpc.exports = {
             agentDirectories.add(dir);
         }
 
-        for (const [name, address] of files) {
-            agentFiles.set(name, address);
+        for (const [name, contents] of files) {
+            agentFiles.set(name, contents);
         }
     },
 
@@ -72,7 +72,7 @@ rpc.exports = {
     },
 };
 
-type FileInfo = [name: string, address: string];
+type FileInfo = [name: string, contents: string];
 
 type DiagnosticFile = [path: string, line: number, character: number];
 
@@ -158,10 +158,7 @@ class FridaSystem implements ts.System {
         if (result === undefined) {
             const agentZipPath = this.#nativePathToAgentZipPath(path);
             if (agentZipPath !== null) {
-                const contentsAddress = agentFiles.get(agentZipPath);
-                if (contentsAddress !== undefined) {
-                    result = ptr(contentsAddress).readUtf8String()!;
-                }
+                result = agentFiles.get(agentZipPath);
             }
         }
 
