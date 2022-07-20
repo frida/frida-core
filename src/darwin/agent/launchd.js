@@ -240,9 +240,8 @@ function findSubstrateLauncher() {
     return null;
 
   const imp = Module.enumerateImports('/sbin/launchd').filter(imp => imp.name === 'posix_spawn')[0];
-  if (!imp || !imp.slot) {
+  if (imp === undefined)
     return null;
-  }
   const impl = imp.slot.readPointer().strip();
   const header = findClosestMachHeader(impl);
 
