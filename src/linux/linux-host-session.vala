@@ -823,7 +823,11 @@ namespace Frida {
 			Object (
 				host_session: host_session,
 				script_source: source,
+#if HAVE_V8
 				script_runtime: ScriptRuntime.V8
+#else
+				script_runtime: ScriptRuntime.DEFAULT
+#endif
 			);
 		}
 
