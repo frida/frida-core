@@ -21,6 +21,31 @@ namespace Frida {
 			Object (manager: manager);
 		}
 
+		public override void dispose () {
+			if (load_request != null)
+				close.begin ();
+
+			base.dispose ();
+		}
+
+		private async void close () {
+			try {
+				var agent = yield get_agent (null);
+				yield agent.close (null);
+			} catch (GLib.Error e) {
+			}
+			load_request = null;
+
+			if (monitor_flush_timer != null) {
+				monitor_flush_timer.destroy ();
+				monitor_flush_timer = null;
+			}
+
+			foreach (var entry in monitors.values)
+				detach_monitor_entry (entry);
+			monitors.clear ();
+		}
+
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var agent = yield get_agent (cancellable);
@@ -103,8 +128,11 @@ namespace Frida {
 
 		private void on_watch_remove (uint id) {
 			MonitorEntry? entry;
-			if (!monitors.unset (id, out entry))
-				return;
+			if (monitors.unset (id, out entry))
+				detach_monitor_entry (entry);
+		}
+
+		private void detach_monitor_entry (MonitorEntry entry) {
 			dirty_monitors.remove (entry);
 
 			entry.file_changed.disconnect (on_file_changed);
