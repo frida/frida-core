@@ -11,7 +11,6 @@ namespace Frida {
 		}
 
 		private Promise<Agent>? load_request;
-		private Gee.Map<string, AgentFile> agent_files = new Gee.HashMap<string, AgentFile> ();
 		private Gee.Map<uint, MonitorEntry> monitors = new Gee.HashMap<uint, MonitorEntry> ();
 		private Gee.Set<MonitorEntry> dirty_monitors = new Gee.HashSet<MonitorEntry> ();
 		private TimeoutSource? monitor_flush_timer;
@@ -158,7 +157,7 @@ namespace Frida {
 		private async void load_agent () {
 			try {
 				var agent_dirs = new string[0];
-				agent_files.clear ();
+				var agent_files = new Gee.HashMap<string, AgentFile> ();
 				_foreach_agent_zip_entry ((name, contents) => {
 					string path = "/" + name;
 					if (contents != null)
@@ -224,12 +223,10 @@ namespace Frida {
 				var files_json = new Json.Builder ();
 				files_json.begin_array ();
 				foreach (var e in files.entries) {
-					unowned string name = e.key;
-					string address = ("0x%" + size_t.FORMAT_MODIFIER + "x").printf ((size_t) e.value.contents);
 					files_json
 						.begin_array ()
-							.add_string_value (name)
-							.add_string_value (address)
+							.add_string_value (e.key)
+							.add_string_value (e.value.contents)
 						.end_array ();
 				}
 				files_json.end_array ();
