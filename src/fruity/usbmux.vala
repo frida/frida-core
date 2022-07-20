@@ -57,7 +57,7 @@ namespace Frida.Fruity {
 					server_host = info.fetch (1);
 					server_port = (uint16) uint.parse (info.fetch (2));
 				} else {
-					throw new Error.INVALID_ARGUMENT ("Bad USBMUXD_SOCKET_ADDRESS environment variable (%s)",
+					throw new UsbmuxError.INVALID_ARGUMENT ("Bad USBMUXD_SOCKET_ADDRESS environment variable (%s)",
 						server_socket);
 				}
 			} else {
