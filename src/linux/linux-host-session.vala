@@ -1345,8 +1345,10 @@ namespace Frida {
 			}
 
 			public void disable_timeout () {
-				expiry_source.destroy ();
-				expiry_source = null;
+				if (expiry_source != null) {
+					expiry_source.destroy ();
+					expiry_source = null;
+				}
 			}
 
 			private TimeoutSource make_expiry_source (uint timeout) {
