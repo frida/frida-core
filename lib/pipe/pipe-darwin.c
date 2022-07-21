@@ -158,7 +158,7 @@ gint
 _frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GError ** error)
 {
   gint fd = -1;
-  gint assigned;
+  G_GNUC_UNUSED gint assigned;
   mach_port_t port = MACH_PORT_NULL;
   FridaInitMessage init = { { 0, }, { 0, } };
   kern_return_t kr;
