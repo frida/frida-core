@@ -416,7 +416,7 @@ namespace Frida {
 						state = DELETED;
 						break;
 					default:
-						break;
+						return;
 				}
 
 				last_change = get_monotonic_time ();
