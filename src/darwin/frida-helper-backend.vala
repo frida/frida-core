@@ -617,6 +617,8 @@ namespace Frida {
 		}
 
 		public extern static PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
+		public extern static void make_pipe_endpoint_from_socket (uint pid, uint task, GLib.Socket sock, out string address)
+			throws Error;
 
 		public extern static uint task_for_pid (uint pid) throws Error;
 		public extern static void deallocate_port (uint port);

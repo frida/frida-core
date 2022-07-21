@@ -4,9 +4,9 @@ namespace Frida {
 
 		Gum.init ();
 
-		var parent_service_name = args[1];
+		var parent_address = args[1];
 		var worker = new Thread<int> ("frida-helper-main-loop", () => {
-			var service = new DarwinHelperService (parent_service_name);
+			var service = new DarwinHelperService (parent_address);
 
 			var exit_code = service.run ();
 			_stop_run_loop ();
@@ -23,7 +23,7 @@ namespace Frida {
 	public extern void _stop_run_loop ();
 
 	public class DarwinHelperService : Object, DarwinRemoteHelper {
-		public string parent_service_name {
+		public string parent_address {
 			get;
 			construct;
 		}
@@ -34,12 +34,11 @@ namespace Frida {
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
-		private TaskPort parent_task;
 
 		private DarwinHelperBackend backend = new DarwinHelperBackend ();
 
-		public DarwinHelperService (string parent_service_name) {
-			Object (parent_service_name: parent_service_name);
+		public DarwinHelperService (string parent_address) {
+			Object (parent_address: parent_address);
 		}
 
 		construct {
@@ -112,12 +111,8 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				IOStream stream;
-				var handshake_port = new HandshakePort.remote (parent_service_name);
-
-				yield handshake_port.exchange (0, out parent_task, out stream);
-
-				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection.for_address (parent_address,
+					AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				DarwinRemoteHelper helper = this;
@@ -222,14 +217,15 @@ namespace Frida {
 			yield backend.recreate_injectee_thread (pid, id, cancellable);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint remote_pid, Cancellable? cancellable) throws Error, IOError {
-			yield backend.prepare_target (remote_pid, cancellable);
+		public async void transfer_socket (uint pid, GLib.Socket sock, Cancellable? cancellable, out string remote_address)
+				throws Error, IOError {
+			yield backend.prepare_target (pid, cancellable);
 
-			var remote_task = DarwinHelperBackend.task_for_pid (remote_pid);
+			var task = DarwinHelperBackend.task_for_pid (pid);
 			try {
-				return DarwinHelperBackend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
+				DarwinHelperBackend.make_pipe_endpoint_from_socket (pid, task, sock, out remote_address);
 			} finally {
-				DarwinHelperBackend.deallocate_port (remote_task);
+				DarwinHelperBackend.deallocate_port (task);
 			}
 		}
 
