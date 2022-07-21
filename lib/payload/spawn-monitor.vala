@@ -213,9 +213,6 @@ namespace Frida {
 
 			if ((invocation.creation_flags & CreateProcessFlags.CREATE_SUSPENDED) == 0)
 				_resume_thread (invocation.process_info.thread);
-
-			(void) invocation.process_info.process;
-			(void) invocation.process_info.thread_id;
 		}
 
 		private struct Invocation {
@@ -229,7 +226,7 @@ namespace Frida {
 			public CreateProcessInfo * process_info;
 		}
 
-		private struct CreateProcessInfo {
+		public struct CreateProcessInfo {
 			public void * process;
 			public void * thread;
 			public uint32 process_id;
