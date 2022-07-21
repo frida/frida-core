@@ -108,6 +108,8 @@ namespace Frida {
 			construct;
 		}
 
+		private AgentContainer? system_session_container;
+
 		private Fruitjector fruitjector;
 		private AgentResource? agent;
 #if IOS
@@ -164,49 +166,39 @@ namespace Frida {
 				return fruitjector.any_still_injected ();
 			});
 
-			agent = null;
-
 			fruitjector.injected.disconnect (on_injected);
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
+
+			if (system_session_container != null) {
+				yield system_session_container.destroy (cancellable);
+				system_session_container = null;
+			}
 
 			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
 			helper.spawn_added.disconnect (on_spawn_added);
 			helper.spawn_removed.disconnect (on_spawn_removed);
 
+			agent = null;
+
 			tempdir.destroy ();
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
-			yield helper.preload (cancellable);
+			string path;
+#if HAVE_EMBEDDED_ASSETS
+			path = agent.get_file ().path;
+#else
+			path = Config.FRIDA_AGENT_PATH;
+#endif
 
-			var pid = helper.pid;
+			system_session_container = yield AgentContainer.create (path, cancellable);
 
-			string remote_address;
-			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
+			connection = system_session_container.connection;
 
-			var id = yield inject_agent (pid, remote_address, cancellable);
-			injectee_by_pid[pid] = id;
-
-			IOStream stream = yield stream_request.wait_async (cancellable);
-
-			DBusConnection conn;
-			AgentSessionProvider provider;
-			try {
-				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
-
-				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
-					cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-
-			connection = conn;
-
-			return provider;
+			return system_session_container;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
