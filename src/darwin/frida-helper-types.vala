@@ -81,7 +81,8 @@ namespace Frida {
 		public abstract async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async PipeEndpoints make_pipe_endpoints (uint remote_pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void transfer_socket (uint pid, GLib.Socket sock, Cancellable? cancellable,
+			out string remote_address) throws GLib.Error;
 	}
 
 	public struct PipeEndpoints {

@@ -14,7 +14,6 @@ namespace Frida {
 		private ResourceStore _resource_store;
 
 		private Pid process_pid;
-		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
 		private Promise<DarwinRemoteHelper> obtain_request;
@@ -223,25 +222,35 @@ namespace Frida {
 
 		public async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable, out string remote_address)
 				throws Error, IOError {
+			var result = new Promise<IOStream> ();
+
 			var helper = yield obtain (cancellable);
+
+			var fds = new int[2];
+			Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds);
+
+			Socket local_socket, remote_socket;
 			try {
-				var endpoints = yield helper.make_pipe_endpoints (remote_pid, cancellable);
+				local_socket = new Socket.from_fd (fds[0]);
+				remote_socket = new Socket.from_fd (fds[1]);
 
-				remote_address = endpoints.remote_address;
+				var local_stream = SocketConnection.factory_create_connection (local_socket);
+				result.resolve (local_stream);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
 
-				return Pipe.open (endpoints.local_address, cancellable);
+			try {
+				yield helper.transfer_socket (remote_pid, remote_socket, cancellable, out remote_address);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+
+			return result.future;
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
-			if (!DarwinHelperBackend.is_mmap_available ())
-				return null;
-
-			yield obtain (cancellable);
-
-			return DarwinHelperBackend.mmap (task.mach_port, blob);
+			return null;
 		}
 
 		private async DarwinRemoteHelper obtain (Cancellable? cancellable) throws Error, IOError {
@@ -280,44 +289,104 @@ namespace Frida {
 		}
 
 		private async DarwinRemoteHelper launch_helper (Cancellable? cancellable) throws Error, IOError {
+			string? pending_socket_path = null;
 			Pid pending_pid = 0;
-			TaskPort pending_task_port = null;
+			IOStream? pending_stream = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
 
-			var service_name = make_service_name ();
+			SocketService? service = null;
+			TimeoutSource? timeout_source = null;
 
 			try {
-				var handshake_port = new HandshakePort.local (service_name);
+				string tempdir;
+				HelperFile helper_file = get_resource_store ().helper;
+				string helper_path = helper_file.path;
+				if (helper_file is TemporaryHelperFile)
+					tempdir = Path.get_dirname (helper_path);
+				else
+					tempdir = Environment.get_tmp_dir ();
 
-				string[] argv = { get_resource_store ().helper.path, service_name };
+				pending_socket_path = Path.build_filename (tempdir, Uuid.string_random ());
+				string socket_address = "unix:path=" + pending_socket_path;
+
+				service = new SocketService ();
+				SocketAddress effective_address;
+				service.add_address (new UnixSocketAddress.with_type (pending_socket_path, -1, PATH),
+					SocketType.STREAM, SocketProtocol.DEFAULT, null, out effective_address);
+				service.start ();
+
+				var main_context = MainContext.get_thread_default ();
+
+				var idle_source = new IdleSource ();
+				idle_source.set_callback (() => {
+					launch_helper.callback ();
+					return false;
+				});
+				idle_source.attach (main_context);
+
+				yield;
+
+				var incoming_handler = service.incoming.connect ((c) => {
+					pending_stream = c;
+					launch_helper.callback ();
+					return true;
+				});
+
+				var timer = new Timer ();
+				timeout_source = new TimeoutSource (10);
+				timeout_source.set_callback (() => {
+					launch_helper.callback ();
+					return Source.CONTINUE;
+				});
+				timeout_source.attach (main_context);
+
+				string[] argv = { helper_path, socket_address };
 
 				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
 				GLib.Process.spawn_async (null, argv, null, flags, null, out pending_pid);
 
-				IOStream stream;
-				yield handshake_port.exchange (pending_pid, out pending_task_port, out stream);
+				while (pending_stream == null && timer.elapsed () < 10.0 && !process_is_dead (pending_pid))
+					yield;
 
-				pending_connection = yield new DBusConnection (stream, null, NONE, null, cancellable);
+				service.disconnect (incoming_handler);
+				service.stop ();
+				service = null;
+				timeout_source.destroy ();
+				timeout_source = null;
+
+				if (pending_stream == null)
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
+
+				pending_connection = yield new DBusConnection (pending_stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 				if (pending_connection.is_closed ())
 					throw new Error.NOT_SUPPORTED ("Helper terminated prematurely");
 			} catch (GLib.Error e) {
-				if (e is Error.PROCESS_NOT_FOUND || e is IOError.CANCELLED)
-					throw_api_error (e);
+				bool died_unexpectedly = pending_pid != 0 && process_is_dead (pending_pid);
 
-				if (pending_pid != 0)
+				if (pending_pid != 0 && !died_unexpectedly)
 					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
 
+				if (timeout_source != null)
+					timeout_source.destroy ();
+
+				if (service != null)
+					service.stop ();
+
+				if (died_unexpectedly)
+					throw new Error.PROCESS_NOT_FOUND ("Peer process died unexpectedly");
 				if (e is Error)
 					throw (Error) e;
-				else
-					throw new Error.PERMISSION_DENIED ("%s", e.message);
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
+			} finally {
+				if (pending_socket_path != null)
+					Posix.unlink (pending_socket_path);
 			}
 
 			process_pid = pending_pid;
-			task = pending_task_port;
 
 			connection = pending_connection;
 			connection.on_closed.connect (on_connection_closed);
@@ -334,15 +403,8 @@ namespace Frida {
 			return proxy;
 		}
 
-		private static string make_service_name () {
-			var builder = new StringBuilder ("re.frida.Helper");
-
-			builder.append_printf (".%d.", Posix.getpid ());
-
-			for (var i = 0; i != 16; i++)
-				builder.append_printf ("%02x", Random.int_range (0, 256));
-
-			return builder.str;
+		private static bool process_is_dead (uint pid) {
+			return Posix.kill ((Posix.pid_t) pid, 0) == -1 && Posix.errno == Posix.ESRCH;
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
@@ -361,7 +423,6 @@ namespace Frida {
 			connection = null;
 
 			process_pid = 0;
-			task = null;
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {

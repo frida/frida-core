@@ -71,8 +71,6 @@ if host_os_family == 'darwin'
     'darwin/policyd-client.c',
     'darwin/substituted-client.c',
     'darwin/substituted2-client.c',
-    'darwin/port.vala',
-    'darwin/port-glue.m',
   ]
   if host_os == 'ios'
     helper_backend_sources += ['darwin/springboard.m']

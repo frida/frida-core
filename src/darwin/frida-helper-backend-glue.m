@@ -566,6 +566,79 @@ beach:
   }
 }
 
+void
+frida_darwin_helper_backend_make_pipe_endpoint_from_socket (guint pid, guint task, GSocket * sock, gchar ** address, GError ** error)
+{
+  mach_port_t self_task;
+  int status;
+  mach_port_t wrapper = MACH_PORT_NULL;
+  mach_port_t rx = MACH_PORT_NULL;
+  mach_port_t tx = MACH_PORT_NULL;
+  mach_msg_type_name_t acquired_type;
+  mach_msg_header_t init;
+  kern_return_t kr;
+  const gchar * failed_operation;
+
+  self_task = mach_task_self ();
+
+  status = fileport_makeport (g_socket_get_fd (sock), &wrapper);
+  CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport");
+
+  kr = mach_port_allocate (task, MACH_PORT_RIGHT_RECEIVE, &rx);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate");
+
+  kr = mach_port_extract_right (task, rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right");
+
+  init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
+  init.msgh_size = sizeof (init);
+  init.msgh_remote_port = tx;
+  init.msgh_local_port = wrapper;
+  init.msgh_reserved = 0;
+  init.msgh_id = 3;
+  kr = mach_msg_send (&init);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg_send");
+  tx = MACH_PORT_NULL;
+  wrapper = MACH_PORT_NULL;
+
+  *address = g_strdup_printf ("pipe:port=0x%x", rx);
+  rx = MACH_PORT_NULL;
+
+  goto beach;
+
+mach_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing pipe endpoint from socket for process with pid %u (%s returned '%s')",
+        pid, failed_operation, mach_error_string (kr));
+    goto beach;
+  }
+bsd_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing pipe endpoint from socket for process with pid %u (%s returned '%s')",
+        pid, failed_operation, g_strerror (errno));
+    goto beach;
+  }
+beach:
+  {
+    if (tx != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, tx);
+
+    if (rx != MACH_PORT_NULL)
+      mach_port_mod_refs (task, rx, MACH_PORT_RIGHT_RECEIVE, -1);
+
+    if (wrapper != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, wrapper);
+
+    return;
+  }
+}
+
 guint
 frida_darwin_helper_backend_task_for_pid (guint pid, GError ** error)
 {
