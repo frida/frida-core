@@ -72,8 +72,8 @@ namespace Frida {
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void enable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void disable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void post_messages (AgentMessage[] messages, uint batch_id,
 			Cancellable? cancellable) throws GLib.Error;

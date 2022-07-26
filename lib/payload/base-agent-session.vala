@@ -236,16 +236,16 @@ namespace Frida {
 			script_eternalized (script);
 		}
 
-		public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
+		public async void enable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			script_engine.enable_debugger ();
+			script_engine.enable_debugger (script_id);
 		}
 
-		public async void disable_debugger (Cancellable? cancellable) throws Error, IOError {
+		public async void disable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			script_engine.disable_debugger ();
+			script_engine.disable_debugger (script_id);
 		}
 
 		public async void post_messages (AgentMessage[] messages, uint batch_id,
@@ -259,7 +259,7 @@ namespace Frida {
 						script_engine.post_to_script (m.script_id, m.text, m.has_data ? new Bytes (m.data) : null);
 						break;
 					case DEBUGGER:
-						script_engine.post_to_debugger (m.text);
+						script_engine.post_to_debugger (m.script_id, m.text);
 						break;
 				}
 			}
@@ -596,14 +596,12 @@ namespace Frida {
 		}
 
 		private void on_message_from_script (AgentScriptId script_id, string json, Bytes? data) {
-			pending_messages.offer (
-				new PendingMessage (next_serial++, AgentMessageKind.SCRIPT, script_id, json, data));
+			pending_messages.offer (new PendingMessage (next_serial++, AgentMessageKind.SCRIPT, script_id, json, data));
 			maybe_deliver_pending_messages ();
 		}
 
-		private void on_message_from_debugger (string message) {
-			pending_messages.offer (
-				new PendingMessage (next_serial++, AgentMessageKind.DEBUGGER, AgentScriptId (0), message));
+		private void on_message_from_debugger (AgentScriptId script_id, string message) {
+			pending_messages.offer (new PendingMessage (next_serial++, AgentMessageKind.DEBUGGER, script_id, message));
 			maybe_deliver_pending_messages ();
 		}
 

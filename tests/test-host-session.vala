@@ -498,40 +498,45 @@ namespace Frida.HostSessionTest {
 									});
 									break;
 								case 2:
-								case 3: {
+								case 3:
+								case 4:
+								case 5: {
 									var tokens = command.split(" ");
 									if (tokens.length < 2) {
 										printerr ("Missing argument\n");
 										continue;
 									}
 
-									int64 script_index;
-									if (!int64.try_parse (tokens[1], out script_index)) {
+									int64 raw_script_index;
+									if (!int64.try_parse (tokens[1], out raw_script_index)) {
 										printerr ("Invalid script index\n");
 										continue;
 									}
+									var script_index = (int) raw_script_index;
 
 									Idle.add (() => {
-										if (choice == 2)
-											load_script.begin ((int) script_index, scripts);
-										else
-											remove_script.begin ((int) script_index, scripts);
+										switch (choice) {
+											case 2:
+												load_script.begin (script_index, scripts);
+												break;
+											case 3:
+												remove_script.begin (script_index, scripts);
+												break;
+											case 4:
+												enable_debugger.begin (script_index,
+													scripts);
+												break;
+											case 5:
+												disable_debugger.begin (script_index,
+													scripts);
+												break;
+											default:
+												assert_not_reached ();
+										}
 										return false;
 									});
 									break;
 								}
-								case 4:
-									Idle.add (() => {
-										enable_debugger.begin (session);
-										return false;
-									});
-									break;
-								case 5:
-									Idle.add (() => {
-										disable_debugger.begin (session);
-										return false;
-									});
-									break;
 								default:
 									break;
 							}
@@ -583,12 +588,9 @@ namespace Frida.HostSessionTest {
 			}
 
 			private static async void load_script (int index, Gee.ArrayList<Script> container) {
-				if (index < 0 || index >= container.size) {
-					printerr ("Invalid script index\n");
+				Script script;
+				if (!get_script (index, container, out script))
 					return;
-				}
-
-				var script = container[index];
 
 				try {
 					yield script.load ();
@@ -598,12 +600,11 @@ namespace Frida.HostSessionTest {
 			}
 
 			private static async void remove_script (int index, Gee.ArrayList<Script> container) {
-				if (index < 0 || index >= container.size) {
-					printerr ("Invalid script index\n");
+				Script script;
+				if (!get_script (index, container, out script))
 					return;
-				}
 
-				var script = container.remove_at (index);
+				container.remove_at (index);
 
 				try {
 					yield script.unload ();
@@ -612,20 +613,39 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void enable_debugger (Session session) {
+			private static async void enable_debugger (int index, Gee.ArrayList<Script> container) {
+				Script script;
+				if (!get_script (index, container, out script))
+					return;
+
 				try {
-					yield session.enable_debugger (5858);
+					yield script.enable_debugger (5858);
 				} catch (GLib.Error e) {
 					printerr ("Unable to enable debugger: %s\n", e.message);
 				}
 			}
 
-			private static async void disable_debugger (Session session) {
+			private static async void disable_debugger (int index, Gee.ArrayList<Script> container) {
+				Script script;
+				if (!get_script (index, container, out script))
+					return;
+
 				try {
-					yield session.disable_debugger ();
+					yield script.disable_debugger ();
 				} catch (GLib.Error e) {
 					printerr ("Unable to disable debugger: %s\n", e.message);
 				}
+			}
+
+			private static bool get_script (int index, Gee.ArrayList<Script> container, out Script? script) {
+				if (index < 0 || index >= container.size) {
+					printerr ("Invalid script index\n");
+					script = null;
+					return false;
+				}
+
+				script = container[index];
+				return true;
 			}
 
 			private static string prompt (string message) {
