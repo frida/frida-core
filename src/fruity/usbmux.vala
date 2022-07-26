@@ -53,7 +53,7 @@ namespace Frida.Fruity {
 			string? server_socket = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
 			if (server_socket != null) {
 				MatchInfo info;
-				if (/^([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
+				if (/^([\d\w.:-]+):([\d]+)$/.match (server_socket, 0, out info)) {
 					server_host = info.fetch (1);
 					server_port = (uint16) uint.parse (info.fetch (2));
 				} else {

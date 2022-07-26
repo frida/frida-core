@@ -800,7 +800,7 @@ namespace Frida.Droidy {
 			string? server_socket = Environment.get_variable ("ADB_SERVER_SOCKET");
 			if (server_socket != null) {
 				MatchInfo info;
-				if (/^tcp:([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
+				if (/^tcp:([\d\w.:-]+):([\d]+)$/.match (server_socket, 0, out info)) {
 					server_host = info.fetch (1);
 					server_port = (uint16) uint.parse (info.fetch (2));
 				} else if (/^tcp:([\d]+)$/.match (server_socket, 0, out info)) {
