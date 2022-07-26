@@ -1,7 +1,7 @@
 namespace Frida {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId script_id, string json, Bytes? data);
-		public signal void message_from_debugger (string message);
+		public signal void message_from_debugger (AgentScriptId script_id, string message);
 
 		public weak ProcessInvader invader {
 			get;
@@ -13,7 +13,6 @@ namespace Frida {
 		private uint next_script_id = 1;
 
 		private ScriptRuntime preferred_runtime = DEFAULT;
-		private bool debugger_enabled = false;
 
 		private delegate void CompletionNotify ();
 
@@ -40,15 +39,6 @@ namespace Frida {
 			yield;
 
 			on_complete = null;
-
-			if (debugger_enabled) {
-				try {
-					invader.get_script_backend (V8).set_debug_message_handler (null);
-				} catch (Error e) {
-					assert_not_reached ();
-				}
-				debugger_enabled = false;
-			}
 		}
 
 		private async void close_instance (ScriptInstance instance, CompletionNotify on_complete) {
@@ -124,6 +114,7 @@ namespace Frida {
 
 			instance.closed.connect (on_instance_closed);
 			instance.message.connect (on_instance_message);
+			instance.debug_message.connect (on_instance_debug_message);
 
 			return instance;
 		}
@@ -131,6 +122,7 @@ namespace Frida {
 		private void detach_instance (ScriptInstance instance) {
 			instance.closed.disconnect (on_instance_closed);
 			instance.message.disconnect (on_instance_message);
+			instance.debug_message.disconnect (on_instance_debug_message);
 
 			instances.unset (instance.script_id);
 		}
@@ -158,25 +150,15 @@ namespace Frida {
 		}
 
 		public async void destroy_script (AgentScriptId script_id) throws Error {
-			var instance = instances[script_id];
-			if (instance == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-
-			yield instance.close ();
+			yield get_instance (script_id).close ();
 		}
 
 		public async void load_script (AgentScriptId script_id) throws Error {
-			var instance = instances[script_id];
-			if (instance == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-
-			yield instance.load ();
+			yield get_instance (script_id).load ();
 		}
 
 		public Gum.Script eternalize_script (AgentScriptId script_id) throws Error {
-			var instance = instances[script_id];
-			if (instance == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			var instance = get_instance (script_id);
 
 			var script = instance.eternalize ();
 
@@ -186,11 +168,26 @@ namespace Frida {
 		}
 
 		public void post_to_script (AgentScriptId script_id, string json, Bytes? data = null) throws Error {
+			get_instance (script_id).post (json, data);
+		}
+
+		public void enable_debugger (AgentScriptId script_id) throws Error {
+			get_instance (script_id).enable_debugger ();
+		}
+
+		public void disable_debugger (AgentScriptId script_id) throws Error {
+			get_instance (script_id).disable_debugger ();
+		}
+
+		public void post_to_debugger (AgentScriptId script_id, string message) throws Error {
+			get_instance (script_id).post_debug_message (message);
+		}
+
+		private ScriptInstance get_instance (AgentScriptId script_id) throws Error {
 			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-
-			instance.post (json, data);
+			return instance;
 		}
 
 		private void on_instance_closed (ScriptInstance instance) {
@@ -201,29 +198,8 @@ namespace Frida {
 			message_from_script (instance.script_id, json, data);
 		}
 
-		public void enable_debugger () throws Error {
-			invader.get_script_backend (V8).set_debug_message_handler (on_debug_message);
-			debugger_enabled = true;
-		}
-
-		public void disable_debugger () throws Error {
-			invader.get_script_backend (V8).set_debug_message_handler (null);
-			debugger_enabled = false;
-		}
-
-		public void post_to_debugger (string message) {
-			Gum.ScriptBackend backend;
-			try {
-				backend = invader.get_script_backend (V8);
-			} catch (Error e) {
-				return;
-			}
-
-			backend.post_debug_message (message);
-		}
-
-		private void on_debug_message (string message) {
-			message_from_debugger (message);
+		private void on_instance_debug_message (ScriptInstance instance, string message) {
+			message_from_debugger (instance.script_id, message);
 		}
 
 		private static void schedule_idle (owned SourceFunc function) {
@@ -241,13 +217,14 @@ namespace Frida {
 		public class ScriptInstance : Object, RpcPeer {
 			public signal void closed ();
 			public signal void message (string json, Bytes? data);
+			public signal void debug_message (string message);
 
 			public AgentScriptId script_id {
 				get;
 				construct;
 			}
 
-			public Gum.Script script {
+			public Gum.Script? script {
 				get {
 					return _script;
 				}
@@ -259,7 +236,7 @@ namespace Frida {
 						_script.set_message_handler (on_message);
 				}
 			}
-			private Gum.Script _script;
+			private Gum.Script? _script;
 
 			private State state = CREATED;
 
@@ -456,10 +433,29 @@ namespace Frida {
 				}
 			}
 
-			private void on_message (Gum.Script script, string json, Bytes? data) {
+			public void enable_debugger () throws Error {
+				if (_script != null)
+					_script.set_debug_message_handler (on_debug_message);
+			}
+
+			public void disable_debugger () {
+				if (_script != null)
+					_script.set_debug_message_handler (null);
+			}
+
+			public void post_debug_message (string message) {
+				if (_script != null)
+					_script.post_debug_message (message);
+			}
+
+			private void on_message (string json, Bytes? data) {
 				bool handled = rpc_client.try_handle_message (json);
 				if (!handled)
 					this.message (json, data);
+			}
+
+			private void on_debug_message (string message) {
+				this.debug_message (message);
 			}
 
 			private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {

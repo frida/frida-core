@@ -1984,8 +1984,6 @@ namespace Frida {
 		private Gee.HashMap<AgentScriptId?, Script> scripts =
 			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
 
-		private Gum.InspectorServer? inspector_server;
-
 		private PeerOptions? nice_options;
 #if HAVE_NICE
 		private Nice.Agent? nice_agent;
@@ -2244,86 +2242,6 @@ namespace Frida {
 			protected override async Bytes perform_operation () throws Error, IOError {
 				return yield parent.compile_script (source, options, cancellable);
 			}
-		}
-
-		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
-
-			if (inspector_server != null)
-				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
-
-			inspector_server = (port != 0)
-				? new Gum.InspectorServer.with_port (port)
-				: new Gum.InspectorServer ();
-			inspector_server.message.connect (on_debugger_message_from_frontend);
-
-			try {
-				yield session.enable_debugger (cancellable);
-			} catch (GLib.Error e) {
-				inspector_server = null;
-
-				throw_dbus_error (e);
-			}
-
-			if (inspector_server != null) {
-				try {
-					inspector_server.start ();
-				} catch (Gum.Error e) {
-					inspector_server = null;
-
-					try {
-						yield session.disable_debugger (cancellable);
-					} catch (GLib.Error e) {
-					}
-
-					throw new Error.ADDRESS_IN_USE ("%s", e.message);
-				}
-			}
-		}
-
-		public void enable_debugger_sync (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<EnableScriptDebuggerTask> ();
-			task.port = port;
-			task.execute (cancellable);
-		}
-
-		private class EnableScriptDebuggerTask : SessionTask<void> {
-			public uint16 port;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.enable_debugger (port, cancellable);
-			}
-		}
-
-		public async void disable_debugger (Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
-
-			if (inspector_server == null)
-				return;
-
-			inspector_server.message.disconnect (on_debugger_message_from_frontend);
-			inspector_server.stop ();
-			inspector_server = null;
-
-			try {
-				yield session.disable_debugger (cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public void disable_debugger_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<DisableScriptDebuggerTask> ().execute (cancellable);
-		}
-
-		private class DisableScriptDebuggerTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.disable_debugger (cancellable);
-			}
-		}
-
-		private void on_debugger_message_from_frontend (string message) {
-			_post_to_agent (AgentMessageKind.DEBUGGER, AgentScriptId (0), message);
 		}
 
 		public async void setup_peer_connection (PeerOptions? options = null,
@@ -2744,8 +2662,9 @@ namespace Frida {
 						break;
 					}
 					case DEBUGGER:
-						if (inspector_server != null)
-							inspector_server.post_message (m.text);
+						var script = scripts[m.script_id];
+						if (script != null)
+							script.on_debugger_message_from_backend (m.text);
 						break;
 				}
 			}
@@ -2910,12 +2829,6 @@ namespace Frida {
 			state = DETACHED;
 
 			try {
-				if (inspector_server != null) {
-					inspector_server.message.disconnect (on_debugger_message_from_frontend);
-					inspector_server.stop ();
-					inspector_server = null;
-				}
-
 				foreach (var script in scripts.values.to_array ())
 					yield script._do_close (may_block, cancellable);
 
@@ -2988,6 +2901,8 @@ namespace Frida {
 		}
 
 		private Promise<bool> close_request;
+
+		private Gum.InspectorServer? inspector_server;
 
 		internal Script (Session session, AgentScriptId script_id) {
 			Object (id: script_id, session: session);
@@ -3076,6 +2991,91 @@ namespace Frida {
 			session._post_to_agent (AgentMessageKind.SCRIPT, id, json, data);
 		}
 
+		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			if (inspector_server != null)
+				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
+
+			inspector_server = (port != 0)
+				? new Gum.InspectorServer.with_port (port)
+				: new Gum.InspectorServer ();
+			inspector_server.message.connect (on_debugger_message_from_frontend);
+
+			try {
+				yield session.session.enable_debugger (id, cancellable);
+			} catch (GLib.Error e) {
+				inspector_server = null;
+
+				throw_dbus_error (e);
+			}
+
+			if (inspector_server != null) {
+				try {
+					inspector_server.start ();
+				} catch (Gum.Error e) {
+					inspector_server = null;
+
+					try {
+						yield session.session.disable_debugger (id, cancellable);
+					} catch (GLib.Error e) {
+					}
+
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
+				}
+			}
+		}
+
+		public void enable_debugger_sync (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<EnableScriptDebuggerTask> ();
+			task.port = port;
+			task.execute (cancellable);
+		}
+
+		private class EnableScriptDebuggerTask : ScriptTask<void> {
+			public uint16 port;
+
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.enable_debugger (port, cancellable);
+			}
+		}
+
+		public async void disable_debugger (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			if (inspector_server == null)
+				return;
+
+			inspector_server.message.disconnect (on_debugger_message_from_frontend);
+			inspector_server.stop ();
+			inspector_server = null;
+
+			try {
+				yield session.session.disable_debugger (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void disable_debugger_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<DisableScriptDebuggerTask> ().execute (cancellable);
+		}
+
+		private class DisableScriptDebuggerTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.disable_debugger (cancellable);
+			}
+		}
+
+		private void on_debugger_message_from_frontend (string message) {
+			session._post_to_agent (AgentMessageKind.DEBUGGER, id, message);
+		}
+
+		internal void on_debugger_message_from_backend (string message) {
+			if (inspector_server != null)
+				inspector_server.post_message (message);
+		}
+
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Script is destroyed");
@@ -3096,6 +3096,12 @@ namespace Frida {
 			var parent = session;
 
 			parent._release_script (id);
+
+			if (inspector_server != null) {
+				inspector_server.message.disconnect (on_debugger_message_from_frontend);
+				inspector_server.stop ();
+				inspector_server = null;
+			}
 
 			if (may_block) {
 				try {
