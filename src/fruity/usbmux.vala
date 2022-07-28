@@ -22,7 +22,7 @@ namespace Frida.Fruity {
 			MODE_SWITCH
 		}
 
-		private const uint16 USBMUX_SERVER_PORT = 27015;
+		private const uint16 USBMUXD_DEFAULT_SERVER_PORT = 27015;
 		private const uint USBMUX_PROTOCOL_VERSION = 1;
 		private const uint32 MAX_MESSAGE_SIZE = 128 * 1024;
 
@@ -40,40 +40,37 @@ namespace Frida.Fruity {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws UsbmuxError, IOError {
 			assert (!is_processing_messages);
-
-			var client = new SocketClient ();
-
 			SocketConnectable connectable;
-#if WINDOWS
-			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), USBMUX_SERVER_PORT);
-#else
-			string? server_host = null;
-			uint16 server_port = USBMUX_SERVER_PORT;
 
-			string? server_socket = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
-			if (server_socket != null) {
-				MatchInfo info;
-				if (/^([\d\w.:-]+):([\d]+)$/.match (server_socket, 0, out info)) {
-					server_host = info.fetch (1);
-					server_port = (uint16) uint.parse (info.fetch (2));
-				} else {
-					throw new UsbmuxError.INVALID_ARGUMENT ("Bad USBMUXD_SOCKET_ADDRESS environment variable (%s)",
-						server_socket);
+			string? env_socket_address = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
+			string? env_server_address = Environment.get_variable ("USBMUXD_SERVER_ADDRESS");
+			string? env_server_port = Environment.get_variable ("USBMUXD_SERVER_PORT");
+			if (env_socket_address != null) {
+				try {
+					connectable = NetworkAddress.parse_uri (env_socket_address, USBMUXD_DEFAULT_SERVER_PORT);
+				} catch (GLib.Error e) {
+					connectable = NetworkAddress.parse (env_socket_address, USBMUXD_DEFAULT_SERVER_PORT);
 				}
+			} else if (env_server_address != null && env_server_port != null) {
+				connectable = new NetworkAddress (
+					env_server_address,
+					(uint16) uint.parse (env_server_port)
+				);
+			} else if (env_server_address != null) {
+				connectable = new NetworkAddress (
+					env_server_address,
+					USBMUXD_DEFAULT_SERVER_PORT
+				);
+			} else if (env_server_port != null) {
+				connectable = new NetworkAddress.loopback ((uint16) uint.parse (env_server_port));
+			} else if (File.new_for_path ("/var/run/usbmuxd").query_exists () == true) {
+				connectable = new UnixSocketAddress ("/var/run/usbmuxd");
 			} else {
-				server_host = Environment.get_variable ("USBMUXD_SERVER_ADDRESS");
-				string? server_port_str = Environment.get_variable ("USBMUXD_SERVER_PORT");
-				if (server_port_str != null)
-					server_port = (uint16) uint.parse (server_port_str);
+				connectable = new NetworkAddress.loopback (USBMUXD_DEFAULT_SERVER_PORT);
 			}
 
-			if (server_host != null)
-				connectable = new NetworkAddress (server_host, server_port);
-			else
-				connectable = new UnixSocketAddress ("/var/run/usbmuxd");
-#endif
-
 			try {
+				var client = new SocketClient ();
 				connection = yield client.connect_async (connectable, cancellable);
 
 				var socket = connection.socket;
