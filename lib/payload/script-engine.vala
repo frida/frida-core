@@ -91,14 +91,14 @@ namespace Frida {
 			if (name == null)
 				name = "script%u".printf (script_id.handle);
 
-			Gum.ScriptBackend backend = pick_backend (options);
+			Gum.ScriptBackend backend = pick_backend (options.runtime);
 
 			Gum.Script script;
 			try {
 				if (source != null)
-					script = yield backend.create (name, source);
+					script = yield backend.create (name, source, options.snapshot);
 				else
-					script = yield backend.create_from_bytes (bytes);
+					script = yield backend.create_from_bytes (bytes, options.snapshot);
 			} catch (Gum.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
@@ -132,7 +132,7 @@ namespace Frida {
 			if (name == null)
 				name = "agent";
 
-			Gum.ScriptBackend backend = pick_backend (options);
+			Gum.ScriptBackend backend = pick_backend (options.runtime);
 
 			try {
 				return yield backend.compile (name, source);
@@ -141,8 +141,17 @@ namespace Frida {
 			}
 		}
 
-		private Gum.ScriptBackend pick_backend (ScriptOptions options) throws Error {
-			ScriptRuntime runtime = options.runtime;
+		public async Bytes snapshot_script (string embed_script, SnapshotOptions options) throws Error {
+			Gum.ScriptBackend backend = pick_backend (options.runtime);
+
+			try {
+				return yield backend.snapshot (embed_script, options.warmup_script);
+			} catch (Gum.Error e) {
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+			}
+		}
+
+		private Gum.ScriptBackend pick_backend (ScriptRuntime runtime) throws Error {
 			if (runtime == DEFAULT)
 				runtime = preferred_runtime;
 
