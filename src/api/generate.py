@@ -198,6 +198,7 @@ def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, bas
         "ProcessQueryOptions": "ApplicationQueryOptions",
         "SessionOptions": "ProcessQueryOptions",
         "ScriptOptions": "Script",
+        "SnapshotOptions": "Script",
         "PeerOptions": "ScriptOptions",
         "Relay": "PeerOptions",
         "PortalOptions": "Relay",

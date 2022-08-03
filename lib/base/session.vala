@@ -68,6 +68,8 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint8[] compile_script (string source, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint8[] snapshot_script (string embed_script, HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
@@ -902,6 +904,11 @@ namespace Frida {
 			set;
 		}
 
+		public Bytes? snapshot {
+			get;
+			set;
+		}
+
 		public ScriptRuntime runtime {
 			get;
 			set;
@@ -913,6 +920,9 @@ namespace Frida {
 
 			if (name != null)
 				dict["name"] = new Variant.string (name);
+
+			if (snapshot != null)
+				dict["snapshot"] = Variant.new_from_data (new VariantType ("ay"), snapshot.get_data (), true, snapshot);
 
 			if (runtime != DEFAULT)
 				dict["runtime"] = new Variant.string (runtime.to_nick ());
@@ -928,6 +938,58 @@ namespace Frida {
 				if (!name.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'name' option must be a string");
 				options.name = name.get_string ();
+			}
+
+			Variant? snapshot = dict["snapshot"];
+			if (snapshot != null) {
+				if (!snapshot.is_of_type (new VariantType ("ay")))
+					throw new Error.INVALID_ARGUMENT ("The 'snapshot' option must be a byte array");
+				options.snapshot = snapshot.get_data_as_bytes ();
+			}
+
+			Variant? runtime = dict["runtime"];
+			if (runtime != null) {
+				if (!runtime.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'runtime' option must be a string");
+				options.runtime = ScriptRuntime.from_nick (runtime.get_string ());
+			}
+
+			return options;
+		}
+	}
+
+	public class SnapshotOptions : Object {
+		public string? warmup_script {
+			get;
+			set;
+		}
+
+		public ScriptRuntime runtime {
+			get;
+			set;
+			default = DEFAULT;
+		}
+
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_parameters_dict ();
+
+			if (warmup_script != null)
+				dict["warmup-script"] = new Variant.string (warmup_script);
+
+			if (runtime != DEFAULT)
+				dict["runtime"] = new Variant.string (runtime.to_nick ());
+
+			return dict;
+		}
+
+		public static SnapshotOptions _deserialize (HashTable<string, Variant> dict) throws Error {
+			var options = new SnapshotOptions ();
+
+			Variant? warmup_script = dict["warmup-script"];
+			if (warmup_script != null) {
+				if (!warmup_script.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'warmup-script' option must be a string");
+				options.warmup_script = warmup_script.get_string ();
 			}
 
 			Variant? runtime = dict["runtime"];

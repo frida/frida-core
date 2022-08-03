@@ -217,6 +217,14 @@ namespace Frida {
 			return bytes.get_data ();
 		}
 
+		public async uint8[] snapshot_script (string embed_script, HashTable<string, Variant> options, Cancellable? cancellable)
+				throws Error, IOError {
+			check_open ();
+
+			var bytes = yield script_engine.snapshot_script (embed_script, SnapshotOptions._deserialize (options));
+			return bytes.get_data ();
+		}
+
 		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 

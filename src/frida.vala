@@ -2244,6 +2244,39 @@ namespace Frida {
 			}
 		}
 
+		public async Bytes snapshot_script (string embed_script, SnapshotOptions? options = null, Cancellable? cancellable = null)
+				throws Error, IOError {
+			check_open ();
+
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
+
+			uint8[] data;
+			try {
+				data = yield session.snapshot_script (embed_script, raw_options, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			return new Bytes (data);
+		}
+
+		public Bytes snapshot_script_sync (string embed_script, SnapshotOptions? options = null, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var task = create<SnapshotScriptTask> ();
+			task.embed_script = embed_script;
+			task.options = options;
+			return task.execute (cancellable);
+		}
+
+		private class SnapshotScriptTask : SessionTask<Bytes> {
+			public string embed_script;
+			public SnapshotOptions? options;
+
+			protected override async Bytes perform_operation () throws Error, IOError {
+				return yield parent.snapshot_script (embed_script, options, cancellable);
+			}
+		}
+
 		public async void setup_peer_connection (PeerOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
