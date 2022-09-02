@@ -1341,6 +1341,9 @@ namespace Frida.Agent {
 				if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
 					throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
 
+				UnixSocket.tune_buffer_sizes (fds[0]);
+				UnixSocket.tune_buffer_sizes (fds[1]);
+
 				Socket local_socket, remote_socket;
 				try {
 					local_socket = new Socket.from_fd (fds[0]);

@@ -56,6 +56,9 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
   status = socketpair (AF_UNIX, SOCK_STREAM, 0, sockets);
   CHECK_BSD_RESULT (status, ==, 0, "socketpair");
 
+  frida_unix_socket_tune_buffer_sizes (sockets[0]);
+  frida_unix_socket_tune_buffer_sizes (sockets[1]);
+
   status = fileport_makeport (sockets[0], &local_wrapper);
   CHECK_BSD_RESULT (status, ==, 0, "fileport_makeport local");
 

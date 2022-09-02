@@ -36,6 +36,10 @@ namespace Frida {
 		}
 	}
 
+	namespace UnixSocket {
+		public extern void tune_buffer_sizes (int fd);
+	}
+
 	namespace Tcp {
 		public extern void enable_nodelay (Socket socket);
 	}

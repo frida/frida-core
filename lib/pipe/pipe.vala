@@ -154,6 +154,7 @@ namespace Frida {
 
 				if (role == "server") {
 					var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);
+					UnixSocket.tune_buffer_sizes (socket.get_fd ());
 					socket.bind (server_address, true);
 					socket.listen ();
 
@@ -194,6 +195,7 @@ namespace Frida {
 			var client = new SocketClient ();
 			try {
 				var connection = yield client.connect_async (address, cancellable);
+				UnixSocket.tune_buffer_sizes (connection.get_socket ().get_fd ());
 				promise.resolve (connection);
 			} catch (GLib.Error e) {
 				promise.reject (e);

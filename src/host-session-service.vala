@@ -701,6 +701,9 @@ namespace Frida {
 			var fds = new int[2];
 			Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds);
 
+			UnixSocket.tune_buffer_sizes (fds[0]);
+			UnixSocket.tune_buffer_sizes (fds[1]);
+
 			Socket local_socket, remote_socket;
 			IOStream local_stream;
 			try {
