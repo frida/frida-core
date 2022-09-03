@@ -1218,6 +1218,11 @@ namespace Frida {
 			construct;
 		}
 
+		public Future<Bytes>? script_snapshot {
+			get;
+			construct;
+		}
+
 		public ScriptRuntime script_runtime {
 			get;
 			construct;
@@ -1303,6 +1308,8 @@ namespace Frida {
 					if (script_source != null) {
 						var options = new ScriptOptions ();
 						options.name = "internal-agent";
+						if (script_snapshot != null)
+							options.snapshot = yield script_snapshot.wait_async (cancellable);
 						options.runtime = script_runtime;
 
 						script = yield session.create_script (script_source, options._serialize (), cancellable);
