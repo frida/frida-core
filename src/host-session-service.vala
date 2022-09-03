@@ -1223,6 +1223,12 @@ namespace Frida {
 			construct;
 		}
 
+		public SnapshotTransport script_snapshot_transport {
+			get;
+			construct;
+			default = INLINE;
+		}
+
 		public ScriptRuntime script_runtime {
 			get;
 			construct;
@@ -1308,8 +1314,10 @@ namespace Frida {
 					if (script_source != null) {
 						var options = new ScriptOptions ();
 						options.name = "internal-agent";
-						if (script_snapshot != null)
+						if (script_snapshot != null) {
 							options.snapshot = yield script_snapshot.wait_async (cancellable);
+							options.snapshot_transport = script_snapshot_transport;
+						}
 						options.runtime = script_runtime;
 
 						script = yield session.create_script (script_source, options._serialize (), cancellable);

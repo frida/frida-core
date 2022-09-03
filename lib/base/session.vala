@@ -909,6 +909,12 @@ namespace Frida {
 			set;
 		}
 
+		public SnapshotTransport snapshot_transport {
+			get;
+			set;
+			default = INLINE;
+		}
+
 		public ScriptRuntime runtime {
 			get;
 			set;
@@ -921,8 +927,14 @@ namespace Frida {
 			if (name != null)
 				dict["name"] = new Variant.string (name);
 
-			if (snapshot != null)
-				dict["snapshot"] = Variant.new_from_data (new VariantType ("ay"), snapshot.get_data (), true, snapshot);
+			if (snapshot != null) {
+				if (snapshot_transport == SHARED_MEMORY) {
+					unowned uint8[]? data = snapshot.get_data ();
+					dict["snapshot-memory-range"] = new Variant ("(tu)", (uint64) data, (uint) data.length);
+				} else {
+					dict["snapshot"] = Variant.new_from_data (new VariantType ("ay"), snapshot.get_data (), true, snapshot);
+				}
+			}
 
 			if (runtime != DEFAULT)
 				dict["runtime"] = new Variant.string (runtime.to_nick ());
@@ -945,6 +957,19 @@ namespace Frida {
 				if (!snapshot.is_of_type (new VariantType ("ay")))
 					throw new Error.INVALID_ARGUMENT ("The 'snapshot' option must be a byte array");
 				options.snapshot = snapshot.get_data_as_bytes ();
+			} else {
+				Variant? range = dict["snapshot-memory-range"];
+				if (range != null) {
+					if (!range.is_of_type (new VariantType ("(tu)")))
+						throw new Error.INVALID_ARGUMENT ("The 'snapshot-memory-range' option must be a tuple");
+
+					uint64 base_address;
+					uint size;
+					range.get ("(tu)", out base_address, out size);
+					unowned uint8[]? data = ((uint8[]) (void *) base_address)[:size];
+
+					options.snapshot = new Bytes.static (data);
+				}
 			}
 
 			Variant? runtime = dict["runtime"];
@@ -956,6 +981,11 @@ namespace Frida {
 
 			return options;
 		}
+	}
+
+	public enum SnapshotTransport {
+		INLINE,
+		SHARED_MEMORY
 	}
 
 	public class SnapshotOptions : Object {
