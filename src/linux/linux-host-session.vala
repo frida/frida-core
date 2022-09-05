@@ -796,7 +796,6 @@ namespace Frida {
 		public ZygoteAgent (LinuxHostSession host_session, uint pid, string name) {
 			Object (
 				host_session: host_session,
-				script_source: null,
 				pid: pid,
 				name: name
 			);
@@ -815,14 +814,16 @@ namespace Frida {
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return null;
+		}
 	}
 
 	private class SystemServerAgent : InternalAgent {
 		public SystemServerAgent (LinuxHostSession host_session) {
-			string * source = Frida.Data.Android.get_system_server_js_blob ().data;
 			Object (
 				host_session: host_session,
-				script_source: source,
 #if HAVE_V8
 				script_runtime: ScriptRuntime.V8
 #else
@@ -975,6 +976,10 @@ namespace Frida {
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return LocalProcesses.get_pid ("system_server");
+		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) Frida.Data.Android.get_system_server_js_blob ().data;
 		}
 
 		private static void add_parameters_from_json (HashTable<string, Variant> parameters, Json.Object object) {

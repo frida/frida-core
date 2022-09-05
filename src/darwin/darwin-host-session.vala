@@ -869,13 +869,7 @@ namespace Frida {
 		}
 
 		public LaunchdAgent (DarwinHostSession host_session, Cancellable io_cancellable) {
-			string * raw_source = Frida.Data.Darwin.get_launchd_js_blob ().data;
-			string source = raw_source->replace ("@REPORT_CRASHES@", host_session.report_crashes.to_string ());
-			Object (
-				host_session: host_session,
-				script_source: source,
-				io_cancellable: io_cancellable
-			);
+			Object (host_session: host_session, io_cancellable: io_cancellable);
 		}
 
 		construct {
@@ -962,6 +956,11 @@ namespace Frida {
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return 1;
 		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			string * raw_source = Frida.Data.Darwin.get_launchd_js_blob ().data;
+			return raw_source->replace ("@REPORT_CRASHES@", ((DarwinHostSession) host_session).report_crashes.to_string ());
+		}
 	}
 
 	private class XpcProxyAgent : InternalAgent {
@@ -976,8 +975,7 @@ namespace Frida {
 		}
 
 		public XpcProxyAgent (DarwinHostSession host_session, string identifier, uint pid) {
-			string * source = Frida.Data.Darwin.get_xpcproxy_js_blob ().data;
-			Object (host_session: host_session, script_source: source, identifier: identifier, pid: pid);
+			Object (host_session: host_session, identifier: identifier, pid: pid);
 		}
 
 		construct {
@@ -1000,6 +998,10 @@ namespace Frida {
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
+		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) Frida.Data.Darwin.get_xpcproxy_js_blob ().data;
 		}
 	}
 
@@ -1024,10 +1026,8 @@ namespace Frida {
 
 		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container,
 				Cancellable io_cancellable) {
-			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
 			Object (
 				host_session: host_session,
-				script_source: source,
 				pid: pid,
 				mapped_agent_container: mapped_agent_container,
 				io_cancellable: io_cancellable
@@ -1231,6 +1231,10 @@ namespace Frida {
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) Frida.Data.Darwin.get_reportcrash_js_blob ().data;
+		}
 	}
 
 	private class OSAnalyticsAgent : InternalAgent {
@@ -1245,10 +1249,8 @@ namespace Frida {
 		}
 
 		public OSAnalyticsAgent (DarwinHostSession host_session, uint pid, Cancellable io_cancellable) {
-			string * source = Frida.Data.Darwin.get_osanalytics_js_blob ().data;
 			Object (
 				host_session: host_session,
-				script_source: source,
 				pid: pid,
 				io_cancellable: io_cancellable
 			);
@@ -1269,6 +1271,10 @@ namespace Frida {
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
+		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) Frida.Data.Darwin.get_osanalytics_js_blob ().data;
 		}
 	}
 #endif
