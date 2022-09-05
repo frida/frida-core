@@ -202,7 +202,7 @@ namespace Frida {
 			} catch (KeyFileError e) {
 			}
 
-			var input_files = new Gee.HashMap<ResourceFile, Gee.Future<File>> ();
+			var prepared_resources = new Gee.HashMap<ResourceFile, Gee.Future<PreparedResource>> ();
 			var compression_pool = new ThreadPool<CompressRequest>.with_owned_data (compress_file,
 				(int) get_num_processors (), false);
 			foreach (ResourceCategory category in categories) {
@@ -219,14 +219,23 @@ namespace Frida {
 						}
 					}
 
-					var file = File.new_for_commandline_arg (input.source);
-					var promise = new Gee.Promise<File> ();
-					input_files[input] = promise.future;
+					var input_file = File.new_for_commandline_arg (input.source);
+					var input_stream = input_file.read ();
+					FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
+					uint64 input_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
 
-					if (rule != null)
-						compression_pool.add (new CompressRequest (name, file, rule, output_basename, promise));
-					else
-						promise.set_value (file);
+					var promise = new Gee.Promise<PreparedResource> ();
+					prepared_resources[input] = promise.future;
+
+					if (rule != null) {
+						var output_file = File.new_for_path (output_basename + "-" + name + ".br");
+						var output_stream = output_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
+						compression_pool.add (new CompressRequest (input_stream, input_size,
+							output_file, output_stream, rule, promise));
+					} else {
+						input_stream.close ();
+						promise.set_value (new PreparedResource (input_file, input_size, input_size));
+					}
 				}
 			}
 
@@ -277,6 +286,7 @@ namespace Frida {
 				"  const gchar * name;\n" +
 				"  gconstpointer data;\n" +
 				"  guint data_length1;\n" +
+				"  guint uncompressed_size;\n" +
 				"};\n" +
 				"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
 				null);
@@ -318,32 +328,30 @@ namespace Frida {
 				var identifier_by_index = new Gee.ArrayList<string> ();
 				var blob_identifier_by_index = new Gee.ArrayList<string> ();
 				var size_by_index = new Gee.ArrayList<uint64?> ();
+				var uncompressed_size_by_index = new Gee.ArrayList<uint64?> ();
 				int file_count = category.files.size;
 
 				foreach (ResourceFile input in category.files) {
-					File input_file;
-					Gee.Future<File> input_future = input_files[input];
+					PreparedResource prepared_resource;
+					Gee.Future<PreparedResource> future = prepared_resources[input];
 					try {
-						input_file = input_future.wait ();
+						prepared_resource = future.wait ();
 					} catch (Gee.FutureError e) {
-						throw input_future.exception;
+						throw future.exception;
 					}
 
-					FileInputStream input_stream = input_file.read ();
-					FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
 					string identifier = identifier_from_filename (input.name);
-					uint64 file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
-
 					identifier_by_index.add (identifier);
-					size_by_index.add (file_size);
+					size_by_index.add (prepared_resource.size);
+					uncompressed_size_by_index.add (prepared_resource.uncompressed_size);
 
-					var blob_identifier = "_" + namespace_cprefix + "_" + identifier;
+					string blob_identifier = "_" + namespace_cprefix + "_" + identifier;
 					blob_identifier_by_index.add (blob_identifier);
 
 					csource.put_string ("extern const char " + blob_identifier + "[];\n");
 
 					if (toolchain == Toolchain.MICROSOFT) {
-						obj.write (blob_identifier, input_stream);
+						obj.write (blob_identifier, prepared_resource.file.read ());
 					} else {
 						if (toolchain == Toolchain.APPLE) {
 							var allow_dead_strip_directive = ".subsections_via_symbols\n";
@@ -361,7 +369,7 @@ namespace Frida {
 
 						asource.put_string (".globl " + asm_identifier_prefix + blob_identifier + "\n");
 						asource.put_string (asm_identifier_prefix + blob_identifier + ":\n");
-						asource.put_string (".incbin \"" + input_file.get_path () + "\"\n");
+						asource.put_string (".incbin \"" + prepared_resource.file.get_path () + "\"\n");
 
 						if (!is_dylib)
 							asource.put_string (".byte 0\n");
@@ -374,10 +382,16 @@ namespace Frida {
 
 				csource.put_string ("static const " + blob_ctype + " " + blob_list_identifier + "[" + category.files.size.to_string () + "] =\n{");
 				for (int file_index = 0; file_index != file_count; file_index++) {
-					var filename = category.files[file_index].name;
-					var blob_identifier = blob_identifier_by_index[file_index];
-					var size = size_by_index[file_index];
-					csource.put_string ("\n  { \"%s\", %s, %s },".printf (filename, blob_identifier, size.to_string ()));
+					string filename = category.files[file_index].name;
+					string blob_identifier = blob_identifier_by_index[file_index];
+					uint64 size = size_by_index[file_index];
+					uint64 uncompressed_size = uncompressed_size_by_index[file_index];
+					csource.put_string ("\n  { \"%s\", %s, %s, %s },".printf (
+							filename,
+							blob_identifier,
+							size.to_string (),
+							uncompressed_size.to_string ()
+						));
 				}
 				csource.put_string ("\n};\n\n");
 
@@ -424,6 +438,7 @@ namespace Frida {
 						"  needle.name = name;\n" +
 						"  needle.data = NULL;\n" +
 						"  needle.data_length1 = 0;\n" +
+						"  needle.uncompressed_size = 0;\n" +
 						"\n" +
 						"  return bsearch (&needle, " + blob_list_identifier + ", G_N_ELEMENTS (" + blob_list_identifier + "), sizeof (" + blob_ctype + "), " + compare_func_identifier + ");\n" +
 						"}\n",
@@ -438,10 +453,12 @@ namespace Frida {
 				"	public struct Blob {\n" +
 				"		public unowned string name;\n" +
 				"		public unowned uint8[] data;\n" +
+				"		public uint uncompressed_size;\n" +
 				"\n" +
-				"		public Blob (string name, uint8[] data) {\n" +
+				"		public Blob (string name, uint8[] data, uint uncompressed_size) {\n" +
 				"			this.name = name;\n" +
 				"			this.data = data;\n" +
+				"			this.uncompressed_size = uncompressed_size;\n" +
 				"		}\n" +
 				"	}\n" +
 				"\n" +
@@ -518,26 +535,23 @@ namespace Frida {
 
 		private static void compress_file (owned CompressRequest request) {
 			try {
-				var input_stream = request.file.read ();
-				FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
-				uint64 file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
-
-				var output_file = File.new_for_path (request.output_basename + "-" + request.name + ".br");
-				var output_stream = output_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
+				InputStream input_stream = request.input_stream;
+				OutputStream output_stream = request.output_stream;
+				var input_buffer = new uint8[512 * 1024];
+				var output_buffer = new uint8[512 * 1024];
+				uint64 input_size = request.input_size;
+				uint64 output_size = 0;
 
 				var encoder = new Brotli.Encoder ();
 				encoder.set_parameter (MODE, request.rule.mode);
 				encoder.set_parameter (QUALITY, request.rule.quality);
 				uint32 window_bits = Brotli.MIN_WINDOW_BITS;
-				while (brotli_backward_limit_for (window_bits) < file_size)
+				while (brotli_backward_limit_for (window_bits) < input_size)
 					window_bits++;
 				if (window_bits > Brotli.MAX_WINDOW_BITS)
 					encoder.set_parameter (LARGE_WINDOW, 1);
 				encoder.set_parameter (LGWIN, window_bits);
-				encoder.set_parameter (SIZE_HINT, uint32.min ((uint32) file_size, 1 << 30));
-
-				var input_buffer = new uint8[512 * 1024];
-				var output_buffer = new uint8[512 * 1024];
+				encoder.set_parameter (SIZE_HINT, uint32.min ((uint32) input_size, 1 << 30));
 
 				bool is_eof = false;
 				size_t available_in = 0;
@@ -546,7 +560,7 @@ namespace Frida {
 				uint8 * next_out = output_buffer;
 				while (true) {
 					if (available_in == 0 && !is_eof) {
-						ssize_t n = input_stream.read (input_buffer);
+						ssize_t n = request.input_stream.read (input_buffer);
 						is_eof = n == 0;
 						available_in = n;
 						next_in = input_buffer;
@@ -561,6 +575,7 @@ namespace Frida {
 
 					if (available_out == 0) {
 						output_stream.write_all (output_buffer, out bytes_written);
+						output_size += bytes_written;
 						available_out = output_buffer.length;
 						next_out = output_buffer;
 					}
@@ -568,13 +583,15 @@ namespace Frida {
 					if (encoder.is_finished ()) {
 						output_stream.write_all (output_buffer[:next_out - (uint8 *) output_buffer],
 							out bytes_written);
+						output_size += bytes_written;
 						break;
 					}
 				}
 
 				output_stream.close ();
+				input_stream.close ();
 
-				request.promise.set_value (output_file);
+				request.promise.set_value (new PreparedResource (request.output_file, output_size, request.input_size));
 			} catch (Error e) {
 				request.promise.set_exception ((owned) e);
 			}
@@ -606,6 +623,18 @@ namespace Frida {
 			}
 		}
 
+		private class PreparedResource {
+			public File file;
+			public uint64 size;
+			public uint64 uncompressed_size;
+
+			public PreparedResource (File file, uint64 size, uint64 uncompressed_size) {
+				this.file = file;
+				this.size = size;
+				this.uncompressed_size = uncompressed_size;
+			}
+		}
+
 		private class CompressRule {
 			public PatternSpec pattern;
 			public Brotli.EncoderMode mode;
@@ -618,18 +647,20 @@ namespace Frida {
 		}
 
 		private class CompressRequest {
-			public string name;
-			public File file;
+			public InputStream input_stream;
+			public uint64 input_size;
+			public File output_file;
+			public OutputStream output_stream;
 			public CompressRule rule;
-			public string output_basename;
-			public Gee.Promise<File> promise;
+			public Gee.Promise<PreparedResource> promise;
 
-			public CompressRequest (string name, File file, CompressRule rule, string output_basename,
-					Gee.Promise<File> promise) {
-				this.name = name;
-				this.file = file;
+			public CompressRequest (InputStream input_stream, uint64 input_size, File output_file, OutputStream output_stream,
+					CompressRule rule, Gee.Promise<PreparedResource> promise) {
+				this.input_stream = input_stream;
+				this.input_size = input_size;
+				this.output_file = output_file;
+				this.output_stream = output_stream;
 				this.rule = rule;
-				this.output_basename = output_basename;
 				this.promise = promise;
 			}
 		}
