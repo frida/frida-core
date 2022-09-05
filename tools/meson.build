@@ -13,6 +13,6 @@ endif
 resource_compiler = executable('frida-resource-compiler', 'resource-compiler.vala',
   link_args: extra_link_args,
   link_depends: extra_link_depends,
-  dependencies: [native_glib_dep, native_gio_dep, native_gee_dep],
+  dependencies: [native_glib_dep, native_gio_dep, native_gee_dep, native_brotlienc_dep],
   native: true,
 )

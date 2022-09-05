@@ -171,6 +171,65 @@ namespace Frida {
 					categories.add (category);
 			}
 
+			var compress_rules = new Gee.ArrayList<CompressRule> ();
+			try {
+				var raw_specs = config.get_string_list ("resource-compiler", "compress");
+				foreach (unowned string s in raw_specs) {
+					string[] tokens = s.strip ().split (":", 3);
+					if (tokens.length != 3)
+						throw new IOError.INVALID_ARGUMENT ("Compression must be specified as glob:mode:quality");
+
+					PatternSpec pattern = new PatternSpec (tokens[0]);
+
+					Brotli.EncoderMode mode;
+					switch (tokens[1]) {
+						case "generic":	mode = GENERIC;	break;
+						case "text":	mode = TEXT;	break;
+						case "font":	mode = FONT;	break;
+						default:
+							throw new IOError.INVALID_ARGUMENT ("Unsupported encoder mode");
+					}
+
+					int quality;
+					bool is_integer = int.try_parse (tokens[2], out quality);
+					if (!is_integer || quality < Brotli.MIN_QUALITY || quality > Brotli.MAX_QUALITY) {
+						throw new IOError.INVALID_ARGUMENT ("Compression quality must be between %d and %d",
+							Brotli.MIN_QUALITY, Brotli.MAX_QUALITY);
+					}
+
+					compress_rules.add (new CompressRule ((owned) pattern, mode, quality));
+				}
+			} catch (KeyFileError e) {
+			}
+
+			var input_files = new Gee.HashMap<ResourceFile, Gee.Future<File>> ();
+			var compression_pool = new ThreadPool<CompressRequest>.with_owned_data (compress_file,
+				(int) get_num_processors (), false);
+			foreach (ResourceCategory category in categories) {
+				foreach (ResourceFile input in category.files) {
+					unowned string name = input.name;
+
+					CompressRule? rule = null;
+					uint name_length = name.length;
+					string name_reversed = name.reverse ();
+					foreach (CompressRule r in compress_rules) {
+						if (r.pattern.match (name_length, name, name_reversed)) {
+							rule = r;
+							break;
+						}
+					}
+
+					var file = File.new_for_commandline_arg (input.source);
+					var promise = new Gee.Promise<File> ();
+					input_files[input] = promise.future;
+
+					if (rule != null)
+						compression_pool.add (new CompressRequest (name, file, rule, output_basename, promise));
+					else
+						promise.set_value (file);
+				}
+			}
+
 			var vapi_file = File.new_for_commandline_arg (output_basename + ".vapi");
 			var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 			var csource_file = File.new_for_commandline_arg (output_basename + ".c");
@@ -262,7 +321,13 @@ namespace Frida {
 				int file_count = category.files.size;
 
 				foreach (ResourceFile input in category.files) {
-					var input_file = File.new_for_commandline_arg (input.source);
+					File input_file;
+					Gee.Future<File> input_future = input_files[input];
+					try {
+						input_file = input_future.wait ();
+					} catch (Gee.FutureError e) {
+						throw input_future.exception;
+					}
 
 					FileInputStream input_stream = input_file.read ();
 					FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
@@ -451,6 +516,76 @@ namespace Frida {
 			return builder.str;
 		}
 
+		private static void compress_file (owned CompressRequest request) {
+			try {
+				var input_stream = request.file.read ();
+				FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
+				uint64 file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
+
+				var output_file = File.new_for_path (request.output_basename + "-" + request.name + ".br");
+				var output_stream = output_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
+
+				var encoder = new Brotli.Encoder ();
+				encoder.set_parameter (MODE, request.rule.mode);
+				encoder.set_parameter (QUALITY, request.rule.quality);
+				uint32 window_bits = Brotli.MIN_WINDOW_BITS;
+				while (brotli_backward_limit_for (window_bits) < file_size)
+					window_bits++;
+				if (window_bits > Brotli.MAX_WINDOW_BITS)
+					encoder.set_parameter (LARGE_WINDOW, 1);
+				encoder.set_parameter (LGWIN, window_bits);
+				encoder.set_parameter (SIZE_HINT, uint32.min ((uint32) file_size, 1 << 30));
+
+				var input_buffer = new uint8[512 * 1024];
+				var output_buffer = new uint8[512 * 1024];
+
+				bool is_eof = false;
+				size_t available_in = 0;
+				size_t available_out = output_buffer.length;
+				uint8 * next_in = null;
+				uint8 * next_out = output_buffer;
+				while (true) {
+					if (available_in == 0 && !is_eof) {
+						ssize_t n = input_stream.read (input_buffer);
+						is_eof = n == 0;
+						available_in = n;
+						next_in = input_buffer;
+					}
+
+					var op = is_eof ? Brotli.EncoderOperation.FINISH : Brotli.EncoderOperation.PROCESS;
+					if (!encoder.compress_stream (op, &available_in, &next_in, &available_out, &next_out)) {
+						throw new IOError.FAILED ("Unable to compress");
+					}
+
+					size_t bytes_written;
+
+					if (available_out == 0) {
+						output_stream.write_all (output_buffer, out bytes_written);
+						available_out = output_buffer.length;
+						next_out = output_buffer;
+					}
+
+					if (encoder.is_finished ()) {
+						output_stream.write_all (output_buffer[:next_out - (uint8 *) output_buffer],
+							out bytes_written);
+						break;
+					}
+				}
+
+				output_stream.close ();
+
+				request.promise.set_value (output_file);
+			} catch (Error e) {
+				request.promise.set_exception ((owned) e);
+			}
+		}
+
+		private const size_t BROTLI_WINDOW_GAP = 16;
+
+		private static size_t brotli_backward_limit_for (uint32 window_bits) {
+			return ((size_t) 1 << window_bits) - BROTLI_WINDOW_GAP;
+		}
+
 		private class ResourceCategory {
 			public string name {
 				get;
@@ -482,6 +617,34 @@ namespace Frida {
 			public ResourceFile (string name, string source) {
 				this.name = name;
 				this.source = source;
+			}
+		}
+
+		private class CompressRule {
+			public PatternSpec pattern;
+			public Brotli.EncoderMode mode;
+			public int quality;
+
+			public CompressRule (owned PatternSpec pattern, Brotli.EncoderMode mode, int quality) {
+				this.pattern = (owned) pattern;
+				this.quality = quality;
+			}
+		}
+
+		private class CompressRequest {
+			public string name;
+			public File file;
+			public CompressRule rule;
+			public string output_basename;
+			public Gee.Promise<File> promise;
+
+			public CompressRequest (string name, File file, CompressRule rule, string output_basename,
+					Gee.Promise<File> promise) {
+				this.name = name;
+				this.file = file;
+				this.rule = rule;
+				this.output_basename = output_basename;
+				this.promise = promise;
 			}
 		}
 	}

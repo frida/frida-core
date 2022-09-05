@@ -214,6 +214,7 @@ endif
 native_glib_dep = dependency('glib-2.0', version: '>=2.56', native: true)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true)
+native_brotlienc_dep = dependency('libbrotlienc', native: true)
 
 if host_os_family != 'windows'
   gio_unix_dep = dependency('gio-unix-2.0')
@@ -333,6 +334,11 @@ if get_option('agent_legacy') != ''
   vala_flags += ['--define=CROSS_ARCH']
 endif
 add_project_arguments(vala_flags, language: ['vala'])
+
+native_vala_flags = [
+  '--vapidir=' + meson.current_source_dir() / 'vapi',
+]
+add_project_arguments(native_vala_flags, language: ['vala'], native: true)
 
 subdir('tools')
 subdir('lib')
