@@ -587,15 +587,8 @@ namespace Frida {
 		}
 
 		private class ResourceCategory {
-			public string name {
-				get;
-				private set;
-			}
-
-			public Gee.ArrayList<ResourceFile> files {
-				get;
-				private set;
-			}
+			public string name;
+			public Gee.ArrayList<ResourceFile> files;
 
 			public ResourceCategory (string name) {
 				this.name = name;
@@ -604,15 +597,8 @@ namespace Frida {
 		}
 
 		private class ResourceFile {
-			public string name {
-				get;
-				private set;
-			}
-
-			public string source {
-				get;
-				private set;
-			}
+			public string name;
+			public string source;
 
 			public ResourceFile (string name, string source) {
 				this.name = name;
