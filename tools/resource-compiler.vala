@@ -34,6 +34,93 @@ namespace Frida {
 
 		private const char NIBBLE_TO_HEX_CHAR[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 
+		public static int main (string[] args) {
+#if WINDOWS
+			toolchain = Toolchain.MICROSOFT;
+#elif DARWIN
+			toolchain = Toolchain.APPLE;
+#else
+			toolchain = Toolchain.GNU;
+#endif
+			machine = Machine.ANY;
+
+			try {
+				var ctx = new OptionContext ("- Vala Resource Compiler");
+				ctx.set_help_enabled (true);
+				ctx.add_main_entries (options, null);
+				ctx.parse (ref args);
+			} catch (OptionError e) {
+				stdout.printf ("%s\n", e.message);
+				stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
+				return 1;
+			}
+
+			if (toolchain_name != null) {
+				switch (toolchain_name) {
+					case "microsoft":
+						toolchain = Toolchain.MICROSOFT;
+						break;
+					case "apple":
+						toolchain = Toolchain.APPLE;
+						break;
+					case "gnu":
+						toolchain = Toolchain.GNU;
+						break;
+					default:
+						stderr.printf ("Invalid toolchain. Please specify either `microsoft`, `apple` or `gnu`.\n");
+						return 1;
+				}
+			}
+
+			if (machine_name != null) {
+				switch (machine_name) {
+					case "any":
+						machine = Machine.ANY;
+						break;
+					case "x86":
+						machine = Machine.X86;
+						break;
+					case "x64":
+						machine = Machine.X64;
+						break;
+					case "ARM":
+						machine = Machine.ARM;
+						break;
+					case "ARM64":
+						machine = Machine.ARM64;
+						break;
+					default:
+						stderr.printf ("Invalid machine. Please specify either `any`, `x86`, `x64`, `ARM` or `ARM64`.\n");
+						return 1;
+				}
+			}
+
+			if (toolchain == Toolchain.MICROSOFT && machine == Machine.ANY) {
+				stderr.printf ("Machine must be specified. Please specify either `-m x86`, `-m x64`, `-m ARM` or `-m ARM64`.\n");
+				return 1;
+			}
+
+			if (config_filename == null) {
+				stderr.printf ("No config file specified.\n");
+				return 1;
+			}
+
+			if (output_basename == null) {
+				stderr.printf ("No output basename specified.\n");
+				return 1;
+			}
+
+			var compiler = new ResourceCompiler ();
+			try {
+				compiler.run ();
+			} catch (Error e) {
+				stderr.printf ("%s\n", e.message);
+				return 1;
+			}
+
+			return 0;
+		}
+
 		private void run () throws Error {
 			var input_dir = File.new_for_path (Path.get_dirname (config_filename));
 			string output_namespace;
@@ -76,7 +163,6 @@ namespace Frida {
 							category.files.add (new ResourceFile (filename, source));
 						}
 					}
-
 				}
 
 				category.files.sort ();
@@ -167,7 +253,7 @@ namespace Frida {
 
 			var asm_identifier_prefix = toolchain == Toolchain.APPLE ? "_" : "";
 
-			foreach (var category in categories) {
+			foreach (ResourceCategory category in categories) {
 				bool is_root_category = (category.name == "root");
 				var category_identifier = identifier_from_filename (category.name);
 				var identifier_by_index = new Gee.ArrayList<string> ();
@@ -175,13 +261,13 @@ namespace Frida {
 				var size_by_index = new Gee.ArrayList<uint64?> ();
 				int file_count = category.files.size;
 
-				foreach (var input in category.files) {
+				foreach (ResourceFile input in category.files) {
 					var input_file = File.new_for_commandline_arg (input.source);
 
-					var file_input_stream = input_file.read (null);
-					var input_info = file_input_stream.query_info (FileAttribute.STANDARD_SIZE);
-					var identifier = identifier_from_filename (input.name);
-					var file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
+					FileInputStream input_stream = input_file.read ();
+					FileInfo input_info = input_stream.query_info (FileAttribute.STANDARD_SIZE);
+					string identifier = identifier_from_filename (input.name);
+					uint64 file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
 
 					identifier_by_index.add (identifier);
 					size_by_index.add (file_size);
@@ -192,7 +278,7 @@ namespace Frida {
 					csource.put_string ("extern const char " + blob_identifier + "[];\n");
 
 					if (toolchain == Toolchain.MICROSOFT) {
-						obj.write (blob_identifier, file_input_stream);
+						obj.write (blob_identifier, input_stream);
 					} else {
 						if (toolchain == Toolchain.APPLE) {
 							var allow_dead_strip_directive = ".subsections_via_symbols\n";
@@ -363,93 +449,6 @@ namespace Frida {
 			}
 
 			return builder.str;
-		}
-
-		static int main (string[] args) {
-#if WINDOWS
-			toolchain = Toolchain.MICROSOFT;
-#elif DARWIN
-			toolchain = Toolchain.APPLE;
-#else
-			toolchain = Toolchain.GNU;
-#endif
-			machine = Machine.ANY;
-
-			try {
-				var ctx = new OptionContext ("- Vala Resource Compiler");
-				ctx.set_help_enabled (true);
-				ctx.add_main_entries (options, null);
-				ctx.parse (ref args);
-			} catch (OptionError e) {
-				stdout.printf ("%s\n", e.message);
-				stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
-				return 1;
-			}
-
-			if (toolchain_name != null) {
-				switch (toolchain_name) {
-					case "microsoft":
-						toolchain = Toolchain.MICROSOFT;
-						break;
-					case "apple":
-						toolchain = Toolchain.APPLE;
-						break;
-					case "gnu":
-						toolchain = Toolchain.GNU;
-						break;
-					default:
-						stderr.printf ("Invalid toolchain. Please specify either `microsoft`, `apple` or `gnu`.\n");
-						return 1;
-				}
-			}
-
-			if (machine_name != null) {
-				switch (machine_name) {
-					case "any":
-						machine = Machine.ANY;
-						break;
-					case "x86":
-						machine = Machine.X86;
-						break;
-					case "x64":
-						machine = Machine.X64;
-						break;
-					case "ARM":
-						machine = Machine.ARM;
-						break;
-					case "ARM64":
-						machine = Machine.ARM64;
-						break;
-					default:
-						stderr.printf ("Invalid machine. Please specify either `any`, `x86`, `x64`, `ARM` or `ARM64`.\n");
-						return 1;
-				}
-			}
-
-			if (toolchain == Toolchain.MICROSOFT && machine == Machine.ANY) {
-				stderr.printf ("Machine must be specified. Please specify either `-m x86`, `-m x64`, `-m ARM` or `-m ARM64`.\n");
-				return 1;
-			}
-
-			if (config_filename == null) {
-				stderr.printf ("No config file specified.\n");
-				return 1;
-			}
-
-			if (output_basename == null) {
-				stderr.printf ("No output basename specified.\n");
-				return 1;
-			}
-
-			var compiler = new ResourceCompiler ();
-			try {
-				compiler.run ();
-			} catch (Error e) {
-				stderr.printf ("%s\n", e.message);
-				return 1;
-			}
-
-			return 0;
 		}
 
 		private class ResourceCategory {
