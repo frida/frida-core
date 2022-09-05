@@ -1213,22 +1213,6 @@ namespace Frida {
 			construct;
 		}
 
-		public string? script_source {
-			get;
-			construct;
-		}
-
-		public Future<Bytes>? script_snapshot {
-			get;
-			construct;
-		}
-
-		public SnapshotTransport script_snapshot_transport {
-			get;
-			construct;
-			default = INLINE;
-		}
-
 		public ScriptRuntime script_runtime {
 			get;
 			construct;
@@ -1266,6 +1250,14 @@ namespace Frida {
 		}
 
 		protected abstract async uint get_target_pid (Cancellable? cancellable) throws Error, IOError;
+
+		protected abstract async string? load_source (Cancellable? cancellable) throws Error, IOError;
+
+		protected virtual async Bytes? load_snapshot (Cancellable? cancellable, out SnapshotTransport transport)
+				throws Error, IOError {
+			transport = INLINE;
+			return null;
+		}
 
 		protected virtual void on_event (string type, Json.Array event) {
 		}
@@ -1311,16 +1303,19 @@ namespace Frida {
 
 					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 
-					if (script_source != null) {
+					string? source = yield load_source (cancellable);
+					if (source != null) {
 						var options = new ScriptOptions ();
 						options.name = "internal-agent";
-						if (script_snapshot != null) {
-							options.snapshot = yield script_snapshot.wait_async (cancellable);
-							options.snapshot_transport = script_snapshot_transport;
+						SnapshotTransport transport;
+						Bytes? snapshot = yield load_snapshot (cancellable, out transport);
+						if (snapshot != null) {
+							options.snapshot = snapshot;
+							options.snapshot_transport = transport;
 						}
 						options.runtime = script_runtime;
 
-						script = yield session.create_script (script_source, options._serialize (), cancellable);
+						script = yield session.create_script (source, options._serialize (), cancellable);
 
 						yield session.load_script (script, cancellable);
 					}
