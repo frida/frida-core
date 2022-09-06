@@ -184,21 +184,9 @@ namespace Frida {
 
 		private async void load_agent () {
 			try {
-				var agent_dirs = new string[0];
-				var agent_files = new Gee.HashMap<string, AgentFile> ();
-				_foreach_agent_zip_entry ((name, contents) => {
-					string path = "/" + name;
-					if (contents != null)
-						agent_files[path] = new AgentFile ((owned) contents);
-					else
-						agent_dirs += path[:-1];
-				});
-
 				var device = yield manager.get_device_by_type (LOCAL, 0, io_cancellable);
 				var session = yield device.get_host_session (io_cancellable);
-				var agent = new Agent (this, (BaseDBusHostSession) session, agent_files["/agent.js"].contents);
-
-				yield agent.init (agent_dirs, agent_files, io_cancellable);
+				var agent = new Agent (this, (BaseDBusHostSession) session);
 
 				load_request.resolve (agent);
 			} catch (GLib.Error e) {
@@ -221,21 +209,19 @@ namespace Frida {
 			}
 		}
 
-		public extern static void _foreach_agent_zip_entry (EachAgentZipEntryFunc func);
-
-		public delegate void EachAgentZipEntryFunc (string name, owned string? contents);
-
 		private class Agent : InternalAgent {
 			public weak Compiler parent {
 				get;
 				construct;
 			}
 
-			public Agent (Compiler parent, BaseDBusHostSession host_session, string source) {
+			private Promise<string> source_request = new Promise<string> ();
+			private Promise<Bytes?> snapshot_request = new Promise<Bytes?> ();
+
+			public Agent (Compiler parent, BaseDBusHostSession host_session) {
 				Object (
 					parent: parent,
 					host_session: host_session,
-					script_source: source,
 #if HAVE_V8
 					script_runtime: ScriptRuntime.V8
 #else
@@ -244,30 +230,20 @@ namespace Frida {
 				);
 			}
 
-			public async string init (string[] directories, Gee.Map<string, AgentFile> files, Cancellable? cancellable)
-					throws Error, IOError {
-				var dirs_json = new Json.Builder ();
-				dirs_json.begin_array ();
-				foreach (unowned string name in directories)
-					dirs_json.add_string_value (name);
-				dirs_json.end_array ();
+			construct {
+				load_resources ();
+			}
 
-				var files_json = new Json.Builder ();
-				files_json.begin_array ();
-				foreach (var e in files.entries) {
-					files_json
-						.begin_array ()
-							.add_string_value (e.key)
-							.add_string_value (e.value.contents)
-						.end_array ();
-				}
-				files_json.end_array ();
+			private void load_resources () {
+				new Thread<void> ("compiler-agent-loader", () => {
+					var agent_js_blob = Data.Compiler.get_agent_js_blob ();
+					Bytes agent_js_bytes = decompress (agent_js_blob.data, agent_js_blob.uncompressed_size);
+					source_request.resolve ((string) agent_js_bytes.get_data ());
 
-				Json.Node bundle = yield call ("init", new Json.Node[] {
-						dirs_json.get_root (),
-						files_json.get_root ()
-					}, cancellable);
-				return bundle.get_string ();
+					var snapshot_blob = Data.Compiler.get_snapshot_bin_blob ();
+					Bytes snapshot = decompress (snapshot_blob.data, snapshot_blob.uncompressed_size);
+					snapshot_request.resolve ((snapshot.get_size () != 0) ? snapshot : null);
+				});
 			}
 
 			public async string build (string entrypoint, BuildOptions? options, Cancellable? cancellable)
@@ -325,6 +301,16 @@ namespace Frida {
 				return 0;
 			}
 
+			protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+				return yield source_request.future.wait_async (cancellable);
+			}
+
+			protected override async Bytes? load_snapshot (Cancellable? cancellable, out SnapshotTransport transport)
+					throws Error, IOError {
+				transport = SHARED_MEMORY;
+				return yield snapshot_request.future.wait_async (cancellable);
+			}
+
 			protected override void on_event (string type, Json.Array event) {
 				if (type == "diagnostics") {
 					on_build_diagnostics (event.get_array_element (1));
@@ -371,13 +357,20 @@ namespace Frida {
 			private void on_watch_bundle_updated (string bundle) {
 				parent.output (bundle);
 			}
-		}
 
-		private class AgentFile {
-			public string contents;
+			private static Bytes decompress (uint8[] data, uint uncompressed_size) {
+				var decoder = new Brotli.Decoder ();
+				decoder.set_parameter (LARGE_WINDOW, 1);
 
-			public AgentFile (owned string contents) {
-				this.contents = (owned) contents;
+				uint8[] uncompressed_data = new uint8[uncompressed_size + 1];
+				size_t available_in = data.length;
+				size_t available_out = uncompressed_size;
+				uint8 * next_in = data;
+				uint8 * next_out = uncompressed_data;
+				decoder.decompress_stream (&available_in, &next_in, &available_out, &next_out);
+				uncompressed_data.length = (int) (next_out - (uint8 *) uncompressed_data);
+
+				return new Bytes.take ((owned) uncompressed_data);
 			}
 		}
 

@@ -262,9 +262,6 @@
     <ClCompile Include="$(IntDir)src\compiler\compiler.c">
       <Filter>Source Files\generated\compiler</Filter>
     </ClCompile>
-    <ClCompile Include="src\compiler\compiler-glue.c">
-      <Filter>Source Files\compiler</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-compiler.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>

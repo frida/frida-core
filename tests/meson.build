@@ -5,6 +5,7 @@ test_sources = [
   'test-agent-glue.c',
   'test-gadget.vala',
   'test-host-session.vala',
+  'test-compiler.vala',
   'runner.vala',
   'runner-glue.c',
   'labrats.vala',

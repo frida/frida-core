@@ -205,10 +205,17 @@ json_glib_dep = dependency('json-glib-1.0')
 libsoup_dep = dependency('libsoup-2.4')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
+brotlidec_dep = dependency('libbrotlidec')
 
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
 if have_v8
   vala_flags += ['--define=HAVE_V8']
+  v8_mksnapshot = find_program('v8-mksnapshot-@0@-@1@'.format(host_os, host_arch), required: false)
+  if not v8_mksnapshot.found()
+    v8_mksnapshot = ''
+  endif
+else
+  v8_mksnapshot = ''
 endif
 
 native_glib_dep = dependency('glib-2.0', version: '>=2.56', native: true)
@@ -219,8 +226,6 @@ native_brotlienc_dep = dependency('libbrotlienc', native: true)
 if host_os_family != 'windows'
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
-
-minizip_dep = dependency('minizip')
 
 backend_deps_private = []
 backend_libs_private = []

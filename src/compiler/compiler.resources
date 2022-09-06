@@ -1,2 +1,3 @@
 [resource-compiler]
 namespace = Frida.Data.Compiler
+compress = *.js:text:11; *.bin:generic:11
