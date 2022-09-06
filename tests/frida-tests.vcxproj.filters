@@ -30,6 +30,9 @@
     <None Include="test-agent.vala">
       <Filter>Tests</Filter>
     </None>
+    <None Include="test-compiler.vala">
+      <Filter>Tests</Filter>
+    </None>
     <None Include="runner.vala">
       <Filter>Source Files</Filter>
     </None>
@@ -45,6 +48,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)test-injector.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)test-compiler.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="process-windows.c">

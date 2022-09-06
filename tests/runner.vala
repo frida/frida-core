@@ -50,6 +50,8 @@ namespace Frida.Test {
 #endif
 		Frida.HostSessionTest.add_tests ();
 
+		Frida.CompilerTest.add_tests ();
+
 		GLib.Test.run ();
 
 		Environment.deinit ();

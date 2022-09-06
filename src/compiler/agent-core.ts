@@ -1,57 +1,70 @@
 import * as crosspath from "@frida/crosspath";
-import * as backend from "frida-compile";
+import type * as backend from "frida-compile";
+import {
+    makeDefaultCompilerOptions,
+    build as _build,
+    watch as _watch,
+    queryDefaultAssets as _queryDefaultAssets,
+} from "frida-compile";
 import ts from "frida-compile/ext/typescript.js";
-import fs from "node:fs";
 import fridaFs from "frida-fs";
+import fs from "fs";
 
 const { DiagnosticCategory, FileWatcherEventKind } = ts;
 
 const { S_IFDIR } = fs.constants;
 
-const compilerRoot = "/frida-compile";
-const compilerNodeModules = compilerRoot + "/node_modules";
+export const compilerRoot = "/frida-compile";
+export const compilerNodeModules = compilerRoot + "/node_modules";
 
-const agentDirectories = new Set<string>();
-const agentFiles = new Map<string, string>();
+export const agentDirectories = new Set<string>(__agentDirectories__);
+export const agentFiles = new Map<string, string>(__agentFiles__);
+const cachedSourceFiles = new Map<string, ts.SourceFile>();
+
+declare const __agentDirectories__: string[];
+declare const __agentFiles__: [string, string][];
 
 const pendingDiagnostics: ts.Diagnostic[] = [];
 
 const fileWatchers = new Map<WatcherId, WatcherCallback>();
 let nextWatcherId: WatcherId = 1;
 
-rpc.exports = {
-    init(directories: string[], files: FileInfo[]): void {
-        for (const dir of directories) {
-            agentDirectories.add(dir);
-        }
+populateSourceFileCache();
 
-        for (const [name, contents] of files) {
-            agentFiles.set(name, contents);
+function populateSourceFileCache() {
+    const config = makeDefaultCompilerOptions();
+    for (const [name, contents] of agentFiles) {
+        if (name.endsWith(".d.ts")) {
+            const sf = ts.createSourceFile(name, contents, config.target!);
+            ts.prebindSourceFile(sf, config);
+            cachedSourceFiles.set(name, sf);
         }
-    },
+    }
+}
 
-    async build(projectRoot: string, entrypoint: string, sourceMaps: backend.SourceMaps, compression: backend.Compression): Promise<string> {
-        const system = new FridaSystem(projectRoot);
-        const assets = backend.queryDefaultAssets(projectRoot, system);
-        try {
-            return await backend.build({
-                projectRoot,
-                entrypoint,
-                assets,
-                system,
-                sourceMaps,
-                compression,
-                onDiagnostic,
-            });
-        } finally {
-            flushDiagnostics();
-        }
-    },
+export function init(): void {
+    function onChange(message: WatchChangeMessage): void {
+        const callback = fileWatchers.get(message.id);
+        callback?.(fileWatcherEventKindFromFileState(message.state));
 
-    async watch(projectRoot: string, entrypoint: string, sourceMaps: backend.SourceMaps, compression: backend.Compression): Promise<void> {
-        const system = new FridaSystem(projectRoot);
-        const assets = backend.queryDefaultAssets(projectRoot, system);
-        backend.watch({
+        recv("watch:change", onChange);
+    }
+    recv("watch:change", onChange);
+
+    const origCreateCompilerHostFromProgramHost = (ts as any).createCompilerHostFromProgramHost;
+    (ts as any).createCompilerHostFromProgramHost = (...args: any[]): ts.CompilerHost => {
+        const host = origCreateCompilerHostFromProgramHost(...args);
+        patchCompilerHost(host);
+        return host;
+    };
+}
+
+export function build(projectRoot: string, entrypoint: string, sourceMaps: backend.SourceMaps, compression: backend.Compression): string {
+    const system = new FridaSystem(projectRoot);
+    const assets = _queryDefaultAssets(projectRoot, system);
+
+    try {
+        return _build({
             projectRoot,
             entrypoint,
             assets,
@@ -59,20 +72,61 @@ rpc.exports = {
             sourceMaps,
             compression,
             onDiagnostic,
-        })
-            .on("compilationStarting", () => {
-                send(["watch:compilation-starting"]);
-            })
-            .on("compilationFinished", () => {
-                send(["watch:compilation-finished"]);
-            })
-            .on("bundleUpdated", bundle => {
-                send(["watch:bundle-updated", bundle]);
-            });
-    },
-};
+            onCompilerHostCreated: patchCompilerHost,
+        });
+    } finally {
+        flushDiagnostics();
+    }
+}
 
-type FileInfo = [name: string, contents: string];
+export function watch(projectRoot: string, entrypoint: string, sourceMaps: backend.SourceMaps, compression: backend.Compression): void {
+    const system = new FridaSystem(projectRoot);
+    const assets = _queryDefaultAssets(projectRoot, system);
+    _watch({
+        projectRoot,
+        entrypoint,
+        assets,
+        system,
+        sourceMaps,
+        compression,
+        onDiagnostic,
+    })
+        .on("compilationStarting", () => {
+            send(["watch:compilation-starting"]);
+        })
+        .on("compilationFinished", () => {
+            send(["watch:compilation-finished"]);
+        })
+        .on("bundleUpdated", bundle => {
+            send(["watch:bundle-updated", bundle]);
+        });
+}
+
+function patchCompilerHost(host: ts.CompilerHost) {
+    const origGetSourceFile = host.getSourceFile;
+    host.getSourceFile = (fileName, ...args) => {
+        const compilerPath = nativePathToCompilerPath(fileName);
+        if (compilerPath !== null) {
+            const sf = cachedSourceFiles.get(compilerPath);
+            if (sf !== undefined) {
+                return sf;
+            }
+        } else {
+            const startPos = fileName.indexOf("/node_modules/@types/");
+            if (startPos !== -1) {
+                const builtinsPath = fileName.substring(startPos);
+                const sf = cachedSourceFiles.get(builtinsPath);
+                if (sf !== undefined) {
+                    return sf;
+                }
+            }
+        }
+
+        return origGetSourceFile(fileName, ...args);
+    };
+}
+
+export { _build, _watch, _queryDefaultAssets };
 
 type DiagnosticFile = [path: string, line: number, character: number];
 
@@ -329,12 +383,9 @@ class FridaSystem implements ts.System {
     }
 
     #nativePathToAgentZipPath(path: string): string | null {
-        if (path.startsWith(compilerRoot)) {
-            const subPath = path.substring(compilerRoot.length);
-            if (subPath.startsWith("/node_modules")) {
-                return subPath;
-            }
-            return "/node_modules/frida-compile" + subPath;
+        const compilerPath = nativePathToCompilerPath(path);
+        if (compilerPath !== null) {
+            return compilerPath;
         }
 
         if (path.startsWith(this.#projectNodeModules)) {
@@ -343,6 +394,19 @@ class FridaSystem implements ts.System {
 
         return null;
     }
+}
+
+function nativePathToCompilerPath(path: string): string | null {
+    if (!path.startsWith(compilerRoot)) {
+        return null;
+    }
+
+    const subPath = path.substring(compilerRoot.length);
+    if (subPath.startsWith("/node_modules")) {
+        return subPath;
+    }
+
+    return "/node_modules/frida-compile" + subPath;
 }
 
 type WatcherId = number;
@@ -382,14 +446,6 @@ function makeDummyWatcher(): ts.FileWatcher {
         }
     };
 }
-
-function onChange(message: WatchChangeMessage): void {
-    const callback = fileWatchers.get(message.id);
-    callback?.(fileWatcherEventKindFromFileState(message.state));
-
-    recv("watch:change", onChange);
-}
-recv("watch:change", onChange);
 
 function fileWatcherEventKindFromFileState(state: FileState): ts.FileWatcherEventKind {
     switch (state) {
