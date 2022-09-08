@@ -43,26 +43,12 @@ namespace Frida.Fruity {
 			SocketConnectable connectable;
 
 			string? env_socket_address = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
-			string? env_server_address = Environment.get_variable ("USBMUXD_SERVER_ADDRESS");
-			string? env_server_port = Environment.get_variable ("USBMUXD_SERVER_PORT");
 			if (env_socket_address != null) {
 				try {
 					connectable = NetworkAddress.parse_uri (env_socket_address, USBMUXD_DEFAULT_SERVER_PORT);
 				} catch (GLib.Error e) {
 					connectable = NetworkAddress.parse (env_socket_address, USBMUXD_DEFAULT_SERVER_PORT);
 				}
-			} else if (env_server_address != null && env_server_port != null) {
-				connectable = new NetworkAddress (
-					env_server_address,
-					(uint16) uint.parse (env_server_port)
-				);
-			} else if (env_server_address != null) {
-				connectable = new NetworkAddress (
-					env_server_address,
-					USBMUXD_DEFAULT_SERVER_PORT
-				);
-			} else if (env_server_port != null) {
-				connectable = new NetworkAddress.loopback ((uint16) uint.parse (env_server_port));
 			} else if (File.new_for_path ("/var/run/usbmuxd").query_exists () == true) {
 				connectable = new UnixSocketAddress ("/var/run/usbmuxd");
 			} else {
