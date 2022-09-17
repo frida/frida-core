@@ -2,6 +2,14 @@ compiler_sources = files(
   'compiler.vala',
 )
 
+if get_option('compiler_snapshot').auto()
+  # Generating our snapshot with V8's CPU simulator takes a very long time.
+  use_snapshot = meson.can_run_host_binaries()
+else
+  use_snapshot = get_option('compiler_snapshot').enabled()
+endif
+compiler_mksnapshot = use_snapshot ? v8_mksnapshot : ''
+
 compiler_agent = custom_target('frida-compiler-agent',
   input: [
     'agent-entrypoint.js',
@@ -23,7 +31,7 @@ compiler_agent = custom_target('frida-compiler-agent',
     meson.current_build_dir(),
     host_os_family,
     host_cpu_mode,
-    v8_mksnapshot,
+    compiler_mksnapshot,
   ],
 )
 if host_os_family == 'darwin'

@@ -59,6 +59,12 @@ option('mapper',
   description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
 )
 
+option('compiler_snapshot',
+  type: 'feature',
+  value: 'auto',
+  description: 'Speed up compiler startup by using a snapshot'
+)
+
 option('tests',
   type: 'boolean',
   value: true,
