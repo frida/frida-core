@@ -106,6 +106,15 @@ else
 endif
 
 cdata = configuration_data()
+if cc.get_define('FRIDA_VERSION') == ''
+  version = meson.project_version()
+  tokens = version.split('.')
+  cdata.set_quoted('FRIDA_VERSION', version)
+  cdata.set('FRIDA_MAJOR_VERSION', tokens[0].to_int())
+  cdata.set('FRIDA_MINOR_VERSION', tokens[1].to_int())
+  cdata.set('FRIDA_MICRO_VERSION', tokens[2].to_int())
+  cdata.set('FRIDA_NANO_VERSION', 0)
+endif
 
 if host_os_family == 'windows'
   shlib_suffix = '.dll'
