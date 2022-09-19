@@ -2,7 +2,7 @@ generate_api = files('generate.py')
 
 core_vapi = join_paths(core_build_dir, 'frida-core.vapi')
 core_header = join_paths(core_build_dir, 'frida-core.h')
-base_vapi = join_paths(base_build_dir, 'frida-base.vapi')
+base_vapi = join_paths(base_build_dir, f'frida-base-@api_version@.vapi')
 base_header = join_paths(base_build_dir, 'frida-base.h')
 
 custom_target('frida-core-header',
@@ -17,7 +17,7 @@ custom_target('frida-core-header',
     meson.current_build_dir(),
   ],
   install: true,
-  install_dir: join_paths(get_option('includedir'), 'frida-' + api_version),
+  install_dir: header_install_dir,
 )
 
 custom_target('frida-core-vapi',

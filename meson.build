@@ -6,6 +6,8 @@ project('frida-core', 'vala', 'c', 'cpp',
 
 api_version = '1.0'
 
+header_install_dir = get_option('includedir') / 'frida-' + api_version
+
 build_os = build_machine.system()
 if build_os == 'android'
   build_os_family = 'linux'
