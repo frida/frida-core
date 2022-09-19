@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
-helper_modern="$1"
-helper_legacy="$2"
-output_dir="$3"
-host_os="$4"
-resource_compiler="$5"
-resource_config="$6"
+helper_modern=$1
+helper_legacy=$2
+output_dir=$3
+host_os=$4
+resource_compiler=$5
+resource_config=$6
+lipo=$7
 
 priv_dir="$output_dir/frida-helper@emb"
 
@@ -15,13 +16,8 @@ case $host_os in
   macos|ios)
     embedded_helper="$priv_dir/frida-helper"
 
-    if [ -z "$LIPO" ]; then
-      echo "LIPO not set"
-      exit 1
-    fi
-
     if [ -f "$helper_modern" -a -f "$helper_legacy" ]; then
-      "$LIPO" "$helper_modern" "$helper_legacy" -create -output "$embedded_helper" || exit 1
+      "$lipo" "$helper_modern" "$helper_legacy" -create -output "$embedded_helper" || exit 1
     elif [ -f "$helper_modern" ]; then
       cp "$helper_modern" "$embedded_helper" || exit 1
     elif [ -f "$helper_legacy" ]; then

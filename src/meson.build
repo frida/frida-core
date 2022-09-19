@@ -116,6 +116,7 @@ if host_os_family == 'darwin'
       host_os,
       strip,
       get_option('strip').to_string(),
+      codesign,
     ],
     build_by_default: true,
     install: get_option('assets') == 'installed',
@@ -150,6 +151,7 @@ if host_os_family == 'darwin'
         host_os,
         resource_compiler,
         '@INPUT0@',
+        lipo,
       ],
     )
     darwin_sources += [helper_process_data]
@@ -236,6 +238,7 @@ if host_os_family == 'linux'
       host_os,
       strip,
       get_option('strip').to_string(),
+      codesign,
     ],
     build_by_default: true,
     install: get_option('assets') == 'installed',
@@ -266,6 +269,7 @@ if host_os_family == 'linux'
         host_os,
         resource_compiler,
         '@INPUT@',
+        lipo,
       ],
     )
     linux_sources += [helper_process_data]
@@ -324,6 +328,7 @@ if get_option('assets') == 'embedded'
       host_os,
       resource_compiler,
       '@INPUT0@',
+      lipo,
     ],
   )
 else

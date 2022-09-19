@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
 
-input_portal_path="$1"
-input_entitlements_path="$2"
-output_portal_path="$3"
-host_os="$4"
-strip_binary="$5"
-strip_enabled="$6"
+input_portal_path=$1
+input_entitlements_path=$2
+output_portal_path=$3
+host_os=$4
+strip_binary=$5
+strip_enabled=$6
+codesign=$7
 
-case $host_os in
-  macos|ios)
-    if [ -z "$CODESIGN" ]; then
-      echo "CODESIGN not set"
-      exit 1
-    fi
-    ;;
-esac
 case $host_os in
   macos)
     if [ -z "$MACOS_CERTID" ]; then
@@ -42,10 +35,10 @@ case $host_os in
   macos|ios)
     case $host_os in
       macos)
-        "$CODESIGN" -f -s "$MACOS_CERTID" -i "re.frida.Portal" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$MACOS_CERTID" -i "re.frida.Portal" "$intermediate_path" || exit 1
         ;;
       ios)
-        "$CODESIGN" -f -s "$IOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$IOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

@@ -70,6 +70,7 @@ if host_os_family == 'darwin'
     command: [
       files('sign.sh'),
       host_os,
+      codesign,
       '@INPUT@',
       '@OUTPUT@',
     ],

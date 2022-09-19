@@ -293,9 +293,25 @@ else
   libtool = ''
   strip = ''
 endif
+if host_os_family == 'darwin'
+  install_name_tool = find_program('install_name_tool')
+  lipo = find_program('lipo')
+  codesign = find_program('codesign')
+else
+  install_name_tool = ''
+  lipo = ''
+  codesign = ''
+endif
 
 modulate = files('tools/modulate.py')
-post_process_module = files('tools/post-process-module.sh')
+post_process_module = [
+  files('tools/post-process-module.sh'),
+  host_os,
+  strip,
+  get_option('strip').to_string(),
+  install_name_tool,
+  codesign,
+]
 
 mapper_opt = get_option('mapper')
 if mapper_opt.auto()

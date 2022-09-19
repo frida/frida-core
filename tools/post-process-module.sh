@@ -1,24 +1,14 @@
 #!/usr/bin/env bash
 
-input_path="$1"
-output_path="$2"
-identity="$3"
-host_os="$4"
-strip_binary="$5"
-strip_enabled="$6"
+host_os=$1
+strip_binary=$2
+strip_enabled=$3
+install_name_tool=$4
+codesign=$5
+input_path=$6
+output_path=$7
+identity=$8
 
-case $host_os in
-  macos|ios)
-    if [ -z "$INSTALL_NAME_TOOL" ]; then
-      echo "INSTALL_NAME_TOOL not set"
-      exit 1
-    fi
-    if [ -z "$CODESIGN" ]; then
-      echo "CODESIGN not set"
-      exit 1
-    fi
-    ;;
-esac
 case $host_os in
   macos)
     if [ -z "$MACOS_CERTID" ]; then
@@ -44,14 +34,14 @@ fi
 
 case $host_os in
   macos|ios)
-    "$INSTALL_NAME_TOOL" -id "$identity" "$intermediate_path" || exit 1
+    "$install_name_tool" -id "$identity" "$intermediate_path" || exit 1
 
     case $host_os in
       macos)
-        "$CODESIGN" -f -s "$MACOS_CERTID" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$MACOS_CERTID" "$intermediate_path" || exit 1
         ;;
       ios)
-        "$CODESIGN" -f -s "$IOS_CERTID" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$IOS_CERTID" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

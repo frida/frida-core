@@ -1,14 +1,10 @@
 #!/bin/sh
 
-host_os="$1"
-runner_binary="$2"
-runner_entitlements="$3"
-signed_runner_binary="$4"
-
-if [ -z "$CODESIGN" ]; then
-  echo "CODESIGN not set"
-  exit 1
-fi
+host_os=$1
+codesign=$2
+runner_binary=$3
+runner_entitlements=$4
+signed_runner_binary=$5
 
 case $host_os in
   macos)
@@ -34,9 +30,9 @@ cp "$runner_binary" "$signed_runner_binary"
 
 case $host_os in
   macos)
-    "$CODESIGN" -f -s "$MACOS_CERTID" -i "re.frida.CoreTests" "$signed_runner_binary" || exit 1
+    "$codesign" -f -s "$MACOS_CERTID" -i "re.frida.CoreTests" "$signed_runner_binary" || exit 1
     ;;
   ios)
-    "$CODESIGN" -f -s "$IOS_CERTID" --entitlements "$runner_entitlements" "$signed_runner_binary" || exit 1
+    "$codesign" -f -s "$IOS_CERTID" --entitlements "$runner_entitlements" "$signed_runner_binary" || exit 1
     ;;
 esac

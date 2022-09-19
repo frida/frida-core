@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
 
-agent_modern="$1"
-agent_legacy="$2"
-agent_emulated_modern="$3"
-agent_emulated_legacy="$4"
-output_dir="$5"
-host_os="$6"
-resource_compiler="$7"
-resource_config="$8"
+agent_modern=$1
+agent_legacy=$2
+agent_emulated_modern=$3
+agent_emulated_legacy=$4
+output_dir=$5
+host_os=$6
+resource_compiler=$7
+resource_config=$8
+lipo=$9
 
 priv_dir="$output_dir/frida-agent@emb"
-
-case $host_os in
-  macos|ios)
-    if [ -z "$LIPO" ]; then
-      echo "LIPO not set"
-      exit 1
-    fi
-    ;;
-esac
 
 mkdir -p "$priv_dir"
 
@@ -38,7 +30,7 @@ case $host_os in
     embedded_agent="$priv_dir/frida-agent.dylib"
 
     if [ -f "$agent_modern" -a -f "$agent_legacy" ]; then
-      "$LIPO" "$agent_modern" "$agent_legacy" -create -output "$embedded_agent" || exit 1
+      "$lipo" "$agent_modern" "$agent_legacy" -create -output "$embedded_agent" || exit 1
     elif [ -f "$agent_modern" ]; then
       cp "$agent_modern" "$embedded_agent" || exit 1
     elif [ -f "$agent_legacy" ]; then
