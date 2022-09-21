@@ -190,8 +190,8 @@ namespace Frida.Server {
 		});
 
 		if (on_ready != null) {
-			application.ready.connect (() => {
-				on_ready (true);
+			application.ready.connect (success => {
+				on_ready (success);
 				on_ready = null;
 			});
 		}
@@ -215,7 +215,7 @@ namespace Frida.Server {
 #endif
 
 	private class Application : Object {
-		public signal void ready ();
+		public signal void ready (bool success);
 
 		public ControlService service {
 			get;
@@ -254,11 +254,12 @@ namespace Frida.Server {
 				printerr ("Unable to start: %s\n", e.message);
 				exit_code = 5;
 				loop.quit ();
+				ready (false);
 				return;
 			}
 
 			Idle.add (() => {
-				ready ();
+				ready (true);
 				return false;
 			});
 		}
