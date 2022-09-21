@@ -133,8 +133,8 @@ namespace Frida.Portal {
 		});
 
 		if (on_ready != null) {
-			application.ready.connect (() => {
-				on_ready (true);
+			application.ready.connect (success => {
+				on_ready (success);
 				on_ready = null;
 			});
 		}
@@ -143,7 +143,7 @@ namespace Frida.Portal {
 	}
 
 	private class Application : Object {
-		public signal void ready ();
+		public signal void ready (bool success);
 
 		public PortalService service {
 			get;
@@ -182,11 +182,12 @@ namespace Frida.Portal {
 				printerr ("Unable to start: %s\n", e.message);
 				exit_code = 4;
 				loop.quit ();
+				ready (false);
 				return;
 			}
 
 			Idle.add (() => {
-				ready ();
+				ready (true);
 				return false;
 			});
 		}
