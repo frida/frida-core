@@ -794,34 +794,49 @@ namespace Frida.Droidy {
 		private const uint16 MAX_MESSAGE_LENGTH = 1024;
 
 		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
-			string? server_host = null;
-			uint16 server_port = ADB_SERVER_DEFAULT_PORT;
-
-			string? server_socket = Environment.get_variable ("ADB_SERVER_SOCKET");
-			if (server_socket != null) {
-				MatchInfo info;
-				if (/^tcp:([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
-					server_host = info.fetch (1);
-					server_port = (uint16) uint.parse (info.fetch (2));
-				} else if (/^tcp:([\d]+)$/.match (server_socket, 0, out info)) {
-					server_port = (uint16) uint.parse (info.fetch (1));
-				} else {
-					throw new Error.INVALID_ARGUMENT ("Bad ADB_SERVER_SOCKET environment variable (%s)", server_socket);
+			SocketConnectable? connectable = null;
+			string? env_socket_address = Environment.get_variable ("ADB_SERVER_SOCKET");
+			string? env_server_address = Environment.get_variable ("ANDROID_ADB_SERVER_ADDRESS");
+			string? env_server_port = Environment.get_variable ("ANDROID_ADB_SERVER_PORT");
+			if (env_socket_address != null) {
+				string[] tokens = env_socket_address.split (":", 2);
+				if (tokens.length == 2) {
+					unowned string socket_type = tokens[0];
+					unowned string socket_address = tokens[1];
+					if (socket_type == "tcp") {
+						try {
+							connectable = NetworkAddress.parse (socket_address, ADB_SERVER_DEFAULT_PORT);
+						} catch (GLib.Error e) {
+						}
+					}
+#if !WINDOWS
+					else if (socket_type == "local" || socket_type == "localfilesystem")
+						connectable = new UnixSocketAddress (socket_address);
+					else if (socket_type == "localabstract" && UnixSocketAddress.abstract_names_supported ())
+						connectable = new UnixSocketAddress.as_abstract (socket_address, socket_address.length);
+#endif
 				}
-			} else {
-				server_host = Environment.get_variable ("ANDROID_ADB_SERVER_ADDRESS");
-				string? server_port_str = Environment.get_variable ("ANDROID_ADB_SERVER_PORT");
-				if (server_port_str != null)
-					server_port = (uint16) uint.parse (server_port_str);
+			} else if (env_server_address != null && env_server_port != null) {
+				connectable = new NetworkAddress (
+					env_server_address,
+					(uint16) uint.parse (env_server_port)
+				);
+			} else if (env_server_address != null) {
+				connectable = new NetworkAddress (
+					env_server_address,
+					ADB_SERVER_DEFAULT_PORT
+				);
+			} else if (env_server_port != null) {
+				connectable = new NetworkAddress.loopback ((uint16) uint.parse (env_server_port));
 			}
+
+			if (connectable == null)
+				connectable = new NetworkAddress.loopback (ADB_SERVER_DEFAULT_PORT);
 
 			IOStream stream;
 			try {
 				var client = new SocketClient ();
-				NetworkAddress address = (server_host != null)
-					? new NetworkAddress (server_host, server_port)
-					: new NetworkAddress.loopback (server_port);
-				var connection = yield client.connect_async (address, cancellable);
+				var connection = yield client.connect_async (connectable, cancellable);
 
 				Tcp.enable_nodelay (connection.socket);
 
