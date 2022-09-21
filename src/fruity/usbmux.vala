@@ -22,7 +22,7 @@ namespace Frida.Fruity {
 			MODE_SWITCH
 		}
 
-		private const uint16 USBMUX_SERVER_PORT = 27015;
+		private const uint16 USBMUXD_DEFAULT_SERVER_PORT = 27015;
 		private const uint USBMUX_PROTOCOL_VERSION = 1;
 		private const uint32 MAX_MESSAGE_SIZE = 128 * 1024;
 
@@ -41,34 +41,32 @@ namespace Frida.Fruity {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws UsbmuxError, IOError {
 			assert (!is_processing_messages);
 
-			var client = new SocketClient ();
-
-			SocketConnectable connectable;
-#if WINDOWS
-			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), USBMUX_SERVER_PORT);
-#else
-			string? server_host = null;
-			uint16 server_port = USBMUX_SERVER_PORT;
-
-			string? server_socket = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
-			if (server_socket != null) {
-				MatchInfo info;
-				if (/^([\d\w.:]+):([\d]+)$/.match (server_socket, 0, out info)) {
-					server_host = info.fetch (1);
-					server_port = (uint16) uint.parse (info.fetch (2));
+			SocketConnectable? connectable = null;
+			string? env_socket_address = Environment.get_variable ("USBMUXD_SOCKET_ADDRESS");
+			if (env_socket_address != null) {
+				if (env_socket_address.has_prefix ("UNIX:")) {
+#if !WINDOWS
+					connectable = new UnixSocketAddress (env_socket_address[5:]);
+#endif
 				} else {
-					throw new UsbmuxError.INVALID_ARGUMENT ("Bad USBMUXD_SOCKET_ADDRESS environment variable (%s)",
-						server_socket);
+					try {
+						connectable = NetworkAddress.parse (env_socket_address, USBMUXD_DEFAULT_SERVER_PORT);
+					} catch (GLib.Error e) {
+					}
 				}
 			}
 
-			if (server_host != null)
-				connectable = new NetworkAddress (server_host, server_port);
-			else
+			if (connectable == null) {
+#if WINDOWS
+				connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4),
+					USBMUXD_DEFAULT_SERVER_PORT);
+#else
 				connectable = new UnixSocketAddress ("/var/run/usbmuxd");
 #endif
+			}
 
 			try {
+				var client = new SocketClient ();
 				connection = yield client.connect_async (connectable, cancellable);
 
 				var socket = connection.socket;
