@@ -115,21 +115,9 @@ function patchCompilerHost(host: ts.CompilerHost) {
             const startPos = fileName.indexOf("/node_modules/@types/");
             if (startPos !== -1) {
                 const builtinsPath = fileName.substring(startPos);
-
-                let allowCache = true;
-                if (builtinsPath.startsWith("/node_modules/@types/frida-gum/")) {
-                    try {
-                        fs.statSync(fileName);
-                        allowCache = false;
-                    } catch (e) {
-                    }
-                }
-
-                if (allowCache) {
-                    const sf = cachedSourceFiles.get(builtinsPath);
-                    if (sf !== undefined) {
-                        return sf;
-                    }
+                const sf = cachedSourceFiles.get(builtinsPath);
+                if (sf !== undefined) {
+                    return sf;
                 }
             }
         }
