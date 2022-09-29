@@ -410,6 +410,16 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #  define __NR_dup3 292
 # elif defined (HAVE_ARM)
 #  define __NR_dup3 (__NR_SYSCALL_BASE + 358)
+# elif defined (HAVE_MIPS)
+#  if _MIPS_SIM == _MIPS_SIM_ABI32
+#   define __NR_dup3 4327
+#  elif _MIPS_SIM == _MIPS_SIM_ABI64
+#   define __NR_dup3 5286
+#  elif _MIPS_SIM == _MIPS_SIM_NABI32
+#   define __NR_dup3 6290
+#  else
+#   error Unexpected MIPS ABI
+#  endif
 # endif
 #endif
 
