@@ -117,9 +117,9 @@ dpkg-deb --root-owner-group --build "$tmpdir" "$output_deb"
 package_size=$(expr $(du -sk "$output_deb" | cut -f1) \* 1024)
 
 sed \
-  -i "" \
   -e "s,^Size: 1337$,Size: $package_size,g" \
-  "$tmpdir/DEBIAN/control"
+  "$tmpdir/DEBIAN/control" > "$tmpdir/DEBIAN/control_"
+mv "$tmpdir/DEBIAN/control_" "$tmpdir/DEBIAN/control"
 dpkg-deb --root-owner-group --build "$tmpdir" "$output_deb"
 
 rm -rf "$tmpdir"
