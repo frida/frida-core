@@ -79,8 +79,8 @@ Priority: optional
 Size: 1337
 Installed-Size: $installed_size
 Architecture: iphoneos-arm
-Description: Inject JavaScript to explore iOS apps over USB.
-Homepage: https://www.frida.re/
+Description: Observe and reprogram running programs.
+Homepage: https://frida.re/
 Maintainer: Ole André Vadla Ravnås <oleavr@nowsecure.com>
 Author: Frida Developers <oleavr@nowsecure.com>
 Section: Development
