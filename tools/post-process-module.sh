@@ -26,13 +26,25 @@ identity=$6
 case $host_os in
   macos)
     if [ -z "$MACOS_CERTID" ]; then
-      echo "MACOS_CERTID not set, see https://github.com/frida/frida#macos-and-ios"
+      echo "MACOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
       exit 1
     fi
     ;;
   ios)
     if [ -z "$IOS_CERTID" ]; then
-      echo "IOS_CERTID not set, see https://github.com/frida/frida#macos-and-ios"
+      echo "IOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
+      exit 1
+    fi
+    ;;
+  watchos)
+    if [ -z "$WATCHOS_CERTID" ]; then
+      echo "WATCHOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
+      exit 1
+    fi
+    ;;
+  tvos)
+    if [ -z "$TVOS_CERTID" ]; then
+      echo "TVOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
       exit 1
     fi
     ;;
@@ -47,7 +59,7 @@ if [ "$strip_enabled" = "true" ]; then
 fi
 
 case $host_os in
-  macos|ios)
+  macos|ios|watchos|tvos)
     "$install_name_tool" -id "$identity" "$intermediate_path" || exit 1
 
     case $host_os in
@@ -56,6 +68,12 @@ case $host_os in
         ;;
       ios)
         "$codesign" -f -s "$IOS_CERTID" "$intermediate_path" || exit 1
+        ;;
+      watchos)
+        "$codesign" -f -s "$WATCHOS_CERTID" "$intermediate_path" || exit 1
+        ;;
+      tvos)
+        "$codesign" -f -s "$TVOS_CERTID" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

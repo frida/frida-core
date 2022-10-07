@@ -26,7 +26,7 @@ collect_generic_agent ()
 }
 
 case $host_os in
-  macos|ios)
+  macos|ios|watchos|tvos)
     embedded_agent="$priv_dir/frida-agent.dylib"
 
     if [ -f "$agent_modern" -a -f "$agent_legacy" ]; then

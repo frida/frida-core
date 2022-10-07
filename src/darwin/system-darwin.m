@@ -20,6 +20,10 @@
 # import "springboard.h"
 #endif
 
+#if defined (HAVE_WATCHOS) || defined (HAVE_TVOS)
+# import <Foundation/Foundation.h>
+#endif
+
 #ifndef PROC_PIDPATHINFO_MAXSIZE
 # define PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN)
 #endif
@@ -56,7 +60,9 @@ static void frida_collect_application_info_from_id_nsstring (NSString * identifi
 static void frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation * op);
 static void frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumerateProcessesOperation * op);
 
+#if defined (HAVE_MACOS) || defined (HAVE_IOS)
 static void frida_add_app_id (GHashTable * parameters, NSString * identifier);
+#endif
 
 #if defined (HAVE_MACOS)
 static void frida_add_app_icons (GHashTable * parameters, NSImage * image);
@@ -64,7 +70,9 @@ static void frida_add_app_icons (GHashTable * parameters, NSImage * image);
 static void frida_add_app_metadata (GHashTable * parameters, NSString * identifier, FridaSpringboardApi * api);
 static void frida_add_app_state (GHashTable * parameters, guint pid, FridaSpringboardApi * api);
 static void frida_add_app_icons (GHashTable * parameters, NSString * identifier);
+#endif
 
+#ifndef HAVE_MACOS
 extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
 #endif
 
@@ -446,6 +454,8 @@ frida_temporary_directory_get_system_tmp (void)
   }
 }
 
+#if defined (HAVE_MACOS) || defined (HAVE_IOS)
+
 static void
 frida_add_app_id (GHashTable * parameters, NSString * identifier)
 {
@@ -455,6 +465,8 @@ frida_add_app_id (GHashTable * parameters, NSString * identifier)
   g_variant_builder_add_value (&builder, g_variant_new_string (identifier.UTF8String));
   g_hash_table_insert (parameters, g_strdup ("applications"), g_variant_ref_sink (g_variant_builder_end (&builder)));
 }
+
+#endif
 
 #if defined (HAVE_MACOS)
 
