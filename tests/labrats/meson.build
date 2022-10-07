@@ -41,6 +41,24 @@ if host_os == 'ios'
   ]
 endif
 
+if host_os == 'watchos'
+  labrat_files += [
+    'sleeper-watchos',
+    'stdio-writer-watchos',
+    'simple-agent-watchos.dylib',
+    'resident-agent-watchos.dylib',
+  ]
+endif
+
+if host_os == 'tvos'
+  labrat_files += [
+    'sleeper-tvos',
+    'stdio-writer-tvos',
+    'simple-agent-tvos.dylib',
+    'resident-agent-tvos.dylib',
+  ]
+endif
+
 if host_os == 'android'
   labrat_files += [
     'sleeper-android-' + host_abi,

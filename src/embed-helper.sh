@@ -13,7 +13,7 @@ priv_dir="$output_dir/frida-helper@emb"
 mkdir -p "$priv_dir"
 
 case $host_os in
-  macos|ios)
+  macos|ios|watchos|tvos)
     embedded_helper="$priv_dir/frida-helper"
 
     if [ -f "$helper_modern" -a -f "$helper_legacy" ]; then

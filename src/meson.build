@@ -62,18 +62,28 @@ if host_os_family == 'darwin'
   darwin_sources += [darwin_data]
 
   helper_backend_sources = [
-    'darwin/frida-helper-backend.vala',
-    'darwin/frida-helper-backend-glue.m',
     'darwin/frida-helper-types.vala',
     'darwin/policy-softener.vala',
     'darwin/policy-softener-glue.c',
-    'darwin/policyd.c',
-    'darwin/policyd-client.c',
-    'darwin/substituted-client.c',
-    'darwin/substituted2-client.c',
   ]
+  if host_os in ['macos', 'ios']
+    helper_backend_sources += [
+      'darwin/frida-helper-backend.vala',
+      'darwin/frida-helper-backend-glue.m',
+      'darwin/policyd.c',
+      'darwin/policyd-client.c',
+    ]
+  else
+    helper_backend_sources += [
+      'darwin/frida-helper-null-backend.vala',
+    ]
+  endif
   if host_os == 'ios'
-    helper_backend_sources += ['darwin/springboard.m']
+    helper_backend_sources += [
+      'darwin/springboard.m',
+      'darwin/substituted-client.c',
+      'darwin/substituted2-client.c',
+    ]
   endif
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,

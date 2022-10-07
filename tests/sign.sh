@@ -9,13 +9,13 @@ signed_runner_binary=$5
 case $host_os in
   macos)
     if [ -z "$MACOS_CERTID" ]; then
-      echo "MACOS_CERTID not set, see https://github.com/frida/frida#macos-and-ios"
+      echo "MACOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
       exit 1
     fi
     ;;
   ios)
     if [ -z "$IOS_CERTID" ]; then
-      echo "IOS_CERTID not set, see https://github.com/frida/frida#macos-and-ios"
+      echo "IOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
       exit 1
     fi
     ;;

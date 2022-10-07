@@ -1257,6 +1257,10 @@ namespace Frida {
 		id = "linux";
 #elif IOS
 		id = "ios";
+#elif WATCHOS
+		id = "watchos";
+#elif TVOS
+		id = "tvos";
 #elif ANDROID
 		id = "android";
 #elif FREEBSD

@@ -78,24 +78,28 @@ if host_arch == 'arm'
 endif
 
 if host_os_family == 'darwin'
-  target_conditionals_prefix = '#include <TargetConditionals.h>'
-
-  is_macos_src = target_conditionals_prefix + '''
-#if !TARGET_OS_OSX
-# error Not macOS
-#endif
-'''
-  if cc.compiles(is_macos_src, name: 'compiling for macOS')
-    host_os = 'macos'
-  endif
-
-  is_ios_src = target_conditionals_prefix + '''
-#if !TARGET_OS_IOS
-# error Not iOS
-#endif
-'''
-  if cc.compiles(is_ios_src, name: 'compiling for iOS')
-    host_os = 'ios'
+  apple_os_flavors = [
+    ['macOS',   'OSX'],
+    ['iOS',     'IOS'],
+    ['watchOS', 'WATCH'],
+    ['tvOS',    'TV'],
+  ]
+  foreach candidate : apple_os_flavors
+    name = candidate[0]
+    constant = candidate[1]
+    if cc.compiles('''
+                   #include <TargetConditionals.h>
+                   #if !TARGET_OS_@0@
+                   # error Nope
+                   #endif
+                   '''.format(constant),
+                   name: f'compiling for @name@')
+      host_os = name.to_lower()
+      break
+    endif
+  endforeach
+  if host_os == 'darwin'
+    error('Unable to detect Apple OS flavor')
   endif
 
   have_ptrauth_src = '''
@@ -395,10 +399,12 @@ add_project_arguments(native_vala_flags, language: ['vala'], native: true)
 subdir('tools')
 subdir('lib')
 subdir('src')
-subdir('server')
-subdir('portal')
-subdir('inject')
+if host_os not in ['watchos', 'tvos']
+  subdir('server')
+  subdir('portal')
+  subdir('inject')
 
-if get_option('tests')
-  subdir('tests')
+  if get_option('tests')
+    subdir('tests')
+  endif
 endif
