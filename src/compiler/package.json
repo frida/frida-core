@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@frida/crosspath": "3.0.0",
-    "frida-compile": "16.1.2",
+    "frida-compile": "16.1.3",
     "frida-fs": "5.2.1"
   },
   "devDependencies": {
