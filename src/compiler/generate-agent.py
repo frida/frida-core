@@ -68,6 +68,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_cpu_mode, v8_mksn
         (output_dir / "embed.js").write_text(components_source, encoding="utf-8")
         subprocess.run([
             v8_mksnapshot,
+            "--turbo-instruction-scheduling",
             "--startup-blob=snapshot.bin",
             "embed.js",
             input_dir / "agent-warmup.js",
