@@ -216,6 +216,7 @@ json_glib_dep = dependency('json-glib-1.0')
 libsoup_dep = dependency('libsoup-2.4')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
+gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 brotlidec_dep = dependency('libbrotlidec')
 
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
