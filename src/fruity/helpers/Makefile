@@ -38,7 +38,6 @@ build/%.dylib: %.c $(sources)
 		$< \
 		-o $@ \
 		-dynamiclib \
-		-nostdlib \
 		$(ldflags)
 
 build/test-%: %.c $(sources)
