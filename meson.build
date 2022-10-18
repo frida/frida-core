@@ -222,7 +222,7 @@ brotlidec_dep = dependency('libbrotlidec')
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
 if have_v8
   vala_flags += ['--define=HAVE_V8']
-  v8_mksnapshot = find_program('v8-mksnapshot-@0@-@1@'.format(host_os, host_arch), required: false)
+  v8_mksnapshot = find_program('v8-mksnapshot-@0@-@1@'.format(host_os, host_abi), required: false)
   if not v8_mksnapshot.found()
     v8_mksnapshot = ''
   endif
