@@ -164,6 +164,18 @@ free (void * ptr)
   gum_free (ptr);
 }
 
+G_GNUC_INTERNAL size_t
+malloc_size (const void * ptr)
+{
+  return gum_malloc_usable_size (ptr);
+}
+
+G_GNUC_INTERNAL size_t
+malloc_usable_size (const void * ptr)
+{
+  return gum_malloc_usable_size (ptr);
+}
+
 G_GNUC_INTERNAL void *
 memcpy (void * dst, const void * src, size_t n)
 {
