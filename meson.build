@@ -97,6 +97,23 @@ if host_os_family == 'darwin'
   if cc.compiles(is_ios_src, name: 'compiling for iOS')
     host_os = 'ios'
   endif
+
+  have_ptrauth_src = '''
+#ifdef __clang__
+# if __has_feature (ptrauth_calls)
+#  define HAVE_PTRAUTH 1
+# endif
+#endif
+
+#ifndef HAVE_PTRAUTH
+# error Pointer authentication not supported
+#endif
+'''
+  have_ptrauth = cc.compiles(have_ptrauth_src, name: 'pointer authentication')
+
+  if host_arch == 'arm64' and have_ptrauth
+    host_abi = 'arm64e'
+  endif
 endif
 
 if host_os_family == 'linux' and cc.has_header('android/api-level.h')
