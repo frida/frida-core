@@ -77,27 +77,29 @@ if host_arch == 'arm'
   endif
 endif
 
-target_conditionals_prefix = '#include <TargetConditionals.h>'
+if host_os_family == 'darwin'
+  target_conditionals_prefix = '#include <TargetConditionals.h>'
 
-is_macos_src = target_conditionals_prefix + '''
+  is_macos_src = target_conditionals_prefix + '''
 #if !TARGET_OS_OSX
 # error Not macOS
 #endif
 '''
-if cc.compiles(is_macos_src, name: 'compiling for macOS')
-  host_os = 'macos'
-endif
+  if cc.compiles(is_macos_src, name: 'compiling for macOS')
+    host_os = 'macos'
+  endif
 
-is_ios_src = target_conditionals_prefix + '''
+  is_ios_src = target_conditionals_prefix + '''
 #if !TARGET_OS_IOS
 # error Not iOS
 #endif
 '''
-if cc.compiles(is_ios_src, name: 'compiling for iOS')
-  host_os = 'ios'
+  if cc.compiles(is_ios_src, name: 'compiling for iOS')
+    host_os = 'ios'
+  endif
 endif
 
-if cc.has_header('android/api-level.h')
+if host_os_family == 'linux' and cc.has_header('android/api-level.h')
   host_os = 'android'
 endif
 
