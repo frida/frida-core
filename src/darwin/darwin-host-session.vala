@@ -317,7 +317,7 @@ namespace Frida {
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var id = yield inject_agent (pid, make_agent_parameters (remote_address, options), cancellable);
+			var id = yield inject_agent (pid, make_agent_parameters (pid, remote_address, options), cancellable);
 			injectee_by_pid[pid] = id;
 
 			return stream_future;

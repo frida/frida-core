@@ -275,7 +275,7 @@ namespace Frida {
 
 			var winjector = injector as Winjector;
 			var id = yield winjector.inject_library_resource (pid, agent, "frida_agent_main",
-				make_agent_parameters (t.remote_address, options), cancellable);
+				make_agent_parameters (pid, t.remote_address, options), cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;

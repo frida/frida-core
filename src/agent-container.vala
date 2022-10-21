@@ -82,7 +82,10 @@ namespace Frida {
 		}
 
 		private bool run () {
-			main_impl (transport.remote_address, null, 0);
+			string agent_parameters = transport.remote_address + "|exceptor:off|exit-monitor:off|thread-suspend-monitor:off";
+
+			main_impl (agent_parameters, null, 0);
+
 			return true;
 		}
 

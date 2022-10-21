@@ -183,7 +183,7 @@ namespace Frida {
 			var stream_request = Pipe.open (t.local_address, cancellable);
 
 			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main",
-				make_agent_parameters (t.remote_address, options), cancellable);
+				make_agent_parameters (pid, t.remote_address, options), cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;

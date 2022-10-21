@@ -422,7 +422,7 @@ namespace Frida {
 
 			uint id;
 			string entrypoint = "frida_agent_main";
-			string agent_parameters = make_agent_parameters (t.remote_address, options);
+			string agent_parameters = make_agent_parameters (pid, t.remote_address, options);
 			var linjector = injector as Linjector;
 #if HAVE_EMBEDDED_ASSETS
 			id = yield linjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);

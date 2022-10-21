@@ -474,15 +474,26 @@ namespace Frida {
 		protected abstract async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
 			Cancellable? cancellable, out Object? transport) throws Error, IOError;
 
-		protected string make_agent_parameters (string remote_address, HashTable<string, Variant> options) throws Error {
+		protected string make_agent_parameters (uint pid, string remote_address, HashTable<string, Variant> options) throws Error {
 			var parameters = new StringBuilder (remote_address);
 
 			string[] features = { "exceptor", "exit-monitor", "thread-suspend-monitor" };
+			bool is_system_session = pid == 0;
 			foreach (string feature in features) {
-				Variant? val = options[feature];
-				if (val != null) {
-					if (!val.is_of_type (VariantType.STRING) || val.get_string () != "off")
-						throw new Error.INVALID_ARGUMENT ("The '%s' option is invalid", feature);
+				bool enabled = true;
+
+				if (is_system_session) {
+					enabled = false;
+				} else {
+					Variant? val = options[feature];
+					if (val != null) {
+						if (!val.is_of_type (VariantType.STRING) || val.get_string () != "off")
+							throw new Error.INVALID_ARGUMENT ("The '%s' option is invalid", feature);
+						enabled = false;
+					}
+				}
+
+				if (!enabled) {
 					parameters
 						.append_c ('|')
 						.append (feature)
