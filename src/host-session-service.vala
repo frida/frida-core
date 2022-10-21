@@ -589,7 +589,7 @@ namespace Frida {
 				var sessions = entry.sessions;
 				if (sessions.remove (id)) {
 					if (sessions.is_empty) {
-						var is_system_session = entry.pid == 0;
+						bool is_system_session = entry.pid == 0;
 						if (!is_system_session && !entry.eternalized)
 							unload_and_destroy.begin (entry, reason);
 					}
