@@ -187,6 +187,35 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
+#if IOS
+			yield helper.preload (cancellable);
+
+			var pid = helper.pid;
+
+			string remote_address;
+			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
+
+			var id = yield inject_agent (pid, remote_address, cancellable);
+			injectee_by_pid[pid] = id;
+
+			IOStream stream = yield stream_request.wait_async (cancellable);
+
+			DBusConnection conn;
+			AgentSessionProvider provider;
+			try {
+				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+
+				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			connection = conn;
+
+			return provider;
+#else
 			string path;
 #if HAVE_EMBEDDED_ASSETS
 			path = agent.get_file ().path;
@@ -199,6 +228,7 @@ namespace Frida {
 			connection = system_session_container.connection;
 
 			return system_session_container;
+#endif
 		}
 
 		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
