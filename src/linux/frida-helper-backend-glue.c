@@ -3067,14 +3067,15 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   while (result == 0 && fgets (line, line_size, fp) != NULL)
   {
     GumAddress start;
+    gchar perms[5];
     gint n;
 
-    n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
-    if (n == 1)
+    n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %s %*x %*s %*s %s", &start, perms, path);
+    if (n == 2)
       continue;
-    g_assert (n == 2);
+    g_assert (n == 3);
 
-    if (path[0] == '[')
+    if (perms[3] == 's' || path[0] == '[')
       continue;
 
     if (strcmp (path, library_name) == 0)
