@@ -483,7 +483,7 @@ namespace Frida {
 				bool enabled = true;
 
 				if (is_system_session) {
-					enabled = false;
+					enabled = feature == "exceptor";
 				} else {
 					Variant? val = options[feature];
 					if (val != null) {
