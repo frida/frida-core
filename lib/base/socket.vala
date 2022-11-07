@@ -102,7 +102,7 @@ namespace Frida {
 		string canonical_host = canonicalize_host (host);
 		string uri = protocol + "://" + canonical_host + "/ws";
 		var msg = new Soup.Message ("GET", uri);
-		Soup.websocket_client_prepare_handshake (msg, origin, null);
+		Soup.websocket_client_prepare_handshake (msg, origin, null, null);
 		msg.request_headers.replace ("Host", canonical_host);
 		msg.request_headers.replace ("User-Agent", "Frida/" + _version_string ());
 		msg.request_headers.foreach ((name, val) => {
@@ -151,7 +151,8 @@ namespace Frida {
 		var dbus_context = yield get_dbus_context ();
 		var dbus_source = new IdleSource ();
 		dbus_source.set_callback (() => {
-			var websocket = new Soup.WebsocketConnection (stream, msg.uri, CLIENT, origin, null);
+			var websocket = new Soup.WebsocketConnection (stream, msg.uri, CLIENT, origin, protocol,
+				new List<Soup.WebsocketExtension> ());
 			connection = new WebConnection (websocket);
 
 			var frida_source = new IdleSource ();
@@ -255,7 +256,7 @@ namespace Frida {
 			server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
 
 			if (endpoint_params.asset_root != null)
-				server.add_handler ("/", on_asset_request);
+				server.add_handler (null, on_asset_request);
 
 			SocketConnectable connectable = (flavor == CONTROL)
 				? parse_control_address (endpoint_params.address, endpoint_params.port)
@@ -350,10 +351,16 @@ namespace Frida {
 			server.disconnect ();
 		}
 
-		private void on_websocket_opened (Soup.Server server, Soup.WebsocketConnection connection, string path,
-				Soup.ClientContext client) {
+		private void on_websocket_opened (Soup.Server server, Soup.ServerMessage msg, string path,
+				Soup.WebsocketConnection connection) {
 			var peer = new WebConnection (connection);
-			SocketAddress remote_address = client.get_remote_address ();
+			var socket_connection = (SocketConnection) connection.get_io_stream ();
+			SocketAddress remote_address;
+			try {
+				remote_address = socket_connection.get_remote_address ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
 
 			schedule_on_frida_thread (() => {
 				incoming (peer, remote_address);
@@ -361,13 +368,12 @@ namespace Frida {
 			});
 		}
 
-		private void on_asset_request (Soup.Server server, Soup.Message msg, string path, HashTable<string, string>? query,
-				Soup.ClientContext client) {
-			msg.response_headers.replace ("Server", "Frida/" + _version_string ());
+		private void on_asset_request (Soup.Server server, Soup.ServerMessage msg, string path, HashTable<string, string>? query) {
+			msg.get_response_headers ().replace ("Server", "Frida/" + _version_string ());
 
-			string method = msg.method;
+			unowned string method = msg.get_method ();
 			if (method != "GET" && method != "HEAD") {
-				msg.set_status (Soup.Status.METHOD_NOT_ALLOWED);
+				msg.set_status (Soup.Status.METHOD_NOT_ALLOWED, null);
 				return;
 			}
 
@@ -377,7 +383,7 @@ namespace Frida {
 			handle_asset_request.begin (path, location, msg);
 		}
 
-		private async void handle_asset_request (string path, File file, Soup.Message msg) {
+		private async void handle_asset_request (string path, File file, Soup.ServerMessage msg) {
 			int priority = Priority.DEFAULT;
 
 			string attributes = FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE;
@@ -408,7 +414,7 @@ namespace Frida {
 				if (type != DIRECTORY)
 					stream = yield file.read_async (priority, io_cancellable);
 			} catch (GLib.Error e) {
-				msg.set_status (Soup.Status.NOT_FOUND);
+				msg.set_status (Soup.Status.NOT_FOUND, null);
 				server.unpause_message (msg);
 				return;
 			}
@@ -419,7 +425,7 @@ namespace Frida {
 				yield handle_file_request (file, info, stream, msg);
 		}
 
-		private async void handle_directory_request (string path, File file, Soup.Message msg) {
+		private async void handle_directory_request (string path, File file, Soup.ServerMessage msg) {
 			var listing = new StringBuilder.sized (1024);
 
 			string escaped_path = Markup.escape_text (path);
@@ -492,17 +498,17 @@ namespace Frida {
 					listing.append_printf ("%8s\n", size_info);
 				}
 			} catch (GLib.Error e) {
-				msg.set_status (Soup.Status.NOT_FOUND);
+				msg.set_status (Soup.Status.NOT_FOUND, null);
 				server.unpause_message (msg);
 				return;
 			}
 
 			listing.append ("</pre><hr></body>\n</html>");
 
-			msg.set_status (Soup.Status.OK);
+			msg.set_status (Soup.Status.OK, null);
 
-			if (msg.method == "HEAD") {
-				var headers = msg.response_headers;
+			if (msg.get_method () == "HEAD") {
+				var headers = msg.get_response_headers ();
 				headers.replace ("Content-Type", "text/html");
 				headers.replace ("Content-Length", listing.len.to_string ());
 			} else {
@@ -512,19 +518,19 @@ namespace Frida {
 			server.unpause_message (msg);
 		}
 
-		private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.Message msg) {
-			msg.set_status (Soup.Status.OK);
+		private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.ServerMessage msg) {
+			msg.set_status (Soup.Status.OK, null);
 
-			var headers = msg.response_headers;
+			var headers = msg.get_response_headers ();
 			headers.replace ("Content-Type", guess_mime_type_for (file.get_path ()));
 			headers.replace ("Content-Length", info.get_size ().to_string ());
 
-			if (msg.method == "HEAD") {
+			if (msg.get_method () == "HEAD") {
 				server.unpause_message (msg);
 				return;
 			}
 
-			var body = msg.response_body;
+			var body = msg.get_response_body ();
 			body.set_accumulate (false);
 
 			bool finished = false;
@@ -571,7 +577,7 @@ namespace Frida {
 			}
 		}
 
-		private void handle_misplaced_request (string redirect_uri, Soup.Message msg) {
+		private void handle_misplaced_request (string redirect_uri, Soup.ServerMessage msg) {
 			msg.set_redirect (Soup.Status.MOVED_PERMANENTLY, redirect_uri);
 
 			string body = """<html>
@@ -582,8 +588,8 @@ namespace Frida {
 </body>
 </html>""".printf ("Frida/" + _version_string ());
 
-			if (msg.method == "HEAD") {
-				var headers = msg.response_headers;
+			if (msg.get_method () == "HEAD") {
+				var headers = msg.get_response_headers ();
 				headers.replace ("Content-Type", "text/html");
 				headers.replace ("Content-Length", body.length.to_string ());
 			} else {
