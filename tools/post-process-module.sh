@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
 
 host_os=$1
-strip_binary=$2
-strip_enabled=$3
-install_name_tool=$4
-codesign=$5
-input_path=$6
-output_path=$7
-identity=$8
+strip_binary=()
+if [ "$2" = ">>>" ]; then
+  shift 2
+  while true; do
+    cur=$1
+    shift 1
+    if [ "$cur" = "<<<" ]; then
+      break
+    fi
+    strip_binary+=("$cur")
+  done
+else
+  strip_binary+=("$2")
+  shift 2
+fi
+strip_enabled=$1
+install_name_tool=$2
+codesign=$3
+input_path=$4
+output_path=$5
+identity=$6
 
 case $host_os in
   macos)
@@ -29,7 +43,7 @@ rm -f "$intermediate_path"
 cp -a "$input_path" "$intermediate_path"
 
 if [ "$strip_enabled" = "true" ]; then
-  "$strip_binary" "$intermediate_path" || exit 1
+  "${strip_binary[@]}" "$intermediate_path" || exit 1
 fi
 
 case $host_os in

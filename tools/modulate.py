@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -35,7 +36,27 @@ def main():
     the_endians = ('big', 'little')
     parser.add_argument("--endian",  metavar=("|".join(the_endians)), type=str, default='little', choices=the_endians)
 
-    args = parser.parse_args()
+    raw_args = []
+    tool_argvs = {}
+    pending_raw_args = sys.argv[1:]
+    while len(pending_raw_args) > 0:
+        cur = pending_raw_args.pop(0)
+        if cur == ">>>":
+            tool_hash = hashlib.sha256()
+            tool_argv = []
+            while True:
+                cur = pending_raw_args.pop(0)
+                if cur == "<<<":
+                    break
+                tool_hash.update(cur.encode("utf-8"))
+                tool_argv.append(cur)
+            tool_id = tool_hash.hexdigest()
+            tool_argvs[tool_id] = tool_argv
+            raw_args.append(tool_id)
+        else:
+            raw_args.append(cur)
+
+    args = parser.parse_args(raw_args)
 
     if args.input.name == "<stdin>":
         parser.error("reading from stdin is not supported")
@@ -50,9 +71,10 @@ def main():
 
     toolchain = Toolchain()
     for tool in vars(toolchain).keys():
-        path = getattr(args, tool)
-        if path is not None:
-            setattr(toolchain, tool, path)
+        path_or_tool_id = getattr(args, tool)
+        if path_or_tool_id is not None:
+            tool_argv = tool_argvs.get(path_or_tool_id, [path_or_tool_id])
+            setattr(toolchain, tool, tool_argv)
 
     try:
         editor = ModuleEditor(args.input, args.endian, toolchain)
@@ -109,7 +131,7 @@ class ModuleEditor(object):
 
         strip = self.toolchain.strip
         if strip is not None:
-            subprocess.check_call([strip, temp_destination_path])
+            subprocess.check_call(strip + [temp_destination_path])
 
         shutil.move(temp_destination_path, destination_path)
 
@@ -258,9 +280,9 @@ class ModuleEditor(object):
 
 class Toolchain(object):
     def __init__(self):
-        self.nm = "nm"
-        self.readelf = "readelf"
-        self.otool = "otool"
+        self.nm = ["nm"]
+        self.readelf = ["readelf"]
+        self.otool = ["otool"]
         self.strip = None
 
     def __repr__(self):
@@ -277,7 +299,7 @@ class Layout(object):
         env = make_non_localized_env()
 
         if file_format == 'elf':
-            output = subprocess.check_output([toolchain.readelf, "--file-header", "--section-headers", binary_path],
+            output = subprocess.check_output(toolchain.readelf + ["--file-header", "--section-headers", binary_path],
                                              env=env).decode('utf-8')
 
             elf_class = elf_class_pattern.search(output).group(1)
@@ -293,7 +315,7 @@ class Layout(object):
                 name, address, offset, size = m.groups()
                 sections[name] = Section(name, int(size, 16), int(address, 16), int(offset, 16))
         else:
-            output = subprocess.check_output([toolchain.otool, "-l", binary_path],
+            output = subprocess.check_output(toolchain.otool + ["-l", binary_path],
                                              env=env).decode('utf-8')
 
             arch_name = subprocess.check_output(["file", binary_path],
@@ -350,7 +372,7 @@ class Symbols(object):
     @classmethod
     def from_file(cls, binary_path, pointer_size, toolchain):
         raw_items = {}
-        for line in subprocess.check_output([toolchain.nm, "--format=posix", binary_path],
+        for line in subprocess.check_output(toolchain.nm + ["--format=posix", binary_path],
                                             env=make_non_localized_env()).decode('utf-8').split("\n"):
             tokens = line.rstrip().split(" ", 3)
             if len(tokens) < 3:

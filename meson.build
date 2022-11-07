@@ -338,7 +338,7 @@ modulate = files('tools/modulate.py')
 post_process_module = [
   files('tools/post-process-module.sh'),
   host_os,
-  strip,
+  '>>>', strip, '<<<',
   get_option('strip').to_string(),
   install_name_tool,
   codesign,

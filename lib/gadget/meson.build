@@ -64,7 +64,7 @@ if host_os_family != 'darwin'
   ]
 endif
 if get_option('strip')
-  operations += ['--strip', strip]
+  operations += ['--strip', '>>>', strip, '<<<']
 endif
 
 if host_machine.endian() == 'little'
