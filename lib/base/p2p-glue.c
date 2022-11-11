@@ -1,5 +1,7 @@
 #ifdef HAVE_NICE
 
+#define OPENSSL_SUPPRESS_DEPRECATED
+
 #include "frida-base.h"
 
 #include <errno.h>
