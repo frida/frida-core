@@ -354,10 +354,15 @@ namespace Frida {
 		private void on_websocket_opened (Soup.Server server, Soup.ServerMessage msg, string path,
 				Soup.WebsocketConnection connection) {
 			var peer = new WebConnection (connection);
-			var socket_connection = (SocketConnection) connection.get_io_stream ();
+
+			IOStream soup_stream = connection.get_io_stream ();
+
+			SocketConnection socket_stream;
+			soup_stream.get ("base-iostream", out socket_stream);
+
 			SocketAddress remote_address;
 			try {
-				remote_address = socket_connection.get_remote_address ();
+				remote_address = socket_stream.get_remote_address ();
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
