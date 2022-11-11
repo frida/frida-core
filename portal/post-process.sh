@@ -4,9 +4,23 @@ input_portal_path=$1
 input_entitlements_path=$2
 output_portal_path=$3
 host_os=$4
-strip_binary=$5
-strip_enabled=$6
-codesign=$7
+strip_command=()
+if [ "$5" = ">>>" ]; then
+  shift 5
+  while true; do
+    cur=$1
+    shift 1
+    if [ "$cur" = "<<<" ]; then
+      break
+    fi
+    strip_command+=("$cur")
+  done
+else
+  echo "Invalid argument" > /dev/stderr
+  exit 1
+fi
+strip_enabled=$1
+codesign=$2
 
 case $host_os in
   macos)
@@ -28,7 +42,7 @@ rm -f "$intermediate_path"
 cp -a "$input_portal_path" "$intermediate_path"
 
 if [ "$strip_enabled" = "true" ]; then
-  "$strip_binary" "$intermediate_path" || exit 1
+  "${strip_command[@]}" "$intermediate_path" || exit 1
 fi
 
 case $host_os in

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 host_os=$1
-strip_binary=()
+strip_command=()
 if [ "$2" = ">>>" ]; then
   shift 2
   while true; do
@@ -10,11 +10,11 @@ if [ "$2" = ">>>" ]; then
     if [ "$cur" = "<<<" ]; then
       break
     fi
-    strip_binary+=("$cur")
+    strip_command+=("$cur")
   done
 else
-  strip_binary+=("$2")
-  shift 2
+  echo "Invalid argument" > /dev/stderr
+  exit 1
 fi
 strip_enabled=$1
 install_name_tool=$2
@@ -43,7 +43,7 @@ rm -f "$intermediate_path"
 cp -a "$input_path" "$intermediate_path"
 
 if [ "$strip_enabled" = "true" ]; then
-  "${strip_binary[@]}" "$intermediate_path" || exit 1
+  "${strip_command[@]}" "$intermediate_path" || exit 1
 fi
 
 case $host_os in
