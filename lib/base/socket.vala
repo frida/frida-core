@@ -751,23 +751,25 @@ namespace Frida {
 		}
 
 		public ssize_t recv (uint8[] buffer) throws IOError {
-			size_t n;
-
+			ssize_t n;
 			lock (state) {
-				n = size_t.min (recv_queue.len, buffer.length);
-				if (n == 0) {
+				n = ssize_t.min (recv_queue.len, buffer.length);
+				if (n > 0) {
+					Memory.copy (buffer, recv_queue.data, n);
+					recv_queue.remove_range (0, (uint) n);
+
+					recompute_pending_io_unlocked ();
+				} else {
 					if (state == OPEN)
-						throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
-					return 0;
+						n = -1;
 				}
 
-				Memory.copy (buffer, recv_queue.data, n);
-				recv_queue.remove_range (0, (uint) n);
-
-				recompute_pending_io_unlocked ();
 			}
 
-			return (ssize_t) n;
+			if (n == -1)
+				throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+
+			return n;
 		}
 
 		public ssize_t send (uint8[] buffer) {
