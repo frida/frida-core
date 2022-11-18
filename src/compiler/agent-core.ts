@@ -117,7 +117,20 @@ function patchCompilerHost(host: ts.CompilerHost) {
                 const builtinsPath = fileName.substring(startPos);
                 const sf = cachedSourceFiles.get(builtinsPath);
                 if (sf !== undefined) {
-                    return sf;
+                    let allowCache = true;
+
+                    if (builtinsPath.startsWith("/node_modules/@types/frida-gum/")) {
+                        try {
+                            const hashOnDisk = Checksum.compute("sha256", File.readAllText(fileName));
+                            const hashInCache = Checksum.compute("sha256", agentFiles.get(sf.fileName)!);
+                            allowCache = hashOnDisk === hashInCache;
+                        } catch (e) {
+                        }
+                    }
+
+                    if (allowCache) {
+                        return sf;
+                    }
                 }
             }
         }
