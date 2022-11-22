@@ -39,6 +39,7 @@ build/%.dylib: %.c $(sources)
 		-o $@ \
 		-dynamiclib \
 		$(ldflags)
+	./serialize.py $@ ../injector.vala
 
 build/test-%: %.c $(sources)
 	@mkdir -p $(@D)
