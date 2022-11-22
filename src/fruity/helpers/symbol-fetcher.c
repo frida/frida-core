@@ -49,6 +49,8 @@ frida_fetch_dyld_symbols (char * output_buffer, const void * dyld_load_address)
     const char * name = strings + sym->n_un.n_strx;
 
     if (frida_str_contains (name, "libdyld_initialize") ||
+        frida_str_contains (name, "restartWithDyldInCache") ||
+        frida_str_equals (name, "_gProcessInfo") ||
         frida_str_contains (name, "launchWithClosure") ||
         frida_str_contains (name, "initializeMainExecutable") ||
         frida_str_contains (name, "registerThreadHelpers") ||
@@ -164,6 +166,9 @@ frida_append_uint64 (char ** output, uint64_t val)
     if (found_first_nonzero)
       *cursor++ = nibble_to_hex_char[nibble];
   }
+
+  if (!found_first_nonzero)
+    *cursor++ = '0';
 
   *output = cursor;
 }

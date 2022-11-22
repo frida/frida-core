@@ -56,6 +56,11 @@ namespace Frida.LLDB {
 			CLOSED
 		}
 
+		public enum CachePolicy {
+			ALLOW_CACHE,
+			BYPASS_CACHE
+		}
+
 		private enum AckMode {
 			SEND_ACKS,
 			SKIP_ACKS
@@ -211,7 +216,7 @@ namespace Frida.LLDB {
 
 			var process = yield probe_target (cancellable);
 
-			var dyld_fields = yield get_apple_dyld_fields (cancellable);
+			var dyld_fields = yield get_apple_dyld_fields (ALLOW_CACHE, cancellable);
 			bool libsystem_initialized = yield read_bool (dyld_fields.libsystem_initialized, cancellable);
 
 			process.observed_state = libsystem_initialized
@@ -683,8 +688,9 @@ namespace Frida.LLDB {
 				breakpoint_exception = null;
 		}
 
-		public async AppleDyldFields get_apple_dyld_fields (Cancellable? cancellable = null) throws Error, IOError {
-			if (cached_dyld_fields != null)
+		public async AppleDyldFields get_apple_dyld_fields (CachePolicy cache_policy = ALLOW_CACHE, Cancellable? cancellable = null)
+				throws Error, IOError {
+			if (cache_policy == ALLOW_CACHE && cached_dyld_fields != null)
 				return cached_dyld_fields;
 
 			var response = yield _query_simple ("qShlibInfoAddr", cancellable);
