@@ -21,6 +21,7 @@
 #endif
 #include <gum/gum.h>
 #include <gum/gumdarwin.h>
+#include <mach-o/dyld_images.h>
 #include <mach-o/loader.h>
 #include <mach/exc.h>
 #include <mach/mach.h>
@@ -177,6 +178,11 @@ struct _FridaSpawnInstance
   mach_vm_address_t dyld_data;
 
   GumAddress modern_entry_address;
+
+  /* V4+ */
+  GumAddress info_ptr_address;
+
+  /* V3- */
   GumAddress dlopen_address;
   GumAddress cf_initialize_address;
   GumAddress info_address;
@@ -374,6 +380,7 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
 static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoint * breakpoint, GumDarwinUnifiedThreadState * state);
+static gboolean frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self);
 static gboolean frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc);
 static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self);
 static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
@@ -1838,6 +1845,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   {
     instance->modern_entry_address = modern_entry_address;
     legacy_entry_address = 0;
+
+    instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "_gProcessInfo");
+    if (instance->info_ptr_address == 0)
+      goto dyld_probe_failed;
   }
   else
   {
@@ -1903,6 +1914,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     frida_spawn_instance_set_nth_breakpoint (instance, i++, legacy_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (modern_entry_address != 0)
     frida_spawn_instance_set_nth_breakpoint (instance, i++, modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+  if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
+  {
+    GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
+        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv");
+    if (restart_with_dyld_in_cache != 0)
+      frida_spawn_instance_set_nth_breakpoint (instance, i++, restart_with_dyld_in_cache, FRIDA_BREAKPOINT_REPEAT_NEVER);
+  }
 
   kr = frida_set_debug_state (child_thread, &instance->breakpoint_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_set_debug_state");
@@ -2829,7 +2847,10 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
   {
     if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
     {
-      self->breakpoint_phase = FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT;
+      if (pc == self->modern_entry_address)
+        self->breakpoint_phase = FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT;
+      else
+        return frida_spawn_instance_handle_dyld_restart (self);
     }
     else
     {
@@ -3052,6 +3073,49 @@ next_phase:
     default:
       g_assert_not_reached ();
   }
+}
+
+static gboolean
+frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
+{
+  gboolean handled = FALSE;
+  GumAddress * info_ptr;
+  struct dyld_all_image_infos * info = NULL;
+  GumDarwinModule * dyld = NULL;
+  GumAddress entry_address;
+
+  info_ptr = (GumAddress *) gum_darwin_read (self->task, self->info_ptr_address, sizeof (GumAddress), NULL);
+  if (info_ptr == NULL)
+    goto beach;
+
+  info = (struct dyld_all_image_infos *) gum_darwin_read (self->task, *info_ptr, sizeof (struct dyld_all_image_infos), NULL);
+  if (info == NULL)
+    goto beach;
+
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", self->task, GUM_ADDRESS (info->dyldImageLoadAddress),
+      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  if (dyld == NULL)
+    goto beach;
+
+  entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
+  if (entry_address == 0)
+    goto beach;
+
+  self->modern_entry_address = entry_address;
+
+  g_object_unref (self->dyld);
+  self->dyld = g_steal_pointer (&dyld);
+
+  frida_spawn_instance_set_nth_breakpoint (self, 0, entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+
+  handled = TRUE;
+
+beach:
+  g_clear_object (&dyld);
+  g_free (info);
+  g_free (info_ptr);
+
+  return handled;
 }
 
 static gboolean
