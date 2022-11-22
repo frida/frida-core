@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import urllib.request
 
 
 INPUTS = [
@@ -45,6 +46,10 @@ def generate_agent(input_dir, output_dir, host_os_family, host_cpu_mode, v8_mksn
             "***\n",
         ])
         raise EnvironmentError(message)
+
+    with urllib.request.urlopen("https://raw.githubusercontent.com/DefinitelyTyped/DefinitelyTyped/86804f3dc1469f041fcec0f945e66eefbd94baeb/types/frida-gum/index.d.ts") as response, \
+            (output_dir / "node_modules" / "@types" / "frida-gum" / "index.d.ts").open("wb") as frida_gum_types:
+        shutil.copyfileobj(response, frida_gum_types)
 
     components = ["typescript", "agent-core"]
     for component in components:
