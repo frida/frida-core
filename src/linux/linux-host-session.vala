@@ -802,12 +802,19 @@ namespace Frida {
 		}
 
 		public async void load (Cancellable? cancellable) throws Error, IOError {
-			yield ensure_loaded (cancellable);
+			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
 
+			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
-				yield session.enable_child_gating (cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				yield ensure_loaded (cancellable);
+
+				try {
+					yield session.enable_child_gating (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			} finally {
+				helper.resume_syscall.begin (pid, null);
 			}
 		}
 
