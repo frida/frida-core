@@ -84,6 +84,9 @@
 #ifndef PTRACE_INTERRUPT
 # define PTRACE_INTERRUPT 0x4207
 #endif
+#ifndef PTRACE_O_TRACESYSGOOD
+# define PTRACE_O_TRACESYSGOOD (1 << 0)
+#endif
 #ifndef PTRACE_O_TRACEEXEC
 # define PTRACE_O_TRACEEXEC (1 << 4)
 #endif
