@@ -16,6 +16,8 @@ namespace Frida {
 		private Gee.HashMap<uint, uint> exec_waiters = new Gee.HashMap<uint, uint> ();
 		private uint next_waiter_id = 1;
 
+		public Gee.HashMap<uint, void *> syscall_instances = new Gee.HashMap<uint, void *> ();
+
 		public Gee.HashMap<uint, void *> inject_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<uint, RemoteThreadSession> inject_sessions = new Gee.HashMap<uint, RemoteThreadSession> ();
 		private Gee.HashMap<uint, uint> inject_expiry_by_id = new Gee.HashMap<uint, uint> ();
@@ -29,6 +31,8 @@ namespace Frida {
 				_free_spawn_instance (instance);
 			foreach (var instance in exec_instances.values)
 				_free_exec_instance (instance);
+			foreach (var instance in syscall_instances.values)
+				_free_syscall_instance (instance);
 			foreach (var instance in inject_instances.values)
 				_free_inject_instance (instance, RESIDENT);
 		}
@@ -176,6 +180,21 @@ namespace Frida {
 			if (spawn_instances.has_key (pid))
 				monitor_child (pid);
 			_notify_exec_pending (pid, false);
+		}
+
+		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+			if (syscall_instances.has_key (pid))
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			_do_await_syscall (pid, mask);
+		}
+
+		public async void resume_syscall (uint pid, Cancellable? cancellable) throws Error, IOError {
+			void * instance;
+			if (!syscall_instances.unset (pid, out instance))
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
+
+			_free_syscall_instance (instance);
 		}
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
@@ -369,6 +388,9 @@ namespace Frida {
 		protected extern void _suspend_exec_instance (void * instance);
 		protected extern void _resume_exec_instance (void * instance);
 		protected extern void _free_exec_instance (void * instance);
+
+		protected extern void _do_await_syscall (uint pid, LinuxSyscall mask) throws Error;
+		protected extern void _free_syscall_instance (void * instance);
 
 		protected extern void _do_inject (uint pid, string path, string entrypoint, string data, string temp_path, uint id) throws Error;
 		protected extern void _demonitor (void * instance);

@@ -94,6 +94,23 @@
 # define O_CLOEXEC 02000000
 #endif
 
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+# define FRIDA_REGS_SYSCALL_ID(r)     (r)->orig_eax
+# define FRIDA_REGS_SYSCALL_RESULT(r) (r)->eax
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+# define FRIDA_REGS_SYSCALL_ID(r)     (r)->orig_rax
+# define FRIDA_REGS_SYSCALL_RESULT(r) (r)->rax
+#elif defined (HAVE_ARM)
+# define FRIDA_REGS_SYSCALL_ID(r)     (r)->uregs[7]
+# define FRIDA_REGS_SYSCALL_RESULT(r) (r)->uregs[0]
+#elif defined (HAVE_ARM64)
+# define FRIDA_REGS_SYSCALL_ID(r)     (r)->regs[8]
+# define FRIDA_REGS_SYSCALL_RESULT(r) (r)->regs[0]
+#elif defined (HAVE_MIPS)
+# define FRIDA_REGS_SYSCALL_ID(r)     (r)->v0
+# define FRIDA_REGS_SYSCALL_RESULT(r) (r)->v0
+#endif
+
 #if defined (HAVE_I386)
 typedef struct user_regs_struct FridaRegs;
 #elif defined (HAVE_ARM)
@@ -160,6 +177,7 @@ struct _FridaRegs
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef struct _FridaExecInstance FridaExecInstance;
 typedef struct _FridaNotifyExecPendingContext FridaNotifyExecPendingContext;
+typedef struct _FridaSyscallInstance FridaSyscallInstance;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectParams FridaInjectParams;
 typedef struct _FridaInjectRegion FridaInjectRegion;
@@ -187,6 +205,16 @@ struct _FridaNotifyExecPendingContext
 {
   pid_t pid;
   gboolean pending;
+};
+
+struct _FridaSyscallInstance
+{
+  pid_t pid;
+  gboolean attached;
+  gboolean interrupted;
+  FridaRegs saved_regs;
+
+  FridaLinuxHelperBackend * backend;
 };
 
 struct _FridaInjectInstance
@@ -289,6 +317,10 @@ static gboolean frida_exec_instance_prepare_transition (FridaExecInstance * self
 static gboolean frida_exec_instance_try_perform_transition (FridaExecInstance * self, GError ** error);
 static void frida_exec_instance_suspend (FridaExecInstance * self);
 static void frida_exec_instance_resume (FridaExecInstance * self);
+
+static FridaSyscallInstance * frida_syscall_instance_new (FridaLinuxHelperBackend * backend, pid_t pid);
+static void frida_syscall_instance_free (FridaSyscallInstance * instance);
+static gboolean frida_syscall_instance_await (FridaSyscallInstance * self, FridaLinuxSyscall mask, GError ** error);
 
 static void frida_make_pipe (int fds[2]);
 
@@ -547,12 +579,40 @@ _frida_linux_helper_backend_free_exec_instance (FridaLinuxHelperBackend * self, 
 }
 
 void
+_frida_linux_helper_backend_do_await_syscall (FridaLinuxHelperBackend * self, guint pid, FridaLinuxSyscall mask, GError ** error)
+{
+  FridaSyscallInstance * instance;
+
+  instance = frida_syscall_instance_new (self, pid);
+
+  if (!frida_syscall_instance_await (instance, mask, error))
+    goto failure;
+
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->syscall_instances), GUINT_TO_POINTER (pid), instance);
+
+  return;
+
+failure:
+  {
+    frida_syscall_instance_free (instance);
+    return;
+  }
+}
+
+void
+_frida_linux_helper_backend_free_syscall_instance (FridaLinuxHelperBackend * self, void * instance)
+{
+  frida_syscall_instance_free (instance);
+}
+
+void
 _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, guint id, GError ** error)
 {
   FridaInjectInstance * instance;
   FridaInjectParams params;
   guint offset, page_size;
   FridaRegs saved_regs;
+  FridaSyscallInstance * syscall_instance;
   gboolean exited;
 
   params.pid = pid;
@@ -626,6 +686,10 @@ _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto premature_termination;
+
+  syscall_instance = gee_abstract_map_get (GEE_ABSTRACT_MAP (self->syscall_instances), GUINT_TO_POINTER (pid));
+  if (syscall_instance != NULL)
+    syscall_instance->interrupted = TRUE;
 
   params.fifo_path = instance->fifo_path;
   params.remote_address = frida_remote_alloc (pid, params.remote_size, PROT_READ | PROT_WRITE, error);
@@ -891,6 +955,166 @@ static void
 frida_exec_instance_resume (FridaExecInstance * self)
 {
   ptrace (PTRACE_DETACH, self->pid, NULL, NULL);
+}
+
+static FridaSyscallInstance *
+frida_syscall_instance_new (FridaLinuxHelperBackend * backend, pid_t pid)
+{
+  FridaSyscallInstance * instance;
+
+  instance = g_slice_new0 (FridaSyscallInstance);
+  instance->pid = pid;
+  instance->attached = FALSE;
+  instance->interrupted = FALSE;
+
+  instance->backend = g_object_ref (backend);
+
+  return instance;
+}
+
+static void
+frida_syscall_instance_free (FridaSyscallInstance * instance)
+{
+  if (instance->interrupted)
+  {
+    FRIDA_REGS_SYSCALL_RESULT (&instance->saved_regs) = -EINTR;
+    frida_set_regs (instance->pid, &instance->saved_regs);
+  }
+
+  if (instance->attached)
+    ptrace (PTRACE_DETACH, instance->pid, NULL, NULL);
+
+  g_object_unref (instance->backend);
+
+  g_slice_free (FridaSyscallInstance, instance);
+}
+
+static gboolean
+frida_syscall_instance_await (FridaSyscallInstance * self, FridaLinuxSyscall mask, GError ** error)
+{
+  const gchar * failed_operation;
+  gboolean can_seize;
+  long pt_result;
+  int status;
+  pid_t wait_result;
+  gboolean satisfied, on_syscall_entry;
+  int pending_signal;
+
+  can_seize = frida_is_seize_supported ();
+
+  if (can_seize)
+    pt_result = ptrace (PTRACE_SEIZE, self->pid, NULL, PTRACE_O_TRACESYSGOOD);
+  else
+    pt_result = ptrace (PTRACE_ATTACH, self->pid, NULL, NULL);
+  CHECK_OS_RESULT (pt_result, ==, 0, can_seize ? "PTRACE_SEIZE" : "PTRACE_ATTACH");
+
+  self->attached = TRUE;
+
+  if (can_seize)
+  {
+    pt_result = ptrace (PTRACE_INTERRUPT, self->pid, NULL, NULL);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_INTERRUPT");
+  }
+  else
+  {
+    pt_result = ptrace (PTRACE_SETOPTIONS, self->pid, NULL, PTRACE_O_TRACESYSGOOD);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_SETOPTIONS");
+  }
+
+  if (!frida_wait_for_attach_signal (self->pid))
+    goto wait_failed;
+
+  satisfied = FALSE;
+  on_syscall_entry = TRUE;
+  pending_signal = 0;
+  do
+  {
+    pt_result = ptrace (PTRACE_SYSCALL, self->pid, NULL, pending_signal);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_SYSCALL");
+    pending_signal = 0;
+
+    status = 0;
+    wait_result = waitpid (self->pid, &status, 0);
+    if (wait_result != self->pid || !WIFSTOPPED (status))
+      goto wait_failed;
+
+    pt_result = frida_get_regs (self->pid, &self->saved_regs);
+    CHECK_OS_RESULT (pt_result, ==, 0, "frida_get_regs");
+
+    if (WSTOPSIG (status) != (SIGTRAP | 0x80))
+    {
+      on_syscall_entry = !on_syscall_entry;
+      pending_signal = WSTOPSIG (status);
+      continue;
+    }
+
+    if (on_syscall_entry)
+    {
+      switch (FRIDA_REGS_SYSCALL_ID (&self->saved_regs))
+      {
+#ifdef __NR_select
+        case __NR_select:
+#endif
+#ifdef __NR__newselect
+        case __NR__newselect:
+#endif
+#ifdef __NR_pselect6
+        case __NR_pselect6:
+#endif
+#ifdef __NR_pselect6_time64
+        case __NR_pselect6_time64:
+#endif
+#ifdef __NR_poll
+        case __NR_poll:
+#endif
+#ifdef __NR_ppoll
+        case __NR_ppoll:
+#endif
+#ifdef __NR_ppoll_time64
+        case __NR_ppoll_time64:
+#endif
+#ifdef __NR_epoll_wait
+        case __NR_epoll_wait:
+#endif
+#ifdef __NR_epoll_pwait
+        case __NR_epoll_pwait:
+#endif
+#ifdef __NR_epoll_pwait2
+        case __NR_epoll_pwait2:
+#endif
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_POLL_LIKE) != 0;
+          break;
+        default:
+          break;
+      }
+    }
+
+    on_syscall_entry = !on_syscall_entry;
+  }
+  while (!satisfied);
+
+  return TRUE;
+
+os_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to wait for next syscall: %s failed", failed_operation);
+    goto failure;
+  }
+wait_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to wait for next syscall: waitpid() failed");
+    goto failure;
+  }
+failure:
+  {
+    return FALSE;
+  }
 }
 
 static void

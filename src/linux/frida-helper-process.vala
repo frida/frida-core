@@ -62,6 +62,16 @@ namespace Frida {
 			yield helper.cancel_exec_transition (pid, cancellable);
 		}
 
+		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.await_syscall (pid, mask, cancellable);
+		}
+
+		public async void resume_syscall (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.resume_syscall (pid, cancellable);
+		}
+
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain_for_pid (pid, cancellable);
 			yield helper.input (pid, data, cancellable);
@@ -505,6 +515,22 @@ namespace Frida {
 		public async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
 				yield proxy.cancel_exec_transition (pid, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.await_syscall (pid, mask, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void resume_syscall (uint pid, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.resume_syscall (pid, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

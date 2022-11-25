@@ -9,6 +9,8 @@ namespace Frida {
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void resume_syscall (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws Error, IOError;
@@ -19,6 +21,11 @@ namespace Frida {
 		public abstract async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
 			throws Error, IOError;
 		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	[Flags]
+	public enum LinuxSyscall {
+		POLL_LIKE,
 	}
 
 	[DBus (name = "re.frida.Helper")]
@@ -32,6 +39,8 @@ namespace Frida {
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume_syscall (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
