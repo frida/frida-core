@@ -1055,6 +1055,16 @@ frida_syscall_instance_await (FridaSyscallInstance * self, FridaLinuxSyscall mas
     {
       switch (FRIDA_REGS_SYSCALL_ID (&self->saved_regs))
       {
+        case __NR_restart_syscall:
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_RESTART) != 0;
+          break;
+        case __NR_ioctl:
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_IOCTL) != 0;
+          break;
+        case __NR_read:
+        case __NR_readv:
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_READ) != 0;
+          break;
 #ifdef __NR_select
         case __NR_select:
 #endif
@@ -1086,6 +1096,49 @@ frida_syscall_instance_await (FridaSyscallInstance * self, FridaLinuxSyscall mas
         case __NR_epoll_pwait2:
 #endif
           satisfied = (mask & FRIDA_LINUX_SYSCALL_POLL_LIKE) != 0;
+          break;
+#ifdef __NR_wait4
+        case __NR_wait4:
+#endif
+#ifdef __NR_waitpid
+        case __NR_waitpid:
+#endif
+        case __NR_waitid:
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_WAIT) != 0;
+          break;
+        case __NR_rt_sigtimedwait:
+#ifdef __NR_rt_sigtimedwait_time64
+        case __NR_rt_sigtimedwait_time64:
+#endif
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_SIGWAIT) != 0;
+          break;
+        case __NR_futex:
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_FUTEX) != 0;
+          break;
+#ifdef __NR_accept
+        case __NR_accept:
+#endif
+#ifdef __NR_accept4
+        case __NR_accept4:
+#endif
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_ACCEPT) != 0;
+          break;
+#ifdef __NR_recv
+        case __NR_recv:
+#endif
+#ifdef __NR_recvfrom
+        case __NR_recvfrom:
+#endif
+#ifdef __NR_recvmsg
+        case __NR_recvmsg:
+#endif
+#ifdef __NR_recvmmsg
+        case __NR_recvmmsg:
+#endif
+#ifdef __NR_recvmmsg_time64
+        case __NR_recvmmsg_time64:
+#endif
+          satisfied = (mask & FRIDA_LINUX_SYSCALL_RECV) != 0;
           break;
         default:
           break;

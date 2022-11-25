@@ -25,7 +25,15 @@ namespace Frida {
 
 	[Flags]
 	public enum LinuxSyscall {
+		RESTART,
+		IOCTL,
+		READ,
 		POLL_LIKE,
+		WAIT,
+		SIGWAIT,
+		FUTEX,
+		ACCEPT,
+		RECV,
 	}
 
 	[DBus (name = "re.frida.Helper")]
