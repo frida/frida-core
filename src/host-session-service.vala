@@ -1234,6 +1234,7 @@ namespace Frida {
 		private Promise<bool> _unloaded = new Promise<bool> ();
 
 		protected HashTable<string, Variant> attach_options = make_parameters_dict ();
+		protected uint target_pid;
 		protected AgentSessionId session_id;
 		protected AgentSession session;
 		protected AgentScriptId script;
@@ -1307,7 +1308,7 @@ namespace Frida {
 			try {
 				yield ensure_unloaded (cancellable);
 
-				uint target_pid = yield get_target_pid (cancellable);
+				target_pid = yield get_target_pid (cancellable);
 
 				try {
 					session_id = yield host_session.attach (target_pid, attach_options, cancellable);
@@ -1328,7 +1329,7 @@ namespace Frida {
 
 						script = yield session.create_script (source, options._serialize (), cancellable);
 
-						yield session.load_script (script, cancellable);
+						yield load_script (cancellable);
 					}
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
@@ -1348,6 +1349,14 @@ namespace Frida {
 				}
 
 				throw_api_error (pending_error);
+			}
+		}
+
+		protected virtual async void load_script (Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield session.load_script (script, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
 			}
 		}
 
