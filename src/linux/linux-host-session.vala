@@ -854,8 +854,8 @@ namespace Frida {
 		}
 
 		protected override async void load_script (Cancellable? cancellable) throws Error, IOError {
-			var thread_ids = new Gee.HashSet<uint> ();
 
+			var thread_ids = new Gee.ArrayList<uint> ();
 			Dir dir;
 			try {
 				dir = Dir.open ("/proc/%u/task".printf (target_pid));
@@ -867,30 +867,45 @@ namespace Frida {
 				var tid = uint.parse (name);
 				thread_ids.add (tid);
 			}
-			try {
-				foreach (var agent_tid in yield session.query_agent_thread_ids (cancellable)) {
-					thread_ids.remove ((uint) agent_tid);
-				}
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
 
-			var stopped_tids = new Gee.ArrayQueue<uint> ();
+			var suspended_tids = new Gee.ArrayQueue<uint> ();
 			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
 			try {
 				foreach (var tid in thread_ids) {
-					try {
-						yield helper.await_syscall (tid,
-							RESTART | IOCTL | READ | POLL_LIKE | WAIT | SIGWAIT | FUTEX | ACCEPT | RECV,
-							cancellable);
-						stopped_tids.offer (tid);
-					} catch (GLib.Error e) {
+					bool safe_to_suspend = false;
+					if (tid == target_pid) {
+						safe_to_suspend = true;
+					} else {
+						try {
+							string thread_name;
+							FileUtils.get_contents ("/proc/%u/task/%u/comm".printf (target_pid, tid), out thread_name);
+							thread_name = thread_name.chomp ();
+							safe_to_suspend = (thread_name == "ActivityManager")
+								|| thread_name == "NetworkPolicy"
+								|| thread_name.has_prefix ("WifiHandler")
+								|| thread_name == "android.anim"
+								|| thread_name == "android.display"
+								|| thread_name == "android.ui"
+								|| thread_name.has_prefix ("binder:")
+								|| thread_name == "jobscheduler.bg"
+								;
+						} catch (FileError e) {
+						}
+					}
+					if (safe_to_suspend) {
+						try {
+							yield helper.await_syscall (tid,
+								RESTART | IOCTL | READ | POLL_LIKE | WAIT | SIGWAIT | FUTEX | ACCEPT | RECV,
+								cancellable);
+							suspended_tids.offer (tid);
+						} catch (GLib.Error e) {
+						}
 					}
 				}
 
 				yield base.load_script (cancellable);
 			} finally {
-				foreach (var tid in stopped_tids)
+				foreach (var tid in suspended_tids)
 					helper.resume_syscall.begin (tid, cancellable);
 			}
 		}
