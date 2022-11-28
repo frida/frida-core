@@ -894,9 +894,7 @@ namespace Frida {
 					}
 					if (safe_to_suspend) {
 						try {
-							yield helper.await_syscall (tid,
-								RESTART | IOCTL | READ | POLL_LIKE | WAIT | SIGWAIT | FUTEX | ACCEPT | RECV,
-								cancellable);
+							yield helper.await_syscall (tid, RESTART | IOCTL | POLL_LIKE | FUTEX, cancellable);
 							suspended_tids.offer (tid);
 						} catch (GLib.Error e) {
 						}
