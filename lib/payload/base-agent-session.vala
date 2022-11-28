@@ -598,15 +598,6 @@ namespace Frida {
 			maybe_deliver_pending_messages ();
 		}
 
-		public async uint64[] query_agent_thread_ids (Cancellable? cancellable) throws Error, IOError {
-			uint64[] ids = {};
-			Gum.Cloak.enumerate_threads (id => {
-				ids += id;
-				return true;
-			});
-			return ids;
-		}
-
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Session is closing");
