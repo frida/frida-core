@@ -386,9 +386,7 @@ namespace Frida {
 					provider = yield create_system_session_provider (cancellable, out connection);
 					entry = new AgentEntry (pid, null, connection, provider);
 				} else {
-					yield wait_for_uninject (injector, cancellable, () => {
-						return injectee_by_pid.has_key (pid);
-					});
+					yield wait_for_uninject_of_pid (pid, cancellable);
 
 					var io_cancellable = new Cancellable ();
 					pending_establish_ops[pid] = io_cancellable;
@@ -451,6 +449,12 @@ namespace Frida {
 			}
 
 			return entry;
+		}
+
+		internal async void wait_for_uninject_of_pid (uint pid, Cancellable? cancellable) throws IOError {
+			yield wait_for_uninject (injector, cancellable, () => {
+				return injectee_by_pid.has_key (pid);
+			});
 		}
 
 		protected virtual void on_uninjected (uint id) {
@@ -1352,24 +1356,16 @@ namespace Frida {
 			}
 		}
 
-		protected virtual async void load_script (Cancellable? cancellable) throws Error, IOError {
-			try {
-				yield session.load_script (script, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
+		private async void ensure_unloaded (Cancellable? cancellable) throws IOError {
+			if (session == null && script.handle == 0)
+				return;
+
+			yield perform_unload (cancellable);
 		}
 
-		private async void ensure_unloaded (Cancellable? cancellable) throws IOError {
-			if (script.handle != 0) {
-				try {
-					yield session.destroy_script (script, cancellable);
-				} catch (GLib.Error e) {
-					if (e is IOError.CANCELLED)
-						return;
-				}
-				script = AgentScriptId (0);
-			}
+		protected virtual async void perform_unload (Cancellable? cancellable) throws IOError {
+			if (script.handle != 0)
+				yield destroy_script (cancellable);
 
 			if (session != null) {
 				try {
@@ -1380,6 +1376,24 @@ namespace Frida {
 				}
 				session = null;
 			}
+		}
+
+		protected virtual async void load_script (Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield session.load_script (script, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		protected virtual async void destroy_script (Cancellable? cancellable) throws IOError {
+			try {
+				yield session.destroy_script (script, cancellable);
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					return;
+			}
+			script = AgentScriptId (0);
 		}
 
 		protected async void wait_for_unload (Cancellable? cancellable) throws IOError {

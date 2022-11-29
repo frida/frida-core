@@ -163,8 +163,6 @@ namespace Frida {
 		}
 
 		public override async void close (Cancellable? cancellable) throws IOError {
-			yield base.close (cancellable);
-
 #if ANDROID
 			yield robo_launcher.close (cancellable);
 			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
@@ -172,7 +170,11 @@ namespace Frida {
 
 			system_server_agent.unloaded.disconnect (on_system_server_agent_unloaded);
 			yield system_server_agent.close (cancellable);
+#endif
 
+			yield base.close (cancellable);
+
+#if ANDROID
 			if (crash_monitor != null) {
 				crash_monitor.process_crashed.disconnect (on_process_crashed);
 				yield crash_monitor.close (cancellable);
@@ -520,11 +522,11 @@ namespace Frida {
 				}
 			}
 
-			foreach (var request in spawn_requests.values)
+			foreach (var request in spawn_requests.values.to_array ())
 				request.reject (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
 			spawn_requests.clear ();
 
-			foreach (var agent in zygote_agents.values)
+			foreach (var agent in zygote_agents.values.to_array ())
 				yield agent.close (cancellable);
 			zygote_agents.clear ();
 		}
@@ -818,6 +820,26 @@ namespace Frida {
 			}
 		}
 
+		protected override async void perform_unload (Cancellable? cancellable) throws IOError {
+			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+
+			bool suspended = false;
+			try {
+				yield helper.await_syscall (pid, POLL_LIKE, cancellable);
+				suspended = true;
+			} catch (Error e) {
+			}
+			try {
+				yield base.perform_unload (cancellable);
+
+				var parent = (LinuxHostSession) host_session;
+				yield parent.wait_for_uninject_of_pid (target_pid, cancellable);
+			} finally {
+				if (suspended)
+					helper.resume_syscall.begin (pid, null);
+			}
+		}
+
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
@@ -850,61 +872,6 @@ namespace Frida {
 			try {
 				yield start_package ("", new DefaultActivityEntrypoint (), cancellable);
 			} catch (Error e) {
-			}
-		}
-
-		protected override async void load_script (Cancellable? cancellable) throws Error, IOError {
-
-			var thread_ids = new Gee.ArrayList<uint> ();
-			Dir dir;
-			try {
-				dir = Dir.open ("/proc/%u/task".printf (target_pid));
-			} catch (FileError e) {
-				throw new Error.PROCESS_NOT_FOUND ("Unable to query system_server threads: %s", e.message);
-			}
-			string? name;
-			while ((name = dir.read_name ()) != null) {
-				var tid = uint.parse (name);
-				thread_ids.add (tid);
-			}
-
-			var suspended_tids = new Gee.ArrayQueue<uint> ();
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
-			try {
-				foreach (var tid in thread_ids) {
-					bool safe_to_suspend = false;
-					if (tid == target_pid) {
-						safe_to_suspend = true;
-					} else {
-						try {
-							string thread_name;
-							FileUtils.get_contents ("/proc/%u/task/%u/comm".printf (target_pid, tid), out thread_name);
-							thread_name = thread_name.chomp ();
-							safe_to_suspend = (thread_name == "ActivityManager")
-								|| thread_name == "NetworkPolicy"
-								|| thread_name.has_prefix ("WifiHandler")
-								|| thread_name == "android.anim"
-								|| thread_name == "android.display"
-								|| thread_name == "android.ui"
-								|| thread_name.has_prefix ("binder:")
-								|| thread_name == "jobscheduler.bg"
-								;
-						} catch (FileError e) {
-						}
-					}
-					if (safe_to_suspend) {
-						try {
-							yield helper.await_syscall (tid, RESTART | IOCTL | POLL_LIKE | FUTEX, cancellable);
-							suspended_tids.offer (tid);
-						} catch (GLib.Error e) {
-						}
-					}
-				}
-
-				yield base.load_script (cancellable);
-			} finally {
-				foreach (var tid in suspended_tids)
-					helper.resume_syscall.begin (tid, cancellable);
 			}
 		}
 
@@ -1042,6 +1009,83 @@ namespace Frida {
 
 		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
 			return (string) Frida.Data.Android.get_system_server_js_blob ().data;
+		}
+
+		protected override async void load_script (Cancellable? cancellable) throws Error, IOError {
+			var suspended_threads = yield suspend_sensitive_threads (cancellable);
+			try {
+				yield base.load_script (cancellable);
+			} finally {
+				resume_threads (suspended_threads);
+			}
+		}
+
+		protected override async void destroy_script (Cancellable? cancellable) throws IOError {
+			Gee.List<uint>? suspended_threads = null;
+			try {
+				suspended_threads = yield suspend_sensitive_threads (cancellable);
+			} catch (Error e) {
+			}
+			try {
+				yield base.destroy_script (cancellable);
+			} finally {
+				if (suspended_threads != null)
+					resume_threads (suspended_threads);
+			}
+		}
+
+		private async Gee.List<uint> suspend_sensitive_threads (Cancellable? cancellable) throws Error, IOError {
+			var thread_ids = new Gee.ArrayList<uint> ();
+			Dir dir;
+			try {
+				dir = Dir.open ("/proc/%u/task".printf (target_pid));
+			} catch (FileError e) {
+				throw new Error.PROCESS_NOT_FOUND ("Unable to query system_server threads: %s", e.message);
+			}
+			string? name;
+			while ((name = dir.read_name ()) != null) {
+				var tid = uint.parse (name);
+				thread_ids.add (tid);
+			}
+
+			var suspended_tids = new Gee.ArrayList<uint> ();
+			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			foreach (var tid in thread_ids) {
+				bool safe_to_suspend = false;
+				if (tid == target_pid) {
+					safe_to_suspend = true;
+				} else {
+					try {
+						string thread_name;
+						FileUtils.get_contents ("/proc/%u/task/%u/comm".printf (target_pid, tid), out thread_name);
+						thread_name = thread_name.chomp ();
+						safe_to_suspend = (thread_name == "ActivityManager")
+							|| thread_name == "NetworkPolicy"
+							|| thread_name.has_prefix ("WifiHandler")
+							|| thread_name == "android.anim"
+							|| thread_name == "android.display"
+							|| thread_name == "android.ui"
+							|| thread_name.has_prefix ("binder:")
+							|| thread_name == "jobscheduler.bg"
+							;
+					} catch (FileError e) {
+					}
+				}
+				if (safe_to_suspend) {
+					try {
+						yield helper.await_syscall (tid, RESTART | IOCTL | POLL_LIKE | FUTEX, cancellable);
+						suspended_tids.add (tid);
+					} catch (GLib.Error e) {
+					}
+				}
+			}
+			return suspended_tids;
+		}
+
+		private void resume_threads (Gee.List<uint> thread_ids) {
+			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			foreach (var tid in thread_ids)
+				helper.resume_syscall.begin (tid, null);
 		}
 
 		private static void add_parameters_from_json (HashTable<string, Variant> parameters, Json.Object object) {
