@@ -820,26 +820,6 @@ namespace Frida {
 			}
 		}
 
-		protected override async void perform_unload (Cancellable? cancellable) throws IOError {
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
-
-			bool suspended = false;
-			try {
-				yield helper.await_syscall (pid, POLL_LIKE, cancellable);
-				suspended = true;
-			} catch (Error e) {
-			}
-			try {
-				yield base.perform_unload (cancellable);
-
-				var parent = (LinuxHostSession) host_session;
-				yield parent.wait_for_uninject_of_pid (target_pid, cancellable);
-			} finally {
-				if (suspended)
-					helper.resume_syscall.begin (pid, null);
-			}
-		}
-
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
@@ -1017,20 +997,6 @@ namespace Frida {
 				yield base.load_script (cancellable);
 			} finally {
 				resume_threads (suspended_threads);
-			}
-		}
-
-		protected override async void destroy_script (Cancellable? cancellable) throws IOError {
-			Gee.List<uint>? suspended_threads = null;
-			try {
-				suspended_threads = yield suspend_sensitive_threads (cancellable);
-			} catch (Error e) {
-			}
-			try {
-				yield base.destroy_script (cancellable);
-			} finally {
-				if (suspended_threads != null)
-					resume_threads (suspended_threads);
 			}
 		}
 
