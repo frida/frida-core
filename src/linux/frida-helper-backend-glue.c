@@ -1274,6 +1274,12 @@ frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy un
     if (frida_inject_instance_did_not_exec (instance) &&
         frida_inject_instance_attach (instance, &saved_regs, NULL))
     {
+      FridaSyscallInstance * syscall_instance;
+
+      syscall_instance = gee_abstract_map_get (GEE_ABSTRACT_MAP (instance->backend->syscall_instances), GUINT_TO_POINTER (instance->pid));
+      if (syscall_instance != NULL)
+        syscall_instance->interrupted = TRUE;
+
       frida_remote_dealloc (instance->pid, instance->remote_payload, instance->remote_size, NULL);
       frida_inject_instance_detach (instance, &saved_regs, NULL);
     }
