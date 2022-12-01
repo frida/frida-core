@@ -12,6 +12,9 @@ if host_os_family == 'windows'
   ]
 elif host_os in ['macos', 'ios']
   pipe_sources += ['pipe-darwin.c']
+
+  system_deps += [gio_unix_dep]
+  vala_args += ['--pkg=frida-gum-darwin-1.0', '--pkg=posix']
 else
   pipe_sources += ['pipe-unix.c']
 

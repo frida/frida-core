@@ -30,6 +30,11 @@ namespace Frida {
 		}
 
 		private FileDescriptorTablePadder () {
+#if DARWIN
+			if (Gum.Darwin.query_hardened ())
+				return;
+#endif
+
 			open_needed_descriptors ();
 		}
 
@@ -44,6 +49,11 @@ namespace Frida {
 		}
 
 		public void move_descriptor_if_needed (ref int fd) {
+#if DARWIN
+			if (Gum.Darwin.query_hardened ())
+				return;
+#endif
+
 			if (fd >= MIN_TABLE_SIZE)
 				return;
 

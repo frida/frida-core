@@ -254,6 +254,9 @@ namespace Frida.Agent {
 			string[] tokens = agent_parameters.split ("|");
 			unowned string transport_uri = tokens[0];
 			bool enable_exceptor = true;
+#if DARWIN
+			enable_exceptor = !Gum.Darwin.query_hardened ();
+#endif
 			bool enable_exit_monitor = true;
 			bool enable_thread_suspend_monitor = true;
 			foreach (unowned string option in tokens[1:]) {

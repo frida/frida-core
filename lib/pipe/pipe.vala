@@ -118,14 +118,21 @@ namespace Frida {
 	}
 #elif MACOS || IOS
 	namespace DarwinPipe {
-		public static Future<SocketConnection> open (string address, Cancellable? cancellable) {
-			var promise = new Promise<SocketConnection> ();
+		public static Future<IOStream> open (string address, Cancellable? cancellable) {
+			var promise = new Promise<IOStream> ();
 
 			try {
 				var fd = _consume_stashed_file_descriptor (address);
-				var socket = new Socket.from_fd (fd);
-				var connection = SocketConnection.factory_create_connection (socket);
-				promise.resolve (connection);
+				IOStream stream;
+				if (Gum.Darwin.query_hardened ()) {
+					var input = new UnixInputStream (fd, true);
+					var output = new UnixOutputStream (fd, false);
+					stream = new SimpleIOStream (input, output);
+				} else {
+					var socket = new Socket.from_fd (fd);
+					stream = SocketConnection.factory_create_connection (socket);
+				}
+				promise.resolve (stream);
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
