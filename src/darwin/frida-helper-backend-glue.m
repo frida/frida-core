@@ -2445,16 +2445,30 @@ frida_inject_instance_on_mach_thread_dead (void * context)
 
   if (posix_thread_right_in_remote_task != MACH_PORT_NULL)
   {
-    kern_return_t kr;
-    mach_msg_type_name_t acquired_type;
-    gboolean denied_by_modern_xnu;
+    gboolean port_might_be_guarded, denied_by_modern_xnu;
 
     self->agent_context->posix_thread = MACH_PORT_NULL;
 
-    kr = mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_right_in_local_task,
-        &acquired_type);
+#ifdef HAVE_IOS
+    port_might_be_guarded = gum_darwin_check_xnu_version (7938, 0, 0);
+#else
+    port_might_be_guarded = FALSE;
+#endif
 
-    denied_by_modern_xnu = kr == KERN_INVALID_CAPABILITY;
+    if (port_might_be_guarded)
+    {
+      denied_by_modern_xnu = TRUE;
+    }
+    else
+    {
+      kern_return_t kr;
+      mach_msg_type_name_t acquired_type;
+
+      kr = mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND,
+          &posix_thread_right_in_local_task, &acquired_type);
+      denied_by_modern_xnu = kr == KERN_INVALID_CAPABILITY;
+    }
+
     if (denied_by_modern_xnu)
     {
       posix_thread_right_in_local_task = frida_obtain_thread_port_for_thread_id (self->task, self->agent_context->posix_tid);
