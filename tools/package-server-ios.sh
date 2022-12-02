@@ -57,6 +57,8 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	<string>root</string>
 	<key>RunAtLoad</key>
 	<true/>
+	<key>LimitLoadToSessionType</key>
+	<string>System</string>
 	<key>KeepAlive</key>
 	<true/>
 	<key>ThrottleInterval</key>
