@@ -1,5 +1,12 @@
 namespace Frida {
 	public class ThreadIgnoreScope {
+		public enum Kind {
+			APPLICATION_THREAD,
+			FRIDA_THREAD
+		}
+
+		private Kind kind;
+
 		private Gum.Interceptor interceptor;
 
 		private Gum.ThreadId thread_id;
@@ -7,23 +14,29 @@ namespace Frida {
 		private uint num_ranges;
 		private Gum.MemoryRange ranges[2];
 
-		public ThreadIgnoreScope () {
+		public ThreadIgnoreScope (Kind kind) {
+			this.kind = kind;
+
 			interceptor = Gum.Interceptor.obtain ();
 			interceptor.ignore_current_thread ();
 
-			thread_id = Gum.Process.get_current_thread_id ();
-			Gum.Cloak.add_thread (thread_id);
+			if (kind == FRIDA_THREAD) {
+				thread_id = Gum.Process.get_current_thread_id ();
+				Gum.Cloak.add_thread (thread_id);
 
-			num_ranges = Gum.Thread.try_get_ranges (ranges);
-			for (var i = 0; i != num_ranges; i++)
-				Gum.Cloak.add_range (ranges[i]);
+				num_ranges = Gum.Thread.try_get_ranges (ranges);
+				for (var i = 0; i != num_ranges; i++)
+					Gum.Cloak.add_range (ranges[i]);
+			}
 		}
 
 		~ThreadIgnoreScope () {
-			for (var i = 0; i != num_ranges; i++)
-				Gum.Cloak.remove_range (ranges[i]);
+			if (kind == FRIDA_THREAD) {
+				for (var i = 0; i != num_ranges; i++)
+					Gum.Cloak.remove_range (ranges[i]);
 
-			Gum.Cloak.remove_thread (thread_id);
+				Gum.Cloak.remove_thread (thread_id);
+			}
 
 			interceptor.unignore_current_thread ();
 		}

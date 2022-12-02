@@ -532,7 +532,7 @@ namespace Frida.Gadget {
 
 			wait_for_resume_context = scheduler.get_js_context ();
 
-			var ignore_scope = new ThreadIgnoreScope ();
+			var ignore_scope = new ThreadIgnoreScope (APPLICATION_THREAD);
 
 			start (request);
 
@@ -643,7 +643,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void perform_start (Gee.Promise<int>? request) {
-		worker_ignore_scope = new ThreadIgnoreScope ();
+		worker_ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 
 		try {
 			yield controller.start ();

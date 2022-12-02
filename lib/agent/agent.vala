@@ -131,7 +131,7 @@ namespace Frida.Agent {
 				}
 #endif
 
-				var ignore_scope = new ThreadIgnoreScope ();
+				var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 
 				shared_instance = new Runner (agent_parameters, agent_path, agent_range);
 
@@ -172,7 +172,7 @@ namespace Frida.Agent {
 				}
 #endif
 
-				var ignore_scope = new ThreadIgnoreScope ();
+				var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 
 				shared_instance.run_after_transition ();
 
@@ -309,7 +309,7 @@ namespace Frida.Agent {
 
 		private void keep_running_eternalized () {
 			agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
-				var ignore_scope = new ThreadIgnoreScope ();
+				var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 
 				agent_tid = Gum.Process.get_current_thread_id ();
 
@@ -505,7 +505,7 @@ namespace Frida.Agent {
 				}
 			} else {
 				agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
-					var ignore_scope = new ThreadIgnoreScope ();
+					var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 					run_after_transition ();
 					ignore_scope = null;
 
@@ -613,7 +613,7 @@ namespace Frida.Agent {
 				}
 			} else {
 				agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
-					var ignore_scope = new ThreadIgnoreScope ();
+					var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 					run_after_transition ();
 					ignore_scope = null;
 
