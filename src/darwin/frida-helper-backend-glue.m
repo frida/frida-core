@@ -457,6 +457,7 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
 {
   mach_port_t self_task;
   int status, sockets[2] = { -1, -1 };
+  const int no_sigpipe = TRUE;
   mach_port_t local_wrapper = MACH_PORT_NULL;
   mach_port_t remote_wrapper = MACH_PORT_NULL;
   mach_port_t local_rx = MACH_PORT_NULL;
@@ -476,6 +477,9 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
 
   status = socketpair (AF_UNIX, SOCK_STREAM, 0, sockets);
   CHECK_BSD_RESULT (status, ==, 0, "socketpair");
+
+  setsockopt (sockets[0], SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof (no_sigpipe));
+  setsockopt (sockets[1], SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof (no_sigpipe));
 
   frida_unix_socket_tune_buffer_sizes (sockets[0]);
   frida_unix_socket_tune_buffer_sizes (sockets[1]);
