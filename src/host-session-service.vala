@@ -543,6 +543,14 @@ namespace Frida {
 			entry.sink_registration_id = 0;
 		}
 
+		public bool can_pass_file_descriptors_to_agent_session (AgentSessionId id) throws Error {
+			AgentSessionEntry? entry = agent_sessions[id];
+			if (entry == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+
+			return (entry.connection.get_capabilities () & DBusCapabilityFlags.UNIX_FD_PASSING) != 0;
+		}
+
 		public AgentSessionProvider obtain_session_provider (AgentSessionId id) throws Error {
 			foreach (var future in agent_entries.values) {
 				if (!future.ready)

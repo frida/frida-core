@@ -450,6 +450,12 @@ namespace Frida {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
 #else
+			var base_host_session = host_session as BaseDBusHostSession;
+			if (base_host_session == null)
+				throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
+			if (!base_host_session.can_pass_file_descriptors_to_agent_session (id))
+				throw new Error.INVALID_ARGUMENT ("Not supported by this particular agent session");
+
 			if (broker_port == 0) {
 				try {
 					broker_port = broker_service.add_any_inet_port (null);
