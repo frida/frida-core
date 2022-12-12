@@ -191,9 +191,7 @@ struct _FridaSpawnInstance
   GumAddress helpers_ptr_address;
   GumAddress ret_gadget;
   FridaRetState ret_state;
-  GumAddress do_modinit_start;
-  GumAddress do_modinit_end;
-  GumAddress strcmp_address;
+  GHashTable * do_modinit_strcmp_checks;
 
   mach_port_t task;
   GumDarwinUnifiedThreadState previous_thread_state;
@@ -228,7 +226,6 @@ enum _FridaBreakpointPhase
 enum _FridaRetState
 {
   FRIDA_RET_FROM_HELPER,
-  FRIDA_RET_FROM_STRCMP
 };
 
 struct _FridaSpawnInstanceDyldData
@@ -442,6 +439,7 @@ static void frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifi
 static gboolean frida_is_hardware_breakpoint_support_working (void);
 
 static GumAddress frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start);
+static GHashTable * frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld);
 static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size);
 static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
 
@@ -1884,13 +1882,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     instance->dlerror_clear_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
     instance->info_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
     instance->helpers_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
-    instance->do_modinit_start = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE");
-    instance->do_modinit_end = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO16doGetDOFSectionsERKN11ImageLoader11LinkContextERNSt3__16vectorINS0_7DOFInfoENS4_9allocatorIS6_EEEE");
-    instance->strcmp_address = gum_darwin_module_resolve_symbol_address (dyld, "_strcmp");
+    instance->do_modinit_strcmp_checks = frida_find_modinit_strcmp_checks (task, dyld);
 
     if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0 ||
-        instance->info_address == 0 || instance->do_modinit_start == 0 || instance->do_modinit_end == 0 ||
-        instance->strcmp_address == 0)
+        instance->info_address == 0 || instance->do_modinit_strcmp_checks == NULL)
     {
       goto dyld_probe_failed;
     }
@@ -1899,7 +1894,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     {
       instance->dlopen_address |= 1;
       instance->register_helpers_address |= 1;
-      instance->do_modinit_start |= 1;
     }
 
     instance->ret_gadget = frida_find_function_end (task, instance->cpu_type, instance->register_helpers_address, 128);
@@ -2578,6 +2572,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   self_task = mach_task_self ();
 
+  if (instance->do_modinit_strcmp_checks != NULL)
+    g_hash_table_unref (instance->do_modinit_strcmp_checks);
+
   mach_msg_destroy (&instance->pending_request.Head);
 
   previous_ports = &instance->previous_ports;
@@ -2968,9 +2965,23 @@ next_phase:
 
     case FRIDA_BREAKPOINT_DLOPEN_LIBC:
       if (frida_spawn_instance_is_libc_initialized (self))
+      {
         frida_spawn_instance_unset_helpers (self);
+      }
       else
-        frida_spawn_instance_set_nth_breakpoint (self, 1, self->strcmp_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+      {
+        GHashTableIter iter;
+        gpointer strcmp_check;
+        guint breakpoint_index;
+
+        g_hash_table_iter_init (&iter, self->do_modinit_strcmp_checks);
+        breakpoint_index = 1;
+        while (g_hash_table_iter_next (&iter, &strcmp_check, NULL))
+        {
+          frida_spawn_instance_set_nth_breakpoint (self, breakpoint_index, GUM_ADDRESS (strcmp_check), FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+          breakpoint_index++;
+        }
+      }
 
       memcpy (state, &self->previous_thread_state, sizeof (GumDarwinUnifiedThreadState));
 
@@ -3142,67 +3153,18 @@ beach:
 static gboolean
 frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc)
 {
-  if (pc == self->strcmp_address)
+  if (g_hash_table_contains (self->do_modinit_strcmp_checks, GSIZE_TO_POINTER (pc)))
   {
-    GumAddress ret_address;
-
 #ifdef HAVE_I386
     if (self->cpu_type == GUM_CPU_AMD64)
-    {
-      guint64 * info_ptr;
-
-      info_ptr = (guint64 *) gum_darwin_read (self->task, state->uts.ts64.__rsp, sizeof (info_ptr), NULL);
-      ret_address = *info_ptr;
-      g_free (info_ptr);
-
-      if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
-      {
-        state->uts.ts64.__rax = 0;
-        state->uts.ts64.__rip = self->ret_gadget;
-
-        self->ret_state = FRIDA_RET_FROM_STRCMP;
-      }
-    }
+      state->uts.ts64.__rax = 0;
     else
-    {
-      guint32 * info_ptr;
-
-      info_ptr = (guint32 *) gum_darwin_read (self->task, state->uts.ts32.__esp, sizeof (info_ptr), NULL);
-      ret_address = *info_ptr;
-      g_free (info_ptr);
-
-      if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
-      {
-        state->uts.ts32.__eax = 0;
-        state->uts.ts32.__eip = self->ret_gadget;
-
-        self->ret_state = FRIDA_RET_FROM_STRCMP;
-      }
-    }
+      state->uts.ts32.__eax = 0;
 #else
     if (self->cpu_type == GUM_CPU_ARM64)
-    {
-      ret_address = __darwin_arm_thread_state64_get_lr (state->ts_64);
-      if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
-      {
-        state->ts_64.__x[0] = 0;
-        __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (gum_sign_code_address (ret_address)));
-
-        self->ret_state = FRIDA_RET_FROM_STRCMP;
-      }
-    }
+      state->ts_64.__x[0] = 0;
     else
-    {
-      ret_address = state->ts_32.__lr;
-      if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
-      {
-        /* Make both args point to a NUL byte. */
-        state->ts_32.__r[0] = self->lib_name + 26;
-        state->ts_32.__r[1] = state->ts_32.__r[0];
-
-        self->ret_state = FRIDA_RET_FROM_STRCMP;
-      }
-    }
+      state->ts_32.__r[0] = 0;
 #endif
 
     return TRUE;
@@ -5237,6 +5199,103 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
   cs_close (&capstone);
 
   return match;
+}
+
+static GHashTable *
+frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld)
+{
+  GHashTable * checks;
+  GumAddress modinit_start, modinit_end, dyld_strcmp;
+  uint64_t address;
+  size_t size;
+  csh capstone;
+  cs_err err;
+  gpointer chunk;
+  cs_insn * insn;
+  const uint8_t * code;
+
+  modinit_start = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE");
+  modinit_end = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO16doGetDOFSectionsERKN11ImageLoader11LinkContextERNSt3__16vectorINS0_7DOFInfoENS4_9allocatorIS6_EEEE");
+  dyld_strcmp = gum_darwin_module_resolve_symbol_address (dyld, "_strcmp");
+  if (modinit_start == 0 || modinit_end == 0 || modinit_end <= modinit_start || dyld_strcmp == 0)
+    return NULL;
+  address = modinit_start & ~G_GUINT64_CONSTANT (1);
+  size = modinit_end - modinit_start;
+
+  capstone = frida_create_capstone (dyld->cpu_type, modinit_start);
+
+  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
+  g_assert (err == CS_ERR_OK);
+
+  chunk = gum_darwin_read (task, address, size, NULL);
+
+  insn = cs_malloc (capstone);
+  code = chunk;
+
+  checks = g_hash_table_new (NULL, NULL);
+
+  switch (dyld->cpu_type)
+  {
+    case GUM_CPU_IA32:
+    case GUM_CPU_AMD64:
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+      {
+        if (insn->id == X86_INS_CALL)
+        {
+          const cs_x86_op * op = &insn->detail->x86.operands[0];
+
+          if (op->type == X86_OP_IMM && op->imm == dyld_strcmp)
+          {
+            g_hash_table_add (checks, GSIZE_TO_POINTER (insn->address + insn->size));
+          }
+        }
+      }
+      break;
+
+    case GUM_CPU_ARM:
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+      {
+        if (insn->id == ARM_INS_BLX)
+        {
+          const cs_arm_op * op = &insn->detail->arm.operands[0];
+
+          if (op->type == ARM_OP_IMM && op->imm == dyld_strcmp)
+          {
+            g_hash_table_add (checks, GSIZE_TO_POINTER (insn->address + insn->size));
+          }
+        }
+      }
+      break;
+
+    case GUM_CPU_ARM64:
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+      {
+        if (insn->id == ARM64_INS_BL && insn->detail->arm64.operands[0].imm == dyld_strcmp)
+        {
+          g_hash_table_add (checks, GSIZE_TO_POINTER (insn->address + insn->size));
+        }
+      }
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  switch (g_hash_table_size (checks))
+  {
+    case 1:
+    case 2:
+      break;
+    default:
+      g_hash_table_unref (checks);
+      checks = NULL;
+  }
+
+  cs_free (insn, 1);
+  g_free (chunk);
+  cs_close (&capstone);
+
+  return checks;
 }
 
 static GumAddress
