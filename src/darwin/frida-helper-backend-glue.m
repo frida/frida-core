@@ -5164,12 +5164,12 @@ frida_is_hardware_breakpoint_support_working (void)
 static GumAddress
 frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start)
 {
-  GumAddress found = 0;
+  GumAddress match = 0;
   const size_t max_size = 2048;
   uint64_t address = start & ~G_GUINT64_CONSTANT (1);
   csh capstone;
   cs_err err;
-  gpointer image;
+  gpointer chunk;
   cs_insn * insn;
   const uint8_t * code;
   size_t size;
@@ -5179,10 +5179,10 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
   g_assert (err == CS_ERR_OK);
 
-  image = gum_darwin_read (task, address, max_size, NULL);
+  chunk = gum_darwin_read (task, address, max_size, NULL);
 
   insn = cs_malloc (capstone);
-  code = image;
+  code = chunk;
   size = max_size;
 
   switch (cpu_type)
@@ -5195,7 +5195,7 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
           const cs_x86_op * src = &insn->detail->x86.operands[1];
           if (src->type == X86_OP_MEM && src->mem.base != X86_REG_EBP && src->mem.disp == 0x18)
           {
-            found = insn->address;
+            match = insn->address;
             break;
           }
         }
@@ -5210,7 +5210,7 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
           const cs_x86_op * op = &insn->detail->x86.operands[0];
           if (op->type == X86_OP_MEM && op->mem.disp == 0x28)
           {
-            found = insn->address;
+            match = insn->address;
             break;
           }
         }
@@ -5222,7 +5222,7 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
       {
         if (insn->id == ARM64_INS_LDR && insn->detail->arm64.operands[1].mem.disp == 0x28)
         {
-          found = insn->address;
+          match = insn->address;
           break;
         }
       }
@@ -5233,20 +5233,20 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
   }
 
   cs_free (insn, 1);
+  g_free (chunk);
   cs_close (&capstone);
-  g_free (image);
 
-  return found;
+  return match;
 }
 
 static GumAddress
 frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size)
 {
-  GumAddress found = 0;
+  GumAddress match = 0;
   uint64_t address = start & ~G_GUINT64_CONSTANT (1);
   csh capstone;
   cs_err err;
-  gpointer image;
+  gpointer chunk;
   cs_insn * insn;
   const uint8_t * code;
   size_t size;
@@ -5256,10 +5256,10 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
   g_assert (err == CS_ERR_OK);
 
-  image = gum_darwin_read (task, address, max_size, NULL);
+  chunk = gum_darwin_read (task, address, max_size, NULL);
 
   insn = cs_malloc (capstone);
-  code = image;
+  code = chunk;
   size = max_size;
 
   switch (cpu_type)
@@ -5272,7 +5272,7 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
             insn->id == X86_INS_RETF ||
             insn->id == X86_INS_RETFQ)
         {
-          found = insn->address;
+          match = insn->address;
           break;
         }
       }
@@ -5301,7 +5301,7 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
             insn->detail->arm.operands[0].type == ARM_OP_REG &&
             insn->detail->arm.operands[0].reg == ARM_REG_LR)
         {
-          found = insn->address;
+          match = insn->address;
           break;
         }
 
@@ -5311,7 +5311,7 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
         {
           if (insn->detail->arm.operands[pop_lr].reg == ARM_REG_PC)
           {
-            found = insn->address;
+            match = insn->address;
             break;
           }
         }
@@ -5325,7 +5325,7 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
       {
         if (insn->id == ARM64_INS_RET)
         {
-          found = insn->address;
+          match = insn->address;
           break;
         }
       }
@@ -5336,10 +5336,10 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
   }
 
   cs_free (insn, 1);
+  g_free (chunk);
   cs_close (&capstone);
-  g_free (image);
 
-  return found;
+  return match;
 }
 
 static csh
@@ -5350,8 +5350,12 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
 
   switch (cpu_type)
   {
-    case GUM_CPU_ARM64:
-      err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
+    case GUM_CPU_IA32:
+      err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
+      break;
+
+    case GUM_CPU_AMD64:
+      err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
       break;
 
     case GUM_CPU_ARM:
@@ -5361,12 +5365,8 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
         err = cs_open (CS_ARCH_ARM, CS_MODE_ARM, &capstone);
       break;
 
-    case GUM_CPU_IA32:
-      err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
-      break;
-
-    case GUM_CPU_AMD64:
-      err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
+    case GUM_CPU_ARM64:
+      err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
       break;
 
     default:
