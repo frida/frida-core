@@ -85,11 +85,16 @@ namespace Frida {
 			} catch (Error e) {
 				if (!(e is Error.INVALID_ARGUMENT))
 					throw e;
-				if (cpu_type == Gum.CpuType.AMD64 || cpu_type == Gum.CpuType.ARM64)
-					helper = yield obtain_for_32bit (cancellable);
-				else
-					helper = yield obtain_for_64bit (cancellable);
-				yield helper.resume (pid, cancellable);
+				try {
+					if (cpu_type == Gum.CpuType.AMD64 || cpu_type == Gum.CpuType.ARM64)
+						helper = yield obtain_for_32bit (cancellable);
+					else
+						helper = yield obtain_for_64bit (cancellable);
+					yield helper.resume (pid, cancellable);
+				} catch (Error _e) {
+					// Intentionally rethrowing the original error instead of the new error
+					throw e;
+				}
 			}
 		}
 
