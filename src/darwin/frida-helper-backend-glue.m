@@ -3114,7 +3114,6 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   GumAddress * info_ptr;
   struct dyld_all_image_infos * info = NULL;
   GumDarwinModule * dyld = NULL;
-  GumAddress entry_address;
 
   info_ptr = (GumAddress *) gum_darwin_read (self->task, self->info_ptr_address, sizeof (GumAddress), NULL);
   if (info_ptr == NULL)
@@ -3129,16 +3128,12 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   if (dyld == NULL)
     goto beach;
 
-  entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
-  if (entry_address == 0)
-    goto beach;
-
-  self->modern_entry_address = entry_address;
+  self->modern_entry_address = GUM_ADDRESS (info->dyldImageLoadAddress) + (self->modern_entry_address - self->dyld->base_address);
 
   g_object_unref (self->dyld);
   self->dyld = g_steal_pointer (&dyld);
 
-  frida_spawn_instance_set_nth_breakpoint (self, 0, entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+  frida_spawn_instance_set_nth_breakpoint (self, 0, self->modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
   handled = TRUE;
 
