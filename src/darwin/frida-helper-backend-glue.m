@@ -3153,6 +3153,9 @@ beach:
 static gboolean
 frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc)
 {
+  if (self->do_modinit_strcmp_checks == NULL)
+    return FALSE;
+
   if (g_hash_table_contains (self->do_modinit_strcmp_checks, GSIZE_TO_POINTER (pc)))
   {
 #ifdef HAVE_I386
