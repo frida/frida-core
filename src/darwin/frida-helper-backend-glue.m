@@ -2973,11 +2973,15 @@ next_phase:
         GHashTableIter iter;
         gpointer strcmp_check;
         guint breakpoint_index;
+        gboolean avoid_breakpoint_conflict = self->fake_helpers != 0 && self->dlerror_clear_address == 0;
 
         g_hash_table_iter_init (&iter, self->do_modinit_strcmp_checks);
         breakpoint_index = 1;
         while (g_hash_table_iter_next (&iter, &strcmp_check, NULL))
         {
+          if (avoid_breakpoint_conflict && breakpoint_index == 2)
+            breakpoint_index++;
+
           frida_spawn_instance_set_nth_breakpoint (self, breakpoint_index, GUM_ADDRESS (strcmp_check), FRIDA_BREAKPOINT_REPEAT_ALWAYS);
           breakpoint_index++;
         }
