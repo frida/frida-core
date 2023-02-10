@@ -231,9 +231,20 @@ if get_option('b_sanitize') == 'address'
 endif
 
 glib_dep = dependency('glib-2.0', version: '>=2.56')
+gio_dep = dependency('gio-2.0')
+
+assert(
+  # vala: Thread.garbage_collect
+  cc.has_function('g_thread_garbage_collect', dependencies: [glib_dep]) and
+  # vala: GLibFork.prepare_to_fork
+  cc.has_function('glib_prepare_to_fork', dependencies: [glib_dep]) and
+  # vala: GIOFork.prepare_to_fork
+  cc.has_function('gio_prepare_to_fork', dependencies: [gio_dep]),
+  'please use vala from https://github.com/frida/vala and glib from https://github.com/frida/glib'
+)
+
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
-gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8')
 json_glib_dep = dependency('json-glib-1.0')
 libsoup_dep = dependency('libsoup-3.0')
