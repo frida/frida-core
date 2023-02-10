@@ -64,6 +64,7 @@ struct _FridaSpringboardApi
   void * fbs;
   void * mcs;
 
+  mach_port_t (* SBSSpringBoardBackgroundServerPort) (void);
   NSString * (* SBSCopyFrontmostApplicationDisplayIdentifier) (void);
   NSArray * (* SBSCopyApplicationDisplayIdentifiers) (BOOL active, BOOL debuggable);
   NSString * (* SBSCopyDisplayIdentifierForProcessID) (UInt32 pid);
