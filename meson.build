@@ -292,6 +292,11 @@ if nice_dep.found()
                    prefix: '#include <usrsctp.h>')
     cdata.set('HAVE_SCONN_LEN', 1)
   endif
+
+  assert(
+    cc.has_function('usrsctp_get_timeout', dependencies: [usrsctp_dep]),
+    'please use usrsctp with https://github.com/sctplab/usrsctp/pull/591'
+  )
 else
   openssl_dep = []
   usrsctp_dep = []
