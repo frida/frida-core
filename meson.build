@@ -282,7 +282,10 @@ if host_os == 'android'
   backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
-tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
+tls_provider_dep = dependency('gioopenssl',
+  required: get_option('connectivity'),
+  not_found_message: 'please use glib-networking from https://github.com/frida/glib-networking'
+)
 if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
