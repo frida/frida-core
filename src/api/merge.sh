@@ -16,7 +16,13 @@ else
 
   echo "create $output_lib" > "$mri_script"
   while [[ $# > 0 ]]; do
-    echo "addlib $1" >> "$mri_script"
+    ext=${1##*.}
+    if [[ "$ext" == 'a' ]]; then
+      echo "addlib $1" >> "$mri_script"
+    else
+      # $1 is *.o or *.so
+      echo "addmod $1" >> "$mri_script"
+    fi
     shift
   done
   echo "save" >> "$mri_script"
