@@ -55,6 +55,8 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	</dict>
 	<key>UserName</key>
 	<string>root</string>
+	<key>POSIXSpawnType</key>
+	<string>Interactive</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>LimitLoadToSessionType</key>
