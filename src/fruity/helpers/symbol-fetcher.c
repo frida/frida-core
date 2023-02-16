@@ -9,6 +9,7 @@ struct _FridaMachO
 {
   const void * base;
   uintptr_t slide;
+  uint64_t size;
   const void * linkedit;
   const struct symtab_command * symtab;
   const struct dysymtab_command * dysymtab;
@@ -51,6 +52,7 @@ frida_fetch_dyld_symbols (char * output_buffer, const void * dyld_load_address)
     if (frida_str_contains (name, "libdyld_initialize") ||
         frida_str_contains (name, "restartWithDyldInCache") ||
         frida_str_equals (name, "_gProcessInfo") ||
+        frida_str_equals (name, "__ZN5dyld412gProcessInfoE") ||
         frida_str_contains (name, "launchWithClosure") ||
         frida_str_contains (name, "initializeMainExecutable") ||
         frida_str_contains (name, "registerThreadHelpers") ||
@@ -69,6 +71,11 @@ frida_fetch_dyld_symbols (char * output_buffer, const void * dyld_load_address)
       n++;
     }
   }
+
+  frida_append_char (&cursor, '\n');
+  frida_append_uint64 (&cursor, dyld.size);
+  frida_append_char (&cursor, '\t');
+  frida_append_string (&cursor, "dyld_size");
 
   size = cursor - output_buffer;
 
@@ -101,9 +108,14 @@ frida_parse_macho (const void * macho, FridaMachO * result)
         const struct segment_command_64 * sc = (const struct segment_command_64 *) lc;
 
         if (frida_str_equals (sc->segname, "__TEXT"))
+        {
           preferred_base = (const void *) sc->vmaddr;
+          result->size = sc->vmsize;
+        }
         else if (frida_str_equals (sc->segname, "__LINKEDIT"))
+        {
           linkedit = (const void *) sc->vmaddr - sc->fileoff;
+        }
 
         break;
       }
