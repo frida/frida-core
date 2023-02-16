@@ -284,7 +284,7 @@ endif
 
 tls_provider_dep = dependency('gioopenssl',
   required: get_option('connectivity'),
-  not_found_message: 'please use glib-networking from https://github.com/frida/glib-networking'
+  not_found_message: 'Please use GLib Networking from https://github.com/frida/glib-networking'
 )
 if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
