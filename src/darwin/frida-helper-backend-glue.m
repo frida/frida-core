@@ -164,6 +164,7 @@ struct _FridaSpawnInstance
   __Request__exception_raise_state_identity_t pending_request;
 
   GumDarwinModule * dyld;
+  size_t dyld_size;
   FridaDyldFlavor dyld_flavor;
 
   FridaBreakpointPhase breakpoint_phase;
@@ -1716,6 +1717,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_",
   };
   GumDarwinModule * dyld;
+  const GumDarwinSegment * segment;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
 
@@ -1843,6 +1845,16 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
   instance->dyld = dyld;
+  instance->dyld_size = 0;
+  i = 0;
+  while ((segment = gum_darwin_module_get_nth_segment (dyld, i++)) != NULL)
+  {
+    if (strcmp (segment->name, "__TEXT") == 0)
+    {
+      instance->dyld_size = segment->vm_size;
+      break;
+    }
+  }
 
   modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
   instance->dyld_flavor = (modern_entry_address != 0) ? FRIDA_DYLD_V4_PLUS : FRIDA_DYLD_V3_MINUS;
@@ -2927,6 +2939,7 @@ next_phase:
       GumAddress frame_pointer = 0;
       guint64 * ret_addr_data;
       GumAddress libsystem_initializer_caller;
+      gboolean falls_within_dyld;
 
 #if defined (HAVE_I386)
       frame_pointer = state->uts.ts64.__rbp;
@@ -2934,14 +2947,29 @@ next_phase:
       frame_pointer = __darwin_arm_thread_state64_get_fp (state->ts_64);
 #endif
 
-      ret_addr_data = (guint64 *) gum_darwin_read (self->task, frame_pointer + 8, 8, NULL);
-      libsystem_initializer_caller = *ret_addr_data;
+      do
+      {
+        ret_addr_data = (guint64 *) gum_darwin_read (self->task, frame_pointer + 8, 8, NULL);
+        libsystem_initializer_caller = *ret_addr_data;
 #ifdef HAVE_ARM64
-      libsystem_initializer_caller &= G_GUINT64_CONSTANT (0x7fffffffff);
+        libsystem_initializer_caller &= G_GUINT64_CONSTANT (0x7fffffffff);
 #endif
-      g_free (ret_addr_data);
+        g_free (ret_addr_data);
+
+        falls_within_dyld = libsystem_initializer_caller >= self->dyld->base_address &&
+            libsystem_initializer_caller < self->dyld->base_address + self->dyld_size;
+
+        if (!falls_within_dyld)
+        {
+          ret_addr_data = (guint64 *) gum_darwin_read (self->task, frame_pointer, 8, NULL);
+          frame_pointer = *ret_addr_data;
+          g_free (ret_addr_data);
+        }
+      }
+      while (!falls_within_dyld);
 
       frida_spawn_instance_set_nth_breakpoint (self, 1, libsystem_initializer_caller, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+
       self->breakpoint_phase = FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED;
 
       return TRUE;
