@@ -309,7 +309,7 @@ if nice_dep.found()
 
   assert(
     cc.has_function('usrsctp_get_timeout', dependencies: [usrsctp_dep]),
-    'please use usrsctp with https://github.com/sctplab/usrsctp/pull/591'
+    'Please use usrsctp with https://github.com/sctplab/usrsctp/pull/591'
   )
 else
   openssl_dep = []
