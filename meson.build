@@ -240,7 +240,7 @@ assert(
   cc.has_function('glib_prepare_to_fork', dependencies: [glib_dep]) and
   # vala: GIOFork.prepare_to_fork
   cc.has_function('gio_prepare_to_fork', dependencies: [gio_dep]),
-  'please use vala from https://github.com/frida/vala and glib from https://github.com/frida/glib'
+  'Please use Vala from https://github.com/frida/vala and GLib from https://github.com/frida/glib'
 )
 
 gobject_dep = dependency('gobject-2.0')
