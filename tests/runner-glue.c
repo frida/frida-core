@@ -118,6 +118,8 @@ frida_test_libc (void)
   return FRIDA_TEST_LIBC_APPLE;
 #elif defined (HAVE_GLIBC)
   return FRIDA_TEST_LIBC_GLIBC;
+#elif defined (HAVE_MUSL)
+  return FRIDA_TEST_LIBC_MUSL;
 #elif defined (HAVE_UCLIBC)
   return FRIDA_TEST_LIBC_UCLIBC;
 #elif defined (HAVE_ANDROID)

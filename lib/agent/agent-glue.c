@@ -16,6 +16,14 @@
 void
 _frida_agent_environment_init (void)
 {
+#ifdef HAVE_MUSL
+  static gboolean been_here = FALSE;
+
+  if (been_here)
+    return;
+  been_here = TRUE;
+#endif
+
   gum_init_embedded ();
   gio_init ();
 
@@ -40,6 +48,7 @@ _frida_agent_environment_init (void)
 void
 _frida_agent_environment_deinit (void)
 {
+#ifndef HAVE_MUSL
   gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
@@ -49,9 +58,10 @@ _frida_agent_environment_deinit (void)
 
   frida_run_atexit_handlers ();
 
-#ifdef HAVE_DARWIN
+# ifdef HAVE_DARWIN
   /* Do what frida_deinit_memory() does on the other platforms. */
   gum_internal_heap_unref ();
+# endif
 #endif
 }
 

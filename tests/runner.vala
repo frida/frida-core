@@ -200,6 +200,7 @@ namespace Frida.Test {
 		MSVCRT,
 		APPLE,
 		GLIBC,
+		MUSL,
 		UCLIBC,
 		BIONIC,
 		FREEBSD,

@@ -669,6 +669,11 @@ _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid
     params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
     params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
   }
+#elif defined (HAVE_MUSL)
+  params.dlopen_impl = frida_resolve_libc_function (pid, "dlopen");
+  params.dlopen_flags = RTLD_LAZY;
+  params.dlclose_impl = frida_resolve_libc_function (pid, "dlclose");
+  params.dlsym_impl = frida_resolve_libc_function (pid, "dlsym");
 #elif defined (HAVE_UCLIBC)
   params.dlopen_impl = frida_resolve_linker_address (params.pid, dlopen);
   params.dlopen_flags = RTLD_LAZY;
@@ -1557,7 +1562,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_x86_writer_init (&cw, code->cur);
   cw.pc = remote_address + params->code.offset + code->size;
 
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
   EMIT_LOAD_IMM (XAX, frida_resolve_libc_function (params->pid, "pthread_create"));
 #else
   EMIT_CALL_IMM (params->dlopen_impl,
@@ -1659,7 +1664,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CMP (EAX, FRIDA_UNLOAD_POLICY_DEFERRED);
   EMIT_JE (skip_detach);
   {
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
     EMIT_LOAD_IMM (XAX, frida_resolve_libc_function (params->pid, "pthread_detach"));
 #else
     EMIT_LOAD_FIELD (XAX, pthread_so);
@@ -1675,7 +1680,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   }
   EMIT_LABEL (skip_detach);
 
-#ifndef HAVE_ANDROID
+#if !(defined (HAVE_MUSL) || defined (HAVE_ANDROID))
   EMIT_LOAD_FIELD (XAX, pthread_so);
   EMIT_CALL_IMM (params->dlclose_impl,
       1,
@@ -1776,7 +1781,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_init (&cw, code->cur);
   cw.pc = remote_address + params->code.offset + code->size;
 
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
   EMIT_LDR_ADDRESS (R5, frida_resolve_libc_function (params->pid, "pthread_create"));
 #else
   EMIT_LDR_ADDRESS (R6, remote_address + params->data.offset);
@@ -1883,7 +1888,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_DEFERRED);
   EMIT_BEQ (skip_detach);
   {
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
     EMIT_LDR_ADDRESS (R3, frida_resolve_libc_function (params->pid, "pthread_detach"));
 #else
     EMIT_LOAD_FIELD (R0, pthread_so);
@@ -1900,7 +1905,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   }
   EMIT_LABEL (skip_detach);
 
-#ifndef HAVE_ANDROID
+#if !(defined (HAVE_MUSL) || defined (HAVE_ANDROID))
   EMIT_LOAD_FIELD (R0, pthread_so);
   EMIT_CALL_IMM (params->dlclose_impl,
       1,
@@ -1998,7 +2003,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_arm64_writer_init (&cw, code->cur);
   cw.pc = remote_address + params->code.offset + code->size;
 
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
   EMIT_LDR_ADDRESS (X5, frida_resolve_libc_function (params->pid, "pthread_create"));
 #else
   EMIT_LDR_ADDRESS (X20, remote_address + params->data.offset);
@@ -2105,7 +2110,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CMP (W22, W1);
   EMIT_B_COND (EQ, skip_detach);
   {
-#ifdef HAVE_ANDROID
+#if defined (HAVE_MUSL) || defined (HAVE_ANDROID)
     EMIT_LDR_ADDRESS (X5, frida_resolve_libc_function (params->pid, "pthread_detach"));
 #else
     EMIT_LOAD_FIELD (X0, pthread_so);
@@ -2122,7 +2127,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   }
   EMIT_LABEL (skip_detach);
 
-#ifndef HAVE_ANDROID
+#if !(defined (HAVE_MUSL) || defined (HAVE_ANDROID))
   EMIT_LOAD_FIELD (X0, pthread_so);
   EMIT_CALL_IMM (params->dlclose_impl,
       1,
@@ -3137,7 +3142,9 @@ frida_resolve_executable_path (pid_t pid)
 static GumAddress
 frida_resolve_libc_function (pid_t pid, const gchar * function_name)
 {
-#if defined (HAVE_UCLIBC)
+#if defined (HAVE_MUSL)
+  return frida_resolve_library_function (pid, "ld-musl", function_name);
+#elif defined (HAVE_UCLIBC)
   return frida_resolve_library_function (pid, "libuClibc", function_name);
 #else
   return frida_resolve_library_function (pid, "libc", function_name);
@@ -3147,7 +3154,9 @@ frida_resolve_libc_function (pid_t pid, const gchar * function_name)
 static GumAddress
 frida_find_libc_base (pid_t pid)
 {
-#if defined (HAVE_UCLIBC)
+#if defined (HAVE_MUSL)
+  return frida_find_library_base (pid, "ld-musl", NULL);
+#elif defined (HAVE_UCLIBC)
   return frida_find_library_base (pid, "libuClibc", NULL);
 #else
   return frida_find_library_base (pid, "libc", NULL);
