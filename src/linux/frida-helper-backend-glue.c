@@ -3172,7 +3172,7 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
   gchar * linker_path;
   GumAddress local_base, remote_base, remote_address;
 
-  if (dladdr (func, &info) != 0) 
+  if (dladdr (func, &info) != 0)
     local_base = GUM_ADDRESS (info.dli_fbase);
   else
     local_base = gum_android_get_linker_module_details ()->range->base_address;
