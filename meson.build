@@ -233,20 +233,9 @@ if get_option('b_sanitize') == 'address'
 endif
 
 glib_dep = dependency('glib-2.0', version: '>=2.56')
-gio_dep = dependency('gio-2.0')
-
-assert(
-  # vala: Thread.garbage_collect
-  cc.has_function('g_thread_garbage_collect', dependencies: [glib_dep]) and
-  # vala: GLibFork.prepare_to_fork
-  cc.has_function('glib_prepare_to_fork', dependencies: [glib_dep]) and
-  # vala: GIOFork.prepare_to_fork
-  cc.has_function('gio_prepare_to_fork', dependencies: [gio_dep]),
-  'Please use Vala from https://github.com/frida/vala and GLib from https://github.com/frida/glib'
-)
-
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
+gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8')
 json_glib_dep = dependency('json-glib-1.0')
 libsoup_dep = dependency('libsoup-3.0')
@@ -284,10 +273,7 @@ if host_os == 'android'
   backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
-tls_provider_dep = dependency('gioopenssl',
-  required: get_option('connectivity'),
-  not_found_message: 'Please use GLib Networking from https://github.com/frida/glib-networking'
-)
+tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
 if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
@@ -308,11 +294,6 @@ if nice_dep.found()
                    prefix: '#include <usrsctp.h>')
     cdata.set('HAVE_SCONN_LEN', 1)
   endif
-
-  assert(
-    cc.has_function('usrsctp_get_timeout', dependencies: [usrsctp_dep]),
-    'Please use usrsctp with https://github.com/sctplab/usrsctp/pull/591'
-  )
 else
   openssl_dep = []
   usrsctp_dep = []
