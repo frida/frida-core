@@ -203,7 +203,7 @@ foreach h : headers
   endif
 endforeach
 
-if host_os_family == 'linux'
+if host_os == 'linux'
   glibc_src = '''
 #include <features.h>
 
