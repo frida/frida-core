@@ -54,6 +54,7 @@ if host_os == 'macos'
 endif
 
 runner = executable(runner_name, 'main.vala',
+  vala_args: system_vala_args,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   link_with: frida_tests,

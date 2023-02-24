@@ -210,6 +210,7 @@ if host_os_family == 'linux'
   helper_backend_sources = [
     'linux/frida-helper-backend.vala',
     'linux/frida-helper-backend-glue.c',
+    'linux/frida-helper-backend-types.c',
     'linux/frida-helper-types.vala',
   ]
   helper_backend_extra_deps = []
@@ -218,7 +219,7 @@ if host_os_family == 'linux'
   endif
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
-    vala_args: ['--pkg=posix', '--pkg=frida-gum-linux-1.0'],
+    vala_args: ['--pkg=posix', '--pkg=linux', '--pkg=frida-gum-linux-1.0'],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
   )
   backend_libs += [helper_backend]
