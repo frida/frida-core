@@ -3,6 +3,9 @@
     # FreeBSD needs these two:
     __progname;
     environ;
+    # Allow users to load the server as shared library with `dlopen` and call `main` directly
+    main;
+
 
   local:
     *;
