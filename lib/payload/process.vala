@@ -43,6 +43,21 @@ namespace Frida {
 				return true;
 			});
 
+			if (own_range == null) {
+				Gum.Process.enumerate_ranges (READ | EXECUTE, details => {
+					var range = details.range;
+
+					if (our_address >= range.base_address && our_address < range.base_address + range.size) {
+						own_range = range;
+						if (details.file != null)
+							own_path = details.file.path;
+						return false;
+					}
+
+					return true;
+				});
+			}
+
 			assert (own_range != null);
 			assert (own_path != null);
 		}
