@@ -354,11 +354,11 @@ namespace Frida {
 			Gum.CpuType cpu_type;
 			try {
 				cpu_type = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-			} catch (GLib.Error e) {
-				if (e is FileError.NOENT)
-					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
-				else if (e is FileError.ACCES)
-					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
+			} catch (Gum.Error e) {
+				if (e is Gum.Error.NOT_FOUND)
+					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
+				else if (e is Gum.Error.PERMISSION_DENIED)
+					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u", pid);
 				else
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}

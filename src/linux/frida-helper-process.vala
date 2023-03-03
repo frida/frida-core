@@ -233,24 +233,26 @@ namespace Frida {
 		private static Gum.CpuType cpu_type_from_file (string path) throws Error {
 			try {
 				return Gum.Linux.cpu_type_from_file (path);
-			} catch (GLib.Error e) {
-				if (e is IOError.NOT_FOUND)
-					throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'".printf (path));
-				else if (e is IOError.NOT_SUPPORTED)
-					throw new Error.EXECUTABLE_NOT_SUPPORTED ("Unable to spawn executable at '%s': unsupported file format".printf (path));
+			} catch (Gum.Error e) {
+				if (e is Gum.Error.NOT_FOUND)
+					throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
+				else if (e is Gum.Error.NOT_SUPPORTED)
+					throw new Error.EXECUTABLE_NOT_SUPPORTED ("Unable to parse executable at '%s'", path);
+				else if (e is Gum.Error.PERMISSION_DENIED)
+					throw new Error.PERMISSION_DENIED ("Unable to access executable at '%s'", path);
 				else
-					throw new Error.PERMISSION_DENIED ("%s", e.message);
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
 		private static Gum.CpuType cpu_type_from_pid (uint pid) throws Error {
 			try {
 				return Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-			} catch (GLib.Error e) {
-				if (e is FileError.NOENT)
-					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
-				else if (e is FileError.ACCES)
-					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
+			} catch (Gum.Error e) {
+				if (e is Gum.Error.NOT_FOUND)
+					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
+				else if (e is Gum.Error.PERMISSION_DENIED)
+					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u", pid);
 				else
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
