@@ -214,7 +214,7 @@ namespace Frida.Fruity.Injector {
 			return new GadgetDetails (gadget_port);
 		}
 
-		private void perform_rebase_operations (LLDB.Buffer buffer) throws GLib.Error {
+		private void perform_rebase_operations (Buffer buffer) throws GLib.Error {
 			GLib.Error? pending_error = null;
 
 			module.enumerate_rebases (rebase => {
@@ -238,7 +238,7 @@ namespace Frida.Fruity.Injector {
 				throw pending_error;
 		}
 
-		private void collect_needed_symbols_and_threaded_items (LLDB.Buffer buffer, SymbolQueryBuilder symbols_needed,
+		private void collect_needed_symbols_and_threaded_items (Buffer buffer, SymbolQueryBuilder symbols_needed,
 				ThreadedItemsBuilder threaded_items) throws GLib.Error {
 			Gum.Address slide = module.slide;
 			bool have_threaded_items = false;
@@ -298,7 +298,7 @@ namespace Frida.Fruity.Injector {
 			});
 		}
 
-		private void perform_bind_operations (LLDB.Buffer buffer, SymbolSet symbols) throws GLib.Error {
+		private void perform_bind_operations (Buffer buffer, SymbolSet symbols) throws GLib.Error {
 			GLib.Error? pending_error = null;
 
 			Gum.FoundDarwinBindFunc perform_bind = bind => {
@@ -328,7 +328,7 @@ namespace Frida.Fruity.Injector {
 				throw pending_error;
 		}
 
-		private async uint16 upload (LLDB.Buffer buffer, ThreadedItems threaded_items, ChainedFixups chained_fixups,
+		private async uint16 upload (Buffer buffer, ThreadedItems threaded_items, ChainedFixups chained_fixups,
 				UploadSymbols symbols, Cancellable? cancellable) throws GLib.Error {
 			uint64 code = jit_page;
 			yield lldb.write_byte_array (code, new Bytes.static (UPLOAD_LISTENER_CODE), cancellable);
@@ -432,7 +432,7 @@ namespace Frida.Fruity.Injector {
 			return (uint16) receive_result;
 		}
 
-		private async void perform_upload (LLDB.Buffer buffer, ThreadedItems threaded_items, ChainedFixups chained_fixups,
+		private async void perform_upload (Buffer buffer, ThreadedItems threaded_items, ChainedFixups chained_fixups,
 				uint16 listener_port, uint64 session_id_top, uint64 session_id_bottom, UploadSymbols symbols,
 				Cancellable? cancellable) {
 			try {
@@ -1554,7 +1554,7 @@ namespace Frida.Fruity.Injector {
 		}
 
 		private class StringVectorBuilder {
-			private LLDB.BufferBuilder buffer_builder;
+			private BufferBuilder buffer_builder;
 			private Gee.ArrayList<int> vector = new Gee.ArrayList<int> ();
 			private size_t start_offset;
 
@@ -1564,7 +1564,7 @@ namespace Frida.Fruity.Injector {
 				}
 			}
 
-			public StringVectorBuilder (LLDB.BufferBuilder buffer_builder) {
+			public StringVectorBuilder (BufferBuilder buffer_builder) {
 				this.buffer_builder = buffer_builder;
 			}
 
