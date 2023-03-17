@@ -1959,7 +1959,7 @@ namespace Frida.HostSessionTest {
 				var message = Json.from_string (received_message).get_object ();
 				assert_true (message.get_string_member ("type") == "send");
 
-				var uncloaked_ranges = new Gee.ArrayList <string> ();
+				var uncloaked_ranges = new Gee.ArrayList<string> ();
 				message.get_array_member ("payload").foreach_element ((array, index, element) => {
 					var range = element.get_string ();
 					if (!original_ranges.contains (range)) {
@@ -2456,8 +2456,8 @@ namespace Frida.HostSessionTest {
 
 				string parent_detach_reason = null;
 				string child_detach_reason = null;
-				var parent_messages = new Gee.ArrayList <string> ();
-				var child_messages = new Gee.ArrayList <string> ();
+				var parent_messages = new Gee.ArrayList<string> ();
+				var child_messages = new Gee.ArrayList<string> ();
 				Child the_child = null;
 				bool waiting = false;
 
@@ -2597,7 +2597,7 @@ namespace Frida.HostSessionTest {
 				string parent_detach_reason = null;
 				string child_pre_exec_detach_reason = null;
 				string child_post_exec_detach_reason = null;
-				var child_messages = new Gee.ArrayList <string> ();
+				var child_messages = new Gee.ArrayList<string> ();
 				Child the_child = null;
 				bool waiting = false;
 
@@ -2750,7 +2750,7 @@ namespace Frida.HostSessionTest {
 
 				string pre_exec_detach_reason = null;
 				string post_exec_detach_reason = null;
-				var messages = new Gee.ArrayList <string> ();
+				var messages = new Gee.ArrayList<string> ();
 				Child the_child = null;
 				bool waiting = false;
 
@@ -2933,7 +2933,7 @@ namespace Frida.HostSessionTest {
 
 				string parent_detach_reason = null;
 				string child_detach_reason = null;
-				var child_messages = new Gee.ArrayList <string> ();
+				var child_messages = new Gee.ArrayList<string> ();
 				Child the_child = null;
 				bool waiting = false;
 
@@ -3199,7 +3199,7 @@ namespace Frida.HostSessionTest {
 
 				string parent_detach_reason = null;
 				string child_detach_reason = null;
-				var child_messages = new Gee.ArrayList <string> ();
+				var child_messages = new Gee.ArrayList<string> ();
 				Child the_child = null;
 				bool waiting = false;
 
