@@ -3825,6 +3825,9 @@ frida_make_pty (int fds[2])
     const int fd = fds[i];
     int res;
 
+    res = fcntl (fd, F_SETFD, fcntl (fd, F_GETFD) | FD_CLOEXEC);
+    g_assert (res == 0);
+
     res = fcntl (fd, F_SETNOSIGPIPE, TRUE);
     g_assert (res == 0);
   }
