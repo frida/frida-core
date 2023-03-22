@@ -401,7 +401,8 @@ static void frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * se
 static guint32 frida_spawn_instance_put_software_breakpoint (FridaSpawnInstance * self, GumAddress where, guint index);
 static guint32 frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, GumAddress address, guint32 new_instruction);
 
-static void frida_make_pipe (int fds[2]);
+static void frida_make_pty (int fds[2]);
+static void frida_configure_terminal_attributes (gint fd);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint pid);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
@@ -827,9 +828,9 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
       break;
 
     case FRIDA_STDIO_PIPE:
-      frida_make_pipe (stdin_pipe);
-      frida_make_pipe (stdout_pipe);
-      frida_make_pipe (stderr_pipe);
+      frida_make_pty (stdin_pipe);
+      frida_make_pty (stdout_pipe);
+      frida_make_pty (stderr_pipe);
 
       *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
 
@@ -976,8 +977,6 @@ static guint frida_kill_application (NSString * identifier);
 
 static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
-
-static void frida_configure_terminal_attributes (gint fd);
 
 static gboolean frida_find_uikit (const gchar * dependency, gboolean * has_uikit);
 
@@ -1503,20 +1502,6 @@ frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
   }
 
   return result;
-}
-
-static void
-frida_configure_terminal_attributes (gint fd)
-{
-  struct termios tios;
-
-  tcgetattr (fd, &tios);
-
-  tios.c_oflag &= ~ONLCR;
-  tios.c_cflag = (tios.c_cflag & CLOCAL) | CS8 | CREAD | HUPCL;
-  tios.c_lflag &= ~ECHO;
-
-  tcsetattr (fd, 0, &tios);
 }
 
 gboolean
@@ -3827,19 +3812,38 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
 }
 
 static void
-frida_make_pipe (int fds[2])
+frida_make_pty (int fds[2])
 {
   gboolean pipe_opened;
-  int res;
+  int i;
 
-  pipe_opened = g_unix_open_pipe (fds, FD_CLOEXEC, NULL);
+  pipe_opened = openpty (&fds[0], &fds[1], NULL, NULL, NULL) != -1;
   g_assert (pipe_opened);
 
-  res = fcntl (fds[0], F_SETNOSIGPIPE, TRUE);
-  g_assert (res == 0);
+  for (i = 0; i != 2; i++)
+  {
+    const int fd = fds[i];
+    int res;
 
-  res = fcntl (fds[1], F_SETNOSIGPIPE, TRUE);
-  g_assert (res == 0);
+    res = fcntl (fd, F_SETNOSIGPIPE, TRUE);
+    g_assert (res == 0);
+  }
+
+  frida_configure_terminal_attributes (fds[0]);
+}
+
+static void
+frida_configure_terminal_attributes (gint fd)
+{
+  struct termios tios;
+
+  tcgetattr (fd, &tios);
+
+  tios.c_oflag &= ~ONLCR;
+  tios.c_cflag = (tios.c_cflag & CLOCAL) | CS8 | CREAD | HUPCL;
+  tios.c_lflag &= ~ECHO;
+
+  tcsetattr (fd, 0, &tios);
 }
 
 static FridaInjectInstance *
