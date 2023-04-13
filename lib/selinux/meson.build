@@ -12,4 +12,4 @@ frida_selinux_dep = declare_dependency(
   link_with: frida_selinux,
 )
 
-frida_selinux_vala_args = ['--pkg=libselinux']
+frida_selinux_vala_args = ['--pkg=libselinux', '--pkg=libselinux-errata']
