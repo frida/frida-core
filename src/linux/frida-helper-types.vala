@@ -15,11 +15,12 @@ namespace Frida {
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
-			string temp_path, uint id, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void inject_library (uint pid, UnixInputStream library_so, string entrypoint, string data,
+			AgentFeatures features, uint id, Cancellable? cancellable) throws Error, IOError;
+		public abstract async IOStream request_control_channel (uint id, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError;
-		public abstract async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
-			throws Error, IOError;
+		public abstract async void demonitor_and_clone_injectee_state (uint id, uint clone_id, AgentFeatures features,
+			Cancellable? cancellable) throws Error, IOError;
 		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError;
 	}
 
@@ -34,6 +35,11 @@ namespace Frida {
 		FUTEX,
 		ACCEPT,
 		RECV,
+	}
+
+	[Flags]
+	public enum AgentFeatures {
+		CONTROL_CHANNEL,
 	}
 
 	[DBus (name = "re.frida.Helper")]
@@ -53,11 +59,12 @@ namespace Frida {
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
-			string temp_path, uint id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void inject_library (uint pid, UnixInputStream library_so, string entrypoint, string data,
+			AgentFeatures features, uint id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async Socket request_control_channel (uint id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void demonitor (uint id, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
-			throws GLib.Error;
+		public abstract async void demonitor_and_clone_injectee_state (uint id, uint clone_id, AgentFeatures features,
+			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws GLib.Error;
 	}
 

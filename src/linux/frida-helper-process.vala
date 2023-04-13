@@ -107,12 +107,21 @@ namespace Frida {
 			}
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
-				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
+		public async void inject_library (uint pid, UnixInputStream library_so, string entrypoint, string data,
+				AgentFeatures features, uint id, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain_for_cpu_type (cpu_type_from_pid (pid), cancellable);
 			try {
-				yield helper.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
+				yield helper.inject_library (pid, library_so, entrypoint, data, features, id, cancellable);
 				injectee_ids[id] = helper;
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async IOStream request_control_channel (uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = obtain_for_injectee_id (id);
+			try {
+				return yield helper.request_control_channel (id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -127,11 +136,11 @@ namespace Frida {
 			}
 		}
 
-		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
-				throws Error, IOError {
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, AgentFeatures features,
+				Cancellable? cancellable) throws Error, IOError {
 			var helper = obtain_for_injectee_id (id);
 			try {
-				yield helper.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+				yield helper.demonitor_and_clone_injectee_state (id, clone_id, features, cancellable);
 				injectee_ids[clone_id] = helper;
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
@@ -229,34 +238,6 @@ namespace Frida {
 
 			uninjected (id);
 		}
-
-		private static Gum.CpuType cpu_type_from_file (string path) throws Error {
-			try {
-				return Gum.Linux.cpu_type_from_file (path);
-			} catch (Gum.Error e) {
-				if (e is Gum.Error.NOT_FOUND)
-					throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
-				else if (e is Gum.Error.NOT_SUPPORTED)
-					throw new Error.EXECUTABLE_NOT_SUPPORTED ("Unable to parse executable at '%s'", path);
-				else if (e is Gum.Error.PERMISSION_DENIED)
-					throw new Error.PERMISSION_DENIED ("Unable to access executable at '%s'", path);
-				else
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
-		}
-
-		private static Gum.CpuType cpu_type_from_pid (uint pid) throws Error {
-			try {
-				return Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-			} catch (Gum.Error e) {
-				if (e is Gum.Error.NOT_FOUND)
-					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
-				else if (e is Gum.Error.PERMISSION_DENIED)
-					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u", pid);
-				else
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
-		}
 	}
 
 	private class HelperFactory {
@@ -334,7 +315,7 @@ namespace Frida {
 			TimeoutSource? timeout_source = null;
 
 			try {
-				string socket_path = Path.build_filename (resource_store.tempdir.path, Uuid.string_random ());
+				string socket_path = "/frida-" + Uuid.string_random ();
 				string socket_address = "unix:abstract=" + socket_path;
 
 				service = new SocketService ();
@@ -389,8 +370,8 @@ namespace Frida {
 				timeout_source = null;
 
 				if (pending_error == null) {
-					pending_connection = yield new DBusConnection (pending_stream, null, DBusConnectionFlags.NONE, null,
-						cancellable);
+					pending_connection = yield new DBusConnection (pending_stream, ServerGuid.HOST_SESSION_SERVICE,
+						AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
 					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 						cancellable);
 					if (pending_connection.is_closed ())
@@ -567,10 +548,19 @@ namespace Frida {
 			}
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
-				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
+		public async void inject_library (uint pid, UnixInputStream library_so, string entrypoint, string data,
+				AgentFeatures features, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
+				yield proxy.inject_library (pid, library_so, entrypoint, data, features, id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async IOStream request_control_channel (uint id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				Socket socket = yield proxy.request_control_channel (id, cancellable);
+				return SocketConnection.factory_create_connection (socket);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -584,10 +574,10 @@ namespace Frida {
 			}
 		}
 
-		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
-				throws Error, IOError {
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, AgentFeatures features,
+				Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+				yield proxy.demonitor_and_clone_injectee_state (id, clone_id, features, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -631,22 +621,12 @@ namespace Frida {
 
 #if HAVE_EMBEDDED_ASSETS
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
-			if (blob32.data.length > 0) {
-				helper32 = new TemporaryHelperFile (
-					new TemporaryFile.from_stream ("frida-helper-32",
-						new MemoryInputStream.from_data (blob32.data, null),
-						tempdir));
-				FileUtils.chmod (helper32.path, 0700);
-			}
+			if (blob32.data.length > 0)
+				helper32 = make_temporary_helper ("frida-helper-32", blob32.data);
 
 			var blob64 = Frida.Data.Helper.get_frida_helper_64_blob ();
-			if (blob64.data.length > 0) {
-				helper64 = new TemporaryHelperFile (
-					new TemporaryFile.from_stream ("frida-helper-64",
-						new MemoryInputStream.from_data (blob64.data, null),
-						tempdir));
-				FileUtils.chmod (helper64.path, 0700);
-			}
+			if (blob64.data.length > 0)
+				helper64 = make_temporary_helper ("frida-helper-64", blob64.data);
 #else
 			var tpl = PathTemplate (Config.FRIDA_HELPER_PATH);
 			string path = tpl.expand ((sizeof (void *) == 8) ? "32" : "64");
@@ -656,6 +636,37 @@ namespace Frida {
 			else
 				helper64 = file;
 #endif
+		}
+
+#if HAVE_EMBEDDED_ASSETS
+		private HelperFile make_temporary_helper (string name, uint8[] data) throws Error {
+			if (MemoryFileDescriptor.is_supported ())
+				return new MemoryHelperFile (name, new Bytes.static (data));
+
+			var helper = new TemporaryHelperFile (
+				new TemporaryFile.from_stream (name,
+					new MemoryInputStream.from_data (data, null),
+					tempdir));
+			FileUtils.chmod (helper.path, 0700);
+			return helper;
+		}
+#endif
+	}
+
+	private class MemoryHelperFile : Object, HelperFile {
+		public FileDescriptor fd {
+			get;
+			construct;
+		}
+
+		public string path {
+			owned get {
+				return "/proc/self/fd/%d".printf (fd.handle);
+			}
+		}
+
+		public MemoryHelperFile (string name, Bytes bytes) {
+			Object (fd: MemoryFileDescriptor.from_bytes (name, bytes));
 		}
 	}
 }

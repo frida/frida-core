@@ -35,7 +35,7 @@ elif host_machine.cpu_family() == 'mips'
     host_abi = 'mips'
   endif
 elif host_machine.cpu_family() == 'mips64'
-  host_arch = 'mips64'
+  host_arch = 'mips'
   if host_machine.endian() == 'little'
     host_abi = 'mips64el'
   else
@@ -184,7 +184,6 @@ cpu_defines = [
   ['arm', 'HAVE_ARM'],
   ['arm64', 'HAVE_ARM64'],
   ['mips', 'HAVE_MIPS'],
-  ['mips64', 'HAVE_MIPS'],
 ]
 foreach d : cpu_defines
   if d.get(0) == host_arch
@@ -266,6 +265,10 @@ endif
 
 backend_deps_private = []
 backend_libs_private = []
+
+if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>')
+  vala_flags += '--define=HAVE_OPENPTY'
+endif
 
 if host_os == 'android'
   libselinux_dep = dependency('libselinux', version: '>=3.0')

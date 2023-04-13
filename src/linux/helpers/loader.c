@@ -1,12 +1,21 @@
 #include "inject-context.h"
+#include "syscall.h"
 
-#include "syscall.c"
-
+#include <alloca.h>
+#include <elf.h>
+#include <fcntl.h>
+#include <link.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <unistd.h>
+#include <sys/un.h>
+
+#ifndef SOCK_CLOEXEC
+# define SOCK_CLOEXEC 0x80000
+#endif
 
 typedef int FridaUnloadPolicy;
-typedef struct _FridaPosixInjectorState FridaPosixInjectorState;
+typedef struct _FridaLinuxInjectorState FridaLinuxInjectorState;
 typedef union _FridaControlMessage FridaControlMessage;
 
 enum _FridaUnloadPolicy
@@ -16,9 +25,10 @@ enum _FridaUnloadPolicy
   FRIDA_UNLOAD_POLICY_DEFERRED,
 };
 
-struct _FridaPosixInjectorState
+struct _FridaLinuxInjectorState
 {
-  int fifo_fd;
+  int frida_ctrlfd;
+  int agent_ctrlfd;
 };
 
 union _FridaControlMessage
@@ -28,89 +38,294 @@ union _FridaControlMessage
 };
 
 static void * frida_main (void * user_data);
-static int frida_receive_fd (int sockfd, FridaLibcApi * libc);
+
+static int frida_connect (const char * address, const FridaLibcApi * libc);
+static bool frida_send_hello (int sockfd, pid_t thread_id, const FridaLibcApi * libc);
+static bool frida_send_ready (int sockfd, const FridaLibcApi * libc);
+static bool frida_receive_ack (int sockfd, const FridaLibcApi * libc);
+static bool frida_send_bye (int sockfd, FridaUnloadPolicy unload_policy, const FridaLibcApi * libc);
+static bool frida_send_error (int sockfd, FridaMessageType type, const char * message, const FridaLibcApi * libc);
+
+static bool frida_receive_chunk (int sockfd, void * buffer, size_t length, const FridaLibcApi * api);
+static int frida_receive_fd (int sockfd, const FridaLibcApi * libc);
+static bool frida_send_chunk (int sockfd, const void * buffer, size_t length, const FridaLibcApi * libc);
+static void frida_enable_close_on_exec (int fd, const FridaLibcApi * libc);
+
+static size_t frida_strlen (const char * str);
 
 static pid_t frida_gettid (void);
 
-bool
+__attribute__ ((section (".text.entrypoint")))
+__attribute__ ((visibility ("default")))
+void
 frida_load (FridaLoaderContext * ctx)
 {
   ctx->libc->pthread_create (&ctx->worker, NULL, frida_main, ctx);
-
-  return true;
 }
 
 static void *
 frida_main (void * user_data)
 {
   FridaLoaderContext * ctx = user_data;
-  FridaLibcApi * libc = ctx->libc;
+  const FridaLibcApi * libc = ctx->libc;
+  pid_t thread_id;
   FridaUnloadPolicy unload_policy;
-  int peer_fd, our_fd, agent_so_fd;
-  char agent_path_storage[32];
-  const char * agent_path;
-  void * agent_handle = NULL;
-  void (* agent_entrypoint) (const char * agent_parameters, FridaUnloadPolicy * unload_policy, void * injector_state);
-  FridaPosixInjectorState injector_state;
+  int ctrlfd_for_peer, ctrlfd, agent_codefd, agent_ctrlfd;
+  FridaLinuxInjectorState injector_state;
 
+  thread_id = frida_gettid ();
   unload_policy = FRIDA_UNLOAD_POLICY_IMMEDIATE;
+  ctrlfd = -1;
+  agent_codefd = -1;
+  agent_ctrlfd = -1;
 
-  peer_fd = ctx->socket_endpoints[0];
-  if (peer_fd != -1)
-    libc->close (peer_fd);
+  ctrlfd_for_peer = ctx->ctrlfds[0];
+  if (ctrlfd_for_peer != -1)
+    libc->close (ctrlfd_for_peer);
 
-  our_fd = ctx->socket_endpoints[1];
-  if (our_fd != -1)
+  ctrlfd = ctx->ctrlfds[1];
+  if (ctrlfd != -1)
   {
-    agent_so_fd = frida_receive_fd (our_fd, libc);
-
-    libc->sprintf (agent_path_storage, "/proc/self/fd/%d", agent_so_fd);
-    agent_path = agent_path_storage;
+    if (!frida_send_hello (ctrlfd, thread_id, libc))
+    {
+      libc->close (ctrlfd);
+      ctrlfd = -1;
+    }
   }
-  else
+  if (ctrlfd == -1)
   {
-    agent_so_fd = -1;
+    ctrlfd = frida_connect (ctx->fallback_address, libc);
+    if (ctrlfd == -1)
+      goto beach;
 
-    agent_path = ctx->agent_path;
+    if (!frida_send_hello (ctrlfd, thread_id, libc))
+      goto beach;
   }
 
-  agent_handle = libc->dlopen (agent_path, RTLD_GLOBAL | RTLD_LAZY);
+  if (ctx->agent_handle == NULL)
+  {
+    char agent_path[32];
+    const void * pretend_caller_addr = libc->close;
 
-  if (agent_so_fd != -1)
-    libc->close (agent_so_fd);
+    agent_codefd = frida_receive_fd (ctrlfd, libc);
+    if (agent_codefd == -1)
+      goto beach;
 
-  if (agent_handle == NULL)
+    libc->sprintf (agent_path, "/proc/self/fd/%d", agent_codefd);
+
+    ctx->agent_handle = libc->dlopen (agent_path, libc->dlopen_flags, pretend_caller_addr);
+    if (ctx->agent_handle == NULL)
+      goto dlopen_failed;
+
+    if (agent_codefd != -1)
+    {
+      libc->close (agent_codefd);
+      agent_codefd = -1;
+    }
+
+    ctx->agent_entrypoint_impl = libc->dlsym (ctx->agent_handle, ctx->agent_entrypoint, pretend_caller_addr);
+    if (ctx->agent_entrypoint_impl == NULL)
+      goto dlsym_failed;
+  }
+
+  agent_ctrlfd = frida_receive_fd (ctrlfd, libc);
+  if (agent_ctrlfd != -1)
+    frida_enable_close_on_exec (agent_ctrlfd, libc);
+
+  if (!frida_send_ready (ctrlfd, libc))
+    goto beach;
+  if (!frida_receive_ack (ctrlfd, libc))
     goto beach;
 
-  agent_entrypoint = libc->dlsym (agent_handle, ctx->agent_entrypoint);
-  if (agent_entrypoint == NULL)
+  injector_state.frida_ctrlfd = ctrlfd;
+  injector_state.agent_ctrlfd = agent_ctrlfd;
+
+  ctx->agent_entrypoint_impl (ctx->agent_data, &unload_policy, &injector_state);
+
+  ctrlfd = injector_state.frida_ctrlfd;
+  agent_ctrlfd = injector_state.agent_ctrlfd;
+
+  goto beach;
+
+dlopen_failed:
+  {
+    frida_send_error (ctrlfd,
+        FRIDA_MESSAGE_ERROR_DLOPEN,
+        (libc->dlerror != NULL) ? libc->dlerror () : "Unable to load library",
+        libc);
+    goto beach;
+  }
+dlsym_failed:
+  {
+    frida_send_error (ctrlfd,
+        FRIDA_MESSAGE_ERROR_DLSYM,
+        (libc->dlerror != NULL) ? libc->dlerror () : "Unable to find entrypoint",
+        libc);
+    goto beach;
+  }
+beach:
+  {
+    if (unload_policy == FRIDA_UNLOAD_POLICY_IMMEDIATE && ctx->agent_handle != NULL)
+      libc->dlclose (ctx->agent_handle);
+
+    if (unload_policy != FRIDA_UNLOAD_POLICY_DEFERRED)
+      libc->pthread_detach (ctx->worker);
+
+    if (agent_ctrlfd != -1)
+      libc->close (agent_ctrlfd);
+
+    if (agent_codefd != -1)
+      libc->close (agent_codefd);
+
+    if (ctrlfd != -1)
+    {
+      frida_send_bye (ctrlfd, unload_policy, libc);
+      libc->close (ctrlfd);
+    }
+
+    return NULL;
+  }
+}
+
+/* TODO: Handle EINTR. */
+
+static int
+frida_connect (const char * address, const FridaLibcApi * libc)
+{
+  bool success = false;
+  int sockfd;
+  struct sockaddr_un addr;
+  size_t len;
+  const char * c;
+  char ch;
+
+  sockfd = libc->socket (AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (sockfd == -1)
     goto beach;
 
-  injector_state.fifo_fd = our_fd;
-  agent_entrypoint (ctx->agent_parameters, &unload_policy, &injector_state);
+  addr.sun_family = AF_UNIX;
+  addr.sun_path[0] = '\0';
+  for (c = address, len = 0; (ch = *c) != '\0'; c++, len++)
+    addr.sun_path[1 + len] = ch;
+
+  if (libc->connect (sockfd, (struct sockaddr *) &addr, offsetof (struct sockaddr_un, sun_path) + 1 + len) == -1)
+    goto beach;
+
+  success = true;
 
 beach:
-  if (unload_policy == FRIDA_UNLOAD_POLICY_IMMEDIATE && agent_handle != NULL)
-    libc->dlclose (agent_handle);
-
-  if (unload_policy != FRIDA_UNLOAD_POLICY_DEFERRED)
-    libc->pthread_detach (ctx->worker);
-
-  if (our_fd != -1)
+  if (!success && sockfd != -1)
   {
-    FridaByeMessage bye = {
-      .unload_policy = unload_policy,
-      .thread_id = frida_gettid (),
-    };
-    libc->send (our_fd, &bye, sizeof (bye), MSG_NOSIGNAL);
-    libc->close (our_fd);
+    libc->close (sockfd);
+    sockfd = -1;
   }
 
-  return NULL;
+  return sockfd;
+}
+
+static bool
+frida_send_hello (int sockfd, pid_t thread_id, const FridaLibcApi * libc)
+{
+  FridaMessageType type = FRIDA_MESSAGE_HELLO;
+  FridaHelloMessage hello = {
+    .thread_id = thread_id,
+  };
+
+  if (!frida_send_chunk (sockfd, &type, sizeof (type), libc))
+    return false;
+
+  return frida_send_chunk (sockfd, &hello, sizeof (hello), libc);
+}
+
+static bool
+frida_send_ready (int sockfd, const FridaLibcApi * libc)
+{
+  FridaMessageType type = FRIDA_MESSAGE_READY;
+
+  return frida_send_chunk (sockfd, &type, sizeof (type), libc);
+}
+
+static bool
+frida_receive_ack (int sockfd, const FridaLibcApi * libc)
+{
+  FridaMessageType type;
+
+  if (!frida_receive_chunk (sockfd, &type, sizeof (type), libc))
+    return false;
+
+  return type == FRIDA_MESSAGE_ACK;
+}
+
+static bool
+frida_send_bye (int sockfd, FridaUnloadPolicy unload_policy, const FridaLibcApi * libc)
+{
+  FridaMessageType type = FRIDA_MESSAGE_BYE;
+  FridaByeMessage bye = {
+    .unload_policy = unload_policy,
+  };
+
+  if (!frida_send_chunk (sockfd, &type, sizeof (type), libc))
+    return false;
+
+  return frida_send_chunk (sockfd, &bye, sizeof (bye), libc);
+}
+
+static bool
+frida_send_error (int sockfd, FridaMessageType type, const char * message, const FridaLibcApi * libc)
+{
+  uint16_t length;
+
+  length = frida_strlen (message);
+
+  #define FRIDA_SEND_VALUE(v) \
+      if (!frida_send_chunk (sockfd, &(v), sizeof (v), libc)) \
+        return false
+  #define FRIDA_SEND_BYTES(data, size) \
+      if (!frida_send_chunk (sockfd, data, size, libc)) \
+        return false
+
+  FRIDA_SEND_VALUE (type);
+  FRIDA_SEND_VALUE (length);
+  FRIDA_SEND_BYTES (message, length);
+
+  return true;
+}
+
+static bool
+frida_receive_chunk (int sockfd, void * buffer, size_t length, const FridaLibcApi * libc)
+{
+  void * cursor = buffer;
+  size_t remaining = length;
+
+  while (remaining != 0)
+  {
+    struct iovec io = {
+      .iov_base = cursor,
+      .iov_len = remaining
+    };
+    struct msghdr msg = {
+      .msg_name = NULL,
+      .msg_namelen = 0,
+      .msg_iov = &io,
+      .msg_iovlen = 1,
+      .msg_control = NULL,
+      .msg_controllen = 0,
+    };
+    ssize_t n;
+
+    n = libc->recvmsg (sockfd, &msg, 0);
+    if (n <= 0)
+      return false;
+
+    cursor += n;
+    remaining -= n;
+  }
+
+  return true;
 }
 
 static int
-frida_receive_fd (int sockfd, FridaLibcApi * libc)
+frida_receive_fd (int sockfd, const FridaLibcApi * libc)
 {
   int res;
   uint8_t dummy;
@@ -129,10 +344,52 @@ frida_receive_fd (int sockfd, FridaLibcApi * libc)
   };
 
   res = libc->recvmsg (sockfd, &msg, 0);
-  if (res == -1 || res == 0)
+  if (res == -1 || res == 0 || msg.msg_controllen == 0)
     return -1;
 
   return *((int *) CMSG_DATA (CMSG_FIRSTHDR (&msg)));
+}
+
+static bool
+frida_send_chunk (int sockfd, const void * buffer, size_t length, const FridaLibcApi * libc)
+{
+  const void * cursor = buffer;
+  size_t remaining = length;
+
+  while (remaining != 0)
+  {
+    ssize_t n;
+
+    n = libc->send (sockfd, cursor, remaining, MSG_NOSIGNAL);
+    if (n == -1)
+      return false;
+
+    cursor += n;
+    remaining -= n;
+  }
+
+  return true;
+}
+
+static void
+frida_enable_close_on_exec (int fd, const FridaLibcApi * libc)
+{
+  libc->fcntl (fd, F_SETFD, libc->fcntl (fd, F_GETFD) | FD_CLOEXEC);
+}
+
+static size_t
+frida_strlen (const char * str)
+{
+  size_t n = 0;
+  const char * cursor;
+
+  for (cursor = str; *cursor != '\0'; cursor++)
+  {
+    asm ("");
+    n++;
+  }
+
+  return n;
 }
 
 static pid_t

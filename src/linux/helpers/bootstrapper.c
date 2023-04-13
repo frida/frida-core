@@ -1,105 +1,295 @@
+#include "elf-parser.h"
 #include "inject-context.h"
 
-#include "syscall.c"
+#include <alloca.h>
+#include <stdalign.h>
 
-#include <elf.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/types.h>
+#ifdef NOLIBC
+# define AF_UNIX 1
+# define SOCK_STREAM 1
+# define PR_GET_DUMPABLE 3
+# define PR_SET_DUMPABLE 4
+# define RTLD_LAZY 1
+#else
+# include <errno.h>
+# include <fcntl.h>
+# include <signal.h>
+# include <stdio.h>
+# include <string.h>
+# include <unistd.h>
+# include <sys/prctl.h>
+#endif
+#ifndef SOCK_CLOEXEC
+# define SOCK_CLOEXEC 0x80000
+#endif
+#define FRIDA_GLIBC_RTLD_DLOPEN 0x80000000U
 
-typedef struct _FridaCollectLibcApiContext FridaCollectLibcApiContext;
-typedef struct _FridaElfExportDetails FridaElfExportDetails;
-typedef bool (* FridaFoundElfExportFunc) (const FridaElfExportDetails * details, void * user_data);
+#ifndef MIN
+# define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+#ifndef MAX
+# define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#endif
 
 #define FRIDA_STRINGIFY(identifier) _FRIDA_STRINGIFY (identifier)
 #define _FRIDA_STRINGIFY(identifier) #identifier
 
-#define FRIDA_ELF_ST_TYPE ELF64_ST_TYPE
-#define FRIDA_ELF_ST_BIND ELF64_ST_BIND
+#ifndef DF_1_PIE
+# define DF_1_PIE 0x08000000
+#endif
 
-typedef Elf64_Ehdr FridaElfEhdr;
-typedef Elf64_Phdr FridaElfPhdr;
-typedef Elf64_Dyn FridaElfDyn;
-typedef Elf64_Sym FridaElfSym;
-typedef Elf64_Addr FridaElfAddr;
-typedef Elf64_Word FridaElfWord;
-typedef Elf64_Half FridaElfHalf;
+#ifndef AT_RANDOM
+# define AT_RANDOM 25
+#endif
+
+#ifndef AT_EXECFN
+# define AT_EXECFN  31
+#endif
+
+typedef struct _FridaCollectLibcApiContext FridaCollectLibcApiContext;
+typedef struct _FridaProcessLayout FridaProcessLayout;
+typedef struct _FridaRDebug FridaRDebug;
+typedef int FridaRState;
+typedef struct _FridaLinkMap FridaLinkMap;
+typedef struct _FridaDetectRtldFlavorContext FridaDetectRtldFlavorContext;
+typedef struct _FridaEntrypointParameters FridaEntrypointParameters;
+typedef ssize_t (* FridaParseFunc) (void * data, size_t size, void * user_data);
 
 struct _FridaCollectLibcApiContext
 {
   int total_missing;
+  FridaRtldFlavor rtld_flavor;
   FridaLibcApi * api;
 };
 
-struct _FridaElfExportDetails
+struct _FridaProcessLayout
 {
-  const char * name;
-  void * address;
-  uint8_t type;
-  uint8_t bind;
+  ElfW(Phdr) * phdrs;
+  ElfW(Half) phdr_size;
+  ElfW(Half) phdr_count;
+  ElfW(Ehdr) * interpreter;
+  FridaRtldFlavor rtld_flavor;
+  FridaRDebug * r_debug;
+  void * r_brk;
+  void * libc;
 };
 
-static bool frida_collect_libc_export (const FridaElfExportDetails * details, void * user_data);
+struct _FridaRDebug
+{
+  int r_version;
+  FridaLinkMap * r_map;
+  ElfW(Addr) r_brk;
+  FridaRState r_state;
+  ElfW(Addr) r_ldbase;
+};
 
-static bool frida_find_libc (char * buffer, size_t buffer_size, void ** base, const char ** path);
-static void frida_enumerate_exports (FridaElfEhdr * ehdr, FridaFoundElfExportFunc func, void * user_data);
-static FridaElfPhdr * frida_find_program_header_by_type (FridaElfEhdr * ehdr, FridaElfWord type);
-static size_t frida_find_elf_region_upper_bound (FridaElfEhdr * ehdr, FridaElfAddr address);
+enum _FridaRState
+{
+  RT_CONSISTENT,
+  RT_ADD,
+  RT_DELETE
+};
 
+struct _FridaLinkMap
+{
+  ElfW(Addr) l_addr;
+  char * l_name;
+  ElfW(Dyn) * l_ld;
+  FridaLinkMap * l_next;
+  FridaLinkMap * l_prev;
+};
+
+struct _FridaDetectRtldFlavorContext
+{
+  ElfW(Ehdr) * interpreter;
+  FridaRtldFlavor flavor;
+};
+
+struct _FridaEntrypointParameters
+{
+  intptr_t argc;
+  char * argv[2];
+  char * envp[1];
+  ElfW(auxv_t) auxv[9];
+};
+
+static bool frida_resolve_libc_apis (const FridaProcessLayout * layout, FridaLibcApi * libc);
+static bool frida_collect_libc_symbol (const FridaElfExportDetails * details, void * user_data);
+static bool frida_collect_android_linker_symbol (const FridaElfExportDetails * details, void * user_data);
+
+static bool frida_probe_process (size_t page_size, FridaProcessLayout * layout);
+static FridaRtldFlavor frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter);
+static FridaRtldFlavor frida_infer_rtld_flavor_from_filename (const char * name);
+static ssize_t frida_try_infer_rtld_flavor_from_maps_line (void * data, size_t size, void * user_data);
+static bool frida_path_is_libc (const char * path);
+static ssize_t frida_parse_auxv_entry (void * data, size_t size, void * user_data);
+static bool frida_collect_interpreter_symbol (const FridaElfExportDetails * details, void * user_data);
+static ssize_t frida_try_find_libc_from_maps_line (void * data, size_t size, void * user_data);
+static void frida_try_load_libc_and_raise (FridaBootstrapContext * ctx);
+static int frida_libc_main (int argc, char * argv[]);
+static void * frida_map_elf (FridaBootstrapContext * ctx, const char * path, void ** entrypoint);
+
+static void frida_parse_file (const char * path, FridaParseFunc parse, void * user_data);
 static size_t frida_parse_size (const char * str);
-static size_t frida_strlen (const char * str);
-static bool frida_str_equals (const char * str, const char * other);
 static bool frida_str_has_prefix (const char * str, const char * prefix);
-static char * frida_strstr (const char * str, const char * needle);
-static char * frida_strchr (const char * str, char needle);
-static void frida_bzero (void * dst, size_t n);
-static void * frida_memmove (void * dst, const void * src, size_t n);
 
-static int frida_open (const char * pathname, int flags);
-static int frida_close (int fd);
-static ssize_t frida_read (int fd, void * buf, size_t count);
-static ssize_t frida_write (int fd, const void * buf, size_t count);
+static int frida_socketpair (int domain, int type, int protocol, int sv[2]);
+static int frida_prctl (int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5);
 
-__attribute__ ((unused)) static void frida_log_string (const char * str);
-__attribute__ ((unused)) static void frida_log_pointer (void * ptr);
-__attribute__ ((unused)) static void frida_log_size (size_t val);
-
-size_t
+__attribute__ ((section (".text.entrypoint")))
+__attribute__ ((visibility ("default")))
+FridaBootstrapStatus
 frida_bootstrap (FridaBootstrapContext * ctx)
 {
-  char libc_buffer[2048];
-  void * libc_base;
-  const char * libc_path; /* FIXME: No longer used, should be removed. */
-  FridaCollectLibcApiContext collect_ctx;
+  FridaLibcApi * libc = ctx->libc;
+  FridaProcessLayout process;
 
-  if (!frida_find_libc (libc_buffer, sizeof (libc_buffer), &libc_base, &libc_path))
-    return 1;
+  if (!frida_probe_process (ctx->page_size, &process))
+    return FRIDA_BOOTSTRAP_AUXV_NOT_FOUND;
 
-  collect_ctx.total_missing = 13;
-  collect_ctx.api = ctx->libc;
-  frida_bzero (collect_ctx.api, sizeof (FridaLibcApi));
-  frida_enumerate_exports (libc_base, frida_collect_libc_export, &collect_ctx);
-  if (collect_ctx.total_missing != 0)
-    return 2;
+  ctx->rtld_flavor = process.rtld_flavor;
+  ctx->r_brk = process.r_brk;
 
-  ctx->loader_base = ctx->libc->mmap (NULL, ctx->loader_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (process.interpreter != NULL && process.libc == NULL)
+    return FRIDA_BOOTSTRAP_TOO_EARLY;
+
+  if (process.interpreter == NULL && process.libc == NULL)
+  {
+    frida_try_load_libc_and_raise (ctx);
+    return FRIDA_BOOTSTRAP_LIBC_LOAD_ERROR;
+  }
+
+  if (!frida_resolve_libc_apis (&process, libc))
+    return FRIDA_BOOTSTRAP_LIBC_UNSUPPORTED;
+
+  ctx->loader_base = mmap (NULL, ctx->loader_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (ctx->loader_base == MAP_FAILED)
-    return 3;
+    return FRIDA_BOOTSTRAP_MMAP_ERROR;
 
-  ctx->socket_endpoints[0] = -1;
-  ctx->socket_endpoints[1] = -1;
-  if (ctx->enable_socket_endpoints)
-    ctx->libc->socketpair (AF_UNIX, SOCK_STREAM, 0, ctx->socket_endpoints);
+  ctx->ctrlfds[0] = -1;
+  ctx->ctrlfds[1] = -1;
+  if (ctx->enable_ctrlfds)
+    frida_socketpair (AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, ctx->ctrlfds);
 
-  return 0;
+  return FRIDA_BOOTSTRAP_SUCCESS;
 }
 
 static bool
-frida_collect_libc_export (const FridaElfExportDetails * details,
-                           void * user_data)
+frida_resolve_libc_apis (const FridaProcessLayout * layout, FridaLibcApi * libc)
+{
+  FridaCollectLibcApiContext ctx;
+
+  memset (libc, 0, sizeof (FridaLibcApi));
+  libc->dlopen_flags = RTLD_LAZY;
+
+  ctx.total_missing = 17;
+  if (layout->rtld_flavor == FRIDA_RTLD_ANDROID)
+    ctx.total_missing -= 4;
+  ctx.rtld_flavor = layout->rtld_flavor;
+  ctx.api = libc;
+  frida_enumerate_symbols (layout->libc, frida_collect_libc_symbol, &ctx);
+
+  if (ctx.total_missing > 0 &&
+      (libc->dlopen_flags & FRIDA_GLIBC_RTLD_DLOPEN) != 0 &&
+      libc->dlerror == NULL)
+  {
+    ctx.total_missing--;
+  }
+
+  if (ctx.total_missing == 2 &&
+      libc->pthread_create == NULL &&
+      libc->pthread_detach == NULL)
+  {
+    const void * pretend_caller_addr = libc->close;
+    void * libpthread = libc->dlopen ("libpthread.so.0", libc->dlopen_flags, pretend_caller_addr);
+    if (libpthread != NULL)
+    {
+      libc->pthread_create = libc->dlsym (libpthread, "pthread_create", pretend_caller_addr);
+      if (libc->pthread_create != NULL)
+        ctx.total_missing--;
+      libc->pthread_detach = libc->dlsym (libpthread, "pthread_detach", pretend_caller_addr);
+      if (libc->pthread_detach != NULL)
+        ctx.total_missing--;
+    }
+  }
+
+  if (ctx.total_missing != 0)
+    return false;
+
+  if (layout->rtld_flavor == FRIDA_RTLD_ANDROID)
+  {
+    ctx.total_missing = 4;
+    frida_enumerate_symbols (layout->interpreter, frida_collect_android_linker_symbol, &ctx);
+    if (ctx.total_missing != 0)
+      return false;
+  }
+
+  return true;
+}
+
+static bool
+frida_collect_libc_symbol (const FridaElfExportDetails * details, void * user_data)
+{
+  FridaCollectLibcApiContext * ctx = user_data;
+  FridaLibcApi * api = ctx->api;
+
+  if (details->type != STT_FUNC)
+    return true;
+
+#define FRIDA_TRY_COLLECT_NAMED(e, n) \
+    if (api->e == NULL && strcmp (details->name, n) == 0) \
+    { \
+      api->e = details->address; \
+      ctx->total_missing--; \
+      goto beach; \
+    }
+#define FRIDA_TRY_COLLECT(e) \
+    FRIDA_TRY_COLLECT_NAMED (e, FRIDA_STRINGIFY (e))
+
+  FRIDA_TRY_COLLECT (printf)
+  FRIDA_TRY_COLLECT (sprintf)
+
+  FRIDA_TRY_COLLECT (mmap)
+  FRIDA_TRY_COLLECT (munmap)
+  FRIDA_TRY_COLLECT (socket)
+  FRIDA_TRY_COLLECT (socketpair)
+  FRIDA_TRY_COLLECT (connect)
+  FRIDA_TRY_COLLECT (recvmsg)
+  FRIDA_TRY_COLLECT (send)
+  FRIDA_TRY_COLLECT (fcntl)
+  FRIDA_TRY_COLLECT (close)
+
+  FRIDA_TRY_COLLECT (pthread_create)
+  FRIDA_TRY_COLLECT (pthread_detach)
+
+  if (ctx->rtld_flavor != FRIDA_RTLD_ANDROID)
+  {
+    FRIDA_TRY_COLLECT (dlopen)
+    if (api->dlopen == NULL && strcmp (details->name, "__libc_dlopen_mode") == 0)
+    {
+      api->dlopen = details->address;
+      api->dlopen_flags |= FRIDA_GLIBC_RTLD_DLOPEN;
+      ctx->total_missing--;
+      goto beach;
+    }
+
+    FRIDA_TRY_COLLECT (dlclose)
+    FRIDA_TRY_COLLECT_NAMED (dlclose, "__libc_dlclose")
+
+    FRIDA_TRY_COLLECT (dlsym)
+    FRIDA_TRY_COLLECT_NAMED (dlsym, "__libc_dlsym")
+
+    FRIDA_TRY_COLLECT (dlerror)
+  }
+
+#undef FRIDA_TRY_COLLECT
+
+beach:
+  return ctx->total_missing > 0;
+}
+
+static bool
+frida_collect_android_linker_symbol (const FridaElfExportDetails * details, void * user_data)
 {
   FridaCollectLibcApiContext * ctx = user_data;
   FridaLibcApi * api = ctx->api;
@@ -108,80 +298,620 @@ frida_collect_libc_export (const FridaElfExportDetails * details,
     return true;
 
 #define FRIDA_TRY_COLLECT(e) \
-    if (api->e == NULL && frida_str_equals (details->name, FRIDA_STRINGIFY (e))) \
+    if (api->e == NULL && strcmp (details->name, "__loader_" FRIDA_STRINGIFY (e)) == 0) \
     { \
       api->e = details->address; \
       ctx->total_missing--; \
       goto beach; \
     }
 
-  FRIDA_TRY_COLLECT (printf)
-  FRIDA_TRY_COLLECT (sprintf)
-
-  FRIDA_TRY_COLLECT (mmap)
-  FRIDA_TRY_COLLECT (munmap)
-  FRIDA_TRY_COLLECT (socketpair)
-  FRIDA_TRY_COLLECT (recvmsg)
-  FRIDA_TRY_COLLECT (send)
-  FRIDA_TRY_COLLECT (close)
-
-  FRIDA_TRY_COLLECT (pthread_create)
-  FRIDA_TRY_COLLECT (pthread_detach)
-
   FRIDA_TRY_COLLECT (dlopen)
   FRIDA_TRY_COLLECT (dlclose)
   FRIDA_TRY_COLLECT (dlsym)
+  FRIDA_TRY_COLLECT (dlerror)
+
+#undef FRIDA_TRY_COLLECT
 
 beach:
   return ctx->total_missing > 0;
 }
 
 static bool
-frida_find_libc (char * buffer, size_t buffer_size, void ** base, const char ** path)
+frida_probe_process (size_t page_size, FridaProcessLayout * layout)
+{
+  int previous_dumpable;
+  bool use_proc_fallback;
+
+  layout->phdrs = NULL;
+  layout->phdr_size = 0;
+  layout->phdr_count = 0;
+  layout->interpreter = NULL;
+  layout->rtld_flavor = FRIDA_RTLD_UNKNOWN;
+  layout->r_debug = NULL;
+  layout->r_brk = NULL;
+  layout->libc = NULL;
+
+  previous_dumpable = frida_prctl (PR_GET_DUMPABLE, 0, 0, 0, 0);
+  if (previous_dumpable != -1 && previous_dumpable != 1)
+    frida_prctl (PR_SET_DUMPABLE, 1, 0, 0, 0);
+
+  frida_parse_file ("/proc/self/auxv", frida_parse_auxv_entry, layout);
+
+  if (previous_dumpable != -1 && previous_dumpable != 1)
+    frida_prctl (PR_SET_DUMPABLE, previous_dumpable, 0, 0, 0);
+
+  if (layout->phdrs == NULL)
+    return false;
+
+  layout->rtld_flavor = frida_detect_rtld_flavor (layout->interpreter);
+
+  if (layout->interpreter != NULL)
+  {
+    frida_enumerate_symbols (layout->interpreter, frida_collect_interpreter_symbol, layout);
+
+    if (layout->r_debug != NULL)
+    {
+      FridaRDebug * r = layout->r_debug;
+      FridaLinkMap * map;
+
+      for (map = r->r_map; map != NULL; map = map->l_next)
+      {
+        if (frida_path_is_libc (map->l_name))
+        {
+          layout->libc = (void *) map->l_addr;
+          break;
+        }
+      }
+
+      /*
+       * Injecting right after libc has been loaded appears to be risky, e.g. the program's observed __environ might be NULL.
+       * So instead of waiting for r_brk to be executed again, we use the program's earliest initializer / entrypoint.
+       */
+      if (layout->libc == NULL && (map = r->r_map) != NULL)
+      {
+        const ElfW(Dyn) * entry;
+
+        layout->r_brk = NULL;
+
+        for (entry = map->l_ld; entry->d_tag != DT_NULL; entry++)
+        {
+          switch (entry->d_tag)
+          {
+            case DT_INIT:
+              layout->r_brk = (void *) (entry->d_un.d_ptr + map->l_addr);
+              break;
+            case DT_INIT_ARRAY:
+              if (layout->r_brk == NULL)
+                layout->r_brk = *((void **) (entry->d_un.d_ptr + map->l_addr));
+              break;
+          }
+        }
+
+        if (layout->r_brk == NULL)
+        {
+          const ElfW(Ehdr) * program = (const ElfW(Ehdr) *)
+              frida_compute_elf_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
+          layout->r_brk = (void *) (program->e_entry + map->l_addr);
+        }
+      }
+
+      use_proc_fallback = false;
+    }
+    else
+    {
+      use_proc_fallback = true;
+    }
+  }
+  else
+  {
+    use_proc_fallback = true;
+  }
+
+  if (use_proc_fallback)
+    frida_parse_file ("/proc/self/maps", frida_try_find_libc_from_maps_line, layout);
+
+  return true;
+}
+
+static FridaRtldFlavor
+frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter)
+{
+  const char * soname;
+  FridaDetectRtldFlavorContext ctx;
+
+  if (interpreter == NULL)
+    return FRIDA_RTLD_NONE;
+
+  soname = frida_query_soname (interpreter);
+  if (soname != NULL)
+    return frida_infer_rtld_flavor_from_filename (soname);
+
+  ctx.interpreter = interpreter;
+  ctx.flavor = FRIDA_RTLD_UNKNOWN;
+  frida_parse_file ("/proc/self/maps", frida_try_infer_rtld_flavor_from_maps_line, &ctx);
+
+  return ctx.flavor;
+}
+
+static FridaRtldFlavor
+frida_infer_rtld_flavor_from_filename (const char * name)
+{
+  if (frida_str_has_prefix (name, "ld-linux-"))
+    return FRIDA_RTLD_GLIBC;
+
+  if (frida_str_has_prefix (name, "ld-uClibc"))
+    return FRIDA_RTLD_UCLIBC;
+
+  if (strcmp (name, "libc.so") == 0)
+    return FRIDA_RTLD_MUSL;
+
+  if (strcmp (name, "ld-android.so") == 0)
+    return FRIDA_RTLD_ANDROID;
+  if (strcmp (name, "linker") == 0)
+    return FRIDA_RTLD_ANDROID;
+  if (strcmp (name, "linker64") == 0)
+    return FRIDA_RTLD_ANDROID;
+
+  return FRIDA_RTLD_UNKNOWN;
+}
+
+static ssize_t
+frida_try_infer_rtld_flavor_from_maps_line (void * data, size_t size, void * user_data)
+{
+  char * line = data;
+  FridaDetectRtldFlavorContext * ctx = user_data;
+  char * next_newline;
+  void * base;
+
+  next_newline = strchr (line, '\n');
+  if (next_newline == NULL)
+    return 0;
+
+  *next_newline = '\0';
+
+  base = (void *) frida_parse_size (line);
+
+  if (base == ctx->interpreter)
+  {
+    const char * filename = strrchr (line, '/') + 1;
+    ctx->flavor = frida_infer_rtld_flavor_from_filename (filename);
+    return -1;
+  }
+
+  return (next_newline + 1) - (char *) data;
+}
+
+static bool
+frida_path_is_libc (const char * path)
+{
+  const char * last_slash, * name;
+
+  last_slash = strrchr (path, '/');
+  if (last_slash != NULL)
+    name = last_slash + 1;
+  else
+    name = path;
+
+  return frida_str_has_prefix (name, "libc.so");
+}
+
+static ssize_t
+frida_parse_auxv_entry (void * data, size_t size, void * user_data)
+{
+  ElfW(auxv_t) * entry = data;
+  FridaProcessLayout * layout = user_data;
+
+  if (size < sizeof (ElfW(auxv_t)))
+    return 0;
+
+  switch (entry->a_type)
+  {
+    case AT_PHDR:
+      layout->phdrs = (ElfW(Phdr) *) entry->a_un.a_val;
+      break;
+    case AT_PHENT:
+      layout->phdr_size = entry->a_un.a_val;
+      break;
+    case AT_PHNUM:
+      layout->phdr_count = entry->a_un.a_val;
+      break;
+    case AT_BASE:
+      layout->interpreter = (ElfW(Ehdr) *) entry->a_un.a_val;
+      break;
+  }
+
+  return sizeof (ElfW(auxv_t));
+}
+
+static bool
+frida_collect_interpreter_symbol (const FridaElfExportDetails * details, void * user_data)
+{
+  FridaProcessLayout * layout = user_data;
+  bool found_both;
+
+  if (details->type == STT_OBJECT && strcmp (details->name, "_r_debug") == 0)
+    layout->r_debug = details->address;
+
+  if (details->type == STT_FUNC && strcmp (details->name, "_dl_debug_state") == 0)
+    layout->r_brk = details->address;
+
+  found_both = layout->r_debug != NULL && layout->r_brk != NULL;
+  return !found_both;
+}
+
+static ssize_t
+frida_try_find_libc_from_maps_line (void * data, size_t size, void * user_data)
+{
+  char * line = data;
+  FridaProcessLayout * layout = user_data;
+  char * next_newline, * path;
+
+  next_newline = strchr (line, '\n');
+  if (next_newline == NULL)
+    return 0;
+
+  *next_newline = '\0';
+
+  path = strchr (line, '/');
+  if (path != NULL && frida_path_is_libc (path))
+  {
+    layout->libc = (void *) frida_parse_size (line);
+    return -1;
+  }
+
+  return (next_newline + 1) - (char *) data;
+}
+
+static void
+frida_try_load_libc_and_raise (FridaBootstrapContext * ctx)
+{
+  void * ld, * entrypoint, * program;
+  uint8_t dummy_random[16] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
+  const char * ld_name = ctx->fallback_ld;
+  const char * libc_name = ctx->fallback_libc;
+  size_t phdr_offset = 64;
+  size_t ld_name_offset = 256;
+  size_t ld_name_size = strlen (ld_name) + 1;
+  const char * strtab_data = libc_name;
+  size_t strtab_offset = 384;
+  size_t strtab_size = strlen (libc_name) + 1;
+  size_t symtab_offset = 448;
+  ElfW(Dyn) dyn[] = {
+    {
+      .d_tag = DT_NEEDED,
+      .d_un.d_val = 0,
+    },
+    {
+      .d_tag = DT_STRTAB,
+      .d_un.d_ptr = strtab_offset,
+    },
+    {
+      .d_tag = DT_STRSZ,
+      .d_un.d_val = strtab_size,
+    },
+    {
+      .d_tag = DT_SYMTAB,
+      .d_un.d_ptr = symtab_offset,
+    },
+    {
+      .d_tag = DT_SYMENT,
+      .d_un.d_val = sizeof (ElfW(Sym)),
+    },
+    {
+      .d_tag = DT_FLAGS_1,
+      .d_un.d_val = DF_1_PIE,
+    },
+    {
+      .d_tag = DT_NULL,
+      .d_un.d_val = 0,
+    },
+  };
+  size_t dyn_offset = 512;
+  size_t dyn_size = sizeof (dyn);
+  size_t entrypoint_offset = 1024;
+  ElfW(Phdr) phdr[] = {
+    {
+      .p_type = PT_PHDR,
+      .p_flags = PF_R,
+      .p_offset = phdr_offset,
+      .p_vaddr = phdr_offset,
+      .p_paddr = phdr_offset,
+      .p_align = 8,
+    },
+    {
+      .p_type = PT_INTERP,
+      .p_flags = PF_R,
+      .p_offset = ld_name_offset,
+      .p_vaddr = ld_name_offset,
+      .p_paddr = ld_name_offset,
+      .p_filesz = ld_name_size,
+      .p_memsz = ld_name_size,
+      .p_align = 1,
+    },
+    {
+      .p_type = PT_DYNAMIC,
+      .p_flags = PF_R | PF_W,
+      .p_offset = dyn_offset,
+      .p_vaddr = dyn_offset,
+      .p_paddr = dyn_offset,
+      .p_filesz = dyn_size,
+      .p_memsz = dyn_size,
+      .p_align = 8,
+    },
+  };
+  ElfW(Ehdr) ehdr = {
+    .e_ident = ELFMAG "\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+    .e_type = ET_DYN,
+    .e_machine = EM_X86_64,
+    .e_version = EV_CURRENT,
+    .e_entry = entrypoint_offset,
+    .e_phoff = phdr_offset,
+    .e_shoff = -1,
+    .e_flags = 0,
+    .e_ehsize = sizeof (ElfW(Ehdr)),
+    .e_phentsize = sizeof (ElfW(Phdr)),
+    .e_phnum = sizeof (phdr) / sizeof (phdr[0]),
+    .e_shentsize = 0,
+    .e_shnum = 0,
+    .e_shstrndx = 0,
+  };
+
+  phdr[0].p_filesz = sizeof (phdr);
+  phdr[0].p_memsz = sizeof (phdr);
+
+  entrypoint = NULL;
+  ld = frida_map_elf (ctx, ld_name, &entrypoint);
+  if (ld == NULL)
+    return;
+
+  program = mmap (NULL, ctx->page_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  memmove (program, &ehdr, sizeof (ehdr));
+  memmove (program + phdr_offset, phdr, sizeof (phdr));
+  memmove (program + ld_name_offset, ld_name, ld_name_size);
+  memmove (program + strtab_offset, strtab_data, strtab_size);
+  memmove (program + dyn_offset, dyn, dyn_size);
+
+  {
+    alignas (16) FridaEntrypointParameters params = {
+      .argc = 1,
+      .argv = {
+        "/bin/program",
+        NULL,
+      },
+      .envp = {
+        NULL,
+      },
+      .auxv = {
+        { .a_type = AT_PAGESZ, .a_un.a_val = ctx->page_size },
+        { .a_type = AT_PHDR, .a_un.a_val = (size_t) (program + phdr_offset) },
+        { .a_type = AT_PHENT, .a_un.a_val = sizeof (ElfW(Phdr)) },
+        { .a_type = AT_PHNUM, .a_un.a_val = sizeof (phdr) / sizeof (phdr[0]) },
+        { .a_type = AT_BASE, .a_un.a_val = (size_t) ld },
+        { .a_type = AT_ENTRY, .a_un.a_val = (size_t) frida_libc_main },
+        { .a_type = AT_RANDOM, .a_un.a_val = (ElfW(Addr)) dummy_random },
+        { .a_type = AT_EXECFN, .a_un.a_val = (ElfW(Addr)) "/bin/program" },
+        { .a_type = AT_NULL, .a_un.a_val = 0 },
+      },
+    };
+
+#if defined (__i386__) || defined (__i486__) || defined (__i586__) || defined (__i686__)
+    asm volatile (
+        "mov %0, %%esp\n\t"
+        "jmp *%1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
+#elif defined (__x86_64__)
+    asm volatile (
+        "mov %0, %%rsp\n\t"
+        "jmp *%1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
+#elif defined (__ARM_EABI__)
+    asm volatile (
+        "mov sp, %0\n\t"
+        "bx %1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
+#elif defined (__aarch64__)
+    asm volatile (
+        "mov sp, %0\n\t"
+        "br %1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
+#elif defined (__mips__)
+    asm volatile (
+        "move $sp, %0\n\t"
+        "jr %1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
+#endif
+  }
+}
+
+static int
+frida_libc_main (int argc, char * argv[])
+{
+  raise (SIGSTOP);
+  return 0;
+}
+
+static void *
+frida_map_elf (FridaBootstrapContext * ctx, const char * path, void ** entrypoint)
 {
   bool success = false;
-  char proc_self_maps[] = "/proc/self/maps";
-  int fd;
-  char * libc_path_fragment, * cursor, * range_start;
-  size_t fill_amount;
-  int spaces_seen;
+  int fd = -1;
+  ElfW(Ehdr) ehdr;
+  size_t phdrs_size;
+  ElfW(Phdr) * phdrs;
+  const ElfW(Addr) page_size = ctx->page_size;
+  ElfW(Half) i;
+  ElfW(Addr) lowest, highest;
+  size_t footprint_size = 0;
+  void * base = MAP_FAILED;
+  void * previous_end;
+  ElfW(Addr) bss_start, bss_end;
+  size_t n;
 
-  *base = NULL;
-  *path = NULL;
-
-  fd = frida_open (proc_self_maps, O_RDONLY);
+  fd = open (path, O_RDONLY);
   if (fd == -1)
     goto beach;
 
-  libc_path_fragment = NULL;
+  if (read (fd, &ehdr, sizeof (ehdr)) != sizeof (ehdr))
+    goto beach;
+
+  if (lseek (fd, ehdr.e_phoff, SEEK_SET) == -1)
+    goto beach;
+  phdrs_size = ehdr.e_phnum * ehdr.e_phentsize;
+  phdrs = alloca (phdrs_size);
+  if (read (fd, phdrs, phdrs_size) != phdrs_size)
+    goto beach;
+
+  lowest = ~0;
+  highest = 0;
+  for (i = 0; i != ehdr.e_phnum; i++)
+  {
+    ElfW(Phdr) * phdr = &phdrs[i];
+
+    if (phdr->p_type == PT_LOAD)
+    {
+      lowest = MIN (FRIDA_ELF_PAGE_START (phdr->p_vaddr, page_size), lowest);
+      highest = MAX (phdr->p_vaddr + phdr->p_memsz, highest);
+    }
+  }
+
+  footprint_size = highest - lowest;
+
+  base = mmap (NULL, footprint_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (base == MAP_FAILED)
+    goto beach;
+
+  previous_end = NULL;
+
+  bss_start = 0;
+  bss_end = 0;
+
+  for (i = 0; i != ehdr.e_phnum; i++)
+  {
+    ElfW(Phdr) * phdr = &phdrs[i];
+
+    if (phdr->p_type == PT_LOAD)
+    {
+      ElfW(Addr) relative_vaddr;
+      ElfW(Addr) map_address;
+      size_t gap_size, page_offset, map_offset, map_size;
+      void * segment_base;
+      ElfW(Word) flags = phdr->p_flags;
+      int prot;
+
+      relative_vaddr = phdr->p_vaddr - lowest;
+
+      map_address = FRIDA_ELF_PAGE_START (base + relative_vaddr, page_size);
+
+      gap_size = (previous_end != NULL)
+          ? (void *) map_address - previous_end
+          : 0;
+      if (gap_size != 0)
+        munmap (previous_end, gap_size);
+
+      page_offset = FRIDA_ELF_PAGE_OFFSET (relative_vaddr, page_size);
+      map_offset = phdr->p_offset - page_offset;
+      map_size = FRIDA_ELF_PAGE_ALIGN (phdr->p_filesz + page_offset, page_size);
+
+      prot = 0;
+      if ((flags & PF_R) != 0)
+        prot |= PROT_READ;
+      if ((flags & PF_W) != 0)
+        prot |= PROT_WRITE;
+      if ((flags & PF_X) != 0)
+        prot |= PROT_EXEC;
+
+      segment_base = mmap ((void *) map_address, map_size, prot, MAP_PRIVATE | MAP_FIXED, fd, map_offset);
+      if (segment_base == MAP_FAILED)
+        goto beach;
+
+      previous_end = segment_base + map_size;
+
+      bss_start = MAX ((ElfW(Addr)) base + relative_vaddr + phdr->p_filesz, bss_start);
+      bss_end = MAX ((ElfW(Addr)) base + relative_vaddr + phdr->p_memsz, bss_end);
+    }
+  }
+
+  n = FRIDA_ELF_PAGE_OFFSET (bss_start, page_size);
+  if (n != 0)
+  {
+    n = page_size - n;
+    memset ((void *) bss_start, 0, n);
+  }
+
+  if (entrypoint != NULL)
+    *entrypoint = base + ehdr.e_entry;
+
+  success = true;
+
+beach:
+  if (!success && base != MAP_FAILED)
+    munmap (base, footprint_size);
+
+  if (fd != -1)
+    close (fd);
+
+  return success ? base : NULL;
+}
+
+
+static void
+frida_parse_file (const char * path, FridaParseFunc parse, void * user_data)
+{
+  int fd;
+  char * cursor;
+  size_t fill_amount;
+  char buffer[2048];
+
+  fd = open (path, O_RDONLY);
+  if (fd == -1)
+    goto beach;
+
   fill_amount = 0;
-  do
+  while (true)
   {
     ssize_t n;
 
-    do
-      n = frida_read (fd, buffer + fill_amount, buffer_size - fill_amount - 1);
-    while (n == -EINTR);
+    n = read (fd, buffer + fill_amount, sizeof (buffer) - fill_amount - 1);
     if (n > 0)
     {
       fill_amount += n;
       buffer[fill_amount] = '\0';
     }
     if (fill_amount == 0)
-      goto beach;
+      break;
 
     cursor = buffer;
     while (true)
     {
-      char * next_newline;
-
-      next_newline = frida_strchr (cursor, '\n');
-      if (next_newline == NULL)
+      ssize_t n = parse (cursor, buffer + fill_amount - cursor, user_data);
+      if (n == -1)
+        goto beach;
+      if (n == 0)
       {
         size_t consumed = cursor - buffer;
         if (consumed != 0)
         {
-          frida_memmove (buffer, buffer + consumed, fill_amount - consumed + 1);
+          memmove (buffer, buffer + consumed, fill_amount - consumed + 1);
           fill_amount -= consumed;
         }
         else
@@ -190,146 +920,14 @@ frida_find_libc (char * buffer, size_t buffer_size, void ** base, const char ** 
         }
         break;
       }
-      *next_newline = '\0';
 
-      libc_path_fragment = frida_strstr (cursor, "libc.so");
-      if (libc_path_fragment != NULL)
-        break;
-
-      cursor = next_newline + 1;
+      cursor += n;
     }
   }
-  while (libc_path_fragment == NULL);
-
-  for (cursor = libc_path_fragment; cursor != buffer && *cursor != '\0'; cursor--)
-    ;
-  range_start = (cursor != buffer) ? cursor + 1 : cursor;
-  *base = (void *) frida_parse_size (range_start);
-
-  for (spaces_seen = 0, cursor = range_start; spaces_seen != 5; cursor++)
-  {
-    if (*cursor == ' ')
-      spaces_seen++;
-  }
-  while (*cursor == ' ')
-    cursor++;
-  *path = cursor;
-  while (*cursor != '\n')
-    cursor++;
-  *cursor = '\0';
-
-  success = true;
 
 beach:
   if (fd != -1)
-    frida_close (fd);
-
-  return success;
-}
-
-static void
-frida_enumerate_exports (FridaElfEhdr * ehdr, FridaFoundElfExportFunc func, void * user_data)
-{
-  FridaElfAddr symbols_base, strings_base;
-  size_t symbols_size, strings_size;
-  FridaElfPhdr * dyn;
-  size_t num_entries, i;
-  size_t num_symbols;
-
-  symbols_base = 0;
-  strings_base = 0;
-  symbols_size = 0;
-  strings_size = 0;
-  dyn = frida_find_program_header_by_type (ehdr, PT_DYNAMIC);
-  num_entries = dyn->p_filesz / sizeof (FridaElfDyn);
-  for (i = 0; i != num_entries; i++)
-  {
-    FridaElfDyn * entry = (void *) ehdr + dyn->p_vaddr + (i * sizeof (FridaElfDyn));
-
-    switch (entry->d_tag)
-    {
-      case DT_SYMTAB:
-        symbols_base = entry->d_un.d_ptr;
-        break;
-      case DT_STRTAB:
-        strings_base = entry->d_un.d_ptr;
-        break;
-      case DT_STRSZ:
-        strings_size = entry->d_un.d_ptr;
-        break;
-      default:
-        break;
-    }
-  }
-  if (symbols_base == 0 || strings_base == 0 || strings_size == 0)
-    return;
-  symbols_size = frida_find_elf_region_upper_bound (ehdr, symbols_base - (FridaElfAddr) ehdr);
-  if (symbols_size == 0)
-    return;
-  num_symbols = symbols_size / sizeof (FridaElfSym);
-
-  for (i = 0; i != num_symbols; i++)
-  {
-    FridaElfSym * sym;
-    bool probably_reached_end;
-    FridaElfExportDetails d;
-
-    sym = (void *) symbols_base + (i * sizeof (FridaElfSym));
-
-    probably_reached_end = sym->st_name >= strings_size;
-    if (probably_reached_end)
-      break;
-
-    if (sym->st_shndx == SHN_UNDEF)
-      continue;
-
-    d.type = FRIDA_ELF_ST_TYPE (sym->st_info);
-    if (!(d.type == STT_FUNC || d.type == STT_OBJECT))
-      continue;
-
-    d.bind = FRIDA_ELF_ST_BIND (sym->st_info);
-    if (!(d.bind == STB_GLOBAL || d.bind == STB_WEAK))
-      continue;
-
-    d.name = (char *) strings_base + sym->st_name;
-    d.address = (void *) ehdr + sym->st_value;
-
-    if (!func (&d, user_data))
-      return;
-  }
-}
-
-static FridaElfPhdr *
-frida_find_program_header_by_type (FridaElfEhdr * ehdr, FridaElfWord type)
-{
-  FridaElfHalf i;
-
-  for (i = 0; i != ehdr->e_phnum; i++)
-  {
-    FridaElfPhdr * phdr = (void *) ehdr + ehdr->e_phoff + (i * ehdr->e_phentsize);
-    if (phdr->p_type == type)
-      return phdr;
-  }
-
-  return NULL;
-}
-
-static size_t
-frida_find_elf_region_upper_bound (FridaElfEhdr * ehdr, FridaElfAddr address)
-{
-  FridaElfHalf i;
-
-  for (i = 0; i != ehdr->e_phnum; i++)
-  {
-    FridaElfPhdr * phdr = (void *) ehdr + ehdr->e_phoff + (i * ehdr->e_phentsize);
-    FridaElfAddr start = phdr->p_vaddr;
-    FridaElfAddr end = start + phdr->p_memsz;
-
-    if (phdr->p_type == PT_LOAD && address >= start && address < end)
-      return end - address;
-  }
-
-  return 0;
+    close (fd);
 }
 
 static size_t
@@ -353,36 +951,6 @@ frida_parse_size (const char * str)
   return result;
 }
 
-static size_t
-frida_strlen (const char * str)
-{
-  size_t n = 0;
-  while (*str++ != '\0')
-    n++;
-  return n;
-}
-
-/* TODO: Avoid duplicating these here and in src/fruity/helpers */
-
-static bool
-frida_str_equals (const char * str, const char * other)
-{
-  char a, b;
-
-  do
-  {
-    a = *str;
-    b = *other;
-    if (a != b)
-      return false;
-    str++;
-    other++;
-  }
-  while (a != '\0');
-
-  return true;
-}
-
 static bool
 frida_str_has_prefix (const char * str, const char * prefix)
 {
@@ -397,123 +965,24 @@ frida_str_has_prefix (const char * str, const char * prefix)
   return true;
 }
 
-static char *
-frida_strstr (const char * str, const char * needle)
+static int
+frida_socketpair (int domain, int type, int protocol, int sv[2])
 {
-  char first, c;
-
-  first = needle[0];
-
-  while ((c = *str) != '\0')
-  {
-    if (c == first && frida_str_has_prefix (str, needle))
-      return (char *) str;
-    str++;
-  }
-
-  return NULL;
-}
-
-static char *
-frida_strchr (const char * str, char needle)
-{
-  const char * cursor;
-  char c;
-
-  for (cursor = (char *) str; (c = *cursor) != '\0'; cursor++)
-  {
-    if (c == needle)
-      return (char *) cursor;
-  }
-
-  return NULL;
-}
-
-static void
-frida_bzero (void * dst, size_t n)
-{
-  size_t offset;
-
-  for (offset = 0; offset != n; offset++)
-    ((uint8_t *) dst)[offset] = 0;
-}
-
-static void *
-frida_memmove (void * dst, const void * src, size_t n)
-{
-  uint8_t * dst_u8 = dst;
-  const uint8_t * src_u8 = src;
-  size_t i;
-
-  if (dst_u8 < src_u8)
-  {
-    for (i = 0; i != n; i++)
-      dst_u8[i] = src_u8[i];
-  }
-  else if (dst_u8 > src_u8)
-  {
-    for (i = n; i != 0; i--)
-      dst_u8[i - 1] = src_u8[i - 1];
-  }
-
-  return dst;
+#ifdef NOLIBC
+  return my_syscall4 (__NR_socketpair, domain, type, protocol, sv);
+#else
+  return socketpair (domain, type, protocol, sv);
+#endif
 }
 
 static int
-frida_open (const char * pathname, int flags)
+frida_prctl (int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5)
 {
-  return frida_syscall_2 (SYS_open, (size_t) pathname, flags);
-}
-
-static int
-frida_close (int fd)
-{
-  return frida_syscall_1 (SYS_close, fd);
-}
-
-static ssize_t
-frida_read (int fd, void * buf, size_t count)
-{
-  return frida_syscall_3 (SYS_read, fd, (size_t) buf, count);
-}
-
-static ssize_t
-frida_write (int fd, const void * buf, size_t count)
-{
-  return frida_syscall_3 (SYS_write, fd, (size_t) buf, count);
-}
-
-static void
-frida_log_string (const char * str)
-{
-  const char newline = '\n';
-
-  frida_write (STDOUT_FILENO, str, frida_strlen (str));
-  frida_write (STDOUT_FILENO, &newline, sizeof (newline));
-}
-
-static void
-frida_log_pointer (void * ptr)
-{
-  frida_log_size ((size_t) ptr);
-}
-
-static void
-frida_log_size (size_t val)
-{
-  char output_buf[2 + 16 + 1] = "0x";
-  char * output_cursor;
-  int shift;
-  char nibble_to_hex[] = "0123456789abcdef";
-
-  output_cursor = output_buf + 2;
-  for (shift = (sizeof (void *) * 8) - 4; shift != -4; shift -= 4, output_cursor++)
-  {
-    *output_cursor = nibble_to_hex[(val >> shift) & 0xf];
-  }
-  *output_cursor++ = '\n';
-
-  frida_write (STDOUT_FILENO, output_buf, output_cursor - output_buf);
+#ifdef NOLIBC
+  return my_syscall5 (__NR_prctl, option, arg2, arg3, arg4, arg5);
+#else
+  return prctl (option, arg2, arg3, arg4, arg5);
+#endif
 }
 
 #ifdef BUILDING_TEST_PROGRAM
@@ -531,8 +1000,9 @@ main (void)
   bzero (&libc, sizeof (libc));
 
   bzero (&ctx, sizeof (ctx));
+  ctx.page_size = getpagesize ();
   ctx.loader_size = 4096;
-  ctx.enable_socket_endpoints = true;
+  ctx.enable_ctrlfds = true;
   ctx.libc = &libc;
 
   result = frida_bootstrap (&ctx);

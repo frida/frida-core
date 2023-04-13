@@ -17,12 +17,7 @@ payload_sources = [
 ]
 
 if host_os_family == 'linux'
-  if host_arch == 'mips64'
-    flavor = 'mips'
-  else
-    flavor = host_arch
-  endif
-  payload_sources += ['syscall-linux-@0@.S'.format(flavor)]
+  payload_sources += 'syscall-linux-@0@.S'.format(host_arch)
 endif
 
 extra_vala_args = []

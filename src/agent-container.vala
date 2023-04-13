@@ -7,9 +7,14 @@ namespace Frida {
 
 		private Module module;
 		[CCode (has_target = false)]
-		private delegate void AgentMainFunc (string data, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id);
+		private delegate void AgentMainFunc (string data, ref UnloadPolicy unload_policy, void * injector_state);
 		private AgentMainFunc main_impl;
+#if LINUX
+		private FileDescriptor agent_ctrlfd_for_peer;
+#else
 		private PipeTransport transport;
+#endif
+		private string transport_address;
 		private Thread<bool> thread;
 		private AgentSessionProvider provider;
 
@@ -24,10 +29,31 @@ namespace Frida {
 			assert (main_func_found);
 			container.main_impl = (AgentMainFunc) main_func_symbol;
 
+			Future<IOStream> stream_request;
+#if LINUX
+			int agent_ctrlfds[2];
+			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, agent_ctrlfds) != 0)
+				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
+			var agent_ctrlfd = new FileDescriptor (agent_ctrlfds[0]);
+			container.agent_ctrlfd_for_peer = new FileDescriptor (agent_ctrlfds[1]);
+			container.transport_address = "";
+
+			try {
+				Socket socket = new Socket.from_fd (agent_ctrlfd.handle);
+				agent_ctrlfd.steal ();
+				var promise = new Promise<IOStream> ();
+				promise.resolve (SocketConnection.factory_create_connection (socket));
+				stream_request = promise.future;
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+#else
 			var transport = new PipeTransport ();
 			container.transport = transport;
+			container.transport_address = transport.remote_address;
 
-			var stream_request = Pipe.open (transport.local_address, cancellable);
+			stream_request = Pipe.open (transport.local_address, cancellable);
+#endif
 
 			container.start_worker_thread ();
 
@@ -66,7 +92,9 @@ namespace Frida {
 
 			stop_worker_thread ();
 
+#if !LINUX
 			transport = null;
+#endif
 
 			module = null;
 		}
@@ -82,9 +110,19 @@ namespace Frida {
 		}
 
 		private bool run () {
-			string agent_parameters = transport.remote_address + "|exit-monitor:off|thread-suspend-monitor:off";
+			UnloadPolicy unload_policy = IMMEDIATE;
+			void * injector_state = null;
 
-			main_impl (agent_parameters, null, 0);
+#if LINUX
+			var s = LinuxInjectorState ();
+			s.frida_ctrlfd = -1;
+			s.agent_ctrlfd = agent_ctrlfd_for_peer.steal ();
+			injector_state = &s;
+#endif
+
+			string agent_parameters = transport_address + "|exit-monitor:off|thread-suspend-monitor:off";
+
+			main_impl (agent_parameters, ref unload_policy, injector_state);
 
 			return true;
 		}

@@ -213,13 +213,52 @@ if host_os_family == 'linux'
     'linux/frida-helper-backend-types.c',
     'linux/frida-helper-types.vala',
   ]
+  bootstrapper_bin = custom_target('frida-bootstrapper-bin',
+    input: ['linux/helpers/bootstrapper-' + host_abi + '.bin'],
+    output: ['bootstrapper.bin'],
+    command: ['cp', '@INPUT0@', '@OUTPUT0@'],
+  )
+  loader_bin = custom_target('frida-loader-bin',
+    input: ['linux/helpers/loader-' + host_abi + '.bin'],
+    output: ['loader.bin'],
+    command: ['cp', '@INPUT0@', '@OUTPUT0@'],
+  )
+  helper_backend_data = custom_target('frida-data-helper-backend',
+    input: [
+      'linux/frida-helper-backend.resources',
+      bootstrapper_bin,
+      loader_bin,
+    ],
+    output: [
+      'frida-data-helper-backend.vapi',
+      'frida-data-helper-backend.h',
+      'frida-data-helper-backend.c',
+      'frida-data-helper-backend-blob.S',
+    ],
+    command: [
+      resource_compiler,
+      '--toolchain=gnu',
+      '-c', '@INPUT0@',
+      '-o', join_paths(meson.current_build_dir(), 'frida-data-helper-backend'),
+      '@INPUT1@',
+      '@INPUT2@',
+    ],
+  )
+  helper_backend_sources += [helper_backend_data]
   helper_backend_extra_deps = []
   if host_os == 'android'
     helper_backend_extra_deps += [frida_selinux_dep]
   endif
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
-    vala_args: ['--pkg=posix', '--pkg=linux', '--pkg=frida-gum-linux-1.0'],
+    vala_args: [
+      '--vapidir=' + (meson.current_source_dir() / 'linux'),
+      '--pkg=frida-sysapi',
+      '--pkg=posix',
+      '--pkg=linux',
+      '--pkg=frida-gum-linux-1.0',
+      '--pkg=frida-gum-elf-1.0',
+    ],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
   )
   backend_libs += [helper_backend]
@@ -235,7 +274,7 @@ if host_os_family == 'linux'
     link_args: helper_link_args,
     link_depends: helper_link_depends,
     link_with: helper_backend,
-    dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
+    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep],
   )
 
   helper = custom_target('frida-helper',

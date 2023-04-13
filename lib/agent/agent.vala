@@ -14,6 +14,8 @@ namespace Frida.Agent {
 	private class Runner : Object, ProcessInvader, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
+		private static string? cached_agent_path = null;
+		private static Gum.MemoryRange cached_agent_range;
 
 		public string agent_parameters {
 			get;
@@ -117,9 +119,10 @@ namespace Frida.Agent {
 					mapped_range = injector_state.mapped_range;
 #endif
 
-				string? agent_path;
-				var agent_range = detect_own_range_and_path (mapped_range, out agent_path);
-				Gum.Cloak.add_range (agent_range);
+				if (cached_agent_path == null) {
+					cached_agent_range = detect_own_range_and_path (mapped_range, out cached_agent_path);
+					Gum.Cloak.add_range (cached_agent_range);
+				}
 
 				var fdt_padder = FileDescriptorTablePadder.obtain ();
 
@@ -131,9 +134,22 @@ namespace Frida.Agent {
 				}
 #endif
 
+#if LINUX
+				var linjector_state = (LinuxInjectorState *) opaque_injector_state;
+
+				int agent_ctrlfd = linjector_state->agent_ctrlfd;
+				linjector_state->agent_ctrlfd = -1;
+
+				fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
+				Gum.Cloak.add_file_descriptor (agent_ctrlfd);
+
+				string agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
+				agent_parameters = agent_parameters_with_transport_uri;
+#endif
+
 				var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
 
-				shared_instance = new Runner (agent_parameters, agent_path, agent_range);
+				shared_instance = new Runner (agent_parameters, cached_agent_path, cached_agent_range);
 
 				try {
 					shared_instance.run ((owned) fdt_padder);

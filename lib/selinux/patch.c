@@ -40,9 +40,8 @@ static const FridaSELinuxRule frida_selinux_rules[] =
 {
   { { "domain", NULL }, "domain", "process", { "execmem", NULL } },
   { { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
-  { { "domain", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
   { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", "?map", NULL } },
-  { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
+  { { "domain", NULL }, "frida_memfd", "file", { "open", "read", "write", "getattr", "execute", "?map", NULL } },
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "zygote_exec", "file", { "execute", NULL } },
   { { "domain", NULL }, "$self", "process", { "sigchld", NULL } },
@@ -84,6 +83,13 @@ frida_selinux_patch_policy (void)
   g_assert (res == 0);
 
   if (frida_ensure_type (&db, "frida_file", 2, "file_type", "mlstrustedobject", &error) == NULL)
+  {
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
+
+  if (frida_ensure_type (&db, "frida_memfd", 2, "file_type", "mlstrustedobject", &error) == NULL)
   {
     g_printerr ("Unable to add SELinux type: %s\n", error->message);
     g_clear_error (&error);

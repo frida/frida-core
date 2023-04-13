@@ -915,19 +915,21 @@ namespace Frida.HostSessionTest {
 			Thread.usleep (50000);
 
 			/* Warm up static allocations */
-			var session = yield device.attach (process.id);
-			var script = yield session.create_script ("true;");
-			yield script.load ();
-			yield script.unload ();
-			script = null;
-			yield detach_and_wait_for_cleanup (session);
-			session = null;
+			for (int i = 0; i != 2; i++) {
+				var session = yield device.attach (process.id);
+				var script = yield session.create_script ("true;");
+				yield script.load ();
+				yield script.unload ();
+				script = null;
+				yield detach_and_wait_for_cleanup (session);
+				session = null;
+			}
 
 			var usage_before = process.snapshot_resource_usage ();
 
 			for (var i = 0; i != 1; i++) {
-				session = yield device.attach (process.id);
-				script = yield session.create_script ("true;");
+				var session = yield device.attach (process.id);
+				var script = yield session.create_script ("true;");
 				yield script.load ();
 				yield script.unload ();
 				script = null;

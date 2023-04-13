@@ -121,9 +121,11 @@ namespace Frida.InjectorTest {
 		var rat = new Labrat ("sleeper", envp);
 
 		/* Warm up static allocations */
-		rat.inject ("simple-agent", "");
-		rat.wait_for_uninject ();
-		rat.wait_for_cleanup ();
+		for (int i = 0; i != 2; i++) {
+			rat.inject ("simple-agent", "");
+			rat.wait_for_uninject ();
+			rat.wait_for_cleanup ();
+		}
 
 		var usage_before = rat.process.snapshot_resource_usage ();
 

@@ -41,26 +41,34 @@ namespace Frida {
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
-			return yield inject_library_file_with_template (pid, PathTemplate (path), entrypoint, data, cancellable);
+			AgentFeatures features = 0;
+			return yield inject_library_file_with_template (pid, PathTemplate (path), entrypoint, data, features, cancellable);
 		}
 
 		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
-			ensure_tempdir_prepared ();
+				AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
+			string path = path_template.expand (arch_name_from_pid (pid));
+			int fd = Posix.open (path, Posix.O_RDONLY);
+			if (fd == -1)
+				throw new Error.INVALID_ARGUMENT ("Unable to open library: %s", strerror (errno));
+			var library_so = new UnixInputStream (fd, true);
 
-			uint id = next_injectee_id++;
-			yield helper.inject_library_file (pid, path_template, entrypoint, data, tempdir.path, id, cancellable);
-
-			pid_by_id[id] = pid;
-
-			return id;
+			return yield inject_library_fd (pid, library_so, entrypoint, data, features, cancellable);
 		}
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
+			string name = "blob%u.so".printf (next_blob_id++);
+			AgentFeatures features = 0;
+
+			if (MemoryFileDescriptor.is_supported ()) {
+				FileDescriptor fd = MemoryFileDescriptor.from_bytes (name, blob);
+				UnixInputStream library_so = new UnixInputStream (fd.steal (), true);
+				return yield inject_library_fd (pid, library_so, entrypoint, data, features, cancellable);
+			}
+
 			ensure_tempdir_prepared ();
 
-			var name = "blob%u.so".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
 			var path = file.path;
 			adjust_file_permissions (path);
@@ -73,9 +81,35 @@ namespace Frida {
 		}
 
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
+				AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
+			if (MemoryFileDescriptor.is_supported ()) {
+				unowned string arch_name = arch_name_from_pid (pid);
+				string name = agent.name_template.expand (arch_name);
+				AgentResource? resource = agent.resources.first_match (r => r.name == name);
+				if (resource == null) {
+					throw new Error.NOT_SUPPORTED ("Unable to handle %s-bit processes due to build configuration",
+						arch_name);
+				}
+				return yield inject_library_fd (pid, resource.get_memfd (), entrypoint, data, features, cancellable);
+			}
+
 			ensure_tempdir_prepared ();
-			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
+			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, features,
+				cancellable);
+		}
+
+		public async uint inject_library_fd (uint pid, UnixInputStream library_so, string entrypoint, string data,
+				AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
+			uint id = next_injectee_id++;
+			yield helper.inject_library (pid, library_so, entrypoint, data, features, id, cancellable);
+
+			pid_by_id[id] = pid;
+
+			return id;
+		}
+
+		public async IOStream request_control_channel (uint id, Cancellable? cancellable) throws Error, IOError {
+			return yield helper.request_control_channel (id, cancellable);
 		}
 
 		private void ensure_tempdir_prepared () {
@@ -94,7 +128,7 @@ namespace Frida {
 
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			uint clone_id = next_injectee_id++;
-			yield helper.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+			yield helper.demonitor_and_clone_injectee_state (id, clone_id, 0, cancellable);
 			return clone_id;
 		}
 
@@ -200,7 +234,8 @@ namespace Frida {
 			construct;
 		}
 
-		private TemporaryFile _file;
+		private TemporaryFile? _file;
+		private UnixInputStream? _memfd;
 
 		public AgentResource (string name, Bytes blob, TemporaryDirectory? tempdir = null) {
 			Object (name: name, blob: blob, tempdir: tempdir);
@@ -212,6 +247,19 @@ namespace Frida {
 				_file = new TemporaryFile.from_stream (name, stream, tempdir);
 			}
 			return _file;
+		}
+
+		public UnixInputStream get_memfd () throws Error {
+			if (_memfd == null) {
+				if (!MemoryFileDescriptor.is_supported ())
+					throw new Error.NOT_SUPPORTED ("Kernel too old for memfd support");
+				FileDescriptor fd = MemoryFileDescriptor.from_bytes (name, blob);
+#if ANDROID
+				SELinux.fsetfilecon (fd.handle, "u:object_r:frida_memfd:s0");
+#endif
+				_memfd = new UnixInputStream (fd.steal (), true);
+			}
+			return _memfd;
 		}
 	}
 

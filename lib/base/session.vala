@@ -376,6 +376,13 @@ namespace Frida {
 	}
 #endif
 
+#if LINUX
+	public struct LinuxInjectorState {
+		public int frida_ctrlfd;
+		public int agent_ctrlfd;
+	}
+#endif
+
 #if LINUX || FREEBSD
 	public struct PosixInjectorState {
 		public int fifo_fd;
@@ -1340,8 +1347,6 @@ namespace Frida {
 		arch = "arm64";
 #elif MIPS
 		arch = "mips";
-#elif MIPS64
-		arch = "mips64";
 #else
 		arch = FIXME;
 #endif
