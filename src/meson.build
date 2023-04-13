@@ -213,13 +213,18 @@ if host_os_family == 'linux'
     'linux/frida-helper-backend-types.c',
     'linux/frida-helper-types.vala',
   ]
+  if host_abi == 'armhf'
+    host_lowlevel_abi = 'arm'
+  else
+    host_lowlevel_abi = host_abi
+  endif
   bootstrapper_bin = custom_target('frida-bootstrapper-bin',
-    input: ['linux/helpers/bootstrapper-' + host_abi + '.bin'],
+    input: ['linux/helpers/bootstrapper-' + host_lowlevel_abi + '.bin'],
     output: ['bootstrapper.bin'],
     command: ['cp', '@INPUT0@', '@OUTPUT0@'],
   )
   loader_bin = custom_target('frida-loader-bin',
-    input: ['linux/helpers/loader-' + host_abi + '.bin'],
+    input: ['linux/helpers/loader-' + host_lowlevel_abi + '.bin'],
     output: ['loader.bin'],
     command: ['cp', '@INPUT0@', '@OUTPUT0@'],
   )
