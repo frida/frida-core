@@ -817,9 +817,9 @@ namespace Frida {
 
 		private static int get_syscall_id (GPRegs regs) {
 #if X86
-			return (int) regs.eax;
+			return regs.orig_eax;
 #elif X86_64
-			return (int) regs.rax;
+			return (int) regs.orig_rax;
 #elif ARM
 			return (int) regs.r[7];
 #elif ARM64
