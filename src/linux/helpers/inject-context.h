@@ -40,6 +40,7 @@ struct _FridaBootstrapContext
   const char * fallback_ld;
   const char * fallback_libc;
   FridaRtldFlavor rtld_flavor;
+  void * rtld_base;
   void * r_brk;
   size_t loader_size;
   void * loader_base;

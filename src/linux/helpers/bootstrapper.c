@@ -148,6 +148,7 @@ frida_bootstrap (FridaBootstrapContext * ctx)
     return FRIDA_BOOTSTRAP_AUXV_NOT_FOUND;
 
   ctx->rtld_flavor = process.rtld_flavor;
+  ctx->rtld_base = process.interpreter;
   ctx->r_brk = process.r_brk;
 
   if (process.interpreter != NULL && process.libc == NULL)
@@ -218,9 +219,13 @@ frida_resolve_libc_apis (const FridaProcessLayout * layout, FridaLibcApi * libc)
 
   if (layout->rtld_flavor == FRIDA_RTLD_ANDROID)
   {
+    bool found_all_or_none;
+
     ctx.total_missing = 4;
     frida_enumerate_symbols (layout->interpreter, frida_collect_android_linker_symbol, &ctx);
-    if (ctx.total_missing != 0)
+
+    found_all_or_none = ctx.total_missing == 0 || ctx.total_missing == 4;
+    if (!found_all_or_none)
       return false;
   }
 
