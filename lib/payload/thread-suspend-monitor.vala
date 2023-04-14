@@ -119,9 +119,9 @@ namespace Frida {
 		}
 
 		private bool is_called_by_frida (Gum.InvocationContext context) {
-			var range = invader.get_memory_range ();
-			var caller = (Gum.Address) context.get_return_address ();
-			return (caller >= range.base_address && caller < range.base_address + range.size);
+			Gum.MemoryRange range = invader.get_memory_range ();
+			var caller = Gum.Address.from_pointer (context.get_return_address ());
+			return caller >= range.base_address && caller < range.base_address + range.size;
 		}
 	}
 #else
