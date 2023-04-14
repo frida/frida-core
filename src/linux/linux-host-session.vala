@@ -815,8 +815,10 @@ namespace Frida {
 		public async void load (Cancellable? cancellable) throws Error, IOError {
 			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
 
+#if ARM || ARM64
 			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
+#endif
 				yield ensure_loaded (cancellable);
 
 				try {
@@ -824,9 +826,11 @@ namespace Frida {
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
 				}
+#if ARM || ARM64
 			} finally {
 				helper.resume_syscall.begin (pid, null);
 			}
+#endif
 		}
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
@@ -1002,6 +1006,7 @@ namespace Frida {
 			return (string) Frida.Data.Android.get_system_server_js_blob ().data;
 		}
 
+#if ARM || ARM64
 		protected override async void load_script (Cancellable? cancellable) throws Error, IOError {
 			var suspended_threads = yield suspend_sensitive_threads (cancellable);
 			try {
@@ -1095,6 +1100,7 @@ namespace Frida {
 			foreach (var tid in thread_ids)
 				helper.resume_syscall.begin (tid, null);
 		}
+#endif
 
 		private static void add_parameters_from_json (HashTable<string, Variant> parameters, Json.Object object) {
 			var iter = Json.ObjectIter ();
