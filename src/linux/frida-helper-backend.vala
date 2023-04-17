@@ -3288,7 +3288,7 @@ namespace Frida {
 					return;
 				}
 
-				if (!/^([0-9a-f]+)-([0-9a-f]+) \S{4} [0-9a-f]+ ([0-9a-f]{2}:[0-9a-f]{2} \d+) +([^\n]+)$/m.match (contents,
+				if (!/^([0-9a-f]+)-([0-9a-f]+) \S{4} [0-9a-f]+ ([0-9a-f]{2,}:[0-9a-f]{2} \d+) +([^\n]+)$/m.match (contents,
 						0, out info)) {
 					assert_not_reached ();
 				}
