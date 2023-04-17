@@ -21,7 +21,7 @@ INPUTS = [
 ]
 
 
-def generate_agent(input_dir, output_dir, host_os_family, host_cpu_mode, v8_mksnapshot):
+def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot):
     npm = os.environ.get("NPM", make_script_filename("npm"))
 
     entrypoint = input_dir / "agent-entrypoint.js"
@@ -56,7 +56,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_cpu_mode, v8_mksn
         subprocess.run([
                 npm, "run", "build:" + component,
                 "--",
-                "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
+                "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
                 "--silent",
             ], cwd=output_dir, check=True)
     chunks = []
@@ -93,15 +93,15 @@ def make_script_filename(name):
 
 if __name__ == "__main__":
     input_dir, output_dir = [Path(d).resolve() for d in sys.argv[1:3]]
-    host_os_family, host_cpu_mode = sys.argv[3:5]
-    v8_mksnapshot = sys.argv[5]
+    host_os_family, host_arch, host_cpu_mode = sys.argv[3:6]
+    v8_mksnapshot = sys.argv[6]
     if v8_mksnapshot != "":
         v8_mksnapshot = Path(v8_mksnapshot)
     else:
         v8_mksnapshot = None
 
     try:
-        generate_agent(input_dir, output_dir, host_os_family, host_cpu_mode, v8_mksnapshot)
+        generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot)
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)

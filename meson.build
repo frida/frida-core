@@ -45,6 +45,11 @@ else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
 endif
+gumjs_archs = {
+  'x86': 'ia32',
+  'x86_64': 'x64',
+}
+host_arch_gumjs = gumjs_archs.get(host_arch, host_arch)
 
 c_languages = ['c', 'cpp']
 if host_os_family == 'darwin'

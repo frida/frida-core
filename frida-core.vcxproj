@@ -246,49 +246,57 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing compiler resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\compiler.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">if $(ProcessorArchitecture)==amd64 (
+  set host_arch=x64
   set cpu_mode=64
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\x64-Release\bin\windows-x86_64\v8-mksnapshot-windows-x86_64.exe
 ) else (
+  set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
-$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %cpu_mode% %v8_mksnapshot% || exit 1
+$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
 REM. &gt; "$(IntDir)data\compiler.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">if $(ProcessorArchitecture)==amd64 (
+  set host_arch=x64
   set cpu_mode=64
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\x64-Release\bin\windows-x86_64\v8-mksnapshot-windows-x86_64.exe
 ) else (
+  set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
-$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %cpu_mode% %v8_mksnapshot% || exit 1
+$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
 REM. &gt; "$(IntDir)data\compiler.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">if $(ProcessorArchitecture)==amd64 (
+  set host_arch=x64
   set cpu_mode=64
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\x64-Release\bin\windows-x86_64\v8-mksnapshot-windows-x86_64.exe
 ) else (
+  set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
-$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %cpu_mode% %v8_mksnapshot% || exit 1
+$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
 REM. &gt; "$(IntDir)data\compiler.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">if $(ProcessorArchitecture)==amd64 (
+  set host_arch=x64
   set cpu_mode=64
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\x64-Release\bin\windows-x86_64\v8-mksnapshot-windows-x86_64.exe
 ) else (
+  set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
-$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %cpu_mode% %v8_mksnapshot% || exit 1
+$(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
 REM. &gt; "$(IntDir)data\compiler.stamp"

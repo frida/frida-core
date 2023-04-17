@@ -56,6 +56,11 @@ function computeSubstitutionValues() {
       throw new Error("missing FRIDA_HOST_OS_FAMILY");
     }
 
+    const hostArch = process.env.FRIDA_HOST_ARCH;
+    if (hostArch === undefined) {
+      throw new Error("missing FRIDA_HOST_ARCH");
+    }
+
     const hostCpuMode = process.env.FRIDA_HOST_CPU_MODE;
     if (hostCpuMode === undefined) {
       throw new Error("missing FRIDA_HOST_CPU_MODE");
@@ -150,6 +155,7 @@ function computeSubstitutionValues() {
         "Frida.version": "'0.0.0'",
         "Process.id": "1",
         "Process.platform": `'${hostOsFamily}'`,
+        "Process.arch": `'${hostArch}'`,
         "Process.pointerSize": (hostCpuMode === "64") ? "8" : "4",
         "__agentDirectories__": JSON.stringify(orderedAgentDirectories, null, 4),
         "__agentFiles__": JSON.stringify(orderedAgentFiles, null, 4),
