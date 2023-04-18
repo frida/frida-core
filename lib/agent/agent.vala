@@ -242,15 +242,19 @@ namespace Frida.Agent {
 
 			disable_child_gating ();
 
-			thread_suspend_monitor = null;
-
 			exceptor = null;
 
 			exit_monitor = null;
 
 			interceptor.end_transaction ();
 
+			interceptor.begin_transaction ();
+
+			thread_suspend_monitor = null;
+
 			invalidate_dbus_context ();
+
+			interceptor.end_transaction ();
 		}
 
 		private void run (owned FileDescriptorTablePadder padder) throws Error {
