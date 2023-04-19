@@ -119,6 +119,7 @@ function computeSubstitutionValues() {
         assets.push(...glob(crosspath.join(assetModulesDir, ...typeDir, "**", "*.d.ts")));
     }
     assets.push(...glob(crosspath.join(compilerDir, "ext", "lib.es*.d.ts")));
+    assets.push(...glob(crosspath.join(compilerDir, "ext", "lib.decorators*.d.ts")));
 
     const ignoredAssetFiles = new Set([
         "@frida/process/browser.js",
