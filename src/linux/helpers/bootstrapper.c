@@ -121,7 +121,7 @@ static bool frida_probe_process (size_t page_size, FridaProcessLayout * layout);
 static FridaRtldFlavor frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter);
 static FridaRtldFlavor frida_infer_rtld_flavor_from_filename (const char * name);
 static ssize_t frida_try_infer_rtld_flavor_from_maps_line (void * data, size_t size, void * user_data);
-static bool frida_path_is_libc (const char * path);
+static bool frida_path_is_libc (const char * path, FridaRtldFlavor rtld_flavor);
 static ssize_t frida_parse_auxv_entry (void * data, size_t size, void * user_data);
 static bool frida_collect_interpreter_symbol (const FridaElfExportDetails * details, void * user_data);
 static ssize_t frida_try_find_libc_from_maps_line (void * data, size_t size, void * user_data);
@@ -132,6 +132,7 @@ static void * frida_map_elf (FridaBootstrapContext * ctx, const char * path, voi
 static void frida_parse_file (const char * path, FridaParseFunc parse, void * user_data);
 static size_t frida_parse_size (const char * str);
 static bool frida_str_has_prefix (const char * str, const char * prefix);
+static bool frida_str_has_suffix (const char * str, const char * suffix);
 
 static int frida_socketpair (int domain, int type, int protocol, int sv[2]);
 static int frida_prctl (int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5);
@@ -361,7 +362,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
 
       for (map = r->r_map; map != NULL; map = map->l_next)
       {
-        if (frida_path_is_libc (map->l_name))
+        if (frida_path_is_libc (map->l_name, layout->rtld_flavor))
         {
           layout->libc = (void *) map->l_addr;
           break;
@@ -487,9 +488,12 @@ frida_try_infer_rtld_flavor_from_maps_line (void * data, size_t size, void * use
 }
 
 static bool
-frida_path_is_libc (const char * path)
+frida_path_is_libc (const char * path, FridaRtldFlavor rtld_flavor)
 {
   const char * last_slash, * name;
+
+  if (rtld_flavor == FRIDA_RTLD_ANDROID)
+    return frida_str_has_suffix (path, "/lib/libc.so") || frida_str_has_suffix (path, "/lib64/libc.so");
 
   last_slash = strrchr (path, '/');
   if (last_slash != NULL)
@@ -534,10 +538,14 @@ frida_collect_interpreter_symbol (const FridaElfExportDetails * details, void * 
   FridaProcessLayout * layout = user_data;
   bool found_both;
 
-  if (details->type == STT_OBJECT && strcmp (details->name, "_r_debug") == 0)
+  if (details->type == STT_OBJECT && (
+        strcmp (details->name, "_r_debug") == 0 ||
+        strcmp (details->name, "__dl__r_debug") == 0))
     layout->r_debug = details->address;
 
-  if (details->type == STT_FUNC && strcmp (details->name, "_dl_debug_state") == 0)
+  if (details->type == STT_FUNC && (
+        strcmp (details->name, "_dl_debug_state") == 0 ||
+        strcmp (details->name, "rtld_db_dlactivity") == 0))
     layout->r_brk = details->address;
 
   found_both = layout->r_debug != NULL && layout->r_brk != NULL;
@@ -558,7 +566,7 @@ frida_try_find_libc_from_maps_line (void * data, size_t size, void * user_data)
   *next_newline = '\0';
 
   path = strchr (line, '/');
-  if (path != NULL && frida_path_is_libc (path))
+  if (path != NULL && frida_path_is_libc (path, layout->rtld_flavor))
   {
     layout->libc = (void *) frida_parse_size (line);
     return -1;
@@ -959,15 +967,20 @@ frida_parse_size (const char * str)
 static bool
 frida_str_has_prefix (const char * str, const char * prefix)
 {
-  char c;
+  return strncmp (str, prefix, strlen (prefix)) == 0;
+}
 
-  while ((c = *prefix++) != '\0')
-  {
-    if (*str++ != c)
-      return false;
-  }
+static bool
+frida_str_has_suffix (const char * str, const char * suffix)
+{
+  size_t str_length, suffix_length;
 
-  return true;
+  str_length = strlen (str);
+  suffix_length = strlen (suffix);
+  if (str_length < suffix_length)
+    return false;
+
+  return strcmp (str + str_length - suffix_length, suffix) == 0;
 }
 
 static int
