@@ -27,6 +27,11 @@ namespace Frida.Agent {
 			construct;
 		}
 
+		public string? emulated_agent_path {
+			get;
+			set;
+		}
+
 		public StopReason stop_reason {
 			get;
 			set;
@@ -1304,9 +1309,6 @@ namespace Frida.Agent {
 				session.unprepare_for_termination ();
 		}
 
-#if !WINDOWS
-		private string? emulated_agent_path;
-#endif
 #if ANDROID && (X86 || X86_64)
 		private Promise<AgentSessionProvider>? get_emulated_request;
 		private AgentSessionProvider? cached_emulated_provider;
