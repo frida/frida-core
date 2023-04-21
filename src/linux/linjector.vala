@@ -183,16 +183,18 @@ namespace Frida {
 		public AgentDescriptor (PathTemplate name_template, Bytes? so32, Bytes? so64, AgentResource[] resources = {},
 				AgentMode mode = AgentMode.INSTANCED, TemporaryDirectory? tempdir = null) {
 			var all_resources = new Gee.ArrayList<AgentResource> ();
-			if (so32 != null) {
+			if (so32 != null && so32.length != 0) {
 				all_resources.add (new AgentResource (name_template.expand ("32"),
 					(mode == INSTANCED) ? _clone_so (so32) : so32, tempdir));
 			}
-			if (so64 != null) {
+			if (so64 != null && so64.length != 0) {
 				all_resources.add (new AgentResource (name_template.expand ("64"),
 					(mode == INSTANCED) ? _clone_so (so64) : so64, tempdir));
 			}
-			foreach (var r in resources)
-				all_resources.add (r);
+			foreach (var r in resources) {
+				if (r.blob.length != 0)
+					all_resources.add (r);
+			}
 
 			Object (name_template: name_template, resources: all_resources, mode: mode, tempdir: tempdir);
 		}
@@ -201,8 +203,6 @@ namespace Frida {
 			if (cached_path_template == null) {
 				TemporaryDirectory? first_tempdir = null;
 				foreach (AgentResource r in resources) {
-					if (r.blob.length == 0)
-						continue;
 					TemporaryFile f = r.get_file ();
 					adjust_file_permissions (f.path);
 					if (first_tempdir == null)

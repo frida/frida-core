@@ -447,6 +447,26 @@ namespace Frida {
 			return stream_request.future;
 		}
 
+		protected override string? get_emulated_agent_path (uint pid) throws Error {
+			unowned string name;
+			switch (cpu_type_from_pid (pid)) {
+				case Gum.CpuType.IA32:
+					name = "frida-agent-arm.so";
+					break;
+				case Gum.CpuType.AMD64:
+					name = "frida-agent-arm64.so";
+					break;
+				default:
+					throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on this architecture");
+			}
+
+			AgentResource? resource = agent.resources.first_match (r => r.name == name);
+			if (resource == null)
+				throw new Error.NOT_SUPPORTED ("Unable to handle emulated processes due to build configuration");
+
+			return resource.get_file ().path;
+		}
+
 #if ANDROID
 		private void on_system_server_agent_unloaded (InternalAgent dead_agent) {
 			dead_agent.unloaded.disconnect (on_system_server_agent_unloaded);

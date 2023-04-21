@@ -339,13 +339,23 @@ namespace Frida {
 
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			var entry = yield establish (pid, options, cancellable);
+			var raw_opts = options;
+			var opts = SessionOptions._deserialize (raw_opts);
+
+			if (opts.realm == EMULATED) {
+				if (opts.emulated_agent_path == null) {
+					opts.emulated_agent_path = get_emulated_agent_path (pid);
+					raw_opts = opts._serialize ();
+				}
+			}
+
+			var entry = yield establish (pid, raw_opts, cancellable);
 
 			var id = AgentSessionId.generate ();
 			entry.sessions.add (id);
 
 			try {
-				yield entry.provider.open (id, options, cancellable);
+				yield entry.provider.open (id, raw_opts, cancellable);
 			} catch (GLib.Error e) {
 				entry.sessions.remove (id);
 
@@ -477,6 +487,12 @@ namespace Frida {
 
 		protected abstract async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
 			Cancellable? cancellable, out Object? transport) throws Error, IOError;
+
+#if !WINDOWS
+		protected virtual string? get_emulated_agent_path (uint pid) throws Error {
+			return null;
+		}
+#endif
 
 		protected string make_agent_parameters (uint pid, string remote_address, HashTable<string, Variant> options) throws Error {
 			var parameters = new StringBuilder (remote_address);

@@ -728,6 +728,11 @@ namespace Frida {
 			default = 0;
 		}
 
+		public string? emulated_agent_path {
+			get;
+			set;
+		}
+
 		public HashTable<string, Variant> _serialize () {
 			var dict = make_parameters_dict ();
 
@@ -736,6 +741,9 @@ namespace Frida {
 
 			if (persist_timeout != 0)
 				dict["persist-timeout"] = new Variant.uint32 (persist_timeout);
+
+			if (emulated_agent_path != null)
+				dict["emulated-agent-path"] = new Variant.string (emulated_agent_path);
 
 			return dict;
 		}
@@ -755,6 +763,13 @@ namespace Frida {
 				if (!persist_timeout.is_of_type (VariantType.UINT32))
 					throw new Error.INVALID_ARGUMENT ("The 'persist-timeout' option must be a uint32");
 				options.persist_timeout = persist_timeout.get_uint32 ();
+			}
+
+			Variant? path = dict["emulated-agent-path"];
+			if (path != null) {
+				if (!path.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'emulated-agent-path' option must be a string");
+				options.emulated_agent_path = path.get_string ();
 			}
 
 			return options;

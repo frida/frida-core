@@ -136,15 +136,17 @@ namespace Frida.Agent {
 
 #if LINUX
 				var linjector_state = (LinuxInjectorState *) opaque_injector_state;
+				string? agent_parameters_with_transport_uri = null;
+				if (linjector_state != null) {
+					int agent_ctrlfd = linjector_state->agent_ctrlfd;
+					linjector_state->agent_ctrlfd = -1;
 
-				int agent_ctrlfd = linjector_state->agent_ctrlfd;
-				linjector_state->agent_ctrlfd = -1;
+					fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
+					Gum.Cloak.add_file_descriptor (agent_ctrlfd);
 
-				fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
-				Gum.Cloak.add_file_descriptor (agent_ctrlfd);
-
-				string agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
-				agent_parameters = agent_parameters_with_transport_uri;
+					agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
+					agent_parameters = agent_parameters_with_transport_uri;
+				}
 #endif
 
 				var ignore_scope = new ThreadIgnoreScope (FRIDA_THREAD);
@@ -765,6 +767,12 @@ namespace Frida.Agent {
 			}
 
 			if (opts.realm == EMULATED) {
+				string? path = opts.emulated_agent_path;
+				if (path == null)
+					throw new Error.INVALID_ARGUMENT ("Missing emulated agent path");
+				if (emulated_agent_path == null)
+					emulated_agent_path = path;
+
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 
 				var emulated_opts = new SessionOptions ();
@@ -1296,6 +1304,9 @@ namespace Frida.Agent {
 				session.unprepare_for_termination ();
 		}
 
+#if !WINDOWS
+		private string? emulated_agent_path;
+#endif
 #if ANDROID && (X86 || X86_64)
 		private Promise<AgentSessionProvider>? get_emulated_request;
 		private AgentSessionProvider? cached_emulated_provider;
@@ -1334,12 +1345,6 @@ namespace Frida.Agent {
 			try {
 				if (nb_api == null)
 					nb_api = NativeBridgeApi.open ();
-
-				string parent_path = Path.get_dirname (agent_path);
-				string emulated_agent_path = Path.build_filename (parent_path,
-					sizeof (void *) == 8 ? "frida-agent-arm64.so" : "frida-agent-arm.so");
-				if (!FileUtils.test (emulated_agent_path, EXISTS))
-					throw new Error.NOT_SUPPORTED ("Unable to handle emulated processes due to build configuration");
 
 				if (nb_api.load_library_ext != null && nb_api.flavor == LEGACY) {
 					/*
