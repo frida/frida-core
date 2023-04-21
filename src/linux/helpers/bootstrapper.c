@@ -493,7 +493,11 @@ frida_path_is_libc (const char * path, FridaRtldFlavor rtld_flavor)
   const char * last_slash, * name;
 
   if (rtld_flavor == FRIDA_RTLD_ANDROID)
-    return frida_str_has_suffix (path, "/lib/libc.so") || frida_str_has_suffix (path, "/lib64/libc.so");
+  {
+    return frida_str_has_suffix (path, "/lib/libc.so") ||
+        frida_str_has_suffix (path, "/lib64/libc.so") ||
+        frida_str_has_suffix (path, "/bionic/libc.so");
+  }
 
   last_slash = strrchr (path, '/');
   if (last_slash != NULL)
