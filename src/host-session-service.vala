@@ -488,11 +488,9 @@ namespace Frida {
 		protected abstract async Future<IOStream> perform_attach_to (uint pid, HashTable<string, Variant> options,
 			Cancellable? cancellable, out Object? transport) throws Error, IOError;
 
-#if !WINDOWS
 		protected virtual string? get_emulated_agent_path (uint pid) throws Error {
 			return null;
 		}
-#endif
 
 		protected string make_agent_parameters (uint pid, string remote_address, HashTable<string, Variant> options) throws Error {
 			var parameters = new StringBuilder (remote_address);
