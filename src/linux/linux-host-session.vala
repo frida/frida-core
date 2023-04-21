@@ -813,9 +813,8 @@ namespace Frida {
 		}
 
 		public async void load (Cancellable? cancellable) throws Error, IOError {
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
-
 #if ARM || ARM64
+			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
 			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
 #endif
