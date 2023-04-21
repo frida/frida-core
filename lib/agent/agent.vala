@@ -774,7 +774,7 @@ namespace Frida.Agent {
 			if (opts.realm == EMULATED) {
 				string? path = opts.emulated_agent_path;
 				if (path == null)
-					throw new Error.INVALID_ARGUMENT ("Missing emulated agent path");
+					throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on this OS");
 				if (emulated_agent_path == null)
 					emulated_agent_path = path;
 
