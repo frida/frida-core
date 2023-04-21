@@ -1817,11 +1817,11 @@ namespace Frida {
 				_tid = pid;
 		}
 
-		~SeizeSession () {
-			try {
-				close ();
-			} catch (Error e) {
-			}
+		public override void dispose () {
+			if (attach_state == ATTACHED)
+				close_potentially_running.begin ();
+
+			base.dispose ();
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
@@ -1886,6 +1886,20 @@ namespace Frida {
 			if (attach_state == ATTACHED) {
 				ptrace (DETACH, tid);
 				attach_state = ALREADY_ATTACHED;
+			}
+		}
+
+		private async void close_potentially_running () {
+			try {
+				close ();
+				return;
+			} catch (Error e) {
+			}
+
+			try {
+				yield suspend (null);
+				close ();
+			} catch (GLib.Error e) {
 			}
 		}
 
