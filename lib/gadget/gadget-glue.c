@@ -36,8 +36,12 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
       frida_gadget_load (NULL, NULL, NULL);
       break;
     case DLL_PROCESS_DETACH:
-      frida_gadget_unload ();
+    {
+      gboolean is_dynamic_unload = reserved == NULL;
+      if (is_dynamic_unload)
+        frida_gadget_unload ();
       break;
+    }
     default:
       break;
   }
