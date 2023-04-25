@@ -974,6 +974,8 @@ static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 
 static guint frida_kill_application (NSString * identifier);
+static gboolean frida_has_active_prewarm (gint pid);
+static guint8 * frida_skip_string (guint8 * cursor, guint8 * end);
 
 static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
@@ -1352,7 +1354,7 @@ _frida_darwin_helper_backend_kill_application (const gchar * identifier)
 static guint
 frida_kill_application (NSString * identifier)
 {
-  guint killed_pid = 0;
+  gint killed_pid = 0;
   FridaSpringboardApi * api;
   GTimer * timer;
   const double kill_timeout = 3.0;
@@ -1375,12 +1377,26 @@ frida_kill_application (NSString * identifier)
 
     timer = g_timer_new ();
 
-    while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < kill_timeout)
+    while ((killed_pid = [service pidForApplication:identifier]) > 0 && g_timer_elapsed (timer, NULL) < kill_timeout)
     {
       g_usleep (10000);
     }
 
     g_timer_destroy (timer);
+
+    if (killed_pid > 0 && frida_has_active_prewarm (killed_pid))
+    {
+      kill (killed_pid, SIGKILL);
+
+      timer = g_timer_new ();
+
+      while ((killed_pid = [service pidForApplication:identifier]) > 0 && g_timer_elapsed (timer, NULL) < kill_timeout)
+      {
+        g_usleep (10000);
+      }
+
+      g_timer_destroy (timer);
+    }
   }
   else
   {
@@ -1448,6 +1464,74 @@ beach:
   g_free (processes);
 
   return killed_pid;
+}
+
+static gboolean
+frida_has_active_prewarm (gint pid)
+{
+  gboolean result = false;
+  int mib_argmax[] = { CTL_KERN, KERN_ARGMAX };
+  int mib_args[] = { CTL_KERN, KERN_PROCARGS2, 0 };
+  size_t size;
+  gint32 arg_max = 0, argc;
+  guint8 * buffer = NULL, * cursor, * end;
+
+  size = sizeof (arg_max);
+
+  if (sysctl (mib_argmax, G_N_ELEMENTS (mib_argmax), &arg_max, &size, NULL, 0) != 0)
+    goto beach;
+  if (arg_max < sizeof (argc))
+    goto beach;
+
+  buffer = g_malloc (arg_max);
+  if (buffer == NULL)
+    goto beach;
+
+  mib_args[2] = pid;
+  size = arg_max;
+
+  if (sysctl (mib_args, G_N_ELEMENTS (mib_args), buffer, &size, NULL, 0) != 0)
+    goto beach;
+  if (size < sizeof (argc))
+    goto beach;
+
+  argc = *(gint32 *)buffer;
+  end = buffer + size;
+  cursor = buffer + sizeof (argc);
+
+  /* Skip executable name */
+  cursor = frida_skip_string (cursor, end);
+
+  /* Skip args */
+  while (argc-- != 0)
+    cursor = frida_skip_string (cursor, end);
+
+  /* Iterate environment */
+  while (cursor < end)
+  {
+    if (strstr ((char *)cursor, "ActivePrewarm=1"))
+    {
+      result = true;
+      break;
+    }
+    cursor = frida_skip_string (cursor, end);
+  }
+
+beach:
+  g_free (buffer);
+
+  return result;
+}
+
+static guint8 *
+frida_skip_string (guint8 * cursor, guint8 * end)
+{
+  while (cursor < end && *cursor != 0)
+    cursor++;
+  while (cursor < end && *cursor == 0)
+    cursor++;
+
+  return cursor;
 }
 
 static NSArray *

@@ -51,13 +51,18 @@ applyJailbreakQuirks();
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter(args) {
+    const envp = args[4];
+    if (isPrewarmLaunch(envp)) {
+      return;
+    }
+
     const path = args[1].readUtf8String();
 
     let rawIdentifier;
     if (path === '/usr/libexec/xpcproxy') {
       rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
     } else {
-      rawIdentifier = tryParseXpcServiceName(args[4]);
+      rawIdentifier = tryParseXpcServiceName(envp);
       if (rawIdentifier === null)
         return;
     }
@@ -120,6 +125,26 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     }
   }
 });
+
+function isPrewarmLaunch(envp) {
+  if (envp.isNull())
+    return null;
+
+  let cur = envp;
+  while (true) {
+    const elementPtr = cur.readPointer();
+    if (elementPtr.isNull())
+      break;
+
+    const element = elementPtr.readUtf8String();
+    if (element.startsWith('ActivePrewarm'))
+      return true;
+
+    cur = cur.add(pointerSize);
+  }
+
+  return false;
+}
 
 function tryParseXpcServiceName(envp) {
   if (envp.isNull())
