@@ -52,9 +52,10 @@ applyJailbreakQuirks();
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter(args) {
     const envp = args[4];
-    if (isPrewarmLaunch(envp)) {
+    const prewarm = isPrewarmLaunch(envp);
+
+    if (prewarm && !gating)
       return;
-    }
 
     const path = args[1].readUtf8String();
 
@@ -70,7 +71,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     let identifier, event;
     if (rawIdentifier.startsWith('UIKitApplication:')) {
       identifier = rawIdentifier.substring(17, rawIdentifier.indexOf('['));
-      if (upcoming.has(identifier))
+      if (!prewarm && upcoming.has(identifier))
         event = 'launch:app';
       else if (gating)
         event = 'spawn';
