@@ -1489,8 +1489,6 @@ frida_has_active_prewarm (gint pid)
 
   if (sysctl (mib_args, G_N_ELEMENTS (mib_args), buffer, &size, NULL, 0) != 0)
     goto beach;
-  if (size < sizeof (argc))
-    goto beach;
 
   argc = *(gint32 *) buffer;
   end = buffer + size;
