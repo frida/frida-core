@@ -1094,8 +1094,6 @@ namespace Frida {
 				return process.pid;
 			} catch (Fruity.InstallationProxyError e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			} catch (LLDB.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
@@ -1149,8 +1147,7 @@ namespace Frida {
 				lldb_session = new LLDBSession (lldb, process, null, channel_provider);
 				yield lldb_session.kill (cancellable);
 				yield lldb_session.close (cancellable);
-
-			} catch (LLDB.Error e) {
+			} catch (Error e) {
 				var process_control = yield Fruity.ProcessControlService.open (channel_provider, cancellable);
 				yield process_control.kill (pid, cancellable);
 			}
@@ -1178,18 +1175,14 @@ namespace Frida {
 			if (pid == 0)
 				throw new Error.NOT_SUPPORTED ("The Frida system session is not available on jailed iOS");
 
-			try {
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
-				var lldb = yield start_lldb_service (lockdown, cancellable);
-				var process = yield lldb.attach_by_pid (pid, cancellable);
+			var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+			var lldb = yield start_lldb_service (lockdown, cancellable);
+			var process = yield lldb.attach_by_pid (pid, cancellable);
 
-				string? gadget_path = null;
+			string? gadget_path = null;
 
-				lldb_session = new LLDBSession (lldb, process, gadget_path, channel_provider);
-				add_lldb_session (lldb_session);
-			} catch (LLDB.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
+			lldb_session = new LLDBSession (lldb, process, gadget_path, channel_provider);
+			add_lldb_session (lldb_session);
 
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
@@ -1201,7 +1194,7 @@ namespace Frida {
 		}
 
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
-				throws Error, LLDB.Error, IOError {
+				throws Error, IOError {
 			foreach (unowned string endpoint in DEBUGSERVER_ENDPOINT_CANDIDATES) {
 				try {
 					var lldb_stream = yield lockdown.start_service (endpoint, cancellable);
@@ -1581,19 +1574,11 @@ namespace Frida {
 			}
 
 			public async void resume (Cancellable? cancellable) throws Error, IOError {
-				try {
-					yield lldb.detach (cancellable);
-				} catch (LLDB.Error e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
+				yield lldb.detach (cancellable);
 			}
 
 			public async void kill (Cancellable? cancellable) throws Error, IOError {
-				try {
-					yield lldb.kill (cancellable);
-				} catch (LLDB.Error e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
+				yield lldb.kill (cancellable);
 			}
 
 			public async Fruity.Injector.GadgetDetails query_gadget_details (Cancellable? cancellable) throws Error, IOError {

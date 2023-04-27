@@ -78,6 +78,9 @@
     <None Include="src\agent-container.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="src\gdb.vala">
+      <Filter>Source Files</Filter>
+    </None>
     <None Include="src\system.vala">
       <Filter>Source Files</Filter>
     </None>
@@ -147,6 +150,9 @@
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\agent-container.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\gdb.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\system.c">

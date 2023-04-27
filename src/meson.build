@@ -5,6 +5,7 @@ base_sources = [
   'portal-service.vala',
   'host-session-service.vala',
   'agent-container.vala',
+  'gdb.vala',
   'system.vala',
   'file-monitor.vala',
   'async-task.vala',
