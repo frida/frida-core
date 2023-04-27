@@ -51,8 +51,8 @@ applyJailbreakQuirks();
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter(args) {
-    const envp = args[4];
-    const prewarm = isPrewarmLaunch(envp);
+    const env = parseStringv(args[4]);
+    const prewarm = isPrewarmLaunch(env);
 
     if (prewarm && !gating)
       return;
@@ -63,7 +63,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     if (path === '/usr/libexec/xpcproxy') {
       rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
     } else {
-      rawIdentifier = tryParseXpcServiceName(envp);
+      rawIdentifier = tryParseXpcServiceName(env);
       if (rawIdentifier === null)
         return;
     }
@@ -127,41 +127,40 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
   }
 });
 
-function isPrewarmLaunch(envp) {
-  if (envp.isNull())
-    return null;
+function parseStringv(p) {
+  const strings = [];
 
-  let cur = envp;
+  if (p.isNull())
+    return [];
+
+  let cur = p;
   while (true) {
     const elementPtr = cur.readPointer();
     if (elementPtr.isNull())
       break;
 
     const element = elementPtr.readUtf8String();
-    if (element.startsWith('ActivePrewarm'))
-      return true;
+    strings.push(element);
 
     cur = cur.add(pointerSize);
+  }
+
+  return strings;
+}
+
+function isPrewarmLaunch(env) {
+  for (const element of env) {
+    if (element.startsWith('ActivePrewarm='))
+      return true;
   }
 
   return false;
 }
 
-function tryParseXpcServiceName(envp) {
-  if (envp.isNull())
-    return null;
-
-  let cur = envp;
-  while (true) {
-    const elementPtr = cur.readPointer();
-    if (elementPtr.isNull())
-      break;
-
-    const element = elementPtr.readUtf8String();
+function tryParseXpcServiceName(env) {
+  for (const element of env) {
     if (element.startsWith('XPC_SERVICE_NAME='))
       return element.substring(17);
-
-    cur = cur.add(pointerSize);
   }
 
   return null;

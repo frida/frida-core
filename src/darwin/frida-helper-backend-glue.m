@@ -1369,11 +1369,21 @@ frida_kill_application (NSString * identifier)
     service = [api->FBSSystemService sharedService];
 
     killed_pid = [service pidForApplication:identifier];
+    if (killed_pid <= 0)
+      goto beach;
 
-    [service terminateApplication:identifier
-                        forReason:FBProcessKillReasonUser
-                        andReport:NO
-                  withDescription:@"killed from Frida"];
+    if (frida_has_active_prewarm (killed_pid))
+    {
+      kill (killed_pid, SIGKILL);
+    }
+    else
+    {
+      [service terminateApplication:identifier
+                          forReason:FBProcessKillReasonUser
+                          andReport:NO
+                    withDescription:@"killed from Frida"];
+
+    }
 
     timer = g_timer_new ();
 
@@ -1383,20 +1393,6 @@ frida_kill_application (NSString * identifier)
     }
 
     g_timer_destroy (timer);
-
-    if (killed_pid > 0 && frida_has_active_prewarm (killed_pid))
-    {
-      kill (killed_pid, SIGKILL);
-
-      timer = g_timer_new ();
-
-      while ((killed_pid = [service pidForApplication:identifier]) > 0 && g_timer_elapsed (timer, NULL) < kill_timeout)
-      {
-        g_usleep (10000);
-      }
-
-      g_timer_destroy (timer);
-    }
   }
   else
   {
@@ -1469,18 +1465,19 @@ beach:
 static gboolean
 frida_has_active_prewarm (gint pid)
 {
-  gboolean result = false;
+  gboolean prewarm_active = FALSE;
   int mib_argmax[] = { CTL_KERN, KERN_ARGMAX };
   int mib_args[] = { CTL_KERN, KERN_PROCARGS2, 0 };
+  guint8 * buffer;
   size_t size;
-  gint32 arg_max = 0, argc;
-  guint8 * buffer = NULL, * cursor, * end;
+  gint32 arg_max, argc;
+  guint8 * cursor, * end;
 
+  buffer = NULL;
   size = sizeof (arg_max);
 
+  arg_max = 0;
   if (sysctl (mib_argmax, G_N_ELEMENTS (mib_argmax), &arg_max, &size, NULL, 0) != 0)
-    goto beach;
-  if (arg_max < sizeof (argc))
     goto beach;
 
   buffer = g_malloc (arg_max);
@@ -1507,11 +1504,11 @@ frida_has_active_prewarm (gint pid)
     cursor = frida_skip_string (cursor, end);
 
   /* Iterate environment */
-  while (cursor < end)
+  while (cursor != end)
   {
-    if (strstr ((char *)cursor, "ActivePrewarm=1"))
+    if (strstr ((char *)cursor, "ActivePrewarm=1") != NULL)
     {
-      result = true;
+      prewarm_active = true;
       break;
     }
     cursor = frida_skip_string (cursor, end);
@@ -1520,15 +1517,15 @@ frida_has_active_prewarm (gint pid)
 beach:
   g_free (buffer);
 
-  return result;
+  return prewarm_active;
 }
 
 static guint8 *
 frida_skip_string (guint8 * cursor, guint8 * end)
 {
-  while (cursor < end && *cursor != 0)
+  while (cursor != end && *cursor != 0)
     cursor++;
-  while (cursor < end && *cursor == 0)
+  while (cursor != end && *cursor == 0)
     cursor++;
 
   return cursor;
