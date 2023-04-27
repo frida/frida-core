@@ -1506,7 +1506,7 @@ frida_has_active_prewarm (gint pid)
   /* Iterate environment */
   while (cursor != end)
   {
-    if (strstr ((char *)cursor, "ActivePrewarm=1") != NULL)
+    if (strstr ((char *) cursor, "ActivePrewarm=1") != NULL)
     {
       prewarm_active = true;
       break;

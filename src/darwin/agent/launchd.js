@@ -149,21 +149,14 @@ function parseStringv(p) {
 }
 
 function isPrewarmLaunch(env) {
-  for (const element of env) {
-    if (element.startsWith('ActivePrewarm='))
-      return true;
-  }
-
-  return false;
+  return env.some(candidate => candidate.startsWith('ActivePrewarm='));
 }
 
 function tryParseXpcServiceName(env) {
-  for (const element of env) {
-    if (element.startsWith('XPC_SERVICE_NAME='))
-      return element.substring(17);
-  }
-
-  return null;
+  const entry = env.find(candidate => candidate.startsWith('XPC_SERVICE_NAME='));
+  if (entry === undefined)
+    return null;
+  return entry.substring(17);
 }
 
 function applyJailbreakQuirks() {
