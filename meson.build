@@ -409,12 +409,14 @@ add_project_arguments(native_vala_flags, language: ['vala'], native: true)
 subdir('tools')
 subdir('lib')
 subdir('src')
-if host_os not in ['watchos', 'tvos']
+if host_os != 'watchos'
   subdir('server')
   subdir('portal')
   subdir('inject')
 
-  if get_option('tests')
-    subdir('tests')
+  if host_os != 'tvos'
+    if get_option('tests')
+      subdir('tests')
+    endif
   endif
 endif

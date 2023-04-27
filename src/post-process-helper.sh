@@ -70,7 +70,7 @@ case $host_os in
         "$codesign" -f -s "$WATCHOS_CERTID" "$intermediate_path" || exit 1
         ;;
       tvos)
-        "$codesign" -f -s "$TVOS_CERTID" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$TVOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

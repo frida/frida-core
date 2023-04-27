@@ -33,7 +33,7 @@ namespace Frida {
 		public Future<IOStream> open (string address, Cancellable? cancellable) {
 #if WINDOWS
 			return WindowsPipe.open (address, cancellable);
-#elif MACOS || IOS
+#elif MACOS || IOS || TVOS
 			return DarwinPipe.open (address, cancellable);
 #else
 			return UnixPipe.open (address, cancellable);
@@ -116,7 +116,7 @@ namespace Frida {
 		protected extern static InputStream _make_input_stream (void * backend);
 		protected extern static OutputStream _make_output_stream (void * backend);
 	}
-#elif MACOS || IOS
+#elif MACOS || IOS || TVOS
 	namespace DarwinPipe {
 		public static Future<IOStream> open (string address, Cancellable? cancellable) {
 			var promise = new Promise<IOStream> ();

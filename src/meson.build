@@ -66,7 +66,7 @@ if host_os_family == 'darwin'
     'darwin/policy-softener.vala',
     'darwin/policy-softener-glue.c',
   ]
-  if host_os in ['macos', 'ios']
+  if host_os in ['macos', 'ios', 'tvos']
     helper_backend_sources += [
       'darwin/frida-helper-backend.vala',
       'darwin/frida-helper-backend-glue.m',
@@ -78,7 +78,7 @@ if host_os_family == 'darwin'
       'darwin/frida-helper-null-backend.vala',
     ]
   endif
-  if host_os == 'ios'
+  if host_os in ['ios', 'tvos']
     helper_backend_sources += [
       'darwin/springboard.m',
       'darwin/substituted-client.c',

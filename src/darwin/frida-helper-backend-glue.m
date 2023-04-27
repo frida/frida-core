@@ -78,7 +78,7 @@
     goto bsd_failure; \
   }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 #else
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
