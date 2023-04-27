@@ -5,12 +5,18 @@ if [ -z "$FRIDA_VERSION" ]; then
   exit 2
 fi
 
-if [ $# -ne 2 ]; then
-  echo "Usage: $0 path/to/prefix output.deb" > /dev/stderr
+if [ $# -ne 3 ]; then
+  echo "Usage: $0 [ios|tvos] path/to/prefix output.deb" > /dev/stderr
   exit 3
 fi
-prefix=$1
-output_deb=$2
+os=$1
+prefix=$2
+output_deb=$3
+
+arch=iphoneos-arm
+if [ "$os" = "tvos" ]; then
+  arch=appletvos-arm64
+fi
 
 executable=$prefix/usr/bin/frida-server
 if [ ! -f "$executable" ]; then
@@ -82,7 +88,7 @@ Version: $FRIDA_VERSION
 Priority: optional
 Size: 1337
 Installed-Size: $installed_size
-Architecture: iphoneos-arm
+Architecture: $arch
 Description: Observe and reprogram running programs.
 Homepage: https://frida.re/
 Maintainer: Ole André Vadla Ravnås <oleavr@nowsecure.com>
