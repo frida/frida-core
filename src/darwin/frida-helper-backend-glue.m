@@ -1492,7 +1492,7 @@ frida_has_active_prewarm (gint pid)
   if (size < sizeof (argc))
     goto beach;
 
-  argc = *(gint32 *)buffer;
+  argc = *(gint32 *) buffer;
   end = buffer + size;
   cursor = buffer + sizeof (argc);
 
@@ -1523,12 +1523,10 @@ beach:
 static guint8 *
 frida_skip_string (guint8 * cursor, guint8 * end)
 {
-  while (cursor != end && *cursor != 0)
-    cursor++;
-  while (cursor != end && *cursor == 0)
+  while (cursor != end && *cursor != '\0')
     cursor++;
 
-  return cursor;
+  return ++cursor;
 }
 
 static NSArray *
