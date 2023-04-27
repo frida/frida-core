@@ -383,6 +383,10 @@ if host_os_family == 'linux'
   add_project_arguments('-D_GNU_SOURCE=1', language: c_languages)
 endif
 
+if host_os == 'tvos'
+  add_project_arguments('-I' + meson.current_source_dir() / 'src', language: c_languages)
+endif
+
 vala_flags += [
   '--vapidir=' + meson.current_source_dir() / 'vapi',
   '--pkg', 'config',

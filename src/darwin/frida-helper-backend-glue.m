@@ -1,4 +1,5 @@
 #include "frida-helper-backend.h"
+#include "frida-tvos.h"
 
 #include <capstone.h>
 #include <dispatch/dispatch.h>
