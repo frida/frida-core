@@ -10,7 +10,7 @@ namespace Frida.Portal {
 	private static string? control_origin = null;
 	private static string? control_token = null;
 	private static string? control_asset_root = null;
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 	private static bool daemonize = false;
 #endif
 
@@ -32,7 +32,7 @@ namespace Frida.Portal {
 			"TOKEN" },
 		{ "control-asset-root", 0, 0, OptionArg.FILENAME, ref control_asset_root, "Serve static files inside ROOT on control " +
 			"endpoint (by default no files are served)", "ROOT" },
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
 		{ null }
@@ -72,7 +72,7 @@ namespace Frida.Portal {
 		}
 
 		ReadyHandler? on_ready = null;
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 		if (daemonize) {
 			var sync_fds = new int[2];
 
