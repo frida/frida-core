@@ -145,6 +145,598 @@ namespace Frida {
 		DEBUGGER
 	}
 
+	public class AgentMessageTransmitter : Object {
+		public signal void closed ();
+		public signal void new_candidates (string[] candidate_sdps);
+		public signal void candidate_gathering_done ();
+
+		public uint persist_timeout {
+			get;
+			construct;
+		}
+
+		public AgentMessageSink? message_sink {
+			get;
+			set;
+		}
+
+		public MainContext frida_context {
+			get;
+			construct;
+		}
+
+		public MainContext dbus_context {
+			get;
+			construct;
+		}
+
+		private Promise<bool>? close_request;
+
+		private State state = LIVE;
+
+		private TimeoutSource? expiry_timer;
+
+		private uint last_rx_batch_id = 0;
+		private Gee.LinkedList<PendingMessage> pending_messages = new Gee.LinkedList<PendingMessage> ();
+		private int next_serial = 1;
+		private uint pending_deliveries = 0;
+		private Cancellable delivery_cancellable = new Cancellable ();
+
+#if HAVE_NICE
+		private Nice.Agent? nice_agent;
+		private uint nice_stream_id;
+		private uint nice_component_id;
+		private SctpConnection? nice_iostream;
+		private DBusConnection? nice_connection;
+		private uint nice_registration_id;
+#endif
+		private AgentMessageSink? nice_message_sink;
+		private Cancellable nice_cancellable = new Cancellable ();
+
+		private enum State {
+			LIVE,
+			INTERRUPTED
+		}
+
+		public AgentMessageTransmitter (uint persist_timeout, MainContext frida_context, MainContext dbus_context) {
+			Object (
+				persist_timeout: persist_timeout,
+				frida_context: frida_context,
+				dbus_context: dbus_context
+			);
+		}
+
+		construct {
+			assert (frida_context != null);
+			assert (dbus_context != null);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			while (close_request != null) {
+				try {
+					yield close_request.future.wait_async (cancellable);
+					return;
+				} catch (GLib.Error e) {
+					assert (e is IOError.CANCELLED);
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			close_request = new Promise<bool> ();
+
+			nice_cancellable.cancel ();
+
+			delivery_cancellable.cancel ();
+
+			yield teardown_peer_connection_and_emit_closed ();
+
+			message_sink = null;
+
+			close_request.resolve (true);
+		}
+
+		public void check_okay_to_receive () throws Error {
+			if (state == INTERRUPTED)
+				throw new Error.INVALID_OPERATION ("Cannot receive messages while interrupted");
+		}
+
+		public void interrupt () throws Error {
+			if (persist_timeout == 0 || expiry_timer != null)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			state = INTERRUPTED;
+			delivery_cancellable.cancel ();
+
+			expiry_timer = new TimeoutSource.seconds (persist_timeout);
+			expiry_timer.set_callback (() => {
+				close.begin (null);
+				return false;
+			});
+			expiry_timer.attach (frida_context);
+		}
+
+		public void resume (uint rx_batch_id, out uint tx_batch_id) throws Error {
+			if (persist_timeout == 0 || expiry_timer == null)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			if (rx_batch_id != 0) {
+				PendingMessage? m;
+				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= rx_batch_id) {
+					pending_messages.poll ();
+				}
+			}
+
+			expiry_timer.destroy ();
+			expiry_timer = null;
+
+			delivery_cancellable = new Cancellable ();
+			state = LIVE;
+
+			schedule_on_frida_thread (() => {
+				maybe_deliver_pending_messages ();
+				return false;
+			});
+
+			tx_batch_id = last_rx_batch_id;
+		}
+
+		public void notify_rx_batch_id (uint batch_id) throws Error {
+			if (state == INTERRUPTED)
+				throw new Error.INVALID_OPERATION ("Cannot receive messages while interrupted");
+
+			last_rx_batch_id = batch_id;
+		}
+
+#if HAVE_NICE
+		public async void offer_peer_connection (string offer_sdp, HashTable<string, Variant> peer_options,
+				Cancellable? cancellable, out string answer_sdp) throws Error, IOError {
+			var offer = PeerSessionDescription.parse (offer_sdp);
+
+			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, ICE_TRICKLE);
+			agent.set_software ("Frida");
+			agent.controlling_mode = false;
+			agent.ice_tcp = false;
+
+			uint stream_id = agent.add_stream (1);
+			if (stream_id == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to add stream");
+			uint component_id = 1;
+			agent.set_stream_name (stream_id, "application");
+			agent.set_remote_credentials (stream_id, offer.ice_ufrag, offer.ice_pwd);
+
+			yield PeerConnection.configure_agent (agent, stream_id, component_id, PeerOptions._deserialize (peer_options),
+				cancellable);
+
+			uint8[] cert_der;
+			string cert_pem, key_pem;
+			yield generate_certificate (out cert_der, out cert_pem, out key_pem);
+
+			TlsCertificate certificate;
+			try {
+				certificate = new TlsCertificate.from_pem (cert_pem + key_pem, -1);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			var answer = new PeerSessionDescription ();
+			answer.session_id = PeerSessionId.generate ();
+			agent.get_local_credentials (stream_id, out answer.ice_ufrag, out answer.ice_pwd);
+			answer.ice_trickle = offer.ice_trickle;
+			answer.fingerprint = PeerConnection.compute_certificate_fingerprint (cert_der);
+			answer.setup = (offer.setup != ACTIVE) ? PeerSetup.ACTIVE : PeerSetup.ACTPASS;
+			answer.sctp_port = offer.sctp_port;
+			answer.max_message_size = offer.max_message_size;
+
+			answer_sdp = answer.to_sdp ();
+
+			if (nice_agent != null)
+				throw new Error.INVALID_OPERATION ("Peer connection already exists");
+
+			nice_agent = agent;
+			nice_stream_id = stream_id;
+			nice_component_id = component_id;
+
+			schedule_on_dbus_thread (() => {
+				open_peer_connection.begin (certificate, offer, cancellable);
+				return false;
+			});
+		}
+
+		private async void teardown_peer_connection_and_emit_closed () {
+			schedule_on_frida_thread (() => {
+				if (nice_agent != null)
+					close_nice_resources_and_emit_closed.begin ();
+				else
+					closed ();
+				return Source.REMOVE;
+			});
+		}
+
+		private async void close_nice_resources_and_emit_closed () {
+			yield close_nice_resources (true);
+
+			closed ();
+		}
+
+		private async void close_nice_resources (bool connection_still_alive) {
+			Nice.Agent? agent = nice_agent;
+			DBusConnection? conn = nice_connection;
+
+			discard_nice_resources ();
+
+			if (conn != null && connection_still_alive) {
+				try {
+					yield conn.flush ();
+					yield conn.close ();
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (agent != null) {
+				schedule_on_dbus_thread (() => {
+					agent.close_async.begin ();
+
+					schedule_on_frida_thread (() => {
+						close_nice_resources.callback ();
+						return false;
+					});
+
+					return false;
+				});
+				yield;
+			}
+		}
+
+		private void discard_nice_resources () {
+			nice_cancellable.cancel ();
+			nice_cancellable = new Cancellable ();
+
+			nice_message_sink = null;
+
+			if (nice_registration_id != 0) {
+				nice_connection.unregister_object (nice_registration_id);
+				nice_registration_id = 0;
+			}
+
+			if (nice_connection != null) {
+				nice_connection.on_closed.disconnect (on_nice_connection_closed);
+				nice_connection = null;
+			}
+
+			nice_iostream = null;
+
+			nice_component_id = 0;
+			nice_stream_id = 0;
+
+			nice_agent = null;
+		}
+
+		private async void open_peer_connection (TlsCertificate certificate, PeerSessionDescription offer,
+				Cancellable? cancellable) {
+			Nice.Agent agent = nice_agent;
+			DtlsConnection? tc = null;
+			ulong candidate_handler = 0;
+			ulong gathering_handler = 0;
+			ulong accept_handler = 0;
+			try {
+				agent.component_state_changed.connect (on_component_state_changed);
+
+				var pending_candidates = new Gee.ArrayList<string> ();
+				candidate_handler = agent.new_candidate_full.connect (candidate => {
+					string candidate_sdp = agent.generate_local_candidate_sdp (candidate);
+					pending_candidates.add (candidate_sdp);
+					if (pending_candidates.size == 1) {
+						schedule_on_dbus_thread (() => {
+							var stolen_candidates = pending_candidates;
+							pending_candidates = new Gee.ArrayList<string> ();
+
+							schedule_on_frida_thread (() => {
+								int n = stolen_candidates.size;
+								var sdps = new string[n + 1];
+								for (int i = 0; i != n; i++)
+									sdps[i] = stolen_candidates[i];
+
+								new_candidates (sdps[0:n]);
+
+								return false;
+							});
+
+							return false;
+						});
+					}
+				});
+
+				gathering_handler = agent.candidate_gathering_done.connect (stream_id => {
+					schedule_on_dbus_thread (() => {
+						schedule_on_frida_thread (() => {
+							candidate_gathering_done ();
+							return false;
+						});
+						return false;
+					});
+				});
+
+				if (!agent.gather_candidates (nice_stream_id))
+					throw new Error.NOT_SUPPORTED ("Unable to gather local candidates");
+
+				var socket = new PeerSocket (agent, nice_stream_id, nice_component_id);
+
+				if (offer.setup == ACTIVE) {
+					tc = DtlsServerConnection.new (socket, certificate);
+				} else {
+					tc = DtlsClientConnection.new (socket, null);
+					tc.set_certificate (certificate);
+				}
+				tc.set_database (null);
+				accept_handler = tc.accept_certificate.connect ((peer_cert, errors) => {
+					return PeerConnection.compute_certificate_fingerprint (peer_cert.certificate.data) == offer.fingerprint;
+				});
+				yield tc.handshake_async (Priority.DEFAULT, nice_cancellable);
+
+				nice_iostream = new SctpConnection (tc, offer.setup, offer.sctp_port, offer.max_message_size);
+
+				schedule_on_frida_thread (() => {
+					complete_peer_connection.begin ();
+					return false;
+				});
+			} catch (GLib.Error e) {
+				schedule_on_frida_thread (() => {
+					close_nice_resources.begin (false);
+					return false;
+				});
+			} finally {
+				if (accept_handler != 0)
+					tc.disconnect (accept_handler);
+				if (gathering_handler != 0)
+					agent.disconnect (gathering_handler);
+				if (candidate_handler != 0)
+					agent.disconnect (candidate_handler);
+			}
+		}
+
+		private async void complete_peer_connection () {
+			try {
+				nice_connection = yield new DBusConnection (nice_iostream, null, DELAY_MESSAGE_PROCESSING, null,
+					nice_cancellable);
+				nice_connection.on_closed.connect (on_nice_connection_closed);
+
+				try {
+					nice_registration_id = nice_connection.register_object (ObjectPath.AGENT_SESSION,
+						(AgentSession) this);
+				} catch (IOError io_error) {
+					assert_not_reached ();
+				}
+
+				nice_connection.start_message_processing ();
+
+				nice_message_sink = yield nice_connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK,
+					DO_NOT_LOAD_PROPERTIES, null);
+			} catch (GLib.Error e) {
+				close_nice_resources.begin (false);
+			}
+		}
+
+		private void on_component_state_changed (uint stream_id, uint component_id, Nice.ComponentState state) {
+			switch (state) {
+				case FAILED:
+					nice_cancellable.cancel ();
+					break;
+				default:
+					break;
+			}
+		}
+
+		public void add_candidates (string[] candidate_sdps) throws Error {
+			Nice.Agent? agent = nice_agent;
+			if (agent == null)
+				throw new Error.INVALID_OPERATION ("No peer connection in progress");
+
+			string[] candidate_sdps_copy = candidate_sdps;
+			schedule_on_dbus_thread (() => {
+				var candidates = new SList<Nice.Candidate> ();
+				foreach (unowned string sdp in candidate_sdps_copy) {
+					var candidate = agent.parse_remote_candidate_sdp (nice_stream_id, sdp);
+					if (candidate != null)
+						candidates.append (candidate);
+				}
+
+				agent.set_remote_candidates (nice_stream_id, nice_component_id, candidates);
+
+				return false;
+			});
+		}
+
+		public void notify_candidate_gathering_done () throws Error {
+			Nice.Agent? agent = nice_agent;
+			if (agent == null)
+				throw new Error.INVALID_OPERATION ("No peer connection in progress");
+
+			schedule_on_dbus_thread (() => {
+				agent.peer_candidate_gathering_done (nice_stream_id);
+
+				return false;
+			});
+		}
+
+		private void on_nice_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			handle_nice_connection_closure.begin ();
+		}
+
+		private async void handle_nice_connection_closure () {
+			yield close_nice_resources (false);
+
+			if (persist_timeout != 0) {
+				try {
+					interrupt ();
+				} catch (Error e) {
+				}
+			} else {
+				close.begin (null);
+			}
+		}
+#else
+		public async void offer_peer_connection (string offer_sdp, HashTable<string, Variant> peer_options,
+				Cancellable? cancellable, out string answer_sdp) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Peer-to-peer support not available due to build configuration");
+		}
+
+		private async void teardown_peer_connection_and_emit_closed () {
+			schedule_on_frida_thread (() => {
+				closed ();
+				return Source.REMOVE;
+			});
+		}
+
+		public void add_candidates (string[] candidate_sdps) throws Error {
+		}
+
+		public void notify_candidate_gathering_done () throws Error {
+		}
+#endif
+
+		public void begin_migration () {
+			state = INTERRUPTED;
+		}
+
+		public void commit_migration () {
+			if (expiry_timer != null)
+				return;
+
+			state = LIVE;
+
+			maybe_deliver_pending_messages ();
+		}
+
+		public void post_message_from_script (AgentScriptId script_id, string json, Bytes? data) {
+			pending_messages.offer (new PendingMessage (next_serial++, AgentMessageKind.SCRIPT, script_id, json, data));
+			maybe_deliver_pending_messages ();
+		}
+
+		public void post_message_from_debugger (AgentScriptId script_id, string message) {
+			pending_messages.offer (new PendingMessage (next_serial++, AgentMessageKind.DEBUGGER, script_id, message));
+			maybe_deliver_pending_messages ();
+		}
+
+		private void maybe_deliver_pending_messages () {
+			if (state != LIVE)
+				return;
+
+			AgentMessageSink? sink = (nice_message_sink != null) ? nice_message_sink : message_sink;
+			if (sink == null)
+				return;
+
+			if (pending_messages.is_empty)
+				return;
+
+			var batch = new Gee.ArrayList<PendingMessage> ();
+			void * items = null;
+			int n_items = 0;
+			size_t total_size = 0;
+			size_t max_size = 4 * 1024 * 1024;
+			PendingMessage? m;
+			while ((m = pending_messages.peek ()) != null) {
+				size_t message_size = m.estimate_size_in_bytes ();
+				if (total_size + message_size > max_size && !batch.is_empty)
+					break;
+				pending_messages.poll ();
+				batch.add (m);
+
+				n_items++;
+				items = realloc (items, n_items * sizeof (AgentMessage));
+
+				AgentMessage * am = (AgentMessage *) items + n_items - 1;
+
+				am->kind = m.kind;
+				am->script_id = m.script_id;
+
+				*((void **) &am->text) = m.text;
+
+				unowned Bytes? data = m.data;
+				am->has_data = data != null;
+				*((void **) &am->data) = am->has_data ? data.get_data () : null;
+				am->data.length = am->has_data ? data.length : 0;
+
+				total_size += message_size;
+			}
+
+			if (persist_timeout == 0)
+				emit_batch (sink, batch, items);
+			else
+				deliver_batch.begin (sink, batch, items);
+		}
+
+		private void emit_batch (AgentMessageSink sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+			items_arr.length = messages.size;
+
+			sink.post_messages.begin (items_arr, 0, delivery_cancellable);
+
+			free (items);
+		}
+
+		private async void deliver_batch (AgentMessageSink sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			bool success = false;
+			pending_deliveries++;
+			try {
+				int n = messages.size;
+
+				foreach (var message in messages)
+					message.delivery_attempts++;
+
+				unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+				items_arr.length = n;
+
+				uint batch_id = messages[n - 1].serial;
+
+				yield sink.post_messages (items_arr, batch_id, delivery_cancellable);
+
+				success = true;
+			} catch (GLib.Error e) {
+				pending_messages.add_all (messages);
+				pending_messages.sort ((a, b) => a.serial - b.serial);
+			} finally {
+				pending_deliveries--;
+				if (pending_deliveries == 0 && success)
+					next_serial = 1;
+
+				free (items);
+			}
+		}
+
+		protected void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (frida_context);
+		}
+
+		protected void schedule_on_dbus_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (dbus_context);
+		}
+
+		private class PendingMessage {
+			public int serial;
+			public AgentMessageKind kind;
+			public AgentScriptId script_id;
+			public string text;
+			public Bytes? data;
+			public uint delivery_attempts;
+
+			public PendingMessage (int serial, AgentMessageKind kind, AgentScriptId script_id, string text,
+					Bytes? data = null) {
+				this.serial = serial;
+				this.kind = kind;
+				this.script_id = script_id;
+				this.text = text;
+				this.data = data;
+			}
+
+			public size_t estimate_size_in_bytes () {
+				return sizeof (AgentMessage) + text.length + 1 + ((data != null) ? data.length : 0);
+			}
+		}
+	}
+
 	[DBus (name = "re.frida.TransportBroker16")]
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
