@@ -245,7 +245,7 @@ function findSubstrateLauncher() {
   const impl = imp.slot.readPointer().strip();
   const header = findClosestMachHeader(impl);
 
-  const launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
+  const launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62'; // Launcher.t.dylib
   const isSubstrate = Memory.scanSync(header, 2048, launcherDylibName).length > 0;
   if (!isSubstrate)
     return null;
