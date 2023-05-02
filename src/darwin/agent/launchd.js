@@ -251,14 +251,14 @@ function findSubstrateLauncher() {
     return null;
 
   return {
-    handlePosixSpawn: resolveFunction('fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 04 d1'),
-    workerCont: resolveFunction('fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 01 d1'),
+    handlePosixSpawn: resolveFunction('handlePosixSpawn', 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 04 d1'),
+    workerCont: resolveFunction('workerCont', 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 01 d1'),
   };
 
-  function resolveFunction(signature) {
+  function resolveFunction(name, signature) {
     const matches = Memory.scanSync(header, 37056, signature);
     if (matches.length !== 1) {
-      throw new Error('Unsupported version of Substrate; please file a bug');
+      throw new Error('Unsupported version of Substrate; please file a bug: ' + name + ' matched ' + matches.length + ' times')
     }
     return matches[0].address;
   }
