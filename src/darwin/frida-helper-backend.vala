@@ -48,7 +48,7 @@ namespace Frida {
 				dtrace_agent.spawn_removed.connect (on_dtrace_agent_spawn_removed);
 			}
 
-#if IOS
+#if IOS || TVOS
 			if (InternalIOSPolicySoftener.is_available ())
 				policy_softener = new InternalIOSPolicySoftener ();
 			else if (ElectraPolicySoftener.is_available ())

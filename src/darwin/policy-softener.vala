@@ -20,7 +20,7 @@ namespace Frida {
 		}
 	}
 
-#if IOS
+#if IOS || TVOS
 	public class IOSPolicySoftener : Object, PolicySoftener {
 		private Gee.HashMap<uint, ProcessEntry> process_entries = new Gee.HashMap<uint, ProcessEntry> ();
 

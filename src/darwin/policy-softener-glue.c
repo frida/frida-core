@@ -1,6 +1,6 @@
 #include "frida-helper-backend.h"
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 # include "policyd.h"
 # include "substituted-client.h"
 # include "substituted2-client.h"

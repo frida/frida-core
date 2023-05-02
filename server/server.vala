@@ -100,7 +100,7 @@ namespace Frida.Server {
 			}
 		}
 
-#if IOS
+#if IOS || TVOS
 		if (softener_flavor == INTERNAL)
 			InternalIOSPolicySoftener.enable ();
 #endif
