@@ -387,7 +387,7 @@ static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * s
 static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data);
 #endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
@@ -965,7 +965,7 @@ invalid_pid:
   }
 }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 #import "springboard.h"
 
@@ -2452,7 +2452,7 @@ frida_inject_instance_on_mach_thread_dead (void * context)
 
     self->agent_context->posix_thread = MACH_PORT_NULL;
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
     port_might_be_guarded = gum_darwin_check_xnu_version (7938, 0, 0);
 #else
     port_might_be_guarded = FALSE;
@@ -3039,7 +3039,7 @@ next_phase:
       return TRUE;
 
     case FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER:
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
       if (self->bootstrapper_name != 0)
       {
         frida_spawn_instance_set_libc_initialized (self);
@@ -3327,7 +3327,7 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
   if (!gum_darwin_query_ptrauth_support (self->task, &ptrauth_support))
     return KERN_FAILURE;
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   gum_darwin_enumerate_modules (self->task, frida_pick_ios_bootstrapper, &data);
 #endif
 
@@ -3405,7 +3405,7 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
   self->dyld_data = 0;
 }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static gboolean
 frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data)
@@ -5131,7 +5131,7 @@ frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadStat
 static gboolean
 frida_is_hardware_breakpoint_support_working (void)
 {
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   static gsize cached_result = 0;
 
   if (g_once_init_enter (&cached_result))
