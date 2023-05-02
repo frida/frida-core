@@ -1129,7 +1129,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
       pending_error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to launch iOS app: %s",
+          "Unable to launch iOS app via FBS: %s",
           [[error localizedDescription] UTF8String]);
     }
 
@@ -1248,7 +1248,7 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
       error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to launch iOS app: %s",
+          "Unable to launch iOS app via SBS: %s",
           [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
     }
 
