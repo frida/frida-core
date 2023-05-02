@@ -112,7 +112,7 @@ namespace Frida {
 
 		private Fruitjector fruitjector;
 		private AgentResource? agent;
-#if IOS
+#if IOS || TVOS
 		private FruitController fruit_controller;
 #endif
 
@@ -142,7 +142,7 @@ namespace Frida {
 			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
 #endif
 
-#if IOS
+#if IOS || TVOS
 			fruit_controller = new FruitController (this, io_cancellable);
 			fruit_controller.spawn_added.connect (on_spawn_added);
 			fruit_controller.spawn_removed.connect (on_spawn_removed);
@@ -153,7 +153,7 @@ namespace Frida {
 		public override async void close (Cancellable? cancellable) throws IOError {
 			yield base.close (cancellable);
 
-#if IOS
+#if IOS || TVOS
 			yield fruit_controller.close (cancellable);
 			fruit_controller.spawn_added.disconnect (on_spawn_added);
 			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
@@ -187,7 +187,7 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			yield helper.preload (cancellable);
 
 			var pid = helper.pid;
@@ -247,7 +247,7 @@ namespace Frida {
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			yield fruit_controller.enable_spawn_gating (cancellable);
 #else
 			yield helper.enable_spawn_gating (cancellable);
@@ -255,7 +255,7 @@ namespace Frida {
 		}
 
 		public override async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			yield fruit_controller.disable_spawn_gating (cancellable);
 #else
 			yield helper.disable_spawn_gating (cancellable);
@@ -263,7 +263,7 @@ namespace Frida {
 		}
 
 		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			return fruit_controller.enumerate_pending_spawn ();
 #else
 			return yield helper.enumerate_pending_spawn (cancellable);
@@ -272,7 +272,7 @@ namespace Frida {
 
 		public override async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
 				throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			if (!program.has_prefix ("/"))
 				return yield fruit_controller.spawn (program, options, cancellable);
 #endif
@@ -298,7 +298,7 @@ namespace Frida {
 		}
 
 		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-#if IOS
+#if IOS || TVOS
 			if (yield fruit_controller.try_resume (pid, cancellable))
 				return;
 #endif
@@ -323,7 +323,7 @@ namespace Frida {
 			return stream_future;
 		}
 
-#if IOS
+#if IOS || TVOS
 		public void activate_crash_reporter_integration () {
 			fruit_controller.activate_crash_reporter_integration ();
 		}
@@ -345,7 +345,7 @@ namespace Frida {
 			spawn_removed (info);
 		}
 
-#if IOS
+#if IOS || TVOS
 		private void on_process_crashed (CrashInfo info) {
 			process_crashed (info);
 		}
@@ -359,7 +359,7 @@ namespace Frida {
 			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);
 #else
 			string agent_path = Config.FRIDA_AGENT_PATH;
-#if IOS
+#if IOS || TVOS
 			unowned string? cryptex_path = Environment.get_variable ("CRYPTEX_MOUNT_PATH");
 			if (cryptex_path != null)
 				agent_path = cryptex_path + agent_path;
@@ -371,7 +371,7 @@ namespace Frida {
 		}
 
 		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
-#if IOS
+#if IOS || TVOS
 			DarwinModuleDetails? mapped_module_value = null;
 			if (has_mapped_module)
 				mapped_module_value = mapped_module;
@@ -380,7 +380,7 @@ namespace Frida {
 		}
 
 		protected override void on_uninjected (uint id) {
-#if IOS
+#if IOS || TVOS
 			fruit_controller.on_agent_uninjected (id);
 #endif
 
@@ -388,7 +388,7 @@ namespace Frida {
 		}
 	}
 
-#if IOS
+#if IOS || TVOS
 	private class FruitController : Object, MappedAgentContainer {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);

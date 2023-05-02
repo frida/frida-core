@@ -732,7 +732,7 @@ namespace Frida.Gadget {
 		if (config_path == null)
 			config_path = derive_config_path_from_file_path (gadget_path);
 
-#if IOS
+#if IOS || TVOS
 		if (resource_dir == null && !FileUtils.test (config_path, FileTest.EXISTS)) {
 			var config_dir = Path.get_dirname (config_path);
 			if (Path.get_basename (config_dir) == "Frameworks") {
