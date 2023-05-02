@@ -250,9 +250,18 @@ function findSubstrateLauncher() {
   if (!isSubstrate)
     return null;
 
+  const atvLauncherDylibName = "build.atv/Launcher.t.dylib".split('').map(o => o.charCodeAt(0).toString(16)).join(' ')
+  const isATVSubstrate = Memory.scanSync(header, 2048, atvLauncherDylibName).length > 0;
+
   return {
-    handlePosixSpawn: resolveFunction('handlePosixSpawn', 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 04 d1'),
-    workerCont: resolveFunction('workerCont', 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 01 d1'),
+    handlePosixSpawn: resolveFunction('handlePosixSpawn',
+      isATVSubstrate
+      ? 'f6 57 bd a9 f4 4f 01 a9 fd 7b 02 a9 fd 83 00 91 ff 43 00 d1'
+      : 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 04 d1'),
+    workerCont: resolveFunction('workerCont',
+      isATVSubstrate
+      ? 'f6 57 bd a9 f4 4f 01 a9 fd 7b 02 a9 fd 83 00 91 ff 03 01 d1'
+      : 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 01 d1'),
   };
 
   function resolveFunction(name, signature) {
