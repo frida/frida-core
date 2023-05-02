@@ -5,7 +5,7 @@
 # include <psapi.h>
 typedef HANDLE FridaProcessHandle;
 #elif defined (HAVE_DARWIN)
-# ifdef HAVE_IOS
+# if defined (HAVE_IOS) || defined (HAVE_TVOS)
 #  define PROC_PIDLISTFDS 1
 #  define PROC_PIDLISTFD_SIZE (sizeof (struct proc_fdinfo))
 struct proc_fdinfo

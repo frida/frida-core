@@ -28,7 +28,7 @@ _frida_query_windows_computer_name (void)
   return g_utf16_to_utf8 (buffer, -1, NULL, NULL, NULL);
 }
 
-#elif defined (HAVE_IOS)
+#elif defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
