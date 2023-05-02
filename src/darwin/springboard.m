@@ -88,6 +88,9 @@ _frida_get_springboard_api (void)
     api->LSApplicationProxy = objc_get_class_impl ("LSApplicationProxy");
     g_assert (api->LSApplicationProxy != nil);
 
+    api->LSApplicationWorkspace = objc_get_class_impl ("LSApplicationWorkspace");
+    g_assert (api->LSApplicationWorkspace != nil);
+
     if (api->SBSSpringBoardBackgroundServerPort () == MACH_PORT_NULL)
     {
       GumInterceptor * interceptor;

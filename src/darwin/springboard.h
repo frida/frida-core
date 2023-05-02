@@ -58,6 +58,11 @@ enum _FBProcessKillReason
 
 @end
 
+@interface LSApplicationWorkspace : NSObject
++ (LSApplicationWorkspace *)defaultWorkspace;
+- (BOOL)openApplicationWithBundleID:(NSString *)bundleID;
+@end
+
 struct _FridaSpringboardApi
 {
   void * sbs;
@@ -88,6 +93,7 @@ struct _FridaSpringboardApi
 
   id FBSSystemService;
   id LSApplicationProxy;
+  id LSApplicationWorkspace;
 };
 
 G_GNUC_INTERNAL FridaSpringboardApi * _frida_get_springboard_api (void);

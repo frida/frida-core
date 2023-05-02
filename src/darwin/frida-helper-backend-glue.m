@@ -1043,9 +1043,11 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   GError * error = NULL;
   FridaAslr aslr = FRIDA_ASLR_AUTO;
   GVariant * aslr_value;
+#ifndef HAVE_TVOS
   FBSSystemService * service;
   mach_port_t client_port;
   FBSOpenResultCallback result_callback;
+#endif
 
   api = _frida_get_springboard_api ();
 
@@ -1109,6 +1111,17 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                       forKey:api->FBSDebugOptionKeyDisableASLR];
   }
 
+#ifdef HAVE_TVOS
+  GError * pending_error = NULL;
+  BOOL opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
+  if (!opened) {
+    pending_error = g_error_new (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to launch tvOS app via LSAW");
+  }
+  on_complete (pipes, pending_error, on_complete_target);
+#else
   service = [api->FBSSystemService sharedService];
 
   client_port = [service createClientPort];
@@ -1156,6 +1169,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                     withResult:result_callback];
     }
   });
+#endif
 
   return;
 
