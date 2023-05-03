@@ -1464,11 +1464,7 @@ frida_kill_application (NSString * identifier)
 
   api = _frida_get_springboard_api ();
 
-#ifdef HAVE_TVOS
-  if (0)
-#else
   if (api->FBSSystemService != nil)
-#endif
   {
     FBSSystemService * service;
 
