@@ -973,6 +973,8 @@ static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
+static void frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 
 static guint frida_kill_application (NSString * identifier);
 
@@ -1002,6 +1004,11 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
       goto invalid_url;
     url_value = [NSURL URLWithString:[NSString stringWithUTF8String:g_variant_get_string (url, NULL)]];
   }
+
+#ifdef HAVE_TVOS
+  frida_darwin_helper_backend_launch_using_lsaw (identifier_value, url_value, options, on_complete, on_complete_target);
+  goto beach;
+#endif
 
   if (_frida_get_springboard_api ()->fbs != NULL)
   {
@@ -1034,6 +1041,90 @@ beach:
 }
 
 static void
+frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+{
+  FridaSpringboardApi * api;
+  GError * error = NULL;
+  BOOL opened = NO;
+
+  if (spawn_options->has_argv)
+    goto argv_not_supported;
+
+  if (spawn_options->has_envp)
+    goto envp_not_supported;
+
+  if (spawn_options->has_env)
+    goto env_not_supported;
+
+  if (strlen (spawn_options->cwd) > 0)
+    goto cwd_not_supported;
+
+  if (spawn_options->stdio != FRIDA_STDIO_INHERIT)
+    goto stdio_not_supported;
+
+  api = _frida_get_springboard_api ();
+
+  opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
+  if (!opened) {
+    error = g_error_new (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to launch tvOS app via LSAW");
+    goto failure;
+  }
+
+  on_complete (NULL, NULL, on_complete_target);
+  return;
+
+argv_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'argv' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+envp_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'envp' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+env_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'env' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+cwd_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'cwd' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+stdio_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'stdio' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+failure:
+  {
+    on_complete (NULL, error, on_complete_target);
+    return;
+  }
+}
+
+static void
 frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
@@ -1043,11 +1134,9 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   GError * error = NULL;
   FridaAslr aslr = FRIDA_ASLR_AUTO;
   GVariant * aslr_value;
-#ifndef HAVE_TVOS
   FBSSystemService * service;
   mach_port_t client_port;
   FBSOpenResultCallback result_callback;
-#endif
 
   api = _frida_get_springboard_api ();
 
@@ -1111,17 +1200,6 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                       forKey:api->FBSDebugOptionKeyDisableASLR];
   }
 
-#ifdef HAVE_TVOS
-  GError * pending_error = NULL;
-  BOOL opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
-  if (!opened) {
-    pending_error = g_error_new (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to launch tvOS app via LSAW");
-  }
-  on_complete (pipes, pending_error, on_complete_target);
-#else
   service = [api->FBSSystemService sharedService];
 
   client_port = [service createClientPort];
@@ -1169,7 +1247,6 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                     withResult:result_callback];
     }
   });
-#endif
 
   return;
 
