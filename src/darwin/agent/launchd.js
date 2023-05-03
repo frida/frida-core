@@ -253,6 +253,10 @@ function findJbdCallImpl() {
   return matches[0].address;
 }
 
+function stringToHexPattern(str) {
+  return str.split('').map(o => o.charCodeAt(0).toString(16)).join(' ');
+}
+
 function findSubstrateLauncher() {
   if (Process.arch !== 'arm64')
     return null;
@@ -263,12 +267,12 @@ function findSubstrateLauncher() {
   const impl = imp.slot.readPointer().strip();
   const header = findClosestMachHeader(impl);
 
-  const launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62'; // Launcher.t.dylib
+  const launcherDylibName = stringToHexPattern('Launcher.t.dylib');
   const isSubstrate = Memory.scanSync(header, 2048, launcherDylibName).length > 0;
   if (!isSubstrate)
     return null;
 
-  const atvLauncherDylibName = "build.atv/Launcher.t.dylib".split('').map(o => o.charCodeAt(0).toString(16)).join(' ')
+  const atvLauncherDylibName = stringToHexPattern('build.atv/Launcher.t.dylib');
   const isATVSubstrate = Memory.scanSync(header, 2048, atvLauncherDylibName).length > 0;
 
   return {
