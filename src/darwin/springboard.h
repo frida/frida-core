@@ -49,6 +49,7 @@ enum _FBProcessKillReason
 
 + (LSApplicationProxy *)applicationProxyForIdentifier:(NSString *)identifier;
 
+- (NSString *)applicationIdentifier;
 - (NSString *)shortVersionString;
 - (NSString *)bundleVersion;
 - (NSURL *)bundleURL;
@@ -61,6 +62,8 @@ enum _FBProcessKillReason
 @interface LSApplicationWorkspace : NSObject
 
 + (LSApplicationWorkspace *)defaultWorkspace;
+
+- (NSArray <LSApplicationProxy *> *)allApplications;
 
 - (BOOL)openApplicationWithBundleID:(NSString *)bundleID;
 - (BOOL)openURL:(NSURL *)url;
