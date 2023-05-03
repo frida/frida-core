@@ -1450,9 +1450,8 @@ frida_kill_application (NSString * identifier)
         g_timer_destroy (timer);
 
         found = TRUE;
-
-        [cur release];
       }
+      [cur release];
     }
   }
 
