@@ -1067,8 +1067,18 @@ frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * ur
 
   api = _frida_get_springboard_api ();
 
-  opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
-  if (!opened) {
+  frida_kill_application (identifier);
+
+  if (url != nil)
+  {
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openURL:url];
+  }
+  else
+  {
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
+  }
+  if (!opened)
+  {
     error = g_error_new (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,

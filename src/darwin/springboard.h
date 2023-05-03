@@ -59,8 +59,12 @@ enum _FBProcessKillReason
 @end
 
 @interface LSApplicationWorkspace : NSObject
+
 + (LSApplicationWorkspace *)defaultWorkspace;
+
 - (BOOL)openApplicationWithBundleID:(NSString *)bundleID;
+- (BOOL)openURL:(NSURL *)url;
+
 @end
 
 struct _FridaSpringboardApi
