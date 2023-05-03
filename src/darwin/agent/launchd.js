@@ -256,11 +256,11 @@ function findSubstrateLauncher() {
   return {
     handlePosixSpawn: resolveFunction('handlePosixSpawn',
       isATVSubstrate
-      ? 'f6 57 bd a9 f4 4f 01 a9 fd 7b 02 a9 fd 83 00 91 ff 43 02 d1 f3 03 02 aa f6 03 01 aa f5 03 00 aa 1f 20 03 d5 68 66 00 58'
+      ? 'fc 6f ba a9 fa 67 01 a9 f8 5f 02 a9 f6 57 03 a9 f4 4f 04 a9 fd 7b 05 a9 fd 43 01 91 ff 83 02 d1 e6 1f 00 f9'
       : 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 04 d1'),
     workerCont: resolveFunction('workerCont',
       isATVSubstrate
-      ? 'f6 57 bd a9 f4 4f 01 a9 fd 7b 02 a9 fd 83 00 91 ff 43 00 d1'
+      ? 'f8 5f bc a9 f6 57 01 a9 f4 4f 02 a9 fd 7b 03 a9 fd c3 00 91 ff 83 00 d1 f3 03 00 aa c3 fc ff 97 f4 03 00 aa'
       : 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 43 01 d1'),
   };
 
