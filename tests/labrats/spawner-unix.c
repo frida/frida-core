@@ -4,6 +4,16 @@
 # define HAVE_POSIX_SPAWN
 #endif
 
+#include <TargetConditionals.h>
+#include <Availability.h>
+#if TARGET_OS_TV
+# undef __TVOS_PROHIBITED
+# define __TVOS_PROHIBITED
+# undef __API_UNAVAILABLE
+# define __API_UNAVAILABLE(...)
+# include <sys/syslimits.h>
+#endif
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdbool.h>

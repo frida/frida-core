@@ -148,6 +148,7 @@ namespace Frida.Test {
 			case OS.MACOS:
 			case OS.LINUX:
 			case OS.IOS:
+			case OS.TVOS:
 			case OS.ANDROID:
 			case OS.FREEBSD:
 			case OS.QNX:
