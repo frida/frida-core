@@ -9,14 +9,9 @@ if [ $# -ne 3 ]; then
   echo "Usage: $0 [ios|tvos] path/to/prefix output.deb" > /dev/stderr
   exit 3
 fi
-os=$1
+arch=$1
 prefix=$2
 output_deb=$3
-
-arch=iphoneos-arm
-if [ "$os" = "tvos" ]; then
-  arch=appletvos-arm64
-fi
 
 executable=$prefix/usr/bin/frida-server
 if [ ! -f "$executable" ]; then
