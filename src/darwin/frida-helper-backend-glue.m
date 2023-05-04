@@ -389,7 +389,7 @@ static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
-static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data);
+static gboolean frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data);
 #endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
@@ -3507,7 +3507,7 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
     return KERN_FAILURE;
 
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
-  gum_darwin_enumerate_modules (self->task, frida_pick_ios_bootstrapper, &data);
+  gum_darwin_enumerate_modules (self->task, frida_pick_ios_tvos_bootstrapper, &data);
 #endif
 
   ret_gadget = self->ret_gadget;
@@ -3587,7 +3587,7 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static gboolean
-frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data)
+frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data)
 {
   FridaSpawnInstanceDyldData * data = user_data;
   const gchar * candidates[] = {
