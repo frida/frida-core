@@ -313,7 +313,7 @@ endif
 if host_os == 'macos'
   backend_libs_private += ['-Wl,-framework,AppKit']
 endif
-if host_os == 'ios'
+if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
 
