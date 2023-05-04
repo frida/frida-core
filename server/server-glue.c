@@ -2,7 +2,7 @@
 
 #include "frida-core.h"
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
-# include "server-ios.h"
+# include "server-ios-tvos.h"
 #endif
 #ifdef HAVE_ANDROID
 # include "frida-selinux.h"

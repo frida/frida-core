@@ -1,4 +1,4 @@
-#include "server-ios.h"
+#include "server-ios-tvos.h"
 
 #include <dlfcn.h>
 #include <gio/gio.h>

@@ -8,7 +8,7 @@ if host_os_family == 'darwin'
 endif
 if host_os in ['ios', 'tvos']
   server_sources += [
-    'server-ios.c',
+    'server-ios-tvos.c',
   ]
 endif
 
