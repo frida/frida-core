@@ -83,6 +83,8 @@ namespace Frida.Test {
 				return "-macos";
 			case OS.IOS:
 				return "-ios";
+			case OS.TVOS:
+				return "-tvos";
 			default:
 				break;
 		}
@@ -177,6 +179,7 @@ namespace Frida.Test {
 		MACOS,
 		LINUX,
 		IOS,
+		TVOS,
 		ANDROID,
 		FREEBSD,
 		QNX
