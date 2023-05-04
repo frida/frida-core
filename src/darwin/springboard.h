@@ -57,6 +57,7 @@ enum _FBProcessKillReason
 - (NSURL *)dataContainerURL;
 - (NSDictionary<NSString *, NSURL *> *)groupContainerURLs;
 - (id)entitlementValueForKey:(NSString *)key ofClass:(Class)klass;
+- (id)localizedNameWithPreferredLocalizations:(id)arg1 useShortNameOnly:(BOOL)arg2;
 
 @end
 

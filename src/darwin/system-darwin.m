@@ -256,7 +256,10 @@ frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnu
 
   name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
   if (!name)
-    name = [[[api->LSApplicationProxy applicationProxyForIdentifier:identifier] itemName] retain];
+  {
+    LSApplicationProxy * app = [api->LSApplicationProxy applicationProxyForIdentifier:identifier];
+    name = [[app localizedNameWithPreferredLocalizations:nil useShortNameOnly:YES] retain];
+  }
 
   info.identifier = g_strdup (identifier.UTF8String);
   info.name = g_strdup (name ? name.UTF8String : "");
