@@ -217,13 +217,10 @@ frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int
   }
   else
   {
-    NSArray * identifiers;
+    NSArray * identifiers = op.api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
 
-#if HAVE_TVOS
-    identifiers = [[[op.api->LSApplicationWorkspace defaultWorkspace] allApplications] valueForKey:@"applicationIdentifier"];
-#else
-    identifiers = op.api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
-#endif
+    if (!identifiers)
+      identifiers = [[[op.api->LSApplicationWorkspace defaultWorkspace] allApplications] valueForKey:@"applicationIdentifier"];
 
     count = [identifiers count];
     for (i = 0; i != count; i++)
