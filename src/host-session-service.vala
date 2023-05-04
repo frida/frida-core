@@ -9,7 +9,7 @@ namespace Frida {
 
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
-#if !IOS && !ANDROID
+#if !IOS && !ANDROID && !TVOS
 			add_backend (new FruityHostSessionBackend ());
 			add_backend (new DroidyHostSessionBackend ());
 #endif
