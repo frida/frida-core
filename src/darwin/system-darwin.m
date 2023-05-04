@@ -220,7 +220,7 @@ frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int
     NSArray * identifiers = op.api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
 
     if (!identifiers)
-      identifiers = [[[op.api->LSApplicationWorkspace defaultWorkspace] allApplications] valueForKey:@"applicationIdentifier"];
+      identifiers = [[[[op.api->LSApplicationWorkspace defaultWorkspace] allApplications] valueForKey:@"applicationIdentifier"] retain];
 
     count = [identifiers count];
     for (i = 0; i != count; i++)
@@ -248,17 +248,18 @@ frida_collect_application_info_from_id_cstring (const gchar * identifier, FridaE
 static void
 frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnumerateApplicationsOperation * op)
 {
-  FridaHostApplicationInfo info;
+  FridaHostApplicationInfo info = { 0, };
   FridaScope scope = op->scope;
   FridaSpringboardApi * api = op->api;
   NSString * name;
   struct kinfo_proc * process;
 
   name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+  if (!name)
+    name = [[[api->LSApplicationProxy applicationProxyForIdentifier:identifier] itemName] retain];
 
   info.identifier = g_strdup (identifier.UTF8String);
-  info.name = g_strdup (name.UTF8String);
-  info.pid = 0;
+  info.name = g_strdup (name ? name.UTF8String : "Unknown");
   info.parameters = frida_make_parameters_dict ();
 
   process = g_hash_table_lookup (op->process_by_identifier, info.identifier);

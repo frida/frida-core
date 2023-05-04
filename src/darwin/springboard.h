@@ -50,6 +50,7 @@ enum _FBProcessKillReason
 + (LSApplicationProxy *)applicationProxyForIdentifier:(NSString *)identifier;
 
 - (NSString *)applicationIdentifier;
+- (NSString *)itemName;
 - (NSString *)shortVersionString;
 - (NSString *)bundleVersion;
 - (NSURL *)bundleURL;
