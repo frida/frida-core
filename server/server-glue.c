@@ -55,7 +55,7 @@ void
 frida_server_environment_configure (void)
 {
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
-  _frida_server_ios_configure ();
+  _frida_server_ios_tvos_configure ();
 #endif
 
 #ifdef HAVE_ANDROID
