@@ -16,7 +16,7 @@
 # endif
 #endif
 
-#if defined(HAVE_IOS) || defined(HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 # import "springboard.h"
 #endif
 
