@@ -164,6 +164,7 @@ namespace Frida.Test {
 				return ".dll";
 			case OS.MACOS:
 			case OS.IOS:
+			case OS.TVOS:
 				return ".dylib";
 			case OS.LINUX:
 			case OS.ANDROID:
