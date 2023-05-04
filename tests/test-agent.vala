@@ -434,7 +434,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 #else
 			shlib_extension = "so";
 #endif
-#if IOS || ANDROID || QNX
+#if IOS || TVOS || ANDROID || QNX
 			var deployment_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 			agent_filename = Path.build_filename (deployment_dir, "frida-agent." + shlib_extension);
 #else
