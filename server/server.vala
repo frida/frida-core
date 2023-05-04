@@ -102,7 +102,7 @@ namespace Frida.Server {
 
 #if IOS || TVOS
 		if (softener_flavor == INTERNAL)
-			InternalIOSPolicySoftener.enable ();
+			InternalIOSTVOSPolicySoftener.enable ();
 #endif
 
 		ReadyHandler? on_ready = null;

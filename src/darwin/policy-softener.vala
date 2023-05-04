@@ -21,7 +21,7 @@ namespace Frida {
 	}
 
 #if IOS || TVOS
-	public class IOSPolicySoftener : Object, PolicySoftener {
+	public class IOSTVOSPolicySoftener : Object, PolicySoftener {
 		private Gee.HashMap<uint, ProcessEntry> process_entries = new Gee.HashMap<uint, ProcessEntry> ();
 
 		public void soften (uint pid) throws Error {
@@ -164,7 +164,7 @@ namespace Frida {
 		}
 	}
 
-	public class InternalIOSPolicySoftener : IOSPolicySoftener {
+	public class InternalIOSTVOSPolicySoftener : IOSTVOSPolicySoftener {
 		private static bool enabled = false;
 
 		public static void enable () {
@@ -175,7 +175,7 @@ namespace Frida {
 			return enabled;
 		}
 
-		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
+		protected override IOSTVOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
 			_soften (pid);
 
 			return base.perform_softening (pid);
@@ -184,7 +184,7 @@ namespace Frida {
 		private extern static void _soften (uint pid) throws Error;
 	}
 
-	public class ElectraPolicySoftener : IOSPolicySoftener {
+	public class ElectraPolicySoftener : IOSTVOSPolicySoftener {
 		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
 		private Module libjailbreak;
@@ -212,7 +212,7 @@ namespace Frida {
 			return FileUtils.test (LIBJAILBREAK_PATH, FileTest.EXISTS);
 		}
 
-		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
+		protected override IOSTVOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
 			entitle_and_platformize (pid);
 
 			return base.perform_softening (pid);
@@ -234,7 +234,7 @@ namespace Frida {
 		private extern static int _internal_jb_entitle_now (void * jbd_call, uint connection, uint pid);
 	}
 
-	public class Unc0verPolicySoftener : IOSPolicySoftener {
+	public class Unc0verPolicySoftener : IOSTVOSPolicySoftener {
 		private const string SUBSTITUTED_PATH = "/usr/libexec/substituted";
 
 		private uint connection;
@@ -251,7 +251,7 @@ namespace Frida {
 			return FileUtils.test (SUBSTITUTED_PATH, FileTest.EXISTS);
 		}
 
-		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
+		protected override IOSTVOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
 			substitute_setup_process (pid);
 
 			return base.perform_softening (pid);

@@ -17,8 +17,8 @@ typedef int (* JbdCallFunc) (mach_port_t service_port, guint command, guint pid)
 extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, char * service_name, mach_port_t * service_port);
 
 void
-_frida_internal_ios_policy_softener_soften (guint pid,
-                                            GError ** error)
+_frida_internal_iostvos_policy_softener_soften (guint pid,
+                                                GError ** error)
 {
   static mach_port_t service_port = MACH_PORT_NULL;
   kern_return_t kr;

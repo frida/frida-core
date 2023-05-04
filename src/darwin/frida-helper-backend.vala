@@ -49,14 +49,14 @@ namespace Frida {
 			}
 
 #if IOS || TVOS
-			if (InternalIOSPolicySoftener.is_available ())
-				policy_softener = new InternalIOSPolicySoftener ();
+			if (InternalIOSTVOSPolicySoftener.is_available ())
+				policy_softener = new InternalIOSTVOSPolicySoftener ();
 			else if (ElectraPolicySoftener.is_available ())
 				policy_softener = new ElectraPolicySoftener ();
 			else if (Unc0verPolicySoftener.is_available ())
 				policy_softener = new Unc0verPolicySoftener ();
 			else
-				policy_softener = new IOSPolicySoftener ();
+				policy_softener = new IOSTVOSPolicySoftener ();
 #else
 			policy_softener = new NullPolicySoftener ();
 #endif
