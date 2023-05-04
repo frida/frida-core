@@ -58,7 +58,7 @@ if [ "$strip_enabled" = "true" ]; then
 fi
 
 case $host_os in
-  macos|ios)
+  macos|ios|watchos|tvos)
     case $host_os in
       macos)
         "$codesign" -f -s "$MACOS_CERTID" -i "re.frida.Helper" "$intermediate_path" || exit 1
