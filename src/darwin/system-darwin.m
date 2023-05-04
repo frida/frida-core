@@ -255,14 +255,14 @@ frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnu
   struct kinfo_proc * process;
 
   name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-  if (!name)
+  if (name == nil)
   {
     LSApplicationProxy * app = [api->LSApplicationProxy applicationProxyForIdentifier:identifier];
     name = [[app localizedNameWithPreferredLocalizations:nil useShortNameOnly:YES] retain];
   }
 
   info.identifier = g_strdup (identifier.UTF8String);
-  info.name = g_strdup (name ? name.UTF8String : "");
+  info.name = g_strdup ((name != nil) ? name.UTF8String : "");
   info.parameters = frida_make_parameters_dict ();
 
   process = g_hash_table_lookup (op->process_by_identifier, info.identifier);
