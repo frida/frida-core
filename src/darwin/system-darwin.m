@@ -272,8 +272,7 @@ frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnu
   }
   else if (api->FBSSystemService != nil)
   {
-    FBSSystemService * service = [api->FBSSystemService sharedService];
-    gint pid = [service pidForApplication:identifier];
+    gint pid = [[api->FBSSystemService sharedService] pidForApplication:identifier];
     if (pid > 0)
       info.pid = pid;
   }
