@@ -1,5 +1,7 @@
 #include "frida-tests.h"
 
+#include "frida-tvos.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <sys/wait.h>

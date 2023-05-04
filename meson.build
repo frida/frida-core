@@ -418,9 +418,7 @@ if host_os != 'watchos'
   subdir('portal')
   subdir('inject')
 
-  if host_os != 'tvos'
-    if get_option('tests')
-      subdir('tests')
-    endif
+  if get_option('tests')
+    subdir('tests')
   endif
 endif
