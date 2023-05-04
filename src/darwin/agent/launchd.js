@@ -253,10 +253,6 @@ function findJbdCallImpl() {
   return matches[0].address;
 }
 
-function stringToHexPattern(str) {
-  return str.split('').map(o => o.charCodeAt(0).toString(16)).join(' ');
-}
-
 function findSubstrateLauncher() {
   if (Process.arch !== 'arm64')
     return null;
@@ -293,6 +289,10 @@ function findSubstrateLauncher() {
     }
     return matches[0].address;
   }
+}
+
+function stringToHexPattern(str) {
+  return str.split('').map(o => o.charCodeAt(0).toString(16)).join(' ');
 }
 
 function findClosestMachHeader(address) {
