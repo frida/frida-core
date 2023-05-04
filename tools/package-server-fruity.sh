@@ -6,7 +6,7 @@ if [ -z "$FRIDA_VERSION" ]; then
 fi
 
 if [ $# -ne 3 ]; then
-  echo "Usage: $0 [ios|tvos] path/to/prefix output.deb" > /dev/stderr
+  echo "Usage: $0 arch path/to/prefix output.deb" > /dev/stderr
   exit 3
 fi
 arch=$1
