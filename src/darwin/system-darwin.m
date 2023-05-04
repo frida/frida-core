@@ -264,7 +264,16 @@ frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnu
 
   process = g_hash_table_lookup (op->process_by_identifier, info.identifier);
   if (process != NULL)
+  {
     info.pid = process->kp_proc.p_pid;
+  }
+  else if (api->FBSSystemService != nil)
+  {
+    FBSSystemService * service = [api->FBSSystemService sharedService];
+    gint pid = [service pidForApplication:identifier];
+    if (pid > 0)
+      info.pid = pid;
+  }
 
   if (scope != FRIDA_SCOPE_MINIMAL)
   {
