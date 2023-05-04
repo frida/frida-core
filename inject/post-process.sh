@@ -37,7 +37,7 @@ case $host_os in
     ;;
   tvos)
     if [ -z "$TVOS_CERTID" ]; then
-      echo "IOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
+      echo "TVOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
       exit 1
     fi
     ;;
