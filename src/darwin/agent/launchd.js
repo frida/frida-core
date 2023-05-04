@@ -285,7 +285,7 @@ function findSubstrateLauncher() {
   function resolveFunction(name, signature) {
     const matches = Memory.scanSync(header, 37056, signature);
     if (matches.length !== 1) {
-      throw new Error('Unsupported version of Substrate; please file a bug: ' + name + ' matched ' + matches.length + ' times')
+      throw new Error(`Unsupported version of Substrate; please file a bug: ${name} matched ${matches.length} times`)
     }
     return matches[0].address;
   }
