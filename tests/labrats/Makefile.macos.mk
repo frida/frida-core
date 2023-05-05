@@ -15,7 +15,7 @@ WATCHOS_LDFLAGS := -Wl,-dead_strip
 
 TVOS_MINVER = 13.0
 TVOS_CC := $(shell xcrun --sdk appletvos -f clang)
-TVOS_CFLAGS := -Wall -Oz -target arm64-apple-tvos$(TVOS_MINVER) -isysroot $(shell xcrun --sdk appletvos --show-sdk-path)
+TVOS_CFLAGS := -Wall -Oz -target arm64-apple-tvos$(TVOS_MINVER) -isysroot $(shell xcrun --sdk appletvos --show-sdk-path) -DHAVE_TVOS=1
 TVOS_LDFLAGS := -Wl,-dead_strip
 
 all: \
