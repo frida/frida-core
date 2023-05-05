@@ -5,15 +5,12 @@
 #endif
 
 #ifdef HAVE_TVOS
-# include <TargetConditionals.h>
 # include <Availability.h>
-# if TARGET_OS_TV
-#  undef __TVOS_PROHIBITED
-#  define __TVOS_PROHIBITED
-#  undef __API_UNAVAILABLE
-#  define __API_UNAVAILABLE(...)
-#  include <sys/syslimits.h>
-# endif
+# undef __TVOS_PROHIBITED
+# define __TVOS_PROHIBITED
+# undef __API_UNAVAILABLE
+# define __API_UNAVAILABLE(...)
+# include <sys/syslimits.h>
 #endif
 
 #include <dlfcn.h>
