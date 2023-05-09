@@ -1162,6 +1162,8 @@ namespace Frida.Fruity.Injector {
 			unowned string output_str = (string) output_bytes.get_data ();
 			foreach (var line in output_str.split ("\n")) {
 				var tokens = line.split ("\t", 2);
+				if (tokens.length != 2)
+					throw new Error.UNSUPPORTED ("Unable to fetch dyld symbols; please file a bug");
 
 				unowned string raw_address = tokens[0];
 				unowned string name = tokens[1];
