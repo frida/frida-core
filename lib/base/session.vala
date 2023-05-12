@@ -2063,7 +2063,7 @@ namespace Frida {
 			var v = klass.get_value_by_nick (nick);
 			if (v == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid %s", klass.get_type ().name ());
-			return (Realm) v.value;
+			return (T) v.value;
 		}
 
 		public static string enum_to_nick<T> (int val) {
