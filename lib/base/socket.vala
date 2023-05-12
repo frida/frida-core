@@ -1035,9 +1035,25 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder append_size (uint64 val) {
+			return append_pointer (val);
+		}
+
+		public unowned BufferBuilder append_int8 (int8 val) {
+			write_int8 (cursor, val);
+			cursor += (uint) sizeof (int8);
+			return this;
+		}
+
 		public unowned BufferBuilder append_uint8 (uint8 val) {
 			write_uint8 (cursor, val);
 			cursor += (uint) sizeof (uint8);
+			return this;
+		}
+
+		public unowned BufferBuilder append_int16 (int16 val) {
+			write_int16 (cursor, val);
+			cursor += (uint) sizeof (int16);
 			return this;
 		}
 
@@ -1047,15 +1063,39 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder append_int32 (int32 val) {
+			write_int32 (cursor, val);
+			cursor += (uint) sizeof (int32);
+			return this;
+		}
+
 		public unowned BufferBuilder append_uint32 (uint32 val) {
 			write_uint32 (cursor, val);
 			cursor += (uint) sizeof (uint32);
 			return this;
 		}
 
+		public unowned BufferBuilder append_int64 (int64 val) {
+			write_int64 (cursor, val);
+			cursor += (uint) sizeof (int64);
+			return this;
+		}
+
 		public unowned BufferBuilder append_uint64 (uint64 val) {
 			write_uint64 (cursor, val);
 			cursor += (uint) sizeof (uint64);
+			return this;
+		}
+
+		public unowned BufferBuilder append_float (float val) {
+			write_float (cursor, val);
+			cursor += (uint) sizeof (float);
+			return this;
+		}
+
+		public unowned BufferBuilder append_double (double val) {
+			write_double (cursor, val);
+			cursor += (uint) sizeof (double);
 			return this;
 		}
 
@@ -1068,6 +1108,16 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder append_bytes (Bytes bytes) {
+			return append_data (bytes.get_data ());
+		}
+
+		public unowned BufferBuilder append_data (uint8[] data) {
+			write_data (cursor, data);
+			cursor += data.length;
+			return this;
+		}
+
 		public unowned BufferBuilder write_pointer (size_t offset, uint64 val) {
 			if (pointer_size == 4)
 				write_uint32 (offset, (uint32) val);
@@ -1076,8 +1126,25 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder write_size (size_t offset, uint64 val) {
+			return write_pointer (offset, val);
+		}
+
+		public unowned BufferBuilder write_int8 (size_t offset, int8 val) {
+			*((int8 *) get_pointer (offset, sizeof (int8))) = val;
+			return this;
+		}
+
 		public unowned BufferBuilder write_uint8 (size_t offset, uint8 val) {
-			*((uint8 *) get_pointer (offset, sizeof (uint8))) = val;
+			*get_pointer (offset, sizeof (uint8)) = val;
+			return this;
+		}
+
+		public unowned BufferBuilder write_int16 (size_t offset, int16 val) {
+			int16 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int16 *) get_pointer (offset, sizeof (int16))) = target_val;
 			return this;
 		}
 
@@ -1089,11 +1156,27 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder write_int32 (size_t offset, int32 val) {
+			int32 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int32 *) get_pointer (offset, sizeof (int32))) = target_val;
+			return this;
+		}
+
 		public unowned BufferBuilder write_uint32 (size_t offset, uint32 val) {
 			uint32 target_val = (byte_order == BIG_ENDIAN)
 				? val.to_big_endian ()
 				: val.to_little_endian ();
 			*((uint32 *) get_pointer (offset, sizeof (uint32))) = target_val;
+			return this;
+		}
+
+		public unowned BufferBuilder write_int64 (size_t offset, int64 val) {
+			int64 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int64 *) get_pointer (offset, sizeof (int64))) = target_val;
 			return this;
 		}
 
@@ -1105,9 +1188,26 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder write_float (size_t offset, float val) {
+			return write_uint32 (offset, *((uint32 *) &val));
+		}
+
+		public unowned BufferBuilder write_double (size_t offset, double val) {
+			return write_uint64 (offset, *((uint64 *) &val));
+		}
+
 		public unowned BufferBuilder write_string (size_t offset, string val) {
 			uint size = val.length + 1;
 			Memory.copy (get_pointer (offset, size), val, size);
+			return this;
+		}
+
+		public unowned BufferBuilder write_bytes (size_t offset, Bytes bytes) {
+			return write_data (offset, bytes.get_data ());
+		}
+
+		public unowned BufferBuilder write_data (size_t offset, uint8[] data) {
+			Memory.copy (get_pointer (offset, data.length), data, data.length);
 			return this;
 		}
 
@@ -1174,6 +1274,35 @@ namespace Frida {
 				write_uint64 (offset, val);
 		}
 
+		public int8 read_int8 (size_t offset) {
+			return *((int8 *) get_pointer (offset, sizeof (int8)));
+		}
+
+		public uint8 read_uint8 (size_t offset) {
+			return *get_pointer (offset, sizeof (uint8));
+		}
+
+		public int16 read_int16 (size_t offset) {
+			int16 val = *((int16 *) get_pointer (offset, sizeof (int16)));
+			return (byte_order == BIG_ENDIAN)
+				? int16.from_big_endian (val)
+				: int16.from_little_endian (val);
+		}
+
+		public uint16 read_uint16 (size_t offset) {
+			uint16 val = *((uint16 *) get_pointer (offset, sizeof (uint16)));
+			return (byte_order == BIG_ENDIAN)
+				? uint16.from_big_endian (val)
+				: uint16.from_little_endian (val);
+		}
+
+		public int32 read_int32 (size_t offset) {
+			int32 val = *((int32 *) get_pointer (offset, sizeof (int32)));
+			return (byte_order == BIG_ENDIAN)
+				? int32.from_big_endian (val)
+				: int32.from_little_endian (val);
+		}
+
 		public uint32 read_uint32 (size_t offset) {
 			uint32 val = *((uint32 *) get_pointer (offset, sizeof (uint32)));
 			return (byte_order == BIG_ENDIAN)
@@ -1189,6 +1318,13 @@ namespace Frida {
 			return this;
 		}
 
+		public int64 read_int64 (size_t offset) {
+			int64 val = *((int64 *) get_pointer (offset, sizeof (int64)));
+			return (byte_order == BIG_ENDIAN)
+				? int64.from_big_endian (val)
+				: int64.from_little_endian (val);
+		}
+
 		public uint64 read_uint64 (size_t offset) {
 			uint64 val = *((uint64 *) get_pointer (offset, sizeof (uint64)));
 			return (byte_order == BIG_ENDIAN)
@@ -1202,6 +1338,16 @@ namespace Frida {
 				: val.to_little_endian ();
 			*((uint64 *) get_pointer (offset, sizeof (uint64))) = target_val;
 			return this;
+		}
+
+		public float read_float (size_t offset) {
+			uint32 bits = read_uint32 (offset);
+			return *((float *) &bits);
+		}
+
+		public double read_double (size_t offset) {
+			uint64 bits = read_uint64 (offset);
+			return *((double *) &bits);
 		}
 
 		public string read_string (size_t offset) {
