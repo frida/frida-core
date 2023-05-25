@@ -1008,6 +1008,10 @@ namespace Frida {
 		private ByteArray buffer = new ByteArray ();
 		private size_t cursor = 0;
 
+		private uint64 base_address = 0;
+		private Gee.List<LabelRef>? label_refs;
+		private Gee.Map<string, uint>? label_defs;
+
 		public BufferBuilder (uint pointer_size = (uint) sizeof (size_t), ByteOrder byte_order = HOST) {
 			Object (
 				pointer_size: pointer_size,
@@ -1032,6 +1036,30 @@ namespace Frida {
 		public unowned BufferBuilder append_pointer (uint64 val) {
 			write_pointer (cursor, val);
 			cursor += pointer_size;
+			return this;
+		}
+
+		public unowned BufferBuilder append_pointer_to_label (string name) {
+			if (label_refs == null)
+				label_refs = new Gee.ArrayList<LabelRef> ();
+			label_refs.add (new LabelRef (name, cursor));
+			return skip (pointer_size);
+		}
+
+		public unowned BufferBuilder append_pointer_to_label_if (bool present, string name) {
+			if (present)
+				append_pointer_to_label (name);
+			else
+				append_pointer (0);
+			return this;
+		}
+
+		public unowned BufferBuilder append_label (string name) throws Error {
+			if (label_defs == null)
+				label_defs = new Gee.HashMap<string, uint> ();
+			if (label_defs.has_key (name))
+				throw new Error.INVALID_ARGUMENT ("Label '%s' already exists", name);
+			label_defs[name] = (uint) cursor;
 			return this;
 		}
 
@@ -1219,8 +1247,40 @@ namespace Frida {
 			return (uint8 *) buffer.data + offset;
 		}
 
-		public Bytes build () {
+		public Bytes try_build (uint64 base_address = 0) throws Error {
+			this.base_address = base_address;
+
+			if (label_refs != null) {
+				foreach (LabelRef r in label_refs)
+					write_pointer (r.offset, address_of (r.name));
+			}
+
 			return ByteArray.free_to_bytes ((owned) buffer);
+		}
+
+		public Bytes build (uint64 base_address = 0) {
+			try {
+				return try_build (base_address);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		public uint64 address_of (string label) throws Error {
+			if (label_defs == null || !label_defs.has_key (label))
+				throw new Error.INVALID_OPERATION ("Label '%s' not defined", label);
+			size_t offset = label_defs[label];
+			return base_address + offset;
+		}
+
+		private class LabelRef {
+			public string name;
+			public size_t offset;
+
+			public LabelRef (string name, size_t offset) {
+				this.name = name;
+				this.offset = offset;
+			}
 		}
 	}
 
