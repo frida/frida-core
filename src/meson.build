@@ -262,7 +262,6 @@ if host_os_family == 'linux'
       '--pkg=posix',
       '--pkg=linux',
       '--pkg=frida-gum-linux-1.0',
-      '--pkg=frida-gum-elf-1.0',
     ],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
   )
@@ -340,7 +339,7 @@ if host_os_family == 'freebsd'
     'freebsd/binjector-glue.c',
     'freebsd/system-freebsd.c',
   ]
-  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-freebsd-1.0', '--pkg=frida-gum-elf-1.0']
+  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-freebsd-1.0']
 endif
 
 if host_os_family == 'qnx'
