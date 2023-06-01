@@ -8,6 +8,7 @@ base_sources = [
   'promise.vala',
   'socket.vala',
   'socket-glue.c',
+  'buffer.vala',
 ]
 
 extra_deps = []

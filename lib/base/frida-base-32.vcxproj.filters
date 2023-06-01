@@ -45,6 +45,9 @@
     <ClCompile Include="$(IntDir)socket.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)buffer.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
     <ClCompile Include="session-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -73,6 +76,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="socket.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="buffer.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
