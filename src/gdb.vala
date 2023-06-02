@@ -155,6 +155,8 @@ namespace Frida.GDB {
 					ack_mode = SKIP_ACKS;
 				}
 
+				detect_vendor_features.begin (io_cancellable);
+
 				yield enable_extensions (cancellable);
 
 				string attached_response = yield query_property ("Attached", cancellable);
@@ -172,6 +174,15 @@ namespace Frida.GDB {
 			}
 
 			return true;
+		}
+
+		private async void detect_vendor_features (Cancellable? cancellable) {
+			try {
+				string response = yield query_property ("qemu.PhyMemMode", cancellable);
+				if (response.length == 1)
+					supported_features.add ("qemu");
+			} catch (GLib.Error e) {
+			}
 		}
 
 		protected virtual async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
