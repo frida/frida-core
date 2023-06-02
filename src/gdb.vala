@@ -145,7 +145,7 @@ namespace Frida.GDB {
 
 				foreach (string feature in supported_features) {
 					if (feature.has_prefix ("PacketSize=")) {
-						max_packet_size = (size_t) uint64.parse (feature[11:]);
+						max_packet_size = (size_t) uint64.parse (feature[11:], 16);
 						break;
 					}
 				}
