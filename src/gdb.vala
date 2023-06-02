@@ -53,7 +53,7 @@ namespace Frida.GDB {
 		private Exception? _exception;
 		private Exception? breakpoint_exception;
 		private Gee.List<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
-		private size_t max_packet_size = 500;
+		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
 		private Gee.Queue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
