@@ -44,6 +44,13 @@ namespace Frida {
 			return this;
 		}
 
+		public unowned BufferBuilder align (size_t n) {
+			size_t remainder = cursor % n;
+			if (remainder != 0)
+				skip (n - remainder);
+			return this;
+		}
+
 		public unowned BufferBuilder append_pointer (uint64 val) {
 			write_pointer (cursor, val);
 			cursor += pointer_size;
