@@ -56,6 +56,7 @@ namespace Frida.GDB {
 		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
 		private Gee.Queue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
+		private Promise<uint>? write_request;
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 
 		protected Gee.Set<string> supported_features = new Gee.HashSet<string> ();
@@ -815,18 +816,26 @@ namespace Frida.GDB {
 		}
 
 		private async void process_pending_writes () {
-			while (!pending_writes.is_empty) {
-				Bytes current = pending_writes.peek ();
+			write_request = new Promise<uint> ();
+			size_t total_bytes_written = 0;
+			try {
+				while (!pending_writes.is_empty) {
+					Bytes current = pending_writes.peek ();
 
-				size_t bytes_written;
-				try {
-					yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable,
-						out bytes_written);
-				} catch (GLib.Error e) {
-					return;
+					size_t bytes_written;
+					try {
+						yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable,
+							out bytes_written);
+						total_bytes_written += bytes_written;
+					} catch (GLib.Error e) {
+						return;
+					}
+
+					pending_writes.poll ();
 				}
-
-				pending_writes.poll ();
+			} finally {
+				write_request.resolve ((uint) total_bytes_written);
+				write_request = null;
 			}
 		}
 
@@ -999,8 +1008,11 @@ namespace Frida.GDB {
 
 			var packet = depacketize (header, body, body_size, trailer);
 
-			if (ack_mode == SEND_ACKS)
+			if (ack_mode == SEND_ACKS) {
 				write_string (ACK_NOTIFICATION);
+				var req = write_request.future;
+				yield req.wait_async (io_cancellable);
+			}
 
 			return packet;
 		}
