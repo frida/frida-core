@@ -990,9 +990,10 @@ namespace Frida.GDB {
 		}
 
 		private async Packet read_packet () throws Error, IOError {
-			string header = yield read_string (1);
-			if (header == ACK_NOTIFICATION || header == NACK_NOTIFICATION)
-				return yield read_packet ();
+			string? header = null;
+			do {
+				header = yield read_string (1);
+			} while (header == ACK_NOTIFICATION || header == NACK_NOTIFICATION);
 
 			string body;
 			size_t body_size;
