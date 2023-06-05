@@ -466,13 +466,7 @@ namespace Frida.GDB {
 					builder.append_hexbyte (byte);
 				}
 
-				Bytes slice = builder.build ();
-
-				bool last_slice = remaining == slice_size;
-				if (last_slice)
-					yield execute (slice, cancellable);
-				else
-					execute.begin (slice, cancellable);
+				yield execute (builder.build (), cancellable);
 
 				builder.reset ();
 
