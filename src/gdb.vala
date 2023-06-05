@@ -443,7 +443,7 @@ namespace Frida.GDB {
 
 		public async void write_byte_array (uint64 address, Bytes bytes, Cancellable? cancellable = null)
 				throws Error, IOError {
-			size_t max_bytes_per_packet = max_packet_size - 1 - 16 - 1 - 8 - 1 - Packet.OVERHEAD;
+			size_t max_bytes_per_packet = (max_packet_size - 1 - 16 - 1 - 8 - 1 - Packet.OVERHEAD) / 2;
 
 			var data = bytes.get_data ();
 			size_t offset = 0;
