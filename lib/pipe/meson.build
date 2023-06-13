@@ -10,7 +10,7 @@ if host_os_family == 'windows'
     'pipe-windows.c',
     'pipe-sddl.c',
   ]
-elif host_os in ['macos', 'ios']
+elif host_os in ['macos', 'ios', 'tvos']
   pipe_sources += ['pipe-darwin.c']
 
   system_deps += [gio_unix_dep]

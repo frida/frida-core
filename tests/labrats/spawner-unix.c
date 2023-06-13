@@ -4,6 +4,15 @@
 # define HAVE_POSIX_SPAWN
 #endif
 
+#ifdef HAVE_TVOS
+# include <Availability.h>
+# undef __TVOS_PROHIBITED
+# define __TVOS_PROHIBITED
+# undef __API_UNAVAILABLE
+# define __API_UNAVAILABLE(...)
+# include <sys/syslimits.h>
+#endif
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdbool.h>

@@ -3,6 +3,8 @@
 
 /* Module substitute2_daemon */
 
+#include "frida-tvos.h"
+
 #include <string.h>
 #include <mach/ndr.h>
 #include <mach/boolean.h>

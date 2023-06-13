@@ -313,7 +313,7 @@ endif
 if host_os == 'macos'
   backend_libs_private += ['-Wl,-framework,AppKit']
 endif
-if host_os == 'ios'
+if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
 
@@ -409,7 +409,7 @@ add_project_arguments(native_vala_flags, language: ['vala'], native: true)
 subdir('tools')
 subdir('lib')
 subdir('src')
-if host_os not in ['watchos', 'tvos']
+if host_os != 'watchos'
   subdir('server')
   subdir('portal')
   subdir('inject')

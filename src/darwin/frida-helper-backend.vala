@@ -48,15 +48,15 @@ namespace Frida {
 				dtrace_agent.spawn_removed.connect (on_dtrace_agent_spawn_removed);
 			}
 
-#if IOS
-			if (InternalIOSPolicySoftener.is_available ())
-				policy_softener = new InternalIOSPolicySoftener ();
+#if IOS || TVOS
+			if (InternalIOSTVOSPolicySoftener.is_available ())
+				policy_softener = new InternalIOSTVOSPolicySoftener ();
 			else if (ElectraPolicySoftener.is_available ())
 				policy_softener = new ElectraPolicySoftener ();
 			else if (Unc0verPolicySoftener.is_available ())
 				policy_softener = new Unc0verPolicySoftener ();
 			else
-				policy_softener = new IOSPolicySoftener ();
+				policy_softener = new IOSTVOSPolicySoftener ();
 #else
 			policy_softener = new NullPolicySoftener ();
 #endif

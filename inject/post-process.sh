@@ -35,6 +35,12 @@ case $host_os in
       exit 1
     fi
     ;;
+  tvos)
+    if [ -z "$TVOS_CERTID" ]; then
+      echo "TVOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
+      exit 1
+    fi
+    ;;
 esac
 
 intermediate_path=$output_inject_path.tmp
@@ -46,13 +52,16 @@ if [ "$strip_enabled" = "true" ]; then
 fi
 
 case $host_os in
-  macos|ios)
+  macos|ios|tvos)
     case $host_os in
       macos)
         "$codesign" -f -s "$MACOS_CERTID" -i "re.frida.Inject" "$intermediate_path" || exit 1
         ;;
       ios)
         "$codesign" -f -s "$IOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
+        ;;
+      tvos)
+        "$codesign" -f -s "$TVOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

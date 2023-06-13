@@ -58,7 +58,7 @@ if [ "$strip_enabled" = "true" ]; then
 fi
 
 case $host_os in
-  macos|ios)
+  macos|ios|watchos|tvos)
     case $host_os in
       macos)
         "$codesign" -f -s "$MACOS_CERTID" -i "re.frida.Helper" "$intermediate_path" || exit 1
@@ -70,7 +70,7 @@ case $host_os in
         "$codesign" -f -s "$WATCHOS_CERTID" "$intermediate_path" || exit 1
         ;;
       tvos)
-        "$codesign" -f -s "$TVOS_CERTID" "$intermediate_path" || exit 1
+        "$codesign" -f -s "$TVOS_CERTID" --entitlements "$input_entitlements_path" "$intermediate_path" || exit 1
         ;;
     esac
     ;;

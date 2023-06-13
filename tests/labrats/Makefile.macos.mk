@@ -15,7 +15,7 @@ WATCHOS_LDFLAGS := -Wl,-dead_strip
 
 TVOS_MINVER = 13.0
 TVOS_CC := $(shell xcrun --sdk appletvos -f clang)
-TVOS_CFLAGS := -Wall -Oz -target arm64-apple-tvos$(TVOS_MINVER) -isysroot $(shell xcrun --sdk appletvos --show-sdk-path)
+TVOS_CFLAGS := -Wall -Oz -target arm64-apple-tvos$(TVOS_MINVER) -isysroot $(shell xcrun --sdk appletvos --show-sdk-path) -DHAVE_TVOS=1
 TVOS_LDFLAGS := -Wl,-dead_strip
 
 all: \
@@ -29,8 +29,10 @@ all: \
 	stdio-writer-tvos \
 	forker-macos \
 	forker-ios \
+	forker-tvos \
 	spawner-macos \
 	spawner-ios \
+	spawner-tvos \
 	simple-agent-macos.dylib \
 	simple-agent-ios.dylib \
 	simple-agent-watchos.dylib \
@@ -131,9 +133,11 @@ $(eval $(call declare-executable-tvos,stdio-writer,stdio-writer.c))
 
 $(eval $(call declare-executable-macos,forker,forker.c))
 $(eval $(call declare-executable-ios,forker,forker.c))
+$(eval $(call declare-executable-tvos,forker,forker.c))
 
 $(eval $(call declare-executable-macos,spawner,spawner-unix.c))
 $(eval $(call declare-executable-ios,spawner,spawner-unix.c))
+$(eval $(call declare-executable-tvos,spawner,spawner-unix.c))
 
 $(eval $(call declare-library-macos,simple-agent,simple-agent.c))
 $(eval $(call declare-library-ios,simple-agent,simple-agent.c))

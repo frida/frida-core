@@ -1,5 +1,7 @@
 #include "frida-helper-backend.h"
 
+#include "frida-tvos.h"
+
 #include <capstone.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -78,7 +80,7 @@
     goto bsd_failure; \
   }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 #else
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
@@ -386,8 +388,8 @@ static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * s
 static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
-#ifdef HAVE_IOS
-static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data);
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+static gboolean frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data);
 #endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
@@ -964,13 +966,15 @@ invalid_pid:
   }
 }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 #import "springboard.h"
 
 static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
+static void frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 
 static guint frida_kill_application (NSString * identifier);
@@ -1003,6 +1007,11 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
       goto invalid_url;
     url_value = [NSURL URLWithString:[NSString stringWithUTF8String:g_variant_get_string (url, NULL)]];
   }
+
+#ifdef HAVE_TVOS
+  frida_darwin_helper_backend_launch_using_lsaw (identifier_value, url_value, options, on_complete, on_complete_target);
+  goto beach;
+#endif
 
   if (_frida_get_springboard_api ()->fbs != NULL)
   {
@@ -1130,7 +1139,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
       pending_error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to launch iOS app: %s",
+          "Unable to launch iOS app via FBS: %s",
           [[error localizedDescription] UTF8String]);
     }
 
@@ -1249,7 +1258,7 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
       error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to launch iOS app: %s",
+          "Unable to launch iOS app via SBS: %s",
           [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
     }
 
@@ -1304,6 +1313,96 @@ aslr_not_supported:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Disabling ASLR is not supported when spawning apps on this version of iOS");
+    goto failure;
+  }
+failure:
+  {
+    on_complete (NULL, error, on_complete_target);
+    return;
+  }
+}
+
+static void
+frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+{
+  FridaSpringboardApi * api;
+  GError * error = NULL;
+  BOOL opened = NO;
+
+  if (spawn_options->has_argv)
+    goto argv_not_supported;
+
+  if (spawn_options->has_envp)
+    goto envp_not_supported;
+
+  if (spawn_options->has_env)
+    goto env_not_supported;
+
+  if (strlen (spawn_options->cwd) > 0)
+    goto cwd_not_supported;
+
+  if (spawn_options->stdio != FRIDA_STDIO_INHERIT)
+    goto stdio_not_supported;
+
+  api = _frida_get_springboard_api ();
+
+  frida_kill_application (identifier);
+
+  if (url != nil)
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openURL:url];
+  else
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
+  if (!opened)
+  {
+    error = g_error_new (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to launch tvOS app via LSAW");
+    goto failure;
+  }
+
+  on_complete (NULL, NULL, on_complete_target);
+  return;
+
+argv_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'argv' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+envp_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'envp' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+env_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'env' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+cwd_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'cwd' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+stdio_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'stdio' option is not supported when spawning tvOS apps");
     goto failure;
   }
 failure:
@@ -2527,7 +2626,7 @@ frida_inject_instance_on_mach_thread_dead (void * context)
 
     self->agent_context->posix_thread = MACH_PORT_NULL;
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
     port_might_be_guarded = gum_darwin_check_xnu_version (7938, 0, 0);
 #else
     port_might_be_guarded = FALSE;
@@ -3114,7 +3213,7 @@ next_phase:
       return TRUE;
 
     case FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER:
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
       if (self->bootstrapper_name != 0)
       {
         frida_spawn_instance_set_libc_initialized (self);
@@ -3402,8 +3501,8 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
   if (!gum_darwin_query_ptrauth_support (self->task, &ptrauth_support))
     return KERN_FAILURE;
 
-#ifdef HAVE_IOS
-  gum_darwin_enumerate_modules (self->task, frida_pick_ios_bootstrapper, &data);
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+  gum_darwin_enumerate_modules (self->task, frida_pick_ios_tvos_bootstrapper, &data);
 #endif
 
   ret_gadget = self->ret_gadget;
@@ -3480,10 +3579,10 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
   self->dyld_data = 0;
 }
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static gboolean
-frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data)
+frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data)
 {
   FridaSpawnInstanceDyldData * data = user_data;
   const gchar * candidates[] = {
@@ -5206,7 +5305,7 @@ frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadStat
 static gboolean
 frida_is_hardware_breakpoint_support_working (void)
 {
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   static gsize cached_result = 0;
 
   if (g_once_init_enter (&cached_result))

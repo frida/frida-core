@@ -9,7 +9,7 @@ namespace Frida.Server {
 	private static string? token = null;
 	private static string? asset_root = null;
 	private static string? directory = null;
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 	private static bool daemonize = false;
 #endif
 	private static string? softener_flavor_str = null;
@@ -38,7 +38,7 @@ namespace Frida.Server {
 		{ "asset-root", 0, 0, OptionArg.FILENAME, ref asset_root, "Serve static files inside ROOT (by default no files are served)",
 			"ROOT" },
 		{ "directory", 'd', 0, OptionArg.STRING, ref directory, "Store binaries in DIRECTORY", "DIRECTORY" },
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
 		{ "policy-softener", 0, 0, OptionArg.STRING, ref softener_flavor_str, "Select policy softener", "system|internal" },
@@ -100,13 +100,13 @@ namespace Frida.Server {
 			}
 		}
 
-#if IOS
+#if IOS || TVOS
 		if (softener_flavor == INTERNAL)
-			InternalIOSPolicySoftener.enable ();
+			InternalIOSTVOSPolicySoftener.enable ();
 #endif
 
 		ReadyHandler? on_ready = null;
-#if !WINDOWS
+#if !WINDOWS && !TVOS
 		if (daemonize) {
 			var sync_fds = new int[2];
 

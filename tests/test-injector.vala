@@ -58,6 +58,7 @@ namespace Frida.InjectorTest {
 		switch (Frida.Test.os ()) {
 			case Frida.Test.OS.MACOS:   // Gum.Darwin.Mapper
 			case Frida.Test.OS.IOS:     // Gum.Darwin.Mapper
+			case Frida.Test.OS.TVOS:    // Gum.Darwin.Mapper
 			case Frida.Test.OS.ANDROID: // Bionic's behavior
 				assert_true (content_of (logfile) == ">m<>m");
 				break;

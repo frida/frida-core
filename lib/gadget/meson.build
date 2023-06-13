@@ -89,7 +89,7 @@ modulated_gadget = custom_target('frida-gadget-modulated',
 
 if host_os == 'macos'
   identity = '@executable_path/../Frameworks/FridaGadget.dylib'
-elif host_os == 'ios'
+elif host_os in ['ios', 'tvos']
   identity = '@executable_path/Frameworks/FridaGadget.dylib'
 else
   identity = gadget_name

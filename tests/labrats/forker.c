@@ -1,3 +1,9 @@
+#ifdef HAVE_TVOS
+# include <Availability.h>
+# undef __TVOS_PROHIBITED
+# define __TVOS_PROHIBITED
+#endif
+
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>

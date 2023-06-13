@@ -1,4 +1,4 @@
-#include "server-ios.h"
+#include "server-ios-tvos.h"
 
 #include <dlfcn.h>
 #include <gio/gio.h>
@@ -26,7 +26,7 @@ static gboolean frida_refresh_inode (const gchar * path);
 static gboolean frida_add_to_trust_cache (const gchar * path);
 
 void
-_frida_server_ios_configure (void)
+_frida_server_ios_tvos_configure (void)
 {
   memorystatus_control (MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, getpid (), 256, NULL, 0);
 

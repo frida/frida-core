@@ -175,7 +175,7 @@ namespace Frida {
 		}
 
 		private void on_server_connection (IOStream connection, SocketAddress remote_address) {
-#if IOS
+#if IOS || TVOS
 			/*
 			 * We defer the launchd injection until the first connection is established in order
 			 * to avoid bootloops on unsupported jailbreaks.

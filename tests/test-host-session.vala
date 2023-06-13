@@ -2128,7 +2128,19 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static string target_name_of_native (string name) {
-			string suffix = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "macos" : "ios";
+			string suffix;
+			switch (Frida.Test.os ())
+			{
+				case Frida.Test.OS.MACOS:
+					suffix = "macos";
+					break;
+				case Frida.Test.OS.TVOS:
+					suffix = "tvos";
+					break;
+				default:
+					suffix = "ios";
+					break;
+			}
 
 			return name + "-" + suffix;
 		}

@@ -16,7 +16,7 @@
 # endif
 #endif
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 # import "springboard.h"
 #endif
 
@@ -35,7 +35,7 @@ struct _FridaEnumerateApplicationsOperation
 {
   FridaScope scope;
   GHashTable * process_by_identifier;
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   FridaSpringboardApi * api;
 #endif
 
@@ -45,14 +45,14 @@ struct _FridaEnumerateApplicationsOperation
 struct _FridaEnumerateProcessesOperation
 {
   FridaScope scope;
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   FridaSpringboardApi * api;
 #endif
 
   GArray * result;
 };
 
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
 static void frida_collect_application_info_from_id_cstring (const gchar * identifier, FridaEnumerateApplicationsOperation * op);
 static void frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnumerateApplicationsOperation * op);
 #endif
@@ -60,13 +60,13 @@ static void frida_collect_application_info_from_id_nsstring (NSString * identifi
 static void frida_collect_process_info_from_pid (guint pid, FridaEnumerateProcessesOperation * op);
 static void frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumerateProcessesOperation * op);
 
-#if defined (HAVE_MACOS) || defined (HAVE_IOS)
+#if defined (HAVE_MACOS) || defined (HAVE_IOS) || defined (HAVE_TVOS)
 static void frida_add_app_id (GHashTable * parameters, NSString * identifier);
 #endif
 
 #if defined (HAVE_MACOS)
 static void frida_add_app_icons (GHashTable * parameters, NSImage * image);
-#elif defined (HAVE_IOS)
+#elif defined (HAVE_IOS) || defined (HAVE_TVOS)
 static void frida_add_app_metadata (GHashTable * parameters, NSString * identifier, FridaSpringboardApi * api);
 static void frida_add_app_state (GHashTable * parameters, guint pid, FridaSpringboardApi * api);
 static void frida_add_app_icons (GHashTable * parameters, NSString * identifier);
@@ -100,7 +100,7 @@ frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int
   return NULL;
 }
 
-#elif defined (HAVE_IOS)
+#elif defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 void
 frida_system_get_frontmost_application (FridaFrontmostQueryOptions * options, FridaHostApplicationInfo * result, GError ** error)
@@ -219,6 +219,9 @@ frida_system_enumerate_applications (FridaApplicationQueryOptions * options, int
   {
     NSArray * identifiers = op.api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
 
+    if (identifiers == nil)
+      identifiers = [[[[op.api->LSApplicationWorkspace defaultWorkspace] allApplications] valueForKey:@"applicationIdentifier"] retain];
+
     count = [identifiers count];
     for (i = 0; i != count; i++)
       frida_collect_application_info_from_id_nsstring ([identifiers objectAtIndex:i], &op);
@@ -245,22 +248,34 @@ frida_collect_application_info_from_id_cstring (const gchar * identifier, FridaE
 static void
 frida_collect_application_info_from_id_nsstring (NSString * identifier, FridaEnumerateApplicationsOperation * op)
 {
-  FridaHostApplicationInfo info;
+  FridaHostApplicationInfo info = { 0, };
   FridaScope scope = op->scope;
   FridaSpringboardApi * api = op->api;
   NSString * name;
   struct kinfo_proc * process;
 
   name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+  if (name == nil)
+  {
+    LSApplicationProxy * app = [api->LSApplicationProxy applicationProxyForIdentifier:identifier];
+    name = [[app localizedNameWithPreferredLocalizations:nil useShortNameOnly:YES] retain];
+  }
 
   info.identifier = g_strdup (identifier.UTF8String);
-  info.name = g_strdup (name.UTF8String);
-  info.pid = 0;
+  info.name = g_strdup ((name != nil) ? name.UTF8String : "");
   info.parameters = frida_make_parameters_dict ();
 
   process = g_hash_table_lookup (op->process_by_identifier, info.identifier);
   if (process != NULL)
+  {
     info.pid = process->kp_proc.p_pid;
+  }
+  else if (api->FBSSystemService != nil)
+  {
+    gint pid = [[api->FBSSystemService sharedService] pidForApplication:identifier];
+    if (pid > 0)
+      info.pid = pid;
+  }
 
   if (scope != FRIDA_SCOPE_MINIMAL)
   {
@@ -291,7 +306,7 @@ frida_system_enumerate_processes (FridaProcessQueryOptions * options, int * resu
   NSAutoreleasePool * pool;
 
   op.scope = frida_process_query_options_get_scope (options);
-#ifdef HAVE_IOS
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
   op.api = _frida_get_springboard_api ();
 #endif
 
@@ -380,7 +395,7 @@ frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumera
         frida_add_app_icons (info.parameters, app.icon);
     }
   }
-#elif defined (HAVE_IOS)
+#elif defined (HAVE_IOS) || defined (HAVE_TVOS)
   {
     FridaSpringboardApi * api = op->api;
     NSString * identifier;
@@ -454,7 +469,7 @@ frida_temporary_directory_get_system_tmp (void)
   }
 }
 
-#if defined (HAVE_MACOS) || defined (HAVE_IOS)
+#if defined (HAVE_MACOS) || defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static void
 frida_add_app_id (GHashTable * parameters, NSString * identifier)
@@ -526,7 +541,7 @@ frida_add_app_icons (GHashTable * parameters, NSImage * image)
   g_hash_table_insert (parameters, g_strdup ("icons"), g_variant_ref_sink (g_variant_builder_end (&builder)));
 }
 
-#elif defined (HAVE_IOS)
+#elif defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static void
 frida_add_app_metadata (GHashTable * parameters, NSString * identifier, FridaSpringboardApi * api)

@@ -1,8 +1,8 @@
 #include "server-glue.h"
 
 #include "frida-core.h"
-#ifdef HAVE_IOS
-# include "server-ios.h"
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+# include "server-ios-tvos.h"
 #endif
 #ifdef HAVE_ANDROID
 # include "frida-selinux.h"
@@ -54,8 +54,8 @@ frida_server_environment_set_verbose_logging_enabled (gboolean enabled)
 void
 frida_server_environment_configure (void)
 {
-#ifdef HAVE_IOS
-  _frida_server_ios_configure ();
+#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+  _frida_server_ios_tvos_configure ();
 #endif
 
 #ifdef HAVE_ANDROID

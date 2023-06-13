@@ -88,6 +88,10 @@ _frida_get_springboard_api (void)
     api->LSApplicationProxy = objc_get_class_impl ("LSApplicationProxy");
     g_assert (api->LSApplicationProxy != nil);
 
+    api->LSApplicationWorkspace = objc_get_class_impl ("LSApplicationWorkspace");
+    g_assert (api->LSApplicationWorkspace != nil);
+
+#ifndef HAVE_TVOS
     if (api->SBSSpringBoardBackgroundServerPort () == MACH_PORT_NULL)
     {
       GumInterceptor * interceptor;
@@ -102,6 +106,7 @@ _frida_get_springboard_api (void)
       else
         g_error ("Unable to locate _xpc_look_up_endpoint(); please file a bug");
     }
+#endif
 
     frida_springboard_api = api;
   }

@@ -6,9 +6,9 @@ server_sources = [
 if host_os_family == 'darwin'
   server_sources += ['server-darwin.m']
 endif
-if host_os == 'ios'
+if host_os in ['ios', 'tvos']
   server_sources += [
-    'server-ios.c',
+    'server-ios-tvos.c',
   ]
 endif
 

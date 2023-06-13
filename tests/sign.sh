@@ -19,6 +19,12 @@ case $host_os in
       exit 1
     fi
     ;;
+  tvos)
+    if [ -z "$TVOS_CERTID" ]; then
+      echo "TVOS_CERTID not set, see https://github.com/frida/frida#apple-oses"
+      exit 1
+    fi
+    ;;
   *)
     echo "Unexpected host OS"
     exit 1
@@ -34,5 +40,8 @@ case $host_os in
     ;;
   ios)
     "$codesign" -f -s "$IOS_CERTID" --entitlements "$runner_entitlements" "$signed_runner_binary" || exit 1
+    ;;
+  tvos)
+    "$codesign" -f -s "$TVOS_CERTID" --entitlements "$runner_entitlements" "$signed_runner_binary" || exit 1
     ;;
 esac

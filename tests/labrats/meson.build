@@ -54,6 +54,8 @@ if host_os == 'tvos'
   labrat_files += [
     'sleeper-tvos',
     'stdio-writer-tvos',
+    'forker-tvos',
+    'spawner-tvos',
     'simple-agent-tvos.dylib',
     'resident-agent-tvos.dylib',
   ]
