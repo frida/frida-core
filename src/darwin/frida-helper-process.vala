@@ -381,8 +381,8 @@ namespace Frida {
 
 				if (died_unexpectedly) {
 					throw new Error.PROCESS_NOT_FOUND ("Peer process (%d) died unexpectedly: %s",
-                        pending_pid, e.message);
-                }
+						pending_pid, e.message);
+				}
 				if (e is Error)
 					throw (Error) e;
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
