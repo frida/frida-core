@@ -1044,100 +1044,6 @@ beach:
 }
 
 static void
-frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
-    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
-{
-  FridaSpringboardApi * api;
-  GError * error = NULL;
-  BOOL opened = NO;
-
-  if (spawn_options->has_argv)
-    goto argv_not_supported;
-
-  if (spawn_options->has_envp)
-    goto envp_not_supported;
-
-  if (spawn_options->has_env)
-    goto env_not_supported;
-
-  if (strlen (spawn_options->cwd) > 0)
-    goto cwd_not_supported;
-
-  if (spawn_options->stdio != FRIDA_STDIO_INHERIT)
-    goto stdio_not_supported;
-
-  api = _frida_get_springboard_api ();
-
-  frida_kill_application (identifier);
-
-  if (url != nil)
-  {
-    opened = [[api->LSApplicationWorkspace defaultWorkspace] openURL:url];
-  }
-  else
-  {
-    opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
-  }
-  if (!opened)
-  {
-    error = g_error_new (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to launch tvOS app via LSAW");
-    goto failure;
-  }
-
-  on_complete (NULL, NULL, on_complete_target);
-  return;
-
-argv_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "The 'argv' option is not supported when spawning tvOS apps");
-    goto failure;
-  }
-envp_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "The 'envp' option is not supported when spawning tvOS apps");
-    goto failure;
-  }
-env_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "The 'env' option is not supported when spawning tvOS apps");
-    goto failure;
-  }
-cwd_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "The 'cwd' option is not supported when spawning tvOS apps");
-    goto failure;
-  }
-stdio_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "The 'stdio' option is not supported when spawning tvOS apps");
-    goto failure;
-  }
-failure:
-  {
-    on_complete (NULL, error, on_complete_target);
-    return;
-  }
-}
-
-static void
 frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
@@ -1407,6 +1313,96 @@ aslr_not_supported:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Disabling ASLR is not supported when spawning apps on this version of iOS");
+    goto failure;
+  }
+failure:
+  {
+    on_complete (NULL, error, on_complete_target);
+    return;
+  }
+}
+
+static void
+frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+{
+  FridaSpringboardApi * api;
+  GError * error = NULL;
+  BOOL opened = NO;
+
+  if (spawn_options->has_argv)
+    goto argv_not_supported;
+
+  if (spawn_options->has_envp)
+    goto envp_not_supported;
+
+  if (spawn_options->has_env)
+    goto env_not_supported;
+
+  if (strlen (spawn_options->cwd) > 0)
+    goto cwd_not_supported;
+
+  if (spawn_options->stdio != FRIDA_STDIO_INHERIT)
+    goto stdio_not_supported;
+
+  api = _frida_get_springboard_api ();
+
+  frida_kill_application (identifier);
+
+  if (url != nil)
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openURL:url];
+  else
+    opened = [[api->LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:identifier];
+  if (!opened)
+  {
+    error = g_error_new (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to launch tvOS app via LSAW");
+    goto failure;
+  }
+
+  on_complete (NULL, NULL, on_complete_target);
+  return;
+
+argv_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'argv' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+envp_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'envp' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+env_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'env' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+cwd_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'cwd' option is not supported when spawning tvOS apps");
+    goto failure;
+  }
+stdio_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'stdio' option is not supported when spawning tvOS apps");
     goto failure;
   }
 failure:

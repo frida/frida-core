@@ -16,8 +16,8 @@ namespace Frida.GadgetTest {
 					data_dir = Path.build_filename (source_dir, "tests");
 					break;
 				}
-				case Frida.Test.OS.TVOS:
-				case Frida.Test.OS.IOS: {
+				case Frida.Test.OS.IOS:
+				case Frida.Test.OS.TVOS: {
 					var deployment_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 					gadget_dir = deployment_dir;
 					data_dir = deployment_dir;
