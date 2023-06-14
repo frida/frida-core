@@ -1241,19 +1241,25 @@ namespace Frida.GDB {
 			}
 
 			public void complete_with_response (Packet response) {
-				if (handler == null)
-					return;
 				this.response = response;
-				handler ();
-				handler = null;
+				invoke_handler_in_idle ();
 			}
 
 			public void complete_with_error (GLib.Error error) {
-				if (handler == null)
-					return;
 				this.error = error;
-				handler ();
-				handler = null;
+				invoke_handler_in_idle ();
+			}
+
+			private void invoke_handler_in_idle () {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					if (handler != null) {
+						handler ();
+						handler = null;
+					}
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
 			}
 		}
 
