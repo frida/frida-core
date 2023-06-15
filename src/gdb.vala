@@ -510,7 +510,7 @@ namespace Frida.GDB {
 			return make_buffer (bytes);
 		}
 
-		public async Breakpoint add_breakpoint (Breakpoint.Kind kind, uint64 address, uint size, Cancellable? cancellable = null)
+		public async Breakpoint add_breakpoint (Breakpoint.Kind kind, uint64 address, size_t size, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_stopped ();
 
@@ -1865,7 +1865,7 @@ namespace Frida.GDB {
 			construct;
 		}
 
-		public uint size {
+		public size_t size {
 			get;
 			construct;
 		}
@@ -1898,7 +1898,7 @@ namespace Frida.GDB {
 
 		private State state = DISABLED;
 
-		public Breakpoint (Kind kind, uint64 address, uint size, Client client) {
+		public Breakpoint (Kind kind, uint64 address, size_t size, Client client) {
 			Object (
 				kind: kind,
 				address: address,
