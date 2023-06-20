@@ -5625,24 +5625,34 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
 
   switch (cpu_type)
   {
+#ifdef HAVE_I386
     case GUM_CPU_IA32:
+      cs_arch_register_x86 ();
       err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
       break;
 
     case GUM_CPU_AMD64:
+      cs_arch_register_x86 ();
       err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
       break;
+#endif
 
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
     case GUM_CPU_ARM:
+      cs_arch_register_arm ();
       if (start & 1)
         err = cs_open (CS_ARCH_ARM, CS_MODE_THUMB, &capstone);
       else
         err = cs_open (CS_ARCH_ARM, CS_MODE_ARM, &capstone);
       break;
+#endif
 
+#ifdef HAVE_ARM64
     case GUM_CPU_ARM64:
+      cs_arch_register_arm64 ();
       err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
       break;
+#endif
 
     default:
       g_assert_not_reached ();
