@@ -5,9 +5,7 @@ import replace from "@rollup/plugin-replace";
 import resolve from "@rollup/plugin-node-resolve";
 import typescript from "@rollup/plugin-typescript";
 import polyfills from "@frida/rollup-plugin-node-polyfills";
-import { terser } from "rollup-plugin-terser";
 import { defineConfig } from "rollup";
-import type rollup from "rollup";
 
 export default defineConfig({
     input: "agent-core.ts",
@@ -30,23 +28,8 @@ export default defineConfig({
             preventAssignment: true,
             values: computeSubstitutionValues(),
         }),
-        stubTsImportPlugin(),
         polyfills(),
         resolve(),
-        /*
-        terser({
-            ecma: 2020,
-            compress: {
-                module: true,
-                global_defs: {
-                    "process.env.FRIDA_COMPILE": true
-                },
-            },
-            mangle: {
-                module: true,
-            },
-        }),
-        */
     ],
 });
 
@@ -160,24 +143,5 @@ function computeSubstitutionValues() {
         "Process.pointerSize": (hostCpuMode === "64") ? "8" : "4",
         "__agentDirectories__": JSON.stringify(orderedAgentDirectories, null, 4),
         "__agentFiles__": JSON.stringify(orderedAgentFiles, null, 4),
-    };
-}
-
-function stubTsImportPlugin(): rollup.Plugin {
-    return {
-        name: "stub-ts-import",
-        async resolveId(source, importer, options) {
-            if (crosspath.basename(source) === "typescript.js") {
-                return {
-                    id: "typescript",
-                    external: true,
-                    meta: {},
-                    moduleSideEffects: false,
-                    syntheticNamedExports: false
-                };
-            }
-
-            return this.resolve(source, importer, { skipSelf: true, ...options });
-        }
     };
 }
