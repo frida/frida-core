@@ -15,7 +15,8 @@ INPUTS = [
     "package.json",
     "package-lock.json",
     "tsconfig.json",
-    "rollup.config.ts",
+    "rollup.config.agent-core.ts",
+    "rollup.config.typescript.ts",
 ]
 
 
@@ -45,20 +46,26 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
         ])
         raise EnvironmentError(message)
 
-    subprocess.run([
-            npm, "run", "build",
-            "--",
-            "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
-            "--silent",
-        ], cwd=output_dir, check=True)
-    agent_core_source = (output_dir / "agent-core.js").read_text(encoding="utf-8")
+    components = ["typescript", "agent-core"]
+    for component in components:
+        subprocess.run([
+                npm, "run", "build:" + component,
+                "--",
+                "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
+                "--silent",
+            ], cwd=output_dir, check=True)
+    chunks = []
+    for component in components:
+        script = (output_dir / f"{component}.js").read_text(encoding="utf-8")
+        chunks.append(script)
+    components_source = "\n".join(chunks)
 
     agent = output_dir / "agent.js"
     snapshot = output_dir / "snapshot.bin"
 
     if v8_mksnapshot is not None:
         shutil.copyfile(entrypoint, agent)
-        (output_dir / "embed.js").write_text(agent_core_source, encoding="utf-8")
+        (output_dir / "embed.js").write_text(components_source, encoding="utf-8")
         subprocess.run([
             v8_mksnapshot,
             "--turbo-instruction-scheduling",
@@ -68,7 +75,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
         ], cwd=output_dir, check=True)
     else:
         agent.write_text("\n".join([
-            agent_core_source,
+            components_source,
             entrypoint.read_text(encoding="utf-8"),
         ]))
         snapshot.write_bytes(b"")

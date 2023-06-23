@@ -4,7 +4,8 @@
   "description": "Agent used by Frida's compiler",
   "main": "agent.ts",
   "scripts": {
-    "build": "rollup --config rollup.config.ts --configPlugin typescript"
+    "build:typescript": "rollup --config rollup.config.typescript.ts --configPlugin typescript",
+    "build:agent-core": "rollup --config rollup.config.agent-core.ts --configPlugin typescript"
   },
   "dependencies": {
     "@frida/crosspath": "3.0.0",
@@ -20,6 +21,7 @@
     "@types/glob": "^8.0.0",
     "@types/node": "18.7.23",
     "glob": "^8.0.3",
-    "rollup": "^2.79.1"
+    "rollup": "^2.79.1",
+    "rollup-plugin-terser": "^7.0.2"
   }
 }
