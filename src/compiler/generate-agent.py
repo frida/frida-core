@@ -50,7 +50,10 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
             "--",
             "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
             "--silent",
-        ], cwd=output_dir, check=True)
+        ],
+        cwd=output_dir,
+        env={ **os.environ, "NODE_OPTIONS": "--max_old_space_size=4096" },
+        check=True)
     agent_core_source = (output_dir / "agent-core.js").read_text(encoding="utf-8")
 
     agent = output_dir / "agent.js"
