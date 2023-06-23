@@ -61,6 +61,18 @@
     <Filter Include="Resource Files\compiler">
       <UniqueIdentifier>{56aeb7fc-6443-41fd-8bad-d5e3dd174f5c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\barebone">
+      <UniqueIdentifier>{8095dacf-9529-4daf-9fa7-124a0dbd8c8c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\barebone\arch-arm64">
+      <UniqueIdentifier>{5eb2dd88-94b6-46fb-bb45-04a18223ffa4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\barebone">
+      <UniqueIdentifier>{7543fdf8-bcba-4faf-b776-ba8c60b43ea6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\barebone">
+      <UniqueIdentifier>{ee876d25-94c0-4b08-b62e-542701f53a5a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\windows\frida-windows.resources">
@@ -134,6 +146,9 @@
     </None>
     <CustomBuild Include="src\compiler\compiler.resources">
       <Filter>Resource Files\compiler</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\barebone\barebone.resources">
+      <Filter>Resource Files\barebone</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
@@ -247,6 +262,9 @@
     <ClCompile Include="$(IntDir)src\droidy\injector.c">
       <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\axml.c">
+      <Filter>Source Files\generated\droidy</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)src\droidy\jdwp.c">
       <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
@@ -269,6 +287,48 @@
       <Filter>Source Files\generated\compiler</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-compiler.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\barebone-host-session.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\script.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\machine.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\allocator.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\callback.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\memory-scanner.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\interceptor.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\rust-module.c">
+      <Filter>Source Files\generated\barebone</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86\machine.c">
+      <Filter>Source Files\generated\barebone\arch-x86</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86_64\machine.c">
+      <Filter>Source Files\generated\barebone\arch-x86_64</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-arm\machine.c">
+      <Filter>Source Files\generated\barebone\arch-arm</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-arm64\machine.c">
+      <Filter>Source Files\generated\barebone\arch-arm64</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-unknown\machine.c">
+      <Filter>Source Files\generated\barebone\arch-unknown</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\frida-data-barebone.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
   </ItemGroup>
@@ -296,6 +356,48 @@
     </None>
     <None Include="src\compiler\compiler.vala">
       <Filter>Source Files\compiler</Filter>
+    </None>
+    <None Include="src\droidy\axml.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
+    <None Include="src\barebone\barebone-host-session.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\script.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\machine.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\allocator.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\callback.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\memory-scanner.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\interceptor.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\rust-module.vala">
+      <Filter>Source Files\barebone</Filter>
+    </None>
+    <None Include="src\barebone\arch-x86\machine.vala">
+      <Filter>Source Files\barebone\arch-x86</Filter>
+    </None>
+    <None Include="src\barebone\arch-x86_64\machine.vala">
+      <Filter>Source Files\barebone\arch-x86_64</Filter>
+    </None>
+    <None Include="src\barebone\arch-arm\machine.vala">
+      <Filter>Source Files\barebone\arch-arm</Filter>
+    </None>
+    <None Include="src\barebone\arch-arm64\machine.vala">
+      <Filter>Source Files\barebone\arch-arm64</Filter>
+    </None>
+    <None Include="src\barebone\arch-unknown\machine.vala">
+      <Filter>Source Files\barebone\arch-unknown</Filter>
     </None>
   </ItemGroup>
 </Project>

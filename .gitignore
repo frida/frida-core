@@ -2,6 +2,9 @@
 /lib/xnu/build/
 /lib/xnu/FridaKernelAgent.xcodeproj/project.xcworkspace/xcuserdata/
 /lib/xnu/FridaKernelAgent.xcodeproj/xcuserdata/
+/src/barebone/helpers/memory-scanner/target/
+/src/barebone/helpers/target/
+/src/barebone/node_modules/
 /src/compiler/node_modules/
 /src/droidy/helper/build/
 /src/fruity/helpers/build/

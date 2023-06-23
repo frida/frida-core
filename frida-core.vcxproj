@@ -89,7 +89,7 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-base-32.lib;frida-pipe-32.lib;frida-helper-backend-32.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-base-32.lib;frida-pipe-32.lib;frida-helper-backend-32.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;$(IntDir)data\frida-data-barebone-blob.obj;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -100,7 +100,7 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-base-32.lib;frida-pipe-32.lib;frida-helper-backend-32.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-base-32.lib;frida-pipe-32.lib;frida-helper-backend-32.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;$(IntDir)data\frida-data-barebone-blob.obj;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -111,7 +111,7 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-base-64.lib;frida-pipe-64.lib;frida-helper-backend-64.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-base-64.lib;frida-pipe-64.lib;frida-helper-backend-64.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;$(IntDir)data\frida-data-barebone-blob.obj;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -122,7 +122,7 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-base-64.lib;frida-pipe-64.lib;frida-helper-backend-64.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-base-64.lib;frida-pipe-64.lib;frida-helper-backend-64.lib;$(IntDir)data\frida-data-compiler-blob.obj;$(IntDir)data\frida-data-windows-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;$(IntDir)data\frida-data-barebone-blob.obj;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -193,42 +193,42 @@ REM. &gt; "$(IntDir)data\agent.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent || exit 1
+"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala src/droidy/axml.vala src/barebone/barebone-host-session.vala src/barebone/script.vala src/barebone/machine.vala src/barebone/allocator.vala src/barebone/callback.vala src/barebone/memory-scanner.vala src/barebone/interceptor.vala src/barebone/rust-module.vala src/barebone/arch-x86/machine.vala src/barebone/arch-x86_64/machine.vala src/barebone/arch-arm/machine.vala src/barebone/arch-arm64/machine.vala src/barebone/arch-unknown/machine.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=quickjs --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent --pkg=frida-data-barebone || exit 1
 mkdir "$(IntDir)api" 2&gt;NUL
 $(Python) "$(ProjectDir)src\api\generate.py" 1.0 "$(IntDir)frida-core.vapi" "$(IntDir)frida-core.h" "$(IntDir)..\frida-base-32\frida-base.vapi" "$(IntDir)..\frida-base-32\frida-base.h" "$(IntDir)api"
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(ProjectDir)src\droidy\axml.vala;$(ProjectDir)src\barebone\barebone-host-session.vala;$(ProjectDir)src\barebone\script.vala;$(ProjectDir)src\barebone\machine.vala;$(ProjectDir)src\barebone\allocator.vala;$(ProjectDir)src\barebone\callback.vala;$(ProjectDir)src\barebone\memory-scanner.vala;$(ProjectDir)src\barebone\interceptor.vala;$(ProjectDir)src\barebone\rust-module.vala;$(ProjectDir)src\barebone\arch-x86\machine.vala;$(ProjectDir)src\barebone\arch-x86_64\machine.vala;$(ProjectDir)src\barebone\arch-arm\machine.vala;$(ProjectDir)src\barebone\arch-arm64\machine.vala;$(ProjectDir)src\barebone\arch-unknown\machine.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;$(IntDir)data\barebone.stamp;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent || exit 1
+"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala src/droidy/axml.vala src/barebone/barebone-host-session.vala src/barebone/script.vala src/barebone/machine.vala src/barebone/allocator.vala src/barebone/callback.vala src/barebone/memory-scanner.vala src/barebone/interceptor.vala src/barebone/rust-module.vala src/barebone/arch-x86/machine.vala src/barebone/arch-x86_64/machine.vala src/barebone/arch-arm/machine.vala src/barebone/arch-arm64/machine.vala src/barebone/arch-unknown/machine.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=quickjs --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent --pkg=frida-data-barebone || exit 1
 mkdir "$(IntDir)api" 2&gt;NUL
 $(Python) "$(ProjectDir)src\api\generate.py" 1.0 "$(IntDir)frida-core.vapi" "$(IntDir)frida-core.h" "$(IntDir)..\frida-base-64\frida-base.vapi" "$(IntDir)..\frida-base-64\frida-base.h" "$(IntDir)api"
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(ProjectDir)src\droidy\axml.vala;$(ProjectDir)src\barebone\barebone-host-session.vala;$(ProjectDir)src\barebone\script.vala;$(ProjectDir)src\barebone\machine.vala;$(ProjectDir)src\barebone\allocator.vala;$(ProjectDir)src\barebone\callback.vala;$(ProjectDir)src\barebone\memory-scanner.vala;$(ProjectDir)src\barebone\interceptor.vala;$(ProjectDir)src\barebone\rust-module.vala;$(ProjectDir)src\barebone\arch-x86\machine.vala;$(ProjectDir)src\barebone\arch-x86_64\machine.vala;$(ProjectDir)src\barebone\arch-arm\machine.vala;$(ProjectDir)src\barebone\arch-arm64\machine.vala;$(ProjectDir)src\barebone\arch-unknown\machine.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;$(IntDir)data\barebone.stamp;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent || exit 1
+"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala src/droidy/axml.vala src/barebone/barebone-host-session.vala src/barebone/script.vala src/barebone/machine.vala src/barebone/allocator.vala src/barebone/callback.vala src/barebone/memory-scanner.vala src/barebone/interceptor.vala src/barebone/rust-module.vala src/barebone/arch-x86/machine.vala src/barebone/arch-x86_64/machine.vala src/barebone/arch-arm/machine.vala src/barebone/arch-arm64/machine.vala src/barebone/arch-unknown/machine.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=quickjs --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent --pkg=frida-data-barebone || exit 1
 mkdir "$(IntDir)api" 2&gt;NUL
 $(Python) "$(ProjectDir)src\api\generate.py" 1.0 "$(IntDir)frida-core.vapi" "$(IntDir)frida-core.h" "$(IntDir)..\frida-base-32\frida-base.vapi" "$(IntDir)..\frida-base-32\frida-base.h" "$(IntDir)api"
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(ProjectDir)src\droidy\axml.vala;$(ProjectDir)src\barebone\barebone-host-session.vala;$(ProjectDir)src\barebone\script.vala;$(ProjectDir)src\barebone\machine.vala;$(ProjectDir)src\barebone\allocator.vala;$(ProjectDir)src\barebone\callback.vala;$(ProjectDir)src\barebone\memory-scanner.vala;$(ProjectDir)src\barebone\interceptor.vala;$(ProjectDir)src\barebone\rust-module.vala;$(ProjectDir)src\barebone\arch-x86\machine.vala;$(ProjectDir)src\barebone\arch-x86_64\machine.vala;$(ProjectDir)src\barebone\arch-arm\machine.vala;$(ProjectDir)src\barebone\arch-arm64\machine.vala;$(ProjectDir)src\barebone\arch-unknown\machine.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;$(IntDir)data\barebone.stamp;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent || exit 1
+"$(ValaCompiler)" src/frida.vala src/control-service.vala src/portal-service.vala src/host-session-service.vala src/agent-container.vala src/gdb.vala src/system.vala src/compiler/compiler.vala src/file-monitor.vala src/async-task.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/frida-helper-process.vala src/socket/socket-host-session.vala src/fruity/fruity-host-session.vala src/fruity/dtx.vala src/fruity/lockdown.vala src/fruity/installation-proxy.vala src/fruity/springboard-services.vala src/fruity/lldb.vala src/fruity/injector.vala src/fruity/usbmux.vala src/fruity/keyed-archive.vala src/fruity/plist.vala src/fruity/plist-service.vala src/droidy/droidy-host-session.vala src/droidy/droidy-client.vala src/droidy/jdwp.vala src/droidy/injector.vala src/droidy/axml.vala src/barebone/barebone-host-session.vala src/barebone/script.vala src/barebone/machine.vala src/barebone/allocator.vala src/barebone/callback.vala src/barebone/memory-scanner.vala src/barebone/interceptor.vala src/barebone/rust-module.vala src/barebone/arch-x86/machine.vala src/barebone/arch-x86_64/machine.vala src/barebone/arch-arm/machine.vala src/barebone/arch-arm64/machine.vala src/barebone/arch-unknown/machine.vala --ccode --directory=$(IntDir) --library=frida-core --gir=Frida-1.0.gir --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" --vapidir="$(IntDir)data" $(ValaFlags) $(FridaCoreValaFlags) --pkg config --pkg=gmodule-2.0 --pkg=gio-2.0 --pkg=nice --pkg=gioopenssl --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=libsoup-3.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-inspector-1.0 --pkg=libbrotlidec --pkg=quickjs --pkg=frida-base --pkg=frida-pipe --pkg=frida-helper-backend --pkg=frida-data-compiler --pkg=frida-data-windows --pkg=frida-data-agent --pkg=frida-data-barebone || exit 1
 mkdir "$(IntDir)api" 2&gt;NUL
 $(Python) "$(ProjectDir)src\api\generate.py" 1.0 "$(IntDir)frida-core.vapi" "$(IntDir)frida-core.h" "$(IntDir)..\frida-base-64\frida-base.vapi" "$(IntDir)..\frida-base-64\frida-base.h" "$(IntDir)api"
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)src\control-service.vala;$(ProjectDir)src\portal-service.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\agent-container.vala;$(ProjectDir)src\gdb.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\compiler\compiler.vala;$(ProjectDir)src\file-monitor.vala;$(ProjectDir)src\async-task.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\frida-helper-process.vala;$(ProjectDir)src\socket\socket-host-session.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\dtx.vala;$(ProjectDir)src\fruity\lockdown.vala;$(ProjectDir)src\fruity\installation-proxy.vala;$(ProjectDir)src\fruity\springboard-services.vala;$(ProjectDir)src\fruity\lldb.vala;$(ProjectDir)src\fruity\injector.vala;$(ProjectDir)src\fruity\usbmux.vala;$(ProjectDir)src\fruity\keyed-archive.vala;$(ProjectDir)src\fruity\plist.vala;$(ProjectDir)src\fruity\plist-service.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\jdwp.vala;$(ProjectDir)src\droidy\injector.vala;$(ProjectDir)src\droidy\axml.vala;$(ProjectDir)src\barebone\barebone-host-session.vala;$(ProjectDir)src\barebone\script.vala;$(ProjectDir)src\barebone\machine.vala;$(ProjectDir)src\barebone\allocator.vala;$(ProjectDir)src\barebone\callback.vala;$(ProjectDir)src\barebone\memory-scanner.vala;$(ProjectDir)src\barebone\interceptor.vala;$(ProjectDir)src\barebone\rust-module.vala;$(ProjectDir)src\barebone\arch-x86\machine.vala;$(ProjectDir)src\barebone\arch-x86_64\machine.vala;$(ProjectDir)src\barebone\arch-arm\machine.vala;$(ProjectDir)src\barebone\arch-arm64\machine.vala;$(ProjectDir)src\barebone\arch-unknown\machine.vala;$(IntDir)data\compiler.stamp;$(IntDir)data\windows.stamp;$(IntDir)data\agent.stamp;$(IntDir)data\barebone.stamp;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
     <CustomBuild Include="src\compiler\compiler.resources">
@@ -302,6 +302,41 @@ mkdir "$(IntDir)data" 2&gt;NUL
 REM. &gt; "$(IntDir)data\compiler.stamp"
 </Command>
     </CustomBuild>
+    <CustomBuild Include="src\barebone\barebone.resources">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Python) src\barebone\generate-script-runtime.py src\barebone "$(IntDir)src\barebone" || exit 1
+mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\barebone\barebone.resources" -o "$(IntDir)data\frida-data-barebone" "$(IntDir)src\barebone\script-runtime.js" src\barebone\helpers\memory-scanner-arm64.elf || exit 1
+REM. &gt; "$(IntDir)data\barebone.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Python) src\barebone\generate-script-runtime.py src\barebone "$(IntDir)src\barebone" || exit 1
+mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\barebone\barebone.resources" -o "$(IntDir)data\frida-data-barebone" "$(IntDir)src\barebone\script-runtime.js" src\barebone\helpers\memory-scanner-arm64.elf || exit 1
+REM. &gt; "$(IntDir)data\barebone.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Python) src\barebone\generate-script-runtime.py src\barebone "$(IntDir)src\barebone" || exit 1
+mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\barebone\barebone.resources" -o "$(IntDir)data\frida-data-barebone" "$(IntDir)src\barebone\script-runtime.js" src\barebone\helpers\memory-scanner-arm64.elf || exit 1
+REM. &gt; "$(IntDir)data\barebone.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Python) src\barebone\generate-script-runtime.py src\barebone "$(IntDir)src\barebone" || exit 1
+mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\barebone\barebone.resources" -o "$(IntDir)data\frida-data-barebone" "$(IntDir)src\barebone\script-runtime.js" src\barebone\helpers\memory-scanner-arm64.elf || exit 1
+REM. &gt; "$(IntDir)data\barebone.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Barebone resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\barebone.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe;src\barebone\generate-script-runtime.py;src\barebone\package.json;src\barebone\package-lock.json;src\barebone\script-runtime\console.ts;src\barebone\script-runtime\entrypoint.ts;src\barebone\script-runtime\gdb.ts;src\barebone\script-runtime\hexdump.ts;src\barebone\script-runtime\message-dispatcher.ts;src\barebone\script-runtime\primitives.ts;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Barebone resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\barebone.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe;src\barebone\generate-script-runtime.py;src\barebone\package.json;src\barebone\package-lock.json;src\barebone\script-runtime\console.ts;src\barebone\script-runtime\entrypoint.ts;src\barebone\script-runtime\gdb.ts;src\barebone\script-runtime\hexdump.ts;src\barebone\script-runtime\message-dispatcher.ts;src\barebone\script-runtime\primitives.ts;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing Barebone resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\barebone.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe;src\barebone\generate-script-runtime.py;src\barebone\package.json;src\barebone\package-lock.json;src\barebone\script-runtime\console.ts;src\barebone\script-runtime\entrypoint.ts;src\barebone\script-runtime\gdb.ts;src\barebone\script-runtime\hexdump.ts;src\barebone\script-runtime\message-dispatcher.ts;src\barebone\script-runtime\primitives.ts;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Barebone resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\barebone.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe;src\barebone\generate-script-runtime.py;src\barebone\package.json;src\barebone\package-lock.json;src\barebone\script-runtime\console.ts;src\barebone\script-runtime\entrypoint.ts;src\barebone\script-runtime\gdb.ts;src\barebone\script-runtime\hexdump.ts;src\barebone\script-runtime\message-dispatcher.ts;src\barebone\script-runtime\primitives.ts;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
     <None Include="src\control-service.vala" />
     <None Include="src\portal-service.vala" />
     <None Include="src\host-session-service.vala" />
@@ -330,6 +365,20 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
     <None Include="src\droidy\droidy-client.vala" />
     <None Include="src\droidy\jdwp.vala" />
     <None Include="src\droidy\injector.vala" />
+    <None Include="src\droidy\axml.vala" />
+    <None Include="src\barebone\barebone-host-session.vala" />
+    <None Include="src\barebone\script.vala" />
+    <None Include="src\barebone\machine.vala" />
+    <None Include="src\barebone\allocator.vala" />
+    <None Include="src\barebone\callback.vala" />
+    <None Include="src\barebone\memory-scanner.vala" />
+    <None Include="src\barebone\interceptor.vala" />
+    <None Include="src\barebone\rust-module.vala" />
+    <None Include="src\barebone\arch-x86\machine.vala" />
+    <None Include="src\barebone\arch-x86_64\machine.vala" />
+    <None Include="src\barebone\arch-arm\machine.vala" />
+    <None Include="src\barebone\arch-arm64\machine.vala" />
+    <None Include="src\barebone\arch-unknown\machine.vala" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\frida.c">
@@ -665,6 +714,146 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\droidy\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\droidy\</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\axml.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\droidy\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\droidy\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\droidy\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\droidy\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\barebone-host-session.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\script.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\allocator.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\callback.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\memory-scanner.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\interceptor.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\rust-module.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\arch-x86\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\arch-x86\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\arch-x86\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\arch-x86\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86_64\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\arch-x86_64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\arch-x86_64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\arch-x86_64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\arch-x86_64\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-arm\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\arch-arm\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\arch-arm\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\arch-arm\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\arch-arm\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-arm64\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\arch-arm64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\arch-arm64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\arch-arm64\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\arch-arm64\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-unknown\machine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\barebone\arch-unknown\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\barebone\arch-unknown\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\barebone\arch-unknown\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\barebone\arch-unknown\</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-compiler.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
@@ -678,6 +867,12 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\frida-data-barebone.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>

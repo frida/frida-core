@@ -1,0 +1,13 @@
+{
+  "name": "frida-barebone-script-runtime",
+  "version": "1.0.0",
+  "description": "Script runtime used by Frida's Barebone backend",
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "frida-compile script-runtime/entrypoint.ts -o script-runtime.js -c"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^18.3.2",
+    "frida-compile": "^16.2.1"
+  }
+}

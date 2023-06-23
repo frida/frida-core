@@ -423,10 +423,11 @@ droidy_sources = [
   'droidy/axml.vala',
 ]
 
+subdir('barebone')
 subdir('compiler')
 
 local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sources + qnx_sources + [agent_data]
-remote_sources = socket_sources + fruity_sources + droidy_sources
+remote_sources = socket_sources + fruity_sources + droidy_sources + barebone_sources
 
 core_sources = base_sources + local_sources + remote_sources + compiler_sources
 

@@ -14,6 +14,7 @@ namespace Frida {
 			add_backend (new DroidyHostSessionBackend ());
 #endif
 			add_backend (new SocketHostSessionBackend ());
+			add_backend (new BareboneHostSessionBackend ());
 		}
 
 		public HostSessionService.with_local_backend_only () {

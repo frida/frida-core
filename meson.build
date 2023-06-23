@@ -45,6 +45,7 @@ else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
 endif
+host_toolchain = (host_os_family == 'darwin') ? 'apple' : 'gnu'
 gumjs_archs = {
   'x86': 'ia32',
   'x86_64': 'x64',
@@ -246,6 +247,7 @@ libsoup_dep = dependency('libsoup-3.0')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
+quickjs_dep = dependency('quickjs', required: false)
 brotlidec_dep = dependency('libbrotlidec')
 
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
@@ -270,6 +272,10 @@ endif
 
 backend_deps_private = []
 backend_libs_private = []
+
+if quickjs_dep.found()
+  backend_deps_private += quickjs_dep
+endif
 
 if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>')
   vala_flags += '--define=HAVE_OPENPTY'
