@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "@frida/crosspath": "3.0.0",
-    "frida-compile": "16.2.2",
-    "frida-fs": "5.2.3"
+    "frida-compile": "16.3.0",
+    "frida-fs": "5.2.5"
   },
   "devDependencies": {
     "@frida/rollup-plugin-node-polyfills": "^1.0.3",
