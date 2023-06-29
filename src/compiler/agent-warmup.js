@@ -82,6 +82,9 @@ class StubSystem {
   }
 
   fileExists(path) {
+    if (path === '/package.json' || path === '/agent/package.json')
+      return false;
+
     const agentZipPath = this.#nativePathToAgentZipPath(path);
     if (agentZipPath !== null)
       return agentFiles.has(agentZipPath);
@@ -90,7 +93,7 @@ class StubSystem {
   }
 
   directoryExists(path) {
-    if (path === compilerNodeModules)
+    if (path === '/' || path === projectRoot || path === compilerNodeModules)
       return true;
 
     const agentZipPath = this.#nativePathToAgentZipPath(path);
