@@ -80,11 +80,4 @@ export type GDBBreakpointKind =
     | "access"
     ;
 
-export type GDBEvent = GDBStateChangeEvent;
-
-export interface GDBStateChangeEvent {
-    type: "state:change";
-    state: GDBState;
-}
-
 declare const $gdb: GDBClient;
