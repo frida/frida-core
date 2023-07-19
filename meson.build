@@ -237,7 +237,7 @@ if get_option('b_sanitize') == 'address'
   cdata.set('HAVE_ASAN', 1)
 endif
 
-glib_dep = dependency('glib-2.0', version: '>=2.56')
+glib_dep = dependency('glib-2.0', version: '>=2.74')
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
@@ -261,7 +261,7 @@ else
   v8_mksnapshot = ''
 endif
 
-native_glib_dep = dependency('glib-2.0', version: '>=2.56', native: true)
+native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true)
 native_brotlienc_dep = dependency('libbrotlienc', native: true)
