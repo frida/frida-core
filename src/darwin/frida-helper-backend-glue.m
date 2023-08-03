@@ -2028,7 +2028,11 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     {
       instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld412gProcessInfoE");
       if (instance->info_ptr_address == 0)
-        goto dyld_probe_failed;
+      {
+        instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12sProcessInfo");
+        if (instance->info_ptr_address == 0)
+          goto dyld_probe_failed;
+      }
     }
   }
   else
