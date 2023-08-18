@@ -2023,13 +2023,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     instance->modern_entry_address = modern_entry_address;
     legacy_entry_address = 0;
 
-    instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "_gProcessInfo");
+    instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12sProcessInfo");
     if (instance->info_ptr_address == 0)
     {
       instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld412gProcessInfoE");
       if (instance->info_ptr_address == 0)
       {
-        instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12sProcessInfo");
+        instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "_gProcessInfo");
         if (instance->info_ptr_address == 0)
           goto dyld_probe_failed;
       }
