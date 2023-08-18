@@ -974,8 +974,10 @@ static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
+#ifdef HAVE_TVOS
 static void frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
+#endif
 
 static guint frida_kill_application (NSString * identifier);
 static gboolean frida_has_active_prewarm (gint pid);
@@ -1322,6 +1324,8 @@ failure:
   }
 }
 
+#ifdef HAVE_TVOS
+
 static void
 frida_darwin_helper_backend_launch_using_lsaw (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
@@ -1411,6 +1415,8 @@ failure:
     return;
   }
 }
+
+#endif
 
 void
 _frida_darwin_helper_backend_kill_process (guint pid)
