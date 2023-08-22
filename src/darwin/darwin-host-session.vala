@@ -103,9 +103,34 @@ namespace Frida {
 			construct;
 		}
 
+		public string? sysroot {
+			get;
+			construct;
+		}
+
 		public bool report_crashes {
 			get;
 			construct;
+		}
+
+		public string? agent_path {
+			owned get {
+#if HAVE_EMBEDDED_ASSETS
+				return null;
+#else
+				unowned string path = Config.FRIDA_AGENT_PATH;
+# if IOS || TVOS
+				unowned string? cryptex_path = Environment.get_variable ("CRYPTEX_MOUNT_PATH");
+				if (cryptex_path != null)
+					return cryptex_path + path;
+# endif
+				unowned string? root_path = sysroot;
+				if (root_path != null)
+					return root_path + path;
+
+				return path;
+#endif
+			}
 		}
 
 		private AgentContainer? system_session_container;
@@ -119,10 +144,12 @@ namespace Frida {
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
-		public DarwinHostSession (owned DarwinHelper helper, owned TemporaryDirectory tempdir, bool report_crashes = true) {
+		public DarwinHostSession (owned DarwinHelper helper, owned TemporaryDirectory tempdir, owned string? sysroot = null,
+				bool report_crashes = true) {
 			Object (
 				helper: helper,
 				tempdir: tempdir,
+				sysroot: sysroot,
 				report_crashes: report_crashes
 			);
 		}
@@ -220,7 +247,7 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 			path = agent.get_file ().path;
 #else
-			path = Config.FRIDA_AGENT_PATH;
+			path = agent_path;
 #endif
 
 			system_session_container = yield AgentContainer.create (path, cancellable);
@@ -358,12 +385,6 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, agent_parameters, cancellable);
 #else
-			string agent_path = Config.FRIDA_AGENT_PATH;
-#if IOS || TVOS
-			unowned string? cryptex_path = Environment.get_variable ("CRYPTEX_MOUNT_PATH");
-			if (cryptex_path != null)
-				agent_path = cryptex_path + agent_path;
-#endif
 			id = yield fruitjector.inject_library_file (pid, agent_path, entrypoint, agent_parameters, cancellable);
 #endif
 

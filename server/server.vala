@@ -90,6 +90,23 @@ namespace Frida.Server {
 		options.enable_preload = enable_preload;
 		options.report_crashes = report_crashes;
 
+#if (IOS || TVOS) && !HAVE_EMBEDDED_ASSETS
+		string? program_path = null;
+		Gum.Process.enumerate_modules (m => {
+			uint32 * file_type = (uint32 *) (m.range.base_address + 12);
+			const uint32 MH_EXECUTE = 2;
+			if (*file_type == MH_EXECUTE) {
+				program_path = m.path;
+				return false;
+			}
+			return true;
+		});
+		int prefix_pos = program_path.last_index_of (Config.FRIDA_PREFIX + "/");
+		if (prefix_pos != -1 && prefix_pos != 0) {
+			options.sysroot = program_path[:prefix_pos];
+		}
+#endif
+
 		PolicySoftenerFlavor softener_flavor = SYSTEM;
 		if (softener_flavor_str != null) {
 			try {

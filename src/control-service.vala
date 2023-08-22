@@ -50,7 +50,7 @@ namespace Frida {
 #endif
 #if DARWIN
 			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory (),
-				opts.report_crashes);
+				opts.sysroot, opts.report_crashes);
 #endif
 #if LINUX
 			var tempdir = new TemporaryDirectory ();
@@ -860,6 +860,11 @@ namespace Frida {
 	}
 
 	public class ControlServiceOptions : Object {
+		public string? sysroot {
+			get;
+			set;
+		}
+
 		public bool enable_preload {
 			get;
 			set;
