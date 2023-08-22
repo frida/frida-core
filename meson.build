@@ -147,6 +147,8 @@ if cc.get_define('FRIDA_VERSION') == ''
   cdata.set('FRIDA_NANO_VERSION', 0)
 endif
 
+cdata.set_quoted('FRIDA_PREFIX', get_option('prefix'))
+
 if host_os_family == 'windows'
   shlib_suffix = '.dll'
 elif host_os_family == 'darwin'
