@@ -25,18 +25,29 @@ if [ ! -f "$agent" ]; then
   exit 5
 fi
 
+if [ "$arch" == "iphoneos-arm64" ]; then
+  sysroot=/var/jb
+else
+  sysroot=""
+fi
+
 tmpdir="$(mktemp -d /tmp/package-server.XXXXXX)"
 
-mkdir -p "$tmpdir/usr/sbin/"
-cp "$executable" "$tmpdir/usr/sbin/frida-server"
-chmod 755 "$tmpdir/usr/sbin/frida-server"
+pkroot=$tmpdir$sysroot
+bindir=$pkroot/usr/sbin
+libdir=$pkroot/usr/lib/frida
+daedir=$pkroot/Library/LaunchDaemons
 
-mkdir -p "$tmpdir/usr/lib/frida/"
-cp "$agent" "$tmpdir/usr/lib/frida/frida-agent.dylib"
-chmod 755 "$tmpdir/usr/lib/frida/frida-agent.dylib"
+mkdir -p "$bindir/"
+cp "$executable" "$bindir/frida-server"
+chmod 755 "$bindir/frida-server"
 
-mkdir -p "$tmpdir/Library/LaunchDaemons/"
-cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
+mkdir -p "$libdir/"
+cp "$agent" "$libdir/frida-agent.dylib"
+chmod 755 "$libdir/frida-agent.dylib"
+
+mkdir -p "$daedir/"
+cat >"$daedir/re.frida.server.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,10 +55,10 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	<key>Label</key>
 	<string>re.frida.server</string>
 	<key>Program</key>
-	<string>/usr/sbin/frida-server</string>
+	<string>$sysroot/usr/sbin/frida-server</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/sbin/frida-server</string>
+		<string>$sysroot/usr/sbin/frida-server</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
@@ -71,7 +82,7 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 </dict>
 </plist>
 EOF
-chmod 644 "$tmpdir/Library/LaunchDaemons/re.frida.server.plist"
+chmod 644 "$daedir/re.frida.server.plist"
 
 installed_size=$(du -sk "$tmpdir" | cut -f1)
 
@@ -97,11 +108,11 @@ cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
 if [ "\$1" = upgrade ]; then
-  launchctl unload /Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload $sysroot/Library/LaunchDaemons/re.frida.server.plist
 fi
 
 if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
-  launchctl load /Library/LaunchDaemons/re.frida.server.plist
+  launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0
@@ -111,7 +122,7 @@ cat >"$tmpdir/DEBIAN/prerm" <<EOF
 #!/bin/sh
 
 if [ "\$1" = remove ] || [ "\$1" = purge ]; then
-  launchctl unload /Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload $sysroot/Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0
