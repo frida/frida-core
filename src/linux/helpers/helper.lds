@@ -19,6 +19,9 @@ SECTIONS {
   .note.gnu.build-id : {
     *(.note.gnu.build-id)
   }
+  .note.android.ident : {
+    *(.note.android.ident)
+  }
   .got : ALIGN(64) {
     *(.got*)
     . = ALIGN(64);

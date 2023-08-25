@@ -28,10 +28,13 @@ common_objcopy_flags = [
   '-O', 'binary',
   '-S',
   '-R', '.plt',
+  '-R', '.rel.dyn',
   '-R', '.rela.dyn',
   '-R', '.dynamic',
   '-R', '.dynstr',
   '-R', '.dynsym',
+  '-R', '.gnu.version',
+  '-R', '.gnu.version_r',
   '-R', '.gnu.hash',
   '-R', '.hash',
   '-R', '.note.*',
@@ -44,6 +47,14 @@ if not host_machine.cpu_family().startswith('mips')
 endif
 
 helper_lds = meson.current_source_dir() / 'helper.lds'
+
+extra_link_args = [
+  '-nostdlib',
+  '-Wl,-T,' + helper_lds,
+]
+if host_machine.cpu_family() == 'arm'
+  extra_link_args += run_command('../../../../build/frida-android-arm-clang', '-print-libgcc-file-name', check: false).stdout().strip()
+endif
 
 bootstrapper_sources = [
   'bootstrapper.c',
@@ -58,10 +69,7 @@ bootstrapper = shared_module('bootstrapper', bootstrapper_sources,
     '-include', 'ext/linux/tools/include/nolibc/nolibc.h',
     '-ffreestanding',
   ] + extra_flags,
-  link_args: [
-    '-nostdlib',
-    '-Wl,-T,' + helper_lds,
-  ],
+  link_args: extra_link_args,
   link_depends: [helper_lds],
 )
 custom_target('bootstrapper-bin',
@@ -80,10 +88,7 @@ test('bootstrapper', executable('test-bootstrapper', bootstrapper_sources,
 loader = shared_module('loader', ['loader.c', 'syscall.c'],
   name_prefix: '',
   c_args: extra_flags,
-  link_args: [
-    '-nostdlib',
-    '-Wl,-T,' + helper_lds,
-  ],
+  link_args: extra_link_args,
   link_depends: [helper_lds],
 )
 custom_target('loader-bin',
