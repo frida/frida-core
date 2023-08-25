@@ -1,13 +1,13 @@
 #include "elf-parser.h"
 
-static ElfW(Phdr) * frida_find_program_header_by_type (ElfW(Ehdr) * ehdr, ElfW(Word) type);
-static size_t frida_compute_elf_region_upper_bound (ElfW(Ehdr) * ehdr, ElfW(Addr) address);
+static const ElfW(Phdr) * frida_find_program_header_by_type (const ElfW(Ehdr) * ehdr, ElfW(Word) type);
+static size_t frida_compute_elf_region_upper_bound (const ElfW(Ehdr) * ehdr, ElfW(Addr) address);
 
 const char *
-frida_query_soname (ElfW(Ehdr) * ehdr)
+frida_elf_query_soname (const ElfW(Ehdr) * ehdr)
 {
   ElfW(Addr) soname_offset, strings_base;
-  ElfW(Phdr) * dyn;
+  const ElfW(Phdr) * dyn;
   size_t num_entries, i;
   const ElfW(Dyn) * entries;
 
@@ -41,11 +41,11 @@ frida_query_soname (ElfW(Ehdr) * ehdr)
 }
 
 void
-frida_enumerate_symbols (ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void * user_data)
+frida_elf_enumerate_exports (const ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void * user_data)
 {
   ElfW(Addr) symbols_base, strings_base;
   size_t symbols_size, strings_size;
-  ElfW(Phdr) * dyn;
+  const ElfW(Phdr) * dyn;
   size_t num_entries, i;
   size_t num_symbols;
 
@@ -117,8 +117,60 @@ frida_enumerate_symbols (ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void *
   }
 }
 
-static ElfW(Phdr) *
-frida_find_program_header_by_type (ElfW(Ehdr) * ehdr, ElfW(Word) type)
+void
+frida_elf_enumerate_symbols (const ElfW(Ehdr) * ehdr, void * loaded_base, FridaFoundElfSymbolFunc func, void * user_data)
+{
+  const ElfW(Sym) * symbols;
+  size_t symbols_entsize, num_symbols;
+  const char * strings;
+  size_t i;
+
+  symbols = NULL;
+  strings = NULL;
+  for (i = 0; i != ehdr->e_shnum; i++)
+  {
+    ElfW(Shdr) * shdr = (void *) ehdr + ehdr->e_shoff + (i * ehdr->e_shentsize);
+    switch (shdr->sh_type)
+    {
+      case SHT_SYMTAB:
+        symbols = (void *) ehdr + shdr->sh_offset;
+        symbols_entsize = shdr->sh_entsize;
+        num_symbols = shdr->sh_size / symbols_entsize;
+        break;
+      case SHT_STRTAB:
+        strings = (char *) ehdr + shdr->sh_offset;
+        break;
+      default:
+        break;
+    }
+  }
+  if (symbols == NULL || strings == NULL)
+    return;
+
+  for (i = 0; i != num_symbols; i++)
+  {
+    const ElfW(Sym) * sym = &symbols[i];
+    FridaElfExportDetails d;
+
+    if (sym->st_shndx == SHN_UNDEF)
+      continue;
+
+    d.type = FRIDA_ELF_ST_TYPE (sym->st_info);
+    if (!(d.type == STT_FUNC || d.type == STT_OBJECT))
+      continue;
+
+    d.bind = FRIDA_ELF_ST_BIND (sym->st_info);
+
+    d.name = strings + sym->st_name;
+    d.address = loaded_base + sym->st_value;
+
+    if (!func (&d, user_data))
+      return;
+  }
+}
+
+static const ElfW(Phdr) *
+frida_find_program_header_by_type (const ElfW(Ehdr) * ehdr, ElfW(Word) type)
 {
   ElfW(Half) i;
 
@@ -133,7 +185,7 @@ frida_find_program_header_by_type (ElfW(Ehdr) * ehdr, ElfW(Word) type)
 }
 
 ElfW(Addr)
-frida_compute_elf_base_from_phdrs (const ElfW(Phdr) * phdrs, ElfW(Half) phdr_size, ElfW(Half) phdr_count, size_t page_size)
+frida_elf_compute_base_from_phdrs (const ElfW(Phdr) * phdrs, ElfW(Half) phdr_size, ElfW(Half) phdr_count, size_t page_size)
 {
   ElfW(Addr) base_address;
   ElfW(Half) i;
@@ -162,7 +214,7 @@ frida_compute_elf_base_from_phdrs (const ElfW(Phdr) * phdrs, ElfW(Half) phdr_siz
 }
 
 static size_t
-frida_compute_elf_region_upper_bound (ElfW(Ehdr) * ehdr, ElfW(Addr) address)
+frida_compute_elf_region_upper_bound (const ElfW(Ehdr) * ehdr, ElfW(Addr) address)
 {
   ElfW(Half) i;
 

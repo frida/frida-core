@@ -48,8 +48,9 @@ struct _FridaElfExportDetails
   uint8_t bind;
 };
 
-const char * frida_query_soname (ElfW(Ehdr) * ehdr);
-void frida_enumerate_symbols (ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void * user_data);
-ElfW(Addr) frida_compute_elf_base_from_phdrs (const ElfW(Phdr) * phdrs, ElfW(Half) phdr_size, ElfW(Half) phdr_count, size_t page_size);
+const char * frida_elf_query_soname (const ElfW(Ehdr) * ehdr);
+void frida_elf_enumerate_exports (const ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void * user_data);
+void frida_elf_enumerate_symbols (const ElfW(Ehdr) * ehdr, void * loaded_base, FridaFoundElfSymbolFunc func, void * user_data);
+ElfW(Addr) frida_elf_compute_base_from_phdrs (const ElfW(Phdr) * phdrs, ElfW(Half) phdr_size, ElfW(Half) phdr_count, size_t page_size);
 
 #endif

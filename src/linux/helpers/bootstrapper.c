@@ -51,6 +51,7 @@ typedef struct _FridaProcessLayout FridaProcessLayout;
 typedef struct _FridaRDebug FridaRDebug;
 typedef int FridaRState;
 typedef struct _FridaLinkMap FridaLinkMap;
+typedef struct _FridaOpenFileForMappedRangeContext FridaOpenFileForMappedRangeContext;
 typedef struct _FridaDetectRtldFlavorContext FridaDetectRtldFlavorContext;
 typedef struct _FridaEntrypointParameters FridaEntrypointParameters;
 typedef ssize_t (* FridaParseFunc) (void * data, size_t size, void * user_data);
@@ -99,6 +100,12 @@ struct _FridaLinkMap
   FridaLinkMap * l_prev;
 };
 
+struct _FridaOpenFileForMappedRangeContext
+{
+  void * base;
+  int fd;
+};
+
 struct _FridaDetectRtldFlavorContext
 {
   ElfW(Ehdr) * interpreter;
@@ -118,6 +125,8 @@ static bool frida_collect_libc_symbol (const FridaElfExportDetails * details, vo
 static bool frida_collect_android_linker_symbol (const FridaElfExportDetails * details, void * user_data);
 
 static bool frida_probe_process (size_t page_size, FridaProcessLayout * layout);
+static int frida_open_file_for_mapped_range_with_base (void * base);
+static ssize_t frida_open_file_for_matching_maps_line (void * data, size_t size, void * user_data);
 static FridaRtldFlavor frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter);
 static FridaRtldFlavor frida_infer_rtld_flavor_from_filename (const char * name);
 static ssize_t frida_try_infer_rtld_flavor_from_maps_line (void * data, size_t size, void * user_data);
@@ -189,7 +198,7 @@ frida_resolve_libc_apis (const FridaProcessLayout * layout, FridaLibcApi * libc)
     ctx.total_missing -= 4;
   ctx.rtld_flavor = layout->rtld_flavor;
   ctx.api = libc;
-  frida_enumerate_symbols (layout->libc, frida_collect_libc_symbol, &ctx);
+  frida_elf_enumerate_exports (layout->libc, frida_collect_libc_symbol, &ctx);
 
   if (ctx.total_missing > 0 &&
       (libc->dlopen_flags & FRIDA_GLIBC_RTLD_DLOPEN) != 0 &&
@@ -223,7 +232,25 @@ frida_resolve_libc_apis (const FridaProcessLayout * layout, FridaLibcApi * libc)
     bool found_all_or_none;
 
     ctx.total_missing = 4;
-    frida_enumerate_symbols (layout->interpreter, frida_collect_android_linker_symbol, &ctx);
+    frida_elf_enumerate_exports (layout->interpreter, frida_collect_android_linker_symbol, &ctx);
+
+    if (ctx.total_missing == 4)
+    {
+      int fd;
+      off_t size;
+      void * elf;
+
+      fd = frida_open_file_for_mapped_range_with_base (layout->interpreter);
+      if (fd == -1)
+        return true;
+      size = lseek (fd, 0, SEEK_END);
+      elf = mmap (NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+      frida_elf_enumerate_symbols (elf, layout->interpreter, frida_collect_android_linker_symbol, &ctx);
+
+      munmap (elf, size);
+      close (fd);
+    }
 
     found_all_or_none = ctx.total_missing == 0 || ctx.total_missing == 4;
     if (!found_all_or_none)
@@ -242,6 +269,8 @@ frida_collect_libc_symbol (const FridaElfExportDetails * details, void * user_da
   if (details->type != STT_FUNC)
     return true;
 
+#define FRIDA_TRY_COLLECT(e) \
+    FRIDA_TRY_COLLECT_NAMED (e, FRIDA_STRINGIFY (e))
 #define FRIDA_TRY_COLLECT_NAMED(e, n) \
     if (api->e == NULL && strcmp (details->name, n) == 0) \
     { \
@@ -249,8 +278,6 @@ frida_collect_libc_symbol (const FridaElfExportDetails * details, void * user_da
       ctx->total_missing--; \
       goto beach; \
     }
-#define FRIDA_TRY_COLLECT(e) \
-    FRIDA_TRY_COLLECT_NAMED (e, FRIDA_STRINGIFY (e))
 
   FRIDA_TRY_COLLECT (printf)
   FRIDA_TRY_COLLECT (sprintf)
@@ -303,18 +330,23 @@ frida_collect_android_linker_symbol (const FridaElfExportDetails * details, void
   if (details->type != STT_FUNC)
     return true;
 
-#define FRIDA_TRY_COLLECT(e) \
-    if (api->e == NULL && strcmp (details->name, "__loader_" FRIDA_STRINGIFY (e)) == 0) \
+#define FRIDA_TRY_COLLECT(e, n) \
+    if (api->e == NULL && strcmp (details->name, n) == 0) \
     { \
       api->e = details->address; \
       ctx->total_missing--; \
       goto beach; \
     }
 
-  FRIDA_TRY_COLLECT (dlopen)
-  FRIDA_TRY_COLLECT (dlclose)
-  FRIDA_TRY_COLLECT (dlsym)
-  FRIDA_TRY_COLLECT (dlerror)
+  FRIDA_TRY_COLLECT (dlopen, "__loader_dlopen");
+  FRIDA_TRY_COLLECT (dlclose, "__loader_dlclose");
+  FRIDA_TRY_COLLECT (dlsym, "__loader_dlsym");
+  FRIDA_TRY_COLLECT (dlerror, "__loader_dlerror");
+
+  FRIDA_TRY_COLLECT (dlopen, "__dl__Z8__dlopenPKciPKv");
+  FRIDA_TRY_COLLECT (dlclose, "__dl__Z9__dlclosePv");
+  FRIDA_TRY_COLLECT (dlsym, "__dl__Z7__dlsymPvPKcPKv");
+  FRIDA_TRY_COLLECT (dlerror, "__dl__Z9__dlerrorv");
 
 #undef FRIDA_TRY_COLLECT
 
@@ -353,7 +385,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
 
   if (layout->interpreter != NULL)
   {
-    frida_enumerate_symbols (layout->interpreter, frida_collect_interpreter_symbol, layout);
+    frida_elf_enumerate_exports (layout->interpreter, frida_collect_interpreter_symbol, layout);
 
     if (layout->r_debug != NULL)
     {
@@ -396,7 +428,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
         if (layout->r_brk == NULL)
         {
           const ElfW(Ehdr) * program = (const ElfW(Ehdr) *)
-              frida_compute_elf_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
+              frida_elf_compute_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
           layout->r_brk = (void *) (program->e_entry + map->l_addr);
         }
       }
@@ -419,6 +451,46 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
   return true;
 }
 
+static int
+frida_open_file_for_mapped_range_with_base (void * base)
+{
+  FridaOpenFileForMappedRangeContext ctx;
+
+  ctx.base = base;
+  ctx.fd = -1;
+  frida_parse_file ("/proc/self/maps", frida_open_file_for_matching_maps_line, &ctx);
+
+  return ctx.fd;
+}
+
+static ssize_t
+frida_open_file_for_matching_maps_line (void * data, size_t size, void * user_data)
+{
+  char * line = data;
+  FridaOpenFileForMappedRangeContext * ctx = user_data;
+  char * next_newline;
+  void * base;
+
+  next_newline = strchr (line, '\n');
+  if (next_newline == NULL)
+    return 0;
+
+  *next_newline = '\0';
+
+  base = (void *) frida_parse_size (line);
+  if (base == ctx->base)
+  {
+    const char * path = strchr (line, '/');
+    if (path != NULL)
+    {
+      ctx->fd = open (path, O_RDONLY);
+      return -1;
+    }
+  }
+
+  return (next_newline + 1) - (char *) data;
+}
+
 static FridaRtldFlavor
 frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter)
 {
@@ -428,7 +500,7 @@ frida_detect_rtld_flavor (ElfW(Ehdr) * interpreter)
   if (interpreter == NULL)
     return FRIDA_RTLD_NONE;
 
-  soname = frida_query_soname (interpreter);
+  soname = frida_elf_query_soname (interpreter);
   if (soname != NULL)
     return frida_infer_rtld_flavor_from_filename (soname);
 
@@ -889,7 +961,6 @@ beach:
 
   return success ? base : NULL;
 }
-
 
 static void
 frida_parse_file (const char * path, FridaParseFunc parse, void * user_data)
