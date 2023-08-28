@@ -25,7 +25,7 @@ if [ ! -f "$agent" ]; then
   exit 5
 fi
 
-if [ "$arch" == "iphoneos-arm64" ]; then
+if [ "$arch" = "iphoneos-arm64" ]; then
   sysroot=/var/jb
 else
   sysroot=""
