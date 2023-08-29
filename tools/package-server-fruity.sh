@@ -26,6 +26,12 @@ if [ ! -f "$agent" ]; then
 fi
 
 if [ "$arch" = "iphoneos-arm64" ]; then
+  rootless=1
+else
+  rootless=0
+fi
+
+if [ $rootless -eq 1 ]; then
   sysroot=/var/jb
 else
   sysroot=""
@@ -47,41 +53,45 @@ cp "$agent" "$libdir/frida-agent.dylib"
 chmod 755 "$libdir/frida-agent.dylib"
 
 mkdir -p "$daedir/"
-cat >"$daedir/re.frida.server.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>re.frida.server</string>
-	<key>Program</key>
-	<string>$sysroot/usr/sbin/frida-server</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>$sysroot/usr/sbin/frida-server</string>
-	</array>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>_MSSafeMode</key>
-		<string>1</string>
-	</dict>
-	<key>UserName</key>
-	<string>root</string>
-	<key>POSIXSpawnType</key>
-	<string>Interactive</string>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>LimitLoadToSessionType</key>
-	<string>System</string>
-	<key>KeepAlive</key>
-	<true/>
-	<key>ThrottleInterval</key>
-	<integer>5</integer>
-	<key>ExecuteAllowed</key>
-	<true/>
-</dict>
-</plist>
-EOF
+(
+  echo '<?xml version="1.0" encoding="UTF-8"?>'
+  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+  echo '<plist version="1.0">'
+  echo "<dict>"
+  echo "	<key>Label</key>"
+  echo "	<string>re.frida.server</string>"
+  echo "	<key>Program</key>"
+  echo "	<string>$sysroot/usr/sbin/frida-server</string>"
+  echo "	<key>ProgramArguments</key>"
+  echo "	<array>"
+  echo "		<string>$sysroot/usr/sbin/frida-server</string>"
+  echo "	</array>"
+  if [ $rootless -eq 0 ]; then
+    echo "	<key>EnvironmentVariables</key>"
+    echo "	<dict>"
+    echo "		<key>_MSSafeMode</key>"
+    echo "		<string>1</string>"
+    echo "	</dict>"
+  fi
+  echo "	<key>UserName</key>"
+  echo "	<string>root</string>"
+  echo "	<key>POSIXSpawnType</key>"
+  echo "	<string>Interactive</string>"
+  echo "	<key>RunAtLoad</key>"
+  echo "	<true/>"
+  if [ $rootless -eq 0 ]; then
+    echo "	<key>LimitLoadToSessionType</key>"
+    echo "	<string>System</string>"
+  fi
+  echo "	<key>KeepAlive</key>"
+  echo "	<true/>"
+  echo "	<key>ThrottleInterval</key>"
+  echo "	<integer>5</integer>"
+  echo "	<key>ExecuteAllowed</key>"
+  echo "	<true/>"
+  echo "</dict>"
+  echo "</plist>"
+) > "$daedir/re.frida.server.plist"
 chmod 644 "$daedir/re.frida.server.plist"
 
 installed_size=$(du -sk "$tmpdir" | cut -f1)
