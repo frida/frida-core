@@ -986,7 +986,7 @@ static guint8 * frida_skip_string (guint8 * cursor, guint8 * end);
 static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
 
-static gboolean frida_find_uikit (const gchar * dependency, gboolean * has_uikit);
+static gboolean frida_find_uikit (const GumDependencyDetails * details, gboolean * has_uikit);
 
 void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
@@ -1700,7 +1700,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
     return FALSE;
 
   is_app = FALSE;
-  gum_darwin_module_enumerate_dependencies (module, (GumFoundDarwinDependencyFunc) frida_find_uikit, &is_app);
+  gum_darwin_module_enumerate_dependencies (module, (GumFoundDependencyFunc) frida_find_uikit, &is_app);
 
   g_object_unref (module);
 
@@ -1708,9 +1708,9 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 }
 
 static gboolean
-frida_find_uikit (const gchar * dependency, gboolean * has_uikit)
+frida_find_uikit (const GumDependencyDetails * details, gboolean * has_uikit)
 {
-  *has_uikit = strcmp (dependency, "/System/Library/Frameworks/UIKit.framework/UIKit") == 0;
+  *has_uikit = strcmp (details->name, "/System/Library/Frameworks/UIKit.framework/UIKit") == 0;
   return !*has_uikit;
 }
 
