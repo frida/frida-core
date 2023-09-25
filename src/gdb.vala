@@ -648,6 +648,8 @@ namespace Frida.GDB {
 				string payload = response.payload;
 				if (payload.length == 0)
 					throw new Error.NOT_SUPPORTED ("Feature query not supported by the remote stub");
+				if (payload[0] == 'E')
+					throw new Error.INVALID_ARGUMENT ("Feature document '%s' not found", name);
 
 				status = payload[0];
 
