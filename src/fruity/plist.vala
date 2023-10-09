@@ -1208,6 +1208,13 @@ namespace Frida.Fruity {
 			storage.values.foreach (free_value);
 		}
 
+		public PlistDict clone () {
+			var result = new PlistDict ();
+			foreach (var e in storage.entries)
+				result.set_raw_value (e.key, clone_value (e.value));
+			return result;
+		}
+
 		public void clear () {
 			storage.values.foreach (free_value);
 			storage.clear ();
@@ -1541,6 +1548,14 @@ namespace Frida.Fruity {
 		Value * v = malloc0 (sizeof (Value));
 		v.init (t);
 		return v;
+	}
+
+	private static Value * clone_value (Value * v) {
+		Value? result = *v;
+
+		Value * r = null;
+		*(void **) &r = (owned) result;
+		return r;
 	}
 
 	private static bool free_value (Value * v) {
