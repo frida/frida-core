@@ -166,16 +166,27 @@ namespace Frida.Fruity {
 
 			var response = yield query (request, REGULAR, cancellable);
 			try {
-				if (response.has ("MessageType")) {
-					if (response.get_string ("MessageType") != "Result")
-						throw new UsbmuxError.PROTOCOL ("Unexpected ReadPairRecord response");
-					var result = (int) response.get_integer ("Number");
-					if (result != 0)
-						throw new UsbmuxError.PROTOCOL ("Unexpected result while trying to read pair record: %d", result);
-				}
+				check_pair_response (response, "ReadPairRecord");
 
 				var raw_record = response.get_bytes ("PairRecordData");
 				return new Plist.from_data (raw_record.get_data ());
+			} catch (PlistError e) {
+				throw new UsbmuxError.PROTOCOL ("Unexpected ReadPairRecord response: %s", e.message);
+			}
+		}
+
+		private static void check_pair_response (Plist response, string operation) throws UsbmuxError {
+			if (!response.has ("MessageType"))
+				return;
+
+			try {
+				if (response.get_string ("MessageType") != "Result")
+					throw new UsbmuxError.PROTOCOL ("Unexpected %s response", operation);
+				var result = (int) response.get_integer ("Number");
+				if (result == ResultCode.NOT_FOUND)
+					throw new UsbmuxError.INVALID_ARGUMENT ("Pair record not found");
+				if (result != 0)
+					throw new UsbmuxError.PROTOCOL ("Unexpected %s result: %d", operation, result);
 			} catch (PlistError e) {
 				throw new UsbmuxError.PROTOCOL ("Unexpected response: %s", e.message);
 			}
@@ -453,6 +464,7 @@ namespace Frida.Fruity {
 		private enum ResultCode {
 			PROTOCOL_ERROR      = -1,
 			SUCCESS		    = 0,
+			NOT_FOUND           = 2,
 			CONNECTION_REFUSED  = 3,
 			INVALID_REQUEST	    = 5
 		}
