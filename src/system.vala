@@ -158,21 +158,22 @@ namespace Frida {
 			private set;
 		}
 
-		private static string? sysroot = null;
-
-		private static string system_tmp_directory {
-			owned get {
-				return (sysroot != null) ? Path.build_path (Path.DIR_SEPARATOR_S, sysroot, get_system_tmp ()) : get_system_tmp();
-			}
-		}
-
 		public static TemporaryDirectory system_default {
 			owned get {
 				return new TemporaryDirectory.with_file (File.new_for_path (system_tmp_directory), false);
 			}
 		}
 
+		private static string system_tmp_directory {
+			owned get {
+				return (sysroot != null)
+					? Path.build_filename (sysroot, get_system_tmp ())
+					: get_system_tmp ();
+			}
+		}
+
 		private static string? fixed_name = null;
+		private static string? sysroot = null;
 
 		public TemporaryDirectory () {
 #if !QNX
@@ -203,12 +204,12 @@ namespace Frida {
 			destroy ();
 		}
 
-		public static void always_use (string name) {
+		public static void always_use (string? name) {
 			fixed_name = name;
 		}
 
-		public static void use_sysroot (string prefix) {
-			sysroot = prefix;
+		public static void use_sysroot (string? root) {
+			sysroot = root;
 		}
 
 		public void destroy () {
