@@ -216,6 +216,39 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public async void unpair (Cancellable? cancellable = null) throws LockdownError, IOError {
+			var request = create_request ("Unpair");
+
+			var record = pair_record.clone ();
+			record.remove ("RootPrivateKey");
+			record.remove ("HostPrivateKey");
+			request.set_dict ("PairRecord", record);
+
+			Plist response;
+			try {
+				response = yield service.query (request, cancellable);
+			} catch (PlistServiceError e) {
+				throw error_from_service (e);
+			}
+			if (response.has ("Error")) {
+				try {
+					var error = response.get_string ("Error");
+					if (error != "InvalidHostID")
+						throw new LockdownError.PROTOCOL ("Unexpected response: %s", error);
+				} catch (Fruity.PlistError e) {
+					throw new LockdownError.PROTOCOL ("%s", e.message);
+				}
+			}
+
+			try {
+				var usbmux = yield UsbmuxClient.open (cancellable);
+				yield usbmux.delete_pair_record (device_details.udid, cancellable);
+			} catch (UsbmuxError e) {
+				if (!(e is UsbmuxError.INVALID_ARGUMENT))
+					throw new LockdownError.PROTOCOL ("%s", e.message);
+			}
+		}
+
 		private async string query_type (Cancellable? cancellable) throws LockdownError, IOError {
 			try {
 				var response = yield service.query (create_request ("QueryType"), cancellable);
