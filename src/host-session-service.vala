@@ -155,6 +155,10 @@ namespace Frida {
 		public abstract async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError;
 	}
 
+	public interface Pairable : Object {
+		public abstract async void unpair (Cancellable? cancellable) throws Error, IOError;
+	}
+
 	public interface HostSessionBackend : Object {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
