@@ -1245,6 +1245,26 @@ namespace Frida {
 			}
 		}
 
+		public async void unpair (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			var pairable = provider as Pairable;
+			if (pairable == null)
+				throw new Error.NOT_SUPPORTED ("Pairing functionality is not supported by this device");
+
+			yield pairable.unpair (cancellable);
+		}
+
+		public void unpair_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<UnpairTask> ().execute (cancellable);
+		}
+
+		private class UnpairTask : DeviceTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.unpair (cancellable);
+			}
+		}
+
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Device is gone");
