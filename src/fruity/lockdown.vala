@@ -45,7 +45,13 @@ namespace Frida.Fruity {
 			try {
 				var usbmux = yield UsbmuxClient.open (cancellable);
 
-				var pair_record = yield usbmux.read_pair_record (device.udid, cancellable);
+				try {
+					pair_record = yield usbmux.read_pair_record (device.udid, cancellable);
+				} catch (UsbmuxError e) {
+					if (e is UsbmuxError.INVALID_ARGUMENT)
+						throw new LockdownError.NOT_PAIRED ("Not paired");
+					throw e;
+				}
 				try {
 					host_id = pair_record.get_string ("HostID");
 					system_buid = pair_record.get_string ("SystemBUID");
@@ -251,6 +257,7 @@ namespace Frida.Fruity {
 
 	public errordomain LockdownError {
 		INVALID_SERVICE,
+		NOT_PAIRED,
 		UNSUPPORTED,
 		PROTOCOL
 	}
