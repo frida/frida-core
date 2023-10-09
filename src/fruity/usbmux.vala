@@ -175,6 +175,14 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public async void delete_pair_record (Udid udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
+			var request = create_request ("DeletePairRecord");
+			request.set_string ("PairRecordID", udid.raw_value);
+
+			var response = yield query (request, REGULAR, cancellable);
+			check_pair_response (response, "DeletePairRecord");
+		}
+
 		private static void check_pair_response (Plist response, string operation) throws UsbmuxError {
 			if (!response.has ("MessageType"))
 				return;
