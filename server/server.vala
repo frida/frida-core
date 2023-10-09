@@ -196,6 +196,7 @@ namespace Frida.Server {
 
 	private static int run_application (EndpointParameters endpoint_params, ControlServiceOptions options, ReadyHandler on_ready) {
 		TemporaryDirectory.always_use ((directory != null) ? directory : DEFAULT_DIRECTORY);
+		TemporaryDirectory.use_sysroot (options.sysroot);
 
 		application = new Application (new ControlService (endpoint_params, options));
 

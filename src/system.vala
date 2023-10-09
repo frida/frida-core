@@ -137,9 +137,9 @@ namespace Frida {
 			owned get {
 				if (file == null) {
 					if (name != null)
-						file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+						file = File.new_for_path (Path.build_filename (system_tmp_directory, name));
 					else
-						file = File.new_for_path (get_system_tmp ());
+						file = File.new_for_path (system_tmp_directory);
 
 					try {
 						file.make_directory_with_parents ();
@@ -160,11 +160,20 @@ namespace Frida {
 
 		public static TemporaryDirectory system_default {
 			owned get {
-				return new TemporaryDirectory.with_file (File.new_for_path (get_system_tmp ()), false);
+				return new TemporaryDirectory.with_file (File.new_for_path (system_tmp_directory), false);
+			}
+		}
+
+		private static string system_tmp_directory {
+			owned get {
+				return (sysroot != null)
+					? Path.build_filename (sysroot, get_system_tmp ())
+					: get_system_tmp ();
 			}
 		}
 
 		private static string? fixed_name = null;
+		private static string? sysroot = null;
 
 		public TemporaryDirectory () {
 #if !QNX
@@ -195,8 +204,12 @@ namespace Frida {
 			destroy ();
 		}
 
-		public static void always_use (string name) {
+		public static void always_use (string? name) {
 			fixed_name = name;
+		}
+
+		public static void use_sysroot (string? root) {
+			sysroot = root;
 		}
 
 		public void destroy () {
