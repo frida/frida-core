@@ -2105,7 +2105,10 @@ namespace Frida {
 				ssize_t res = process_vm_readv (pid, (Posix.iovector[]) &local, (Posix.iovector[]) &remote, 0);
 				if (res != -1)
 					return result;
-				if (errno != Posix.EPERM)
+				if (errno == Posix.ENOSYS) {
+					// The kernel doesn't implement the syscall, we avoid to use it by resetting the function pointer.
+					process_vm_readv = null;
+				} else if (errno != Posix.EPERM)
 					throw new Error.NOT_SUPPORTED ("Unable to read from process memory: %s", strerror (errno));
 			}
 
@@ -2139,7 +2142,10 @@ namespace Frida {
 				ssize_t res = process_vm_writev (pid, (Posix.iovector[]) &local, (Posix.iovector[]) &remote, 0);
 				if (res != -1)
 					return;
-				if (errno != Posix.EPERM && errno != Posix.EFAULT)
+				if (errno == Posix.ENOSYS) {
+					// The kernel does not implement the syscall, we avoid to use it by resetting the function pointer.
+					process_vm_writev = null;
+				} else if (errno != Posix.EPERM && errno != Posix.EFAULT)
 					throw new Error.NOT_SUPPORTED ("Unable to write to process memory: %s", strerror (errno));
 			}
 #endif
