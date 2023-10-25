@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@frida/crosspath": "3.0.0",
-    "frida-compile": "16.3.0",
+    "frida-compile": "16.4.0",
     "frida-fs": "5.2.5"
   },
   "devDependencies": {
@@ -17,7 +17,7 @@
     "@rollup/plugin-node-resolve": "^14.1.0",
     "@rollup/plugin-replace": "^4.0.0",
     "@rollup/plugin-typescript": "^8.3.4",
-    "@types/frida-gum": "18.4.0",
+    "@types/frida-gum": "18.4.4",
     "@types/glob": "^8.0.0",
     "@types/node": "18.7.23",
     "glob": "^8.0.3",
