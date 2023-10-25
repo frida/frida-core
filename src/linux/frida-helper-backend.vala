@@ -2141,10 +2141,9 @@ namespace Frida {
 				ssize_t res = process_vm_writev (pid, (Posix.iovector[]) &local, (Posix.iovector[]) &remote, 0);
 				if (res != -1)
 					return;
-				if (errno == Posix.ENOSYS) {
-					// The kernel does not implement the syscall, we avoid to use it by resetting the function pointer.
+				if (errno == Posix.ENOSYS)
 					process_vm_writev = null;
-				} else if (errno != Posix.EPERM && errno != Posix.EFAULT)
+				else if (errno != Posix.EPERM && errno != Posix.EFAULT)
 					throw new Error.NOT_SUPPORTED ("Unable to write to process memory: %s", strerror (errno));
 			}
 #endif
