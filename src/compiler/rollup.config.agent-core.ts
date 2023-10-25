@@ -82,6 +82,7 @@ function computeSubstitutionValues() {
         ["@frida", "assert"],
         ["@frida", "base64-js"],
         ["@frida", "buffer"],
+        ["@frida", "crypto"],
         ["@frida", "diagnostics_channel"],
         ["@frida", "events"],
         ["@frida", "http"],
