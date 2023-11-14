@@ -15,7 +15,7 @@
   }
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
-typedef enum _FridaWindowsPipeRole FridaWindowsPipeRole;
+typedef guint FridaWindowsPipeRole;
 
 struct _FridaPipeBackend
 {
