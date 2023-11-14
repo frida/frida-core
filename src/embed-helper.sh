@@ -30,8 +30,14 @@ case $host_os in
     exec "$resource_compiler" --toolchain=apple -c "$resource_config" -o "$output_dir/frida-data-helper-process" "$embedded_helper"
     ;;
   *)
-    embedded_helper_modern="$priv_dir/frida-helper-64"
-    embedded_helper_legacy="$priv_dir/frida-helper-32"
+    if [ $host_os = windows ]; then
+      exe_suffix=".exe"
+    else
+      exe_suffix=""
+    fi
+
+    embedded_helper_modern="$priv_dir/frida-helper-64$exe_suffix"
+    embedded_helper_legacy="$priv_dir/frida-helper-32$exe_suffix"
 
     if [ -f "$helper_modern" ]; then
       cp "$helper_modern" "$embedded_helper_modern" || exit 1

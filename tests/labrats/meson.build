@@ -1,5 +1,20 @@
 labrat_files = []
 
+if host_os == 'windows'
+  labrat_files += [
+    'sleeper-windows-x86_64.exe',
+    'sleeper-windows-x86.exe',
+    'cycler-windows-x86_64.exe',
+    'cycler-windows-x86.exe',
+    'spawner-windows-x86_64.exe',
+    'spawner-windows-x86.exe',
+    'simple-agent-windows-x86_64.dll',
+    'simple-agent-windows-x86.dll',
+    'resident-agent-windows-x86_64.dll',
+    'resident-agent-windows-x86.dll',
+  ]
+endif
+
 if host_os == 'macos'
   labrat_files += [
     'sleeper-macos',

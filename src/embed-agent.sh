@@ -9,12 +9,31 @@ host_os=$6
 resource_compiler=$7
 resource_config=$8
 lipo=$9
+agent_dbghelp_prefix=${10}
+agent_symsrv_prefix=${11}
 
 priv_dir="$output_dir/frida-agent@emb"
 
 mkdir -p "$priv_dir"
 
-collect_generic_agent ()
+collect_windows_agent ()
+{
+  embedded_agent="$priv_dir/frida-agent-$2.dll"
+  embedded_dbghelp="$priv_dir/dbghelp-$2.dll"
+  embedded_symsrv="$priv_dir/symsrv-$2.dll"
+  if [ -f "$1" ]; then
+    cp "$1" "$embedded_agent" || exit 1
+    cp "$agent_dbghelp_prefix/dbghelp-$2.dll" "$embedded_dbghelp" || exit 1
+    cp "$agent_symsrv_prefix/symsrv-$2.dll" "$embedded_symsrv" || exit 1
+  else
+    touch "$embedded_agent"
+    touch "$embedded_dbghelp"
+    touch "$embedded_symsrv"
+  fi
+  embedded_assets+=("$embedded_agent" "$embedded_dbghelp" "$embedded_symsrv")
+}
+
+collect_unix_agent ()
 {
   embedded_agent="$priv_dir/frida-agent-$2.so"
   if [ -f "$1" ]; then
@@ -22,10 +41,18 @@ collect_generic_agent ()
   else
     touch "$embedded_agent"
   fi
-  embedded_agents+=("$embedded_agent")
+  embedded_assets+=("$embedded_agent")
 }
 
 case $host_os in
+  windows)
+    embedded_assets=()
+
+    collect_windows_agent "$agent_modern" 64
+    collect_windows_agent "$agent_legacy" 32
+
+    exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "${embedded_assets[@]}"
+    ;;
   macos|ios|watchos|tvos)
     embedded_agent="$priv_dir/frida-agent.dylib"
 
@@ -57,13 +84,13 @@ case $host_os in
     exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "$embedded_agent"
     ;;
   *)
-    embedded_agents=()
+    embedded_assets=()
 
-    collect_generic_agent "$agent_modern" 64
-    collect_generic_agent "$agent_legacy" 32
-    collect_generic_agent "$agent_emulated_modern" arm64
-    collect_generic_agent "$agent_emulated_legacy" arm
+    collect_unix_agent "$agent_modern" 64
+    collect_unix_agent "$agent_legacy" 32
+    collect_unix_agent "$agent_emulated_modern" arm64
+    collect_unix_agent "$agent_emulated_legacy" arm
 
-    exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "${embedded_agents[@]}"
+    exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "${embedded_assets[@]}"
     ;;
 esac

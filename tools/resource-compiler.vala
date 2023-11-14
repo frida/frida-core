@@ -317,10 +317,17 @@ namespace Frida {
 					null);
 			}
 
+			if (toolchain != Toolchain.MICROSOFT) {
+				asource.put_string (
+					"#if (defined (__WIN32__) && defined (__i386__)) || defined (__APPLE__)\n" +
+					"# define FRIDA_CSYM(x) _ ## x\n" +
+					"#else\n" +
+					"# define FRIDA_CSYM(x) x\n" +
+					"#endif\n");
+			}
+
 			if (toolchain == Toolchain.APPLE)
 				asource.put_string (".const\n");
-
-			var asm_identifier_prefix = toolchain == Toolchain.APPLE ? "_" : "";
 
 			foreach (ResourceCategory category in categories) {
 				bool is_root_category = (category.name == "root");
@@ -367,8 +374,8 @@ namespace Frida {
 						else
 							asource.put_string (align_for_generic_simd_compatibility);
 
-						asource.put_string (".globl " + asm_identifier_prefix + blob_identifier + "\n");
-						asource.put_string (asm_identifier_prefix + blob_identifier + ":\n");
+						asource.put_string (".globl FRIDA_CSYM (" + blob_identifier + ")\n");
+						asource.put_string ("FRIDA_CSYM (" + blob_identifier + "):\n");
 						asource.put_string (".incbin \"" + prepared_resource.file.get_path () + "\"\n");
 
 						if (!is_dylib)

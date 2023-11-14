@@ -149,6 +149,7 @@ endif
 
 cdata.set_quoted('FRIDA_PREFIX', get_option('prefix'))
 
+exe_suffix = (host_os_family == 'windows') ? '.exe' : ''
 if host_os_family == 'windows'
   shlib_suffix = '.dll'
 elif host_os_family == 'darwin'
@@ -157,7 +158,7 @@ else
   shlib_suffix = '.so'
 endif
 
-helper_name = 'frida-helper'
+helper_name = 'frida-helper' + exe_suffix
 agent_name = 'frida-agent' + shlib_suffix
 gadget_name = 'frida-gadget' + shlib_suffix
 
@@ -268,8 +269,10 @@ native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true)
 native_brotlienc_dep = dependency('libbrotlienc', native: true)
 
-if host_os_family != 'windows'
-  gio_unix_dep = dependency('gio-unix-2.0')
+if host_os_family == 'windows'
+  gio_os_dep = dependency('gio-windows-2.0')
+else
+  gio_os_dep = dependency('gio-unix-2.0')
 endif
 
 backend_deps_private = []
@@ -315,6 +318,9 @@ else
   usrsctp_dep = []
 endif
 
+if host_os_family == 'windows'
+  backend_libs_private += ['-lsetupapi']
+endif
 if host_os_family == 'darwin'
   backend_libs_private += ['-Wl,-framework,Foundation', '-lbsm']
 endif
@@ -325,9 +331,9 @@ if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
 
+ar = find_program('ar')
+nm = find_program('nm')
 if host_os_family != 'windows'
-  ar = find_program('ar')
-  nm = find_program('nm')
   if host_os_family == 'darwin'
     readelf = ''
     otool = find_program('otool')
@@ -337,15 +343,12 @@ if host_os_family != 'windows'
     otool = ''
     libtool = ''
   endif
-  strip = find_program('strip')
 else
-  ar = ''
-  nm = ''
   readelf = ''
   otool = ''
   libtool = ''
-  strip = ''
 endif
+strip = find_program('strip')
 if host_os_family == 'darwin'
   install_name_tool = find_program('install_name_tool')
   lipo = find_program('lipo')

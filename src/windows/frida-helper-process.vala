@@ -386,12 +386,12 @@ namespace Frida {
 		}
 
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
-			var blob32 = Frida.Data.Windows.get_frida_helper_32_exe_blob ();
+			var blob32 = Frida.Data.Helper.get_frida_helper_32_exe_blob ();
 			helper32 = new TemporaryFile.from_stream ("frida-helper-32.exe",
 				new MemoryInputStream.from_data (blob32.data, null),
 				tempdir);
 
-			var blob64 = Frida.Data.Windows.get_frida_helper_64_exe_blob ();
+			var blob64 = Frida.Data.Helper.get_frida_helper_64_exe_blob ();
 			helper64 = new TemporaryFile.from_stream ("frida-helper-64.exe",
 				new MemoryInputStream.from_data (blob64.data, null),
 				tempdir);

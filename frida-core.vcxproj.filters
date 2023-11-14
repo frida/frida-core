@@ -75,8 +75,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="src\windows\frida-windows.resources">
-      <Filter>Resource Files\windows</Filter>
+    <CustomBuild Include="src\helper.resources">
+      <Filter>Resource Files</Filter>
     </CustomBuild>
     <CustomBuild Include="src\agent.resources">
       <Filter>Resource Files</Filter>
@@ -245,7 +245,7 @@
     <ClCompile Include="$(IntDir)src\droidy\droidy-client.c">
       <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\frida-data-windows.c">
+    <ClCompile Include="$(IntDir)data\frida-data-helper.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">

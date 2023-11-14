@@ -47,6 +47,18 @@ option('agent_emulated_legacy',
   description: 'Prebuilt agent to embed for use on legacy emulated targets'
 )
 
+option('agent_dbghelp_prefix',
+  type: 'string',
+  value: '',
+  description: 'Location of DbgHelp binaries to embed alongside agent (Windows only)'
+)
+
+option('agent_symsrv_prefix',
+  type: 'string',
+  value: '',
+  description: 'Location of SymSrv binaries to embed alongside agent (Windows only)'
+)
+
 option('connectivity',
   type: 'feature',
   value: 'auto',

@@ -19,10 +19,90 @@ qnx_sources = []
 
 backend_vala_args = []
 backend_libs = []
-backend_deps = []
+backend_deps = [
+  gio_os_dep,
+]
 
 if host_os_family == 'windows'
-  # TODO
+  windows_sources = [
+    'windows/windows-host-session.vala',
+    'windows/windows-host-session-glue.c',
+    'windows/winjector.vala',
+    'windows/winjector-glue.c',
+    'windows/frida-helper-process.vala',
+    'windows/frida-helper-process-glue.c',
+    'windows/system-windows.c',
+    'windows/access-helpers.c',
+    'windows/icon-helpers.c',
+  ]
+
+  helper_backend_sources = [
+    'windows/frida-helper-backend.vala',
+    'windows/frida-helper-backend-glue.c',
+    'windows/frida-helper-types.vala',
+    'windows/wait-handle-source.c',
+  ]
+  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
+    c_args: frida_component_cflags,
+    dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
+  )
+  backend_libs += helper_backend
+
+  helper_sources = [
+    'windows/frida-helper-service.vala',
+    'windows/frida-helper-service-glue.c',
+  ]
+  raw_helper = executable('frida-helper-raw', helper_sources,
+    link_with: helper_backend,
+    dependencies: [gio_dep, gee_dep, gum_dep, base_dep, pipe_dep],
+  )
+
+  helper = custom_target('frida-helper',
+    input: raw_helper,
+    output: helper_name,
+    command: [
+      files('post-process-helper.sh'),
+      '@INPUT@',
+      '',
+      '@OUTPUT@',
+      host_os,
+      '>>>', strip, '<<<',
+      get_option('strip').to_string(),
+    ],
+    build_by_default: true,
+    install: get_option('assets') == 'installed',
+    install_dir: asset_dir,
+  )
+
+  if get_option('assets') == 'embedded'
+    helper_modern = get_option('helper_modern')
+    helper_legacy = get_option('helper_legacy')
+    if host_is_64bit
+      helper_modern = ''
+    else
+      helper_legacy = ''
+    endif
+    helper_process_data = custom_target('frida-data-helper-process',
+      input: 'helper.resources',
+      output: [
+        'frida-data-helper-process.vapi',
+        'frida-data-helper-process.h',
+        'frida-data-helper-process.c',
+        'frida-data-helper-process-blob.S',
+      ],
+      command: [
+        files('embed-helper.sh'),
+        helper_modern,
+        helper_legacy,
+        meson.current_build_dir(),
+        host_os,
+        resource_compiler,
+        '@INPUT@',
+        lipo,
+      ],
+    )
+    windows_sources += [helper_process_data]
+  endif
 endif
 
 if host_os_family == 'darwin'
@@ -384,6 +464,8 @@ if get_option('assets') == 'embedded'
       resource_compiler,
       '@INPUT0@',
       lipo,
+      get_option('agent_dbghelp_prefix'),
+      get_option('agent_symsrv_prefix'),
     ],
   )
 else
@@ -430,10 +512,6 @@ local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sourc
 remote_sources = socket_sources + fruity_sources + droidy_sources + barebone_sources
 
 core_sources = base_sources + local_sources + remote_sources + compiler_sources
-
-if host_os_family != 'windows'
-  backend_deps += [gio_unix_dep]
-endif
 
 internal_libs = [base, pipe] + backend_libs
 internal_deps = [base_dep, pipe_dep]

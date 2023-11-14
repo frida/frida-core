@@ -76,6 +76,13 @@ def main():
             tool_argv = tool_argvs.get(path_or_tool_id, [path_or_tool_id])
             setattr(toolchain, tool, tool_argv)
 
+    with open(args.input.name, "rb") as f:
+        magic = f.read(2)
+    if magic == b"MZ":
+        # For now we will assume that no processing is needed for our Windows binaries.
+        shutil.copyfile(args.input.name, args.output)
+        return
+
     try:
         editor = ModuleEditor(args.input, args.endian, toolchain)
     except Exception as e:
