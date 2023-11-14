@@ -72,7 +72,7 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to spawn executable at '%s': 0x%08x\n",
+        "Unable to spawn executable at '%s': 0x%08lx\n",
         path, GetLastError ());
   }
 
