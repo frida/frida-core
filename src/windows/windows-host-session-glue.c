@@ -17,8 +17,8 @@
 
 static void frida_child_process_on_death (GPid pid, gint status, gpointer user_data);
 
-static WCHAR * frida_argv_to_command_line (const gchar ** argv, gint argv_length);
-static WCHAR * frida_envp_to_environment_block (const gchar ** envp, gint envp_length);
+static WCHAR * frida_argv_to_command_line (gchar ** argv, gint argv_length);
+static WCHAR * frida_envp_to_environment_block (gchar ** envp, gint envp_length);
 
 static void frida_append_n_backslashes (GString * str, guint n);
 
@@ -321,7 +321,7 @@ frida_child_process_on_death (GPid pid, gint status, gpointer user_data)
 }
 
 static WCHAR *
-frida_argv_to_command_line (const gchar ** argv, gint argv_length)
+frida_argv_to_command_line (gchar ** argv, gint argv_length)
 {
   GString * line;
   WCHAR * line_utf16;
@@ -392,7 +392,7 @@ frida_argv_to_command_line (const gchar ** argv, gint argv_length)
 }
 
 static WCHAR *
-frida_envp_to_environment_block (const gchar ** envp, gint envp_length)
+frida_envp_to_environment_block (gchar ** envp, gint envp_length)
 {
   GString * block;
 
