@@ -438,7 +438,7 @@ frida_make_pipe (HANDLE * read, HANDLE * write)
 {
   SECURITY_ATTRIBUTES attributes;
   DWORD default_buffer_size = 0;
-  BOOL pipe_created;
+  G_GNUC_UNUSED BOOL pipe_created;
 
   attributes.nLength = sizeof (attributes);
   attributes.bInheritHandle = TRUE;
@@ -451,7 +451,7 @@ frida_make_pipe (HANDLE * read, HANDLE * write)
 static void
 frida_ensure_not_inherited (HANDLE handle)
 {
-  BOOL inherit_flag_updated;
+  G_GNUC_UNUSED BOOL inherit_flag_updated;
 
   inherit_flag_updated = SetHandleInformation (handle, HANDLE_FLAG_INHERIT, 0);
   g_assert (inherit_flag_updated);
