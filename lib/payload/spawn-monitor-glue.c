@@ -21,7 +21,7 @@ _frida_spawn_monitor_get_environment (int * length)
 
   strings = GetEnvironmentStringsW ();
   result = _frida_spawn_monitor_parse_unicode_environment (strings, length);
-  FreeEnvironmentStrings (strings);
+  FreeEnvironmentStringsW (strings);
 
   return result;
 }

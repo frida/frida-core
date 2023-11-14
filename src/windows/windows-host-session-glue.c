@@ -81,7 +81,7 @@ _frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar *
 {
   FridaChildProcess * process = NULL;
   WCHAR * application_name, * command_line, * environment, * current_directory;
-  STARTUPINFO startup_info;
+  STARTUPINFOW startup_info;
   HANDLE stdin_read = NULL, stdin_write = NULL;
   HANDLE stdout_read = NULL, stdout_write = NULL;
   HANDLE stderr_read = NULL, stderr_write = NULL;

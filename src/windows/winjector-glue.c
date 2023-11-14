@@ -30,7 +30,7 @@ frida_winjector_set_acls_as_needed (const gchar * path, GError ** error)
 
   if (sddl != NULL)
   {
-    DWORD success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
+    DWORD success = ConvertStringSecurityDescriptorToSecurityDescriptorW (sddl, SDDL_REVISION_1, (PSECURITY_DESCRIPTOR *) &sd, NULL);
     CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
 
     dacl_present = FALSE;
@@ -38,7 +38,7 @@ frida_winjector_set_acls_as_needed (const gchar * path, GError ** error)
     success = GetSecurityDescriptorDacl (sd, &dacl_present, &dacl, &dacl_defaulted);
     CHECK_WINAPI_RESULT (success, !=, FALSE, "GetSecurityDescriptorDacl");
 
-    success = SetNamedSecurityInfo (path_utf16, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, dacl, NULL);
+    success = SetNamedSecurityInfoW (path_utf16, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, dacl, NULL);
     CHECK_WINAPI_RESULT (success, ==, ERROR_SUCCESS, "SetNamedSecurityInfo");
   }
 

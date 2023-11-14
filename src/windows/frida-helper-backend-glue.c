@@ -552,7 +552,7 @@ frida_file_exists_and_is_readable (const WCHAR * filename)
 {
   HANDLE file;
 
-  file = CreateFile (filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+  file = CreateFileW (filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
     NULL, OPEN_EXISTING, 0, NULL);
   if (file == INVALID_HANDLE_VALUE)
     return FALSE;

@@ -88,7 +88,7 @@ GVariant *
 _frida_icon_from_file (WCHAR * filename, FridaIconSize size)
 {
   GVariant * result = NULL;
-  SHFILEINFO shfi = { 0, };
+  SHFILEINFOW shfi = { 0, };
   UINT flags;
 
   flags = SHGFI_ICON;

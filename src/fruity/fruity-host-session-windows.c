@@ -287,7 +287,7 @@ frida_foreach_usb_device (const GUID * guid, FridaEnumerateDeviceFunc func, gpoi
   gboolean carry_on = TRUE;
   guint member_index;
 
-  info_set = SetupDiGetClassDevs (guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+  info_set = SetupDiGetClassDevsW (guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
   if (info_set == INVALID_HANDLE_VALUE)
     goto beach;
 

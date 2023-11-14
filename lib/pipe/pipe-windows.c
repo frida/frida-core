@@ -151,7 +151,7 @@ frida_windows_pipe_open_named_pipe (const gchar * name, FridaWindowsPipeRole rol
 
   path = frida_pipe_path_from_name (name);
   sddl = frida_pipe_get_sddl_string_for_pipe ();
-  success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
+  success = ConvertStringSecurityDescriptorToSecurityDescriptorW (sddl, SDDL_REVISION_1, &sd, NULL);
   CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
 
   sa.nLength = sizeof (sa);

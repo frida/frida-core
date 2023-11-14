@@ -584,7 +584,7 @@ frida_unregister_stale_services (FridaServiceContext * self)
   if (!g_queue_is_empty (&stale_services))
   {
     GHashTable * stale_dirs;
-    QUERY_SERVICE_CONFIG * config_data;
+    QUERY_SERVICE_CONFIGW * config_data;
     DWORD config_size;
     GList * cur;
     GHashTableIter iter;

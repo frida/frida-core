@@ -215,7 +215,7 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
   WCHAR drive_strings[DRIVE_STRINGS_MAX_LENGTH];
   WCHAR *drive;
 
-  if (GetProcessImageFileName (process, name, name_capacity) == 0)
+  if (GetProcessImageFileNameW (process, name, name_capacity) == 0)
     return FALSE;
   name_length = wcslen (name);
 
@@ -233,7 +233,7 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
 
     mapping_strings[0] = '\0';
     mapping_strings[MAX_PATH - 1] = '\0';
-    QueryDosDevice (device_name, mapping_strings, MAX_PATH - 1);
+    QueryDosDeviceW (device_name, mapping_strings, MAX_PATH - 1);
     for (mapping = mapping_strings; *mapping != '\0'; mapping += mapping_length + 1)
     {
       mapping_length = wcslen (mapping);
