@@ -12,21 +12,22 @@ extra_vala_args = []
 extra_link_args = []
 
 if host_os_family != 'windows'
-  extra_vala_args += ['--pkg=posix']
+  extra_vala_args += '--pkg=posix'
 endif
 if host_os_family == 'darwin'
-  extra_vala_args += ['--pkg=frida-gum-darwin-1.0']
+  extra_vala_args += '--pkg=frida-gum-darwin-1.0'
 endif
 
 if host_os_family == 'darwin'
-  extra_link_args += ['-Wl,-exported_symbol,_frida_agent_main']
+  extra_link_args += '-Wl,-exported_symbol,_frida_agent_main'
 elif host_os_family != 'windows'
-  extra_link_args += ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), 'frida-agent.version')]
+  symscript = 'frida-agent.version'
+  extra_link_args += '-Wl,--version-script,' + (meson.current_source_dir() / symscript)
 endif
 
 if host_os_family in ['linux', 'qnx']
   # For our libc shim to be effective.
-  extra_link_args += ['-Wl,-Bsymbolic']
+  extra_link_args += '-Wl,-Bsymbolic'
 endif
 
 raw_agent = shared_library('frida-agent', agent_sources,
