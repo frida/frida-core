@@ -270,9 +270,9 @@ native_gee_dep = dependency('gee-0.8', native: true)
 native_brotlienc_dep = dependency('libbrotlienc', native: true)
 
 if host_os_family == 'windows'
-  gio_os_dep = dependency('gio-windows-2.0')
+  gio_windows_dep = dependency('gio-windows-2.0')
 else
-  gio_os_dep = dependency('gio-unix-2.0')
+  gio_unix_dep = dependency('gio-unix-2.0')
 endif
 
 backend_deps_private = []

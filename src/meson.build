@@ -19,9 +19,7 @@ qnx_sources = []
 
 backend_vala_args = []
 backend_libs = []
-backend_deps = [
-  gio_os_dep,
-]
+backend_deps = []
 
 if host_os_family == 'windows'
   windows_sources = [
@@ -515,6 +513,12 @@ core_sources = base_sources + local_sources + remote_sources + compiler_sources
 
 internal_libs = [base, pipe] + backend_libs
 internal_deps = [base_dep, pipe_dep]
+
+if host_os_family == 'windows'
+  backend_deps += gio_windows_dep
+else
+  backend_deps += gio_unix_dep
+endif
 
 core = library('frida-core', core_sources,
   c_args: frida_component_cflags,
