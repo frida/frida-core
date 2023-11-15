@@ -34,7 +34,7 @@ _frida_windows_host_session_provider_try_extract_icon (void)
   IEnumIDList * children = NULL;
   ITEMIDLIST * child;
 
-  wcscpy_s (my_computer_parse_string, PARSE_STRING_MAX_LENGTH, L"::");
+  wcscpy (my_computer_parse_string, L"::");
   StringFromGUID2 (&CLSID_MyComputer, my_computer_parse_string + 2, PARSE_STRING_MAX_LENGTH - 2);
 
   if (SHGetDesktopFolder (&desktop_folder) != S_OK)

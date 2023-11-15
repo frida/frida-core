@@ -226,10 +226,11 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
   {
     WCHAR device_name[3];
     WCHAR mapping_strings[MAX_PATH];
-    WCHAR *mapping;
+    WCHAR * mapping;
     gsize mapping_length;
 
-    wcsncpy_s (device_name, 3, drive, 2);
+    wcsncpy (device_name, drive, 2);
+    device_name[2] = L'\0';
 
     mapping_strings[0] = '\0';
     mapping_strings[MAX_PATH - 1] = '\0';
@@ -243,7 +244,7 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
 
       if (wcsncmp (name, mapping, mapping_length) == 0)
       {
-        wcscpy_s (name, 3, device_name);
+        wcsncpy (name, device_name, 2);
         memmove (name + 2, name + mapping_length, (name_length - mapping_length + 1) * sizeof (WCHAR));
         return TRUE;
       }
