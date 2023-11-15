@@ -41,7 +41,7 @@ custom_target('frida-server',
     raw_server,
     'frida-server.xcent',
   ],
-  output: 'frida-server',
+  output: 'frida-server' + exe_suffix,
   command: [
     files('post-process.sh'),
     '@INPUT@',

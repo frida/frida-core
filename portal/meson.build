@@ -31,7 +31,7 @@ custom_target('frida-portal',
     raw_portal,
     'frida-portal.xcent',
   ],
-  output: 'frida-portal',
+  output: 'frida-portal' + exe_suffix,
   command: [
     files('post-process.sh'),
     '@INPUT@',

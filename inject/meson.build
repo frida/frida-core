@@ -33,7 +33,7 @@ custom_target('frida-inject',
     raw_inject,
     'frida-inject.xcent',
   ],
-  output: 'frida-inject',
+  output: 'frida-inject' + exe_suffix,
   command: [
     files('post-process.sh'),
     '@INPUT@',
