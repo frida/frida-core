@@ -19,9 +19,13 @@ if host_os_family == 'darwin'
   extra_vala_args += '--pkg=frida-gum-darwin-1.0'
 endif
 
-if host_os_family == 'darwin'
+if host_os_family == 'windows'
+  symfile = (host_arch == 'x86') ? 'frida-agent-x86.symbols' : 'frida-agent.symbols'
+  extra_link_args += '-Wl,--retain-symbols-file,' + (meson.current_source_dir() / symfile)
+  extra_link_depends += symfile
+elif host_os_family == 'darwin'
   extra_link_args += '-Wl,-exported_symbol,_frida_agent_main'
-elif host_os_family != 'windows'
+else
   symscript = 'frida-agent.version'
   extra_link_args += '-Wl,--version-script,' + (meson.current_source_dir() / symscript)
   extra_link_depends += symscript
