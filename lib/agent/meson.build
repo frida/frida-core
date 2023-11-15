@@ -10,6 +10,7 @@ endif
 
 extra_vala_args = []
 extra_link_args = []
+extra_link_depends = []
 
 if host_os_family != 'windows'
   extra_vala_args += '--pkg=posix'
@@ -23,6 +24,7 @@ if host_os_family == 'darwin'
 elif host_os_family != 'windows'
   symscript = 'frida-agent.version'
   extra_link_args += '-Wl,--version-script,' + (meson.current_source_dir() / symscript)
+  extra_link_depends += symscript
 endif
 
 if host_os_family in ['linux', 'qnx']
@@ -35,6 +37,7 @@ raw_agent = shared_library('frida-agent', agent_sources,
   c_args: frida_component_cflags,
   vala_args: extra_vala_args,
   link_args: extra_link_args,
+  link_depends: extra_link_depends,
   vs_module_defs: 'frida-agent.def',
   override_options: ['b_asneeded=true'],
   dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, base_dep, pipe_dep, tls_provider_dep, payload_dep],
