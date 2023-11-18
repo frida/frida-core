@@ -737,16 +737,16 @@ namespace Frida.Barebone {
 						string[] tokens = line.split ("=");
 						if (tokens.length != 2)
 							continue;
-						string name = tokens[0].strip ().up ();
+						string name = tokens[0].strip ().down ();
 						uint64 val = uint64.parse (tokens[1].strip ());
-						if (name == "TCR_EL1")
+						if (name == "tcr_el1")
 							regs.tcr = val;
-						else if (name == "TTBR1_EL1")
+						else if (name == "ttbr1_el1")
 							regs.ttbr1 = val;
 					}
 				} else {
-					regs.tcr = yield thread.read_register ("TCR_EL1", cancellable);
-					regs.ttbr1 = yield thread.read_register ("TTBR1_EL1", cancellable);
+					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
+					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);
 				}
 
 				return regs;
