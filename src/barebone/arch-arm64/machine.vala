@@ -680,7 +680,7 @@ namespace Frida.Barebone {
 			Gee.Set<string> features = gdb.features;
 			if ("corellium" in features)
 				yield gdb.run_remote_command ((mode == PHYSICAL) ? "phys 0" : "virt", cancellable);
-			else if ("qemu" in features)
+			else if ("qemu-phy-mem-mode" in features)
 				yield gdb.execute_simple ("Qqemu.PhyMemMode:" + ((mode == PHYSICAL) ? "1" : "0"), cancellable);
 			else
 				throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
