@@ -588,20 +588,9 @@ namespace Frida.GDB {
 			try {
 				target = yield fetch_feature_document ("target.xml", next_regnum, cancellable);
 			} catch (Error e) {
-				if (e is Error.NOT_SUPPORTED) {
-					try {
-						string info = yield run_remote_command ("info", cancellable);
-						if ("Corellium" in info) {
-							target = FeatureDocument.from_xml (CORELLIUM_TARGET_XML, next_regnum);
-							supported_features.add ("corellium");
-						}
-					} catch (Error e) {
-					}
-					if (target == null)
-						return new TargetSpec (UNKNOWN, new Gee.ArrayList<Register> ());
-				} else {
-					throw e;
-				}
+				if (e is Error.NOT_SUPPORTED)
+					return new TargetSpec (UNKNOWN, new Gee.ArrayList<Register> ());
+				throw e;
 			}
 			next_regnum = target.next_regnum;
 
@@ -1547,135 +1536,6 @@ namespace Frida.GDB {
 				}
 			}
 		}
-
-		private const string CORELLIUM_TARGET_XML = """
-			<!-- Based on QEMU's target.xml + aarch64-core.xml + aarch64-fpu.xml:
-
-			     Copyright (C) 2009-2012 Free Software Foundation, Inc.
-			     Contributed by ARM Ltd.
-
-			     Copying and distribution of this file, with or without modification,
-			     are permitted in any medium without royalty provided the copyright
-			     notice and this notice are preserved.  -->
-			<?xml version="1.0"?>
-			<!DOCTYPE target SYSTEM "gdb-target.dtd">
-			<target>
-			  <architecture>aarch64</architecture>
-			  <feature name="org.gnu.gdb.aarch64.core">
-			    <reg name="x0" bitsize="64"/>
-			    <reg name="x1" bitsize="64"/>
-			    <reg name="x2" bitsize="64"/>
-			    <reg name="x3" bitsize="64"/>
-			    <reg name="x4" bitsize="64"/>
-			    <reg name="x5" bitsize="64"/>
-			    <reg name="x6" bitsize="64"/>
-			    <reg name="x7" bitsize="64"/>
-			    <reg name="x8" bitsize="64"/>
-			    <reg name="x9" bitsize="64"/>
-			    <reg name="x10" bitsize="64"/>
-			    <reg name="x11" bitsize="64"/>
-			    <reg name="x12" bitsize="64"/>
-			    <reg name="x13" bitsize="64"/>
-			    <reg name="x14" bitsize="64"/>
-			    <reg name="x15" bitsize="64"/>
-			    <reg name="x16" bitsize="64"/>
-			    <reg name="x17" bitsize="64"/>
-			    <reg name="x18" bitsize="64"/>
-			    <reg name="x19" bitsize="64"/>
-			    <reg name="x20" bitsize="64"/>
-			    <reg name="x21" bitsize="64"/>
-			    <reg name="x22" bitsize="64"/>
-			    <reg name="x23" bitsize="64"/>
-			    <reg name="x24" bitsize="64"/>
-			    <reg name="x25" bitsize="64"/>
-			    <reg name="x26" bitsize="64"/>
-			    <reg name="x27" bitsize="64"/>
-			    <reg name="x28" bitsize="64"/>
-			    <reg name="x29" bitsize="64"/>
-			    <reg name="x30" bitsize="64"/>
-			    <reg name="sp" bitsize="64" type="data_ptr"/>
-
-			    <reg name="pc" bitsize="64" type="code_ptr"/>
-			    <reg name="cpsr" bitsize="32"/>
-			  </feature>
-			  <feature name="org.gnu.gdb.aarch64.fpu">
-			    <vector id="v2d" type="ieee_double" count="2"/>
-			    <vector id="v2u" type="uint64" count="2"/>
-			    <vector id="v2i" type="int64" count="2"/>
-			    <vector id="v4f" type="ieee_single" count="4"/>
-			    <vector id="v4u" type="uint32" count="4"/>
-			    <vector id="v4i" type="int32" count="4"/>
-			    <vector id="v8u" type="uint16" count="8"/>
-			    <vector id="v8i" type="int16" count="8"/>
-			    <vector id="v16u" type="uint8" count="16"/>
-			    <vector id="v16i" type="int8" count="16"/>
-			    <vector id="v1u" type="uint128" count="1"/>
-			    <vector id="v1i" type="int128" count="1"/>
-			    <union id="vnd">
-			      <field name="f" type="v2d"/>
-			      <field name="u" type="v2u"/>
-			      <field name="s" type="v2i"/>
-			    </union>
-			    <union id="vns">
-			      <field name="f" type="v4f"/>
-			      <field name="u" type="v4u"/>
-			      <field name="s" type="v4i"/>
-			    </union>
-			    <union id="vnh">
-			      <field name="u" type="v8u"/>
-			      <field name="s" type="v8i"/>
-			    </union>
-			    <union id="vnb">
-			      <field name="u" type="v16u"/>
-			      <field name="s" type="v16i"/>
-			    </union>
-			    <union id="vnq">
-			      <field name="u" type="v1u"/>
-			      <field name="s" type="v1i"/>
-			    </union>
-			    <union id="aarch64v">
-			      <field name="d" type="vnd"/>
-			      <field name="s" type="vns"/>
-			      <field name="h" type="vnh"/>
-			      <field name="b" type="vnb"/>
-			      <field name="q" type="vnq"/>
-			    </union>
-			    <reg name="v0" bitsize="128" type="aarch64v" regnum="34"/>
-			    <reg name="v1" bitsize="128" type="aarch64v" />
-			    <reg name="v2" bitsize="128" type="aarch64v" />
-			    <reg name="v3" bitsize="128" type="aarch64v" />
-			    <reg name="v4" bitsize="128" type="aarch64v" />
-			    <reg name="v5" bitsize="128" type="aarch64v" />
-			    <reg name="v6" bitsize="128" type="aarch64v" />
-			    <reg name="v7" bitsize="128" type="aarch64v" />
-			    <reg name="v8" bitsize="128" type="aarch64v" />
-			    <reg name="v9" bitsize="128" type="aarch64v" />
-			    <reg name="v10" bitsize="128" type="aarch64v"/>
-			    <reg name="v11" bitsize="128" type="aarch64v"/>
-			    <reg name="v12" bitsize="128" type="aarch64v"/>
-			    <reg name="v13" bitsize="128" type="aarch64v"/>
-			    <reg name="v14" bitsize="128" type="aarch64v"/>
-			    <reg name="v15" bitsize="128" type="aarch64v"/>
-			    <reg name="v16" bitsize="128" type="aarch64v"/>
-			    <reg name="v17" bitsize="128" type="aarch64v"/>
-			    <reg name="v18" bitsize="128" type="aarch64v"/>
-			    <reg name="v19" bitsize="128" type="aarch64v"/>
-			    <reg name="v20" bitsize="128" type="aarch64v"/>
-			    <reg name="v21" bitsize="128" type="aarch64v"/>
-			    <reg name="v22" bitsize="128" type="aarch64v"/>
-			    <reg name="v23" bitsize="128" type="aarch64v"/>
-			    <reg name="v24" bitsize="128" type="aarch64v"/>
-			    <reg name="v25" bitsize="128" type="aarch64v"/>
-			    <reg name="v26" bitsize="128" type="aarch64v"/>
-			    <reg name="v27" bitsize="128" type="aarch64v"/>
-			    <reg name="v28" bitsize="128" type="aarch64v"/>
-			    <reg name="v29" bitsize="128" type="aarch64v"/>
-			    <reg name="v30" bitsize="128" type="aarch64v"/>
-			    <reg name="v31" bitsize="128" type="aarch64v"/>
-			    <reg name="fpsr" bitsize="32"/>
-			    <reg name="fpcr" bitsize="32"/>
-			  </feature>
-			</target>""";
 	}
 
 	public enum TargetArch {
