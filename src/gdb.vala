@@ -156,7 +156,7 @@ namespace Frida.GDB {
 					ack_mode = SKIP_ACKS;
 				}
 
-				detect_vendor_features.begin (io_cancellable);
+				yield detect_vendor_features (cancellable);
 
 				yield enable_extensions (cancellable);
 
@@ -177,12 +177,23 @@ namespace Frida.GDB {
 			return true;
 		}
 
-		private async void detect_vendor_features (Cancellable? cancellable) {
+		protected virtual async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
+			try {
+				string info = yield run_remote_command ("info", cancellable);
+				if ("Corellium" in info)
+					supported_features.add ("corellium");
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+			}
+
 			try {
 				string response = yield query_property ("qemu.PhyMemMode", cancellable);
 				if (response.length == 1)
-					supported_features.add ("qemu");
+					supported_features.add ("qemu-phy-mem-mode");
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 			}
 		}
 
