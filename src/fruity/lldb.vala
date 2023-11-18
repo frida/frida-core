@@ -32,6 +32,9 @@ namespace Frida.LLDB {
 			return client;
 		}
 
+		protected override async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
+		}
+
 		protected override async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
 			yield execute_simple ("QThreadSuffixSupported", cancellable);
 			yield execute_simple ("QListThreadsInStopReply", cancellable);
