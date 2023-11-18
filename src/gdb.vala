@@ -1478,8 +1478,8 @@ namespace Frida.GDB {
 				}
 
 				private void on_reg_element (string[] attribute_names, string[] attribute_values) {
-					unowned string? name = null;
-					unowned string? altname = null;
+					string? name = null;
+					string? altname = null;
 					int regnum = -1;
 					int bitsize = -1;
 					uint i = 0;
@@ -1487,9 +1487,9 @@ namespace Frida.GDB {
 						unowned string val = attribute_values[i];
 
 						if (attribute_name == "name")
-							name = val;
+							name = val.down ();
 						else if (attribute_name == "altname")
-							altname = val;
+							altname = val.down ();
 						else if (attribute_name == "regnum")
 							regnum = int.parse (val);
 						else if (attribute_name == "bitsize")
