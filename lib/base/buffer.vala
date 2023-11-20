@@ -434,6 +434,11 @@ namespace Frida {
 			return val->substring (0, (long) max_length);
 		}
 
+		public string read_fixed_string (size_t offset, size_t size) {
+			string * val = (string *) get_pointer (offset, size);
+			return val->substring (0, (long) size);
+		}
+
 		public unowned Buffer write_string (size_t offset, string val) {
 			uint size = val.length + 1;
 			Memory.copy (get_pointer (offset, size), val, size);
