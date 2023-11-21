@@ -2079,6 +2079,17 @@ namespace Frida {
 	}
 
 	namespace Numeric {
+		public uint int64_hash (int64? val) {
+			uint64 v = (uint64) val.abs ();
+			return (uint) ((v >> 32) ^ (v & 0xffffffffU));
+		}
+
+		public bool int64_equal (int64? val_a, int64? val_b) {
+			int64 a = val_a;
+			int64 b = val_b;
+			return a == b;
+		}
+
 		public uint uint64_hash (uint64? val) {
 			uint64 v = val;
 			return (uint) ((v >> 32) ^ (v & 0xffffffffU));
