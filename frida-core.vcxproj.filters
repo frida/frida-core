@@ -73,6 +73,33 @@
     <Filter Include="Source Files\generated\barebone">
       <UniqueIdentifier>{ee876d25-94c0-4b08-b62e-542701f53a5a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\generated\barebone\arch-arm">
+      <UniqueIdentifier>{a44b2b16-0f6e-4a59-ace2-5eafb5842cd3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\barebone\arch-unknown">
+      <UniqueIdentifier>{732196c7-efbb-467b-9a46-1b893a3ec1cf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\barebone\arch-x86_64">
+      <UniqueIdentifier>{890a4566-74ae-4d0a-a479-7e45580171db}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\barebone\arch-arm64">
+      <UniqueIdentifier>{e062def2-897c-47e2-bde1-74b23a6066a8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\barebone\arch-x86">
+      <UniqueIdentifier>{6408ed39-33ab-461c-b887-a8da9e80ba2b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\barebone\arch-arm">
+      <UniqueIdentifier>{98bd47cd-d261-4776-942b-1a40a30bc3ff}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\barebone\arch-x86">
+      <UniqueIdentifier>{fe48f50a-d564-4618-bbd3-813d5b7a79cb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\barebone\arch-unknown">
+      <UniqueIdentifier>{0e4c39a3-82f0-4034-af21-3f787d114fe6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\barebone\arch-x86_64">
+      <UniqueIdentifier>{abc9ec18-ef36-4200-ac4c-1dcba33f5db5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\helper.resources">
@@ -313,23 +340,23 @@
     <ClCompile Include="$(IntDir)src\barebone\rust-module.c">
       <Filter>Source Files\generated\barebone</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\barebone\arch-x86\machine.c">
-      <Filter>Source Files\generated\barebone\arch-x86</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\barebone\arch-x86_64\machine.c">
-      <Filter>Source Files\generated\barebone\arch-x86_64</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\barebone\arch-arm\machine.c">
-      <Filter>Source Files\generated\barebone\arch-arm</Filter>
+    <ClCompile Include="$(IntDir)data\frida-data-barebone.c">
+      <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\barebone\arch-arm64\machine.c">
       <Filter>Source Files\generated\barebone\arch-arm64</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-arm\machine.c">
+      <Filter>Source Files\generated\barebone\arch-arm</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86\machine.c">
+      <Filter>Source Files\generated\barebone\arch-x86</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)src\barebone\arch-unknown\machine.c">
       <Filter>Source Files\generated\barebone\arch-unknown</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\frida-data-barebone.c">
-      <Filter>Source Files\generated\data</Filter>
+    <ClCompile Include="$(IntDir)src\barebone\arch-x86_64\machine.c">
+      <Filter>Source Files\generated\barebone\arch-x86_64</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -384,20 +411,20 @@
     <None Include="src\barebone\rust-module.vala">
       <Filter>Source Files\barebone</Filter>
     </None>
-    <None Include="src\barebone\arch-x86\machine.vala">
-      <Filter>Source Files\barebone\arch-x86</Filter>
-    </None>
-    <None Include="src\barebone\arch-x86_64\machine.vala">
-      <Filter>Source Files\barebone\arch-x86_64</Filter>
+    <None Include="src\barebone\arch-arm64\machine.vala">
+      <Filter>Source Files\barebone\arch-arm64</Filter>
     </None>
     <None Include="src\barebone\arch-arm\machine.vala">
       <Filter>Source Files\barebone\arch-arm</Filter>
     </None>
-    <None Include="src\barebone\arch-arm64\machine.vala">
-      <Filter>Source Files\barebone\arch-arm64</Filter>
+    <None Include="src\barebone\arch-x86\machine.vala">
+      <Filter>Source Files\barebone\arch-x86</Filter>
     </None>
     <None Include="src\barebone\arch-unknown\machine.vala">
       <Filter>Source Files\barebone\arch-unknown</Filter>
+    </None>
+    <None Include="src\barebone\arch-x86_64\machine.vala">
+      <Filter>Source Files\barebone\arch-x86_64</Filter>
     </None>
   </ItemGroup>
 </Project>
