@@ -77,7 +77,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
         agent.write_text("\n".join([
             components_source,
             entrypoint.read_text(encoding="utf-8"),
-        ]))
+        ]), encoding="utf-8")
         snapshot.write_bytes(b"")
 
 def make_script_filename(name):
