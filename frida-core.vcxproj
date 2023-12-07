@@ -254,6 +254,9 @@ echo &gt; "$(IntDir)valacode.stamp"
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
+if $(Configuration)==Debug (
+  set v8_mksnapshot=""
+)
 $(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
@@ -267,6 +270,9 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
   set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
+)
+if $(Configuration)==Debug (
+  set v8_mksnapshot=""
 )
 $(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
@@ -282,6 +288,9 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
 )
+if $(Configuration)==Debug (
+  set v8_mksnapshot=""
+)
 $(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
 "$(IntDir)..\frida-resource-compiler\frida-resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\compiler\compiler.resources" -o "$(IntDir)data\frida-data-compiler" "$(IntDir)src\compiler\agent.js" "$(IntDir)src\compiler\snapshot.bin" || exit 1
@@ -295,6 +304,9 @@ REM. &gt; "$(IntDir)data\compiler.stamp"
   set host_arch=ia32
   set cpu_mode=32
   set v8_mksnapshot=$(SolutionDir)build\sdk-windows\Win32-Release\bin\windows-x86\v8-mksnapshot-windows-x86.exe
+)
+if $(Configuration)==Debug (
+  set v8_mksnapshot=""
 )
 $(Python) src\compiler\generate-agent.py src\compiler "$(IntDir)src\compiler" windows %host_arch% %cpu_mode% %v8_mksnapshot% || exit 1
 mkdir "$(IntDir)data" 2&gt;NUL
