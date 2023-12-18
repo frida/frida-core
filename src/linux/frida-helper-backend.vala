@@ -867,6 +867,13 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
+			try {
+				string target = FileUtils.read_link (fallback_ld);
+				string parent_dir = Path.get_dirname (fallback_ld);
+				fallback_ld = Filename.canonicalize (target, parent_dir);
+			} catch (FileError e) {
+			}
+
 #if ANDROID
 			local_android_ld = ProcMapsEntry.find_by_path (local_pid, fallback_ld);
 #endif
