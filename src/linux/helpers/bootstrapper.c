@@ -407,6 +407,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
             case DT_INIT:
               layout->r_brk = (void *) (entry->d_un.d_ptr + map->l_addr);
               break;
+            case DT_PREINIT_ARRAY:
             case DT_INIT_ARRAY:
               if (layout->r_brk == NULL)
               {
