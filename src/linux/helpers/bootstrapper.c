@@ -393,6 +393,9 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
       /*
        * Injecting right after libc has been loaded appears to be risky, e.g. the program's observed __environ might be NULL.
        * So instead of waiting for r_brk to be executed again, we use the program's earliest initializer / entrypoint.
+       *
+       * This still leaves the issue where we might be attaching to a process in the brief moment right after libc has become
+       * visible, but before it's been fully linked in. So we definitely want to move to a better strategy.
        */
       if (layout->libc == NULL && (map = r->r_map) != NULL)
       {
