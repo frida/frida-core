@@ -355,5 +355,9 @@
 	<true/>
 	<key>com.apple.private.skip-library-validation</key>
 	<true/>
+	<key>com.apple.private.amfi.can-load-cdhash</key>
+	<true/>
+	<key>com.apple.private.amfi.can-execute-cdhash</key>
+	<true/>
 </dict>
 </plist>
