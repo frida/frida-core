@@ -3,6 +3,16 @@
 static const ElfW(Phdr) * frida_find_program_header_by_type (const ElfW(Ehdr) * ehdr, ElfW(Word) type);
 static size_t frida_compute_elf_region_upper_bound (const ElfW(Ehdr) * ehdr, ElfW(Addr) address);
 
+const ElfW(Dyn) *
+frida_elf_find_dynamic_section (const ElfW(Ehdr) * ehdr)
+{
+  const ElfW(Phdr) * dyn;
+
+  dyn = frida_find_program_header_by_type (ehdr, PT_DYNAMIC);
+
+  return (void *) ehdr + dyn->p_vaddr;
+}
+
 const char *
 frida_elf_query_soname (const ElfW(Ehdr) * ehdr)
 {

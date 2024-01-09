@@ -379,7 +379,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
     if (layout->r_debug != NULL)
     {
       FridaRDebug * r = layout->r_debug;
-      FridaLinkMap * map;
+      FridaLinkMap * map, * program;
 
       for (map = r->r_map; map != NULL; map = map->l_next)
       {
@@ -397,24 +397,33 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
        * This still leaves the issue where we might be attaching to a process in the brief moment right after libc has become
        * visible, but before it's been fully linked in. So we definitely want to move to a better strategy.
        */
-      if (layout->libc == NULL && (map = r->r_map) != NULL)
+      program = r->r_map;
+      if (layout->libc == NULL && program != NULL)
       {
-        const ElfW(Dyn) * entry;
+        const ElfW(Ehdr) * program_elf;
+        const ElfW(Dyn) * entries, * entry;
+
+        program_elf = (const ElfW(Ehdr) *)
+            frida_elf_compute_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
+
+        entries = (program->l_ld != NULL)
+            ? program->l_ld
+            : frida_elf_find_dynamic_section (program_elf);
 
         layout->r_brk = NULL;
 
-        for (entry = map->l_ld; entry->d_tag != DT_NULL; entry++)
+        for (entry = entries; entry->d_tag != DT_NULL; entry++)
         {
           switch (entry->d_tag)
           {
             case DT_INIT:
-              layout->r_brk = (void *) (entry->d_un.d_ptr + map->l_addr);
+              layout->r_brk = (void *) program_elf + entry->d_un.d_ptr;
               break;
             case DT_PREINIT_ARRAY:
             case DT_INIT_ARRAY:
               if (layout->r_brk == NULL)
               {
-                void * val = *((void **) (entry->d_un.d_ptr + map->l_addr));
+                void * val = *((void **) ((void *) program_elf + entry->d_un.d_ptr));
                 if (val != NULL && val != (void *) -1)
                   layout->r_brk = val;
               }
@@ -423,11 +432,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
         }
 
         if (layout->r_brk == NULL)
-        {
-          const ElfW(Ehdr) * program = (const ElfW(Ehdr) *)
-              frida_elf_compute_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
-          layout->r_brk = (void *) (program->e_entry + map->l_addr);
-        }
+          layout->r_brk = (void *) program_elf + program_elf->e_entry;
       }
 
       use_proc_fallback = false;

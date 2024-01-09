@@ -48,6 +48,7 @@ struct _FridaElfExportDetails
   uint8_t bind;
 };
 
+const ElfW(Dyn) * frida_elf_find_dynamic_section (const ElfW(Ehdr) * ehdr);
 const char * frida_elf_query_soname (const ElfW(Ehdr) * ehdr);
 void frida_elf_enumerate_exports (const ElfW(Ehdr) * ehdr, FridaFoundElfSymbolFunc func, void * user_data);
 void frida_elf_enumerate_symbols (const ElfW(Ehdr) * ehdr, void * loaded_base, FridaFoundElfSymbolFunc func, void * user_data);
