@@ -133,28 +133,31 @@ frida_elf_enumerate_symbols (const ElfW(Ehdr) * ehdr, void * loaded_base, FridaF
   const ElfW(Sym) * symbols;
   size_t symbols_entsize, num_symbols;
   const char * strings;
+  void * section_headers;
   size_t i;
 
   symbols = NULL;
   strings = NULL;
+  section_headers = (void *) ehdr + ehdr->e_shoff;
   for (i = 0; i != ehdr->e_shnum; i++)
   {
-    ElfW(Shdr) * shdr = (void *) ehdr + ehdr->e_shoff + (i * ehdr->e_shentsize);
-    switch (shdr->sh_type)
+    ElfW(Shdr) * shdr = section_headers + (i * ehdr->e_shentsize);
+
+    if (shdr->sh_type == SHT_SYMTAB)
     {
-      case SHT_SYMTAB:
-        symbols = (void *) ehdr + shdr->sh_offset;
-        symbols_entsize = shdr->sh_entsize;
-        num_symbols = shdr->sh_size / symbols_entsize;
-        break;
-      case SHT_STRTAB:
-        strings = (char *) ehdr + shdr->sh_offset;
-        break;
-      default:
-        break;
+      ElfW(Shdr) * strings_shdr;
+
+      symbols = (void *) ehdr + shdr->sh_offset;
+      symbols_entsize = shdr->sh_entsize;
+      num_symbols = shdr->sh_size / symbols_entsize;
+
+      strings_shdr = section_headers + (shdr->sh_link * ehdr->e_shentsize);
+      strings = (char *) ehdr + strings_shdr->sh_offset;
+
+      break;
     }
   }
-  if (symbols == NULL || strings == NULL)
+  if (symbols == NULL)
     return;
 
   for (i = 0; i != num_symbols; i++)
