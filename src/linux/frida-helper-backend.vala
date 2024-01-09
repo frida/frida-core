@@ -2124,7 +2124,7 @@ namespace Frida {
 					return result;
 				if (errno == Posix.ENOSYS)
 					process_vm_readv = null;
-				else if (errno != Posix.EPERM)
+				else if (errno != Posix.EPERM && errno != Posix.EFAULT)
 					throw new Error.NOT_SUPPORTED ("Unable to read from process memory: %s", strerror (errno));
 			}
 
