@@ -401,10 +401,15 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
       if (layout->libc == NULL && program != NULL)
       {
         const ElfW(Ehdr) * program_elf;
+        ElfW(Addr) addr_delta;
         const ElfW(Dyn) * entries, * entry;
 
         program_elf = (const ElfW(Ehdr) *)
             frida_elf_compute_base_from_phdrs (layout->phdrs, layout->phdr_size, layout->phdr_count, page_size);
+
+        addr_delta = (program_elf->e_type == ET_EXEC)
+            ? 0
+            : (ElfW(Addr)) program_elf;
 
         entries = (program->l_ld != NULL)
             ? program->l_ld
@@ -417,13 +422,13 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
           switch (entry->d_tag)
           {
             case DT_INIT:
-              layout->r_brk = (void *) program_elf + entry->d_un.d_ptr;
+              layout->r_brk = (void *) (entry->d_un.d_ptr + addr_delta);
               break;
             case DT_PREINIT_ARRAY:
             case DT_INIT_ARRAY:
               if (layout->r_brk == NULL)
               {
-                void * val = *((void **) ((void *) program_elf + entry->d_un.d_ptr));
+                void * val = *((void **) (entry->d_un.d_ptr + addr_delta));
                 if (val != NULL && val != (void *) -1)
                   layout->r_brk = val;
               }
@@ -432,7 +437,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
         }
 
         if (layout->r_brk == NULL)
-          layout->r_brk = (void *) program_elf + program_elf->e_entry;
+          layout->r_brk = (void *) (program_elf->e_entry + addr_delta);
       }
 
       use_proc_fallback = false;
