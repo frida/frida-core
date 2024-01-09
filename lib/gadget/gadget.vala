@@ -6,10 +6,10 @@ namespace Frida.Gadget {
 			default = new ListenInteraction ();
 		}
 
-		public TeardownRequirement teardown {
+		public Gum.TeardownRequirement teardown {
 			get;
 			set;
-			default = TeardownRequirement.MINIMAL;
+			default = Gum.TeardownRequirement.MINIMAL;
 		}
 
 		public ScriptRuntime runtime {
@@ -91,11 +91,6 @@ namespace Frida.Gadget {
 		public new void set_property (ParamSpec pspec, Value value) {
 			base.set_property (pspec.name, value);
 		}
-	}
-
-	private enum TeardownRequirement {
-		MINIMAL,
-		FULL
 	}
 
 	private class ScriptInteraction : Object, Json.Serializable {
@@ -479,6 +474,7 @@ namespace Frida.Gadget {
 			return;
 		}
 
+		Gum.Process.set_teardown_requirement (config.teardown);
 		Gum.Process.set_code_signing_policy (config.code_signing);
 
 		Gum.Cloak.add_range (location.range);
@@ -590,7 +586,7 @@ namespace Frida.Gadget {
 		if (final_state == DETACHED)
 			return;
 
-		if (config.teardown == TeardownRequirement.FULL) {
+		if (config.teardown == Gum.TeardownRequirement.FULL) {
 			config = null;
 
 			invalidate_dbus_context ();
@@ -697,7 +693,7 @@ namespace Frida.Gadget {
 			if (controller.is_eternal) {
 				pending_state = DETACHED;
 			} else {
-				if (config.teardown == TeardownRequirement.MINIMAL) {
+				if (config.teardown == Gum.TeardownRequirement.MINIMAL) {
 					yield controller.prepare_for_termination (TerminationReason.EXIT);
 				} else {
 					yield controller.stop ();
