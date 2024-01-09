@@ -373,7 +373,7 @@ frida_probe_process (size_t page_size, FridaProcessLayout * layout)
   {
     frida_elf_enumerate_exports (layout->interpreter, frida_collect_interpreter_symbol, layout);
 
-    if (layout->r_debug == NULL)
+    if (layout->r_debug == NULL || layout->r_brk == NULL)
       frida_enumerate_module_symbols_on_disk (layout->interpreter, frida_collect_interpreter_symbol, layout);
 
     if (layout->r_debug != NULL)
@@ -635,13 +635,16 @@ frida_collect_interpreter_symbol (const FridaElfExportDetails * details, void * 
   FridaProcessLayout * layout = user_data;
   bool found_both;
 
-  if (details->type == STT_OBJECT && (
+  if (layout->r_debug == NULL &&
+        details->type == STT_OBJECT && (
         strcmp (details->name, "_r_debug") == 0 ||
         strcmp (details->name, "__dl__r_debug") == 0))
     layout->r_debug = details->address;
 
-  if (details->type == STT_FUNC && (
+  if (layout->r_brk == NULL &&
+        details->type == STT_FUNC && (
         strcmp (details->name, "_dl_debug_state") == 0 ||
+        strcmp (details->name, "__dl_rtld_db_dlactivity") == 0 ||
         strcmp (details->name, "rtld_db_dlactivity") == 0))
     layout->r_brk = details->address;
 
