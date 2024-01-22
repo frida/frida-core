@@ -124,7 +124,7 @@ if [ "\$1" = upgrade ]; then
 fi
 
 if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
-  logfile=$TMPDIR/frida-server-launch.log
+  logfile=\$TMPDIR/frida-server-launch.log
 
   function dispose {
     rm -f "\$logfile"
