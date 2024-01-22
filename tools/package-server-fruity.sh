@@ -117,14 +117,32 @@ chmod 644 "$tmpdir/DEBIAN/control"
 cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
+launchcfg=$sysroot/Library/LaunchDaemons/re.frida.server.plist
+
 if [ "\$1" = upgrade ]; then
-  launchctl unload $sysroot/Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload "\$launchcfg" &> /dev/null
 fi
 
 if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
-  if launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist 2>&1 | grep "Service cannot load in requested session"; then
-    sed -ie "/LimitLoadToSessionType/,+1d" $sysroot/Library/LaunchDaemons/re.frida.server.plist
-    launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist
+  logfile=$TMPDIR/frida-server-launch.log
+
+  function dispose {
+    rm -f "$logfile"
+  }
+  trap dispose EXIT
+
+  launchctl load "\$launchcfg" &> "$logfile"
+  res=$?
+
+  if grep -q "Service cannot load in requested session" "$logfile"; then
+    sed -ie "/LimitLoadToSessionType/,+1d" "\$launchcfg"
+    launchctl load "\$launchcfg" &> "$logfile"
+    res=$?
+  fi
+
+  if [ $res -ne 0 ]; then
+    cat "$logfile"
+    exit $res
   fi
 fi
 
