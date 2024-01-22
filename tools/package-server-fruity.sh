@@ -118,30 +118,29 @@ cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/bash
 
 launchcfg=$sysroot/Library/LaunchDaemons/re.frida.server.plist
+launchlog=\$TMPDIR/frida-server-launch.log
+
+function dispose {
+  rm -f "\$launchlog"
+}
+trap dispose EXIT
 
 if [ "\$1" = upgrade ]; then
   launchctl unload "\$launchcfg" &> /dev/null
 fi
 
 if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
-  logfile=\$TMPDIR/frida-server-launch.log
-
-  function dispose {
-    rm -f "\$logfile"
-  }
-  trap dispose EXIT
-
-  launchctl load "\$launchcfg" &> "\$logfile"
+  launchctl load "\$launchcfg" &> "\$launchlog"
   res=\$?
 
-  if grep -q "Service cannot load in requested session" "\$logfile"; then
+  if grep -q "Service cannot load in requested session" "\$launchlog"; then
     sed -ie "/LimitLoadToSessionType/,+1d" "\$launchcfg"
-    launchctl load "\$launchcfg" &> "\$logfile"
+    launchctl load "\$launchcfg" &> "\$launchlog"
     res=\$?
   fi
 
   if [ \$res -ne 0 ]; then
-    cat "\$logfile"
+    cat "\$launchlog"
     exit \$res
   fi
 fi
