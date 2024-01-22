@@ -140,7 +140,7 @@ if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
   fi
 
   if [ \$res -ne 0 ]; then
-    cat "\$launchlog"
+    cat "\$launchlog" > /dev/stderr
     exit \$res
   fi
 fi
