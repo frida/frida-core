@@ -122,7 +122,10 @@ if [ "\$1" = upgrade ]; then
 fi
 
 if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
-  launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist
+  if launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist 2>&1 | grep "Service cannot load in requested session"; then
+    sed -ie "/LimitLoadToSessionType/,+1d" $sysroot/Library/LaunchDaemons/re.frida.server.plist
+    launchctl load $sysroot/Library/LaunchDaemons/re.frida.server.plist
+  fi
 fi
 
 exit 0
