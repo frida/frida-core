@@ -127,22 +127,22 @@ if [ "\$1" = install ] || [ "\$1" = upgrade ]; then
   logfile=$TMPDIR/frida-server-launch.log
 
   function dispose {
-    rm -f "$logfile"
+    rm -f "\$logfile"
   }
   trap dispose EXIT
 
-  launchctl load "\$launchcfg" &> "$logfile"
-  res=$?
+  launchctl load "\$launchcfg" &> "\$logfile"
+  res=\$?
 
-  if grep -q "Service cannot load in requested session" "$logfile"; then
+  if grep -q "Service cannot load in requested session" "\$logfile"; then
     sed -ie "/LimitLoadToSessionType/,+1d" "\$launchcfg"
-    launchctl load "\$launchcfg" &> "$logfile"
-    res=$?
+    launchctl load "\$launchcfg" &> "\$logfile"
+    res=\$?
   fi
 
-  if [ $res -ne 0 ]; then
-    cat "$logfile"
-    exit $res
+  if [ \$res -ne 0 ]; then
+    cat "\$logfile"
+    exit \$res
   fi
 fi
 
