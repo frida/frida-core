@@ -115,7 +115,7 @@ EOF
 chmod 644 "$tmpdir/DEBIAN/control"
 
 cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
-#!/bin/sh
+#!/bin/bash
 
 launchcfg=$sysroot/Library/LaunchDaemons/re.frida.server.plist
 
@@ -150,10 +150,10 @@ exit 0
 EOF
 chmod 755 "$tmpdir/DEBIAN/extrainst_"
 cat >"$tmpdir/DEBIAN/prerm" <<EOF
-#!/bin/sh
+#!/bin/bash
 
 if [ "\$1" = remove ] || [ "\$1" = purge ]; then
-  launchctl unload $sysroot/Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload $sysroot/Library/LaunchDaemons/re.frida.server.plist &> /dev/null
 fi
 
 exit 0
