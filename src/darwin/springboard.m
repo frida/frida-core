@@ -22,6 +22,7 @@ extern kern_return_t bootstrap_look_up_per_user (mach_port_t bp, const char * se
 
 extern mach_port_t bootstrap_port;
 
+#ifndef HAVE_TVOS
 static kern_return_t frida_replacement_bootstrap_look_up (mach_port_t bp, const char * service_name, mach_port_t * sp);
 static kern_return_t frida_replacement_xpc_look_up_endpoint (const char * service_name, uint32_t type, uint64_t handle,
     uint64_t lookup_handle, const uint8_t * instance, uint64_t flags, void * cputypes, mach_port_t * port, bool * non_launching);
@@ -31,9 +32,12 @@ typedef kern_return_t (* FridaXpcLookUpEndpointFunc) (const char * service_name,
 
 static FridaXpcLookUpEndpointFunc frida_find_xpc_look_up_endpoint_implementation (void);
 static gboolean frida_is_bl_imm (guint32 insn);
+#endif
 
 static FridaSpringboardApi * frida_springboard_api = NULL;
+#ifndef HAVE_TVOS
 static FridaXpcLookUpEndpointFunc frida_xpc_look_up_endpoint;
+#endif
 
 FridaSpringboardApi *
 _frida_get_springboard_api (void)
@@ -114,6 +118,8 @@ _frida_get_springboard_api (void)
   return frida_springboard_api;
 }
 
+#ifndef HAVE_TVOS
+
 static kern_return_t
 frida_replacement_bootstrap_look_up (mach_port_t bp, const char * service_name, mach_port_t * sp)
 {
@@ -181,3 +187,5 @@ frida_is_bl_imm (guint32 insn)
 {
   return (insn & ~GUM_INT26_MASK) == 0x94000000;
 }
+
+#endif
