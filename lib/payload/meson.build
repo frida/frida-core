@@ -14,6 +14,8 @@ payload_sources = [
   'fd-guard.vala',
   'fdt-padder.vala',
   'libc-shim.c',
+  'unwind-sitter.vala',
+  'unwind-sitter-glue.c'
 ]
 
 if host_os_family == 'linux'

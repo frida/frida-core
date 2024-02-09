@@ -99,6 +99,7 @@ namespace Frida.Agent {
 		private Cond transition_cond;
 		private SpawnMonitor? spawn_monitor;
 		private ThreadSuspendMonitor? thread_suspend_monitor;
+		private UnwindSitter? unwind_sitter;
 
 		private delegate void CompletionNotify ();
 
@@ -258,6 +259,7 @@ namespace Frida.Agent {
 			interceptor.begin_transaction ();
 
 			thread_suspend_monitor = null;
+			unwind_sitter = null;
 
 			invalidate_dbus_context ();
 
@@ -286,6 +288,7 @@ namespace Frida.Agent {
 #endif
 			bool enable_exit_monitor = true;
 			bool enable_thread_suspend_monitor = true;
+			bool enable_unwind_sitter = true;
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
@@ -297,6 +300,8 @@ namespace Frida.Agent {
 					enable_exit_monitor = false;
 				else if (option == "thread-suspend-monitor:off")
 					enable_thread_suspend_monitor = false;
+				else if (option == "unwind-sitter:off")
+					enable_unwind_sitter = false;
 			}
 
 			if (!enable_exceptor)
@@ -311,6 +316,9 @@ namespace Frida.Agent {
 
 				if (enable_thread_suspend_monitor)
 					thread_suspend_monitor = new ThreadSuspendMonitor (this);
+
+				if (enable_unwind_sitter)
+					unwind_sitter = new UnwindSitter (this);
 
 				this.interceptor = interceptor;
 				this.exceptor = Gum.Exceptor.obtain ();
