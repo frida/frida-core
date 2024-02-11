@@ -172,6 +172,16 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/UnwindSitter/exceptions-on-swizzled-objc-methods-should-be-caught", () => {
+			var h = new Harness ((h) => Darwin.UnwindSitter.exceptions_on_swizzled_objc_methods_should_be_caught.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/UnwindSitter/exceptions-on-intercepted-objc-methods-should-be-caught", () => {
+			var h = new Harness ((h) => Darwin.UnwindSitter.exceptions_on_intercepted_objc_methods_should_be_caught.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-native", () => {
 			var h = new Harness ((h) => Darwin.fork_native.begin (h as Harness));
 			h.run ();
@@ -2104,6 +2114,125 @@ namespace Frida.HostSessionTest {
 						waiting = false;
 					}
 					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"dispose\"}");
+					assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+					h.done ();
+				} catch (GLib.Error e) {
+					printerr ("ERROR: %s\n", e.message);
+				}
+			}
+		}
+
+		namespace UnwindSitter {
+			private static async void exceptions_on_swizzled_objc_methods_should_be_caught (Harness h) {
+				try {
+					var device_manager = new DeviceManager ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("exception-catcher"));
+
+					/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+					Thread.usleep (50000);
+
+					var session = yield device.attach (process.id);
+					var script = yield session.create_script ("""
+						const meth = ObjC.classes.NSBundle['- initWithURL:'];
+						const origImpl = meth.implementation;
+						meth.implementation = ObjC.implement(meth, function (handle, selector, url) {
+						  return origImpl(handle, selector, NULL);
+						});
+						Interceptor.attach(Module.getExportByName(null, "abort"), function () {
+						  send('abort');
+						  Thread.sleep(1);
+						});
+						Interceptor.attach(Module.getExportByName(null, "__exit"), function (args) {
+						  send(`exit(${args[0].toUInt32()})`);
+						  Thread.sleep(1);
+						});
+						""");
+
+					string? detach_reason = null;
+					string? received_message = null;
+					bool waiting = false;
+					session.detached.connect (reason => {
+						detach_reason = reason.to_string ();
+						if (waiting)
+							exceptions_on_swizzled_objc_methods_should_be_caught.callback ();
+					});
+					script.message.connect ((message, data) => {
+						assert_null (received_message);
+						received_message = message;
+						if (waiting)
+							exceptions_on_swizzled_objc_methods_should_be_caught.callback ();
+					});
+
+					yield script.load ();
+					yield device.resume (process.id);
+
+					while (received_message == null || detach_reason == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"exit(0)\"}");
+					assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+					h.done ();
+				} catch (GLib.Error e) {
+					printerr ("ERROR: %s\n", e.message);
+				}
+			}
+
+			private static async void exceptions_on_intercepted_objc_methods_should_be_caught (Harness h) {
+				try {
+					var device_manager = new DeviceManager ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("exception-catcher"));
+
+					/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+					Thread.usleep (50000);
+
+					var session = yield device.attach (process.id);
+					var script = yield session.create_script ("""
+						const meth = ObjC.classes.NSBundle['- initWithURL:'];
+						Interceptor.attach(meth.implementation, {
+						  onEnter(args) {
+						    args[2] = NULL;
+						  }
+						});
+						Interceptor.attach(Module.getExportByName(null, "abort"), function () {
+						  send('abort');
+						  Thread.sleep(1);
+						});
+						Interceptor.attach(Module.getExportByName(null, "__exit"), function (args) {
+						  send(`exit(${args[0].toUInt32()})`);
+						  Thread.sleep(1);
+						});
+						""");
+
+					string? detach_reason = null;
+					string? received_message = null;
+					bool waiting = false;
+					session.detached.connect (reason => {
+						detach_reason = reason.to_string ();
+						if (waiting)
+							exceptions_on_intercepted_objc_methods_should_be_caught.callback ();
+					});
+					script.message.connect ((message, data) => {
+						assert_null (received_message);
+						received_message = message;
+						if (waiting)
+							exceptions_on_intercepted_objc_methods_should_be_caught.callback ();
+					});
+
+					yield script.load ();
+					yield device.resume (process.id);
+
+					while (received_message == null || detach_reason == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"exit(0)\"}");
 					assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 					h.done ();
