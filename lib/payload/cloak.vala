@@ -43,6 +43,104 @@ namespace Frida {
 	}
 
 #if LINUX
+	public class ThreadCountCloaker : Object {
+		private ReadListener listener;
+
+		construct {
+			listener = new ReadListener ();
+			Gum.Interceptor.obtain ().attach (
+				Gum.Module.find_export_by_name (Gum.Process.query_libc_name (), "read"),
+				listener);
+		}
+
+		~ThreadCountCloaker () {
+			Gum.Interceptor.obtain ().detach (listener);
+		}
+
+		private class ReadListener : Object, Gum.InvocationListener {
+			private static string expected_magic = "%u (".printf (Posix.getpid ());
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
+				invocation.fd = (int) context.get_nth_argument (0);
+				invocation.buf = context.get_nth_argument (1);
+				invocation.count = (size_t) context.get_nth_argument (2);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				var n = (ssize_t) context.get_return_value ();
+				if (n <= 0)
+					return;
+
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
+
+				if (!file_content_might_be_from_proc_self_stat (invocation.buf, n))
+					return;
+
+				try {
+					if (!file_descriptor_is_proc_self_stat (invocation.fd))
+						return;
+
+					unowned string raw_str = (string) invocation.buf;
+					string str = raw_str.substring (0, n);
+
+					MatchInfo info;
+					if (!/^(\d+ \(.+\)(?: [^ ]+){17}) \d+ (.+)/s.match (str, 0, out info))
+						return;
+					string fields_before = info.fetch (1);
+					string fields_after = info.fetch (2);
+
+					// We cannot simply use the value we got from the kernel and subtract the number of cloaked threads,
+					// as there's a chance the total may have changed in the last moment.
+					uint num_uncloaked_threads = query_num_uncloaked_threads ();
+
+					string adjusted_str = "%s %u %s".printf (fields_before, num_uncloaked_threads, fields_after);
+
+					var adjusted_length = adjusted_str.length;
+					if (adjusted_length > invocation.count)
+						return;
+					Memory.copy (invocation.buf, adjusted_str, adjusted_length);
+					context.replace_return_value ((void *) adjusted_length);
+				} catch (FileError e) {
+				}
+			}
+
+			private static bool file_content_might_be_from_proc_self_stat (void * content, ssize_t size) {
+				if (size < expected_magic.length)
+					return false;
+				if (Memory.cmp (content, expected_magic, expected_magic.length) != 0)
+					return false;
+				unowned string raw_str = (string) content;
+				return raw_str[size - 1] == '\n';
+			}
+
+			private static bool file_descriptor_is_proc_self_stat (int fd) throws FileError {
+				string path = FileUtils.read_link ("/proc/self/fd/%d".printf (fd));
+				uint pid = Posix.getpid ();
+				return (path == "/proc/%u/stat".printf (pid)) ||
+					(path == "/proc/%u/task/%u/stat".printf (pid, pid));
+			}
+
+			private static uint query_num_uncloaked_threads () throws FileError {
+				uint n = 0;
+				var dir = Dir.open ("/proc/self/task");
+				string? name;
+				while ((name = dir.read_name ()) != null) {
+					var tid = uint.parse (name);
+					if (!Gum.Cloak.has_thread (tid))
+						n++;
+				}
+				return n;
+			}
+
+			private struct Invocation {
+				public int fd;
+				public void * buf;
+				public size_t count;
+			}
+		}
+	}
+
 	public class ThreadListCloaker : Object, DirListFilter {
 		private string our_dir_by_pid;
 		private DirListCloaker cloaker;
@@ -349,6 +447,9 @@ namespace Frida {
 		public abstract bool matches_file (string name);
 	}
 #else
+	public class ThreadCountCloaker : Object {
+	}
+
 	public class ThreadListCloaker : Object {
 	}
 
