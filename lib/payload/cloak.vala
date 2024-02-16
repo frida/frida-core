@@ -45,7 +45,7 @@ namespace Frida {
 #if ANDROID
 	public class ThreadCountCloaker : Object {
 		private ReadFunc * read_slot;
-		private ReadFunc old_read_impl;
+		private static ReadFunc old_read_impl;
 
 		private static string expected_magic = "%u (".printf (Posix.getpid ());
 
@@ -87,7 +87,7 @@ namespace Frida {
 		}
 
 		private static ssize_t on_read (int fd, void * buf, size_t count) {
-			var n = Posix.read (fd, buf, count);
+			var n = old_read_impl (fd, buf, count);
 			if (n <= 0)
 				return n;
 
