@@ -118,7 +118,7 @@ cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/bash
 
 launchcfg=$sysroot/Library/LaunchDaemons/re.frida.server.plist
-launchlog=\$TMPDIR/frida-server-launch.log
+launchlog=\$(mktemp)
 
 function dispose {
   rm -f "\$launchlog"
