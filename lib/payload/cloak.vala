@@ -58,7 +58,6 @@ namespace Frida {
 					read_slot = (ReadFunc *) imp.slot;
 					return false;
 				}
-
 				return true;
 			});
 			if (read_slot != null)
