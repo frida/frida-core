@@ -445,8 +445,11 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 #endif
 #endif
 
-			module = GLib.Module.open (agent_filename, LOCAL | LAZY);
-			assert_nonnull (module);
+			try {
+				module = new Module (agent_filename, LOCAL | LAZY);
+			} catch (ModuleError e) {
+				assert_not_reached ();
+			}
 
 			void * main_func_symbol;
 			var main_func_found = module.symbol ("frida_agent_main", out main_func_symbol);

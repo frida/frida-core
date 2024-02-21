@@ -810,10 +810,12 @@ namespace Frida.Droidy {
 						}
 					}
 #if !WINDOWS
-					else if (socket_type == "local" || socket_type == "localfilesystem")
+					else if (socket_type == "local" || socket_type == "localfilesystem") {
 						connectable = new UnixSocketAddress (socket_address);
-					else if (socket_type == "localabstract" && UnixSocketAddress.abstract_names_supported ())
-						connectable = new UnixSocketAddress.as_abstract (socket_address, socket_address.length);
+					} else if (socket_type == "localabstract" && UnixSocketAddress.abstract_names_supported ()) {
+						connectable = new UnixSocketAddress.with_type (socket_address, socket_address.length,
+							ABSTRACT_PADDED);
+					}
 #endif
 				}
 			} else if (env_server_address != null && env_server_port != null) {

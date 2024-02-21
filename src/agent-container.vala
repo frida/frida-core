@@ -21,8 +21,11 @@ namespace Frida {
 		public static async AgentContainer create (string agent_filename, Cancellable? cancellable) throws Error, IOError {
 			var container = new AgentContainer ();
 
-			container.module = Module.open (agent_filename, 0);
-			assert (container.module != null);
+			try {
+				container.module = new Module (agent_filename, 0);
+			} catch (ModuleError e) {
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
+			}
 
 			void * main_func_symbol;
 			var main_func_found = container.module.symbol ("frida_agent_main", out main_func_symbol);
