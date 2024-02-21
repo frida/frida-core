@@ -32,8 +32,6 @@ namespace Frida {
 			{ null }
 		};
 
-		private const char NIBBLE_TO_HEX_CHAR[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
-
 		public static int main (string[] args) {
 #if WINDOWS
 			toolchain = Toolchain.MICROSOFT;
