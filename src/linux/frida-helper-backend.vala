@@ -2984,7 +2984,7 @@ namespace Frida {
 				throw new Error.PERMISSION_DENIED (
 					"Unable to access process with pid %u due to system restrictions;" +
 					" try `sudo sysctl kernel.yama.ptrace_scope=0`, or run Frida as root",
-					pid, strerror (err));
+					pid);
 			default:
 				throw new Error.NOT_SUPPORTED ("Unable to perform ptrace %s: %s",
 					Marshal.enum_to_nick<PtraceRequest> (request),
