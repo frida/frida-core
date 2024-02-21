@@ -27,7 +27,7 @@ namespace Frida {
 
 		private void * execve;
 
-		private Private posix_spawn_caller_is_internal = new Private ();
+		private static Private posix_spawn_caller_is_internal = new Private ();
 #endif
 
 		public SpawnMonitor (SpawnHandler handler, MainContext main_context) {
