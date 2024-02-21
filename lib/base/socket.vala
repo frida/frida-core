@@ -384,7 +384,7 @@ namespace Frida {
 
 			File location = endpoint_params.asset_root.resolve_relative_path (path.next_char ());
 
-			server.pause_message (msg);
+			msg.pause ();
 			handle_asset_request.begin (path, location, msg);
 		}
 
@@ -420,7 +420,7 @@ namespace Frida {
 					stream = yield file.read_async (priority, io_cancellable);
 			} catch (GLib.Error e) {
 				msg.set_status (Soup.Status.NOT_FOUND, null);
-				server.unpause_message (msg);
+				msg.unpause ();
 				return;
 			}
 
@@ -504,7 +504,7 @@ namespace Frida {
 				}
 			} catch (GLib.Error e) {
 				msg.set_status (Soup.Status.NOT_FOUND, null);
-				server.unpause_message (msg);
+				msg.unpause ();
 				return;
 			}
 
@@ -520,7 +520,7 @@ namespace Frida {
 				msg.set_response ("text/html", Soup.MemoryUse.COPY, listing.str.data);
 			}
 
-			server.unpause_message (msg);
+			msg.unpause ();
 		}
 
 		private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.ServerMessage msg) {
@@ -531,7 +531,7 @@ namespace Frida {
 			headers.replace ("Content-Length", info.get_size ().to_string ());
 
 			if (msg.get_method () == "HEAD") {
-				server.unpause_message (msg);
+				msg.unpause ();
 				return;
 			}
 
@@ -563,7 +563,7 @@ namespace Frida {
 
 					body.append_take (buffer[0:n]);
 
-					server.unpause_message (msg);
+					msg.unpause ();
 
 					waiting = true;
 					yield;
@@ -572,13 +572,13 @@ namespace Frida {
 					if (finished)
 						break;
 
-					server.pause_message (msg);
+					msg.pause ();
 				}
 			} finally {
 				msg.disconnect (write_handler);
 				msg.disconnect (finished_handler);
 				if (!finished)
-					server.unpause_message (msg);
+					msg.unpause ();
 			}
 		}
 
@@ -601,7 +601,7 @@ namespace Frida {
 				msg.set_response ("text/html", Soup.MemoryUse.COPY, body.data);
 			}
 
-			server.unpause_message (msg);
+			msg.unpause ();
 		}
 
 		private static string guess_mime_type_for (string path) {
