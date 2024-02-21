@@ -390,10 +390,6 @@ add_project_arguments(
   '-DG_DISABLE_DEPRECATED',
   language: c_languages)
 
-if host_os_family == 'linux'
-  add_project_arguments('-D_GNU_SOURCE=1', language: c_languages)
-endif
-
 vala_flags += [
   '--vapidir=' + meson.current_source_dir() / 'vapi',
   '--pkg', 'config',
