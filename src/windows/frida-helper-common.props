@@ -25,12 +25,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
   </ItemGroup>
 
   <ItemGroup>
-    <ClCompile Include="$(IntDir)frida-helper-service.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
+    <ClCompile Include="$(IntDir)frida-helper-service.c" />
     <ClCompile Include="frida-helper-service-glue.c" />
   </ItemGroup>
 
