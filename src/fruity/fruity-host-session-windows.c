@@ -187,7 +187,7 @@ try_device_path:
   goto keep_looking;
 
 match:
-  location = (WCHAR *) g_memdup (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
+  location = (WCHAR *) g_memdup2 (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
   ctx->mobile_device = frida_mobile_device_info_new (location);
 
   return FALSE;
