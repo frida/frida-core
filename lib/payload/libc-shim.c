@@ -1,4 +1,5 @@
 #define FRIDA_PRINTF_BUFFER_SIZE (512 * 1024)
+#define _GNU_SOURCE
 
 #include <errno.h>
 #include <gum/gum.h>
