@@ -59,7 +59,7 @@ _frida_generate_certificate (guint8 ** cert_der, gint * cert_der_length, gchar *
   bio = BIO_new (BIO_s_mem ());
   i2d_X509_bio (bio, x509);
   n = BIO_get_mem_data (bio, (guint8 **) &der);
-  *cert_der = g_memdup (der, n);
+  *cert_der = g_memdup2 (der, n);
   *cert_der_length = n;
   BIO_free (g_steal_pointer (&bio));
 
