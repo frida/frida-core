@@ -396,7 +396,7 @@ configure_file(
   configuration: cdata)
 
 add_project_arguments(
-  '-include', 'config.h',
+  (cc.get_argument_syntax() == 'msvc') ? '/FI' : '-include', meson.current_build_dir() / 'config.h',
   '-DG_LOG_DOMAIN="Frida"',
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56',
   '-DG_DISABLE_DEPRECATED',
