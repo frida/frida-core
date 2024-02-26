@@ -10,10 +10,12 @@ namespace Frida {
 			construct;
 		}
 
+#if HAVE_COMPILER_BACKEND
 		private Promise<Agent>? load_request;
 		private Gee.Map<uint, MonitorEntry> monitors = new Gee.HashMap<uint, MonitorEntry> ();
 		private Gee.Set<MonitorEntry> dirty_monitors = new Gee.HashSet<MonitorEntry> ();
 		private TimeoutSource? monitor_flush_timer;
+#endif
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -21,6 +23,7 @@ namespace Frida {
 			Object (manager: manager);
 		}
 
+#if HAVE_COMPILER_BACKEND
 		public override void dispose () {
 			if (load_request != null)
 				close.begin ();
@@ -45,9 +48,11 @@ namespace Frida {
 				detach_monitor_entry (entry);
 			monitors.clear ();
 		}
+#endif
 
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
+#if HAVE_COMPILER_BACKEND
 			var agent = yield get_agent (cancellable);
 
 			starting ();
@@ -60,6 +65,9 @@ namespace Frida {
 			} finally {
 				finished ();
 			}
+#else
+			throw_not_supported ();
+#endif
 		}
 
 		public string build_sync (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
@@ -81,9 +89,13 @@ namespace Frida {
 
 		public async void watch (string entrypoint, WatchOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
+#if HAVE_COMPILER_BACKEND
 			var agent = yield get_agent (cancellable);
 
 			yield agent.watch (entrypoint, options, cancellable);
+#else
+			throw_not_supported ();
+#endif
 		}
 
 		public void watch_sync (string entrypoint, WatchOptions? options = null, Cancellable? cancellable = null)
@@ -103,6 +115,7 @@ namespace Frida {
 			}
 		}
 
+#if HAVE_COMPILER_BACKEND
 		private void on_watch_add (uint id, string path, string type, int64 polling_interval) {
 			var file = File.parse_name (path);
 
@@ -197,6 +210,12 @@ namespace Frida {
 				load_request = null;
 			}
 		}
+#else
+		[NoReturn]
+		private void throw_not_supported () throws Error {
+			throw new Error.NOT_SUPPORTED ("Compiler backend disabled at build-time");
+		}
+#endif
 
 		private T create<T> () {
 			return Object.new (typeof (T), parent: this);
@@ -209,6 +228,7 @@ namespace Frida {
 			}
 		}
 
+#if HAVE_COMPILER_BACKEND
 		private class Agent : InternalAgent {
 			public weak Compiler parent {
 				get;
@@ -423,6 +443,7 @@ namespace Frida {
 			MODIFIED,
 			DELETED,
 		}
+#endif
 	}
 
 	public class CompilerOptions : Object {

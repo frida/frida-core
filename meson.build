@@ -415,6 +415,13 @@ if have_mapper
   cdata.set('HAVE_MAPPER', 1)
 endif
 
+have_compiler_backend = get_option('compiler_backend') \
+    .disable_auto_if(host_os == 'watchos') \
+    .allowed()
+if have_compiler_backend
+  vala_flags += '--define=HAVE_COMPILER_BACKEND'
+endif
+
 configure_file(
   output: 'config.h',
   configuration: cdata)

@@ -86,6 +86,12 @@ option('mapper',
   description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
 )
 
+option('compiler_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include frida-compile backend powered by GumJS',
+)
+
 option('compiler_snapshot',
   type: 'feature',
   value: 'auto',
