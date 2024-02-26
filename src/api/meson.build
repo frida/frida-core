@@ -5,7 +5,7 @@ core_header = join_paths(core_build_dir, 'frida-core.h')
 base_vapi = join_paths(base_build_dir, f'frida-base-@api_version@.vapi')
 base_header = join_paths(base_build_dir, 'frida-base.h')
 
-custom_target('frida-core-header',
+core_public_h = custom_target('frida-core-header',
   input: [core, base],
   output: ['frida-core.h'],
   command: [
@@ -38,7 +38,7 @@ custom_target('frida-core-vapi',
   install_dir: join_paths(get_option('datadir'), 'vala', 'vapi'),
 )
 
-custom_target('frida-core-library',
+core_public = custom_target('frida-core-library',
   input: [core] + internal_libs,
   output: 'libfrida-core-@0@.a'.format(api_version),
   command: [
@@ -53,6 +53,15 @@ custom_target('frida-core-library',
   install_dir: get_option('libdir'),
 )
 
+core_public_dep = declare_dependency(
+  sources: [core_public_h],
+  include_directories: include_directories('.'),
+  link_with: core_public,
+  variables: [
+    'vapidir=' + meson.current_build_dir(),
+  ],
+)
+
 pkg = import('pkgconfig')
 pkg.generate(filebase: 'frida-core-' + api_version,
   name: 'Frida Core',
@@ -64,3 +73,5 @@ pkg.generate(filebase: 'frida-core-' + api_version,
   libraries: ['-L${libdir}', '-lfrida-core-' + api_version],
   libraries_private: backend_libs_private,
 )
+
+meson.override_dependency('frida-core-' + api_version, core_public_dep)
