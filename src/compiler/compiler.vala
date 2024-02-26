@@ -15,9 +15,9 @@ namespace Frida {
 		private Gee.Map<uint, MonitorEntry> monitors = new Gee.HashMap<uint, MonitorEntry> ();
 		private Gee.Set<MonitorEntry> dirty_monitors = new Gee.HashSet<MonitorEntry> ();
 		private TimeoutSource? monitor_flush_timer;
-#endif
 
 		private Cancellable io_cancellable = new Cancellable ();
+#endif
 
 		public Compiler (DeviceManager manager) {
 			Object (manager: manager);
