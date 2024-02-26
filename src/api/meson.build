@@ -56,6 +56,7 @@ core_public = custom_target('frida-core-library',
 core_public_dep = declare_dependency(
   sources: [core_public_h],
   include_directories: include_directories('.'),
+  link_args: backend_libs_private,
   link_with: core_public,
   dependencies: core_deps,
   variables: [
