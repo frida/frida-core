@@ -50,6 +50,30 @@ option('agent_symsrv_prefix',
   description: 'Location of SymSrv binaries to embed alongside agent (Windows only)'
 )
 
+option('gadget',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build frida-gadget',
+)
+
+option('server',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build frida-server',
+)
+
+option('portal',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build frida-portal',
+)
+
+option('inject',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build frida-inject',
+)
+
 option('connectivity',
   type: 'feature',
   value: 'auto',
@@ -69,7 +93,7 @@ option('compiler_snapshot',
 )
 
 option('tests',
-  type: 'boolean',
-  value: true,
+  type: 'feature',
+  value: 'auto',
   description: 'Build tests'
 )

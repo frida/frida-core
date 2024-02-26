@@ -136,6 +136,30 @@ else
   host_cpu_mode = '32'
 endif
 
+build_gadget = get_option('gadget') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_server = get_option('server') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-server not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_portal = get_option('portal') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-portal not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_inject = get_option('inject') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-inject not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_tests = get_option('tests') \
+    .disable_if(host_os == 'watchos', error_message: 'tests not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject() or not meson.can_run_host_binaries()) \
+    .allowed()
+
 cdata = configuration_data()
 if cc.get_define('FRIDA_VERSION') == ''
   version = meson.project_version()
@@ -428,12 +452,15 @@ add_project_arguments(native_vala_flags, language: ['vala'], native: true)
 subdir('tools')
 subdir('lib')
 subdir('src')
-if host_os != 'watchos'
+if build_server
   subdir('server')
+endif
+if build_portal
   subdir('portal')
+endif
+if build_inject
   subdir('inject')
-
-  if get_option('tests')
-    subdir('tests')
-  endif
+endif
+if build_tests
+  subdir('tests')
 endif

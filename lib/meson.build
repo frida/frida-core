@@ -5,4 +5,6 @@ subdir('base')
 subdir('pipe')
 subdir('payload')
 subdir('agent')
-subdir('gadget')
+if build_gadget
+  subdir('gadget')
+endif
