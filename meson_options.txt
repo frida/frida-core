@@ -7,55 +7,46 @@ option('assets',
 
 option('asset_path_template',
   type: 'string',
-  value: '',
   description: 'Override the default installed asset path template'
 )
 
 option('helper_modern',
   type: 'string',
-  value: '',
   description: 'Prebuilt frida-helper to embed for use on modern systems'
 )
 
 option('helper_legacy',
   type: 'string',
-  value: '',
   description: 'Prebuilt frida-helper to embed for use on legacy systems'
 )
 
 option('agent_modern',
   type: 'string',
-  value: '',
   description: 'Prebuilt agent to embed for use on modern targets'
 )
 
 option('agent_legacy',
   type: 'string',
-  value: '',
   description: 'Prebuilt agent to embed for use on legacy targets'
 )
 
 option('agent_emulated_modern',
   type: 'string',
-  value: '',
   description: 'Prebuilt agent to embed for use on modern emulated targets'
 )
 
 option('agent_emulated_legacy',
   type: 'string',
-  value: '',
   description: 'Prebuilt agent to embed for use on legacy emulated targets'
 )
 
 option('agent_dbghelp_prefix',
   type: 'string',
-  value: '',
   description: 'Location of DbgHelp binaries to embed alongside agent (Windows only)'
 )
 
 option('agent_symsrv_prefix',
   type: 'string',
-  value: '',
   description: 'Location of SymSrv binaries to embed alongside agent (Windows only)'
 )
 
