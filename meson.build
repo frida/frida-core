@@ -240,6 +240,11 @@ if get_option('b_sanitize') == 'address'
   cdata.set('HAVE_ASAN', 1)
 endif
 
+gum_dep = dependency('frida-gum-1.0', default_options: [
+  'gumjs=enabled',
+])
+gumjs_dep = dependency('frida-gumjs-1.0')
+gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 glib_dep = dependency('glib-2.0', version: '>=2.74')
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
@@ -247,11 +252,18 @@ gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8')
 json_glib_dep = dependency('json-glib-1.0')
 libsoup_dep = dependency('libsoup-3.0')
-gum_dep = dependency('frida-gum-1.0')
-gumjs_dep = dependency('frida-gumjs-1.0')
-gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 quickjs_dep = dependency('quickjs', required: false)
 brotlidec_dep = dependency('libbrotlidec')
+
+gum_vapidir = gum_dep.get_variable('vapidir', default_value: '')
+if gum_vapidir != ''
+  vala_flags += [
+    '--vapidir=' + gum_vapidir,
+    '--pkg=frida-gum-1.0',
+    '--pkg=frida-gumjs-1.0',
+    '--pkg=frida-gumjs-inspector-1.0',
+  ]
+endif
 
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
 if have_v8
