@@ -1,4 +1,5 @@
 namespace Frida {
+#if HAVE_LOCAL_BACKEND
 	public class ControlService : Object {
 		public HostSession host_session {
 			get;
@@ -858,6 +859,54 @@ namespace Frida {
 			}
 		}
 	}
+#else
+	public class ControlService : Object {
+		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) {
+		}
+
+		public ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
+				ControlServiceOptions? options = null) {
+		}
+
+		public async void start (Cancellable? cancellable = null) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Local backend not available");
+		}
+
+		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<StartTask> ().execute (cancellable);
+		}
+
+		private class StartTask : ControlServiceTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.start (cancellable);
+			}
+		}
+
+		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+		}
+
+		public void stop_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<StopTask> ().execute (cancellable);
+		}
+
+		private class StopTask : ControlServiceTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.stop (cancellable);
+			}
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class ControlServiceTask<T> : AsyncTask<T> {
+			public weak ControlService parent {
+				get;
+				construct;
+			}
+		}
+	}
+#endif
 
 	public class ControlServiceOptions : Object {
 		public string? sysroot {

@@ -31,7 +31,6 @@ def main():
     parser.add_argument("--nm", metavar="/path/to/nm", type=str, default=None)
     parser.add_argument("--readelf", metavar="/path/to/readelf", type=str, default=None)
     parser.add_argument("--otool", metavar="/path/to/otool", type=str, default=None)
-    parser.add_argument("--strip", metavar="/path/to/strip", type=str, default=None)
 
     the_endians = ('big', 'little')
     parser.add_argument("--endian",  metavar=("|".join(the_endians)), type=str, default='little', choices=the_endians)
@@ -135,10 +134,6 @@ class ModuleEditor(object):
 
             self._write_function_pointer_vector(self.constructors, destination)
             self._write_function_pointer_vector(self.destructors, destination)
-
-        strip = self.toolchain.strip
-        if strip is not None:
-            subprocess.check_call(strip + [temp_destination_path])
 
         shutil.move(temp_destination_path, destination_path)
 
@@ -292,7 +287,6 @@ class Toolchain(object):
         self.nm = ["nm"]
         self.readelf = ["readelf"]
         self.otool = ["otool"]
-        self.strip = None
 
     def __repr__(self):
         return "Toolchain({})".format(", ".join([k + "=" + repr(v) for k, v in vars(self).items()]))

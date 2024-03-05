@@ -20,14 +20,16 @@ if host_os_family == 'darwin'
 endif
 
 if host_os_family == 'windows'
-  symfile = (host_arch == 'x86') ? 'frida-agent-x86.symbols' : 'frida-agent.symbols'
-  extra_link_args += '-Wl,--retain-symbols-file,' + (meson.current_source_dir() / symfile)
-  extra_link_depends += symfile
+  if host_toolchain != 'microsoft'
+    symfile = (host_arch == 'x86') ? 'frida-agent-x86.symbols' : 'frida-agent.symbols'
+    extra_link_args += '-Wl,--retain-symbols-file,' + meson.current_source_dir() / symfile
+    extra_link_depends += symfile
+  endif
 elif host_os_family == 'darwin'
   extra_link_args += '-Wl,-exported_symbol,_frida_agent_main'
 else
   symscript = 'frida-agent.version'
-  extra_link_args += '-Wl,--version-script,' + (meson.current_source_dir() / symscript)
+  extra_link_args += '-Wl,--version-script,' + meson.current_source_dir() / symscript
   extra_link_depends += symscript
 endif
 
@@ -39,7 +41,7 @@ endif
 raw_agent = shared_library('frida-agent', agent_sources,
   name_prefix: 'lib',
   c_args: frida_component_cflags,
-  vala_args: extra_vala_args,
+  vala_args: [base_vala_args, payload_vala_args, extra_vala_args],
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-agent.def',
@@ -51,25 +53,10 @@ operations = ['--move', 'constructor', 'frida_init_memory', 'first']
 if host_os_family != 'darwin'
   operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
 endif
-
-if host_machine.endian() == 'little'
-  endian_option = ['--endian', 'little']
-else
-  endian_option = ['--endian', 'big']
-endif
-
 modulated_agent = custom_target('frida-agent-modulated',
   input: raw_agent,
   output: 'libfrida-agent-modulated' + shlib_suffix,
-  command: [
-    modulate,
-    '@INPUT@',
-    ] + operations + endian_option + [
-    '--output', '@OUTPUT@',
-    '--nm', nm,
-    '--readelf', readelf,
-    '--otool', otool,
-  ],
+  command: modulate + operations,
 )
 
 if host_os_family == 'darwin'
@@ -77,16 +64,10 @@ if host_os_family == 'darwin'
 else
   identity = agent_name
 endif
-
 agent = custom_target('frida-agent',
   input: modulated_agent,
   output: agent_name,
-  command: [
-    post_process_module,
-    '@INPUT@',
-    '@OUTPUT@',
-    identity,
-  ],
+  command: post_process + ['shared-library', identity],
   build_by_default: true,
   install: get_option('assets') == 'installed',
   install_dir: asset_dir,

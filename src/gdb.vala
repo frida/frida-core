@@ -1823,9 +1823,11 @@ namespace Frida.GDB {
 	}
 
 	namespace Protocol {
+#if HAVE_FRUITY_BACKEND
 		internal uint64 parse_address (string raw_val) throws Error {
 			return parse_uint64 (raw_val, 16);
 		}
+#endif
 
 		internal uint parse_uint (string raw_val, uint radix) throws Error {
 			uint64 val;

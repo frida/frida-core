@@ -11,520 +11,528 @@ base_sources = [
   'async-task.vala',
 ]
 
-windows_sources = []
-darwin_sources = []
-linux_sources = []
-freebsd_sources = []
-qnx_sources = []
+if host_os_family == 'darwin'
+  base_sources += 'darwin' / 'system-darwin.m'
+else
+  base_sources += host_os_family / f'system-@host_os_family@.c'
+endif
+if host_os_family == 'windows'
+  base_sources += 'windows' / 'icon-helpers.c'
+elif host_os_family == 'darwin'
+  base_sources += 'darwin' / 'icon-helpers.m'
+endif
 
+backend_sources = []
 backend_vala_args = []
+backend_vala_args_private = []
 backend_libs = []
 backend_deps = []
 
-if host_os_family == 'windows'
-  windows_sources = [
-    'windows/windows-host-session.vala',
-    'windows/windows-host-session-glue.c',
-    'windows/winjector.vala',
-    'windows/winjector-glue.c',
-    'windows/frida-helper-process.vala',
-    'windows/frida-helper-process-glue.c',
-    'windows/system-windows.c',
-    'windows/access-helpers.c',
-    'windows/icon-helpers.c',
+if have_local_backend
+  post_process_helper = post_process + ['executable', 're.frida.Helper']
+
+  embed_helper = [
+    python,
+    files('embed-helper.py'),
+    host_os,
+    host_arch,
+    host_toolchain,
+    resource_compiler,
+    '>>>', lipo, '<<<',
+    meson.current_build_dir(),
+    '@INPUT0@',
   ]
 
-  helper_backend_sources = [
-    'windows/frida-helper-backend.vala',
-    'windows/frida-helper-backend-glue.c',
-    'windows/frida-helper-types.vala',
-    'windows/wait-handle-source.c',
-  ]
-  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
-    c_args: frida_component_cflags,
-    dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
-  )
-  backend_libs += helper_backend
+  if host_os_family == 'windows'
+    backend_sources += [
+      'windows' / 'windows-host-session.vala',
+      'windows' / 'windows-host-session-glue.c',
+      'windows' / 'winjector.vala',
+      'windows' / 'winjector-glue.c',
+      'windows' / 'frida-helper-process.vala',
+      'windows' / 'frida-helper-process-glue.c',
+      'windows' / 'access-helpers.c',
+    ]
 
-  helper_sources = [
-    'windows/frida-helper-service.vala',
-    'windows/frida-helper-service-glue.c',
-  ]
-  raw_helper = executable('frida-helper-raw', helper_sources,
-    link_with: helper_backend,
-    dependencies: [gio_dep, gee_dep, gum_dep, base_dep, pipe_dep],
-  )
-
-  helper = custom_target('frida-helper',
-    input: raw_helper,
-    output: helper_name,
-    command: [
-      files('post-process-helper.sh'),
-      '@INPUT@',
-      '',
-      '@OUTPUT@',
-      host_os,
-      '>>>', strip, '<<<',
-      get_option('strip').to_string(),
-    ],
-    build_by_default: true,
-    install: get_option('assets') == 'installed',
-    install_dir: asset_dir,
-  )
-
-  if get_option('assets') == 'embedded'
-    helper_modern = get_option('helper_modern')
-    helper_legacy = get_option('helper_legacy')
-    if host_is_64bit
-      helper_modern = ''
-    else
-      helper_legacy = ''
-    endif
-    helper_process_data = custom_target('frida-data-helper-process',
-      input: 'helper.resources',
-      output: [
-        'frida-data-helper-process.vapi',
-        'frida-data-helper-process.h',
-        'frida-data-helper-process.c',
-        'frida-data-helper-process-blob.S',
-      ],
-      command: [
-        files('embed-helper.sh'),
-        helper_modern,
-        helper_legacy,
-        meson.current_build_dir(),
-        host_os,
-        resource_compiler,
-        '@INPUT@',
-        lipo,
-      ],
+    helper_backend_sources = [
+      'windows' / 'frida-helper-backend.vala',
+      'windows' / 'frida-helper-backend-glue.c',
+      'windows' / 'frida-helper-types.vala',
+      'windows' / 'wait-handle-source.c',
+    ]
+    helper_backend_vala_args = base_vala_args
+    helper_backend = static_library('frida-helper-backend', helper_backend_sources,
+      vala_args: helper_backend_vala_args,
+      c_args: frida_component_cflags,
+      dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
     )
-    windows_sources += [helper_process_data]
-  endif
-endif
+    backend_libs += helper_backend
 
-if host_os_family == 'darwin'
-  darwin_sources = [
-    'darwin/darwin-host-session.vala',
-    'darwin/darwin-host-session-glue.m',
-    'darwin/fruitjector.vala',
-    'darwin/frida-helper-process.vala',
-    'darwin/icon-helpers.m',
-    'darwin/system-darwin.m',
-  ]
-
-  darwin_data = custom_target('frida-data-darwin',
-    input: [
-      'darwin/frida-darwin.resources',
-      'darwin/agent/launchd.js',
-      'darwin/agent/xpcproxy.js',
-      'darwin/agent/reportcrash.js',
-      'darwin/agent/osanalytics.js',
-    ],
-    output: [
-      'frida-data-darwin.vapi',
-      'frida-data-darwin.h',
-      'frida-data-darwin.c',
-      'frida-data-darwin-blob.S',
-    ],
-    command: [
-      resource_compiler,
-      '--toolchain=apple',
-      '-c', '@INPUT0@',
-      '-o', join_paths(meson.current_build_dir(), 'frida-data-darwin'),
-      '@INPUT1@',
-      '@INPUT2@',
-      '@INPUT3@',
-      '@INPUT4@',
-    ],
-  )
-  darwin_sources += [darwin_data]
-
-  helper_backend_sources = [
-    'darwin/frida-helper-types.vala',
-    'darwin/policy-softener.vala',
-    'darwin/policy-softener-glue.c',
-  ]
-  if host_os in ['macos', 'ios', 'tvos']
-    helper_backend_sources += [
-      'darwin/frida-helper-backend.vala',
-      'darwin/frida-helper-backend-glue.m',
-      'darwin/policyd.c',
-      'darwin/policyd-client.c',
+    helper_sources = [
+      'windows' / 'frida-helper-service.vala',
+      'windows' / 'frida-helper-service-glue.c',
     ]
-  else
-    helper_backend_sources += [
-      'darwin/frida-helper-null-backend.vala',
-    ]
-  endif
-  if host_os in ['ios', 'tvos']
-    helper_backend_sources += [
-      'darwin/springboard.m',
-      'darwin/substituted-client.c',
-      'darwin/substituted2-client.c',
-    ]
-  endif
-  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
-    c_args: frida_component_cflags,
-    vala_args: ['--pkg=frida-gum-darwin-1.0', '--pkg=posix'],
-    dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
-  )
-  backend_libs += [helper_backend]
+    raw_helper = executable('frida-helper-raw', helper_sources,
+      vala_args: helper_backend_vala_args,
+      link_with: helper_backend,
+      dependencies: [gio_dep, gee_dep, gum_dep, base_dep, pipe_dep],
+    )
 
-  helper_sources = [
-    'darwin/frida-helper-service.vala',
-    'darwin/frida-helper-service-glue.m',
-  ]
-  helper_symlist = 'darwin/frida-helper.symbols'
-  helper_link_args = ['-Wl,-exported_symbols_list,' + join_paths(meson.current_source_dir(), helper_symlist)]
-  helper_link_depends = [helper_symlist]
-  if host_os == 'macos'
-    helper_plist = 'darwin/frida-helper.plist'
-    helper_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), helper_plist)]
-    helper_link_depends += [helper_plist]
-  endif
-  raw_helper = executable('frida-helper-raw', helper_sources,
-    vala_args: ['--pkg=posix'],
-    link_args: helper_link_args + backend_libs_private,
-    link_depends: helper_link_depends,
-    link_with: helper_backend,
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
-    override_options: ['b_asneeded=false'],
-  )
+    helper = custom_target('frida-helper',
+      input: raw_helper,
+      output: helper_name,
+      command: post_process_helper,
+      build_by_default: true,
+      install: get_option('assets') == 'installed',
+      install_dir: asset_dir,
+    )
 
-  helper = custom_target('frida-helper',
-    input: [
-      raw_helper,
-      'darwin/frida-helper.xcent',
-    ],
-    output: helper_name,
-    command: [
-      files('post-process-helper.sh'),
-      '@INPUT@',
-      '@OUTPUT@',
-      host_os,
-      '>>>', strip, '<<<',
-      get_option('strip').to_string(),
-      codesign,
-    ],
-    build_by_default: true,
-    install: get_option('assets') == 'installed',
-    install_dir: asset_dir,
-  )
-
-  if get_option('assets') == 'embedded'
-    helper_modern = get_option('helper_modern')
-    helper_legacy = get_option('helper_legacy')
-    helper_inputs = ['helper.resources']
-    if helper_modern == '' and helper_legacy == ''
+    if get_option('assets') == 'embedded'
+      helper_modern = get_option('helper_modern')
+      helper_legacy = get_option('helper_legacy')
       if host_is_64bit
-        helper_modern = helper.full_path()
+        helper_modern = ''
       else
-        helper_legacy = helper.full_path()
+        helper_legacy = ''
       endif
-      helper_inputs += helper
+      helper_process_data = custom_target('frida-data-helper-process',
+        input: 'helper.resources',
+        output: [
+          'frida-data-helper-process.vapi',
+          'frida-data-helper-process.h',
+          'frida-data-helper-process.c',
+          'frida-data-helper-process-blob' + resource_blob_extension,
+        ],
+        command: embed_helper + [helper_modern, helper_legacy],
+      )
+      backend_sources += [helper_process_data]
     endif
-    helper_process_data = custom_target('frida-data-helper-process',
-      input: helper_inputs,
-      output: [
-        'frida-data-helper-process.vapi',
-        'frida-data-helper-process.h',
-        'frida-data-helper-process.c',
-        'frida-data-helper-process-blob.S',
-      ],
-      command: [
-        files('embed-helper.sh'),
-        helper_modern,
-        helper_legacy,
-        meson.current_build_dir(),
-        host_os,
-        resource_compiler,
-        '@INPUT0@',
-        lipo,
-      ],
-    )
-    darwin_sources += [helper_process_data]
   endif
 
-  backend_vala_args += ['--pkg=posix']
-endif
+  if host_os_family == 'darwin'
+    backend_sources += [
+      'darwin' / 'darwin-host-session.vala',
+      'darwin' / 'darwin-host-session-glue.m',
+      'darwin' / 'fruitjector.vala',
+      'darwin' / 'frida-helper-process.vala',
+    ]
 
-if host_os_family == 'linux'
-  linux_sources = [
-    'linux/linux-host-session.vala',
-    'linux/linjector.vala',
-    'linux/linjector-glue.c',
-    'linux/frida-helper-process.vala',
-    'linux/supersu.vala',
-    'linux/system-linux.c',
-  ]
-
-  if host_os == 'android'
-    backend_vala_args += frida_selinux_vala_args
-    backend_libs += frida_selinux
-    backend_deps += frida_selinux_dep
-
-    android_data = custom_target('frida-data-android',
+    darwin_data = custom_target('frida-data-darwin',
       input: [
-        'linux/frida-android.resources',
-        'linux/agent/system-server.js',
+        'darwin' / 'frida-darwin.resources',
+        'darwin' / 'agent' / 'launchd.js',
+        'darwin' / 'agent' / 'xpcproxy.js',
+        'darwin' / 'agent' / 'reportcrash.js',
+        'darwin' / 'agent' / 'osanalytics.js',
       ],
       output: [
-        'frida-data-android.vapi',
-        'frida-data-android.h',
-        'frida-data-android.c',
-        'frida-data-android-blob.S',
+        'frida-data-darwin.vapi',
+        'frida-data-darwin.h',
+        'frida-data-darwin.c',
+        'frida-data-darwin-blob' + resource_blob_extension,
       ],
       command: [
-        resource_compiler,
-        '--toolchain=gnu',
+        resource_compiler_cmd_array,
         '-c', '@INPUT0@',
-        '-o', join_paths(meson.current_build_dir(), 'frida-data-android'),
+        '-o', join_paths(meson.current_build_dir(), 'frida-data-darwin'),
         '@INPUT1@',
+        '@INPUT2@',
+        '@INPUT3@',
+        '@INPUT4@',
       ],
     )
-    linux_sources += [android_data]
+    backend_sources += [darwin_data]
+
+    helper_backend_sources = [
+      'darwin' / 'frida-helper-types.vala',
+      'darwin' / 'policy-softener.vala',
+      'darwin' / 'policy-softener-glue.c',
+    ]
+    if host_os in ['macos', 'ios', 'tvos']
+      helper_backend_sources += [
+        'darwin' / 'frida-helper-backend.vala',
+        'darwin' / 'frida-helper-backend-glue.m',
+        'darwin' / 'policyd.c',
+        'darwin' / 'policyd-client.c',
+      ]
+    else
+      helper_backend_sources += [
+        'darwin' / 'frida-helper-null-backend.vala',
+      ]
+    endif
+    if host_os in ['ios', 'tvos']
+      helper_backend_sources += [
+        'darwin' / 'springboard.m',
+        'darwin' / 'substituted-client.c',
+        'darwin' / 'substituted2-client.c',
+      ]
+    endif
+    helper_backend_vala_args = base_vala_args
+    helper_backend = static_library('frida-helper-backend', helper_backend_sources,
+      c_args: frida_component_cflags,
+      vala_args: [
+        helper_backend_vala_args,
+        gum_vala_args,
+        '--pkg=frida-gum-darwin-1.0',
+        '--pkg=gio-unix-2.0',
+        '--pkg=posix',
+      ],
+      dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
+    )
+    backend_libs += [helper_backend]
+
+    helper_sources = [
+      'darwin' / 'frida-helper-service.vala',
+      'darwin' / 'frida-helper-service-glue.m',
+    ]
+    helper_symlist = 'darwin' / 'frida-helper.symbols'
+    helper_link_args = ['-Wl,-exported_symbols_list,' + meson.current_source_dir() / helper_symlist]
+    helper_link_depends = [helper_symlist]
+    if host_os == 'macos'
+      helper_plist = 'darwin' / 'frida-helper.plist'
+      helper_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + meson.current_source_dir() / helper_plist]
+      helper_link_depends += [helper_plist]
+    endif
+    raw_helper = executable('frida-helper-raw', helper_sources,
+      vala_args: [helper_backend_vala_args, '--pkg=posix'],
+      link_args: [helper_link_args, backend_libs_private],
+      link_depends: helper_link_depends,
+      link_with: helper_backend,
+      dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
+      override_options: ['b_asneeded=false'],
+    )
+
+    helper = custom_target('frida-helper',
+      input: [
+        raw_helper,
+        'darwin' / 'frida-helper.xcent',
+      ],
+      output: helper_name,
+      command: post_process_helper,
+      build_by_default: true,
+      install: get_option('assets') == 'installed',
+      install_dir: asset_dir,
+    )
+
+    if get_option('assets') == 'embedded'
+      helper_modern = get_option('helper_modern')
+      helper_legacy = get_option('helper_legacy')
+      helper_inputs = ['helper.resources']
+      if helper_modern == '' and helper_legacy == ''
+        if host_is_64bit
+          helper_modern = helper.full_path()
+        else
+          helper_legacy = helper.full_path()
+        endif
+        helper_inputs += helper
+      endif
+      helper_process_data = custom_target('frida-data-helper-process',
+        input: helper_inputs,
+        output: [
+          'frida-data-helper-process.vapi',
+          'frida-data-helper-process.h',
+          'frida-data-helper-process.c',
+          'frida-data-helper-process-blob' + resource_blob_extension,
+        ],
+        command: embed_helper + [helper_modern, helper_legacy],
+      )
+      backend_sources += [helper_process_data]
+    endif
   endif
 
-  helper_backend_sources = [
-    'linux/frida-helper-backend.vala',
-    'linux/frida-helper-backend-glue.c',
-    'linux/frida-helper-backend-types.c',
-    'linux/frida-helper-types.vala',
-  ]
-  if host_abi == 'armhf'
-    host_lowlevel_abi = 'arm'
-  else
-    host_lowlevel_abi = host_abi
-  endif
-  bootstrapper_bin = custom_target('frida-bootstrapper-bin',
-    input: ['linux/helpers/bootstrapper-' + host_lowlevel_abi + '.bin'],
-    output: ['bootstrapper.bin'],
-    command: ['cp', '@INPUT0@', '@OUTPUT0@'],
-  )
-  loader_bin = custom_target('frida-loader-bin',
-    input: ['linux/helpers/loader-' + host_lowlevel_abi + '.bin'],
-    output: ['loader.bin'],
-    command: ['cp', '@INPUT0@', '@OUTPUT0@'],
-  )
-  helper_backend_data = custom_target('frida-data-helper-backend',
-    input: [
-      'linux/frida-helper-backend.resources',
-      bootstrapper_bin,
-      loader_bin,
-    ],
-    output: [
-      'frida-data-helper-backend.vapi',
-      'frida-data-helper-backend.h',
-      'frida-data-helper-backend.c',
-      'frida-data-helper-backend-blob.S',
-    ],
-    command: [
-      resource_compiler,
-      '--toolchain=gnu',
-      '-c', '@INPUT0@',
-      '-o', join_paths(meson.current_build_dir(), 'frida-data-helper-backend'),
-      '@INPUT1@',
-      '@INPUT2@',
-    ],
-  )
-  helper_backend_sources += [helper_backend_data]
-  helper_backend_extra_deps = []
-  if host_os == 'android'
-    helper_backend_extra_deps += [frida_selinux_dep]
-  endif
-  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
-    c_args: frida_component_cflags,
-    vala_args: [
-      '--vapidir=' + (meson.current_source_dir() / 'linux'),
-      '--pkg=frida-sysapi',
+  if host_os_family == 'linux'
+    backend_sources += [
+      'linux' / 'linux-host-session.vala',
+      'linux' / 'linjector.vala',
+      'linux' / 'linjector-glue.c',
+      'linux' / 'frida-helper-process.vala',
+      'linux' / 'supersu.vala',
+    ]
+
+    if host_os == 'android'
+      backend_vala_args_private += frida_selinux_vala_args
+      backend_libs += frida_selinux
+      backend_deps += frida_selinux_dep
+
+      android_data = custom_target('frida-data-android',
+        input: [
+          'linux' / 'frida-android.resources',
+          'linux' / 'agent' / 'system-server.js',
+        ],
+        output: [
+          'frida-data-android.vapi',
+          'frida-data-android.h',
+          'frida-data-android.c',
+          'frida-data-android-blob' + resource_blob_extension,
+        ],
+        command: [
+          resource_compiler_cmd_array,
+          '-c', '@INPUT0@',
+          '-o', join_paths(meson.current_build_dir(), 'frida-data-android'),
+          '@INPUT1@',
+        ],
+      )
+      backend_sources += [android_data]
+    endif
+
+    helper_backend_sources = [
+      'linux' / 'frida-helper-backend.vala',
+      'linux' / 'frida-helper-backend-glue.c',
+      'linux' / 'frida-helper-backend-types.c',
+      'linux' / 'frida-helper-types.vala',
+    ]
+    if host_abi == 'armhf'
+      host_lowlevel_abi = 'arm'
+    else
+      host_lowlevel_abi = host_abi
+    endif
+    fs = import('fs')
+    helper_backend_data = custom_target('frida-data-helper-backend',
+      input: [
+        'linux' / 'frida-helper-backend.resources',
+        fs.copyfile(
+          'linux' / 'helpers' / f'bootstrapper-@host_lowlevel_abi@.bin',
+          'bootstrapper.bin',
+        ),
+        fs.copyfile(
+          'linux' / 'helpers' / f'loader-@host_lowlevel_abi@.bin',
+          'loader.bin',
+        ),
+      ],
+      output: [
+        'frida-data-helper-backend.vapi',
+        'frida-data-helper-backend.h',
+        'frida-data-helper-backend.c',
+        'frida-data-helper-backend-blob' + resource_blob_extension,
+      ],
+      command: [
+        resource_compiler_cmd_array,
+        '-c', '@INPUT0@',
+        '-o', join_paths(meson.current_build_dir(), 'frida-data-helper-backend'),
+        '@INPUT1@',
+        '@INPUT2@',
+      ],
+    )
+    helper_backend_sources += [helper_backend_data]
+    helper_backend_extra_deps = []
+    if host_os == 'android'
+      helper_backend_extra_deps += [frida_selinux_dep]
+    endif
+    helper_backend_vala_args = [
+      base_vala_args,
+      gum_vala_args,
+      '--pkg=gio-unix-2.0',
       '--pkg=posix',
-      '--pkg=linux',
-      '--pkg=frida-gum-linux-1.0',
-    ],
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
-  )
-  backend_libs += [helper_backend]
+    ]
+    helper_backend = static_library('frida-helper-backend', helper_backend_sources,
+      c_args: frida_component_cflags,
+      vala_args: [
+        helper_backend_vala_args,
+        '--vapidir=' + meson.current_source_dir() / 'linux',
+        '--pkg=frida-sysapi',
+        '--pkg=linux',
+        '--pkg=frida-gum-linux-1.0',
+      ],
+      dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
+    )
+    backend_vala_args += helper_backend_vala_args
+    backend_libs += [helper_backend]
 
-  helper_sources = [
-    'linux/frida-helper-service.vala',
-  ]
-  helper_symscript = 'linux/frida-helper.version'
-  helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
-  helper_link_depends = [helper_symscript]
-  raw_helper = executable('frida-helper-raw', helper_sources,
-    vala_args: ['--pkg=posix'],
-    link_args: helper_link_args,
-    link_depends: helper_link_depends,
-    link_with: helper_backend,
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep],
-  )
+    helper_sources = [
+      'linux' / 'frida-helper-service.vala',
+    ]
+    helper_symscript = 'linux' / 'frida-helper.version'
+    helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
+    helper_link_depends = [helper_symscript]
+    raw_helper = executable('frida-helper-raw', helper_sources,
+      vala_args: helper_backend_vala_args,
+      link_args: helper_link_args,
+      link_depends: helper_link_depends,
+      link_with: helper_backend,
+      dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep],
+    )
 
-  helper = custom_target('frida-helper',
-    input: raw_helper,
-    output: helper_name,
-    command: [
-      files('post-process-helper.sh'),
-      '@INPUT@',
-      '',
-      '@OUTPUT@',
-      host_os,
-      '>>>', strip, '<<<',
-      get_option('strip').to_string(),
-      codesign,
-    ],
-    build_by_default: true,
-    install: get_option('assets') == 'installed',
-    install_dir: asset_dir,
-  )
+    helper = custom_target('frida-helper',
+      input: raw_helper,
+      output: helper_name,
+      command: post_process_helper,
+      build_by_default: true,
+      install: get_option('assets') == 'installed',
+      install_dir: asset_dir,
+    )
+
+    if get_option('assets') == 'embedded'
+      helper_modern = get_option('helper_modern')
+      helper_legacy = get_option('helper_legacy')
+      if host_is_64bit
+        helper_modern = ''
+      else
+        helper_legacy = ''
+      endif
+      helper_process_data = custom_target('frida-data-helper-process',
+        input: 'helper.resources',
+        output: [
+          'frida-data-helper-process.vapi',
+          'frida-data-helper-process.h',
+          'frida-data-helper-process.c',
+          'frida-data-helper-process-blob' + resource_blob_extension,
+        ],
+        command: embed_helper + [helper_modern, helper_legacy],
+      )
+      backend_sources += [helper_process_data]
+    endif
+  endif
+
+  if host_os_family == 'freebsd'
+    backend_sources += [
+      'freebsd' / 'freebsd-host-session.vala',
+      'freebsd' / 'binjector.vala',
+      'freebsd' / 'binjector-glue.c',
+    ]
+    backend_vala_args_private += '--pkg=frida-gum-freebsd-1.0'
+  endif
+
+  if host_os_family == 'qnx'
+    backend_sources += [
+      'qnx' / 'qnx-host-session.vala',
+      'qnx' / 'qinjector.vala',
+      'qnx' / 'qinjector-glue.c',
+    ]
+  endif
 
   if get_option('assets') == 'embedded'
-    helper_modern = get_option('helper_modern')
-    helper_legacy = get_option('helper_legacy')
-    if host_is_64bit
-      helper_modern = ''
-    else
-      helper_legacy = ''
+    agent_modern = get_option('agent_modern')
+    agent_legacy = get_option('agent_legacy')
+    agent_inputs = ['agent.resources']
+    if agent_modern == '' and agent_legacy == ''
+      if host_is_64bit
+        agent_modern = agent.full_path()
+      else
+        agent_legacy = agent.full_path()
+      endif
+      agent_inputs += agent
     endif
-    helper_process_data = custom_target('frida-data-helper-process',
-      input: 'helper.resources',
+    backend_sources += custom_target('frida-data-agent',
+      input: agent_inputs,
       output: [
-        'frida-data-helper-process.vapi',
-        'frida-data-helper-process.h',
-        'frida-data-helper-process.c',
-        'frida-data-helper-process-blob.S',
+        'frida-data-agent.vapi',
+        'frida-data-agent.h',
+        'frida-data-agent.c',
+        'frida-data-agent-blob' + resource_blob_extension,
       ],
       command: [
-        files('embed-helper.sh'),
-        helper_modern,
-        helper_legacy,
-        meson.current_build_dir(),
+        python,
+        files('embed-agent.py'),
         host_os,
+        host_arch,
+        host_toolchain,
         resource_compiler,
-        '@INPUT@',
-        lipo,
+        '>>>', lipo, '<<<',
+        meson.current_build_dir(),
+        '@INPUT0@',
+        agent_modern,
+        agent_legacy,
+        get_option('agent_emulated_modern'),
+        get_option('agent_emulated_legacy'),
+        get_option('agent_dbghelp_prefix'),
+        get_option('agent_symsrv_prefix'),
       ],
     )
-    linux_sources += [helper_process_data]
   endif
-
-  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0']
 endif
 
-if host_os_family == 'freebsd'
-  freebsd_sources = [
-    'freebsd/freebsd-host-session.vala',
-    'freebsd/binjector.vala',
-    'freebsd/binjector-glue.c',
-    'freebsd/system-freebsd.c',
+if have_fruity_backend
+  backend_sources += [
+    'fruity' / 'fruity-host-session.vala',
+    'fruity' / 'dtx.vala',
+    'fruity' / 'lockdown.vala',
+    'fruity' / 'installation-proxy.vala',
+    'fruity' / 'springboard-services.vala',
+    'fruity' / 'lldb.vala',
+    'fruity' / 'injector.vala',
+    'fruity' / 'usbmux.vala',
+    'fruity' / 'keyed-archive.vala',
+    'fruity' / 'plist.vala',
+    'fruity' / 'plist-service.vala',
   ]
-  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-freebsd-1.0']
-endif
-
-if host_os_family == 'qnx'
-  qnx_sources = [
-    'qnx/qnx-host-session.vala',
-    'qnx/qinjector.vala',
-    'qnx/qinjector-glue.c',
-    'qnx/system-qnx.c',
-  ]
-  backend_vala_args += ['--pkg=posix']
-endif
-
-if get_option('assets') == 'embedded'
-  agent_modern = get_option('agent_modern')
-  agent_legacy = get_option('agent_legacy')
-  agent_inputs = ['agent.resources']
-  if agent_modern == '' and agent_legacy == ''
-    if host_is_64bit
-      agent_modern = agent.full_path()
-    else
-      agent_legacy = agent.full_path()
-    endif
-    agent_inputs += agent
+  if host_os_family == 'windows'
+    backend_sources += 'fruity' / 'fruity-host-session-windows.c'
+  elif host_os_family == 'darwin'
+    backend_sources += 'fruity' / 'fruity-host-session-darwin.m'
+  else
+    backend_sources += 'fruity' / 'fruity-host-session-unix.c'
   endif
-  agent_data = custom_target('frida-data-agent',
-    input: agent_inputs,
-    output: [
-      'frida-data-agent.vapi',
-      'frida-data-agent.h',
-      'frida-data-agent.c',
-      'frida-data-agent-blob.S',
-    ],
-    command: [
-      files('embed-agent.sh'),
-      agent_modern,
-      agent_legacy,
-      get_option('agent_emulated_modern'),
-      get_option('agent_emulated_legacy'),
-      meson.current_build_dir(),
-      host_os,
-      resource_compiler,
-      '@INPUT0@',
-      lipo,
-      get_option('agent_dbghelp_prefix'),
-      get_option('agent_symsrv_prefix'),
-    ],
-  )
-else
-  agent_data = []
 endif
 
-socket_sources = [
-  'socket/socket-host-session.vala',
-]
-
-fruity_sources = [
-  'fruity/fruity-host-session.vala',
-  'fruity/dtx.vala',
-  'fruity/lockdown.vala',
-  'fruity/installation-proxy.vala',
-  'fruity/springboard-services.vala',
-  'fruity/lldb.vala',
-  'fruity/injector.vala',
-  'fruity/usbmux.vala',
-  'fruity/keyed-archive.vala',
-  'fruity/plist.vala',
-  'fruity/plist-service.vala',
-]
-if host_os_family == 'windows'
-  fruity_sources += ['fruity/fruity-host-session-windows.c']
-elif host_os_family == 'darwin'
-  fruity_sources += ['fruity/fruity-host-session-darwin.m']
-else
-  fruity_sources += ['fruity/fruity-host-session-unix.c']
+if have_droidy_backend
+  backend_sources += [
+    'droidy' / 'droidy-host-session.vala',
+    'droidy' / 'droidy-client.vala',
+    'droidy' / 'jdwp.vala',
+    'droidy' / 'injector.vala',
+    'droidy' / 'axml.vala',
+  ]
 endif
 
-droidy_sources = [
-  'droidy/droidy-host-session.vala',
-  'droidy/droidy-client.vala',
-  'droidy/jdwp.vala',
-  'droidy/injector.vala',
-  'droidy/axml.vala',
-]
+if have_socket_backend
+  backend_sources += [
+    'socket' / 'socket-host-session.vala',
+  ]
+endif
 
-subdir('barebone')
+if have_barebone_backend
+  subdir('barebone')
+endif
+
+if host_os_family != 'windows'
+  backend_vala_args_private += '--pkg=posix'
+endif
+
 subdir('compiler')
 
-local_sources = windows_sources + darwin_sources + linux_sources + freebsd_sources + qnx_sources + [agent_data]
-remote_sources = socket_sources + fruity_sources + droidy_sources + barebone_sources
-
-core_sources = base_sources + local_sources + remote_sources + compiler_sources
+core_sources = base_sources + backend_sources + compiler_sources
 
 internal_libs = [base, pipe] + backend_libs
 internal_deps = [base_dep, pipe_dep]
 
 if host_os_family == 'windows'
+  gio_platform_vala_args = ['--pkg=gio-windows-2.0']
   backend_deps += gio_windows_dep
 else
+  gio_platform_vala_args = ['--pkg=gio-unix-2.0']
   backend_deps += gio_unix_dep
 endif
 
-core_deps = [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_inspector_dep, brotlidec_dep, tls_provider_dep] + backend_deps
+core_deps = [
+  glib_dep,
+  gobject_dep,
+  gmodule_dep,
+  gio_dep,
+  gee_dep,
+  json_glib_dep,
+  gum_dep,
+  gumjs_inspector_dep,
+  tls_provider_dep,
+]
+core_deps += backend_deps
+core_deps += backend_deps_private
+
+core_vala_args = [
+  backend_vala_args,
+  '--pkg=gio-2.0',
+  gio_platform_vala_args,
+  '--pkg=json-glib-1.0',
+]
 
 core = library('frida-core', core_sources,
   c_args: frida_component_cflags,
-  vala_args: backend_vala_args,
+  vala_args: [
+    core_vala_args,
+    backend_vala_args_private,
+    base_vala_args,
+    gumjs_inspector_vala_args,
+    '--pkg=gmodule-2.0',
+  ],
   vala_gir: 'Frida-' + api_version + '.gir',
   link_args: backend_libs_private,
   link_with: backend_libs,
@@ -540,3 +548,6 @@ core_dep = declare_dependency(
 
 core_build_dir = meson.current_build_dir()
 subdir('api')
+if 'core' in get_option('devkits')
+  subdir('devkit')
+endif

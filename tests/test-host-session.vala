@@ -10,6 +10,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+#if HAVE_LOCAL_BACKEND
 		GLib.Test.add_func ("/HostSession/Manual/full-cycle", () => {
 			var h = new Harness.without_timeout ((h) => Service.Manual.full_cycle.begin (h as Harness));
 			h.run ();
@@ -34,7 +35,9 @@ namespace Frida.HostSessionTest {
 			var h = new Harness.without_timeout ((h) => Service.Manual.torture.begin (h as Harness));
 			h.run ();
 		});
+#endif
 
+#if HAVE_FRUITY_BACKEND
 		GLib.Test.add_func ("/HostSession/Fruity/Plist/can-construct-from-xml-document", () => {
 			Fruity.Plist.can_construct_from_xml_document ();
 		});
@@ -57,7 +60,9 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Fruity.Manual.lockdown.begin (h as Harness));
 			h.run ();
 		});
+#endif
 
+#if HAVE_DROIDY_BACKEND
 		GLib.Test.add_func ("/HostSession/Droidy/backend", () => {
 			var h = new Harness ((h) => Droidy.backend.begin (h as Harness));
 			h.run ();
@@ -67,7 +72,9 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Droidy.injector.begin (h as Harness));
 			h.run ();
 		});
+#endif
 
+#if HAVE_LOCAL_BACKEND
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -301,16 +308,18 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Local/latency-should-be-nominal", () => {
+			var h = new Harness ((h) => Local.latency_should_be_nominal.begin (h as Harness));
+			h.run ();
+		});
+#endif // HAVE_LOCAL_BACKEND
+
 		GLib.Test.add_func ("/HostSession/start-stop-fast", () => {
 			var h = new Harness ((h) => start_stop_fast.begin (h as Harness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Local/latency-should-be-nominal", () => {
-			var h = new Harness ((h) => Local.latency_should_be_nominal.begin (h as Harness));
-			h.run ();
-		});
-
+#if HAVE_LOCAL_BACKEND && HAVE_SOCKET_BACKEND
 		Connectivity.Strategy[] strategies = new Connectivity.Strategy[] {
 			SERVER,
 		};
@@ -345,7 +354,7 @@ namespace Frida.HostSessionTest {
 				h.run ();
 			});
 		}
-
+#endif
 	}
 
 	namespace Service {
@@ -442,6 +451,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
+#if HAVE_LOCAL_BACKEND
 		namespace Manual {
 
 			private static async void full_cycle (Harness h) {
@@ -901,9 +911,11 @@ namespace Frida.HostSessionTest {
 			}
 
 		}
+#endif // HAVE_LOCAL_BACKEND
 
 	}
 
+#if HAVE_LOCAL_BACKEND
 	private static async void resource_leaks (Harness h) {
 		try {
 			var device_manager = new DeviceManager ();
@@ -957,23 +969,6 @@ namespace Frida.HostSessionTest {
 		yield;
 	}
 
-	private static async void start_stop_fast (Harness h) {
-		var device_manager = new DeviceManager ();
-		device_manager.enumerate_devices.begin ();
-
-		var timer = new Timer ();
-		try {
-			yield device_manager.close ();
-		} catch (IOError e) {
-			assert_not_reached ();
-		}
-		if (GLib.Test.verbose ()) {
-			printerr ("close() took %u ms\n", (uint) (timer.elapsed () * 1000.0));
-		}
-
-		h.done ();
-	}
-
 	namespace Local {
 
 		private static async void latency_should_be_nominal (Harness h) {
@@ -995,9 +990,33 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
+#endif // HAVE_LOCAL_BACKEND
 
+	private static async void start_stop_fast (Harness h) {
+		var device_manager = new DeviceManager ();
+		device_manager.enumerate_devices.begin ();
+
+		var timer = new Timer ();
+		try {
+			yield device_manager.close ();
+		} catch (IOError e) {
+			assert_not_reached ();
+		}
+		if (GLib.Test.verbose ()) {
+			printerr ("close() took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+		}
+
+		h.done ();
+	}
+
+#if HAVE_LOCAL_BACKEND
 	namespace Connectivity {
+		private enum Strategy {
+			SERVER,
+			PEER
+		}
 
+#if HAVE_SOCKET_BACKEND
 		private static async void flawless (Harness h, Strategy strategy) {
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => FORWARD, out seen_disruptions);
@@ -1044,11 +1063,6 @@ namespace Frida.HostSessionTest {
 				return FORWARD;
 			}, out seen_disruptions);
 			assert (seen_disruptions == 1);
-		}
-
-		private enum Strategy {
-			SERVER,
-			PEER
 		}
 
 		private static async void run_reliability_scenario (Harness h, Strategy strategy, owned ChaosProxy.Inducer on_message,
@@ -1388,6 +1402,7 @@ namespace Frida.HostSessionTest {
 
 			h.done ();
 		}
+#endif // HAVE_SOCKET_BACKEND
 
 		private async void measure_latency (Harness h, Device device, Strategy strategy) throws GLib.Error {
 			h.disable_timeout ();
@@ -3331,7 +3346,9 @@ namespace Frida.HostSessionTest {
 
 	}
 #endif
+#endif // HAVE_LOCAL_BACKEND
 
+#if HAVE_FRUITY_BACKEND
 	namespace Fruity {
 
 		private static async void backend (Harness h) {
@@ -3702,7 +3719,9 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
+#endif // HAVE_FRUITY_BACKEND
 
+#if HAVE_DROIDY_BACKEND
 	namespace Droidy {
 
 		private static async void backend (Harness h) {
@@ -3777,7 +3796,9 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 	}
+#endif // HAVE_DROIDY_BACKEND
 
+#if HAVE_LOCAL_BACKEND
 	private static string parse_string_message_payload (string json) {
 		Json.Object message;
 		try {
@@ -3790,6 +3811,7 @@ namespace Frida.HostSessionTest {
 
 		return message.get_string_member ("payload");
 	}
+#endif
 
 	public class Harness : Frida.Test.AsyncHarness, AgentMessageSink {
 		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);

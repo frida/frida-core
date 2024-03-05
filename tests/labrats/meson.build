@@ -106,13 +106,7 @@ if host_os == 'qnx'
   ]
 endif
 
-labrats = custom_target('labrats',
-  input: labrat_files,
-  output: labrat_files,
-  command: ['cp', '@INPUT@', '@OUTDIR@'],
-)
-labrats_stamp = custom_target('labrats-stamp',
-  input: [labrats],
-  output: '.stamp',
-  command: ['touch', '@OUTPUT@'],
-)
+fs = import('fs')
+foreach f : labrat_files
+  fs.copyfile(f)
+endforeach

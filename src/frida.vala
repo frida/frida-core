@@ -205,6 +205,7 @@ namespace Frida {
 
 		public async Device add_remote_device (string address, RemoteDeviceOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
+#if HAVE_SOCKET_BACKEND
 			check_open ();
 
 			var socket_device = yield get_device ((device) => {
@@ -247,6 +248,9 @@ namespace Frida {
 			changed ();
 
 			return device;
+#else
+			throw new Error.NOT_SUPPORTED ("Socket backend not available");
+#endif
 		}
 
 		public Device add_remote_device_sync (string address, RemoteDeviceOptions? options = null,
@@ -3229,6 +3233,7 @@ namespace Frida {
 		public signal void uninjected (uint id);
 
 		public static Injector new () {
+#if HAVE_LOCAL_BACKEND
 #if WINDOWS
 			var tempdir = new TemporaryDirectory ();
 			var helper = new WindowsHelperProcess (tempdir);
@@ -3250,9 +3255,13 @@ namespace Frida {
 #if QNX
 			return new Qinjector ();
 #endif
+#else
+			assert_not_reached ();
+#endif
 		}
 
 		public static Injector new_inprocess () {
+#if HAVE_LOCAL_BACKEND
 #if WINDOWS
 			var tempdir = new TemporaryDirectory ();
 			var helper = new WindowsHelperBackend (PrivilegeLevel.NORMAL);
@@ -3273,6 +3282,9 @@ namespace Frida {
 #endif
 #if QNX
 			return new Qinjector ();
+#endif
+#else
+			assert_not_reached ();
 #endif
 		}
 

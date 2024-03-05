@@ -45,16 +45,18 @@ if have_compiler_backend
       'frida-data-compiler.vapi',
       'frida-data-compiler.h',
       'frida-data-compiler.c',
-      'frida-data-compiler-blob.S',
+      'frida-data-compiler-blob' + resource_blob_extension,
     ],
     command: [
-      resource_compiler,
-      '--toolchain=' + host_toolchain,
+      resource_compiler_cmd_array,
       '-c', '@INPUT0@',
-      '-o', join_paths(meson.current_build_dir(), 'frida-data-compiler'),
+      '-o', meson.current_build_dir() / 'frida-data-compiler',
       '@INPUT1@',
       '@INPUT2@',
     ],
   )
   compiler_sources += compiler_data
+
+  backend_vala_args_private += '--pkg=libbrotlidec'
+  backend_deps_private += brotlidec_dep
 endif

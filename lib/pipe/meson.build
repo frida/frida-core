@@ -3,7 +3,7 @@ pipe_sources = [
 ]
 
 system_deps = []
-vala_args = []
+extra_vala_args = []
 
 if host_os_family == 'windows'
   pipe_sources += [
@@ -11,25 +11,25 @@ if host_os_family == 'windows'
     'pipe-sddl.c',
   ]
 elif host_os in ['macos', 'ios', 'tvos']
-  pipe_sources += ['pipe-darwin.c']
-
-  system_deps += [gio_unix_dep]
-  vala_args += ['--pkg=frida-gum-darwin-1.0', '--pkg=posix']
+  pipe_sources += 'pipe-darwin.c'
+  extra_vala_args += '--pkg=frida-gum-darwin-1.0'
 else
-  pipe_sources += ['pipe-unix.c']
+  pipe_sources += 'pipe-unix.c'
+endif
 
-  system_deps += [gio_unix_dep]
-  vala_args += ['--pkg=posix']
+if host_os_family != 'windows'
+  system_deps += gio_unix_dep
+  extra_vala_args += ['--pkg=gio-unix-2.0', '--pkg=posix']
 endif
 
 if host_os == 'android'
-  system_deps += [frida_selinux_dep]
-  vala_args += frida_selinux_vala_args
+  system_deps += libselinux_dep
+  extra_vala_args += '--pkg=libselinux'
 endif
 
 pipe = static_library('frida-pipe', pipe_sources,
   c_args: frida_component_cflags,
-  vala_args: vala_args,
+  vala_args: base_vala_args + extra_vala_args,
   vala_header: 'frida-pipe.h',
   dependencies: [glib_dep, gobject_dep, gio_dep, gee_dep, base_dep] + system_deps,
 )

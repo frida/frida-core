@@ -14,11 +14,13 @@ endif
 
 platform_deps = []
 
+extra_vala_args = []
 extra_objc_args = []
 extra_link_args = []
 extra_link_depends = []
 
 if host_os_family != 'windows'
+  extra_vala_args += '--pkg=gio-unix-2.0'
   platform_deps += gio_unix_dep
 endif
 
@@ -28,16 +30,18 @@ if host_os_family == 'darwin'
 endif
 
 if host_os_family == 'windows'
-  symfile = 'frida-gadget.symbols'
-  extra_link_args += '-Wl,--retain-symbols-file,' + (meson.current_source_dir() / symfile)
-  extra_link_depends += symfile
+  if host_toolchain != 'microsoft'
+    symfile = 'frida-gadget.symbols'
+    extra_link_args += '-Wl,--retain-symbols-file,' + meson.current_source_dir() / symfile
+    extra_link_depends += symfile
+  endif
 elif host_os_family == 'darwin'
   symlist = 'frida-gadget.symbols'
-  extra_link_args += '-Wl,-exported_symbols_list,' + (meson.current_source_dir() / symlist)
+  extra_link_args += '-Wl,-exported_symbols_list,' + meson.current_source_dir() / symlist
   extra_link_depends += symlist
 else
   symscript = 'frida-gadget.version'
-  extra_link_args += '-Wl,--version-script,' + (meson.current_source_dir() / symscript)
+  extra_link_args += '-Wl,--version-script,' + meson.current_source_dir() / symscript
   extra_link_depends += symscript
 endif
 
@@ -48,6 +52,7 @@ endif
 
 raw_gadget = shared_library('frida-gadget', gadget_sources,
   name_prefix: 'lib',
+  vala_args: [base_vala_args, payload_vala_args, extra_vala_args],
   c_args: frida_component_cflags,
   objc_args: extra_objc_args,
   link_args: extra_link_args,
@@ -67,28 +72,10 @@ if host_os_family != 'darwin'
     '--move', 'destructor', 'frida_on_unload', 'last',
   ]
 endif
-if get_option('strip')
-  operations += ['--strip', '>>>', strip, '<<<']
-endif
-
-if host_machine.endian() == 'little'
-  endian_option = ['--endian', 'little']
-else
-  endian_option = ['--endian', 'big']
-endif
-
 modulated_gadget = custom_target('frida-gadget-modulated',
   input: raw_gadget,
   output: 'libfrida-gadget-modulated' + shlib_suffix,
-  command: [
-    modulate,
-    '@INPUT@',
-    ] + operations + endian_option + [
-    '--output', '@OUTPUT@',
-    '--nm', nm,
-    '--readelf', readelf,
-    '--otool', otool,
-  ],
+  command: modulate + operations,
 )
 
 if host_os == 'macos'
@@ -98,16 +85,10 @@ elif host_os in ['ios', 'tvos']
 else
   identity = gadget_name
 endif
-
 custom_target('frida-gadget',
   input: modulated_gadget,
   output: gadget_name,
-  command: [
-    post_process_module,
-    '@INPUT@',
-    '@OUTPUT@',
-    identity,
-  ],
+  command: post_process + ['shared-library', identity],
   install: true,
   install_dir: asset_dir,
 )

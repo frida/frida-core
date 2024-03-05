@@ -42,15 +42,19 @@ namespace Frida.Test {
 
 		Frida.SystemTest.add_tests ();
 
+#if HAVE_LOCAL_BACKEND
 		Frida.InjectorTest.add_tests ();
 
 		Frida.AgentTest.add_tests ();
+#endif
 #if !WINDOWS
 		Frida.GadgetTest.add_tests ();
 #endif
 		Frida.HostSessionTest.add_tests ();
 
+#if HAVE_COMPILER_BACKEND
 		Frida.CompilerTest.add_tests ();
+#endif
 
 		GLib.Test.run ();
 

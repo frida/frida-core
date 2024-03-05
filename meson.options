@@ -1,3 +1,45 @@
+option('local_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include backend for the local system',
+)
+
+option('fruity_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the Fruity backend',
+)
+
+option('droidy_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the Droidy backend',
+)
+
+option('socket_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the Socket backend',
+)
+
+option('barebone_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the Barebone backend',
+)
+
+option('compiler_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include frida-compile backend powered by GumJS',
+)
+
+option('compiler_snapshot',
+  type: 'feature',
+  value: 'auto',
+  description: 'Speed up compiler startup by using a snapshot'
+)
+
 option('assets',
   type: 'combo',
   choices: ['embedded', 'installed'],
@@ -86,16 +128,11 @@ option('mapper',
   description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
 )
 
-option('compiler_backend',
-  type: 'feature',
-  value: 'auto',
-  description: 'Include frida-compile backend powered by GumJS',
-)
-
-option('compiler_snapshot',
-  type: 'feature',
-  value: 'auto',
-  description: 'Speed up compiler startup by using a snapshot'
+option('devkits',
+  type: 'array',
+  choices: ['core'],
+  value: [],
+  description: 'Devkits to build'
 )
 
 option('tests',

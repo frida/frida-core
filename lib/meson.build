@@ -4,7 +4,9 @@ endif
 subdir('base')
 subdir('pipe')
 subdir('payload')
-subdir('agent')
+if have_local_backend
+  subdir('agent')
+endif
 if build_gadget
   subdir('gadget')
 endif

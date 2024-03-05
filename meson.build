@@ -6,7 +6,7 @@ project('frida-core', 'vala', 'c', 'cpp',
 
 api_version = '1.0'
 
-header_install_dir = get_option('includedir') / 'frida-' + api_version
+header_install_dir = get_option('includedir') / f'frida-@api_version@'
 
 build_os = build_machine.system()
 if build_os == 'android'
@@ -45,7 +45,6 @@ else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
 endif
-host_toolchain = (host_os_family == 'darwin') ? 'apple' : 'gnu'
 gumjs_archs = {
   'x86': 'ia32',
   'x86_64': 'x64',
@@ -60,11 +59,22 @@ endif
 
 cc = meson.get_compiler('c')
 
+python = import('python').find_installation()
+
+if cc.get_argument_syntax() == 'msvc'
+  host_toolchain = 'microsoft'
+  resource_blob_extension = '.obj'
+else
+  host_toolchain = (host_os_family == 'darwin') ? 'apple' : 'gnu'
+  resource_blob_extension = '.S'
+endif
+
 vala_flags = []
 
 frida_component_cflags = []
 ndebug = get_option('b_ndebug')
-if ndebug == 'true' or (ndebug == 'if-release' and not get_option('debug'))
+optimize_for_prod = ndebug == 'true' or (ndebug == 'if-release' and not get_option('debug'))
+if optimize_for_prod
   frida_component_cflags += [
     '-DG_DISABLE_ASSERT',
     '-DG_DISABLE_CHECKS',
@@ -136,31 +146,8 @@ else
   host_cpu_mode = '32'
 endif
 
-build_gadget = get_option('gadget') \
-    .disable_auto_if(meson.is_subproject()) \
-    .allowed()
-
-build_server = get_option('server') \
-    .disable_if(host_os == 'watchos', error_message: 'frida-server not yet supported on watchOS') \
-    .disable_auto_if(meson.is_subproject()) \
-    .allowed()
-
-build_portal = get_option('portal') \
-    .disable_if(host_os == 'watchos', error_message: 'frida-portal not yet supported on watchOS') \
-    .disable_auto_if(meson.is_subproject()) \
-    .allowed()
-
-build_inject = get_option('inject') \
-    .disable_if(host_os == 'watchos', error_message: 'frida-inject not yet supported on watchOS') \
-    .disable_auto_if(meson.is_subproject()) \
-    .allowed()
-
-build_tests = get_option('tests') \
-    .disable_if(host_os == 'watchos', error_message: 'tests not yet supported on watchOS') \
-    .disable_auto_if(meson.is_subproject() or not meson.can_run_host_binaries()) \
-    .allowed()
-
 cdata = configuration_data()
+
 if cc.get_define('FRIDA_VERSION') == ''
   version = meson.project_version()
   tokens = version.split('.')
@@ -269,25 +256,133 @@ gum_dep = dependency('frida-gum-1.0', default_options: [
 ])
 gumjs_dep = dependency('frida-gumjs-1.0')
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
-glib_dep = dependency('glib-2.0', version: '>=2.74')
+
+glib_options = [
+  'cocoa=disabled',
+  'selinux=disabled',
+  'xattr=false',
+  'libmount=disabled',
+  'tests=false',
+  'nls=disabled',
+]
+if optimize_for_prod
+  glib_options += [
+    'glib_debug=disabled',
+    'glib_assert=false',
+    'glib_checks=false',
+  ]
+endif
+
+gee_options = [
+  'disable-introspection=true',
+]
+if optimize_for_prod
+  gee_options += 'disable-internal-asserts=true'
+endif
+
+glib_dep = dependency('glib-2.0', version: '>=2.74', default_options: glib_options)
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
-gee_dep = dependency('gee-0.8')
-json_glib_dep = dependency('json-glib-1.0')
-libsoup_dep = dependency('libsoup-3.0')
-quickjs_dep = dependency('quickjs', required: false)
+gee_dep = dependency('gee-0.8', default_options: gee_options)
+json_glib_dep = dependency('json-glib-1.0', default_options: [
+  'introspection=disabled',
+  'gtk_doc=disabled',
+  'tests=false',
+])
+libsoup_dep = dependency('libsoup-3.0', default_options: [
+    'gssapi=disabled',
+    'ntlm=disabled',
+    'brotli=disabled',
+    'tls_check=false',
+    'introspection=disabled',
+    'vapi=disabled',
+    'docs=disabled',
+    'examples=disabled',
+    'tests=false',
+    'sysprof=disabled',
+  ])
 brotlidec_dep = dependency('libbrotlidec')
+quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
+  'libc=false',
+  'bignum=true',
+  'atomics=disabled',
+  'stack_check=disabled',
+])
 
+native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true, default_options: glib_options)
+native_gio_dep = dependency('gio-2.0', native: true)
+native_gee_dep = dependency('gee-0.8', native: true, default_options: gee_options)
+native_brotlienc_dep = dependency('libbrotlienc', native: true)
+
+if host_os_family == 'windows'
+  gio_windows_dep = dependency('gio-windows-2.0')
+else
+  gio_unix_dep = dependency('gio-unix-2.0')
+endif
+
+have_local_backend = get_option('local_backend').allowed()
+have_fruity_backend = get_option('fruity_backend').allowed()
+have_droidy_backend = get_option('droidy_backend').allowed()
+have_socket_backend = get_option('socket_backend').allowed()
+have_barebone_backend = quickjs_dep.found()
+have_compiler_backend = get_option('compiler_backend') \
+    .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
+    .disable_auto_if(host_os == 'watchos') \
+    .allowed()
+
+build_gadget = get_option('gadget') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_server = get_option('server') \
+    .disable_if(not have_local_backend, error_message: 'frida-server requires the local backend to be included') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-server not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_portal = get_option('portal') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-portal not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_inject = get_option('inject') \
+    .disable_if(not have_local_backend, error_message: 'frida-inject requires the local backend to be included') \
+    .disable_if(host_os == 'watchos', error_message: 'frida-inject not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject()) \
+    .allowed()
+
+build_tests = get_option('tests') \
+    .disable_if(host_os == 'watchos', error_message: 'tests not yet supported on watchOS') \
+    .disable_auto_if(meson.is_subproject() or not meson.can_run_host_binaries()) \
+    .allowed()
+
+foreach b : [['local', have_local_backend],
+             ['fruity', have_fruity_backend],
+             ['droidy', have_droidy_backend],
+             ['socket', have_socket_backend],
+             ['barebone', have_barebone_backend],
+             ['compiler', have_compiler_backend]]
+  if b[1]
+    vala_flags += '--define=HAVE_@0@_BACKEND'.format(b[0].to_upper())
+  endif
+endforeach
+
+gi_dep = dependency('gobject-introspection-1.0', required: false)
+if gi_dep.found()
+  girdir = gi_dep.get_variable('girdir')
+else
+  girdir = get_option('prefix') / get_option('datadir') / 'gir-1.0'
+endif
+uninstalled_girdir = meson.current_build_dir() / 'src'
+
+gum_vala_args = ['--pkg=frida-gum-1.0']
 gum_vapidir = gum_dep.get_variable('vapidir', default_value: '')
 if gum_vapidir != ''
-  vala_flags += [
-    '--vapidir=' + gum_vapidir,
-    '--pkg=frida-gum-1.0',
-    '--pkg=frida-gumjs-1.0',
-    '--pkg=frida-gumjs-inspector-1.0',
-  ]
+  gum_vala_args += '--vapidir=' + gum_vapidir
 endif
+gumjs_vala_args = ['--pkg=frida-gumjs-1.0', '--pkg=gio-2.0', gum_vala_args]
+gumjs_inspector_vala_args = ['--pkg=frida-gumjs-inspector-1.0', gum_vala_args]
 
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
 if have_v8
@@ -300,22 +395,13 @@ else
   v8_mksnapshot = ''
 endif
 
-native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true)
-native_gio_dep = dependency('gio-2.0', native: true)
-native_gee_dep = dependency('gee-0.8', native: true)
-native_brotlienc_dep = dependency('libbrotlienc', native: true)
-
-if host_os_family == 'windows'
-  gio_windows_dep = dependency('gio-windows-2.0')
-else
-  gio_unix_dep = dependency('gio-unix-2.0')
-endif
-
 backend_deps_private = []
+backend_reqs_private = []
 backend_libs_private = []
 
 if quickjs_dep.found()
   backend_deps_private += quickjs_dep
+  backend_reqs_private += 'quickjs'
 endif
 
 if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>')
@@ -326,6 +412,7 @@ if host_os == 'android'
   libselinux_dep = dependency('libselinux', version: '>=3.0')
   libsepol_dep = dependency('libsepol', version: '>=3.0')
   backend_deps_private += [libselinux_dep, libsepol_dep]
+  backend_reqs_private += ['libselinux', 'libsepol']
 endif
 
 tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
@@ -333,6 +420,7 @@ if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
   backend_deps_private += tls_provider_dep
+  backend_reqs_private += 'gioopenssl'
 endif
 
 nice_dep = dependency('nice', required: get_option('connectivity'))
@@ -343,6 +431,7 @@ if nice_dep.found()
   cdata.set('HAVE_NICE', 1)
   vala_flags += ['--define=HAVE_NICE']
   backend_deps_private += [nice_dep, openssl_dep, usrsctp_dep]
+  backend_reqs_private += ['nice', 'openssl', 'usrsctp']
 
   if cc.has_member('struct sockaddr_conn', 'sconn_len',
                    dependencies: [usrsctp_dep],
@@ -367,8 +456,17 @@ if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
 
-ar = find_program('ar')
-nm = find_program('nm')
+if host_toolchain == 'microsoft'
+  lib = find_program('lib')
+  ar = ''
+  nm = ''
+  strip = ''
+else
+  lib = ''
+  ar = find_program('ar')
+  nm = find_program('nm')
+  strip = find_program('strip')
+endif
 if host_os_family != 'windows'
   if host_os_family == 'darwin'
     readelf = ''
@@ -384,7 +482,6 @@ else
   otool = ''
   libtool = ''
 endif
-strip = find_program('strip')
 if host_os_family == 'darwin'
   install_name_tool = find_program('install_name_tool')
   lipo = find_program('lipo')
@@ -395,14 +492,58 @@ else
   codesign = ''
 endif
 
-modulate = files('tools/modulate.py')
-post_process_module = [
-  files('tools/post-process-module.sh'),
+if get_option('devkits').length() != 0
+  if get_option('default_library') != 'static'
+    error('Devkits can only be generated from static libraries')
+  endif
+  mkdevkit = find_program('./releng/mkdevkit.py')
+  uninstalled_dir = meson.global_build_root() / 'meson-uninstalled'
+  devkit_options = [
+    '--cc=' + '!'.join(cc.cmd_array()),
+    '--c-args=' + '!'.join(get_option('c_args')),
+    '--pkg-config-path=' + '!'.join([uninstalled_dir] + get_option('pkg_config_path')),
+  ]
+  if host_toolchain == 'microsoft'
+    static_lib_prefix = ''
+    static_lib_suffix = '.lib'
+    devkit_options += ['--lib=' + lib.full_path()]
+  else
+    static_lib_prefix = 'lib'
+    static_lib_suffix = '.a'
+    devkit_options += [
+      '--ar=' + ar.full_path(),
+      '--nm=' + nm.full_path(),
+    ]
+    objcopy = find_program('objcopy', required: false)
+    if objcopy.found()
+      devkit_options += '--objcopy=' + objcopy.full_path()
+    endif
+  endif
+  if host_os_family == 'darwin'
+    devkit_options += ['--libtool=' + libtool.full_path()]
+  endif
+endif
+
+modulate = [
+  python,
+  files('tools' / 'modulate.py'),
+  '--endian', host_machine.endian(),
+  '--nm', '>>>', nm, '<<<',
+  '--readelf', '>>>', readelf, '<<<',
+  '--otool', '>>>', otool, '<<<',
+  '--output', '@OUTPUT@',
+  '@INPUT@',
+]
+post_process = [
+  python,
+  files('tools' / 'post-process.py'),
   host_os,
   '>>>', strip, '<<<',
   get_option('strip').to_string(),
-  install_name_tool,
-  codesign,
+  '>>>', install_name_tool, '<<<',
+  '>>>', codesign, '<<<',
+  '@OUTPUT@',
+  '@INPUT0@',
 ]
 
 mapper_opt = get_option('mapper')
@@ -413,13 +554,6 @@ else
 endif
 if have_mapper
   cdata.set('HAVE_MAPPER', 1)
-endif
-
-have_compiler_backend = get_option('compiler_backend') \
-    .disable_auto_if(host_os == 'watchos') \
-    .allowed()
-if have_compiler_backend
-  vala_flags += '--define=HAVE_COMPILER_BACKEND'
 endif
 
 configure_file(
@@ -449,12 +583,12 @@ endif
 if get_option('agent_legacy') != ''
   vala_flags += ['--define=CROSS_ARCH']
 endif
-add_project_arguments(vala_flags, language: ['vala'])
+add_project_arguments(vala_flags, language: 'vala')
 
 native_vala_flags = [
   '--vapidir=' + meson.current_source_dir() / 'vapi',
 ]
-add_project_arguments(native_vala_flags, language: ['vala'], native: true)
+add_project_arguments(native_vala_flags, language: 'vala', native: true)
 
 subdir('tools')
 subdir('lib')

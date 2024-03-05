@@ -10,11 +10,19 @@ namespace Frida {
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
 #if !IOS && !ANDROID && !TVOS
+#if HAVE_FRUITY_BACKEND
 			add_backend (new FruityHostSessionBackend ());
+#endif
+#if HAVE_DROIDY_BACKEND
 			add_backend (new DroidyHostSessionBackend ());
 #endif
+#endif
+#if HAVE_SOCKET_BACKEND
 			add_backend (new SocketHostSessionBackend ());
+#endif
+#if HAVE_BAREBONE_BACKEND
 			add_backend (new BareboneHostSessionBackend ());
+#endif
 		}
 
 		public HostSessionService.with_local_backend_only () {
@@ -22,10 +30,13 @@ namespace Frida {
 		}
 
 		public HostSessionService.with_socket_backend_only () {
+#if HAVE_SOCKET_BACKEND
 			add_backend (new SocketHostSessionBackend ());
+#endif
 		}
 
 		private void add_local_backends () {
+#if HAVE_LOCAL_BACKEND
 #if WINDOWS
 			add_backend (new WindowsHostSessionBackend ());
 #endif
@@ -40,6 +51,7 @@ namespace Frida {
 #endif
 #if QNX
 			add_backend (new QnxHostSessionBackend ());
+#endif
 #endif
 		}
 
@@ -1523,6 +1535,7 @@ namespace Frida {
 
 	internal delegate bool UninjectPredicate ();
 
+#if HAVE_FRUITY_BACKEND || HAVE_DROIDY_BACKEND
 	internal async DBusConnection establish_direct_connection (TransportBroker broker, AgentSessionId id,
 			ChannelProvider channel_provider, Cancellable? cancellable) throws Error, IOError {
 		uint16 port;
@@ -1546,4 +1559,5 @@ namespace Frida {
 			throw new Error.TRANSPORT ("%s", e.message);
 		}
 	}
+#endif
 }
