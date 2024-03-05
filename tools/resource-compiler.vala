@@ -66,7 +66,7 @@ namespace Frida {
 						toolchain = Toolchain.GNU;
 						break;
 					default:
-						stderr.printf ("Invalid toolchain. Please specify either `microsoft`, `apple` or `gnu`.\n");
+						stderr.printf ("Invalid toolchain. Specify either `microsoft`, `apple` or `gnu`.\n");
 						return 1;
 				}
 			}
