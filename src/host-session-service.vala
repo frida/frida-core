@@ -44,7 +44,7 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable = null) throws IOError {
-			var remaining = backends.size;
+			var remaining = backends.size + 1;
 
 			NotifyCompleteFunc on_complete = () => {
 				remaining--;
@@ -55,13 +55,20 @@ namespace Frida {
 			foreach (var backend in backends)
 				perform_start.begin (backend, cancellable, on_complete);
 
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				on_complete ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+
 			yield;
 
 			on_complete = null;
 		}
 
 		public async void stop (Cancellable? cancellable = null) throws IOError {
-			var remaining = backends.size;
+			var remaining = backends.size + 1;
 
 			NotifyCompleteFunc on_complete = () => {
 				remaining--;
@@ -71,6 +78,13 @@ namespace Frida {
 
 			foreach (var backend in backends)
 				perform_stop.begin (backend, cancellable, on_complete);
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				on_complete ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
 
 			yield;
 
