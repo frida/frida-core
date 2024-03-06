@@ -379,7 +379,7 @@ namespace Frida {
 
 						asource.put_string (".globl FRIDA_CSYM (" + blob_identifier + ")\n");
 						asource.put_string ("FRIDA_CSYM (" + blob_identifier + "):\n");
-						asource.put_string (".incbin \"" + prepared_resource.file.get_path () + "\"\n");
+						asource.put_string (".incbin " + quote (prepared_resource.file.get_path ()) + "\n");
 
 						if (!is_dylib)
 							asource.put_string (".byte 0\n");
@@ -541,6 +541,13 @@ namespace Frida {
 			}
 
 			return builder.str;
+		}
+
+		private static string quote (string path) {
+			string lit = path
+				.replace ("\\", "\\\\")
+				.replace ("\"", "\\\"");
+			return "\"" + lit + "\"";
 		}
 
 		private static void compress_file (owned CompressRequest request) {
