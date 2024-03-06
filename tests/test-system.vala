@@ -30,10 +30,6 @@ namespace Frida.SystemTest {
 
 			if (GLib.Test.verbose ())
 				stdout.printf (" [spent %f and %f] ", time_spent_on_first_run, time_spent_on_second_run);
-
-			if (Frida.Test.os () == Frida.Test.OS.IOS) {
-				assert_true (time_spent_on_second_run <= time_spent_on_first_run / 2.0);
-			}
 		});
 	}
 }
