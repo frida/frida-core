@@ -421,15 +421,10 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			Cancellable? cancellable = null;
 
 			string agent_filename;
-#if WINDOWS
-			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
-			if (sizeof (void *) == 4)
-				agent_filename = Path.build_filename (intermediate_root_dir, "frida-agent-32", "frida-agent-32.dll");
-			else
-				agent_filename = Path.build_filename (intermediate_root_dir, "frida-agent-64", "frida-agent-64.dll");
-#else
 			string shlib_extension;
-#if DARWIN
+#if WINDOWS
+			shlib_extension = "dll";
+#elif DARWIN
 			shlib_extension = "dylib";
 #else
 			shlib_extension = "so";
@@ -442,7 +437,6 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			agent_filename = Path.build_filename (frida_root_dir, "lib", "frida", "frida-agent." + shlib_extension);
 			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
 				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", "frida-agent." + shlib_extension);
-#endif
 #endif
 
 			try {
