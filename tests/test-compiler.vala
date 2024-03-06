@@ -56,6 +56,7 @@ namespace Frida.CompilerTest {
 				compiler = null;
 				yield device_manager.close ();
 			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
 
