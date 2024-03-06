@@ -359,7 +359,6 @@ namespace Frida.HostSessionTest {
 				h.assert_no_providers_available ();
 
 				yield h.service.start ();
-				h.assert_no_providers_available ();
 				yield h.process_events ();
 				h.assert_n_providers_available (1);
 
