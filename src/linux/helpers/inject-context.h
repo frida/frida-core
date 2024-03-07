@@ -26,24 +26,27 @@ typedef int FridaRtldFlavor;
 
 enum _FridaBootstrapStatus
 {
+  FRIDA_BOOTSTRAP_ALLOCATION_SUCCESS,
+  FRIDA_BOOTSTRAP_ALLOCATION_ERROR,
+
   FRIDA_BOOTSTRAP_SUCCESS,
   FRIDA_BOOTSTRAP_AUXV_NOT_FOUND,
   FRIDA_BOOTSTRAP_TOO_EARLY,
   FRIDA_BOOTSTRAP_LIBC_LOAD_ERROR,
   FRIDA_BOOTSTRAP_LIBC_UNSUPPORTED,
-  FRIDA_BOOTSTRAP_MMAP_ERROR,
 };
 
 struct _FridaBootstrapContext
 {
+  void * allocation_base;
+  size_t allocation_size;
+
   size_t page_size;
   const char * fallback_ld;
   const char * fallback_libc;
   FridaRtldFlavor rtld_flavor;
   void * rtld_base;
   void * r_brk;
-  size_t loader_size;
-  void * loader_base;
   int enable_ctrlfds;
   int ctrlfds[2];
   FridaLibcApi * libc;

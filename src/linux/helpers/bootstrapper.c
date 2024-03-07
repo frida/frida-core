@@ -155,6 +155,14 @@ frida_bootstrap (FridaBootstrapContext * ctx)
   FridaLibcApi * libc = ctx->libc;
   FridaProcessLayout process;
 
+  if (ctx->allocation_base == NULL)
+  {
+    ctx->allocation_base = mmap (NULL, ctx->allocation_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return (ctx->allocation_base == MAP_FAILED)
+        ? FRIDA_BOOTSTRAP_ALLOCATION_ERROR
+        : FRIDA_BOOTSTRAP_ALLOCATION_SUCCESS;
+  }
+
   if (!frida_probe_process (ctx->page_size, &process))
     return FRIDA_BOOTSTRAP_AUXV_NOT_FOUND;
 
@@ -173,10 +181,6 @@ frida_bootstrap (FridaBootstrapContext * ctx)
 
   if (!frida_resolve_libc_apis (&process, libc))
     return FRIDA_BOOTSTRAP_LIBC_UNSUPPORTED;
-
-  ctx->loader_base = mmap (NULL, ctx->loader_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (ctx->loader_base == MAP_FAILED)
-    return FRIDA_BOOTSTRAP_MMAP_ERROR;
 
   ctx->ctrlfds[0] = -1;
   ctx->ctrlfds[1] = -1;
@@ -1109,28 +1113,31 @@ frida_prctl (int option, unsigned long arg2, unsigned long arg3, unsigned long a
 
 #ifdef BUILDING_TEST_PROGRAM
 
+#include <assert.h>
 #include <stdio.h>
 #include <strings.h>
 
 int
 main (void)
 {
-  FridaLibcApi libc;
   FridaBootstrapContext ctx;
-  size_t result;
-
-  bzero (&libc, sizeof (libc));
+  FridaBootstrapStatus status;
+  FridaLibcApi libc;
 
   bzero (&ctx, sizeof (ctx));
+  ctx.allocation_size = 4096;
+  status = frida_bootstrap (&ctx);
+  assert (status == FRIDA_BOOTSTRAP_ALLOCATION_SUCCESS);
+  printf ("allocation_base: %p\n", ctx.allocation_base);
+  assert (ctx.allocation_base != NULL);
+
+  bzero (&libc, sizeof (libc));
   ctx.page_size = getpagesize ();
-  ctx.loader_size = 4096;
   ctx.enable_ctrlfds = true;
   ctx.libc = &libc;
 
-  result = frida_bootstrap (&ctx);
-
-  printf ("result: %zu\n", result);
-  printf ("loader_base: %p\n", ctx.loader_base);
+  status = frida_bootstrap (&ctx);
+  printf ("status: %zu\n", status);
 
   return 0;
 }

@@ -900,7 +900,7 @@ namespace Frida {
 			LoaderLayout loader_layout = compute_loader_layout (spec, fallback_address);
 
 			BootstrapResult bootstrap_result = yield bootstrap (loader_layout.size, cancellable);
-			var loader_base = (uint64) bootstrap_result.context.loader_base;
+			var loader_base = (uint64) bootstrap_result.context.allocation_base;
 
 			try {
 				unowned uint8[] loader_code = Frida.Data.HelperBackend.get_loader_bin_blob ().data;
@@ -915,9 +915,9 @@ namespace Frida {
 				loader_ctx.libc = (HelperLibcApi *) (loader_base + loader_layout.libc_api_offset);
 				write_memory (loader_base + loader_layout.ctx_offset, (uint8[]) &loader_ctx);
 				write_memory (loader_base + loader_layout.libc_api_offset, (uint8[]) &bootstrap_result.libc);
-				write_memory (loader_base + loader_layout.agent_entrypoint_offset, spec.entrypoint.data);
-				write_memory (loader_base + loader_layout.agent_data_offset, spec.data.data);
-				write_memory (loader_base + loader_layout.fallback_address_offset, fallback_address.data);
+				write_memory_string (loader_base + loader_layout.agent_entrypoint_offset, spec.entrypoint);
+				write_memory_string (loader_base + loader_layout.agent_data_offset, spec.data);
+				write_memory_string (loader_base + loader_layout.fallback_address_offset, fallback_address);
 
 				return yield launch_loader (FROM_SCRATCH, spec, bootstrap_result, null, fallback_address, loader_layout,
 					cancellable);
@@ -940,7 +940,7 @@ namespace Frida {
 
 			string fallback_address = make_fallback_address ();
 			LoaderLayout loader_layout = compute_loader_layout (spec, fallback_address);
-			uint64 loader_base = (uint64) bootstrap_result.context.loader_base;
+			uint64 loader_base = (uint64) bootstrap_result.context.allocation_base;
 			uint64 loader_ctrlfds_location = loader_base + loader_layout.ctx_offset;
 
 			if (bootstrap_result.context.enable_ctrlfds) {
@@ -1014,7 +1014,7 @@ namespace Frida {
 			Future<RemoteAgent> future_agent =
 				establish_connection (launch, spec, bres, agent_ctrl, fallback_address, cancellable);
 
-			var loader_base = (uint64) bres.context.loader_base;
+			var loader_base = (uint64) bres.context.allocation_base;
 
 			var call_builder = new RemoteCallBuilder (loader_base, saved_regs);
 			call_builder.add_argument (loader_base + loader_layout.ctx_offset);
@@ -1072,8 +1072,10 @@ namespace Frida {
 			var result = new BootstrapResult ();
 
 			unowned uint8[] bootstrapper_code = Frida.Data.HelperBackend.get_bootstrapper_bin_blob ().data;
-			uint64 bootstrapper_base = 0;
 			size_t bootstrapper_size = round_size_to_page_size (bootstrapper_code.length);
+
+			uint64 allocation_base = 0;
+			size_t allocation_size = size_t.max (bootstrapper_size, loader_size);
 
 			uint64 remote_mmap = 0;
 			uint64 remote_munmap = 0;
@@ -1085,28 +1087,46 @@ namespace Frida {
 			}
 
 			if (remote_mmap != 0) {
-				bootstrapper_base = yield allocate_memory (remote_mmap, bootstrapper_size,
+				allocation_base = yield allocate_memory (remote_mmap, allocation_size,
 					Posix.PROT_READ | Posix.PROT_WRITE | Posix.PROT_EXEC, cancellable);
+			} else {
+				var code_swap = yield new ProcessCodeSwapScope (this, bootstrapper_code, cancellable);
+				uint64 code_start = code_swap.code_start;
+				uint64 code_end = code_start + bootstrapper_size;
+				maybe_fixup_helper_code (code_start, bootstrapper_code);
+
+				var call_builder = new RemoteCallBuilder (code_start, saved_regs);
+
+				uint64 bootstrap_ctx_location;
+				call_builder.reserve_stack_space (sizeof (HelperBootstrapContext), out bootstrap_ctx_location);
+
+				var bootstrap_ctx = HelperBootstrapContext ();
+				bootstrap_ctx.allocation_size = allocation_size;
+				write_memory (bootstrap_ctx_location, (uint8[]) &bootstrap_ctx);
+
+				call_builder.add_argument (bootstrap_ctx_location);
+
+				RemoteCallResult bootstrap_result = yield call_builder.build (this).execute (cancellable);
+				var status = (HelperBootstrapStatus) bootstrap_result.return_value;
+				if (bootstrap_result.status != COMPLETED || status != ALLOCATION_SUCCESS)
+					throw_bootstrap_error (bootstrap_result, status, code_start, code_end);
+
+				uint8[] output_context = read_memory (bootstrap_ctx_location, sizeof (HelperBootstrapContext));
+				Memory.copy (&bootstrap_ctx, output_context, output_context.length);
+
+				allocation_base = (uint64) bootstrap_ctx.allocation_base;
+
+				code_swap.revert ();
 			}
 
 			try {
-				if (bootstrapper_base != 0)
-					write_memory (bootstrapper_base, bootstrapper_code);
+				write_memory (allocation_base, bootstrapper_code);
+				maybe_fixup_helper_code (allocation_base, bootstrapper_code);
+				uint64 code_start = allocation_base;
+				uint64 code_end = code_start + bootstrapper_size;
 
 				HelperBootstrapStatus status = SUCCESS;
 				do {
-					uint64 code_start;
-					ProcessCodeSwapScope? code_swap = null;
-					if (bootstrapper_base != 0) {
-						code_start = bootstrapper_base;
-					} else {
-						code_swap = yield new ProcessCodeSwapScope (this, bootstrapper_code, cancellable);
-						code_start = code_swap.code_start;
-					}
-					uint64 code_end = code_start + bootstrapper_size;
-
-					maybe_fixup_helper_code (code_start, bootstrapper_code);
-
 					var call_builder = new RemoteCallBuilder (code_start, saved_regs);
 
 					unowned uint8[] fallback_ld_data = fallback_ld.data;
@@ -1120,10 +1140,11 @@ namespace Frida {
 						.reserve_stack_space (fallback_libc_data.length + 1, out fallback_libc_location);
 
 					var bootstrap_ctx = HelperBootstrapContext ();
+					bootstrap_ctx.allocation_base = (void *) allocation_base;
+					bootstrap_ctx.allocation_size = allocation_size;
 					bootstrap_ctx.page_size = Gum.query_page_size ();
 					bootstrap_ctx.fallback_ld = (string *) fallback_ld_location;
 					bootstrap_ctx.fallback_libc = (string *) fallback_libc_location;
-					bootstrap_ctx.loader_size = loader_size;
 					bootstrap_ctx.enable_ctrlfds = PidFileDescriptor.getfd_is_supported ();
 					bootstrap_ctx.libc = (HelperLibcApi *) libc_api_location;
 					write_memory (bootstrap_ctx_location, (uint8[]) &bootstrap_ctx);
@@ -1144,26 +1165,8 @@ namespace Frida {
 						status = (HelperBootstrapStatus) bootstrap_result.return_value;
 					}
 
-					if (!(bootstrap_result.status == COMPLETED && (status == SUCCESS || status == TOO_EARLY))) {
-						if (bootstrap_result.status == COMPLETED) {
-							throw new Error.NOT_SUPPORTED ("Bootstrapper failed due to '%s'; " +
-								"please file a bug",
-								Marshal.enum_to_nick<HelperBootstrapStatus> (status));
-						} else {
-							uint64 pc = bootstrap_result.regs.program_counter;
-							if (pc >= code_start && pc < code_end) {
-								throw new Error.NOT_SUPPORTED (
-									"Bootstrapper crashed with signal %d at offset 0x%x; please file a bug\n%s",
-									bootstrap_result.stop_signal,
-									(uint) (pc - code_start),
-									bootstrap_result.regs.to_string ());
-							} else {
-								throw new Error.NOT_SUPPORTED ("Bootstrapper crashed with signal %d; please file a bug\n%s",
-									bootstrap_result.stop_signal,
-									bootstrap_result.regs.to_string ());
-							}
-						}
-					}
+					if (!(bootstrap_result.status == COMPLETED && (status == SUCCESS || status == TOO_EARLY)))
+						throw_bootstrap_error (bootstrap_result, status, code_start, code_end);
 
 					uint8[] output_context = read_memory (bootstrap_ctx_location, sizeof (HelperBootstrapContext));
 					Memory.copy (&result.context, output_context, output_context.length);
@@ -1184,19 +1187,13 @@ namespace Frida {
 						result.libc.dlerror = rebase_pointer ((uintptr) dlerror, local_android_ld, remote_ld);
 					}
 
-					if (code_swap != null)
-						code_swap.revert ();
-
 					if (status == TOO_EARLY)
 						yield resume_until_execution_reaches ((uint64) result.context.r_brk, cancellable);
 				} while (status == TOO_EARLY);
-
-				if (bootstrapper_base != 0)
-					yield deallocate_memory (remote_munmap, bootstrapper_base, bootstrapper_size, cancellable);
 			} catch (GLib.Error e) {
-				if (bootstrapper_base != 0) {
+				if (remote_munmap != 0) {
 					try {
-						yield deallocate_memory (remote_munmap, bootstrapper_base, bootstrapper_size, null);
+						yield deallocate_memory (remote_munmap, allocation_base, allocation_size, null);
 					} catch (GLib.Error e) {
 					}
 				}
@@ -1205,6 +1202,29 @@ namespace Frida {
 			}
 
 			return result;
+		}
+
+		[NoReturn]
+		private static void throw_bootstrap_error (RemoteCallResult bootstrap_result, HelperBootstrapStatus status,
+				uint64 code_start, uint64 code_end) throws Error {
+			if (bootstrap_result.status == COMPLETED) {
+				throw new Error.NOT_SUPPORTED ("Bootstrapper failed due to '%s'; " +
+					"please file a bug",
+					Marshal.enum_to_nick<HelperBootstrapStatus> (status));
+			} else {
+				uint64 pc = bootstrap_result.regs.program_counter;
+				if (pc >= code_start && pc < code_end) {
+					throw new Error.NOT_SUPPORTED (
+						"Bootstrapper crashed with signal %d at offset 0x%x; please file a bug\n%s",
+						bootstrap_result.stop_signal,
+						(uint) (pc - code_start),
+						bootstrap_result.regs.to_string ());
+				} else {
+					throw new Error.NOT_SUPPORTED ("Bootstrapper crashed with signal %d; please file a bug\n%s",
+						bootstrap_result.stop_signal,
+						bootstrap_result.regs.to_string ());
+				}
+			}
 		}
 
 		private static void * rebase_pointer (uintptr local_ptr, ProcMapsEntry local_module, ProcMapsEntry remote_module) {
@@ -1371,8 +1391,8 @@ namespace Frida {
 		}
 
 		public async void deallocate (BootstrapResult bres, Cancellable? cancellable) throws Error, IOError {
-			yield deallocate_memory ((uint64) bres.libc.munmap, (uint64) bres.context.loader_base, bres.context.loader_size,
-				cancellable);
+			yield deallocate_memory ((uint64) bres.libc.munmap, (uint64) bres.context.allocation_base,
+				bres.context.allocation_size, cancellable);
 		}
 	}
 
@@ -1672,23 +1692,26 @@ namespace Frida {
 	}
 
 	protected enum HelperBootstrapStatus {
+		ALLOCATION_SUCCESS,
+		ALLOCATION_ERROR,
+
 		SUCCESS,
 		AUXV_NOT_FOUND,
 		TOO_EARLY,
 		LIBC_LOAD_ERROR,
 		LIBC_UNSUPPORTED,
-		MMAP_ERROR,
 	}
 
 	protected struct HelperBootstrapContext {
+		void * allocation_base;
+		size_t allocation_size;
+
 		size_t page_size;
 		string * fallback_ld;
 		string * fallback_libc;
 		HelperRtldFlavor rtld_flavor;
 		void * rtld_base;
 		void * r_brk;
-		size_t loader_size;
-		void * loader_base;
 		bool enable_ctrlfds;
 		int ctrlfds[2];
 		HelperLibcApi * libc;
@@ -2179,6 +2202,11 @@ namespace Frida {
 
 				offset += chunk_size;
 			}
+		}
+
+		public void write_memory_string (uint64 address, string str) throws Error {
+			unowned uint8[] data = str.data;
+			write_memory (address, data[:data.length + 1]);
 		}
 
 		private static ssize_t process_vm_readv_impl (uint pid,
