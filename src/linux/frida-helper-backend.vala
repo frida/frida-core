@@ -856,8 +856,8 @@ namespace Frida {
 			uint local_pid = Posix.getpid ();
 			local_libc = ProcMapsEntry.find_by_path (local_pid, libc_name);
 			assert (local_libc != null);
-			mmap_offset = (uint64) Gum.Module.find_export_by_name (libc_name, "mmap") - local_libc.base_address;
-			munmap_offset = (uint64) Gum.Module.find_export_by_name (libc_name, "munmap") - local_libc.base_address;
+			mmap_offset = (uint64) (uintptr) Gum.Module.find_export_by_name (libc_name, "mmap") - local_libc.base_address;
+			munmap_offset = (uint64) (uintptr) Gum.Module.find_export_by_name (libc_name, "munmap") - local_libc.base_address;
 
 			try {
 				var program = new Gum.ElfModule.from_file ("/proc/self/exe");
@@ -900,7 +900,7 @@ namespace Frida {
 			LoaderLayout loader_layout = compute_loader_layout (spec, fallback_address);
 
 			BootstrapResult bootstrap_result = yield bootstrap (loader_layout.size, cancellable);
-			var loader_base = (uint64) bootstrap_result.context.allocation_base;
+			uint64 loader_base = (uintptr) bootstrap_result.context.allocation_base;
 
 			try {
 				unowned uint8[] loader_code = Frida.Data.HelperBackend.get_loader_bin_blob ().data;
@@ -923,7 +923,7 @@ namespace Frida {
 					cancellable);
 			} catch (GLib.Error error) {
 				try {
-					yield deallocate_memory ((uint64) bootstrap_result.libc.munmap, loader_base, loader_layout.size,
+					yield deallocate_memory ((uintptr) bootstrap_result.libc.munmap, loader_base, loader_layout.size,
 						null);
 				} catch (GLib.Error e) {
 				}
@@ -940,11 +940,11 @@ namespace Frida {
 
 			string fallback_address = make_fallback_address ();
 			LoaderLayout loader_layout = compute_loader_layout (spec, fallback_address);
-			uint64 loader_base = (uint64) bootstrap_result.context.allocation_base;
+			uint64 loader_base = (uintptr) bootstrap_result.context.allocation_base;
 			uint64 loader_ctrlfds_location = loader_base + loader_layout.ctx_offset;
 
 			if (bootstrap_result.context.enable_ctrlfds) {
-				var builder = new RemoteCallBuilder ((uint64) bootstrap_result.libc.socketpair, saved_regs);
+				var builder = new RemoteCallBuilder ((uintptr) bootstrap_result.libc.socketpair, saved_regs);
 				builder
 					.add_argument (Posix.AF_UNIX)
 					.add_argument (Posix.SOCK_STREAM | SOCK_CLOEXEC)
@@ -1014,7 +1014,7 @@ namespace Frida {
 			Future<RemoteAgent> future_agent =
 				establish_connection (launch, spec, bres, agent_ctrl, fallback_address, cancellable);
 
-			var loader_base = (uint64) bres.context.allocation_base;
+			uint64 loader_base = (uintptr) bres.context.allocation_base;
 
 			var call_builder = new RemoteCallBuilder (loader_base, saved_regs);
 			call_builder.add_argument (loader_base + loader_layout.ctx_offset);
@@ -1114,7 +1114,7 @@ namespace Frida {
 				uint8[] output_context = read_memory (bootstrap_ctx_location, sizeof (HelperBootstrapContext));
 				Memory.copy (&bootstrap_ctx, output_context, output_context.length);
 
-				allocation_base = (uint64) bootstrap_ctx.allocation_base;
+				allocation_base = (uintptr) bootstrap_ctx.allocation_base;
 
 				code_swap.revert ();
 			}
@@ -1391,7 +1391,7 @@ namespace Frida {
 		}
 
 		public async void deallocate (BootstrapResult bres, Cancellable? cancellable) throws Error, IOError {
-			yield deallocate_memory ((uint64) bres.libc.munmap, (uint64) bres.context.allocation_base,
+			yield deallocate_memory ((uintptr) bres.libc.munmap, (uintptr) bres.context.allocation_base,
 				bres.context.allocation_size, cancellable);
 		}
 	}
