@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  FRIDA_CORE_OPTIONS: '--with-devkits=core --enable-tests'
+
+jobs:
+  native:
+    strategy:
+      matrix:
+        include:
+          - { id: windows-x86_64, runner: '"windows-latest"'                    }
+          - { id: windows-x86,    runner: '"windows-latest"'                    }
+          - { id: macos-x86_64,   runner: '"macos-latest"'                      }
+          - { id: macos-arm64,    runner: '"macos-14"'                          }
+          - { id: linux-x86_64,   runner: '"ubuntu-latest"'                     }
+          - { id: linux-x86,      runner: '"ubuntu-latest"'                     }
+          - { id: freebsd-arm64,  runner: '["self-hosted", "freebsd", "arm64"]' }
+      fail-fast: false
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Apple certificates
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        uses: ./.github/actions/setup-apple-certificates
+        with:
+          certificates-p12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          certificates-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+      - name: Relax macOS security policy to avoid prompts
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: sudo security authorizationdb write system.privilege.taskport allow
+      - name: Install gcc-multilib
+        if: matrix.id == 'linux-x86'
+        run: sudo apt-get install gcc-multilib lib32stdc++-11-dev
+      - name: Build
+        if: ${{ startsWith(matrix.id, 'windows-') }}
+        run: |
+          .\configure ${{ env.FRIDA_CORE_OPTIONS }}
+          .\make
+      - name: Build
+        if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
+        run: |
+          ./configure ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Build
+        if: matrix.id == 'linux-x86'
+        run: |
+          CC="gcc -m32" CXX="g++ -m32" STRIP="strip" \
+              ./configure --build=linux-x86 --host=linux-x86 ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Upload devkit
+        if: ${{ !startsWith(matrix.id, 'linux-') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-devkit-${{ matrix.id }}
+          path: build/src/devkit/
+      - name: Test
+        run: make test
+
+  cross:
+    strategy:
+      matrix:
+        include:
+          - { id: windows-x86_64-mingw, opts: '--host=x86_64-w64-mingw32 --without-prebuilds=sdk:host', pkg: g++-mingw-w64-x86-64        }
+          - { id: windows-x86-mingw,    opts: '--host=i686-w64-mingw32 --without-prebuilds=sdk:host',   pkg: g++-mingw-w64-i686          }
+          - { id: linux-mips,           opts: '--host=mips-linux-gnu',                                  pkg: g++-mips-linux-gnu          }
+          - { id: linux-mipsel,         opts: '--host=mipsel-linux-gnu',                                pkg: g++-mipsel-linux-gnu        }
+          - { id: linux-mips64,         opts: '--host=mips64-linux-gnuabi64',                           pkg: g++-mips64-linux-gnuabi64   }
+          - { id: linux-mips64el,       opts: '--host=mips64el-linux-gnuabi64',                         pkg: g++-mips64el-linux-gnuabi64 }
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install toolchain
+        run: sudo apt-get install ${{ matrix.pkg }}
+      - name: Build
+        run: |
+          ./configure ${{ matrix.opts }} ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Upload devkit
+        if: ${{ !startsWith(matrix.id, 'linux-') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-devkit-${{ matrix.id }}
+          path: build/src/devkit/
+
+  manylinux:
+    strategy:
+      matrix:
+        arch: [x86, x86_64, x86_64-musl, armhf, arm64, arm64-musl, mips, mipsel, mips64, mips64el]
+      fail-fast: false
+    runs-on: ubuntu-latest
+    container: ghcr.io/frida/x-tools-linux-${{ matrix.arch }}:latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build
+        run: |
+          ./configure --host=$XTOOLS_HOST ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Upload devkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-devkit-linux-${{ matrix.arch }}
+          path: build/src/devkit/
+      - name: Test
+        if: matrix.arch == 'x86' || matrix.arch == 'x86_64'
+        run: make test
+
+  mobile:
+    strategy:
+      matrix:
+        id:
+          - ios-arm64
+          - android-x86
+          - android-x86_64
+          - android-arm
+          - android-arm64
+      fail-fast: false
+    runs-on: macos-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Apple certificates
+        if: startsWith(matrix.id, 'ios-')
+        uses: ./.github/actions/setup-apple-certificates
+        with:
+          certificates-p12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          certificates-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+      - name: Build
+        run: |
+          ./configure --host=${{ matrix.id }} ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Upload devkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-devkit-${{ matrix.id }}
+          path: build/src/devkit/
+      - name: Package tests
+        run: |
+          mkdir -p /tmp/pkg
+          cd build
+          case ${{ matrix.id }} in
+            ios-*)
+              shlibext=.dylib
+              ;;
+            android-*)
+              shlibext=.so
+              ;;
+          esac
+          cp -a tests/frida-tests tests/labrats lib/agent/frida-agent$shlibext /tmp/pkg/
+          tar -C /tmp/pkg -czf /tmp/runner.tar.gz .
+      - name: Test on Corellium iOS device
+        if: matrix.id == 'ios-arm64'
+        uses: frida/corellium-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          gateway: corellium.frida.re
+          device: ios-12.5.7-arm64
+          upload: /tmp/runner.tar.gz
+          run: |
+            cd /usr/local
+            rm -rf opt/frida
+            mkdir -p opt/frida
+            cd opt/frida
+            tar xf $ASSET_PATH
+            ./frida-tests
+      - name: Test on Corellium Android device
+        if: startsWith(matrix.id, 'android-arm')
+        uses: frida/corellium-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          gateway: corellium.frida.re
+          device: android-8.1.0-arm64
+          upload: /tmp/runner.tar.gz
+          run: |
+            cd /data/local/tmp
+            tar xf $ASSET_PATH
+            ./frida-tests
+
+  qnx-armeabi:
+    runs-on: ubuntu-latest
+    container: ghcr.io/frida/qnx-tools:latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build
+        run: |
+          CFLAGS="--sysroot=$QNX_TARGET/armle-v7" \
+              ./configure --host=arm-unknown-nto-qnx6.5.0eabi ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Upload devkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-devkit-qnx-armeabi
+          path: build/src/devkit/
+      - name: Test
+        run: |
+          mkdir -p /tmp/pkg
+          cd build
+          cp -a tests/frida-tests tests/labrats lib/agent/frida-agent.so /tmp/pkg/
+          tar -C /tmp/pkg -cf /tmp/runner.tar .
+          /opt/sabrelite/run.sh /tmp/runner.tar /opt/frida/frida-tests
