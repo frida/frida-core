@@ -409,6 +409,7 @@ frida_test_process_backend_kill (void * handle)
 #if defined (HAVE_DARWIN) || defined (HAVE_QNX)
   kill (GPOINTER_TO_SIZE (handle), SIGKILL);
 #else
+  g_subprocess_force_exit (handle);
   g_object_unref (handle);
 #endif
 }
