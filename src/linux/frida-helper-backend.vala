@@ -1188,7 +1188,7 @@ namespace Frida {
 					}
 
 					if (status == TOO_EARLY)
-						yield resume_until_execution_reaches ((uint64) result.context.r_brk, cancellable);
+						yield resume_until_execution_reaches ((uintptr) result.context.r_brk, cancellable);
 				} while (status == TOO_EARLY);
 			} catch (GLib.Error e) {
 				if (remote_munmap != 0) {
