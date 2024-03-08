@@ -753,6 +753,8 @@ namespace Frida {
 
 		public async void wait_for_exec (Cancellable? cancellable) throws Error, IOError {
 			yield wait_for_signal (TRAP, cancellable);
+			step ();
+			yield wait_for_signal (TRAP, cancellable);
 		}
 	}
 
