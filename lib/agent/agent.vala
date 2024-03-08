@@ -81,7 +81,7 @@ namespace Frida.Agent {
 
 		private uint child_gating_subscriber_count = 0;
 		private ForkMonitor? fork_monitor;
-		private FileDescriptorGuard fd_guard;
+		private FileDescriptorGuard? fd_guard;
 		private ThreadCountCloaker? thread_count_cloaker;
 		private ThreadListCloaker? thread_list_cloaker;
 		private FDListCloaker? fd_list_cloaker;
