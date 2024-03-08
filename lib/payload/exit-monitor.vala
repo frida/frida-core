@@ -32,7 +32,7 @@ namespace Frida {
 			unowned Gum.InvocationListener listener = this;
 
 #if WINDOWS
-			interceptor.attach (Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
+			interceptor.attach ((void *) Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
 #else
 			unowned string libc = Gum.Process.query_libc_name ();
 			const string[] apis = {
@@ -41,7 +41,7 @@ namespace Frida {
 				"abort",
 			};
 			foreach (var symbol in apis) {
-				interceptor.attach (Gum.Module.find_export_by_name (libc, symbol), listener);
+				interceptor.attach ((void *) Gum.Module.find_export_by_name (libc, symbol), listener);
 			}
 #endif
 		}

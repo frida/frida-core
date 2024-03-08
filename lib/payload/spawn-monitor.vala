@@ -39,10 +39,10 @@ namespace Frida {
 
 #if WINDOWS
 			var create_process_internal = Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW");
-			if (create_process_internal == null)
+			if (create_process_internal == 0)
 				create_process_internal = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
-			assert (create_process_internal != null);
-			interceptor.attach (create_process_internal, this);
+			assert (create_process_internal != 0);
+			interceptor.attach ((void *) create_process_internal, this);
 #else
 			unowned string libc = Gum.Process.query_libc_name ();
 #if DARWIN
@@ -52,14 +52,13 @@ namespace Frida {
 			posix_spawnattr_getflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_getflags");
 			posix_spawnattr_setflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_setflags");
 
-			execve = Gum.Module.find_export_by_name (libc, "execve");
+			execve = (void *) Gum.Module.find_export_by_name (libc, "execve");
 
 			interceptor.attach ((void *) posix_spawn, this);
 
 			interceptor.replace (execve, (void *) replacement_execve, this);
 #else
-			interceptor.attach (Gum.Module.find_export_by_name (libc, "execve"), this);
-#endif
+			interceptor.attach ((void *) Gum.Module.find_export_by_name (libc, "execve"), this);
 #endif
 		}
 

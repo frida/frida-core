@@ -28,7 +28,7 @@ namespace Frida {
 
 			var close = Gum.Module.find_export_by_name (Gum.Process.query_libc_name (), "close");
 			close_listener = new CloseListener (this);
-			interceptor.attach (close, close_listener);
+			interceptor.attach ((void *) close, close_listener);
 		}
 
 		~FileDescriptorGuard () {
