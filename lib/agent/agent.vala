@@ -148,7 +148,6 @@ namespace Frida.Agent {
 					linjector_state->agent_ctrlfd = -1;
 
 					fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
-					Gum.Cloak.add_file_descriptor (agent_ctrlfd);
 
 					agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
 					agent_parameters = agent_parameters_with_transport_uri;
