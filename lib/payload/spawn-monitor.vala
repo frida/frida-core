@@ -58,7 +58,14 @@ namespace Frida {
 
 			interceptor.replace (execve, (void *) replacement_execve, this);
 #else
-			interceptor.attach ((void *) Gum.Module.find_export_by_name (libc, "execve"), this);
+			Gum.Address execve = 0;
+#if ANDROID
+			execve = Gum.Module.find_symbol_by_name (libc, "__execve");
+#endif
+			if (execve == 0)
+				execve = Gum.Module.find_export_by_name (libc, "execve");
+			interceptor.attach ((void *) execve, this);
+#endif
 #endif
 		}
 
