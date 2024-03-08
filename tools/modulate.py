@@ -206,7 +206,9 @@ class ModuleEditor(object):
             else:
                 address = value
 
-            name = symbols.resolve(address)
+            name = symbols.find(address)
+            if name is None:
+                name = f"sub_{address:x}"
             if is_macho and name.startswith("_"):
                 name = name[1:]
 
@@ -413,16 +415,8 @@ class Symbols(object):
     def __repr__(self):
         return "Symbols(items=<{} objects>".format(len(self.items))
 
-    def resolve(self, address):
-        result = self.items.get(address, None)
-        if result is None:
-            raise SymbolNotFound("unable to resolve address 0x{address:0{width}x}".format(address=address, width=self._pointer_size * 2))
-        return result
-
-
-class SymbolNotFound(ValueError):
-    def __init__(self, message):
-        super().__init__(message)
+    def find(self, address):
+        return self.items.get(address, None)
 
 
 class Section(object):
