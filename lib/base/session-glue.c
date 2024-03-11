@@ -2,6 +2,8 @@
 
 #if defined (HAVE_WINDOWS)
 
+#include <windows.h>
+
 gchar *
 _frida_query_windows_version (void)
 {
