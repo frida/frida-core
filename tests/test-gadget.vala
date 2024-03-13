@@ -11,7 +11,7 @@ namespace Frida.GadgetTest {
 				case Frida.Test.OS.MACOS: {
 					var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 					var build_dir = Path.get_dirname (tests_dir);
-					var source_dir = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (build_dir))), "frida-core");
+					var source_dir = Path.get_dirname (build_dir);
 					gadget_dir = Path.build_filename (build_dir, "lib", "gadget");
 					data_dir = Path.build_filename (source_dir, "tests");
 					break;
