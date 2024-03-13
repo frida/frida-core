@@ -5,12 +5,14 @@
 #include <capstone.h>
 #include <gum/gumdarwin.h>
 #include <gum/gummemory.h>
+#include <ptrauth.h>
 
 #define MH_MAGIC_64 0xfeedfacf
 #define LIBUNWIND "/usr/lib/system/libunwind.dylib"
 #define LIBDYLD "/usr/lib/system/libdyld.dylib"
 #define UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO 0x68
 #define UNWIND_CURSOR_VTABLE_OFFSET_GET_REG 0x18
+#define UNWIND_CURSOR_VTABLE_OFFSET_SET_REG 0x20
 #define FP_TO_SP(fp) (fp + 0x10)
 #define UNW_REG_IP -1
 #ifdef HAVE_ARM64
@@ -18,6 +20,7 @@
 # define UNWIND_CURSOR_unwindInfoMissing 0x268
 # define UNWIND_CURSOR_info_format 0x250
 # define UNW_AARCH64_X29 29
+# define UNW_ARM64_RA_SIGN_STATE 34
 # define HIGHEST_NIBBLE 0xf000000000000000UL
 # define STRIP_MASK 0x0000007fffffffffUL
 # if __has_feature (ptrauth_calls)
@@ -80,6 +83,7 @@ struct _UnwindHookState
   GumAddress invader_end;
   void (* set_info) (gpointer cursor, int is_return_address);
   gpointer (* get_reg) (gpointer cursor, int reg);
+  void (* set_reg) (gpointer cursor, int reg, gpointer value);
 };
 
 #if __has_feature (ptrauth_calls)
@@ -162,7 +166,7 @@ void
 _frida_unwind_sitter_hook_libunwind (GumAddress invader_start, GumAddress invader_end)
 {
   gpointer * set_info_slot;
-  gpointer get_reg_impl;
+  gpointer get_reg_impl, set_reg_impl;
   GumPageProtection prot;
 
 #if GLIB_SIZEOF_VOID_P != 8
@@ -187,11 +191,14 @@ _frida_unwind_sitter_hook_libunwind (GumAddress invader_start, GumAddress invade
       UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO + state->shift);
   get_reg_impl = *(gpointer *)(GUM_ADDRESS (state->vtable) +
       UNWIND_CURSOR_VTABLE_OFFSET_GET_REG + state->shift);
+  set_reg_impl = *(gpointer *)(GUM_ADDRESS (state->vtable) +
+      UNWIND_CURSOR_VTABLE_OFFSET_SET_REG + state->shift);
 
   state->set_info_slot = set_info_slot;
   state->set_info_original = *set_info_slot;
   state->set_info = RESIGN_PTR (state->set_info_original);
   state->get_reg = RESIGN_PTR (get_reg_impl);
+  state->set_reg = RESIGN_PTR (set_reg_impl);
 
   if (!gum_memory_query_protection ((gpointer) set_info_slot, &prot))
     goto beach;
@@ -339,7 +346,7 @@ frida_fill_info (const GumDarwinSectionDetails * details, FillInfoContext * ctx)
 static void
 frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
 {
-  gboolean missing_info, signed_ptr_on_arm64 = FALSE;
+  gboolean missing_info;
   GumAddress fp, stored_pc;
   gpointer * stored_pc_slot;
 
@@ -354,7 +361,7 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
   fp = GUM_ADDRESS (state->get_reg (self, UNW_X86_64_RBP));
 #endif
 
-  if (fp == 0)
+  if (fp == 0 || fp == -1)
     return;
 
   missing_info = *((guint8 *)self + UNWIND_CURSOR_unwindInfoMissing);
@@ -364,61 +371,45 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
 #if __has_feature (ptrauth_calls)
   stored_pc = gum_strip_code_address (stored_pc);
 #elif defined (HAVE_ARM64)
-  signed_ptr_on_arm64 = (stored_pc & HIGHEST_NIBBLE) != 0;
+  if ((stored_pc & HIGHEST_NIBBLE) != 0)
+    stored_pc &= STRIP_MASK;
 #endif
 
   if (!missing_info)
   {
-    if (!signed_ptr_on_arm64)
-    {
-      GumAddress translated = GUM_ADDRESS (
-          gum_interceptor_translate_top_return_address (
-              GSIZE_TO_POINTER (stored_pc)));
+    GumAddress translated;
 
-      if (translated != stored_pc)
+    translated = GUM_ADDRESS (
+        gum_interceptor_translate_top_return_address (
+            GSIZE_TO_POINTER (stored_pc)));
+
+    if (translated != stored_pc)
+    {
+#if __has_feature (ptrauth_calls)
+      *stored_pc_slot = ptrauth_sign_unauthenticated (
+          ptrauth_strip (GSIZE_TO_POINTER (translated), ptrauth_key_asia),
+          ptrauth_key_asib, FP_TO_SP (fp));
+#elif defined (HAVE_ARM64)
       {
-#if __has_feature (ptrauth_calls)
-        *stored_pc_slot = ptrauth_sign_unauthenticated (
-            ptrauth_strip (GSIZE_TO_POINTER (translated), ptrauth_key_asia),
-            ptrauth_key_asib, FP_TO_SP (fp));
-#else
-        *stored_pc_slot = GSIZE_TO_POINTER (translated);
-#endif
+        GumAddress resigned;
+
+        asm volatile (
+            "mov x17, %1\n\t"
+            "mov x16, %2\n\t"
+            ".byte 0x5f,0x21,0x03,0xd5\n\t" /* pacib1716 */
+            "mov %0, x17\n\t"
+            : "=r" (resigned)
+            : "r" (translated & STRIP_MASK),
+              "r" (FP_TO_SP(fp))
+            : "x16", "x17"
+        );
+
+        *stored_pc_slot = GSIZE_TO_POINTER (resigned);
       }
-    }
-  }
-  else
-  {
-#ifdef HAVE_ARM64
-    GumAddress stripped_pc, translated;
-    gboolean pc_within_invader;
-
-    stripped_pc = GUM_ADDRESS (state->get_reg (self, UNW_REG_IP)) & STRIP_MASK;
-    pc_within_invader = stripped_pc >= state->invader_start && stripped_pc < state->invader_end;
-
-    if (signed_ptr_on_arm64)
-    {
-      translated = GUM_ADDRESS (
-          gum_interceptor_translate_top_return_address (
-              GSIZE_TO_POINTER (stripped_pc)));
-    }
-    else
-    {
-      translated = stripped_pc;
-    }
-
-    if (!pc_within_invader && translated == stripped_pc)
-      return;
-
-    *(guint32 *)(GUM_ADDRESS (self) + UNWIND_CURSOR_info_format) = UNWIND_ARM64_MODE_FRAME;
-    *((guint8 *)self + UNWIND_CURSOR_unwindInfoMissing) = 0;
-
-#if __has_feature (ptrauth_calls)
-    *stored_pc_slot = ptrauth_sign_unauthenticated (
-        ptrauth_strip (GSIZE_TO_POINTER (stored_pc), ptrauth_key_asia),
-        ptrauth_key_asib, FP_TO_SP (fp));
+#else
+      *stored_pc_slot = GSIZE_TO_POINTER (translated);
 #endif
-#endif
+    }
   }
 }
 
