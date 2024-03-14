@@ -566,7 +566,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			injector_state = &s;
 #endif
 
-			string agent_parameters = transport_address + "|exit-monitor:off|thread-suspend-monitor:off";
+			string agent_parameters = transport_address;
 
 			main_impl (agent_parameters, ref unload_policy, injector_state);
 
