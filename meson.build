@@ -4,6 +4,15 @@ project('frida-core', 'vala', 'c', 'cpp',
   default_options: ['c_std=gnu99,c99', 'cpp_std=c++17'],
 )
 
+if not meson.get_compiler('vala').version().endswith('-frida')
+  error('''Incompatible Vala compiler detected.
+
+Frida currently relies on features not yet upstream. Grab the Frida-optimized
+Vala compiler from:
+
+    https://github.com/frida/vala''')
+endif
+
 api_version = '1.0'
 
 header_install_dir = get_option('includedir') / f'frida-@api_version@'
