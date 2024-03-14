@@ -134,7 +134,7 @@ if have_local_backend
       command: [
         resource_compiler_cmd_array,
         '-c', '@INPUT0@',
-        '-o', join_paths(meson.current_build_dir(), 'frida-data-darwin'),
+        '-o', meson.current_build_dir() / 'frida-data-darwin',
         '@INPUT1@',
         '@INPUT2@',
         '@INPUT3@',
@@ -268,7 +268,7 @@ if have_local_backend
         command: [
           resource_compiler_cmd_array,
           '-c', '@INPUT0@',
-          '-o', join_paths(meson.current_build_dir(), 'frida-data-android'),
+          '-o', meson.current_build_dir() / 'frida-data-android',
           '@INPUT1@',
         ],
       )
@@ -308,7 +308,7 @@ if have_local_backend
       command: [
         resource_compiler_cmd_array,
         '-c', '@INPUT0@',
-        '-o', join_paths(meson.current_build_dir(), 'frida-data-helper-backend'),
+        '-o', meson.current_build_dir() / 'frida-data-helper-backend',
         '@INPUT1@',
         '@INPUT2@',
       ],
@@ -342,7 +342,7 @@ if have_local_backend
       'linux' / 'frida-helper-service.vala',
     ]
     helper_symscript = 'linux' / 'frida-helper.version'
-    helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
+    helper_link_args = ['-Wl,--version-script,' + meson.current_source_dir() / helper_symscript]
     helper_link_depends = [helper_symscript]
     raw_helper = executable('frida-helper-raw', helper_sources,
       vala_args: helper_backend_vala_args,
