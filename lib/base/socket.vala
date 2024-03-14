@@ -848,7 +848,7 @@ namespace Frida {
 			_pending_io = new_io;
 
 			foreach (var entry in sources.entries) {
-				Source source = entry.key;
+				unowned Source source = entry.key;
 				IOCondition c = entry.value;
 				if ((new_io & c) != 0)
 					source.set_ready_time (0);

@@ -447,7 +447,7 @@ namespace Frida {
 			_pending_io = condition;
 
 			foreach (var entry in sources.entries) {
-				Source source = entry.key;
+				unowned Source source = entry.key;
 				IOCondition c = entry.value;
 				if ((_pending_io & c) != 0)
 					source.set_ready_time (0);
@@ -825,7 +825,7 @@ namespace Frida {
 				sctp_events = new_events;
 
 				foreach (var entry in sources.entries) {
-					Source source = entry.key;
+					unowned Source source = entry.key;
 					IOCondition c = entry.value;
 					if ((new_events & c) != 0)
 						source.set_ready_time (0);
