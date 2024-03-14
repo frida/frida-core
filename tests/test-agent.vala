@@ -329,6 +329,12 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 		}
 
 		private static async void thread_suspend_awareness (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
 			var session = yield h.load_agent ();
 
 			try {
