@@ -36,6 +36,16 @@ core_public_vapi = custom_target('frida-core-vapi',
   install_dir: get_option('datadir') / 'vala' / 'vapi',
 )
 
+core_public_vapi_stamp =  custom_target('frida-core-vapi-stamp',
+  input: core_public_vapi,
+  output: f'frida-core-@api_version@.vapi.stamp',
+  command: [
+    generate_api,
+    '--output=vapi-stamp',
+    generate_api_args,
+  ],
+)
+
 core_public_lib = custom_target('frida-core-library',
   input: [core] + internal_libs,
   output: f'libfrida-core-@api_version@.a',
@@ -61,7 +71,7 @@ if host_os == 'android'
 endif
 
 core_public_dep = declare_dependency(
-  sources: [core_public_h, core_public_vapi] + core_public_extra_headers,
+  sources: [core_public_h, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,

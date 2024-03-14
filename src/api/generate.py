@@ -9,7 +9,7 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
-    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
+    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi', 'vapi-stamp'], default='bundle')
     parser.add_argument('api_version', metavar='api-version', type=str)
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
@@ -19,12 +19,17 @@ def main():
 
     args = parser.parse_args()
 
+    output_type = args.output_type
     api_version = args.api_version
     core_vapi = args.core_vapi.read()
     core_header = args.core_header.read()
     base_vapi = args.base_vapi.read()
     base_header = args.base_header.read()
     output_dir = Path(args.output_dir)
+
+    if output_type == 'vapi-stamp':
+        (output_dir / f"frida-core-{api_version}.vapi.stamp").write_bytes(b"")
+        return
 
     toplevel_names = [
         "frida.vala",
@@ -42,7 +47,6 @@ def main():
 
     enable_header = False
     enable_vapi = False
-    output_type = args.output_type
     if output_type == 'bundle':
         enable_header = True
         enable_vapi = True
