@@ -300,17 +300,17 @@ json_glib_dep = dependency('json-glib-1.0', default_options: [
   'tests=false',
 ])
 libsoup_dep = dependency('libsoup-3.0', default_options: [
-    'gssapi=disabled',
-    'ntlm=disabled',
-    'brotli=disabled',
-    'tls_check=false',
-    'introspection=disabled',
-    'vapi=disabled',
-    'docs=disabled',
-    'examples=disabled',
-    'tests=false',
-    'sysprof=disabled',
-  ])
+  'gssapi=disabled',
+  'ntlm=disabled',
+  'brotli=disabled',
+  'tls_check=false',
+  'introspection=disabled',
+  'vapi=disabled',
+  'docs=disabled',
+  'examples=disabled',
+  'tests=false',
+  'sysprof=disabled',
+])
 brotlidec_dep = dependency('libbrotlidec')
 quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
   'libc=false',
