@@ -3,6 +3,7 @@
 #include <pwd.h>
 #include <string.h>
 #include <unistd.h>
+#include <gio/gunixmounts.h>
 
 typedef struct _FridaEnumerateProcessesOperation FridaEnumerateProcessesOperation;
 
@@ -13,6 +14,8 @@ struct _FridaEnumerateProcessesOperation
 };
 
 static void frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op);
+static gboolean frida_is_directory_noexec (const gchar * directory);
+static gchar * frida_get_application_directory (void);
 static gboolean frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_name);
 static GDateTime * frida_query_boot_time (void);
 static GVariant * frida_uid_to_name (uid_t uid);
@@ -151,12 +154,60 @@ frida_system_kill (guint pid)
 gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
+  const gchar * tmp_dir;
+
 #ifdef HAVE_ANDROID
   if (getuid () == 0)
     return g_strdup ("/data/local/tmp");
 #endif
 
-  return g_strdup (g_get_tmp_dir ());
+  tmp_dir = g_get_tmp_dir ();
+
+  /*
+   * If the temporary directory resides on a file-system which is marked
+   * `noexec`, then we won't be able to write the frida-agent.so there and
+   * subsequently dlopen() it inside the target application as it will result in
+   * permission denied.
+   *
+   * The mounting of the temporary file-system as `noexec` is sometimes used as
+   * an added security measure on embedded systems where the functionality is
+   * fixed and we aren't expecting any interactive user sessions.
+   *
+   * Since our current process is executing, we know that it must reside on a
+   * file-system which is not mounted `noexec`. Whilst it is possible that it is
+   * mounted read-only, or there may be some other reason why it isn't suitable,
+   * we know that the temporary directory is definitely unusable. If both these
+   * locations are found to be unsuitable, then a future implementation may seek
+   * to validate an ordered list of potential locations.
+   */
+  if (frida_is_directory_noexec (tmp_dir))
+    return frida_get_application_directory ();
+  else
+    return g_strdup (tmp_dir);
+}
+
+static gboolean
+frida_is_directory_noexec (const gchar * directory)
+{
+  gboolean is_noexec;
+  g_autoptr(GUnixMountEntry) entry;
+  gchar ** options;
+
+  entry = g_unix_mount_for (directory, NULL);
+  if (entry == NULL)
+    return FALSE;
+
+  options = g_strsplit (g_unix_mount_get_options (entry), ",", 0);
+  is_noexec = g_strv_contains ((const char * const *) options, "noexec");
+  g_strfreev (options);
+
+  return is_noexec;
+}
+
+static gchar *
+frida_get_application_directory (void)
+{
+  return g_path_get_dirname (gum_process_get_main_module ()->path);
 }
 
 static gboolean
