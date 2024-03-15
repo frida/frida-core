@@ -1,8 +1,10 @@
 #include "frida-core.h"
 
+#include <mntent.h>
 #include <pwd.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 typedef struct _FridaEnumerateProcessesOperation FridaEnumerateProcessesOperation;
 
@@ -12,7 +14,12 @@ struct _FridaEnumerateProcessesOperation
   GArray * result;
 };
 
+static gchar mntent_buf [PATH_MAX * 4] = {0};
+
 static void frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op);
+static gboolean frida_is_mount_noexec (struct mntent * mntent);
+static gboolean frida_is_directory_noexec (const gchar * directory);
+static gchar * frida_get_application_directory (void);
 static gboolean frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_name);
 static GDateTime * frida_query_boot_time (void);
 static GVariant * frida_uid_to_name (uid_t uid);
@@ -151,12 +158,151 @@ frida_system_kill (guint pid)
 gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
+  const gchar * tmp_dir;
+
 #ifdef HAVE_ANDROID
   if (getuid () == 0)
     return g_strdup ("/data/local/tmp");
 #endif
 
-  return g_strdup (g_get_tmp_dir ());
+  tmp_dir = g_get_tmp_dir ();
+
+  /*
+   * If the temporary directory resides on a file-system which is marked
+   * `noexec`, then we won't be able to write the `frida-agent.so` there and
+   * subsequently `dlopen` it inside the target application as it will result in
+   * permission denied.
+   *
+   * The mounting of the temporary file-system as `noexec` is sometimes used as
+   * an added security measure on embedded systems where the functionality is
+   * fixed and we aren't expecting any interactive user sessions.
+   *
+   * Since our current process is executing, we know that it must reside on a
+   * file-system which is not mounted `noexec`. Whilst it is possible that it is
+   * mounted read-only, or there may be some other reason why it isn't suitable,
+   * we know that the temporary directory is definitely unusable. If both these
+   * locations are found to be unsuitable, then a future implementation may seek
+   * to validate an ordered list of potential locations.
+   */
+  if (frida_is_directory_noexec (tmp_dir))
+    return frida_get_application_directory ();
+  else
+    return g_strdup (tmp_dir);
+}
+
+static gboolean
+frida_is_directory_noexec (const gchar * directory)
+{
+  struct stat directory_stat, current_stat;
+  FILE * fp = NULL;
+  struct mntent mntent, * current;
+
+  /*
+   * Since the mounting of the temporary filesystem as `noexec` is not that
+   * common, we assume that this isn't the case unless we can determine
+   * otherwise definitively. (e.g. any errors whilst determining the status
+   * result in us assuming that the directory is executable).
+   */
+  gboolean noexec = FALSE;
+
+  /*
+   * The implementation of this function is derived from `find_mount_point` in
+   * busybox. It finds the mounted filesystem on which a given directory resides
+   * and checks the mount options for `noexec`.
+   */
+  if (stat (directory, &directory_stat) != 0)
+    goto beach;
+
+  if (!S_ISDIR (directory_stat.st_mode))
+    goto beach;
+
+  fp = setmntent ("/proc/mounts", "r");
+  if (fp == NULL)
+    goto beach;
+
+  for (
+    current = getmntent_r (fp, &mntent, mntent_buf, sizeof (mntent_buf));
+    current != NULL;
+    current = getmntent_r (fp, &mntent, mntent_buf, sizeof (mntent_buf)))
+  {
+    /*
+     * In Linux 2.6 rootfs mount always exists, and it makes sense to always
+     * ignore it.
+     */
+    if (g_strcmp0 (current->mnt_fsname, "rootfs") == 0)
+      continue;
+
+    /* If the directory name matches the mountpoint */
+    if (g_strcmp0 (directory, current->mnt_dir) == 0)
+    {
+      noexec = frida_is_mount_noexec (current);
+      break;
+    }
+
+    /* If the directory name matches mounted the device name */
+    if (g_strcmp0 (directory, current->mnt_fsname) == 0)
+    {
+      noexec = frida_is_mount_noexec (current);
+      break;
+    }
+
+    /* Ignore sysfs, proc, none etc */
+    if (current->mnt_fsname[0] == '/')
+    {
+      /* Match the directory and device dev_t */
+      if (stat (current->mnt_fsname, &current_stat) == 0)
+      {
+        if (current_stat.st_rdev == directory_stat.st_dev)
+        {
+          noexec = frida_is_mount_noexec (current);
+          break;
+        }
+      }
+    }
+
+    /* Match the directory and mount point's dev_t */
+    if (stat (current->mnt_dir, &current_stat) == 0)
+    {
+      if (current_stat.st_dev == directory_stat.st_dev)
+      {
+        noexec = frida_is_mount_noexec (current);
+        break;
+      }
+    }
+  }
+
+beach:
+  if (fp != NULL)
+    endmntent (fp);
+
+  return noexec;
+}
+
+static gboolean
+frida_is_mount_noexec (struct mntent * mntent)
+{
+  if (hasmntopt (mntent, "noexec") == NULL)
+    return FALSE;
+  else
+    return TRUE;
+}
+
+static gchar *
+frida_get_application_directory (void)
+{
+  gchar * exe_path = NULL;
+  gchar * exe_dir = NULL;
+
+  exe_path = g_file_read_link ("/proc/self/exe", NULL);
+  if (exe_path == NULL)
+    goto beach;
+
+  exe_dir = g_path_get_dirname (exe_path);
+
+beach:
+  g_free (exe_path);
+
+  return exe_dir;
 }
 
 static gboolean
