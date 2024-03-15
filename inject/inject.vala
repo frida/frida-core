@@ -7,6 +7,7 @@ namespace Frida.Inject {
 	private static string? target_name;
 	private static string? realm_str;
 	private static string? script_path;
+	private static bool cshell;
 	private static string? script_runtime_str;
 	private static string? parameters_str;
 	private static bool eternalize;
@@ -21,6 +22,7 @@ namespace Frida.Inject {
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
 		{ "realm", 'r', 0, OptionArg.STRING, ref realm_str, "attach in REALM", "REALM" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
+		{ "cshell", 'C', 0, OptionArg.NONE, ref cshell, "Load the C-Shell", null },
 		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "qjs|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
@@ -69,15 +71,24 @@ namespace Frida.Inject {
 			}
 		}
 
-		if (script_path == null || script_path == "") {
-			printerr ("Path to JavaScript file must be specified\n");
-			return 4;
-		}
-
 		string? script_source = null;
-		if (script_path == "-") {
+		if (cshell) {
+			if (script_path != null && script_path != "") {
+			  printerr ("Cannot specify both -s and -C options\n");
+				return 4;
+			}
 			script_path = null;
-			script_source = read_stdin ();
+			script_source = CShellScript.get_source ();
+		} else {
+			if (script_path == null || script_path == "") {
+			  printerr ("Path to JavaScript file must be specified\n");
+				return 5;
+			}
+
+			if (script_path == "-") {
+				script_path = null;
+				script_source = read_stdin ();
+			}
 		}
 
 		ScriptRuntime script_runtime = DEFAULT;
@@ -86,7 +97,7 @@ namespace Frida.Inject {
 				script_runtime = ScriptRuntime.from_nick (script_runtime_str);
 			} catch (Error e) {
 				printerr ("%s\n", e.message);
-				return 5;
+				return 6;
 			}
 		}
 
@@ -94,26 +105,31 @@ namespace Frida.Inject {
 		if (parameters_str != null) {
 			if (parameters_str == "") {
 				printerr ("Parameters argument must be specified as JSON if present\n");
-				return 6;
+				return 7;
 			}
 
 			try {
 				var root = Json.from_string (parameters_str);
 				if (root.get_node_type () != OBJECT) {
 					printerr ("Failed to parse parameters argument as JSON: not an object\n");
-					return 7;
+					return 8;
 				}
 
 				parameters.take_object (root.get_object ());
 			} catch (GLib.Error e) {
 				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
-				return 8;
+				return 9;
 			}
 		}
 
 		if (interactive && eternalize) {
 			printerr ("Cannot specify both -e and -i options\n");
-			return 9;
+			return 10;
+		}
+
+		if (cshell && eternalize) {
+			printerr ("Cannot specify both -e and -C options\n");
+			return 11;
 		}
 
 		application = new Application (device_id, spawn_file, target_pid, target_name, options, script_path, script_source,
@@ -249,7 +265,15 @@ namespace Frida.Inject {
 
 				uint pid;
 				if (spawn_file != null) {
-					pid = yield device.spawn (spawn_file, null, io_cancellable);
+					/*
+					 * If frida-inject is supposed to be interactive, then don't connect any spawned
+					 * child process to the TTY.
+					 */
+					var options = new SpawnOptions ();
+					if (interactive || cshell) {
+						options.stdio = PIPE;
+					}
+					pid = yield device.spawn (spawn_file, options, io_cancellable);
 				} else if (target_name != null) {
 					var proc = yield device.get_process_by_name (target_name, null, io_cancellable);
 					pid = proc.pid;
@@ -265,7 +289,7 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 
-				if (interactive)
+				if (interactive || cshell)
 					watch_stdin ();
 
 				if (spawn_file != null) {

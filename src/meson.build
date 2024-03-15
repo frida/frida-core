@@ -521,6 +521,10 @@ if have_barebone_backend
   subdir('barebone')
 endif
 
+if have_cshell_backend
+  subdir('cshell')
+endif
+
 if host_os_family != 'windows'
   backend_vala_args_private += '--pkg=posix'
 endif

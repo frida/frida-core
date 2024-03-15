@@ -34,6 +34,12 @@ option('barebone_backend',
   description: 'Include the Barebone backend',
 )
 
+option('cshell_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the CShell backend',
+)
+
 option('compiler_backend',
   type: 'feature',
   value: 'auto',
