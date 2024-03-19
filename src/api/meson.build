@@ -2,6 +2,7 @@ generate_api = [python, files('generate.py')]
 
 generate_api_args = [
   api_version,
+  core_build_dir / core_gir_name,
   core_build_dir / 'frida-core.vapi',
   core_build_dir / 'frida-core.h',
   base_build_dir / f'frida-base-@api_version@.vapi',
@@ -19,6 +20,18 @@ core_public_h = custom_target('frida-core-header',
   ],
   install: true,
   install_dir: header_install_dir,
+)
+
+core_public_gir = custom_target('frida-core-gir',
+  input: [core, base],
+  output: [core_gir_name],
+  command: [
+    generate_api,
+    '--output=gir',
+    generate_api_args,
+  ],
+  install: true,
+  install_dir: girdir,
 )
 
 core_public_vapi = custom_target('frida-core-vapi',
@@ -71,7 +84,7 @@ if host_os == 'android'
 endif
 
 core_public_dep = declare_dependency(
-  sources: [core_public_h, core_public_vapi_stamp, core_public_extra_headers],
+  sources: [core_public_h, core_public_gir, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,

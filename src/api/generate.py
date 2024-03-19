@@ -9,8 +9,9 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
-    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi', 'vapi-stamp'], default='bundle')
+    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp'], default='bundle')
     parser.add_argument('api_version', metavar='api-version', type=str)
+    parser.add_argument('core_gir', metavar='/path/to/Frida-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('base_vapi', metavar='/path/to/frida-base.vapi', type=argparse.FileType('r', encoding='utf-8'))
@@ -21,11 +22,16 @@ def main():
 
     output_type = args.output_type
     api_version = args.api_version
+    core_gir = args.core_gir.read()
     core_vapi = args.core_vapi.read()
     core_header = args.core_header.read()
     base_vapi = args.base_vapi.read()
     base_header = args.base_header.read()
     output_dir = Path(args.output_dir)
+
+    if output_type == 'gir':
+        (output_dir / f"Frida-{api_version}.gir").write_text(core_gir, encoding='utf-8')
+        return
 
     if output_type == 'vapi-stamp':
         (output_dir / f"frida-core-{api_version}.vapi.stamp").write_bytes(b"")

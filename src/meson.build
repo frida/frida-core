@@ -524,6 +524,8 @@ core_vala_args = [
   '--pkg=json-glib-1.0',
 ]
 
+core_gir_name = f'Frida-@api_version@.gir'
+
 core = library('frida-core', core_sources,
   c_args: frida_component_cflags,
   vala_args: [
@@ -533,7 +535,7 @@ core = library('frida-core', core_sources,
     gumjs_inspector_vala_args,
     '--pkg=gmodule-2.0',
   ],
-  vala_gir: 'Frida-' + api_version + '.gir',
+  vala_gir: core_gir_name,
   link_args: backend_libs_private,
   link_with: backend_libs,
   dependencies: core_deps + internal_deps,
