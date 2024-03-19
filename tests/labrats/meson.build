@@ -1,3 +1,5 @@
+fs = import('fs')
+
 labrat_files = []
 
 if host_os == 'windows'
@@ -106,7 +108,7 @@ if host_os == 'qnx'
   ]
 endif
 
-fs = import('fs')
+labrats = []
 foreach f : labrat_files
-  fs.copyfile(f)
+  labrats += fs.copyfile(f)
 endforeach
