@@ -25,7 +25,7 @@ def main(argv):
         embedded_helper = priv_dir / "frida-helper"
 
         if helper_modern is not None and helper_legacy is not None:
-            subprocess.run([lipo, helper_modern, helper_legacy, "-create", "-output", embedded_helper],
+            subprocess.run(lipo + [helper_modern, helper_legacy, "-create", "-output", embedded_helper],
                            check=True)
         elif helper_modern is not None:
             shutil.copy(helper_modern, embedded_helper)
