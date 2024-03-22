@@ -29,7 +29,6 @@ if host_os == 'android'
 else
   host_os_family = host_os
 endif
-host_is_64bit = host_machine.cpu_family().endswith('64')
 if host_machine.cpu_family() == 'arm'
   host_arch = 'arm'
   host_abi = 'arm'
@@ -153,6 +152,12 @@ if cc.sizeof('void *') == 8
   host_cpu_mode = '64'
 else
   host_cpu_mode = '32'
+endif
+
+if host_os_family == 'darwin' and host_arch == 'arm64'
+  host_is_modern = host_abi == 'arm64e'
+else
+  host_is_modern = host_cpu_mode == '64'
 endif
 
 cdata = configuration_data()

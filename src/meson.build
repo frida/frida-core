@@ -89,12 +89,15 @@ if have_local_backend
 
     if get_option('assets') == 'embedded'
       helper_modern = get_option('helper_modern')
-      helper_legacy = get_option('helper_legacy')
-      if host_is_64bit
-        helper_modern = ''
-      else
-        helper_legacy = ''
+      if helper_modern == 'auto'
+        helper_modern = host_is_modern ? helper : ''
       endif
+
+      helper_legacy = get_option('helper_legacy')
+      if helper_legacy == 'auto'
+        helper_legacy = host_is_modern ? '' : helper
+      endif
+
       helper_process_data = custom_target('frida-data-helper-process',
         input: 'helper.resources',
         output: [
@@ -216,18 +219,17 @@ if have_local_backend
 
     if get_option('assets') == 'embedded'
       helper_modern = get_option('helper_modern')
-      helper_legacy = get_option('helper_legacy')
-      helper_inputs = ['helper.resources']
-      if helper_modern == '' and helper_legacy == ''
-        if host_is_64bit
-          helper_modern = helper.full_path()
-        else
-          helper_legacy = helper.full_path()
-        endif
-        helper_inputs += helper
+      if helper_modern == 'auto'
+        helper_modern = host_is_modern ? helper : ''
       endif
+
+      helper_legacy = get_option('helper_legacy')
+      if helper_legacy == 'auto'
+        helper_legacy = host_is_modern ? '' : helper
+      endif
+
       helper_process_data = custom_target('frida-data-helper-process',
-        input: helper_inputs,
+        input: 'helper.resources',
         output: [
           'frida-data-helper-process.vapi',
           'frida-data-helper-process.h',
@@ -363,12 +365,23 @@ if have_local_backend
 
     if get_option('assets') == 'embedded'
       helper_modern = get_option('helper_modern')
+      if helper_modern == 'auto'
+        helper_modern = host_is_modern ? helper : ''
+      endif
+
       helper_legacy = get_option('helper_legacy')
-      if host_is_64bit
+      if helper_legacy == 'auto'
+        helper_legacy = host_is_modern ? '' : helper
+      endif
+
+      # For our Linux backend, in-process is as capable as out-of-process, so we
+      # only embed a helper if it's for the other architecture.
+      if host_is_modern
         helper_modern = ''
       else
         helper_legacy = ''
       endif
+
       helper_process_data = custom_target('frida-data-helper-process',
         input: 'helper.resources',
         output: [
@@ -402,18 +415,17 @@ if have_local_backend
 
   if get_option('assets') == 'embedded'
     agent_modern = get_option('agent_modern')
-    agent_legacy = get_option('agent_legacy')
-    agent_inputs = ['agent.resources']
-    if agent_modern == '' and agent_legacy == ''
-      if host_is_64bit
-        agent_modern = agent.full_path()
-      else
-        agent_legacy = agent.full_path()
-      endif
-      agent_inputs += agent
+    if agent_modern == 'auto'
+      agent_modern = host_is_modern ? agent : ''
     endif
+
+    agent_legacy = get_option('agent_legacy')
+    if agent_legacy == 'auto'
+      agent_legacy = host_is_modern ? '' : agent
+    endif
+
     backend_sources += custom_target('frida-data-agent',
-      input: agent_inputs,
+      input: 'agent.resources',
       output: [
         'frida-data-agent.vapi',
         'frida-data-agent.h',

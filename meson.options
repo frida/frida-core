@@ -54,21 +54,25 @@ option('asset_path_template',
 
 option('helper_modern',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt frida-helper to embed for use on modern systems'
 )
 
 option('helper_legacy',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt frida-helper to embed for use on legacy systems'
 )
 
 option('agent_modern',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt agent to embed for use on modern targets'
 )
 
 option('agent_legacy',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt agent to embed for use on legacy targets'
 )
 
