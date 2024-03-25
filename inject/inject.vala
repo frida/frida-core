@@ -414,7 +414,14 @@ namespace Frida.Inject {
 
 			buf[n] = 0;
 
-			script_runner.on_stdin ((string) buf);
+			if (script_runner.terminal_mode == TerminalMode.ENCODED)
+				/*
+				 * If we are in encoded mode, then send our data to
+				 * the target in base64 encoded form.
+				 */
+				script_runner.on_stdin (Base64.encode (buf[:n]));
+			else
+				script_runner.on_stdin ((string) buf);
 
 			return true;
 		}
@@ -599,10 +606,18 @@ namespace Frida.Inject {
 			if (mode_value.get_value_type () != typeof (string))
 				return COOKED;
 
-			return (mode_value.get_string () == "raw") ? TerminalMode.RAW : TerminalMode.COOKED;
+			switch (mode_value.get_string ()) {
+				case "raw":
+					return TerminalMode.RAW;
+				case "encoded":
+					return TerminalMode.ENCODED;
+				default:
+					return TerminalMode.COOKED;
+			}
 		}
 
 		private void apply_terminal_mode (TerminalMode mode) throws Error {
+			/* Disable processing by the TTY in RAW and ENCODED modes */
 			if (mode == COOKED || original_term == null)
 				return;
 
@@ -751,7 +766,14 @@ namespace Frida.Inject {
 
 			switch (type) {
 				case "frida:stdout":
-					stdout.write (str.data);
+					/*
+					 * If we are in encoded mode, expect our input from our
+					 * target to be base64 encoded.
+					 */
+					if (this.terminal_mode == TerminalMode.ENCODED)
+						stdout.write (Base64.decode (str));
+					else
+						stdout.write (str.data);
 					stdout.flush ();
 					return true;
 				case "frida:stderr":
@@ -769,6 +791,7 @@ namespace Frida.Inject {
 
 	private enum TerminalMode {
 		COOKED,
-		RAW
+		RAW,
+		ENCODED
 	}
 }
