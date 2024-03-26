@@ -45,7 +45,7 @@ namespace Frida {
 			return yield inject_library_file_with_template (pid, PathTemplate (path), entrypoint, data, features, cancellable);
 		}
 
-		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
+		public async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
 				AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
 			string path = path_template.expand (arch_name_from_pid (pid));
 			int fd = Posix.open (path, Posix.O_RDONLY);
