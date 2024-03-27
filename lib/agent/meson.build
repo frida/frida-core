@@ -60,6 +60,10 @@ modulated_agent = custom_target('frida-agent-modulated',
   command: modulate + operations,
 )
 
+need_universal_agent = host_os_family == 'darwin' \
+    and get_option('assets') == 'installed' \
+    and agent_depends.length() != 0
+
 if host_os_family == 'darwin'
   identity = 'FridaAgent'
 else
@@ -67,11 +71,28 @@ else
 endif
 agent = custom_target('frida-agent',
   input: modulated_agent,
-  output: agent_name,
+  output: need_universal_agent ? f'@agent_name@-@host_abi@' : agent_name,
   command: post_process + ['shared-library', identity],
   build_by_default: true,
-  install: get_option('assets') == 'installed',
+  install: get_option('assets') == 'installed' and not need_universal_agent,
   install_dir: asset_dir,
 )
 
 agent_dep = declare_dependency(link_with: agent)
+
+if need_universal_agent
+  custom_target('frida-agent-universal',
+    input: agent,
+    output: agent_name,
+    command: [
+      lipo,
+      '@INPUT@',
+      agent_compat,
+      '-create',
+      '-output', meson.current_build_dir() / agent_name,
+    ],
+    depends: agent_depends,
+    install: true,
+    install_dir: asset_dir,
+  )
+endif

@@ -187,11 +187,14 @@ helper_name = 'frida-helper' + exe_suffix
 agent_name = 'frida-agent' + shlib_suffix
 gadget_name = 'frida-gadget' + shlib_suffix
 
+root_asset_dir = get_option('libdir') / 'frida'
 if host_os_family == 'darwin'
-  asset_dir = get_option('libdir') / 'frida'
+  asset_dir = root_asset_dir
   default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida'
 else
-  asset_dir = get_option('libdir') / 'frida' / host_cpu_mode
+  asset_dir = root_asset_dir / host_cpu_mode
+  asset_dir_modern = root_asset_dir / '64'
+  asset_dir_legacy = root_asset_dir / '32'
   default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida' / '<arch>'
 endif
 
@@ -604,6 +607,7 @@ native_vala_flags = [
 ]
 add_project_arguments(native_vala_flags, language: 'vala', native: true)
 
+subdir('compat')
 subdir('tools')
 subdir('lib')
 subdir('src')

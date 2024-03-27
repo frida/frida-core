@@ -52,6 +52,13 @@ option('asset_path_template',
   description: 'Override the default installed asset path template'
 )
 
+option('compat',
+  type: 'array',
+  choices: ['auto', 'disabled', 'native', 'emulated'],
+  value: ['auto'],
+  description: 'Support for targets with a different architecture',
+)
+
 option('helper_modern',
   type: 'string',
   value: 'auto',
@@ -78,11 +85,13 @@ option('agent_legacy',
 
 option('agent_emulated_modern',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt agent to embed for use on modern emulated targets'
 )
 
 option('agent_emulated_legacy',
   type: 'string',
+  value: 'auto',
   description: 'Prebuilt agent to embed for use on legacy emulated targets'
 )
 

@@ -88,12 +88,10 @@ if have_local_backend
     )
 
     if get_option('assets') == 'embedded'
-      helper_modern = get_option('helper_modern')
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
 
-      helper_legacy = get_option('helper_legacy')
       if helper_legacy == 'auto'
         helper_legacy = host_is_modern ? '' : helper
       endif
@@ -107,6 +105,7 @@ if have_local_backend
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
         command: embed_helper + [helper_modern, helper_legacy],
+        depends: helper_depends,
       )
       backend_sources += [helper_process_data]
     endif
@@ -205,25 +204,42 @@ if have_local_backend
       override_options: ['b_asneeded=false'],
     )
 
+    need_universal_helper = get_option('assets') == 'installed' and helper_depends.length() != 0
+
     helper = custom_target('frida-helper',
       input: [
         raw_helper,
         'darwin' / 'frida-helper.xcent',
       ],
-      output: helper_name,
+      output: need_universal_helper ? f'@helper_name@-@host_abi@' : helper_name,
       command: post_process_helper,
       build_by_default: true,
-      install: get_option('assets') == 'installed',
+      install: get_option('assets') == 'installed' and not need_universal_helper,
       install_dir: asset_dir,
     )
 
+    if need_universal_helper
+      custom_target('frida-helper-universal',
+        input: helper,
+        output: helper_name,
+        command: [
+          lipo,
+          '@INPUT@',
+          helper_compat,
+          '-create',
+          '-output', meson.current_build_dir() / helper_name
+        ],
+        depends: helper_depends,
+        install: true,
+        install_dir: asset_dir,
+      )
+    endif
+
     if get_option('assets') == 'embedded'
-      helper_modern = get_option('helper_modern')
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
 
-      helper_legacy = get_option('helper_legacy')
       if helper_legacy == 'auto'
         helper_legacy = host_is_modern ? '' : helper
       endif
@@ -237,6 +253,7 @@ if have_local_backend
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
         command: embed_helper + [helper_modern, helper_legacy],
+        depends: helper_depends,
       )
       backend_sources += [helper_process_data]
     endif
@@ -364,12 +381,10 @@ if have_local_backend
     )
 
     if get_option('assets') == 'embedded'
-      helper_modern = get_option('helper_modern')
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
 
-      helper_legacy = get_option('helper_legacy')
       if helper_legacy == 'auto'
         helper_legacy = host_is_modern ? '' : helper
       endif
@@ -391,6 +406,7 @@ if have_local_backend
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
         command: embed_helper + [helper_modern, helper_legacy],
+        depends: helper_depends,
       )
       backend_sources += [helper_process_data]
     endif
@@ -414,14 +430,20 @@ if have_local_backend
   endif
 
   if get_option('assets') == 'embedded'
-    agent_modern = get_option('agent_modern')
     if agent_modern == 'auto'
       agent_modern = host_is_modern ? agent : ''
     endif
 
-    agent_legacy = get_option('agent_legacy')
     if agent_legacy == 'auto'
       agent_legacy = host_is_modern ? '' : agent
+    endif
+
+    if agent_emulated_modern == 'auto'
+      agent_emulated_modern = ''
+    endif
+
+    if agent_emulated_legacy == 'auto'
+      agent_emulated_legacy = ''
     endif
 
     backend_sources += custom_target('frida-data-agent',
@@ -444,11 +466,12 @@ if have_local_backend
         '@INPUT0@',
         agent_modern,
         agent_legacy,
-        get_option('agent_emulated_modern'),
-        get_option('agent_emulated_legacy'),
+        agent_emulated_modern,
+        agent_emulated_legacy,
         get_option('agent_dbghelp_prefix'),
         get_option('agent_symsrv_prefix'),
       ],
+      depends: agent_depends,
     )
   endif
 endif

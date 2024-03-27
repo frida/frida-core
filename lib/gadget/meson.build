@@ -79,6 +79,8 @@ modulated_gadget = custom_target('frida-gadget-modulated',
   command: modulate + operations,
 )
 
+need_universal_gadget = host_os_family == 'darwin' and gadget_depends.length() != 0
+
 if host_os == 'macos'
   identity = '@executable_path/../Frameworks/FridaGadget.dylib'
 elif host_os in ['ios', 'tvos']
@@ -86,10 +88,27 @@ elif host_os in ['ios', 'tvos']
 else
   identity = gadget_name
 endif
-custom_target('frida-gadget',
+gadget = custom_target('frida-gadget',
   input: modulated_gadget,
-  output: gadget_name,
+  output: need_universal_gadget ? f'@gadget_name@-@host_abi@' : gadget_name,
   command: post_process + ['shared-library', identity],
-  install: true,
+  install: not need_universal_gadget,
   install_dir: asset_dir,
 )
+
+if need_universal_gadget
+  custom_target('frida-gadget-universal',
+    input: gadget,
+    output: gadget_name,
+    command: [
+      lipo,
+      '@INPUT@',
+      gadget_compat,
+      '-create',
+      '-output', meson.current_build_dir() / gadget_name,
+    ],
+    depends: gadget_depends,
+    install: true,
+    install_dir: asset_dir,
+  )
+endif

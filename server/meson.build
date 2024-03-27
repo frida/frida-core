@@ -36,10 +36,30 @@ raw_server = executable('frida-server-raw', server_sources,
   dependencies: [core_dep],
 )
 
-custom_target('frida-server',
+server_name = 'frida-server' + exe_suffix
+need_universal_server = get_option('assets') == 'installed' and server_depends.length() != 0
+
+server = custom_target('frida-server',
   input: [raw_server, 'frida-server.xcent'],
-  output: 'frida-server' + exe_suffix,
+  output: need_universal_server ? f'@server_name@-@host_abi@' : server_name,
   command: post_process + ['executable', 're.frida.Server', '@INPUT1@'],
   install: true,
   install_dir: get_option('bindir'),
 )
+
+if need_universal_server
+  custom_target('frida-server-universal',
+    input: server,
+    output: server_name,
+    command: [
+      lipo,
+      '@INPUT@',
+      server_compat,
+      '-create',
+      '-output', meson.current_build_dir() / server_name
+    ],
+    depends: server_depends,
+    install: true,
+    install_dir: get_option('bindir'),
+  )
+endif
