@@ -26,6 +26,8 @@
 # if __has_feature (ptrauth_calls)
 #  define DSC_HEADER_MAPPING_OFFSET 0x10
 #  define DSC_HEADER_MAPPING_COUNT 0x14
+#  define DSC_HEADER_MAPPING_SLIDE_OFFSET 0x138
+#  define DSC_HEADER_MAPPING_SLIDE_COUNT 0x13c
 #  define DSC_HEADER_SHARED_REGION_START 0xe0
 #  define DSC_HEADER_SUBCACHE_ARRAY_OFFSET 0x188
 #  define DSC_HEADER_SUBCACHE_ARRAY_COUNT 0x18c
@@ -47,7 +49,9 @@ typedef struct _CreateArgs CreateArgs;
 typedef struct _UnwindHookState UnwindHookState;
 #if __has_feature (ptrauth_calls)
 typedef struct _DSCRangeContext DSCRangeContext;
+typedef struct _DSCBaseMappingInfo DSCBaseMappingInfo;
 typedef struct _DSCMappingInfo DSCMappingInfo;
+typedef struct _DSCMappingSlideInfo DSCMappingSlideInfo;
 typedef struct _DSCMappingDetails DSCMappingDetails;
 typedef struct _DSCMappingContext DSCMappingContext;
 #endif
@@ -94,6 +98,13 @@ struct _DSCRangeContext
   gchar * file_name;
 };
 
+struct _DSCBaseMappingInfo
+{
+  guint64 address;
+  guint64 size;
+  guint64 fileOffset;
+};
+
 struct _DSCMappingInfo
 {
   guint64 address;
@@ -103,10 +114,23 @@ struct _DSCMappingInfo
   guint32 initProt;
 };
 
+struct _DSCMappingSlideInfo
+{
+  guint64 address;
+  guint64 size;
+  guint64 fileOffset;
+  guint64 slideInfoFileOffset;
+  guint64 slideInfoFileSize;
+  guint64 flags;
+  guint32 maxProt;
+  guint32 initProt;
+};
+
 struct _DSCMappingDetails
 {
-  const DSCMappingInfo * info;
+  const DSCBaseMappingInfo * info;
   const gchar * file_name;
+  guint slide_info_offset;
 };
 
 struct _DSCMappingContext
@@ -114,6 +138,7 @@ struct _DSCMappingContext
   GumAddress address;
   gsize offset;
   gchar * file_name;
+  gsize slide_info_offset;
 };
 
 typedef gboolean (* FoundMappingFunc) (const DSCMappingDetails * details, gpointer user_data);
@@ -145,6 +170,7 @@ static gboolean frida_iterate_dsc_maps (const GumMemoryRange * range, const gcha
 static gboolean frida_store_range_if_dsc (const GumRangeDetails * details, DSCRangeContext * ctx);
 static gchar * frida_copy_without_suffix (const gchar * file_name);
 static gboolean frida_iterate_maps_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx);
+static gboolean frida_iterate_maps_slide_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx);
 #endif
 
 static UnwindHookState * state = NULL;
@@ -699,10 +725,41 @@ frida_get_diversity_from_dsc (gpointer slot, guint16 * diversity)
   if (f == NULL)
     goto beach;
 
+  guint shift = 0;
+
+  if (mapping_ctx.slide_info_offset != 0)
+  {
+    if (fseek (f, mapping_ctx.slide_info_offset, SEEK_SET) != -1)
+    {
+      guint32 slide_info_version;
+
+      if (fread (&slide_info_version, sizeof (slide_info_version), 1, f) == 1)
+      {
+        if (slide_info_version == 5)
+          shift = 2;
+      }
+    }
+  }
+
   if (fseek (f, mapping_ctx.offset + 4, SEEK_SET) != -1)
   {
-    gsize read = fread (diversity, sizeof (guint16), 1, f);
-    result = read == 1;
+    guint32 raw;
+
+    if (fread (&raw, sizeof (raw), 1, f) == 1)
+    {
+      gboolean has_diversity = FALSE;
+
+      raw = raw >> shift;
+      has_diversity = (raw >> 16) & 1;
+      if (has_diversity)
+        *diversity = (guint16) (raw & 0xffff);
+
+      result = has_diversity;
+    }
+    else
+    {
+      result = FALSE;
+    }
   }
 
   fclose (f);
@@ -722,6 +779,7 @@ frida_translate_address_to_file_offset (const DSCMappingDetails * details, DSCMa
   {
     ctx->offset = ctx->address - details->info->address + details->info->fileOffset;
     ctx->file_name = g_strdup (details->file_name);
+    ctx->slide_info_offset = details->slide_info_offset;
 
     return FALSE;
   }
@@ -734,7 +792,7 @@ frida_iterate_dsc_maps (const GumMemoryRange * range, const gchar * file_name, F
 {
   gboolean carry_on = TRUE;
   gsize slide;
-  gsize mapping_offset, mapping_count;
+  gsize mapping_offset, header_size;
   GumAddress sub_caches_array, v1_check_at, v2_check_at, sub_caches_end;
   GumAddress end = range->base_address + range->size;
   gsize sub_caches_count, sub_cache_element_size;
@@ -746,15 +804,31 @@ frida_iterate_dsc_maps (const GumMemoryRange * range, const gchar * file_name, F
 
   slide = range->base_address - GUM_ADDRESS (*(gpointer *)(range->base_address + DSC_HEADER_SHARED_REGION_START));
   mapping_offset = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_OFFSET);
-  mapping_count = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_COUNT);
+  header_size = mapping_offset;
 
-  if (mapping_offset >= range->size || mapping_offset + mapping_count * sizeof (DSCMappingInfo) > range->size)
-    return TRUE;
+  if (header_size >= DSC_HEADER_MAPPING_SLIDE_COUNT)
+  {
+    guint32 mapping_slide_offset = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_SLIDE_OFFSET);
+    guint32 mapping_slide_count = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_SLIDE_COUNT);
 
-  if (!frida_iterate_maps_at (range->base_address + mapping_offset, mapping_count, slide, file_name, func, ctx))
-    return FALSE;
+    if (mapping_slide_offset >= range->size || mapping_slide_offset + mapping_slide_count * sizeof (DSCMappingSlideInfo) > range->size)
+      return TRUE;
 
-  if (mapping_offset < DSC_HEADER_SUBCACHE_ARRAY_OFFSET || range->size < DSC_HEADER_SUBCACHE_ARRAY_COUNT + 4)
+    if (!frida_iterate_maps_slide_at (range->base_address + mapping_slide_offset, mapping_slide_count, slide, file_name, func, ctx))
+      return FALSE;
+  }
+  else
+  {
+    guint32 mapping_count = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_COUNT);
+
+    if (mapping_offset >= range->size || mapping_offset + mapping_count * sizeof (DSCMappingInfo) > range->size)
+      return TRUE;
+
+    if (!frida_iterate_maps_at (range->base_address + mapping_offset, mapping_count, slide, file_name, func, ctx))
+      return FALSE;
+  }
+
+  if (header_size < DSC_HEADER_SUBCACHE_ARRAY_COUNT + 4)
     return TRUE;
 
   sub_caches_array = range->base_address + *(guint32 *)(range->base_address + DSC_HEADER_SUBCACHE_ARRAY_OFFSET);
@@ -875,8 +949,9 @@ frida_iterate_maps_at (GumAddress start, gsize count, gsize slide, const gchar *
 
     info.address += slide;
 
-    details.info = &info;
+    details.info = (DSCBaseMappingInfo *)&info;
     details.file_name = file_name;
+    details.slide_info_offset = 0;
 
     if (!func (&details, ctx))
       return FALSE;
@@ -887,6 +962,34 @@ frida_iterate_maps_at (GumAddress start, gsize count, gsize slide, const gchar *
   return TRUE;
 }
 
+static gboolean
+frida_iterate_maps_slide_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx)
+{
+  GumAddress cursor = start;
+  GumAddress end = start + count * sizeof (DSCMappingSlideInfo);
+
+  while (cursor < end)
+  {
+    DSCMappingSlideInfo info = *(DSCMappingSlideInfo *)GSIZE_TO_POINTER (cursor);
+    DSCMappingDetails details;
+
+    info.address += slide;
+
+    details.info = (DSCBaseMappingInfo *)&info;
+    details.file_name = file_name;
+    if (info.slideInfoFileSize >= 4)
+      details.slide_info_offset = info.slideInfoFileOffset;
+    else
+      details.slide_info_offset = 0;
+
+    if (!func (&details, ctx))
+      return FALSE;
+
+    cursor += sizeof (DSCMappingSlideInfo);
+  }
+
+  return TRUE;
+}
 #endif
 
 #endif
