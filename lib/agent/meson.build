@@ -38,9 +38,10 @@ if host_os_family in ['linux', 'qnx']
   extra_link_args += '-Wl,-Bsymbolic'
 endif
 
-raw_agent = shared_library('frida-agent', agent_sources,
+raw_agent = shared_library('frida-agent-raw', agent_sources,
   name_prefix: 'lib',
   c_args: frida_component_cflags,
+  vala_header: 'frida-agent.h',
   vala_args: [base_vala_args, payload_vala_args, extra_vala_args],
   link_args: extra_link_args,
   link_depends: extra_link_depends,
