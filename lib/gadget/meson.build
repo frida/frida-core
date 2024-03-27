@@ -50,9 +50,10 @@ if host_os_family in ['linux', 'qnx']
   extra_link_args += ['-Wl,-Bsymbolic']
 endif
 
-raw_gadget = shared_library('frida-gadget', gadget_sources,
+raw_gadget = shared_library('frida-gadget-raw', gadget_sources,
   name_prefix: 'lib',
   vala_args: [base_vala_args, payload_vala_args, extra_vala_args],
+  vala_header: 'frida-gadget.h',
   c_args: frida_component_cflags,
   objc_args: extra_objc_args,
   link_args: extra_link_args,
