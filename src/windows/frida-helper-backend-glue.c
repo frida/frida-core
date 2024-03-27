@@ -305,10 +305,11 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   gpointer code;
   guint code_size;
   GumX86Writer cw;
-  const gsize data_alignment = 4;
   const gchar * loadlibrary_failed = "loadlibrary_failed";
   const gchar * skip_unload = "skip_unload";
   const gchar * return_result = "return_result";
+  SIZE_T page_size, alloc_size;
+  DWORD old_protect;
 
   gum_init ();
 
@@ -347,7 +348,7 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
       GUM_ARG_REGISTER, GUM_X86_XSI,
       GUM_ARG_REGISTER, GUM_X86_XDX);
 
-  /* xax (xbx->entrypoint_data, &stay_resident, NULL) */
+  /* xax (xbx->entrypoint_data, &xbx->stay_resident, NULL) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XCX,
       GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_data));
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDX,
@@ -358,7 +359,7 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
       GUM_ARG_REGISTER, GUM_X86_XDX,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
-  /* if (!stay_resident) { */
+  /* if (!xbx->stay_resident) { */
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EAX,
       GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
   gum_x86_writer_put_test_reg_reg (&cw, GUM_X86_EAX, GUM_X86_EAX);
@@ -403,18 +404,23 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   StringCbCopyA (rwc->entrypoint_name, sizeof (rwc->entrypoint_name), details->entrypoint_name);
   StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
 
-  rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
-      code_size + data_alignment + sizeof (FridaRemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+  page_size = gum_query_page_size ();
+  g_assert (code_size <= page_size);
+
+  alloc_size = page_size + sizeof (FridaRemoteWorkerContext);
+  rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
   if (rwc->entrypoint == NULL)
-    goto virtual_alloc_failed;
+    goto virtual_alloc_ex_failed;
 
   if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, code_size, NULL))
     goto write_process_memory_failed;
 
-  rwc->argument = GSIZE_TO_POINTER (
-      (GPOINTER_TO_SIZE (rwc->entrypoint) + code_size + data_alignment - 1) & ~(data_alignment - 1));
+  rwc->argument = GSIZE_TO_POINTER (GPOINTER_TO_SIZE (rwc->entrypoint) + page_size);
   if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (FridaRemoteWorkerContext), NULL))
     goto write_process_memory_failed;
+
+  if (!VirtualProtectEx (details->process_handle, rwc->entrypoint, page_size, PAGE_EXECUTE_READ, &old_protect))
+    goto virtual_protect_ex_failed;
 
   gum_free_pages (code);
   return TRUE;
@@ -428,12 +434,12 @@ failed_to_resolve_kernel32_functions:
         "Unexpected error while resolving kernel32 functions");
     goto error_common;
   }
-virtual_alloc_failed:
+virtual_alloc_ex_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error allocating memory in target process (VirtualAlloc returned 0x%08lx)",
+        "Unexpected error allocating memory in target process (VirtualAllocEx returned 0x%08lx)",
         GetLastError ());
     goto error_common;
   }
@@ -443,6 +449,15 @@ write_process_memory_failed:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error writing to memory in target process (WriteProcessMemory returned 0x%08lx)",
+        GetLastError ());
+    goto error_common;
+  }
+virtual_protect_ex_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error changing memory permission in target process (VirtualProtectEx returned 0x%08lx)",
         GetLastError ());
     goto error_common;
   }
