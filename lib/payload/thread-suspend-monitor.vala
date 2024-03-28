@@ -84,14 +84,19 @@ namespace Frida {
 			if (script_backend == null || thread_id == caller_thread_id)
 				return thread_suspend (thread_id);
 
-			int result = 0;
+			var interceptor = Gum.Interceptor.obtain ();
 
+			int result = 0;
 			while (true) {
 				script_backend.with_lock_held (() => {
-					result = thread_suspend (thread_id);
+					interceptor.with_lock_held(() => {
+						Gum.Cloak.with_lock_held (() => {
+							result = thread_suspend (thread_id);
+						});
+					});
 				});
 
-				if (result != 0 || !script_backend.is_locked ())
+				if (result != 0 || (!script_backend.is_locked () && !Gum.Cloak.is_locked () && !interceptor.is_locked ()))
 					break;
 
 				if (thread_resume (thread_id) != 0)
