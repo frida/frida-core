@@ -18,20 +18,6 @@
 # define UNW_AARCH64_X29 29
 # define HIGHEST_NIBBLE 0xf000000000000000ULL
 # define STRIP_MASK 0x0000007fffffffffULL
-# if __has_feature (ptrauth_calls)
-#  define DSC_HEADER_MAPPING_OFFSET 0x10
-#  define DSC_HEADER_MAPPING_COUNT 0x14
-#  define DSC_HEADER_MAPPING_SLIDE_OFFSET 0x138
-#  define DSC_HEADER_MAPPING_SLIDE_COUNT 0x13c
-#  define DSC_HEADER_SHARED_REGION_START 0xe0
-#  define DSC_HEADER_SUBCACHE_ARRAY_OFFSET 0x188
-#  define DSC_HEADER_SUBCACHE_ARRAY_COUNT 0x18c
-#  define DSC_SUBCACHE_ENTRY_V1_SIZE 24
-#  define DSC_SUBCACHE_ENTRY_V2_SIZE 56
-#  define DSC_SUBCACHE_ENTRY_CACHE_VM_OFFSET 0x10
-#  define DSC_SUBCACHE_ENTRY_SUFFIX 0x18
-#  define DSC_SUBCACHE_ENTRY_SUFFIX_SIZE 16
-# endif
 #else
 # define UNWIND_CURSOR_unwindInfoMissing 0x100
 # define UNW_X86_64_RBP 6
@@ -185,6 +171,7 @@ _frida_unwind_sitter_hook_libunwind ()
   gpointer * set_info_slot;
   gpointer get_reg_impl;
   GumPageProtection prot;
+  GumInterceptor * interceptor;
 
 #if GLIB_SIZEOF_VOID_P != 8
    return;
@@ -214,35 +201,9 @@ _frida_unwind_sitter_hook_libunwind ()
   state->set_info = RESIGN_PTR (state->set_info_original);
   state->get_reg = RESIGN_PTR (get_reg_impl);
 
-  if (!gum_memory_query_protection ((gpointer) set_info_slot, &prot))
+  interceptor = gum_interceptor_obtain ();
+  if (gum_interceptor_replace (interceptor, state->set_info_original, frida_unwind_cursor_set_info_replacement, NULL, NULL) != GUM_REPLACE_OK)
     goto beach;
-
-  if ((prot & GUM_PAGE_WRITE) == 0)
-  {
-    if (!gum_try_mprotect ((gpointer) set_info_slot, GLIB_SIZEOF_VOID_P, GUM_PAGE_READ | GUM_PAGE_WRITE))
-      goto beach;
-  }
-
-#if __has_feature (ptrauth_calls)
-  {
-    guint16 diversity;
-    gpointer context;
-
-    if (frida_get_diversity_from_dsc ((gpointer) set_info_slot, &diversity))
-      context = GSIZE_TO_POINTER (ptrauth_blend_discriminator ((gpointer) set_info_slot, diversity));
-    else
-      context = (gpointer) set_info_slot;
-
-    *set_info_slot = ptrauth_sign_unauthenticated (
-        ptrauth_strip (&frida_unwind_cursor_set_info_replacement, ptrauth_key_asia),
-        ptrauth_key_asia, context);
-  }
-#else
-  *set_info_slot = &frida_unwind_cursor_set_info_replacement;
-#endif
-
-  if ((prot & GUM_PAGE_WRITE) == 0)
-    gum_mprotect ((gpointer) set_info_slot, GLIB_SIZEOF_VOID_P, prot);
 
   return;
 
@@ -255,6 +216,7 @@ void
 _frida_unwind_sitter_unhook_libunwind ()
 {
   GumPageProtection prot;
+  GumInterceptor * interceptor;
 
   if (state == NULL)
     return;
@@ -262,19 +224,8 @@ _frida_unwind_sitter_unhook_libunwind ()
   if (state->set_info_slot == NULL || state->set_info_original == NULL)
     goto beach;
 
-  if (!gum_memory_query_protection ((gpointer) state->set_info_slot, &prot))
-    goto beach;
-
-  if ((prot & GUM_PAGE_WRITE) == 0)
-  {
-    if (!gum_try_mprotect ((gpointer) state->set_info_slot, GLIB_SIZEOF_VOID_P, GUM_PAGE_READ | GUM_PAGE_WRITE))
-      goto beach;
-  }
-
-  *state->set_info_slot = state->set_info_original;
-
-  if ((prot & GUM_PAGE_WRITE) == 0)
-    gum_mprotect ((gpointer) state->set_info_slot, GLIB_SIZEOF_VOID_P, prot);
+  interceptor = gum_interceptor_obtain ();
+  gum_interceptor_revert (interceptor, state->set_info_original);
 
 beach:
   g_slice_free (UnwindHookState, state);
@@ -649,335 +600,6 @@ frida_has_first_match (GumAddress address, gsize size, gboolean * matches)
   return FALSE;
 }
 
-#endif
-
-#if __has_feature (ptrauth_calls)
-
-static gboolean
-frida_get_diversity_from_dsc (gpointer slot, guint16 * diversity)
-{
-  gboolean result = FALSE;
-  GumDarwinAllImageInfos infos;
-  const gchar * dsc_base;
-  const gchar * file_name;
-  DSCRangeContext range_ctx;
-  DSCMappingContext mapping_ctx;
-  FILE * f;
-
-  if (!gum_darwin_query_all_image_infos (mach_task_self (), &infos))
-    return result;
-
-  if (infos.shared_cache_base_address == 0)
-    return result;
-
-  dsc_base = GSIZE_TO_POINTER (infos.shared_cache_base_address);
-
-  if (memcmp (dsc_base + 9, "arm64e", 6) != 0)
-    return result;
-
-  range_ctx.range.base_address = infos.shared_cache_base_address;
-  range_ctx.range.size = 0;
-  range_ctx.file_name = NULL;
-
-  mapping_ctx.address = GUM_ADDRESS (slot);
-  mapping_ctx.file_name = NULL;
-
-  gum_process_enumerate_ranges (GUM_PAGE_NO_ACCESS,
-      (GumFoundRangeFunc) frida_store_range_if_dsc, &range_ctx);
-
-  if (range_ctx.range.size == 0)
-    goto beach;
-
-  if (range_ctx.file_name == NULL)
-  {
-    gchar * (* dyld_shared_cache_file_path) (void);
-
-    dyld_shared_cache_file_path = GSIZE_TO_POINTER (gum_module_find_export_by_name (LIBDYLD, "dyld_shared_cache_file_path"));
-    if (dyld_shared_cache_file_path == NULL)
-      goto beach;
-
-    file_name = dyld_shared_cache_file_path ();
-  }
-  else
-  {
-    file_name = range_ctx.file_name;
-  }
-
-  frida_iterate_dsc_maps (&range_ctx.range, file_name,
-      (FoundMappingFunc) frida_translate_address_to_file_offset, &mapping_ctx);
-
-  if (mapping_ctx.file_name == NULL)
-    goto beach;
-
-  f = fopen (mapping_ctx.file_name, "rb");
-  if (f == NULL)
-    goto beach;
-
-  guint shift = 0;
-
-  if (mapping_ctx.slide_info_offset != 0)
-  {
-    if (fseek (f, mapping_ctx.slide_info_offset, SEEK_SET) != -1)
-    {
-      guint32 slide_info_version;
-
-      if (fread (&slide_info_version, sizeof (slide_info_version), 1, f) == 1)
-      {
-        if (slide_info_version == 5)
-          shift = 2;
-      }
-    }
-  }
-
-  if (fseek (f, mapping_ctx.offset + 4, SEEK_SET) != -1)
-  {
-    guint32 raw;
-
-    if (fread (&raw, sizeof (raw), 1, f) == 1)
-    {
-      gboolean has_diversity = FALSE;
-
-      raw = raw >> shift;
-      has_diversity = (raw >> 16) & 1;
-      if (has_diversity)
-        *diversity = (guint16) (raw & 0xffff);
-
-      result = has_diversity;
-    }
-    else
-    {
-      result = FALSE;
-    }
-  }
-
-  fclose (f);
-
-beach:
-  g_free (range_ctx.file_name);
-  g_free (mapping_ctx.file_name);
-
-  return result;
-}
-
-static gboolean
-frida_translate_address_to_file_offset (const DSCMappingDetails * details, DSCMappingContext * ctx)
-{
-  if (details->info->address <= ctx->address &&
-      ctx->address < details->info->address + details->info->size)
-  {
-    ctx->offset = ctx->address - details->info->address + details->info->fileOffset;
-    ctx->file_name = g_strdup (details->file_name);
-    ctx->slide_info_offset = details->slide_info_offset;
-
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-static gboolean
-frida_iterate_dsc_maps (const GumMemoryRange * range, const gchar * file_name, FoundMappingFunc func, gpointer ctx)
-{
-  gboolean carry_on = TRUE;
-  gsize slide;
-  gsize mapping_offset, header_size;
-  GumAddress sub_caches_array, v1_check_at, v2_check_at, sub_caches_end;
-  GumAddress end = range->base_address + range->size;
-  gsize sub_caches_count, sub_cache_element_size;
-  guint idx;
-  GumAddress cursor;
-
-  if (range->size < DSC_HEADER_SHARED_REGION_START + 8)
-    return TRUE;
-
-  slide = range->base_address - GUM_ADDRESS (*(gpointer *)(range->base_address + DSC_HEADER_SHARED_REGION_START));
-  mapping_offset = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_OFFSET);
-  header_size = mapping_offset;
-
-  if (header_size >= DSC_HEADER_MAPPING_SLIDE_COUNT)
-  {
-    guint32 mapping_slide_offset = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_SLIDE_OFFSET);
-    guint32 mapping_slide_count = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_SLIDE_COUNT);
-
-    if (mapping_slide_offset >= range->size || mapping_slide_offset + mapping_slide_count * sizeof (DSCMappingSlideInfo) > range->size)
-      return TRUE;
-
-    if (!frida_iterate_maps_slide_at (range->base_address + mapping_slide_offset, mapping_slide_count, slide, file_name, func, ctx))
-      return FALSE;
-  }
-  else
-  {
-    guint32 mapping_count = *(guint32 *)(range->base_address + DSC_HEADER_MAPPING_COUNT);
-
-    if (mapping_offset >= range->size || mapping_offset + mapping_count * sizeof (DSCMappingInfo) > range->size)
-      return TRUE;
-
-    if (!frida_iterate_maps_at (range->base_address + mapping_offset, mapping_count, slide, file_name, func, ctx))
-      return FALSE;
-  }
-
-  if (header_size < DSC_HEADER_SUBCACHE_ARRAY_COUNT + 4)
-    return TRUE;
-
-  sub_caches_array = range->base_address + *(guint32 *)(range->base_address + DSC_HEADER_SUBCACHE_ARRAY_OFFSET);
-  if (sub_caches_array == 0)
-    return TRUE;
-
-  sub_caches_count = *(guint32 *)(range->base_address + DSC_HEADER_SUBCACHE_ARRAY_COUNT);
-  if (sub_caches_count == 0)
-    return TRUE;
-
-  v1_check_at = sub_caches_array + sub_caches_count * DSC_SUBCACHE_ENTRY_V1_SIZE;
-  v2_check_at = sub_caches_array + sub_caches_count * DSC_SUBCACHE_ENTRY_V2_SIZE;
-
-  if (v1_check_at < end && *(gchar *)GSIZE_TO_POINTER (v1_check_at) == '/')
-  {
-    sub_cache_element_size = DSC_SUBCACHE_ENTRY_V1_SIZE;
-    sub_caches_end = v1_check_at;
-  }
-  else if (v2_check_at < end && *(gchar *)GSIZE_TO_POINTER (v2_check_at) == '/')
-  {
-    sub_cache_element_size = DSC_SUBCACHE_ENTRY_V2_SIZE;
-    sub_caches_end = v2_check_at;
-  }
-  else
-  {
-    return FALSE;
-  }
-
-  idx = 1;
-  cursor = sub_caches_array;
-  while (cursor < sub_caches_end)
-  {
-    DSCRangeContext range_ctx;
-    gsize offset;
-    gchar * without_suffix;
-    gchar * sub_file_name = NULL;
-
-    offset = *(gsize *)GSIZE_TO_POINTER (cursor + DSC_SUBCACHE_ENTRY_CACHE_VM_OFFSET);
-
-    range_ctx.range.base_address = range->base_address + offset;;
-    range_ctx.range.size = 0;
-    range_ctx.file_name = NULL;
-
-    gum_process_enumerate_ranges (GUM_PAGE_NO_ACCESS,
-        (GumFoundRangeFunc) frida_store_range_if_dsc, &range_ctx);
-
-    if (range_ctx.range.size == 0)
-      goto next;
-
-    without_suffix = frida_copy_without_suffix (file_name);
-
-    if (sub_cache_element_size == DSC_SUBCACHE_ENTRY_V2_SIZE)
-    {
-      gchar suffix[DSC_SUBCACHE_ENTRY_SUFFIX_SIZE + 1];
-
-      g_strlcpy (suffix, (const gchar *) GSIZE_TO_POINTER (cursor + DSC_SUBCACHE_ENTRY_SUFFIX), sizeof (suffix));
-      sub_file_name = g_strdup_printf ("%s%s", without_suffix, suffix);
-    }
-    else
-    {
-      sub_file_name = g_strdup_printf ("%s.%d", without_suffix, idx);
-    }
-
-    g_free (without_suffix);
-
-    carry_on = frida_iterate_dsc_maps (&range_ctx.range, sub_file_name, func, ctx);
-    g_free (sub_file_name);
-    if (!carry_on)
-      break;
-
-next:
-    cursor += sub_cache_element_size;
-  }
-
-  return carry_on;
-}
-
-static gboolean
-frida_store_range_if_dsc (const GumRangeDetails * details, DSCRangeContext * ctx)
-{
-  if (details->range->base_address == ctx->range.base_address)
-  {
-    ctx->range.size = details->range->size;
-    if (details->file != NULL)
-      ctx->file_name = g_strdup (details->file->path);
-
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-static gchar *
-frida_copy_without_suffix (const gchar * file_name)
-{
-  gchar * copy = g_strdup (file_name);
-  gchar * slash, * dot;
-
-  slash = strrchr (copy, '/');
-  dot = strrchr (copy, '.');
-
-  if (dot != NULL && dot > slash)
-    *dot = 0;
-
-  return copy;
-}
-
-static gboolean
-frida_iterate_maps_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx)
-{
-  GumAddress cursor = start;
-  GumAddress end = start + count * sizeof (DSCMappingInfo);
-
-  while (cursor < end)
-  {
-    DSCMappingInfo info = *(DSCMappingInfo *)GSIZE_TO_POINTER (cursor);
-    DSCMappingDetails details;
-
-    info.address += slide;
-
-    details.info = (DSCBaseMappingInfo *)&info;
-    details.file_name = file_name;
-    details.slide_info_offset = 0;
-
-    if (!func (&details, ctx))
-      return FALSE;
-
-    cursor += sizeof (DSCMappingInfo);
-  }
-
-  return TRUE;
-}
-
-static gboolean
-frida_iterate_maps_slide_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx)
-{
-  GumAddress cursor = start;
-  GumAddress end = start + count * sizeof (DSCMappingSlideInfo);
-
-  while (cursor < end)
-  {
-    DSCMappingSlideInfo info = *(DSCMappingSlideInfo *)GSIZE_TO_POINTER (cursor);
-    DSCMappingDetails details;
-
-    info.address += slide;
-
-    details.info = (DSCBaseMappingInfo *)&info;
-    details.file_name = file_name;
-    if (info.slideInfoFileSize >= 4)
-      details.slide_info_offset = info.slideInfoFileOffset;
-    else
-      details.slide_info_offset = 0;
-
-    if (!func (&details, ctx))
-      return FALSE;
-
-    cursor += sizeof (DSCMappingSlideInfo);
-  }
-
-  return TRUE;
-}
 #endif
 
 #endif
