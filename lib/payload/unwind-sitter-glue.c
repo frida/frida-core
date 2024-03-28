@@ -16,8 +16,8 @@
 #ifdef HAVE_ARM64
 # define UNWIND_CURSOR_unwindInfoMissing 0x268
 # define UNW_AARCH64_X29 29
-# define HIGHEST_NIBBLE 0xf000000000000000UL
-# define STRIP_MASK 0x0000007fffffffffUL
+# define HIGHEST_NIBBLE 0xf000000000000000ULL
+# define STRIP_MASK 0x0000007fffffffffULL
 # if __has_feature (ptrauth_calls)
 #  define DSC_HEADER_MAPPING_OFFSET 0x10
 #  define DSC_HEADER_MAPPING_COUNT 0x14
@@ -394,7 +394,7 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
     GumAddress translated;
 
     translated = GUM_ADDRESS (
-        gum_interceptor_translate_top_return_address (
+        gum_interceptor_translate_return_address (
             GSIZE_TO_POINTER (stored_pc)));
 
     if (translated != stored_pc)
