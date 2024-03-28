@@ -26,8 +26,7 @@ namespace Frida {
 			interceptor.replace ((void *) dyld_find_unwind_sections,
 					(void *) replacement_dyld_find_unwind_sections, this);
 
-			Gum.MemoryRange invader_range = invader.get_memory_range ();
-			_hook_libunwind (invader_range.base_address, invader_range.base_address + invader_range.size);
+			_hook_libunwind ();
 		}
 
 		public override void dispose () {
@@ -57,7 +56,7 @@ namespace Frida {
 		}
 
 		public extern static void _fill_unwind_sections (Gum.Address invader_start, Gum.Address invader_end, void * info);
-		public extern static void _hook_libunwind (Gum.Address invader_start, Gum.Address invader_end);
+		public extern static void _hook_libunwind ();
 		public extern static void _unhook_libunwind ();
 	}
 #else

@@ -12,15 +12,10 @@
 #define LIBDYLD "/usr/lib/system/libdyld.dylib"
 #define UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO 0x68
 #define UNWIND_CURSOR_VTABLE_OFFSET_GET_REG 0x18
-#define UNWIND_CURSOR_VTABLE_OFFSET_SET_REG 0x20
 #define FP_TO_SP(fp) (fp + 0x10)
-#define UNW_REG_IP -1
 #ifdef HAVE_ARM64
-# define UNWIND_ARM64_MODE_FRAME 0x4000000
 # define UNWIND_CURSOR_unwindInfoMissing 0x268
-# define UNWIND_CURSOR_info_format 0x250
 # define UNW_AARCH64_X29 29
-# define UNW_ARM64_RA_SIGN_STATE 34
 # define HIGHEST_NIBBLE 0xf000000000000000UL
 # define STRIP_MASK 0x0000007fffffffffUL
 # if __has_feature (ptrauth_calls)
@@ -39,7 +34,6 @@
 # endif
 #else
 # define UNWIND_CURSOR_unwindInfoMissing 0x100
-# define UNWIND_CURSOR_info_format 0xe8
 # define UNW_X86_64_RBP 6
 #endif
 
@@ -83,11 +77,8 @@ struct _UnwindHookState
   gssize shift;
   gpointer * set_info_slot;
   gpointer set_info_original;
-  GumAddress invader_start;
-  GumAddress invader_end;
   void (* set_info) (gpointer cursor, int is_return_address);
   gpointer (* get_reg) (gpointer cursor, int reg);
-  void (* set_reg) (gpointer cursor, int reg, gpointer value);
 };
 
 #if __has_feature (ptrauth_calls)
@@ -189,10 +180,10 @@ _frida_unwind_sitter_fill_unwind_sections (GumAddress invader_start, GumAddress 
 }
 
 void
-_frida_unwind_sitter_hook_libunwind (GumAddress invader_start, GumAddress invader_end)
+_frida_unwind_sitter_hook_libunwind ()
 {
   gpointer * set_info_slot;
-  gpointer get_reg_impl, set_reg_impl;
+  gpointer get_reg_impl;
   GumPageProtection prot;
 
 #if GLIB_SIZEOF_VOID_P != 8
@@ -203,8 +194,8 @@ _frida_unwind_sitter_hook_libunwind (GumAddress invader_start, GumAddress invade
     return;
 
   state = g_slice_new0 (UnwindHookState);
-  state->invader_start = invader_start;
-  state->invader_end = invader_end;
+  if (state == NULL)
+    return;
 
   state->vtable = frida_find_vtable ();
   if (state->vtable == NULL)
@@ -217,14 +208,11 @@ _frida_unwind_sitter_hook_libunwind (GumAddress invader_start, GumAddress invade
       UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO + state->shift);
   get_reg_impl = *(gpointer *)(GUM_ADDRESS (state->vtable) +
       UNWIND_CURSOR_VTABLE_OFFSET_GET_REG + state->shift);
-  set_reg_impl = *(gpointer *)(GUM_ADDRESS (state->vtable) +
-      UNWIND_CURSOR_VTABLE_OFFSET_SET_REG + state->shift);
 
   state->set_info_slot = set_info_slot;
   state->set_info_original = *set_info_slot;
   state->set_info = RESIGN_PTR (state->set_info_original);
   state->get_reg = RESIGN_PTR (get_reg_impl);
-  state->set_reg = RESIGN_PTR (set_reg_impl);
 
   if (!gum_memory_query_protection ((gpointer) set_info_slot, &prot))
     goto beach;
