@@ -2140,11 +2140,11 @@ namespace Frida.HostSessionTest {
 						meth.implementation = ObjC.implement(meth, function (handle, selector, url) {
 						  return origImpl(handle, selector, NULL);
 						});
-						Interceptor.attach(Module.getExportByName(null, "abort"), function () {
+						Interceptor.attach(Module.getExportByName(null, 'abort'), function () {
 						  send('abort');
 						  Thread.sleep(1);
 						});
-						Interceptor.attach(Module.getExportByName(null, "__exit"), function (args) {
+						Interceptor.attach(Module.getExportByName(null, '__exit'), function (args) {
 						  send(`exit(${args[0].toUInt32()})`);
 						  Thread.sleep(1);
 						});
@@ -2193,17 +2193,24 @@ namespace Frida.HostSessionTest {
 
 					var session = yield device.attach (process.id);
 					var script = yield session.create_script ("""
-						const meth = ObjC.classes.NSBundle['- initWithURL:'];
+						const { NSBundle } = ObjC.classes;
+						const meth = NSBundle['+ bundleWithURL:'];
+						const methInner = NSBundle['- initWithURL:'];
 						Interceptor.attach(meth.implementation, {
 						  onEnter(args) {
 						    args[2] = NULL;
 						  }
 						});
-						Interceptor.attach(Module.getExportByName(null, "abort"), function () {
+						Interceptor.attach(methInner.implementation, {
+						  onEnter(args) {
+						    args[2] = NULL;
+						  }
+						});
+						Interceptor.attach(Module.getExportByName(null, 'abort'), function () {
 						  send('abort');
 						  Thread.sleep(1);
 						});
-						Interceptor.attach(Module.getExportByName(null, "__exit"), function (args) {
+						Interceptor.attach(Module.getExportByName(null, '__exit'), function (args) {
 						  send(`exit(${args[0].toUInt32()})`);
 						  Thread.sleep(1);
 						});
