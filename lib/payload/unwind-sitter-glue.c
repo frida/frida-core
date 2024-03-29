@@ -27,14 +27,6 @@ typedef struct _FillInfoContext FillInfoContext;
 typedef struct _DyldUwindSections DyldUnwindSections;
 typedef struct _CreateArgs CreateArgs;
 typedef struct _UnwindHookState UnwindHookState;
-#if __has_feature (ptrauth_calls)
-typedef struct _DSCRangeContext DSCRangeContext;
-typedef struct _DSCBaseMappingInfo DSCBaseMappingInfo;
-typedef struct _DSCMappingInfo DSCMappingInfo;
-typedef struct _DSCMappingSlideInfo DSCMappingSlideInfo;
-typedef struct _DSCMappingDetails DSCMappingDetails;
-typedef struct _DSCMappingContext DSCMappingContext;
-#endif
 
 struct _FillInfoContext
 {
@@ -68,61 +60,6 @@ struct _UnwindHookState
 };
 
 #if __has_feature (ptrauth_calls)
-
-struct _DSCRangeContext
-{
-  GumMemoryRange range;
-  gchar * file_name;
-};
-
-struct _DSCBaseMappingInfo
-{
-  guint64 address;
-  guint64 size;
-  guint64 fileOffset;
-};
-
-struct _DSCMappingInfo
-{
-  guint64 address;
-  guint64 size;
-  guint64 fileOffset;
-  guint32 maxProt;
-  guint32 initProt;
-};
-
-struct _DSCMappingSlideInfo
-{
-  guint64 address;
-  guint64 size;
-  guint64 fileOffset;
-  guint64 slideInfoFileOffset;
-  guint64 slideInfoFileSize;
-  guint64 flags;
-  guint32 maxProt;
-  guint32 initProt;
-};
-
-struct _DSCMappingDetails
-{
-  const DSCBaseMappingInfo * info;
-  const gchar * file_name;
-  guint slide_info_offset;
-};
-
-struct _DSCMappingContext
-{
-  GumAddress address;
-  gsize offset;
-  gchar * file_name;
-  gsize slide_info_offset;
-};
-
-typedef gboolean (* FoundMappingFunc) (const DSCMappingDetails * details, gpointer user_data);
-
-#endif
-
-#if __has_feature (ptrauth_calls)
 # define RESIGN_PTR(x) GSIZE_TO_POINTER (gum_sign_code_address (gum_strip_code_address (GUM_ADDRESS (x))))
 #else
 # define RESIGN_PTR(x) (x)
@@ -139,15 +76,6 @@ static gboolean frida_find_bss_range (const GumSectionDetails * details, GumMemo
 #else
 static gboolean frida_is_empty_function (GumAddress address);
 static gboolean frida_has_first_match (GumAddress address, gsize size, gboolean * matches);
-#endif
-#if __has_feature (ptrauth_calls)
-static gboolean frida_get_diversity_from_dsc (gpointer slot, guint16 * diversity);
-static gboolean frida_translate_address_to_file_offset (const DSCMappingDetails * details, DSCMappingContext * ctx);
-static gboolean frida_iterate_dsc_maps (const GumMemoryRange * range, const gchar * file_name, FoundMappingFunc func, gpointer ctx);
-static gboolean frida_store_range_if_dsc (const GumRangeDetails * details, DSCRangeContext * ctx);
-static gchar * frida_copy_without_suffix (const gchar * file_name);
-static gboolean frida_iterate_maps_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx);
-static gboolean frida_iterate_maps_slide_at (GumAddress start, gsize count, gsize slide, const gchar * file_name, FoundMappingFunc func, gpointer ctx);
 #endif
 
 static UnwindHookState * state = NULL;
@@ -170,7 +98,6 @@ _frida_unwind_sitter_hook_libunwind ()
 {
   gpointer * set_info_slot;
   gpointer get_reg_impl;
-  GumPageProtection prot;
   GumInterceptor * interceptor;
 
 #if GLIB_SIZEOF_VOID_P != 8
@@ -215,7 +142,6 @@ beach:
 void
 _frida_unwind_sitter_unhook_libunwind ()
 {
-  GumPageProtection prot;
   GumInterceptor * interceptor;
 
   if (state == NULL)
