@@ -46,6 +46,9 @@ namespace Frida {
 			var range_end = range.base_address + range.size;
 
 			var address = Gum.Address.from_pointer (addr);
+#if ARM64
+			address &= 0x7ffffffffULL;
+#endif
 			var is_ours = address >= range.base_address && address < range_end;
 			if (!is_ours)
 				return sitter.dyld_find_unwind_sections(addr, info);

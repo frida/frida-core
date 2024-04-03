@@ -240,6 +240,9 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
   gboolean missing_info;
   GumAddress fp, stored_pc;
   gpointer * stored_pc_slot;
+#if defined (HAVE_ARM64) && !__has_feature (ptrauth_calls)
+  gboolean was_signed = FALSE;
+#endif
 
   if (state == NULL)
     return;
@@ -262,7 +265,8 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
 #if __has_feature (ptrauth_calls)
   stored_pc = gum_strip_code_address (stored_pc);
 #elif defined (HAVE_ARM64)
-  if ((stored_pc & HIGHEST_NIBBLE) != 0)
+  was_signed = (stored_pc & HIGHEST_NIBBLE) != 0;
+  if (was_signed)
     stored_pc &= STRIP_MASK;
 #endif
 
@@ -271,7 +275,8 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
     GumAddress translated;
 
     translated = GUM_ADDRESS (
-        gum_interceptor_translate_return_address (
+        gum_invocation_stack_translate (
+            gum_interceptor_get_current_stack (),
             GSIZE_TO_POINTER (stored_pc)));
 
     if (translated != stored_pc)
@@ -281,6 +286,7 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
           ptrauth_strip (GSIZE_TO_POINTER (translated), ptrauth_key_asia),
           ptrauth_key_asib, FP_TO_SP (fp));
 #elif defined (HAVE_ARM64)
+      if (was_signed)
       {
         GumAddress resigned;
 
@@ -296,6 +302,10 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
         );
 
         *stored_pc_slot = GSIZE_TO_POINTER (resigned);
+      }
+      else
+      {
+        *stored_pc_slot = GSIZE_TO_POINTER (translated);
       }
 #else
       *stored_pc_slot = GSIZE_TO_POINTER (translated);
