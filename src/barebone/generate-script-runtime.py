@@ -25,11 +25,15 @@ def generate_runtime(input_dir, output_dir):
     try:
         subprocess.run([npm, "install"], capture_output=True, cwd=output_dir, check=True)
     except Exception as e:
+        if hasattr(e, "stderr") and e.stderr != b"":
+            info = e.stderr.decode()
+        else:
+            info = str(e)
         message = "\n".join([
             "",
             "***",
             "Failed to bootstrap the Barebone backend script runtime:",
-            "\t" + str(e),
+            "\t" + info,
             "It appears Node.js is not installed.",
             "We need it for processing JavaScript code at build-time.",
             "Check PATH or set NPM to the absolute path of your npm binary.",
