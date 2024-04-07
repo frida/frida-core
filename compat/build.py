@@ -13,7 +13,7 @@ import platform
 import shutil
 import subprocess
 import sys
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Literal, Mapping, Optional, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -24,11 +24,15 @@ from mesonbuild.mesonlib import OptionKey
 from releng.env import TOOLCHAIN_ENVVARS
 
 
+Role = Literal["project", "subproject"]
+
+
 def main(argv):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
     command = subparsers.add_parser("setup", help="setup build directories")
+    command.add_argument("role", help="project vs subproject", choices=["project", "subproject"])
     command.add_argument("builddir", help="build directory", type=Path)
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
@@ -37,7 +41,8 @@ def main(argv):
     command.add_argument("assets", help="whether assets are embedded vs installed and loaded at runtime")
     command.add_argument("components", help="which components will be built",
                          type=parse_array_option_value)
-    command.set_defaults(func=lambda args: setup(args.builddir,
+    command.set_defaults(func=lambda args: setup(args.role,
+                                                 args.builddir,
                                                  args.host_os,
                                                  args.host_arch,
                                                  args.compat,
@@ -72,7 +77,8 @@ def parse_array_option_value(v: str) -> set[str]:
     return {v.strip() for v in v.split(",")}
 
 
-def setup(builddir: Path,
+def setup(role: Role,
+          builddir: Path,
           host_os: str,
           host_arch: str,
           compat: set[str],
@@ -207,7 +213,7 @@ def setup(builddir: Path,
     if not outputs:
         return
 
-    state = State(host_os, host_arch, outputs)
+    state = State(role, host_os, host_arch, outputs)
     privdir = compute_private_dir(builddir)
     privdir.mkdir(exist_ok=True)
     (privdir / STATE_FILENAME).write_bytes(pickle.dumps(state))
@@ -219,6 +225,7 @@ def setup(builddir: Path,
 
 @dataclass
 class State:
+    role: Role
     host_os: str
     host_arch: str
     outputs: Mapping[str, Sequence[Output]]
@@ -250,7 +257,7 @@ def compile(builddir: Path, top_builddir: Path):
 
         if not (workdir / "build.ninja").exists():
             if options is None:
-                options = load_meson_options(top_builddir)
+                options = load_meson_options(top_builddir, state.role)
             perform(REPO_ROOT / configure_script,
                     f"--host={state.host_os}-{extra_arch}",
                     "--",
@@ -296,14 +303,26 @@ def make_build_environment(workdir: Path) -> Mapping[str, str]:
     }
 
 
-def load_meson_options(top_builddir: Path) -> Sequence[str]:
-    return [f"-D{k}={v.value}" for k, v in coredata.load(top_builddir).options.items() \
-            if option_should_be_forwarded(k, v)]
+def load_meson_options(top_builddir: Path, role: Role) -> Sequence[str]:
+    return [f"-D{adapt_key(k, role)}={v.value}" for k, v in coredata.load(top_builddir).options.items() \
+            if option_should_be_forwarded(k, v, role)]
 
 
-def option_should_be_forwarded(k: OptionKey, v: coredata.UserOption[Any]) -> bool:
+def adapt_key(k: OptionKey, role: Role) -> OptionKey:
+    if role == "subproject" and k.subproject == "frida-core":
+        return k.as_root()
+    return k
+
+
+def option_should_be_forwarded(k: OptionKey,
+                               v: coredata.UserOption[Any],
+                               role: Role) -> bool:
+    our_project_id = "frida-core" if role == "subproject" else ""
+    is_for_us = k.subproject == our_project_id
+    is_for_child = k.subproject == "frida-gum" # TODO: Include fallbacks
+
     if coredata.CoreData.is_per_machine_option(k) \
-            and not (k.subproject and k.is_project() and k.machine is coredata.MachineChoice.HOST):
+            and not (is_for_child and k.is_project() and k.machine is coredata.MachineChoice.HOST):
         return False
 
     if k.as_host() in coredata.BUILTIN_OPTIONS_PER_MACHINE:
@@ -321,12 +340,13 @@ def option_should_be_forwarded(k: OptionKey, v: coredata.UserOption[Any]) -> boo
         if not str(v.value):
             return False
 
-    if not k.subproject and k.is_project():
+    if k.is_project() and is_for_us:
         tokens = k.name.split("_")
         if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
             return False
+        return True
 
-    return True
+    return is_for_us or is_for_child
 
 
 def scrub_environment(env: Mapping[str, str]) -> Mapping[str, str]:

@@ -34,6 +34,7 @@ if no_overridden_compat_bits
 
   setup_result = run_command(build_py,
     'setup',
+    meson.is_subproject() ? 'subproject' : 'project',
     meson.current_build_dir(),
     host_os,
     host_abi,
