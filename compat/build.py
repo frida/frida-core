@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 import argparse
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -21,49 +22,6 @@ sys.path.insert(0, str(REPO_ROOT))
 from mesonbuild import coredata
 from mesonbuild.mesonlib import OptionKey
 from releng.env import TOOLCHAIN_ENVVARS
-
-
-STATE_FILENAME = "state.dat"
-DEPFILE_FILENAME = "compat.deps"
-
-HELPER_TARGET = "frida-helper"
-HELPER_FILE_WINDOWS = Path("src") / "frida-helper.exe"
-HELPER_FILE_UNIX = Path("src") / "frida-helper"
-
-AGENT_TARGET = "frida-agent"
-AGENT_FILE_WINDOWS = Path("lib") / "agent" / "frida-agent.dll"
-AGENT_FILE_DARWIN = Path("lib") / "agent" / "frida-agent.dylib"
-AGENT_FILE_ELF = Path("lib") / "agent" / "frida-agent.so"
-
-GADGET_TARGET = "frida-gadget"
-GADGET_FILE_WINDOWS = Path("lib") / "gadget" / "frida-gadget.dll"
-GADGET_FILE_DARWIN = Path("lib") / "gadget" / "frida-gadget.dylib"
-GADGET_FILE_ELF = Path("lib") / "gadget" / "frida-gadget.so"
-
-SERVER_TARGET = "frida-server"
-SERVER_FILE_UNIX = Path("server") / "frida-server"
-
-MSVS_ENVVARS = {
-    "PLATFORM",
-    "VCINSTALLDIR",
-    "INCLUDE",
-    "LIB",
-}
-
-
-@dataclass
-class Output:
-    identifier: str
-    name: str
-    file: Path
-    target: str
-
-
-@dataclass
-class State:
-    host_os: str
-    host_arch: str
-    outputs: Mapping[str, Sequence[Output]]
 
 
 def main(argv):
@@ -259,6 +217,21 @@ def setup(builddir: Path,
     print(f"{','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME}")
 
 
+@dataclass
+class State:
+    host_os: str
+    host_arch: str
+    outputs: Mapping[str, Sequence[Output]]
+
+
+@dataclass
+class Output:
+    identifier: str
+    name: str
+    file: Path
+    target: str
+
+
 def compile(builddir: Path, top_builddir: Path):
     state = pickle.loads((compute_private_dir(builddir) / STATE_FILENAME).read_bytes())
 
@@ -414,6 +387,34 @@ def perform(*args, **kwargs):
         print(e, file=sys.stderr)
         print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
         sys.exit(1)
+
+
+STATE_FILENAME = "state.dat"
+DEPFILE_FILENAME = "compat.deps"
+
+HELPER_TARGET = "frida-helper"
+HELPER_FILE_WINDOWS = Path("src") / "frida-helper.exe"
+HELPER_FILE_UNIX = Path("src") / "frida-helper"
+
+AGENT_TARGET = "frida-agent"
+AGENT_FILE_WINDOWS = Path("lib") / "agent" / "frida-agent.dll"
+AGENT_FILE_DARWIN = Path("lib") / "agent" / "frida-agent.dylib"
+AGENT_FILE_ELF = Path("lib") / "agent" / "frida-agent.so"
+
+GADGET_TARGET = "frida-gadget"
+GADGET_FILE_WINDOWS = Path("lib") / "gadget" / "frida-gadget.dll"
+GADGET_FILE_DARWIN = Path("lib") / "gadget" / "frida-gadget.dylib"
+GADGET_FILE_ELF = Path("lib") / "gadget" / "frida-gadget.so"
+
+SERVER_TARGET = "frida-server"
+SERVER_FILE_UNIX = Path("server") / "frida-server"
+
+MSVS_ENVVARS = {
+    "PLATFORM",
+    "VCINSTALLDIR",
+    "INCLUDE",
+    "LIB",
+}
 
 
 if __name__ == "__main__":
