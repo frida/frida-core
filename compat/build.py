@@ -20,7 +20,7 @@ sys.path.insert(0, str(REPO_ROOT / "releng" / "meson"))
 sys.path.insert(0, str(REPO_ROOT))
 from mesonbuild import coredata
 from mesonbuild.mesonlib import OptionKey
-from releng.env_generic import TOOLCHAIN_ENVVARS
+from releng.env import TOOLCHAIN_ENVVARS
 
 
 STATE_FILENAME = "state.dat"
