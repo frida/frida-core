@@ -17,11 +17,6 @@ from typing import Any, Literal, Mapping, Optional, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "releng" / "meson"))
-sys.path.insert(0, str(REPO_ROOT))
-from mesonbuild import coredata
-from mesonbuild.mesonlib import OptionKey
-from releng.env import TOOLCHAIN_ENVVARS
 
 
 Role = Literal["project", "subproject"]
@@ -85,6 +80,8 @@ def setup(role: Role,
           assets: str,
           components: set[str]):
     outputs: Mapping[str, Sequence[Output]] = {}
+
+    configure_import_path(query_rootdir(role))
 
     if "auto" in compat:
         compat = {"native", "emulated"} if host_os in {"windows", "macos", "ios", "tvos", "android"} else set()
@@ -242,9 +239,12 @@ class Output:
 def compile(builddir: Path, top_builddir: Path):
     state = pickle.loads((compute_private_dir(builddir) / STATE_FILENAME).read_bytes())
 
+    rootdir = query_rootdir(state.role)
+    configure_import_path(rootdir)
+
     if platform.system() == "Windows":
         configure_script = "configure.bat"
-        make_command = REPO_ROOT / "make.bat"
+        make_command = rootdir / "make.bat"
     else:
         configure_script = "configure"
         make_command = "make"
@@ -258,7 +258,7 @@ def compile(builddir: Path, top_builddir: Path):
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(top_builddir, state.role)
-            perform(REPO_ROOT / configure_script,
+            perform(rootdir / configure_script,
                     f"--host={state.host_os}-{extra_arch}",
                     "--",
                     "-Dhelper_modern=",
@@ -298,25 +298,30 @@ def compute_workdir_for_arch(arch: str, builddir: Path) -> Path:
 
 def make_build_environment(workdir: Path) -> Mapping[str, str]:
     return {
+        "FRIDA_SOURCEDIR": str(REPO_ROOT),
         "FRIDA_BUILDDIR": str(workdir),
         **scrub_environment(os.environ),
     }
 
 
 def load_meson_options(top_builddir: Path, role: Role) -> Sequence[str]:
+    from mesonbuild import coredata
+
     return [f"-D{adapt_key(k, role)}={v.value}" for k, v in coredata.load(top_builddir).options.items() \
             if option_should_be_forwarded(k, v, role)]
 
 
-def adapt_key(k: OptionKey, role: Role) -> OptionKey:
+def adapt_key(k: "OptionKey", role: Role) -> "OptionKey":
     if role == "subproject" and k.subproject == "frida-core":
         return k.as_root()
     return k
 
 
-def option_should_be_forwarded(k: OptionKey,
-                               v: coredata.UserOption[Any],
+def option_should_be_forwarded(k: "OptionKey",
+                               v: "coredata.UserOption[Any]",
                                role: Role) -> bool:
+    from mesonbuild import coredata
+
     our_project_id = "frida-core" if role == "subproject" else ""
     is_for_us = k.subproject == our_project_id
     is_for_child = k.subproject == "frida-gum" # TODO: Include fallbacks
@@ -350,6 +355,7 @@ def option_should_be_forwarded(k: OptionKey,
 
 
 def scrub_environment(env: Mapping[str, str]) -> Mapping[str, str]:
+    from releng.env import TOOLCHAIN_ENVVARS
     clean_env = OrderedDict()
     envvars_to_avoid = {*TOOLCHAIN_ENVVARS, *MSVS_ENVVARS}
     for k, v in env.items():
@@ -407,6 +413,15 @@ def perform(*args, **kwargs):
         print(e, file=sys.stderr)
         print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
         sys.exit(1)
+
+
+def query_rootdir(role: Role) -> Path:
+    return REPO_ROOT.parent.parent if role == "subproject" else REPO_ROOT
+
+
+def configure_import_path(rootdir: Path):
+    sys.path.insert(0, str(rootdir / "releng" / "meson"))
+    sys.path.insert(0, str(rootdir))
 
 
 STATE_FILENAME = "state.dat"
