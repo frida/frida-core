@@ -265,7 +265,7 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
 #if __has_feature (ptrauth_calls)
   stored_pc = gum_strip_code_address (stored_pc);
 #elif defined (HAVE_ARM64)
-  was_signed = (stored_pc & HIGHEST_NIBBLE) != 0;
+  was_signed = (stored_pc & ~STRIP_MASK ) != 0ULL;
   if (was_signed)
     stored_pc &= STRIP_MASK;
 #endif
