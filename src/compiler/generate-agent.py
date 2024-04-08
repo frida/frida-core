@@ -30,9 +30,17 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
             continue
         shutil.copyfile(input_dir / name, output_dir / name)
 
+    run_kwargs = {
+        "cwd": output_dir,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "encoding": "utf-8",
+        "check": True,
+    }
+
     try:
-        subprocess.run([npm, "install"], capture_output=True, cwd=output_dir, check=True)
-        #subprocess.run([npm, "link", "/Users/oleavr/src/frida-compile"], capture_output=True, cwd=output_dir, check=True)
+        subprocess.run([npm, "install"], **run_kwargs)
+        #subprocess.run([npm, "link", "/Users/oleavr/src/frida-compile"], **run_kwargs)
     except Exception as e:
         message = "\n".join([
             "",
@@ -49,11 +57,12 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
     components = ["typescript", "agent-core"]
     for component in components:
         subprocess.run([
-                npm, "run", "build:" + component,
-                "--",
-                "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
-                "--silent",
-            ], cwd=output_dir, check=True)
+                           npm, "run", "build:" + component,
+                           "--",
+                           "--environment", f"FRIDA_HOST_OS_FAMILY:{host_os_family},FRIDA_HOST_ARCH:{host_arch},FRIDA_HOST_CPU_MODE:{host_cpu_mode}",
+                           "--silent",
+                       ],
+                       **run_kwargs)
     chunks = []
     for component in components:
         script = (output_dir / f"{component}.js").read_text(encoding="utf-8")
@@ -67,12 +76,13 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
         shutil.copyfile(entrypoint, agent)
         (output_dir / "embed.js").write_text(components_source, encoding="utf-8")
         subprocess.run([
-            v8_mksnapshot,
-            "--turbo-instruction-scheduling",
-            "--startup-blob=snapshot.bin",
-            "embed.js",
-            input_dir / "agent-warmup.js",
-        ], cwd=output_dir, check=True)
+                           v8_mksnapshot,
+                           "--turbo-instruction-scheduling",
+                           "--startup-blob=snapshot.bin",
+                           "embed.js",
+                           input_dir / "agent-warmup.js",
+                       ],
+                       **run_kwargs)
     else:
         agent.write_text("\n".join([
             components_source,
@@ -97,6 +107,10 @@ if __name__ == "__main__":
 
     try:
         generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot)
+    except subprocess.CalledProcessError as e:
+        print(e, file=sys.stderr)
+        print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
+        sys.exit(2)
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)
