@@ -83,22 +83,23 @@ if host_os == 'android'
   core_public_extra_headers += fs.copyfile(frida_selinux_h)
 endif
 
+if build_machine.system() == 'windows'
+  uninstalled_incdir = fs.as_posix(meson.current_build_dir())
+else
+  uninstalled_incdir = meson.current_build_dir()
+endif
+
 core_public_dep = declare_dependency(
   sources: [core_public_h, core_public_gir, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,
   dependencies: core_deps,
-  variables: [
-    'vapidir=' + meson.current_build_dir(),
-  ],
+  variables: {
+    'frida_includedir': uninstalled_incdir,
+    'frida_girdir': uninstalled_girdir,
+  },
 )
-
-if build_machine.system() == 'windows'
-  uninstalled_incdir = fs.as_posix(meson.current_build_dir())
-else
-  uninstalled_incdir = meson.current_build_dir()
-endif
 
 pkg = import('pkgconfig')
 pkg.generate(
