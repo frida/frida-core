@@ -46,7 +46,7 @@ core_public_vapi = custom_target('frida-core-vapi',
     generate_api_args,
   ],
   install: true,
-  install_dir: get_option('datadir') / 'vala' / 'vapi',
+  install_dir: vapidir,
 )
 
 core_public_vapi_stamp =  custom_target('frida-core-vapi-stamp',
@@ -88,6 +88,7 @@ if build_machine.system() == 'windows'
 else
   uninstalled_incdir = meson.current_build_dir()
 endif
+uninstalled_vapidir = uninstalled_incdir
 
 core_public_dep = declare_dependency(
   sources: [core_public_h, core_public_gir, core_public_vapi_stamp, core_public_extra_headers],
@@ -98,6 +99,7 @@ core_public_dep = declare_dependency(
   variables: {
     'frida_includedir': uninstalled_incdir,
     'frida_girdir': uninstalled_girdir,
+    'frida_vapidir': uninstalled_vapidir,
   },
 )
 
@@ -116,10 +118,12 @@ pkg.generate(
   variables: {
     'frida_includedir': '${includedir}',
     'frida_girdir': girdir,
+    'frida_vapidir': vapidir,
   },
   uninstalled_variables: {
     'frida_includedir': uninstalled_incdir,
     'frida_girdir': uninstalled_girdir,
+    'frida_vapidir': uninstalled_vapidir,
   },
 )
 

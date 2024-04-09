@@ -393,6 +393,8 @@ else
 endif
 uninstalled_girdir = meson.current_build_dir() / 'src'
 
+vapidir = get_option('datadir') / 'vala' / 'vapi'
+
 gum_vala_args = [
   '--pkg=frida-gum-1.0',
   '--vapidir=' + gum_dep.get_variable('frida_vapidir'),
