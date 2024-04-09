@@ -393,11 +393,10 @@ else
 endif
 uninstalled_girdir = meson.current_build_dir() / 'src'
 
-gum_vala_args = ['--pkg=frida-gum-1.0']
-gum_vapidir = gum_dep.get_variable('vapidir', default_value: '')
-if gum_vapidir != ''
-  gum_vala_args += '--vapidir=' + gum_vapidir
-endif
+gum_vala_args = [
+  '--pkg=frida-gum-1.0',
+  '--vapidir=' + gum_dep.get_variable('frida_vapidir'),
+]
 gumjs_vala_args = ['--pkg=frida-gumjs-1.0', '--pkg=gio-2.0', gum_vala_args]
 gumjs_inspector_vala_args = ['--pkg=frida-gumjs-inspector-1.0', gum_vala_args]
 
