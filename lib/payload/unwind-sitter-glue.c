@@ -16,7 +16,6 @@
 #ifdef HAVE_ARM64
 # define UNWIND_CURSOR_unwindInfoMissing 0x268
 # define UNW_AARCH64_X29 29
-# define HIGHEST_NIBBLE 0xf000000000000000ULL
 # define STRIP_MASK 0x0000007fffffffffULL
 #else
 # define UNWIND_CURSOR_unwindInfoMissing 0x100
