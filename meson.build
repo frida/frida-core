@@ -521,28 +521,28 @@ if get_option('devkits').length() != 0
   mkdevkit = find_program(releng / 'mkdevkit.py')
   uninstalled_dir = meson.global_build_root() / 'meson-uninstalled'
   devkit_options = [
-    '--cc=' + '!'.join(cc.cmd_array()),
-    '--c-args=' + '!'.join(get_option('c_args')),
-    '--pkg-config-path=' + '!'.join([uninstalled_dir] + get_option('pkg_config_path')),
+    '--cc', '>>>', cc.cmd_array(), '<<<',
+    '--c-args', '>>>', get_option('c_args'), '<<<',
+    '--pkg-config-path', '>>>', uninstalled_dir, get_option('pkg_config_path'), '<<<',
   ]
   if host_toolchain == 'microsoft'
     static_lib_prefix = ''
     static_lib_suffix = '.lib'
-    devkit_options += ['--lib=' + lib.full_path()]
+    devkit_options += ['--lib', '>>>', lib, '<<<']
   else
     static_lib_prefix = 'lib'
     static_lib_suffix = '.a'
     devkit_options += [
-      '--ar=' + ar.full_path(),
-      '--nm=' + nm.full_path(),
+      '--ar', '>>>', ar, '<<<',
+      '--nm', '>>>', nm, '<<<',
     ]
     objcopy = find_program('objcopy', required: false)
     if objcopy.found()
-      devkit_options += '--objcopy=' + objcopy.full_path()
+      devkit_options += ['--objcopy', '>>>', objcopy, '<<<']
     endif
   endif
   if host_os_family == 'darwin'
-    devkit_options += ['--libtool=' + libtool.full_path()]
+    devkit_options += ['--libtool', '>>>', libtool, '<<<']
   endif
 endif
 
