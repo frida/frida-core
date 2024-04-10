@@ -523,6 +523,7 @@ if get_option('devkits').length() != 0
   devkit_options = [
     '--cc', '>>>', cc.cmd_array(), '<<<',
     '--c-args', '>>>', get_option('c_args'), '<<<',
+    '--pkg-config', '>>>', find_program('pkg-config'), '<<<',
     '--pkg-config-path', '>>>', uninstalled_dir, get_option('pkg_config_path'), '<<<',
   ]
   if host_toolchain == 'microsoft'
