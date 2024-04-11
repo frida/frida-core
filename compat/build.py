@@ -51,7 +51,12 @@ def main(argv):
 
     args = parser.parse_args()
     if "func" in args:
-        args.func(args)
+        try:
+            args.func(args)
+        except subprocess.CalledProcessError as e:
+            print(e, file=sys.stderr)
+            print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
+            sys.exit(1)
     else:
         parser.print_usage(file=sys.stderr)
         sys.exit(1)
@@ -81,7 +86,9 @@ def setup(role: Role,
           components: set[str]):
     outputs: Mapping[str, Sequence[Output]] = {}
 
-    configure_import_path(query_releng_parentdir(role))
+    releng_parentdir = query_releng_parentdir(role)
+    ensure_submodules_checked_out(releng_parentdir)
+    configure_import_path(releng_parentdir)
 
     if "auto" in compat:
         compat = {"native", "emulated"} if host_os in {"windows", "macos", "ios", "tvos", "android"} else set()
@@ -411,6 +418,16 @@ def query_releng_parentdir(role: Role) -> Path:
         if (candidate / "releng").is_dir():
             return candidate
     return REPO_ROOT
+
+
+def ensure_submodules_checked_out(releng_parentdir: Path):
+    if not (releng_parentdir / "releng" / "meson" / "meson.py").exists():
+        subprocess.run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1", "releng"],
+                       cwd=releng_parentdir,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT,
+                       encoding="utf-8",
+                       check=True)
 
 
 def configure_import_path(releng_parentdir: Path):
