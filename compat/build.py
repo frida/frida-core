@@ -286,7 +286,8 @@ def compile(builddir: Path, top_builddir: Path):
                           "-Dagent_emulated_legacy=",
                           *options,
                       ],
-                      call_meson=call_internal_meson)
+                      call_meson=call_internal_meson,
+                      on_progress=lambda progress: None)
 
         make(sourcedir=REPO_ROOT,
              builddir=workdir,
