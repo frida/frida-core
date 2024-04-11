@@ -81,7 +81,7 @@ def setup(role: Role,
           components: set[str]):
     outputs: Mapping[str, Sequence[Output]] = {}
 
-    configure_import_path(query_rootdir(role))
+    configure_import_path(query_releng_parentdir(role))
 
     if "auto" in compat:
         compat = {"native", "emulated"} if host_os in {"windows", "macos", "ios", "tvos", "android"} else set()
@@ -239,12 +239,12 @@ class Output:
 def compile(builddir: Path, top_builddir: Path):
     state = pickle.loads((compute_private_dir(builddir) / STATE_FILENAME).read_bytes())
 
-    rootdir = query_rootdir(state.role)
-    configure_import_path(rootdir)
+    releng_parentdir = query_releng_parentdir(state.role)
+    configure_import_path(releng_parentdir)
 
     if platform.system() == "Windows":
         configure_script = "configure.bat"
-        make_command = rootdir / "make.bat"
+        make_command = releng_parentdir / "make.bat"
     else:
         configure_script = "configure"
         make_command = "make"
@@ -258,7 +258,7 @@ def compile(builddir: Path, top_builddir: Path):
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(top_builddir, state.role)
-            perform(rootdir / configure_script,
+            perform(releng_parentdir / configure_script,
                     f"--host={state.host_os}-{extra_arch}",
                     "--",
                     "-Dhelper_modern=",
@@ -415,13 +415,17 @@ def perform(*args, **kwargs):
         sys.exit(1)
 
 
-def query_rootdir(role: Role) -> Path:
-    return REPO_ROOT.parent.parent if role == "subproject" else REPO_ROOT
+def query_releng_parentdir(role: Role) -> Path:
+    if role == "subproject":
+        candidate = REPO_ROOT.parent.parent
+        if (candidate / "releng").is_dir():
+            return candidate
+    return REPO_ROOT
 
 
-def configure_import_path(rootdir: Path):
-    sys.path.insert(0, str(rootdir / "releng" / "meson"))
-    sys.path.insert(0, str(rootdir))
+def configure_import_path(releng_parentdir: Path):
+    sys.path.insert(0, str(releng_parentdir / "releng" / "meson"))
+    sys.path.insert(0, str(releng_parentdir))
 
 
 STATE_FILENAME = "state.dat"
