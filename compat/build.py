@@ -405,20 +405,6 @@ def quote(path: str) -> str:
     return "\"" + path.replace ("\"", "\\\"") + "\""
 
 
-def perform(*args, **kwargs):
-    try:
-        return subprocess.run(args,
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT,
-                              encoding="utf-8",
-                              **kwargs)
-    except subprocess.CalledProcessError as e:
-        print(e, file=sys.stderr)
-        print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
-        sys.exit(1)
-
-
 def query_releng_parentdir(role: Role) -> Path:
     if role == "subproject":
         candidate = REPO_ROOT.parent.parent
