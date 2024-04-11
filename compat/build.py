@@ -241,39 +241,51 @@ def compile(builddir: Path, top_builddir: Path):
 
     releng_parentdir = query_releng_parentdir(state.role)
     configure_import_path(releng_parentdir)
+    from releng.env import call_meson
+    from releng.machine_spec import MachineSpec
+    from releng.meson_configure import configure
+    from releng.meson_make import make
 
-    if platform.system() == "Windows":
-        configure_script = "configure.bat"
-        make_command = releng_parentdir / "make.bat"
-    else:
-        configure_script = "configure"
-        make_command = "make"
+    # TODO: Handle releng submodule needing checkout
+
+    call_internal_meson = lambda argv, *args, **kwargs: \
+            call_meson(argv,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT,
+                       encoding="utf-8",
+                       *args,
+                       **kwargs)
 
     source_paths: set[Path] = set()
     options: Optional[Sequence[str]] = None
+    build_env = scrub_environment(os.environ)
     for extra_arch, outputs in state.outputs.items():
         workdir = compute_workdir_for_arch(extra_arch, builddir)
-        build_env = make_build_environment(workdir)
+        host_machine = MachineSpec(state.host_os, extra_arch)
 
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(top_builddir, state.role)
-            perform(releng_parentdir / configure_script,
-                    f"--host={state.host_os}-{extra_arch}",
-                    "--",
-                    "-Dhelper_modern=",
-                    "-Dhelper_legacy=",
-                    "-Dagent_modern=",
-                    "-Dagent_legacy=",
-                    "-Dagent_emulated_modern=",
-                    "-Dagent_emulated_legacy=",
-                    *options,
-                    env=build_env)
+            configure(sourcedir=REPO_ROOT,
+                      builddir=workdir,
+                      host_machine=host_machine,
+                      environ=build_env,
+                      extra_meson_options=[
+                          "-Dhelper_modern=",
+                          "-Dhelper_legacy=",
+                          "-Dagent_modern=",
+                          "-Dagent_legacy=",
+                          "-Dagent_emulated_modern=",
+                          "-Dagent_emulated_legacy=",
+                          *options,
+                      ],
+                      call_meson=call_internal_meson)
 
-        targets_to_build = [o.target for o in outputs]
-        perform(make_command, *targets_to_build,
-                cwd=workdir,
-                env=build_env)
+        make(sourcedir=REPO_ROOT,
+             builddir=workdir,
+             targets=[o.target for o in outputs],
+             environ=build_env,
+             call_meson=call_internal_meson)
 
         for o in outputs:
             shutil.copy(workdir / o.file, builddir / o.name)
@@ -294,14 +306,6 @@ def compute_private_dir(builddir: Path) -> Path:
 
 def compute_workdir_for_arch(arch: str, builddir: Path) -> Path:
     return compute_private_dir(builddir) / arch
-
-
-def make_build_environment(workdir: Path) -> Mapping[str, str]:
-    return {
-        "FRIDA_SOURCEDIR": str(REPO_ROOT),
-        "FRIDA_BUILDDIR": str(workdir),
-        **scrub_environment(os.environ),
-    }
 
 
 def load_meson_options(top_builddir: Path, role: Role) -> Sequence[str]:
