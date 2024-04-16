@@ -255,13 +255,17 @@ def compile(builddir: Path, top_builddir: Path):
 
     # TODO: Handle releng submodule needing checkout
 
-    call_internal_meson = lambda argv, *args, **kwargs: \
-            call_meson(argv,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.STDOUT,
-                       encoding="utf-8",
-                       *args,
-                       **kwargs)
+    def call_internal_meson(argv, *args, **kwargs):
+        if "stdout" not in kwargs and "stderr" not in kwargs:
+            silenced_kwargs = {
+                **kwargs,
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "encoding": "utf-8",
+            }
+        else:
+            silenced_kwargs = kwargs
+        return call_meson(argv, *args, **silenced_kwargs)
 
     source_paths: set[Path] = set()
     options: Optional[Sequence[str]] = None
