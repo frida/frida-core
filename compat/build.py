@@ -31,6 +31,8 @@ def main(argv):
     command.add_argument("builddir", help="build directory", type=Path)
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
+    command.add_argument("host_toolchain", help="the kind of toolchain being used",
+                         choices=["microsoft", "apple", "gnu"])
     command.add_argument("compat", help="support for targets with a different architecture",
                          type=parse_compat_option_value)
     command.add_argument("assets", help="whether assets are embedded vs installed and loaded at runtime")
@@ -40,6 +42,7 @@ def main(argv):
                                                  args.builddir,
                                                  args.host_os,
                                                  args.host_arch,
+                                                 args.host_toolchain,
                                                  args.compat,
                                                  args.assets,
                                                  args.components))
@@ -81,6 +84,7 @@ def setup(role: Role,
           builddir: Path,
           host_os: str,
           host_arch: str,
+          host_toolchain: str,
           compat: set[str],
           assets: str,
           components: set[str]):
@@ -217,7 +221,7 @@ def setup(role: Role,
     if not outputs:
         return
 
-    state = State(role, host_os, host_arch, outputs)
+    state = State(role, host_os, host_arch, host_toolchain, outputs)
     privdir = compute_private_dir(builddir)
     privdir.mkdir(exist_ok=True)
     (privdir / STATE_FILENAME).write_bytes(pickle.dumps(state))
@@ -232,6 +236,7 @@ class State:
     role: Role
     host_os: str
     host_arch: str
+    host_toolchain: str
     outputs: Mapping[str, Sequence[Output]]
 
 
@@ -272,11 +277,20 @@ def compile(builddir: Path, top_builddir: Path):
     build_env = scrub_environment(os.environ)
     for extra_arch, outputs in state.outputs.items():
         workdir = compute_workdir_for_arch(extra_arch, builddir)
-        host_machine = MachineSpec(state.host_os, extra_arch)
 
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(top_builddir, state.role)
+
+            if state.host_os == "windows":
+                if state.host_toolchain == "microsoft":
+                    config = next((opt.split("=")[1] for opt in options if opt.startswith("-Db_vscrt=")))
+                else:
+                    config = "mingw"
+            else:
+                config = None
+            host_machine = MachineSpec(state.host_os, extra_arch, config)
+
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,
                       host_machine=host_machine,

@@ -38,6 +38,7 @@ if no_overridden_compat_bits
     meson.current_build_dir(),
     host_os,
     host_abi,
+    host_toolchain,
     ','.join(get_option('compat')),
     get_option('assets'),
     ','.join(components),
