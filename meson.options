@@ -1,7 +1,7 @@
 option('frida_version',
   type: 'string',
   value: '',
-  description: 'Frida version, such as 16.2.1 (stable) or 16.2.2-dev.27 (snapshot)',
+  description: 'Frida version, such as 16.2.2 or 16.2.2-dev.27',
 )
 
 option('local_backend',
