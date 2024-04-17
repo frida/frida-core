@@ -429,10 +429,16 @@ namespace Frida {
 		}
 
 		public string read_string (size_t offset) {
-			string * val = (string *) get_pointer (offset, sizeof (char));
 			size_t max_length = size - offset;
-			return val->substring (0, (long) max_length);
+			string * val = (string *) get_pointer (offset, sizeof (char));
+			string * end = memchr (val, 0, max_length);
+			assert (end != null);
+			size_t size = end - val;
+			return val->substring (0, (long) size);
 		}
+
+		[CCode (cname = "memchr", cheader_filename = "string.h")]
+		private extern static string * memchr (string * s, int c, size_t n);
 
 		public string read_fixed_string (size_t offset, size_t size) {
 			string * val = (string *) get_pointer (offset, size);
