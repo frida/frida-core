@@ -258,8 +258,6 @@ def compile(builddir: Path, top_builddir: Path):
     from releng.meson_configure import configure
     from releng.meson_make import make
 
-    # TODO: Handle releng submodule needing checkout
-
     def call_internal_meson(argv, *args, **kwargs):
         if "stdout" not in kwargs and "stderr" not in kwargs:
             silenced_kwargs = {
