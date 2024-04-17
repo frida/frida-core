@@ -13,6 +13,22 @@ Vala compiler from:
     https://github.com/frida/vala''')
 endif
 
+frida_version = get_option('frida_version')
+if frida_version == ''
+  frida_version = meson.project_version()
+endif
+tokens = frida_version.split('.')
+frida_major_version = tokens[0].to_int()
+frida_minor_version = tokens[1].to_int()
+if tokens.length() == 4
+  frida_micro_version = tokens[2].split('-')[0].to_int() - 1
+  frida_nano_version = tokens[3].to_int() + 1
+else
+  assert(tokens.length() == 3)
+  frida_micro_version = tokens[2].to_int()
+  frida_nano_version = 0
+endif
+
 api_version = '1.0'
 
 header_install_dir = get_option('includedir') / f'frida-@api_version@'
@@ -162,17 +178,17 @@ endif
 
 cdata = configuration_data()
 
-if cc.get_define('FRIDA_VERSION') == ''
-  version = meson.project_version()
-  tokens = version.split('.')
-  cdata.set_quoted('FRIDA_VERSION', version)
-  cdata.set('FRIDA_MAJOR_VERSION', tokens[0].to_int())
-  cdata.set('FRIDA_MINOR_VERSION', tokens[1].to_int())
-  cdata.set('FRIDA_MICRO_VERSION', tokens[2].to_int())
-  cdata.set('FRIDA_NANO_VERSION', 0)
-endif
+cdata.set_quoted('FRIDA_VERSION', frida_version)
+cdata.set('FRIDA_MAJOR_VERSION', frida_major_version)
+cdata.set('FRIDA_MINOR_VERSION', frida_minor_version)
+cdata.set('FRIDA_MICRO_VERSION', frida_micro_version)
+cdata.set('FRIDA_NANO_VERSION', frida_nano_version)
 
-cdata.set_quoted('FRIDA_PREFIX', get_option('prefix'))
+escaped_prefix = get_option('prefix')
+if host_os_family == 'windows'
+  escaped_prefix = escaped_prefix.replace('\\', '\\\\')
+endif
+cdata.set_quoted('FRIDA_PREFIX', escaped_prefix)
 
 exe_suffix = (host_os_family == 'windows') ? '.exe' : ''
 if host_os_family == 'windows'
@@ -269,6 +285,7 @@ if get_option('b_sanitize') == 'address'
 endif
 
 gum_dep = dependency('frida-gum-1.0', default_options: [
+  f'frida_version=@frida_version@',
   'gumjs=enabled',
 ])
 gumjs_dep = dependency('frida-gumjs-1.0')
