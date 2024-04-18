@@ -252,7 +252,11 @@ def compile(builddir: Path, top_builddir: Path):
     state = pickle.loads((compute_private_dir(builddir) / STATE_FILENAME).read_bytes())
 
     releng_parentdir = query_releng_parentdir(state.role)
+    subprojects = detect_relevant_subprojects(releng_parentdir)
+    if state.role == "subproject":
+        grab_subprojects_from_parent(subprojects, releng_parentdir)
     configure_import_path(releng_parentdir)
+
     from releng.env import call_meson
     from releng.machine_spec import MachineSpec
     from releng.meson_configure import configure
@@ -441,6 +445,45 @@ def ensure_submodules_checked_out(releng_parentdir: Path):
     if not (releng_parentdir / "releng" / "meson" / "meson.py").exists():
         subprocess.run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1", "releng"],
                        cwd=releng_parentdir,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT,
+                       encoding="utf-8",
+                       check=True)
+
+
+def detect_relevant_subprojects(releng_parentdir: Path) -> dict[str, Path]:
+    subprojects = detect_relevant_subprojects_in(REPO_ROOT, releng_parentdir)
+    gum_location = subprojects.get("frida-gum")
+    if gum_location is not None:
+        subprojects.update(detect_relevant_subprojects_in(gum_location, releng_parentdir))
+    return subprojects
+
+
+def detect_relevant_subprojects_in(repo_root: Path, releng_parentdir: Path) -> dict[str, Path]:
+    result = {}
+    for f in (repo_root / "subprojects").glob("*.wrap"):
+        name = f.stem
+        location = releng_parentdir / "subprojects" / name
+        if location.exists():
+            result[name] = location
+    return result
+
+
+def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_parentdir: Path):
+    for name, location in subprojects.items():
+        subp_here = REPO_ROOT / "subprojects" / name
+        if subp_here.exists():
+            continue
+
+        try:
+            subp_here.symlink_to(location, target_is_directory=True)
+            continue
+        except OSError as e:
+            if not getattr(e, "winerror") == 1314:
+                raise e
+
+        subprocess.run(["git", "worktree", "add", subp_here],
+                       cwd=location,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT,
                        encoding="utf-8",
