@@ -46,6 +46,8 @@ if have_compiler_backend
       'frida-data-compiler.h',
       'frida-data-compiler.c',
       'frida-data-compiler-blob' + resource_blob_extension,
+      'frida-data-compiler-agent.js.br',
+      'frida-data-compiler-snapshot.bin.br',
     ],
     command: [
       resource_compiler_cmd_array,
