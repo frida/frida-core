@@ -1996,7 +1996,7 @@ namespace Frida {
 				get_regs (&saved_regs);
 				write_memory (target_address, original_code);
 
-				bool hit_breakpoint = saved_regs.program_counter == target_address ||
+				bool hit_breakpoint = (void *) saved_regs.program_counter == (void *) target_address ||
 					saved_regs.program_counter == target_address + breakpoint_data.length;
 				if (!hit_breakpoint)
 					throw new Error.NOT_SUPPORTED ("Unable to reach breakpoint (got unknown trap)");
