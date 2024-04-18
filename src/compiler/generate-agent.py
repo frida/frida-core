@@ -20,18 +20,38 @@ INPUTS = [
 ]
 
 
-def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot):
+def main(argv):
+    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in sys.argv[1:4]]
+    host_os_family, host_arch, host_cpu_mode = sys.argv[4:7]
+    v8_mksnapshot = sys.argv[7]
+    if v8_mksnapshot != "":
+        v8_mksnapshot = Path(v8_mksnapshot)
+    else:
+        v8_mksnapshot = None
+
+    try:
+        generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot)
+    except subprocess.CalledProcessError as e:
+        print(e, file=sys.stderr)
+        print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
+
+
+def generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot):
     npm = os.environ.get("NPM", make_script_filename("npm"))
 
     entrypoint = input_dir / "agent-entrypoint.js"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    priv_dir.mkdir(exist_ok=True)
     for name in INPUTS:
         if name == "agent-entrypoint.js":
             continue
         shutil.copy(input_dir / name, priv_dir / name)
 
     run_kwargs = {
-        "cwd": output_dir,
+        "cwd": priv_dir,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
         "encoding": "utf-8",
@@ -65,7 +85,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
                        **run_kwargs)
     chunks = []
     for component in components:
-        script = (output_dir / f"{component}.js").read_text(encoding="utf-8")
+        script = (priv_dir / f"{component}.js").read_text(encoding="utf-8")
         chunks.append(script)
     components_source = "\n".join(chunks)
 
@@ -74,7 +94,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
 
     if v8_mksnapshot is not None:
         shutil.copy(entrypoint, agent)
-        (output_dir / "embed.js").write_text(components_source, encoding="utf-8")
+        (priv_dir / "embed.js").write_text(components_source, encoding="utf-8")
         subprocess.run([
                            v8_mksnapshot,
                            "--turbo-instruction-scheduling",
@@ -90,6 +110,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
         ]), encoding="utf-8")
         snapshot.write_bytes(b"")
 
+
 def make_script_filename(name):
     build_os = platform.system().lower()
     extension = ".cmd" if build_os == "windows" else ""
@@ -97,20 +118,4 @@ def make_script_filename(name):
 
 
 if __name__ == "__main__":
-    input_dir, output_dir = [Path(d).resolve() for d in sys.argv[1:3]]
-    host_os_family, host_arch, host_cpu_mode = sys.argv[3:6]
-    v8_mksnapshot = sys.argv[6]
-    if v8_mksnapshot != "":
-        v8_mksnapshot = Path(v8_mksnapshot)
-    else:
-        v8_mksnapshot = None
-
-    try:
-        generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot)
-    except subprocess.CalledProcessError as e:
-        print(e, file=sys.stderr)
-        print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
-        sys.exit(2)
-    except Exception as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+    main(sys.argv)

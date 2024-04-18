@@ -40,6 +40,7 @@ if have_local_backend
     resource_compiler,
     '>>>', lipo, '<<<',
     meson.current_build_dir(),
+    '@PRIVATE_DIR@',
     '@INPUT0@',
   ]
 
@@ -449,10 +450,10 @@ if have_local_backend
     backend_sources += custom_target('frida-data-agent',
       input: 'agent.resources',
       output: [
+        'frida-data-agent-blob' + resource_blob_extension,
         'frida-data-agent.vapi',
         'frida-data-agent.h',
         'frida-data-agent.c',
-        'frida-data-agent-blob' + resource_blob_extension,
       ],
       command: [
         python,
@@ -463,6 +464,7 @@ if have_local_backend
         resource_compiler,
         '>>>', lipo, '<<<',
         meson.current_build_dir(),
+        '@PRIVATE_DIR@',
         '@INPUT0@',
         agent_modern,
         agent_legacy,

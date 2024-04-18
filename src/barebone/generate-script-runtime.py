@@ -8,22 +8,32 @@ import subprocess
 import sys
 
 
-def generate_runtime(input_dir, output_dir):
-    output_dir.mkdir(parents=True, exist_ok=True)
+def main(argv):
+    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in sys.argv[1:]]
 
-    shutil.copy(input_dir / "package.json", output_dir)
-    shutil.copy(input_dir / "package-lock.json", output_dir)
+    try:
+        generate_runtime(input_dir, output_dir, priv_dir)
+    except Exception as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
+
+
+def generate_runtime(input_dir, output_dir, priv_dir):
+    priv_dir.mkdir(exist_ok=True)
+
+    shutil.copy(input_dir / "package.json", priv_dir)
+    shutil.copy(input_dir / "package-lock.json", priv_dir)
 
     runtime_reldir = Path("script-runtime")
     runtime_srcdir = input_dir / runtime_reldir
-    runtime_intdir = output_dir / runtime_reldir
+    runtime_intdir = priv_dir / runtime_reldir
     if runtime_intdir.exists():
         shutil.rmtree(runtime_intdir)
     shutil.copytree(runtime_srcdir, runtime_intdir)
 
     npm = os.environ.get("NPM", make_script_filename("npm"))
     try:
-        subprocess.run([npm, "install"], capture_output=True, cwd=output_dir, check=True)
+        subprocess.run([npm, "install"], capture_output=True, cwd=priv_dir, check=True)
     except Exception as e:
         message = "\n".join([
             "",
@@ -37,6 +47,8 @@ def generate_runtime(input_dir, output_dir):
         ])
         raise EnvironmentError(message)
 
+    shutil.copy(priv_dir / "script-runtime.js", output_dir)
+
 
 def make_script_filename(name):
     build_os = platform.system().lower()
@@ -45,10 +57,4 @@ def make_script_filename(name):
 
 
 if __name__ == "__main__":
-    input_dir, output_dir = [Path(d).resolve() for d in sys.argv[1:3]]
-
-    try:
-        generate_runtime(input_dir, output_dir)
-    except Exception as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+    main(sys.argv)

@@ -14,10 +14,10 @@ def main(argv):
     resource_compiler = args.pop(0)
     lipo = pop_cmd_array_arg(args)
     output_dir = Path(args.pop(0))
+    priv_dir = Path(args.pop(0))
     resource_config = args.pop(0)
     helper_modern, helper_legacy = [Path(p) if p else None for p in args[:2]]
 
-    priv_dir = output_dir / "frida-helper@emb"
     priv_dir.mkdir(exist_ok=True)
 
     embedded_assets = []

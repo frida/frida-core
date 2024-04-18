@@ -30,6 +30,7 @@ if have_compiler_backend
       find_program('generate-agent.py'),
       meson.current_source_dir(),
       meson.current_build_dir(),
+      '@PRIVATE_DIR@',
       host_os_family,
       host_arch_gumjs,
       host_cpu_mode,

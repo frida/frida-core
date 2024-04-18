@@ -14,6 +14,7 @@ def main(argv):
     resource_compiler = args.pop(0)
     lipo = pop_cmd_array_arg(args)
     output_dir = Path(args.pop(0))
+    priv_dir = Path(args.pop(0))
     resource_config = args.pop(0)
     agent_modern, agent_legacy, \
             agent_emulated_modern, agent_emulated_legacy, \
@@ -24,7 +25,6 @@ def main(argv):
         print("At least one agent must be provided", file=sys.stderr)
         sys.exit(1)
 
-    priv_dir = output_dir / "frida-agent@emb"
     priv_dir.mkdir(exist_ok=True)
 
     embedded_assets = []

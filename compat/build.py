@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import argparse
+import base64
 from collections import OrderedDict
 from dataclasses import dataclass
 import itertools
@@ -26,9 +27,10 @@ def main(argv):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    command = subparsers.add_parser("setup", help="setup build directories")
+    command = subparsers.add_parser("setup", help="setup everything needed to compile")
     command.add_argument("role", help="project vs subproject", choices=["project", "subproject"])
     command.add_argument("builddir", help="build directory", type=Path)
+    command.add_argument("top_builddir", help="top build directory", type=Path)
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
     command.add_argument("host_toolchain", help="the kind of toolchain being used",
@@ -40,6 +42,7 @@ def main(argv):
                          type=parse_array_option_value)
     command.set_defaults(func=lambda args: setup(args.role,
                                                  args.builddir,
+                                                 args.top_builddir,
                                                  args.host_os,
                                                  args.host_arch,
                                                  args.host_toolchain,
@@ -47,10 +50,10 @@ def main(argv):
                                                  args.assets,
                                                  args.components))
 
-    command = subparsers.add_parser("compile", help="compile a specific build directory")
-    command.add_argument("builddir", help="build directory", type=Path)
-    command.add_argument("top_builddir", help="top build directory", type=Path)
-    command.set_defaults(func=lambda args: compile(args.builddir, args.top_builddir))
+    command = subparsers.add_parser("compile", help="compile compatibility assets")
+    command.add_argument("privdir", help="directory to store intermediate files", type=Path)
+    command.add_argument("state", help="opaque state from the setup step")
+    command.set_defaults(func=lambda args: compile(args.privdir, pickle.loads(base64.b64decode(args.state))))
 
     args = parser.parse_args()
     if "func" in args:
@@ -82,13 +85,16 @@ def parse_array_option_value(v: str) -> set[str]:
 
 def setup(role: Role,
           builddir: Path,
+          top_builddir: Path,
           host_os: str,
           host_arch: str,
           host_toolchain: str,
           compat: set[str],
           assets: str,
           components: set[str]):
-    outputs: Mapping[str, Sequence[Output]] = {}
+    outputs: Mapping[str, Sequence[Output]] = OrderedDict()
+
+    outputs["bundle"] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
 
     releng_parentdir = query_releng_parentdir(role)
     ensure_submodules_checked_out(releng_parentdir)
@@ -218,22 +224,19 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
 
-    if not outputs:
-        return
-
-    state = State(role, host_os, host_arch, host_toolchain, outputs)
-    privdir = compute_private_dir(builddir)
-    privdir.mkdir(exist_ok=True)
-    (privdir / STATE_FILENAME).write_bytes(pickle.dumps(state))
+    state = State(role, builddir, top_builddir, host_os, host_arch, host_toolchain, outputs)
+    serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
     variable_names, output_names = zip(*[(output.identifier, output.name) \
             for output in itertools.chain.from_iterable(outputs.values())])
-    print(f"{','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME}")
+    print(f"{','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME} {serialized_state}")
 
 
 @dataclass
 class State:
     role: Role
+    builddir: Path
+    top_builddir: Path
     host_os: str
     host_arch: str
     host_toolchain: str
@@ -248,9 +251,7 @@ class Output:
     target: str
 
 
-def compile(builddir: Path, top_builddir: Path):
-    state = pickle.loads((compute_private_dir(builddir) / STATE_FILENAME).read_bytes())
-
+def compile(privdir: Path, state: State):
     releng_parentdir = query_releng_parentdir(state.role)
     subprojects = detect_relevant_subprojects(releng_parentdir)
     if state.role == "subproject":
@@ -277,12 +278,18 @@ def compile(builddir: Path, top_builddir: Path):
     source_paths: set[Path] = set()
     options: Optional[Sequence[str]] = None
     build_env = scrub_environment(os.environ)
-    for extra_arch, outputs in state.outputs.items():
-        workdir = compute_workdir_for_arch(extra_arch, builddir)
+    for key, outputs in state.outputs.items():
+        if key == "bundle":
+            for o in outputs:
+                (state.builddir / o.name).write_bytes(b"")
+            continue
+
+        extra_arch = key
+        workdir = (privdir / extra_arch).resolve()
 
         if not (workdir / "build.ninja").exists():
             if options is None:
-                options = load_meson_options(top_builddir, state.role, set(subprojects.keys()))
+                options = load_meson_options(state.top_builddir, state.role, set(subprojects.keys()))
 
             if state.host_os == "windows":
                 if state.host_toolchain == "microsoft":
@@ -316,24 +323,16 @@ def compile(builddir: Path, top_builddir: Path):
              call_meson=call_internal_meson)
 
         for o in outputs:
-            shutil.copy(workdir / o.file, builddir / o.name)
+            shutil.copy(workdir / o.file, state.builddir / o.name)
 
         for cmd in json.loads((workdir / "compile_commands.json").read_text(encoding="utf-8")):
             source_paths.add((workdir / Path(cmd["file"])).absolute())
 
-    (builddir / DEPFILE_FILENAME).write_text(generate_depfile(itertools.chain.from_iterable(state.outputs.values()),
-                                                              source_paths,
-                                                              builddir,
-                                                              top_builddir),
-                                             encoding="utf-8")
-
-
-def compute_private_dir(builddir: Path) -> Path:
-    return builddir / "arch-support.p"
-
-
-def compute_workdir_for_arch(arch: str, builddir: Path) -> Path:
-    return compute_private_dir(builddir) / arch
+    (state.builddir / DEPFILE_FILENAME).write_text(generate_depfile(itertools.chain.from_iterable(state.outputs.values()),
+                                                                    source_paths,
+                                                                    state.builddir,
+                                                                    state.top_builddir),
+                                                   encoding="utf-8")
 
 
 def load_meson_options(top_builddir: Path,
