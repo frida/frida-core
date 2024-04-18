@@ -282,7 +282,7 @@ def compile(builddir: Path, top_builddir: Path):
 
         if not (workdir / "build.ninja").exists():
             if options is None:
-                options = load_meson_options(top_builddir, state.role)
+                options = load_meson_options(top_builddir, state.role, set(subprojects.keys()))
 
             if state.host_os == "windows":
                 if state.host_toolchain == "microsoft":
@@ -336,11 +336,13 @@ def compute_workdir_for_arch(arch: str, builddir: Path) -> Path:
     return compute_private_dir(builddir) / arch
 
 
-def load_meson_options(top_builddir: Path, role: Role) -> Sequence[str]:
+def load_meson_options(top_builddir: Path,
+                       role: Role,
+                       subprojects: set[str]) -> Sequence[str]:
     from mesonbuild import coredata
 
-    return [f"-D{adapt_key(k, role)}={v.value}" for k, v in coredata.load(top_builddir).options.items() \
-            if option_should_be_forwarded(k, v, role)]
+    return [f"-D{adapt_key(k, role)}={v.value}" for k, v in coredata.load(top_builddir).options.items()
+            if option_should_be_forwarded(k, v, role, subprojects)]
 
 
 def adapt_key(k: "OptionKey", role: Role) -> "OptionKey":
@@ -351,12 +353,13 @@ def adapt_key(k: "OptionKey", role: Role) -> "OptionKey":
 
 def option_should_be_forwarded(k: "OptionKey",
                                v: "coredata.UserOption[Any]",
-                               role: Role) -> bool:
+                               role: Role,
+                               subprojects: set[str]) -> bool:
     from mesonbuild import coredata
 
     our_project_id = "frida-core" if role == "subproject" else ""
     is_for_us = k.subproject == our_project_id
-    is_for_child = k.subproject == "frida-gum" # TODO: Include fallbacks
+    is_for_child = k.subproject in subprojects
 
     if coredata.CoreData.is_per_machine_option(k) \
             and not (is_for_child and k.is_project() and k.machine is coredata.MachineChoice.HOST):
