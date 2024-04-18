@@ -432,7 +432,7 @@ def quote(path: str) -> str:
 def query_releng_parentdir(role: Role) -> Path:
     if role == "subproject":
         candidate = REPO_ROOT.parent.parent
-        if (candidate / "releng").is_dir():
+        if (candidate / "releng").exists():
             return candidate
     return REPO_ROOT
 
