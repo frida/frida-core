@@ -28,7 +28,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
     for name in INPUTS:
         if name == "agent-entrypoint.js":
             continue
-        shutil.copyfile(input_dir / name, output_dir / name)
+        shutil.copy(input_dir / name, priv_dir / name)
 
     run_kwargs = {
         "cwd": output_dir,
@@ -73,7 +73,7 @@ def generate_agent(input_dir, output_dir, host_os_family, host_arch, host_cpu_mo
     snapshot = output_dir / "snapshot.bin"
 
     if v8_mksnapshot is not None:
-        shutil.copyfile(entrypoint, agent)
+        shutil.copy(entrypoint, agent)
         (output_dir / "embed.js").write_text(components_source, encoding="utf-8")
         subprocess.run([
                            v8_mksnapshot,

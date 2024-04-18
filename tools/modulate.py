@@ -79,7 +79,7 @@ def main():
         magic = f.read(2)
     if magic == b"MZ":
         # For now we will assume that no processing is needed for our Windows binaries.
-        shutil.copyfile(args.input.name, args.output)
+        shutil.copy(args.input.name, args.output)
         return
 
     try:
