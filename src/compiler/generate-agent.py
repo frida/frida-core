@@ -21,9 +21,9 @@ INPUTS = [
 
 
 def main(argv):
-    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in sys.argv[1:4]]
-    host_os_family, host_arch, host_cpu_mode = sys.argv[4:7]
-    v8_mksnapshot = sys.argv[7]
+    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in argv[1:4]]
+    host_os_family, host_arch, host_cpu_mode = argv[4:7]
+    v8_mksnapshot = argv[7]
     if v8_mksnapshot != "":
         v8_mksnapshot = Path(v8_mksnapshot)
     else:

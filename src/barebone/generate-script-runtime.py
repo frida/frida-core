@@ -9,7 +9,7 @@ import sys
 
 
 def main(argv):
-    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in sys.argv[1:]]
+    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in argv[1:]]
 
     try:
         generate_runtime(input_dir, output_dir, priv_dir)
