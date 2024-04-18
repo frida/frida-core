@@ -50,5 +50,8 @@ payload_dep = declare_dependency(
 
 pkg = import('pkgconfig')
 pkg.generate(payload,
-  description: 'Frida payload library intended for static linking into payloads',
+  filebase: f'frida-payload-@api_version@',
+  name: 'Frida Payload Library',
+  version: frida_version,
+  description: 'Building blocks commonly needed to implement payloads',
 )

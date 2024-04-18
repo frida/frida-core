@@ -40,5 +40,8 @@ base_build_dir = meson.current_build_dir()
 
 pkg = import('pkgconfig')
 pkg.generate(base,
-  description: 'Frida base library',
+  filebase: f'frida-base-@api_version@',
+  name: 'Frida Base Library',
+  version: frida_version,
+  description: 'Basic building blocks',
 )

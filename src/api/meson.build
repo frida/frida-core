@@ -106,9 +106,9 @@ core_public_dep = declare_dependency(
 pkg = import('pkgconfig')
 pkg.generate(
   filebase: f'frida-core-@api_version@',
-  name: 'Frida Core',
-  version: meson.project_version(),
-  description: 'Frida core library intended for static linking into bindings',
+  name: 'Frida Core Library',
+  version: frida_version,
+  description: 'Instrumentation toolkit for developers, reverse-engineers, and security researchers',
   requires: ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'json-glib-1.0'],
   requires_private: ['gmodule-2.0', 'gee-0.8', 'libsoup-3.0', 'frida-gum-1.0', 'frida-gumjs-inspector-1.0', 'libbrotlidec'] + backend_reqs_private,
   subdirs: f'frida-@api_version@',
