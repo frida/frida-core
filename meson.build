@@ -479,7 +479,11 @@ nice_dep = dependency('nice', required: get_option('connectivity'), default_opti
 ])
 if nice_dep.found()
   openssl_dep = dependency('openssl')
-  usrsctp_dep = dependency('usrsctp')
+  usrsctp_dep = dependency('usrsctp', default_options: [
+    'sctp_inet=false',
+    'sctp_inet6=false',
+    'sctp_build_programs=false',
+  ])
 
   cdata.set('HAVE_NICE', 1)
   vala_flags += ['--define=HAVE_NICE']
