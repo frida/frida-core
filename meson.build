@@ -469,7 +469,14 @@ if tls_provider_dep.found()
   backend_reqs_private += 'gioopenssl'
 endif
 
-nice_dep = dependency('nice', required: get_option('connectivity'))
+nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
+  'gupnp=disabled',
+  'gstreamer=disabled',
+  'crypto-library=openssl',
+  'examples=disabled',
+  'tests=disabled',
+  'introspection=disabled',
+])
 if nice_dep.found()
   openssl_dep = dependency('openssl')
   usrsctp_dep = dependency('usrsctp')
