@@ -28,13 +28,14 @@ if have_compiler_backend
     ],
     command: [
       find_program('generate-agent.py'),
-      meson.current_source_dir(),
       meson.current_build_dir(),
       '@PRIVATE_DIR@',
+      meson.current_source_dir(),
+      npm,
+      compiler_mksnapshot,
       host_os_family,
       host_arch_gumjs,
       host_cpu_mode,
-      compiler_mksnapshot,
     ],
   )
   compiler_data = custom_target('frida-data-compiler',

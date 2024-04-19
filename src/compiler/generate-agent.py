@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
-import os
 from pathlib import Path
-import platform
 import shutil
 import subprocess
 import sys
@@ -21,16 +19,11 @@ INPUTS = [
 
 
 def main(argv):
-    input_dir, output_dir, priv_dir = [Path(d).resolve() for d in argv[1:4]]
-    host_os_family, host_arch, host_cpu_mode = argv[4:7]
-    v8_mksnapshot = argv[7]
-    if v8_mksnapshot != "":
-        v8_mksnapshot = Path(v8_mksnapshot)
-    else:
-        v8_mksnapshot = None
+    output_dir, priv_dir, input_dir, npm, v8_mksnapshot = [Path(d).resolve() if d else None for d in argv[1:6]]
+    host_os_family, host_arch, host_cpu_mode = argv[6:9]
 
     try:
-        generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot)
+        generate_agent(output_dir, priv_dir, input_dir, npm, v8_mksnapshot, host_os_family, host_arch, host_cpu_mode)
     except subprocess.CalledProcessError as e:
         print(e, file=sys.stderr)
         print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
@@ -40,9 +33,7 @@ def main(argv):
         sys.exit(1)
 
 
-def generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, host_cpu_mode, v8_mksnapshot):
-    npm = os.environ.get("NPM", make_script_filename("npm"))
-
+def generate_agent(output_dir, priv_dir, input_dir, npm, v8_mksnapshot, host_os_family, host_arch, host_cpu_mode):
     entrypoint = input_dir / "agent-entrypoint.js"
     priv_dir.mkdir(exist_ok=True)
     for name in INPUTS:
@@ -58,21 +49,8 @@ def generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, h
         "check": True,
     }
 
-    try:
-        subprocess.run([npm, "install"], **run_kwargs)
-        #subprocess.run([npm, "link", "/Users/oleavr/src/frida-compile"], **run_kwargs)
-    except Exception as e:
-        message = "\n".join([
-            "",
-            "***",
-            "Failed to bootstrap the compiler agent:",
-            "\t" + str(e),
-            "It appears Node.js is not installed.",
-            "We need it for processing JavaScript code at build-time.",
-            "Check PATH or set NPM to the absolute path of your npm binary.",
-            "***\n",
-        ])
-        raise EnvironmentError(message)
+    subprocess.run([npm, "install"], **run_kwargs)
+    #subprocess.run([npm, "link", "/Users/oleavr/src/frida-compile"], **run_kwargs)
 
     components = ["typescript", "agent-core"]
     for component in components:
@@ -109,12 +87,6 @@ def generate_agent(input_dir, output_dir, priv_dir, host_os_family, host_arch, h
             entrypoint.read_text(encoding="utf-8"),
         ]), encoding="utf-8")
         snapshot.write_bytes(b"")
-
-
-def make_script_filename(name):
-    build_os = platform.system().lower()
-    extension = ".cmd" if build_os == "windows" else ""
-    return name + extension
 
 
 if __name__ == "__main__":

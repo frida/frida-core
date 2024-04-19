@@ -29,9 +29,10 @@ barebone_script_runtime = custom_target('frida-barebone-script-runtime',
   ],
   command: [
     find_program('generate-script-runtime.py'),
-    meson.current_source_dir(),
     meson.current_build_dir(),
     '@PRIVATE_DIR@',
+    meson.current_source_dir(),
+    npm,
   ],
 )
 backend_sources += custom_target('frida-data-barebone',
