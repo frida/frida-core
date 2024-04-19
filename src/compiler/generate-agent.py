@@ -76,7 +76,7 @@ def generate_agent(output_dir, priv_dir, input_dir, npm, v8_mksnapshot, host_os_
         subprocess.run([
                            v8_mksnapshot,
                            "--turbo-instruction-scheduling",
-                           "--startup-blob=snapshot.bin",
+                           f"--startup-blob={snapshot}",
                            "embed.js",
                            input_dir / "agent-warmup.js",
                        ],
