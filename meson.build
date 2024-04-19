@@ -490,9 +490,7 @@ if nice_dep.found()
   backend_deps_private += [nice_dep, openssl_dep, usrsctp_dep]
   backend_reqs_private += ['nice', 'openssl', 'usrsctp']
 
-  if cc.has_member('struct sockaddr_conn', 'sconn_len',
-                   dependencies: [usrsctp_dep],
-                   prefix: '#include <usrsctp.h>')
+  if host_os_family in ['darwin', 'freebsd', 'qnx']
     cdata.set('HAVE_SCONN_LEN', 1)
   endif
 else
