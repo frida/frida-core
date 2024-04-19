@@ -19,6 +19,9 @@ if host_os_family != 'windows'
 endif
 
 base_vala_args = [gum_vala_args, '--pkg=gio-2.0', '--pkg=json-glib-1.0']
+if nice_dep.found()
+  base_vala_args += '--pkg=nice'
+endif
 
 base = static_library('frida-base-' + api_version, base_sources,
   c_args: frida_component_cflags,
