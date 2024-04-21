@@ -41,10 +41,10 @@ def main(argv):
 
     try:
         run_kwargs = {
-            "check": True,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
             "encoding": "utf-8",
+            "check": True,
         }
 
         if strip_enabled and strip_command is not None:
