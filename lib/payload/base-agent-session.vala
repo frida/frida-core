@@ -50,7 +50,7 @@ namespace Frida {
 			script_engine.message_from_script.connect (on_message_from_script);
 			script_engine.message_from_debugger.connect (on_message_from_debugger);
 
-			transmitter = new AgentMessageTransmitter (persist_timeout, frida_context, dbus_context);
+			transmitter = new AgentMessageTransmitter (this, persist_timeout, frida_context, dbus_context);
 			transmitter.closed.connect (on_transmitter_closed);
 			transmitter.new_candidates.connect (on_transmitter_new_candidates);
 			transmitter.candidate_gathering_done.connect (on_transmitter_candidate_gathering_done);

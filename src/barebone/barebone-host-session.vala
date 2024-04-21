@@ -343,7 +343,7 @@ namespace Frida {
 			assert (frida_context != null);
 			assert (dbus_context != null);
 
-			transmitter = new AgentMessageTransmitter (persist_timeout, frida_context, dbus_context);
+			transmitter = new AgentMessageTransmitter (this, persist_timeout, frida_context, dbus_context);
 			transmitter.closed.connect (on_transmitter_closed);
 			transmitter.new_candidates.connect (on_transmitter_new_candidates);
 			transmitter.candidate_gathering_done.connect (on_transmitter_candidate_gathering_done);

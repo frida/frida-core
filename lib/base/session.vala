@@ -150,6 +150,11 @@ namespace Frida {
 		public signal void new_candidates (string[] candidate_sdps);
 		public signal void candidate_gathering_done ();
 
+		public weak AgentSession agent_session {
+			get;
+			construct;
+		}
+
 		public uint persist_timeout {
 			get;
 			construct;
@@ -198,8 +203,10 @@ namespace Frida {
 			INTERRUPTED
 		}
 
-		public AgentMessageTransmitter (uint persist_timeout, MainContext frida_context, MainContext dbus_context) {
+		public AgentMessageTransmitter (AgentSession agent_session, uint persist_timeout, MainContext frida_context,
+				MainContext dbus_context) {
 			Object (
+				agent_session: agent_session,
 				persist_timeout: persist_timeout,
 				frida_context: frida_context,
 				dbus_context: dbus_context
@@ -500,8 +507,7 @@ namespace Frida {
 				nice_connection.on_closed.connect (on_nice_connection_closed);
 
 				try {
-					nice_registration_id = nice_connection.register_object (ObjectPath.AGENT_SESSION,
-						(AgentSession) this);
+					nice_registration_id = nice_connection.register_object (ObjectPath.AGENT_SESSION, agent_session);
 				} catch (IOError io_error) {
 					assert_not_reached ();
 				}
