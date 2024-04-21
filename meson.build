@@ -455,10 +455,13 @@ if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <p
 endif
 
 if host_os == 'android'
+  termux_elf_cleaner = find_program('termux-elf-cleaner', native: true)
   libselinux_dep = dependency('libselinux', version: '>=3.0')
   libsepol_dep = dependency('libsepol', version: '>=3.0')
   backend_deps_private += [libselinux_dep, libsepol_dep]
   backend_reqs_private += ['libselinux', 'libsepol']
+else
+  termux_elf_cleaner = []
 endif
 
 tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
@@ -598,10 +601,12 @@ post_process = [
   python,
   files('tools' / 'post-process.py'),
   host_os,
+  host_abi,
   '>>>', strip, '<<<',
   get_option('strip').to_string(),
   '>>>', install_name_tool, '<<<',
   '>>>', codesign, '<<<',
+  '>>>', termux_elf_cleaner, '<<<',
   '@OUTPUT@',
   '@INPUT0@',
 ]

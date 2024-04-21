@@ -10,10 +10,12 @@ import sys
 def main(argv):
     args = argv[1:]
     host_os = args.pop(0)
+    host_abi = args.pop(0)
     strip_command = pop_cmd_array_arg(args)
     strip_enabled = args.pop(0) == "true"
     install_name_tool = pop_cmd_array_arg(args)
     codesign = pop_cmd_array_arg(args)
+    termux_elf_cleaner = pop_cmd_array_arg(args)
     output_path = Path(args.pop(0))
     input_path = Path(args.pop(0))
     kind = args.pop(0)
@@ -61,6 +63,11 @@ def main(argv):
                 if input_entitlements_path is not None and host_os in {"ios", "tvos"}:
                     codesign_args += ["--entitlements", input_entitlements_path]
             subprocess.run(codesign + codesign_args + [intermediate_path], **run_kwargs)
+
+        if host_os == "android":
+            api_level = 19 if host_abi in {"x86", "arm"} else 21
+            subprocess.run(termux_elf_cleaner + ["--api-level", str(api_level), "--quiet", intermediate_path],
+                           **run_kwargs)
     except subprocess.CalledProcessError as e:
         print(e, file=sys.stderr)
         print("Output:\n\t| " + "\n\t| ".join(e.output.strip().split("\n")), file=sys.stderr)
