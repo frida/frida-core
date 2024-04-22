@@ -1,7 +1,8 @@
 [wrap-git]
 url = https://github.com/frida/frida-gum.git
-revision = main
+revision = 3551d1d7bb229d4038e2b38e9cfd7c7840c97db7
 depth = 1
 
 [provide]
 dependency_names = frida-gum-1.0, frida-gum-heap-1.0, frida-gum-prof-1.0, frida-gumjs-1.0, frida-gumjs-inspector-1.0
+
