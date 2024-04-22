@@ -1,7 +1,8 @@
 [wrap-git]
 url = https://github.com/frida/libgee.git
-revision = main
+revision = ad17ed847039469fcc2dc711ecfee2bbf7d2bf87
 depth = 1
 
 [provide]
 dependency_names = gee-0.8
+
