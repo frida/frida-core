@@ -37,6 +37,7 @@ if no_overridden_compat_bits
     meson.is_subproject() ? 'subproject' : 'project',
     meson.current_build_dir(),
     meson.global_build_root(),
+    frida_version,
     host_os,
     host_abi,
     host_toolchain,

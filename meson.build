@@ -13,9 +13,14 @@ Vala compiler from:
     https://github.com/frida/vala''')
 endif
 
+releng = meson.global_source_root() / 'releng'
+if not import('fs').exists(releng)
+  releng = meson.project_source_root() / 'releng'
+endif
+
 frida_version = get_option('frida_version')
 if frida_version == ''
-  frida_version = meson.project_version()
+  frida_version = run_command(releng / 'frida_version.py', meson.project_source_root(), check: true).stdout().strip()
 endif
 tokens = frida_version.split('.')
 frida_major_version = tokens[0].to_int()
@@ -553,10 +558,6 @@ endif
 if get_option('devkits').length() != 0
   if get_option('default_library') != 'static'
     error('Devkits can only be generated from static libraries')
-  endif
-  releng = meson.global_source_root() / 'releng'
-  if not import('fs').exists(releng)
-    releng = meson.project_source_root() / 'releng'
   endif
   mkdevkit = find_program(releng / 'mkdevkit.py')
   uninstalled_dir = meson.global_build_root() / 'meson-uninstalled'

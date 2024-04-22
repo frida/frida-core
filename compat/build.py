@@ -31,6 +31,7 @@ def main(argv):
     command.add_argument("role", help="project vs subproject", choices=["project", "subproject"])
     command.add_argument("builddir", help="build directory", type=Path)
     command.add_argument("top_builddir", help="top build directory", type=Path)
+    command.add_argument("frida_version", help="the Frida version")
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
     command.add_argument("host_toolchain", help="the kind of toolchain being used",
@@ -43,6 +44,7 @@ def main(argv):
     command.set_defaults(func=lambda args: setup(args.role,
                                                  args.builddir,
                                                  args.top_builddir,
+                                                 args.frida_version,
                                                  args.host_os,
                                                  args.host_arch,
                                                  args.host_toolchain,
@@ -86,6 +88,7 @@ def parse_array_option_value(v: str) -> set[str]:
 def setup(role: Role,
           builddir: Path,
           top_builddir: Path,
+          frida_version: str,
           host_os: str,
           host_arch: str,
           host_toolchain: str,
@@ -224,7 +227,7 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
 
-    state = State(role, builddir, top_builddir, host_os, host_arch, host_toolchain, outputs)
+    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_toolchain, outputs)
     serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
     variable_names, output_names = zip(*[(output.identifier, output.name) \
@@ -237,6 +240,7 @@ class State:
     role: Role
     builddir: Path
     top_builddir: Path
+    frida_version: str
     host_os: str
     host_arch: str
     host_toolchain: str
@@ -290,6 +294,9 @@ def compile(privdir: Path, state: State):
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(state.top_builddir, state.role, set(subprojects.keys()))
+                version_opt = next((opt for opt in options if opt.startswith("-Dfrida_version=")), None)
+                if version_opt is None:
+                    options += [f"-Dfrida_version={state.frida_version}"]
 
             if state.host_os == "windows":
                 if state.host_toolchain == "microsoft":
