@@ -27,7 +27,8 @@ if have_compiler_backend
       'snapshot.bin',
     ],
     command: [
-      find_program('generate-agent.py'),
+      python,
+      files('generate-agent.py'),
       meson.current_build_dir(),
       '@PRIVATE_DIR@',
       meson.current_source_dir(),

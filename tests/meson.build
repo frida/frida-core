@@ -75,7 +75,7 @@ runner = custom_target('frida-tests',
   build_by_default: true,
 )
 
-test('core', find_program('./run.py'),
+test('core', [python, files('./run.py')],
   args: runner.full_path(),
   timeout: 120,
   depends: [runner, labrats],
