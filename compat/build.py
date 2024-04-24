@@ -442,10 +442,10 @@ def quote(path: str) -> str:
 
 def query_releng_location(role: Role) -> Path:
     if role == "subproject":
-        candidate = REPO_ROOT.parent.parent
-        if (candidate / "releng").exists():
+        candidate = REPO_ROOT.parent.parent / "releng"
+        if candidate.exists():
             return candidate
-    return REPO_ROOT
+    return REPO_ROOT / "releng"
 
 
 def ensure_submodules_checked_out(releng_location: Path):
