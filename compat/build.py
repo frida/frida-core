@@ -280,6 +280,7 @@ def compile(privdir: Path, state: State):
     source_paths: set[Path] = set()
     options: Optional[Sequence[str]] = None
     build_env = scrub_environment(os.environ)
+    build_env["FRIDA_RELENG"] = str(releng_location)
     for key, outputs in state.outputs.items():
         if key == "bundle":
             for o in outputs:
