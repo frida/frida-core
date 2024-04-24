@@ -97,9 +97,9 @@ def setup(role: Role,
 
     outputs["bundle"] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
 
-    releng_parentdir = query_releng_parentdir(role)
-    ensure_submodules_checked_out(releng_parentdir)
-    configure_import_path(releng_parentdir)
+    releng_location = query_releng_location(role)
+    ensure_submodules_checked_out(releng_location)
+    configure_import_path(releng_location)
 
     if "auto" in compat:
         compat = {"native", "emulated"} if host_os in {"windows", "macos", "ios", "tvos", "android"} else set()
@@ -254,11 +254,11 @@ class Output:
 
 
 def compile(privdir: Path, state: State):
-    releng_parentdir = query_releng_parentdir(state.role)
-    subprojects = detect_relevant_subprojects(releng_parentdir)
+    releng_location = query_releng_location(state.role)
+    subprojects = detect_relevant_subprojects(releng_location)
     if state.role == "subproject":
-        grab_subprojects_from_parent(subprojects, releng_parentdir)
-    configure_import_path(releng_parentdir)
+        grab_subprojects_from_parent(subprojects, releng_location)
+    configure_import_path(releng_location)
 
     from releng.env import call_meson
     from releng.machine_spec import MachineSpec
@@ -440,7 +440,7 @@ def quote(path: str) -> str:
     return "\"" + path.replace ("\"", "\\\"") + "\""
 
 
-def query_releng_parentdir(role: Role) -> Path:
+def query_releng_location(role: Role) -> Path:
     if role == "subproject":
         candidate = REPO_ROOT.parent.parent
         if (candidate / "releng").exists():
@@ -448,35 +448,35 @@ def query_releng_parentdir(role: Role) -> Path:
     return REPO_ROOT
 
 
-def ensure_submodules_checked_out(releng_parentdir: Path):
-    if not (releng_parentdir / "releng" / "meson" / "meson.py").exists():
+def ensure_submodules_checked_out(releng_location: Path):
+    if not (releng_location / "meson" / "meson.py").exists():
         subprocess.run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1", "releng"],
-                       cwd=releng_parentdir,
+                       cwd=releng_location.parent,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT,
                        encoding="utf-8",
                        check=True)
 
 
-def detect_relevant_subprojects(releng_parentdir: Path) -> dict[str, Path]:
-    subprojects = detect_relevant_subprojects_in(REPO_ROOT, releng_parentdir)
+def detect_relevant_subprojects(releng_location: Path) -> dict[str, Path]:
+    subprojects = detect_relevant_subprojects_in(REPO_ROOT, releng_location)
     gum_location = subprojects.get("frida-gum")
     if gum_location is not None:
-        subprojects.update(detect_relevant_subprojects_in(gum_location, releng_parentdir))
+        subprojects.update(detect_relevant_subprojects_in(gum_location, releng_location))
     return subprojects
 
 
-def detect_relevant_subprojects_in(repo_root: Path, releng_parentdir: Path) -> dict[str, Path]:
+def detect_relevant_subprojects_in(repo_root: Path, releng_location: Path) -> dict[str, Path]:
     result = {}
     for f in (repo_root / "subprojects").glob("*.wrap"):
         name = f.stem
-        location = releng_parentdir / "subprojects" / name
+        location = releng_location.parent / "subprojects" / name
         if location.exists():
             result[name] = location
     return result
 
 
-def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_parentdir: Path):
+def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_location: Path):
     for name, location in subprojects.items():
         subp_here = REPO_ROOT / "subprojects" / name
         if subp_here.exists():
@@ -497,9 +497,9 @@ def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_parentdir:
                        check=True)
 
 
-def configure_import_path(releng_parentdir: Path):
-    sys.path.insert(0, str(releng_parentdir / "releng" / "meson"))
-    sys.path.insert(0, str(releng_parentdir))
+def configure_import_path(releng_location: Path):
+    sys.path.insert(0, str(releng_location / "meson"))
+    sys.path.insert(0, str(releng_location.parent))
 
 
 STATE_FILENAME = "state.dat"
