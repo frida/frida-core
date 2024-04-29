@@ -35,7 +35,13 @@ payload_vala_args = gum_vala_args + gumjs_vala_args
 
 payload = static_library('frida-payload-' + api_version, payload_sources,
   c_args: frida_component_cflags,
-  vala_args: [payload_vala_args, base_vala_args, extra_vala_args],
+  vala_args: [
+    '--vapidir=' + meson.current_source_dir(),
+    '--pkg=libc-shim',
+    payload_vala_args,
+    base_vala_args,
+    extra_vala_args,
+  ],
   vala_header: 'frida-payload.h',
   vala_vapi: f'frida-payload-@api_version@.vapi',
   dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, base_dep],

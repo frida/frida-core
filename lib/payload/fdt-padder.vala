@@ -67,7 +67,7 @@ namespace Frida {
 			int result = -1;
 #if LINUX
 			do {
-				result = Linux.dup3 (fd, pair[0], Posix.FD_CLOEXEC);
+				result = LibcShim.dup3 (fd, pair[0], Posix.FD_CLOEXEC);
 			} while (result == -1 && Posix.errno == Posix.EINTR);
 #else
 			do {
