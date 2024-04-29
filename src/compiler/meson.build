@@ -41,7 +41,7 @@ if have_compiler_backend
   )
   compiler_data = custom_target('frida-data-compiler',
     input: [
-      'compiler.resources',
+      'compiler.resources.' + frida_profile,
       compiler_agent,
     ],
     output: [

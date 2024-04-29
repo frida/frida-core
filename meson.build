@@ -35,6 +35,7 @@ else
   frida_micro_version = tokens[2].to_int()
   frida_nano_version = 0
 endif
+frida_profile = (frida_version != '0.0.0' and frida_nano_version == 0) ? 'prod' : 'dev'
 
 api_version = '1.0'
 
