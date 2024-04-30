@@ -193,8 +193,11 @@ namespace Frida {
 		private uint connection;
 
 		construct {
-			libjailbreak = Module.open (LIBJAILBREAK_PATH, LAZY);
-			assert (libjailbreak != null);
+			try {
+				libjailbreak = new Module (LIBJAILBREAK_PATH, LAZY);
+			} catch (ModuleError e) {
+				assert_not_reached ();
+			}
 
 			jbd_call = resolve_symbol ("jbd_call");
 			assert (jbd_call != null);
