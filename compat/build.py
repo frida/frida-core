@@ -132,7 +132,7 @@ def setup(role: Role,
                            target=GADGET_TARGET),
                 ]
 
-        if host_os in {"macos", "ios", "tvos"} and host_arch in {"arm64e", "arm64"}:
+        if host_os in {"macos", "ios"} and host_arch in {"arm64e", "arm64"}:
             if host_arch == "arm64e":
                 other_arch = "arm64"
                 kind = "legacy"
