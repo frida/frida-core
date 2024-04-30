@@ -48,6 +48,9 @@ else
   build_os_family = build_os
 endif
 host_os_family = host_machine.system()
+if host_os_family == 'android'
+  host_os_family = 'linux'
+endif
 host_os = host_machine.subsystem().split('-')[0]
 if host_machine.cpu_family() == 'arm'
   host_arch = 'arm'
