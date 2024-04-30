@@ -362,15 +362,7 @@ def option_should_be_forwarded(k: "OptionKey",
                                subprojects: set[str]) -> bool:
     from mesonbuild import coredata
 
-    our_project_id = "frida-core" if role == "subproject" else ""
-    is_for_us = k.subproject == our_project_id
-    is_for_child = k.subproject in subprojects
-
-    if coredata.CoreData.is_per_machine_option(k) \
-            and not (is_for_child and k.is_project() and k.machine is coredata.MachineChoice.HOST):
-        return False
-
-    if k.as_host() in coredata.BUILTIN_OPTIONS_PER_MACHINE:
+    if coredata.CoreData.is_per_machine_option(k) and k.machine is not coredata.MachineChoice.HOST:
         return False
 
     if k.is_builtin():
@@ -385,11 +377,14 @@ def option_should_be_forwarded(k: "OptionKey",
         if not str(v.value):
             return False
 
+    our_project_id = "frida-core" if role == "subproject" else ""
+    is_for_us = k.subproject == our_project_id
+    is_for_child = k.subproject in subprojects
+
     if k.is_project() and is_for_us:
         tokens = k.name.split("_")
         if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
             return False
-        return True
 
     return is_for_us or is_for_child
 
