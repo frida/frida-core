@@ -366,8 +366,21 @@ def option_should_be_forwarded(k: "OptionKey",
                                subprojects: set[str]) -> bool:
     from mesonbuild import coredata
 
-    if coredata.CoreData.is_per_machine_option(k) and k.machine is not coredata.MachineChoice.HOST:
-        return False
+    our_project_id = "frida-core" if role == "subproject" else ""
+    is_for_us = k.subproject == our_project_id
+    is_for_child = k.subproject in subprojects
+
+    if k.is_project():
+        if is_for_us:
+            tokens = k.name.split("_")
+            if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
+                return False
+        if k.subproject and k.machine is not coredata.MachineChoice.HOST:
+            return False
+        return is_for_us or is_for_child
+
+    if coredata.CoreData.is_per_machine_option(k):
+        return k.machine is coredata.MachineChoice.BUILD
 
     if k.is_builtin():
         if k.name in {"buildtype", "genvslite"}:
@@ -379,15 +392,6 @@ def option_should_be_forwarded(k: "OptionKey",
         if k.name == "install_env" and v.value == "prefix":
             return False
         if not str(v.value):
-            return False
-
-    our_project_id = "frida-core" if role == "subproject" else ""
-    is_for_us = k.subproject == our_project_id
-    is_for_child = k.subproject in subprojects
-
-    if k.is_project() and is_for_us:
-        tokens = k.name.split("_")
-        if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
             return False
 
     return is_for_us or is_for_child
