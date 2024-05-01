@@ -32,6 +32,7 @@ def main(argv):
     command.add_argument("frida_version", help="the Frida version")
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
+    command.add_argument("host_config", help="configuration binaries are being built for")
     command.add_argument("host_toolchain", help="the kind of toolchain being used",
                          choices=["microsoft", "apple", "gnu"])
     command.add_argument("compat", help="support for targets with a different architecture",
@@ -45,6 +46,7 @@ def main(argv):
                                                  args.frida_version,
                                                  args.host_os,
                                                  args.host_arch,
+                                                 args.host_config,
                                                  args.host_toolchain,
                                                  args.compat,
                                                  args.assets,
@@ -89,6 +91,7 @@ def setup(role: Role,
           frida_version: str,
           host_os: str,
           host_arch: str,
+          host_config: str,
           host_toolchain: str,
           compat: set[str],
           assets: str,
@@ -132,7 +135,7 @@ def setup(role: Role,
                            target=GADGET_TARGET),
                 ]
 
-        if host_os in {"macos", "ios"} and host_arch in {"arm64e", "arm64"}:
+        if host_os in {"macos", "ios"} and host_arch in {"arm64e", "arm64"} and host_config != "simulator":
             if host_arch == "arm64e":
                 other_arch = "arm64"
                 kind = "legacy"
@@ -225,7 +228,7 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
 
-    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_toolchain, outputs)
+    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, host_toolchain, outputs)
     serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
     variable_names, output_names = zip(*[(output.identifier, output.name) \
@@ -241,6 +244,7 @@ class State:
     frida_version: str
     host_os: str
     host_arch: str
+    host_config: str
     host_toolchain: str
     outputs: Mapping[str, Sequence[Output]]
 

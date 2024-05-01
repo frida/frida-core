@@ -40,6 +40,7 @@ if no_overridden_compat_bits
     frida_version,
     host_os,
     host_abi,
+    host_config,
     host_toolchain,
     ','.join(get_option('compat')),
     get_option('assets'),
