@@ -52,7 +52,7 @@ namespace Frida.Test {
 #endif
 		Frida.HostSessionTest.add_tests ();
 
-#if HAVE_COMPILER_BACKEND
+#if HAVE_COMPILER_BACKEND && !QNX
 		Frida.CompilerTest.add_tests ();
 #endif
 
