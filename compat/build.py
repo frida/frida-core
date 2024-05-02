@@ -228,7 +228,11 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
 
-    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, host_toolchain, outputs)
+    raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
+    allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
+
+    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, host_toolchain,
+                  allowed_prebuilds, outputs)
     serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
     variable_names, output_names = zip(*[(output.identifier, output.name) \
@@ -246,6 +250,7 @@ class State:
     host_arch: str
     host_config: str
     host_toolchain: str
+    allowed_prebuilds: Optional[set[str]]
     outputs: Mapping[str, Sequence[Output]]
 
 
@@ -314,6 +319,7 @@ def compile(privdir: Path, state: State):
                       builddir=workdir,
                       host_machine=host_machine,
                       environ=build_env,
+                      allowed_prebuilds=state.allowed_prebuilds,
                       extra_meson_options=[
                           "-Dhelper_modern=",
                           "-Dhelper_legacy=",
