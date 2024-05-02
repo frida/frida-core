@@ -3227,7 +3227,8 @@ namespace Frida {
 
 			var fd = new FileDescriptor (memfd_create (name, 0));
 			unowned uint8[] data = bytes.get_data ();
-			Posix.write (fd.handle, data, data.length);
+			ssize_t n = Posix.write (fd.handle, data, data.length);
+			assert (n == data.length);
 			return fd;
 		}
 
