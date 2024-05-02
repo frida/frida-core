@@ -609,6 +609,13 @@ add_project_arguments(
   '-DG_DISABLE_DEPRECATED',
   language: c_languages)
 
+# Our Vala compiler emits warnings pragmas for GCC >= 5, so for older versions we'll need to
+# suppress them through GCC's command-line options. It would be better to only do this for
+# Vala-generated sources, but this will have to do for now.
+if cc.get_id() == 'gcc' and cc.compiles('#if __GNUC__ >= 5\n#error NOTNEEDED\n#endif')
+  add_project_arguments('-w', language: 'c')
+endif
+
 vala_flags += [
   '--vapidir=' + meson.current_source_dir() / 'vapi',
   '--pkg', 'config',
