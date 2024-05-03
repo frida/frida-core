@@ -15,6 +15,9 @@ Vala compiler from:
     https://github.com/frida/vala''')
 endif
 
+c_languages = ['c', 'cpp']
+cc = meson.get_compiler('c')
+
 releng = meson.global_source_root() / 'releng'
 if not import('fs').exists(releng)
   releng = meson.project_source_root() / 'releng'
@@ -53,7 +56,17 @@ if host_os_family == 'android'
 endif
 tokens = host_machine.subsystem().split('-')
 host_os = tokens[0]
-host_config = (tokens.length() == 2) ? tokens[1] : ''
+if tokens.length() == 2
+  host_config = tokens[1]
+elif host_os_family == 'windows'
+  if cc.get_argument_syntax() == 'msvc'
+    host_config = get_option('b_vscrt')
+  else
+    host_config = 'mingw'
+  endif
+else
+  host_config = ''
+endif
 if host_machine.cpu_family() == 'arm'
   host_arch = 'arm'
   host_abi = 'arm'
@@ -84,13 +97,10 @@ gumjs_archs = {
 }
 host_arch_gumjs = gumjs_archs.get(host_arch, host_arch)
 
-c_languages = ['c', 'cpp']
 if host_os_family == 'darwin'
   c_languages += ['objc', 'objcpp']
   add_languages('objc', 'objcpp', native: false)
 endif
-
-cc = meson.get_compiler('c')
 
 python = import('python').find_installation()
 
