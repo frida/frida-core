@@ -62,7 +62,7 @@ modulated_agent = custom_target('frida-agent-modulated',
 
 need_universal_agent = host_os_family == 'darwin' \
     and get_option('assets') == 'installed' \
-    and agent_depends.length() != 0
+    and agent_compat != ''
 
 if host_os_family == 'darwin'
   identity = 'FridaAgent'

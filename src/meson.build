@@ -205,7 +205,7 @@ if have_local_backend
       override_options: ['b_asneeded=false'],
     )
 
-    need_universal_helper = get_option('assets') == 'installed' and helper_depends.length() != 0
+    need_universal_helper = get_option('assets') == 'installed' and helper_compat != ''
 
     helper = custom_target('frida-helper',
       input: [

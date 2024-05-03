@@ -37,7 +37,7 @@ raw_server = executable('frida-server-raw', server_sources,
 )
 
 server_name = 'frida-server' + exe_suffix
-need_universal_server = get_option('assets') == 'installed' and server_depends.length() != 0
+need_universal_server = get_option('assets') == 'installed' and server_compat != ''
 
 server = custom_target('frida-server',
   input: [raw_server, 'frida-server.xcent'],

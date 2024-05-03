@@ -79,7 +79,7 @@ modulated_gadget = custom_target('frida-gadget-modulated',
   command: modulate + operations,
 )
 
-need_universal_gadget = host_os_family == 'darwin' and gadget_depends.length() != 0
+need_universal_gadget = host_os_family == 'darwin' and gadget_compat != ''
 
 if host_os == 'macos'
   identity = '@executable_path/../Frameworks/FridaGadget.dylib'
