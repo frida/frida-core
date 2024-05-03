@@ -107,8 +107,17 @@ def setup(role: Role,
 
     if "native" in compat:
         other_triplet: Optional[str] = None
+        if host_os == "windows" and host_config == "mingw":
+            triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
+            if shutil.which(triplet + "-gcc") is not None:
+                other_triplet = triplet
+                have_compiler = True
+            else:
+                have_compiler = False
+        else:
+            have_compiler = True
 
-        if host_os == "windows" and host_arch in {"x86_64", "x86"}:
+        if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_compiler:
             if host_arch == "x86_64":
                 other_arch = "x86"
                 kind = "legacy"
