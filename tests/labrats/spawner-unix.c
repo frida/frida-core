@@ -26,6 +26,7 @@
 # include <linux/limits.h>
 #endif
 #ifdef __APPLE__
+# include <sys/param.h>
 # define environ (* _NSGetEnviron ())
 extern char *** _NSGetEnviron (void);
 #else
