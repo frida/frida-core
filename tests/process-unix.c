@@ -159,16 +159,16 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
 # elif defined (HAVE_ARM)
     pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM : CPU_TYPE_ARM64;
 # elif defined (HAVE_ARM64)
-#  if __has_feature (ptrauth_calls)
     pref = CPU_TYPE_ARM64;
+#  if __has_feature (ptrauth_calls)
+    if (arch == FRIDA_TEST_ARCH_CURRENT)
+#  else
     if (arch == FRIDA_TEST_ARCH_OTHER)
+#  endif
     {
-      special_path = g_strconcat (path, "64", NULL);
+      special_path = g_strconcat (path, "-arm64e", NULL);
       path = special_path;
     }
-#  else
-    pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM64 : CPU_TYPE_ARM;
-#  endif
 # endif
     posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
 

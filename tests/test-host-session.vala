@@ -2146,7 +2146,10 @@ namespace Frida.HostSessionTest {
 			switch (Frida.Test.os ())
 			{
 				case Frida.Test.OS.MACOS:
-					suffix = "macos";
+					if (Frida.Test.cpu () == ARM_64)
+						suffix = (Gum.query_ptrauth_support () == SUPPORTED) ? "macos-arm64e" : "macos";
+					else
+						suffix = "macos";
 					break;
 				case Frida.Test.OS.TVOS:
 					suffix = "tvos";
@@ -2162,7 +2165,10 @@ namespace Frida.HostSessionTest {
 		private static string target_name_of_other (string name) {
 			string suffix;
 			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
-				suffix = "macos32";
+				if (Frida.Test.cpu () == ARM_64)
+					suffix = (Gum.query_ptrauth_support () == SUPPORTED) ? "macos" : "macos-arm64e";
+				else
+					suffix = "macos32";
 			} else {
 				suffix = (Gum.query_ptrauth_support () == SUPPORTED) ? "ios64" : "ios32";
 			}

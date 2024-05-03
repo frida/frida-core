@@ -12,13 +12,25 @@ namespace Frida.Test {
 	public static void run (string[] args) {
 		Environment.init (ref args);
 
-		if (os () == MACOS) {
-			switch (cpu ()) {
-				case ARM_64:
-					can_test_cross_arch_injection = false;
-					break;
-				case X86_64:
-					try {
+		if (can_test_cross_arch_injection && os () == MACOS) {
+			try {
+				switch (cpu ()) {
+					case ARM_64:
+						if (Gum.query_ptrauth_support () == UNSUPPORTED) {
+							string output;
+							GLib.Process.spawn_command_line_sync ("nvram boot-args", out output);
+
+							string[] tokens = output.strip ().split ("\t");
+							if (tokens.length == 2) {
+								unowned string boot_args = tokens[1];
+								can_test_cross_arch_injection = "-arm64e_preview_abi" in boot_args;
+							} else {
+								assert (tokens.length == 1);
+								can_test_cross_arch_injection = false;
+							}
+						}
+						break;
+					case X86_64:
 						string raw_version;
 						GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
 
@@ -29,14 +41,13 @@ namespace Frida.Test {
 						uint minor = uint.parse (tokens[1]);
 
 						bool newer_than_mojave = major > 10 || (major == 10 && minor > 4);
-						if (newer_than_mojave)
-							can_test_cross_arch_injection = false;
-					} catch (GLib.Error e) {
-						assert_not_reached ();
-					}
-					break;
-				default:
-					break;
+						can_test_cross_arch_injection = !newer_than_mojave;
+						break;
+					default:
+						break;
+				}
+			} catch (GLib.Error e) {
+				assert_not_reached ();
 			}
 		}
 
