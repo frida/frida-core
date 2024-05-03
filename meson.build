@@ -639,9 +639,6 @@ vala_flags += ['--define=' + host_arch.to_upper()]
 if host_abi != host_arch
   vala_flags += ['--define=' + host_abi.to_upper()]
 endif
-if get_option('agent_legacy') != ''
-  vala_flags += ['--define=CROSS_ARCH']
-endif
 add_project_arguments(vala_flags, language: 'vala')
 
 native_vala_flags = [

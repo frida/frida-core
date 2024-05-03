@@ -34,9 +34,15 @@ else
   system_vala_args += ['--pkg=posix']
 endif
 
+test_vala_args = []
+if agent_compat != ''
+  test_vala_args += '--define=CROSS_ARCH'
+endif
+
 frida_tests = static_library('frida-tests', test_sources,
   vala_args: [
     '--pkg=gmodule-2.0',
+    test_vala_args,
     core_vala_args,
     system_vala_args,
   ],
