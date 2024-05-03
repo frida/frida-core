@@ -1,6 +1,5 @@
 test_sources = [
   'test-system.vala',
-  'test-gadget.vala',
   'test-host-session.vala',
   'runner.vala',
   'runner-glue.c',
@@ -9,6 +8,17 @@ test_sources = [
   'process.vala',
   'process-resource-usage.c',
 ]
+
+test_vala_args = []
+
+if agent_compat != ''
+  test_vala_args += '--define=CROSS_ARCH'
+endif
+
+if build_gadget
+  test_vala_args += '--define=HAVE_GADGET'
+  test_sources += 'test-gadget.vala'
+endif
 
 subdir('labrats')
 
@@ -32,11 +42,6 @@ else
   test_sources += ['process-unix.c']
 
   system_vala_args += ['--pkg=posix']
-endif
-
-test_vala_args = []
-if agent_compat != ''
-  test_vala_args += '--define=CROSS_ARCH'
 endif
 
 frida_tests = static_library('frida-tests', test_sources,

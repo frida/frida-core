@@ -58,7 +58,7 @@ namespace Frida.Test {
 
 		Frida.AgentTest.add_tests ();
 #endif
-#if !WINDOWS
+#if HAVE_GADGET && !WINDOWS
 		Frida.GadgetTest.add_tests ();
 #endif
 		Frida.HostSessionTest.add_tests ();
