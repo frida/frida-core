@@ -94,7 +94,7 @@ def setup(role: Role,
           components: set[str]):
     outputs: Mapping[str, Sequence[Output]] = OrderedDict()
 
-    outputs["bundle"] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
+    outputs[("bundle", None)] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
 
     releng_location = query_releng_location(role)
     ensure_submodules_checked_out(releng_location)
@@ -106,6 +106,8 @@ def setup(role: Role,
         compat = set()
 
     if "native" in compat:
+        other_triplet: Optional[str] = None
+
         if host_os == "windows" and host_arch in {"x86_64", "x86"}:
             if host_arch == "x86_64":
                 other_arch = "x86"
@@ -113,7 +115,7 @@ def setup(role: Role,
             else:
                 other_arch = "x86_64"
                 kind = "modern"
-            outputs[other_arch] = [
+            outputs[(other_arch, other_triplet)] = [
                 Output(identifier=f"helper_{kind}",
                        name=HELPER_FILE_WINDOWS.name,
                        file=HELPER_FILE_WINDOWS,
@@ -124,7 +126,7 @@ def setup(role: Role,
                        target=AGENT_TARGET),
             ]
             if "gadget" in components:
-                outputs[other_arch] += [
+                outputs[(other_arch, other_triplet)] += [
                     Output(identifier=f"gadget_{kind}",
                            name=GADGET_FILE_WINDOWS.name,
                            file=GADGET_FILE_WINDOWS,
@@ -138,7 +140,7 @@ def setup(role: Role,
             else:
                 other_arch = "arm64e"
                 kind = "modern"
-            outputs[other_arch] = [
+            outputs[(other_arch, other_triplet)] = [
                 Output(identifier=f"helper_{kind}",
                        name=f"frida-helper-{other_arch}",
                        file=HELPER_FILE_UNIX,
@@ -149,14 +151,14 @@ def setup(role: Role,
                        target=AGENT_TARGET),
             ]
             if "gadget" in components:
-                outputs[other_arch] += [
+                outputs[(other_arch, other_triplet)] += [
                     Output(identifier=f"gadget_{kind}",
                            name=f"frida-gadget-{other_arch}.dylib",
                            file=GADGET_FILE_DARWIN,
                            target=GADGET_TARGET),
                 ]
             if "server" in components and assets == "installed":
-                outputs[other_arch] += [
+                outputs[(other_arch, other_triplet)] += [
                     Output(identifier=f"server_{kind}",
                            name=f"frida-server-{other_arch}",
                            file=SERVER_FILE_UNIX,
@@ -170,7 +172,7 @@ def setup(role: Role,
             else:
                 other_arch = "x86_64"
                 kind = "modern"
-            outputs[other_arch] = [
+            outputs[(other_arch, other_triplet)] = [
                 Output(identifier="helper_legacy",
                        name=HELPER_FILE_UNIX.name,
                        file=HELPER_FILE_UNIX,
@@ -181,7 +183,7 @@ def setup(role: Role,
                        target=AGENT_TARGET),
             ]
             if "gadget" in components:
-                outputs[other_arch] += [
+                outputs[(other_arch, other_triplet)] += [
                     Output(identifier=f"gadget_{kind}",
                            name=GADGET_FILE_ELF.name,
                            file=GADGET_FILE_ELF,
@@ -190,7 +192,7 @@ def setup(role: Role,
 
         if host_os == "android" and host_arch in {"arm64", "x86_64"}:
             other_arch = "arm" if host_arch == "arm64" else "x86"
-            outputs[other_arch] = [
+            outputs[(other_arch, other_triplet)] = [
                 Output(identifier="helper_legacy",
                        name=HELPER_FILE_UNIX.name,
                        file=HELPER_FILE_UNIX,
@@ -201,7 +203,7 @@ def setup(role: Role,
                        target=AGENT_TARGET),
             ]
             if "gadget" in components:
-                outputs[other_arch] += [
+                outputs[(other_arch, other_triplet)] += [
                     Output(identifier="gadget_legacy",
                            name=GADGET_FILE_ELF.name,
                            file=GADGET_FILE_ELF,
@@ -210,14 +212,14 @@ def setup(role: Role,
 
     if "emulated" in compat:
         if host_os == "android" and host_arch in {"x86_64", "x86"}:
-            outputs["arm"] = [
+            outputs[("arm", None)] = [
                 Output(identifier="agent_emulated_legacy",
                        name="frida-agent-arm.so",
                        file=AGENT_FILE_ELF,
                        target=AGENT_TARGET),
             ]
             if host_arch == "x86_64":
-                outputs["arm64"] = [
+                outputs[("arm64", None)] = [
                     Output(identifier="agent_emulated_modern",
                            name="frida-agent-arm64.so",
                            file=AGENT_FILE_ELF,
@@ -284,13 +286,13 @@ def compile(privdir: Path, state: State):
     options: Optional[Sequence[str]] = None
     build_env = scrub_environment(os.environ)
     build_env["FRIDA_RELENG"] = str(releng_location)
-    for key, outputs in state.outputs.items():
-        if key == "bundle":
+    for (flavor, triplet), outputs in state.outputs.items():
+        if flavor == "bundle":
             for o in outputs:
                 (state.builddir / o.name).write_bytes(b"")
             continue
 
-        extra_arch = key
+        extra_arch = flavor
         workdir = (privdir / extra_arch).resolve()
 
         if not (workdir / "build.ninja").exists():
@@ -300,7 +302,7 @@ def compile(privdir: Path, state: State):
                 if version_opt is None:
                     options += [f"-Dfrida_version={state.frida_version}"]
 
-            host_machine = MachineSpec(state.host_os, extra_arch, state.host_config)
+            host_machine = MachineSpec(state.host_os, extra_arch, state.host_config, triplet)
 
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,
