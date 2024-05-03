@@ -33,8 +33,6 @@ def main(argv):
     command.add_argument("host_os", help="operating system binaries are being built for")
     command.add_argument("host_arch", help="architecture binaries are being built for")
     command.add_argument("host_config", help="configuration binaries are being built for")
-    command.add_argument("host_toolchain", help="the kind of toolchain being used",
-                         choices=["microsoft", "apple", "gnu"])
     command.add_argument("compat", help="support for targets with a different architecture",
                          type=parse_compat_option_value)
     command.add_argument("assets", help="whether assets are embedded vs installed and loaded at runtime")
@@ -46,8 +44,7 @@ def main(argv):
                                                  args.frida_version,
                                                  args.host_os,
                                                  args.host_arch,
-                                                 args.host_config,
-                                                 args.host_toolchain,
+                                                 args.host_config if args.host_config else None,
                                                  args.compat,
                                                  args.assets,
                                                  args.components))
@@ -91,8 +88,7 @@ def setup(role: Role,
           frida_version: str,
           host_os: str,
           host_arch: str,
-          host_config: str,
-          host_toolchain: str,
+          host_config: Optional[str],
           compat: set[str],
           assets: str,
           components: set[str]):
@@ -231,8 +227,7 @@ def setup(role: Role,
     raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
     allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
 
-    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, host_toolchain,
-                  allowed_prebuilds, outputs)
+    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, allowed_prebuilds, outputs)
     serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
     variable_names, output_names = zip(*[(output.identifier, output.name) \
@@ -248,8 +243,7 @@ class State:
     frida_version: str
     host_os: str
     host_arch: str
-    host_config: str
-    host_toolchain: str
+    host_config: Optional[str]
     allowed_prebuilds: Optional[set[str]]
     outputs: Mapping[str, Sequence[Output]]
 
@@ -306,14 +300,7 @@ def compile(privdir: Path, state: State):
                 if version_opt is None:
                     options += [f"-Dfrida_version={state.frida_version}"]
 
-            if state.host_os == "windows":
-                if state.host_toolchain == "microsoft":
-                    config = next((opt.split("=")[1] for opt in options if opt.startswith("-Db_vscrt=")))
-                else:
-                    config = "mingw"
-            else:
-                config = None
-            host_machine = MachineSpec(state.host_os, extra_arch, config)
+            host_machine = MachineSpec(state.host_os, extra_arch, state.host_config)
 
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,

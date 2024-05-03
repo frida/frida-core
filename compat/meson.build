@@ -41,7 +41,6 @@ if no_overridden_compat_bits
     host_os,
     host_abi,
     host_config,
-    host_toolchain,
     ','.join(get_option('compat')),
     get_option('assets'),
     ','.join(components),
