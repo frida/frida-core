@@ -10,6 +10,7 @@ test_sources = [
 ]
 
 test_vala_args = []
+test_depends = []
 
 if agent_compat != ''
   test_vala_args += '--define=CROSS_ARCH'
@@ -18,6 +19,7 @@ endif
 if build_gadget
   test_vala_args += '--define=HAVE_GADGET'
   test_sources += 'test-gadget.vala'
+  test_depends += gadget
 endif
 
 subdir('labrats')
@@ -89,5 +91,5 @@ runner = custom_target('frida-tests',
 test('core', python,
   args: [files('run.py'), runner.full_path()],
   timeout: 120,
-  depends: [runner, labrats],
+  depends: [runner, labrats, test_depends],
 )

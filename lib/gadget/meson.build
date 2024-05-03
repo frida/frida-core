@@ -88,7 +88,7 @@ elif host_os in ['ios', 'tvos']
 else
   identity = gadget_name
 endif
-gadget = custom_target('frida-gadget',
+gadget_for_host_arch = custom_target('frida-gadget',
   input: modulated_gadget,
   output: need_universal_gadget ? f'@gadget_name@-@host_abi@' : gadget_name,
   command: post_process + ['shared-library', identity],
@@ -97,8 +97,8 @@ gadget = custom_target('frida-gadget',
 )
 
 if need_universal_gadget
-  custom_target('frida-gadget-universal',
-    input: gadget,
+  gadget = custom_target('frida-gadget-universal',
+    input: gadget_for_host_arch,
     output: gadget_name,
     command: [
       lipo,
@@ -111,4 +111,6 @@ if need_universal_gadget
     install: true,
     install_dir: asset_dir,
   )
+else
+  gadget = gadget_for_host_arch
 endif
