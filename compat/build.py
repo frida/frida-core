@@ -146,11 +146,11 @@ def setup(role: Role,
             other_triplet: Optional[str] = None
             extra_environ: dict[str, str] = {}
 
-            if host_os == "windows" and host_arch in {"x86_64", "x86"} and host_config == "mingw":
-                other_triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
+            if host_os == "windows" and host_arch == "x86_64" and host_config == "mingw":
+                other_triplet = "i686-w64-mingw32"
                 have_toolchain = shutil.which(other_triplet + "-gcc") is not None
-            elif host_os == "linux" and host_arch in {"x86_64", "x86"} and host_config is None:
-                other_triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
+            elif host_os == "linux" and host_arch == "x86_64" and host_config is None:
+                other_triplet = "i686-linux-gnu"
                 have_toolchain = shutil.which(other_triplet + "-gcc") is not None
                 if not have_toolchain:
                     with (tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".c") as probe_c,
@@ -175,27 +175,21 @@ def setup(role: Role,
                     raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
                 summary = "disabled due to missing toolchain for {other_triplet}"
 
-            if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_toolchain:
-                if host_arch == "x86_64":
-                    other_arch = "x86"
-                    kind = "legacy"
-                else:
-                    other_arch = "x86_64"
-                    kind = "modern"
-                group = OutputGroup(other_arch, other_triplet, extra_environ)
+            if host_os == "windows" and host_arch == "x86_64" and have_toolchain:
+                group = OutputGroup("x86", other_triplet, extra_environ)
                 outputs[group] = [
-                    Output(identifier=f"helper_{kind}",
+                    Output(identifier="helper_legacy",
                            name=HELPER_FILE_WINDOWS.name,
                            file=HELPER_FILE_WINDOWS,
                            target=HELPER_TARGET),
-                    Output(identifier=f"agent_{kind}",
+                    Output(identifier="agent_legacy",
                            name=AGENT_FILE_WINDOWS.name,
                            file=AGENT_FILE_WINDOWS,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
                     outputs[group] += [
-                        Output(identifier=f"gadget_{kind}",
+                        Output(identifier="gadget_legacy",
                                name=GADGET_FILE_WINDOWS.name,
                                file=GADGET_FILE_WINDOWS,
                                target=GADGET_TARGET),
@@ -234,14 +228,8 @@ def setup(role: Role,
                                target=SERVER_TARGET),
                     ]
 
-            if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_toolchain:
-                if host_arch == "x86_64":
-                    other_arch = "x86"
-                    kind = "legacy"
-                else:
-                    other_arch = "x86_64"
-                    kind = "modern"
-                group = OutputGroup(other_arch, other_triplet, extra_environ)
+            if host_os == "linux" and host_arch == "x86_64" and have_toolchain:
+                group = OutputGroup("x86", other_triplet, extra_environ)
                 outputs[group] = [
                     Output(identifier="helper_legacy",
                            name=HELPER_FILE_UNIX.name,
@@ -254,7 +242,7 @@ def setup(role: Role,
                 ]
                 if "gadget" in components:
                     outputs[group] += [
-                        Output(identifier=f"gadget_{kind}",
+                        Output(identifier="gadget_legacy",
                                name=GADGET_FILE_ELF.name,
                                file=GADGET_FILE_ELF,
                                target=GADGET_TARGET),
