@@ -114,6 +114,13 @@ def setup(role: Role,
                 have_compiler = True
             else:
                 have_compiler = False
+        elif host_os == "linux" and host_config is None:
+            triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
+            if shutil.which(triplet + "-gcc") is not None:
+                other_triplet = triplet
+                have_compiler = True
+            else:
+                have_compiler = False
         else:
             have_compiler = True
 
@@ -174,7 +181,7 @@ def setup(role: Role,
                            target=SERVER_TARGET),
                 ]
 
-        if host_os == "linux" and host_arch in {"x86_64", "x86"}:
+        if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_compiler:
             if host_arch == "x86_64":
                 other_arch = "x86"
                 kind = "legacy"
