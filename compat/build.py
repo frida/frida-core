@@ -102,31 +102,27 @@ def setup(role: Role,
         ensure_submodules_checked_out(releng_location)
         configure_import_path(releng_location)
 
-        if "auto" in compat:
+        auto_detect = "auto" in compat
+        if auto_detect:
             compat = {"native", "emulated"} if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"} else set()
         elif "disabled" in compat:
             compat = set()
 
         if "native" in compat:
+            have_toolchain = True
             other_triplet: Optional[str] = None
-            if host_os == "windows" and host_config == "mingw":
-                triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
-                if shutil.which(triplet + "-gcc") is not None:
-                    other_triplet = triplet
-                    have_compiler = True
-                else:
-                    have_compiler = False
-            elif host_os == "linux" and host_config is None:
-                triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
-                if shutil.which(triplet + "-gcc") is not None:
-                    other_triplet = triplet
-                    have_compiler = True
-                else:
-                    have_compiler = False
-            else:
-                have_compiler = True
 
-            if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_compiler:
+            if host_os == "windows" and host_config == "mingw":
+                other_triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
+                have_toolchain = shutil.which(other_triplet + "-gcc") is not None
+            elif host_os == "linux" and host_config is None:
+                other_triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
+                have_toolchain = shutil.which(other_triplet + "-gcc") is not None
+
+            if not auto_detect and not have_toolchain:
+                raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
+
+            if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_toolchain:
                 if host_arch == "x86_64":
                     other_arch = "x86"
                     kind = "legacy"
@@ -183,7 +179,7 @@ def setup(role: Role,
                                target=SERVER_TARGET),
                     ]
 
-            if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_compiler:
+            if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_toolchain:
                 if host_arch == "x86_64":
                     other_arch = "x86"
                     kind = "legacy"
@@ -256,6 +252,10 @@ def setup(role: Role,
     except Exception as e:
         details = "\n".join(traceback.format_exception(e))
         print(f"error {e}\n\n{details}")
+
+
+class ToolchainNotFoundError(Exception):
+    pass
 
 
 @dataclass
