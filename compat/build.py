@@ -101,7 +101,7 @@ def setup(role: Role,
     configure_import_path(releng_location)
 
     if "auto" in compat:
-        compat = {"native", "emulated"} if host_os in {"windows", "macos", "ios", "tvos", "android"} else set()
+        compat = {"native", "emulated"} if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"} else set()
     elif "disabled" in compat:
         compat = set()
 
