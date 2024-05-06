@@ -378,6 +378,7 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend *
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
+static void frida_spawn_instance_on_server_cancel (void * context);
 static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoint * breakpoint, GumDarwinUnifiedThreadState * state);
 static gboolean frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self);
@@ -2138,6 +2139,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, instance->server_port, 0, ctx->dispatch_queue);
   instance->server_recv_source = source;
   dispatch_set_context (source, instance);
+  dispatch_source_set_cancel_handler_f (source, frida_spawn_instance_on_server_cancel);
   dispatch_source_set_event_handler_f (source, frida_spawn_instance_on_server_recv);
   dispatch_resume (source);
 
@@ -2756,6 +2758,12 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
   FridaExceptionPortSet * previous_ports;
   mach_msg_type_number_t port_index;
 
+  if (instance->server_recv_source != NULL)
+  {
+    dispatch_source_cancel (instance->server_recv_source);
+    return;
+  }
+
   self_task = mach_task_self ();
 
   if (instance->do_modinit_strcmp_checks != NULL)
@@ -2768,8 +2776,6 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
   {
     mach_port_deallocate (self_task, previous_ports->ports[port_index]);
   }
-  if (instance->server_recv_source != NULL)
-    dispatch_release (instance->server_recv_source);
   if (instance->server_port != MACH_PORT_NULL)
   {
     mach_port_mod_refs (self_task, instance->server_port, MACH_PORT_RIGHT_SEND, -1);
@@ -2819,6 +2825,15 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
   }
 
   frida_spawn_instance_send_breakpoint_response (self);
+}
+
+static void
+frida_spawn_instance_on_server_cancel (void * context)
+{
+  FridaSpawnInstance * self = context;
+
+  dispatch_release (g_steal_pointer (&self->server_recv_source));
+  frida_spawn_instance_free (self);
 }
 
 static void
