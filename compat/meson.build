@@ -47,7 +47,11 @@ if no_overridden_compat_bits
     check: true
   )
   setup_output = setup_result.stdout().strip()
-  tokens = setup_output.split(' ')
+  if setup_output.startswith('error ')
+    error('compat/build.py setup failed:', setup_output.substring(6))
+  endif
+  assert(setup_output.startswith('ok '))
+  tokens = setup_output.substring(3).split(' ')
   varnames = tokens[0].split(',')
   outputs = tokens[1].split(',')
   depfile = tokens[2]

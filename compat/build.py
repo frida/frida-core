@@ -12,6 +12,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import traceback
 from typing import Any, Literal, Mapping, Optional, Sequence
 
 
@@ -92,165 +93,169 @@ def setup(role: Role,
           compat: set[str],
           assets: str,
           components: set[str]):
-    outputs: Mapping[str, Sequence[Output]] = OrderedDict()
+    try:
+        outputs: Mapping[str, Sequence[Output]] = OrderedDict()
 
-    outputs[("bundle", None)] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
+        outputs[("bundle", None)] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
 
-    releng_location = query_releng_location(role)
-    ensure_submodules_checked_out(releng_location)
-    configure_import_path(releng_location)
+        releng_location = query_releng_location(role)
+        ensure_submodules_checked_out(releng_location)
+        configure_import_path(releng_location)
 
-    if "auto" in compat:
-        compat = {"native", "emulated"} if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"} else set()
-    elif "disabled" in compat:
-        compat = set()
+        if "auto" in compat:
+            compat = {"native", "emulated"} if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"} else set()
+        elif "disabled" in compat:
+            compat = set()
 
-    if "native" in compat:
-        other_triplet: Optional[str] = None
-        if host_os == "windows" and host_config == "mingw":
-            triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
-            if shutil.which(triplet + "-gcc") is not None:
-                other_triplet = triplet
+        if "native" in compat:
+            other_triplet: Optional[str] = None
+            if host_os == "windows" and host_config == "mingw":
+                triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
+                if shutil.which(triplet + "-gcc") is not None:
+                    other_triplet = triplet
+                    have_compiler = True
+                else:
+                    have_compiler = False
+            elif host_os == "linux" and host_config is None:
+                triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
+                if shutil.which(triplet + "-gcc") is not None:
+                    other_triplet = triplet
+                    have_compiler = True
+                else:
+                    have_compiler = False
+            else:
                 have_compiler = True
-            else:
-                have_compiler = False
-        elif host_os == "linux" and host_config is None:
-            triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
-            if shutil.which(triplet + "-gcc") is not None:
-                other_triplet = triplet
-                have_compiler = True
-            else:
-                have_compiler = False
-        else:
-            have_compiler = True
 
-        if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_compiler:
-            if host_arch == "x86_64":
-                other_arch = "x86"
-                kind = "legacy"
-            else:
-                other_arch = "x86_64"
-                kind = "modern"
-            outputs[(other_arch, other_triplet)] = [
-                Output(identifier=f"helper_{kind}",
-                       name=HELPER_FILE_WINDOWS.name,
-                       file=HELPER_FILE_WINDOWS,
-                       target=HELPER_TARGET),
-                Output(identifier=f"agent_{kind}",
-                       name=AGENT_FILE_WINDOWS.name,
-                       file=AGENT_FILE_WINDOWS,
-                       target=AGENT_TARGET),
-            ]
-            if "gadget" in components:
-                outputs[(other_arch, other_triplet)] += [
-                    Output(identifier=f"gadget_{kind}",
-                           name=GADGET_FILE_WINDOWS.name,
-                           file=GADGET_FILE_WINDOWS,
-                           target=GADGET_TARGET),
+            if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_compiler:
+                if host_arch == "x86_64":
+                    other_arch = "x86"
+                    kind = "legacy"
+                else:
+                    other_arch = "x86_64"
+                    kind = "modern"
+                outputs[(other_arch, other_triplet)] = [
+                    Output(identifier=f"helper_{kind}",
+                           name=HELPER_FILE_WINDOWS.name,
+                           file=HELPER_FILE_WINDOWS,
+                           target=HELPER_TARGET),
+                    Output(identifier=f"agent_{kind}",
+                           name=AGENT_FILE_WINDOWS.name,
+                           file=AGENT_FILE_WINDOWS,
+                           target=AGENT_TARGET),
                 ]
+                if "gadget" in components:
+                    outputs[(other_arch, other_triplet)] += [
+                        Output(identifier=f"gadget_{kind}",
+                               name=GADGET_FILE_WINDOWS.name,
+                               file=GADGET_FILE_WINDOWS,
+                               target=GADGET_TARGET),
+                    ]
 
-        if host_os in {"macos", "ios"} and host_arch in {"arm64e", "arm64"} and host_config != "simulator":
-            if host_arch == "arm64e":
-                other_arch = "arm64"
-                kind = "legacy"
-            else:
-                other_arch = "arm64e"
-                kind = "modern"
-            outputs[(other_arch, other_triplet)] = [
-                Output(identifier=f"helper_{kind}",
-                       name=f"frida-helper-{other_arch}",
-                       file=HELPER_FILE_UNIX,
-                       target=HELPER_TARGET),
-                Output(identifier=f"agent_{kind}",
-                       name=f"frida-agent-{other_arch}.dylib",
-                       file=AGENT_FILE_DARWIN,
-                       target=AGENT_TARGET),
-            ]
-            if "gadget" in components:
-                outputs[(other_arch, other_triplet)] += [
-                    Output(identifier=f"gadget_{kind}",
-                           name=f"frida-gadget-{other_arch}.dylib",
-                           file=GADGET_FILE_DARWIN,
-                           target=GADGET_TARGET),
+            if host_os in {"macos", "ios"} and host_arch in {"arm64e", "arm64"} and host_config != "simulator":
+                if host_arch == "arm64e":
+                    other_arch = "arm64"
+                    kind = "legacy"
+                else:
+                    other_arch = "arm64e"
+                    kind = "modern"
+                outputs[(other_arch, other_triplet)] = [
+                    Output(identifier=f"helper_{kind}",
+                           name=f"frida-helper-{other_arch}",
+                           file=HELPER_FILE_UNIX,
+                           target=HELPER_TARGET),
+                    Output(identifier=f"agent_{kind}",
+                           name=f"frida-agent-{other_arch}.dylib",
+                           file=AGENT_FILE_DARWIN,
+                           target=AGENT_TARGET),
                 ]
-            if "server" in components and assets == "installed":
-                outputs[(other_arch, other_triplet)] += [
-                    Output(identifier=f"server_{kind}",
-                           name=f"frida-server-{other_arch}",
-                           file=SERVER_FILE_UNIX,
-                           target=SERVER_TARGET),
-                ]
+                if "gadget" in components:
+                    outputs[(other_arch, other_triplet)] += [
+                        Output(identifier=f"gadget_{kind}",
+                               name=f"frida-gadget-{other_arch}.dylib",
+                               file=GADGET_FILE_DARWIN,
+                               target=GADGET_TARGET),
+                    ]
+                if "server" in components and assets == "installed":
+                    outputs[(other_arch, other_triplet)] += [
+                        Output(identifier=f"server_{kind}",
+                               name=f"frida-server-{other_arch}",
+                               file=SERVER_FILE_UNIX,
+                               target=SERVER_TARGET),
+                    ]
 
-        if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_compiler:
-            if host_arch == "x86_64":
-                other_arch = "x86"
-                kind = "legacy"
-            else:
-                other_arch = "x86_64"
-                kind = "modern"
-            outputs[(other_arch, other_triplet)] = [
-                Output(identifier="helper_legacy",
-                       name=HELPER_FILE_UNIX.name,
-                       file=HELPER_FILE_UNIX,
-                       target=HELPER_TARGET),
-                Output(identifier="agent_legacy",
-                       name=AGENT_FILE_ELF.name,
-                       file=AGENT_FILE_ELF,
-                       target=AGENT_TARGET),
-            ]
-            if "gadget" in components:
-                outputs[(other_arch, other_triplet)] += [
-                    Output(identifier=f"gadget_{kind}",
-                           name=GADGET_FILE_ELF.name,
-                           file=GADGET_FILE_ELF,
-                           target=GADGET_TARGET),
-                ]
-
-        if host_os == "android" and host_arch in {"arm64", "x86_64"}:
-            other_arch = "arm" if host_arch == "arm64" else "x86"
-            outputs[(other_arch, other_triplet)] = [
-                Output(identifier="helper_legacy",
-                       name=HELPER_FILE_UNIX.name,
-                       file=HELPER_FILE_UNIX,
-                       target=HELPER_TARGET),
-                Output(identifier="agent_legacy",
-                       name=AGENT_FILE_ELF.name,
-                       file=AGENT_FILE_ELF,
-                       target=AGENT_TARGET),
-            ]
-            if "gadget" in components:
-                outputs[(other_arch, other_triplet)] += [
-                    Output(identifier="gadget_legacy",
-                           name=GADGET_FILE_ELF.name,
-                           file=GADGET_FILE_ELF,
-                           target=GADGET_TARGET),
-                ]
-
-    if "emulated" in compat:
-        if host_os == "android" and host_arch in {"x86_64", "x86"}:
-            outputs[("arm", None)] = [
-                Output(identifier="agent_emulated_legacy",
-                       name="frida-agent-arm.so",
-                       file=AGENT_FILE_ELF,
-                       target=AGENT_TARGET),
-            ]
-            if host_arch == "x86_64":
-                outputs[("arm64", None)] = [
-                    Output(identifier="agent_emulated_modern",
-                           name="frida-agent-arm64.so",
+            if host_os == "linux" and host_arch in {"x86_64", "x86"} and have_compiler:
+                if host_arch == "x86_64":
+                    other_arch = "x86"
+                    kind = "legacy"
+                else:
+                    other_arch = "x86_64"
+                    kind = "modern"
+                outputs[(other_arch, other_triplet)] = [
+                    Output(identifier="helper_legacy",
+                           name=HELPER_FILE_UNIX.name,
+                           file=HELPER_FILE_UNIX,
+                           target=HELPER_TARGET),
+                    Output(identifier="agent_legacy",
+                           name=AGENT_FILE_ELF.name,
                            file=AGENT_FILE_ELF,
                            target=AGENT_TARGET),
                 ]
+                if "gadget" in components:
+                    outputs[(other_arch, other_triplet)] += [
+                        Output(identifier=f"gadget_{kind}",
+                               name=GADGET_FILE_ELF.name,
+                               file=GADGET_FILE_ELF,
+                               target=GADGET_TARGET),
+                    ]
 
-    raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
-    allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
+            if host_os == "android" and host_arch in {"arm64", "x86_64"}:
+                other_arch = "arm" if host_arch == "arm64" else "x86"
+                outputs[(other_arch, other_triplet)] = [
+                    Output(identifier="helper_legacy",
+                           name=HELPER_FILE_UNIX.name,
+                           file=HELPER_FILE_UNIX,
+                           target=HELPER_TARGET),
+                    Output(identifier="agent_legacy",
+                           name=AGENT_FILE_ELF.name,
+                           file=AGENT_FILE_ELF,
+                           target=AGENT_TARGET),
+                ]
+                if "gadget" in components:
+                    outputs[(other_arch, other_triplet)] += [
+                        Output(identifier="gadget_legacy",
+                               name=GADGET_FILE_ELF.name,
+                               file=GADGET_FILE_ELF,
+                               target=GADGET_TARGET),
+                    ]
 
-    state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, allowed_prebuilds, outputs)
-    serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
+        if "emulated" in compat:
+            if host_os == "android" and host_arch in {"x86_64", "x86"}:
+                outputs[("arm", None)] = [
+                    Output(identifier="agent_emulated_legacy",
+                           name="frida-agent-arm.so",
+                           file=AGENT_FILE_ELF,
+                           target=AGENT_TARGET),
+                ]
+                if host_arch == "x86_64":
+                    outputs[("arm64", None)] = [
+                        Output(identifier="agent_emulated_modern",
+                               name="frida-agent-arm64.so",
+                               file=AGENT_FILE_ELF,
+                               target=AGENT_TARGET),
+                    ]
 
-    variable_names, output_names = zip(*[(output.identifier, output.name) \
-            for output in itertools.chain.from_iterable(outputs.values())])
-    print(f"{','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME} {serialized_state}")
+        raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
+        allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
+
+        state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, allowed_prebuilds, outputs)
+        serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
+
+        variable_names, output_names = zip(*[(output.identifier, output.name) \
+                for output in itertools.chain.from_iterable(outputs.values())])
+        print(f"ok {','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME} {serialized_state}")
+    except Exception as e:
+        details = "\n".join(traceback.format_exception(e))
+        print(f"error {e}\n\n{details}")
 
 
 @dataclass
