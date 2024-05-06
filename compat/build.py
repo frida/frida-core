@@ -129,9 +129,17 @@ def setup(role: Role,
 
         auto_detect = "auto" in compat
         if auto_detect:
-            compat = {"native", "emulated"} if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"} else set()
+            if host_os in {"windows", "macos", "linux", "ios", "tvos", "android"}:
+                summary = f"enabled by default for {host_os}-{host_arch}"
+                compat = {"native", "emulated"}
+            else:
+                summary = f"disabled by default for {host_os}-{host_arch}"
+                compat = set()
         elif "disabled" in compat:
+            summary = "disabled by user"
             compat = set()
+        else:
+            summary = "enabled by user"
 
         if "native" in compat:
             have_toolchain = True
@@ -162,8 +170,10 @@ def setup(role: Role,
                             except:
                                 pass
 
-            if not auto_detect and not have_toolchain:
-                raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
+            if not have_toolchain:
+                if not auto_detect:
+                    raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
+                summary = "disabled due to missing toolchain for {other_triplet}"
 
             if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_toolchain:
                 if host_arch == "x86_64":
@@ -294,10 +304,16 @@ def setup(role: Role,
 
         variable_names, output_names = zip(*[(output.identifier, output.name) \
                 for output in itertools.chain.from_iterable(outputs.values())])
-        print(f"ok {','.join(variable_names)} {','.join(output_names)} {DEPFILE_FILENAME} {serialized_state}")
+        print("ok")
+        print(summary)
+        print(f"{','.join(variable_names)}")
+        print(f"{','.join(output_names)}")
+        print(DEPFILE_FILENAME)
+        print(serialized_state)
     except Exception as e:
-        details = "\n".join(traceback.format_exception(e))
-        print(f"error {e}\n\n{details}")
+        print(f"error {e}")
+        print("")
+        print(traceback.format_exception(e))
 
 
 class ToolchainNotFoundError(Exception):

@@ -663,3 +663,10 @@ endif
 if build_tests
   subdir('tests')
 endif
+
+summary(
+  {
+    'compat': compat_summary,
+  },
+  section: 'Features',
+)

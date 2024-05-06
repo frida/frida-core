@@ -53,12 +53,13 @@ if no_overridden_compat_bits
   if setup_output.startswith('error ')
     error('compat/build.py setup failed:', setup_output.substring(6))
   endif
-  assert(setup_output.startswith('ok '))
-  tokens = setup_output.substring(3).split(' ')
-  varnames = tokens[0].split(',')
-  outputs = tokens[1].split(',')
-  depfile = tokens[2]
-  state = tokens[3]
+  lines = setup_output.split('\n')
+  assert(lines[0] == 'ok')
+  compat_summary = lines[1]
+  varnames = lines[2].split(',')
+  outputs = lines[3].split(',')
+  depfile = lines[4]
+  state = lines[5]
 
   if host_os_family == 'darwin'
     install = false
@@ -113,4 +114,6 @@ if no_overridden_compat_bits
 
     i += 1
   endforeach
+else
+  compat_summary = 'not available due to externally provided helper/agent assets'
 endif
