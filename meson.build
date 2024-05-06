@@ -17,6 +17,7 @@ endif
 
 c_languages = ['c', 'cpp']
 cc = meson.get_compiler('c')
+cpp = meson.get_compiler('cpp')
 
 releng = meson.global_source_root() / 'releng'
 if not import('fs').exists(releng)

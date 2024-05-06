@@ -44,6 +44,9 @@ if no_overridden_compat_bits
     ','.join(get_option('compat')),
     get_option('assets'),
     ','.join(components),
+    '--',
+    '>>>', cc.cmd_array(), '<<<',
+    '>>>', cpp.cmd_array(), '<<<',
     check: true
   )
   setup_output = setup_result.stdout().strip()

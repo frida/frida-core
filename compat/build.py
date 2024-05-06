@@ -2,16 +2,18 @@ from __future__ import annotations
 import argparse
 import base64
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import itertools
 import json
 import os
 from pathlib import Path
 import pickle
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from typing import Any, Literal, Mapping, Optional, Sequence
 
@@ -39,6 +41,7 @@ def main(argv):
     command.add_argument("assets", help="whether assets are embedded vs installed and loaded at runtime")
     command.add_argument("components", help="which components will be built",
                          type=parse_array_option_value)
+    command.add_argument("compilers", help="compiler command arrays", nargs="+")
     command.set_defaults(func=lambda args: setup(args.role,
                                                  args.builddir,
                                                  args.top_builddir,
@@ -48,7 +51,8 @@ def main(argv):
                                                  args.host_config if args.host_config else None,
                                                  args.compat,
                                                  args.assets,
-                                                 args.components))
+                                                 args.components,
+                                                 parse_compilers(args.compilers)))
 
     command = subparsers.add_parser("compile", help="compile compatibility assets")
     command.add_argument("privdir", help="directory to store intermediate files", type=Path)
@@ -83,6 +87,26 @@ def parse_array_option_value(v: str) -> set[str]:
     return {v.strip() for v in v.split(",")}
 
 
+def parse_compilers(compilers: list[str]) -> Compilers:
+    cc = pop_cmd_array_arg(compilers)
+    cpp = pop_cmd_array_arg(compilers)
+    return Compilers(cc, cpp)
+
+
+def pop_cmd_array_arg(args: list[str]) -> list[str]:
+    result: list[str] = []
+    first = args.pop(0)
+    assert first == ">>>"
+    while True:
+        cur = args.pop(0)
+        if cur == "<<<":
+            break
+        result.append(cur)
+    if len(result) == 1 and not result[0]:
+        return None
+    return result
+
+
 def setup(role: Role,
           builddir: Path,
           top_builddir: Path,
@@ -92,11 +116,12 @@ def setup(role: Role,
           host_config: Optional[str],
           compat: set[str],
           assets: str,
-          components: set[str]):
+          components: set[str],
+          compilers: Compilers):
     try:
         outputs: Mapping[str, Sequence[Output]] = OrderedDict()
 
-        outputs[("bundle", None)] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
+        outputs[OutputGroup(arch=None)] = [Output("arch_support_bundle", "arch-support.bundle", Path("compat"), "")]
 
         releng_location = query_releng_location(role)
         ensure_submodules_checked_out(releng_location)
@@ -111,13 +136,31 @@ def setup(role: Role,
         if "native" in compat:
             have_toolchain = True
             other_triplet: Optional[str] = None
+            extra_environ: dict[str, str] = {}
 
-            if host_os == "windows" and host_config == "mingw":
+            if host_os == "windows" and host_arch in {"x86_64", "x86"} and host_config == "mingw":
                 other_triplet = "i686-w64-mingw32" if host_arch == "x86_64" else "x86_64-w64-mingw32"
                 have_toolchain = shutil.which(other_triplet + "-gcc") is not None
-            elif host_os == "linux" and host_config is None:
+            elif host_os == "linux" and host_arch in {"x86_64", "x86"} and host_config is None:
                 other_triplet = "i686-linux-gnu" if host_arch == "x86_64" else "x86_64-linux-gnu"
                 have_toolchain = shutil.which(other_triplet + "-gcc") is not None
+                if not have_toolchain:
+                    with (tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".c") as probe_c,
+                          tempfile.NamedTemporaryFile(delete=False) as probe_executable):
+                        try:
+                            probe_c.write("int main (void) { return 0; }")
+                            probe_c.flush()
+                            p = subprocess.run(compilers.cc + ["-m32", probe_c.name, "-o", probe_executable.name],
+                                               capture_output=True)
+                            if p.returncode == 0:
+                                extra_environ["CC"] = shlex.join(compilers.cc + ["-m32"])
+                                extra_environ["CXX"] = shlex.join(compilers.cpp + ["-m32"])
+                                have_toolchain = True
+                        finally:
+                            try:
+                                os.unlink(probe_executable.name)
+                            except:
+                                pass
 
             if not auto_detect and not have_toolchain:
                 raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
@@ -129,7 +172,8 @@ def setup(role: Role,
                 else:
                     other_arch = "x86_64"
                     kind = "modern"
-                outputs[(other_arch, other_triplet)] = [
+                group = OutputGroup(other_arch, other_triplet, extra_environ)
+                outputs[group] = [
                     Output(identifier=f"helper_{kind}",
                            name=HELPER_FILE_WINDOWS.name,
                            file=HELPER_FILE_WINDOWS,
@@ -140,7 +184,7 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
-                    outputs[(other_arch, other_triplet)] += [
+                    outputs[group] += [
                         Output(identifier=f"gadget_{kind}",
                                name=GADGET_FILE_WINDOWS.name,
                                file=GADGET_FILE_WINDOWS,
@@ -154,7 +198,8 @@ def setup(role: Role,
                 else:
                     other_arch = "arm64e"
                     kind = "modern"
-                outputs[(other_arch, other_triplet)] = [
+                group = OutputGroup(other_arch)
+                outputs[group] = [
                     Output(identifier=f"helper_{kind}",
                            name=f"frida-helper-{other_arch}",
                            file=HELPER_FILE_UNIX,
@@ -165,14 +210,14 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
-                    outputs[(other_arch, other_triplet)] += [
+                    outputs[group] += [
                         Output(identifier=f"gadget_{kind}",
                                name=f"frida-gadget-{other_arch}.dylib",
                                file=GADGET_FILE_DARWIN,
                                target=GADGET_TARGET),
                     ]
                 if "server" in components and assets == "installed":
-                    outputs[(other_arch, other_triplet)] += [
+                    outputs[group] += [
                         Output(identifier=f"server_{kind}",
                                name=f"frida-server-{other_arch}",
                                file=SERVER_FILE_UNIX,
@@ -186,7 +231,8 @@ def setup(role: Role,
                 else:
                     other_arch = "x86_64"
                     kind = "modern"
-                outputs[(other_arch, other_triplet)] = [
+                group = OutputGroup(other_arch, other_triplet, extra_environ)
+                outputs[group] = [
                     Output(identifier="helper_legacy",
                            name=HELPER_FILE_UNIX.name,
                            file=HELPER_FILE_UNIX,
@@ -197,7 +243,7 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
-                    outputs[(other_arch, other_triplet)] += [
+                    outputs[group] += [
                         Output(identifier=f"gadget_{kind}",
                                name=GADGET_FILE_ELF.name,
                                file=GADGET_FILE_ELF,
@@ -205,8 +251,8 @@ def setup(role: Role,
                     ]
 
             if host_os == "android" and host_arch in {"arm64", "x86_64"}:
-                other_arch = "arm" if host_arch == "arm64" else "x86"
-                outputs[(other_arch, other_triplet)] = [
+                group = OutputGroup("arm" if host_arch == "arm64" else "x86")
+                outputs[group] = [
                     Output(identifier="helper_legacy",
                            name=HELPER_FILE_UNIX.name,
                            file=HELPER_FILE_UNIX,
@@ -217,7 +263,7 @@ def setup(role: Role,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
-                    outputs[(other_arch, other_triplet)] += [
+                    outputs[group] += [
                         Output(identifier="gadget_legacy",
                                name=GADGET_FILE_ELF.name,
                                file=GADGET_FILE_ELF,
@@ -226,14 +272,14 @@ def setup(role: Role,
 
         if "emulated" in compat:
             if host_os == "android" and host_arch in {"x86_64", "x86"}:
-                outputs[("arm", None)] = [
+                outputs[OutputGroup("arm")] = [
                     Output(identifier="agent_emulated_legacy",
                            name="frida-agent-arm.so",
                            file=AGENT_FILE_ELF,
                            target=AGENT_TARGET),
                 ]
                 if host_arch == "x86_64":
-                    outputs[("arm64", None)] = [
+                    outputs[OutputGroup("arm64")] = [
                         Output(identifier="agent_emulated_modern",
                                name="frida-agent-arm64.so",
                                file=AGENT_FILE_ELF,
@@ -243,7 +289,7 @@ def setup(role: Role,
         raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
         allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
 
-        state = State(role, builddir, top_builddir, frida_version, host_os, host_arch, host_config, allowed_prebuilds, outputs)
+        state = State(role, builddir, top_builddir, frida_version, host_os, host_config, allowed_prebuilds, outputs)
         serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
         variable_names, output_names = zip(*[(output.identifier, output.name) \
@@ -259,16 +305,36 @@ class ToolchainNotFoundError(Exception):
 
 
 @dataclass
+class Compilers:
+    cc: list[str]
+    cpp: list[str]
+
+
+@dataclass
 class State:
     role: Role
     builddir: Path
     top_builddir: Path
     frida_version: str
     host_os: str
-    host_arch: str
     host_config: Optional[str]
     allowed_prebuilds: Optional[set[str]]
-    outputs: Mapping[str, Sequence[Output]]
+    outputs: Mapping[OutputGroup, Sequence[Output]]
+
+
+@dataclass
+class OutputGroup:
+    arch: Optional[str]
+    triplet: Optional[str] = None
+    extra_environ: dict[str, str] = field(default_factory=dict)
+
+    def __eq__(self, other):
+        if isinstance(other, OutputGroup):
+            return other.arch == self.arch
+        return False
+
+    def __hash__(self):
+        return hash(self.arch)
 
 
 @dataclass
@@ -307,14 +373,13 @@ def compile(privdir: Path, state: State):
     options: Optional[Sequence[str]] = None
     build_env = scrub_environment(os.environ)
     build_env["FRIDA_RELENG"] = str(releng_location)
-    for (flavor, triplet), outputs in state.outputs.items():
-        if flavor == "bundle":
+    for group, outputs in state.outputs.items():
+        if group.arch is None:
             for o in outputs:
                 (state.builddir / o.name).write_bytes(b"")
             continue
 
-        extra_arch = flavor
-        workdir = (privdir / extra_arch).resolve()
+        workdir = (privdir / group.arch).resolve()
 
         if not (workdir / "build.ninja").exists():
             if options is None:
@@ -323,12 +388,12 @@ def compile(privdir: Path, state: State):
                 if version_opt is None:
                     options += [f"-Dfrida_version={state.frida_version}"]
 
-            host_machine = MachineSpec(state.host_os, extra_arch, state.host_config, triplet)
+            host_machine = MachineSpec(state.host_os, group.arch, state.host_config, group.triplet)
 
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,
                       host_machine=host_machine,
-                      environ=build_env,
+                      environ={**build_env, **group.extra_environ},
                       allowed_prebuilds=state.allowed_prebuilds,
                       extra_meson_options=[
                           "-Dhelper_modern=",
