@@ -78,11 +78,12 @@ namespace Frida.Test {
 	}
 
 	public static string path_to_temporary_file (string name) {
+		var prefix = "frida-tests-%u-".printf (Gum.Process.get_id ());
 #if QNX
-		return Path.build_filename (GLib.Environment.get_tmp_dir (), name);
+		return Path.build_filename (GLib.Environment.get_tmp_dir (), prefix + name);
 #else
 		var tests_dir = Path.get_dirname (Process.current.filename);
-		return Path.build_filename (tests_dir, name);
+		return Path.build_filename (tests_dir, prefix + name);
 #endif
 	}
 
