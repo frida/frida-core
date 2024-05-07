@@ -60,13 +60,27 @@ namespace Frida {
 #else
 			policy_softener = new NullPolicySoftener ();
 #endif
+
+			_log_event ("DarwinHelperBackend.init() %p", this);
+		}
+
+		public override void dispose () {
+			_log_event ("DarwinHelperBackend.dispose() %p", this);
+
+			foreach (var instance in spawn_instances.values)
+				_free_spawn_instance (instance);
+			spawn_instances.clear ();
+
+			foreach (var instance in inject_instances.values)
+				_free_inject_instance (instance);
+			inject_instances.clear ();
+
+			base.dispose ();
 		}
 
 		~DarwinHelperBackend () {
-			foreach (var instance in spawn_instances.values)
-				_free_spawn_instance (instance);
-			foreach (var instance in inject_instances.values)
-				_free_inject_instance (instance);
+			_log_event ("DarwinHelperBackend.finalize() %p", this);
+
 			_destroy_context ();
 		}
 
@@ -362,6 +376,38 @@ namespace Frida {
 			}
 		}
 
+		private Timer log_timer = new Timer ();
+		private Gee.Map<uint, uint> log_threads = new Gee.HashMap<uint, uint> ();
+		private const uint[] log_palette = { 36, 35, 33, 32, 31, 34 };
+		private uint log_palette_offset = 0;
+
+		public void _log_event (string format, ...) {
+			lock (log_timer) {
+				var builder = new StringBuilder ();
+
+				var timestamp = (uint) (log_timer.elapsed () * 1000.0);
+
+				var tid = (uint) Gum.Process.get_current_thread_id ();
+
+				var color = log_threads[tid];
+				if (color == 0) {
+					color = log_palette[log_palette_offset];
+					log_palette_offset = (log_palette_offset + 1) % log_palette.length;
+					log_threads[tid] = color;
+				}
+				builder.append_printf ("\033[0;%um", color);
+
+				builder.append_printf ("[%05u ms] [thread %04x] %p ", timestamp, tid, this);
+
+				var args = va_list ();
+				builder.append_vprintf (format, args);
+
+				builder.append ("\033[0m\n");
+
+				stderr.write (builder.str.data);
+			}
+		}
+
 		public async void prepare_target (uint pid, Cancellable? cancellable) throws Error, IOError {
 			policy_softener.soften (pid);
 
@@ -377,6 +423,11 @@ namespace Frida {
 
 				if (not_yet_booted) {
 					try {
+						printerr ("\n------------------------------------------------------------\n");
+						lock (log_timer)
+							log_timer.reset ();
+						_log_event ("prepare-start pid=%u instance=%p", pid, spawn_instance);
+
 						_prepare_spawn_instance_for_injection (spawn_instance, task);
 
 						resume_process_fast (task);
@@ -400,16 +451,32 @@ namespace Frida {
 							return false;
 						});
 						timeout_source.attach (MainContext.get_thread_default ());
+						var heartbeat_source = new TimeoutSource.seconds (1);
+						uint next_heartbeat_id = 1;
+						heartbeat_source.set_callback (() => {
+							uint id = next_heartbeat_id++;
+							_on_heartbeat (spawn_instance, id);
+							_schedule_heartbeat_on_dispatch_queue (spawn_instance, id);
+							return true;
+						});
+						heartbeat_source.attach (MainContext.get_thread_default ());
 
 						yield;
 
+						heartbeat_source.destroy ();
 						timeout_source.destroy ();
 						disconnect (error_handler);
 						disconnect (ready_handler);
 
 						if (pending_error != null)
 							throw pending_error;
+
+						printerr ("\n");
+						_log_event ("prepare-end pid=%u", pid);
+						printerr ("------------------------------------------------------------\n\n");
 					} catch (GLib.Error e) {
+						_log_event ("prepare-error pid=%u message=\"%s\"", pid, e.message);
+
 						if (instance_created_here) {
 							spawn_instances.unset (pid);
 							_free_spawn_instance (spawn_instance);
@@ -421,6 +488,51 @@ namespace Frida {
 			} finally {
 				deallocate_port (task);
 			}
+		}
+
+		public void _on_breakpoint_request (int kr, int exception, int[] code) {
+			printerr ("\n");
+
+			var message = new StringBuilder.sized (256);
+			message.append_printf ("breakpoint-request kr=%d exception=%s code=[", kr, exception_type_to_string (exception));
+			uint i = 0;
+			foreach (int c in code) {
+				if (i != 0)
+					message.append (", ");
+				message.append_printf ("0x%x", c);
+				i++;
+			}
+			message.append_c (']');
+
+			_log_event ("%s", message.str);
+		}
+
+		private static string exception_type_to_string (int exception) {
+			switch (exception) {
+				case 1: return "EXC_BAD_ACCESS";
+				case 2: return "EXC_BAD_INSTRUCTION";
+				case 3: return "EXC_ARITHMETIC";
+				case 4: return "EXC_EMULATION";
+				case 5: return "EXC_SOFTWARE";
+				case 6: return "EXC_BREAKPOINT";
+				case 7: return "EXC_SYSCALL";
+				case 8: return "EXC_MACH_SYSCALL";
+				case 9: return "EXC_RPC_ALERT";
+				case 10: return "EXC_CRASH";
+				case 11: return "EXC_RESOURCE";
+				case 12: return "EXC_GUARD";
+				case 13: return "EXC_CORPSE_NOTIFY";
+				default: return "%d".printf (exception);
+			}
+		}
+
+		public void _on_breakpoint_response (int kr) {
+			_log_event ("breakpoint-response kr=%d", kr);
+		}
+
+		public void _on_heartbeat (void * spawn_instance, uint id) {
+			_log_event ("heartbeat id=%u", id);
+			_log_thread_state (spawn_instance);
 		}
 
 		private bool is_booting (uint task) throws Error {
@@ -643,6 +755,8 @@ namespace Frida {
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
 		protected extern void _free_spawn_instance (void * instance);
+		protected extern void _schedule_heartbeat_on_dispatch_queue (void * spawn_instance, uint id);
+		protected extern void _log_thread_state (void * spawn_instance);
 
 		protected extern uint _inject_into_task (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
 		protected extern void _demonitor (void * instance);

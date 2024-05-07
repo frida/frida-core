@@ -166,6 +166,7 @@ struct _FridaSpawnInstance
   __Request__exception_raise_state_identity_t pending_request;
 
   GumDarwinModule * dyld;
+  GumDarwinModule * old_dyld;
   size_t dyld_size;
   FridaDyldFlavor dyld_flavor;
 
@@ -403,6 +404,8 @@ static void frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self
 static void frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * self, guint n);
 static guint32 frida_spawn_instance_put_software_breakpoint (FridaSpawnInstance * self, GumAddress where, guint index);
 static guint32 frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, GumAddress address, guint32 new_instruction);
+static void frida_spawn_instance_log_breakpoint_phase (FridaSpawnInstance * self, const gchar * label);
+static void frida_spawn_instance_log_address (FridaSpawnInstance * self, const gchar * prefix, GumAddress address);
 
 static void frida_make_pty (int fds[2]);
 static void frida_configure_terminal_attributes (gint fd);
@@ -2193,6 +2196,75 @@ _frida_darwin_helper_backend_free_spawn_instance (FridaDarwinHelperBackend * sel
   frida_spawn_instance_free (instance);
 }
 
+void
+_frida_darwin_helper_backend_schedule_heartbeat_on_dispatch_queue (FridaDarwinHelperBackend * self, void * spawn_instance, guint identifier)
+{
+  FridaHelperContext * ctx = self->context;
+
+  dispatch_async (ctx->dispatch_queue, ^
+  {
+    _frida_darwin_helper_backend_on_heartbeat (self, spawn_instance, identifier);
+  });
+}
+
+void
+_frida_darwin_helper_backend_log_thread_state (FridaDarwinHelperBackend * self, void * opaque_spawn_instance)
+{
+  FridaSpawnInstance * instance = opaque_spawn_instance;
+  kern_return_t kr;
+  thread_basic_info_data_t info;
+  mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
+  GumDarwinUnifiedThreadState state;
+  mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
+  thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
+
+  kr = thread_info (instance->thread, THREAD_BASIC_INFO, (thread_info_t) &info, &info_count);
+  if (kr == KERN_SUCCESS)
+  {
+    const gchar * state;
+
+    switch (info.run_state)
+    {
+      case TH_STATE_RUNNING: state = "running"; break;
+      case TH_STATE_STOPPED: state = "stopped"; break;
+      case TH_STATE_WAITING: state = "waiting"; break;
+      case TH_STATE_UNINTERRUPTIBLE: state = "uninterruptible"; break;
+      case TH_STATE_HALTED: state = "halted"; break;
+      default: state = "other"; break;
+    }
+
+    _frida_darwin_helper_backend_log_event (instance->backend, "\trun_state=%s", state);
+  }
+  else
+  {
+    _frida_darwin_helper_backend_log_event (instance->backend, "\tthread_info() failed: %d", kr);
+  }
+
+  kr = thread_get_state (instance->thread, state_flavor, (thread_state_t) &state, &state_count);
+  if (kr == KERN_SUCCESS)
+  {
+    GumAddress pc;
+
+#ifdef HAVE_I386
+    if (instance->cpu_type == GUM_CPU_AMD64)
+      pc = state.uts.ts64.__rip;
+    else
+      pc = state.uts.ts32.__eip;
+#else
+    if (instance->cpu_type == GUM_CPU_ARM64)
+      pc = __darwin_arm_thread_state64_get_pc (state.ts_64);
+    else
+      pc = state.ts_32.__pc;
+#endif
+
+    frida_spawn_instance_log_address (instance, "pc", pc);
+  }
+  else
+  {
+    _frida_darwin_helper_backend_log_event (instance->backend, "\tthread_get_state() failed: %d", kr);
+  }
+}
+
 guint
 _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
     const gchar * entrypoint, const gchar * data, GError ** error)
@@ -2768,9 +2840,13 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->server_recv_source != NULL)
   {
+    _frida_darwin_helper_backend_log_event (instance->backend, "\tcancelling source for instance %p (on backend %p)", instance, instance->backend);
+    g_object_ref (instance->backend);
     dispatch_source_cancel (instance->server_recv_source);
     return;
   }
+
+  _frida_darwin_helper_backend_log_event (instance->backend, "\tfreeing instance %p (on backend %p)", instance, instance->backend);
 
   self_task = mach_task_self ();
 
@@ -2798,6 +2874,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->dyld != NULL)
     g_object_unref (instance->dyld);
+
+  if (instance->old_dyld != NULL)
+    g_object_unref (instance->old_dyld);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -2839,9 +2918,11 @@ static void
 frida_spawn_instance_on_server_cancel (void * context)
 {
   FridaSpawnInstance * self = context;
+  FridaDarwinHelperBackend * backend = self->backend;
 
   dispatch_release (g_steal_pointer (&self->server_recv_source));
   frida_spawn_instance_free (self);
+  g_object_unref (backend);
 }
 
 static void
@@ -2856,6 +2937,7 @@ frida_spawn_instance_on_server_recv (void * context)
   GumDarwinUnifiedThreadState state;
   guint i, current_bp_index;
   FridaBreakpoint * breakpoint = NULL;
+  GumAddress new_pc;
   gboolean carry_on, pc_changed;
 
   frida_spawn_instance_receive_breakpoint_request (self);
@@ -2869,6 +2951,8 @@ frida_spawn_instance_on_server_recv (void * context)
     if ((self->single_stepping >= 0 && !is_step_complete) ||
         (self->single_stepping == -1 && is_step_complete))
     {
+      _frida_darwin_helper_backend_log_event (self->backend, "\tack-step single_stepping=%d is_step_complete=%s",
+          self->single_stepping, is_step_complete ? "TRUE" : "FALSE");
       frida_spawn_instance_send_breakpoint_response (self);
       return;
     }
@@ -2877,7 +2961,10 @@ frida_spawn_instance_on_server_recv (void * context)
 
   kr = frida_get_thread_state (self->thread, state_flavor, &state, &state_count);
   if (kr != KERN_SUCCESS)
+  {
+    _frida_darwin_helper_backend_log_event (self->backend, "\tfrida_get_thread_state() failed with kr=%u", kr);
     return;
+  }
 
 #if __has_feature (ptrauth_calls)
   {
@@ -2904,12 +2991,16 @@ frida_spawn_instance_on_server_recv (void * context)
     pc = state.ts_32.__pc;
 #endif
 
+  frida_spawn_instance_log_address (self, "pc", pc);
+
   if (request->exception != EXC_BREAKPOINT)
     goto unexpected_exception;
 
   if (self->single_stepping >= 0)
   {
     FridaBreakpoint * bp = &self->breakpoints[self->single_stepping];
+
+    _frida_darwin_helper_backend_log_event (self->backend, "\thandle-step single_stepping=%d", self->single_stepping);
 
     frida_set_hardware_single_step (&self->breakpoint_debug_state, &state, FALSE, self->cpu_type);
 
@@ -2942,24 +3033,33 @@ frida_spawn_instance_on_server_recv (void * context)
     }
   }
 
+  _frida_darwin_helper_backend_log_event (self->backend, "\thit breakpoint: %s", (breakpoint != NULL) ? "yes" : "no");
   if (breakpoint == NULL)
     goto unexpected_exception;
 
+  frida_spawn_instance_log_breakpoint_phase (self, ">>>");
   carry_on = frida_spawn_instance_handle_breakpoint (self, breakpoint, &state);
+  frida_spawn_instance_log_breakpoint_phase (self, "<<<");
+  _frida_darwin_helper_backend_log_event (self->backend, "\thandle_breakpoint => carry_on=%s", carry_on ? "TRUE" : "FALSE");
   if (!carry_on)
     return;
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
-    pc_changed = state.uts.ts64.__rip != pc;
+    new_pc = state.uts.ts64.__rip;
   else
-    pc_changed = state.uts.ts32.__eip != pc;
+    new_pc = state.uts.ts32.__eip;
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
-    pc_changed = __darwin_arm_thread_state64_get_pc (state.ts_64) != pc;
+    new_pc = __darwin_arm_thread_state64_get_pc (state.ts_64);
   else
-    pc_changed = state.ts_32.__pc != pc;
+    new_pc = state.ts_32.__pc;
 #endif
+  pc_changed = new_pc != pc;
+
+  _frida_darwin_helper_backend_log_event (self->backend, "\tpc_changed=%s", pc_changed ? "TRUE" : "FALSE");
+  if (pc_changed)
+    frida_spawn_instance_log_address (self, "new_pc", new_pc);
 
   if (!pc_changed)
   {
@@ -3078,7 +3178,10 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
     {
       if (pc == self->modern_entry_address)
+      {
         self->breakpoint_phase = FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT;
+        frida_spawn_instance_log_breakpoint_phase (self, "A");
+      }
       else
         return frida_spawn_instance_handle_dyld_restart (self);
     }
@@ -3090,6 +3193,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
         self->breakpoint_phase = FRIDA_BREAKPOINT_CF_INITIALIZE;
       else
         self->breakpoint_phase = FRIDA_BREAKPOINT_SET_HELPERS;
+      frida_spawn_instance_log_breakpoint_phase (self, "B");
     }
   }
 
@@ -3178,6 +3282,7 @@ next_phase:
     case FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED:
       memcpy (&self->previous_thread_state, state, sizeof (GumDarwinUnifiedThreadState));
       self->breakpoint_phase = FRIDA_BREAKPOINT_CF_INITIALIZE;
+      frida_spawn_instance_log_breakpoint_phase (self, "C");
       goto next_phase;
 
     case FRIDA_BREAKPOINT_SET_HELPERS:
@@ -3265,7 +3370,10 @@ next_phase:
 #endif
 
     case FRIDA_BREAKPOINT_CF_INITIALIZE:
+      _frida_darwin_helper_backend_log_event (self->backend, "\tenumerate-start");
       gum_darwin_enumerate_modules (self->task, frida_find_cf_initialize, self);
+      _frida_darwin_helper_backend_log_event (self->backend, "\tenumerate-end cf_initialize_address=0x%" G_GINT64_MODIFIER "x",
+          self->cf_initialize_address);
 
       if (self->cf_initialize_address != 0)
       {
@@ -3362,9 +3470,10 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
 
   self->modern_entry_address = GUM_ADDRESS (info->dyldImageLoadAddress) + (self->modern_entry_address - self->dyld->base_address);
 
-  g_object_unref (self->dyld);
+  self->old_dyld = self->dyld;
   self->dyld = g_steal_pointer (&dyld);
 
+  frida_spawn_instance_log_address (self, "dyld-restart breakpoint_at", self->modern_entry_address);
   frida_spawn_instance_set_nth_breakpoint (self, 0, self->modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
   handled = TRUE;
@@ -3408,13 +3517,16 @@ frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
 {
   __Request__exception_raise_state_identity_t * request = &self->pending_request;
   mach_msg_header_t * header = &request->Head;
+  kern_return_t kr;
 
   mach_msg_destroy (header);
 
   bzero (request, sizeof (*request));
   header->msgh_size = sizeof (*request);
   header->msgh_local_port = self->server_port;
-  mach_msg_receive (header);
+  kr = mach_msg_receive (header);
+
+  _frida_darwin_helper_backend_on_breakpoint_request (self->backend, kr, request->exception, request->code, request->codeCnt);
 }
 
 static void
@@ -3436,6 +3548,7 @@ frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
   response.NDR = NDR_record;
   response.RetCode = KERN_SUCCESS;
   kr = mach_msg_send (header);
+  _frida_darwin_helper_backend_on_breakpoint_response (self->backend, kr);
   if (kr == KERN_SUCCESS)
     request->Head.msgh_remote_port = MACH_PORT_NULL;
 }
@@ -4020,6 +4133,56 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
     return 0;
 
   return original_instruction;
+}
+
+static void
+frida_spawn_instance_log_breakpoint_phase (FridaSpawnInstance * self, const gchar * label)
+{
+  const gchar * name;
+
+  switch (self->breakpoint_phase)
+  {
+    case FRIDA_BREAKPOINT_DETECT_FLAVOR: name = "detect-flavor"; break;
+
+    case FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT: name = "set-libdyld-initialize-caller-breakpoint"; break;
+    case FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED: name = "libsystem-initialized"; break;
+
+    case FRIDA_BREAKPOINT_SET_HELPERS: name = "set-helpers"; break;
+    case FRIDA_BREAKPOINT_DLOPEN_LIBC: name = "dlopen-libc"; break;
+    case FRIDA_BREAKPOINT_SKIP_CLEAR: name = "skip-clear"; break;
+    case FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER: name = "dlopen-bootstrapper"; break;
+
+    case FRIDA_BREAKPOINT_CF_INITIALIZE: name = "cf-initialize"; break;
+    case FRIDA_BREAKPOINT_CLEANUP: name = "cleanup"; break;
+    case FRIDA_BREAKPOINT_DONE: name = "done"; break;
+
+    default: g_assert_not_reached ();
+  }
+
+  _frida_darwin_helper_backend_log_event (self->backend, "\t%3s breakpoint_phase=\"%s\"", label, name);
+}
+
+static void
+frida_spawn_instance_log_address (FridaSpawnInstance * self, const gchar * prefix, GumAddress address)
+{
+  if (address >= self->dyld->base_address && address < self->dyld->base_address + self->dyld_size)
+  {
+    _frida_darwin_helper_backend_log_event (self->backend, "\t%s=dyld!0x%" G_GINT64_MODIFIER "x",
+        prefix,
+        address - self->dyld->base_address);
+  }
+  else if (self->old_dyld != NULL && address >= self->old_dyld->base_address && address < self->old_dyld->base_address + self->dyld_size)
+  {
+    _frida_darwin_helper_backend_log_event (self->backend, "\t%s=old_dyld!0x%" G_GINT64_MODIFIER "x",
+        prefix,
+        address - self->old_dyld->base_address);
+  }
+  else
+  {
+    _frida_darwin_helper_backend_log_event (self->backend, "\t%s=0x%" G_GINT64_MODIFIER "x",
+        prefix,
+        address);
+  }
 }
 
 static void
