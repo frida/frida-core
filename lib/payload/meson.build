@@ -20,11 +20,14 @@ if host_os_family == 'linux'
   payload_sources += 'syscall-linux-@0@.S'.format(host_arch)
 endif
 
+extra_c_args = []
 extra_vala_args = []
 if host_os_family != 'windows'
   extra_vala_args += ['--pkg=posix']
 endif
 if host_os_family == 'darwin'
+  # FIXME: Remove this once glib-2.0.vapi provides a GLib.Private binding not involving deprecated APIs.
+  extra_c_args += ['-UGLIB_VERSION_MIN_REQUIRED', '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_30']
   extra_vala_args += ['--pkg=frida-gum-darwin-1.0']
 endif
 if host_os_family == 'linux'
@@ -34,7 +37,7 @@ endif
 payload_vala_args = gum_vala_args + gumjs_vala_args
 
 payload = static_library('frida-payload-' + api_version, payload_sources,
-  c_args: frida_component_cflags,
+  c_args: [frida_component_cflags, extra_c_args],
   vala_args: [
     '--vapidir=' + meson.current_source_dir(),
     '--pkg=libc-shim',
