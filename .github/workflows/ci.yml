@@ -196,7 +196,7 @@ jobs:
           run: |
             cd /data/local/tmp
             tar xf $ASSET_PATH
-            ./frida-tests
+            TMPDIR=/data/local/tmp ./frida-tests
 
   qnx-armeabi:
     runs-on: ubuntu-latest
