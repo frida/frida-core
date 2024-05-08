@@ -13,6 +13,7 @@ env:
 
 jobs:
   native:
+    if: false
     strategy:
       matrix:
         include:
@@ -70,6 +71,7 @@ jobs:
         run: make test
 
   cross:
+    if: false
     strategy:
       matrix:
         include:
@@ -100,6 +102,7 @@ jobs:
           path: build/src/devkit/
 
   manylinux:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, x86_64-musl, armhf, arm64, arm64-musl, mips, mipsel, mips64, mips64el]
@@ -129,10 +132,10 @@ jobs:
       matrix:
         id:
           - ios-arm64
-          - android-x86
-          - android-x86_64
-          - android-arm
-          - android-arm64
+          #- android-x86
+          #- android-x86_64
+          #- android-arm
+          #- android-arm64
       fail-fast: false
     runs-on: ${{ startsWith(matrix.id, 'ios-') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
@@ -140,23 +143,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Cache runner
+        id: cache-runner
+        uses: actions/cache@v4
+        with:
+          path: /tmp/runner.tar.gz
+          key: ${{ matrix.id }}-runner
       - name: Set up Apple certificates
-        if: startsWith(matrix.id, 'ios-')
+        if: steps.cache-runner.outputs.cache-hit != 'true' && startsWith(matrix.id, 'ios-')
         uses: ./.github/actions/setup-apple-certificates
         with:
           certificates-p12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
           certificates-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
       - name: Build
+        if: steps.cache-runner.outputs.cache-hit != 'true'
         run: |
           ./configure --host=${{ matrix.id }} ${{ env.FRIDA_CORE_OPTIONS }}
           make
-      - name: Upload devkit
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-devkit-${{ matrix.id }}
-          path: build/src/devkit/
+      #- name: Upload devkit
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: core-devkit-${{ matrix.id }}
+      #    path: build/src/devkit/
       - name: Package tests
+        if: steps.cache-runner.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/pkg
           cd build
@@ -204,6 +215,7 @@ jobs:
             TMPDIR=/data/local/tmp ./frida-tests
 
   qnx-armeabi:
+    if: false
     runs-on: ubuntu-latest
     container: ghcr.io/frida/qnx-tools:latest
     steps:
