@@ -4,7 +4,6 @@ import base64
 from collections import OrderedDict
 from dataclasses import dataclass, field
 import itertools
-import json
 import os
 from pathlib import Path
 import pickle
@@ -19,6 +18,7 @@ from typing import Any, Literal, Mapping, Optional, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+NINJA = os.environ.get("NINJA", "ninja")
 
 
 Role = Literal["project", "subproject"]
@@ -373,10 +373,11 @@ def compile(privdir: Path, state: State):
             silenced_kwargs = kwargs
         return call_meson(argv, *args, **silenced_kwargs)
 
-    source_paths: set[Path] = set()
     options: Optional[Sequence[str]] = None
     build_env = scrub_environment(os.environ)
     build_env["FRIDA_RELENG"] = str(releng_location)
+    top_builddir = state.top_builddir
+    depfile_lines = []
     for group, outputs in state.outputs.items():
         if group.arch is None:
             for o in outputs:
@@ -387,7 +388,7 @@ def compile(privdir: Path, state: State):
 
         if not (workdir / "build.ninja").exists():
             if options is None:
-                options = load_meson_options(state.top_builddir, state.role, set(subprojects.keys()))
+                options = load_meson_options(top_builddir, state.role, set(subprojects.keys()))
                 version_opt = next((opt for opt in options if opt.startswith("-Dfrida_version=")), None)
                 if version_opt is None:
                     options += [f"-Dfrida_version={state.frida_version}"]
@@ -420,14 +421,18 @@ def compile(privdir: Path, state: State):
         for o in outputs:
             shutil.copy(workdir / o.file, state.builddir / o.name)
 
-        for cmd in json.loads((workdir / "compile_commands.json").read_text(encoding="utf-8")):
-            source_paths.add((workdir / Path(cmd["file"])).absolute())
+            output_relpath = (workdir / o.name).relative_to(top_builddir).as_posix()
+            raw_inputs = subprocess.run([NINJA, "-t", "inputs", o.file],
+                                        cwd=workdir,
+                                        capture_output=True,
+                                        encoding="utf-8",
+                                        check=True).stdout.rstrip().split("\n")
+            input_paths = [workdir / relpath for relpath in raw_inputs]
+            input_relpaths = [Path(os.path.relpath(p, top_builddir)).as_posix() for p in input_paths]
+            quoted_input_relpaths = " ".join([quote(p) for p in input_relpaths])
+            depfile_lines.append(f"{output_relpath}: {quoted_input_relpaths}")
 
-    (state.builddir / DEPFILE_FILENAME).write_text(generate_depfile(itertools.chain.from_iterable(state.outputs.values()),
-                                                                    source_paths,
-                                                                    state.builddir,
-                                                                    state.top_builddir),
-                                                   encoding="utf-8")
+    (state.builddir / DEPFILE_FILENAME).write_text("\n".join(depfile_lines), encoding="utf-8")
 
 
 def load_meson_options(top_builddir: Path,
@@ -509,18 +514,6 @@ def scrub_windows_devenv_dirs_from_path(raw_path: str, env: Mapping[str, str]) -
             continue
         clean_entries.append(raw_entry)
     return ";".join(clean_entries)
-
-
-def generate_depfile(outputs: Sequence[Output],
-                     source_paths: Sequence[Path],
-                     builddir: Path,
-                     top_builddir: Path) -> str:
-    output_relpaths = [(builddir / o.name).relative_to(top_builddir).as_posix() for o in outputs]
-    inputs = " ".join([quote(Path(os.path.relpath(p, top_builddir)).as_posix()) for p in source_paths if p.exists()])
-    lines = []
-    for output in output_relpaths:
-        lines.append(f"{output}: {inputs}")
-    return "\n".join(lines)
 
 
 def quote(path: str) -> str:
