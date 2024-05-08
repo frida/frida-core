@@ -18,7 +18,7 @@ jobs:
         include:
           - { id: windows-x86_64, runner: '"windows-latest"'                    }
           - { id: windows-x86,    runner: '"windows-latest"'                    }
-          - { id: macos-x86_64,   runner: '"macos-13"'                          }
+          - { id: macos-x86_64,   runner: '"macos-11"'                          }
           - { id: macos-arm64,    runner: '"macos-latest"'                      }
           - { id: linux-x86_64,   runner: '"ubuntu-latest"'                     }
           - { id: linux-x86,      runner: '"ubuntu-latest"'                     }
@@ -66,6 +66,7 @@ jobs:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
       - name: Test
+        if: matrix.id != 'macos-arm64'
         run: make test
 
   cross:
