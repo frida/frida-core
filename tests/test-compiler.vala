@@ -13,6 +13,12 @@ namespace Frida.CompilerTest {
 
 	namespace Performance {
 		private static async void build_simple_agent (Harness h) {
+			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
 			try {
 				var device_manager = new DeviceManager ();
 				var compiler = new Compiler (device_manager);
@@ -64,6 +70,12 @@ namespace Frida.CompilerTest {
 		}
 
 		private static async void watch_simple_agent (Harness h) {
+			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
 			try {
 				var device_manager = new DeviceManager ();
 				var compiler = new Compiler (device_manager);
