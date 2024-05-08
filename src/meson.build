@@ -213,7 +213,7 @@ if have_local_backend
         'darwin' / 'frida-helper.xcent',
       ],
       output: need_universal_helper ? f'@helper_name@-@host_abi@' : helper_name,
-      command: post_process_helper,
+      command: post_process_helper + '@INPUT1@',
       build_by_default: true,
       install: get_option('assets') == 'installed' and not need_universal_helper,
       install_dir: asset_dir,
