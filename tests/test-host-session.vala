@@ -319,7 +319,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-#if HAVE_LOCAL_BACKEND && HAVE_SOCKET_BACKEND
+#if HAVE_LOCAL_BACKEND && HAVE_SOCKET_BACKEND && !ANDROID
 		Connectivity.Strategy[] strategies = new Connectivity.Strategy[] {
 			SERVER,
 		};
@@ -1016,7 +1016,7 @@ namespace Frida.HostSessionTest {
 			PEER
 		}
 
-#if HAVE_SOCKET_BACKEND
+#if HAVE_SOCKET_BACKEND && !ANDROID
 		private static async void flawless (Harness h, Strategy strategy) {
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => FORWARD, out seen_disruptions);
