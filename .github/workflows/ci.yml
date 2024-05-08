@@ -169,6 +169,11 @@ jobs:
               ;;
           esac
           cp -a tests/frida-tests tests/labrats lib/agent/frida-agent$shlibext /tmp/pkg/
+          case ${{ matrix.id }} in
+            ios-*)
+              cp -a lib/gadget/frida-gadget.dylib ../tests/test-gadget-standalone.js /tmp/pkg/
+              ;;
+          esac
           tar -C /tmp/pkg -czf /tmp/runner.tar.gz .
       - name: Test on Corellium iOS device
         if: matrix.id == 'ios-arm64'
