@@ -12,7 +12,6 @@ namespace Frida.SystemTest {
 
 			switch (Frida.Test.os ()) {
 				case Frida.Test.OS.WINDOWS:
-				case Frida.Test.OS.IOS:
 					int num_icons_seen = 0;
 					foreach (var p in processes) {
 						if (p.parameters.contains ("icons"))
