@@ -413,6 +413,7 @@ static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
 
 static gboolean frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error);
+static void frida_inject_instance_on_thread_monitor_cancel (void * context);
 static void frida_inject_instance_on_mach_thread_dead (void * context);
 static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread);
 static void frida_inject_instance_on_posix_thread_dead (void * context);
@@ -2600,6 +2601,7 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
   self->thread_monitor_source = source;
   dispatch_set_context (source, self);
+  dispatch_source_set_cancel_handler_f (source, frida_inject_instance_on_thread_monitor_cancel);
   dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
   dispatch_resume (source);
 
@@ -2623,6 +2625,15 @@ beach:
   {
     return success;
   }
+}
+
+static void
+frida_inject_instance_on_thread_monitor_cancel (void * context)
+{
+  FridaInjectInstance * self = context;
+
+  dispatch_release (g_steal_pointer (&self->thread_monitor_source));
+  frida_inject_instance_free (self);
 }
 
 static void
@@ -2694,6 +2705,7 @@ frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
   self->thread_monitor_source = source;
   dispatch_set_context (source, self);
+  dispatch_source_set_cancel_handler_f (source, frida_inject_instance_on_thread_monitor_cancel);
   dispatch_source_set_event_handler_f (source, frida_inject_instance_on_posix_thread_dead);
   dispatch_resume (source);
 }
@@ -4111,10 +4123,14 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   task_t self_task;
   gboolean can_deallocate_payload;
 
+  if (instance->thread_monitor_source != NULL)
+  {
+    dispatch_source_cancel (instance->thread_monitor_source);
+    return;
+  }
+
   self_task = mach_task_self ();
 
-  if (instance->thread_monitor_source != NULL)
-    dispatch_release (instance->thread_monitor_source);
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
 
