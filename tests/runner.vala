@@ -12,36 +12,54 @@ namespace Frida.Test {
 	public static void run (string[] args) {
 		Environment.init (ref args);
 
-		if (can_test_cross_arch_injection && os () == MACOS) {
+		if (can_test_cross_arch_injection) {
 			try {
-				switch (cpu ()) {
-					case ARM_64:
-						if (Gum.query_ptrauth_support () == UNSUPPORTED) {
-							string output;
-							GLib.Process.spawn_command_line_sync ("nvram boot-args", out output);
+				switch (os ()) {
+					case MACOS:
+						switch (cpu ()) {
+							case ARM_64:
+								if (Gum.query_ptrauth_support () == UNSUPPORTED) {
+									string output;
+									GLib.Process.spawn_command_line_sync ("nvram boot-args", out output);
 
-							string[] tokens = output.strip ().split ("\t");
-							if (tokens.length == 2) {
-								unowned string boot_args = tokens[1];
-								can_test_cross_arch_injection = "-arm64e_preview_abi" in boot_args;
-							} else {
-								assert (tokens.length == 1);
-								can_test_cross_arch_injection = false;
-							}
+									string[] tokens = output.strip ().split ("\t");
+									if (tokens.length == 2) {
+										unowned string boot_args = tokens[1];
+										can_test_cross_arch_injection = "-arm64e_preview_abi" in boot_args;
+									} else {
+										assert (tokens.length == 1);
+										can_test_cross_arch_injection = false;
+									}
+								}
+								break;
+							case X86_64:
+								string raw_version;
+								GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
+
+								string[] tokens = raw_version.strip ().split (".");
+								assert (tokens.length >= 2);
+
+								uint major = uint.parse (tokens[0]);
+								uint minor = uint.parse (tokens[1]);
+
+								bool newer_than_mojave = major > 10 || (major == 10 && minor > 4);
+								can_test_cross_arch_injection = !newer_than_mojave;
+								break;
+							default:
+								break;
 						}
 						break;
-					case X86_64:
-						string raw_version;
-						GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
+					case IOS:
+					case TVOS:
+						if (cpu () == ARM_64) {
+							string output;
+							GLib.Process.spawn_command_line_sync ("sysctl -nq hw.cpusubtype", out output);
 
-						string[] tokens = raw_version.strip ().split (".");
-						assert (tokens.length >= 2);
+							var cpu_subtype = uint.parse (output.strip ());
 
-						uint major = uint.parse (tokens[0]);
-						uint minor = uint.parse (tokens[1]);
-
-						bool newer_than_mojave = major > 10 || (major == 10 && minor > 4);
-						can_test_cross_arch_injection = !newer_than_mojave;
+							uint subtype_arm64e = 2;
+							can_test_cross_arch_injection = cpu_subtype == subtype_arm64e;
+						}
 						break;
 					default:
 						break;
