@@ -2122,11 +2122,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   previous_ports = &instance->previous_ports;
   kr = thread_swap_exception_ports (child_thread,
-#if __has_feature (ptrauth_calls)
-      EXC_MASK_BAD_ACCESS | EXC_MASK_BREAKPOINT,
-#else
-      EXC_MASK_BREAKPOINT,
-#endif
+      EXC_MASK_ALL,
       instance->server_port,
       EXCEPTION_DEFAULT,
       state_flavor,
@@ -2907,6 +2903,9 @@ frida_spawn_instance_on_server_recv (void * context)
   else
     pc = state.ts_32.__pc;
 #endif
+
+  if (request->exception != EXC_BREAKPOINT)
+    goto unexpected_exception;
 
   if (self->single_stepping >= 0)
   {
