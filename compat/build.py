@@ -429,10 +429,17 @@ def compile(privdir: Path, state: State):
                                          check=True).stdout.rstrip().split("\n")
             input_entries = []
             for raw_path in input_paths:
+                print("raw_path:", raw_path)
                 path = Path(raw_path)
                 if not path.is_absolute():
-                    path = Path(os.path.relpath(workdir / path, top_builddir))
-                input_entries.append(quote(path.as_posix()))
+                    abspath = workdir / path
+                    print(f"\tcomputing relative for: {abspath}")
+                    raw_relpath = os.path.relpath(abspath, top_builddir)
+                    print(f"\traw_relpath: {raw_relpath}")
+                    path = Path(raw_relpath)
+                x = quote(path.as_posix())
+                print(f"\t=> {x}")
+                input_entries.append(x)
             depfile_lines.append(f"{output_relpath}: {' '.join(input_entries)}")
 
     (state.builddir / DEPFILE_FILENAME).write_text("\n".join(depfile_lines), encoding="utf-8")
