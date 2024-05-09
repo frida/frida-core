@@ -422,15 +422,18 @@ def compile(privdir: Path, state: State):
             shutil.copy(workdir / o.file, state.builddir / o.name)
 
             output_relpath = (workdir / o.name).relative_to(top_builddir).as_posix()
-            raw_inputs = subprocess.run([NINJA, "-t", "inputs", o.file],
-                                        cwd=workdir,
-                                        capture_output=True,
-                                        encoding="utf-8",
-                                        check=True).stdout.rstrip().split("\n")
-            input_paths = [workdir / relpath for relpath in raw_inputs]
-            input_relpaths = [Path(os.path.relpath(p, top_builddir)).as_posix() for p in input_paths]
-            quoted_input_relpaths = " ".join([quote(p) for p in input_relpaths])
-            depfile_lines.append(f"{output_relpath}: {quoted_input_relpaths}")
+            input_paths = subprocess.run([NINJA, "-t", "inputs", o.file],
+                                         cwd=workdir,
+                                         capture_output=True,
+                                         encoding="utf-8",
+                                         check=True).stdout.rstrip().split("\n")
+            input_entries = []
+            for raw_path in input_paths:
+                path = Path(raw_path)
+                if not path.is_absolute():
+                    path = Path(os.path.relpath(workdir / path, top_builddir))
+                input_entries.append(quote(path.as_posix()))
+            depfile_lines.append(f"{output_relpath}: {' '.join(input_entries)}")
 
     (state.builddir / DEPFILE_FILENAME).write_text("\n".join(depfile_lines), encoding="utf-8")
 
