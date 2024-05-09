@@ -422,11 +422,11 @@ def compile(privdir: Path, state: State):
             shutil.copy(workdir / o.file, state.builddir / o.name)
 
             output_relpath = (workdir / o.name).relative_to(top_builddir).as_posix()
-            input_paths = subprocess.run([NINJA, "-t", "inputs", o.file],
-                                         cwd=workdir,
-                                         capture_output=True,
-                                         encoding="utf-8",
-                                         check=True).stdout.rstrip().split("\n")
+            input_paths = shlex.split(subprocess.run([NINJA, "-t", "inputs", o.file],
+                                                     cwd=workdir,
+                                                     capture_output=True,
+                                                     encoding="utf-8",
+                                                     check=True).stdout)
             input_entries = []
             for raw_path in input_paths:
                 path = Path(raw_path)
