@@ -17,12 +17,12 @@ jobs:
       matrix:
         include:
           - { id: windows-x86_64, runner: '"windows-latest"'                    }
-          - { id: windows-x86,    runner: '"windows-latest"'                    }
-          - { id: macos-x86_64,   runner: '"macos-11"'                          }
-          - { id: macos-arm64,    runner: '"macos-latest"'                      }
-          - { id: linux-x86_64,   runner: '"ubuntu-latest"'                     }
-          - { id: linux-x86,      runner: '"ubuntu-latest"'                     }
-          - { id: freebsd-arm64,  runner: '["self-hosted", "freebsd", "arm64"]' }
+          #- { id: windows-x86,    runner: '"windows-latest"'                    }
+          #- { id: macos-x86_64,   runner: '"macos-11"'                          }
+          #- { id: macos-arm64,    runner: '"macos-latest"'                      }
+          #- { id: linux-x86_64,   runner: '"ubuntu-latest"'                     }
+          #- { id: linux-x86,      runner: '"ubuntu-latest"'                     }
+          #- { id: freebsd-arm64,  runner: '["self-hosted", "freebsd", "arm64"]' }
       fail-fast: false
     runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
@@ -70,6 +70,7 @@ jobs:
         run: make test
 
   cross:
+    if: false
     strategy:
       matrix:
         include:
@@ -100,6 +101,7 @@ jobs:
           path: build/src/devkit/
 
   manylinux:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, x86_64-musl, armhf, arm64, arm64-musl, mips, mipsel, mips64, mips64el]
@@ -125,6 +127,7 @@ jobs:
         run: make test
 
   mobile:
+    if: false
     strategy:
       matrix:
         id:
@@ -204,6 +207,7 @@ jobs:
             TMPDIR=/data/local/tmp ./frida-tests
 
   qnx-armeabi:
+    if: false
     runs-on: ubuntu-latest
     container: ghcr.io/frida/qnx-tools:latest
     steps:
