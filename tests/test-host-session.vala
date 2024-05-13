@@ -173,12 +173,14 @@ namespace Frida.HostSessionTest {
 		});
 
 		GLib.Test.add_func ("/HostSession/Darwin/UnwindSitter/exceptions-on-swizzled-objc-methods-should-be-caught", () => {
-			var h = new Harness ((h) => Darwin.UnwindSitter.exceptions_on_swizzled_objc_methods_should_be_caught.begin (h as Harness));
+			var h = new Harness ((h) =>
+				Darwin.UnwindSitter.exceptions_on_swizzled_objc_methods_should_be_caught.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Darwin/UnwindSitter/exceptions-on-intercepted-objc-methods-should-be-caught", () => {
-			var h = new Harness ((h) => Darwin.UnwindSitter.exceptions_on_intercepted_objc_methods_should_be_caught.begin (h as Harness));
+			var h = new Harness ((h) =>
+				Darwin.UnwindSitter.exceptions_on_intercepted_objc_methods_should_be_caught.begin (h as Harness));
 			h.run ();
 		});
 
@@ -2128,9 +2130,12 @@ namespace Frida.HostSessionTest {
 				try {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
-					var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("exception-catcher"));
+					var process = Frida.Test.Process.create (
+						Frida.Test.Labrats.path_to_executable ("exception-catcher"));
 
-					/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+					/*
+					 * TODO: Improve injector to handle injection into a process that hasn't yet finished initializing.
+					 */
 					Thread.usleep (50000);
 
 					var session = yield device.attach (process.id);
@@ -2186,9 +2191,12 @@ namespace Frida.HostSessionTest {
 				try {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
-					var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("exception-catcher"));
+					var process = Frida.Test.Process.create (
+						Frida.Test.Labrats.path_to_executable ("exception-catcher"));
 
-					/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+					/*
+					 * TODO: Improve injector to handle injection into a process that hasn't yet finished initializing.
+					 */
 					Thread.usleep (50000);
 
 					var session = yield device.attach (process.id);

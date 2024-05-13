@@ -23,8 +23,7 @@ namespace Frida {
 			dyld_find_unwind_sections = (DyldFindUnwindSectionsFunc)
 				Gum.Module.find_export_by_name (LIBDYLD, "_dyld_find_unwind_sections");
 
-			interceptor.replace ((void *) dyld_find_unwind_sections,
-					(void *) replacement_dyld_find_unwind_sections, this);
+			interceptor.replace ((void *) dyld_find_unwind_sections, (void *) replacement_dyld_find_unwind_sections, this);
 
 			_hook_libunwind ();
 		}
@@ -51,7 +50,7 @@ namespace Frida {
 #endif
 			var is_ours = address >= range.base_address && address < range_end;
 			if (!is_ours)
-				return sitter.dyld_find_unwind_sections(addr, info);
+				return sitter.dyld_find_unwind_sections (addr, info);
 
 			_fill_unwind_sections (range.base_address, range_end, info);
 

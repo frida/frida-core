@@ -93,15 +93,12 @@ _frida_unwind_sitter_fill_unwind_sections (GumAddress invader_start, GumAddress 
 }
 
 void
-_frida_unwind_sitter_hook_libunwind ()
+_frida_unwind_sitter_hook_libunwind (void)
 {
+#if GLIB_SIZEOF_VOID_P == 8
   gpointer * set_info_slot;
   gpointer get_reg_impl;
   GumInterceptor * interceptor;
-
-#if GLIB_SIZEOF_VOID_P != 8
-   return;
-#endif
 
   if (state != NULL)
     return;
@@ -112,15 +109,13 @@ _frida_unwind_sitter_hook_libunwind ()
 
   state->vtable = frida_find_vtable ();
   if (state->vtable == NULL)
-    goto beach;
+    goto unsupported_version;
 
   if (!frida_compute_vtable_shift (state->vtable, &state->shift))
-    goto beach;
+    goto unsupported_version;
 
-  set_info_slot = (gpointer *)(GUM_ADDRESS (state->vtable) +
-      UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO + state->shift);
-  get_reg_impl = *(gpointer *)(GUM_ADDRESS (state->vtable) +
-      UNWIND_CURSOR_VTABLE_OFFSET_GET_REG + state->shift);
+  set_info_slot = (gpointer *) (GUM_ADDRESS (state->vtable) + UNWIND_CURSOR_VTABLE_OFFSET_SET_INFO + state->shift);
+  get_reg_impl = *(gpointer *) (GUM_ADDRESS (state->vtable) + UNWIND_CURSOR_VTABLE_OFFSET_GET_REG + state->shift);
 
   state->set_info_slot = set_info_slot;
   state->set_info_original = *set_info_slot;
@@ -128,26 +123,25 @@ _frida_unwind_sitter_hook_libunwind ()
   state->get_reg = RESIGN_PTR (get_reg_impl);
 
   interceptor = gum_interceptor_obtain ();
-  if (gum_interceptor_replace (interceptor, state->set_info_original, frida_unwind_cursor_set_info_replacement, NULL, NULL) != GUM_REPLACE_OK)
-    goto beach;
+  if (gum_interceptor_replace (interceptor, state->set_info_original, frida_unwind_cursor_set_info_replacement, NULL, NULL)
+      != GUM_REPLACE_OK)
+    goto unsupported_version;
 
   return;
 
-beach:
+unsupported_version:
   g_slice_free (UnwindHookState, state);
   state = NULL;
+#endif
 }
 
 void
-_frida_unwind_sitter_unhook_libunwind ()
+_frida_unwind_sitter_unhook_libunwind (void)
 {
   GumInterceptor * interceptor;
 
   if (state == NULL)
     return;
-
-  if (state->set_info_slot == NULL || state->set_info_original == NULL)
-    goto beach;
 
   interceptor = gum_interceptor_obtain ();
   gum_interceptor_revert (interceptor, state->set_info_original);
@@ -175,30 +169,27 @@ static DyldUnwindSections *
 frida_create_cached_sections (CreateArgs * args)
 {
   DyldUnwindSections * cached_sections;
-  GumDarwinModule * module;
-  FillInfoContext ctx;
   gsize page_size;
   gpointer header;
   GumPageProtection prot;
+  GumDarwinModule * module;
+  FillInfoContext ctx;
 
-  page_size = getpagesize ();
+  page_size = gum_query_page_size ();
   header = GSIZE_TO_POINTER (args->range_start);
 
   while ((gum_memory_query_protection (header, &prot) && (prot & GUM_PAGE_READ) == 0) ||
-      (*(guint32 *)header != MH_MAGIC_64 && header + 4 <= GSIZE_TO_POINTER (args->range_end)))
+      (*(guint32 *) header != MH_MAGIC_64 && header + 4 <= GSIZE_TO_POINTER (args->range_end)))
+  {
     header += page_size;
-
-  if (*(guint32 *)header != MH_MAGIC_64)
+  }
+  if (*(guint32 *) header != MH_MAGIC_64)
     return NULL;
 
   cached_sections = g_slice_new0 (DyldUnwindSections);
-  if (cached_sections == NULL)
-    return NULL;
-
   cached_sections->mh = header;
 
-  module = gum_darwin_module_new_from_memory ("Frida", mach_task_self (), GPOINTER_TO_SIZE (header),
-      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  module = gum_darwin_module_new_from_memory ("Frida", mach_task_self (), GPOINTER_TO_SIZE (header), GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
   if (module == NULL)
     return cached_sections;
 
@@ -253,18 +244,17 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
 #else
   fp = GUM_ADDRESS (state->get_reg (self, UNW_X86_64_RBP));
 #endif
-
   if (fp == 0 || fp == -1)
     return;
 
-  missing_info = *((guint8 *)self + UNWIND_CURSOR_unwindInfoMissing);
+  missing_info = *((guint8 *) self + UNWIND_CURSOR_unwindInfoMissing);
 
   stored_pc_slot = GSIZE_TO_POINTER (fp + GLIB_SIZEOF_VOID_P);
   stored_pc = GUM_ADDRESS (*stored_pc_slot);
 #if __has_feature (ptrauth_calls)
   stored_pc = gum_strip_code_address (stored_pc);
 #elif defined (HAVE_ARM64)
-  was_signed = (stored_pc & ~STRIP_MASK ) != 0ULL;
+  was_signed = (stored_pc & ~STRIP_MASK) != 0ULL;
   if (was_signed)
     stored_pc &= STRIP_MASK;
 #endif
@@ -273,17 +263,12 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
   {
     GumAddress translated;
 
-    translated = GUM_ADDRESS (
-        gum_invocation_stack_translate (
-            gum_interceptor_get_current_stack (),
-            GSIZE_TO_POINTER (stored_pc)));
-
+    translated = GUM_ADDRESS (gum_invocation_stack_translate (gum_interceptor_get_current_stack (), GSIZE_TO_POINTER (stored_pc)));
     if (translated != stored_pc)
     {
 #if __has_feature (ptrauth_calls)
       *stored_pc_slot = ptrauth_sign_unauthenticated (
-          ptrauth_strip (GSIZE_TO_POINTER (translated), ptrauth_key_asia),
-          ptrauth_key_asib, FP_TO_SP (fp));
+          ptrauth_strip (GSIZE_TO_POINTER (translated), ptrauth_key_asia), ptrauth_key_asib, FP_TO_SP (fp));
 #elif defined (HAVE_ARM64)
       if (was_signed)
       {
@@ -296,7 +281,7 @@ frida_unwind_cursor_set_info_replacement (gpointer self, int is_return_address)
             "mov %0, x17\n\t"
             : "=r" (resigned)
             : "r" (translated & STRIP_MASK),
-              "r" (FP_TO_SP(fp))
+              "r" (FP_TO_SP (fp))
             : "x16", "x17"
         );
 
@@ -317,14 +302,14 @@ static gpointer
 frida_find_vtable (void)
 {
   GumAddress result = 0;
-  csh capstone;
-  cs_err err;
-  cs_insn * insn = NULL;
   GumAddress export;
+  uint64_t address;
+  cs_err err;
+  csh capstone;
+  cs_insn * insn = NULL;
   const uint8_t * code;
   size_t size;
   const size_t max_size = 2048;
-  uint64_t address;
 
   export = gum_module_find_export_by_name (LIBUNWIND, "unw_init_local");
   if (export == 0)
@@ -343,13 +328,9 @@ frida_find_vtable (void)
   err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
 #endif
   g_assert (err == CS_ERR_OK);
-  if (err != CS_ERR_OK)
-    goto beach;
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
   g_assert (err == CS_ERR_OK);
-  if (err != CS_ERR_OK)
-    goto beach;
 
   insn = cs_malloc (capstone);
   code = GSIZE_TO_POINTER (export);
@@ -377,8 +358,12 @@ frida_find_vtable (void)
       }
       else if (insn->id == ARM64_INS_ADD && insn->detail->arm64.operands[0].reg == last_adrp_reg)
       {
-        GumAddress candidate = last_adrp + (GumAddress) insn->detail->arm64.operands[2].imm;
-        gboolean is_bss = bss_range.base_address != 0 &&
+        GumAddress candidate;
+        gboolean is_bss;
+
+        candidate = last_adrp + (GumAddress) insn->detail->arm64.operands[2].imm;
+
+        is_bss = bss_range.base_address != 0 &&
             bss_range.base_address <= candidate &&
             candidate < bss_range.base_address + bss_range.size;
         if (!is_bss)
@@ -406,7 +391,7 @@ frida_find_vtable (void)
   {
     if (insn->id == X86_INS_RET)
       break;
-    if (insn->id == X86_INS_LEA && insn->detail->x86.op_count == 2)
+    if (insn->id == X86_INS_LEA)
     {
       const cs_x86_op * op = &insn->detail->x86.operands[1];
       if (op->type == X86_OP_MEM && op->mem.base == X86_REG_RIP)
@@ -445,8 +430,8 @@ static gboolean
 frida_compute_vtable_shift (gpointer vtable, gssize * shift)
 {
   gboolean result = FALSE;
-  csh capstone;
   cs_err err;
+  csh capstone;
   cs_insn * insn = NULL;
   const uint8_t * code;
   uint64_t address;
@@ -454,13 +439,10 @@ frida_compute_vtable_shift (gpointer vtable, gssize * shift)
 
   cs_arch_register_arm64 ();
   err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
-
   g_assert (err == CS_ERR_OK);
-  if (err != CS_ERR_OK)
-    goto beach;
 
   insn = cs_malloc (capstone);
-  code = gum_strip_code_pointer (*(gpointer *)vtable);
+  code = gum_strip_code_pointer (*(gpointer *) vtable);
   address = GPOINTER_TO_SIZE (code);
 
   if (cs_disasm_iter (capstone, &code, &size, &address, insn))
@@ -489,14 +471,14 @@ frida_compute_vtable_shift (gpointer vtable, gssize * shift)
   GumAddress cursor = GPOINTER_TO_SIZE (vtable);
   GumAddress error = cursor + 16 * GLIB_SIZEOF_VOID_P;
 
-  while (cursor < error && *(gpointer *)GSIZE_TO_POINTER (cursor) == NULL)
+  while (cursor < error && *(gpointer *) GSIZE_TO_POINTER (cursor) == NULL)
     cursor += GLIB_SIZEOF_VOID_P;
 
   if (cursor == error)
     return FALSE;
 
-  if (frida_is_empty_function (GUM_ADDRESS (*(gpointer *)GSIZE_TO_POINTER (cursor))) &&
-      frida_is_empty_function (GUM_ADDRESS (*(gpointer *)GSIZE_TO_POINTER (cursor + GLIB_SIZEOF_VOID_P))))
+  if (frida_is_empty_function (GUM_ADDRESS (*(gpointer *) GSIZE_TO_POINTER (cursor))) &&
+      frida_is_empty_function (GUM_ADDRESS (*(gpointer *) GSIZE_TO_POINTER (cursor + GLIB_SIZEOF_VOID_P))))
     *shift = cursor - GPOINTER_TO_SIZE (vtable);
   else
     *shift = cursor - GPOINTER_TO_SIZE (vtable) - 2 * GLIB_SIZEOF_VOID_P;

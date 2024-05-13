@@ -9,13 +9,13 @@ payload_sources = [
   'spawn-monitor-glue.c',
   'thread-suspend-monitor.vala',
   'thread-suspend-monitor-glue.c',
+  'unwind-sitter.vala',
+  'unwind-sitter-glue.c',
   'exit-monitor.vala',
   'cloak.vala',
   'fd-guard.vala',
   'fdt-padder.vala',
   'libc-shim.c',
-  'unwind-sitter.vala',
-  'unwind-sitter-glue.c'
 ]
 
 if host_os_family == 'linux'
