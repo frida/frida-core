@@ -33,6 +33,8 @@ all: \
 	spawner-macos \
 	spawner-ios \
 	spawner-tvos \
+	exception-catcher-macos \
+	exception-catcher-ios \
 	simple-agent-macos.dylib \
 	simple-agent-ios.dylib \
 	simple-agent-watchos.dylib \
@@ -55,6 +57,34 @@ $1-ios: $2
 	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch armv7 $$< -o $$@.armv7
 	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch arm64 $$< -o $$@.arm64
 	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch arm64e $$< -o $$@.arm64e
+	strip -Sx $$@.armv7 $$@.arm64 $$@.arm64e
+	lipo $$@.armv7 $$@.arm64 $$@.arm64e -create -output $$@.unsigned
+	$(RM) $$@.arm64e
+	codesign -s "$$$$IOS_CERTID" $$@.armv7
+	mv $$@.armv7 $$@32
+	codesign -s "$$$$IOS_CERTID" $$@.arm64
+	mv $$@.arm64 $$@64
+	codesign -s "$$$$IOS_CERTID" $$@.unsigned
+	mv $$@.unsigned $$@
+endef
+
+define declare-executable-macos-foundation
+$1-macos: $2
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework Foundation -arch arm64 $$< -o $$@.arm64
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework Foundation -arch x86_64 $$< -o $$@.x86_64
+	strip -Sx $$@.arm64 $$@.x86_64
+	lipo $$@.arm64 $$@.x86_64 -create -output $$@.unsigned
+	$(RM) $$@.arm64
+	$(RM) $$@.x86_64
+	codesign -s "$$$$MACOS_CERTID" $$@.unsigned
+	mv $$@.unsigned $$@
+endef
+
+define declare-executable-ios-foundation
+$1-ios: $2
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -framework Foundation -arch armv7 $$< -o $$@.armv7
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -framework Foundation -arch arm64 $$< -o $$@.arm64
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -framework Foundation -arch arm64e $$< -o $$@.arm64e
 	strip -Sx $$@.armv7 $$@.arm64 $$@.arm64e
 	lipo $$@.armv7 $$@.arm64 $$@.arm64e -create -output $$@.unsigned
 	$(RM) $$@.arm64e
@@ -138,6 +168,9 @@ $(eval $(call declare-executable-tvos,forker,forker.c))
 $(eval $(call declare-executable-macos,spawner,spawner-unix.c))
 $(eval $(call declare-executable-ios,spawner,spawner-unix.c))
 $(eval $(call declare-executable-tvos,spawner,spawner-unix.c))
+
+$(eval $(call declare-executable-macos-foundation,exception-catcher,exception-catcher.m))
+$(eval $(call declare-executable-ios-foundation,exception-catcher,exception-catcher.m))
 
 $(eval $(call declare-library-macos,simple-agent,simple-agent.c))
 $(eval $(call declare-library-ios,simple-agent,simple-agent.c))

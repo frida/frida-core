@@ -841,6 +841,7 @@ namespace Frida.Gadget {
 
 		private ExitMonitor exit_monitor;
 		private ThreadSuspendMonitor thread_suspend_monitor;
+		private UnwindSitter unwind_sitter;
 
 		private Gum.ScriptBackend? qjs_backend;
 		private Gum.ScriptBackend? v8_backend;
@@ -852,6 +853,7 @@ namespace Frida.Gadget {
 		construct {
 			exit_monitor = new ExitMonitor (this, MainContext.default ());
 			thread_suspend_monitor = new ThreadSuspendMonitor (this);
+			unwind_sitter = new UnwindSitter (this);
 		}
 
 		public async void start () throws Error, IOError {
