@@ -20,12 +20,13 @@ namespace Frida.Barebone {
 		private GDB.Client gdb;
 
 		private Gee.Map<uint64?, BreakpointEntry> breakpoint_entries =
-			new Gee.HashMap<uint64?, BreakpointEntry> (uint64_hash, uint64_equal);
+			new Gee.HashMap<uint64?, BreakpointEntry> (Numeric.uint64_hash, Numeric.uint64_equal);
 		private Gee.Map<string, CallStack> call_stacks = new Gee.HashMap<string, CallStack> ();
 		private Gee.MultiMap<uint64?, CallStack> pending_returns =
-			new Gee.HashMultiMap<uint64?, CallStack> (uint64_hash, uint64_equal);
+			new Gee.HashMultiMap<uint64?, CallStack> (Numeric.uint64_hash, Numeric.uint64_equal);
 
-		private Gee.Map<uint64?, InlineHook> inline_hooks = new Gee.HashMap<uint64?, InlineHook> (uint64_hash, uint64_equal);
+		private Gee.Map<uint64?, InlineHook> inline_hooks =
+			new Gee.HashMap<uint64?, InlineHook> (Numeric.uint64_hash, Numeric.uint64_equal);
 
 		private Cancellable io_cancellable = new Cancellable ();
 

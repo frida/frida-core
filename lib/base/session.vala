@@ -2077,4 +2077,17 @@ namespace Frida {
 			return klass.get_value (val).value_nick;
 		}
 	}
+
+	namespace Numeric {
+		public uint uint64_hash (uint64? val) {
+			uint64 v = val;
+			return (uint) ((v >> 32) ^ (v & 0xffffffffU));
+		}
+
+		public bool uint64_equal (uint64? val_a, uint64? val_b) {
+			uint64 a = val_a;
+			uint64 b = val_b;
+			return a == b;
+		}
+	}
 }

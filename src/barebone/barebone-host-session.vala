@@ -555,15 +555,4 @@ namespace Frida {
 	private static void throw_not_supported () throws Error {
 		throw new Error.NOT_SUPPORTED ("Not yet supported");
 	}
-
-	private static uint uint64_hash (uint64? val) {
-		uint64 v = val;
-		return (uint) ((v >> 32) ^ (v & 0xffffffffU));
-	}
-
-	private static bool uint64_equal (uint64? val_a, uint64? val_b) {
-		uint64 a = val_a;
-		uint64 b = val_b;
-		return a == b;
-	}
 }
