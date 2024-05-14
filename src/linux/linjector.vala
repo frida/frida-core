@@ -63,6 +63,7 @@ namespace Frida {
 
 			if (MemoryFileDescriptor.is_supported ()) {
 				FileDescriptor fd = MemoryFileDescriptor.from_bytes (name, blob);
+				adjust_fd_permissions (fd);
 				UnixInputStream library_so = new UnixInputStream (fd.steal (), true);
 				return yield inject_library_fd (pid, library_so, entrypoint, data, features, cancellable);
 			}
@@ -254,9 +255,7 @@ namespace Frida {
 				if (!MemoryFileDescriptor.is_supported ())
 					throw new Error.NOT_SUPPORTED ("Kernel too old for memfd support");
 				FileDescriptor fd = MemoryFileDescriptor.from_bytes (name, blob);
-#if ANDROID
-				SELinux.fsetfilecon (fd.handle, "u:object_r:frida_memfd:s0");
-#endif
+				adjust_fd_permissions (fd);
 				_memfd = new UnixInputStream (fd.steal (), true);
 			}
 			return _memfd;
@@ -274,6 +273,12 @@ namespace Frida {
 		FileUtils.chmod (path, path.has_suffix (".so") ? 0755 : 0644);
 #if ANDROID
 		SELinux.setfilecon (path, "u:object_r:frida_file:s0");
+#endif
+	}
+
+	private static void adjust_fd_permissions (FileDescriptor fd) {
+#if ANDROID
+		SELinux.fsetfilecon (fd.handle, "u:object_r:frida_memfd:s0");
 #endif
 	}
 }
