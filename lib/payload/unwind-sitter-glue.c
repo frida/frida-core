@@ -145,7 +145,6 @@ _frida_unwind_sitter_unhook_libunwind (void)
   interceptor = gum_interceptor_obtain ();
   gum_interceptor_revert (interceptor, state->set_info_original);
 
-beach:
   g_slice_free (FridaUnwindHookState, state);
   state = NULL;
 }
@@ -303,7 +302,7 @@ frida_find_vtable (void)
   GumAddress result = 0;
   GumAddress export;
   uint64_t address;
-  cs_err err;
+  G_GNUC_UNUSED cs_err err;
   csh capstone;
   cs_insn * insn = NULL;
   const uint8_t * code;
@@ -401,7 +400,6 @@ frida_find_vtable (void)
   }
 #endif
 
-beach:
   if (insn != NULL)
     cs_free (insn, 1);
   cs_close (&capstone);
@@ -428,7 +426,7 @@ static gboolean
 frida_compute_vtable_shift (gpointer vtable, gssize * shift)
 {
   gboolean result = FALSE;
-  cs_err err;
+  G_GNUC_UNUSED cs_err err;
   csh capstone;
   cs_insn * insn = NULL;
   const uint8_t * code;
@@ -453,7 +451,6 @@ frida_compute_vtable_shift (gpointer vtable, gssize * shift)
     result = TRUE;
   }
 
-beach:
   if (insn != NULL)
     cs_free (insn, 1);
   cs_close (&capstone);
