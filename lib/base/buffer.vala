@@ -1,11 +1,11 @@
 namespace Frida {
 	public class BufferBuilder : Object {
-		public uint pointer_size {
+		public ByteOrder byte_order {
 			get;
 			construct;
 		}
 
-		public ByteOrder byte_order {
+		public uint pointer_size {
 			get;
 			construct;
 		}
@@ -23,10 +23,10 @@ namespace Frida {
 		private Gee.List<LabelRef>? label_refs;
 		private Gee.Map<string, uint>? label_defs;
 
-		public BufferBuilder (uint pointer_size = (uint) sizeof (size_t), ByteOrder byte_order = HOST) {
+		public BufferBuilder (ByteOrder byte_order = HOST, uint pointer_size = (uint) sizeof (size_t)) {
 			Object (
-				pointer_size: pointer_size,
-				byte_order: byte_order
+				byte_order: byte_order,
+				pointer_size: pointer_size
 			);
 		}
 
@@ -313,12 +313,12 @@ namespace Frida {
 			construct;
 		}
 
-		public uint pointer_size {
+		public ByteOrder byte_order {
 			get;
 			construct;
 		}
 
-		public ByteOrder byte_order {
+		public uint pointer_size {
 			get;
 			construct;
 		}
@@ -326,11 +326,11 @@ namespace Frida {
 		private unowned uint8 * data;
 		private size_t size;
 
-		public Buffer (Bytes bytes, uint pointer_size, ByteOrder byte_order) {
+		public Buffer (Bytes bytes, ByteOrder byte_order = HOST, uint pointer_size = (uint) sizeof (size_t)) {
 			Object (
 				bytes: bytes,
-				pointer_size: pointer_size,
-				byte_order: byte_order
+				byte_order: byte_order,
+				pointer_size: pointer_size
 			);
 		}
 

@@ -509,11 +509,11 @@ namespace Frida.GDB {
 		}
 
 		public BufferBuilder make_buffer_builder () {
-			return new BufferBuilder (pointer_size, byte_order);
+			return new BufferBuilder (byte_order, pointer_size);
 		}
 
 		public Buffer make_buffer (Bytes bytes) {
-			return new Buffer (bytes, pointer_size, byte_order);
+			return new Buffer (bytes, byte_order, pointer_size);
 		}
 
 		public async Buffer read_buffer (uint64 address, size_t size, Cancellable? cancellable = null) throws Error, IOError {

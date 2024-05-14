@@ -36,8 +36,7 @@ namespace Frida.Barebone {
 				return true;
 			});
 
-			var relocated_buf = new Buffer (
-				new Bytes (module.get_file_data ()[file_start:file_end]), gdb.pointer_size, gdb.byte_order);
+			var relocated_buf = gdb.make_buffer (new Bytes (module.get_file_data ()[file_start:file_end]));
 			Error? pending_error = null;
 			module.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
