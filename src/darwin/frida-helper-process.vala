@@ -61,7 +61,7 @@ namespace Frida {
 			try {
 				yield helper.enable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -70,7 +70,7 @@ namespace Frida {
 			try {
 				yield helper.disable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -79,7 +79,7 @@ namespace Frida {
 			try {
 				return yield helper.enumerate_pending_spawn (cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -88,7 +88,7 @@ namespace Frida {
 			try {
 				return yield helper.spawn (path, options, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -97,7 +97,7 @@ namespace Frida {
 			try {
 				yield helper.launch (identifier, options, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -106,7 +106,7 @@ namespace Frida {
 			try {
 				yield helper.notify_launch_completed (identifier, pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -115,7 +115,7 @@ namespace Frida {
 			try {
 				yield helper.notify_exec_completed (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -124,7 +124,7 @@ namespace Frida {
 			try {
 				yield helper.wait_until_suspended (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -133,7 +133,7 @@ namespace Frida {
 			try {
 				yield helper.cancel_pending_waits (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -142,7 +142,7 @@ namespace Frida {
 			try {
 				yield helper.input (pid, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -151,7 +151,7 @@ namespace Frida {
 			try {
 				yield helper.resume (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -160,7 +160,7 @@ namespace Frida {
 			try {
 				yield helper.kill_process (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -169,7 +169,7 @@ namespace Frida {
 			try {
 				yield helper.kill_application (identifier, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -179,7 +179,7 @@ namespace Frida {
 			try {
 				return yield helper.inject_library_file (pid, path, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -189,7 +189,7 @@ namespace Frida {
 			try {
 				return yield helper.inject_library_blob (pid, name, blob, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -198,7 +198,7 @@ namespace Frida {
 			try {
 				yield helper.demonitor (id, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -207,7 +207,7 @@ namespace Frida {
 			try {
 				return yield helper.demonitor_and_clone_injectee_state (id, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -216,7 +216,7 @@ namespace Frida {
 			try {
 				yield helper.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 		}
 
@@ -246,10 +246,24 @@ namespace Frida {
 			try {
 				yield helper.transfer_socket (remote_pid, remote_socket, cancellable, out remote_address);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				throw_helper_error (e);
 			}
 
 			return result.future;
+		}
+
+		[NoReturn]
+		private static void throw_helper_error (GLib.Error e) throws Error, IOError {
+#if MACOS
+			if (e is IOError.CLOSED) {
+				throw new Error.PERMISSION_DENIED ("Oops, frida-helper appears to have crashed. It may have been killed " +
+					"by the system while trying to access a hardened process. If this is the case, try setting these " +
+					"boot arguments: `sudo nvram boot-args=\"-arm64e_preview_abi thid_should_crash=0 " +
+					"tss_should_crash=0\"`. For more information, see: https://github.com/frida/frida-core/issues/524");
+			}
+#endif
+
+			throw_dbus_error (e);
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
