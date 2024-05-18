@@ -480,6 +480,10 @@ def option_should_be_forwarded(k: "OptionKey",
             return False
         if not str(v.value):
             return False
+        if not is_for_child and role == "subproject" and k.subproject in {"", our_project_id}:
+            if not coredata.BUILTIN_OPTIONS[k.as_root()].yielding:
+                return k.subproject == our_project_id
+            return True
 
     if k.module == "python":
         if k.name == "install_env" and v.value == "prefix":
