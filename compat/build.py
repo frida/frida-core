@@ -432,7 +432,7 @@ def compile(privdir: Path, state: State):
                 path = Path(raw_path)
                 if not path.is_absolute():
                     path = Path(os.path.relpath(workdir / path, top_builddir))
-                input_entries.append(quote(path.as_posix()))
+                input_entries.append(escape_depfile_path(path.as_posix()))
             depfile_lines.append(f"{output_relpath}: {' '.join(input_entries)}")
 
     (state.builddir / DEPFILE_FILENAME).write_text("\n".join(depfile_lines), encoding="utf-8")
@@ -523,10 +523,8 @@ def scrub_windows_devenv_dirs_from_path(raw_path: str, env: Mapping[str, str]) -
     return ";".join(clean_entries)
 
 
-def quote(path: str) -> str:
-    if " " not in path:
-        return path
-    return "\"" + path.replace ("\"", "\\\"") + "\""
+def escape_depfile_path(path: str) -> str:
+    return path.replace(" ", "\\ ")
 
 
 def query_releng_location(role: Role) -> Path:
