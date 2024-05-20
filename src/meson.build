@@ -470,8 +470,8 @@ if have_local_backend
         agent_legacy,
         agent_emulated_modern,
         agent_emulated_legacy,
-        get_option('agent_dbghelp_prefix'),
-        get_option('agent_symsrv_prefix'),
+        gum_dep.get_variable('frida_dbghelp_prefix'),
+        gum_dep.get_variable('frida_symsrv_prefix'),
       ],
       depends: agent_depends,
     )

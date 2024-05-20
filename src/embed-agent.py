@@ -37,12 +37,12 @@ def main(argv):
                 shutil.copy(agent, embedded_agent)
 
                 if agent_dbghelp_prefix is not None:
-                    shutil.copy(agent_dbghelp_prefix / f"dbghelp-{flavor}.dll", embedded_dbghelp)
+                    shutil.copy(agent_dbghelp_prefix / flavor / "dbghelp.dll", embedded_dbghelp)
                 else:
                     embedded_dbghelp.write_bytes(b"")
 
                 if agent_symsrv_prefix is not None:
-                    shutil.copy(agent_symsrv_prefix / f"symsrv-{flavor}.dll", embedded_symsrv)
+                    shutil.copy(agent_symsrv_prefix / flavor / "symsrv.dll", embedded_symsrv)
                 else:
                     embedded_symsrv.write_bytes(b"")
             else:
