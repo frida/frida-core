@@ -90,17 +90,25 @@ else
 endif
 uninstalled_vapidir = uninstalled_incdir
 
+uninstalled_variables = {
+  'frida_includedir': uninstalled_incdir,
+  'frida_girdir': uninstalled_girdir,
+  'frida_vapidir': uninstalled_vapidir,
+}
+
+installed_variables = {
+  'frida_includedir': '${includedir}',
+  'frida_girdir': girdir,
+  'frida_vapidir': vapidir,
+}
+
 core_public_dep = declare_dependency(
   sources: [core_public_h, core_public_gir, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,
   dependencies: core_deps,
-  variables: {
-    'frida_includedir': uninstalled_incdir,
-    'frida_girdir': uninstalled_girdir,
-    'frida_vapidir': uninstalled_vapidir,
-  },
+  variables: uninstalled_variables,
 )
 
 pkg = import('pkgconfig')
@@ -115,16 +123,8 @@ pkg.generate(
   libraries: core_public_lib,
   libraries_private: backend_libs_private,
   extra_cflags: ['-I${frida_includedir}'],
-  variables: {
-    'frida_includedir': '${includedir}',
-    'frida_girdir': girdir,
-    'frida_vapidir': vapidir,
-  },
-  uninstalled_variables: {
-    'frida_includedir': uninstalled_incdir,
-    'frida_girdir': uninstalled_girdir,
-    'frida_vapidir': uninstalled_vapidir,
-  },
+  variables: installed_variables,
+  uninstalled_variables: uninstalled_variables,
 )
 
 meson.override_dependency(f'frida-core-@api_version@', core_public_dep)
