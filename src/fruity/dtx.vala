@@ -705,7 +705,9 @@ namespace Frida.Fruity {
 
 			int32 channel_code = message.channel_code;
 			bool is_notification = false;
-			if (message.type == RESULT && channel_code < 0) {
+			if (message.type == INVOKE) {
+				channel_code = -channel_code;
+			} else if (message.type == RESULT && channel_code < 0) {
 				channel_code = -channel_code;
 				is_notification = true;
 			}
