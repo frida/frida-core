@@ -23,6 +23,11 @@ namespace Frida.Fruity {
 	}
 
 	public class NSNumber : NSObject {
+		public Kind kind {
+			get;
+			private set;
+		}
+
 		public bool boolean {
 			get;
 			private set;
@@ -33,14 +38,44 @@ namespace Frida.Fruity {
 			private set;
 		}
 
+		public double number {
+			get;
+			private set;
+		}
+
+		public enum Kind {
+			BOOLEAN,
+			INTEGER,
+			FLOAT,
+			DOUBLE,
+		}
+
 		public NSNumber.from_boolean (bool val) {
+			kind = BOOLEAN;
 			boolean = val;
 			integer = val ? 1 : 0;
+			number = val ? 1.0 : 0.0;
 		}
 
 		public NSNumber.from_integer (int64 val) {
+			kind = INTEGER;
 			boolean = (val != 0) ? true : false;
 			integer = val;
+			number = val;
+		}
+
+		public NSNumber.from_float (float val) {
+			kind = FLOAT;
+			boolean = (val != 0.0f) ? true : false;
+			integer = (int64) val;
+			number = val;
+		}
+
+		public NSNumber.from_double (double val) {
+			kind = DOUBLE;
+			boolean = (val != 0.0) ? true : false;
+			integer = (int64) val;
+			number = val;
 		}
 
 		public override uint hash () {
@@ -51,7 +86,21 @@ namespace Frida.Fruity {
 			var other_number = other as NSNumber;
 			if (other_number == null)
 				return false;
-			return other_number.integer == integer;
+
+			if (other_number.kind != kind)
+				return false;
+
+			switch (kind) {
+				case BOOLEAN:
+					return other_number.boolean == boolean;
+				case INTEGER:
+					return other_number.integer == integer;
+				case FLOAT:
+				case DOUBLE:
+					return other_number.number == number;
+			}
+
+			return false;
 		}
 
 		public override string to_string () {
@@ -319,6 +368,12 @@ namespace Frida.Fruity {
 			if (t == typeof (int64))
 				return new NSNumber.from_integer (val.get_int64 ());
 
+			if (t == typeof (float))
+				return new NSNumber.from_float (val.get_float ());
+
+			if (t == typeof (double))
+				return new NSNumber.from_double (val.get_double ());
+
 			if (t == typeof (string))
 				return new NSString (val.get_string ());
 
@@ -368,8 +423,32 @@ namespace Frida.Fruity {
 		}
 
 		private static PlistUid encode_number (NSObject instance, EncodingContext ctx) {
-			int64 val = ((NSNumber) instance).integer;
+			var n = (NSNumber) instance;
+			switch (n.kind) {
+				case BOOLEAN:
+					return encode_boolean (n.boolean, ctx);
+				case INTEGER:
+					return encode_integer (n.integer, ctx);
+				case FLOAT:
+					return encode_float (n.integer, ctx);
+				case DOUBLE:
+					return encode_double (n.integer, ctx);
+			}
+			assert_not_reached ();
+		}
 
+		private static PlistUid encode_boolean (bool val, EncodingContext ctx) {
+			var uid = ctx.find_existing_object (e => e.holds (typeof (bool)) && e.get_boolean () == val);
+			if (uid != null)
+				return uid;
+
+			var objects = ctx.objects;
+			uid = new PlistUid (objects.length);
+			objects.add_boolean (val);
+			return uid;
+		}
+
+		private static PlistUid encode_integer (int64 val, EncodingContext ctx) {
 			var uid = ctx.find_existing_object (e => e.holds (typeof (int64)) && e.get_int64 () == val);
 			if (uid != null)
 				return uid;
@@ -377,6 +456,28 @@ namespace Frida.Fruity {
 			var objects = ctx.objects;
 			uid = new PlistUid (objects.length);
 			objects.add_integer (val);
+			return uid;
+		}
+
+		private static PlistUid encode_float (float val, EncodingContext ctx) {
+			var uid = ctx.find_existing_object (e => e.holds (typeof (float)) && e.get_float () == val);
+			if (uid != null)
+				return uid;
+
+			var objects = ctx.objects;
+			uid = new PlistUid (objects.length);
+			objects.add_float (val);
+			return uid;
+		}
+
+		private static PlistUid encode_double (double val, EncodingContext ctx) {
+			var uid = ctx.find_existing_object (e => e.holds (typeof (double)) && e.get_double () == val);
+			if (uid != null)
+				return uid;
+
+			var objects = ctx.objects;
+			uid = new PlistUid (objects.length);
+			objects.add_double (val);
 			return uid;
 		}
 
