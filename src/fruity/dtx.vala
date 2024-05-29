@@ -868,7 +868,7 @@ namespace Frida.Fruity {
 
 	public class DTXChannel : Object {
 		public signal void invocation (string method_name, DTXArgumentList args, DTXMessageTransportFlags transport_flags);
-		public signal void notification (NSDictionary dict);
+		public signal void notification (NSObject obj);
 		public signal void barrier ();
 
 		public int32 code {
@@ -1018,10 +1018,8 @@ namespace Frida.Fruity {
 		}
 
 		internal void handle_notification (DTXMessage message) throws Error {
-			NSDictionary? dict = NSKeyedArchive.decode (message.payload_data) as NSDictionary;
-			if (dict == null)
-				throw new Error.PROTOCOL ("Malformed notification payload");
-			notification (dict);
+			var payload = NSKeyedArchive.decode (message.payload_data);
+			notification (payload);
 		}
 
 		internal void handle_barrier (DTXMessage message) throws Error {
