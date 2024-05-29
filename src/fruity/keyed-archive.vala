@@ -326,6 +326,7 @@ namespace Frida.Fruity {
 		private Gee.HashMap<string, DecodeFunc> decoders;
 
 		private const string[] DICTIONARY_CLASS = { "NSDictionary", "NSObject" };
+		private const string[] ARRAY_CLASS = { "NSArray", "NSObject" };
 
 		[CCode (has_target = false)]
 		private delegate PlistUid EncodeFunc (NSObject instance, EncodingContext ctx);
@@ -442,6 +443,7 @@ namespace Frida.Fruity {
 			encoders[typeof (NSNumber)] = encode_number;
 			encoders[typeof (NSString)] = encode_string;
 			encoders[typeof (NSDictionary)] = encode_dictionary;
+			encoders[typeof (NSArray)] = encode_array;
 		}
 
 		private static void ensure_decoders_registered () {
@@ -583,6 +585,21 @@ namespace Frida.Fruity {
 
 				return new NSDictionaryRaw (storage);
 			}
+		}
+
+		private static PlistUid encode_array (NSObject instance, EncodingContext ctx) {
+			NSArray array = (NSArray) instance;
+
+			var object = new PlistDict ();
+			var uid = ctx.add_object (object);
+
+			var objs = new PlistArray ();
+			foreach (var element in array.elements)
+				objs.add_uid (encode_value (element, ctx));
+			object.set_array ("NS.objects", objs);
+			object.set_uid ("$class", ctx.get_class (ARRAY_CLASS));
+
+			return uid;
 		}
 
 		private static NSObject decode_array (PlistDict instance, DecodingContext ctx) throws Error, PlistError {
