@@ -321,6 +321,17 @@ namespace Frida.Fruity {
 		}
 	}
 
+	public class DTTapMessage : NSObject {
+		public NSDictionary plist {
+			get;
+			private set;
+		}
+
+		public DTTapMessage (NSDictionary plist) {
+			this.plist = plist;
+		}
+	}
+
 	namespace NSKeyedArchive {
 		private Gee.HashMap<Type, EncodeFunc> encoders;
 		private Gee.HashMap<string, DecodeFunc> decoders;
@@ -455,6 +466,12 @@ namespace Frida.Fruity {
 			decoders["NSArray"] = decode_array;
 			decoders["NSDate"] = decode_date;
 			decoders["NSError"] = decode_error;
+			decoders["DTTapMessage"] = decode_tap_message;
+			decoders["DTSysmonTapMessage"] = decode_tap_message;
+			decoders["DTActivityTraceTapMessage"] = decode_tap_message;
+			decoders["DTTapStatusMessage"] = decode_tap_message;
+			decoders["DTTapHeartbeatMessage"] = decode_tap_message;
+			decoders["DTKTraceTapMessage"] = decode_tap_message;
 		}
 
 		private static PlistUid encode_number (NSObject instance, EncodingContext ctx) {
@@ -635,6 +652,10 @@ namespace Frida.Fruity {
 				throw new Error.PROTOCOL ("Malformed NSError");
 
 			return new NSError (domain, code, (NSDictionary) user_info);
+		}
+
+		private static NSObject decode_tap_message (PlistDict instance, DecodingContext ctx) throws Error, PlistError {
+			return new DTTapMessage ((NSDictionary) decode_value (instance.get_uid ("DTTapMessagePlist"), ctx));
 		}
 
 		private class EncodingContext {
