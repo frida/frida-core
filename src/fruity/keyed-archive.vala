@@ -134,6 +134,32 @@ namespace Frida.Fruity {
 		}
 	}
 
+	public class NSData : NSObject {
+		public Bytes bytes {
+			get;
+			private set;
+		}
+
+		public NSData (Bytes bytes) {
+			this.bytes = bytes;
+		}
+
+		public override uint hash () {
+			return bytes.hash ();
+		}
+
+		public override bool is_equal_to (NSObject other) {
+			var other_data = other as NSData;
+			if (other_data == null)
+				return false;
+			return other_data.bytes.compare (bytes) == 0;
+		}
+
+		public override string to_string () {
+			return "NSData";
+		}
+	}
+
 	public class NSDictionary : NSObject {
 		public int size {
 			get {
@@ -376,6 +402,9 @@ namespace Frida.Fruity {
 
 			if (t == typeof (string))
 				return new NSString (val.get_string ());
+
+			if (t == typeof (Bytes))
+				return new NSData ((Bytes) val.get_boxed ());
 
 			if (t == typeof (PlistDict)) {
 				var instance = (PlistDict) val.get_object ();
