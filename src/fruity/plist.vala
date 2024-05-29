@@ -1573,6 +1573,12 @@ namespace Frida.Fruity {
 		if (t == typeof (int64))
 			return (uint) v.get_int64 ();
 
+		if (t == typeof (float))
+			return (uint) v.get_float ();
+
+		if (t == typeof (double))
+			return (uint) v.get_double ();
+
 		if (t == typeof (string))
 			return str_hash (v.get_string ());
 
@@ -1597,6 +1603,12 @@ namespace Frida.Fruity {
 
 		if (t == typeof (int64))
 			return a.get_int64 () == b.get_int64 ();
+
+		if (t == typeof (float))
+			return a.get_float () == b.get_float ();
+
+		if (t == typeof (double))
+			return a.get_double () == b.get_double ();
 
 		if (t == typeof (string))
 			return a.get_string () == b.get_string ();
