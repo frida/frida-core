@@ -383,7 +383,7 @@ namespace Frida.Fruity {
 		private const uint32 DTX_FRAGMENT_MAGIC = 0x1f3d5b79U;
 		private const uint MAX_BUFFERED_COUNT = 100;
 		private const size_t MAX_BUFFERED_SIZE = 30 * 1024 * 1024;
-		private const size_t MAX_MESSAGE_SIZE = 1024 * 1024;
+		private const size_t MAX_MESSAGE_SIZE = 128 * 1024 * 1024;
 		private const size_t MAX_FRAGMENT_SIZE = 128 * 1024;
 		private const string REMOTESERVER_ENDPOINT_MODERN = "lockdown:com.apple.instruments.remoteserver.DVTSecureSocketProxy";
 		private const string REMOTESERVER_ENDPOINT_LEGACY = "lockdown:com.apple.instruments.remoteserver?tls=handshake-only";
