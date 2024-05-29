@@ -273,6 +273,10 @@ namespace Frida.Fruity {
 		public NSArray (Gee.ArrayList<NSObject>? storage = null) {
 			this.storage = (storage != null) ? storage : new Gee.ArrayList<NSObject> (NSObject.equal_func);
 		}
+
+		public void add_object (NSObject obj) {
+			storage.add (obj);
+		}
 	}
 
 	public class NSDate : NSObject {
