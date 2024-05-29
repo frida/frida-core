@@ -53,6 +53,7 @@ frida_fetch_dyld_symbols (char * output_buffer, const void * dyld_load_address)
         frida_str_contains (name, "restartWithDyldInCache") ||
         frida_str_equals (name, "_gProcessInfo") ||
         frida_str_equals (name, "__ZN5dyld412gProcessInfoE") ||
+        frida_str_equals (name, "__ZL12sProcessInfo") ||
         frida_str_contains (name, "launchWithClosure") ||
         frida_str_contains (name, "initializeMainExecutable") ||
         frida_str_contains (name, "registerThreadHelpers") ||
