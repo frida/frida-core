@@ -9,6 +9,7 @@ base_sources = [
   'socket.vala',
   'socket-glue.c',
   'buffer.vala',
+  'value.vala',
 ]
 
 extra_vala_args = []
