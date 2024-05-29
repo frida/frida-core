@@ -1062,7 +1062,7 @@ namespace Frida.Fruity {
 	}
 
 	public class DTXArgumentList {
-		private Value[] elements;
+		public Value[] elements;
 
 		private DTXArgumentList (owned Value[] elements) {
 			this.elements = (owned) elements;
