@@ -450,12 +450,10 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  backend_deps_private += [
-    dependency('libnghttp2'),
-    dependency('libngtcp2'),
-    dependency('libngtcp2_crypto_quictls'),
-    dependency('lwip'),
-  ]
+  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'lwip']
+    backend_deps_private += dependency(dep)
+    backend_reqs_private += dep
+  endforeach
 endif
 
 if quickjs_dep.found()
