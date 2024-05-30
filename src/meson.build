@@ -593,6 +593,7 @@ core_deps += backend_deps_private
 
 core_vala_args = [
   backend_vala_args,
+  base_vala_args,
   '--pkg=gio-2.0',
   gio_platform_vala_args,
   '--pkg=json-glib-1.0',

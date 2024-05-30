@@ -437,29 +437,17 @@ backend_deps_private = []
 backend_reqs_private = []
 backend_libs_private = []
 
-nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
-  'gupnp=disabled',
-  'gstreamer=disabled',
-  'crypto-library=openssl',
-  'examples=disabled',
-  'tests=disabled',
-  'introspection=disabled',
-])
-
-if have_fruity_backend or nice_dep.found()
-  openssl_options = [
-    'cli=disabled',
-  ]
-  if host_os_family == 'windows' and cc.get_argument_syntax() != 'msvc'
-    openssl_options += 'asm=disabled'
-  endif
-  openssl_dep = dependency('openssl',
-    modules: cc.get_argument_syntax() == 'msvc' ? ['OpenSSL::SSL'] : [],
-    default_options: openssl_options,
-  )
-else
-  openssl_dep = []
+openssl_options = [
+  'cli=disabled',
+]
+if host_os_family == 'windows' and cc.get_argument_syntax() != 'msvc'
+  openssl_options += 'asm=disabled'
 endif
+openssl_dep = dependency('openssl',
+  required: have_fruity_backend or get_option('connectivity').enabled(),
+  modules: cc.get_argument_syntax() == 'msvc' ? ['OpenSSL::SSL'] : [],
+  default_options: openssl_options,
+)
 
 if have_fruity_backend
   backend_deps_private += [
@@ -489,7 +477,13 @@ else
   termux_elf_cleaner = []
 endif
 
-tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'))
+tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'), default_options: [
+  'gnutls=disabled',
+  'openssl=enabled',
+  'libproxy=disabled',
+  'gnome_proxy=disabled',
+  'tests=false',
+])
 if tls_provider_dep.found()
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
@@ -497,6 +491,14 @@ if tls_provider_dep.found()
   backend_reqs_private += 'gioopenssl'
 endif
 
+nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
+  'gupnp=disabled',
+  'gstreamer=disabled',
+  'crypto-library=openssl',
+  'examples=disabled',
+  'tests=disabled',
+  'introspection=disabled',
+])
 if nice_dep.found()
   usrsctp_dep = dependency('usrsctp', default_options: [
     'sctp_inet=false',
