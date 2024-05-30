@@ -2,11 +2,6 @@ portal_sources = [
   'portal.vala',
 ]
 
-extra_vala_args = []
-if tls_provider_dep.found()
-  extra_vala_args += '--pkg=gioopenssl'
-endif
-
 extra_link_args = []
 extra_link_depends = []
 if host_os_family == 'darwin'
@@ -25,7 +20,7 @@ if tls_provider_dep.found()
 endif
 
 raw_portal = executable('frida-portal-raw', portal_sources,
-  vala_args: [core_vala_args, '--pkg=posix', extra_vala_args],
+  vala_args: [core_vala_args, tls_provider_vala_args, '--pkg=posix'],
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   dependencies: [core_dep] + extra_deps,

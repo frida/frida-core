@@ -484,7 +484,12 @@ tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity')
   'gnome_proxy=disabled',
   'tests=false',
 ])
+tls_provider_vala_args = []
 if tls_provider_dep.found()
+  tls_provider_vala_args += [
+    '--pkg=gioopenssl',
+    '--vapidir=' + tls_provider_dep.get_variable('vapidir'),
+  ]
   cdata.set('HAVE_GIOOPENSSL', 1)
   vala_flags += ['--define=HAVE_GIOOPENSSL']
   backend_deps_private += tls_provider_dep
