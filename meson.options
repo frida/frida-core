@@ -127,7 +127,7 @@ option('inject',
 
 option('connectivity',
   type: 'feature',
-  value: 'auto',
+  value: 'enabled',
   description: 'Internet connectivity features (TLS and ICE support)'
 )
 
