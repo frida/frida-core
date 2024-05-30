@@ -1,18 +1,18 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class DeviceInfoService : Object, AsyncInitable {
-		public ChannelProvider channel_provider {
+		public HostChannelProvider channel_provider {
 			get;
 			construct;
 		}
 
 		private DTXChannel channel;
 
-		private DeviceInfoService (ChannelProvider channel_provider) {
+		private DeviceInfoService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
 		}
 
-		public static async DeviceInfoService open (ChannelProvider channel_provider, Cancellable? cancellable = null)
+		public static async DeviceInfoService open (HostChannelProvider channel_provider, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var service = new DeviceInfoService (channel_provider);
 
@@ -74,21 +74,53 @@ namespace Frida.Fruity {
 				return "/private" + name;
 			return name;
 		}
+
+		public class ProcessInfo : Object {
+			public uint pid {
+				get;
+				set;
+			}
+
+			public string name {
+				get;
+				set;
+			}
+
+			public string real_app_name {
+				get;
+				set;
+			}
+
+			public bool is_application {
+				get;
+				set;
+			}
+
+			public bool foreground_running {
+				get;
+				set;
+			}
+
+			public DateTime? start_date {
+				get;
+				set;
+			}
+		}
 	}
 
 	public class ApplicationListingService : Object, AsyncInitable {
-		public ChannelProvider channel_provider {
+		public HostChannelProvider channel_provider {
 			get;
 			construct;
 		}
 
 		private DTXChannel channel;
 
-		private ApplicationListingService (ChannelProvider channel_provider) {
+		private ApplicationListingService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
 		}
 
-		public static async ApplicationListingService open (ChannelProvider channel_provider, Cancellable? cancellable = null)
+		public static async ApplicationListingService open (HostChannelProvider channel_provider, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var service = new ApplicationListingService (channel_provider);
 
@@ -178,21 +210,115 @@ namespace Frida.Fruity {
 
 			return result;
 		}
+
+		public class ApplicationInfo : Object {
+			public ApplicationType app_type {
+				get;
+				set;
+			}
+
+			public string display_name {
+				get;
+				set;
+			}
+
+			public string bundle_identifier {
+				get;
+				set;
+			}
+
+			public string bundle_path {
+				get;
+				set;
+			}
+
+			public string? version {
+				get;
+				set;
+			}
+
+			public bool placeholder {
+				get;
+				set;
+			}
+
+			public bool restricted {
+				get;
+				set;
+			}
+
+			public string? executable_name {
+				get;
+				set;
+			}
+
+			public string[]? app_extension_uuids {
+				get;
+				set;
+			}
+
+			public string? plugin_uuid {
+				get;
+				set;
+			}
+
+			public string? plugin_identifier {
+				get;
+				set;
+			}
+
+			public string? container_bundle_identifier {
+				get;
+				set;
+			}
+
+			public string? container_bundle_path {
+				get;
+				set;
+			}
+		}
+
+		public enum ApplicationType {
+			SYSTEM = 1,
+			USER,
+			PLUGIN_KIT;
+
+			public static ApplicationType from_nick (string nick) throws Error {
+				return Marshal.enum_from_nick<ApplicationType> (nick);
+			}
+
+			public string to_nick () {
+				return Marshal.enum_to_nick<ApplicationType> (this);
+			}
+
+			internal static ApplicationType from_dtx (string type) {
+				if (type == "System")
+					return SYSTEM;
+
+				if (type == "User")
+					return USER;
+
+				if (type == "PluginKit")
+					return PLUGIN_KIT;
+
+				assert_not_reached ();
+			}
+		}
 	}
 
 	public class ProcessControlService : Object, AsyncInitable {
-		public ChannelProvider channel_provider {
+		public HostChannelProvider channel_provider {
 			get;
 			construct;
 		}
 
 		private DTXChannel channel;
 
-		private ProcessControlService (ChannelProvider channel_provider) {
+		private ProcessControlService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
 		}
 
-		public static async ProcessControlService open (ChannelProvider channel_provider, Cancellable? cancellable = null)
+		public static async ProcessControlService open (HostChannelProvider channel_provider, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var service = new ProcessControlService (channel_provider);
 
@@ -220,132 +346,6 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class ProcessInfo : Object {
-		public uint pid {
-			get;
-			set;
-		}
-
-		public string name {
-			get;
-			set;
-		}
-
-		public string real_app_name {
-			get;
-			set;
-		}
-
-		public bool is_application {
-			get;
-			set;
-		}
-
-		public bool foreground_running {
-			get;
-			set;
-		}
-
-		public DateTime? start_date {
-			get;
-			set;
-		}
-	}
-
-	public class ApplicationInfo : Object {
-		public ApplicationType app_type {
-			get;
-			set;
-		}
-
-		public string display_name {
-			get;
-			set;
-		}
-
-		public string bundle_identifier {
-			get;
-			set;
-		}
-
-		public string bundle_path {
-			get;
-			set;
-		}
-
-		public string? version {
-			get;
-			set;
-		}
-
-		public bool placeholder {
-			get;
-			set;
-		}
-
-		public bool restricted {
-			get;
-			set;
-		}
-
-		public string? executable_name {
-			get;
-			set;
-		}
-
-		public string[]? app_extension_uuids {
-			get;
-			set;
-		}
-
-		public string? plugin_uuid {
-			get;
-			set;
-		}
-
-		public string? plugin_identifier {
-			get;
-			set;
-		}
-
-		public string? container_bundle_identifier {
-			get;
-			set;
-		}
-
-		public string? container_bundle_path {
-			get;
-			set;
-		}
-	}
-
-	public enum ApplicationType {
-		SYSTEM = 1,
-		USER,
-		PLUGIN_KIT;
-
-		public static ApplicationType from_nick (string nick) throws Error {
-			return Marshal.enum_from_nick<ApplicationType> (nick);
-		}
-
-		public string to_nick () {
-			return Marshal.enum_to_nick<ApplicationType> (this);
-		}
-
-		internal static ApplicationType from_dtx (string type) {
-			if (type == "System")
-				return SYSTEM;
-
-			if (type == "User")
-				return USER;
-
-			if (type == "PluginKit")
-				return PLUGIN_KIT;
-
-			assert_not_reached ();
-		}
-	}
-
 	public class DTXConnection : Object, DTXTransport {
 		public IOStream stream {
 			get;
@@ -363,7 +363,7 @@ namespace Frida.Fruity {
 			CLOSED
 		}
 
-		private static Gee.HashMap<ChannelProvider, Future<DTXConnection>> connections;
+		private static Gee.HashMap<HostChannelProvider, Future<DTXConnection>> connections;
 
 		private State _state = OPEN;
 
@@ -385,17 +385,19 @@ namespace Frida.Fruity {
 		private const size_t MAX_BUFFERED_SIZE = 30 * 1024 * 1024;
 		private const size_t MAX_MESSAGE_SIZE = 128 * 1024 * 1024;
 		private const size_t MAX_FRAGMENT_SIZE = 128 * 1024;
-		private const string REMOTESERVER_ENDPOINT_MODERN = "lockdown:com.apple.instruments.remoteserver.DVTSecureSocketProxy";
+		private const string REMOTESERVER_ENDPOINT_17PLUS = "lockdown:com.apple.instruments.dtservicehub";
+		private const string REMOTESERVER_ENDPOINT_14PLUS = "lockdown:com.apple.instruments.remoteserver.DVTSecureSocketProxy";
 		private const string REMOTESERVER_ENDPOINT_LEGACY = "lockdown:com.apple.instruments.remoteserver?tls=handshake-only";
  		private const string[] REMOTESERVER_ENDPOINT_CANDIDATES = {
-			REMOTESERVER_ENDPOINT_MODERN,
+			REMOTESERVER_ENDPOINT_17PLUS,
+			REMOTESERVER_ENDPOINT_14PLUS,
 			REMOTESERVER_ENDPOINT_LEGACY,
 		};
 
-		public static async DTXConnection obtain (ChannelProvider channel_provider, Cancellable? cancellable)
+		public static async DTXConnection obtain (HostChannelProvider channel_provider, Cancellable? cancellable)
 				throws Error, IOError {
 			if (connections == null)
-				connections = new Gee.HashMap<ChannelProvider, Future<DTXConnection>> ();
+				connections = new Gee.HashMap<HostChannelProvider, Future<DTXConnection>> ();
 
 			while (connections.has_key (channel_provider)) {
 				var future = connections[channel_provider];
@@ -442,7 +444,7 @@ namespace Frida.Fruity {
 			throw api_error;
 		}
 
-		public static async void close_all (ChannelProvider channel_provider, Cancellable? cancellable) throws IOError {
+		public static async void close_all (HostChannelProvider channel_provider, Cancellable? cancellable) throws IOError {
 			if (connections == null)
 				return;
 

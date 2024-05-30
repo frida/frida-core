@@ -481,6 +481,7 @@ endif
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
+    'fruity' / 'xpc.vala',
     'fruity' / 'dtx.vala',
     'fruity' / 'lockdown.vala',
     'fruity' / 'installation-proxy.vala',
@@ -492,12 +493,48 @@ if have_fruity_backend
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
   ]
+
   if host_os_family == 'windows'
     backend_sources += 'fruity' / 'fruity-host-session-windows.c'
   elif host_os_family == 'darwin'
     backend_sources += 'fruity' / 'fruity-host-session-darwin.m'
   else
     backend_sources += 'fruity' / 'fruity-host-session-unix.c'
+  endif
+
+  if host_os_family == 'darwin'
+    backend_sources += 'fruity' / 'xpc-darwin.vala'
+  endif
+  if host_os == 'macos'
+    backend_sources += [
+      'fruity' / 'xpc-macos.vala',
+      'fruity' / 'iokit.vala',
+    ]
+  elif host_os == 'linux'
+    backend_sources += 'fruity' / 'xpc-linux.vala'
+  endif
+
+  backend_deps += openssl_dep
+  backend_vala_args += [
+    '--pkg=libnghttp2',
+    '--pkg=libngtcp2',
+    '--pkg=libngtcp2_crypto_quictls',
+    '--pkg=lwip',
+    '--pkg=openssl',
+  ]
+  if host_os_family == 'darwin'
+    backend_vala_args += [
+      '--pkg=darwin-xnu',
+      '--pkg=darwin-iokit',
+      '--pkg=darwin-xpc',
+      '--pkg=darwin-gcd',
+      '--pkg=darwin-net',
+      '--pkg=darwin-dns-sd',
+      '--pkg=corefoundation',
+    ]
+  endif
+  if host_os_family == 'linux'
+    backend_vala_args += '--pkg=linux'
   endif
 endif
 
@@ -589,4 +626,12 @@ core_build_dir = meson.current_build_dir()
 subdir('api')
 if 'core' in get_option('devkits')
   subdir('devkit')
+endif
+
+if have_fruity_backend
+  executable('xpc-test',
+    'fruity' / 'xpc-test.vala',
+    vala_args: [backend_vala_args, backend_vala_args_private, base_vala_args, gum_vala_args],
+    dependencies: core_dep,
+  )
 endif

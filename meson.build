@@ -437,6 +437,39 @@ backend_deps_private = []
 backend_reqs_private = []
 backend_libs_private = []
 
+nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
+  'gupnp=disabled',
+  'gstreamer=disabled',
+  'crypto-library=openssl',
+  'examples=disabled',
+  'tests=disabled',
+  'introspection=disabled',
+])
+
+if have_fruity_backend or nice_dep.found()
+  openssl_options = [
+    'cli=disabled',
+  ]
+  if host_os_family == 'windows' and cc.get_argument_syntax() != 'msvc'
+    openssl_options += 'asm=disabled'
+  endif
+  openssl_dep = dependency('openssl',
+    modules: cc.get_argument_syntax() == 'msvc' ? ['OpenSSL::SSL'] : [],
+    default_options: openssl_options,
+  )
+else
+  openssl_dep = []
+endif
+
+if have_fruity_backend
+  backend_deps_private += [
+    dependency('libnghttp2'),
+    dependency('libngtcp2'),
+    dependency('libngtcp2_crypto_quictls'),
+    dependency('lwip'),
+  ]
+endif
+
 if quickjs_dep.found()
   backend_deps_private += quickjs_dep
   backend_reqs_private += 'quickjs'
@@ -464,16 +497,7 @@ if tls_provider_dep.found()
   backend_reqs_private += 'gioopenssl'
 endif
 
-nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
-  'gupnp=disabled',
-  'gstreamer=disabled',
-  'crypto-library=openssl',
-  'examples=disabled',
-  'tests=disabled',
-  'introspection=disabled',
-])
 if nice_dep.found()
-  openssl_dep = dependency('openssl')
   usrsctp_dep = dependency('usrsctp', default_options: [
     'sctp_inet=false',
     'sctp_inet6=false',
@@ -489,7 +513,6 @@ if nice_dep.found()
     cdata.set('HAVE_SCONN_LEN', 1)
   endif
 else
-  openssl_dep = []
   usrsctp_dep = []
 endif
 
@@ -500,7 +523,7 @@ if host_os_family == 'darwin'
   backend_libs_private += ['-Wl,-framework,Foundation', '-lbsm']
 endif
 if host_os == 'macos'
-  backend_libs_private += ['-Wl,-framework,AppKit']
+  backend_libs_private += ['-Wl,-framework,AppKit', '-Wl,-framework,IOKit']
 endif
 if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']

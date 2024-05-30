@@ -86,7 +86,7 @@ namespace Frida {
 		}
 	}
 
-	public class DroidyHostSessionProvider : Object, HostSessionProvider, ChannelProvider {
+	public class DroidyHostSessionProvider : Object, HostSessionProvider, HostChannelProvider {
 		public string id {
 			get { return device_details.serial; }
 		}
@@ -162,7 +162,7 @@ namespace Frida {
 			agent_session_detached (id, reason, crash);
 		}
 
-		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
+		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
 			if (address.contains (":")) {
 				Droidy.Client client = null;
 				try {
@@ -188,7 +188,7 @@ namespace Frida {
 			construct;
 		}
 
-		public weak ChannelProvider channel_provider {
+		public weak HostChannelProvider channel_provider {
 			get;
 			construct;
 		}
@@ -216,7 +216,7 @@ namespace Frida {
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 
-		public DroidyHostSession (Droidy.DeviceDetails device_details, ChannelProvider channel_provider) {
+		public DroidyHostSession (Droidy.DeviceDetails device_details, HostChannelProvider channel_provider) {
 			Object (
 				device_details: device_details,
 				channel_provider: channel_provider

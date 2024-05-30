@@ -1,0 +1,4586 @@
+[CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
+namespace Frida.Fruity {
+	using OpenSSL;
+	using OpenSSL.Envelope;
+
+	private const string PAIRING_REGTYPE = "_remoted._tcp";
+	private const string PAIRING_DOMAIN = "local.";
+
+	public interface TunnelFinder : Object {
+		public static TunnelFinder make_default () {
+#if MACOS
+			return new MacOSTunnelFinder ();
+#elif LINUX && !ANDROID
+			return new LinuxTunnelFinder ();
+#else
+			return new NullTunnelFinder ();
+#endif
+		}
+
+		public abstract async Tunnel? find (string udid, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public class NullTunnelFinder : Object, TunnelFinder {
+		public async Tunnel? find (string udid, Cancellable? cancellable) throws Error, IOError {
+			return null;
+		}
+	}
+
+	public interface Tunnel : Object {
+		public abstract DiscoveryService discovery {
+			get;
+		}
+
+		public abstract async void close (Cancellable? cancellable) throws IOError;
+		public abstract async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public interface FruitFinder : Object {
+		public static FruitFinder make_default () {
+#if MACOS
+			return new MacOSFruitFinder ();
+#elif LINUX && !ANDROID
+			return new LinuxFruitFinder ();
+#else
+			return new NullFruitFinder ();
+#endif
+		}
+
+		public abstract string? udid_from_iface (string ifname) throws Error;
+	}
+
+	public class NullFruitFinder : Object, FruitFinder {
+		public string? udid_from_iface (string ifname) throws Error {
+			return null;
+		}
+	}
+
+	public interface PairingBrowser : Object {
+		public static PairingBrowser make_default () {
+#if DARWIN
+			return new DarwinPairingBrowser ();
+#elif LINUX && !ANDROID
+			return new LinuxPairingBrowser ();
+#else
+			return new NullPairingBrowser ();
+#endif
+		}
+
+		public signal void services_discovered (PairingServiceDetails[] services);
+	}
+
+	public class NullPairingBrowser : Object, PairingBrowser {
+	}
+
+	public interface PairingServiceDetails : Object {
+		public abstract string name {
+			get;
+		}
+
+		public abstract uint interface_index {
+			get;
+		}
+
+		public abstract string interface_name {
+			get;
+		}
+
+		public abstract async Gee.List<PairingServiceHost> resolve (Cancellable? cancellable = null) throws Error, IOError;
+
+		public string to_string () {
+			return @"PairingServiceDetails { name: \"$name\", interface_index: $interface_index," +
+				@" interface_name: \"$interface_name\" }";
+		}
+	}
+
+	public interface PairingServiceHost : Object {
+		public abstract string name {
+			get;
+		}
+
+		public abstract uint16 port {
+			get;
+		}
+
+		public abstract Gee.List<string> txt_record {
+			get;
+		}
+
+		public abstract async Gee.List<InetSocketAddress> resolve (Cancellable? cancellable = null) throws Error, IOError;
+
+		public string to_string () {
+			return @"PairingServiceHost { name: \"$name\", port: $port, txt_record: <$(txt_record.size) entries> }";
+		}
+	}
+
+	public class DiscoveryService : Object, AsyncInitable {
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private XpcConnection connection;
+
+		private Promise<Variant> handshake_promise = new Promise<Variant> ();
+		private Variant handshake_body;
+
+		public static async DiscoveryService open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
+			var service = new DiscoveryService (stream);
+
+			try {
+				yield service.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return service;
+		}
+
+		private DiscoveryService (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			connection = new XpcConnection (stream);
+			connection.close.connect (on_close);
+			connection.message.connect (on_message);
+			connection.activate ();
+
+			handshake_body = yield handshake_promise.future.wait_async (cancellable);
+
+			return true;
+		}
+
+		public void close () {
+			connection.cancel ();
+		}
+
+		public string query_udid () throws Error {
+			var reader = new VariantReader (handshake_body);
+			reader
+				.read_member ("Properties")
+				.read_member ("UniqueDeviceID");
+			return reader.get_string_value ();
+		}
+
+		public ServiceInfo get_service (string identifier) throws Error {
+			var reader = new VariantReader (handshake_body);
+			reader.read_member ("Services");
+			try {
+				reader.read_member (identifier);
+			} catch (Error e) {
+				throw new Error.NOT_SUPPORTED ("Service '%s' not found", identifier);
+			}
+
+			var port = (uint16) uint.parse (reader.read_member ("Port").get_string_value ());
+
+			return new ServiceInfo () {
+				port = port,
+			};
+		}
+
+		private void on_close (Error? error) {
+			if (!handshake_promise.future.ready) {
+				handshake_promise.reject (
+					(error != null)
+						? error
+						: new Error.TRANSPORT ("XpcConnection closed while waiting for Handshake message"));
+			}
+		}
+
+		private void on_message (XpcMessage msg) {
+			if (msg.body == null)
+				return;
+
+			var reader = new VariantReader (msg.body);
+			try {
+				reader.read_member ("MessageType");
+				unowned string message_type = reader.get_string_value ();
+
+				if (message_type == "Handshake")
+					handshake_promise.resolve (msg.body);
+			} catch (Error e) {
+			}
+		}
+
+		public string to_string () {
+			return @"DiscoveryService { handshake_body: $(variant_to_pretty_string (handshake_body)) }";
+		}
+	}
+
+	public class ServiceInfo {
+		public uint16 port;
+	}
+
+	public class PairingService : Object, AsyncInitable {
+		public PairingTransport transport {
+			get;
+			construct;
+		}
+
+		public DeviceOptions device_options {
+			get;
+			private set;
+		}
+
+		public DeviceInfo? device_info {
+			get;
+			private set;
+		}
+
+		private Gee.Map<uint64?, Promise<ObjectReader>> requests =
+			new Gee.HashMap<uint64?, Promise<ObjectReader>> (Numeric.uint64_hash, Numeric.uint64_equal);
+		private uint64 next_control_sequence_number = 0;
+		private uint64 next_encrypted_sequence_number = 0;
+
+		private File config_file;
+		private string host_identifier;
+		private Key pair_record_key;
+		private ChaCha20Poly1305? client_cipher;
+		private ChaCha20Poly1305? server_cipher;
+
+		public static async PairingService open (PairingTransport transport, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var service = new PairingService (transport);
+
+			try {
+				yield service.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return service;
+		}
+
+		private PairingService (PairingTransport transport) {
+			Object (transport: transport);
+		}
+
+		construct {
+			transport.close.connect (on_close);
+			transport.message.connect (on_message);
+
+#if DARWIN
+			config_file = File.new_for_path ("/var/db/lockdown/RemotePairing/user_%u/selfIdentity.plist".printf (
+				(uint) Posix.getuid ()));
+#else
+			config_file = File.new_build_filename (Environment.get_user_config_dir (), "frida", "remote-xpc.plist");
+#endif
+
+			Bytes? key = null;
+			try {
+				uint8[] raw_identity;
+				FileUtils.get_data (config_file.get_path (), out raw_identity);
+				Plist identity = new Plist.from_data (raw_identity);
+
+				unowned string identifier = identity.get_string ("identifier");
+				key = identity.get_bytes ("privateKey");
+
+				host_identifier = identifier;
+			} catch (GLib.Error e) {
+				host_identifier = make_host_identifier ();
+			}
+			if (key == null) {
+				uint8 dummy_key[32] = { 0, };
+				key = new Bytes (dummy_key);
+			}
+
+			pair_record_key = new Key.from_raw_private_key (ED25519, null, key.get_data ());
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			yield transport.open (cancellable);
+
+			yield attempt_pair_verify (cancellable);
+
+			Bytes? shared_key = yield verify_manual_pairing (cancellable);
+			if (shared_key == null) {
+				if (!device_options.allows_pair_setup)
+					throw new Error.NOT_SUPPORTED ("Device not paired and pairing not allowed on current transport");
+				shared_key = yield setup_manual_pairing (cancellable);
+			}
+
+			client_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ClientEncrypt-main"));
+			server_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ServerEncrypt-main"));
+
+			return true;
+		}
+
+		public void close () {
+			transport.cancel ();
+		}
+
+		public async TunnelConnection open_tunnel (string device_address, Cancellable? cancellable = null) throws Error, IOError {
+			Key local_keypair = make_keypair (RSA);
+
+			string request = Json.to_string (
+				new Json.Builder ()
+				.begin_object ()
+					.set_member_name ("request")
+					.begin_object ()
+						.set_member_name ("_0")
+						.begin_object ()
+							.set_member_name ("createListener")
+							.begin_object ()
+								.set_member_name ("transportProtocolType")
+								.add_string_value ("quic")
+								.set_member_name ("key")
+								.add_string_value (Base64.encode (key_to_der (local_keypair)))
+							.end_object ()
+						.end_object ()
+					.end_object ()
+				.end_object ()
+				.get_root (), false);
+
+			string response = yield request_encrypted (request, cancellable);
+
+			Json.Reader reader;
+			try {
+				reader = new Json.Reader (Json.from_string (response));
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("Invalid response JSON");
+			}
+
+			reader.read_member ("response");
+			reader.read_member ("_1");
+			reader.read_member ("createListener");
+
+			reader.read_member ("devicePublicKey");
+			string? device_pubkey = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("port");
+			uint16 port = (uint16) reader.get_int_value ();
+			reader.end_member ();
+
+			GLib.Error? error = reader.get_error ();
+			if (error != null)
+				throw new Error.PROTOCOL ("Invalid response: %s", error.message);
+
+			Key remote_pubkey = key_from_der (Base64.decode (device_pubkey));
+
+			return yield TunnelConnection.open (
+				new InetSocketAddress.from_string (device_address, port),
+				new TunnelKey ((owned) local_keypair),
+				new TunnelKey ((owned) remote_pubkey),
+				cancellable);
+		}
+
+		private async void attempt_pair_verify (Cancellable? cancellable) throws Error, IOError {
+			Bytes payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("request")
+					.begin_dictionary ()
+						.set_member_name ("_0")
+						.begin_dictionary ()
+							.set_member_name ("handshake")
+							.begin_dictionary ()
+								.set_member_name ("_0")
+								.begin_dictionary ()
+									.set_member_name ("wireProtocolVersion")
+									.add_int64_value (19)
+									.set_member_name ("hostOptions")
+									.begin_dictionary ()
+										.set_member_name ("attemptPairVerify")
+										.add_bool_value (true)
+									.end_dictionary ()
+								.end_dictionary ()
+							.end_dictionary ()
+						.end_dictionary ()
+					.end_dictionary ()
+				.end_dictionary ()
+				.build ();
+
+			ObjectReader response = yield request_plain (payload, cancellable);
+
+			response
+				.read_member ("response")
+				.read_member ("_1")
+				.read_member ("handshake")
+				.read_member ("_0");
+
+			response.read_member ("deviceOptions");
+
+			bool allows_pair_setup = response.read_member ("allowsPairSetup").get_bool_value ();
+			response.end_member ();
+
+			bool allows_pinless_pairing = response.read_member ("allowsPinlessPairing").get_bool_value ();
+			response.end_member ();
+
+			bool allows_promptless_automation_pairing_upgrade =
+				response.read_member ("allowsPromptlessAutomationPairingUpgrade").get_bool_value ();
+			response.end_member ();
+
+			bool allows_sharing_sensitive_info = response.read_member ("allowsSharingSensitiveInfo").get_bool_value ();
+			response.end_member ();
+
+			bool allows_incoming_tunnel_connections =
+				response.read_member ("allowsIncomingTunnelConnections").get_bool_value ();
+			response.end_member ();
+
+			device_options = new DeviceOptions () {
+				allows_pair_setup = allows_pair_setup,
+				allows_pinless_pairing = allows_pinless_pairing,
+				allows_promptless_automation_pairing_upgrade = allows_promptless_automation_pairing_upgrade,
+				allows_sharing_sensitive_info = allows_sharing_sensitive_info,
+				allows_incoming_tunnel_connections = allows_incoming_tunnel_connections,
+			};
+
+			if (response.has_member ("peerDeviceInfo")) {
+				response.read_member ("peerDeviceInfo");
+
+				string name = response.read_member ("name").get_string_value ();
+				response.end_member ();
+
+				string model = response.read_member ("model").get_string_value ();
+				response.end_member ();
+
+				string udid = response.read_member ("udid").get_string_value ();
+				response.end_member ();
+
+				uint64 ecid = response.read_member ("ecid").get_uint64_value ();
+				response.end_member ();
+
+				Plist kvs;
+				try {
+					kvs = new Plist.from_binary (response.read_member ("deviceKVSData").get_data_value ().get_data ());
+					response.end_member ();
+				} catch (PlistError e) {
+					throw new Error.PROTOCOL ("%s", e.message);
+				}
+
+				device_info = new DeviceInfo () {
+					name = name,
+					model = model,
+					udid = udid,
+					ecid = ecid,
+					kvs = kvs,
+				};
+			}
+		}
+
+		private async Bytes? verify_manual_pairing (Cancellable? cancellable) throws Error, IOError {
+			Key host_keypair = make_keypair (X25519);
+			uint8[] raw_host_pubkey = get_raw_public_key (host_keypair).get_data ();
+
+			Bytes start_params = new PairingParamsBuilder ()
+				.add_state (1)
+				.add_public_key (host_keypair)
+				.build ();
+
+			Bytes start_payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("kind")
+					.add_string_value ("verifyManualPairing")
+					.set_member_name ("startNewSession")
+					.add_bool_value (true)
+					.set_member_name ("data")
+					.add_data_value (start_params)
+				.end_dictionary ()
+				.build ();
+
+			var start_response = yield request_pairing_data (start_payload, cancellable);
+			uint8[] raw_device_pubkey = start_response.read_member ("public-key").get_data_value ().get_data ();
+			start_response.end_member ();
+			var device_pubkey = new Key.from_raw_public_key (X25519, null, raw_device_pubkey);
+
+			Bytes shared_key = derive_shared_key (host_keypair, device_pubkey);
+
+			Bytes operation_key = derive_chacha_key (shared_key,
+				"Pair-Verify-Encrypt-Info",
+				"Pair-Verify-Encrypt-Salt");
+
+			var cipher = new ChaCha20Poly1305 (operation_key);
+
+			// TODO: Verify signature using peer's public key.
+			/* var start_inner_response = */ new VariantReader (PairingParamsParser.parse (cipher.decrypt (
+				new Bytes.static ("\x00\x00\x00\x00PV-Msg02".data[:12]),
+				start_response.read_member ("encrypted-data").get_data_value ()).get_data ()));
+
+			var message = new ByteArray.sized (100);
+			message.append (raw_host_pubkey);
+			message.append (host_identifier.data);
+			message.append (raw_device_pubkey);
+			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), pair_record_key);
+
+			Bytes inner_params = new PairingParamsBuilder ()
+				.add_identifier (host_identifier)
+				.add_signature (signature)
+				.build ();
+
+			Bytes outer_params = new PairingParamsBuilder ()
+				.add_state (3)
+				.add_encrypted_data (
+					cipher.encrypt (
+						new Bytes.static ("\x00\x00\x00\x00PV-Msg03".data[:12]),
+						inner_params))
+				.build ();
+
+			Bytes finish_payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("kind")
+					.add_string_value ("verifyManualPairing")
+					.set_member_name ("startNewSession")
+					.add_bool_value (false)
+					.set_member_name ("data")
+					.add_data_value (outer_params)
+				.end_dictionary ()
+				.build ();
+
+			ObjectReader finish_response = yield request_pairing_data (finish_payload, cancellable);
+			if (finish_response.has_member ("error")) {
+				yield post_plain (transport.make_object_builder ()
+					.begin_dictionary ()
+						.set_member_name ("event")
+						.begin_dictionary ()
+							.set_member_name ("_0")
+							.begin_dictionary ()
+								.set_member_name ("pairVerifyFailed")
+								.begin_dictionary ()
+								.end_dictionary ()
+							.end_dictionary ()
+						.end_dictionary ()
+					.end_dictionary ()
+					.build (), cancellable);
+				return null;
+			}
+
+			return shared_key;
+		}
+
+		private async Bytes setup_manual_pairing (Cancellable? cancellable) throws Error, IOError {
+			Bytes start_params = new PairingParamsBuilder ()
+				.add_method (0)
+				.add_state (1)
+				.build ();
+
+			Bytes start_payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("kind")
+					.add_string_value ("setupManualPairing")
+					.set_member_name ("startNewSession")
+					.add_bool_value (true)
+					.set_member_name ("sendingHost")
+					.add_string_value (Environment.get_host_name ())
+					.set_member_name ("data")
+					.add_data_value (start_params)
+				.end_dictionary ()
+				.build ();
+
+			var start_response = yield request_pairing_data (start_payload, cancellable);
+			if (start_response.has_member ("retry-delay")) {
+				uint16 retry_delay = start_response.read_member ("retry-delay").get_uint16_value ();
+				throw new Error.INVALID_OPERATION ("Rate limit exceeded, try again in %u seconds", retry_delay);
+			}
+
+			Bytes remote_pubkey = start_response.read_member ("public-key").get_data_value ();
+			start_response.end_member ();
+
+			Bytes salt = start_response.read_member ("salt").get_data_value ();
+			start_response.end_member ();
+
+			var srp_session = new SRPClientSession ("Pair-Setup", "000000");
+			srp_session.process (remote_pubkey, salt);
+			Bytes shared_key = srp_session.key;
+
+			Bytes verify_params = new PairingParamsBuilder ()
+				.add_state (3)
+				.add_raw_public_key (srp_session.public_key)
+				.add_proof (srp_session.key_proof)
+				.build ();
+
+			Bytes verify_payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("kind")
+					.add_string_value ("setupManualPairing")
+					.set_member_name ("startNewSession")
+					.add_bool_value (false)
+					.set_member_name ("sendingHost")
+					.add_string_value (Environment.get_host_name ())
+					.set_member_name ("data")
+					.add_data_value (verify_params)
+				.end_dictionary ()
+				.build ();
+
+			var verify_response = yield request_pairing_data (verify_payload, cancellable);
+			Bytes remote_proof = verify_response.read_member ("proof").get_data_value ();
+
+			srp_session.verify_proof (remote_proof);
+
+			Bytes operation_key = derive_chacha_key (shared_key,
+				"Pair-Setup-Encrypt-Info",
+				"Pair-Setup-Encrypt-Salt");
+
+			var cipher = new ChaCha20Poly1305 (operation_key);
+
+			Key new_pair_record_key = make_keypair (ED25519);
+			Bytes new_pair_record_pubkey = get_raw_public_key (new_pair_record_key);
+
+			uint8 raw_irk[16];
+			Rng.generate (raw_irk);
+			Bytes irk = new Bytes (raw_irk);
+
+			Bytes signing_key = derive_chacha_key (shared_key,
+				"Pair-Setup-Controller-Sign-Info",
+				"Pair-Setup-Controller-Sign-Salt");
+
+			var message = new ByteArray.sized (100);
+			message.append (signing_key.get_data ());
+			message.append (host_identifier.data);
+			message.append (new_pair_record_pubkey.get_data ());
+			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), new_pair_record_key);
+
+			Bytes info = new OpackBuilder ()
+				.begin_dictionary ()
+					.set_member_name ("name")
+					.add_string_value (Environment.get_host_name ())
+					.set_member_name ("accountID")
+					.add_string_value (host_identifier)
+					.set_member_name ("remotepairing_serial_number")
+					.add_string_value ("AAAAAAAAAAAA")
+					.set_member_name ("altIRK")
+					.add_data_value (irk)
+					.set_member_name ("model")
+					.add_string_value ("computer-model")
+					.set_member_name ("mac")
+					.add_data_value (new Bytes ({ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 }))
+					.set_member_name ("btAddr")
+					.add_string_value ("11:22:33:44:55:66")
+				.end_dictionary ()
+				.build ();
+
+			Bytes inner_params = new PairingParamsBuilder ()
+				.add_identifier (host_identifier)
+				.add_raw_public_key (new_pair_record_pubkey)
+				.add_signature (signature)
+				.add_info (info)
+				.build ();
+
+			Bytes outer_params = new PairingParamsBuilder ()
+				.add_state (5)
+				.add_encrypted_data (
+					cipher.encrypt (
+						new Bytes.static ("\x00\x00\x00\x00PS-Msg05".data[:12]),
+						inner_params))
+				.build ();
+
+			Bytes finish_payload = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("kind")
+					.add_string_value ("setupManualPairing")
+					.set_member_name ("startNewSession")
+					.add_bool_value (false)
+					.set_member_name ("sendingHost")
+					.add_string_value (Environment.get_host_name ())
+					.set_member_name ("data")
+					.add_data_value (outer_params)
+				.end_dictionary ()
+				.build ();
+
+			var finish_response = yield request_pairing_data (finish_payload, cancellable);
+
+			Bytes encrypted_response = finish_response.read_member ("encrypted-data").get_data_value ();
+			Bytes raw_response = cipher.decrypt (new Bytes.static ("\x00\x00\x00\x00PS-Msg06".data[:12]), encrypted_response);
+			// TODO: Wire up if/when needed.
+			/* Variant response = */ PairingParamsParser.parse (raw_response.get_data ());
+
+			var config = new Plist ();
+			config.set_string ("identifier", host_identifier);
+			config.set_bytes ("publicKey", new_pair_record_pubkey);
+			config.set_bytes ("privateKey", get_raw_private_key (new_pair_record_key));
+			config.set_bytes ("irk", irk);
+			try {
+				config_file.get_parent ().make_directory_with_parents (cancellable);
+			} catch (GLib.Error e) {
+			}
+			try {
+				FileUtils.set_contents (config_file.get_path (), config.to_xml ());
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			pair_record_key = (owned) new_pair_record_key;
+
+			return shared_key;
+		}
+
+		private async ObjectReader request_pairing_data (Bytes payload, Cancellable? cancellable) throws Error, IOError {
+			Bytes wrapper = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("event")
+					.begin_dictionary ()
+						.set_member_name ("_0")
+						.begin_dictionary ()
+							.set_member_name ("pairingData")
+							.begin_dictionary ()
+								.set_member_name ("_0")
+								.add_raw_value (payload)
+							.end_dictionary ()
+						.end_dictionary ()
+					.end_dictionary ()
+				.end_dictionary ()
+				.build ();
+
+			ObjectReader response = yield request_plain (wrapper, cancellable);
+
+			response
+				.read_member ("event")
+				.read_member ("_0");
+
+			if (response.has_member ("pairingRejectedWithError")) {
+				string description = response
+					.read_member ("pairingRejectedWithError")
+					.read_member ("wrappedError")
+					.read_member ("userInfo")
+					.read_member ("NSLocalizedDescription")
+					.get_string_value ();
+				throw new Error.PROTOCOL ("%s", description);
+			}
+
+			Bytes raw_data = response
+				.read_member ("pairingData")
+				.read_member ("_0")
+				.read_member ("data")
+				.get_data_value ();
+			Variant data = PairingParamsParser.parse (raw_data.get_data ());
+			return new VariantReader (data);
+		}
+
+		private async ObjectReader request_plain (Bytes payload, Cancellable? cancellable) throws Error, IOError {
+			uint64 seqno = next_control_sequence_number++;
+			var promise = new Promise<ObjectReader> ();
+			requests[seqno] = promise;
+
+			try {
+				yield post_plain_with_sequence_number (seqno, payload, cancellable);
+			} catch (GLib.Error e) {
+				if (requests.unset (seqno))
+					promise.reject (e);
+			}
+
+			ObjectReader response = yield promise.future.wait_async (cancellable);
+
+			return response
+				.read_member ("plain")
+				.read_member ("_0");
+		}
+
+		private async void post_plain (Bytes payload, Cancellable? cancellable) throws Error, IOError {
+			uint64 seqno = next_control_sequence_number++;
+			yield post_plain_with_sequence_number (seqno, payload, cancellable);
+		}
+
+		private async void post_plain_with_sequence_number (uint64 seqno, Bytes payload, Cancellable? cancellable)
+				throws Error, IOError {
+			transport.post (transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("sequenceNumber")
+					.add_uint64_value (seqno)
+					.set_member_name ("originatedBy")
+					.add_string_value ("host")
+					.set_member_name ("message")
+					.begin_dictionary ()
+						.set_member_name ("plain")
+						.begin_dictionary ()
+							.set_member_name ("_0")
+							.add_raw_value (payload)
+						.end_dictionary ()
+					.end_dictionary ()
+				.end_dictionary ()
+				.build ());
+		}
+
+		private async string request_encrypted (string json, Cancellable? cancellable) throws Error, IOError {
+			uint64 seqno = next_control_sequence_number++;
+			var promise = new Promise<ObjectReader> ();
+			requests[seqno] = promise;
+
+			Bytes iv = new BufferBuilder (LITTLE_ENDIAN)
+				.append_uint64 (next_encrypted_sequence_number++)
+				.append_uint32 (0)
+				.build ();
+
+			Bytes raw_request = transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("sequenceNumber")
+					.add_uint64_value (seqno)
+					.set_member_name ("originatedBy")
+					.add_string_value ("host")
+					.set_member_name ("message")
+					.begin_dictionary ()
+						.set_member_name ("streamEncrypted")
+						.begin_dictionary ()
+							.set_member_name ("_0")
+							.add_data_value (client_cipher.encrypt (iv, new Bytes.static (json.data)))
+						.end_dictionary ()
+					.end_dictionary ()
+				.end_dictionary ()
+				.build ();
+
+			transport.post (raw_request);
+
+			ObjectReader response = yield promise.future.wait_async (cancellable);
+
+			Bytes encrypted_response = response
+				.read_member ("streamEncrypted")
+				.read_member ("_0")
+				.get_data_value ();
+
+			Bytes decrypted_response = server_cipher.decrypt (iv, encrypted_response);
+
+			unowned string s = (string) decrypted_response.get_data ();
+			if (!s.validate ((ssize_t) decrypted_response.get_size ()))
+				throw new Error.PROTOCOL ("Invalid UTF-8");
+
+			return s;
+		}
+
+		private void on_close (Error? error) {
+			var e = (error != null)
+				? error
+				: new Error.TRANSPORT ("Connection closed while waiting for response");
+			foreach (Promise<ObjectReader> promise in requests.values)
+				promise.reject (e);
+			requests.clear ();
+		}
+
+		private void on_message (ObjectReader reader) {
+			try {
+				string origin = reader.read_member ("originatedBy").get_string_value ();
+				if (origin != "device")
+					return;
+				reader.end_member ();
+
+				uint64 seqno = reader.read_member ("sequenceNumber").get_uint64_value ();
+				reader.end_member ();
+
+				reader.read_member ("message");
+
+				Promise<ObjectReader> promise;
+				if (!requests.unset (seqno, out promise))
+					return;
+
+				promise.resolve (reader);
+			} catch (Error e) {
+			}
+		}
+
+		private static Key make_keypair (KeyType type) {
+			var ctx = new KeyContext.for_key_type (type);
+			ctx.keygen_init ();
+
+			Key? keypair = null;
+			ctx.keygen (ref keypair);
+
+			return keypair;
+		}
+
+		private static uint8[] key_to_der (Key key) {
+			var sink = new BasicIO (BasicIOMethod.memory ());
+			key.to_der (sink);
+			unowned uint8[] der_data = get_basic_io_content (sink);
+			uint8[] der_data_owned = der_data;
+			return der_data_owned;
+		}
+
+		private static Key key_from_der (uint8[] der) throws Error {
+			var source = new BasicIO.from_static_memory_buffer (der);
+			Key? key = new Key.from_der (source);
+			if (key == null)
+				throw new Error.PROTOCOL ("Invalid key");
+			return key;
+		}
+
+		private static unowned uint8[] get_basic_io_content (BasicIO bio) {
+			unowned uint8[] data;
+			long n = bio.get_mem_data (out data);
+			data.length = (int) n;
+			return data;
+		}
+
+		private static Bytes derive_shared_key (Key local_keypair, Key remote_pubkey) {
+			var ctx = new KeyContext.for_key (local_keypair);
+			ctx.derive_init ();
+			ctx.derive_set_peer (remote_pubkey);
+
+			size_t size = 0;
+			ctx.derive (null, ref size);
+
+			var shared_key = new uint8[size];
+			ctx.derive (shared_key, ref size);
+
+			return new Bytes.take ((owned) shared_key);
+		}
+
+		private static Bytes derive_chacha_key (Bytes shared_key, string info, string? salt = null) {
+			var kdf = KeyDerivationFunction.fetch (null, KeyDerivationAlgorithm.HKDF);
+
+			var kdf_ctx = new KeyDerivationContext (kdf);
+
+			size_t return_size = OpenSSL.ParamReturnSize.UNMODIFIED;
+
+			OpenSSL.Param kdf_params[] = {
+				{ KeyDerivationParameter.DIGEST, UTF8_STRING, OpenSSL.ShortName.sha512.data, return_size },
+				{ KeyDerivationParameter.KEY, OCTET_STRING, shared_key.get_data (), return_size },
+				{ KeyDerivationParameter.INFO, OCTET_STRING, info.data, return_size },
+				{ (salt != null) ? KeyDerivationParameter.SALT : null, OCTET_STRING, (salt != null) ? salt.data : null,
+					return_size },
+				{ null, INTEGER, null, return_size },
+			};
+
+			var derived_key = new uint8[32];
+			kdf_ctx.derive (derived_key, kdf_params);
+
+			return new Bytes.take ((owned) derived_key);
+		}
+
+		private static Bytes compute_message_signature (Bytes message, Key key) {
+			var ctx = new MessageDigestContext ();
+			ctx.digest_sign_init (null, null, null, key);
+
+			unowned uint8[] data = message.get_data ();
+
+			size_t size = 0;
+			ctx.digest_sign (null, ref size, data);
+
+			var signature = new uint8[size];
+			ctx.digest_sign (signature, ref size, data);
+
+			return new Bytes.take ((owned) signature);
+		}
+
+		private class ChaCha20Poly1305 {
+			private Bytes key;
+
+			private Cipher cipher = Cipher.fetch (null, OpenSSL.ShortName.chacha20_poly1305);
+			private CipherContext? cached_ctx;
+
+			private const size_t TAG_SIZE = 16;
+
+			public ChaCha20Poly1305 (Bytes key) {
+				this.key = key;
+			}
+
+			public Bytes encrypt (Bytes iv, Bytes message) {
+				size_t cleartext_size = message.get_size ();
+				var buf = new uint8[cleartext_size + TAG_SIZE];
+
+				unowned CipherContext ctx = get_context ();
+				cached_ctx.encrypt_init (cipher, key.get_data (), iv.get_data ());
+
+				int size = buf.length;
+				ctx.encrypt_update (buf, ref size, message.get_data ());
+
+				int extra_size = buf.length - size;
+				ctx.encrypt_final (buf[size:], ref extra_size);
+				assert (extra_size == 0);
+
+				ctx.ctrl (AEAD_GET_TAG, (int) TAG_SIZE, (void *) buf[size:]);
+
+				return new Bytes.take ((owned) buf);
+			}
+
+			public Bytes decrypt (Bytes iv, Bytes message) throws Error {
+				size_t message_size = message.get_size ();
+				if (message_size < 1 + TAG_SIZE)
+					throw new Error.PROTOCOL ("Encrypted message is too short");
+				unowned uint8[] message_data = message.get_data ();
+
+				var buf = new uint8[message_size];
+
+				unowned CipherContext ctx = get_context ();
+				cached_ctx.decrypt_init (cipher, key.get_data (), iv.get_data ());
+
+				int size = (int) message_size;
+				int res = ctx.decrypt_update (buf, ref size, message_data);
+				if (res != 1)
+					throw new Error.PROTOCOL ("Failed to decrypt: %d", res);
+
+				int extra_size = buf.length - size;
+				res = ctx.decrypt_final (buf[size:], ref extra_size);
+				if (res != 1)
+					throw new Error.PROTOCOL ("Failed to decrypt: %d", res);
+				assert (extra_size == 0);
+
+				size_t cleartext_size = message_size - TAG_SIZE;
+				buf[cleartext_size] = 0;
+				buf.length = (int) cleartext_size;
+
+				return new Bytes.take ((owned) buf);
+			}
+
+			private unowned CipherContext get_context () {
+				if (cached_ctx == null)
+					cached_ctx = new CipherContext ();
+				else
+					cached_ctx.reset ();
+				return cached_ctx;
+			}
+		}
+
+		private class SRPClientSession {
+			public Bytes public_key {
+				owned get {
+					var buf = new uint8[local_pubkey.num_bytes ()];
+					local_pubkey.to_big_endian (buf);
+					return new Bytes.take ((owned) buf);
+				}
+			}
+
+			public Bytes key {
+				get {
+					return _key;
+				}
+			}
+
+			public Bytes key_proof {
+				get {
+					return _key_proof;
+				}
+			}
+
+			private string username;
+			private string password;
+
+			private BigNumber prime = BigNumber.get_rfc3526_prime_3072 ();
+			private BigNumber generator;
+			private BigNumber multiplier;
+
+			private BigNumber local_privkey;
+			private BigNumber local_pubkey;
+
+			private BigNumber? remote_pubkey;
+			private Bytes? salt;
+
+			private BigNumber? password_hash;
+			private BigNumber? password_verifier;
+
+			private BigNumber? common_secret;
+			private BigNumber? premaster_secret;
+			private Bytes? _key;
+			private Bytes? _key_proof;
+			private Bytes? _key_proof_hash;
+
+			private BigNumberContext bn_ctx = new BigNumberContext.secure ();
+
+			public SRPClientSession (string username, string password) {
+				this.username = username;
+				this.password = password;
+
+				uint8 raw_gen = 5;
+				generator = new BigNumber.from_native ((uint8[]) &raw_gen);
+				multiplier = new HashBuilder ()
+					.add_number_padded (prime)
+					.add_number_padded (generator)
+					.build_number ();
+
+				uint8 raw_local_privkey[128];
+				Rng.generate (raw_local_privkey);
+				local_privkey = new BigNumber.from_big_endian (raw_local_privkey);
+
+				local_pubkey = new BigNumber ();
+				BigNumber.mod_exp (local_pubkey, generator, local_privkey, prime, bn_ctx);
+			}
+
+			public void process (Bytes raw_remote_pubkey, Bytes salt) throws Error {
+				remote_pubkey = new BigNumber.from_big_endian (raw_remote_pubkey.get_data ());
+				var rem = new BigNumber ();
+				BigNumber.mod (rem, remote_pubkey, prime, bn_ctx);
+				if (rem.is_zero ())
+					throw new Error.INVALID_ARGUMENT ("Malformed remote public key");
+
+				this.salt = salt;
+
+				password_hash = compute_password_hash (salt);
+				password_verifier = compute_password_verifier (password_hash);
+
+				common_secret = compute_common_secret (remote_pubkey);
+				premaster_secret = compute_premaster_secret (common_secret, remote_pubkey, password_hash,
+					password_verifier);
+				_key = compute_session_key (premaster_secret);
+				_key_proof = compute_session_key_proof (_key, remote_pubkey, salt);
+				_key_proof_hash = compute_session_key_proof_hash (_key_proof, _key);
+			}
+
+			public void verify_proof (Bytes proof) throws Error {
+				size_t size = proof.get_size ();
+				if (size != _key_proof_hash.get_size ())
+					throw new Error.INVALID_ARGUMENT ("Invalid proof size");
+
+				if (Crypto.memcmp (proof.get_data (), _key_proof_hash.get_data (), size) != 0)
+					throw new Error.INVALID_ARGUMENT ("Invalid proof");
+			}
+
+			private BigNumber compute_password_hash (Bytes salt) {
+				return new HashBuilder ()
+					.add_bytes (salt)
+					.add_bytes (new HashBuilder ()
+						.add_string (username)
+						.add_string (":")
+						.add_string (password)
+						.build_digest ())
+					.build_number ();
+			}
+
+			private BigNumber compute_password_verifier (BigNumber password_hash) {
+				var verifier = new BigNumber ();
+				BigNumber.mod_exp (verifier, generator, password_hash, prime, bn_ctx);
+				return verifier;
+			}
+
+			private BigNumber compute_common_secret (BigNumber remote_pubkey) {
+				return new HashBuilder ()
+					.add_number_padded (local_pubkey)
+					.add_number_padded (remote_pubkey)
+					.build_number ();
+			}
+
+			private BigNumber compute_premaster_secret (BigNumber common_secret, BigNumber remote_pubkey,
+					BigNumber password_hash, BigNumber password_verifier) {
+				var val = new BigNumber ();
+
+				BigNumber.mul (val, multiplier, password_verifier, bn_ctx);
+				var baze = new BigNumber ();
+				BigNumber.sub (baze, remote_pubkey, val);
+
+				var exp = new BigNumber ();
+				BigNumber.mul (val, common_secret, password_hash, bn_ctx);
+				BigNumber.add (exp, local_privkey, val);
+
+				BigNumber.mod_exp (val, baze, exp, prime, bn_ctx);
+
+				return val;
+			}
+
+			private static Bytes compute_session_key (BigNumber premaster_secret) {
+				return new HashBuilder ()
+					.add_number (premaster_secret)
+					.build_digest ();
+			}
+
+			private Bytes compute_session_key_proof (Bytes session_key, BigNumber remote_pubkey, Bytes salt) {
+				Bytes prime_hash = new HashBuilder ().add_number (prime).build_digest ();
+				Bytes generator_hash = new HashBuilder ().add_number (generator).build_digest ();
+				uint8 prime_and_generator_xored[64];
+				unowned uint8[] left = prime_hash.get_data ();
+				unowned uint8[] right = generator_hash.get_data ();
+				for (var i = 0; i != prime_and_generator_xored.length; i++)
+					prime_and_generator_xored[i] = left[i] ^ right[i];
+
+				return new HashBuilder ()
+					.add_data (prime_and_generator_xored)
+					.add_bytes (new HashBuilder ().add_string (username).build_digest ())
+					.add_bytes (salt)
+					.add_number (local_pubkey)
+					.add_number (remote_pubkey)
+					.add_bytes (session_key)
+					.build_digest ();
+			}
+
+			private Bytes compute_session_key_proof_hash (Bytes key_proof, Bytes key) {
+				return new HashBuilder ()
+					.add_number (local_pubkey)
+					.add_bytes (key_proof)
+					.add_bytes (key)
+					.build_digest ();
+			}
+
+			private class HashBuilder {
+				private Checksum checksum = new Checksum (SHA512);
+
+				public unowned HashBuilder add_number (BigNumber val) {
+					var buf = new uint8[val.num_bytes ()];
+					val.to_big_endian (buf);
+					return add_data (buf);
+				}
+
+				public unowned HashBuilder add_number_padded (BigNumber val) {
+					uint8 buf[384];
+					val.to_big_endian_padded (buf);
+					return add_data (buf);
+				}
+
+				public unowned HashBuilder add_string (string val) {
+					return add_data (val.data);
+				}
+
+				public unowned HashBuilder add_bytes (Bytes val) {
+					return add_data (val.get_data ());
+				}
+
+				public unowned HashBuilder add_data (uint8[] val) {
+					checksum.update (val, val.length);
+					return this;
+				}
+
+				public Bytes build_digest () {
+					var buf = new uint8[64];
+					size_t len = buf.length;
+					checksum.get_digest (buf, ref len);
+					return new Bytes.take ((owned) buf);
+				}
+
+				public BigNumber build_number () {
+					uint8 buf[64];
+					size_t len = buf.length;
+					checksum.get_digest (buf, ref len);
+					return new BigNumber.from_big_endian (buf);
+				}
+			}
+		}
+	}
+
+	public interface PairingTransport : Object {
+		public signal void close (Error? error);
+		public signal void message (ObjectReader reader);
+
+		public abstract async void open (Cancellable? cancellable) throws Error, IOError;
+		public abstract void cancel ();
+
+		public abstract ObjectBuilder make_object_builder ();
+		public abstract void post (Bytes message);
+	}
+
+	public class XpcPairingTransport : Object, PairingTransport {
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private XpcConnection connection;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public XpcPairingTransport (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			connection = new XpcConnection (stream);
+			connection.close.connect (on_close);
+			connection.message.connect (on_message);
+		}
+
+		public async void open (Cancellable? cancellable) throws Error, IOError {
+			connection.activate ();
+
+			yield connection.wait_until_ready (cancellable);
+		}
+
+		public void cancel () {
+			io_cancellable.cancel ();
+
+			connection.cancel ();
+		}
+
+		public ObjectBuilder make_object_builder () {
+			return new XpcObjectBuilder ();
+		}
+
+		public void post (Bytes msg) {
+			connection.post.begin (
+				new XpcBodyBuilder ()
+					.begin_dictionary ()
+						.set_member_name ("mangledTypeName")
+						.add_string_value ("RemotePairing.ControlChannelMessageEnvelope")
+						.set_member_name ("value")
+						.add_raw_value (msg)
+					.end_dictionary ()
+					.build (),
+				io_cancellable);
+		}
+
+		private void on_close (Error? error) {
+			close (error);
+		}
+
+		private void on_message (XpcMessage msg) {
+			if (msg.body == null)
+				return;
+
+			var reader = new VariantReader (msg.body);
+			try {
+				string type_name = reader.read_member ("mangledTypeName").get_string_value ();
+				if (type_name != "RemotePairingDevice.ControlChannelMessageEnvelope")
+					return;
+				reader.end_member ();
+
+				reader.read_member ("value");
+
+				message (reader);
+			} catch (Error e) {
+			}
+		}
+	}
+
+	public class PlainPairingTransport : Object, PairingTransport {
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private BufferedInputStream input;
+		private OutputStream output;
+
+		private ByteArray pending_output = new ByteArray ();
+		private bool writing = false;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public PlainPairingTransport (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+				"base-stream", stream.get_input_stream (),
+				"close-base-stream", false,
+				"buffer-size", 128 * 1024);
+			output = stream.get_output_stream ();
+		}
+
+		public async void open (Cancellable? cancellable) throws Error, IOError {
+			process_incoming_messages.begin ();
+		}
+
+		public void cancel () {
+			io_cancellable.cancel ();
+		}
+
+		public ObjectBuilder make_object_builder () {
+			return new JsonObjectBuilder ();
+		}
+
+		public void post (Bytes msg) {
+			Bytes raw_msg = new BufferBuilder (BIG_ENDIAN)
+				.append_string ("RPPairing", StringTerminator.NONE)
+				.append_uint16 ((uint16) msg.get_size ())
+				.append_bytes (msg)
+				.build ();
+			pending_output.append (raw_msg.get_data ());
+
+			if (!writing) {
+				writing = true;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					process_pending_output.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private async void process_incoming_messages () {
+			try {
+				while (true) {
+					size_t header_size = 11;
+					if (input.get_available () < header_size)
+						yield fill_until_n_bytes_available (header_size);
+
+					uint8 raw_magic[9];
+					input.peek (raw_magic);
+					string magic = ((string) raw_magic).make_valid (raw_magic.length);
+					if (magic != "RPPairing")
+						throw new Error.PROTOCOL ("Invalid message magic: '%s'", magic);
+
+					uint16 body_size = 0;
+					unowned uint8[] size_buf = ((uint8[]) &body_size)[:2];
+					input.peek (size_buf, raw_magic.length);
+					body_size = uint16.from_big_endian (body_size);
+					if (body_size < 2)
+						throw new Error.PROTOCOL ("Invalid message size");
+
+					size_t full_size = header_size + body_size;
+					if (input.get_available () < full_size)
+						yield fill_until_n_bytes_available (full_size);
+
+					var raw_json = new uint8[body_size + 1];
+					input.peek (raw_json[:body_size], header_size);
+
+					unowned string json = (string) raw_json;
+					if (!json.validate ())
+						throw new Error.PROTOCOL ("Invalid UTF-8");
+
+					var reader = new JsonObjectReader (json);
+
+					message (reader);
+
+					input.skip (full_size, io_cancellable);
+				}
+			} catch (GLib.Error e) {
+			}
+
+			close (null);
+		}
+
+		private async void process_pending_output () {
+			while (pending_output.len > 0) {
+				uint8[] batch = pending_output.steal ();
+
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (batch, Priority.DEFAULT, io_cancellable, out bytes_written);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+
+		private async void fill_until_n_bytes_available (size_t minimum) throws Error, IOError {
+			size_t available = input.get_available ();
+			while (available < minimum) {
+				if (input.get_buffer_size () < minimum)
+					input.set_buffer_size (minimum);
+
+				ssize_t n;
+				try {
+					n = yield input.fill_async ((ssize_t) (input.get_buffer_size () - available), Priority.DEFAULT,
+						io_cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Connection closed");
+				}
+
+				if (n == 0)
+					throw new Error.TRANSPORT ("Connection closed");
+
+				available += n;
+			}
+		}
+	}
+
+	public class DeviceOptions {
+		public bool allows_pair_setup;
+		public bool allows_pinless_pairing;
+		public bool allows_promptless_automation_pairing_upgrade;
+		public bool allows_sharing_sensitive_info;
+		public bool allows_incoming_tunnel_connections;
+
+		public string to_string () {
+			return "DeviceOptions { " +
+				@"allows_pair_setup: $allows_pair_setup, " +
+				@"allows_pinless_pairing: $allows_pinless_pairing " +
+				@"allows_promptless_automation_pairing_upgrade: $allows_promptless_automation_pairing_upgrade " +
+				@"allows_sharing_sensitive_info: $allows_sharing_sensitive_info " +
+				@"allows_incoming_tunnel_connections: $allows_incoming_tunnel_connections " +
+				"}";
+		}
+	}
+
+	public class DeviceInfo {
+		public string name;
+		public string model;
+		public string udid;
+		public uint64 ecid;
+		public Plist kvs;
+
+		public string to_string () {
+			return @"DeviceInfo { name: \"$name\", model: \"$model\", udid: \"$udid\" }";
+		}
+	}
+
+	private class PairingParamsBuilder {
+		private BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
+
+		public unowned PairingParamsBuilder add_method (uint8 method) {
+			begin_param (METHOD, 1)
+				.append_uint8 (method);
+
+			return this;
+		}
+
+		public unowned PairingParamsBuilder add_identifier (string identifier) {
+			begin_param (IDENTIFIER, identifier.data.length)
+				.append_data (identifier.data);
+
+			return this;
+		}
+
+		public unowned PairingParamsBuilder add_public_key (Key key) {
+			return add_raw_public_key (get_raw_public_key (key));
+		}
+
+		public unowned PairingParamsBuilder add_raw_public_key (Bytes key) {
+			return add_blob (PUBLIC_KEY, key);
+		}
+
+		public unowned PairingParamsBuilder add_proof (Bytes proof) {
+			return add_blob (PROOF, proof);
+		}
+
+		public unowned PairingParamsBuilder add_encrypted_data (Bytes bytes) {
+			return add_blob (ENCRYPTED_DATA, bytes);
+		}
+
+		public unowned PairingParamsBuilder add_state (uint8 state) {
+			begin_param (STATE, 1)
+				.append_uint8 (state);
+
+			return this;
+		}
+
+		public unowned PairingParamsBuilder add_signature (Bytes signature) {
+			return add_blob (SIGNATURE, signature);
+		}
+
+		public unowned PairingParamsBuilder add_info (Bytes info) {
+			return add_blob (INFO, info);
+		}
+
+		private unowned PairingParamsBuilder add_blob (PairingParamType type, Bytes blob) {
+			unowned uint8[] data = blob.get_data ();
+
+			uint cursor = 0;
+			do {
+				uint n = uint.min (data.length - cursor, uint8.MAX);
+				begin_param (type, n)
+					.append_data (data[cursor:cursor + n]);
+				cursor += n;
+			} while (cursor != data.length);
+
+			return this;
+		}
+
+		private unowned BufferBuilder begin_param (PairingParamType type, size_t size) {
+			return builder
+				.append_uint8 (type)
+				.append_uint8 ((uint8) size);
+		}
+
+		public Bytes build () {
+			return builder.build ();
+		}
+	}
+
+	private class PairingParamsParser {
+		private Buffer buf;
+		private size_t cursor = 0;
+		private EnumClass param_type_class;
+
+		public static Variant parse (uint8[] data) throws Error {
+			var parser = new PairingParamsParser (new Bytes.static (data));
+			return parser.read_params ();
+		}
+
+		private PairingParamsParser (Bytes bytes) {
+			this.buf = new Buffer (bytes, LITTLE_ENDIAN);
+			this.param_type_class = (EnumClass) typeof (PairingParamType).class_ref ();
+		}
+
+		private Variant read_params () throws Error {
+			var byte_array = new VariantType.array (VariantType.BYTE);
+
+			var parameters = new Gee.HashMap<string, Variant> ();
+			size_t size = buf.bytes.get_size ();
+			while (cursor != size) {
+				var raw_type = read_raw_uint8 ();
+				unowned EnumValue? type_enum_val = param_type_class.get_value (raw_type);
+				if (type_enum_val == null)
+					throw new Error.INVALID_ARGUMENT ("Unsupported pairing parameter type (0x%x)", raw_type);
+				var type = (PairingParamType) raw_type;
+				unowned string key = type_enum_val.value_nick;
+
+				var val_size = read_raw_uint8 ();
+				Bytes val_bytes = read_raw_bytes (val_size);
+
+				Variant val;
+				switch (type) {
+					case STATE:
+					case ERROR:
+						if (val_bytes.length != 1) {
+							throw new Error.INVALID_ARGUMENT ("Invalid value for '%s': length=%d",
+								key, val_bytes.length);
+						}
+						val = new Variant.byte (val_bytes[0]);
+						break;
+					case RETRY_DELAY: {
+						uint16 delay;
+						switch (val_bytes.length) {
+							case 1:
+								delay = val_bytes[0];
+								break;
+							case 2:
+								delay = new Buffer (val_bytes, LITTLE_ENDIAN).read_uint16 (0);
+								break;
+							default:
+								throw new Error.INVALID_ARGUMENT ("Invalid value for 'retry-delay'");
+						}
+						val = new Variant.uint16 (delay);
+						break;
+					}
+					default: {
+						var val_bytes_copy = new Bytes (val_bytes.get_data ());
+						val = Variant.new_from_data (byte_array, val_bytes_copy.get_data (), true, val_bytes_copy);
+						break;
+					}
+				}
+
+				Variant? existing_val = parameters[key];
+				if (existing_val != null) {
+					if (!existing_val.is_of_type (byte_array))
+						throw new Error.INVALID_ARGUMENT ("Unable to merge '%s' keys: unsupported type", key);
+					Bytes part1 = existing_val.get_data_as_bytes ();
+					Bytes part2 = val.get_data_as_bytes ();
+					var combined = new ByteArray.sized ((uint) (part1.get_size () + part2.get_size ()));
+					combined.append (part1.get_data ());
+					combined.append (part2.get_data ());
+					val = Variant.new_from_data (byte_array, combined.data, true, (owned) combined);
+				}
+
+				parameters[key] = val;
+			}
+
+			var builder = new VariantBuilder (VariantType.VARDICT);
+			foreach (var e in parameters.entries)
+				builder.add ("{sv}", e.key, e.value);
+			return builder.end ();
+		}
+
+		private uint8 read_raw_uint8 () throws Error {
+			check_available (sizeof (uint8));
+			var result = buf.read_uint8 (cursor);
+			cursor += sizeof (uint8);
+			return result;
+		}
+
+		private Bytes read_raw_bytes (size_t n) throws Error {
+			check_available (n);
+			Bytes result = buf.bytes[cursor:cursor + n];
+			cursor += n;
+			return result;
+		}
+
+		private void check_available (size_t required) throws Error {
+			size_t available = buf.bytes.get_size () - cursor;
+			if (available < required)
+				throw new Error.INVALID_ARGUMENT ("Invalid pairing parameters: truncated");
+		}
+	}
+
+	private enum PairingParamType {
+		METHOD,
+		IDENTIFIER,
+		SALT,
+		PUBLIC_KEY,
+		PROOF,
+		ENCRYPTED_DATA,
+		STATE,
+		ERROR,
+		RETRY_DELAY /* = 8 */,
+		SIGNATURE = 10,
+		INFO = 17,
+	}
+
+	public class OpackBuilder {
+		protected BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
+		private Gee.Deque<Scope> scopes = new Gee.ArrayQueue<Scope> ();
+
+		public OpackBuilder () {
+			push_scope (new Scope (ROOT));
+		}
+
+		public unowned OpackBuilder begin_dictionary () {
+			begin_value ();
+
+			size_t type_offset = builder.offset;
+			builder.append_uint8 (0x00);
+
+			push_scope (new CollectionScope (type_offset));
+
+			return this;
+		}
+
+		public unowned OpackBuilder set_member_name (string name) {
+			return add_string_value (name);
+		}
+
+		public unowned OpackBuilder end_dictionary () {
+			CollectionScope scope = pop_scope ();
+
+			size_t n = scope.num_values / 2;
+			if (n < 0xf) {
+				builder.write_uint8 (scope.type_offset, 0xe0 | n);
+			} else {
+				builder
+					.write_uint8 (scope.type_offset, 0xef)
+					.append_uint8 (0x03);
+			}
+
+			return this;
+		}
+
+		public unowned OpackBuilder add_string_value (string val) {
+			begin_value ();
+
+			size_t len = val.length;
+
+			if (len > uint32.MAX) {
+				builder
+					.append_uint8 (0x6f)
+					.append_string (val, StringTerminator.NUL);
+
+				return this;
+			}
+
+			if (len <= 0x20)
+				builder.append_uint8 ((uint8) (0x40 + len));
+			else if (len <= uint8.MAX)
+				builder.append_uint8 (0x61).append_uint8 ((uint8) len);
+			else if (len <= uint16.MAX)
+				builder.append_uint8 (0x62).append_uint16 ((uint16) len);
+			else if (len <= 0xffffff)
+				builder.append_uint8 (0x63).append_uint8 ((uint8) (len & 0xff)).append_uint16 ((uint16) (len >> 8));
+			else
+				builder.append_uint8 (0x64).append_uint32 ((uint32) len);
+
+			builder.append_string (val, StringTerminator.NONE);
+
+			return this;
+		}
+
+		public unowned OpackBuilder add_data_value (Bytes val) {
+			begin_value ();
+
+			size_t size = val.get_size ();
+			if (size <= 0x20)
+				builder.append_uint8 ((uint8) (0x70 + size));
+			else if (size <= uint8.MAX)
+				builder.append_uint8 (0x91).append_uint8 ((uint8) size);
+			else if (size <= uint16.MAX)
+				builder.append_uint8 (0x92).append_uint16 ((uint16) size);
+			else if (size <= 0xffffff)
+				builder.append_uint8 (0x93).append_uint8 ((uint8) (size & 0xff)).append_uint16 ((uint16) (size >> 8));
+			else
+				builder.append_uint8 (0x94).append_uint32 ((uint32) size);
+
+			builder.append_bytes (val);
+
+			return this;
+		}
+
+		private unowned OpackBuilder begin_value () {
+			peek_scope ().num_values++;
+			return this;
+		}
+
+		public Bytes build () {
+			return builder.build ();
+		}
+
+		private void push_scope (Scope scope) {
+			scopes.offer_tail (scope);
+		}
+
+		private Scope peek_scope () {
+			return scopes.peek_tail ();
+		}
+
+		private T pop_scope<T> () {
+			return (T) scopes.poll_tail ();
+		}
+
+		private class Scope {
+			public Kind kind;
+			public size_t num_values = 0;
+
+			public enum Kind {
+				ROOT,
+				COLLECTION,
+			}
+
+			public Scope (Kind kind) {
+				this.kind = kind;
+			}
+		}
+
+		private class CollectionScope : Scope {
+			public size_t type_offset;
+
+			public CollectionScope (size_t type_offset) {
+				base (COLLECTION);
+				this.type_offset = type_offset;
+			}
+		}
+	}
+
+	public sealed class TunnelConnection : Object, AsyncInitable {
+		public InetSocketAddress address {
+			get;
+			construct;
+		}
+
+		public TunnelKey local_keypair {
+			get;
+			construct;
+		}
+
+		public TunnelKey remote_pubkey {
+			get;
+			construct;
+		}
+
+		public uint16 remote_rsd_port {
+			get {
+				return _remote_rsd_port;
+			}
+		}
+
+		private Promise<bool> established = new Promise<bool> ();
+
+		private Stream? control_stream;
+		private string? local_ipv6_address;
+		private string? local_ipv6_netmask;
+		private string? remote_ipv6_address;
+		private uint16 _remote_rsd_port;
+		private uint16 mtu;
+		private bool netif_added = false;
+		private LWIP.NetworkInterface netif;
+
+		private Gee.Map<int64?, Stream> streams = new Gee.HashMap<int64?, Stream> (Numeric.int64_hash, Numeric.int64_equal);
+		private Gee.Queue<Bytes> rx_datagrams = new Gee.ArrayQueue<Bytes> ();
+		private Gee.Queue<Bytes> tx_datagrams = new Gee.ArrayQueue<Bytes> ();
+
+		private SocketSource? rx_source;
+		private uint8[] rx_buf = new uint8[MAX_UDP_PAYLOAD_SIZE];
+		private uint8[] tx_buf = new uint8[MAX_UDP_PAYLOAD_SIZE];
+		private Source? write_idle;
+		private Source? expiry_timer;
+
+		private Socket socket;
+		private uint8[] raw_local_address;
+		private NGTcp2.Connection? connection;
+		private NGTcp2.Crypto.ConnectionRef connection_ref;
+		private OpenSSL.SSLContext ssl_ctx;
+		private OpenSSL.SSL ssl;
+
+		private MainContext main_context;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private const string ALPN = "\x1bRemotePairingTunnelProtocol";
+		private const size_t PREFERRED_MTU = 1420;
+		private const size_t MAX_UDP_PAYLOAD_SIZE = 1452;
+		private const size_t MAX_QUIC_DATAGRAM_SIZE = 14000;
+		private const NGTcp2.Duration KEEP_ALIVE_TIMEOUT = 15ULL * NGTcp2.SECONDS;
+
+		public static async TunnelConnection open (InetSocketAddress address, TunnelKey local_keypair, TunnelKey remote_pubkey,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var connection = new TunnelConnection (address, local_keypair, remote_pubkey);
+
+			try {
+				yield connection.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return connection;
+		}
+
+		private TunnelConnection (InetSocketAddress address, TunnelKey local_keypair, TunnelKey remote_pubkey) {
+			Object (
+				address: address,
+				local_keypair: local_keypair,
+				remote_pubkey: remote_pubkey
+			);
+		}
+
+		static construct {
+			LWIP.Runtime.init (() => {});
+		}
+
+		construct {
+			connection_ref.get_conn = conn_ref => {
+				TunnelConnection * self = conn_ref.user_data;
+				return self->connection;
+			};
+			connection_ref.user_data = this;
+
+			ssl_ctx = new OpenSSL.SSLContext (OpenSSL.SSLMethod.tls_client ());
+			NGTcp2.Crypto.Quictls.configure_client_context (ssl_ctx);
+			ssl_ctx.use_certificate (make_certificate (local_keypair.handle));
+			ssl_ctx.use_private_key (local_keypair.handle);
+
+			ssl = new OpenSSL.SSL (ssl_ctx);
+			ssl.set_app_data (&connection_ref);
+			ssl.set_connect_state ();
+			ssl.set_alpn_protos (ALPN.data);
+			ssl.set_quic_transport_version (OpenSSL.TLSExtensionType.quic_transport_parameters);
+
+			main_context = MainContext.ref_thread_default ();
+		}
+
+		public override void dispose () {
+			cancel ();
+
+			base.dispose ();
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			uint8[] raw_remote_address;
+			try {
+				socket = new Socket (IPV6, DATAGRAM, UDP);
+				socket.connect (address, cancellable);
+
+				raw_local_address = address_to_native (socket.get_local_address ());
+				raw_remote_address = address_to_native (address);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			var dcid = make_connection_id (NGTcp2.MIN_INITIAL_DCIDLEN);
+			var scid = make_connection_id (NGTcp2.MIN_INITIAL_DCIDLEN);
+
+			var path = NGTcp2.Path () {
+				local = NGTcp2.Address () { addr = raw_local_address },
+				remote = NGTcp2.Address () { addr = raw_remote_address },
+			};
+
+			var callbacks = NGTcp2.Callbacks () {
+				get_new_connection_id = on_get_new_connection_id,
+				extend_max_local_streams_bidi = (conn, max_streams, user_data) => {
+					TunnelConnection * self = user_data;
+					return self->on_extend_max_local_streams_bidi (max_streams);
+				},
+				stream_close = (conn, flags, stream_id, app_error_code, user_data, stream_user_data) => {
+					TunnelConnection * self = user_data;
+					return self->on_stream_close (flags, stream_id, app_error_code);
+				},
+				recv_stream_data = (conn, flags, stream_id, offset, data, user_data, stream_user_data) => {
+					TunnelConnection * self = user_data;
+					return self->on_recv_stream_data (flags, stream_id, offset, data);
+				},
+				recv_datagram = (conn, flags, data, user_data) => {
+					TunnelConnection * self = user_data;
+					return self->on_recv_datagram (flags, data);
+				},
+				rand = on_rand,
+				client_initial = NGTcp2.Crypto.client_initial_cb,
+				recv_crypto_data = NGTcp2.Crypto.recv_crypto_data_cb,
+				encrypt = NGTcp2.Crypto.encrypt_cb,
+				decrypt = NGTcp2.Crypto.decrypt_cb,
+				hp_mask = NGTcp2.Crypto.hp_mask_cb,
+				recv_retry = NGTcp2.Crypto.recv_retry_cb,
+				update_key = NGTcp2.Crypto.update_key_cb,
+				delete_crypto_aead_ctx = NGTcp2.Crypto.delete_crypto_aead_ctx_cb,
+				delete_crypto_cipher_ctx = NGTcp2.Crypto.delete_crypto_cipher_ctx_cb,
+				get_path_challenge_data = NGTcp2.Crypto.get_path_challenge_data_cb,
+				version_negotiation = NGTcp2.Crypto.version_negotiation_cb,
+			};
+
+			var settings = NGTcp2.Settings.make_default ();
+			settings.initial_ts = make_timestamp ();
+			settings.max_tx_udp_payload_size = MAX_UDP_PAYLOAD_SIZE;
+			settings.handshake_timeout = 5ULL * NGTcp2.SECONDS;
+
+			var transport_params = NGTcp2.TransportParams.make_default ();
+			transport_params.max_datagram_frame_size = MAX_QUIC_DATAGRAM_SIZE;
+			transport_params.max_idle_timeout = 30ULL * NGTcp2.SECONDS;
+			transport_params.initial_max_data = 1048576;
+			transport_params.initial_max_stream_data_bidi_local = 1048576;
+
+			NGTcp2.Connection.make_client (out connection, dcid, scid, path, NGTcp2.ProtocolVersion.V1, callbacks,
+				settings, transport_params, null, this);
+			connection.set_tls_native_handle (ssl);
+			connection.set_keep_alive_timeout (KEEP_ALIVE_TIMEOUT);
+
+			rx_source = socket.create_source (IOCondition.IN, io_cancellable);
+			rx_source.set_callback (on_socket_readable);
+			rx_source.attach (main_context);
+
+			process_pending_writes ();
+
+			yield established.future.wait_async (cancellable);
+
+			return true;
+		}
+
+		private void on_control_stream_opened () {
+			var zeroed_padding_packet = new uint8[1024];
+			send_datagram (new Bytes.take ((owned) zeroed_padding_packet));
+
+			send_request (Json.to_string (
+				new Json.Builder ()
+				.begin_object ()
+					.set_member_name ("type")
+					.add_string_value ("clientHandshakeRequest")
+					.set_member_name ("mtu")
+					.add_int_value (PREFERRED_MTU)
+				.end_object ()
+				.get_root (), false));
+		}
+
+		private void on_control_stream_response (string json) throws Error {
+			Json.Reader reader;
+			try {
+				reader = new Json.Reader (Json.from_string (json));
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("Invalid response JSON");
+			}
+
+			reader.read_member ("clientParameters");
+
+			reader.read_member ("address");
+			string? address = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("netmask");
+			string? netmask = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("mtu");
+			int64 raw_mtu = reader.get_int_value ();
+			reader.end_member ();
+
+			reader.end_member ();
+
+			reader.read_member ("serverAddress");
+			string? server_address = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("serverRSDPort");
+			int64 server_rsd_port = reader.get_int_value ();
+			reader.end_member ();
+
+			GLib.Error? error = reader.get_error ();
+			if (error != null)
+				throw new Error.PROTOCOL ("Invalid response: %s", error.message);
+
+			local_ipv6_address = address;
+			local_ipv6_netmask = netmask;
+			remote_ipv6_address = server_address;
+			_remote_rsd_port = (uint16) server_rsd_port;
+			mtu = (uint16) raw_mtu;
+
+			LWIP.Runtime.schedule (setup_network_interface);
+			netif_added = true;
+
+			established.resolve (true);
+		}
+
+		private void setup_network_interface () {
+			LWIP.NetworkInterface.add_noaddr (ref netif, this, on_netif_init);
+			netif.set_up ();
+		}
+
+		private void ensure_network_interface_removed () {
+			if (!netif_added)
+				return;
+			netif_added = false;
+
+			ref ();
+			LWIP.Runtime.schedule (remove_network_interface);
+		}
+
+		private void remove_network_interface () {
+			netif.remove ();
+
+			unref ();
+		}
+
+		public async IOStream open_connection (uint16 port, Cancellable? cancellable = null) throws Error, IOError {
+			return yield TcpConnection.open (this, remote_ipv6_address, port, cancellable);
+		}
+
+		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface netif) {
+			TunnelConnection * self = netif.state;
+
+			netif.mtu = self->mtu;
+			netif.output_ip6 = on_netif_output_ip6;
+
+			int8 chosen_index = -1;
+			netif.add_ip6_address (LWIP.IP6Address.parse (self->local_ipv6_address), &chosen_index);
+			netif.ip6_addr_set_state (chosen_index, PREFERRED);
+
+			return OK;
+		}
+
+		private static LWIP.ErrorCode on_netif_output_ip6 (LWIP.NetworkInterface netif, LWIP.PacketBuffer pbuf,
+				LWIP.IP6Address address) {
+			TunnelConnection * self = netif.state;
+
+			var buffer = new uint8[pbuf.tot_len];
+			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
+			var datagram = new Bytes (packet[:pbuf.tot_len]);
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				self->send_datagram (datagram);
+				return Source.REMOVE;
+			});
+			source.attach (self->main_context);
+
+			return OK;
+		}
+
+		public void cancel () {
+			connection = null;
+
+			io_cancellable.cancel ();
+
+			if (rx_source != null) {
+				rx_source.destroy ();
+				rx_source = null;
+			}
+
+			if (write_idle != null) {
+				write_idle.destroy ();
+				write_idle = null;
+			}
+
+			if (expiry_timer != null) {
+				expiry_timer.destroy ();
+				expiry_timer = null;
+			}
+
+			ensure_network_interface_removed ();
+		}
+
+		private void send_request (string json) {
+			unowned uint8[] body = json.data;
+			Bytes request = new BufferBuilder (BIG_ENDIAN)
+				.append_string ("CDTunnel", StringTerminator.NONE)
+				.append_uint16 ((uint16) body.length)
+				.append_data (body)
+				.build ();
+			control_stream.send (request.get_data ());
+		}
+
+		private void on_stream_data_available (Stream stream, uint8[] data, out size_t consumed) {
+			if (stream != control_stream || established.future.ready) {
+				consumed = data.length;
+				return;
+			}
+
+			consumed = 0;
+
+			if (data.length < 12)
+				return;
+
+			var buf = new Buffer (new Bytes.static (data), BIG_ENDIAN);
+
+			try {
+				string magic = buf.read_fixed_string (0, 8);
+				if (magic != "CDTunnel")
+					throw new Error.PROTOCOL ("Invalid magic");
+
+				size_t body_size = buf.read_uint16 (8);
+				size_t body_available = data.length - 10;
+				if (body_available < body_size)
+					return;
+
+				var raw_json = new uint8[body_size + 1];
+				Memory.copy (raw_json, data + 10, body_size);
+
+				unowned string json = (string) raw_json;
+				if (!json.validate ())
+					throw new Error.PROTOCOL ("Invalid UTF-8");
+
+				on_control_stream_response (json);
+
+				consumed = 10 + body_size;
+			} catch (Error e) {
+				if (!established.future.ready)
+					established.reject (e);
+			}
+		}
+
+		private void send_datagram (Bytes datagram) {
+			if (connection == null)
+				return;
+			tx_datagrams.offer (datagram);
+			process_pending_writes ();
+		}
+
+		private bool on_socket_readable (DatagramBased datagram_based, IOCondition condition) {
+			try {
+				SocketAddress remote_address;
+				ssize_t n = socket.receive_from (out remote_address, rx_buf, io_cancellable);
+
+				uint8[] raw_remote_address = address_to_native (remote_address);
+
+				var path = NGTcp2.Path () {
+					local = NGTcp2.Address () { addr = raw_local_address },
+					remote = NGTcp2.Address () { addr = raw_remote_address },
+				};
+
+				unowned uint8[] data = rx_buf[:n];
+
+				connection.read_packet (path, null, data, make_timestamp ());
+			} catch (GLib.Error e) {
+				return Source.REMOVE;
+			} finally {
+				process_pending_writes ();
+			}
+
+			return Source.CONTINUE;
+		}
+
+		private void process_pending_writes () {
+			if (write_idle != null)
+				return;
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				write_idle = null;
+				do_process_pending_writes ();
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
+			write_idle = source;
+		}
+
+		private void do_process_pending_writes () {
+			var ts = make_timestamp ();
+
+			var pi = NGTcp2.PacketInfo ();
+			Gee.Iterator<Stream> stream_iter = streams.values.iterator ();
+			while (true) {
+				ssize_t n = -1;
+
+				Bytes? datagram = tx_datagrams.peek ();
+				if (datagram != null) {
+					int accepted = -1;
+					n = connection.write_datagram (null, null, tx_buf, &accepted, NGTcp2.WriteStreamFlags.MORE, 0,
+						datagram.get_data (), ts);
+					if (accepted > 0)
+						tx_datagrams.poll ();
+				} else {
+					Stream? stream = null;
+					unowned uint8[]? data = null;
+
+					while (stream == null && stream_iter.next ()) {
+						Stream s = stream_iter.get ();
+						uint64 len = s.tx_buf.len;
+						uint64 limit = 0;
+						if (len != 0 && (limit = connection.get_max_stream_data_left (s.id)) != 0) {
+							stream = s;
+							data = s.tx_buf.data[:(int) uint64.min (len, limit)];
+							break;
+						}
+					}
+
+					ssize_t datalen = 0;
+					n = connection.write_stream (null, &pi, tx_buf, &datalen, NGTcp2.WriteStreamFlags.MORE,
+						(stream != null) ? stream.id : -1, data, ts);
+					if (datalen > 0)
+						stream.tx_buf.remove_range (0, (uint) datalen);
+				}
+
+				if (n == 0)
+					break;
+				if (n == NGTcp2.ErrorCode.WRITE_MORE)
+					continue;
+				if (n < 0)
+					break;
+
+				try {
+					socket.send (tx_buf[:n], io_cancellable);
+				} catch (GLib.Error e) {
+					continue;
+				}
+			}
+
+			if (expiry_timer != null) {
+				expiry_timer.destroy ();
+				expiry_timer = null;
+			}
+
+			NGTcp2.Timestamp expiry = connection.get_expiry ();
+			if (expiry == uint64.MAX)
+				return;
+
+			NGTcp2.Timestamp now = make_timestamp ();
+
+			uint delta_msec;
+			if (expiry > now) {
+				uint64 delta_nsec = expiry - now;
+				delta_msec = (uint) (delta_nsec / 1000000ULL);
+			} else {
+				delta_msec = 1;
+			}
+
+			var source = new TimeoutSource (delta_msec);
+			source.set_callback (on_expiry);
+			source.attach (main_context);
+			expiry_timer = source;
+		}
+
+		private bool on_expiry () {
+			int res = connection.handle_expiry (make_timestamp ());
+			if (res != 0) {
+				cancel ();
+				return Source.REMOVE;
+			}
+
+			process_pending_writes ();
+
+			return Source.REMOVE;
+		}
+
+		private static int on_get_new_connection_id (NGTcp2.Connection conn, out NGTcp2.ConnectionID cid, uint8[] token,
+				size_t cidlen, void * user_data) {
+			cid = make_connection_id (cidlen);
+
+			OpenSSL.Rng.generate (token[:NGTcp2.STATELESS_RESET_TOKENLEN]);
+
+			return 0;
+		}
+
+		private int on_extend_max_local_streams_bidi (uint64 max_streams) {
+			if (control_stream == null) {
+				control_stream = open_bidi_stream ();
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					on_control_stream_opened ();
+					return Source.REMOVE;
+				});
+				source.attach (main_context);
+			}
+
+			return 0;
+		}
+
+		private int on_stream_close (uint32 flags, int64 stream_id, uint64 app_error_code) {
+			return 0;
+		}
+
+		private int on_recv_stream_data (uint32 flags, int64 stream_id, uint64 offset, uint8[] data) {
+			Stream? stream = streams[stream_id];
+			if (stream != null)
+				stream.on_recv (data);
+
+			return 0;
+		}
+
+		private int on_recv_datagram (uint32 flags, uint8[] data) {
+			if (netif_added) {
+				lock (rx_datagrams)
+					rx_datagrams.offer (new Bytes (data));
+				LWIP.Runtime.schedule (process_next_rx_datagram);
+			}
+
+			return 0;
+		}
+
+		private void process_next_rx_datagram () {
+			Bytes datagram;
+			lock (rx_datagrams)
+				datagram = rx_datagrams.poll ();
+
+			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
+			pbuf.take (datagram.get_data ());
+
+			if (netif.input (pbuf, netif) == OK)
+				*((void **) &pbuf) = null;
+		}
+
+		private static void on_rand (uint8[] dest, NGTcp2.RNGContext rand_ctx) {
+			OpenSSL.Rng.generate (dest);
+		}
+
+		private static uint8[] address_to_native (SocketAddress address) throws GLib.Error {
+			var size = address.get_native_size ();
+			var buf = new uint8[size];
+			address.to_native (buf, size);
+			return buf;
+		}
+
+		private static NGTcp2.ConnectionID make_connection_id (size_t len) {
+			var cid = NGTcp2.ConnectionID () {
+				datalen = len,
+			};
+
+			NGTcp2.ConnectionID * mutable_cid = &cid;
+			OpenSSL.Rng.generate (mutable_cid->data[:len]);
+
+			return cid;
+		}
+
+		private static NGTcp2.Timestamp make_timestamp () {
+			return get_monotonic_time () * NGTcp2.MICROSECONDS;
+		}
+
+		private static X509 make_certificate (Key keypair) {
+			var cert = new X509 ();
+			cert.get_serial_number ().set_uint64 (1);
+			cert.get_not_before ().adjust (0);
+			cert.get_not_after ().adjust (5260000);
+
+			unowned X509.Name name = cert.get_subject_name ();
+			cert.set_issuer_name (name);
+			cert.set_pubkey (keypair);
+
+			var mc = new MessageDigestContext ();
+			mc.digest_sign_init (null, null, null, keypair);
+			cert.sign_ctx (mc);
+
+			return cert;
+		}
+
+		private Stream open_bidi_stream () {
+			int64 id;
+			connection.open_bidi_stream (out id, null);
+
+			var stream = new Stream (this, id);
+			streams[id] = stream;
+
+			return stream;
+		}
+
+		private class Stream {
+			public int64 id;
+
+			private weak TunnelConnection parent;
+
+			public ByteArray rx_buf = new ByteArray.sized (256);
+			public ByteArray tx_buf = new ByteArray.sized (128);
+
+			public Stream (TunnelConnection parent, int64 id) {
+				this.parent = parent;
+				this.id = id;
+			}
+
+			public void send (uint8[] data) {
+				tx_buf.append (data);
+				parent.process_pending_writes ();
+			}
+
+			public void on_recv (uint8[] data) {
+				rx_buf.append (data);
+
+				size_t consumed;
+				parent.on_stream_data_available (this, rx_buf.data, out consumed);
+
+				if (consumed != 0)
+					rx_buf.remove_range (0, (uint) consumed);
+			}
+		}
+
+		private class TcpConnection : IOStream, AsyncInitable {
+			public TunnelConnection tunnel_connection {
+				get;
+				construct;
+			}
+
+			public string address {
+				get;
+				construct;
+			}
+
+			public uint16 port {
+				get;
+				construct;
+			}
+
+			public State state {
+				get {
+					return _state;
+				}
+			}
+
+			public override InputStream input_stream {
+				get {
+					return _input_stream;
+				}
+			}
+
+			public override OutputStream output_stream {
+				get {
+					return _output_stream;
+				}
+			}
+
+			public IOCondition pending_io {
+				get {
+					lock (state)
+						return events;
+				}
+			}
+
+			private Promise<bool> established = new Promise<bool> ();
+
+			private State _state = CREATED;
+			private TcpInputStream _input_stream;
+			private TcpOutputStream _output_stream;
+
+			private unowned LWIP.TcpPcb? pcb;
+			private IOCondition events = 0;
+			private ByteArray rx_buf = new ByteArray.sized (64 * 1024);
+			private ByteArray tx_buf = new ByteArray.sized (64 * 1024);
+			private size_t rx_bytes_to_acknowledge = 0;
+			private size_t tx_space_available = 0;
+
+			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
+
+			private MainContext main_context;
+
+			public enum State {
+				CREATED,
+				OPENING,
+				OPENED,
+				CLOSED
+			}
+
+			public static async TcpConnection open (TunnelConnection tunnel_connection, string address, uint16 port,
+					Cancellable? cancellable) throws Error, IOError {
+				var connection = new TcpConnection (tunnel_connection, address, port);
+
+				try {
+					yield connection.init_async (Priority.DEFAULT, cancellable);
+				} catch (GLib.Error e) {
+					throw_api_error (e);
+				}
+
+				return connection;
+			}
+
+			private TcpConnection (TunnelConnection tunnel_connection, string address, uint16 port) {
+				Object (
+					tunnel_connection: tunnel_connection,
+					address: address,
+					port: port
+				);
+			}
+
+			construct {
+				_input_stream = new TcpInputStream (this);
+				_output_stream = new TcpOutputStream (this);
+
+				main_context = MainContext.ref_thread_default ();
+			}
+
+			public override void dispose () {
+				stop ();
+
+				base.dispose ();
+			}
+
+			private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+				_state = OPENING;
+				LWIP.Runtime.schedule (do_start);
+
+				try {
+					yield established.future.wait_async (cancellable);
+				} catch (GLib.Error e) {
+					stop ();
+					throw_api_error (e);
+				}
+
+				return true;
+			}
+
+			private void do_start () {
+				pcb = LWIP.TcpPcb.make (V6);
+				pcb.set_user_data (this);
+				pcb.set_recv_callback ((user_data, pcb, pbuf, err) => {
+					TcpConnection * self = user_data;
+					if (self != null)
+						self->on_recv ((owned) pbuf, err);
+					return OK;
+				});
+				pcb.set_sent_callback ((user_data, pcb, len) => {
+					TcpConnection * self = user_data;
+					if (self != null)
+						self->on_sent (len);
+					return OK;
+				});
+				pcb.set_error_callback ((user_data, err) => {
+					TcpConnection * self = user_data;
+					if (self != null)
+						self->on_error (err);
+				});
+				pcb.nagle_disable ();
+				pcb.bind_netif (tunnel_connection.netif);
+
+				pcb.connect (LWIP.IP6Address.parse (address), port, (user_data, pcb, err) => {
+					TcpConnection * self = user_data;
+					if (self != null)
+						self->on_connect ();
+					return OK;
+				});
+			}
+
+			private void stop () {
+				if (_state == CLOSED)
+					return;
+
+				if (state != CREATED) {
+					ref ();
+					LWIP.Runtime.schedule (do_stop);
+				}
+
+				_state = CLOSED;
+			}
+
+			private void do_stop () {
+				if (pcb != null) {
+					pcb.set_user_data (null);
+					if (pcb.close () != OK)
+						pcb.abort ();
+					pcb = null;
+				}
+
+				unref ();
+			}
+
+			private void on_connect () {
+				lock (state)
+					tx_space_available = pcb.query_available_send_buffer_space ();
+				update_events ();
+
+				schedule_on_frida_thread (() => {
+					_state = OPENED;
+
+					if (!established.future.ready)
+						established.resolve (true);
+
+					return Source.REMOVE;
+				});
+			}
+
+			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.ErrorCode err) {
+				if (pbuf == null) {
+					schedule_on_frida_thread (() => {
+						_state = CLOSED;
+						update_events ();
+						return Source.REMOVE;
+					});
+					return;
+				}
+
+				var buffer = new uint8[pbuf.tot_len];
+				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
+				lock (state)
+					rx_buf.append (chunk[:pbuf.tot_len]);
+				update_events ();
+			}
+
+			private void on_sent (uint16 len) {
+				lock (state)
+					tx_space_available = pcb.query_available_send_buffer_space () - tx_buf.len;
+				update_events ();
+			}
+
+			private void on_error (LWIP.ErrorCode err) {
+				schedule_on_frida_thread (() => {
+					_state = CLOSED;
+					update_events ();
+
+					if (!established.future.ready)
+						established.reject (new Error.TRANSPORT ("%s", strerror (err.to_errno ())));
+
+					return Source.REMOVE;
+				});
+			}
+
+			public override bool close (GLib.Cancellable? cancellable) throws IOError {
+				stop ();
+				return true;
+			}
+
+			public override async bool close_async (int io_priority, GLib.Cancellable? cancellable) throws IOError {
+				stop ();
+				return true;
+			}
+
+			public void shutdown_rx () throws IOError {
+				LWIP.Runtime.schedule (do_shutdown_rx);
+			}
+
+			private void do_shutdown_rx () {
+				if (pcb == null)
+					return;
+				pcb.shutdown (true, false);
+			}
+
+			public void shutdown_tx () throws IOError {
+				LWIP.Runtime.schedule (do_shutdown_tx);
+			}
+
+			private void do_shutdown_tx () {
+				if (pcb == null)
+					return;
+				pcb.shutdown (false, true);
+			}
+
+			public ssize_t recv (uint8[] buffer) throws IOError {
+				ssize_t n;
+				lock (state) {
+					n = ssize_t.min (buffer.length, rx_buf.len);
+					if (n != 0) {
+						Memory.copy (buffer, rx_buf.data, n);
+						rx_buf.remove_range (0, (uint) n);
+						rx_bytes_to_acknowledge += n;
+					}
+				}
+				if (n == 0) {
+					if (_state == CLOSED)
+						return 0;
+					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+				}
+
+				update_events ();
+
+				LWIP.Runtime.schedule (do_acknowledge_rx_bytes);
+
+				return n;
+			}
+
+			private void do_acknowledge_rx_bytes () {
+				if (pcb == null)
+					return;
+
+				size_t n;
+				lock (state) {
+					n = rx_bytes_to_acknowledge;
+					rx_bytes_to_acknowledge = 0;
+				}
+
+				size_t remainder = n;
+				while (remainder != 0) {
+					uint16 chunk = (uint16) size_t.min (remainder, uint16.MAX);
+					pcb.notify_received (chunk);
+					remainder -= chunk;
+				}
+			}
+
+			public ssize_t send (uint8[] buffer) throws IOError {
+				ssize_t n;
+				lock (state) {
+					n = ssize_t.min (buffer.length, (ssize_t) tx_space_available);
+					if (n != 0) {
+						tx_buf.append (buffer[:n]);
+						tx_space_available -= n;
+					}
+				}
+				if (n == 0)
+					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+
+				update_events ();
+
+				LWIP.Runtime.schedule (do_send);
+
+				return n;
+			}
+
+			private void do_send () {
+				if (pcb == null)
+					return;
+
+				size_t available_space = pcb.query_available_send_buffer_space ();
+
+				uint8[]? data = null;
+				lock (state) {
+					size_t n = size_t.min (tx_buf.len, available_space);
+					if (n != 0) {
+						data = tx_buf.data[:n];
+						tx_buf.remove_range (0, (uint) n);
+					}
+				}
+				if (data == null)
+					return;
+
+				pcb.write (data, COPY);
+				pcb.output ();
+
+				available_space = pcb.query_available_send_buffer_space ();
+				lock (state)
+					tx_space_available = available_space - tx_buf.len;
+				update_events ();
+			}
+
+			public void register_source (Source source, IOCondition condition) {
+				lock (state)
+					sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
+			}
+
+			public void unregister_source (Source source) {
+				lock (state)
+					sources.unset (source);
+			}
+
+			private void update_events () {
+				lock (state) {
+					IOCondition new_events = 0;
+
+					if (rx_buf.len != 0 || _state == CLOSED)
+						new_events |= IN;
+
+					if (tx_space_available != 0)
+						new_events |= OUT;
+
+					events = new_events;
+
+					foreach (var entry in sources.entries) {
+						unowned Source source = entry.key;
+						IOCondition c = entry.value;
+						if ((new_events & c) != 0)
+							source.set_ready_time (0);
+					}
+				}
+
+				notify_property ("pending-io");
+			}
+
+			private void schedule_on_frida_thread (owned SourceFunc function) {
+				var source = new IdleSource ();
+				source.set_callback ((owned) function);
+				source.attach (main_context);
+			}
+		}
+
+		private class TcpInputStream : InputStream, PollableInputStream {
+			public weak TcpConnection connection {
+				get;
+				construct;
+			}
+
+			public TcpInputStream (TcpConnection connection) {
+				Object (connection: connection);
+			}
+
+			public override bool close (Cancellable? cancellable) throws IOError {
+				connection.shutdown_rx ();
+				return true;
+			}
+
+			public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
+				return close (cancellable);
+			}
+
+			public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
+				if (!is_readable ()) {
+					bool done = false;
+					var mutex = Mutex ();
+					var cond = Cond ();
+
+					ulong io_handler = connection.notify["pending-io"].connect ((obj, pspec) => {
+						if (is_readable ()) {
+							mutex.lock ();
+							done = true;
+							cond.signal ();
+							mutex.unlock ();
+						}
+					});
+					ulong cancellation_handler = 0;
+					if (cancellable != null) {
+						cancellation_handler = cancellable.connect (() => {
+							mutex.lock ();
+							done = true;
+							cond.signal ();
+							mutex.unlock ();
+						});
+					}
+
+					mutex.lock ();
+					while (!done)
+						cond.wait (mutex);
+					mutex.unlock ();
+
+					if (cancellation_handler != 0)
+						cancellable.disconnect (cancellation_handler);
+					connection.disconnect (io_handler);
+
+					cancellable.set_error_if_cancelled ();
+				}
+
+				return connection.recv (buffer);
+			}
+
+			public bool can_poll () {
+				return true;
+			}
+
+			public bool is_readable () {
+				return (connection.pending_io & IOCondition.IN) != 0;
+			}
+
+			public PollableSource create_source (Cancellable? cancellable) {
+				return new PollableSource.full (this, new TcpIOSource (connection, IOCondition.IN), cancellable);
+			}
+
+			public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
+				return connection.recv (buffer);
+			}
+		}
+
+		private class TcpOutputStream : OutputStream, PollableOutputStream {
+			public weak TcpConnection connection {
+				get;
+				construct;
+			}
+
+			public TcpOutputStream (TcpConnection connection) {
+				Object (connection: connection);
+			}
+
+			public override bool close (Cancellable? cancellable) throws IOError {
+				connection.shutdown_tx ();
+				return true;
+			}
+
+			public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
+				return close (cancellable);
+			}
+
+			public override bool flush (GLib.Cancellable? cancellable) throws GLib.Error {
+				return true;
+			}
+
+			public override async bool flush_async (int io_priority, GLib.Cancellable? cancellable) throws GLib.Error {
+				return true;
+			}
+
+			public override ssize_t write (uint8[] buffer, Cancellable? cancellable) throws IOError {
+				assert_not_reached ();
+			}
+
+			public bool can_poll () {
+				return true;
+			}
+
+			public bool is_writable () {
+				return (connection.pending_io & IOCondition.OUT) != 0;
+			}
+
+			public PollableSource create_source (Cancellable? cancellable) {
+				return new PollableSource.full (this, new TcpIOSource (connection, IOCondition.OUT), cancellable);
+			}
+
+			public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
+				return connection.send (buffer);
+			}
+
+			public PollableReturn writev_nonblocking_fn (OutputVector[] vectors, out size_t bytes_written) throws GLib.Error {
+				assert_not_reached ();
+			}
+		}
+
+		private class TcpIOSource : Source {
+			public TcpConnection connection;
+			public IOCondition condition;
+
+			public TcpIOSource (TcpConnection connection, IOCondition condition) {
+				this.connection = connection;
+				this.condition = condition;
+
+				connection.register_source (this, condition);
+			}
+
+			~TcpIOSource () {
+				connection.unregister_source (this);
+			}
+
+			protected override bool prepare (out int timeout) {
+				timeout = -1;
+				return (connection.pending_io & condition) != 0;
+			}
+
+			protected override bool check () {
+				return (connection.pending_io & condition) != 0;
+			}
+
+			protected override bool dispatch (SourceFunc? callback) {
+				set_ready_time (-1);
+
+				if (callback == null)
+					return Source.REMOVE;
+
+				return callback ();
+			}
+
+			protected static bool closure_callback (Closure closure) {
+				var return_value = Value (typeof (bool));
+
+				closure.invoke (ref return_value, {});
+
+				return return_value.get_boolean ();
+			}
+		}
+	}
+
+	public sealed class TunnelKey {
+		public Key handle;
+
+		public TunnelKey (owned Key handle) {
+			this.handle = (owned) handle;
+		}
+	}
+
+	public class AppService : TrustedService {
+		public static async AppService open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
+			var service = new AppService (stream);
+
+			try {
+				yield service.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return service;
+		}
+
+		private AppService (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		public async Gee.List<ApplicationInfo> enumerate_applications (Cancellable? cancellable = null) throws Error, IOError {
+			Bytes input = new XpcObjectBuilder ()
+				.begin_dictionary ()
+					.set_member_name ("includeDefaultApps")
+					.add_bool_value (true)
+					.set_member_name ("includeRemovableApps")
+					.add_bool_value (true)
+					.set_member_name ("includeInternalApps")
+					.add_bool_value (true)
+					.set_member_name ("includeHiddenApps")
+					.add_bool_value (true)
+					.set_member_name ("includeAppClips")
+					.add_bool_value (true)
+				.end_dictionary ()
+				.build ();
+			var response = yield invoke ("com.apple.coredevice.feature.listapps", input, cancellable);
+
+			var applications = new Gee.ArrayList<ApplicationInfo> ();
+			uint n = response.count_elements ();
+			for (uint i = 0; i != n; i++) {
+				response.read_element (i);
+
+				string bundle_identifier = response
+					.read_member ("bundleIdentifier")
+					.get_string_value ();
+				response.end_member ();
+
+				string? bundle_version = null;
+				if (response.has_member ("bundleVersion")) {
+					bundle_version = response
+						.read_member ("bundleVersion")
+						.get_string_value ();
+					response.end_member ();
+				}
+
+				string name = response
+					.read_member ("name")
+					.get_string_value ();
+				response.end_member ();
+
+				string? version = null;
+				if (response.has_member ("version")) {
+					version = response
+						.read_member ("version")
+						.get_string_value ();
+					response.end_member ();
+				}
+
+				string path = response
+					.read_member ("path")
+					.get_string_value ();
+				response.end_member ();
+
+				bool is_first_party = response
+					.read_member ("isFirstParty")
+					.get_bool_value ();
+				response.end_member ();
+
+				bool is_developer_app = response
+					.read_member ("isDeveloperApp")
+					.get_bool_value ();
+				response.end_member ();
+
+				bool is_removable = response
+					.read_member ("isRemovable")
+					.get_bool_value ();
+				response.end_member ();
+
+				bool is_internal = response
+					.read_member ("isInternal")
+					.get_bool_value ();
+				response.end_member ();
+
+				bool is_hidden = response
+					.read_member ("isHidden")
+					.get_bool_value ();
+				response.end_member ();
+
+				bool is_app_clip = response
+					.read_member ("isAppClip")
+					.get_bool_value ();
+				response.end_member ();
+
+				applications.add (new ApplicationInfo () {
+					bundle_identifier = bundle_identifier,
+					bundle_version = bundle_version,
+					name = name,
+					version = version,
+					path = path,
+					is_first_party = is_first_party,
+					is_developer_app = is_developer_app,
+					is_removable = is_removable,
+					is_internal = is_internal,
+					is_hidden = is_hidden,
+					is_app_clip = is_app_clip,
+				});
+
+				response.end_element ();
+			}
+
+			return applications;
+		}
+
+		public async Gee.List<ProcessInfo> enumerate_processes (Cancellable? cancellable = null) throws Error, IOError {
+			var response = yield invoke ("com.apple.coredevice.feature.listprocesses", null, cancellable);
+
+			var processes = new Gee.ArrayList<ProcessInfo> ();
+			uint n = response
+				.read_member ("processTokens")
+				.count_elements ();
+			for (uint i = 0; i != n; i++) {
+				response.read_element (i);
+
+				int64 pid = response
+					.read_member ("processIdentifier")
+					.get_int64_value ();
+				response.end_member ();
+
+				string url = response
+					.read_member ("executableURL")
+					.read_member ("relative")
+					.get_string_value ();
+				response
+					.end_member ()
+					.end_member ();
+
+				if (!url.has_prefix ("file://"))
+					throw new Error.PROTOCOL ("Unsupported URL: %s", url);
+
+				string path = url[7:];
+
+				processes.add (new ProcessInfo () {
+					pid = (uint) pid,
+					path = path,
+				});
+
+				response.end_element ();
+			}
+
+			return processes;
+		}
+
+		public class ApplicationInfo {
+			public string bundle_identifier;
+			public string? bundle_version;
+			public string name;
+			public string? version;
+			public string path;
+			public bool is_first_party;
+			public bool is_developer_app;
+			public bool is_removable;
+			public bool is_internal;
+			public bool is_hidden;
+			public bool is_app_clip;
+
+			public string to_string () {
+				var summary = new StringBuilder.sized (128);
+
+				summary
+					.append ("ApplicationInfo {")
+					.append (@"\n\tbundle_identifier: \"$bundle_identifier\",");
+				if (bundle_version != null)
+					summary.append (@"\n\tbundle_version: \"$bundle_version\",");
+				summary.append (@"\n\tname: \"$name\",");
+				if (version != null)
+					summary.append (@"\n\tversion: \"$version\",");
+				summary
+					.append (@"\n\tpath: \"$path\",")
+					.append (@"\n\tis_first_party: $is_first_party,")
+					.append (@"\n\tis_developer_app: $is_developer_app,")
+					.append (@"\n\tis_removable: $is_removable,")
+					.append (@"\n\tis_internal: $is_internal,")
+					.append (@"\n\tis_hidden: $is_hidden,")
+					.append (@"\n\tis_app_clip: $is_app_clip,")
+					.append ("\n}");
+
+				return summary.str;
+			}
+		}
+
+		public class ProcessInfo {
+			public uint pid;
+			public string path;
+
+			public string to_string () {
+				return "ProcessInfo { pid: %u, path: \"%s\" }".printf (pid, path);
+			}
+		}
+	}
+
+	public abstract class TrustedService : Object, AsyncInitable {
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private XpcConnection connection;
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			connection = new XpcConnection (stream);
+			connection.activate ();
+
+			return true;
+		}
+
+		public void close () {
+			connection.cancel ();
+		}
+
+		protected async VariantReader invoke (string feature_identifier, Bytes? input = null, Cancellable? cancellable)
+				throws Error, IOError {
+			var request = new XpcBodyBuilder ()
+				.begin_dictionary ()
+					.set_member_name ("CoreDevice.featureIdentifier")
+					.add_string_value (feature_identifier)
+					.set_member_name ("CoreDevice.action")
+					.begin_dictionary ()
+					.end_dictionary ()
+					.set_member_name ("CoreDevice.input");
+
+			if (input != null)
+				request.add_raw_value (input);
+			else
+				request.add_null_value ();
+
+			add_standard_request_values (request);
+			request.end_dictionary ();
+
+			XpcMessage raw_response = yield connection.request (request.build (), cancellable);
+
+			var response = new VariantReader (raw_response.body);
+			response.read_member ("CoreDevice.output");
+			return response;
+		}
+
+		public static void add_standard_request_values (ObjectBuilder builder) {
+			builder
+				.set_member_name ("CoreDevice.invocationIdentifier")
+				.add_string_value (Uuid.string_random ().up ())
+				.set_member_name ("CoreDevice.CoreDeviceDDIProtocolVersion")
+				.add_int64_value (0)
+				.set_member_name ("CoreDevice.coreDeviceVersion")
+				.begin_dictionary ()
+					.set_member_name ("originalComponentsCount")
+					.add_int64_value (2)
+					.set_member_name ("components")
+					.begin_array ()
+						.add_uint64_value (348)
+						.add_uint64_value (1)
+						.add_uint64_value (0)
+						.add_uint64_value (0)
+						.add_uint64_value (0)
+					.end_array ()
+					.set_member_name ("stringValue")
+					.add_string_value ("348.1")
+				.end_dictionary ()
+				.set_member_name ("CoreDevice.deviceIdentifier")
+				.add_string_value (make_host_identifier ());
+		}
+	}
+
+	public sealed class XpcConnection : Object {
+		public signal void close (Error? error);
+		public signal void message (XpcMessage msg);
+
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		public State state {
+			get;
+			private set;
+			default = INACTIVE;
+		}
+
+		private Error? pending_error;
+
+		private Promise<bool> ready = new Promise<bool> ();
+		private XpcMessage? root_helo;
+		private XpcMessage? reply_helo;
+		private Gee.Map<uint64?, PendingResponse> pending_responses =
+			new Gee.HashMap<uint64?, PendingResponse> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+		private NGHttp2.Session session;
+		private Stream root_stream;
+		private Stream reply_stream;
+		private uint next_message_id = 1;
+
+		private bool is_processing_messages;
+
+		private ByteArray? send_queue;
+		private Source? send_source;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public enum State {
+			INACTIVE,
+			ACTIVE,
+			CLOSED,
+		}
+
+		public XpcConnection (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			NGHttp2.SessionCallbacks callbacks;
+			NGHttp2.SessionCallbacks.make (out callbacks);
+
+			callbacks.set_send_callback ((session, data, flags, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_send (data, flags);
+			});
+			callbacks.set_on_frame_send_callback ((session, frame, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_frame_send (frame);
+			});
+			callbacks.set_on_frame_not_send_callback ((session, frame, lib_error_code, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_frame_not_send (frame, lib_error_code);
+			});
+			callbacks.set_on_data_chunk_recv_callback ((session, flags, stream_id, data, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_data_chunk_recv (flags, stream_id, data);
+			});
+			callbacks.set_on_frame_recv_callback ((session, frame, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_frame_recv (frame);
+			});
+			callbacks.set_on_stream_close_callback ((session, stream_id, error_code, user_data) => {
+				XpcConnection * self = user_data;
+				return self->on_stream_close (stream_id, error_code);
+			});
+
+			NGHttp2.Option option;
+			NGHttp2.Option.make (out option);
+			option.set_no_auto_window_update (true);
+			option.set_peer_max_concurrent_streams (100);
+			option.set_no_http_messaging (true);
+			// option.set_no_http_semantics (true);
+			option.set_no_closed_streams (true);
+
+			NGHttp2.Session.make_client (out session, callbacks, this, option);
+		}
+
+		public void activate () {
+			do_activate.begin ();
+		}
+
+		private async void do_activate () {
+			try {
+				is_processing_messages = true;
+				process_incoming_messages.begin ();
+
+				session.submit_settings (NGHttp2.Flag.NONE, {
+					{ MAX_CONCURRENT_STREAMS, 100 },
+					{ INITIAL_WINDOW_SIZE, 1048576 },
+				});
+
+				session.set_local_window_size (NGHttp2.Flag.NONE, 0, 1048576);
+
+				root_stream = make_stream ();
+
+				Bytes header_request = new XpcMessageBuilder (HEADER)
+					.add_body (new XpcBodyBuilder ()
+						.begin_dictionary ()
+						.end_dictionary ()
+						.build ()
+					)
+					.build ();
+				yield root_stream.submit_data (header_request, io_cancellable);
+
+				Bytes ping_request = new XpcMessageBuilder (PING)
+					.build ();
+				yield root_stream.submit_data (ping_request, io_cancellable);
+
+				reply_stream = make_stream ();
+
+				Bytes open_reply_channel_request = new XpcMessageBuilder (HEADER)
+					.add_flags (HEADER_OPENS_REPLY_CHANNEL)
+					.build ();
+				yield reply_stream.submit_data (open_reply_channel_request, io_cancellable);
+			} catch (GLib.Error e) {
+				if (e is Error && pending_error == null)
+					pending_error = (Error) e;
+				cancel ();
+			}
+		}
+
+		public void cancel () {
+			io_cancellable.cancel ();
+		}
+
+		public async PeerInfo wait_until_ready (Cancellable? cancellable = null) throws Error, IOError {
+			yield ready.future.wait_async (cancellable);
+
+			return new PeerInfo () {
+				metadata = root_helo.body,
+			};
+		}
+
+		public async XpcMessage request (Bytes body, Cancellable? cancellable = null) throws Error, IOError {
+			uint64 request_id = make_message_id ();
+
+			Bytes raw_request = new XpcMessageBuilder (MSG)
+				.add_flags (WANTS_REPLY)
+				.add_id (request_id)
+				.add_body (body)
+				.build ();
+
+			bool waiting = false;
+
+			var pending = new PendingResponse (() => {
+				if (waiting)
+					request.callback ();
+				return Source.REMOVE;
+			});
+			pending_responses[request_id] = pending;
+
+			try {
+				yield root_stream.submit_data (raw_request, cancellable);
+			} catch (Error e) {
+				if (pending_responses.unset (request_id))
+					pending.complete_with_error (e);
+			}
+
+			if (!pending.completed) {
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (() => {
+					if (pending_responses.unset (request_id))
+						pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
+					return false;
+				});
+				cancel_source.attach (MainContext.get_thread_default ());
+
+				waiting = true;
+				yield;
+				waiting = false;
+
+				cancel_source.destroy ();
+			}
+
+			cancellable.set_error_if_cancelled ();
+
+			if (pending.error != null)
+				throw_api_error (pending.error);
+
+			return pending.result;
+		}
+
+		private class PendingResponse {
+			private SourceFunc? handler;
+
+			public bool completed {
+				get {
+					return result != null || error != null;
+				}
+			}
+
+			public XpcMessage? result {
+				get;
+				private set;
+			}
+
+			public GLib.Error? error {
+				get;
+				private set;
+			}
+
+			public PendingResponse (owned SourceFunc handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_result (XpcMessage result) {
+				if (completed)
+					return;
+				this.result = result;
+				handler ();
+				handler = null;
+			}
+
+			public void complete_with_error (GLib.Error error) {
+				if (completed)
+					return;
+				this.error = error;
+				handler ();
+				handler = null;
+			}
+		}
+
+		public async void post (Bytes body, Cancellable? cancellable = null) throws Error, IOError {
+			Bytes raw_request = new XpcMessageBuilder (MSG)
+				.add_id (make_message_id ())
+				.add_body (body)
+				.build ();
+
+			yield root_stream.submit_data (raw_request, cancellable);
+		}
+
+		private void on_header (XpcMessage msg, Stream sender) {
+			if (sender == root_stream) {
+				if (root_helo == null)
+					root_helo = msg;
+			} else if (sender == reply_stream) {
+				if (reply_helo == null)
+					reply_helo = msg;
+			}
+
+			if (!ready.future.ready && root_helo != null && reply_helo != null)
+				ready.resolve (true);
+		}
+
+		private void on_reply (XpcMessage msg, Stream sender) {
+			if (sender != reply_stream)
+				return;
+
+			PendingResponse response;
+			if (!pending_responses.unset (msg.id, out response))
+				return;
+
+			if (msg.body != null)
+				response.complete_with_result (msg);
+			else
+				response.complete_with_error (new Error.NOT_SUPPORTED ("Request not supported"));
+		}
+
+		private void maybe_send_pending () {
+			while (session.want_write ()) {
+				bool would_block = send_source != null && send_queue == null;
+				if (would_block)
+					break;
+
+				session.send ();
+			}
+		}
+
+		private async void process_incoming_messages () {
+			InputStream input = stream.get_input_stream ();
+
+			var buffer = new uint8[4096];
+
+			while (is_processing_messages) {
+				try {
+					ssize_t n = yield input.read_async (buffer, Priority.DEFAULT, io_cancellable);
+					if (n == 0) {
+						is_processing_messages = false;
+						continue;
+					}
+
+					ssize_t result = session.mem_recv (buffer[:n]);
+					if (result < 0)
+						throw new Error.PROTOCOL ("%s", NGHttp2.strerror (result));
+
+					session.consume_connection (n);
+				} catch (GLib.Error e) {
+					if (e is Error && pending_error == null)
+						pending_error = (Error) e;
+					is_processing_messages = false;
+				}
+			}
+
+			Error error = (pending_error != null)
+				? pending_error
+				: new Error.TRANSPORT ("Connection closed");
+
+			foreach (var r in pending_responses.values.to_array ())
+				r.complete_with_error (error);
+			pending_responses.clear ();
+
+			if (!ready.future.ready)
+				ready.reject (error);
+
+			state = CLOSED;
+
+			close (pending_error);
+			pending_error = null;
+		}
+
+		private ssize_t on_send (uint8[] data, int flags) {
+			if (send_source == null) {
+				send_queue = new ByteArray.sized (1024);
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_send.begin ();
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
+				send_source = source;
+			}
+
+			if (send_queue == null)
+				return NGHttp2.ErrorCode.WOULDBLOCK;
+
+			send_queue.append (data);
+			return data.length;
+		}
+
+		private async void do_send () {
+			uint8[] buffer = send_queue.steal ();
+			send_queue = null;
+
+			try {
+				size_t bytes_written;
+				yield stream.get_output_stream ().write_all_async (buffer, Priority.DEFAULT, io_cancellable,
+					out bytes_written);
+			} catch (GLib.Error e) {
+			}
+
+			send_source = null;
+
+			maybe_send_pending ();
+		}
+
+		private int on_frame_send (NGHttp2.Frame frame) {
+			if (frame.hd.type == DATA)
+				find_stream_by_id (frame.hd.stream_id).on_data_frame_send ();
+			return 0;
+		}
+
+		private int on_frame_not_send (NGHttp2.Frame frame, NGHttp2.ErrorCode lib_error_code) {
+			if (frame.hd.type == DATA)
+				find_stream_by_id (frame.hd.stream_id).on_data_frame_not_send (lib_error_code);
+			return 0;
+		}
+
+		private int on_data_chunk_recv (uint8 flags, int32 stream_id, uint8[] data) {
+			return find_stream_by_id (stream_id).on_data_frame_recv_chunk (data);
+		}
+
+		private int on_frame_recv (NGHttp2.Frame frame) {
+			if (frame.hd.type == DATA)
+				return find_stream_by_id (frame.hd.stream_id).on_data_frame_recv_end (frame);
+			return 0;
+		}
+
+		private int on_stream_close (int32 stream_id, uint32 error_code) {
+			io_cancellable.cancel ();
+			return 0;
+		}
+
+		private Stream make_stream () {
+			int stream_id = session.submit_headers (NGHttp2.Flag.NONE, -1, null, {}, null);
+			maybe_send_pending ();
+
+			return new Stream (this, stream_id);
+		}
+
+		private Stream? find_stream_by_id (int32 id) {
+			if (root_stream.id == id)
+				return root_stream;
+			if (reply_stream.id == id)
+				return reply_stream;
+			return null;
+		}
+
+		private uint make_message_id () {
+			uint id = next_message_id;
+			next_message_id += 2;
+			return id;
+		}
+
+		private class Stream {
+			public int32 id;
+
+			private weak XpcConnection parent;
+
+			private Gee.Deque<SubmitOperation> submissions = new Gee.ArrayQueue<SubmitOperation> ();
+			private SubmitOperation? current_submission = null;
+			private ByteArray incoming_message = new ByteArray ();
+
+			public Stream (XpcConnection parent, int32 id) {
+				this.parent = parent;
+				this.id = id;
+			}
+
+			public async void submit_data (Bytes bytes, Cancellable? cancellable) throws Error, IOError {
+				bool waiting = false;
+
+				var op = new SubmitOperation (bytes, () => {
+					if (waiting)
+						submit_data.callback ();
+					return Source.REMOVE;
+				});
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (() => {
+					op.state = CANCELLED;
+					op.callback ();
+					return Source.REMOVE;
+				});
+				cancel_source.attach (MainContext.get_thread_default ());
+
+				submissions.offer_tail (op);
+				maybe_submit_data ();
+
+				if (op.state < SubmitOperation.State.SUBMITTED) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				cancel_source.destroy ();
+
+				if (op.state == CANCELLED && current_submission != op)
+					submissions.remove (op);
+
+				cancellable.set_error_if_cancelled ();
+
+				if (op.state == ERROR)
+					throw new Error.TRANSPORT ("%s", NGHttp2.strerror (op.error_code));
+			}
+
+			private void maybe_submit_data () {
+				if (current_submission != null)
+					return;
+
+				SubmitOperation? op = submissions.peek_head ();
+				if (op == null)
+					return;
+				current_submission = op;
+
+				var data_prd = NGHttp2.DataProvider ();
+				data_prd.source.ptr = op;
+				data_prd.read_callback = on_data_provider_read;
+				int result = parent.session.submit_data (NGHttp2.DataFlag.NO_END_STREAM, id, data_prd);
+				if (result < 0) {
+					while (true) {
+						op = submissions.poll_head ();
+						if (op == null)
+							break;
+						op.state = ERROR;
+						op.error_code = (NGHttp2.ErrorCode) result;
+						op.callback ();
+					}
+					current_submission = null;
+					return;
+				}
+
+				parent.maybe_send_pending ();
+			}
+
+			private static ssize_t on_data_provider_read (NGHttp2.Session session, int32 stream_id, uint8[] buf,
+					ref uint32 data_flags, NGHttp2.DataSource source, void * user_data) {
+				var op = (SubmitOperation) source.ptr;
+
+				unowned uint8[] data = op.bytes.get_data ();
+
+				uint remaining = data.length - op.cursor;
+				uint n = uint.min (remaining, buf.length);
+				Memory.copy (buf, (uint8 *) data + op.cursor, n);
+
+				op.cursor += n;
+
+				if (op.cursor == data.length)
+					data_flags |= NGHttp2.DataFlag.EOF;
+
+				return n;
+			}
+
+			public void on_data_frame_send () {
+				submissions.poll_head ().complete (SUBMITTED);
+				current_submission = null;
+
+				maybe_submit_data ();
+			}
+
+			public void on_data_frame_not_send (NGHttp2.ErrorCode lib_error_code) {
+				submissions.poll_head ().complete (ERROR, lib_error_code);
+				current_submission = null;
+
+				maybe_submit_data ();
+			}
+
+			private class SubmitOperation {
+				public Bytes bytes;
+				public SourceFunc callback;
+
+				public State state = PENDING;
+				public NGHttp2.ErrorCode error_code;
+				public uint cursor = 0;
+
+				public enum State {
+					PENDING,
+					SUBMITTING,
+					SUBMITTED,
+					ERROR,
+					CANCELLED,
+				}
+
+				public SubmitOperation (Bytes bytes, owned SourceFunc callback) {
+					this.bytes = bytes;
+					this.callback = (owned) callback;
+				}
+
+				public void complete (State new_state, NGHttp2.ErrorCode err = -1) {
+					if (state != PENDING)
+						return;
+					state = new_state;
+					error_code = err;
+					callback ();
+				}
+			}
+
+			public int on_data_frame_recv_chunk (uint8[] data) {
+				incoming_message.append (data);
+				return 0;
+			}
+
+			public int on_data_frame_recv_end (NGHttp2.Frame frame) {
+				XpcMessage? msg;
+				size_t size;
+				try {
+					msg = XpcMessage.try_parse (incoming_message.data, out size);
+				} catch (Error e) {
+					return -1;
+				}
+				if (msg == null)
+					return 0;
+				incoming_message.remove_range (0, (uint) size);
+
+				switch (msg.type) {
+					case HEADER:
+						parent.on_header (msg, this);
+						break;
+					case MSG:
+						if ((msg.flags & MessageFlags.IS_REPLY) != 0)
+							parent.on_reply (msg, this);
+						else if ((msg.flags & (MessageFlags.WANTS_REPLY | MessageFlags.IS_REPLY)) == 0)
+							parent.message (msg);
+						break;
+					case PING:
+						break;
+				}
+
+				return 0;
+			}
+		}
+	}
+
+	public class PeerInfo {
+		public Variant? metadata;
+	}
+
+	public class XpcMessageBuilder : Object {
+		private MessageType message_type;
+		private MessageFlags message_flags = NONE;
+		private uint64 message_id = 0;
+		private Bytes? body = null;
+
+		public XpcMessageBuilder (MessageType message_type) {
+			this.message_type = message_type;
+		}
+
+		public unowned XpcMessageBuilder add_flags (MessageFlags flags) {
+			message_flags = flags;
+			return this;
+		}
+
+		public unowned XpcMessageBuilder add_id (uint64 id) {
+			message_id = id;
+			return this;
+		}
+
+		public unowned XpcMessageBuilder add_body (Bytes b) {
+			body = b;
+			return this;
+		}
+
+		public Bytes build () {
+			var builder = new BufferBuilder (LITTLE_ENDIAN)
+				.append_uint32 (XpcMessage.MAGIC)
+				.append_uint8 (XpcMessage.PROTOCOL_VERSION)
+				.append_uint8 (message_type)
+				.append_uint16 (message_flags)
+				.append_uint64 ((body != null) ? body.length : 0)
+				.append_uint64 (message_id);
+
+			if (body != null)
+				builder.append_bytes (body);
+
+			return builder.build ();
+		}
+	}
+
+	public class XpcMessage {
+		public MessageType type;
+		public MessageFlags flags;
+		public uint64 id;
+		public Variant? body;
+
+		public const uint32 MAGIC = 0x29b00b92;
+		public const uint8 PROTOCOL_VERSION = 1;
+		public const size_t HEADER_SIZE = 24;
+		public const size_t MAX_SIZE = (128 * 1024 * 1024) - 1;
+
+		public static XpcMessage parse (uint8[] data) throws Error {
+			size_t size;
+			var msg = try_parse (data, out size);
+			if (msg == null)
+				throw new Error.INVALID_ARGUMENT ("XpcMessage is truncated");
+			return msg;
+		}
+
+		public static XpcMessage? try_parse (uint8[] data, out size_t size) throws Error {
+			if (data.length < HEADER_SIZE) {
+				size = HEADER_SIZE;
+				return null;
+			}
+
+			var buf = new Buffer (new Bytes.static (data), LITTLE_ENDIAN);
+
+			var magic = buf.read_uint32 (0);
+			if (magic != MAGIC)
+				throw new Error.INVALID_ARGUMENT ("Invalid message: bad magic (0x%08x)", magic);
+
+			var protocol_version = buf.read_uint8 (4);
+			if (protocol_version != PROTOCOL_VERSION)
+				throw new Error.INVALID_ARGUMENT ("Invalid message: unsupported protocol version (%u)", protocol_version);
+
+			var raw_message_type = buf.read_uint8 (5);
+			var message_type_class = (EnumClass) typeof (MessageType).class_ref ();
+			if (message_type_class.get_value (raw_message_type) == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid message: unsupported message type (0x%x)", raw_message_type);
+			var message_type = (MessageType) raw_message_type;
+
+			MessageFlags message_flags = (MessageFlags) buf.read_uint16 (6);
+
+			Variant? body = null;
+			uint64 message_size = buf.read_uint64 (8);
+			size = HEADER_SIZE + (size_t) message_size;
+			if (message_size != 0) {
+				if (message_size > MAX_SIZE) {
+					throw new Error.INVALID_ARGUMENT ("Invalid message: too large (%" + int64.FORMAT_MODIFIER + "u)",
+						message_size);
+				}
+				if (data.length - HEADER_SIZE < message_size)
+					return null;
+				body = XpcBodyParser.parse (data[HEADER_SIZE:HEADER_SIZE + message_size]);
+			}
+
+			uint64 message_id = buf.read_uint64 (16);
+
+			return new XpcMessage (message_type, message_flags, message_id, body);
+		}
+
+		private XpcMessage (MessageType type, MessageFlags flags, uint64 id, Variant? body) {
+			this.type = type;
+			this.flags = flags;
+			this.id = id;
+			this.body = body;
+		}
+
+		public string to_string () {
+			var description = new StringBuilder.sized (128);
+
+			description.append_printf (("XpcMessage {" +
+					"\n\ttype: %s," +
+					"\n\tflags: %s," +
+					"\n\tid: %" + int64.FORMAT_MODIFIER + "u,"),
+				type.to_nick ().up (),
+				flags.print (),
+				id);
+
+			if (body != null) {
+				description.append ("\n\tbody: ");
+				print_variant (body, description, 1);
+				description.append_c (',');
+			}
+
+			description.append ("\n}");
+
+			return description.str;
+		}
+	}
+
+	public enum MessageType {
+		HEADER,
+		MSG,
+		PING;
+
+		public static MessageType from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<MessageType> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<MessageType> (this);
+		}
+	}
+
+	[Flags]
+	public enum MessageFlags {
+		NONE				= 0,
+		WANTS_REPLY			= (1 << 0),
+		IS_REPLY			= (1 << 1),
+		HEADER_OPENS_STREAM_TX		= (1 << 4),
+		HEADER_OPENS_STREAM_RX		= (1 << 5),
+		HEADER_OPENS_REPLY_CHANNEL	= (1 << 6);
+
+		public string print () {
+			uint remainder = this;
+			if (remainder == 0)
+				return "NONE";
+
+			var result = new StringBuilder.sized (128);
+
+			var klass = (FlagsClass) typeof (MessageFlags).class_ref ();
+			foreach (FlagsValue fv in klass.values) {
+				if ((remainder & fv.value) != 0) {
+					if (result.len != 0)
+						result.append (" | ");
+					result.append (fv.value_nick.up ().replace ("-", "_"));
+					remainder &= ~fv.value;
+				}
+			}
+
+			if (remainder != 0) {
+				if (result.len != 0)
+					result.append (" | ");
+				result.append_printf ("0x%04x", remainder);
+			}
+
+			return result.str;
+		}
+	}
+
+	public class XpcBodyBuilder : XpcObjectBuilder {
+		public XpcBodyBuilder () {
+			base ();
+
+			builder
+				.append_uint32 (SerializedXpcObject.MAGIC)
+				.append_uint32 (SerializedXpcObject.VERSION);
+		}
+	}
+
+	public class XpcObjectBuilder : Object, ObjectBuilder {
+		protected BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
+		private Gee.Deque<Scope> scopes = new Gee.ArrayQueue<Scope> ();
+
+		public XpcObjectBuilder () {
+			push_scope (new Scope (ROOT));
+		}
+
+		public unowned ObjectBuilder begin_dictionary () {
+			begin_object (DICTIONARY);
+
+			size_t size_offset = builder.offset;
+			builder.append_uint32 (0);
+
+			size_t num_entries_offset = builder.offset;
+			builder.append_uint32 (0);
+
+			push_scope (new DictionaryScope (size_offset, num_entries_offset));
+
+			return this;
+		}
+
+		public unowned ObjectBuilder set_member_name (string name) {
+			builder
+				.append_string (name)
+				.align (4);
+
+			return this;
+		}
+
+		public unowned ObjectBuilder end_dictionary () {
+			DictionaryScope scope = pop_scope ();
+
+			uint32 size = (uint32) (builder.offset - scope.num_entries_offset);
+			builder.write_uint32 (scope.size_offset, size);
+
+			builder.write_uint32 (scope.num_entries_offset, scope.num_objects);
+
+			return this;
+		}
+
+		public unowned ObjectBuilder begin_array () {
+			begin_object (ARRAY);
+
+			size_t size_offset = builder.offset;
+			builder.append_uint32 (0);
+
+			size_t num_elements_offset = builder.offset;
+			builder.append_uint32 (0);
+
+			push_scope (new ArrayScope (size_offset, num_elements_offset));
+
+			return this;
+		}
+
+		public unowned ObjectBuilder end_array () {
+			ArrayScope scope = pop_scope ();
+
+			uint32 size = (uint32) (builder.offset - scope.num_elements_offset);
+			builder.write_uint32 (scope.size_offset, size);
+
+			builder.write_uint32 (scope.num_elements_offset, scope.num_objects);
+
+			return this;
+		}
+
+		public unowned ObjectBuilder add_null_value () {
+			begin_object (NULL);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_bool_value (bool val) {
+			begin_object (BOOL).append_uint32 ((uint32) val);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_int64_value (int64 val) {
+			begin_object (INT64).append_int64 (val);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_uint64_value (uint64 val) {
+			begin_object (UINT64).append_uint64 (val);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_data_value (Bytes val) {
+			begin_object (DATA)
+				.append_uint32 (val.length)
+				.append_bytes (val)
+				.align (4);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_string_value (string val) {
+			begin_object (STRING)
+				.append_uint32 (val.length + 1)
+				.append_string (val)
+				.align (4);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_uuid_value (string val) {
+			var uuid = new ByteArray.sized (16);
+			int len = val.length;
+			for (int i = 0; i != len;) {
+				if (val[i] == '-') {
+					i++;
+					continue;
+				}
+				var byte = (uint8) uint.parse (val[i:i + 2], 16);
+				uuid.append ({ byte });
+				i += 2;
+			}
+			assert (uuid.len == 16);
+
+			begin_object (UUID).append_data (uuid.data);
+			return this;
+		}
+
+		public unowned ObjectBuilder add_raw_value (Bytes val) {
+			peek_scope ().num_objects++;
+			builder.append_bytes (val);
+			return this;
+		}
+
+		private unowned BufferBuilder begin_object (ObjectType type) {
+			peek_scope ().num_objects++;
+			return builder.append_uint32 (type);
+		}
+
+		public Bytes build () {
+			return builder.build ();
+		}
+
+		private void push_scope (Scope scope) {
+			scopes.offer_tail (scope);
+		}
+
+		private Scope peek_scope () {
+			return scopes.peek_tail ();
+		}
+
+		private T pop_scope<T> () {
+			return (T) scopes.poll_tail ();
+		}
+
+		private class Scope {
+			public Kind kind;
+			public uint32 num_objects = 0;
+
+			public enum Kind {
+				ROOT,
+				DICTIONARY,
+				ARRAY,
+			}
+
+			public Scope (Kind kind) {
+				this.kind = kind;
+			}
+		}
+
+		private class DictionaryScope : Scope {
+			public size_t size_offset;
+			public size_t num_entries_offset;
+
+			public DictionaryScope (size_t size_offset, size_t num_entries_offset) {
+				base (DICTIONARY);
+				this.size_offset = size_offset;
+				this.num_entries_offset = num_entries_offset;
+			}
+		}
+
+		private class ArrayScope : Scope {
+			public size_t size_offset;
+			public size_t num_elements_offset;
+
+			public ArrayScope (size_t size_offset, size_t num_elements_offset) {
+				base (DICTIONARY);
+				this.size_offset = size_offset;
+				this.num_elements_offset = num_elements_offset;
+			}
+		}
+	}
+
+	private enum ObjectType {
+		NULL		= 0x1000,
+		BOOL		= 0x2000,
+		INT64		= 0x3000,
+		UINT64		= 0x4000,
+		DATA		= 0x8000,
+		STRING		= 0x9000,
+		UUID		= 0xa000,
+		ARRAY		= 0xe000,
+		DICTIONARY	= 0xf000,
+	}
+
+	private class XpcBodyParser {
+		public static Variant parse (uint8[] data) throws Error {
+			if (data.length < 12)
+				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: truncated");
+
+			var buf = new Buffer (new Bytes.static (data), LITTLE_ENDIAN);
+
+			var magic = buf.read_uint32 (0);
+			if (magic != SerializedXpcObject.MAGIC)
+				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: bad magic (0x%08x)", magic);
+
+			var version = buf.read_uint8 (4);
+			if (version != SerializedXpcObject.VERSION)
+				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: unsupported version (%u)", version);
+
+			var parser = new XpcObjectParser (buf, 8);
+			return parser.read_object ();
+		}
+	}
+
+	private class XpcObjectParser {
+		private Buffer buf;
+		private size_t cursor;
+		private EnumClass object_type_class;
+
+		public XpcObjectParser (Buffer buf, uint cursor) {
+			this.buf = buf;
+			this.cursor = cursor;
+			this.object_type_class = (EnumClass) typeof (ObjectType).class_ref ();
+		}
+
+		public Variant read_object () throws Error {
+			var raw_type = read_raw_uint32 ();
+			if (object_type_class.get_value ((int) raw_type) == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: unsupported type (0x%x)", raw_type);
+			var type = (ObjectType) raw_type;
+
+			switch (type) {
+				case NULL:
+					return new Variant.maybe (VariantType.VARIANT, null);
+				case BOOL:
+					return new Variant.boolean (read_raw_uint32 () != 0);
+				case INT64:
+					return new Variant.int64 (read_raw_int64 ());
+				case UINT64:
+					return new Variant.uint64 (read_raw_uint64 ());
+				case DATA:
+					return read_data ();
+				case STRING:
+					return read_string ();
+				case UUID:
+					return read_uuid ();
+				case ARRAY:
+					return read_array ();
+				case DICTIONARY:
+					return read_dictionary ();
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private Variant read_data () throws Error {
+			var size = read_raw_uint32 ();
+
+			var bytes = read_raw_bytes (size);
+			align (4);
+
+			return Variant.new_from_data (new VariantType.array (VariantType.BYTE), bytes.get_data (), true, bytes);
+		}
+
+		private Variant read_string () throws Error {
+			var size = read_raw_uint32 ();
+
+			var str = buf.read_string (cursor);
+			cursor += size;
+			align (4);
+
+			return new Variant.string (str);
+		}
+
+		private Variant read_uuid () throws Error {
+			uint8[] uuid = read_raw_bytes (16).get_data ();
+			return new Variant.string ("%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X".printf (
+				uuid[0], uuid[1], uuid[2], uuid[3],
+				uuid[4], uuid[5],
+				uuid[6], uuid[7],
+				uuid[8], uuid[9],
+				uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]));
+		}
+
+		private Variant read_array () throws Error {
+			var builder = new VariantBuilder (new VariantType.array (VariantType.VARIANT));
+
+			var size = read_raw_uint32 ();
+			size_t num_elements_offset = cursor;
+			var num_elements = read_raw_uint32 ();
+
+			for (uint32 i = 0; i != num_elements; i++)
+				builder.add ("v", read_object ());
+
+			cursor = num_elements_offset;
+			skip (size);
+
+			return builder.end ();
+		}
+
+		private Variant read_dictionary () throws Error {
+			var builder = new VariantBuilder (VariantType.VARDICT);
+
+			var size = read_raw_uint32 ();
+			size_t num_entries_offset = cursor;
+			var num_entries = read_raw_uint32 ();
+
+			for (uint32 i = 0; i != num_entries; i++) {
+				string key = buf.read_string (cursor);
+				skip (key.length + 1);
+				align (4);
+
+				Variant val = read_object ();
+
+				builder.add ("{sv}", key, val);
+			}
+
+			cursor = num_entries_offset;
+			skip (size);
+
+			return builder.end ();
+		}
+
+		private uint32 read_raw_uint32 () throws Error {
+			check_available (sizeof (uint32));
+			var result = buf.read_uint32 (cursor);
+			cursor += sizeof (uint32);
+			return result;
+		}
+
+		private int64 read_raw_int64 () throws Error {
+			check_available (sizeof (int64));
+			var result = buf.read_int64 (cursor);
+			cursor += sizeof (int64);
+			return result;
+		}
+
+		private uint64 read_raw_uint64 () throws Error {
+			check_available (sizeof (uint64));
+			var result = buf.read_uint64 (cursor);
+			cursor += sizeof (uint64);
+			return result;
+		}
+
+		private Bytes read_raw_bytes (size_t n) throws Error {
+			check_available (n);
+			Bytes result = buf.bytes[cursor:cursor + n];
+			cursor += n;
+			return result;
+		}
+
+		private void skip (size_t n) throws Error {
+			check_available (n);
+			cursor += n;
+		}
+
+		private void align (size_t n) throws Error {
+			size_t remainder = cursor % n;
+			if (remainder != 0)
+				skip (n - remainder);
+		}
+
+		private void check_available (size_t required) throws Error {
+			size_t available = buf.bytes.get_size () - cursor;
+			if (available < required)
+				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: truncated");
+		}
+	}
+
+	namespace SerializedXpcObject {
+		public const uint32 MAGIC = 0x42133742;
+		public const uint32 VERSION = 5;
+	}
+
+	private Bytes get_raw_public_key (Key key) {
+		size_t size = 0;
+		key.get_raw_public_key (null, ref size);
+
+		var result = new uint8[size];
+		key.get_raw_public_key (result, ref size);
+
+		return new Bytes.take ((owned) result);
+	}
+
+	private Bytes get_raw_private_key (Key key) {
+		size_t size = 0;
+		key.get_raw_private_key (null, ref size);
+
+		var result = new uint8[size];
+		key.get_raw_private_key (result, ref size);
+
+		return new Bytes.take ((owned) result);
+	}
+
+	// https://gist.github.com/phako/96b36b5070beaf7eee27
+	public void hexdump (uint8[] data) {
+		var builder = new StringBuilder.sized (16);
+		var i = 0;
+
+		foreach (var c in data) {
+			if (i % 16 == 0)
+				printerr ("%08x | ", i);
+
+			printerr ("%02x ", c);
+
+			if (((char) c).isprint ())
+				builder.append_c ((char) c);
+			else
+				builder.append (".");
+
+			i++;
+			if (i % 16 == 0) {
+				printerr ("| %s\n", builder.str);
+				builder.erase ();
+			}
+		}
+
+		if (i % 16 != 0)
+			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
+	}
+
+	private string variant_to_pretty_string (Variant v) {
+		var sink = new StringBuilder.sized (128);
+		print_variant (v, sink);
+		return (owned) sink.str;
+	}
+
+	private void print_variant (Variant v, StringBuilder sink, uint depth = 0, bool initial = true) {
+		VariantType type = v.get_type ();
+
+		if (type.is_basic ()) {
+			sink.append (v.print (false));
+			return;
+		}
+
+		if (type.equal (VariantType.VARDICT)) {
+			sink.append ("{\n");
+
+			var iter = new VariantIter (v);
+			string key;
+			Variant val;
+			while (iter.next ("{sv}", out key, out val)) {
+				append_indent (depth + 1, sink);
+
+				if ("." in key || "-" in key) {
+					sink
+						.append_c ('"')
+						.append (key)
+						.append_c ('"');
+				} else {
+					sink.append (key);
+				}
+				sink.append (": ");
+
+				print_variant (val, sink, depth + 1, false);
+
+				sink.append (",\n");
+			}
+
+			append_indent (depth, sink);
+			sink.append ("}");
+		} else if (type.is_array () && !type.equal (new VariantType.array (VariantType.BYTE))) {
+			sink.append ("[\n");
+
+			var iter = new VariantIter (v);
+			Variant? val;
+			while ((val = iter.next_value ()) != null) {
+				append_indent (depth + 1, sink);
+				print_variant (val, sink, depth + 1, false);
+				sink.append (",\n");
+			}
+
+			append_indent (depth, sink);
+			sink.append ("]");
+		} else {
+			sink.append (v.print (false));
+		}
+	}
+
+	private void append_indent (uint depth, StringBuilder sink) {
+		for (uint i = 0; i != depth; i++)
+			sink.append_c ('\t');
+	}
+
+	private string make_host_identifier () {
+		var checksum = new Checksum (MD5);
+
+		const uint8 uuid_version = 3;
+		const uint8 dns_namespace[] = { 0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8 };
+		checksum.update (dns_namespace, dns_namespace.length);
+
+		unowned uint8[] host_name = Environment.get_host_name ().data;
+		checksum.update (host_name, host_name.length);
+
+		uint8 uuid[16];
+		size_t len = uuid.length;
+		checksum.get_digest (uuid, ref len);
+
+		uuid[6] = (uuid_version << 4) | (uuid[6] & 0xf);
+		uuid[8] = 0x80 | (uuid[8] & 0x3f);
+
+		var result = new StringBuilder.sized (36);
+		for (var i = 0; i != uuid.length; i++) {
+			result.append_printf ("%02X", uuid[i]);
+			switch (i) {
+				case 3:
+				case 5:
+				case 7:
+				case 9:
+					result.append_c ('-');
+					break;
+			}
+		}
+
+		return result.str;
+	}
+}

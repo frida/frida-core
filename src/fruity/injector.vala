@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
-	public static async GadgetDetails inject (owned Gum.DarwinModule module, LLDB.Client lldb, ChannelProvider channel_provider,
+	public static async GadgetDetails inject (owned Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider,
 			Cancellable? cancellable) throws Error, IOError {
 		var session = new Session (module, lldb, channel_provider);
 		return yield session.run (cancellable);
@@ -32,7 +32,7 @@ namespace Frida.Fruity.Injector {
 			construct;
 		}
 
-		public ChannelProvider channel_provider {
+		public HostChannelProvider channel_provider {
 			get;
 			construct;
 		}
@@ -70,7 +70,7 @@ namespace Frida.Fruity.Injector {
 
 		private size_t module_size;
 
-		public Session (Gum.DarwinModule module, LLDB.Client lldb, ChannelProvider channel_provider) {
+		public Session (Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider) {
 			Object (
 				module: module,
 				lldb: lldb,

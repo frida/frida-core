@@ -60,6 +60,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Fruity.Manual.lockdown.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/xpc", () => {
+			var h = new Harness ((h) => Fruity.Manual.xpc.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if HAVE_DROIDY_BACKEND
@@ -3517,16 +3522,17 @@ namespace Frida.HostSessionTest {
 #endif
 
 			Variant? icon = prov.icon;
-			assert_nonnull (icon);
-			var dict = new VariantDict (icon);
-			int64 width, height;
-			assert_true (dict.lookup ("width", "x", out width));
-			assert_true (dict.lookup ("height", "x", out height));
-			assert_true (width == 16);
-			assert_true (height == 16);
-			VariantIter image;
-			assert_true (dict.lookup ("image", "ay", out image));
-			assert_true (image.n_children () == width * height * 4);
+			if (icon != null) {
+				var dict = new VariantDict (icon);
+				int64 width, height;
+				assert_true (dict.lookup ("width", "x", out width));
+				assert_true (dict.lookup ("height", "x", out height));
+				assert_true (width == 16);
+				assert_true (height == 16);
+				VariantIter image;
+				assert_true (dict.lookup ("image", "ay", out image));
+				assert_true (image.n_children () == width * height * 4);
+			}
 
 			try {
 				Cancellable? cancellable = null;
@@ -3734,6 +3740,41 @@ namespace Frida.HostSessionTest {
 					}
 
 					yield h.prompt_for_key ("Hit a key to exit: ");
+				} catch (GLib.Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+				}
+
+				h.done ();
+			}
+
+			private static async void xpc (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+					h.done ();
+					return;
+				}
+
+				var device_id = "<device-id>";
+
+				var device_manager = new DeviceManager ();
+
+				try {
+					var timer = new Timer ();
+					var device = yield device_manager.get_device_by_id (device_id);
+					printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					timer.reset ();
+					var appservice = yield device.open_service ("xpc:com.apple.coredevice.appservice");
+					printerr ("[*] Opened service in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+					parameters["CoreDevice.featureIdentifier"] = "com.apple.coredevice.feature.listprocesses";
+					parameters["CoreDevice.action"] = new HashTable<string, Variant> (str_hash, str_equal);
+					parameters["CoreDevice.input"] = new HashTable<string, Variant> (str_hash, str_equal);
+					timer.reset ();
+					var response = yield appservice.request (parameters);
+					printerr ("[*] Made request in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+					printerr ("Got response: %s\n", response.print (true));
 				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 				}

@@ -530,6 +530,7 @@ namespace Frida {
 		private Gee.HashSet<Promise<Session>> pending_attach_requests = new Gee.HashSet<Promise<Session>> ();
 		private Gee.HashMap<AgentSessionId?, Promise<bool>> pending_detach_requests =
 			new Gee.HashMap<AgentSessionId?, Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.Set<Service> services = new Gee.HashSet<Service> ();
 		private Bus _bus;
 
 		internal Device (DeviceManager? manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider,
@@ -1228,7 +1229,7 @@ namespace Frida {
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			var channel_provider = provider as ChannelProvider;
+			var channel_provider = provider as HostChannelProvider;
 			if (channel_provider == null)
 				throw new Error.NOT_SUPPORTED ("Channels are not supported by this device");
 
@@ -1247,6 +1248,38 @@ namespace Frida {
 			protected override async IOStream perform_operation () throws Error, IOError {
 				return yield parent.open_channel (address, cancellable);
 			}
+		}
+
+		public async Service open_service (string address, Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			var service_provider = provider as HostServiceProvider;
+			if (service_provider == null)
+				throw new Error.NOT_SUPPORTED ("Services are not supported by this device");
+
+			var service = yield service_provider.open_service (address, cancellable);
+			service.close.connect (on_service_closed);
+			services.add (service);
+
+			return service;
+		}
+
+		public Service open_service_sync (string address, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<OpenServiceTask> ();
+			task.address = address;
+			return task.execute (cancellable);
+		}
+
+		private class OpenServiceTask : DeviceTask<Service> {
+			public string address;
+
+			protected override async Service perform_operation () throws Error, IOError {
+				return yield parent.open_service (address, cancellable);
+			}
+		}
+
+		private void on_service_closed (Service service) {
+			services.remove (service);
 		}
 
 		public async void unpair (Cancellable? cancellable = null) throws Error, IOError {
@@ -1357,6 +1390,10 @@ namespace Frida {
 			close_request = new Promise<bool> ();
 
 			try {
+				foreach (var service in services.to_array ())
+					yield service.cancel (cancellable);
+				services.clear ();
+
 				while (!pending_detach_requests.is_empty) {
 					var iterator = pending_detach_requests.entries.iterator ();
 					iterator.next ();
@@ -1958,6 +1995,68 @@ namespace Frida {
 
 		private abstract class BusTask<T> : AsyncTask<T> {
 			public weak Bus parent {
+				get;
+				construct;
+			}
+		}
+	}
+
+	public interface Service : Object {
+		public signal void close ();
+		public signal void message (Variant message);
+
+		public abstract bool is_closed ();
+
+		public abstract async void activate (Cancellable? cancellable = null) throws Error, IOError;
+
+		public void activate_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<ActivateTask> ().execute (cancellable);
+		}
+
+		private class ActivateTask : ServiceTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.activate (cancellable);
+			}
+		}
+
+		public abstract async void cancel (Cancellable? cancellable = null) throws IOError;
+
+		public void cancel_sync (Cancellable? cancellable = null) throws IOError {
+			try {
+				create<CancelTask> ().execute (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		private class CancelTask : ServiceTask<void> {
+			protected override async void perform_operation () throws IOError {
+				yield parent.cancel (cancellable);
+			}
+		}
+
+		public abstract async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError;
+
+		public Variant request_sync (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<RequestTask> () as RequestTask;
+			task.parameters = parameters;
+			return task.execute (cancellable);
+		}
+
+		private class RequestTask : ServiceTask<Variant> {
+			public Variant parameters;
+
+			protected override async Variant perform_operation () throws Error, IOError {
+				return yield parent.request (parameters, cancellable);
+			}
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class ServiceTask<T> : AsyncTask<T> {
+			public weak Service parent {
 				get;
 				construct;
 			}

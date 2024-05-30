@@ -13,6 +13,14 @@ base_sources = [
 ]
 
 extra_vala_args = []
+
+if host_os == 'macos'
+  base_sources += [
+    'xpc.vala',
+    'frida-darwin.c',
+  ]
+endif
+
 extra_deps = []
 if host_os_family != 'windows'
   extra_vala_args += '--pkg=gio-unix-2.0'
@@ -22,6 +30,12 @@ endif
 base_vala_args = [gum_vala_args, '--pkg=gio-2.0', '--pkg=json-glib-1.0']
 if nice_dep.found()
   base_vala_args += '--pkg=nice'
+endif
+if host_os_family == 'darwin'
+  base_vala_args += [
+    '--pkg=darwin-gcd',
+    '--pkg=darwin-xpc',
+  ]
 endif
 
 base = static_library('frida-base-' + api_version, base_sources,

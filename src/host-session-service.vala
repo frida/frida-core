@@ -177,12 +177,16 @@ namespace Frida {
 		}
 	}
 
-	public interface ChannelProvider : Object {
+	public interface HostChannelProvider : Object {
 		public abstract async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError;
 	}
 
+	public interface HostServiceProvider : Object {
+		public abstract async Service open_service (string address, Cancellable? cancellable = null) throws Error, IOError;
+	}
+
 	public interface Pairable : Object {
-		public abstract async void unpair (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void unpair (Cancellable? cancellable = null) throws Error, IOError;
 	}
 
 	public interface HostSessionBackend : Object {
@@ -1537,7 +1541,7 @@ namespace Frida {
 
 #if HAVE_FRUITY_BACKEND || HAVE_DROIDY_BACKEND
 	internal async DBusConnection establish_direct_connection (TransportBroker broker, AgentSessionId id,
-			ChannelProvider channel_provider, Cancellable? cancellable) throws Error, IOError {
+			HostChannelProvider channel_provider, Cancellable? cancellable) throws Error, IOError {
 		uint16 port;
 		string token;
 		try {
