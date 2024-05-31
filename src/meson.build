@@ -628,11 +628,3 @@ subdir('api')
 if 'core' in get_option('devkits')
   subdir('devkit')
 endif
-
-if have_fruity_backend
-  executable('xpc-test',
-    'fruity' / 'xpc-test.vala',
-    vala_args: [backend_vala_args, backend_vala_args_private, base_vala_args, gum_vala_args],
-    dependencies: core_dep,
-  )
-endif
