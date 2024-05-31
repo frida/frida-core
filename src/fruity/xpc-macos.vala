@@ -308,7 +308,7 @@ namespace Frida.Fruity {
 					}
 				}
 
-				public Posix.pid_t effective_pid {
+				public int32 effective_pid {
 					get {
 						return sock.effective_pid;
 					}
@@ -391,11 +391,11 @@ namespace Frida.Fruity {
 			public int16 qlimit;
 			public int16 timeo;
 			public uint16 error;
-			public Posix.pid_t pgid;
+			public int32 pgid;
 			public uint32 oobmark;
-			public Posix.uid_t uid;
-			public Posix.pid_t last_pid;
-			public Posix.pid_t effective_pid;
+			public uint32 uid;
+			public int32 last_pid;
+			public int32 effective_pid;
 			public uint64 gencnt;
 			public uint32 flags;
 			public uint32 flags1;
