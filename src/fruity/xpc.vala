@@ -154,6 +154,12 @@ namespace Frida.Fruity {
 			return reader.get_string_value ();
 		}
 
+		public Variant enumerate_services () throws Error {
+			var reader = new VariantReader (handshake_body);
+			reader.read_member ("Services");
+			return reader.current_object;
+		}
+
 		public ServiceInfo get_service (string identifier) throws Error {
 			var reader = new VariantReader (handshake_body);
 			reader.read_member ("Services");

@@ -207,7 +207,7 @@ namespace Frida {
 	}
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, HostServiceProvider,
-			FruityLockdownProvider, Pairable {
+			FruityLockdownProvider, FruityTunnelProvider, Pairable {
 		public string id {
 			get { return device_details.udid.raw_value; }
 		}
@@ -290,7 +290,7 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			host_session = new FruityHostSession (this, this);
+			host_session = new FruityHostSession (this, this, this);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -546,6 +546,10 @@ namespace Frida {
 			Cancellable? cancellable) throws Error, IOError;
 	}
 
+	public interface FruityTunnelProvider : Object {
+		public abstract async Fruity.Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError;
+	}
+
 	public class FruityHostSession : Object, HostSession {
 		public weak HostChannelProvider channel_provider {
 			get;
@@ -553,6 +557,11 @@ namespace Frida {
 		}
 
 		public weak FruityLockdownProvider lockdown_provider {
+			get;
+			construct;
+		}
+
+		public weak FruityTunnelProvider tunnel_provider {
 			get;
 			construct;
 		}
@@ -584,10 +593,12 @@ namespace Frida {
 			DEBUGSERVER_ENDPOINT_LEGACY,
 		};
 
-		public FruityHostSession (HostChannelProvider channel_provider, FruityLockdownProvider lockdown_provider) {
+		public FruityHostSession (HostChannelProvider channel_provider, FruityLockdownProvider lockdown_provider,
+				FruityTunnelProvider tunnel_provider) {
 			Object (
 				channel_provider: channel_provider,
-				lockdown_provider: lockdown_provider
+				lockdown_provider: lockdown_provider,
+				tunnel_provider: tunnel_provider
 			);
 		}
 
@@ -624,6 +635,16 @@ namespace Frida {
 		}
 
 		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable) throws Error, IOError {
+			var parameters = yield query_base_system_parameters (cancellable);
+
+			var tunnel = yield tunnel_provider.find_tunnel (cancellable);
+			if (tunnel != null)
+				parameters["services"] = tunnel.discovery.enumerate_services ();
+
+			return parameters;
+		}
+
+		private async HashTable<string, Variant> query_base_system_parameters (Cancellable? cancellable) throws Error, IOError {
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null && server.flavor == REGULAR) {
 				try {
