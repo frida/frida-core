@@ -86,11 +86,6 @@ namespace Frida.Fruity {
 		}
 
 		public abstract async Gee.List<PairingServiceHost> resolve (Cancellable? cancellable = null) throws Error, IOError;
-
-		public string to_string () {
-			return @"PairingServiceDetails { name: \"$name\", interface_index: $interface_index," +
-				@" interface_name: \"$interface_name\" }";
-		}
 	}
 
 	public interface PairingServiceHost : Object {
@@ -107,10 +102,6 @@ namespace Frida.Fruity {
 		}
 
 		public abstract async Gee.List<InetSocketAddress> resolve (Cancellable? cancellable = null) throws Error, IOError;
-
-		public string to_string () {
-			return @"PairingServiceHost { name: \"$name\", port: $port, txt_record: <$(txt_record.size) entries> }";
-		}
 	}
 
 	public class DiscoveryService : Object, AsyncInitable {
@@ -201,10 +192,6 @@ namespace Frida.Fruity {
 					handshake_promise.resolve (msg.body);
 			} catch (Error e) {
 			}
-		}
-
-		public string to_string () {
-			return @"DiscoveryService { handshake_body: $(variant_to_pretty_string (handshake_body)) }";
 		}
 	}
 
@@ -1457,16 +1444,6 @@ namespace Frida.Fruity {
 		public bool allows_promptless_automation_pairing_upgrade;
 		public bool allows_sharing_sensitive_info;
 		public bool allows_incoming_tunnel_connections;
-
-		public string to_string () {
-			return "DeviceOptions { " +
-				@"allows_pair_setup: $allows_pair_setup, " +
-				@"allows_pinless_pairing: $allows_pinless_pairing " +
-				@"allows_promptless_automation_pairing_upgrade: $allows_promptless_automation_pairing_upgrade " +
-				@"allows_sharing_sensitive_info: $allows_sharing_sensitive_info " +
-				@"allows_incoming_tunnel_connections: $allows_incoming_tunnel_connections " +
-				"}";
-		}
 	}
 
 	public class DeviceInfo {
@@ -1475,10 +1452,6 @@ namespace Frida.Fruity {
 		public string udid;
 		public uint64 ecid;
 		public Plist kvs;
-
-		public string to_string () {
-			return @"DeviceInfo { name: \"$name\", model: \"$model\", udid: \"$udid\" }";
-		}
 	}
 
 	private class PairingParamsBuilder {
@@ -3181,39 +3154,11 @@ namespace Frida.Fruity {
 			public bool is_internal;
 			public bool is_hidden;
 			public bool is_app_clip;
-
-			public string to_string () {
-				var summary = new StringBuilder.sized (128);
-
-				summary
-					.append ("ApplicationInfo {")
-					.append (@"\n\tbundle_identifier: \"$bundle_identifier\",");
-				if (bundle_version != null)
-					summary.append (@"\n\tbundle_version: \"$bundle_version\",");
-				summary.append (@"\n\tname: \"$name\",");
-				if (version != null)
-					summary.append (@"\n\tversion: \"$version\",");
-				summary
-					.append (@"\n\tpath: \"$path\",")
-					.append (@"\n\tis_first_party: $is_first_party,")
-					.append (@"\n\tis_developer_app: $is_developer_app,")
-					.append (@"\n\tis_removable: $is_removable,")
-					.append (@"\n\tis_internal: $is_internal,")
-					.append (@"\n\tis_hidden: $is_hidden,")
-					.append (@"\n\tis_app_clip: $is_app_clip,")
-					.append ("\n}");
-
-				return summary.str;
-			}
 		}
 
 		public class ProcessInfo {
 			public uint pid;
 			public string path;
-
-			public string to_string () {
-				return "ProcessInfo { pid: %u, path: \"%s\" }".printf (pid, path);
-			}
 		}
 	}
 
@@ -3980,28 +3925,6 @@ namespace Frida.Fruity {
 			this.id = id;
 			this.body = body;
 		}
-
-		public string to_string () {
-			var description = new StringBuilder.sized (128);
-
-			description.append_printf (("XpcMessage {" +
-					"\n\ttype: %s," +
-					"\n\tflags: %s," +
-					"\n\tid: %" + int64.FORMAT_MODIFIER + "u,"),
-				type.to_nick ().up (),
-				flags.print (),
-				id);
-
-			if (body != null) {
-				description.append ("\n\tbody: ");
-				print_variant (body, description, 1);
-				description.append_c (',');
-			}
-
-			description.append ("\n}");
-
-			return description.str;
-		}
 	}
 
 	public enum MessageType {
@@ -4459,96 +4382,6 @@ namespace Frida.Fruity {
 		key.get_raw_private_key (result, ref size);
 
 		return new Bytes.take ((owned) result);
-	}
-
-	// https://gist.github.com/phako/96b36b5070beaf7eee27
-	public void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
-	}
-
-	private string variant_to_pretty_string (Variant v) {
-		var sink = new StringBuilder.sized (128);
-		print_variant (v, sink);
-		return (owned) sink.str;
-	}
-
-	private void print_variant (Variant v, StringBuilder sink, uint depth = 0, bool initial = true) {
-		VariantType type = v.get_type ();
-
-		if (type.is_basic ()) {
-			sink.append (v.print (false));
-			return;
-		}
-
-		if (type.equal (VariantType.VARDICT)) {
-			sink.append ("{\n");
-
-			var iter = new VariantIter (v);
-			string key;
-			Variant val;
-			while (iter.next ("{sv}", out key, out val)) {
-				append_indent (depth + 1, sink);
-
-				if ("." in key || "-" in key) {
-					sink
-						.append_c ('"')
-						.append (key)
-						.append_c ('"');
-				} else {
-					sink.append (key);
-				}
-				sink.append (": ");
-
-				print_variant (val, sink, depth + 1, false);
-
-				sink.append (",\n");
-			}
-
-			append_indent (depth, sink);
-			sink.append ("}");
-		} else if (type.is_array () && !type.equal (new VariantType.array (VariantType.BYTE))) {
-			sink.append ("[\n");
-
-			var iter = new VariantIter (v);
-			Variant? val;
-			while ((val = iter.next_value ()) != null) {
-				append_indent (depth + 1, sink);
-				print_variant (val, sink, depth + 1, false);
-				sink.append (",\n");
-			}
-
-			append_indent (depth, sink);
-			sink.append ("]");
-		} else {
-			sink.append (v.print (false));
-		}
-	}
-
-	private void append_indent (uint depth, StringBuilder sink) {
-		for (uint i = 0; i != depth; i++)
-			sink.append_c ('\t');
 	}
 
 	private string make_host_identifier () {
