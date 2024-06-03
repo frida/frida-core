@@ -2588,11 +2588,25 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   FridaHelperContext * ctx = self->backend->context;
   dispatch_source_t source;
 
-  kr = thread_create (self->task, &self->thread);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create");
+  thread_act_array_t threads;
+  mach_msg_type_number_t thread_count;
+  kr = task_threads(self->task, &threads, &thread_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_threads");
 
-  kr = frida_set_thread_state (self->thread, self->thread_state_flavor, self->thread_state_data, self->thread_state_count);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "set_thread_state");
+  thread_state_t remote_state;
+  mach_msg_type_number_t count = self->thread_state_count;
+  remote_state = g_alloca (count * sizeof (integer_t));
+
+  kr = frida_convert_thread_state (*threads, FRIDA_CONVERT_THREAD_STATE_OUT, self->thread_state_flavor, self->thread_state_data, self->thread_state_count, remote_state, &count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_convert_thread_state");
+
+  for (int i = 0; i < thread_count; ++i) {
+    mach_port_deallocate(mach_task_self(), threads[i]);
+  }
+  vm_deallocate(mach_task_self(), (vm_address_t)threads, sizeof(*threads) * thread_count);
+
+  kr = thread_create_running(self->task, self->thread_state_flavor, remote_state, self->thread_state_count, &self->thread);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create_running");
 
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
   self->thread_monitor_source = source;
@@ -2601,7 +2615,20 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
   dispatch_resume (source);
 
-  kr = thread_resume (self->thread);
+  kr = thread_suspend(self->thread);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_suspend");
+
+  guint page_size = getpagesize();
+  
+  uint32_t nop = 0xd503201f;
+  kr = mach_vm_protect (self->task, self->payload_address, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
+  kr = mach_vm_write (self->task, self->payload_address, (vm_offset_t) &nop, sizeof (nop));
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_write(nop)");
+  kr = mach_vm_protect (self->task, self->payload_address, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
+
+  kr = thread_resume(self->thread);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_resume");
 
   success = TRUE;
@@ -4854,6 +4881,9 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   ctx.mapper = mapper;
 
   ctx.aw.ptrauth_support = resolver->ptrauth_support;
+
+  gum_arm64_writer_put_label(&ctx.aw, "loop");
+  gum_arm64_writer_put_b_label(&ctx.aw, "loop");
 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
