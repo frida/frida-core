@@ -428,6 +428,8 @@ static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, g
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
     GumDarwinMapper * mapper);
 
+static gboolean frida_convert_thread_state_for_task (mach_port_t task, thread_state_flavor_t flavor, gconstpointer in_state,
+    mach_msg_type_number_t in_state_count, gpointer out_state, mach_msg_type_number_t * out_state_count, GError ** error);
 static mach_port_t frida_obtain_thread_port_for_thread_id (mach_port_t task, uint64_t thread_id);
 static kern_return_t frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state,
     mach_msg_type_number_t * count);
@@ -2583,16 +2585,24 @@ static gboolean
 frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
 {
   gboolean success = FALSE;
+  thread_state_t thread_state;
+  mach_msg_type_number_t thread_state_count;
   kern_return_t kr;
   const gchar * failed_operation;
   FridaHelperContext * ctx = self->backend->context;
   dispatch_source_t source;
 
-  kr = thread_create (self->task, &self->thread);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create");
+  thread_state = g_alloca (self->thread_state_count * sizeof (natural_t));
+  thread_state_count = self->thread_state_count;
 
-  kr = frida_set_thread_state (self->thread, self->thread_state_flavor, self->thread_state_data, self->thread_state_count);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "set_thread_state");
+  if (!frida_convert_thread_state_for_task (self->task, self->thread_state_flavor, self->thread_state_data, self->thread_state_count,
+        thread_state, &thread_state_count, error))
+  {
+    return FALSE;
+  }
+
+  kr = thread_create_running (self->task, self->thread_state_flavor, thread_state, thread_state_count, &self->thread);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create");
 
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
   self->thread_monitor_source = source;
@@ -2600,9 +2610,6 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   dispatch_source_set_cancel_handler_f (source, frida_inject_instance_on_thread_monitor_cancel);
   dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
   dispatch_resume (source);
-
-  kr = thread_resume (self->thread);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_resume");
 
   success = TRUE;
 
@@ -5071,6 +5078,52 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 }
 
 #endif
+
+static gboolean
+frida_convert_thread_state_for_task (mach_port_t task, thread_state_flavor_t flavor, gconstpointer in_state,
+    mach_msg_type_number_t in_state_count, gpointer out_state, mach_msg_type_number_t * out_state_count,
+    GError ** error)
+{
+  gboolean success = FALSE;
+  kern_return_t kr;
+  const gchar * failed_operation;
+  thread_act_array_t threads = NULL;
+  mach_msg_type_number_t thread_count = 0;
+
+  kr = task_threads (task, &threads, &thread_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_threads");
+
+  kr = frida_convert_thread_state (threads[0], FRIDA_CONVERT_THREAD_STATE_OUT, flavor, in_state, in_state_count,
+      out_state, out_state_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_convert_thread_state");
+
+  success = TRUE;
+
+  goto beach;
+
+mach_failure:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while converting thread state for task (%s returned '%s')",
+        failed_operation, mach_error_string (kr));
+    goto beach;
+  }
+beach:
+  {
+    mach_msg_type_number_t i;
+
+    if (threads != NULL)
+    {
+      for (i = 0; i != thread_count; i++)
+        mach_port_deallocate (mach_task_self (), threads[i]);
+      vm_deallocate (mach_task_self (), (vm_address_t) threads, thread_count * sizeof (thread_t));
+    }
+
+    return success;
+  }
+}
 
 static mach_port_t
 frida_obtain_thread_port_for_thread_id (mach_port_t task, uint64_t thread_id)
