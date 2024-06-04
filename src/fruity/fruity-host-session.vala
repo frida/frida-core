@@ -375,15 +375,46 @@ namespace Frida {
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				Fruity.ServiceInfo? service_info = null;
+				bool needs_checkin = false;
 				try {
 					service_info = tunnel.discovery.get_service (service_name);
 				} catch (Error e) {
 					if (!(e is Error.NOT_SUPPORTED))
 						throw e;
 				}
-				if (service_info == null)
+				if (service_info == null) {
 					service_info = tunnel.discovery.get_service (service_name + ".shim.remote");
-				return yield tunnel.open_tcp_connection (service_info.port, cancellable);
+					needs_checkin = true;
+				}
+
+				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
+
+				if (needs_checkin) {
+					var service = new Fruity.PlistServiceClient (stream);
+
+					var checkin = new Fruity.Plist ();
+					checkin.set_string ("Request", "RSDCheckin");
+					checkin.set_string ("Label", "Xcode");
+					checkin.set_string ("ProtocolVersion", "2");
+
+					try {
+						yield service.query (checkin, cancellable);
+
+						var result = yield service.read_message (cancellable);
+						if (result.has ("Error")) {
+							var error_type = result.get_string ("Error");
+							if (error_type == "ServiceProhibited")
+								throw new Error.PERMISSION_DENIED ("Service prohibited");
+							throw new Error.NOT_SUPPORTED ("%s", error_type);
+						}
+					} catch (Fruity.PlistServiceError e) {
+						throw new Error.PROTOCOL ("%s", e.message);
+					} catch (Frida.Fruity.PlistError e) {
+						throw new Error.PROTOCOL ("%s", e.message);
+					}
+				}
+
+				return stream;
 			}
 
 			try {
