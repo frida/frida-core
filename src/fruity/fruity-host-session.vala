@@ -244,11 +244,7 @@ namespace Frida {
 		}
 
 		private FruityHostSession? host_session;
-		private Promise<Fruity.LockdownClient>? lockdown_client_request;
 		private Promise<Fruity.Tunnel?>? tunnel_request;
-		private Timer? lockdown_client_timer;
-
-		private const double MAX_LOCKDOWN_CLIENT_AGE = 30.0;
 
 		public FruityHostSessionProvider (string name, Variant? icon, Fruity.DeviceDetails details) {
 			Object (
@@ -270,19 +266,6 @@ namespace Frida {
 
 				if (tunnel != null)
 					yield tunnel.close (cancellable);
-			}
-
-			if (lockdown_client_request != null) {
-				Fruity.LockdownClient? lockdown = null;
-				try {
-					lockdown = yield get_lockdown_client (cancellable);
-				} catch (Error e) {
-				}
-
-				if (lockdown != null) {
-					on_lockdown_client_closed (lockdown);
-					yield lockdown.close (cancellable);
-				}
 			}
 		}
 
@@ -445,48 +428,13 @@ namespace Frida {
 		}
 
 		private async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
-			if (lockdown_client_timer != null) {
-				if (lockdown_client_timer.elapsed () > MAX_LOCKDOWN_CLIENT_AGE)
-					on_lockdown_client_closed (lockdown_client_request.future.value);
-				else
-					lockdown_client_timer.start ();
-			}
-
-			while (lockdown_client_request != null) {
-				try {
-					return yield lockdown_client_request.future.wait_async (cancellable);
-				} catch (Error e) {
-					throw e;
-				} catch (IOError e) {
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			lockdown_client_request = new Promise<Fruity.LockdownClient> ();
-
 			try {
 				var client = yield Fruity.LockdownClient.open (device_details, cancellable);
 				yield client.start_session (cancellable);
-				client.closed.connect (on_lockdown_client_closed);
-
-				lockdown_client_request.resolve (client);
-				lockdown_client_timer = new Timer ();
-
 				return client;
-			} catch (GLib.Error e) {
-				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
-
-				lockdown_client_request.reject (api_error);
-				lockdown_client_request = null;
-				lockdown_client_timer = null;
-
-				throw_api_error (api_error);
+			} catch (Frida.Fruity.LockdownError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
-		}
-
-		private void on_lockdown_client_closed (Fruity.LockdownClient client) {
-			client.closed.disconnect (on_lockdown_client_closed);
-			lockdown_client_request = null;
-			lockdown_client_timer = null;
 		}
 
 		private async Fruity.Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
