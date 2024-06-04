@@ -352,6 +352,7 @@ have_fruity_backend = get_option('fruity_backend').allowed()
 have_droidy_backend = get_option('droidy_backend').allowed()
 have_socket_backend = get_option('socket_backend').allowed()
 have_barebone_backend = quickjs_dep.found()
+have_cshell_backend = get_option('cshell_backend').allowed()
 have_compiler_backend = get_option('compiler_backend') \
     .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
     .disable_auto_if(host_os == 'watchos') \
@@ -388,7 +389,8 @@ foreach b : [['local', have_local_backend],
              ['droidy', have_droidy_backend],
              ['socket', have_socket_backend],
              ['barebone', have_barebone_backend],
-             ['compiler', have_compiler_backend]]
+             ['compiler', have_compiler_backend],
+             ['cshell', have_cshell_backend]]
   if b[1]
     vala_flags += '--define=HAVE_@0@_BACKEND'.format(b[0].to_upper())
   endif

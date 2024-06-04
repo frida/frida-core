@@ -1,3 +1,6 @@
 [submodule "releng"]
 	path = releng
 	url = https://github.com/frida/releng.git
+[submodule "src/cshell/frida-cshell"]
+	path = src/cshell/frida-cshell
+	url = https://github.com/WorksButNotTested/frida-cshell.git
