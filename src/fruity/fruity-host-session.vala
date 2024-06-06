@@ -2474,7 +2474,9 @@ namespace Frida {
 					}
 
 					if (val.is_of_type (new VariantType ("av"))) {
+						builder.begin_array ();
 						add_vararray_values (val, builder);
+						builder.end_array ();
 						return;
 					}
 
