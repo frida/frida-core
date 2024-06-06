@@ -11,7 +11,7 @@ namespace Frida {
 			Object (peer: peer);
 		}
 
-		public async Json.Node call (string method, Json.Node[] args, Cancellable? cancellable) throws Error, IOError {
+		public async Json.Node call (string method, Json.Node[] args, Bytes? data, Cancellable? cancellable) throws Error, IOError {
 			string request_id = Uuid.string_random ();
 
 			var request = new Json.Builder ();
@@ -39,7 +39,7 @@ namespace Frida {
 			pending_responses[request_id] = pending;
 
 			try {
-				yield peer.post_rpc_message (raw_request, cancellable);
+				yield peer.post_rpc_message (raw_request, data, cancellable);
 			} catch (Error e) {
 				if (pending_responses.unset (request_id))
 					pending.complete_with_error (e);
@@ -158,6 +158,6 @@ namespace Frida {
 	}
 
 	public interface RpcPeer : Object {
-		public abstract async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError;
 	}
 }

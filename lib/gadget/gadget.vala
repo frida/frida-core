@@ -1381,7 +1381,7 @@ namespace Frida.Gadget {
 			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
 
 			try {
-				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null);
+				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null, null);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -1449,8 +1449,8 @@ namespace Frida.Gadget {
 			return true;
 		}
 
-		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
-			engine.post_to_script (id, json);
+		private async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError {
+			engine.post_to_script (id, json, data);
 		}
 	}
 
