@@ -481,6 +481,7 @@ endif
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
+    'fruity' / 'device-monitor.vala',
     'fruity' / 'xpc.vala',
     'fruity' / 'dtx.vala',
     'fruity' / 'lockdown.vala',
@@ -520,6 +521,7 @@ if have_fruity_backend
     '--pkg=libnghttp2',
     '--pkg=libngtcp2',
     '--pkg=libngtcp2_crypto_quictls',
+    '--pkg=libusb-1.0',
     '--pkg=lwip',
     '--pkg=openssl',
   ]

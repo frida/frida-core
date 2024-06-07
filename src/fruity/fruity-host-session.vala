@@ -1,5 +1,7 @@
 namespace Frida {
 	public class FruityHostSessionBackend : Object, HostSessionBackend {
+		private Fruity.DeviceMonitor device_monitor = new Fruity.DeviceMonitor ();
+
 		private Fruity.UsbmuxClient control_client;
 
 		private Gee.HashSet<uint> devices = new Gee.HashSet<uint> ();

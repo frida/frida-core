@@ -450,7 +450,7 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'lwip']
+  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'libusb-1.0', 'lwip']
     backend_deps_private += dependency(dep)
     backend_reqs_private += dep
   endforeach
