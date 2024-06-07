@@ -1,4 +1,5 @@
 devkit_outputs = [
+  'frida-core.gir',
   'frida-core.h',
   static_lib_prefix + 'frida-core' + static_lib_suffix,
   'frida-core-example.c',
