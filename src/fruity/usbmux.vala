@@ -1,13 +1,16 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class UsbmuxClient : Object, AsyncInitable {
-		public signal void device_attached (DeviceDetails details);
-		public signal void device_detached (DeviceId id);
+		public signal void device_attached (UsbmuxDevice device);
+		public signal void device_detached (UsbmuxDevice device);
 
 		public SocketConnection? connection {
 			get;
 			private set;
 		}
+
+		private Gee.Map<uint, UsbmuxDevice> devices = new Gee.HashMap<uint, UsbmuxDevice> ();
+
 		private InputStream? input;
 		private OutputStream? output;
 		private Cancellable io_cancellable = new Cancellable ();
@@ -132,11 +135,12 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async void connect_to_port (DeviceId device_id, uint16 port, Cancellable? cancellable = null) throws UsbmuxError, IOError {
+		public async void connect_to_port (uint device_id, uint16 port, Cancellable? cancellable = null)
+				throws UsbmuxError, IOError {
 			assert (is_processing_messages);
 
 			var request = create_request ("Connect");
-			request.set_integer ("DeviceID", device_id.raw_value);
+			request.set_integer ("DeviceID", device_id);
 			request.set_integer ("PortNumber", port.to_big_endian ());
 
 			var response = yield query (request, MODE_SWITCH, cancellable);
@@ -160,9 +164,9 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async Plist read_pair_record (Udid udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
+		public async Plist read_pair_record (string udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			var request = create_request ("ReadPairRecord");
-			request.set_string ("PairRecordID", udid.raw_value);
+			request.set_string ("PairRecordID", udid);
 
 			var response = yield query (request, REGULAR, cancellable);
 			try {
@@ -175,9 +179,9 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async void delete_pair_record (Udid udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
+		public async void delete_pair_record (string udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			var request = create_request ("DeletePairRecord");
-			request.set_string ("PairRecordID", udid.raw_value);
+			request.set_string ("PairRecordID", udid);
 
 			var response = yield query (request, REGULAR, cancellable);
 			check_pair_response (response, "DeletePairRecord");
@@ -276,28 +280,26 @@ namespace Frida.Fruity {
 						if (props.has ("ConnectionType") && props.get_string ("ConnectionType") == "Network")
 							connection_type = NETWORK;
 
-						var device_id = DeviceId ((uint) body.get_integer ("DeviceID"));
+						var device_id = (uint) body.get_integer ("DeviceID");
 
-						ProductId product_id;
-						if (connection_type == USB)
-							product_id = ProductId ((int) props.get_integer ("ProductID"));
-						else
-							product_id = ProductId (-1);
+						int product_id = (connection_type == USB) ? (int) props.get_integer ("ProductID") : -1;
 
-						string raw_udid = props.get_string ("SerialNumber");
-						if (raw_udid.length == 24)
-							raw_udid = raw_udid[:8] + "-" + raw_udid[8:];
-						var udid = Udid (raw_udid);
+						string udid = props.get_string ("SerialNumber");
+						if (udid.length == 24)
+							udid = udid[:8] + "-" + udid[8:];
 
 						InetSocketAddress? network_address = null;
 						if (connection_type == NETWORK)
 							network_address = parse_network_address (props.get_bytes ("NetworkAddress"));
 
-						var details =
-							new DeviceDetails (connection_type, device_id, product_id, udid, network_address);
-						device_attached (details);
+						var device =
+							new UsbmuxDevice (connection_type, device_id, product_id, udid, network_address);
+						devices[device_id] = device;
+						device_attached (device);
 					} else if (message_type == "Detached") {
-						device_detached (DeviceId ((uint) body.get_integer ("DeviceID")));
+						UsbmuxDevice? device;
+						if (devices.unset ((uint) body.get_integer ("DeviceID"), out device))
+							device_detached (device);
 					} else {
 						throw new UsbmuxError.PROTOCOL ("Unexpected message type: %s", message_type);
 					}
@@ -546,23 +548,23 @@ namespace Frida.Fruity {
 		PROTOCOL
 	}
 
-	public class DeviceDetails : Object {
+	public class UsbmuxDevice : Object {
 		public ConnectionType connection_type {
 			get;
 			construct;
 		}
 
-		public DeviceId id {
+		public uint id {
 			get;
 			construct;
 		}
 
-		public ProductId product_id {
+		public int product_id {
 			get;
 			construct;
 		}
 
-		public Udid udid {
+		public string udid {
 			get;
 			construct;
 		}
@@ -572,7 +574,7 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public DeviceDetails (ConnectionType connection_type, DeviceId id, ProductId product_id, Udid udid,
+		public UsbmuxDevice (ConnectionType connection_type, uint id, int product_id, string udid,
 				InetSocketAddress? network_address) {
 			Object (
 				connection_type: connection_type,
@@ -581,44 +583,6 @@ namespace Frida.Fruity {
 				udid: udid,
 				network_address: network_address
 			);
-		}
-	}
-
-	public enum ConnectionType {
-		USB,
-		NETWORK
-	}
-
-	public struct DeviceId {
-		public uint raw_value {
-			get;
-			private set;
-		}
-
-		public DeviceId (uint raw_value) {
-			this.raw_value = raw_value;
-		}
-	}
-
-	public struct ProductId {
-		public int raw_value {
-			get;
-			private set;
-		}
-
-		public ProductId (int raw_value) {
-			this.raw_value = raw_value;
-		}
-	}
-
-	public struct Udid {
-		public string raw_value {
-			get;
-			private set;
-		}
-
-		public Udid (string raw_value) {
-			this.raw_value = raw_value;
 		}
 	}
 }

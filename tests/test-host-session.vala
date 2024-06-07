@@ -3669,9 +3669,21 @@ namespace Frida.HostSessionTest {
 
 					var timer = new Timer ();
 
+					printerr ("device.query_system_parameters()");
+					timer.reset ();
+					var p = yield device.query_system_parameters ();
+					printerr (" => got parameters, took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+					var iter = HashTableIter<string, Variant> (p);
+					string k;
+					Variant v;
+					while (iter.next (out k, out v))
+						printerr ("%s: %s\n", k, v.print (false));
+
 					printerr ("device.enumerate_applications()");
 					timer.reset ();
-					var apps = yield device.enumerate_applications ();
+					var opts = new ApplicationQueryOptions ();
+					opts.scope = FULL;
+					var apps = yield device.enumerate_applications (opts);
 					printerr (" => got %d apps, took %u ms\n", apps.size (), (uint) (timer.elapsed () * 1000.0));
 					if (GLib.Test.verbose ()) {
 						var length = apps.size ();
@@ -3744,6 +3756,12 @@ namespace Frida.HostSessionTest {
 					printerr ("\nFAIL: %s\n\n", e.message);
 				}
 
+				try {
+					yield device_manager.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+
 				h.done ();
 			}
 
@@ -3777,6 +3795,7 @@ namespace Frida.HostSessionTest {
 					printerr ("Got response: %s\n", response.print (true));
 				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
+					yield;
 				}
 
 				h.done ();

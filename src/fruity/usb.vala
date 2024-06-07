@@ -1,0 +1,290 @@
+[CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
+namespace Frida.Fruity {
+	internal sealed class UsbDevice : Object, AsyncInitable {
+		public LibUSB.Device? raw_device {
+			get {
+				return _raw_device;
+			}
+		}
+
+		public LibUSB.DeviceHandle? handle {
+			get {
+				return _handle;
+			}
+		}
+
+		public string udid {
+			get {
+				return _udid;
+			}
+		}
+
+		public uint16 default_language_id {
+			get {
+				return _default_language_id;
+			}
+		}
+
+		private LibUSB.Device? _raw_device;
+		private LibUSB.DeviceHandle? _handle;
+		private string _udid;
+		private uint16 _default_language_id;
+
+		private enum AppleSpecificRequest {
+			GET_MODE = 0x45,
+			SET_MODE = 0x52,
+		}
+
+		private const string MODE_INITIAL_UNTETHERED	= "3:3:3:0"; // => 5:3:3:0
+		private const string MODE_INITIAL_TETHERED	= "4:4:3:4"; // => 5:4:3:4
+
+		public static async UsbDevice open (LibUSB.Device raw_device, Cancellable? cancellable = null) throws Error, IOError {
+			var device = new UsbDevice (raw_device);
+
+			try {
+				yield device.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return device;
+		}
+
+		private UsbDevice (LibUSB.Device raw_device) {
+			Object ();
+			_raw_device = raw_device;
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			Usb.check (_raw_device.open (out _handle), "Failed to open USB device");
+
+			Bytes language_ids_response = yield read_string_descriptor_bytes (0, 0, cancellable);
+			if (language_ids_response.get_size () < sizeof (uint16))
+				throw new Error.PROTOCOL ("Invalid language IDs response");
+			Buffer language_ids = new Buffer (language_ids_response, LITTLE_ENDIAN);
+			_default_language_id = language_ids.read_uint16 (0);
+
+			var dev_desc = LibUSB.DeviceDescriptor (_raw_device);
+			string serial_number = yield read_string_descriptor (dev_desc.iSerialNumber, _default_language_id, cancellable);
+			_udid = udid_from_serial_number (serial_number);
+
+			return true;
+		}
+
+		public void close () {
+			_handle = null;
+			_raw_device = null;
+		}
+
+		public async bool maybe_modeswitch (Cancellable? cancellable) throws Error, IOError {
+			var response = yield control_transfer (
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
+				AppleSpecificRequest.GET_MODE,
+				0,
+				0,
+				4,
+				1000,
+				cancellable);
+			string mode = parse_mode (response);
+			bool is_initial_mode = mode == MODE_INITIAL_UNTETHERED || mode == MODE_INITIAL_TETHERED;
+			if (!is_initial_mode)
+				return false;
+
+			response = yield control_transfer (
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
+				AppleSpecificRequest.SET_MODE,
+				0,
+				3,
+				1,
+				1000,
+				cancellable);
+			if (response.get_size () != 1 || response[0] != 0x00)
+				return false;
+
+			return true;
+		}
+
+		private static string parse_mode (Bytes mode) throws Error {
+			if (mode.get_size () != 4)
+				throw new Error.PROTOCOL ("Invalid mode response");
+			unowned uint8[] m = mode.get_data ();
+			return "%u:%u:%u:%u".printf (m[0], m[1], m[2], m[3]);
+		}
+
+		private static string udid_from_serial_number (string serial) {
+			if (serial.length == 24)
+				return serial.substring (0, 8) + "-" + serial.substring (8);
+			return serial;
+		}
+
+		public async string read_string_descriptor (uint8 index, uint16 language_id, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield read_string_descriptor_bytes (index, language_id, cancellable);
+			try {
+				var input = new DataInputStream (new MemoryInputStream.from_bytes (response));
+				input.byte_order = LITTLE_ENDIAN;
+
+				size_t size = response.get_size ();
+				if (size % sizeof (unichar2) != 0)
+					throw new Error.PROTOCOL ("Invalid string descriptor");
+				size_t n = size / sizeof (unichar2);
+				var chars = new unichar2[n];
+				for (size_t i = 0; i != n; i++)
+					chars[i] = input.read_uint16 ();
+
+				unowned string16 str = (string16) chars;
+				return str.to_utf8 ((long) n);
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+		}
+
+		public async Bytes read_string_descriptor_bytes (uint8 index, uint16 language_id, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield control_transfer (
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.STANDARD | LibUSB.EndpointDirection.IN,
+				LibUSB.StandardRequest.GET_DESCRIPTOR,
+				(LibUSB.DescriptorType.STRING << 8) | index,
+				language_id,
+				1024,
+				1000,
+				cancellable);
+			try {
+				var input = new DataInputStream (new MemoryInputStream.from_bytes (response));
+				input.byte_order = LITTLE_ENDIAN;
+
+				uint8 length = input.read_byte ();
+				if (length < 2)
+					throw new Error.PROTOCOL ("Invalid string descriptor length");
+
+				uint8 type = input.read_byte ();
+				if (type != LibUSB.DescriptorType.STRING)
+					throw new Error.PROTOCOL ("Invalid string descriptor type");
+
+				size_t remainder = response.get_size () - 2;
+				length -= 2;
+				if (length > remainder)
+					throw new Error.PROTOCOL ("Invalid string descriptor length");
+
+				return response[2:2 + length];
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+		}
+
+		public async Bytes control_transfer (uint8 request_type, uint8 request, uint16 val, uint16 index, uint16 length,
+				uint timeout, Cancellable? cancellable) throws Error, IOError {
+			var transfer = new LibUSB.Transfer ();
+			var ready_closure = new TransferReadyClosure (control_transfer.callback);
+
+			var buffer = new uint8[sizeof (LibUSB.ControlSetup) + length];
+			LibUSB.Transfer.fill_control_setup (buffer, request_type, request, val, index, length);
+			transfer.fill_control_transfer (_handle, buffer, on_transfer_ready, ready_closure, timeout);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				transfer.cancel ();
+				return Source.REMOVE;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
+
+			try {
+				Usb.check (transfer.submit (), "Failed to submit control transfer");
+				yield;
+			} finally {
+				cancel_source.destroy ();
+			}
+
+			Usb.check_transfer (transfer.status, "Control transfer failed");
+
+			return new Bytes (((uint8[]) transfer.control_get_data ())[:transfer.actual_length]);
+		}
+
+		public async size_t bulk_transfer (uint8 endpoint, uint8[] buffer, uint timeout, Cancellable? cancellable)
+				throws Error, IOError {
+			var transfer = new LibUSB.Transfer ();
+			var ready_closure = new TransferReadyClosure (bulk_transfer.callback);
+
+			transfer.fill_bulk_transfer (_handle, endpoint, buffer, on_transfer_ready, ready_closure, timeout);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				transfer.cancel ();
+				return Source.REMOVE;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
+
+			try {
+				Usb.check (transfer.submit (), "Failed to submit bulk transfer");
+				yield;
+			} finally {
+				cancel_source.destroy ();
+			}
+
+			Usb.check_transfer (transfer.status, "Bulk transfer failed");
+
+			return transfer.actual_length;
+		}
+
+		private static void on_transfer_ready (LibUSB.Transfer transfer) {
+			TransferReadyClosure * closure = transfer.user_data;
+			closure->schedule ();
+		}
+
+		private class TransferReadyClosure {
+			private SourceFunc? handler;
+			private MainContext main_context;
+
+			public TransferReadyClosure (owned SourceFunc handler) {
+				this.handler = (owned) handler;
+				main_context = MainContext.ref_thread_default ();
+			}
+
+			public void schedule () {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					handler ();
+					handler = null;
+					return Source.REMOVE;
+				});
+				source.attach (main_context);
+			}
+		}
+	}
+
+	namespace Usb {
+		internal static void check (LibUSB.Error error, string prefix) throws Error {
+			if (error >= LibUSB.Error.SUCCESS)
+				return;
+
+			string message = @"$prefix: $(error.get_description ())";
+
+			switch (error) {
+				case ACCESS:
+					throw new Error.PERMISSION_DENIED ("%s", message);
+				case NOT_FOUND:
+					throw new Error.INVALID_OPERATION ("%s", message);
+				case TIMEOUT:
+					throw new Error.TIMED_OUT ("%s", message);
+				default:
+					throw new Error.TRANSPORT ("%s", message);
+			}
+		}
+
+		internal static void check_transfer (LibUSB.TransferStatus status, string prefix) throws Error, IOError {
+			if (status == COMPLETED)
+				return;
+
+			string message = @"$prefix: $(status.to_string ())";
+
+			switch (status) {
+				case TIMED_OUT:
+					throw new Error.TIMED_OUT ("%s", message);
+				case CANCELLED:
+					throw new IOError.CANCELLED ("%s", message);
+				default:
+					throw new Error.TRANSPORT ("%s", message);
+			}
+		}
+	}
+}

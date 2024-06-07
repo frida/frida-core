@@ -464,10 +464,28 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'lwip']
+  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'libusb-1.0']
     backend_deps_private += dependency(dep)
     backend_reqs_private += dep
   endforeach
+
+  lwip_options = [
+    'ipv4=disabled',
+    'ipv6=enabled',
+    'dns=disabled',
+    'arp=disabled',
+    'ethernet=enabled',
+    'tcp_mss=1360',
+    'tcp_snd_buf=65535',
+    'tcp_wnd=65535',
+  ]
+  if optimize_for_prod
+    lwip_options += 'lwip_debug=disabled'
+  else
+    lwip_options += 'lwip_debug=enabled'
+  endif
+  backend_deps_private += dependency('lwip', default_options: lwip_options)
+  backend_reqs_private += 'lwip'
 endif
 
 if quickjs_dep.found()

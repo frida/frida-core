@@ -1,37 +1,33 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class InstallationProxyClient : Object, AsyncInitable {
-		public LockdownClient lockdown {
+		public Device device {
 			get;
 			construct;
 		}
 
 		private PlistServiceClient service;
 
-		private InstallationProxyClient (LockdownClient lockdown) {
-			Object (lockdown: lockdown);
+		private InstallationProxyClient (Device device) {
+			Object (device: device);
 		}
 
-		public static async InstallationProxyClient open (LockdownClient lockdown, Cancellable? cancellable = null) throws InstallationProxyError, IOError {
-			var client = new InstallationProxyClient (lockdown);
+		public static async InstallationProxyClient open (Device device, Cancellable? cancellable = null) throws Error, IOError {
+			var client = new InstallationProxyClient (device);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				throw_local_error (e);
+				throw_api_error (e);
 			}
 
 			return client;
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws InstallationProxyError, IOError {
-			try {
-				var stream = yield lockdown.start_service ("com.apple.mobile.installation_proxy", cancellable);
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var stream = yield device.open_lockdown_service ("com.apple.mobile.installation_proxy", cancellable);
 
-				service = new PlistServiceClient (stream);
-			} catch (LockdownError e) {
-				throw new InstallationProxyError.PROTOCOL ("%s", e.message);
-			}
+			service = new PlistServiceClient (stream);
 
 			return true;
 		}
@@ -40,8 +36,7 @@ namespace Frida.Fruity {
 			yield service.close (cancellable);
 		}
 
-		public async Gee.ArrayList<ApplicationDetails> browse (Cancellable? cancellable = null)
-				throws InstallationProxyError, IOError {
+		public async Gee.ArrayList<ApplicationDetails> browse (Cancellable? cancellable = null) throws Error, IOError {
 			try {
 				var result = new Gee.ArrayList<ApplicationDetails> ();
 
@@ -75,7 +70,7 @@ namespace Frida.Fruity {
 		}
 
 		public async Gee.HashMap<string, ApplicationDetails> lookup (PlistDict query, Cancellable? cancellable = null)
-				throws InstallationProxyError, IOError {
+				throws Error, IOError {
 			try {
 				var result = new Gee.HashMap<string, ApplicationDetails> ();
 
@@ -189,28 +184,13 @@ namespace Frida.Fruity {
 			return new ApplicationDetails (identifier, name, version, build, path, containers, debuggable);
 		}
 
-		private static void throw_local_error (GLib.Error e) throws InstallationProxyError, IOError {
-			if (e is InstallationProxyError)
-				throw (InstallationProxyError) e;
-
-			if (e is IOError)
-				throw (IOError) e;
-
-			assert_not_reached ();
+		private static Error error_from_service (PlistServiceError e) {
+			return new Error.PROTOCOL ("%s", e.message);
 		}
 
-		private static InstallationProxyError error_from_service (PlistServiceError e) {
-			return new InstallationProxyError.PROTOCOL ("%s", e.message);
+		private static Error error_from_plist (PlistError e) {
+			return new Error.PROTOCOL ("Unexpected response: %s", e.message);
 		}
-
-		private static InstallationProxyError error_from_plist (PlistError e) {
-			return new InstallationProxyError.PROTOCOL ("Unexpected response: %s", e.message);
-		}
-	}
-
-	public errordomain InstallationProxyError {
-		INVALID_ARGUMENT,
-		PROTOCOL
 	}
 
 	public class ApplicationDetails : Object {

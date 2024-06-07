@@ -481,6 +481,7 @@ endif
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
+    'fruity' / 'device-monitor.vala',
     'fruity' / 'xpc.vala',
     'fruity' / 'dtx.vala',
     'fruity' / 'lockdown.vala',
@@ -492,24 +493,24 @@ if have_fruity_backend
     'fruity' / 'keyed-archive.vala',
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
+    'fruity' / 'network-stack.vala',
+    'fruity' / 'usb.vala',
+    'fruity' / 'ncm.vala',
   ]
 
   if host_os_family == 'windows'
-    backend_sources += 'fruity' / 'fruity-host-session-windows.c'
+    backend_sources += 'fruity' / 'device-monitor-windows.c'
   elif host_os_family == 'darwin'
-    backend_sources += 'fruity' / 'fruity-host-session-darwin.m'
+    backend_sources += 'fruity' / 'device-monitor-darwin.m'
   else
-    backend_sources += 'fruity' / 'fruity-host-session-unix.c'
+    backend_sources += 'fruity' / 'device-monitor-unix.c'
   endif
 
   if host_os_family == 'darwin'
     backend_sources += 'fruity' / 'xpc-darwin.vala'
   endif
   if host_os == 'macos'
-    backend_sources += [
-      'fruity' / 'xpc-macos.vala',
-      'fruity' / 'iokit.vala',
-    ]
+    backend_sources += 'fruity' / 'iokit.vala'
   elif host_os == 'linux'
     backend_sources += 'fruity' / 'xpc-linux.vala'
   endif
@@ -519,6 +520,7 @@ if have_fruity_backend
     '--pkg=libnghttp2',
     '--pkg=libngtcp2',
     '--pkg=libngtcp2_crypto_quictls',
+    '--pkg=libusb-1.0',
     '--pkg=lwip',
     '--pkg=openssl',
   ]
