@@ -492,6 +492,7 @@ if have_fruity_backend
     'fruity' / 'keyed-archive.vala',
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
+    'fruity' / 'network-interface.vala',
   ]
 
   if host_os_family == 'windows'
