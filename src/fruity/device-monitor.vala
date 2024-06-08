@@ -4,6 +4,7 @@ namespace Frida.Fruity {
 		private LibUSB.Context context;
 
 		private NetworkInterface netif = new NetworkInterface ("fe80::90fe:2cff:fe3b:e79b", 1500);
+		private bool started_tcp_connection = false;
 
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
@@ -90,29 +91,27 @@ namespace Frida.Fruity {
 				var altsetting_result = handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
 				printerr ("Altsetting result: %s\n", altsetting_result.get_name ());
 
-				while (true) {
-					printerr ("Starting IN transfer...\n");
-					uint8 data[2048];
-					int n = -1;
-					var transfer_result = handle.bulk_transfer ((uint8) rx_address, data, out n, 10000);
-					printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
-					if (transfer_result != SUCCESS)
-						break;
+				new Thread<void> ("frida-ncm-io", () => {
+					while (true) {
+						uint8 data[2048];
+						int n = -1;
+						var transfer_result = handle.bulk_transfer ((uint8) rx_address, data, out n, 10000);
+						if (transfer_result != SUCCESS)
+							break;
 
-					try {
-						handle_ncm_frame (data[:n]);
-					} catch (Error e) {
-						printerr ("%s\n", e.message);
-						break;
+						try {
+							handle_ncm_frame (data[:n]);
+						} catch (Error e) {
+							printerr ("%s\n", e.message);
+							break;
+						}
 					}
-				}
+				});
 			}
 			printerr ("<<<\n");
 		}
 
 		private void handle_ncm_frame (uint8[] data) throws Error {
-			hexdump (data);
-
 			var buffer = new Buffer (new Bytes (data), LITTLE_ENDIAN);
 			var signature = buffer.read_fixed_string (0, 4);
 			if (signature != "NCMH")
@@ -138,10 +137,19 @@ namespace Frida.Fruity {
 					break;
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
-				printerr ("\n=== datagram_index=%u datagram_length=%u\n", datagram_index, datagram_length);
-				hexdump (datagram);
-
 				netif.handle_incoming_datagram (new Bytes (datagram));
+
+				if (!started_tcp_connection) {
+					started_tcp_connection = true;
+
+					size_t ethernet_header_size = 14;
+					size_t ipv6_source_address_offset = 8;
+					size_t start = ethernet_header_size + ipv6_source_address_offset;
+					var source_address = new InetAddress.from_bytes (datagram[start:start + 16], IPV6);
+					printerr ("source_address: %s\n", source_address.to_string ());
+
+					perform_tcp_connection.begin (source_address);
+				}
 
 				dpe_cursor += dpe_size;
 			}
@@ -149,6 +157,18 @@ namespace Frida.Fruity {
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
 			printerr ("on_netif_outgoing_datagram(): TODO\n");
+		}
+
+		private async void perform_tcp_connection (InetAddress address) {
+			try {
+				Cancellable? cancellable = null;
+
+				var bootstrap_disco = yield DiscoveryService.open (
+					yield netif.open_tcp_connection (address.to_string (), 58783, cancellable), cancellable);
+				printerr ("udid: %s\n", bootstrap_disco.query_udid ());
+			} catch (GLib.Error e) {
+				printerr ("perform_tcp_connection() failed: %s\n", e.message);
+			}
 		}
 	}
 
