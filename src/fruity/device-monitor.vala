@@ -7,6 +7,12 @@ namespace Frida.Fruity {
 		private bool started_tcp_connection = false;
 		private uint16 next_outgoing_sequence = 1;
 
+		private LibUSB.DeviceHandle handle;
+		private uint8 rx_address;
+		private uint8 tx_address;
+		private uint8[] our_mac_address = { 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
+		private uint8[]? peer_mac_address;
+
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
 		private const uint8 USB_CLASS_CDC_DATA = 0x0a;
@@ -29,7 +35,6 @@ namespace Frida.Fruity {
 				printerr ("Found Apple device with idProduct=0x%04x\n",
 					desc.idProduct);
 
-				LibUSB.DeviceHandle handle;
 				if (device.open (out handle) != SUCCESS) {
 					printerr ("Unable to open device :(\n");
 					continue;
@@ -50,8 +55,6 @@ namespace Frida.Fruity {
 
 				int ncm_iface = -1;
 				int ncm_altsetting = -1;
-				int rx_address = -1;
-				int tx_address = -1;
 				uint iface_id = 0;
 				foreach (var iface in config.@interface) {
 					uint setting_id = 0;
@@ -96,7 +99,7 @@ namespace Frida.Fruity {
 					while (true) {
 						uint8 data[2048];
 						int n = -1;
-						var transfer_result = handle.bulk_transfer ((uint8) rx_address, data, out n, 10000);
+						var transfer_result = handle.bulk_transfer (rx_address, data, out n, 10000);
 						if (transfer_result != SUCCESS)
 							break;
 
@@ -143,6 +146,8 @@ namespace Frida.Fruity {
 				if (!started_tcp_connection) {
 					started_tcp_connection = true;
 
+					peer_mac_address = datagram[6:12];
+
 					size_t ethernet_header_size = 14;
 					size_t ipv6_source_address_offset = 8;
 					size_t start = ethernet_header_size + ipv6_source_address_offset;
@@ -157,12 +162,22 @@ namespace Frida.Fruity {
 		}
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
-			printerr ("on_netif_outgoing_datagram(): TODO\n");
+			printerr ("on_netif_outgoing_datagram()\n");
+
+			uint16 ether_type_ipv6 = 0x86dd;
+
+			var full_datagram = new BufferBuilder (BIG_ENDIAN)
+				.append_data (peer_mac_address)
+				.append_data (our_mac_address)
+				.append_uint16 (ether_type_ipv6)
+				.append_bytes (datagram)
+				.build ();
+
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 12;
 
 			uint16 datagram_start_index = transfer_header_length + ndp_header_length;
-			uint16 datagram_length = (uint16) datagram.length;
+			uint16 datagram_length = (uint16) full_datagram.length;
 
 			uint16 sequence = next_outgoing_sequence++;
 			uint16 block_length = datagram_start_index + datagram_length;
@@ -180,11 +195,12 @@ namespace Frida.Fruity {
 				.append_uint16 (next_ndp_index)
 				.append_uint16 (datagram_start_index)
 				.append_uint16 (datagram_length)
-				.append_bytes (datagram)
+				.append_bytes (full_datagram)
 				.build ();
 
 			int n;
-			var transfer_result = handle.bulk_transfer ((uint8) tx_address, buffer, out n, 10000);
+			var transfer_result = handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
+			printerr ("transfer_result: %s\n", transfer_result.get_name ());
 		}
 
 		private async void perform_tcp_connection (InetAddress address) {
