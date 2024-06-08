@@ -187,10 +187,13 @@ namespace Frida.Fruity {
 				.build ();
 
 			uint16 transfer_header_length = 12;
-			uint16 ndp_header_length = 12;
+			uint16 ndp_header_length = 16;
 
 			uint16 datagram_start_index = transfer_header_length + ndp_header_length;
 			uint16 datagram_length = (uint16) full_datagram.length;
+
+			uint16 sentinel_start_index = 0;
+			uint16 sentinel_size = 0;
 
 			uint16 sequence = next_outgoing_sequence++;
 			uint16 block_length = datagram_start_index + datagram_length;
@@ -208,6 +211,8 @@ namespace Frida.Fruity {
 				.append_uint16 (next_ndp_index)
 				.append_uint16 (datagram_start_index)
 				.append_uint16 (datagram_length)
+				.append_uint16 (sentinel_start_index)
+				.append_uint16 (sentinel_size)
 				.append_bytes (full_datagram)
 				.build ();
 
