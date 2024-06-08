@@ -13,12 +13,18 @@ namespace Frida.Fruity {
 		private uint8[] our_mac_address = { 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
 		private uint8[]? peer_mac_address;
 
+		private MainContext main_context;
+
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
 		private const uint8 USB_CLASS_CDC_DATA = 0x0a;
 		private const uint8 USB_SUBCLASS_UNDEFINED = 0x00;
 
+		private const size_t ETHERNET_HEADER_SIZE = 14;
+
 		construct {
+			main_context = MainContext.ref_thread_default ();
+
 			netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			LibUSB.Context.init (out context);
@@ -141,20 +147,27 @@ namespace Frida.Fruity {
 					break;
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
-				netif.handle_incoming_datagram (new Bytes (datagram));
+				printerr ("\n<<<\n");
+				hexdump (datagram);
+				netif.handle_incoming_datagram (new Bytes (datagram[ETHERNET_HEADER_SIZE:]));
 
 				if (!started_tcp_connection) {
 					started_tcp_connection = true;
 
 					peer_mac_address = datagram[6:12];
 
-					size_t ethernet_header_size = 14;
 					size_t ipv6_source_address_offset = 8;
-					size_t start = ethernet_header_size + ipv6_source_address_offset;
+					size_t start = ETHERNET_HEADER_SIZE + ipv6_source_address_offset;
 					var source_address = new InetAddress.from_bytes (datagram[start:start + 16], IPV6);
-					printerr ("source_address: %s\n", source_address.to_string ());
+					printerr ("starting TCP connection with source_address: %s\n", source_address.to_string ());
 
-					perform_tcp_connection.begin (source_address);
+					var source = new TimeoutSource (15000);
+					source.set_callback (() => {
+						perform_tcp_connection.begin (source_address);
+						return Source.REMOVE;
+					});
+					source.attach (main_context);
+					printerr ("scheduling in 15 seconds\n");
 				}
 
 				dpe_cursor += dpe_size;
@@ -198,14 +211,16 @@ namespace Frida.Fruity {
 				.append_bytes (full_datagram)
 				.build ();
 
+			printerr ("\n>>>\n");
 			hexdump (frame.get_data ());
 
 			int n;
 			var transfer_result = handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
-			printerr ("transfer_result: %s\n", transfer_result.get_name ());
+			printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
 		}
 
 		private async void perform_tcp_connection (InetAddress address) {
+			printerr ("perform_tcp_connection()\n");
 			try {
 				Cancellable? cancellable = null;
 
