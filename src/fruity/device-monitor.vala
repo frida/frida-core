@@ -185,18 +185,20 @@ namespace Frida.Fruity {
 			uint16 next_ndp_index = 0;
 
 			var frame = new BufferBuilder (LITTLE_ENDIAN)
-				.append_string ("NCMH")
+				.append_string ("NCMH", StringTerminator.NONE)
 				.append_uint16 (transfer_header_length)
 				.append_uint16 (sequence)
 				.append_uint16 (block_length)
 				.append_uint16 (ndp_index)
-				.append_string ("NCM0")
+				.append_string ("NCM0", StringTerminator.NONE)
 				.append_uint16 (ndp_header_length)
 				.append_uint16 (next_ndp_index)
 				.append_uint16 (datagram_start_index)
 				.append_uint16 (datagram_length)
 				.append_bytes (full_datagram)
 				.build ();
+
+			hexdump (frame.get_data ());
 
 			int n;
 			var transfer_result = handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
