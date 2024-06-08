@@ -3777,6 +3777,7 @@ namespace Frida.HostSessionTest {
 					printerr ("Got response: %s\n", response.print (true));
 				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
+					yield;
 				}
 
 				h.done ();

@@ -5,6 +5,7 @@ namespace Frida.Fruity {
 
 		private NetworkInterface netif = new NetworkInterface ("fe80::90fe:2cff:fe3b:e79b", 1500);
 		private bool started_tcp_connection = false;
+		private uint16 next_outgoing_sequence = 1;
 
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
@@ -157,6 +158,33 @@ namespace Frida.Fruity {
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
 			printerr ("on_netif_outgoing_datagram(): TODO\n");
+			uint16 transfer_header_length = 12;
+			uint16 ndp_header_length = 12;
+
+			uint16 datagram_start_index = transfer_header_length + ndp_header_length;
+			uint16 datagram_length = (uint16) datagram.length;
+
+			uint16 sequence = next_outgoing_sequence++;
+			uint16 block_length = datagram_start_index + datagram_length;
+			uint16 ndp_index = transfer_header_length;
+			uint16 next_ndp_index = 0;
+
+			var frame = new BufferBuilder (LITTLE_ENDIAN)
+				.append_string ("NCMH")
+				.append_uint16 (transfer_header_length)
+				.append_uint16 (sequence)
+				.append_uint16 (block_length)
+				.append_uint16 (ndp_index)
+				.append_string ("NCM0")
+				.append_uint16 (ndp_header_length)
+				.append_uint16 (next_ndp_index)
+				.append_uint16 (datagram_start_index)
+				.append_uint16 (datagram_length)
+				.append_bytes (datagram)
+				.build ();
+
+			int n;
+			var transfer_result = handle.bulk_transfer ((uint8) tx_address, buffer, out n, 10000);
 		}
 
 		private async void perform_tcp_connection (InetAddress address) {
