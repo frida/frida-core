@@ -3,7 +3,7 @@ namespace Frida.Fruity {
 	public sealed class DeviceMonitor : Object {
 		private LibUSB.Context context;
 
-		private NetworkInterface netif = new NetworkInterface ("fe80::90fe:2cff:fe3b:e79b", 1500);
+		private NetworkInterface netif = new NetworkInterface ("fe80::90fe:2cff:fe3b:e763", 1500);
 		private bool started_tcp_connection = false;
 		private uint16 next_outgoing_sequence = 1;
 
@@ -17,10 +17,23 @@ namespace Frida.Fruity {
 
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
-		private const uint8 USB_CLASS_CDC_DATA = 0x0a;
-		private const uint8 USB_SUBCLASS_UNDEFINED = 0x00;
-
 		private const size_t ETHERNET_HEADER_SIZE = 14;
+
+		private enum UsbDescriptorType {
+			INTERFACE = 0x04,
+		}
+
+		private enum UsbCommSubclass {
+			NCM		= 0x0d,
+		}
+
+		private enum UsbDataSubclass {
+			UNDEFINED	= 0x00,
+		}
+
+		private enum UsbCdcDescriptorSubtype {
+			ETHERNET = 0x0f,
+		}
 
 		construct {
 			main_context = MainContext.ref_thread_default ();
@@ -62,19 +75,32 @@ namespace Frida.Fruity {
 				int ncm_iface = -1;
 				int ncm_altsetting = -1;
 				uint iface_id = 0;
+				uint8 mac_address_index = 0;
 				foreach (var iface in config.@interface) {
 					uint setting_id = 0;
 					foreach (var setting in iface.altsetting) {
-						printerr ("iface %u setting %u: bInterfaceClass=0x%02x bInterfaceSubClass=0x%02x endpoint.length=%d\n",
+						printerr ("iface %u setting %u: bInterfaceClass=0x%02x bInterfaceSubClass=0x%02x endpoint.length=%d extra.length=%d\n",
 							iface_id, setting_id,
 							setting.bInterfaceClass,
 							setting.bInterfaceSubClass,
-							setting.endpoint.length);
-						if (setting.bInterfaceClass == USB_CLASS_CDC_DATA &&
-								setting.bInterfaceSubClass == USB_SUBCLASS_UNDEFINED &&
+							setting.endpoint.length,
+							setting.extra.length);
+
+						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
+								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
+							try {
+								parse_cdc_header (setting.extra, out mac_address_index);
+								printerr ("MAC address index: %u\n", mac_address_index);
+							} catch (Error e) {
+								printerr ("Uh oh: %s\n", e.message);
+								break;
+							}
+						} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
+								setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
 								setting.endpoint.length == 2) {
 							ncm_iface = setting.bInterfaceNumber;
 							ncm_altsetting = setting.bAlternateSetting;
+
 							foreach (var ep in setting.endpoint) {
 								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
 									rx_address = ep.bEndpointAddress;
@@ -87,10 +113,20 @@ namespace Frida.Fruity {
 					}
 					iface_id++;
 				}
-				printerr ("ncm_iface=%d ncm_altsetting=%d rx_address=0x%02x tx_address=0x%02x\n",
-					ncm_iface, ncm_altsetting, rx_address, tx_address);
+				printerr ("ncm_iface=%d ncm_altsetting=%d rx_address=0x%02x tx_address=0x%02x mac_address_index=%u\n",
+					ncm_iface, ncm_altsetting, rx_address, tx_address, mac_address_index);
 				if (ncm_iface == -1)
 					continue;
+
+				uint8 mac_address_buf[13];
+				var get_result = handle.get_string_descriptor_ascii (mac_address_index, mac_address_buf);
+				unowned string mac_address_str = (string) mac_address_buf;
+				printerr ("get_result=%d \"%s\"\n", get_result, mac_address_str);
+				for (uint i = 0; i != 6; i++) {
+					uint v;
+					mac_address_str.substring (i * 2, 2).scanf ("%02X", out v);
+					our_mac_address[i] = (uint8) v;
+				}
 
 				var detach_result = handle.detach_kernel_driver (ncm_iface);
 				printerr ("Detach result: %s\n", detach_result.get_name ());
@@ -148,7 +184,7 @@ namespace Frida.Fruity {
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
 				printerr ("\n<<<\n");
-				hexdump (datagram);
+				print_datagram (datagram);
 				netif.handle_incoming_datagram (new Bytes (datagram[ETHERNET_HEADER_SIZE:]));
 
 				if (!started_tcp_connection) {
@@ -185,6 +221,9 @@ namespace Frida.Fruity {
 				.append_uint16 (ether_type_ipv6)
 				.append_bytes (datagram)
 				.build ();
+
+			printerr ("\n>>>\n");
+			print_datagram (full_datagram.get_data ());
 
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 16;
@@ -236,6 +275,54 @@ namespace Frida.Fruity {
 				printerr ("perform_tcp_connection() failed: %s\n", e.message);
 			}
 		}
+
+		private void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
+			var input = new DataInputStream (new MemoryInputStream.from_data (header));
+			input.set_byte_order (LITTLE_ENDIAN);
+
+			try {
+				for (int offset = 0; offset != header.length;) {
+					uint8 length = input.read_byte ();
+					if (length < 3)
+						throw new Error.PROTOCOL ("Invalid descriptor length");
+
+					uint8 descriptor_type = input.read_byte ();
+					if (descriptor_type != (LibUSB.RequestType.CLASS | UsbDescriptorType.INTERFACE))
+						throw new Error.PROTOCOL ("Invalid descriptor type");
+
+					uint8 descriptor_subtype = input.read_byte ();
+					if (descriptor_subtype == UsbCdcDescriptorSubtype.ETHERNET) {
+						mac_address_index = input.read_byte ();
+						return;
+					}
+
+					input.skip (length - 3);
+					offset += length;
+				}
+			} catch (IOError e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+
+			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
+		}
+	}
+
+	private void print_datagram (uint8[] datagram) {
+		printerr ("\tdestination=%02x:%02x:%02x:%02x:%02x:%02x source=%02x:%02x:%02x:%02x:%02x:%02x type=0x%02x%02x\n",
+			datagram[0],
+			datagram[1],
+			datagram[2],
+			datagram[3],
+			datagram[4],
+			datagram[5],
+			datagram[6],
+			datagram[7],
+			datagram[8],
+			datagram[9],
+			datagram[10],
+			datagram[11],
+			datagram[12],
+			datagram[13]);
 	}
 
 	// https://gist.github.com/phako/96b36b5070beaf7eee27
