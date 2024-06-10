@@ -15,6 +15,8 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
+		private DataOutputStream pcap;
+
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
 		private const size_t ETHERNET_HEADER_SIZE = 14;
@@ -36,6 +38,21 @@ namespace Frida.Fruity {
 		}
 
 		construct {
+			try {
+				pcap = new DataOutputStream (File.new_for_path ("C:\\src\\ncm.pcap").create (REPLACE_DESTINATION));
+				pcap.set_byte_order (HOST_ENDIAN);
+				pcap.put_uint32 (0xa1b2c3d4U);
+				pcap.put_uint16 (2);
+				pcap.put_uint16 (4);
+				pcap.put_uint32 (0);
+				pcap.put_uint32 (0);
+				pcap.put_uint32 (16384);
+				pcap.put_uint32 (1); // Ethernet
+				pcap.flush ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
 			main_context = MainContext.ref_thread_default ();
 
 			netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
@@ -184,7 +201,7 @@ namespace Frida.Fruity {
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
 				printerr ("\n<<<\n");
-				print_datagram (datagram);
+				log_datagram (datagram);
 				netif.handle_incoming_datagram (new Bytes (datagram[ETHERNET_HEADER_SIZE:]));
 
 				if (!started_tcp_connection) {
@@ -223,12 +240,13 @@ namespace Frida.Fruity {
 				.build ();
 
 			printerr ("\n>>>\n");
-			print_datagram (full_datagram.get_data ());
+			log_datagram (full_datagram.get_data ());
 
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 16;
+			uint16 alignment_padding_length = 2;
 
-			uint16 datagram_start_index = transfer_header_length + ndp_header_length;
+			uint16 datagram_start_index = transfer_header_length + ndp_header_length + alignment_padding_length;
 			uint16 datagram_length = (uint16) full_datagram.length;
 
 			uint16 sentinel_start_index = 0;
@@ -238,6 +256,8 @@ namespace Frida.Fruity {
 			uint16 block_length = datagram_start_index + datagram_length;
 			uint16 ndp_index = transfer_header_length;
 			uint16 next_ndp_index = 0;
+
+			uint16 alignment_padding_value = 0;
 
 			var frame = new BufferBuilder (LITTLE_ENDIAN)
 				.append_string ("NCMH", StringTerminator.NONE)
@@ -252,6 +272,7 @@ namespace Frida.Fruity {
 				.append_uint16 (datagram_length)
 				.append_uint16 (sentinel_start_index)
 				.append_uint16 (sentinel_size)
+				.append_uint16 (alignment_padding_value)
 				.append_bytes (full_datagram)
 				.build ();
 
@@ -305,24 +326,50 @@ namespace Frida.Fruity {
 
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
 		}
-	}
 
-	private void print_datagram (uint8[] datagram) {
-		printerr ("\tdestination=%02x:%02x:%02x:%02x:%02x:%02x source=%02x:%02x:%02x:%02x:%02x:%02x type=0x%02x%02x\n",
-			datagram[0],
-			datagram[1],
-			datagram[2],
-			datagram[3],
-			datagram[4],
-			datagram[5],
-			datagram[6],
-			datagram[7],
-			datagram[8],
-			datagram[9],
-			datagram[10],
-			datagram[11],
-			datagram[12],
-			datagram[13]);
+		private void log_datagram (uint8[] datagram) {
+			printerr ("\tdestination=%02x:%02x:%02x:%02x:%02x:%02x source=%02x:%02x:%02x:%02x:%02x:%02x type=0x%02x%02x\n",
+				datagram[0],
+				datagram[1],
+				datagram[2],
+				datagram[3],
+				datagram[4],
+				datagram[5],
+				datagram[6],
+				datagram[7],
+				datagram[8],
+				datagram[9],
+				datagram[10],
+				datagram[11],
+				datagram[12],
+				datagram[13]);
+
+			size_t ipv6_source_address_offset = 8;
+
+			uint8 kind = datagram[ETHERNET_HEADER_SIZE + 6];
+
+			size_t cursor = ETHERNET_HEADER_SIZE + ipv6_source_address_offset;
+			var source_address = new InetAddress.from_bytes (datagram[cursor:cursor + 16], IPV6);
+			cursor += 16;
+			var destination_address = new InetAddress.from_bytes (datagram[cursor:cursor + 16], IPV6);
+
+			printerr ("\t\tIPv6      source=%s\n", source_address.to_string ());
+			printerr ("\t\t     destination=%s\n", destination_address.to_string ());
+			printerr ("\t\t            kind=%u\n", kind);
+
+			try {
+				int64 timestamp = get_real_time ();
+				pcap.put_uint32 ((uint32) (timestamp / 1000000));
+				pcap.put_uint32 ((uint32) (timestamp % 1000000));
+				pcap.put_uint32 (datagram.length);
+				pcap.put_uint32 (datagram.length);
+				size_t written;
+				pcap.write_all (datagram, out written);
+				pcap.flush ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+		}
 	}
 
 	// https://gist.github.com/phako/96b36b5070beaf7eee27
