@@ -32,11 +32,19 @@ namespace LWIP {
 		public static ErrorCode default_input_handler (PacketBuffer pbuf, NetworkInterface netif);
 
 		public NetworkInterfaceInputFunc input;
+		public NetworkInterfaceLinkOutputFunc linkoutput;
 		public NetworkInterfaceOutputIP6Func output_ip6;
 
 		public void * state;
 
 		public uint16 mtu;
+
+		public uint8 hwaddr[MAX_HWADDR_LEN];
+		public uint8 hwaddr_len;
+
+		public NetworkInterfaceFlags flags;
+
+		public const uint8 MAX_HWADDR_LEN;
 	}
 
 	[CCode (cname = "netif_init_fn", has_target = false)]
@@ -45,8 +53,33 @@ namespace LWIP {
 	[CCode (cname = "netif_input_fn", has_target = false)]
 	public delegate ErrorCode NetworkInterfaceInputFunc (PacketBuffer pbuf, NetworkInterface netif);
 
+	[CCode (cname = "netif_linkoutput_fn", has_target = false)]
+	public delegate ErrorCode NetworkInterfaceLinkOutputFunc (NetworkInterface netif, PacketBuffer pbuf);
+
 	[CCode (cname = "netif_output_ip6_fn", has_target = false)]
 	public delegate ErrorCode NetworkInterfaceOutputIP6Func (NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
+
+	[Flags]
+	[CCode (cheader_filename = "lwip/netif.h", cprefix = "NETIF_FLAG_")]
+	public enum NetworkInterfaceFlags {
+		UP,
+		BROADCAST,
+		LINK_UP,
+		ETHARP,
+		ETHERNET,
+		IGMP,
+		MLD6,
+	}
+
+	[CCode (cheader_filename = "lwip/prot/ethernet.h", lower_case_cprefix = "ETH_")]
+	namespace Ethernet {
+		public const uint8 HWADDR_LEN;
+
+		namespace IPv6 {
+			[CCode (cname = "ethip6_output")]
+			public ErrorCode output (NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
+		}
+	}
 
 	[CCode (cheader_filename = "lwip/ip6_addr.h", cname = "ip6_addr_t", cprefix = "ip6_addr_")]
 	public struct IP6Address {

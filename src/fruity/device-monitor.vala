@@ -3,7 +3,7 @@ namespace Frida.Fruity {
 	public sealed class DeviceMonitor : Object {
 		private LibUSB.Context context;
 
-		private NetworkInterface netif = new NetworkInterface ("fe80::90fe:2cff:fe3b:e763", 1500);
+		private NetworkInterface? netif;
 		private bool started_tcp_connection = false;
 		private uint16 next_outgoing_sequence = 1;
 
@@ -54,8 +54,6 @@ namespace Frida.Fruity {
 			}
 
 			main_context = MainContext.ref_thread_default ();
-
-			netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			LibUSB.Context.init (out context);
 
@@ -145,6 +143,9 @@ namespace Frida.Fruity {
 					our_mac_address[i] = (uint8) v;
 				}
 
+				netif = new NetworkInterface (new Bytes (our_mac_address), "fe80::90fe:2cff:fe3b:e763", 1500);
+				netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
+
 				var detach_result = handle.detach_kernel_driver (ncm_iface);
 				printerr ("Detach result: %s\n", detach_result.get_name ());
 
@@ -202,7 +203,7 @@ namespace Frida.Fruity {
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
 				printerr ("\n<<<\n");
 				log_datagram (datagram);
-				netif.handle_incoming_datagram (new Bytes (datagram[ETHERNET_HEADER_SIZE:]));
+				netif.handle_incoming_datagram (new Bytes (datagram));
 
 				if (!started_tcp_connection) {
 					started_tcp_connection = true;
@@ -230,24 +231,15 @@ namespace Frida.Fruity {
 		private void on_netif_outgoing_datagram (Bytes datagram) {
 			printerr ("on_netif_outgoing_datagram()\n");
 
-			uint16 ether_type_ipv6 = 0x86dd;
-
-			var full_datagram = new BufferBuilder (BIG_ENDIAN)
-				.append_data (peer_mac_address)
-				.append_data (our_mac_address)
-				.append_uint16 (ether_type_ipv6)
-				.append_bytes (datagram)
-				.build ();
-
 			printerr ("\n>>>\n");
-			log_datagram (full_datagram.get_data ());
+			log_datagram (datagram.get_data ());
 
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 16;
 			uint16 alignment_padding_length = 2;
 
 			uint16 datagram_start_index = transfer_header_length + ndp_header_length + alignment_padding_length;
-			uint16 datagram_length = (uint16) full_datagram.length;
+			uint16 datagram_length = (uint16) datagram.length;
 
 			uint16 sentinel_start_index = 0;
 			uint16 sentinel_size = 0;
@@ -273,7 +265,7 @@ namespace Frida.Fruity {
 				.append_uint16 (sentinel_start_index)
 				.append_uint16 (sentinel_size)
 				.append_uint16 (alignment_padding_value)
-				.append_bytes (full_datagram)
+				.append_bytes (datagram)
 				.build ();
 
 			printerr ("\n>>>\n");

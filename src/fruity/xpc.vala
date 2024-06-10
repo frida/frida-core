@@ -2020,7 +2020,7 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			netif = new NetworkInterface (local_ipv6_address, mtu);
+			netif = new NetworkInterface (null, local_ipv6_address, mtu);
 			netif.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);

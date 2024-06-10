@@ -3,7 +3,12 @@ namespace Frida.Fruity {
 	public sealed class NetworkInterface : Object {
 		public signal void outgoing_datagram (Bytes datagram);
 
-		public string local_ipv6_address {
+		public Bytes? ethernet_address {
+			get;
+			construct;
+		}
+
+		public string ipv6_address {
 			get;
 			construct;
 		}
@@ -19,8 +24,12 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		public class NetworkInterface (string local_ipv6_address, uint16 mtu) {
-			Object (local_ipv6_address: local_ipv6_address, mtu: mtu);
+		public class NetworkInterface (Bytes? ethernet_address, string ipv6_address, uint16 mtu) {
+			Object (
+				ethernet_address: ethernet_address,
+				ipv6_address: ipv6_address,
+				mtu: mtu
+			);
 		}
 
 		static construct {
@@ -60,13 +69,35 @@ namespace Frida.Fruity {
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
 			NetworkInterface * self = handle.state;
+			self->configure_netif (handle);
+			return OK;
+		}
 
-			handle.mtu = self->mtu;
-			handle.output_ip6 = on_netif_output_ip6;
+		private void configure_netif (LWIP.NetworkInterface handle) {
+			if (ethernet_address != null) {
+				handle.output_ip6 = LWIP.Ethernet.IPv6.output;
+				handle.linkoutput = on_netif_link_output;
+			} else {
+				handle.output_ip6 = on_netif_output_ip6;
+			}
+
+			handle.mtu = mtu;
+
+			if (ethernet_address != null) {
+				assert (ethernet_address.length == LWIP.Ethernet.HWADDR_LEN);
+				Memory.copy (&handle.hwaddr, ethernet_address.get_data (), LWIP.Ethernet.HWADDR_LEN);
+				handle.hwaddr_len = LWIP.Ethernet.HWADDR_LEN;
+			}
+
+			handle.flags = BROADCAST | ETHARP;
 
 			int8 chosen_index = -1;
-			handle.add_ip6_address (LWIP.IP6Address.parse (self->local_ipv6_address), &chosen_index);
+			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
+		}
+
+		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface netif, LWIP.PacketBuffer pbuf) {
+			printerr ("on_netif_link_output() TODO\n");
 
 			return OK;
 		}
@@ -97,8 +128,12 @@ namespace Frida.Fruity {
 			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 			pbuf.take (datagram.get_data ());
 
-			if (handle.input (pbuf, handle) == OK)
+			if (handle.input (pbuf, handle) == OK) {
+				printerr ("INPUT: OK\n");
 				*((void **) &pbuf) = null;
+			} else {
+				printerr ("INPUT: BAD\n");
+			}
 		}
 
 		public void stop () {
