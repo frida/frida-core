@@ -467,8 +467,6 @@ if have_fruity_backend
   ]
   if optimize_for_prod
     lwip_options += 'lwip_debug=disabled'
-  else
-    lwip_options += 'lwip_debug=enabled'
   endif
   backend_deps_private += dependency('lwip', default_options: lwip_options)
   backend_reqs_private += 'lwip'

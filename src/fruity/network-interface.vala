@@ -69,11 +69,11 @@ namespace Frida.Fruity {
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
 			NetworkInterface * self = handle.state;
-			self->configure_netif (handle);
+			self->configure_netif (ref handle);
 			return OK;
 		}
 
-		private void configure_netif (LWIP.NetworkInterface handle) {
+		private void configure_netif (ref LWIP.NetworkInterface handle) {
 			if (ethernet_address != null) {
 				handle.output_ip6 = LWIP.Ethernet.IPv6.output;
 				handle.linkoutput = on_netif_link_output;
@@ -96,28 +96,30 @@ namespace Frida.Fruity {
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 		}
 
-		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface netif, LWIP.PacketBuffer pbuf) {
-			printerr ("on_netif_link_output() TODO\n");
-
+		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
+			NetworkInterface * self = handle.state;
+			self->emit_datagram (pbuf);
 			return OK;
 		}
 
 		private static LWIP.ErrorCode on_netif_output_ip6 (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf,
 				LWIP.IP6Address address) {
 			NetworkInterface * self = handle.state;
+			self->emit_datagram (pbuf);
+			return OK;
+		}
 
+		private void emit_datagram (LWIP.PacketBuffer pbuf) {
 			var buffer = new uint8[pbuf.tot_len];
 			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				self->outgoing_datagram (datagram);
+				outgoing_datagram (datagram);
 				return Source.REMOVE;
 			});
-			source.attach (self->main_context);
-
-			return OK;
+			source.attach (main_context);
 		}
 
 		private void process_next_incoming_datagram () {
@@ -128,12 +130,8 @@ namespace Frida.Fruity {
 			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 			pbuf.take (datagram.get_data ());
 
-			if (handle.input (pbuf, handle) == OK) {
-				printerr ("INPUT: OK\n");
+			if (handle.input (pbuf, handle) == OK)
 				*((void **) &pbuf) = null;
-			} else {
-				printerr ("INPUT: BAD\n");
-			}
 		}
 
 		public void stop () {

@@ -17,6 +17,8 @@ namespace Frida.Fruity {
 
 		private DataOutputStream pcap;
 
+		private Timer started = new Timer ();
+
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
 
 		private const size_t ETHERNET_HEADER_SIZE = 14;
@@ -39,7 +41,12 @@ namespace Frida.Fruity {
 
 		construct {
 			try {
-				pcap = new DataOutputStream (File.new_for_path ("C:\\src\\ncm.pcap").create (REPLACE_DESTINATION));
+				var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP), "ncm.pcap");
+				try {
+					f.delete ();
+				} catch (GLib.Error e) {
+				}
+				pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
 				pcap.set_byte_order (HOST_ENDIAN);
 				pcap.put_uint32 (0xa1b2c3d4U);
 				pcap.put_uint16 (2);
@@ -57,7 +64,6 @@ namespace Frida.Fruity {
 
 			LibUSB.Context.init (out context);
 
-			printerr (">>>\n");
 			foreach (var device in context.get_device_list ()) {
 				LibUSB.DeviceDescriptor desc;
 				if (device.get_device_descriptor (out desc) != SUCCESS)
@@ -66,15 +72,10 @@ namespace Frida.Fruity {
 				if (desc.idVendor != USB_VENDOR_APPLE)
 					continue;
 
-				printerr ("Found Apple device with idProduct=0x%04x\n",
-					desc.idProduct);
-
 				if (device.open (out handle) != SUCCESS) {
 					printerr ("Unable to open device :(\n");
 					continue;
 				}
-
-				printerr ("Opened device!!!\n");
 
 				int config_id = -1;
 				handle.get_configuration (out config_id);
@@ -94,20 +95,11 @@ namespace Frida.Fruity {
 				foreach (var iface in config.@interface) {
 					uint setting_id = 0;
 					foreach (var setting in iface.altsetting) {
-						printerr ("iface %u setting %u: bInterfaceClass=0x%02x bInterfaceSubClass=0x%02x endpoint.length=%d extra.length=%d\n",
-							iface_id, setting_id,
-							setting.bInterfaceClass,
-							setting.bInterfaceSubClass,
-							setting.endpoint.length,
-							setting.extra.length);
-
 						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
 								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
 							try {
 								parse_cdc_header (setting.extra, out mac_address_index);
-								printerr ("MAC address index: %u\n", mac_address_index);
 							} catch (Error e) {
-								printerr ("Uh oh: %s\n", e.message);
 								break;
 							}
 						} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
@@ -128,15 +120,12 @@ namespace Frida.Fruity {
 					}
 					iface_id++;
 				}
-				printerr ("ncm_iface=%d ncm_altsetting=%d rx_address=0x%02x tx_address=0x%02x mac_address_index=%u\n",
-					ncm_iface, ncm_altsetting, rx_address, tx_address, mac_address_index);
 				if (ncm_iface == -1)
 					continue;
 
 				uint8 mac_address_buf[13];
 				var get_result = handle.get_string_descriptor_ascii (mac_address_index, mac_address_buf);
 				unowned string mac_address_str = (string) mac_address_buf;
-				printerr ("get_result=%d \"%s\"\n", get_result, mac_address_str);
 				for (uint i = 0; i != 6; i++) {
 					uint v;
 					mac_address_str.substring (i * 2, 2).scanf ("%02X", out v);
@@ -146,18 +135,14 @@ namespace Frida.Fruity {
 				netif = new NetworkInterface (new Bytes (our_mac_address), "fe80::90fe:2cff:fe3b:e763", 1500);
 				netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
-				var detach_result = handle.detach_kernel_driver (ncm_iface);
-				printerr ("Detach result: %s\n", detach_result.get_name ());
-
-				var claim_result = handle.claim_interface (ncm_iface);
-				printerr ("Claim result: %s\n", claim_result.get_name ());
-
-				var altsetting_result = handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
-				printerr ("Altsetting result: %s\n", altsetting_result.get_name ());
+				handle.detach_kernel_driver (ncm_iface);
+				handle.claim_interface (ncm_iface);
+				handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
 
 				new Thread<void> ("frida-ncm-io", () => {
+					uint8 data[64 * 1024];
+
 					while (true) {
-						uint8 data[2048];
 						int n = -1;
 						var transfer_result = handle.bulk_transfer (rx_address, data, out n, 10000);
 						if (transfer_result != SUCCESS)
@@ -172,7 +157,6 @@ namespace Frida.Fruity {
 					}
 				});
 			}
-			printerr ("<<<\n");
 		}
 
 		private void handle_ncm_frame (uint8[] data) throws Error {
@@ -201,7 +185,6 @@ namespace Frida.Fruity {
 					break;
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
-				printerr ("\n<<<\n");
 				log_datagram (datagram);
 				netif.handle_incoming_datagram (new Bytes (datagram));
 
@@ -213,15 +196,13 @@ namespace Frida.Fruity {
 					size_t ipv6_source_address_offset = 8;
 					size_t start = ETHERNET_HEADER_SIZE + ipv6_source_address_offset;
 					var source_address = new InetAddress.from_bytes (datagram[start:start + 16], IPV6);
-					printerr ("starting TCP connection with source_address: %s\n", source_address.to_string ());
 
-					var source = new TimeoutSource (15000);
+					var source = new IdleSource ();
 					source.set_callback (() => {
 						perform_tcp_connection.begin (source_address);
 						return Source.REMOVE;
 					});
 					source.attach (main_context);
-					printerr ("scheduling in 15 seconds\n");
 				}
 
 				dpe_cursor += dpe_size;
@@ -229,9 +210,6 @@ namespace Frida.Fruity {
 		}
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
-			printerr ("on_netif_outgoing_datagram()\n");
-
-			printerr ("\n>>>\n");
 			log_datagram (datagram.get_data ());
 
 			uint16 transfer_header_length = 12;
@@ -268,22 +246,20 @@ namespace Frida.Fruity {
 				.append_bytes (datagram)
 				.build ();
 
-			printerr ("\n>>>\n");
-			hexdump (frame.get_data ());
-
 			int n;
 			var transfer_result = handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
-			printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
+			if (transfer_result != SUCCESS)
+				printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
 		}
 
 		private async void perform_tcp_connection (InetAddress address) {
-			printerr ("perform_tcp_connection()\n");
 			try {
 				Cancellable? cancellable = null;
 
 				var bootstrap_disco = yield DiscoveryService.open (
 					yield netif.open_tcp_connection (address.to_string (), 58783, cancellable), cancellable);
 				printerr ("udid: %s\n", bootstrap_disco.query_udid ());
+				printerr ("took %u ms\n", (uint) (started.elapsed () * 1000.0));
 			} catch (GLib.Error e) {
 				printerr ("perform_tcp_connection() failed: %s\n", e.message);
 			}
@@ -320,46 +296,20 @@ namespace Frida.Fruity {
 		}
 
 		private void log_datagram (uint8[] datagram) {
-			printerr ("\tdestination=%02x:%02x:%02x:%02x:%02x:%02x source=%02x:%02x:%02x:%02x:%02x:%02x type=0x%02x%02x\n",
-				datagram[0],
-				datagram[1],
-				datagram[2],
-				datagram[3],
-				datagram[4],
-				datagram[5],
-				datagram[6],
-				datagram[7],
-				datagram[8],
-				datagram[9],
-				datagram[10],
-				datagram[11],
-				datagram[12],
-				datagram[13]);
-
-			size_t ipv6_source_address_offset = 8;
-
-			uint8 kind = datagram[ETHERNET_HEADER_SIZE + 6];
-
-			size_t cursor = ETHERNET_HEADER_SIZE + ipv6_source_address_offset;
-			var source_address = new InetAddress.from_bytes (datagram[cursor:cursor + 16], IPV6);
-			cursor += 16;
-			var destination_address = new InetAddress.from_bytes (datagram[cursor:cursor + 16], IPV6);
-
-			printerr ("\t\tIPv6      source=%s\n", source_address.to_string ());
-			printerr ("\t\t     destination=%s\n", destination_address.to_string ());
-			printerr ("\t\t            kind=%u\n", kind);
-
-			try {
-				int64 timestamp = get_real_time ();
-				pcap.put_uint32 ((uint32) (timestamp / 1000000));
-				pcap.put_uint32 ((uint32) (timestamp % 1000000));
-				pcap.put_uint32 (datagram.length);
-				pcap.put_uint32 (datagram.length);
-				size_t written;
-				pcap.write_all (datagram, out written);
-				pcap.flush ();
-			} catch (GLib.Error e) {
-				assert_not_reached ();
+			lock (pcap) {
+				try {
+					int64 timestamp = get_real_time ();
+					pcap.put_uint32 ((uint32) (timestamp / 1000000));
+					pcap.put_uint32 ((uint32) (timestamp % 1000000));
+					pcap.put_uint32 (datagram.length);
+					pcap.put_uint32 (datagram.length);
+					size_t written;
+					pcap.write_all (datagram, out written);
+					pcap.flush ();
+				} catch (GLib.Error e) {
+					printerr ("%s\n", e.message);
+					assert_not_reached ();
+				}
 			}
 		}
 	}
