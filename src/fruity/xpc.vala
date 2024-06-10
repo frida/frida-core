@@ -346,6 +346,8 @@ namespace Frida.Fruity {
 
 			Key remote_pubkey = key_from_der (Base64.decode (device_pubkey));
 
+			printerr ("TunnelConnection.open()\n");
+
 			return yield TunnelConnection.open (
 				new InetSocketAddress.from_string (device_address, port),
 				new TunnelKey ((owned) local_keypair),
@@ -1808,7 +1810,7 @@ namespace Frida.Fruity {
 		private string? remote_ipv6_address;
 		private uint16 _remote_rsd_port;
 		private uint16 mtu;
-		private NetworkInterface? netif;
+		private VirtualNetworkStack? netstack;
 
 		private Gee.Map<int64?, Stream> streams = new Gee.HashMap<int64?, Stream> (Numeric.int64_hash, Numeric.int64_equal);
 		private Gee.Queue<Bytes> tx_datagrams = new Gee.ArrayQueue<Bytes> ();
@@ -2020,14 +2022,14 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			netif = new NetworkInterface (null, local_ipv6_address, mtu);
-			netif.outgoing_datagram.connect (send_datagram);
+			netstack = new VirtualNetworkStack (null, local_ipv6_address, mtu);
+			netstack.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);
 		}
 
 		public async IOStream open_connection (uint16 port, Cancellable? cancellable = null) throws Error, IOError {
-			return yield netif.open_tcp_connection (remote_ipv6_address, port, cancellable);
+			return yield netstack.open_tcp_connection (remote_ipv6_address, port, cancellable);
 		}
 
 		public void cancel () {
@@ -2050,7 +2052,7 @@ namespace Frida.Fruity {
 				expiry_timer = null;
 			}
 
-			netif = null;
+			netstack = null;
 		}
 
 		private void send_request (string json) {
@@ -2272,8 +2274,8 @@ namespace Frida.Fruity {
 		}
 
 		private int on_recv_datagram (uint32 flags, uint8[] data) {
-			if (netif != null)
-				netif.handle_incoming_datagram (new Bytes (data));
+			if (netstack != null)
+				netstack.handle_incoming_datagram (new Bytes (data));
 
 			return 0;
 		}

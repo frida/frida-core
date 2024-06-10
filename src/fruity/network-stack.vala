@@ -1,6 +1,56 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public sealed class NetworkInterface : Object {
+	public interface NetworkStack : Object {
+		public abstract async IOStream open_tcp_connection (string address, uint16 port, Cancellable? cancellable)
+			throws Error, IOError;
+		public abstract UdpSocket create_udp_socket () throws Error;
+	}
+
+	public interface UdpSocket : Object {
+		public abstract DatagramBased datagram_based {
+			get;
+		}
+
+		public abstract SocketAddress get_local_address () throws Error;
+		public abstract bool connect (SocketAddress address, Cancellable? cancellable) throws Error;
+	}
+
+	public sealed class SystemNetworkStack : Object, NetworkStack {
+		public async IOStream open_tcp_connection (string address, uint16 port, Cancellable? cancellable) throws Error, IOError {
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			var handle = new Socket (IPV6, DATAGRAM, UDP);
+			return new SystemUdpSocket (handle);
+		}
+
+		private class SystemUdpSocket : Object, UdpSocket {
+			public Socket handle {
+				get;
+				construct;
+			}
+
+			public DatagramBased datagram_based {
+				get {
+					return handle;
+				}
+			}
+
+			public SystemUdpSocket (Socket handle) {
+				Object (handle: handle);
+			}
+
+			public SocketAddress get_local_address () throws Error {
+				return handle.get_local_address ();
+			}
+
+			public bool connect (SocketAddress address, Cancellable? cancellable) throws Error {
+				return handle.connect (address, cancellable);
+			}
+		}
+	}
+
+	public sealed class VirtualNetworkStack : Object, NetworkStack {
 		public signal void outgoing_datagram (Bytes datagram);
 
 		public Bytes? ethernet_address {
@@ -24,7 +74,7 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		public class NetworkInterface (Bytes? ethernet_address, string ipv6_address, uint16 mtu) {
+		public class VirtualNetworkStack (Bytes? ethernet_address, string ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,
@@ -68,7 +118,7 @@ namespace Frida.Fruity {
 		}
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
-			NetworkInterface * self = handle.state;
+			VirtualNetworkStack * self = handle.state;
 			self->configure_netif (ref handle);
 			return OK;
 		}
@@ -97,14 +147,14 @@ namespace Frida.Fruity {
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
-			NetworkInterface * self = handle.state;
+			VirtualNetworkStack * self = handle.state;
 			self->emit_datagram (pbuf);
 			return OK;
 		}
 
 		private static LWIP.ErrorCode on_netif_output_ip6 (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf,
 				LWIP.IP6Address address) {
-			NetworkInterface * self = handle.state;
+			VirtualNetworkStack * self = handle.state;
 			self->emit_datagram (pbuf);
 			return OK;
 		}
@@ -150,7 +200,7 @@ namespace Frida.Fruity {
 		}
 
 		private class TcpConnection : IOStream, AsyncInitable {
-			public NetworkInterface netif {
+			public VirtualNetworkStack stack {
 				get;
 				construct;
 			}
@@ -214,9 +264,9 @@ namespace Frida.Fruity {
 				CLOSED
 			}
 
-			public static async TcpConnection open (NetworkInterface netif, string address, uint16 port,
+			public static async TcpConnection open (VirtualNetworkStack stack, string address, uint16 port,
 					Cancellable? cancellable) throws Error, IOError {
-				var connection = new TcpConnection (netif, address, port);
+				var connection = new TcpConnection (stack, address, port);
 
 				try {
 					yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -227,9 +277,9 @@ namespace Frida.Fruity {
 				return connection;
 			}
 
-			private TcpConnection (NetworkInterface netif, string address, uint16 port) {
+			private TcpConnection (VirtualNetworkStack stack, string address, uint16 port) {
 				Object (
-					netif: netif,
+					stack: stack,
 					address: address,
 					port: port
 				);
@@ -283,7 +333,7 @@ namespace Frida.Fruity {
 						self->on_error (err);
 				});
 				pcb.nagle_disable ();
-				pcb.bind_netif (netif.handle);
+				pcb.bind_netif (stack.handle);
 
 				pcb.connect (LWIP.IP6Address.parse (address), port, (user_data, pcb, err) => {
 					TcpConnection * self = user_data;
