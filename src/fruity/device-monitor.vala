@@ -40,6 +40,15 @@ namespace Frida.Fruity {
 		}
 
 		construct {
+			/*
+			while (!Gum.Process.is_debugger_attached ()) {
+				printerr ("Waiting for debugger...\n");
+				Thread.usleep (1000000);
+			}
+			printerr ("READY!\n");
+			started.reset ();
+			*/
+
 			try {
 				var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP), "ncm.pcap");
 				try {

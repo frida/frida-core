@@ -85,6 +85,9 @@ namespace LWIP {
 	public struct IP6Address {
 		[CCode (cname = "ip6addr_aton")]
 		public static IP6Address parse (string str);
+
+		[CCode (cname = "ip6addr_ntoa")]
+		public unowned string to_string ();
 	}
 
 	[Flags]
@@ -199,6 +202,30 @@ namespace LWIP {
 			COPY,
 			MORE,
 		}
+	}
+
+	[Compact]
+	[CCode (cheader_filename = "lwip/udp.h", cname = "struct udp_pcb", cprefix = "udp_")]
+	public class UdpPcb {
+		[CCode (cname = "udp_new_ip_type")]
+		public static unowned UdpPcb make (IPAddressType type);
+
+		public void remove ();
+
+		[CCode (cname = "udp_recv")]
+		public void set_recv_callback (RecvFunc f);
+
+		public void bind_netif (NetworkInterface? netif);
+
+		public ErrorCode connect (IP6Address ipaddr, uint16 port);
+
+		public ErrorCode send (PacketBuffer pbuf);
+
+		[CCode (cname = "tcp_recv_fn", instance_pos = 0)]
+		public delegate void RecvFunc (UdpPcb pcb, owned PacketBuffer? pbuf, IP6Address addr, uint16 port);
+
+		public uint16 local_port;
+		public uint16 remote_port;
 	}
 
 	[CCode (cheader_filename = "lwip/err.h", cname = "err_t", cprefix = "ERR_", lower_case_cprefix = "err_", has_type_id = false)]

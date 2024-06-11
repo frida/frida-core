@@ -1906,7 +1906,7 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			socket = netstack.create_udp_socket ();
+			socket = yield netstack.create_udp_socket (cancellable);
 			socket.socket_connect (address, cancellable);
 
 			raw_local_address = address_to_native (socket.get_local_address ());

@@ -3,7 +3,7 @@ namespace Frida.Fruity {
 	public interface NetworkStack : Object {
 		public abstract async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable)
 			throws Error, IOError;
-		public abstract UdpSocket create_udp_socket () throws Error;
+		public abstract async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public interface UdpSocket : Object {
@@ -12,7 +12,7 @@ namespace Frida.Fruity {
 		}
 
 		public abstract SocketAddress get_local_address () throws Error;
-		public abstract bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error;
+		public abstract void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error;
 	}
 
 	public sealed class SystemNetworkStack : Object, NetworkStack {
@@ -30,7 +30,7 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
-		public UdpSocket create_udp_socket () throws Error {
+		public async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error {
 			try {
 				var handle = new Socket (IPV6, DATAGRAM, UDP);
 				return new SystemUdpSocket (handle);
@@ -63,9 +63,9 @@ namespace Frida.Fruity {
 				}
 			}
 
-			public bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
+			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
 				try {
-					return handle.connect (address, cancellable);
+					handle.connect (address, cancellable);
 				} catch (GLib.Error e) {
 					throw new Error.TRANSPORT ("%s", e.message);
 				}
@@ -127,8 +127,8 @@ namespace Frida.Fruity {
 			return yield TcpConnection.open (this, address, cancellable);
 		}
 
-		public UdpSocket create_udp_socket () throws Error {
-			return new Ipv6UdpSocket (this);
+		public async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error, IOError {
+			return yield Ipv6UdpSocket.create (this, cancellable);
 		}
 
 		public void handle_incoming_datagram (Bytes datagram) {
@@ -760,7 +760,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private class Ipv6UdpSocket : Object, UdpSocket, DatagramBased {
+		private class Ipv6UdpSocket : Object, AsyncInitable, UdpSocket, DatagramBased {
 			public VirtualNetworkStack netstack {
 				get;
 				construct;
@@ -774,43 +774,219 @@ namespace Frida.Fruity {
 
 			public IOCondition pending_io {
 				get {
-					mutex.lock ();
-					IOCondition result = _pending_io;
-					mutex.unlock ();
-					return result;
+					lock (state)
+						return events;
 				}
 			}
 
-			private IOCondition _pending_io = 0;
+			private Promise<bool> allocated = new Promise<bool> ();
+
+			private State state = CREATED;
+
+			private unowned LWIP.UdpPcb? pcb;
+			private InetSocketAddress? pending_connect_address;
+			private IOCondition events = 0;
+			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
+			private Gee.Queue<Packet> tx_queue = new Gee.ArrayQueue<Packet> ();
 			private Mutex mutex = Mutex ();
 			private Cond cond = Cond ();
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
-			public Ipv6UdpSocket (VirtualNetworkStack netstack) {
+			private MainContext main_context;
+
+			public enum State {
+				CREATED,
+				ALLOCATING,
+				ALLOCATED,
+				DESTROYED
+			}
+
+			public static async Ipv6UdpSocket create (VirtualNetworkStack netstack, Cancellable? cancellable)
+					throws Error, IOError {
+				var sock = new Ipv6UdpSocket (netstack);
+
+				try {
+					yield sock.init_async (Priority.DEFAULT, cancellable);
+				} catch (GLib.Error e) {
+					throw_api_error (e);
+				}
+
+				return sock;
+			}
+
+			private Ipv6UdpSocket (VirtualNetworkStack netstack) {
 				Object (netstack: netstack);
 			}
 
-			public SocketAddress get_local_address () throws Error {
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			construct {
+				main_context = MainContext.ref_thread_default ();
 			}
 
-			public bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			public override void dispose () {
+				destroy ();
+
+				base.dispose ();
+			}
+
+			private async bool init_async (int io_priority, Cancellable? cancellable) throws IOError {
+				state = ALLOCATING;
+				LWIP.Runtime.schedule (allocate);
+
+				try {
+					yield allocated.future.wait_async (cancellable);
+				} catch (GLib.Error e) {
+					assert (e is IOError.CANCELLED);
+					throw (IOError) e;
+				}
+
+				return true;
+			}
+
+			private void allocate () {
+				pcb = LWIP.UdpPcb.make (V6);
+				pcb.set_recv_callback ((pcb, pbuf, addr, port) => {
+					on_recv ((owned) pbuf, addr, port);
+				});
+				pcb.bind_netif (netstack.handle);
+
+				schedule_on_frida_thread (() => {
+					state = ALLOCATED;
+					allocated.resolve (true);
+					return Source.REMOVE;
+				});
+			}
+
+			private void destroy () {
+				if (state == CREATED || state == DESTROYED)
+					return;
+
+				ref ();
+				LWIP.Runtime.schedule (do_destroy);
+
+				state = DESTROYED;
+			}
+
+			private void do_destroy () {
+				pcb.remove ();
+				pcb = null;
+
+				unref ();
+			}
+
+			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.IP6Address addr, uint16 port) {
+				printerr ("on_recv()\n");
+				var buffer = new uint8[pbuf.tot_len];
+				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
+
+				var bytes = new Bytes (chunk[:pbuf.tot_len]);
+				var sender = new InetSocketAddress.from_string (addr.to_string (), port);
+				var packet = new Packet (bytes, sender);
+
+				lock (state)
+					rx_queue.offer (packet);
+				update_events ();
+			}
+
+			public SocketAddress get_local_address () throws Error {
+				printerr ("local_port=%u\n", pcb.local_port);
+				return new InetSocketAddress (netstack.ipv6_address, pcb.local_port);
+			}
+
+			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
+				lock (state)
+					pending_connect_address = address;
+				LWIP.Runtime.schedule (do_socket_connect);
+			}
+
+			private void do_socket_connect () {
+				InetSocketAddress? addr;
+				lock (state) {
+					addr = pending_connect_address;
+					pending_connect_address = null;
+				}
+				if (addr == null)
+					return;
+
+				pcb.connect (LWIP.IP6Address.parse (addr.get_address ().to_string ()), addr.get_port ());
 			}
 
 			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,
 					Cancellable? cancellable) throws GLib.Error {
 				if (flags != 0)
 					throw new IOError.NOT_SUPPORTED ("Flags not supported");
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+				if (timeout != 0)
+					throw new IOError.NOT_SUPPORTED ("Blocking I/O not supported");
+
+				int received;
+				for (received = 0; received != messages.length; received++) {
+					Packet? packet;
+					lock (state)
+						packet = rx_queue.poll ();
+					if (packet == null) {
+						if (received == 0)
+							throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+						break;
+					}
+					update_events ();
+
+					if (messages[received].address != null)
+						*((SocketAddress **) &messages[received].address) = packet.address.ref ();
+
+					messages[received].bytes_received = 0;
+					messages[received].flags = 0;
+
+					var bytes = packet.bytes;
+					uint8 * data = bytes.get_data ();
+					size_t remaining = bytes.get_size ();
+					foreach (unowned InputVector vector in messages[received].vectors) {
+						size_t n = size_t.min (remaining, vector.size);
+						if (n == 0)
+							break;
+						Memory.copy (vector.buffer, data, n);
+						data += n;
+						remaining -= n;
+						messages[received].bytes_received += n;
+					}
+				}
+
+				return received;
 			}
 
 			public virtual int datagram_send_messages (OutputMessage[] messages, int flags, int64 timeout,
 					Cancellable? cancellable) throws GLib.Error {
 				if (flags != 0)
 					throw new IOError.NOT_SUPPORTED ("Flags not supported");
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+
+				foreach (unowned OutputMessage message in messages) {
+					foreach (unowned OutputVector vector in message.vectors) {
+						unowned uint8[] data = (uint8[]) vector.buffer;
+						var packet = new Packet (new Bytes (data[:vector.size]),
+							(InetSocketAddress) message.address);
+						lock (state)
+							tx_queue.offer (packet);
+					}
+				}
+
+				LWIP.Runtime.schedule (transmit_pending);
+
+				return messages.length;
+			}
+
+			private void transmit_pending () {
+				while (true) {
+					Packet? packet;
+					lock (state)
+						packet = tx_queue.poll ();
+					if (packet == null)
+						return;
+
+					var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) packet.bytes.get_size (), POOL);
+					pbuf.take (packet.bytes.get_data ());
+
+					pcb.send (pbuf);
+					printerr ("Called send()\n");
+				}
 			}
 
 			public virtual DatagramBasedSource datagram_create_source (IOCondition condition, Cancellable? cancellable) {
@@ -827,15 +1003,49 @@ namespace Frida.Fruity {
 			}
 
 			public void register_source (Source source, IOCondition condition) {
-				mutex.lock ();
-				sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
-				mutex.unlock ();
+				lock (state)
+					sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
 			}
 
 			public void unregister_source (Source source) {
-				mutex.lock ();
-				sources.unset (source);
-				mutex.unlock ();
+				lock (state)
+					sources.unset (source);
+			}
+
+			private void update_events () {
+				lock (state) {
+					IOCondition new_events = OUT;
+
+					if (!rx_queue.is_empty)
+						new_events |= IN;
+
+					events = new_events;
+
+					foreach (var entry in sources.entries) {
+						unowned Source source = entry.key;
+						IOCondition c = entry.value;
+						if ((new_events & c) != 0)
+							source.set_ready_time (0);
+					}
+				}
+
+				notify_property ("pending-io");
+			}
+
+			private void schedule_on_frida_thread (owned SourceFunc function) {
+				var source = new IdleSource ();
+				source.set_callback ((owned) function);
+				source.attach (main_context);
+			}
+
+			private class Packet {
+				public Bytes bytes;
+				public InetSocketAddress? address;
+
+				public Packet (Bytes bytes, InetSocketAddress? address) {
+					this.bytes = bytes;
+					this.address = address;
+				}
 			}
 		}
 
