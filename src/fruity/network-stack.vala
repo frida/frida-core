@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public interface NetworkStack : Object {
-		public abstract async IOStream open_tcp_connection (string address, uint16 port, Cancellable? cancellable)
+		public abstract async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable)
 			throws Error, IOError;
 		public abstract UdpSocket create_udp_socket () throws Error;
 	}
@@ -12,16 +12,31 @@ namespace Frida.Fruity {
 		}
 
 		public abstract SocketAddress get_local_address () throws Error;
-		public abstract bool connect (SocketAddress address, Cancellable? cancellable) throws Error;
+		public abstract bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error;
 	}
 
 	public sealed class SystemNetworkStack : Object, NetworkStack {
-		public async IOStream open_tcp_connection (string address, uint16 port, Cancellable? cancellable) throws Error, IOError {
+		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable) throws Error, IOError {
+			SocketConnection connection;
+			try {
+				var client = new SocketClient ();
+				connection = yield client.connect_async (address, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			Tcp.enable_nodelay (connection.socket);
+
+			return connection;
 		}
 
 		public UdpSocket create_udp_socket () throws Error {
-			var handle = new Socket (IPV6, DATAGRAM, UDP);
-			return new SystemUdpSocket (handle);
+			try {
+				var handle = new Socket (IPV6, DATAGRAM, UDP);
+				return new SystemUdpSocket (handle);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
 		}
 
 		private class SystemUdpSocket : Object, UdpSocket {
@@ -41,11 +56,19 @@ namespace Frida.Fruity {
 			}
 
 			public SocketAddress get_local_address () throws Error {
-				return handle.get_local_address ();
+				try {
+					return handle.get_local_address ();
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
 			}
 
-			public bool connect (SocketAddress address, Cancellable? cancellable) throws Error {
-				return handle.connect (address, cancellable);
+			public bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
+				try {
+					return handle.connect (address, cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
 			}
 		}
 	}
@@ -58,7 +81,7 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public string ipv6_address {
+		public InetAddress ipv6_address {
 			get;
 			construct;
 		}
@@ -74,7 +97,7 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		public class VirtualNetworkStack (Bytes? ethernet_address, string ipv6_address, uint16 mtu) {
+		public class VirtualNetworkStack (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,
@@ -99,9 +122,13 @@ namespace Frida.Fruity {
 			base.dispose ();
 		}
 
-		public async IOStream open_tcp_connection (string address, uint16 port, Cancellable? cancellable = null)
+		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable = null)
 				throws Error, IOError {
-			return yield TcpConnection.open (this, address, port, cancellable);
+			return yield TcpConnection.open (this, address, cancellable);
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			return new Ipv6UdpSocket (this);
 		}
 
 		public void handle_incoming_datagram (Bytes datagram) {
@@ -142,7 +169,7 @@ namespace Frida.Fruity {
 			handle.flags = BROADCAST | ETHARP;
 
 			int8 chosen_index = -1;
-			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address), &chosen_index);
+			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 		}
 
@@ -200,17 +227,12 @@ namespace Frida.Fruity {
 		}
 
 		private class TcpConnection : IOStream, AsyncInitable {
-			public VirtualNetworkStack stack {
+			public VirtualNetworkStack netstack {
 				get;
 				construct;
 			}
 
-			public string address {
-				get;
-				construct;
-			}
-
-			public uint16 port {
+			public InetSocketAddress address {
 				get;
 				construct;
 			}
@@ -264,9 +286,9 @@ namespace Frida.Fruity {
 				CLOSED
 			}
 
-			public static async TcpConnection open (VirtualNetworkStack stack, string address, uint16 port,
+			public static async TcpConnection open (VirtualNetworkStack netstack, InetSocketAddress address,
 					Cancellable? cancellable) throws Error, IOError {
-				var connection = new TcpConnection (stack, address, port);
+				var connection = new TcpConnection (netstack, address);
 
 				try {
 					yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -277,12 +299,8 @@ namespace Frida.Fruity {
 				return connection;
 			}
 
-			private TcpConnection (VirtualNetworkStack stack, string address, uint16 port) {
-				Object (
-					stack: stack,
-					address: address,
-					port: port
-				);
+			private TcpConnection (VirtualNetworkStack netstack, InetSocketAddress address) {
+				Object (netstack: netstack, address: address);
 			}
 
 			construct {
@@ -333,9 +351,10 @@ namespace Frida.Fruity {
 						self->on_error (err);
 				});
 				pcb.nagle_disable ();
-				pcb.bind_netif (stack.handle);
+				pcb.bind_netif (netstack.handle);
 
-				pcb.connect (LWIP.IP6Address.parse (address), port, (user_data, pcb, err) => {
+				pcb.connect (LWIP.IP6Address.parse (address.get_address ().to_string ()), address.get_port (),
+						(user_data, pcb, err) => {
 					TcpConnection * self = user_data;
 					if (self != null)
 						self->on_connect ();
@@ -738,6 +757,120 @@ namespace Frida.Fruity {
 				closure.invoke (ref return_value, {});
 
 				return return_value.get_boolean ();
+			}
+		}
+
+		private class Ipv6UdpSocket : Object, UdpSocket, DatagramBased {
+			public VirtualNetworkStack netstack {
+				get;
+				construct;
+			}
+
+			public DatagramBased datagram_based {
+				get {
+					return this;
+				}
+			}
+
+			public IOCondition pending_io {
+				get {
+					mutex.lock ();
+					IOCondition result = _pending_io;
+					mutex.unlock ();
+					return result;
+				}
+			}
+
+			private IOCondition _pending_io = 0;
+			private Mutex mutex = Mutex ();
+			private Cond cond = Cond ();
+
+			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
+
+			public Ipv6UdpSocket (VirtualNetworkStack netstack) {
+				Object (netstack: netstack);
+			}
+
+			public SocketAddress get_local_address () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
+			public bool socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
+			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,
+					Cancellable? cancellable) throws GLib.Error {
+				if (flags != 0)
+					throw new IOError.NOT_SUPPORTED ("Flags not supported");
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
+			public virtual int datagram_send_messages (OutputMessage[] messages, int flags, int64 timeout,
+					Cancellable? cancellable) throws GLib.Error {
+				if (flags != 0)
+					throw new IOError.NOT_SUPPORTED ("Flags not supported");
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
+			public virtual DatagramBasedSource datagram_create_source (IOCondition condition, Cancellable? cancellable) {
+				return new Ipv6UdpSocketSource (this, condition);
+			}
+
+			public virtual IOCondition datagram_condition_check (IOCondition condition) {
+				assert_not_reached ();
+			}
+
+			public virtual bool datagram_condition_wait (IOCondition condition, int64 timeout, Cancellable? cancellable)
+					throws GLib.Error {
+				assert_not_reached ();
+			}
+
+			public void register_source (Source source, IOCondition condition) {
+				mutex.lock ();
+				sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
+				mutex.unlock ();
+			}
+
+			public void unregister_source (Source source) {
+				mutex.lock ();
+				sources.unset (source);
+				mutex.unlock ();
+			}
+		}
+
+		private class Ipv6UdpSocketSource : DatagramBasedSource {
+			public Ipv6UdpSocket socket;
+			public IOCondition condition;
+
+			public Ipv6UdpSocketSource (Ipv6UdpSocket socket, IOCondition condition) {
+				this.socket = socket;
+				this.condition = condition;
+
+				socket.register_source (this, condition);
+			}
+
+			~Ipv6UdpSocketSource () {
+				socket.unregister_source (this);
+			}
+
+			protected override bool prepare (out int timeout) {
+				timeout = -1;
+				return (socket.pending_io & condition) != 0;
+			}
+
+			protected override bool check () {
+				return (socket.pending_io & condition) != 0;
+			}
+
+			protected override bool dispatch (SourceFunc? callback) {
+				set_ready_time (-1);
+
+				if (callback == null)
+					return Source.REMOVE;
+
+				DatagramBasedSourceFunc f = (DatagramBasedSourceFunc) callback;
+				return f (socket, socket.pending_io);
 			}
 		}
 	}

@@ -297,7 +297,8 @@ namespace Frida.Fruity {
 			transport.cancel ();
 		}
 
-		public async TunnelConnection open_tunnel (string device_address, Cancellable? cancellable = null) throws Error, IOError {
+		public async TunnelConnection open_tunnel (InetAddress device_address, NetworkStack netstack,
+				Cancellable? cancellable = null) throws Error, IOError {
 			Key local_keypair = make_keypair (RSA);
 
 			string request = Json.to_string (
@@ -349,7 +350,8 @@ namespace Frida.Fruity {
 			printerr ("TunnelConnection.open()\n");
 
 			return yield TunnelConnection.open (
-				new InetSocketAddress.from_string (device_address, port),
+				new InetSocketAddress (device_address, port),
+				netstack,
 				new TunnelKey ((owned) local_keypair),
 				new TunnelKey ((owned) remote_pubkey),
 				cancellable);
@@ -1786,6 +1788,17 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public NetworkStack netstack {
+			get;
+			construct;
+		}
+
+		public NetworkStack tunnel_netstack {
+			get {
+				return _tunnel_netstack;
+			}
+		}
+
 		public TunnelKey local_keypair {
 			get;
 			construct;
@@ -1794,6 +1807,12 @@ namespace Frida.Fruity {
 		public TunnelKey remote_pubkey {
 			get;
 			construct;
+		}
+
+		public InetAddress remote_address {
+			get {
+				return _remote_address;
+			}
 		}
 
 		public uint16 remote_rsd_port {
@@ -1805,23 +1824,21 @@ namespace Frida.Fruity {
 		private Promise<bool> established = new Promise<bool> ();
 
 		private Stream? control_stream;
-		private string? local_ipv6_address;
-		private string? local_ipv6_netmask;
-		private string? remote_ipv6_address;
+		private InetAddress? _remote_address;
 		private uint16 _remote_rsd_port;
 		private uint16 mtu;
-		private VirtualNetworkStack? netstack;
+		private VirtualNetworkStack? _tunnel_netstack;
 
 		private Gee.Map<int64?, Stream> streams = new Gee.HashMap<int64?, Stream> (Numeric.int64_hash, Numeric.int64_equal);
 		private Gee.Queue<Bytes> tx_datagrams = new Gee.ArrayQueue<Bytes> ();
 
-		private SocketSource? rx_source;
+		private DatagramBasedSource? rx_source;
 		private uint8[] rx_buf = new uint8[MAX_UDP_PAYLOAD_SIZE];
 		private uint8[] tx_buf = new uint8[MAX_UDP_PAYLOAD_SIZE];
 		private Source? write_idle;
 		private Source? expiry_timer;
 
-		private Socket socket;
+		private UdpSocket socket;
 		private uint8[] raw_local_address;
 		private NGTcp2.Connection? connection;
 		private NGTcp2.Crypto.ConnectionRef connection_ref;
@@ -1838,9 +1855,9 @@ namespace Frida.Fruity {
 		private const size_t MAX_QUIC_DATAGRAM_SIZE = 14000;
 		private const NGTcp2.Duration KEEP_ALIVE_TIMEOUT = 15ULL * NGTcp2.SECONDS;
 
-		public static async TunnelConnection open (InetSocketAddress address, TunnelKey local_keypair, TunnelKey remote_pubkey,
-				Cancellable? cancellable = null) throws Error, IOError {
-			var connection = new TunnelConnection (address, local_keypair, remote_pubkey);
+		public static async TunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+				TunnelKey remote_pubkey, Cancellable? cancellable = null) throws Error, IOError {
+			var connection = new TunnelConnection (address, netstack, local_keypair, remote_pubkey);
 
 			try {
 				yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -1851,9 +1868,11 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
-		private TunnelConnection (InetSocketAddress address, TunnelKey local_keypair, TunnelKey remote_pubkey) {
+		private TunnelConnection (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+				TunnelKey remote_pubkey) {
 			Object (
 				address: address,
+				netstack: netstack,
 				local_keypair: local_keypair,
 				remote_pubkey: remote_pubkey
 			);
@@ -1887,16 +1906,11 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			uint8[] raw_remote_address;
-			try {
-				socket = new Socket (IPV6, DATAGRAM, UDP);
-				socket.connect (address, cancellable);
+			socket = netstack.create_udp_socket ();
+			socket.socket_connect (address, cancellable);
 
-				raw_local_address = address_to_native (socket.get_local_address ());
-				raw_remote_address = address_to_native (address);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
+			raw_local_address = address_to_native (socket.get_local_address ());
+			uint8[] raw_remote_address = address_to_native (address);
 
 			var dcid = make_connection_id (NGTcp2.MIN_INITIAL_DCIDLEN);
 			var scid = make_connection_id (NGTcp2.MIN_INITIAL_DCIDLEN);
@@ -1954,7 +1968,7 @@ namespace Frida.Fruity {
 			connection.set_tls_native_handle (ssl);
 			connection.set_keep_alive_timeout (KEEP_ALIVE_TIMEOUT);
 
-			rx_source = socket.create_source (IOCondition.IN, io_cancellable);
+			rx_source = socket.datagram_based.create_source (IOCondition.IN, io_cancellable);
 			rx_source.set_callback (on_socket_readable);
 			rx_source.attach (main_context);
 
@@ -1994,10 +2008,6 @@ namespace Frida.Fruity {
 			string? address = reader.get_string_value ();
 			reader.end_member ();
 
-			reader.read_member ("netmask");
-			string? netmask = reader.get_string_value ();
-			reader.end_member ();
-
 			reader.read_member ("mtu");
 			int64 raw_mtu = reader.get_int_value ();
 			reader.end_member ();
@@ -2016,20 +2026,14 @@ namespace Frida.Fruity {
 			if (error != null)
 				throw new Error.PROTOCOL ("Invalid response: %s", error.message);
 
-			local_ipv6_address = address;
-			local_ipv6_netmask = netmask;
-			remote_ipv6_address = server_address;
+			_remote_address = new InetAddress.from_string (server_address);
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			netstack = new VirtualNetworkStack (null, local_ipv6_address, mtu);
-			netstack.outgoing_datagram.connect (send_datagram);
+			_tunnel_netstack = new VirtualNetworkStack (null, new InetAddress.from_string (address), mtu);
+			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);
-		}
-
-		public async IOStream open_connection (uint16 port, Cancellable? cancellable = null) throws Error, IOError {
-			return yield netstack.open_tcp_connection (remote_ipv6_address, port, cancellable);
 		}
 
 		public void cancel () {
@@ -2052,7 +2056,8 @@ namespace Frida.Fruity {
 				expiry_timer = null;
 			}
 
-			netstack = null;
+			if (_tunnel_netstack != null)
+				_tunnel_netstack.stop ();
 		}
 
 		private void send_request (string json) {
@@ -2113,8 +2118,23 @@ namespace Frida.Fruity {
 
 		private bool on_socket_readable (DatagramBased datagram_based, IOCondition condition) {
 			try {
-				SocketAddress remote_address;
-				ssize_t n = socket.receive_from (out remote_address, rx_buf, io_cancellable);
+				var v = InputVector ();
+				v.buffer = rx_buf;
+				v.size = rx_buf.length;
+
+				InputVector[] vectors = { v };
+
+				var m = InputMessage ();
+				SocketAddress remote_address = null;
+				m.address = (SocketAddress) &remote_address;
+				m.vectors = vectors;
+				m.num_vectors = vectors.length;
+
+				InputMessage[] messages = { m };
+
+				socket.datagram_based.receive_messages (messages, 0, 0, io_cancellable);
+
+				printerr ("remote_address we got was: %s\n", remote_address.to_string ());
 
 				uint8[] raw_remote_address = address_to_native (remote_address);
 
@@ -2123,7 +2143,7 @@ namespace Frida.Fruity {
 					remote = NGTcp2.Address () { addr = raw_remote_address },
 				};
 
-				unowned uint8[] data = rx_buf[:n];
+				unowned uint8[] data = rx_buf[:messages[0].bytes_received];
 
 				connection.read_packet (path, null, data, make_timestamp ());
 			} catch (GLib.Error e) {
@@ -2194,7 +2214,19 @@ namespace Frida.Fruity {
 					break;
 
 				try {
-					socket.send (tx_buf[:n], io_cancellable);
+					var v = OutputVector ();
+					v.buffer = tx_buf;
+					v.size = n;
+
+					OutputVector[] vectors = { v };
+
+					var m = OutputMessage ();
+					m.vectors = vectors;
+					m.num_vectors = vectors.length;
+
+					OutputMessage[] messages = { m };
+
+					socket.datagram_based.send_messages (messages, 0, 0, io_cancellable);
 				} catch (GLib.Error e) {
 					continue;
 				}
@@ -2274,8 +2306,7 @@ namespace Frida.Fruity {
 		}
 
 		private int on_recv_datagram (uint32 flags, uint8[] data) {
-			if (netstack != null)
-				netstack.handle_incoming_datagram (new Bytes (data));
+			_tunnel_netstack.handle_incoming_datagram (new Bytes (data));
 
 			return 0;
 		}
@@ -2284,10 +2315,14 @@ namespace Frida.Fruity {
 			OpenSSL.Rng.generate (dest);
 		}
 
-		private static uint8[] address_to_native (SocketAddress address) throws GLib.Error {
+		private static uint8[] address_to_native (SocketAddress address) {
 			var size = address.get_native_size ();
 			var buf = new uint8[size];
-			address.to_native (buf, size);
+			try {
+				address.to_native (buf, size);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
 			return buf;
 		}
 

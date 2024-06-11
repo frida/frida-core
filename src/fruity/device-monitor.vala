@@ -132,8 +132,9 @@ namespace Frida.Fruity {
 					our_mac_address[i] = (uint8) v;
 				}
 
-				netif = new VirtualNetworkStack (new Bytes (our_mac_address), "fe80::90fe:2cff:fe3b:e763", 1500);
-				netif.outgoing_datagram.connect (on_netif_outgoing_datagram);
+				netstack = new VirtualNetworkStack (new Bytes (our_mac_address),
+					new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500);
+				netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 				handle.detach_kernel_driver (ncm_iface);
 				handle.claim_interface (ncm_iface);
@@ -186,7 +187,7 @@ namespace Frida.Fruity {
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
 				log_datagram (datagram);
-				netif.handle_incoming_datagram (new Bytes (datagram));
+				netstack.handle_incoming_datagram (new Bytes (datagram));
 
 				if (!started_tcp_connection) {
 					started_tcp_connection = true;
@@ -256,25 +257,28 @@ namespace Frida.Fruity {
 			try {
 				Cancellable? cancellable = null;
 
-				string raw_address = address.to_string ();
-
 				var bootstrap_disco = yield DiscoveryService.open (
-					yield netif.open_tcp_connection (raw_address, 58783, cancellable), cancellable);
+					yield netstack.open_tcp_connection (new InetSocketAddress (address, 58783), cancellable),
+					cancellable);
 				printerr ("udid: %s\n", bootstrap_disco.query_udid ());
 				printerr ("took %u ms\n", (uint) (started.elapsed () * 1000.0));
 
 				var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
 				printerr ("A\n");
 				var pairing_transport = new XpcPairingTransport (
-					yield netif.open_tcp_connection (raw_address, tunnel_service.port, cancellable));
+					yield netstack.open_tcp_connection (new InetSocketAddress (address, tunnel_service.port),
+					cancellable));
 				printerr ("B\n");
 				var pairing_service = yield PairingService.open (pairing_transport, cancellable);
 				printerr ("C\n");
 
-				TunnelConnection tc = yield pairing_service.open_tunnel (raw_address, cancellable);
+				TunnelConnection tc = yield pairing_service.open_tunnel (address, netstack, cancellable);
 				printerr ("D\n");
 
-				var disco = yield DiscoveryService.open (yield tc.open_connection (tc.remote_rsd_port, cancellable), cancellable);
+				var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (
+					new InetSocketAddress (tc.remote_address, tc.remote_rsd_port),
+					cancellable);
+				var disco = yield DiscoveryService.open (rsd_connection, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("perform_tcp_connection() failed: %s\n", e.message);
 			}
