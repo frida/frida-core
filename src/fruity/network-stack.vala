@@ -849,6 +849,7 @@ namespace Frida.Fruity {
 					on_recv ((owned) pbuf, addr, port);
 				});
 				pcb.bind_netif (netstack.handle);
+				pcb.bind ();
 
 				schedule_on_frida_thread (() => {
 					state = ALLOCATED;

@@ -215,6 +215,7 @@ namespace LWIP {
 		[CCode (cname = "udp_recv")]
 		public void set_recv_callback (RecvFunc f);
 
+		public ErrorCode bind (IP6Address? ipaddr = null, uint16 port = 0);
 		public void bind_netif (NetworkInterface? netif);
 
 		public ErrorCode connect (IP6Address ipaddr, uint16 port);
