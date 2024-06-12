@@ -1,6 +1,10 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public interface NetworkStack : Object {
+		public abstract uint scope_id {
+			get;
+		}
+
 		public abstract async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable)
 			throws Error, IOError;
 		public abstract async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error, IOError;
@@ -16,6 +20,18 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class SystemNetworkStack : Object, NetworkStack {
+		public uint scope_id {
+			get {
+				return _scope_id;
+			}
+		}
+
+		private uint _scope_id;
+
+		public SystemNetworkStack (uint scope_id) {
+			this._scope_id = scope_id;
+		}
+
 		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable) throws Error, IOError {
 			SocketConnection connection;
 			try {
@@ -73,7 +89,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class VirtualNetworkStack : Object, NetworkStack {
+	public sealed class VirtualNetworkStack : Object, AsyncInitable, NetworkStack {
 		public signal void outgoing_datagram (Bytes datagram);
 
 		public Bytes? ethernet_address {
@@ -86,18 +102,41 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public uint scope_id {
+			get {
+				return raw_ipv6_address.zone;
+			}
+		}
+
 		public uint16 mtu {
 			get;
 			construct;
 		}
 
+		private Promise<bool> allocated = new Promise<bool> ();
+
 		private bool netif_added = false;
 		private LWIP.NetworkInterface handle;
+		private LWIP.IP6Address raw_ipv6_address;
 		private Gee.Queue<Bytes> incoming_datagrams = new Gee.ArrayQueue<Bytes> ();
 
 		private MainContext main_context;
 
-		public class VirtualNetworkStack (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu) {
+		public static async VirtualNetworkStack create (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu,
+				Cancellable? cancellable) throws IOError {
+			var netstack = new VirtualNetworkStack (ethernet_address, ipv6_address, mtu);
+
+			try {
+				yield netstack.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				assert (e is IOError.CANCELLED);
+				throw (IOError) e;
+			}
+
+			return netstack;
+		}
+
+		private class VirtualNetworkStack (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,
@@ -111,15 +150,26 @@ namespace Frida.Fruity {
 
 		construct {
 			main_context = MainContext.ref_thread_default ();
-
-			LWIP.Runtime.schedule (start);
-			netif_added = true;
 		}
 
 		public override void dispose () {
 			stop ();
 
 			base.dispose ();
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws IOError {
+			LWIP.Runtime.schedule (start);
+			netif_added = true;
+
+			try {
+				yield allocated.future.wait_async (cancellable);
+			} catch (GLib.Error e) {
+				assert (e is IOError.CANCELLED);
+				throw (IOError) e;
+			}
+
+			return true;
 		}
 
 		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable = null)
@@ -142,6 +192,11 @@ namespace Frida.Fruity {
 		private void start () {
 			LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
 			handle.set_up ();
+
+			schedule_on_frida_thread (() => {
+				allocated.resolve (true);
+				return Source.REMOVE;
+			});
 		}
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
@@ -171,6 +226,7 @@ namespace Frida.Fruity {
 			int8 chosen_index = -1;
 			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
+			raw_ipv6_address = handle.ip6_addr[chosen_index];
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
@@ -191,12 +247,10 @@ namespace Frida.Fruity {
 			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
 
-			var source = new IdleSource ();
-			source.set_callback (() => {
+			schedule_on_frida_thread (() => {
 				outgoing_datagram (datagram);
 				return Source.REMOVE;
 			});
-			source.attach (main_context);
 		}
 
 		private void process_next_incoming_datagram () {
@@ -224,6 +278,12 @@ namespace Frida.Fruity {
 			handle.remove ();
 
 			unref ();
+		}
+
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
 		}
 
 		private class TcpConnection : IOStream, AsyncInitable {
@@ -800,14 +860,14 @@ namespace Frida.Fruity {
 				DESTROYED
 			}
 
-			public static async Ipv6UdpSocket create (VirtualNetworkStack netstack, Cancellable? cancellable)
-					throws Error, IOError {
+			public static async Ipv6UdpSocket create (VirtualNetworkStack netstack, Cancellable? cancellable) throws IOError {
 				var sock = new Ipv6UdpSocket (netstack);
 
 				try {
 					yield sock.init_async (Priority.DEFAULT, cancellable);
 				} catch (GLib.Error e) {
-					throw_api_error (e);
+					assert (e is IOError.CANCELLED);
+					throw (IOError) e;
 				}
 
 				return sock;
@@ -847,7 +907,7 @@ namespace Frida.Fruity {
 					on_recv ((owned) pbuf, addr, port);
 				});
 				pcb.bind_netif (netstack.handle);
-				pcb.bind (LWIP.IP6Address.parse (netstack.ipv6_address.to_string ()));
+				pcb.bind (netstack.raw_ipv6_address);
 
 				schedule_on_frida_thread (() => {
 					state = ALLOCATED;
@@ -888,7 +948,11 @@ namespace Frida.Fruity {
 			}
 
 			public SocketAddress get_local_address () throws Error {
-				return new InetSocketAddress (netstack.ipv6_address, pcb.local_port);
+				return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: netstack.ipv6_address,
+					port: pcb.local_port,
+					scope_id: netstack.raw_ipv6_address.zone
+				);
 			}
 
 			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
@@ -906,7 +970,11 @@ namespace Frida.Fruity {
 				if (addr == null)
 					return;
 
-				pcb.connect (LWIP.IP6Address.parse (addr.get_address ().to_string ()), addr.get_port ());
+				var ip6_addr = LWIP.IP6Address.parse (addr.get_address ().to_string ());
+				ip6_addr.zone = (uint8) addr.scope_id;
+				printerr ("Using zone=%u\n", ip6_addr.zone);
+
+				pcb.connect (ip6_addr, addr.get_port ());
 			}
 
 			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,

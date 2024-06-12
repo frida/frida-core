@@ -17,6 +17,8 @@ namespace Frida.Fruity {
 
 		private DataOutputStream pcap;
 
+		private Cancellable io_cancellable = new Cancellable ();
+
 		private Timer started = new Timer ();
 
 		private const uint16 USB_VENDOR_APPLE = 0x05ac;
@@ -80,11 +82,15 @@ namespace Frida.Fruity {
 
 				if (desc.idVendor != USB_VENDOR_APPLE)
 					continue;
+				if (desc.idProduct != 0x12a8 && desc.idProduct != 0x12ab)
+					continue;
 
 				if (device.open (out handle) != SUCCESS) {
 					printerr ("Unable to open device :(\n");
 					continue;
 				}
+
+				printerr ("Looking at %04x:%04x\n", desc.idVendor, desc.idProduct);
 
 				int config_id = -1;
 				handle.get_configuration (out config_id);
@@ -141,32 +147,36 @@ namespace Frida.Fruity {
 					our_mac_address[i] = (uint8) v;
 				}
 
-				netstack = new VirtualNetworkStack (new Bytes (our_mac_address),
-					new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500);
-				netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
-
-				handle.detach_kernel_driver (ncm_iface);
-				handle.claim_interface (ncm_iface);
-				handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
-
-				new Thread<void> ("frida-ncm-io", () => {
-					uint8 data[64 * 1024];
-
-					while (true) {
-						int n = -1;
-						var transfer_result = handle.bulk_transfer (rx_address, data, out n, 10000);
-						if (transfer_result != SUCCESS)
-							break;
-
-						try {
-							handle_ncm_frame (data[:n]);
-						} catch (Error e) {
-							printerr ("%s\n", e.message);
-							break;
-						}
-					}
-				});
+				start.begin (ncm_iface, ncm_altsetting);
 			}
+		}
+
+		private async void start (int ncm_iface, int ncm_altsetting) throws IOError {
+			netstack = yield VirtualNetworkStack.create (new Bytes (our_mac_address),
+				new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500, io_cancellable);
+			netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
+
+			handle.detach_kernel_driver (ncm_iface);
+			handle.claim_interface (ncm_iface);
+			handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
+
+			new Thread<void> ("frida-ncm-io", () => {
+				uint8 data[64 * 1024];
+
+				while (true) {
+					int n = -1;
+					var transfer_result = handle.bulk_transfer (rx_address, data, out n, 10000);
+					if (transfer_result != SUCCESS)
+						break;
+
+					try {
+						handle_ncm_frame (data[:n]);
+					} catch (Error e) {
+						printerr ("%s\n", e.message);
+						break;
+					}
+				}
+			});
 		}
 
 		private void handle_ncm_frame (uint8[] data) throws Error {

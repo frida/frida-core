@@ -348,9 +348,14 @@ namespace Frida.Fruity {
 			Key remote_pubkey = key_from_der (Base64.decode (device_pubkey));
 
 			printerr ("TunnelConnection.open()\n");
+			var tunnel_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: device_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
 
 			return yield TunnelConnection.open (
-				new InetSocketAddress (device_address, port),
+				tunnel_endpoint,
 				netstack,
 				new TunnelKey ((owned) local_keypair),
 				new TunnelKey ((owned) remote_pubkey),
@@ -2026,14 +2031,23 @@ namespace Frida.Fruity {
 			if (error != null)
 				throw new Error.PROTOCOL ("Invalid response: %s", error.message);
 
+			var local_address = new InetAddress.from_string (address);
 			_remote_address = new InetAddress.from_string (server_address);
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			_tunnel_netstack = new VirtualNetworkStack (null, new InetAddress.from_string (address), mtu);
-			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
+			create_netstack.begin (local_address);
+		}
 
-			established.resolve (true);
+		private async void create_netstack (InetAddress address) {
+			try {
+				_tunnel_netstack = yield VirtualNetworkStack.create (null, address, mtu, io_cancellable);
+				_tunnel_netstack.outgoing_datagram.connect (send_datagram);
+
+				established.resolve (true);
+			} catch (IOError e) {
+				established.reject (e);
+			}
 		}
 
 		public void cancel () {

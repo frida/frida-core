@@ -31,6 +31,8 @@ namespace LWIP {
 		[CCode (cname = "netif_input")]
 		public static ErrorCode default_input_handler (PacketBuffer pbuf, NetworkInterface netif);
 
+		public IP6Address ip6_addr[IPV6_NUM_ADDRESSES];
+
 		public NetworkInterfaceInputFunc input;
 		public NetworkInterfaceLinkOutputFunc linkoutput;
 		public NetworkInterfaceOutputIP6Func output_ip6;
@@ -43,6 +45,8 @@ namespace LWIP {
 		public uint8 hwaddr_len;
 
 		public NetworkInterfaceFlags flags;
+
+		public uint8 num;
 
 		public const uint8 MAX_HWADDR_LEN;
 	}
@@ -81,6 +85,8 @@ namespace LWIP {
 		}
 	}
 
+	public const uint IPV6_NUM_ADDRESSES;
+
 	[CCode (cheader_filename = "lwip/ip6_addr.h", cname = "ip6_addr_t", cprefix = "ip6_addr_")]
 	public struct IP6Address {
 		[CCode (cname = "ip6addr_aton")]
@@ -88,6 +94,9 @@ namespace LWIP {
 
 		[CCode (cname = "ip6addr_ntoa")]
 		public unowned string to_string ();
+
+		public uint32 addr[4];
+		public uint8 zone;
 	}
 
 	[Flags]
