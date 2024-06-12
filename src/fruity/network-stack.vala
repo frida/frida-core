@@ -224,13 +224,16 @@ namespace Frida.Fruity {
 			handle.flags = BROADCAST | ETHARP;
 
 			int8 chosen_index = -1;
+			printerr ("[VirtualNetworkStack %p] ipv6_address: %s\n", this, ipv6_address.to_string ());
 			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
+			printerr ("[VirtualNetworkStack %p] raw_ipv6_address.zone: %u\n", this, raw_ipv6_address.zone);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
 			VirtualNetworkStack * self = handle.state;
+			printerr ("[VirtualNetworkStack %p] emitting Ethernet frame\n", self);
 			self->emit_datagram (pbuf);
 			return OK;
 		}
@@ -238,6 +241,7 @@ namespace Frida.Fruity {
 		private static LWIP.ErrorCode on_netif_output_ip6 (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf,
 				LWIP.IP6Address address) {
 			VirtualNetworkStack * self = handle.state;
+			printerr ("[VirtualNetworkStack %p] emitting IPv6 datagram\n", self);
 			self->emit_datagram (pbuf);
 			return OK;
 		}
@@ -246,6 +250,7 @@ namespace Frida.Fruity {
 			var buffer = new uint8[pbuf.tot_len];
 			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
+			hexdump (datagram.get_data ());
 
 			schedule_on_frida_thread (() => {
 				outgoing_datagram (datagram);
@@ -261,8 +266,13 @@ namespace Frida.Fruity {
 			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 			pbuf.take (datagram.get_data ());
 
-			if (handle.input (pbuf, handle) == OK)
+			if (handle.input (pbuf, handle) == OK) {
+				printerr ("[VirtualNetworkStack %p] handled incoming datagram\n", this);
+				hexdump (datagram.get_data ());
 				*((void **) &pbuf) = null;
+			} else {
+				printerr ("[VirtualNetworkStack %p] failed to handle incoming datagram\n", this);
+			}
 		}
 
 		public void stop () {
@@ -934,12 +944,15 @@ namespace Frida.Fruity {
 			}
 
 			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.IP6Address addr, uint16 port) {
-				printerr ("on_recv()\n");
 				var buffer = new uint8[pbuf.tot_len];
 				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
 
 				var bytes = new Bytes (chunk[:pbuf.tot_len]);
-				var sender = new InetSocketAddress.from_string (addr.to_string (), port);
+				var sender = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: new InetAddress.from_string (addr.to_string ()),
+					port: port,
+					scope_id: netstack.raw_ipv6_address.zone
+				);
 				var packet = new Packet (bytes, sender);
 
 				lock (state)
@@ -972,7 +985,6 @@ namespace Frida.Fruity {
 
 				var ip6_addr = LWIP.IP6Address.parse (addr.get_address ().to_string ());
 				ip6_addr.zone = (uint8) addr.scope_id;
-				printerr ("Using zone=%u\n", ip6_addr.zone);
 
 				pcb.connect (ip6_addr, addr.get_port ());
 			}
@@ -997,7 +1009,7 @@ namespace Frida.Fruity {
 					update_events ();
 
 					if (messages[received].address != null)
-						*((SocketAddress **) &messages[received].address) = packet.address.ref ();
+						*messages[received].address = packet.address.ref ();
 
 					messages[received].bytes_received = 0;
 					messages[received].flags = 0;
@@ -1051,7 +1063,6 @@ namespace Frida.Fruity {
 					pbuf.take (packet.bytes.get_data ());
 
 					pcb.send (pbuf);
-					printerr ("Called send()\n");
 				}
 			}
 

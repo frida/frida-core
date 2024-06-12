@@ -90,7 +90,7 @@ namespace Frida.Fruity {
 					continue;
 				}
 
-				printerr ("Looking at %04x:%04x\n", desc.idVendor, desc.idProduct);
+				printerr ("Using %04x:%04x\n", desc.idVendor, desc.idProduct);
 
 				int config_id = -1;
 				handle.get_configuration (out config_id);
@@ -100,8 +100,10 @@ namespace Frida.Fruity {
 				}
 
 				LibUSB.ConfigDescriptor config;
-				if (device.get_active_config_descriptor (out config) != SUCCESS)
+				if (device.get_active_config_descriptor (out config) != SUCCESS) {
+					printerr ("Failed to get active config descriptor\n");
 					continue;
+				}
 
 				int ncm_iface = -1;
 				int ncm_altsetting = -1;
@@ -135,8 +137,10 @@ namespace Frida.Fruity {
 					}
 					iface_id++;
 				}
-				if (ncm_iface == -1)
+				if (ncm_iface == -1) {
+					printerr ("Failed to find NCM interface\n");
 					continue;
+				}
 
 				uint8 mac_address_buf[13];
 				var get_result = handle.get_string_descriptor_ascii (mac_address_index, mac_address_buf);
@@ -156,8 +160,10 @@ namespace Frida.Fruity {
 				new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500, io_cancellable);
 			netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
-			handle.detach_kernel_driver (ncm_iface);
-			handle.claim_interface (ncm_iface);
+			var res = handle.detach_kernel_driver (ncm_iface);
+			printerr ("detach_kernel_driver() => %s\n", res.get_name ());
+			res = handle.claim_interface (ncm_iface);
+			printerr ("claim_interface() => %s\n", res.get_name ());
 			handle.set_interface_alt_setting (ncm_iface, ncm_altsetting);
 
 			new Thread<void> ("frida-ncm-io", () => {
@@ -276,30 +282,29 @@ namespace Frida.Fruity {
 			try {
 				Cancellable? cancellable = null;
 
-				var bootstrap_disco = yield DiscoveryService.open (
-					yield netstack.open_tcp_connection (new InetSocketAddress (address, 58783), cancellable),
-					cancellable);
+				var stream = yield netstack.open_tcp_connection (new InetSocketAddress (address, 58783), cancellable);
+
+				var bootstrap_disco = yield DiscoveryService.open (stream, cancellable);
 				printerr ("udid: %s\n", bootstrap_disco.query_udid ());
 				printerr ("took %u ms\n", (uint) (started.elapsed () * 1000.0));
 
 				var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
-				printerr ("A\n");
 				var pairing_transport = new XpcPairingTransport (
 					yield netstack.open_tcp_connection (new InetSocketAddress (address, tunnel_service.port),
 					cancellable));
-				printerr ("B\n");
 				var pairing_service = yield PairingService.open (pairing_transport, cancellable);
-				printerr ("C\n");
 
 				TunnelConnection tc = yield pairing_service.open_tunnel (address, netstack, cancellable);
-				printerr ("D\n");
 
-				var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (
-					new InetSocketAddress (tc.remote_address, tc.remote_rsd_port),
-					cancellable);
+				var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: tc.remote_address,
+					port: tc.remote_rsd_port,
+					scope_id: tc.tunnel_netstack.scope_id
+				);
+				var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
 				var disco = yield DiscoveryService.open (rsd_connection, cancellable);
 			} catch (GLib.Error e) {
-				printerr ("perform_tcp_connection() failed: %s\n", e.message);
+				printerr ("Oh noes: %s\n", e.message);
 			}
 		}
 
