@@ -847,7 +847,7 @@ namespace Frida.Fruity {
 					on_recv ((owned) pbuf, addr, port);
 				});
 				pcb.bind_netif (netstack.handle);
-				pcb.bind ();
+				pcb.bind (LWIP.IP6Address.parse (netstack.ipv6_address.to_string ()));
 
 				schedule_on_frida_thread (() => {
 					state = ALLOCATED;
@@ -888,7 +888,6 @@ namespace Frida.Fruity {
 			}
 
 			public SocketAddress get_local_address () throws Error {
-				printerr ("local_port=%u\n", pcb.local_port);
 				return new InetSocketAddress (netstack.ipv6_address, pcb.local_port);
 			}
 
