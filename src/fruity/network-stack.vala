@@ -788,8 +788,6 @@ namespace Frida.Fruity {
 			private IOCondition events = 0;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
 			private Gee.Queue<Packet> tx_queue = new Gee.ArrayQueue<Packet> ();
-			private Mutex mutex = Mutex ();
-			private Cond cond = Cond ();
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 

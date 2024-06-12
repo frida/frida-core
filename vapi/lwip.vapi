@@ -76,7 +76,7 @@ namespace LWIP {
 		public const uint8 HWADDR_LEN;
 
 		namespace IPv6 {
-			[CCode (cname = "ethip6_output")]
+			[CCode (cheader_filename = "lwip/ethip6.h", cname = "ethip6_output")]
 			public ErrorCode output (NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
 		}
 	}
