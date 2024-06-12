@@ -15,8 +15,6 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		private DataOutputStream pcap;
-
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private Timer started = new Timer ();
@@ -50,26 +48,6 @@ namespace Frida.Fruity {
 			printerr ("READY!\n");
 			started.reset ();
 			*/
-
-			try {
-				var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP), "ncm.pcap");
-				try {
-					f.delete ();
-				} catch (GLib.Error e) {
-				}
-				pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
-				pcap.set_byte_order (HOST_ENDIAN);
-				pcap.put_uint32 (0xa1b2c3d4U);
-				pcap.put_uint16 (2);
-				pcap.put_uint16 (4);
-				pcap.put_uint32 (0);
-				pcap.put_uint32 (0);
-				pcap.put_uint32 (16384);
-				pcap.put_uint32 (1); // Ethernet
-				pcap.flush ();
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
 
 			main_context = MainContext.ref_thread_default ();
 
@@ -211,7 +189,6 @@ namespace Frida.Fruity {
 					break;
 
 				unowned uint8[] datagram = data[datagram_index:datagram_index + datagram_length];
-				log_datagram (datagram);
 				netstack.handle_incoming_datagram (new Bytes (datagram));
 
 				if (!started_tcp_connection) {
@@ -223,7 +200,9 @@ namespace Frida.Fruity {
 					size_t start = ETHERNET_HEADER_SIZE + ipv6_source_address_offset;
 					var source_address = new InetAddress.from_bytes (datagram[start:start + 16], IPV6);
 
-					var source = new IdleSource ();
+					//var source = new IdleSource ();
+					// FIXME: We might be connecting before the iDevice-side services are ready for us.
+					var source = new TimeoutSource (1000);
 					source.set_callback (() => {
 						perform_tcp_connection.begin (source_address);
 						return Source.REMOVE;
@@ -236,8 +215,6 @@ namespace Frida.Fruity {
 		}
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
-			log_datagram (datagram.get_data ());
-
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 16;
 			uint16 alignment_padding_length = 2;
@@ -303,6 +280,8 @@ namespace Frida.Fruity {
 				);
 				var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
 				var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+
+				printerr ("YAY! Took %u ms in total\n", (uint) (started.elapsed () * 1000.0));
 			} catch (GLib.Error e) {
 				printerr ("Oh noes: %s\n", e.message);
 			}
@@ -336,24 +315,6 @@ namespace Frida.Fruity {
 			}
 
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
-		}
-
-		private void log_datagram (uint8[] datagram) {
-			lock (pcap) {
-				try {
-					int64 timestamp = get_real_time ();
-					pcap.put_uint32 ((uint32) (timestamp / 1000000));
-					pcap.put_uint32 ((uint32) (timestamp % 1000000));
-					pcap.put_uint32 (datagram.length);
-					pcap.put_uint32 (datagram.length);
-					size_t written;
-					pcap.write_all (datagram, out written);
-					pcap.flush ();
-				} catch (GLib.Error e) {
-					printerr ("%s\n", e.message);
-					assert_not_reached ();
-				}
-			}
 		}
 	}
 

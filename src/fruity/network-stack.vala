@@ -122,6 +122,8 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
+		private DataOutputStream pcap;
+
 		public static async VirtualNetworkStack create (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu,
 				Cancellable? cancellable) throws IOError {
 			var netstack = new VirtualNetworkStack (ethernet_address, ipv6_address, mtu);
@@ -150,6 +152,27 @@ namespace Frida.Fruity {
 
 		construct {
 			main_context = MainContext.ref_thread_default ();
+
+			try {
+				var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP),
+					"vns-%s.pcap".printf (ipv6_address.to_string ().replace (":", "")));
+				try {
+					f.delete ();
+				} catch (GLib.Error e) {
+				}
+				pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
+				pcap.set_byte_order (HOST_ENDIAN);
+				pcap.put_uint32 (0xa1b2c3d4U);
+				pcap.put_uint16 (2);
+				pcap.put_uint16 (4);
+				pcap.put_uint32 (0);
+				pcap.put_uint32 (0);
+				pcap.put_uint32 (16384);
+				pcap.put_uint32 ((ethernet_address != null) ? 1 : 229); // Ethernet or IPv6
+				pcap.flush ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
 		}
 
 		public override void dispose () {
@@ -184,6 +207,7 @@ namespace Frida.Fruity {
 		public void handle_incoming_datagram (Bytes datagram) {
 			if (!netif_added)
 				return;
+			log_datagram (datagram);
 			lock (incoming_datagrams)
 				incoming_datagrams.offer (datagram);
 			LWIP.Runtime.schedule (process_next_incoming_datagram);
@@ -233,7 +257,6 @@ namespace Frida.Fruity {
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
 			VirtualNetworkStack * self = handle.state;
-			printerr ("[VirtualNetworkStack %p] emitting Ethernet frame\n", self);
 			self->emit_datagram (pbuf);
 			return OK;
 		}
@@ -241,7 +264,6 @@ namespace Frida.Fruity {
 		private static LWIP.ErrorCode on_netif_output_ip6 (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf,
 				LWIP.IP6Address address) {
 			VirtualNetworkStack * self = handle.state;
-			printerr ("[VirtualNetworkStack %p] emitting IPv6 datagram\n", self);
 			self->emit_datagram (pbuf);
 			return OK;
 		}
@@ -250,9 +272,9 @@ namespace Frida.Fruity {
 			var buffer = new uint8[pbuf.tot_len];
 			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
-			hexdump (datagram.get_data ());
 
 			schedule_on_frida_thread (() => {
+				log_datagram (datagram);
 				outgoing_datagram (datagram);
 				return Source.REMOVE;
 			});
@@ -266,13 +288,8 @@ namespace Frida.Fruity {
 			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 			pbuf.take (datagram.get_data ());
 
-			if (handle.input (pbuf, handle) == OK) {
-				printerr ("[VirtualNetworkStack %p] handled incoming datagram\n", this);
-				hexdump (datagram.get_data ());
+			if (handle.input (pbuf, handle) == OK)
 				*((void **) &pbuf) = null;
-			} else {
-				printerr ("[VirtualNetworkStack %p] failed to handle incoming datagram\n", this);
-			}
 		}
 
 		public void stop () {
@@ -294,6 +311,24 @@ namespace Frida.Fruity {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
 			source.attach (main_context);
+		}
+
+		private void log_datagram (Bytes datagram) {
+			lock (pcap) {
+				try {
+					int64 timestamp = get_real_time ();
+					pcap.put_uint32 ((uint32) (timestamp / 1000000));
+					pcap.put_uint32 ((uint32) (timestamp % 1000000));
+					pcap.put_uint32 (datagram.length);
+					pcap.put_uint32 (datagram.length);
+					size_t written;
+					pcap.write_all (datagram.get_data (), out written);
+					pcap.flush ();
+				} catch (GLib.Error e) {
+					printerr ("%s\n", e.message);
+					assert_not_reached ();
+				}
+			}
 		}
 
 		private class TcpConnection : IOStream, AsyncInitable {
@@ -855,7 +890,7 @@ namespace Frida.Fruity {
 
 			private unowned LWIP.UdpPcb? pcb;
 			private InetSocketAddress? pending_connect_address;
-			private IOCondition events = 0;
+			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
 			private Gee.Queue<Packet> tx_queue = new Gee.ArrayQueue<Packet> ();
 
