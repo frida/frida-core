@@ -249,9 +249,9 @@ namespace Frida.Fruity {
 				assert (ethernet_address.length == LWIP.Ethernet.HWADDR_LEN);
 				Memory.copy (&handle.hwaddr, ethernet_address.get_data (), LWIP.Ethernet.HWADDR_LEN);
 				handle.hwaddr_len = LWIP.Ethernet.HWADDR_LEN;
-			}
 
-			handle.flags = BROADCAST | ETHARP;
+				handle.flags = BROADCAST | ETHARP;
+			}
 
 			int8 chosen_index = -1;
 			log_event ("[VirtualNetworkStack %p] ipv6_address: %s\n", this, ipv6_address.to_string ());
