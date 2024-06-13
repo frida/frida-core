@@ -205,11 +205,17 @@ namespace Frida.Fruity {
 		}
 
 		public void handle_incoming_datagram (Bytes datagram) {
-			if (!netif_added)
+			if (!netif_added) {
+				if (ethernet_address == null)
+					log_event ("\thandle_incoming_datagram() netif not added?!\n");
 				return;
+			}
 			log_datagram (datagram);
-			lock (incoming_datagrams)
+			lock (incoming_datagrams) {
 				incoming_datagrams.offer (datagram);
+				if (ethernet_address == null)
+					log_event ("\thandle_incoming_datagram() added to queue, size %d\n", incoming_datagrams.size);
+			}
 			LWIP.Runtime.schedule (process_next_incoming_datagram);
 		}
 
@@ -248,11 +254,11 @@ namespace Frida.Fruity {
 			handle.flags = BROADCAST | ETHARP;
 
 			int8 chosen_index = -1;
-			printerr ("[VirtualNetworkStack %p] ipv6_address: %s\n", this, ipv6_address.to_string ());
+			log_event ("[VirtualNetworkStack %p] ipv6_address: %s\n", this, ipv6_address.to_string ());
 			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
-			printerr ("[VirtualNetworkStack %p] raw_ipv6_address.zone: %u\n", this, raw_ipv6_address.zone);
+			log_event ("[VirtualNetworkStack %p] raw_ipv6_address.zone: %u\n", this, raw_ipv6_address.zone);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
@@ -281,6 +287,8 @@ namespace Frida.Fruity {
 		}
 
 		private void process_next_incoming_datagram () {
+			if (ethernet_address == null)
+				log_event ("\tprocess_next_incoming_datagram(): A\n");
 			Bytes datagram;
 			lock (incoming_datagrams)
 				datagram = incoming_datagrams.poll ();
@@ -288,8 +296,14 @@ namespace Frida.Fruity {
 			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 			pbuf.take (datagram.get_data ());
 
-			if (handle.input (pbuf, handle) == OK)
+			if (handle.input (pbuf, handle) == OK) {
+				if (ethernet_address == null)
+					log_event ("\tprocess_next_incoming_datagram(): B\n");
 				*((void **) &pbuf) = null;
+			} else {
+				if (ethernet_address == null)
+					log_event ("\tprocess_next_incoming_datagram(): C\n");
+			}
 		}
 
 		public void stop () {
