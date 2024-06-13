@@ -153,8 +153,6 @@ namespace Frida.Fruity {
 					if (transfer_result != SUCCESS)
 						break;
 
-					log_event ("\treceived NCM frame, size: %d\n", n);
-
 					try {
 						handle_ncm_frame (data[:n]);
 					} catch (Error e) {
@@ -255,8 +253,6 @@ namespace Frida.Fruity {
 			var transfer_result = handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
 			if (transfer_result != SUCCESS)
 				printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
-
-			log_event ("\tsent NCM frame, size: %zu\n", frame.get_size ());
 		}
 
 		private async void perform_tcp_connection (InetAddress address) {
