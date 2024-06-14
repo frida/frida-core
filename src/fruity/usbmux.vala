@@ -542,7 +542,7 @@ namespace Frida.Fruity {
 		PROTOCOL
 	}
 
-	public class UsbmuxDevice : Object {
+	public class UsbmuxDevice : Object, DeviceTransport {
 		public ConnectionType connection_type {
 			get;
 			construct;

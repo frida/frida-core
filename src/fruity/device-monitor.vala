@@ -1,6 +1,9 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public sealed class DeviceMonitor : Object {
+		public signal void device_attached (Device device);
+		public signal void device_detached (Device device);
+
 		private Gee.Map<string, Device> devices = new Gee.HashMap<string, Device> ();
 
 		private UsbmuxClient? usbmux;
@@ -84,8 +87,8 @@ namespace Frida.Fruity {
 
 			try {
 				usbmux = yield UsbmuxClient.open (start_cancellable);
-				usbmux.device_attached.connect (add_usbmux_device);
-				usbmux.device_detached.connect (remove_usbmux_device);
+				usbmux.device_attached.connect (add_transport);
+				usbmux.device_detached.connect (remove_transport);
 
 				yield usbmux.enable_listen_mode (start_cancellable);
 			} catch (GLib.Error e) {
@@ -100,32 +103,36 @@ namespace Frida.Fruity {
 			return success;
 		}
 
-		private void add_usbmux_device (UsbmuxDevice ud) {
-			Device? device = devices[ud.udid];
+		private void add_transport (DeviceTransport transport) {
+			unowned string udid = transport.udid;
+
+			Device? device = devices[udid];
 			if (device == null) {
 				device = new Device ();
-				devices[ud.udid] = device;
+				devices[udid] = device;
 			}
 
-			device.usbmux = ud;
+			device.transports.add (transport);
 		}
 
-		private void remove_usbmux_device (uint id) {
-			foreach (var device in devices.values) {
-				UsbmuxDevice? ud = device.usbmux;
-				if (ud != null && ud.id == id) {
-					device.usbmux = null;
-					return;
-				}
-			}
+		private void remove_transport (DeviceTransport transport) {
+			unowned string udid = transport.udid;
+
+			Device device = devices[udid];
+			device.transports.remove (transport);
+			if (device.transports.is_empty)
+				devices.unset (udid);
 		}
 	}
 
 	public sealed class Device : Object {
-		public UsbmuxDevice? usbmux {
+		public Gee.Set<DeviceTransport> transports {
 			get;
-			set;
+			default = new Gee.HashSet<DeviceTransport> ();
 		}
+	}
+
+	public interface DeviceTransport : Object {
 	}
 
 	public class NcmStuffToBeMoved : Object {
