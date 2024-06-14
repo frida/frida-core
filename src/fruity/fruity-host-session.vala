@@ -4,8 +4,9 @@ namespace Frida {
 
 		private Fruity.UsbmuxClient control_client;
 
-		private Gee.HashSet<uint> devices = new Gee.HashSet<uint> ();
-		private Gee.HashMap<uint, FruityHostSessionProvider> providers = new Gee.HashMap<uint, FruityHostSessionProvider> ();
+		private Gee.Set<Fruity.UsbmuxDevice> devices = new Gee.HashSet<Fruity.UsbmuxDevice> ();
+		private Gee.Map<Fruity.UsbmuxDevice, FruityHostSessionProvider> providers =
+			new Gee.HashMap<Fruity.UsbmuxDevice, FruityHostSessionProvider> ();
 
 		private Promise<bool> start_request;
 		private Cancellable start_cancellable;
@@ -14,6 +15,8 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void start (Cancellable? cancellable) throws IOError {
+			yield device_monitor.start (cancellable);
+
 			start_request = new Promise<bool> ();
 			start_cancellable = new Cancellable ();
 			on_start_completed = start.callback;
@@ -89,8 +92,8 @@ namespace Frida {
 				control_client.device_attached.connect (device => {
 					add_device.begin (device);
 				});
-				control_client.device_detached.connect (id => {
-					remove_device (id);
+				control_client.device_detached.connect (device => {
+					remove_device (device);
 				});
 
 				yield control_client.enable_listen_mode (start_cancellable);
@@ -107,6 +110,8 @@ namespace Frida {
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
+			yield device_monitor.stop (cancellable);
+
 			start_cancellable.cancel ();
 
 			try {
@@ -133,16 +138,16 @@ namespace Frida {
 
 		private async void add_device (Fruity.UsbmuxDevice device) {
 			var id = device.id;
-			if (devices.contains (id))
+			if (devices.contains (device))
 				return;
-			devices.add (id);
+			devices.add (device);
 
 			string? name = null;
 			Variant? icon = null;
 
 			if (device.connection_type == USB) {
 				bool got_details = false;
-				for (int i = 1; !got_details && devices.contains (id); i++) {
+				for (int i = 1; !got_details && devices.contains (device); i++) {
 					try {
 						_extract_details_for_device (device.product_id, device.udid, out name, out icon);
 						got_details = true;
@@ -170,10 +175,10 @@ namespace Frida {
 						}
 					}
 				}
-				if (!devices.contains (id))
+				if (!devices.contains (device))
 					return;
 				if (!got_details) {
-					remove_device (id);
+					remove_device (device);
 					return;
 				}
 			} else {
@@ -181,18 +186,18 @@ namespace Frida {
 			}
 
 			var provider = new FruityHostSessionProvider (name, icon, device);
-			providers[id] = provider;
+			providers[device] = provider;
 
 			provider_available (provider);
 		}
 
-		private void remove_device (uint id) {
-			if (!devices.contains (id))
+		private void remove_device (Fruity.UsbmuxDevice device) {
+			if (!devices.contains (device))
 				return;
-			devices.remove (id);
+			devices.remove (device);
 
 			FruityHostSessionProvider provider;
-			if (providers.unset (id, out provider)) {
+			if (providers.unset (device, out provider)) {
 				provider_unavailable (provider);
 				provider.close.begin (io_cancellable);
 			}

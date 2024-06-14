@@ -4,15 +4,147 @@ namespace Frida.Fruity {
 		public signal void device_attached (Device device);
 		public signal void device_detached (Device device);
 
+		private Gee.List<DeviceTransportBackend> backends = new Gee.ArrayList<DeviceTransportBackend> ();
 		private Gee.Map<string, Device> devices = new Gee.HashMap<string, Device> ();
+
+		private delegate void NotifyCompleteFunc ();
+
+		construct {
+			add_backend (new UsbmuxTransportBackend ());
+#if MACOS
+			add_backend (new RemotePairingTransportBackend ());
+#endif
+		}
+
+		public async void start (Cancellable? cancellable = null) throws IOError {
+			var remaining = backends.size + 1;
+
+			NotifyCompleteFunc on_complete = () => {
+				remaining--;
+				if (remaining == 0)
+					start.callback ();
+			};
+
+			foreach (var backend in backends)
+				do_start.begin (backend, cancellable, on_complete);
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				on_complete ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+
+			yield;
+
+			on_complete = null;
+		}
+
+		public async void stop (Cancellable? cancellable = null) throws IOError {
+			var remaining = backends.size + 1;
+
+			NotifyCompleteFunc on_complete = () => {
+				remaining--;
+				if (remaining == 0)
+					stop.callback ();
+			};
+
+			foreach (var backend in backends)
+				do_stop.begin (backend, cancellable, on_complete);
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				on_complete ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+
+			yield;
+
+			on_complete = null;
+		}
+
+		private async void do_start (DeviceTransportBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				yield backend.start (cancellable);
+			} catch (IOError e) {
+			}
+
+			on_complete ();
+		}
+
+		private async void do_stop (DeviceTransportBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				yield backend.stop (cancellable);
+			} catch (IOError e) {
+			}
+
+			on_complete ();
+		}
+
+		private void add_backend (DeviceTransportBackend backend) {
+			backends.add (backend);
+			backend.transport_attached.connect (on_transport_attached);
+			backend.transport_detached.connect (on_transport_detached);
+		}
+
+		private void on_transport_attached (DeviceTransport transport) {
+			unowned string udid = transport.udid;
+
+			var device = devices[udid];
+			if (device == null) {
+				device = new Device ();
+				devices[udid] = device;
+			}
+
+			device.transports.add (transport);
+
+			if (device.transports.size == 1)
+				device_attached (device);
+		}
+
+		private void on_transport_detached (DeviceTransport transport) {
+			unowned string udid = transport.udid;
+
+			var device = devices[udid];
+			device.transports.remove (transport);
+			if (device.transports.is_empty) {
+				devices.unset (udid);
+
+				device_detached (device);
+			}
+		}
+	}
+
+	public sealed class Device : Object {
+		public Gee.Set<DeviceTransport> transports {
+			get;
+			default = new Gee.HashSet<DeviceTransport> ();
+		}
+	}
+
+	public interface DeviceTransport : Object {
+		public abstract string udid {
+			get;
+		}
+	}
+
+	private interface DeviceTransportBackend : Object {
+		public signal void transport_attached (DeviceTransport transport);
+		public signal void transport_detached (DeviceTransport transport);
+
+		public abstract async void start (Cancellable? cancellable) throws IOError;
+		public abstract async void stop (Cancellable? cancellable) throws IOError;
+	}
+
+	private class UsbmuxTransportBackend : Object, DeviceTransportBackend {
+		private Gee.Map<UsbmuxDevice, UsbmuxDeviceTransport> transports = new Gee.HashMap<UsbmuxDevice, UsbmuxDeviceTransport> ();
 
 		private UsbmuxClient? usbmux;
 
 		private Promise<bool> start_request;
 		private Cancellable start_cancellable;
 		private SourceFunc on_start_completed;
-
-		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void start (Cancellable? cancellable) throws IOError {
 			start_request = new Promise<bool> ();
@@ -87,8 +219,8 @@ namespace Frida.Fruity {
 
 			try {
 				usbmux = yield UsbmuxClient.open (start_cancellable);
-				usbmux.device_attached.connect (add_transport);
-				usbmux.device_detached.connect (remove_transport);
+				usbmux.device_attached.connect (on_device_attached);
+				usbmux.device_detached.connect (on_device_detached);
 
 				yield usbmux.enable_listen_mode (start_cancellable);
 			} catch (GLib.Error e) {
@@ -103,37 +235,146 @@ namespace Frida.Fruity {
 			return success;
 		}
 
-		private void add_transport (DeviceTransport transport) {
-			unowned string udid = transport.udid;
+		public async void stop (Cancellable? cancellable) throws IOError {
+			start_cancellable.cancel ();
 
-			Device? device = devices[udid];
-			if (device == null) {
-				device = new Device ();
-				devices[udid] = device;
+			try {
+				yield start_request.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
 			}
 
-			device.transports.add (transport);
+			if (usbmux != null) {
+				yield usbmux.close (cancellable);
+				usbmux = null;
+			}
+
+			transports.clear ();
 		}
 
-		private void remove_transport (DeviceTransport transport) {
-			unowned string udid = transport.udid;
+		private void on_device_attached (UsbmuxDevice device) {
+			var transport = new UsbmuxDeviceTransport (device);
+			transports[device] = transport;
+			transport_attached (transport);
+		}
 
-			Device device = devices[udid];
-			device.transports.remove (transport);
-			if (device.transports.is_empty)
-				devices.unset (udid);
+		private void on_device_detached (UsbmuxDevice device) {
+			UsbmuxDeviceTransport transport;
+			transports.unset (device, out transport);
+			transport_detached (transport);
 		}
 	}
 
-	public sealed class Device : Object {
-		public Gee.Set<DeviceTransport> transports {
+	private class UsbmuxDeviceTransport : Object, DeviceTransport {
+		public UsbmuxDevice device {
 			get;
-			default = new Gee.HashSet<DeviceTransport> ();
+			construct;
+		}
+
+		public string udid {
+			get {
+				return device.udid;
+			}
+		}
+
+		public UsbmuxDeviceTransport (UsbmuxDevice device) {
+			Object (device: device);
 		}
 	}
 
-	public interface DeviceTransport : Object {
+#if MACOS
+	private class RemotePairingTransportBackend : Object, DeviceTransportBackend {
+		private Gee.Map<string, RemotePairingDeviceTransport> transports = new Gee.HashMap<string, RemotePairingDeviceTransport> ();
+
+		private XpcClient? pairingd;
+		private Darwin.GCD.DispatchQueue queue =
+			new Darwin.GCD.DispatchQueue ("re.frida.fruity.remotepairing", Darwin.GCD.DispatchQueueAttr.SERIAL);
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			pairingd = XpcClient.make_for_mach_service ("com.apple.CoreDevice.remotepairingd", queue);
+			pairingd.notify["state"].connect (on_state_changed);
+			pairingd.message.connect (on_message);
+
+			try {
+				var r = new PairingdRequest ("RemotePairing.BrowseRequest");
+				r.body.set_bool ("currentDevicesOnly", false);
+				yield pairingd.request (r.message, cancellable);
+				printerr ("Started\n");
+			} catch (Error e) {
+				printerr ("Oops: %s\n", e.message);
+			}
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+		}
+
+		private void on_state_changed (Object obj, ParamSpec pspec) {
+			printerr ("[RemotePairingTransportBackend] new state: %s\n", pairingd.state.to_string ());
+		}
+
+		private void on_message (Darwin.Xpc.Object obj) {
+			printerr ("[RemotePairingTransportBackend] %s\n", obj.to_string ());
+			var reader = new XpcObjectReader (obj);
+			try {
+				reader.read_member ("mangledTypeName");
+				if (reader.get_string_value () == "RemotePairing.ServiceEvent") {
+					reader
+						.end_member ()
+						.read_member ("value");
+					if (reader.try_read_member ("deviceFound")) {
+						reader
+							.read_member ("_0")
+							.read_member ("deviceInfo");
+						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
+						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
+						var udid = reader.read_member ("udid").get_string_value ();
+						on_device_found (pairing_device, udid);
+					}
+				}
+			} catch (Error e) {
+			}
+		}
+
+		private void on_device_found (XpcClient pairing_device, string udid) throws Error {
+			var transport = new RemotePairingDeviceTransport (pairing_device, udid);
+			transports[udid] = transport;
+			transport_attached (transport);
+		}
 	}
+
+	private class RemotePairingDeviceTransport : Object, DeviceTransport {
+		public XpcClient pairing_device {
+			get;
+			construct;
+		}
+
+		public string udid {
+			get {
+				return _udid;
+			}
+		}
+
+		private string _udid;
+
+		public RemotePairingDeviceTransport (XpcClient pairing_device, string udid) {
+			Object (pairing_device: pairing_device);
+			_udid = udid;
+		}
+
+		construct {
+			pairing_device.notify["state"].connect (on_state_changed);
+			pairing_device.message.connect (on_message);
+		}
+
+		private void on_state_changed (Object obj, ParamSpec pspec) {
+			printerr ("[RemotePairingDeviceTransport] new state: %s\n", pairing_device.state.to_string ());
+		}
+
+		private void on_message (Darwin.Xpc.Object obj) {
+			printerr ("[RemotePairingDeviceTransport] %s\n", obj.to_string ());
+		}
+	}
+#endif
 
 	public class NcmStuffToBeMoved : Object {
 		private LibUSB.Context context;

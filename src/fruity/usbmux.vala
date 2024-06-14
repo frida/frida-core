@@ -1,13 +1,16 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class UsbmuxClient : Object, AsyncInitable {
-		public signal void device_attached (UsbmuxDevice details);
-		public signal void device_detached (uint id);
+		public signal void device_attached (UsbmuxDevice device);
+		public signal void device_detached (UsbmuxDevice device);
 
 		public SocketConnection? connection {
 			get;
 			private set;
 		}
+
+		private Gee.Map<uint, UsbmuxDevice> devices = new Gee.HashMap<uint, UsbmuxDevice> ();
+
 		private InputStream? input;
 		private OutputStream? output;
 		private Cancellable io_cancellable = new Cancellable ();
@@ -291,9 +294,12 @@ namespace Frida.Fruity {
 
 						var device =
 							new UsbmuxDevice (connection_type, device_id, product_id, udid, network_address);
+						devices[device_id] = device;
 						device_attached (device);
 					} else if (message_type == "Detached") {
-						device_detached ((uint) body.get_integer ("DeviceID"));
+						UsbmuxDevice? device;
+						if (devices.unset ((uint) body.get_integer ("DeviceID"), out device))
+							device_detached (device);
 					} else {
 						throw new UsbmuxError.PROTOCOL ("Unexpected message type: %s", message_type);
 					}
@@ -542,7 +548,7 @@ namespace Frida.Fruity {
 		PROTOCOL
 	}
 
-	public class UsbmuxDevice : Object, DeviceTransport {
+	public class UsbmuxDevice : Object {
 		public ConnectionType connection_type {
 			get;
 			construct;
