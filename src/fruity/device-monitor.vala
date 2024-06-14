@@ -1,6 +1,134 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public sealed class DeviceMonitor : Object {
+		private Gee.Map<string, Device> devices = new Gee.HashMap<string, Device> ();
+
+		private UsbmuxClient? usbmux;
+
+		private Promise<bool> start_request;
+		private Cancellable start_cancellable;
+		private SourceFunc on_start_completed;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			start_request = new Promise<bool> ();
+			start_cancellable = new Cancellable ();
+			on_start_completed = start.callback;
+
+			var main_context = MainContext.get_thread_default ();
+
+			var timeout_source = new TimeoutSource (500);
+			timeout_source.set_callback (start.callback);
+			timeout_source.attach (main_context);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (start.callback);
+			cancel_source.attach (main_context);
+
+			do_start.begin ();
+
+			yield;
+
+			cancel_source.destroy ();
+			timeout_source.destroy ();
+			on_start_completed = null;
+		}
+
+		private async void do_start () {
+			bool success = yield try_open_usbmux_client ();
+			if (success) {
+				/* Perform a dummy-request to flush out any pending device attach notifications. */
+				try {
+					yield usbmux.connect_to_port (uint.MAX, 0, start_cancellable);
+					assert_not_reached ();
+				} catch (GLib.Error expected_error) {
+					if (expected_error.code == IOError.CONNECTION_CLOSED) {
+						/* Deal with usbmuxd closing the connection when receiving commands in the wrong state. */
+						usbmux.close.begin (null);
+
+						success = yield try_open_usbmux_client ();
+						if (success) {
+							UsbmuxClient flush_client = null;
+							try {
+								flush_client = yield UsbmuxClient.open (start_cancellable);
+								try {
+									yield flush_client.connect_to_port (uint.MAX, 0, start_cancellable);
+									assert_not_reached ();
+								} catch (GLib.Error expected_error) {
+								}
+							} catch (GLib.Error e) {
+								success = false;
+							}
+
+							if (flush_client != null)
+								flush_client.close.begin (null);
+
+							if (!success && usbmux != null) {
+								usbmux.close.begin (null);
+								usbmux = null;
+							}
+						}
+					}
+				}
+			}
+
+			start_request.resolve (success);
+
+			if (on_start_completed != null)
+				on_start_completed ();
+		}
+
+		private async bool try_open_usbmux_client () {
+			bool success = true;
+
+			try {
+				usbmux = yield UsbmuxClient.open (start_cancellable);
+				usbmux.device_attached.connect (add_usbmux_device);
+				usbmux.device_detached.connect (remove_usbmux_device);
+
+				yield usbmux.enable_listen_mode (start_cancellable);
+			} catch (GLib.Error e) {
+				success = false;
+			}
+
+			if (!success && usbmux != null) {
+				usbmux.close.begin (null);
+				usbmux = null;
+			}
+
+			return success;
+		}
+
+		private void add_usbmux_device (UsbmuxDevice ud) {
+			Device? device = devices[ud.udid];
+			if (device == null) {
+				device = new Device ();
+				devices[ud.udid] = device;
+			}
+
+			device.usbmux = ud;
+		}
+
+		private void remove_usbmux_device (uint id) {
+			foreach (var device in devices.values) {
+				UsbmuxDevice? ud = device.usbmux;
+				if (ud != null && ud.id == id) {
+					device.usbmux = null;
+					return;
+				}
+			}
+		}
+	}
+
+	public sealed class Device : Object {
+		public UsbmuxDevice? usbmux {
+			get;
+			set;
+		}
+	}
+
+	public class NcmStuffToBeMoved : Object {
 		private LibUSB.Context context;
 
 		private VirtualNetworkStack? netstack;

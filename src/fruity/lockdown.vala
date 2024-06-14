@@ -3,7 +3,7 @@ namespace Frida.Fruity {
 	public class LockdownClient : Object, AsyncInitable {
 		public signal void closed ();
 
-		public DeviceDetails device_details {
+		public UsbmuxDevice device {
 			get;
 			construct;
 		}
@@ -22,13 +22,13 @@ namespace Frida.Fruity {
 
 		private const uint16 LOCKDOWN_PORT = 62078;
 
-		private LockdownClient (DeviceDetails device_details) {
-			Object (device_details: device_details);
+		private LockdownClient (UsbmuxDevice device) {
+			Object (device: device);
 		}
 
-		public static async LockdownClient open (DeviceDetails device_details, Cancellable? cancellable = null)
+		public static async LockdownClient open (UsbmuxDevice device, Cancellable? cancellable = null)
 				throws LockdownError, IOError {
-			var client = new LockdownClient (device_details);
+			var client = new LockdownClient (device);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
@@ -40,7 +40,7 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws LockdownError, IOError {
-			var device = device_details;
+			var device = device;
 
 			try {
 				var usbmux = yield UsbmuxClient.open (cancellable);
@@ -182,7 +182,7 @@ namespace Frida.Fruity {
 				bool enable_encryption = response.has ("EnableServiceSSL") && response.get_boolean ("EnableServiceSSL");
 
 				var client = yield UsbmuxClient.open (cancellable);
-				yield client.connect_to_port (device_details.id, (uint16) response.get_integer ("Port"), cancellable);
+				yield client.connect_to_port (device.id, (uint16) response.get_integer ("Port"), cancellable);
 
 				SocketConnection raw_connection = client.connection;
 				IOStream stream = raw_connection;
@@ -242,7 +242,7 @@ namespace Frida.Fruity {
 
 			try {
 				var usbmux = yield UsbmuxClient.open (cancellable);
-				yield usbmux.delete_pair_record (device_details.udid, cancellable);
+				yield usbmux.delete_pair_record (device.udid, cancellable);
 			} catch (UsbmuxError e) {
 				if (!(e is UsbmuxError.INVALID_ARGUMENT))
 					throw new LockdownError.PROTOCOL ("%s", e.message);
