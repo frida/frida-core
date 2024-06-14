@@ -85,9 +85,16 @@ namespace Frida {
 				if (obj.type == Darwin.Xpc.Error.TYPE) {
 					var e = (Darwin.Xpc.Error) obj;
 					close_reason = e.get_string (Darwin.Xpc.Error.KEY_DESCRIPTION);
-					if (state == CLOSING) {
-						change_state (CLOSED);
-						unref ();
+					switch (state) {
+						case OPEN:
+							change_state (CLOSED);
+							break;
+						case CLOSING:
+							change_state (CLOSED);
+							unref ();
+							break;
+						case CLOSED:
+							assert_not_reached ();
 					}
 				} else {
 					message (obj);
