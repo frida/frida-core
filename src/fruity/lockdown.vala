@@ -1,18 +1,15 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class LockdownClient : Object, AsyncInitable {
+	public class LockdownClient : Object {
 		public signal void closed ();
 
-		public UsbmuxDevice device {
+		public IOStream stream {
 			get;
 			construct;
 		}
 
-		public IOStream stream {
-			get { return service.stream; }
-		}
-
 		private PlistServiceClient service;
+		private UsbmuxDevice? usbmux_device;
 		private Plist? pair_record;
 		private string? host_id;
 		private string? system_buid;
@@ -22,29 +19,21 @@ namespace Frida.Fruity {
 
 		private const uint16 LOCKDOWN_PORT = 62078;
 
-		private LockdownClient (UsbmuxDevice device) {
-			Object (device: device);
+		public LockdownClient (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			service = new PlistServiceClient (stream);
+			service.closed.connect (on_service_closed);
 		}
 
 		public static async LockdownClient open (UsbmuxDevice device, Cancellable? cancellable = null)
 				throws LockdownError, IOError {
-			var client = new LockdownClient (device);
-
-			try {
-				yield client.init_async (Priority.DEFAULT, cancellable);
-			} catch (GLib.Error e) {
-				throw_local_error (e);
-			}
-
-			return client;
-		}
-
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws LockdownError, IOError {
-			var device = device;
-
 			try {
 				var usbmux = yield UsbmuxClient.open (cancellable);
 
+				Plist pair_record;
 				try {
 					pair_record = yield usbmux.read_pair_record (device.udid, cancellable);
 				} catch (UsbmuxError e) {
@@ -52,6 +41,10 @@ namespace Frida.Fruity {
 						throw new LockdownError.NOT_PAIRED ("Not paired");
 					throw e;
 				}
+
+				string? host_id = null;
+				string? system_buid = null;
+				TlsCertificate? tls_certificate = null;
 				try {
 					host_id = pair_record.get_string ("HostID");
 					system_buid = pair_record.get_string ("SystemBUID");
@@ -64,15 +57,16 @@ namespace Frida.Fruity {
 
 				yield usbmux.connect_to_port (device.id, LOCKDOWN_PORT, cancellable);
 
-				service = new PlistServiceClient (usbmux.connection);
-				service.closed.connect (on_service_closed);
-
-				yield query_type (cancellable);
+				var client = new LockdownClient (usbmux.connection);
+				client.usbmux_device = device;
+				client.pair_record = pair_record;
+				client.host_id = host_id;
+				client.system_buid = system_buid;
+				client.tls_certificate = tls_certificate;
+				return client;
 			} catch (UsbmuxError e) {
 				throw new LockdownError.UNSUPPORTED ("%s", e.message);
 			}
-
-			return true;
 		}
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
@@ -182,7 +176,7 @@ namespace Frida.Fruity {
 				bool enable_encryption = response.has ("EnableServiceSSL") && response.get_boolean ("EnableServiceSSL");
 
 				var client = yield UsbmuxClient.open (cancellable);
-				yield client.connect_to_port (device.id, (uint16) response.get_integer ("Port"), cancellable);
+				yield client.connect_to_port (usbmux_device.id, (uint16) response.get_integer ("Port"), cancellable);
 
 				SocketConnection raw_connection = client.connection;
 				IOStream stream = raw_connection;
@@ -242,7 +236,7 @@ namespace Frida.Fruity {
 
 			try {
 				var usbmux = yield UsbmuxClient.open (cancellable);
-				yield usbmux.delete_pair_record (device.udid, cancellable);
+				yield usbmux.delete_pair_record (usbmux_device.udid, cancellable);
 			} catch (UsbmuxError e) {
 				if (!(e is UsbmuxError.INVALID_ARGUMENT))
 					throw new LockdownError.PROTOCOL ("%s", e.message);
@@ -267,16 +261,6 @@ namespace Frida.Fruity {
 			request.set_string ("Label", "Xcode");
 			request.set_string ("ProtocolVersion", "2");
 			return request;
-		}
-
-		private static void throw_local_error (GLib.Error e) throws LockdownError, IOError {
-			if (e is LockdownError)
-				throw (LockdownError) e;
-
-			if (e is IOError)
-				throw (IOError) e;
-
-			assert_not_reached ();
 		}
 
 		private static LockdownError error_from_service (PlistServiceError e) {

@@ -194,22 +194,18 @@ namespace Frida.Fruity {
 		}
 
 		public async LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
-			try {
-				var client = yield LockdownClient.open (get_usbmux_device (), cancellable);
-				yield client.start_session (cancellable);
-				return client;
-			} catch (LockdownError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
+			var stream = yield open_lockdown_service ("", cancellable);
+			return new LockdownClient (stream);
 		}
 
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				ServiceInfo? service_info = null;
-				bool needs_checkin = false;
+				bool needs_checkin = service_name == "";
 				try {
-					service_info = tunnel.discovery.get_service (service_name);
+					service_info = tunnel.discovery.get_service (
+						(service_name == "") ? "com.apple.mobile.lockdown.remote.trusted" : service_name);
 				} catch (Error e) {
 					if (!(e is Error.NOT_SUPPORTED))
 						throw e;
@@ -249,16 +245,16 @@ namespace Frida.Fruity {
 				return stream;
 			}
 
-			var client = yield get_lockdown_client (cancellable);
-
-			if (service_name == "") {
-				try {
-					yield client.start_session (cancellable);
-					return client.stream;
-				} catch (GLib.Error e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
+			LockdownClient client;
+			try {
+				client = yield LockdownClient.open (get_usbmux_device (), cancellable);
+				yield client.start_session (cancellable);
+			} catch (LockdownError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
+
+			if (service_name == "")
+				return client.stream;
 
 			try {
 				return yield client.start_service (service_name, cancellable);
