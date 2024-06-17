@@ -4,8 +4,16 @@ namespace Frida.Fruity {
 		public signal void device_attached (Device device);
 		public signal void device_detached (Device device);
 
+		private State state = CREATED;
 		private Gee.List<DeviceTransportBackend> backends = new Gee.ArrayList<DeviceTransportBackend> ();
 		private Gee.Map<string, Device> devices = new Gee.HashMap<string, Device> ();
+
+		private enum State {
+			CREATED,
+			STARTING,
+			STARTED,
+			STOPPED,
+		}
 
 		private delegate void NotifyCompleteFunc ();
 
@@ -17,6 +25,8 @@ namespace Frida.Fruity {
 		}
 
 		public async void start (Cancellable? cancellable = null) throws IOError {
+			state = STARTING;
+
 			var remaining = backends.size + 1;
 
 			NotifyCompleteFunc on_complete = () => {
@@ -38,6 +48,11 @@ namespace Frida.Fruity {
 			yield;
 
 			on_complete = null;
+
+			state = STARTED;
+
+			foreach (var device in devices.values)
+				device_attached (device);
 		}
 
 		public async void stop (Cancellable? cancellable = null) throws IOError {
@@ -62,6 +77,8 @@ namespace Frida.Fruity {
 			yield;
 
 			on_complete = null;
+
+			state = STOPPED;
 		}
 
 		private async void do_start (DeviceTransportBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
@@ -99,7 +116,7 @@ namespace Frida.Fruity {
 
 			device.transports.add (transport);
 
-			if (device.transports.size == 1)
+			if (state != STARTING && device.transports.size == 1)
 				device_attached (device);
 		}
 
@@ -111,7 +128,8 @@ namespace Frida.Fruity {
 			if (device.transports.is_empty) {
 				devices.unset (udid);
 
-				device_detached (device);
+				if (state != STARTING)
+					device_detached (device);
 			}
 		}
 	}
@@ -286,6 +304,8 @@ namespace Frida.Fruity {
 	private class RemotePairingTransportBackend : Object, DeviceTransportBackend {
 		private Gee.Map<string, RemotePairingDeviceTransport> transports = new Gee.HashMap<string, RemotePairingDeviceTransport> ();
 
+		private Promise<bool> all_current_devices_listed = new Promise<bool> ();
+
 		private XpcClient? pairingd;
 		private Darwin.GCD.DispatchQueue queue =
 			new Darwin.GCD.DispatchQueue ("re.frida.fruity.remotepairing", Darwin.GCD.DispatchQueueAttr.SERIAL);
@@ -299,9 +319,9 @@ namespace Frida.Fruity {
 				var r = new PairingdRequest ("RemotePairing.BrowseRequest");
 				r.body.set_bool ("currentDevicesOnly", false);
 				yield pairingd.request (r.message, cancellable);
-				printerr ("Started\n");
+
+				yield all_current_devices_listed.future.wait_async (cancellable);
 			} catch (Error e) {
-				printerr ("Oops: %s\n", e.message);
 			}
 		}
 
@@ -310,6 +330,10 @@ namespace Frida.Fruity {
 
 		private void on_state_changed (Object obj, ParamSpec pspec) {
 			printerr ("[RemotePairingTransportBackend] new state: %s\n", pairingd.state.to_string ());
+			if (pairingd.state == CLOSED && !all_current_devices_listed.future.ready) {
+				all_current_devices_listed.reject (
+					new Error.TRANSPORT ("Connection closed while waiting for initial device list"));
+			}
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
@@ -329,6 +353,8 @@ namespace Frida.Fruity {
 						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
 						var udid = reader.read_member ("udid").get_string_value ();
 						on_device_found (pairing_device, udid);
+					} else if (reader.try_read_member ("allCurrentDevicesListed")) {
+						all_current_devices_listed.resolve (true);
 					}
 				}
 			} catch (Error e) {
