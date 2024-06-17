@@ -75,6 +75,10 @@ namespace Frida {
 			return reply;
 		}
 
+		public void post (Darwin.Xpc.Object message) throws Error, IOError {
+			connection.send_message (message);
+		}
+
 		private void change_state (State new_state) {
 			_state = new_state;
 			notify_property ("state");
