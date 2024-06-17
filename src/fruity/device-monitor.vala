@@ -658,9 +658,26 @@ namespace Frida.Fruity {
 						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
 						printerr ("%s\n", device_info.to_string ());
 						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
-						ConnectionType connection_type = USB; // FIXME
+
+						bool attached_physically = reader
+							.read_member ("connectionState")
+							.read_member ("value")
+							.read_member ("attachedPhysically")
+							.get_bool_value ();
+						reader
+							.end_member ()
+							.end_member ()
+							.end_member ();
+						var connection_type = attached_physically
+							? ConnectionType.USB
+							: ConnectionType.NETWORK;
+
 						var udid = reader.read_member ("udid").get_string_value ();
+						reader.end_member ();
+
 						var name = reader.read_member ("name").get_string_value ();
+						reader.end_member ();
+
 						on_device_found (pairing_device, connection_type, udid, name);
 					} else if (reader.try_read_member ("allCurrentDevicesListed")) {
 						all_current_devices_listed.resolve (true);
