@@ -305,6 +305,7 @@ namespace Frida.Fruity {
 		private Gee.Map<string, RemotePairingDeviceTransport> transports = new Gee.HashMap<string, RemotePairingDeviceTransport> ();
 
 		private Promise<bool> all_current_devices_listed = new Promise<bool> ();
+		private Promise<bool> browse_request = new Promise<bool> ();
 
 		private XpcClient? pairingd;
 		private Darwin.GCD.DispatchQueue queue =
@@ -315,13 +316,22 @@ namespace Frida.Fruity {
 			pairingd.notify["state"].connect (on_state_changed);
 			pairingd.message.connect (on_message);
 
+			do_browse.begin ();
+
+			try {
+				yield all_current_devices_listed.future.wait_async (cancellable);
+			} catch (Error e) {
+			}
+		}
+
+		private async void do_browse () {
 			try {
 				var r = new PairingdRequest ("RemotePairing.BrowseRequest");
 				r.body.set_bool ("currentDevicesOnly", false);
-				yield pairingd.request (r.message, cancellable);
-
-				yield all_current_devices_listed.future.wait_async (cancellable);
+				yield pairingd.request (r.message, null);
+				browse_request.resolve (true);
 			} catch (Error e) {
+				browse_request.reject (e);
 			}
 		}
 
@@ -329,7 +339,6 @@ namespace Frida.Fruity {
 		}
 
 		private void on_state_changed (Object obj, ParamSpec pspec) {
-			printerr ("[RemotePairingTransportBackend] new state: %s\n", pairingd.state.to_string ());
 			if (pairingd.state == CLOSED && !all_current_devices_listed.future.ready) {
 				all_current_devices_listed.reject (
 					new Error.TRANSPORT ("Connection closed while waiting for initial device list"));
@@ -337,7 +346,6 @@ namespace Frida.Fruity {
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
-			printerr ("[RemotePairingTransportBackend] %s\n", obj.to_string ());
 			var reader = new XpcObjectReader (obj);
 			try {
 				reader.read_member ("mangledTypeName");
