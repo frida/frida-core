@@ -116,8 +116,7 @@ namespace Frida {
 			unowned string service_name = tokens[1];
 
 			if (protocol == "plist") {
-				var client = yield device.get_lockdown_client (cancellable);
-				var stream = yield device.open_lockdown_service (service_name, client, cancellable);
+				var stream = yield device.open_lockdown_service (service_name, cancellable);
 
 				return new PlistService (stream);
 			}
@@ -569,18 +568,13 @@ namespace Frida {
 
 		private async void fetch_apps (Promise<Gee.List<Fruity.ApplicationDetails>> promise, Cancellable? cancellable) {
 			try {
-				var lockdown = yield device.get_lockdown_client (cancellable);
-				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
+				var installation_proxy = yield Fruity.InstallationProxyClient.open (device, cancellable);
 
 				var apps = yield installation_proxy.browse (cancellable);
 
 				promise.resolve (apps);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				promise.reject (e);
-			} catch (IOError e) {
-				promise.reject (e);
-			} catch (Fruity.InstallationProxyError e) {
-				promise.reject (new Error.NOT_SUPPORTED ("%s", e.message));
 			}
 		}
 
@@ -592,9 +586,7 @@ namespace Frida {
 				var processes = yield device_info.enumerate_processes (cancellable);
 
 				promise.resolve (processes);
-			} catch (Error e) {
-				promise.reject (e);
-			} catch (IOError e) {
+			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
 		}
@@ -777,46 +769,40 @@ namespace Frida {
 				gadget_path = gadget_value.get_string ();
 			}
 
-			try {
-				var lockdown = yield device.get_lockdown_client (cancellable);
+			var installation_proxy = yield Fruity.InstallationProxyClient.open (device, cancellable);
 
-				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
+			var query = new Fruity.PlistDict ();
+			var ids = new Fruity.PlistArray ();
+			ids.add_string (program);
+			query.set_array ("BundleIDs", ids);
 
-				var query = new Fruity.PlistDict ();
-				var ids = new Fruity.PlistArray ();
-				ids.add_string (program);
-				query.set_array ("BundleIDs", ids);
+			var matches = yield installation_proxy.lookup (query, cancellable);
+			var app = matches[program];
+			if (app == null)
+				throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
 
-				var matches = yield installation_proxy.lookup (query, cancellable);
-				var app = matches[program];
-				if (app == null)
-					throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
-
-				string[] argv = { app.path };
-				if (options.has_argv) {
-					var provided_argv = options.argv;
-					var length = provided_argv.length;
-					for (int i = 1; i < length; i++)
-						argv += provided_argv[i];
-				}
-
-				var lldb = yield start_lldb_service (lockdown, cancellable);
-				var process = yield lldb.launch (argv, launch_options, cancellable);
-				if (process.observed_state == ALREADY_RUNNING) {
-					yield lldb.kill (cancellable);
-					yield lldb.close (cancellable);
-
-					lldb = yield start_lldb_service (lockdown, cancellable);
-					process = yield lldb.launch (argv, launch_options, cancellable);
-				}
-
-				var session = new LLDBSession (lldb, process, gadget_path, device);
-				add_lldb_session (session);
-
-				return process.pid;
-			} catch (Fruity.InstallationProxyError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			string[] argv = { app.path };
+			if (options.has_argv) {
+				var provided_argv = options.argv;
+				var length = provided_argv.length;
+				for (int i = 1; i < length; i++)
+					argv += provided_argv[i];
 			}
+
+			var lldb = yield start_lldb_service (cancellable);
+			var process = yield lldb.launch (argv, launch_options, cancellable);
+			if (process.observed_state == ALREADY_RUNNING) {
+				yield lldb.kill (cancellable);
+				yield lldb.close (cancellable);
+
+				lldb = yield start_lldb_service (cancellable);
+				process = yield lldb.launch (argv, launch_options, cancellable);
+			}
+
+			var session = new LLDBSession (lldb, process, gadget_path, device);
+			add_lldb_session (session);
+
+			return process.pid;
 		}
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
@@ -862,8 +848,7 @@ namespace Frida {
 			}
 
 			try {
-				var lockdown = yield device.get_lockdown_client (cancellable);
-				var lldb = yield start_lldb_service (lockdown, cancellable);
+				var lldb = yield start_lldb_service (cancellable);
 				var process = yield lldb.attach_by_pid (pid, cancellable);
 
 				lldb_session = new LLDBSession (lldb, process, null, device);
@@ -897,8 +882,7 @@ namespace Frida {
 			if (pid == 0)
 				throw new Error.NOT_SUPPORTED ("The Frida system session is not available on jailed iOS");
 
-			var lockdown = yield device.get_lockdown_client (cancellable);
-			var lldb = yield start_lldb_service (lockdown, cancellable);
+			var lldb = yield start_lldb_service (cancellable);
 			var process = yield lldb.attach_by_pid (pid, cancellable);
 
 			string? gadget_path = null;
@@ -915,11 +899,10 @@ namespace Frida {
 			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
-		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
-				throws Error, IOError {
+		private async LLDB.Client start_lldb_service (Cancellable? cancellable) throws Error, IOError {
 			foreach (unowned string endpoint in DEBUGSERVER_ENDPOINT_CANDIDATES) {
 				try {
-					var lldb_stream = yield device.open_lockdown_service (endpoint, lockdown, cancellable);
+					var lldb_stream = yield device.open_lockdown_service (endpoint, cancellable);
 					return yield LLDB.Client.open (lldb_stream, cancellable);
 				} catch (Error e) {
 					if (!(e is Error.NOT_SUPPORTED))

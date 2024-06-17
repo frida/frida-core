@@ -203,8 +203,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async IOStream open_lockdown_service (string service_name, LockdownClient client, Cancellable? cancellable)
-				throws Error, IOError {
+		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				ServiceInfo? service_info = null;
@@ -248,6 +247,17 @@ namespace Frida.Fruity {
 				}
 
 				return stream;
+			}
+
+			var client = yield get_lockdown_client (cancellable);
+
+			if (service_name == "") {
+				try {
+					yield client.start_session (cancellable);
+					return client.stream;
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
 			}
 
 			try {
@@ -314,18 +324,7 @@ namespace Frida.Fruity {
 			if (address.has_prefix ("lockdown:")) {
 				string service_name = address.substring (9);
 
-				if (service_name == "") {
-					try {
-						var client = yield LockdownClient.open (get_usbmux_device (), cancellable);
-						yield client.start_session (cancellable);
-						return client.stream;
-					} catch (GLib.Error e) {
-						throw new Error.NOT_SUPPORTED ("%s", e.message);
-					}
-				}
-
-				var client = yield get_lockdown_client (cancellable);
-				return yield open_lockdown_service (service_name, client, cancellable);
+				return yield open_lockdown_service (service_name, cancellable);
 			}
 
 			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
@@ -656,7 +655,6 @@ namespace Frida.Fruity {
 							.read_member ("_0")
 							.read_member ("deviceInfo");
 						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
-						printerr ("%s\n", device_info.to_string ());
 						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
 
 						bool attached_physically = reader
@@ -754,7 +752,7 @@ namespace Frida.Fruity {
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
-			printerr ("[RemotePairingDeviceTransport] %s\n", obj.to_string ());
+			// printerr ("[RemotePairingDeviceTransport] %s\n", obj.to_string ());
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
