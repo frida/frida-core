@@ -585,9 +585,4 @@ namespace Frida.Fruity {
 			);
 		}
 	}
-
-	public enum ConnectionType {
-		USB,
-		NETWORK
-	}
 }

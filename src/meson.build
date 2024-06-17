@@ -497,11 +497,11 @@ if have_fruity_backend
   ]
 
   if host_os_family == 'windows'
-    backend_sources += 'fruity' / 'fruity-host-session-windows.c'
+    backend_sources += 'fruity' / 'device-monitor-windows.c'
   elif host_os_family == 'darwin'
-    backend_sources += 'fruity' / 'fruity-host-session-darwin.m'
+    backend_sources += 'fruity' / 'device-monitor-darwin.m'
   else
-    backend_sources += 'fruity' / 'fruity-host-session-unix.c'
+    backend_sources += 'fruity' / 'device-monitor-unix.c'
   endif
 
   if host_os_family == 'darwin'

@@ -8,20 +8,14 @@ namespace Frida.Fruity {
 
 	public interface TunnelFinder : Object {
 		public static TunnelFinder make_default () {
-#if MACOS
-			return new MacOSTunnelFinder ();
-#elif LINUX && !ANDROID
-			return new LinuxTunnelFinder ();
-#else
 			return new NullTunnelFinder ();
-#endif
 		}
 
-		public abstract async Tunnel? find (string udid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public class NullTunnelFinder : Object, TunnelFinder {
-		public async Tunnel? find (string udid, Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
 			return null;
 		}
 	}

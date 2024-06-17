@@ -1,133 +1,24 @@
 namespace Frida {
 	public class FruityHostSessionBackend : Object, HostSessionBackend {
 		private Fruity.DeviceMonitor device_monitor = new Fruity.DeviceMonitor ();
-
-		private Fruity.UsbmuxClient control_client;
-
-		private Gee.Set<Fruity.UsbmuxDevice> devices = new Gee.HashSet<Fruity.UsbmuxDevice> ();
-		private Gee.Map<Fruity.UsbmuxDevice, FruityHostSessionProvider> providers =
-			new Gee.HashMap<Fruity.UsbmuxDevice, FruityHostSessionProvider> ();
-
-		private Promise<bool> start_request;
-		private Cancellable start_cancellable;
-		private SourceFunc on_start_completed;
+		private Gee.Map<Fruity.Device, FruityHostSessionProvider> providers =
+			new Gee.HashMap<Fruity.Device, FruityHostSessionProvider> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
+		construct {
+			device_monitor.device_attached.connect (on_device_attached);
+			device_monitor.device_detached.connect (on_device_detached);
+		}
+
 		public async void start (Cancellable? cancellable) throws IOError {
 			yield device_monitor.start (cancellable);
-
-			start_request = new Promise<bool> ();
-			start_cancellable = new Cancellable ();
-			on_start_completed = start.callback;
-
-			var main_context = MainContext.get_thread_default ();
-
-			var timeout_source = new TimeoutSource (500);
-			timeout_source.set_callback (start.callback);
-			timeout_source.attach (main_context);
-
-			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (start.callback);
-			cancel_source.attach (main_context);
-
-			do_start.begin ();
-
-			yield;
-
-			cancel_source.destroy ();
-			timeout_source.destroy ();
-			on_start_completed = null;
-		}
-
-		private async void do_start () {
-			bool success = yield try_start_control_connection ();
-			if (success) {
-				/* Perform a dummy-request to flush out any pending device attach notifications. */
-				try {
-					yield control_client.connect_to_port (uint.MAX, 0, start_cancellable);
-					assert_not_reached ();
-				} catch (GLib.Error expected_error) {
-					if (expected_error.code == IOError.CONNECTION_CLOSED) {
-						/* Deal with usbmuxd closing the connection when receiving commands in the wrong state. */
-						control_client.close.begin (null);
-
-						success = yield try_start_control_connection ();
-						if (success) {
-							Fruity.UsbmuxClient flush_client = null;
-							try {
-								flush_client = yield Fruity.UsbmuxClient.open (start_cancellable);
-								try {
-									yield flush_client.connect_to_port (uint.MAX, 0, start_cancellable);
-									assert_not_reached ();
-								} catch (GLib.Error expected_error) {
-								}
-							} catch (GLib.Error e) {
-								success = false;
-							}
-
-							if (flush_client != null)
-								flush_client.close.begin (null);
-
-							if (!success && control_client != null) {
-								control_client.close.begin (null);
-								control_client = null;
-							}
-						}
-					}
-				}
-			}
-
-			start_request.resolve (success);
-
-			if (on_start_completed != null)
-				on_start_completed ();
-		}
-
-		private async bool try_start_control_connection () {
-			bool success = true;
-
-			try {
-				control_client = yield Fruity.UsbmuxClient.open (start_cancellable);
-				control_client.device_attached.connect (device => {
-					add_device.begin (device);
-				});
-				control_client.device_detached.connect (device => {
-					remove_device (device);
-				});
-
-				yield control_client.enable_listen_mode (start_cancellable);
-			} catch (GLib.Error e) {
-				success = false;
-			}
-
-			if (!success && control_client != null) {
-				control_client.close.begin (null);
-				control_client = null;
-			}
-
-			return success;
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
-			yield device_monitor.stop (cancellable);
-
-			start_cancellable.cancel ();
-
-			try {
-				yield start_request.future.wait_async (cancellable);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-
-			if (control_client != null) {
-				yield control_client.close (cancellable);
-				control_client = null;
-			}
-
 			io_cancellable.cancel ();
 
-			devices.clear ();
+			yield device_monitor.stop (cancellable);
 
 			foreach (var provider in providers.values) {
 				provider_unavailable (provider);
@@ -136,89 +27,37 @@ namespace Frida {
 			providers.clear ();
 		}
 
-		private async void add_device (Fruity.UsbmuxDevice device) {
-			var id = device.id;
-			if (devices.contains (device))
-				return;
-			devices.add (device);
-
-			string? name = null;
-			Variant? icon = null;
-
-			if (device.connection_type == USB) {
-				bool got_details = false;
-				for (int i = 1; !got_details && devices.contains (device); i++) {
-					try {
-						_extract_details_for_device (device.product_id, device.udid, out name, out icon);
-						got_details = true;
-					} catch (Error e) {
-						if (i != 20) {
-							var main_context = MainContext.get_thread_default ();
-
-							var delay_source = new TimeoutSource.seconds (1);
-							delay_source.set_callback (add_device.callback);
-							delay_source.attach (main_context);
-
-							var cancel_source = new CancellableSource (io_cancellable);
-							cancel_source.set_callback (add_device.callback);
-							cancel_source.attach (main_context);
-
-							yield;
-
-							cancel_source.destroy ();
-							delay_source.destroy ();
-
-							if (io_cancellable.is_cancelled ())
-								return;
-						} else {
-							break;
-						}
-					}
-				}
-				if (!devices.contains (device))
-					return;
-				if (!got_details) {
-					remove_device (device);
-					return;
-				}
-			} else {
-				name = "iOS Device [%s]".printf (device.network_address.address.to_string ());
-			}
-
-			var provider = new FruityHostSessionProvider (name, icon, device);
+		private void on_device_attached (Fruity.Device device) {
+			var provider = new FruityHostSessionProvider (device);
 			providers[device] = provider;
-
 			provider_available (provider);
 		}
 
-		private void remove_device (Fruity.UsbmuxDevice device) {
-			if (!devices.contains (device))
-				return;
-			devices.remove (device);
-
+		private void on_device_detached (Fruity.Device device) {
 			FruityHostSessionProvider provider;
 			if (providers.unset (device, out provider)) {
 				provider_unavailable (provider);
 				provider.close.begin (io_cancellable);
 			}
 		}
-
-		public extern static void _extract_details_for_device (int product_id, string udid, out string name,
-			out Variant? icon) throws Error;
 	}
 
-	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, HostServiceProvider,
-			FruityLockdownProvider, Pairable {
+	public class FruityHostSessionProvider : Object, HostSessionProvider, HostServiceProvider, Pairable {
+		public Fruity.Device device {
+			get;
+			construct;
+		}
+
 		public string id {
 			get { return device.udid; }
 		}
 
 		public string name {
-			get { return device_name; }
+			get { return device.name; }
 		}
 
 		public Variant? icon {
-			get { return device_icon; }
+			get { return device.icon; }
 		}
 
 		public HostSessionProviderKind kind {
@@ -229,52 +68,21 @@ namespace Frida {
 			}
 		}
 
-		public string device_name {
-			get;
-			construct;
-		}
-
-		public Variant? device_icon {
-			get;
-			construct;
-		}
-
-		public Fruity.UsbmuxDevice device {
-			get;
-			construct;
-		}
-
 		private FruityHostSession? host_session;
-		private Promise<Fruity.Tunnel?>? tunnel_request;
 
-		public FruityHostSessionProvider (string name, Variant? icon, Fruity.UsbmuxDevice device) {
-			Object (
-				device_name: name,
-				device_icon: icon,
-				device: device
-			);
+		public FruityHostSessionProvider (Fruity.Device device) {
+			Object (device: device);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
-			yield Fruity.DTXConnection.close_all (this, cancellable);
-
-			if (tunnel_request != null) {
-				Fruity.Tunnel? tunnel = null;
-				try {
-					tunnel = yield find_tunnel (cancellable);
-				} catch (Error e) {
-				}
-
-				if (tunnel != null)
-					yield tunnel.close (cancellable);
-			}
+			yield Fruity.DTXConnection.close_all (device, cancellable);
 		}
 
 		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			host_session = new FruityHostSession (this, this);
+			host_session = new FruityHostSession (device);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -302,151 +110,26 @@ namespace Frida {
 			agent_session_detached (id, reason, crash);
 		}
 
-		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
-			if (address.has_prefix ("tcp:")) {
-				ulong raw_port;
-				if (!ulong.try_parse (address.substring (4), out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
-					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
-				uint16 port = (uint16) raw_port;
-
-				if (device.connection_type == USB) {
-					Fruity.UsbmuxClient client = null;
-					try {
-						client = yield Fruity.UsbmuxClient.open (cancellable);
-
-						yield client.connect_to_port (device.id, port, cancellable);
-
-						return client.connection;
-					} catch (GLib.Error e) {
-						if (client != null)
-							client.close.begin ();
-
-						if (e is Fruity.UsbmuxError.CONNECTION_REFUSED)
-							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
-
-						throw new Error.TRANSPORT ("%s", e.message);
-					}
-				} else {
-					try {
-						InetSocketAddress device_address = device.network_address;
-						var target_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-							address: device_address.address,
-							port: port,
-							flowinfo: device_address.flowinfo,
-							scope_id: device_address.scope_id
-						);
-
-						var client = new SocketClient ();
-						var connection = yield client.connect_async (target_address, cancellable);
-
-						Tcp.enable_nodelay (connection.socket);
-
-						return connection;
-					} catch (GLib.Error e) {
-						if (e is IOError.CONNECTION_REFUSED)
-							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
-
-						throw new Error.TRANSPORT ("%s", e.message);
-					}
-				}
-			}
-
-			if (address.has_prefix ("lockdown:")) {
-				string service_name = address.substring (9);
-
-				if (service_name.length != 0) {
-					var client = yield get_lockdown_client (cancellable);
-					return yield open_lockdown_service (service_name, client, cancellable);
-				} else {
-					try {
-						var client = yield Fruity.LockdownClient.open (device, cancellable);
-						yield client.start_session (cancellable);
-						return client.stream;
-					} catch (GLib.Error e) {
-						throw new Error.NOT_SUPPORTED ("%s", e.message);
-					}
-				}
-			}
-
-			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
-		}
-
-		public async IOStream open_lockdown_service (string service_name, Fruity.LockdownClient client, Cancellable? cancellable)
-				throws Error, IOError {
-			var tunnel = yield find_tunnel (cancellable);
-			if (tunnel != null) {
-				Fruity.ServiceInfo? service_info = null;
-				bool needs_checkin = false;
-				try {
-					service_info = tunnel.discovery.get_service (service_name);
-				} catch (Error e) {
-					if (!(e is Error.NOT_SUPPORTED))
-						throw e;
-				}
-				if (service_info == null) {
-					service_info = tunnel.discovery.get_service (service_name + ".shim.remote");
-					needs_checkin = true;
-				}
-
-				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
-
-				if (needs_checkin) {
-					var service = new Fruity.PlistServiceClient (stream);
-
-					var checkin = new Fruity.Plist ();
-					checkin.set_string ("Request", "RSDCheckin");
-					checkin.set_string ("Label", "Xcode");
-					checkin.set_string ("ProtocolVersion", "2");
-
-					try {
-						yield service.query (checkin, cancellable);
-
-						var result = yield service.read_message (cancellable);
-						if (result.has ("Error")) {
-							var error_type = result.get_string ("Error");
-							if (error_type == "ServiceProhibited")
-								throw new Error.PERMISSION_DENIED ("Service prohibited");
-							throw new Error.NOT_SUPPORTED ("%s", error_type);
-						}
-					} catch (Fruity.PlistServiceError e) {
-						throw new Error.PROTOCOL ("%s", e.message);
-					} catch (Frida.Fruity.PlistError e) {
-						throw new Error.PROTOCOL ("%s", e.message);
-					}
-				}
-
-				return stream;
-			}
-
-			try {
-				return yield client.start_service (service_name, cancellable);
-			} catch (GLib.Error e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE)
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
-		}
-
 		public async Service open_service (string address, Cancellable? cancellable) throws Error, IOError {
 			string[] tokens = address.split (":", 2);
 			unowned string protocol = tokens[0];
 			unowned string service_name = tokens[1];
 
 			if (protocol == "plist") {
-				var client = yield get_lockdown_client (cancellable);
-				var stream = yield open_lockdown_service (service_name, client, cancellable);
+				var client = yield device.get_lockdown_client (cancellable);
+				var stream = yield device.open_lockdown_service (service_name, client, cancellable);
 
 				return new PlistService (stream);
 			}
 
 			if (protocol == "dtx") {
-				var connection = yield Fruity.DTXConnection.obtain (this, cancellable);
+				var connection = yield Fruity.DTXConnection.obtain (device, cancellable);
 
 				return new DTXService (service_name, connection);
 			}
 
 			if (protocol == "xpc") {
-				var tunnel = yield find_tunnel (cancellable);
+				var tunnel = yield device.find_tunnel (cancellable);
 				if (tunnel == null)
 					throw new Error.NOT_SUPPORTED ("RemoteXPC not supported by device");
 
@@ -459,58 +142,9 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
 
-		private async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
-			try {
-				var client = yield Fruity.LockdownClient.open (device, cancellable);
-				yield client.start_session (cancellable);
-				return client;
-			} catch (Frida.Fruity.LockdownError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
-		}
-
-		private async Fruity.Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
-			while (tunnel_request != null) {
-				try {
-					return yield tunnel_request.future.wait_async (cancellable);
-				} catch (Error e) {
-					throw e;
-				} catch (IOError e) {
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			tunnel_request = new Promise<Fruity.Tunnel> ();
-
-			try {
-				bool supported_by_os = true;
-				var lockdown = yield get_lockdown_client (cancellable);
-				var response = yield lockdown.get_value (null, null, cancellable);
-				Fruity.PlistDict properties = response.get_dict ("Value");
-				if (properties.get_string ("ProductName") == "iPhone OS") {
-					uint ios_major_version = uint.parse (properties.get_string ("ProductVersion").split (".")[0]);
-					supported_by_os = ios_major_version >= 17;
-				}
-
-				Fruity.Tunnel? tunnel = null;
-				if (supported_by_os)
-					tunnel = yield Fruity.TunnelFinder.make_default ().find (device.udid, cancellable);
-
-				tunnel_request.resolve (tunnel);
-
-				return tunnel;
-			} catch (GLib.Error e) {
-				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
-
-				tunnel_request.reject (api_error);
-				tunnel_request = null;
-
-				throw_api_error (api_error);
-			}
-		}
-
 		private async void unpair (Cancellable? cancellable) throws Error, IOError {
 			try {
-				var client = yield Fruity.LockdownClient.open (device, cancellable);
+				var client = yield device.get_lockdown_client (cancellable);
 				yield client.unpair (cancellable);
 			} catch (Fruity.LockdownError e) {
 				if (e is Fruity.LockdownError.NOT_PAIRED)
@@ -520,19 +154,8 @@ namespace Frida {
 		}
 	}
 
-	public interface FruityLockdownProvider : Object {
-		public abstract async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError;
-		public abstract async IOStream open_lockdown_service (string service_name, Fruity.LockdownClient client,
-			Cancellable? cancellable) throws Error, IOError;
-	}
-
 	public class FruityHostSession : Object, HostSession {
-		public weak HostChannelProvider channel_provider {
-			get;
-			construct;
-		}
-
-		public weak FruityLockdownProvider lockdown_provider {
+		public Fruity.Device device {
 			get;
 			construct;
 		}
@@ -564,11 +187,8 @@ namespace Frida {
 			DEBUGSERVER_ENDPOINT_LEGACY,
 		};
 
-		public FruityHostSession (HostChannelProvider channel_provider, FruityLockdownProvider lockdown_provider) {
-			Object (
-				channel_provider: channel_provider,
-				lockdown_provider: lockdown_provider
-			);
+		public FruityHostSession (Fruity.Device device) {
+			Object (device: device);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -616,7 +236,7 @@ namespace Frida {
 			var parameters = new HashTable<string, Variant> (str_hash, str_equal);
 
 			try {
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lockdown = yield device.get_lockdown_client (cancellable);
 				var response = yield lockdown.get_value (null, null, cancellable);
 				Fruity.PlistDict properties = response.get_dict ("Value");
 
@@ -728,7 +348,7 @@ namespace Frida {
 
 				if (scope == FULL) {
 					try {
-						var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+						var lockdown = yield device.get_lockdown_client (cancellable);
 						var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
 
 						Bytes png = yield springboard.get_icon_png_data (identifier);
@@ -767,7 +387,7 @@ namespace Frida {
 			Gee.Map<string, Bytes>? icons = null;
 			if (scope == FULL) {
 				try {
-					var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+					var lockdown = yield device.get_lockdown_client (cancellable);
 					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
 
 					var app_ids = new Gee.ArrayList<string> ();
@@ -882,7 +502,7 @@ namespace Frida {
 			if (scope == FULL) {
 				icon_by_pid = new Gee.HashMap<uint, Bytes> ();
 
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lockdown = yield device.get_lockdown_client (cancellable);
 				try {
 					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
 
@@ -949,7 +569,7 @@ namespace Frida {
 
 		private async void fetch_apps (Promise<Gee.List<Fruity.ApplicationDetails>> promise, Cancellable? cancellable) {
 			try {
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lockdown = yield device.get_lockdown_client (cancellable);
 				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
 
 				var apps = yield installation_proxy.browse (cancellable);
@@ -967,7 +587,7 @@ namespace Frida {
 		private async void fetch_processes (Promise<Gee.List<Fruity.DeviceInfoService.ProcessInfo>> promise,
 				Cancellable? cancellable) {
 			try {
-				var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
+				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
 
 				var processes = yield device_info.enumerate_processes (cancellable);
 
@@ -1158,7 +778,7 @@ namespace Frida {
 			}
 
 			try {
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lockdown = yield device.get_lockdown_client (cancellable);
 
 				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
 
@@ -1190,7 +810,7 @@ namespace Frida {
 					process = yield lldb.launch (argv, launch_options, cancellable);
 				}
 
-				var session = new LLDBSession (lldb, process, gadget_path, channel_provider);
+				var session = new LLDBSession (lldb, process, gadget_path, device);
 				add_lldb_session (session);
 
 				return process.pid;
@@ -1242,15 +862,15 @@ namespace Frida {
 			}
 
 			try {
-				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lockdown = yield device.get_lockdown_client (cancellable);
 				var lldb = yield start_lldb_service (lockdown, cancellable);
 				var process = yield lldb.attach_by_pid (pid, cancellable);
 
-				lldb_session = new LLDBSession (lldb, process, null, channel_provider);
+				lldb_session = new LLDBSession (lldb, process, null, device);
 				yield lldb_session.kill (cancellable);
 				yield lldb_session.close (cancellable);
 			} catch (Error e) {
-				var process_control = yield Fruity.ProcessControlService.open (channel_provider, cancellable);
+				var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
 				yield process_control.kill (pid, cancellable);
 			}
 		}
@@ -1277,13 +897,13 @@ namespace Frida {
 			if (pid == 0)
 				throw new Error.NOT_SUPPORTED ("The Frida system session is not available on jailed iOS");
 
-			var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+			var lockdown = yield device.get_lockdown_client (cancellable);
 			var lldb = yield start_lldb_service (lockdown, cancellable);
 			var process = yield lldb.attach_by_pid (pid, cancellable);
 
 			string? gadget_path = null;
 
-			lldb_session = new LLDBSession (lldb, process, gadget_path, channel_provider);
+			lldb_session = new LLDBSession (lldb, process, gadget_path, device);
 			add_lldb_session (lldb_session);
 
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
@@ -1299,7 +919,7 @@ namespace Frida {
 				throws Error, IOError {
 			foreach (unowned string endpoint in DEBUGSERVER_ENDPOINT_CANDIDATES) {
 				try {
-					var lldb_stream = yield lockdown_provider.open_lockdown_service (endpoint, lockdown, cancellable);
+					var lldb_stream = yield device.open_lockdown_service (endpoint, lockdown, cancellable);
 					return yield LLDB.Client.open (lldb_stream, cancellable);
 				} catch (Error e) {
 					if (!(e is Error.NOT_SUPPORTED))
@@ -1314,7 +934,7 @@ namespace Frida {
 		private async AgentSessionId attach_via_gadget (uint pid, HashTable<string, Variant> options,
 				Fruity.Injector.GadgetDetails gadget_details, Cancellable? cancellable) throws Error, IOError {
 			try {
-				var stream = yield channel_provider.open_channel (
+				var stream = yield device.open_channel (
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (gadget_details.port),
 					cancellable);
 
@@ -1367,8 +987,8 @@ namespace Frida {
 			var transport_broker = server.transport_broker;
 			if (transport_broker != null) {
 				try {
-					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id,
-						channel_provider, cancellable);
+					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id, device,
+						cancellable);
 				} catch (Error e) {
 					if (e is Error.NOT_SUPPORTED)
 						server.transport_broker = null;
@@ -1481,7 +1101,7 @@ namespace Frida {
 
 			DBusConnection? connection = null;
 			try {
-				var stream = yield channel_provider.open_channel (
+				var stream = yield device.open_channel (
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 

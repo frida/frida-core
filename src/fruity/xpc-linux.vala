@@ -1,7 +1,8 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
+#if 0
 	public sealed class LinuxTunnelFinder : Object, TunnelFinder {
-		public async Tunnel? find (string udid, Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (string udid, Cancellable? cancellable) throws Error, IOError {
 			NcmPeer? peer = yield locate_ncm_peer (udid, cancellable);
 			if (peer == null)
 				return null;
@@ -158,6 +159,7 @@ namespace Frida.Fruity {
 			}
 		}
 	}
+#endif
 
 	private sealed class LinuxTunnel : Object, Tunnel {
 		public DiscoveryService discovery {
