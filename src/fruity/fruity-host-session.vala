@@ -346,15 +346,10 @@ namespace Frida {
 				add_process_metadata (info.parameters, process);
 
 				if (scope == FULL) {
-					try {
-						var lockdown = yield device.get_lockdown_client (cancellable);
-						var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
+					var springboard = yield Fruity.SpringboardServicesClient.open (device, cancellable);
 
-						Bytes png = yield springboard.get_icon_png_data (identifier);
-						add_app_icons (info.parameters, png);
-					} catch (Fruity.SpringboardServicesError e) {
-						throw new Error.NOT_SUPPORTED ("%s", e.message);
-					}
+					Bytes png = yield springboard.get_icon_png_data (identifier);
+					add_app_icons (info.parameters, png);
 				}
 			}
 
@@ -385,18 +380,13 @@ namespace Frida {
 
 			Gee.Map<string, Bytes>? icons = null;
 			if (scope == FULL) {
-				try {
-					var lockdown = yield device.get_lockdown_client (cancellable);
-					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
+				var springboard = yield Fruity.SpringboardServicesClient.open (device, cancellable);
 
-					var app_ids = new Gee.ArrayList<string> ();
-					foreach (var app in apps)
-						app_ids.add (app.identifier);
+				var app_ids = new Gee.ArrayList<string> ();
+				foreach (var app in apps)
+					app_ids.add (app.identifier);
 
-					icons = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
-				} catch (Fruity.SpringboardServicesError e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
+				icons = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
 			}
 
 			Gee.List<Fruity.DeviceInfoService.ProcessInfo> processes =
@@ -501,19 +491,14 @@ namespace Frida {
 			if (scope == FULL) {
 				icon_by_pid = new Gee.HashMap<uint, Bytes> ();
 
-				var lockdown = yield device.get_lockdown_client (cancellable);
-				try {
-					var springboard = yield Fruity.SpringboardServicesClient.open (lockdown, cancellable);
+				var springboard = yield Fruity.SpringboardServicesClient.open (device, cancellable);
 
-					var pngs = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
+				var pngs = yield springboard.get_icon_png_data_batch (app_ids.to_array (), cancellable);
 
-					int i = 0;
-					foreach (string app_id in app_ids) {
-						icon_by_pid[app_pids[i]] = pngs[app_id];
-						i++;
-					}
-				} catch (Fruity.SpringboardServicesError e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				int i = 0;
+				foreach (string app_id in app_ids) {
+					icon_by_pid[app_pids[i]] = pngs[app_id];
+					i++;
 				}
 			}
 
