@@ -40,7 +40,7 @@ static const FridaFruityModel fruity_models[] =
 };
 
 void
-_frida_fruity_usbmux_transport_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, GVariant ** icon,
+_frida_fruity_usbmux_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, GVariant ** icon,
     GError ** error)
 {
   const FridaFruityModel * model;

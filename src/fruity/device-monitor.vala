@@ -5,7 +5,7 @@ namespace Frida.Fruity {
 		public signal void device_detached (Device device);
 
 		private State state = CREATED;
-		private Gee.List<DeviceTransportBackend> backends = new Gee.ArrayList<DeviceTransportBackend> ();
+		private Gee.List<Backend> backends = new Gee.ArrayList<Backend> ();
 		private Gee.Map<string, Device> devices = new Gee.HashMap<string, Device> ();
 
 		private enum State {
@@ -18,9 +18,10 @@ namespace Frida.Fruity {
 		private delegate void NotifyCompleteFunc ();
 
 		construct {
-			add_backend (new UsbmuxTransportBackend ());
+			add_backend (new UsbmuxBackend ());
+			add_backend (new PortableCoreDeviceBackend ());
 #if MACOS
-			add_backend (new RemotePairingTransportBackend ());
+			add_backend (new MacOSCoreDeviceBackend ());
 #endif
 		}
 
@@ -81,7 +82,7 @@ namespace Frida.Fruity {
 			state = STOPPED;
 		}
 
-		private async void do_start (DeviceTransportBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+		private async void do_start (Backend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
 			try {
 				yield backend.start (cancellable);
 			} catch (IOError e) {
@@ -90,7 +91,7 @@ namespace Frida.Fruity {
 			on_complete ();
 		}
 
-		private async void do_stop (DeviceTransportBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+		private async void do_stop (Backend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
 			try {
 				yield backend.stop (cancellable);
 			} catch (IOError e) {
@@ -99,13 +100,13 @@ namespace Frida.Fruity {
 			on_complete ();
 		}
 
-		private void add_backend (DeviceTransportBackend backend) {
+		private void add_backend (Backend backend) {
 			backends.add (backend);
 			backend.transport_attached.connect (on_transport_attached);
 			backend.transport_detached.connect (on_transport_detached);
 		}
 
-		private void on_transport_attached (DeviceTransport transport) {
+		private void on_transport_attached (Transport transport) {
 			unowned string udid = transport.udid;
 
 			var device = devices[udid];
@@ -120,7 +121,7 @@ namespace Frida.Fruity {
 				device_attached (device);
 		}
 
-		private void on_transport_detached (DeviceTransport transport) {
+		private void on_transport_detached (Transport transport) {
 			unowned string udid = transport.udid;
 
 			var device = devices[udid];
@@ -169,9 +170,9 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public Gee.Set<DeviceTransport> transports {
+		public Gee.Set<Transport> transports {
 			get;
-			default = new Gee.HashSet<DeviceTransport> ();
+			default = new Gee.HashSet<Transport> ();
 		}
 
 		public UsbmuxDevice? find_usbmux_device () throws Error {
@@ -327,7 +328,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public interface DeviceTransport : Object {
+	public interface Transport : Object {
 		public abstract ConnectionType connection_type {
 			get;
 		}
@@ -349,9 +350,9 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private interface DeviceTransportBackend : Object {
-		public signal void transport_attached (DeviceTransport transport);
-		public signal void transport_detached (DeviceTransport transport);
+	private interface Backend : Object {
+		public signal void transport_attached (Transport transport);
+		public signal void transport_detached (Transport transport);
 
 		public abstract async void start (Cancellable? cancellable) throws IOError;
 		public abstract async void stop (Cancellable? cancellable) throws IOError;
@@ -362,8 +363,8 @@ namespace Frida.Fruity {
 		NETWORK
 	}
 
-	private class UsbmuxTransportBackend : Object, DeviceTransportBackend {
-		private Gee.Map<UsbmuxDevice, UsbmuxDeviceTransport> transports = new Gee.HashMap<UsbmuxDevice, UsbmuxDeviceTransport> ();
+	private sealed class UsbmuxBackend : Object, Backend {
+		private Gee.Map<UsbmuxDevice, UsbmuxTransport> transports = new Gee.HashMap<UsbmuxDevice, UsbmuxTransport> ();
 
 		private UsbmuxClient? usbmux;
 
@@ -489,7 +490,7 @@ namespace Frida.Fruity {
 		}
 
 		private async void add_transport (UsbmuxDevice device) {
-			var transport = new UsbmuxDeviceTransport (device);
+			var transport = new UsbmuxTransport (device);
 			transports[device] = transport;
 
 			string? name = null;
@@ -540,7 +541,7 @@ namespace Frida.Fruity {
 		}
 
 		private void remove_transport (UsbmuxDevice device) {
-			UsbmuxDeviceTransport transport;
+			UsbmuxTransport transport;
 			transports.unset (device, out transport);
 			transport_detached (transport);
 		}
@@ -549,7 +550,7 @@ namespace Frida.Fruity {
 			out Variant? icon) throws Error;
 	}
 
-	private class UsbmuxDeviceTransport : Object, DeviceTransport {
+	private sealed class UsbmuxTransport : Object, Transport {
 		public UsbmuxDevice device {
 			get;
 			construct;
@@ -588,14 +589,253 @@ namespace Frida.Fruity {
 		internal string _name;
 		internal Variant? _icon;
 
-		public UsbmuxDeviceTransport (UsbmuxDevice device) {
+		public UsbmuxTransport (UsbmuxDevice device) {
 			Object (device: device);
 		}
 	}
 
+	private sealed class PortableCoreDeviceBackend : Object, Backend {
+		private State state = CREATED;
+
+		private Thread<void>? usb_worker;
+		private LibUSB.Context? usb_context;
+		private LibUSB.HotCallbackHandle iphone_callback;
+		private LibUSB.HotCallbackHandle ipad_callback;
+
+		private enum State {
+			CREATED,
+			STARTED,
+			STOPPING,
+			STOPPED,
+		}
+
+		private const uint16 VENDOR_ID_APPLE = 0x05ac;
+		private const uint16 PRODUCT_ID_IPHONE = 0x12a8;
+		private const uint16 PRODUCT_ID_IPAD = 0x12ab;
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			state = STARTED;
+
+			usb_worker = new Thread<void> ("frida-core-device-usb", perform_usb_work);
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+			state = STOPPING;
+			usb_context.interrupt_event_handler ();
+
+			usb_worker.join ();
+			usb_worker = null;
+
+			state = STOPPED;
+		}
+
+		private void on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
+			if (event == DEVICE_ARRIVED)
+				on_device_arrived (device);
+		}
+
+		private void on_device_arrived (LibUSB.Device device) {
+			try {
+				var driver = UsbNcmDriver.open (device);
+				printerr ("Opened driver! %p\n", driver);
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
+			}
+		}
+
+		private void perform_usb_work () {
+			LibUSB.Context.init (out usb_context);
+
+			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPHONE,
+				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
+			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPAD,
+				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
+
+			while (state == STARTED) {
+				int completed = 0;
+				usb_context.handle_events_completed (out completed);
+			}
+
+			usb_context = null;
+		}
+	}
+
+	private sealed class UsbNcmDriver {
+		private int iface;
+		private int altsetting;
+		private uint8 rx_address;
+		private uint8 tx_address;
+		private uint8 mac_address[6];
+
+		private enum UsbDescriptorType {
+			INTERFACE = 0x04,
+		}
+
+		private enum UsbCommSubclass {
+			NCM		= 0x0d,
+		}
+
+		private enum UsbDataSubclass {
+			UNDEFINED	= 0x00,
+		}
+
+		private enum UsbCdcDescriptorSubtype {
+			ETHERNET = 0x0f,
+		}
+
+		public static UsbNcmDriver open (LibUSB.Device device) throws Error {
+			var driver = new UsbNcmDriver ();
+
+			LibUSB.DeviceHandle handle;
+			check (device.open (out handle), "libusb_open");
+
+			int config_id = -1;
+			check (handle.get_configuration (out config_id), "libusb_get_configuration");
+			if (config_id != 5 && config_id != 6)
+				throw new Error.NOT_SUPPORTED ("Expected config 5 or 6, device is in %d", config_id);
+			printerr ("config_id=%d\n", config_id);
+
+			LibUSB.ConfigDescriptor config;
+			check (device.get_active_config_descriptor (out config), "libusb_get_active_config_descriptor");
+
+			bool found_cdc_header = false;
+			bool found_data_interface = false;
+			uint8 mac_address_index = 0;
+			foreach (var iface in config.@interface) {
+				foreach (var setting in iface.altsetting) {
+					if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
+							setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
+						try {
+							parse_cdc_header (setting.extra, out mac_address_index);
+							found_cdc_header = true;
+						} catch (Error e) {
+							break;
+						}
+					} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
+							setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
+							setting.endpoint.length == 2) {
+						found_data_interface = true;
+
+						driver.iface = setting.bInterfaceNumber;
+						driver.altsetting = setting.bAlternateSetting;
+
+						foreach (var ep in setting.endpoint) {
+							if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
+								driver.rx_address = ep.bEndpointAddress;
+							else
+								driver.tx_address = ep.bEndpointAddress;
+						}
+					}
+				}
+			}
+			if (!found_cdc_header || !found_data_interface)
+				throw new Error.NOT_SUPPORTED ("Failed to find NCM interface");
+
+			uint8 mac_address_buf[13];
+			check (handle.get_string_descriptor_ascii (mac_address_index, mac_address_buf),
+				"libusb_get_string_descriptor_ascii");
+			unowned string mac_address_str = (string) mac_address_buf;
+			for (uint i = 0; i != 6; i++) {
+				uint v;
+				mac_address_str.substring (i * 2, 2).scanf ("%02X", out v);
+				driver.mac_address[i] = (uint8) v;
+			}
+
+			return driver;
+		}
+
+		private UsbNcmDriver () {
+		}
+
+		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
+			var input = new DataInputStream (new MemoryInputStream.from_data (header));
+			input.set_byte_order (LITTLE_ENDIAN);
+
+			try {
+				for (int offset = 0; offset != header.length;) {
+					uint8 length = input.read_byte ();
+					if (length < 3)
+						throw new Error.PROTOCOL ("Invalid descriptor length");
+
+					uint8 descriptor_type = input.read_byte ();
+					if (descriptor_type != (LibUSB.RequestType.CLASS | UsbDescriptorType.INTERFACE))
+						throw new Error.PROTOCOL ("Invalid descriptor type");
+
+					uint8 descriptor_subtype = input.read_byte ();
+					if (descriptor_subtype == UsbCdcDescriptorSubtype.ETHERNET) {
+						mac_address_index = input.read_byte ();
+						return;
+					}
+
+					input.skip (length - 3);
+					offset += length;
+				}
+			} catch (IOError e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+
+			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
+		}
+
+		private static void check (LibUSB.Error error, string operation) throws Error {
+			if (error >= LibUSB.Error.SUCCESS)
+				return;
+
+			string message = @"$(error.get_description ()) during $operation";
+			switch (error) {
+				case NO_DEVICE:
+					throw new Error.TRANSPORT ("%s", message);
+				case ACCESS:
+					throw new Error.PERMISSION_DENIED ("%s", message);
+				default:
+					throw new Error.NOT_SUPPORTED ("%s", message);
+			}
+		}
+	}
+
+	private sealed class PortableCoreDeviceTransport : Object, Transport {
+		public ConnectionType connection_type {
+			get {
+				return USB;
+			}
+		}
+
+		public string udid {
+			get {
+				return _udid;
+			}
+		}
+
+		public string name {
+			get {
+				return _name;
+			}
+		}
+
+		public Variant? icon {
+			get {
+				return null;
+			}
+		}
+
+		public UsbmuxDevice? usbmux_device {
+			get {
+				return null;
+			}
+		}
+
+		private string _udid;
+		private string _name;
+
+		public PortableCoreDeviceTransport (string udid, string name) {
+			_udid = udid;
+			_name = name;
+		}
+	}
+
 #if MACOS
-	private class RemotePairingTransportBackend : Object, DeviceTransportBackend {
-		private Gee.Map<string, RemotePairingDeviceTransport> transports = new Gee.HashMap<string, RemotePairingDeviceTransport> ();
+	private sealed class MacOSCoreDeviceBackend : Object, Backend {
+		private Gee.Map<string, MacOSCoreDeviceTransport> transports = new Gee.HashMap<string, MacOSCoreDeviceTransport> ();
 
 		private Promise<bool> all_current_devices_listed = new Promise<bool> ();
 		private Promise<bool> browse_request = new Promise<bool> ();
@@ -683,13 +923,13 @@ namespace Frida.Fruity {
 
 		private void on_device_found (XpcClient pairing_device, ConnectionType connection_type, string udid, string name)
 				throws Error {
-			var transport = new RemotePairingDeviceTransport (pairing_device, connection_type, udid, name);
+			var transport = new MacOSCoreDeviceTransport (pairing_device, connection_type, udid, name);
 			transports[udid] = transport;
 			transport_attached (transport);
 		}
 	}
 
-	private class RemotePairingDeviceTransport : Object, DeviceTransport, TunnelFinder {
+	private sealed class MacOSCoreDeviceTransport : Object, Transport, TunnelFinder {
 		public XpcClient pairing_device {
 			get;
 			construct;
@@ -731,7 +971,7 @@ namespace Frida.Fruity {
 
 		private Promise<Tunnel>? tunnel_request;
 
-		public RemotePairingDeviceTransport (XpcClient pairing_device, ConnectionType connection_type, string udid, string name) {
+		public MacOSCoreDeviceTransport (XpcClient pairing_device, ConnectionType connection_type, string udid, string name) {
 			Object (pairing_device: pairing_device);
 			_connection_type = connection_type;
 			_udid = udid;
@@ -744,11 +984,11 @@ namespace Frida.Fruity {
 		}
 
 		private void on_state_changed (Object obj, ParamSpec pspec) {
-			printerr ("[RemotePairingDeviceTransport] new state: %s\n", pairing_device.state.to_string ());
+			printerr ("[MacOSCoreDeviceTransport] new state: %s\n", pairing_device.state.to_string ());
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
-			// printerr ("[RemotePairingDeviceTransport] %s\n", obj.to_string ());
+			// printerr ("[MacOSCoreDeviceTransport] %s\n", obj.to_string ());
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
@@ -873,7 +1113,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private class PairingdRequest {
+	private sealed class PairingdRequest {
 		public Darwin.Xpc.Dictionary message = new Darwin.Xpc.Dictionary ();
 		public Darwin.Xpc.Dictionary body = new Darwin.Xpc.Dictionary ();
 
@@ -884,7 +1124,7 @@ namespace Frida.Fruity {
 	}
 #endif
 
-	public class NcmStuffToBeMoved : Object {
+	public sealed class NcmStuffToBeMoved : Object {
 		private LibUSB.Context context;
 
 		private VirtualNetworkStack? netstack;
