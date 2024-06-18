@@ -1,17 +1,20 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	internal sealed class UsbNcmDriver : Object, AsyncInitable {
-		public LibUSB.Device device {
+		public UsbDevice device {
 			get;
 			construct;
 		}
 
-		private LibUSB.DeviceHandle handle;
 		private uint8 data_iface;
 		private int data_altsetting;
 		private uint8 rx_address;
 		private uint8 tx_address;
-		private uint8 mac_address[6];
+
+		private VirtualNetworkStack? netstack;
+		private uint16 next_outgoing_sequence = 1;
+
+		private Cancellable io_cancellable = new Cancellable ();
 
 		private enum UsbDescriptorType {
 			INTERFACE = 0x04,
@@ -29,7 +32,7 @@ namespace Frida.Fruity {
 			ETHERNET = 0x0f,
 		}
 
-		public static async UsbNcmDriver open (LibUSB.Device device, Cancellable? cancellable = null) throws Error, IOError {
+		public static async UsbNcmDriver open (UsbDevice device, Cancellable? cancellable = null) throws Error, IOError {
 			var driver = new UsbNcmDriver (device);
 
 			try {
@@ -41,30 +44,21 @@ namespace Frida.Fruity {
 			return driver;
 		}
 
-		private UsbNcmDriver (LibUSB.Device device) {
+		private UsbNcmDriver (UsbDevice device) {
 			Object (device: device);
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			check (device.open (out handle), "Failed to open USB device");
-
-			Bytes language_ids_response = yield read_string_descriptor_bytes (0, 0, cancellable);
-			if (language_ids_response.get_size () < sizeof (uint16))
-				throw new Error.PROTOCOL ("Invalid language IDs response");
-			Buffer language_ids = new Buffer (language_ids_response, LITTLE_ENDIAN);
-			uint16 default_language_id = language_ids.read_uint16 (0);
-
-			var dev_desc = LibUSB.DeviceDescriptor (device);
-			string serial_number = yield read_string_descriptor_utf16 (dev_desc.iSerialNumber, default_language_id, cancellable);
-			string udid = udid_from_serial_number (serial_number);
+			unowned LibUSB.DeviceHandle handle = device.handle;
 
 			int config_id = -1;
-			check (handle.get_configuration (out config_id), "Failed to get USB device configuration");
+			Usb.check (handle.get_configuration (out config_id), "Failed to get USB device configuration");
 			if (config_id != 5 && config_id != 6)
 				throw new Error.NOT_SUPPORTED ("Expected USB device in config 5 or 6, device is in %d", config_id);
 
 			LibUSB.ConfigDescriptor config;
-			check (device.get_active_config_descriptor (out config), "Failed to get active USB config descriptor");
+			Usb.check (device.raw_device.get_active_config_descriptor (out config),
+				"Failed to get active USB config descriptor");
 
 			bool found_cdc_header = false;
 			bool found_data_interface = false;
@@ -99,7 +93,10 @@ namespace Frida.Fruity {
 			if (!found_cdc_header || !found_data_interface)
 				throw new Error.NOT_SUPPORTED ("Failed to find CDC-NCM interface");
 
-			string mac_address_str = yield read_string_descriptor_utf16 (mac_address_index, default_language_id, cancellable);
+			uint8 mac_address[6];
+			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,
+				cancellable);
+			printerr ("mac_address_str=\"%s\"\n", mac_address_str);
 			if (mac_address_str.length != 12)
 				throw new Error.PROTOCOL ("Invalid MAC address");
 			for (uint i = 0; i != 6; i++) {
@@ -108,17 +105,121 @@ namespace Frida.Fruity {
 				mac_address[i] = (uint8) v;
 			}
 
-			check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
-			check (handle.claim_interface (data_iface), "Failed to claim USB interface");
-			check (handle.set_interface_alt_setting (data_iface, data_altsetting), "Failed to set USB interface alt setting");
+			string ipv6_address = derive_ipv6_link_local_address_from_mac_address (mac_address_str);
+			printerr ("=> ipv6_address=\"%s\"\n", ipv6_address);
+
+			Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
+			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
+			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
+				"Failed to set USB interface alt setting");
+
+			netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), new InetAddress.from_string (ipv6_address),
+				1500, cancellable);
+			netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
+
+			process_incoming_datagrams.begin ();
 
 			return true;
 		}
 
-		private static string udid_from_serial_number (string serial) {
-			if (serial.length == 24)
-				return serial.substring (0, 8) + "-" + serial.substring (8);
-			return serial;
+		private async void process_incoming_datagrams () {
+			var data = new uint8[64 * 1024];
+
+			while (true) {
+				try {
+					size_t n = yield device.bulk_transfer (rx_address, data, 10000, io_cancellable);
+					printerr ("BULK TRANSFER!!!\n");
+
+					handle_ncm_frame (data[:n]);
+				} catch (GLib.Error e) {
+					printerr ("Oh noes: %s\n", e.message);
+					return;
+				}
+			}
+		}
+
+		private void handle_ncm_frame (uint8[] data) throws GLib.Error {
+			hexdump (data);
+
+			var input = new DataInputStream (new MemoryInputStream.from_data (data));
+			input.byte_order = LITTLE_ENDIAN;
+
+			uint8 raw_signature[4 + 1] = { 0, };
+			string signature = (string) raw_signature;
+			size_t bytes_read;
+
+			input.read_all (raw_signature[:4], out bytes_read);
+			if (signature != "NCMH")
+				throw new Error.PROTOCOL ("Invalid NTH16 signature");
+			input.skip (6);
+			var ndp_index = input.read_uint16 ();
+
+			do {
+				input.seek (ndp_index, SET);
+				input.read_all (raw_signature[:4], out bytes_read);
+				if (signature != "NCM0")
+					throw new Error.PROTOCOL ("Invalid NDP16 signature");
+				input.skip (2);
+				var next_ndp_index = input.read_uint16 ();
+
+				while (true) {
+					var datagram_index = input.read_uint16 ();
+					var datagram_length = input.read_uint16 ();
+					if (datagram_index == 0 || datagram_length == 0)
+						break;
+
+					int64 previous_offset = input.tell ();
+					input.seek (datagram_index, SET);
+					var datagram = new uint8[datagram_length];
+					input.read_all (datagram, out bytes_read);
+					input.seek (previous_offset, SET);
+
+					netstack.handle_incoming_datagram (new Bytes.take ((owned) datagram));
+				}
+
+				ndp_index = next_ndp_index;
+			} while (ndp_index != 0);
+		}
+
+		private void on_netif_outgoing_datagram (Bytes datagram) {
+			uint16 transfer_header_length = 12;
+			uint16 ndp_header_length = 16;
+			uint16 alignment_padding_length = 2;
+
+			uint16 datagram_start_index = transfer_header_length + ndp_header_length + alignment_padding_length;
+			uint16 datagram_length = (uint16) datagram.length;
+
+			uint16 sentinel_start_index = 0;
+			uint16 sentinel_size = 0;
+
+			uint16 sequence = next_outgoing_sequence++;
+			uint16 block_length = datagram_start_index + datagram_length;
+			uint16 ndp_index = transfer_header_length;
+			uint16 next_ndp_index = 0;
+
+			uint16 alignment_padding_value = 0;
+
+			var frame = new BufferBuilder (LITTLE_ENDIAN)
+				.append_string ("NCMH", StringTerminator.NONE)
+				.append_uint16 (transfer_header_length)
+				.append_uint16 (sequence)
+				.append_uint16 (block_length)
+				.append_uint16 (ndp_index)
+				.append_string ("NCM0", StringTerminator.NONE)
+				.append_uint16 (ndp_header_length)
+				.append_uint16 (next_ndp_index)
+				.append_uint16 (datagram_start_index)
+				.append_uint16 (datagram_length)
+				.append_uint16 (sentinel_start_index)
+				.append_uint16 (sentinel_size)
+				.append_uint16 (alignment_padding_value)
+				.append_bytes (datagram)
+				.build ();
+
+			int n;
+			var transfer_result = device.handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
+			if (transfer_result != SUCCESS)
+				printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
 		}
 
 		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
@@ -151,125 +252,16 @@ namespace Frida.Fruity {
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
 		}
 
-		private async string read_string_descriptor_utf16 (uint8 index, uint16 language_id, Cancellable? cancellable)
-				throws Error, IOError {
-			var response = yield read_string_descriptor_bytes (index, language_id, cancellable);
-			try {
-				var input = new DataInputStream (new MemoryInputStream.from_bytes (response));
-				input.byte_order = LITTLE_ENDIAN;
+		private string derive_ipv6_link_local_address_from_mac_address (string mac_address) {
+			uint top_octet;
+			mac_address.substring (0, 2).scanf ("%02X", out top_octet);
 
-				size_t size = response.get_size ();
-				if (size % sizeof (unichar2) != 0)
-					throw new Error.PROTOCOL ("Invalid string descriptor");
-				size_t n = size / sizeof (unichar2);
-				var chars = new unichar2[n];
-				for (size_t i = 0; i != n; i++)
-					chars[i] = input.read_uint16 ();
-
-				unowned string16 str = (string16) chars;
-				return str.to_utf8 ((long) n);
-			} catch (GLib.Error e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
-		}
-
-		private async Bytes read_string_descriptor_bytes (uint8 index, uint16 language_id, Cancellable? cancellable)
-				throws Error, IOError {
-			var response = yield control_transfer (
-				LibUSB.RequestType.STANDARD | LibUSB.EndpointDirection.IN,
-				LibUSB.StandardRequest.GET_DESCRIPTOR,
-				(LibUSB.DescriptorType.STRING << 8) | index,
-				language_id,
-				1024,
-				1000,
-				cancellable);
-			try {
-				var input = new DataInputStream (new MemoryInputStream.from_bytes (response));
-				input.byte_order = LITTLE_ENDIAN;
-
-				uint8 length = input.read_byte ();
-				if (length < 2)
-					throw new Error.PROTOCOL ("Invalid string descriptor length");
-
-				uint8 type = input.read_byte ();
-				if (type != LibUSB.DescriptorType.STRING)
-					throw new Error.PROTOCOL ("Invalid string descriptor type");
-
-				size_t remainder = response.get_size () - 2;
-				length -= 2;
-				if (length > remainder)
-					throw new Error.PROTOCOL ("Invalid string descriptor length");
-
-				return response[2:2 + length];
-			} catch (GLib.Error e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
-		}
-
-		private async Bytes control_transfer (uint8 request_type, uint8 request, uint16 val, uint16 index, uint16 length,
-				uint timeout, Cancellable? cancellable) throws Error, IOError {
-			var transfer = new LibUSB.Transfer ();
-			var ready_closure = new TransferReadyClosure (control_transfer.callback);
-
-			var buffer = new uint8[sizeof (LibUSB.ControlSetup) + length];
-			LibUSB.Transfer.fill_control_setup (buffer, request_type, request, val, index, length);
-			transfer.fill_control_transfer (handle, buffer, on_transfer_ready, ready_closure, timeout);
-
-			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (() => {
-				transfer.cancel ();
-				return Source.REMOVE;
-			});
-			cancel_source.attach (MainContext.get_thread_default ());
-
-			try {
-				check (transfer.submit (), "Failed to submit transfer");
-				yield;
-			} finally {
-				cancel_source.destroy ();
-			}
-
-			if (transfer.status != COMPLETED)
-				throw new Error.TRANSPORT ("Control transfer failed");
-
-			return new Bytes (((uint8[]) transfer.control_get_data ())[:transfer.actual_length]);
-		}
-
-		private static void on_transfer_ready (LibUSB.Transfer transfer) {
-			TransferReadyClosure * closure = transfer.user_data;
-			closure->schedule ();
-		}
-
-		private static void check (LibUSB.Error error, string prefix) throws Error {
-			if (error >= LibUSB.Error.SUCCESS)
-				return;
-
-			string message = @"$prefix: $(error.get_description ())";
-
-			if (error == ACCESS)
-				throw new Error.PERMISSION_DENIED ("%s", message);
-
-			throw new Error.TRANSPORT ("%s", message);
-		}
-
-		private class TransferReadyClosure {
-			private SourceFunc? handler;
-			private MainContext main_context;
-
-			public TransferReadyClosure (owned SourceFunc handler) {
-				this.handler = (owned) handler;
-				main_context = MainContext.ref_thread_default ();
-			}
-
-			public void schedule () {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					handler ();
-					handler = null;
-					return Source.REMOVE;
-				});
-				source.attach (main_context);
-			}
+			return "FE80::%02X%s:%sFF:FE%s:%s".printf (
+				top_octet ^ 2,
+				mac_address[2:4],
+				mac_address[4:6],
+				mac_address[6:8],
+				mac_address[8:]);
 		}
 	}
 }

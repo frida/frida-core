@@ -597,6 +597,8 @@ namespace Frida.Fruity {
 	private sealed class PortableCoreDeviceBackend : Object, Backend {
 		private State state = CREATED;
 
+		private UsbNcmDriver? driver_hack;
+
 		private Thread<void>? usb_worker;
 		private LibUSB.Context? usb_context;
 		private LibUSB.HotCallbackHandle iphone_callback;
@@ -653,10 +655,15 @@ namespace Frida.Fruity {
 			});
 		}
 
-		private async void open_device (LibUSB.Device device) {
+		private async void open_device (LibUSB.Device raw_device) {
 			try {
-				var driver = yield UsbNcmDriver.open (device, io_cancellable);
-				printerr ("Opened driver! %p\n", driver);
+				var device = yield UsbDevice.open (raw_device, io_cancellable);
+				printerr ("Opened device! udid=\"%s\"\n", device.udid);
+
+				var ncm = yield UsbNcmDriver.open (device, io_cancellable);
+				printerr ("Opened NCM driver!\n");
+
+				driver_hack = ncm;
 			} catch (GLib.Error e) {
 				printerr ("%s\n", e.message);
 			}

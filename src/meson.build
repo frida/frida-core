@@ -494,6 +494,7 @@ if have_fruity_backend
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
     'fruity' / 'network-stack.vala',
+    'fruity' / 'usb.vala',
     'fruity' / 'ncm.vala',
   ]
 
