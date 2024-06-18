@@ -602,6 +602,10 @@ namespace Frida.Fruity {
 		private LibUSB.HotCallbackHandle iphone_callback;
 		private LibUSB.HotCallbackHandle ipad_callback;
 
+		private MainContext main_context;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
 		private enum State {
 			CREATED,
 			STARTED,
@@ -613,14 +617,22 @@ namespace Frida.Fruity {
 		private const uint16 PRODUCT_ID_IPHONE = 0x12a8;
 		private const uint16 PRODUCT_ID_IPAD = 0x12ab;
 
+		construct {
+			main_context = MainContext.ref_thread_default ();
+		}
+
 		public async void start (Cancellable? cancellable) throws IOError {
 			state = STARTED;
 
 			usb_worker = new Thread<void> ("frida-core-device-usb", perform_usb_work);
+
+			yield; // FIXME
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
 			state = STOPPING;
+
+			io_cancellable.cancel ();
 			usb_context.interrupt_event_handler ();
 
 			usb_worker.join ();
@@ -635,10 +647,17 @@ namespace Frida.Fruity {
 		}
 
 		private void on_device_arrived (LibUSB.Device device) {
+			schedule_on_frida_thread (() => {
+				open_device.begin (device);
+				return Source.REMOVE;
+			});
+		}
+
+		private async void open_device (LibUSB.Device device) {
 			try {
-				var driver = UsbNcmDriver.open (device);
+				var driver = yield UsbNcmDriver.open (device, io_cancellable);
 				printerr ("Opened driver! %p\n", driver);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("%s\n", e.message);
 			}
 		}
@@ -658,138 +677,11 @@ namespace Frida.Fruity {
 
 			usb_context = null;
 		}
-	}
 
-	private sealed class UsbNcmDriver {
-		private int iface;
-		private int altsetting;
-		private uint8 rx_address;
-		private uint8 tx_address;
-		private uint8 mac_address[6];
-
-		private enum UsbDescriptorType {
-			INTERFACE = 0x04,
-		}
-
-		private enum UsbCommSubclass {
-			NCM		= 0x0d,
-		}
-
-		private enum UsbDataSubclass {
-			UNDEFINED	= 0x00,
-		}
-
-		private enum UsbCdcDescriptorSubtype {
-			ETHERNET = 0x0f,
-		}
-
-		public static UsbNcmDriver open (LibUSB.Device device) throws Error {
-			var driver = new UsbNcmDriver ();
-
-			LibUSB.DeviceHandle handle;
-			check (device.open (out handle), "libusb_open");
-
-			int config_id = -1;
-			check (handle.get_configuration (out config_id), "libusb_get_configuration");
-			if (config_id != 5 && config_id != 6)
-				throw new Error.NOT_SUPPORTED ("Expected config 5 or 6, device is in %d", config_id);
-			printerr ("config_id=%d\n", config_id);
-
-			LibUSB.ConfigDescriptor config;
-			check (device.get_active_config_descriptor (out config), "libusb_get_active_config_descriptor");
-
-			bool found_cdc_header = false;
-			bool found_data_interface = false;
-			uint8 mac_address_index = 0;
-			foreach (var iface in config.@interface) {
-				foreach (var setting in iface.altsetting) {
-					if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
-							setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
-						try {
-							parse_cdc_header (setting.extra, out mac_address_index);
-							found_cdc_header = true;
-						} catch (Error e) {
-							break;
-						}
-					} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
-							setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
-							setting.endpoint.length == 2) {
-						found_data_interface = true;
-
-						driver.iface = setting.bInterfaceNumber;
-						driver.altsetting = setting.bAlternateSetting;
-
-						foreach (var ep in setting.endpoint) {
-							if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
-								driver.rx_address = ep.bEndpointAddress;
-							else
-								driver.tx_address = ep.bEndpointAddress;
-						}
-					}
-				}
-			}
-			if (!found_cdc_header || !found_data_interface)
-				throw new Error.NOT_SUPPORTED ("Failed to find NCM interface");
-
-			uint8 mac_address_buf[13];
-			check (handle.get_string_descriptor_ascii (mac_address_index, mac_address_buf),
-				"libusb_get_string_descriptor_ascii");
-			unowned string mac_address_str = (string) mac_address_buf;
-			for (uint i = 0; i != 6; i++) {
-				uint v;
-				mac_address_str.substring (i * 2, 2).scanf ("%02X", out v);
-				driver.mac_address[i] = (uint8) v;
-			}
-
-			return driver;
-		}
-
-		private UsbNcmDriver () {
-		}
-
-		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
-			var input = new DataInputStream (new MemoryInputStream.from_data (header));
-			input.set_byte_order (LITTLE_ENDIAN);
-
-			try {
-				for (int offset = 0; offset != header.length;) {
-					uint8 length = input.read_byte ();
-					if (length < 3)
-						throw new Error.PROTOCOL ("Invalid descriptor length");
-
-					uint8 descriptor_type = input.read_byte ();
-					if (descriptor_type != (LibUSB.RequestType.CLASS | UsbDescriptorType.INTERFACE))
-						throw new Error.PROTOCOL ("Invalid descriptor type");
-
-					uint8 descriptor_subtype = input.read_byte ();
-					if (descriptor_subtype == UsbCdcDescriptorSubtype.ETHERNET) {
-						mac_address_index = input.read_byte ();
-						return;
-					}
-
-					input.skip (length - 3);
-					offset += length;
-				}
-			} catch (IOError e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
-
-			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
-		}
-
-		private static void check (LibUSB.Error error, string operation) throws Error {
-			if (error >= LibUSB.Error.SUCCESS)
-				return;
-
-			string message = @"$(error.get_description ()) during $operation";
-			switch (error) {
-				case NO_DEVICE:
-					throw new Error.TRANSPORT ("%s", message);
-				case ACCESS:
-					throw new Error.PERMISSION_DENIED ("%s", message);
-				default:
-					throw new Error.NOT_SUPPORTED ("%s", message);
-			}
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
 		}
 	}
 
