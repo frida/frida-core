@@ -15,6 +15,7 @@ namespace Frida.Fruity {
 			get;
 		}
 
+		public abstract void bind (InetSocketAddress address) throws Error;
 		public abstract SocketAddress get_local_address () throws Error;
 		public abstract void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error;
 	}
@@ -69,6 +70,14 @@ namespace Frida.Fruity {
 
 			public SystemUdpSocket (Socket handle) {
 				Object (handle: handle);
+			}
+
+			public void bind (InetSocketAddress address) throws Error {
+				try {
+					handle.bind (address, true);
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
 			}
 
 			public SocketAddress get_local_address () throws Error {
@@ -887,7 +896,8 @@ namespace Frida.Fruity {
 			private State state = CREATED;
 
 			private unowned LWIP.UdpPcb? pcb;
-			private InetSocketAddress? pending_connect_address;
+			private Gee.Queue<BindRequest> bind_requests = new Gee.ArrayQueue<BindRequest> ();
+			private Gee.Queue<ConnectRequest> connect_requests = new Gee.ArrayQueue<ConnectRequest> ();
 			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
 			private Gee.Queue<Packet> tx_queue = new Gee.ArrayQueue<Packet> ();
@@ -950,7 +960,6 @@ namespace Frida.Fruity {
 					on_recv ((owned) pbuf, addr, port);
 				});
 				pcb.bind_netif (netstack.handle);
-				pcb.bind (netstack.raw_ipv6_address);
 
 				schedule_on_frida_thread (() => {
 					state = ALLOCATED;
@@ -993,6 +1002,28 @@ namespace Frida.Fruity {
 				update_events ();
 			}
 
+			public void bind (InetSocketAddress address) throws Error {
+				var req = new BindRequest () { address = address };
+
+				lock (state)
+					bind_requests.offer (req);
+				LWIP.Runtime.schedule (do_bind);
+
+				req.join ();
+			}
+
+			private void do_bind () {
+				BindRequest req;
+				lock (state)
+					req = bind_requests.poll ();
+
+				var err = pcb.bind (ip6_address_from_inet_socket_address (req.address));
+				if (err == OK)
+					req.resolve (true);
+				else
+					req.reject (err);
+			}
+
 			public SocketAddress get_local_address () throws Error {
 				return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 					address: netstack.ipv6_address,
@@ -1002,24 +1033,25 @@ namespace Frida.Fruity {
 			}
 
 			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
+				var req = new ConnectRequest () { address = address };
+
 				lock (state)
-					pending_connect_address = address;
+					connect_requests.offer (req);
 				LWIP.Runtime.schedule (do_socket_connect);
+
+				req.join ();
 			}
 
 			private void do_socket_connect () {
-				InetSocketAddress? addr;
-				lock (state) {
-					addr = pending_connect_address;
-					pending_connect_address = null;
-				}
-				if (addr == null)
-					return;
+				ConnectRequest req;
+				lock (state)
+					req = connect_requests.poll ();
 
-				var ip6_addr = LWIP.IP6Address.parse (addr.get_address ().to_string ());
-				ip6_addr.zone = (uint8) addr.scope_id;
-
-				pcb.connect (ip6_addr, addr.get_port ());
+				var err = pcb.connect (ip6_address_from_inet_socket_address (req.address), req.address.get_port ());
+				if (err == OK)
+					req.resolve (true);
+				else
+					req.reject (err);
 			}
 
 			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,
@@ -1146,6 +1178,42 @@ namespace Frida.Fruity {
 				var source = new IdleSource ();
 				source.set_callback ((owned) function);
 				source.attach (main_context);
+			}
+
+			private static LWIP.IP6Address ip6_address_from_inet_socket_address (InetSocketAddress address) {
+				var addr = LWIP.IP6Address.parse (address.get_address ().to_string ());
+				addr.zone = (uint8) address.scope_id;
+				return addr;
+			}
+
+			private class Request<T> {
+				public Gee.Promise<T> promise = new Gee.Promise<T> ();
+
+				public T join () throws Error {
+					var future = promise.future;
+					try {
+						return future.wait ();
+					} catch (Gee.FutureError e) {
+						assert (e is Gee.FutureError.EXCEPTION);
+						throw (Error) future.exception;
+					}
+				}
+
+				public void resolve (T val) {
+					promise.set_value (val);
+				}
+
+				public void reject (LWIP.ErrorCode err) {
+					promise.set_exception (new Error.TRANSPORT ("%s", strerror (err.to_errno ())));
+				}
+			}
+
+			private class BindRequest : Request<bool> {
+				public InetSocketAddress address;
+			}
+
+			private class ConnectRequest : Request<bool> {
+				public InetSocketAddress address;
 			}
 
 			private class Packet {

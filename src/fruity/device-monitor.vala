@@ -846,13 +846,14 @@ namespace Frida.Fruity {
 			var source = new TimeoutSource.seconds (1);
 			source.set_callback (open.callback);
 			source.attach (MainContext.get_thread_default ());
-			printerr ("Waiting for 15 seconds befeur launching ze attack...\n");
+			printerr ("Waiting...\n");
 			yield;
-			printerr ("Here we gou...\n");
+			printerr ("Here we go...\n");
 
 			VirtualNetworkStack netstack = ncm.netstack;
 
 			var sock = yield netstack.create_udp_socket (cancellable);
+			sock.bind (new InetSocketAddress (new InetAddress.any (IPV6), 5353));
 			DatagramBased sock_datagram = sock.datagram_based;
 
 			var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
