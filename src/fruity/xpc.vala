@@ -2126,21 +2126,8 @@ namespace Frida.Fruity {
 
 		private bool on_socket_readable (DatagramBased datagram_based, IOCondition condition) {
 			try {
-				var v = InputVector ();
-				v.buffer = rx_buf;
-				v.size = rx_buf.length;
-
-				InputVector[] vectors = { v };
-
-				var m = InputMessage ();
-				SocketAddress remote_address = null;
-				m.address = &remote_address;
-				m.vectors = vectors;
-				m.num_vectors = vectors.length;
-
-				InputMessage[] messages = { m };
-
-				socket.datagram_based.receive_messages (messages, 0, 0, io_cancellable);
+				InetSocketAddress remote_address;
+				size_t n = Udp.recv (rx_buf, socket.datagram_based, io_cancellable, out remote_address);
 
 				uint8[] raw_remote_address = address_to_native (remote_address);
 
@@ -2149,7 +2136,7 @@ namespace Frida.Fruity {
 					remote = NGTcp2.Address () { addr = raw_remote_address },
 				};
 
-				unowned uint8[] data = rx_buf[:messages[0].bytes_received];
+				unowned uint8[] data = rx_buf[:n];
 
 				connection.read_packet (path, null, data, make_timestamp ());
 			} catch (GLib.Error e) {
@@ -2220,19 +2207,7 @@ namespace Frida.Fruity {
 					break;
 
 				try {
-					var v = OutputVector ();
-					v.buffer = tx_buf;
-					v.size = n;
-
-					OutputVector[] vectors = { v };
-
-					var m = OutputMessage ();
-					m.vectors = vectors;
-					m.num_vectors = vectors.length;
-
-					OutputMessage[] messages = { m };
-
-					socket.datagram_based.send_messages (messages, 0, 0, io_cancellable);
+					Udp.send (tx_buf[:n], socket.datagram_based, io_cancellable);
 				} catch (GLib.Error e) {
 					continue;
 				}

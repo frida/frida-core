@@ -774,25 +774,12 @@ namespace Frida {
 		protected extern void _handle_transport_packet (uint8[] data);
 
 		protected int _emit_transport_packet (uint8[] data) {
-			var v = OutputVector ();
-			v.buffer = data;
-			v.size = data.length;
-
-			OutputVector[] vectors = { v };
-
-			var m = OutputMessage ();
-			m.vectors = vectors;
-			m.num_vectors = vectors.length;
-
-			OutputMessage[] messages = { m };
-
 			try {
-				transport_socket.send_messages (messages, 0, 0, io_cancellable);
+				Udp.send (data, transport_socket, io_cancellable);
+				return 0;
 			} catch (GLib.Error e) {
 				return -1;
 			}
-
-			return 0;
 		}
 
 		protected void _on_sctp_socket_events_changed () {

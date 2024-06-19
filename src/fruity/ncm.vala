@@ -6,12 +6,18 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public VirtualNetworkStack netstack {
+			get {
+				return _netstack;
+			}
+		}
+
 		private uint8 data_iface;
 		private int data_altsetting;
 		private uint8 rx_address;
 		private uint8 tx_address;
 
-		private VirtualNetworkStack? netstack;
+		private VirtualNetworkStack? _netstack;
 		private uint16 next_outgoing_sequence = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -105,15 +111,16 @@ namespace Frida.Fruity {
 			}
 
 			string ipv6_address = derive_ipv6_link_local_address_from_mac_address (mac_address_str);
+			printerr ("Using ipv6_address=\"%s\"\n", ipv6_address);
 
 			Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
 			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
 
-			netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), new InetAddress.from_string (ipv6_address),
+			_netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), new InetAddress.from_string (ipv6_address),
 				1500, cancellable);
-			netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
+			_netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			process_incoming_datagrams.begin ();
 
@@ -168,7 +175,7 @@ namespace Frida.Fruity {
 					input.read_all (datagram, out bytes_read);
 					input.seek (previous_offset, SET);
 
-					netstack.handle_incoming_datagram (new Bytes.take ((owned) datagram));
+					_netstack.handle_incoming_datagram (new Bytes.take ((owned) datagram));
 				}
 
 				ndp_index = next_ndp_index;

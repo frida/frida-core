@@ -3,12 +3,11 @@ namespace Frida.Fruity {
 	public class LockdownClient : Object {
 		public signal void closed ();
 
-		public IOStream stream {
+		public PlistServiceClient service {
 			get;
 			construct;
 		}
 
-		private PlistServiceClient service;
 		private UsbmuxDevice? usbmux_device;
 		private Plist? pair_record;
 		private string? host_id;
@@ -20,11 +19,10 @@ namespace Frida.Fruity {
 		private const uint16 LOCKDOWN_PORT = 62078;
 
 		public LockdownClient (IOStream stream) {
-			Object (stream: stream);
+			Object (service: new PlistServiceClient (stream));
 		}
 
 		construct {
-			service = new PlistServiceClient (stream);
 			service.closed.connect (on_service_closed);
 		}
 
@@ -63,6 +61,9 @@ namespace Frida.Fruity {
 				client.host_id = host_id;
 				client.system_buid = system_buid;
 				client.tls_certificate = tls_certificate;
+
+				yield client.query_type (cancellable);
+
 				return client;
 			} catch (UsbmuxError e) {
 				throw new LockdownError.UNSUPPORTED ("%s", e.message);

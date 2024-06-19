@@ -21,7 +21,7 @@ namespace Frida.Fruity {
 			add_backend (new UsbmuxBackend ());
 			add_backend (new PortableCoreDeviceBackend ());
 #if MACOS
-			add_backend (new MacOSCoreDeviceBackend ());
+			//add_backend (new MacOSCoreDeviceBackend ());
 #endif
 		}
 
@@ -175,6 +175,10 @@ namespace Frida.Fruity {
 			default = new Gee.HashSet<Transport> ();
 		}
 
+		private Gee.Queue<UsbmuxLockdownServiceRequest> usbmux_lockdown_service_requests =
+			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
+		private LockdownClient? cached_usbmux_lockdown_client;
+
 		public UsbmuxDevice? find_usbmux_device () throws Error {
 			var transport = transports.first_match (t => t.usbmux_device != null);
 			return (transport != null) ? transport.usbmux_device : null;
@@ -200,6 +204,8 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
+			printerr ("\n=== open_lockdown_service() service_name=\"%s\"\n\n", service_name);
+
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				ServiceInfo? service_info = null;
@@ -246,23 +252,51 @@ namespace Frida.Fruity {
 				return stream;
 			}
 
-			LockdownClient client;
-			try {
-				client = yield LockdownClient.open (get_usbmux_device (), cancellable);
-				yield client.start_session (cancellable);
-			} catch (LockdownError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			if (service_name == "") {
+				var client = yield open_usbmux_lockdown_client (cancellable);
+				return client.service.stream;
 			}
 
-			if (service_name == "")
-				return client.stream;
+			var request = new UsbmuxLockdownServiceRequest (service_name, cancellable);
+			bool first_request = usbmux_lockdown_service_requests.is_empty;
+			usbmux_lockdown_service_requests.offer (request);
 
+			if (first_request)
+				process_usbmux_lockdown_service_requests.begin ();
+
+			return yield request.promise.future.wait_async (cancellable);
+		}
+
+		private async void process_usbmux_lockdown_service_requests () {
+			UsbmuxLockdownServiceRequest? req;
+			while ((req = usbmux_lockdown_service_requests.peek ()) != null) {
+				try {
+					if (cached_usbmux_lockdown_client == null)
+						cached_usbmux_lockdown_client = yield open_usbmux_lockdown_client (req.cancellable);
+					var stream = yield cached_usbmux_lockdown_client.start_service (req.service_name, req.cancellable);
+					req.promise.resolve (stream);
+				} catch (GLib.Error e) {
+					if (e is Error.TRANSPORT && cached_usbmux_lockdown_client != null) {
+						printerr ("Invalidating and retrying...\n");
+						cached_usbmux_lockdown_client = null;
+						continue;
+					}
+					req.promise.reject ((e is LockdownError.INVALID_SERVICE)
+						? (Error) new Error.NOT_SUPPORTED ("%s", e.message)
+						: (Error) new Error.TRANSPORT ("%s", e.message));
+				}
+
+				usbmux_lockdown_service_requests.poll ();
+			}
+		}
+
+		private async LockdownClient open_usbmux_lockdown_client (Cancellable? cancellable) throws Error, IOError {
 			try {
-				return yield client.start_service (service_name, cancellable);
-			} catch (GLib.Error e) {
-				if (e is LockdownError.INVALID_SERVICE)
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				throw new Error.TRANSPORT ("%s", e.message);
+				var client = yield LockdownClient.open (get_usbmux_device (), cancellable);
+				yield client.start_session (cancellable);
+				return client;
+			} catch (LockdownError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
@@ -326,6 +360,17 @@ namespace Frida.Fruity {
 
 			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
 		}
+
+		private class UsbmuxLockdownServiceRequest {
+			public string service_name;
+			public Cancellable? cancellable;
+			public Promise<IOStream> promise = new Promise<IOStream> ();
+
+			public UsbmuxLockdownServiceRequest (string service_name, Cancellable? cancellable) {
+				this.service_name = service_name;
+				this.cancellable = cancellable;
+			}
+		}
 	}
 
 	public interface Transport : Object {
@@ -337,7 +382,7 @@ namespace Frida.Fruity {
 			get;
 		}
 
-		public abstract string name {
+		public abstract string? name {
 			get;
 		}
 
@@ -568,7 +613,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public string name {
+		public string? name {
 			get {
 				return _name;
 			}
@@ -596,13 +641,13 @@ namespace Frida.Fruity {
 
 	private sealed class PortableCoreDeviceBackend : Object, Backend {
 		private State state = CREATED;
-
-		private UsbNcmDriver? driver_hack;
+		private Promise<bool> started = new Promise<bool> ();
 
 		private Thread<void>? usb_worker;
 		private LibUSB.Context? usb_context;
 		private LibUSB.HotCallbackHandle iphone_callback;
 		private LibUSB.HotCallbackHandle ipad_callback;
+		private uint pending_device_arrivals = 0;
 
 		private MainContext main_context;
 
@@ -610,6 +655,7 @@ namespace Frida.Fruity {
 
 		private enum State {
 			CREATED,
+			STARTING,
 			STARTED,
 			STOPPING,
 			STOPPED,
@@ -624,11 +670,17 @@ namespace Frida.Fruity {
 		}
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			state = STARTED;
+			state = STARTING;
 
 			usb_worker = new Thread<void> ("frida-core-device-usb", perform_usb_work);
 
-			yield; // FIXME
+			try {
+				yield started.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			state = STARTED;
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
@@ -643,46 +695,54 @@ namespace Frida.Fruity {
 			state = STOPPED;
 		}
 
+		private void perform_usb_work () {
+			LibUSB.Context.init (out usb_context);
+
+			AtomicUint.inc (ref pending_device_arrivals);
+			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPHONE,
+				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
+			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPAD,
+				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
+			if (AtomicUint.dec_and_test (ref pending_device_arrivals)) {
+				schedule_on_frida_thread (() => {
+					started.resolve (true);
+					return Source.REMOVE;
+				});
+			}
+
+			while (state != STOPPING) {
+				int completed = 0;
+				usb_context.handle_events_completed (out completed);
+			}
+
+			usb_context = null;
+		}
+
 		private void on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
 			if (event == DEVICE_ARRIVED)
 				on_device_arrived (device);
 		}
 
 		private void on_device_arrived (LibUSB.Device device) {
+			AtomicUint.inc (ref pending_device_arrivals);
 			schedule_on_frida_thread (() => {
-				open_device.begin (device);
+				handle_device_arrival.begin (device);
 				return Source.REMOVE;
 			});
 		}
 
-		private async void open_device (LibUSB.Device raw_device) {
+		private async void handle_device_arrival (LibUSB.Device raw_device) {
 			try {
 				var device = yield UsbDevice.open (raw_device, io_cancellable);
 				printerr ("Opened device! udid=\"%s\"\n", device.udid);
 
-				var ncm = yield UsbNcmDriver.open (device, io_cancellable);
-				printerr ("Opened NCM driver!\n");
-
-				driver_hack = ncm;
+				transport_attached (new PortableCoreDeviceTransport (device));
 			} catch (GLib.Error e) {
 				printerr ("domain=%s code=%d %s\n", e.domain.to_string (), e.code, e.message);
+			} finally {
+				if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
+					started.resolve (true);
 			}
-		}
-
-		private void perform_usb_work () {
-			LibUSB.Context.init (out usb_context);
-
-			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPHONE,
-				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
-			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPAD,
-				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
-
-			while (state == STARTED) {
-				int completed = 0;
-				usb_context.handle_events_completed (out completed);
-			}
-
-			usb_context = null;
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -692,7 +752,12 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private sealed class PortableCoreDeviceTransport : Object, Transport {
+	private sealed class PortableCoreDeviceTransport : Object, Transport, TunnelFinder {
+		public UsbDevice usb_device {
+			get;
+			construct;
+		}
+
 		public ConnectionType connection_type {
 			get {
 				return USB;
@@ -701,13 +766,13 @@ namespace Frida.Fruity {
 
 		public string udid {
 			get {
-				return _udid;
+				return usb_device.udid;
 			}
 		}
 
-		public string name {
+		public string? name {
 			get {
-				return _name;
+				return null;
 			}
 		}
 
@@ -723,12 +788,148 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private string _udid;
-		private string _name;
+		private Promise<Tunnel>? tunnel_request;
 
-		public PortableCoreDeviceTransport (string udid, string name) {
-			_udid = udid;
-			_name = name;
+		public PortableCoreDeviceTransport (UsbDevice usb_device) {
+			Object (usb_device: usb_device);
+		}
+
+		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+			while (tunnel_request != null) {
+				try {
+					return yield tunnel_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			tunnel_request = new Promise<Tunnel> ();
+
+			try {
+				var tunnel = new PortableTunnel (usb_device);
+				yield tunnel.open (cancellable);
+
+				tunnel_request.resolve (tunnel);
+
+				return tunnel;
+			} catch (GLib.Error e) {
+				tunnel_request.reject (e);
+				tunnel_request = null;
+
+				throw_api_error (e);
+			}
+		}
+	}
+
+	private sealed class PortableTunnel : Object, Tunnel {
+		public UsbDevice usb_device {
+			get;
+			construct;
+		}
+
+		public DiscoveryService discovery {
+			get {
+				assert_not_reached ();
+			}
+		}
+
+		private UsbNcmDriver? ncm;
+
+		public PortableTunnel (UsbDevice usb_device) {
+			Object (usb_device: usb_device);
+		}
+
+		public async void open (Cancellable? cancellable) throws Error, IOError {
+			ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+
+			var source = new TimeoutSource.seconds (1);
+			source.set_callback (open.callback);
+			source.attach (MainContext.get_thread_default ());
+			printerr ("Waiting for 15 seconds befeur launching ze attack...\n");
+			yield;
+			printerr ("Here we gou...\n");
+
+			VirtualNetworkStack netstack = ncm.netstack;
+
+			var sock = yield netstack.create_udp_socket (cancellable);
+			DatagramBased sock_datagram = sock.datagram_based;
+
+			var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: new InetAddress.from_string ("ff02::fb"),
+				port: 5353,
+				scope_id: netstack.scope_id
+			);
+			sock.socket_connect (mdns_address, cancellable);
+			var remoted_mdns_request = make_remoted_mdns_request ();
+			Udp.send (remoted_mdns_request.get_data (), sock_datagram, cancellable);
+
+			var main_context = MainContext.get_thread_default ();
+
+			var in_source = sock_datagram.create_source (IN, cancellable);
+			in_source.set_callback (() => {
+				open.callback ();
+				return Source.REMOVE;
+			});
+			in_source.attach (main_context);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				open.callback ();
+				return Source.REMOVE;
+			});
+			cancel_source.attach (main_context);
+
+			printerr (">>>\n");
+			yield;
+			printerr ("<<<\n");
+
+			cancel_source.destroy ();
+			in_source.destroy ();
+
+			cancellable.set_error_if_cancelled ();
+
+			uint8 response_buf[2048];
+			InetSocketAddress sender;
+			Udp.recv (response_buf, sock_datagram, cancellable, out sender);
+
+			printerr ("PER GRYNT. %s\n", sender.address.to_string ());
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			assert_not_reached ();
+		}
+
+		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
+			assert_not_reached ();
+		}
+
+		private static Bytes make_remoted_mdns_request () {
+			uint16 transaction_id = 0;
+			uint16 flags = 0;
+			uint16 num_questions = 1;
+			uint16 answer_rrs = 0;
+			uint16 authority_rrs = 0;
+			uint16 additional_rrs = 0;
+			string components[] = { "_remoted", "_tcp", "local" };
+			uint16 record_type = 12;
+			uint16 dns_class = 1;
+			return new BufferBuilder (BIG_ENDIAN)
+				.append_uint16 (transaction_id)
+				.append_uint16 (flags)
+				.append_uint16 (num_questions)
+				.append_uint16 (answer_rrs)
+				.append_uint16 (authority_rrs)
+				.append_uint16 (additional_rrs)
+				.append_uint8 ((uint8) components[0].length)
+				.append_string (components[0], StringTerminator.NONE)
+				.append_uint8 ((uint8) components[1].length)
+				.append_string (components[1], StringTerminator.NONE)
+				.append_uint8 ((uint8) components[2].length)
+				.append_string (components[2], StringTerminator.NUL)
+				.append_uint16 (record_type)
+				.append_uint16 (dns_class)
+				.build ();
 		}
 	}
 
@@ -846,7 +1047,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public string name {
+		public string? name {
 			get {
 				return _name;
 			}
