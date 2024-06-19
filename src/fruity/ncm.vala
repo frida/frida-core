@@ -21,11 +21,11 @@ namespace Frida.Fruity {
 		}
 
 		private enum UsbCommSubclass {
-			NCM		= 0x0d,
+			NCM = 0x0d,
 		}
 
 		private enum UsbDataSubclass {
-			UNDEFINED	= 0x00,
+			UNDEFINED = 0x00,
 		}
 
 		private enum UsbCdcDescriptorSubtype {
@@ -96,7 +96,6 @@ namespace Frida.Fruity {
 			uint8 mac_address[6];
 			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,
 				cancellable);
-			printerr ("mac_address_str=\"%s\"\n", mac_address_str);
 			if (mac_address_str.length != 12)
 				throw new Error.PROTOCOL ("Invalid MAC address");
 			for (uint i = 0; i != 6; i++) {
@@ -106,7 +105,6 @@ namespace Frida.Fruity {
 			}
 
 			string ipv6_address = derive_ipv6_link_local_address_from_mac_address (mac_address_str);
-			printerr ("=> ipv6_address=\"%s\"\n", ipv6_address);
 
 			Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
 			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
@@ -127,9 +125,7 @@ namespace Frida.Fruity {
 
 			while (true) {
 				try {
-					size_t n = yield device.bulk_transfer (rx_address, data, 10000, io_cancellable);
-					printerr ("BULK TRANSFER!!!\n");
-
+					size_t n = yield device.bulk_transfer (rx_address, data, uint.MAX, io_cancellable);
 					handle_ncm_frame (data[:n]);
 				} catch (GLib.Error e) {
 					printerr ("Oh noes: %s\n", e.message);
@@ -139,13 +135,11 @@ namespace Frida.Fruity {
 		}
 
 		private void handle_ncm_frame (uint8[] data) throws GLib.Error {
-			hexdump (data);
-
 			var input = new DataInputStream (new MemoryInputStream.from_data (data));
 			input.byte_order = LITTLE_ENDIAN;
 
-			uint8 raw_signature[4 + 1] = { 0, };
-			string signature = (string) raw_signature;
+			uint8 raw_signature[4 + 1];
+			unowned string signature = (string) raw_signature;
 			size_t bytes_read;
 
 			input.read_all (raw_signature[:4], out bytes_read);
@@ -181,7 +175,7 @@ namespace Frida.Fruity {
 			} while (ndp_index != 0);
 		}
 
-		private void on_netif_outgoing_datagram (Bytes datagram) {
+		private async void on_netif_outgoing_datagram (Bytes datagram) {
 			uint16 transfer_header_length = 12;
 			uint16 ndp_header_length = 16;
 			uint16 alignment_padding_length = 2;
@@ -216,10 +210,10 @@ namespace Frida.Fruity {
 				.append_bytes (datagram)
 				.build ();
 
-			int n;
-			var transfer_result = device.handle.bulk_transfer (tx_address, frame.get_data (), out n, 10000);
-			if (transfer_result != SUCCESS)
-				printerr ("transfer_result: %s n=%d\n", transfer_result.get_name (), n);
+			try {
+				yield device.bulk_transfer (tx_address, frame.get_data (), uint.MAX, io_cancellable);
+			} catch (GLib.Error e) {
+			}
 		}
 
 		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {

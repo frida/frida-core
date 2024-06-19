@@ -144,8 +144,7 @@ namespace Frida.Fruity {
 				cancel_source.destroy ();
 			}
 
-			if (transfer.status != COMPLETED)
-				throw new Error.TRANSPORT ("Control transfer failed");
+			Usb.check_transfer (transfer.status, "Control transfer failed");
 
 			return new Bytes (((uint8[]) transfer.control_get_data ())[:transfer.actual_length]);
 		}
@@ -171,8 +170,7 @@ namespace Frida.Fruity {
 				cancel_source.destroy ();
 			}
 
-			if (transfer.status != COMPLETED)
-				throw new Error.TRANSPORT ("Bulk transfer failed");
+			Usb.check_transfer (transfer.status, "Bulk transfer failed");
 
 			return transfer.actual_length;
 		}
@@ -210,10 +208,30 @@ namespace Frida.Fruity {
 
 			string message = @"$prefix: $(error.get_description ())";
 
-			if (error == ACCESS)
-				throw new Error.PERMISSION_DENIED ("%s", message);
+			switch (error) {
+				case ACCESS:
+					throw new Error.PERMISSION_DENIED ("%s", message);
+				case TIMEOUT:
+					throw new Error.TIMED_OUT ("%s", message);
+				default:
+					throw new Error.TRANSPORT ("%s", message);
+			}
+		}
 
-			throw new Error.TRANSPORT ("%s", message);
+		internal static void check_transfer (LibUSB.TransferStatus status, string prefix) throws Error, IOError {
+			if (status == COMPLETED)
+				return;
+
+			string message = @"$prefix: $(status.to_string ())";
+
+			switch (status) {
+				case TIMED_OUT:
+					throw new Error.TIMED_OUT ("%s", message);
+				case CANCELLED:
+					throw new IOError.CANCELLED ("%s", message);
+				default:
+					throw new Error.TRANSPORT ("%s", message);
+			}
 		}
 	}
 }

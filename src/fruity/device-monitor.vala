@@ -665,7 +665,7 @@ namespace Frida.Fruity {
 
 				driver_hack = ncm;
 			} catch (GLib.Error e) {
-				printerr ("%s\n", e.message);
+				printerr ("domain=%s code=%d %s\n", e.domain.to_string (), e.code, e.message);
 			}
 		}
 

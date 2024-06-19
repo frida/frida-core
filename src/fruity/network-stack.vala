@@ -248,11 +248,9 @@ namespace Frida.Fruity {
 			}
 
 			int8 chosen_index = -1;
-			printerr ("[VirtualNetworkStack %p] ipv6_address: %s\n", this, ipv6_address.to_string ());
 			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
-			printerr ("[VirtualNetworkStack %p] raw_ipv6_address.zone: %u\n", this, raw_ipv6_address.zone);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
