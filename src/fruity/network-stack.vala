@@ -226,6 +226,9 @@ namespace Frida.Fruity {
 			LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
 			handle.set_up ();
 
+			var mdns_group = LWIP.IP6Address.parse ("ff02::fb");
+			LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, mdns_group);
+
 			schedule_on_frida_thread (() => {
 				allocated.resolve (true);
 				return Source.REMOVE;
@@ -257,7 +260,7 @@ namespace Frida.Fruity {
 			}
 
 			int8 chosen_index = -1;
-			handle.add_ip6_address (LWIP.IP6Address.parse (ipv6_address.to_string ()), &chosen_index);
+			handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
 		}
@@ -465,8 +468,7 @@ namespace Frida.Fruity {
 				pcb.nagle_disable ();
 				pcb.bind_netif (netstack.handle);
 
-				pcb.connect (LWIP.IP6Address.parse (address.get_address ().to_string ()), address.get_port (),
-						(user_data, pcb, err) => {
+				pcb.connect (ip6_address_from_inet_socket_address (address), address.get_port (), (user_data, pcb, err) => {
 					TcpConnection * self = user_data;
 					if (self != null)
 						self->on_connect ();
@@ -1127,7 +1129,11 @@ namespace Frida.Fruity {
 					var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) packet.bytes.get_size (), POOL);
 					pbuf.take (packet.bytes.get_data ());
 
-					pcb.send (pbuf);
+					InetSocketAddress? dst_addr = packet.address;
+					if (dst_addr != null)
+						pcb.sendto (pbuf, ip6_address_from_inet_socket_address (dst_addr), dst_addr.get_port ());
+					else
+						pcb.send (pbuf);
 				}
 			}
 
@@ -1178,12 +1184,6 @@ namespace Frida.Fruity {
 				var source = new IdleSource ();
 				source.set_callback ((owned) function);
 				source.attach (main_context);
-			}
-
-			private static LWIP.IP6Address ip6_address_from_inet_socket_address (InetSocketAddress address) {
-				var addr = LWIP.IP6Address.parse (address.get_address ().to_string ());
-				addr.zone = (uint8) address.scope_id;
-				return addr;
 			}
 
 			private class Request<T> {
@@ -1260,6 +1260,16 @@ namespace Frida.Fruity {
 				DatagramBasedSourceFunc f = (DatagramBasedSourceFunc) callback;
 				return f (socket, socket.pending_io);
 			}
+		}
+
+		private static LWIP.IP6Address ip6_address_from_inet_socket_address (InetSocketAddress address) {
+			var addr = ip6_address_from_inet_address (address.get_address ());
+			addr.zone = (uint8) address.scope_id;
+			return addr;
+		}
+
+		private static LWIP.IP6Address ip6_address_from_inet_address (InetAddress address) {
+			return LWIP.IP6Address.parse (address.to_string ());
 		}
 	}
 }

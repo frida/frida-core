@@ -71,6 +71,11 @@ namespace Frida {
 		}
 
 		public void send (uint8[] data, DatagramBased sink, Cancellable? cancellable) throws Error, IOError {
+			send_to (data, null, sink, cancellable);
+		}
+
+		public void send_to (uint8[] data, InetSocketAddress? dest_addr, DatagramBased sink, Cancellable? cancellable)
+				throws Error, IOError {
 			var v = OutputVector ();
 			v.buffer = data;
 			v.size = data.length;
@@ -78,6 +83,7 @@ namespace Frida {
 			OutputVector[] vectors = { v };
 
 			var m = OutputMessage ();
+			m.address = dest_addr;
 			m.vectors = vectors;
 			m.num_vectors = vectors.length;
 

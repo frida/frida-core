@@ -124,6 +124,18 @@ namespace LWIP {
 		ANY,
 	}
 
+	[CCode (cheader_filename = "lwip/mld6.h", cname = "struct netif", cprefix = "netif_")]
+	namespace IP6MulticastListenerDiscovery {
+		[CCode (cname = "mld6_joingroup")]
+		public ErrorCode join_group (IP6Address src_addr, IP6Address group_addr);
+		[CCode (cname = "mld6_joingroup_netif")]
+		public ErrorCode join_group_netif (ref NetworkInterface netif, IP6Address group_addr);
+		[CCode (cname = "mld6_leavegroup")]
+		public ErrorCode leave_group (IP6Address src_addr, IP6Address group_addr);
+		[CCode (cname = "mld6_leavegroup_netif")]
+		public ErrorCode leave_group_netif (ref NetworkInterface netif, IP6Address group_addr);
+	}
+
 	[Compact]
 	[CCode (cheader_filename = "lwip/pbuf.h", cname = "struct pbuf", cprefix = "pbuf_")]
 	public class PacketBuffer {
@@ -230,6 +242,7 @@ namespace LWIP {
 		public ErrorCode connect (IP6Address ipaddr, uint16 port);
 
 		public ErrorCode send (PacketBuffer pbuf);
+		public ErrorCode sendto (PacketBuffer pbuf, IP6Address dst_ip, uint16 dst_port);
 
 		[CCode (cname = "tcp_recv_fn", instance_pos = 0)]
 		public delegate void RecvFunc (UdpPcb pcb, owned PacketBuffer? pbuf, IP6Address addr, uint16 port);
