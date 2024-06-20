@@ -46,6 +46,14 @@ namespace Frida.Fruity {
 			ETHERNET = 0x0f,
 		}
 
+		private enum EtherType {
+			IPV6 = 0x86dd,
+		}
+
+		private enum IPV6NextHeader {
+			UDP = 0x11,
+		}
+
 		public static async UsbNcmDriver open (UsbDevice device, Cancellable? cancellable = null) throws Error, IOError {
 			var driver = new UsbNcmDriver (device);
 
@@ -184,15 +192,15 @@ namespace Frida.Fruity {
 					input.read_all (datagram_buf, out bytes_read);
 					input.seek (previous_offset, SET);
 
-					var datagram = new Bytes.take ((owned) datagram_buf)
+					var datagram = new Bytes.take ((owned) datagram_buf);
 
-					if (_remote_ipv6_address == null && datagram_length >= 0x3e) {
-						var b = new Buffer (datagram, BIG_ENDIAN);
-						if (b.read_uint16 (12) == 0x86dd) {
-						}
+					if (_remote_ipv6_address == null) {
+						_remote_ipv6_address = try_infer_remote_address_from_datagram (datagram);
+						if (_remote_ipv6_address != null)
+							notify_property ("remote-ipv6-address");
 					}
 
-					_netstack.handle_incoming_datagram ();
+					_netstack.handle_incoming_datagram (datagram);
 				}
 
 				ndp_index = next_ndp_index;
@@ -270,7 +278,7 @@ namespace Frida.Fruity {
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
 		}
 
-		private string derive_ipv6_link_local_address_from_mac_address (string mac_address) {
+		private static string derive_ipv6_link_local_address_from_mac_address (string mac_address) {
 			uint top_octet;
 			mac_address.substring (0, 2).scanf ("%02X", out top_octet);
 
@@ -280,6 +288,23 @@ namespace Frida.Fruity {
 				mac_address[4:6],
 				mac_address[6:8],
 				mac_address[8:]);
+		}
+
+		private static InetAddress? try_infer_remote_address_from_datagram (Bytes datagram) {
+			if (datagram.get_size () < 0x3e)
+				return null;
+
+			var buf = new Buffer (datagram, BIG_ENDIAN);
+
+			var ethertype = (EtherType) buf.read_uint16 (12);
+			if (ethertype != IPV6)
+				return null;
+
+			var next_header = (IPV6NextHeader) buf.read_uint8 (20);
+			if (next_header != UDP)
+				return null;
+
+			return new InetAddress.from_bytes (datagram[22:22 + 16].get_data (), IPV6);
 		}
 	}
 }

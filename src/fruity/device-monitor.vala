@@ -841,6 +841,25 @@ namespace Frida.Fruity {
 		}
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
+			var peer = yield locate_ncm_peer (cancellable);
+			printerr ("Found peer: %s\n", peer.ip.to_string ());
+
+			throw new Error.NOT_SUPPORTED ("Not yet fully implemented");
+		}
+
+		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
+			var device_ifaddrs = detect_ncm_ifaddrs_on_system ();
+			if (!device_ifaddrs.is_empty)
+				return yield locate_ncm_peer_on_system_netifs (device_ifaddrs, cancellable);
+			return yield establish_ncm_peer_using_our_driver (cancellable);
+		}
+
+		private class NcmPeer {
+			public NetworkStack netstack;
+			public InetAddress ip;
+		}
+
+		private Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system () {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
@@ -866,52 +885,39 @@ namespace Frida.Fruity {
 			}
 #endif
 
-			NetworkStack netstack;
-			InetAddress local_ip;
-			if (device_ifaddrs.is_empty) {
-				printerr ("Using our NCM driver\n");
-				ncm = yield UsbNcmDriver.open (usb_device, cancellable);
-				VirtualNetworkStack vnetstack = ncm.netstack;
-				netstack = vnetstack;
-				local_ip = vnetstack.ipv6_address;
-			} else {
-				var addr = device_ifaddrs[device_ifaddrs.size - 1];
-				var scope_id = addr.scope_id;
-				printerr ("Using system network stack with scope ID: %u\n", scope_id);
-				netstack = new SystemNetworkStack (scope_id);
-				local_ip = addr.get_address ();
-			}
+			return device_ifaddrs;
+		}
 
-			var source = new TimeoutSource.seconds (3);
-			source.set_callback (open.callback);
-			source.attach (MainContext.get_thread_default ());
-			printerr ("Waiting three seconds...\n");
-			yield;
-			printerr ("Here we go...\n");
-
-			var sock = yield netstack.create_udp_socket (cancellable);
-			sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: local_ip,
-				scope_id: netstack.scope_id
-			));
-			DatagramBased sock_datagram = sock.datagram_based;
-
+		private async NcmPeer locate_ncm_peer_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
+				throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not yet fully implemented");
+#if 0
 			var remoted_mdns_request = make_remoted_mdns_request ();
-			var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: new InetAddress.from_string ("ff02::fb"),
-				port: 5353,
-				scope_id: netstack.scope_id
-			);
-			Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
+			foreach (var addr in ifaddrs) {
+				var local_ip = addr.get_address ();
+				var netstack = new SystemNetworkStack (addr.scope_id);
 
-			var main_context = MainContext.get_thread_default ();
+				var sock = netstack.create_udp_socket ();
+				sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: local_ip,
+					scope_id: netstack.scope_id
+				));
+				DatagramBased sock_datagram = sock.datagram_based;
 
-			var in_source = sock_datagram.create_source (IN, cancellable);
-			in_source.set_callback (() => {
-				open.callback ();
-				return Source.REMOVE;
-			});
-			in_source.attach (main_context);
+				var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: new InetAddress.from_string ("ff02::fb"),
+					port: 5353,
+					scope_id: netstack.scope_id
+				);
+				Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
+
+				var in_source = sock_datagram.create_source (IN, cancellable);
+				in_source.set_callback (() => {
+					locate_ncm_peer_on_system_netifs.callback ();
+					return Source.REMOVE;
+				});
+				in_source.attach (main_context);
+			}
 
 			var cancel_source = new CancellableSource (cancellable);
 			cancel_source.set_callback (() => {
@@ -933,7 +939,44 @@ namespace Frida.Fruity {
 			InetSocketAddress sender;
 			Udp.recv (response_buf, sock_datagram, cancellable, out sender);
 
-			printerr ("PER GRYNT. %s\n", sender.address.to_string ());
+			printerr ("Detected remote address: %s\n", sender.address.to_string ());
+#endif
+		}
+
+		private async NcmPeer establish_ncm_peer_using_our_driver (Cancellable? cancellable) throws Error, IOError {
+			ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+
+			if (ncm.remote_ipv6_address == null) {
+				ulong change_handler = ncm.notify["remote-ipv6-address"].connect ((obj, pspec) => {
+					establish_ncm_peer_using_our_driver.callback ();
+				});
+
+				var main_context = MainContext.get_thread_default ();
+
+				var timeout_source = new TimeoutSource.seconds (2);
+				timeout_source.set_callback (establish_ncm_peer_using_our_driver.callback);
+				timeout_source.attach (main_context);
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (establish_ncm_peer_using_our_driver.callback);
+				cancel_source.attach (main_context);
+
+				yield;
+
+				cancel_source.destroy ();
+				timeout_source.destroy ();
+				ncm.disconnect (change_handler);
+
+				cancellable.set_error_if_cancelled ();
+
+				if (ncm.remote_ipv6_address == null)
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for the NCM remote IPv6 address");
+			}
+
+			return new NcmPeer () {
+				netstack = ncm.netstack,
+				ip = ncm.remote_ipv6_address
+			};
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
