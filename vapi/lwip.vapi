@@ -247,6 +247,12 @@ namespace LWIP {
 		[CCode (cname = "tcp_recv_fn", instance_pos = 0)]
 		public delegate void RecvFunc (UdpPcb pcb, owned PacketBuffer? pbuf, IP6Address addr, uint16 port);
 
+		public IP6Address local_ip;
+		public IP6Address remote_ip;
+		public uint8 netif_idx;
+		public uint8 so_options;
+		public uint8 tos;
+		public uint8 ttl;
 		public uint16 local_port;
 		public uint16 remote_port;
 	}

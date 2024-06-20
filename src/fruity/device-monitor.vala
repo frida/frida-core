@@ -853,20 +853,18 @@ namespace Frida.Fruity {
 			VirtualNetworkStack netstack = ncm.netstack;
 
 			var sock = yield netstack.create_udp_socket (cancellable);
-			//var local_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-			//	address: netstack.ipv6_address,
-			//	scope_id: netstack.scope_id
-			//);
-			//sock.bind (local_address);
-			sock.bind (new InetSocketAddress (new InetAddress.any (IPV6), 0));
+			sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: netstack.ipv6_address,
+				scope_id: netstack.scope_id
+			));
 			DatagramBased sock_datagram = sock.datagram_based;
 
+			var remoted_mdns_request = make_remoted_mdns_request ();
 			var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: new InetAddress.from_string ("ff02::fb"),
 				port: 5353,
 				scope_id: netstack.scope_id
 			);
-			var remoted_mdns_request = make_remoted_mdns_request ();
 			Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
 
 			var main_context = MainContext.get_thread_default ();

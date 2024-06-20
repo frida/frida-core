@@ -16,7 +16,7 @@ namespace Frida.Fruity {
 		}
 
 		public abstract void bind (InetSocketAddress address) throws Error;
-		public abstract SocketAddress get_local_address () throws Error;
+		public abstract InetSocketAddress get_local_address () throws Error;
 		public abstract void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error;
 	}
 
@@ -80,9 +80,9 @@ namespace Frida.Fruity {
 				}
 			}
 
-			public SocketAddress get_local_address () throws Error {
+			public InetSocketAddress get_local_address () throws Error {
 				try {
-					return handle.get_local_address ();
+					return (InetSocketAddress) handle.get_local_address ();
 				} catch (GLib.Error e) {
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}
@@ -226,9 +226,6 @@ namespace Frida.Fruity {
 			LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
 			handle.set_up ();
 
-			var mdns_group = LWIP.IP6Address.parse ("ff02::fb");
-			LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, mdns_group);
-
 			schedule_on_frida_thread (() => {
 				allocated.resolve (true);
 				return Source.REMOVE;
@@ -250,19 +247,25 @@ namespace Frida.Fruity {
 			}
 
 			handle.mtu = mtu;
+			handle.flags = BROADCAST;
 
 			if (ethernet_address != null) {
 				assert (ethernet_address.length == LWIP.Ethernet.HWADDR_LEN);
 				Memory.copy (&handle.hwaddr, ethernet_address.get_data (), LWIP.Ethernet.HWADDR_LEN);
 				handle.hwaddr_len = LWIP.Ethernet.HWADDR_LEN;
 
-				handle.flags = BROADCAST | ETHARP;
+				handle.flags |= ETHARP;
 			}
 
 			int8 chosen_index = -1;
 			handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
 			handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
+
+			//var icmp_group = LWIP.IP6Address.parse ("ff02::1");
+			//LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, icmp_group);
+			//var mdns_group = LWIP.IP6Address.parse ("ff02::fb");
+			//LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, mdns_group);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
@@ -899,6 +902,8 @@ namespace Frida.Fruity {
 
 			private unowned LWIP.UdpPcb? pcb;
 			private Gee.Queue<BindRequest> bind_requests = new Gee.ArrayQueue<BindRequest> ();
+			private Gee.Queue<GetLocalAddressRequest> get_local_address_requests =
+				new Gee.ArrayQueue<GetLocalAddressRequest> ();
 			private Gee.Queue<ConnectRequest> connect_requests = new Gee.ArrayQueue<ConnectRequest> ();
 			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
@@ -992,11 +997,7 @@ namespace Frida.Fruity {
 				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
 
 				var bytes = new Bytes (chunk[:pbuf.tot_len]);
-				var sender = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-					address: new InetAddress.from_string (addr.to_string ()),
-					port: port,
-					scope_id: netstack.raw_ipv6_address.zone
-				);
+				var sender = ip6_address_to_inet_socket_address (addr, port);
 				var packet = new Packet (bytes, sender);
 
 				lock (state)
@@ -1019,19 +1020,29 @@ namespace Frida.Fruity {
 				lock (state)
 					req = bind_requests.poll ();
 
-				var err = pcb.bind (ip6_address_from_inet_socket_address (req.address));
+				var err = pcb.bind (ip6_address_from_inet_socket_address (req.address), req.address.get_port ());
 				if (err == OK)
 					req.resolve (true);
 				else
 					req.reject (err);
 			}
 
-			public SocketAddress get_local_address () throws Error {
-				return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-					address: netstack.ipv6_address,
-					port: pcb.local_port,
-					scope_id: netstack.raw_ipv6_address.zone
-				);
+			public InetSocketAddress get_local_address () throws Error {
+				var req = new GetLocalAddressRequest ();
+
+				lock (state)
+					get_local_address_requests.offer (req);
+				LWIP.Runtime.schedule (do_get_local_address);
+
+				return req.join ();
+			}
+
+			private void do_get_local_address () {
+				GetLocalAddressRequest req;
+				lock (state)
+					req = get_local_address_requests.poll ();
+
+				req.resolve (ip6_address_to_inet_socket_address (pcb.local_ip, pcb.local_port));
 			}
 
 			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
@@ -1212,6 +1223,10 @@ namespace Frida.Fruity {
 				public InetSocketAddress address;
 			}
 
+			private class GetLocalAddressRequest : Request<InetSocketAddress> {
+				public InetSocketAddress address;
+			}
+
 			private class ConnectRequest : Request<bool> {
 				public InetSocketAddress address;
 			}
@@ -1270,6 +1285,18 @@ namespace Frida.Fruity {
 
 		private static LWIP.IP6Address ip6_address_from_inet_address (InetAddress address) {
 			return LWIP.IP6Address.parse (address.to_string ());
+		}
+
+		private static InetSocketAddress ip6_address_to_inet_socket_address (LWIP.IP6Address address, uint16 port) {
+			return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: ip6_address_to_inet_address (address),
+				port: port,
+				scope_id: address.zone
+			);
+		}
+
+		private static InetAddress ip6_address_to_inet_address (LWIP.IP6Address address) {
+			return new InetAddress.from_string (address.to_string ());
 		}
 	}
 }
