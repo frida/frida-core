@@ -224,6 +224,7 @@ namespace Frida.Fruity {
 
 		private void start () {
 			LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
+			handle.set_link_up ();
 			handle.set_up ();
 
 			schedule_on_frida_thread (() => {
@@ -257,9 +258,11 @@ namespace Frida.Fruity {
 				handle.flags |= ETHARP;
 			}
 
-			int8 chosen_index = -1;
-			handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
-			handle.ip6_addr_set_state (chosen_index, PREFERRED);
+			//int8 chosen_index = -1;
+			//handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
+			//handle.ip6_addr_set_state (chosen_index, PREFERRED);
+			int8 chosen_index = 0;
+			handle.create_ip6_linklocal_address (true);
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
 
 			//var icmp_group = LWIP.IP6Address.parse ("ff02::1");
@@ -963,6 +966,7 @@ namespace Frida.Fruity {
 
 			private void allocate () {
 				pcb = LWIP.UdpPcb.make (V6);
+				pcb.mcast_ttl = 1;
 				pcb.set_recv_callback ((pcb, pbuf, addr, port) => {
 					on_recv ((owned) pbuf, addr, port);
 				});

@@ -113,7 +113,8 @@ namespace Frida.Fruity {
 			string ipv6_address = derive_ipv6_link_local_address_from_mac_address (mac_address_str);
 			printerr ("Using ipv6_address=\"%s\"\n", ipv6_address);
 
-			Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
+			handle.detach_kernel_driver (data_iface);
+			//Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
 			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");

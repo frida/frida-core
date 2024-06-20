@@ -24,7 +24,11 @@ namespace LWIP {
 		public void set_up ();
 		public void set_down ();
 
+		public void set_link_up ();
+		public void set_link_down ();
+
 		public void ip6_addr_set (int8 addr_idx, IP6Address address);
+		public void create_ip6_linklocal_address (bool from_mac_48bit);
 		public ErrorCode add_ip6_address (IP6Address address, int8 * chosen_index = null);
 		public void ip6_addr_set_state (int8 addr_index, IP6AddressState state);
 
@@ -253,8 +257,13 @@ namespace LWIP {
 		public uint8 so_options;
 		public uint8 tos;
 		public uint8 ttl;
+
+		public uint8 flags;
 		public uint16 local_port;
 		public uint16 remote_port;
+
+		public uint8 mcast_ifindex;
+		public uint8 mcast_ttl;
 	}
 
 	[CCode (cheader_filename = "lwip/err.h", cname = "err_t", cprefix = "ERR_", lower_case_cprefix = "err_", has_type_id = false)]

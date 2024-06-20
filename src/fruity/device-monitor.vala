@@ -842,6 +842,8 @@ namespace Frida.Fruity {
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
+
+#if LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
 			printerr ("Our UDID: %s\n", udid);
@@ -862,6 +864,7 @@ namespace Frida.Fruity {
 				printerr ("MATCHES!\n");
 				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
 			}
+#endif
 
 			NetworkStack netstack;
 			InetAddress local_ip;
@@ -879,10 +882,10 @@ namespace Frida.Fruity {
 				local_ip = addr.get_address ();
 			}
 
-			var source = new TimeoutSource.seconds (1);
+			var source = new TimeoutSource.seconds (3);
 			source.set_callback (open.callback);
 			source.attach (MainContext.get_thread_default ());
-			printerr ("Waiting...\n");
+			printerr ("Waiting three seconds...\n");
 			yield;
 			printerr ("Here we go...\n");
 
