@@ -841,7 +841,43 @@ namespace Frida.Fruity {
 		}
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
-			ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
+			var fruit_finder = FruitFinder.make_default ();
+			unowned string udid = usb_device.udid;
+			printerr ("Our UDID: %s\n", udid);
+			string raw_udid = udid.replace ("-", "");
+			Linux.Network.IfAddrs ifaddrs;
+			Linux.Network.getifaddrs (out ifaddrs);
+			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
+				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
+					continue;
+
+				string? candidate_udid = fruit_finder.udid_from_iface (candidate.ifa_name);
+				printerr ("candidate_udid=%s\n", candidate_udid);
+				if (candidate_udid != raw_udid) {
+					printerr ("Not a match!\n");
+					continue;
+				}
+
+				printerr ("MATCHES!\n");
+				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
+			}
+
+			NetworkStack netstack;
+			InetAddress local_ip;
+			if (device_ifaddrs.is_empty) {
+				printerr ("Using our NCM driver\n");
+				ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+				VirtualNetworkStack vnetstack = ncm.netstack;
+				netstack = vnetstack;
+				local_ip = vnetstack.ipv6_address;
+			} else {
+				var addr = device_ifaddrs[device_ifaddrs.size - 1];
+				var scope_id = addr.scope_id;
+				printerr ("Using system network stack with scope ID: %u\n", scope_id);
+				netstack = new SystemNetworkStack (scope_id);
+				local_ip = addr.get_address ();
+			}
 
 			var source = new TimeoutSource.seconds (1);
 			source.set_callback (open.callback);
@@ -850,11 +886,9 @@ namespace Frida.Fruity {
 			yield;
 			printerr ("Here we go...\n");
 
-			VirtualNetworkStack netstack = ncm.netstack;
-
 			var sock = yield netstack.create_udp_socket (cancellable);
 			sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: netstack.ipv6_address,
+				address: local_ip,
 				scope_id: netstack.scope_id
 			));
 			DatagramBased sock_datagram = sock.datagram_based;

@@ -181,7 +181,13 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			return yield tunnel_connection.open_connection (port, cancellable);
+			var netstack = tunnel_connection.tunnel_netstack;
+			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tunnel_connection.remote_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
+			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 	}
 
