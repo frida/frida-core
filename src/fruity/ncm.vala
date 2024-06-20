@@ -12,6 +12,12 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public InetAddress? remote_ipv6_address {
+			get {
+				return _remote_ipv6_address;
+			}
+		}
+
 		private uint8 data_iface;
 		private int data_altsetting;
 		private uint8 rx_address;
@@ -19,6 +25,8 @@ namespace Frida.Fruity {
 
 		private VirtualNetworkStack? _netstack;
 		private uint16 next_outgoing_sequence = 1;
+
+		private InetAddress? _remote_ipv6_address;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -172,11 +180,19 @@ namespace Frida.Fruity {
 
 					int64 previous_offset = input.tell ();
 					input.seek (datagram_index, SET);
-					var datagram = new uint8[datagram_length];
-					input.read_all (datagram, out bytes_read);
+					var datagram_buf = new uint8[datagram_length];
+					input.read_all (datagram_buf, out bytes_read);
 					input.seek (previous_offset, SET);
 
-					_netstack.handle_incoming_datagram (new Bytes.take ((owned) datagram));
+					var datagram = new Bytes.take ((owned) datagram_buf)
+
+					if (_remote_ipv6_address == null && datagram_length >= 0x3e) {
+						var b = new Buffer (datagram, BIG_ENDIAN);
+						if (b.read_uint16 (12) == 0x86dd) {
+						}
+					}
+
+					_netstack.handle_incoming_datagram ();
 				}
 
 				ndp_index = next_ndp_index;

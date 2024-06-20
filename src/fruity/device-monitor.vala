@@ -953,7 +953,7 @@ namespace Frida.Fruity {
 			uint16 additional_rrs = 0;
 			string components[] = { "_remoted", "_tcp", "local" };
 			uint16 record_type = 12;
-			uint16 dns_class = 1;
+			uint16 dns_class = 1 | 0x8000;
 			return new BufferBuilder (BIG_ENDIAN)
 				.append_uint16 (transaction_id)
 				.append_uint16 (flags)
