@@ -140,6 +140,10 @@ namespace Frida.Fruity {
 			return true;
 		}
 
+		public void close () {
+			io_cancellable.cancel ();
+		}
+
 		private async void process_incoming_datagrams () {
 			var data = new uint8[64 * 1024];
 

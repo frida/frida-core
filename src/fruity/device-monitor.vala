@@ -830,11 +830,13 @@ namespace Frida.Fruity {
 
 		public DiscoveryService discovery {
 			get {
-				assert_not_reached ();
+				return _discovery_service;
 			}
 		}
 
 		private UsbNcmDriver? ncm;
+		private TunnelConnection? tunnel_connection;
+		private DiscoveryService? _discovery_service;
 
 		public PortableTunnel (UsbDevice usb_device) {
 			Object (usb_device: usb_device);
@@ -881,6 +883,9 @@ namespace Frida.Fruity {
 			);
 			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
 			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+
+			tunnel_connection = tc;
+			_discovery_service = disco;
 		}
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
@@ -1016,11 +1021,20 @@ namespace Frida.Fruity {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
+			_discovery_service.close ();
+			tunnel_connection.cancel ();
+			if (ncm != null)
+				ncm.close ();
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			assert_not_reached ();
+			var netstack = tunnel_connection.tunnel_netstack;
+			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tunnel_connection.remote_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
+			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 
 		private static Bytes make_remoted_mdns_request () {

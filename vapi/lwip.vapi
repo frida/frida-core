@@ -96,8 +96,8 @@ namespace LWIP {
 		[CCode (cname = "ip6addr_aton")]
 		public static IP6Address parse (string str);
 
-		[CCode (cname = "ip6addr_ntoa")]
-		public unowned string to_string ();
+		[CCode (cname = "ip6addr_ntoa_r")]
+		public unowned string? to_string (char[] buf);
 
 		public uint32 addr[4];
 		public uint8 zone;

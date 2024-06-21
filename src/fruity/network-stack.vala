@@ -1,6 +1,10 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public interface NetworkStack : Object {
+		public abstract InetAddress listener_ip {
+			get;
+		}
+
 		public abstract uint scope_id {
 			get;
 		}
@@ -21,16 +25,24 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class SystemNetworkStack : Object, NetworkStack {
+		public InetAddress listener_ip {
+			get {
+				return _listener_ip;
+			}
+		}
+
 		public uint scope_id {
 			get {
 				return _scope_id;
 			}
 		}
 
+		private InetAddress _listener_ip;
 		private uint _scope_id;
 
-		public SystemNetworkStack (uint scope_id) {
-			this._scope_id = scope_id;
+		public SystemNetworkStack (InetAddress listener_ip, uint scope_id) {
+			_listener_ip = listener_ip;
+			_scope_id = scope_id;
 		}
 
 		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable) throws Error, IOError {
@@ -111,6 +123,14 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public InetAddress listener_ip {
+			get {
+				if (_cached_listener_ip == null)
+					_cached_listener_ip = ip6_address_to_inet_address (raw_ipv6_address);
+				return _cached_listener_ip;
+			}
+		}
+
 		public uint scope_id {
 			get {
 				return raw_ipv6_address.zone;
@@ -128,6 +148,7 @@ namespace Frida.Fruity {
 
 		private LWIP.NetworkInterface handle;
 		private LWIP.IP6Address raw_ipv6_address;
+		private InetAddress? _cached_listener_ip;
 
 		private MainContext main_context;
 
@@ -160,6 +181,40 @@ namespace Frida.Fruity {
 				return OK;
 			});
 			state = STARTED;
+		}
+
+		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
+			VirtualNetworkStack * self = handle.state;
+			self->configure_netif (ref handle);
+			return OK;
+		}
+
+		private void configure_netif (ref LWIP.NetworkInterface handle) {
+			if (ethernet_address != null) {
+				handle.output_ip6 = LWIP.Ethernet.IPv6.output;
+				handle.linkoutput = on_netif_link_output;
+			} else {
+				handle.output_ip6 = on_netif_output_ip6;
+			}
+
+			handle.mtu = mtu;
+			handle.flags = BROADCAST;
+
+			if (ethernet_address != null) {
+				assert (ethernet_address.length == LWIP.Ethernet.HWADDR_LEN);
+				Memory.copy (&handle.hwaddr, ethernet_address.get_data (), LWIP.Ethernet.HWADDR_LEN);
+				handle.hwaddr_len = LWIP.Ethernet.HWADDR_LEN;
+
+				handle.flags |= ETHARP;
+			}
+
+			int8 chosen_index = 0;
+			if (ipv6_address != null)
+				handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
+			else
+				handle.create_ip6_linklocal_address (true);
+			handle.ip6_addr_set_state (chosen_index, PREFERRED); // No need for conflict detection.
+			raw_ipv6_address = handle.ip6_addr[chosen_index];
 		}
 
 		~VirtualNetworkStack () {
@@ -202,45 +257,6 @@ namespace Frida.Fruity {
 
 				return err;
 			}));
-		}
-
-		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
-			VirtualNetworkStack * self = handle.state;
-			self->configure_netif (ref handle);
-			return OK;
-		}
-
-		private void configure_netif (ref LWIP.NetworkInterface handle) {
-			if (ethernet_address != null) {
-				handle.output_ip6 = LWIP.Ethernet.IPv6.output;
-				handle.linkoutput = on_netif_link_output;
-			} else {
-				handle.output_ip6 = on_netif_output_ip6;
-			}
-
-			handle.mtu = mtu;
-			handle.flags = BROADCAST;
-
-			if (ethernet_address != null) {
-				assert (ethernet_address.length == LWIP.Ethernet.HWADDR_LEN);
-				Memory.copy (&handle.hwaddr, ethernet_address.get_data (), LWIP.Ethernet.HWADDR_LEN);
-				handle.hwaddr_len = LWIP.Ethernet.HWADDR_LEN;
-
-				handle.flags |= ETHARP;
-			}
-
-			int8 chosen_index = 0;
-			if (ipv6_address != null)
-				handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
-			else
-				handle.create_ip6_linklocal_address (true);
-			handle.ip6_addr_set_state (chosen_index, PREFERRED); // No need for conflict detection.
-			raw_ipv6_address = handle.ip6_addr[chosen_index];
-
-			//var icmp_group = LWIP.IP6Address.parse ("ff02::1");
-			//LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, icmp_group);
-			//var mdns_group = LWIP.IP6Address.parse ("ff02::fb");
-			//LWIP.IP6MulticastListenerDiscovery.join_group_netif (ref handle, mdns_group);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
@@ -336,8 +352,10 @@ namespace Frida.Fruity {
 			lock (pcap) {
 				try {
 					if (pcap == null) {
+						char buf[40];
+						unowned string addr = raw_ipv6_address.to_string (buf);
 						var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP),
-							"vns-%s.pcap".printf (raw_ipv6_address.to_string ().replace (":", "")));
+							"vns-%s.pcap".printf (addr.replace (":", "")));
 						try {
 							f.delete ();
 						} catch (GLib.Error e) {
@@ -415,7 +433,6 @@ namespace Frida.Fruity {
 			private IOCondition events = 0;
 			private ByteArray rx_buf = new ByteArray.sized (64 * 1024);
 			private ByteArray tx_buf = new ByteArray.sized (64 * 1024);
-			private size_t rx_bytes_to_acknowledge = 0;
 			private size_t tx_space_available = 0;
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
@@ -530,7 +547,10 @@ namespace Frida.Fruity {
 					pcb = null;
 				}
 
-				unref ();
+				schedule_on_frida_thread (() => {
+					unref ();
+					return Source.REMOVE;
+				});
 			}
 
 			private void on_connect () {
@@ -610,15 +630,30 @@ namespace Frida.Fruity {
 			}
 
 			public ssize_t recv (uint8[] buffer) throws IOError {
-				ssize_t n;
-				lock (state) {
-					n = ssize_t.min (buffer.length, rx_buf.len);
-					if (n != 0) {
+				ssize_t n = 0;
+
+				netstack.perform_on_lwip_thread (() => {
+					if (pcb == null)
+						return OK;
+
+					lock (state) {
+						n = ssize_t.min (buffer.length, rx_buf.len);
+						if (n == 0)
+							return OK;
 						Memory.copy (buffer, rx_buf.data, n);
 						rx_buf.remove_range (0, (uint) n);
-						rx_bytes_to_acknowledge += n;
 					}
-				}
+
+					size_t remainder = n;
+					while (remainder != 0) {
+						uint16 chunk = (uint16) size_t.min (remainder, uint16.MAX);
+						pcb.notify_received (chunk);
+						remainder -= chunk;
+					}
+
+					return OK;
+				});
+
 				if (n == 0) {
 					if (_state == CLOSED)
 						return 0;
@@ -627,72 +662,53 @@ namespace Frida.Fruity {
 
 				update_events ();
 
-				LWIP.Runtime.schedule (do_acknowledge_rx_bytes);
-
 				return n;
 			}
 
-			private void do_acknowledge_rx_bytes () {
-				if (pcb == null)
-					return;
-
-				size_t n;
-				lock (state) {
-					n = rx_bytes_to_acknowledge;
-					rx_bytes_to_acknowledge = 0;
-				}
-
-				size_t remainder = n;
-				while (remainder != 0) {
-					uint16 chunk = (uint16) size_t.min (remainder, uint16.MAX);
-					pcb.notify_received (chunk);
-					remainder -= chunk;
-				}
-			}
-
 			public ssize_t send (uint8[] buffer) throws IOError {
-				ssize_t n;
-				lock (state) {
-					n = ssize_t.min (buffer.length, (ssize_t) tx_space_available);
-					if (n != 0) {
+				ssize_t n = 0;
+
+				netstack.perform_on_lwip_thread (() => {
+					if (pcb == null)
+						return OK;
+
+					lock (state) {
+						n = ssize_t.min (buffer.length, (ssize_t) tx_space_available);
+						if (n == 0)
+							return OK;
 						tx_buf.append (buffer[:n]);
 						tx_space_available -= n;
 					}
-				}
+
+					size_t available_space = pcb.query_available_send_buffer_space ();
+
+					uint8[]? data = null;
+					lock (state) {
+						size_t num_bytes_to_write = size_t.min (tx_buf.len, available_space);
+						if (num_bytes_to_write != 0) {
+							data = tx_buf.data[:num_bytes_to_write];
+							tx_buf.remove_range (0, (uint) num_bytes_to_write);
+						}
+					}
+					if (data == null)
+						return OK;
+
+					pcb.write (data, COPY);
+					pcb.output ();
+
+					available_space = pcb.query_available_send_buffer_space ();
+					lock (state)
+						tx_space_available = available_space - tx_buf.len;
+
+					return OK;
+				});
+
 				if (n == 0)
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 
 				update_events ();
 
-				LWIP.Runtime.schedule (do_send);
-
 				return n;
-			}
-
-			private void do_send () {
-				if (pcb == null)
-					return;
-
-				size_t available_space = pcb.query_available_send_buffer_space ();
-
-				uint8[]? data = null;
-				lock (state) {
-					size_t n = size_t.min (tx_buf.len, available_space);
-					if (n != 0) {
-						data = tx_buf.data[:n];
-						tx_buf.remove_range (0, (uint) n);
-					}
-				}
-				if (data == null)
-					return;
-
-				pcb.write (data, COPY);
-				pcb.output ();
-
-				available_space = pcb.query_available_send_buffer_space ();
-				lock (state)
-					tx_space_available = available_space - tx_buf.len;
-				update_events ();
 			}
 
 			public void register_source (Source source, IOCondition condition) {
@@ -929,15 +945,11 @@ namespace Frida.Fruity {
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
-			private MainContext main_context;
-
 			public Ipv6UdpSocket (VirtualNetworkStack netstack) {
 				Object (netstack: netstack);
 			}
 
 			construct {
-				main_context = MainContext.ref_thread_default ();
-
 				netstack.perform_on_lwip_thread (() => {
 					pcb = LWIP.UdpPcb.make (V6);
 					pcb.set_recv_callback (on_recv);
@@ -1112,12 +1124,6 @@ namespace Frida.Fruity {
 				notify_property ("pending-io");
 			}
 
-			private void schedule_on_frida_thread (owned SourceFunc function) {
-				var source = new IdleSource ();
-				source.set_callback ((owned) function);
-				source.attach (main_context);
-			}
-
 			private class Packet {
 				public Bytes bytes;
 				public InetSocketAddress? address;
@@ -1193,7 +1199,8 @@ namespace Frida.Fruity {
 		}
 
 		private static InetAddress ip6_address_to_inet_address (LWIP.IP6Address address) {
-			return new InetAddress.from_string (address.to_string ());
+			char buf[40];
+			return new InetAddress.from_string (address.to_string (buf));
 		}
 	}
 }

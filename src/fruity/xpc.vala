@@ -1911,7 +1911,7 @@ namespace Frida.Fruity {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			socket = netstack.create_udp_socket ();
 			socket.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: address.get_address (),
+				address: netstack.listener_ip,
 				scope_id: netstack.scope_id
 			));
 			socket.socket_connect (address, cancellable);
@@ -2289,7 +2289,10 @@ namespace Frida.Fruity {
 		}
 
 		private int on_recv_datagram (uint32 flags, uint8[] data) {
-			_tunnel_netstack.handle_incoming_datagram (new Bytes (data));
+			try {
+				_tunnel_netstack.handle_incoming_datagram (new Bytes (data));
+			} catch (Error e) {
+			}
 
 			return 0;
 		}
