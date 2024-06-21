@@ -126,17 +126,13 @@ namespace Frida.Fruity {
 				mac_address[i] = (uint8) v;
 			}
 
-			string ipv6_address = derive_ipv6_link_local_address_from_mac_address (mac_address_str);
-			printerr ("Using ipv6_address=\"%s\"\n", ipv6_address);
-
 			handle.detach_kernel_driver (data_iface);
 			//Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
 			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
 
-			_netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), new InetAddress.from_string (ipv6_address),
-				1500, cancellable);
+			_netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), null, 1500, cancellable);
 			_netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			process_incoming_datagrams.begin ();
@@ -276,18 +272,6 @@ namespace Frida.Fruity {
 			}
 
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
-		}
-
-		private static string derive_ipv6_link_local_address_from_mac_address (string mac_address) {
-			uint top_octet;
-			mac_address.substring (0, 2).scanf ("%02X", out top_octet);
-
-			return "FE80::%02X%s:%sFF:FE%s:%s".printf (
-				top_octet ^ 2,
-				mac_address[2:4],
-				mac_address[4:6],
-				mac_address[6:8],
-				mac_address[8:]);
 		}
 
 		private static InetAddress? try_infer_remote_address_from_datagram (Bytes datagram) {

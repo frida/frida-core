@@ -347,12 +347,17 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 
-			return yield TunnelConnection.open (
-				tunnel_endpoint,
-				netstack,
-				new TunnelKey ((owned) local_keypair),
-				new TunnelKey ((owned) remote_pubkey),
-				cancellable);
+			printerr (">>> TunnelConnection.open()\n");
+			try {
+				return yield TunnelConnection.open (
+					tunnel_endpoint,
+					netstack,
+					new TunnelKey ((owned) local_keypair),
+					new TunnelKey ((owned) remote_pubkey),
+					cancellable);
+			} finally {
+				printerr ("<<< TunnelConnection.open()\n");
+			}
 		}
 
 		private async void attempt_pair_verify (Cancellable? cancellable) throws Error, IOError {
@@ -1904,7 +1909,11 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			socket = yield netstack.create_udp_socket (cancellable);
+			socket = netstack.create_udp_socket ();
+			socket.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: address.get_address (),
+				scope_id: netstack.scope_id
+			));
 			socket.socket_connect (address, cancellable);
 
 			raw_local_address = address_to_native (socket.get_local_address ());
@@ -2209,6 +2218,7 @@ namespace Frida.Fruity {
 				try {
 					Udp.send (tx_buf[:n], socket.datagram_based, io_cancellable);
 				} catch (GLib.Error e) {
+					printerr ("Oh no: %s\n", e.message);
 					continue;
 				}
 			}

@@ -844,7 +844,43 @@ namespace Frida.Fruity {
 			var peer = yield locate_ncm_peer (cancellable);
 			printerr ("Found peer: %s\n", peer.ip.to_string ());
 
-			throw new Error.NOT_SUPPORTED ("Not yet fully implemented");
+			var netstack = peer.netstack;
+
+			var bootstrap_rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: peer.ip,
+				port: 58783,
+				scope_id: netstack.scope_id
+			);
+			printerr (">>> open_tcp_connection(bootstrap_stream)\n");
+			var bootstrap_stream = yield netstack.open_tcp_connection (bootstrap_rsd_endpoint, cancellable);
+			printerr ("<<< open_tcp_connection(bootstrap_stream)\n");
+			var bootstrap_disco = yield DiscoveryService.open (bootstrap_stream, cancellable);
+			printerr ("udid: %s\n", bootstrap_disco.query_udid ());
+
+			var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
+			var tunnel_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: peer.ip,
+				port: tunnel_service.port,
+				scope_id: netstack.scope_id
+			);
+			printerr (">>> open_tcp_connection(tunnel_endpoint)\n");
+			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
+			printerr ("<<< open_tcp_connection(tunnel_endpoint)\n");
+			printerr (">>> PairingService.open()\n");
+			var pairing_service = yield PairingService.open (pairing_transport, cancellable);
+			printerr ("<<< PairingService.open()\n");
+
+			printerr (">>> open_tunnel\n");
+			TunnelConnection tc = yield pairing_service.open_tunnel (peer.ip, netstack, cancellable);
+			printerr ("<<< open_tunnel\n");
+
+			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tc.remote_address,
+				port: tc.remote_rsd_port,
+				scope_id: tc.tunnel_netstack.scope_id
+			);
+			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
+			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
 		}
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
@@ -862,7 +898,7 @@ namespace Frida.Fruity {
 		private Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system () {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
-#if LINUX
+#if GRYNTLINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
 			printerr ("Our UDID: %s\n", udid);

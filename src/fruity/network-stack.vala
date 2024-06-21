@@ -7,7 +7,7 @@ namespace Frida.Fruity {
 
 		public abstract async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable)
 			throws Error, IOError;
-		public abstract async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error, IOError;
+		public abstract UdpSocket create_udp_socket () throws Error;
 	}
 
 	public interface UdpSocket : Object {
@@ -47,7 +47,7 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
-		public async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error {
+		public UdpSocket create_udp_socket () throws Error {
 			try {
 				var handle = new Socket (IPV6, DATAGRAM, UDP);
 				return new SystemUdpSocket (handle);
@@ -106,7 +106,7 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public InetAddress ipv6_address {
+		public InetAddress? ipv6_address {
 			get;
 			construct;
 		}
@@ -124,6 +124,8 @@ namespace Frida.Fruity {
 
 		private Promise<bool> allocated = new Promise<bool> ();
 
+		private Gee.Queue<Request> requests = new Gee.ArrayQueue<Request> ();
+
 		private bool netif_added = false;
 		private LWIP.NetworkInterface handle;
 		private LWIP.IP6Address raw_ipv6_address;
@@ -131,9 +133,9 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		private DataOutputStream pcap;
+		private DataOutputStream? pcap;
 
-		public static async VirtualNetworkStack create (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu,
+		public static async VirtualNetworkStack create (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu,
 				Cancellable? cancellable) throws IOError {
 			var netstack = new VirtualNetworkStack (ethernet_address, ipv6_address, mtu);
 
@@ -147,7 +149,7 @@ namespace Frida.Fruity {
 			return netstack;
 		}
 
-		private class VirtualNetworkStack (Bytes? ethernet_address, InetAddress ipv6_address, uint16 mtu) {
+		private class VirtualNetworkStack (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,
@@ -162,32 +164,18 @@ namespace Frida.Fruity {
 		construct {
 			main_context = MainContext.ref_thread_default ();
 
-			try {
-				var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP),
-					"vns-%s.pcap".printf (ipv6_address.to_string ().replace (":", "")));
-				try {
-					f.delete ();
-				} catch (GLib.Error e) {
-				}
-				pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
-				pcap.set_byte_order (HOST_ENDIAN);
-				pcap.put_uint32 (0xa1b2c3d4U);
-				pcap.put_uint16 (2);
-				pcap.put_uint16 (4);
-				pcap.put_uint32 (0);
-				pcap.put_uint32 (0);
-				pcap.put_uint32 (16384);
-				pcap.put_uint32 ((ethernet_address != null) ? 1 : 229); // Ethernet or IPv6
-				pcap.flush ();
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
+			perform_on_lwip_thread (() => {
+				LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
+				handle.set_link_up ();
+				handle.set_up ();
+				return OK;
+			});
 		}
 
-		public override void dispose () {
-			stop ();
-
-			base.dispose ();
+		~VirtualNetworkStack () {
+			perform_on_lwip_thread (() => {
+				handle.remove ();
+			});
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws IOError {
@@ -209,8 +197,8 @@ namespace Frida.Fruity {
 			return yield TcpConnection.open (this, address, cancellable);
 		}
 
-		public async UdpSocket create_udp_socket (Cancellable? cancellable) throws Error, IOError {
-			return yield Ipv6UdpSocket.create (this, cancellable);
+		public UdpSocket create_udp_socket () throws Error {
+			return new Ipv6UdpSocket (this);
 		}
 
 		public void handle_incoming_datagram (Bytes datagram) {
@@ -220,17 +208,6 @@ namespace Frida.Fruity {
 			lock (incoming_datagrams)
 				incoming_datagrams.offer (datagram);
 			LWIP.Runtime.schedule (process_next_incoming_datagram);
-		}
-
-		private void start () {
-			LWIP.NetworkInterface.add_noaddr (ref handle, this, on_netif_init);
-			handle.set_link_up ();
-			handle.set_up ();
-
-			schedule_on_frida_thread (() => {
-				allocated.resolve (true);
-				return Source.REMOVE;
-			});
 		}
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
@@ -258,11 +235,12 @@ namespace Frida.Fruity {
 				handle.flags |= ETHARP;
 			}
 
-			//int8 chosen_index = -1;
-			//handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
-			//handle.ip6_addr_set_state (chosen_index, PREFERRED);
 			int8 chosen_index = 0;
-			handle.create_ip6_linklocal_address (true);
+			if (ipv6_address != null)
+				handle.add_ip6_address (ip6_address_from_inet_address (ipv6_address), &chosen_index);
+			else
+				handle.create_ip6_linklocal_address (true);
+			handle.ip6_addr_set_state (chosen_index, PREFERRED); // No need for conflict detection.
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
 
 			//var icmp_group = LWIP.IP6Address.parse ("ff02::1");
@@ -308,19 +286,55 @@ namespace Frida.Fruity {
 				*((void **) &pbuf) = null;
 		}
 
-		public void stop () {
-			if (!netif_added)
-				return;
-			netif_added = false;
+		internal LWIP.ErrorCode perform_on_lwip_thread (owned WorkFunc work) {
+			var req = new Request ((owned) work);
 
-			ref ();
-			LWIP.Runtime.schedule (do_stop);
+			lock (requests)
+				requests.offer (req);
+			LWIP.Runtime.schedule (perform_next_request);
+
+			return req.join ();
 		}
 
-		private void do_stop () {
-			handle.remove ();
+		private void perform_next_request () {
+			Request req;
+			lock (requests)
+				req = requests.poll ();
 
-			unref ();
+			LWIP.ErrorCode err = req.work ();
+			req.complete (err);
+		}
+
+		internal delegate LWIP.ErrorCode WorkFunc ();
+
+		private class Request {
+			public WorkFunc work;
+
+			private bool completed = false;
+			private LWIP.ErrorCode error;
+			private Mutex mutex = Mutex ();
+			private Cond cond = Cond ();
+
+			public Request (owned WorkFunc work) {
+				this.work = (owned) work;
+			}
+
+			public LWIP.ErrorCode join () {
+				mutex.lock ();
+				while (!completed)
+					cond.wait (mutex);
+				var err = error;
+				mutex.unlock ();
+				return err;
+			}
+
+			public void complete (LWIP.ErrorCode err) {
+				mutex.lock ();
+				completed = true;
+				error = err;
+				cond.signal ();
+				mutex.unlock ();
+			}
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -332,6 +346,25 @@ namespace Frida.Fruity {
 		private void log_datagram (Bytes datagram) {
 			lock (pcap) {
 				try {
+					if (pcap == null) {
+						var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP),
+							"vns-%s.pcap".printf (raw_ipv6_address.to_string ().replace (":", "")));
+						try {
+							f.delete ();
+						} catch (GLib.Error e) {
+						}
+						pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
+						pcap.set_byte_order (HOST_ENDIAN);
+						pcap.put_uint32 (0xa1b2c3d4U);
+						pcap.put_uint16 (2);
+						pcap.put_uint16 (4);
+						pcap.put_uint32 (0);
+						pcap.put_uint32 (0);
+						pcap.put_uint32 (16384);
+						pcap.put_uint32 ((ethernet_address != null) ? 1 : 229); // Ethernet or IPv6
+						pcap.flush ();
+					}
+
 					int64 timestamp = get_real_time ();
 					pcap.put_uint32 ((uint32) (timestamp / 1000000));
 					pcap.put_uint32 ((uint32) (timestamp % 1000000));
@@ -474,12 +507,18 @@ namespace Frida.Fruity {
 				pcb.nagle_disable ();
 				pcb.bind_netif (netstack.handle);
 
-				pcb.connect (ip6_address_from_inet_socket_address (address), address.get_port (), (user_data, pcb, err) => {
+				var err = pcb.connect (ip6_address_from_inet_socket_address (address), address.get_port (), (user_data, pcb, err) => {
 					TcpConnection * self = user_data;
 					if (self != null)
 						self->on_connect ();
 					return OK;
 				});
+				if (err != OK) {
+					schedule_on_frida_thread (() => {
+						established.reject (new Error.TRANSPORT ("%s", strerror (err.to_errno ())));
+						return Source.REMOVE;
+					});
+				}
 			}
 
 			private void stop () {
@@ -880,7 +919,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private class Ipv6UdpSocket : Object, AsyncInitable, UdpSocket, DatagramBased {
+		private class Ipv6UdpSocket : Object, UdpSocket, DatagramBased {
 			public VirtualNetworkStack netstack {
 				get;
 				construct;
@@ -894,109 +933,42 @@ namespace Frida.Fruity {
 
 			public IOCondition pending_io {
 				get {
-					lock (state)
+					lock (events)
 						return events;
 				}
 			}
 
-			private Promise<bool> allocated = new Promise<bool> ();
-
-			private State state = CREATED;
-
 			private unowned LWIP.UdpPcb? pcb;
-			private Gee.Queue<BindRequest> bind_requests = new Gee.ArrayQueue<BindRequest> ();
-			private Gee.Queue<GetLocalAddressRequest> get_local_address_requests =
-				new Gee.ArrayQueue<GetLocalAddressRequest> ();
-			private Gee.Queue<ConnectRequest> connect_requests = new Gee.ArrayQueue<ConnectRequest> ();
 			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
-			private Gee.Queue<Packet> tx_queue = new Gee.ArrayQueue<Packet> ();
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
 
 			private MainContext main_context;
 
-			public enum State {
-				CREATED,
-				ALLOCATING,
-				ALLOCATED,
-				DESTROYED
-			}
-
-			public static async Ipv6UdpSocket create (VirtualNetworkStack netstack, Cancellable? cancellable) throws IOError {
-				var sock = new Ipv6UdpSocket (netstack);
-
-				try {
-					yield sock.init_async (Priority.DEFAULT, cancellable);
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					throw (IOError) e;
-				}
-
-				return sock;
-			}
-
-			private Ipv6UdpSocket (VirtualNetworkStack netstack) {
+			public Ipv6UdpSocket (VirtualNetworkStack netstack) {
 				Object (netstack: netstack);
 			}
 
 			construct {
 				main_context = MainContext.ref_thread_default ();
-			}
 
-			public override void dispose () {
-				destroy ();
-
-				base.dispose ();
-			}
-
-			private async bool init_async (int io_priority, Cancellable? cancellable) throws IOError {
-				state = ALLOCATING;
-				LWIP.Runtime.schedule (allocate);
-
-				try {
-					yield allocated.future.wait_async (cancellable);
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					throw (IOError) e;
-				}
-
-				return true;
-			}
-
-			private void allocate () {
-				pcb = LWIP.UdpPcb.make (V6);
-				pcb.mcast_ttl = 1;
-				pcb.set_recv_callback ((pcb, pbuf, addr, port) => {
-					on_recv ((owned) pbuf, addr, port);
-				});
-				pcb.bind_netif (netstack.handle);
-
-				schedule_on_frida_thread (() => {
-					state = ALLOCATED;
-					allocated.resolve (true);
-					return Source.REMOVE;
+				netstack.perform_on_lwip_thread (() => {
+					pcb = LWIP.UdpPcb.make (V6);
+					pcb.set_recv_callback (on_recv);
+					pcb.bind_netif (netstack.handle);
+					return OK;
 				});
 			}
 
-			private void destroy () {
-				if (state == CREATED || state == DESTROYED)
-					return;
-
-				ref ();
-				LWIP.Runtime.schedule (do_destroy);
-
-				state = DESTROYED;
+			~Ipv6UdpSocket () {
+				netstack.perform_on_lwip_thread (() => {
+					pcb.remove ();
+					pcb = null;
+				});
 			}
 
-			private void do_destroy () {
-				pcb.remove ();
-				pcb = null;
-
-				unref ();
-			}
-
-			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.IP6Address addr, uint16 port) {
+			private void on_recv (LWIP.UdpPcb pcb, owned LWIP.PacketBuffer? pbuf, LWIP.IP6Address addr, uint16 port) {
 				var buffer = new uint8[pbuf.tot_len];
 				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
 
@@ -1004,71 +976,35 @@ namespace Frida.Fruity {
 				var sender = ip6_address_to_inet_socket_address (addr, port);
 				var packet = new Packet (bytes, sender);
 
-				lock (state)
+				lock (events)
 					rx_queue.offer (packet);
 				update_events ();
 			}
 
 			public void bind (InetSocketAddress address) throws Error {
-				var req = new BindRequest () { address = address };
-
-				lock (state)
-					bind_requests.offer (req);
-				LWIP.Runtime.schedule (do_bind);
-
-				req.join ();
-			}
-
-			private void do_bind () {
-				BindRequest req;
-				lock (state)
-					req = bind_requests.poll ();
-
-				var err = pcb.bind (ip6_address_from_inet_socket_address (req.address), req.address.get_port ());
-				if (err == OK)
-					req.resolve (true);
-				else
-					req.reject (err);
+				check (netstack.perform_on_lwip_thread (() => {
+					return pcb.bind (ip6_address_from_inet_socket_address (address), address.get_port ());
+				}));
 			}
 
 			public InetSocketAddress get_local_address () throws Error {
-				var req = new GetLocalAddressRequest ();
-
-				lock (state)
-					get_local_address_requests.offer (req);
-				LWIP.Runtime.schedule (do_get_local_address);
-
-				return req.join ();
-			}
-
-			private void do_get_local_address () {
-				GetLocalAddressRequest req;
-				lock (state)
-					req = get_local_address_requests.poll ();
-
-				req.resolve (ip6_address_to_inet_socket_address (pcb.local_ip, pcb.local_port));
+				InetSocketAddress? result = null;
+				netstack.perform_on_lwip_thread (() => {
+					result = ip6_address_to_inet_socket_address (pcb.local_ip, pcb.local_port);
+					return OK;
+				});
+				return result;
 			}
 
 			public void socket_connect (InetSocketAddress address, Cancellable? cancellable) throws Error {
-				var req = new ConnectRequest () { address = address };
-
-				lock (state)
-					connect_requests.offer (req);
-				LWIP.Runtime.schedule (do_socket_connect);
-
-				req.join ();
+				check (netstack.perform_on_lwip_thread (() => {
+					return pcb.connect (ip6_address_from_inet_socket_address (address), address.get_port ());
+				}));
 			}
 
-			private void do_socket_connect () {
-				ConnectRequest req;
-				lock (state)
-					req = connect_requests.poll ();
-
-				var err = pcb.connect (ip6_address_from_inet_socket_address (req.address), req.address.get_port ());
-				if (err == OK)
-					req.resolve (true);
-				else
-					req.reject (err);
+			private void check (LWIP.ErrorCode err) throws Error {
+				if (err != OK)
+					throw new Error.TRANSPORT ("%s", strerror (err.to_errno ()));
 			}
 
 			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,
@@ -1081,7 +1017,7 @@ namespace Frida.Fruity {
 				int received;
 				for (received = 0; received != messages.length; received++) {
 					Packet? packet;
-					lock (state)
+					lock (events)
 						packet = rx_queue.poll ();
 					if (packet == null) {
 						if (received == 0)
@@ -1118,38 +1054,39 @@ namespace Frida.Fruity {
 				if (flags != 0)
 					throw new IOError.NOT_SUPPORTED ("Flags not supported");
 
+				var packets = new Gee.ArrayList<Packet> ();
 				foreach (unowned OutputMessage message in messages) {
+					var bytes = new ByteArray ();
 					foreach (unowned OutputVector vector in message.vectors) {
 						unowned uint8[] data = (uint8[]) vector.buffer;
-						var packet = new Packet (new Bytes (data[:vector.size]),
-							(InetSocketAddress) message.address);
-						lock (state)
-							tx_queue.offer (packet);
+						bytes.append (data[:vector.size]);
 					}
+					packets.add (
+						new Packet (ByteArray.free_to_bytes ((owned) bytes), (InetSocketAddress) message.address));
 				}
 
-				LWIP.Runtime.schedule (transmit_pending);
+				int sent = 0;
+				var err = netstack.perform_on_lwip_thread (() => {
+					LWIP.ErrorCode err = OK;
+					foreach (var packet in packets) {
+						var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) packet.bytes.get_size (), POOL);
+						pbuf.take (packet.bytes.get_data ());
 
-				return messages.length;
-			}
-
-			private void transmit_pending () {
-				while (true) {
-					Packet? packet;
-					lock (state)
-						packet = tx_queue.poll ();
-					if (packet == null)
-						return;
-
-					var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) packet.bytes.get_size (), POOL);
-					pbuf.take (packet.bytes.get_data ());
-
-					InetSocketAddress? dst_addr = packet.address;
-					if (dst_addr != null)
-						pcb.sendto (pbuf, ip6_address_from_inet_socket_address (dst_addr), dst_addr.get_port ());
-					else
-						pcb.send (pbuf);
-				}
+						InetSocketAddress? dst_addr = packet.address;
+						if (dst_addr != null)
+							err = pcb.sendto (pbuf, ip6_address_from_inet_socket_address (dst_addr), dst_addr.get_port ());
+						else
+							err = pcb.send (pbuf);
+						if (err == OK)
+							sent++;
+						else
+							break;
+					}
+					return err;
+				});
+				if (sent == 0 && err != OK)
+					throw IOError.from_errno (err.to_errno ());
+				return sent;
 			}
 
 			public virtual DatagramBasedSource datagram_create_source (IOCondition condition, Cancellable? cancellable) {
@@ -1166,17 +1103,17 @@ namespace Frida.Fruity {
 			}
 
 			public void register_source (Source source, IOCondition condition) {
-				lock (state)
+				lock (events)
 					sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
 			}
 
 			public void unregister_source (Source source) {
-				lock (state)
+				lock (events)
 					sources.unset (source);
 			}
 
 			private void update_events () {
-				lock (state) {
+				lock (events) {
 					IOCondition new_events = OUT;
 
 					if (!rx_queue.is_empty)
@@ -1199,40 +1136,6 @@ namespace Frida.Fruity {
 				var source = new IdleSource ();
 				source.set_callback ((owned) function);
 				source.attach (main_context);
-			}
-
-			private class Request<T> {
-				public Gee.Promise<T> promise = new Gee.Promise<T> ();
-
-				public T join () throws Error {
-					var future = promise.future;
-					try {
-						return future.wait ();
-					} catch (Gee.FutureError e) {
-						assert (e is Gee.FutureError.EXCEPTION);
-						throw (Error) future.exception;
-					}
-				}
-
-				public void resolve (T val) {
-					promise.set_value (val);
-				}
-
-				public void reject (LWIP.ErrorCode err) {
-					promise.set_exception (new Error.TRANSPORT ("%s", strerror (err.to_errno ())));
-				}
-			}
-
-			private class BindRequest : Request<bool> {
-				public InetSocketAddress address;
-			}
-
-			private class GetLocalAddressRequest : Request<InetSocketAddress> {
-				public InetSocketAddress address;
-			}
-
-			private class ConnectRequest : Request<bool> {
-				public InetSocketAddress address;
 			}
 
 			private class Packet {
