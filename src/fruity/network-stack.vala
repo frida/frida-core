@@ -425,7 +425,7 @@ namespace Frida.Fruity {
 
 			private Promise<bool> established = new Promise<bool> ();
 
-			private State _state = CREATED;
+			private State _state = OPENING;
 			private TcpInputStream _input_stream;
 			private TcpOutputStream _output_stream;
 
@@ -440,7 +440,6 @@ namespace Frida.Fruity {
 			private MainContext main_context;
 
 			public enum State {
-				CREATED,
 				OPENING,
 				OPENED,
 				CLOSED
@@ -471,13 +470,15 @@ namespace Frida.Fruity {
 			}
 
 			public override void dispose () {
+				_output_stream.detach ();
+				_input_stream.detach ();
+
 				stop ();
 
 				base.dispose ();
 			}
 
 			private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-				_state = OPENING;
 				LWIP.Runtime.schedule (do_start);
 
 				try {
@@ -528,28 +529,14 @@ namespace Frida.Fruity {
 			}
 
 			private void stop () {
-				if (_state == CLOSED)
-					return;
-
-				if (state != CREATED) {
-					ref ();
-					LWIP.Runtime.schedule (do_stop);
-				}
-
-				_state = CLOSED;
-			}
-
-			private void do_stop () {
-				if (pcb != null) {
+				netstack.perform_on_lwip_thread (() => {
+					if (pcb == null)
+						return OK;
 					pcb.set_user_data (null);
 					if (pcb.close () != OK)
 						pcb.abort ();
 					pcb = null;
-				}
-
-				schedule_on_frida_thread (() => {
-					unref ();
-					return Source.REMOVE;
+					return OK;
 				});
 			}
 
@@ -752,17 +739,20 @@ namespace Frida.Fruity {
 		}
 
 		private class TcpInputStream : InputStream, PollableInputStream {
-			public weak TcpConnection connection {
-				get;
-				construct;
-			}
+			private weak TcpConnection connection;
 
 			public TcpInputStream (TcpConnection connection) {
-				Object (connection: connection);
+				Object ();
+				this.connection = connection;
+			}
+
+			internal void detach () {
+				connection = null;
 			}
 
 			public override bool close (Cancellable? cancellable) throws IOError {
-				connection.shutdown_rx ();
+				if (connection != null)
+					connection.shutdown_rx ();
 				return true;
 			}
 
@@ -771,6 +761,9 @@ namespace Frida.Fruity {
 			}
 
 			public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
+				if (connection == null)
+					return 0;
+
 				if (!is_readable ()) {
 					bool done = false;
 					var mutex = Mutex ();
@@ -814,6 +807,8 @@ namespace Frida.Fruity {
 			}
 
 			public bool is_readable () {
+				if (connection == null)
+					return true;
 				return (connection.pending_io & IOCondition.IN) != 0;
 			}
 
@@ -822,22 +817,27 @@ namespace Frida.Fruity {
 			}
 
 			public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
+				if (connection == null)
+					return 0;
 				return connection.recv (buffer);
 			}
 		}
 
 		private class TcpOutputStream : OutputStream, PollableOutputStream {
-			public weak TcpConnection connection {
-				get;
-				construct;
-			}
+			private weak TcpConnection? connection;
 
 			public TcpOutputStream (TcpConnection connection) {
-				Object (connection: connection);
+				Object ();
+				this.connection = connection;
+			}
+
+			internal void detach () {
+				connection = null;
 			}
 
 			public override bool close (Cancellable? cancellable) throws IOError {
-				connection.shutdown_tx ();
+				if (connection != null)
+					connection.shutdown_tx ();
 				return true;
 			}
 
@@ -862,6 +862,8 @@ namespace Frida.Fruity {
 			}
 
 			public bool is_writable () {
+				if (connection == null)
+					return false;
 				return (connection.pending_io & IOCondition.OUT) != 0;
 			}
 
@@ -870,6 +872,8 @@ namespace Frida.Fruity {
 			}
 
 			public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
+				if (connection == null)
+					throw new IOError.CLOSED ("Connection is closed");
 				return connection.send (buffer);
 			}
 
@@ -882,24 +886,31 @@ namespace Frida.Fruity {
 			public TcpConnection connection;
 			public IOCondition condition;
 
-			public TcpIOSource (TcpConnection connection, IOCondition condition) {
+			public TcpIOSource (TcpConnection? connection, IOCondition condition) {
 				this.connection = connection;
 				this.condition = condition;
 
-				connection.register_source (this, condition);
+				if (connection != null)
+					connection.register_source (this, condition);
 			}
 
 			~TcpIOSource () {
-				connection.unregister_source (this);
+				if (connection != null)
+					connection.unregister_source (this);
 			}
 
 			protected override bool prepare (out int timeout) {
 				timeout = -1;
-				return (connection.pending_io & condition) != 0;
+				return is_ready ();
 			}
 
 			protected override bool check () {
-				return (connection.pending_io & condition) != 0;
+				return is_ready ();
+			}
+
+			private bool is_ready () {
+				IOCondition pending_io = (connection != null) ? connection.pending_io : IOCondition.IN;
+				return (pending_io & condition) != 0;
 			}
 
 			protected override bool dispatch (SourceFunc? callback) {
