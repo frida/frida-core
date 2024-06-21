@@ -557,6 +557,7 @@ namespace Frida.Fruity {
 
 			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.ErrorCode err) {
 				if (pbuf == null) {
+					pcb = null;
 					schedule_on_frida_thread (() => {
 						_state = CLOSED;
 						update_events ();
@@ -579,6 +580,7 @@ namespace Frida.Fruity {
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
+				pcb = null;
 				schedule_on_frida_thread (() => {
 					_state = CLOSED;
 					update_events ();
