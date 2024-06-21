@@ -2038,7 +2038,7 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu);
+			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu - 100); // TODO: Fix MTU calculation.
 			printerr ("_tunnel_netstack created with scope_id=%u\n", _tunnel_netstack.scope_id);
 			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
