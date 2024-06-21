@@ -132,7 +132,7 @@ namespace Frida.Fruity {
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
 
-			_netstack = yield VirtualNetworkStack.create (new Bytes (mac_address), null, 1500, cancellable);
+			_netstack = new VirtualNetworkStack (new Bytes (mac_address), null, 1500);
 			_netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			process_incoming_datagrams.begin ();

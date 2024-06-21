@@ -1472,13 +1472,13 @@ namespace Frida.Fruity {
 					our_mac_address[i] = (uint8) v;
 				}
 
-				start.begin (ncm_iface, ncm_altsetting);
+				start (ncm_iface, ncm_altsetting);
 			}
 		}
 
-		private async void start (int ncm_iface, int ncm_altsetting) throws IOError {
-			netstack = yield VirtualNetworkStack.create (new Bytes (our_mac_address),
-				new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500, io_cancellable);
+		private void start (int ncm_iface, int ncm_altsetting) {
+			netstack = new VirtualNetworkStack (new Bytes (our_mac_address),
+				new InetAddress.from_string ("fe80::90fe:2cff:fe3b:e763"), 1500);
 			netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
 
 			var res = handle.detach_kernel_driver (ncm_iface);

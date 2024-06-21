@@ -2038,19 +2038,11 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			create_netstack.begin (local_address);
-		}
+			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu);
+			printerr ("_tunnel_netstack created with scope_id=%u\n", _tunnel_netstack.scope_id);
+			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
-		private async void create_netstack (InetAddress address) {
-			try {
-				_tunnel_netstack = yield VirtualNetworkStack.create (null, address, mtu, io_cancellable);
-				printerr ("_tunnel_netstack created with scope_id=%u\n", _tunnel_netstack.scope_id);
-				_tunnel_netstack.outgoing_datagram.connect (send_datagram);
-
-				established.resolve (true);
-			} catch (IOError e) {
-				established.reject (e);
-			}
+			established.resolve (true);
 		}
 
 		public void cancel () {

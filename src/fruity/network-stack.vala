@@ -98,7 +98,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class VirtualNetworkStack : Object, AsyncInitable, NetworkStack {
+	public sealed class VirtualNetworkStack : Object, NetworkStack {
 		public signal void outgoing_datagram (Bytes datagram);
 
 		public Bytes? ethernet_address {
@@ -122,34 +122,23 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		private Promise<bool> allocated = new Promise<bool> ();
+		private State state = STARTED;
 
 		private Gee.Queue<Request> requests = new Gee.ArrayQueue<Request> ();
 
-		private bool netif_added = false;
 		private LWIP.NetworkInterface handle;
 		private LWIP.IP6Address raw_ipv6_address;
-		private Gee.Queue<Bytes> incoming_datagrams = new Gee.ArrayQueue<Bytes> ();
 
 		private MainContext main_context;
 
 		private DataOutputStream? pcap;
 
-		public static async VirtualNetworkStack create (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu,
-				Cancellable? cancellable) throws IOError {
-			var netstack = new VirtualNetworkStack (ethernet_address, ipv6_address, mtu);
-
-			try {
-				yield netstack.init_async (Priority.DEFAULT, cancellable);
-			} catch (GLib.Error e) {
-				assert (e is IOError.CANCELLED);
-				throw (IOError) e;
-			}
-
-			return netstack;
+		private enum State {
+			STARTED,
+			STOPPED
 		}
 
-		private class VirtualNetworkStack (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu) {
+		public class VirtualNetworkStack (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,
@@ -170,44 +159,49 @@ namespace Frida.Fruity {
 				handle.set_up ();
 				return OK;
 			});
+			state = STARTED;
 		}
 
 		~VirtualNetworkStack () {
-			perform_on_lwip_thread (() => {
-				handle.remove ();
-			});
+			stop ();
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws IOError {
-			LWIP.Runtime.schedule (start);
-			netif_added = true;
-
-			try {
-				yield allocated.future.wait_async (cancellable);
-			} catch (GLib.Error e) {
-				assert (e is IOError.CANCELLED);
-				throw (IOError) e;
-			}
-
-			return true;
+		public void stop () {
+			if (state == STOPPED)
+				return;
+			perform_on_lwip_thread (() => {
+				handle.remove ();
+				return OK;
+			});
+			state = STOPPED;
 		}
 
 		public async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable = null)
 				throws Error, IOError {
+			check_started ();
 			return yield TcpConnection.open (this, address, cancellable);
 		}
 
 		public UdpSocket create_udp_socket () throws Error {
+			check_started ();
 			return new Ipv6UdpSocket (this);
 		}
 
-		public void handle_incoming_datagram (Bytes datagram) {
-			if (!netif_added)
-				return;
+		public void handle_incoming_datagram (Bytes datagram) throws Error {
+			check_started ();
+
 			log_datagram (datagram);
-			lock (incoming_datagrams)
-				incoming_datagrams.offer (datagram);
-			LWIP.Runtime.schedule (process_next_incoming_datagram);
+
+			check (perform_on_lwip_thread (() => {
+				var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
+				pbuf.take (datagram.get_data ());
+
+				var err = handle.input (pbuf, handle);
+				if (err == OK)
+					*((void **) &pbuf) = null;
+
+				return err;
+			}));
 		}
 
 		private static LWIP.ErrorCode on_netif_init (LWIP.NetworkInterface handle) {
@@ -268,22 +262,12 @@ namespace Frida.Fruity {
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
 
 			schedule_on_frida_thread (() => {
-				log_datagram (datagram);
-				outgoing_datagram (datagram);
+				if (state == STARTED) {
+					log_datagram (datagram);
+					outgoing_datagram (datagram);
+				}
 				return Source.REMOVE;
 			});
-		}
-
-		private void process_next_incoming_datagram () {
-			Bytes datagram;
-			lock (incoming_datagrams)
-				datagram = incoming_datagrams.poll ();
-
-			var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
-			pbuf.take (datagram.get_data ());
-
-			if (handle.input (pbuf, handle) == OK)
-				*((void **) &pbuf) = null;
 		}
 
 		internal LWIP.ErrorCode perform_on_lwip_thread (owned WorkFunc work) {
@@ -303,6 +287,11 @@ namespace Frida.Fruity {
 
 			LWIP.ErrorCode err = req.work ();
 			req.complete (err);
+		}
+
+		private void check_started () throws Error {
+			if (state != STARTED)
+				throw new Error.INVALID_OPERATION ("Networking stack has been stopped");
 		}
 
 		internal delegate LWIP.ErrorCode WorkFunc ();
@@ -605,23 +594,19 @@ namespace Frida.Fruity {
 			}
 
 			public void shutdown_rx () throws IOError {
-				LWIP.Runtime.schedule (do_shutdown_rx);
-			}
-
-			private void do_shutdown_rx () {
-				if (pcb == null)
-					return;
-				pcb.shutdown (true, false);
+				check_io (netstack.perform_on_lwip_thread (() => {
+					if (pcb == null)
+						return OK;
+					return pcb.shutdown (true, false);
+				}));
 			}
 
 			public void shutdown_tx () throws IOError {
-				LWIP.Runtime.schedule (do_shutdown_tx);
-			}
-
-			private void do_shutdown_tx () {
-				if (pcb == null)
-					return;
-				pcb.shutdown (false, true);
+				check_io (netstack.perform_on_lwip_thread (() => {
+					if (pcb == null)
+						return OK;
+					return pcb.shutdown (false, true);
+				}));
 			}
 
 			public ssize_t recv (uint8[] buffer) throws IOError {
@@ -1002,11 +987,6 @@ namespace Frida.Fruity {
 				}));
 			}
 
-			private void check (LWIP.ErrorCode err) throws Error {
-				if (err != OK)
-					throw new Error.TRANSPORT ("%s", strerror (err.to_errno ()));
-			}
-
 			public int datagram_receive_messages (InputMessage[] messages, int flags, int64 timeout,
 					Cancellable? cancellable) throws GLib.Error {
 				if (flags != 0)
@@ -1084,8 +1064,8 @@ namespace Frida.Fruity {
 					}
 					return err;
 				});
-				if (sent == 0 && err != OK)
-					throw IOError.from_errno (err.to_errno ());
+				if (sent == 0)
+					check_io (err);
 				return sent;
 			}
 
@@ -1182,6 +1162,16 @@ namespace Frida.Fruity {
 				DatagramBasedSourceFunc f = (DatagramBasedSourceFunc) callback;
 				return f (socket, socket.pending_io);
 			}
+		}
+
+		private static void check (LWIP.ErrorCode err) throws Error {
+			if (err != OK)
+				throw new Error.TRANSPORT ("%s", strerror (err.to_errno ()));
+		}
+
+		private static void check_io (LWIP.ErrorCode err) throws IOError {
+			if (err != OK)
+				throw IOError.from_errno (err.to_errno ());
 		}
 
 		private static LWIP.IP6Address ip6_address_from_inet_socket_address (InetSocketAddress address) {
