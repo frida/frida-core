@@ -574,13 +574,8 @@ namespace Frida.Fruity {
 			}
 
 			private void on_sent (uint16 len) {
-				printerr ("on_sent() len=%u\n", len);
-				lock (state) {
+				lock (state)
 					tx_space_available = pcb.query_available_send_buffer_space () - tx_buf.len;
-					printerr ("\tpcb.query_available_send_buffer_space() => %u\n", pcb.query_available_send_buffer_space ());
-					printerr ("\ttx_buf.len=%u\n", tx_buf.len);
-					printerr ("\t=> tx_space_available=%zu\n", tx_space_available);
-				}
 				update_events ();
 			}
 
@@ -662,9 +657,6 @@ namespace Frida.Fruity {
 			public ssize_t send (uint8[] buffer) throws IOError {
 				ssize_t n = 0;
 
-				printerr (">>> send() n=%d\n", buffer.length);
-				if (buffer.length > 1024)
-					hexdump (buffer);
 				netstack.perform_on_lwip_thread (() => {
 					if (pcb == null)
 						return OK;
@@ -687,25 +679,18 @@ namespace Frida.Fruity {
 							tx_buf.remove_range (0, (uint) num_bytes_to_write);
 						}
 					}
-					printerr ("data: %p\n", data);
 					if (data == null)
 						return OK;
 
-					var e1 = pcb.write (data, COPY);
-					var e2 = pcb.output ();
-					printerr ("e1=%d e2=%d\n", e1, e2);
+					pcb.write (data, COPY);
+					pcb.output ();
 
 					available_space = pcb.query_available_send_buffer_space ();
 					lock (state)
 						tx_space_available = available_space - tx_buf.len;
 
-					printerr ("pcb.query_available_send_buffer_space(): %zu\n", available_space);
-					printerr ("tx_buf.len=%u\n", tx_buf.len);
-					printerr ("=> tx_space_available=%zu\n", tx_space_available);
-
 					return OK;
 				});
-				printerr ("<<< n=%zd\n", n);
 
 				if (n == 0)
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
@@ -1230,32 +1215,5 @@ namespace Frida.Fruity {
 			char buf[40];
 			return new InetAddress.from_string (address.to_string (buf));
 		}
-	}
-
-	// https://gist.github.com/phako/96b36b5070beaf7eee27
-	private void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 }

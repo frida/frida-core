@@ -553,12 +553,9 @@ namespace Frida {
 
 		private async void fetch_apps (Promise<Gee.List<Fruity.ApplicationDetails>> promise, Cancellable? cancellable) {
 			try {
-				printerr ("fetch_apps() A\n");
 				var installation_proxy = yield Fruity.InstallationProxyClient.open (device, cancellable);
-				printerr ("fetch_apps() B\n");
 
 				var apps = yield installation_proxy.browse (cancellable);
-				printerr ("fetch_apps() C\n");
 
 				promise.resolve (apps);
 			} catch (GLib.Error e) {
@@ -569,12 +566,9 @@ namespace Frida {
 		private async void fetch_processes (Promise<Gee.List<Fruity.DeviceInfoService.ProcessInfo>> promise,
 				Cancellable? cancellable) {
 			try {
-				printerr ("fetch_processes() A\n");
 				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
-				printerr ("fetch_processes() B\n");
 
 				var processes = yield device_info.enumerate_processes (cancellable);
-				printerr ("fetch_processes() C\n");
 
 				promise.resolve (processes);
 			} catch (GLib.Error e) {
