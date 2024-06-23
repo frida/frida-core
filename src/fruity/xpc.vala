@@ -29,26 +29,6 @@ namespace Frida.Fruity {
 		public abstract async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError;
 	}
 
-	public interface FruitFinder : Object {
-		public static FruitFinder make_default () {
-#if MACOS
-			return new MacOSFruitFinder ();
-#elif LINUX && !ANDROID
-			return new LinuxFruitFinder ();
-#else
-			return new NullFruitFinder ();
-#endif
-		}
-
-		public abstract string? udid_from_iface (string ifname) throws Error;
-	}
-
-	public class NullFruitFinder : Object, FruitFinder {
-		public string? udid_from_iface (string ifname) throws Error {
-			return null;
-		}
-	}
-
 	public interface PairingBrowser : Object {
 		public static PairingBrowser make_default () {
 #if DARWIN

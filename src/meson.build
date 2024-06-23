@@ -510,10 +510,7 @@ if have_fruity_backend
     backend_sources += 'fruity' / 'xpc-darwin.vala'
   endif
   if host_os == 'macos'
-    backend_sources += [
-      'fruity' / 'xpc-macos.vala',
-      'fruity' / 'iokit.vala',
-    ]
+    backend_sources += 'fruity' / 'iokit.vala'
   elif host_os == 'linux'
     backend_sources += 'fruity' / 'xpc-linux.vala'
   endif
