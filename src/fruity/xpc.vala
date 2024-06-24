@@ -327,17 +327,12 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 
-			printerr (">>> TunnelConnection.open()\n");
-			try {
-				return yield TunnelConnection.open (
-					tunnel_endpoint,
-					netstack,
-					new TunnelKey ((owned) local_keypair),
-					new TunnelKey ((owned) remote_pubkey),
-					cancellable);
-			} finally {
-				printerr ("<<< TunnelConnection.open()\n");
-			}
+			return yield TunnelConnection.open (
+				tunnel_endpoint,
+				netstack,
+				new TunnelKey ((owned) local_keypair),
+				new TunnelKey ((owned) remote_pubkey),
+				cancellable);
 		}
 
 		private async void attempt_pair_verify (Cancellable? cancellable) throws Error, IOError {
@@ -2018,8 +2013,7 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu - 100); // TODO: Fix MTU calculation.
-			printerr ("_tunnel_netstack created with scope_id=%u\n", _tunnel_netstack.scope_id);
+			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu - 8); // TODO: Fix MTU calculation.
 			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);

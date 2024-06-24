@@ -204,8 +204,6 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
-			printerr ("\n=== open_lockdown_service() service_name=\"%s\"\n\n", service_name);
-
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				ServiceInfo? service_info = null;
@@ -277,7 +275,6 @@ namespace Frida.Fruity {
 					req.promise.resolve (stream);
 				} catch (GLib.Error e) {
 					if (e is Error.TRANSPORT && cached_usbmux_lockdown_client != null) {
-						printerr ("Invalidating and retrying...\n");
 						cached_usbmux_lockdown_client = null;
 						continue;
 					}
@@ -734,7 +731,6 @@ namespace Frida.Fruity {
 		private async void handle_device_arrival (LibUSB.Device raw_device) {
 			try {
 				var device = yield UsbDevice.open (raw_device, io_cancellable);
-				printerr ("Opened device! udid=\"%s\"\n", device.udid);
 
 				transport_attached (new PortableCoreDeviceTransport (device));
 			} catch (GLib.Error e) {
@@ -844,7 +840,6 @@ namespace Frida.Fruity {
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
 			var peer = yield locate_ncm_peer (cancellable);
-			printerr ("Found peer: %s\n", peer.ip.to_string ());
 
 			var netstack = peer.netstack;
 
@@ -853,11 +848,8 @@ namespace Frida.Fruity {
 				port: 58783,
 				scope_id: netstack.scope_id
 			);
-			printerr (">>> open_tcp_connection(bootstrap_stream)\n");
 			var bootstrap_stream = yield netstack.open_tcp_connection (bootstrap_rsd_endpoint, cancellable);
-			printerr ("<<< open_tcp_connection(bootstrap_stream)\n");
 			var bootstrap_disco = yield DiscoveryService.open (bootstrap_stream, cancellable);
-			printerr ("udid: %s\n", bootstrap_disco.query_udid ());
 
 			var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
 			var tunnel_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
@@ -865,16 +857,10 @@ namespace Frida.Fruity {
 				port: tunnel_service.port,
 				scope_id: netstack.scope_id
 			);
-			printerr (">>> open_tcp_connection(tunnel_endpoint)\n");
 			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
-			printerr ("<<< open_tcp_connection(tunnel_endpoint)\n");
-			printerr (">>> PairingService.open()\n");
 			var pairing_service = yield PairingService.open (pairing_transport, cancellable);
-			printerr ("<<< PairingService.open()\n");
 
-			printerr (">>> open_tunnel\n");
 			TunnelConnection tc = yield pairing_service.open_tunnel (peer.ip, netstack, cancellable);
-			printerr ("<<< open_tunnel\n");
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
@@ -909,7 +895,6 @@ namespace Frida.Fruity {
 #if LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
-			printerr ("Our UDID: %s\n", udid);
 			string raw_udid = udid.replace ("-", "");
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
@@ -918,13 +903,9 @@ namespace Frida.Fruity {
 					continue;
 
 				string? candidate_udid = fruit_finder.udid_from_iface (candidate.ifa_name);
-				printerr ("candidate_udid=%s\n", candidate_udid);
-				if (candidate_udid != raw_udid) {
-					printerr ("Not a match!\n");
+				if (candidate_udid != raw_udid)
 					continue;
-				}
 
-				printerr ("MATCHES!\n");
 				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
 			}
 #endif
@@ -937,16 +918,18 @@ namespace Frida.Fruity {
 			var main_context = MainContext.ref_thread_default ();
 
 			var probes = new Gee.ArrayList<ActiveMulticastDnsProbe> ();
+			var handlers = new Gee.HashMap<ActiveMulticastDnsProbe, ulong> ();
 			ActiveMulticastDnsProbe? successful_probe = null;
 			InetSocketAddress? observed_sender = null;
 			foreach (var addr in ifaddrs) {
 				var probe = new ActiveMulticastDnsProbe (addr, main_context, cancellable);
-				probe.response_received.connect ((probe, response, sender) => {
+				var handler = probe.response_received.connect ((probe, response, sender) => {
 					successful_probe = probe;
 					observed_sender = sender;
 					locate_ncm_peer_on_system_netifs.callback ();
 				});
 				probes.add (probe);
+				handlers[probe] = handler;
 			}
 
 			var timeout_source = new TimeoutSource.seconds (2);
@@ -957,13 +940,14 @@ namespace Frida.Fruity {
 			cancel_source.set_callback (locate_ncm_peer_on_system_netifs.callback);
 			cancel_source.attach (main_context);
 
-			printerr (">>>\n");
 			yield;
-			printerr ("<<<\n");
 
 			cancel_source.destroy ();
 			timeout_source.destroy ();
-			probes.clear ();
+			foreach (var e in handlers.entries)
+				e.key.disconnect (e.value);
+			foreach (var p in probes)
+				p.cancel ();
 
 			cancellable.set_error_if_cancelled ();
 
@@ -978,7 +962,7 @@ namespace Frida.Fruity {
 			};
 		}
 
-		private class ActiveMulticastDnsProbe {
+		private class ActiveMulticastDnsProbe : Object {
 			public signal void response_received (Bytes response, InetSocketAddress sender);
 
 			public NetworkStack netstack;
@@ -1008,11 +992,9 @@ namespace Frida.Fruity {
 				response_source = sock_datagram.create_source (IN, cancellable);
 				response_source.set_callback (on_socket_readable);
 				response_source.attach (main_context);
-
-				printerr ("Sent probe from %s\n", ifaddr.get_address ().to_string ());
 			}
 
-			~ActiveMulticastDnsProbe () {
+			public void cancel () {
 				response_source.destroy ();
 			}
 
