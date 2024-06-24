@@ -712,10 +712,28 @@ namespace Frida.Fruity {
 			LibUSB.Context.init (out usb_context);
 
 			AtomicUint.inc (ref pending_device_arrivals);
-			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPHONE,
-				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
-			usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE, PRODUCT_ID_IPAD,
-				LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
+
+			if (LibUSB.has_capability (HAS_HOTPLUG) != 0) {
+				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
+					PRODUCT_ID_IPHONE, LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
+				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
+					PRODUCT_ID_IPAD, LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
+			} else {
+				foreach (var device in usb_context.get_device_list ()) {
+					var desc = LibUSB.DeviceDescriptor (device);
+
+					if (desc.idVendor != VENDOR_ID_APPLE)
+						continue;
+
+					switch (desc.idProduct) {
+						case PRODUCT_ID_IPHONE:
+						case PRODUCT_ID_IPAD:
+							on_device_arrived (device);
+							break;
+					}
+				}
+			}
+
 			if (AtomicUint.dec_and_test (ref pending_device_arrivals)) {
 				schedule_on_frida_thread (() => {
 					started.resolve (true);
