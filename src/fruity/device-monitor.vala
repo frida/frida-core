@@ -890,8 +890,11 @@ namespace Frida.Fruity {
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = detect_ncm_ifaddrs_on_system ();
-			if (!device_ifaddrs.is_empty)
+			if (!device_ifaddrs.is_empty) {
+				printerr ("\n=== Using system driver\n");
 				return yield locate_ncm_peer_on_system_netifs (device_ifaddrs, cancellable);
+			}
+			printerr ("\n=== Using our driver\n");
 			return yield establish_ncm_peer_using_our_driver (cancellable);
 		}
 
@@ -900,10 +903,10 @@ namespace Frida.Fruity {
 			public InetAddress ip;
 		}
 
-		private Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system () {
+		private Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system () throws Error {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
-#if GRYNTLINUX
+#if LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
 			printerr ("Our UDID: %s\n", udid);
@@ -931,38 +934,27 @@ namespace Frida.Fruity {
 
 		private async NcmPeer locate_ncm_peer_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
 				throws Error, IOError {
-			var remoted_mdns_request = make_remoted_mdns_request ();
+			var main_context = MainContext.ref_thread_default ();
+
+			var probes = new Gee.ArrayList<ActiveMulticastDnsProbe> ();
+			ActiveMulticastDnsProbe? successful_probe = null;
+			InetSocketAddress? observed_sender = null;
 			foreach (var addr in ifaddrs) {
-				var local_ip = addr.get_address ();
-				var netstack = new SystemNetworkStack (addr.scope_id);
-
-				var sock = netstack.create_udp_socket ();
-				sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
-					address: local_ip,
-					scope_id: netstack.scope_id
-				));
-				DatagramBased sock_datagram = sock.datagram_based;
-
-				var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-					address: new InetAddress.from_string ("ff02::fb"),
-					port: 5353,
-					scope_id: netstack.scope_id
-				);
-				Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
-
-				var in_source = sock_datagram.create_source (IN, cancellable);
-				in_source.set_callback (() => {
+				var probe = new ActiveMulticastDnsProbe (addr, main_context, cancellable);
+				probe.response_received.connect ((probe, response, sender) => {
+					successful_probe = probe;
+					observed_sender = sender;
 					locate_ncm_peer_on_system_netifs.callback ();
-					return Source.REMOVE;
 				});
-				in_source.attach (main_context);
+				probes.add (probe);
 			}
 
+			var timeout_source = new TimeoutSource.seconds (2);
+			timeout_source.set_callback (locate_ncm_peer_on_system_netifs.callback);
+			timeout_source.attach (main_context);
+
 			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (() => {
-				open.callback ();
-				return Source.REMOVE;
-			});
+			cancel_source.set_callback (locate_ncm_peer_on_system_netifs.callback);
 			cancel_source.attach (main_context);
 
 			printerr (">>>\n");
@@ -970,15 +962,75 @@ namespace Frida.Fruity {
 			printerr ("<<<\n");
 
 			cancel_source.destroy ();
-			in_source.destroy ();
+			timeout_source.destroy ();
+			probes.clear ();
 
 			cancellable.set_error_if_cancelled ();
 
-			uint8 response_buf[2048];
-			InetSocketAddress sender;
-			Udp.recv (response_buf, sock_datagram, cancellable, out sender);
+			if (successful_probe == null)
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for mDNS reply");
 
-			printerr ("Detected remote address: %s\n", sender.address.to_string ());
+			printerr ("Detected remote address: %s\n", observed_sender.get_address ().to_string ());
+
+			return new NcmPeer () {
+				netstack = successful_probe.netstack,
+				ip = observed_sender.get_address (),
+			};
+		}
+
+		private class ActiveMulticastDnsProbe {
+			public signal void response_received (Bytes response, InetSocketAddress sender);
+
+			public NetworkStack netstack;
+			public UdpSocket sock;
+			public DatagramBasedSource response_source;
+
+			public ActiveMulticastDnsProbe (InetSocketAddress ifaddr, MainContext main_context, Cancellable? cancellable)
+					throws Error, IOError {
+				var local_ip = ifaddr.get_address ();
+				netstack = new SystemNetworkStack (local_ip, ifaddr.scope_id);
+
+				sock = netstack.create_udp_socket ();
+				sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: local_ip,
+					scope_id: netstack.scope_id
+				));
+				DatagramBased sock_datagram = sock.datagram_based;
+
+				var remoted_mdns_request = make_remoted_mdns_request ();
+				var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: new InetAddress.from_string ("ff02::fb"),
+					port: 5353,
+					scope_id: netstack.scope_id
+				);
+				Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
+
+				response_source = sock_datagram.create_source (IN, cancellable);
+				response_source.set_callback (on_socket_readable);
+				response_source.attach (main_context);
+
+				printerr ("Sent probe from %s\n", ifaddr.get_address ().to_string ());
+			}
+
+			~ActiveMulticastDnsProbe () {
+				response_source.destroy ();
+			}
+
+			private bool on_socket_readable () {
+				size_t n;
+				uint8 response_buf[2048];
+				InetSocketAddress sender;
+				try {
+					n = Udp.recv (response_buf, sock.datagram_based, null, out sender);
+				} catch (GLib.Error e) {
+					return Source.REMOVE;
+				}
+
+				var response = new Bytes (response_buf[:n]);
+				response_received (response, sender);
+
+				return Source.CONTINUE;
+			}
 		}
 
 		private async NcmPeer establish_ncm_peer_using_our_driver (Cancellable? cancellable) throws Error, IOError {
