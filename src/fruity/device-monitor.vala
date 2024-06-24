@@ -690,7 +690,6 @@ namespace Frida.Fruity {
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
-			printerr (">>> stop()\n");
 			state = STOPPING;
 
 			io_cancellable.cancel ();
@@ -707,7 +706,6 @@ namespace Frida.Fruity {
 			usb_context = null;
 
 			state = STOPPED;
-			printerr ("<<< stop()\n");
 		}
 
 		private void perform_usb_work () {
@@ -731,9 +729,12 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private void on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
+		private int on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
 			if (event == DEVICE_ARRIVED)
 				on_device_arrived (device);
+			else
+				on_device_left (device);
+			return 0;
 		}
 
 		private void on_device_arrived (LibUSB.Device device) {
@@ -744,18 +745,64 @@ namespace Frida.Fruity {
 			});
 		}
 
-		private async void handle_device_arrival (LibUSB.Device raw_device) {
-			try {
-				var device = yield UsbDevice.open (raw_device, io_cancellable);
+		private void on_device_left (LibUSB.Device device) {
+			schedule_on_frida_thread (() => {
+				handle_device_departure.begin (device);
+				return Source.REMOVE;
+			});
+		}
 
-				var transport = new PortableCoreDeviceTransport (device);
-				transports.add (transport);
-				transport_attached (transport);
-			} catch (GLib.Error e) {
-				printerr ("domain=%s code=%d %s\n", e.domain.to_string (), e.code, e.message);
-			} finally {
-				if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
-					started.resolve (true);
+		private async void handle_device_arrival (LibUSB.Device raw_device) {
+			uint delays[] = { 50, 100, 250 };
+			for (uint attempts = 0; attempts != 3; attempts++) {
+				if (attempts != 0) {
+					uint delay = delays[attempts - 1];
+
+					var timeout_source = new TimeoutSource (delay);
+					timeout_source.set_callback (handle_device_arrival.callback);
+					timeout_source.attach (main_context);
+
+					var cancel_source = new CancellableSource (io_cancellable);
+					cancel_source.set_callback (handle_device_arrival.callback);
+					cancel_source.attach (main_context);
+
+					yield;
+
+					cancel_source.destroy ();
+					timeout_source.destroy ();
+
+					if (io_cancellable.is_cancelled ())
+						break;
+				}
+
+				try {
+					var device = yield UsbDevice.open (raw_device, io_cancellable);
+
+					var transport = new PortableCoreDeviceTransport (device);
+					transports.add (transport);
+					transport_attached (transport);
+				} catch (GLib.Error e) {
+					if (e is Error.PERMISSION_DENIED)
+						continue; // We might still be waiting for a udev rule to run...
+				}
+
+				break;
+			}
+
+			if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
+				started.resolve (true);
+		}
+
+		private async void handle_device_departure (LibUSB.Device raw_device) {
+			var transport = transports.first_match (t => t.usb_device.raw_device == raw_device);
+			if (transport == null)
+				return;
+
+			transports.remove (transport);
+
+			try {
+				yield transport.close (io_cancellable);
+			} catch (IOError e) {
 			}
 		}
 
@@ -927,11 +974,8 @@ namespace Frida.Fruity {
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = detect_ncm_ifaddrs_on_system ();
-			if (!device_ifaddrs.is_empty) {
-				printerr ("\n=== Using system driver\n");
+			if (!device_ifaddrs.is_empty)
 				return yield locate_ncm_peer_on_system_netifs (device_ifaddrs, cancellable);
-			}
-			printerr ("\n=== Using our driver\n");
 			return yield establish_ncm_peer_using_our_driver (cancellable);
 		}
 
@@ -1004,8 +1048,6 @@ namespace Frida.Fruity {
 
 			if (successful_probe == null)
 				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for mDNS reply");
-
-			printerr ("Detected remote address: %s\n", observed_sender.get_address ().to_string ());
 
 			return new NcmPeer () {
 				netstack = successful_probe.netstack,
