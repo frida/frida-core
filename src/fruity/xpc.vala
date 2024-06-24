@@ -1828,8 +1828,16 @@ namespace Frida.Fruity {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const string ALPN = "\x1bRemotePairingTunnelProtocol";
-		private const size_t PREFERRED_MTU = 1420;
-		private const size_t MAX_UDP_PAYLOAD_SIZE = 1452;
+
+		private const size_t NETWORK_MTU = 1500;
+
+		private const size_t ETHERNET_HEADER_SIZE = 14;
+		private const size_t IPV6_HEADER_SIZE = 40;
+		private const size_t UDP_HEADER_SIZE = 8;
+		private const size_t QUIC_HEADER_MAX_SIZE = 38;
+
+		private const size_t MAX_UDP_PAYLOAD_SIZE = NETWORK_MTU - ETHERNET_HEADER_SIZE - IPV6_HEADER_SIZE - UDP_HEADER_SIZE;
+		private const size_t PREFERRED_MTU = MAX_UDP_PAYLOAD_SIZE - QUIC_HEADER_MAX_SIZE;
 		private const size_t MAX_QUIC_DATAGRAM_SIZE = 14000;
 		private const NGTcp2.Duration KEEP_ALIVE_TIMEOUT = 15ULL * NGTcp2.SECONDS;
 
@@ -1937,6 +1945,7 @@ namespace Frida.Fruity {
 			var settings = NGTcp2.Settings.make_default ();
 			settings.initial_ts = make_timestamp ();
 			settings.max_tx_udp_payload_size = MAX_UDP_PAYLOAD_SIZE;
+			settings.no_tx_udp_payload_size_shaping = true;
 			settings.handshake_timeout = 5ULL * NGTcp2.SECONDS;
 
 			var transport_params = NGTcp2.TransportParams.make_default ();
@@ -2013,7 +2022,7 @@ namespace Frida.Fruity {
 			_remote_rsd_port = (uint16) server_rsd_port;
 			mtu = (uint16) raw_mtu;
 
-			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu - 8); // TODO: Fix MTU calculation.
+			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu);
 			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);

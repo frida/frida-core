@@ -1111,9 +1111,6 @@ namespace Frida.Fruity {
 		public abstract string? udid_from_iface (string ifname) throws Error;
 	}
 
-	public interface InterfaceList : Object {
-	}
-
 	public class NullFruitFinder : Object, FruitFinder {
 		public string? udid_from_iface (string ifname) throws Error {
 			return null;
