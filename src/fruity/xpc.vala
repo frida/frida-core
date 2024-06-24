@@ -1816,7 +1816,7 @@ namespace Frida.Fruity {
 		private Source? write_idle;
 		private Source? expiry_timer;
 
-		private UdpSocket socket;
+		private UdpSocket? socket;
 		private uint8[] raw_local_address;
 		private NGTcp2.Connection? connection;
 		private NGTcp2.Crypto.ConnectionRef connection_ref;
@@ -2030,6 +2030,9 @@ namespace Frida.Fruity {
 
 		public void cancel () {
 			connection = null;
+			printerr (">>> setting socket to null\n");
+			socket = null;
+			printerr ("<<< set socket to null\n");
 
 			io_cancellable.cancel ();
 

@@ -217,8 +217,10 @@ namespace Frida.Fruity {
 			raw_ipv6_address = handle.ip6_addr[chosen_index];
 		}
 
-		~VirtualNetworkStack () {
+		public override void dispose () {
 			stop ();
+
+			base.dispose ();
 		}
 
 		public void stop () {
@@ -952,6 +954,7 @@ namespace Frida.Fruity {
 				}
 			}
 
+			//private VirtualNetworkStack? _netstack;
 			private unowned LWIP.UdpPcb? pcb;
 			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
@@ -969,13 +972,22 @@ namespace Frida.Fruity {
 					pcb.bind_netif (netstack.handle);
 					return OK;
 				});
+
+				printerr ("Ipv6UdpSocket %p\n", this);
 			}
 
 			~Ipv6UdpSocket () {
-				netstack.perform_on_lwip_thread (() => {
+				printerr ("~Ipv6UdpSocket %p\n", this);
+			}
+
+			public override void dispose () {
+				_netstack.perform_on_lwip_thread (() => {
 					pcb.remove ();
 					pcb = null;
+					return OK;
 				});
+
+				base.dispose ();
 			}
 
 			private void on_recv (LWIP.UdpPcb pcb, owned LWIP.PacketBuffer? pbuf, LWIP.IP6Address addr, uint16 port) {

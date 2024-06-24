@@ -73,11 +73,6 @@ namespace Frida.Fruity {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			unowned LibUSB.DeviceHandle handle = device.handle;
 
-			int config_id = -1;
-			Usb.check (handle.get_configuration (out config_id), "Failed to get USB device configuration");
-			if (config_id != 5 && config_id != 6)
-				throw new Error.NOT_SUPPORTED ("Expected USB device in config 5 or 6, device is in %d", config_id);
-
 			LibUSB.ConfigDescriptor config;
 			Usb.check (device.raw_device.get_active_config_descriptor (out config),
 				"Failed to get active USB config descriptor");
@@ -127,7 +122,6 @@ namespace Frida.Fruity {
 			}
 
 			handle.detach_kernel_driver (data_iface);
-			//Usb.check (handle.detach_kernel_driver (data_iface), "Failed to detach kernel driver for USB device");
 			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
@@ -142,6 +136,7 @@ namespace Frida.Fruity {
 
 		public void close () {
 			io_cancellable.cancel ();
+			_netstack.stop ();
 		}
 
 		private async void process_incoming_datagrams () {

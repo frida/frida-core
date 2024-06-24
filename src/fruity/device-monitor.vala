@@ -79,6 +79,10 @@ namespace Frida.Fruity {
 
 			on_complete = null;
 
+			foreach (var device in devices.values)
+				device.close ();
+			devices.clear ();
+
 			state = STOPPED;
 		}
 
@@ -178,6 +182,10 @@ namespace Frida.Fruity {
 		private Gee.Queue<UsbmuxLockdownServiceRequest> usbmux_lockdown_service_requests =
 			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
 		private LockdownClient? cached_usbmux_lockdown_client;
+
+		internal void close () {
+			transports.clear ();
+		}
 
 		public UsbmuxDevice? find_usbmux_device () throws Error {
 			var transport = transports.first_match (t => t.usbmux_device != null);
@@ -638,6 +646,7 @@ namespace Frida.Fruity {
 
 	private sealed class PortableCoreDeviceBackend : Object, Backend {
 		private State state = CREATED;
+		private Gee.Set<PortableCoreDeviceTransport> transports = new Gee.HashSet<PortableCoreDeviceTransport> ();
 		private Promise<bool> started = new Promise<bool> ();
 
 		private Thread<void>? usb_worker;
@@ -681,15 +690,24 @@ namespace Frida.Fruity {
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
+			printerr (">>> stop()\n");
 			state = STOPPING;
 
 			io_cancellable.cancel ();
+
 			usb_context.interrupt_event_handler ();
 
 			usb_worker.join ();
 			usb_worker = null;
 
+			foreach (var transport in transports)
+				yield transport.close (cancellable);
+			transports.clear ();
+
+			usb_context = null;
+
 			state = STOPPED;
+			printerr ("<<< stop()\n");
 		}
 
 		private void perform_usb_work () {
@@ -711,8 +729,6 @@ namespace Frida.Fruity {
 				int completed = 0;
 				usb_context.handle_events_completed (out completed);
 			}
-
-			usb_context = null;
 		}
 
 		private void on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
@@ -732,7 +748,9 @@ namespace Frida.Fruity {
 			try {
 				var device = yield UsbDevice.open (raw_device, io_cancellable);
 
-				transport_attached (new PortableCoreDeviceTransport (device));
+				var transport = new PortableCoreDeviceTransport (device);
+				transports.add (transport);
+				transport_attached (transport);
 			} catch (GLib.Error e) {
 				printerr ("domain=%s code=%d %s\n", e.domain.to_string (), e.code, e.message);
 			} finally {
@@ -788,6 +806,20 @@ namespace Frida.Fruity {
 
 		public PortableCoreDeviceTransport (UsbDevice usb_device) {
 			Object (usb_device: usb_device);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (tunnel_request != null) {
+				try {
+					var tunnel = yield tunnel_request.future.wait_async (cancellable);
+					yield tunnel.close (cancellable);
+				} catch (Error e) {
+				} finally {
+					tunnel_request = null;
+				}
+			}
+
+			usb_device.close ();
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
@@ -872,6 +904,25 @@ namespace Frida.Fruity {
 
 			tunnel_connection = tc;
 			_discovery_service = disco;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			_discovery_service.close ();
+
+			tunnel_connection.cancel ();
+
+			if (ncm != null)
+				ncm.close ();
+		}
+
+		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
+			var netstack = tunnel_connection.tunnel_netstack;
+			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tunnel_connection.remote_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
+			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
@@ -1049,23 +1100,6 @@ namespace Frida.Fruity {
 				netstack = ncm.netstack,
 				ip = ncm.remote_ipv6_address
 			};
-		}
-
-		public async void close (Cancellable? cancellable) throws IOError {
-			_discovery_service.close ();
-			tunnel_connection.cancel ();
-			if (ncm != null)
-				ncm.close ();
-		}
-
-		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			var netstack = tunnel_connection.tunnel_netstack;
-			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tunnel_connection.remote_address,
-				port: port,
-				scope_id: netstack.scope_id
-			);
-			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 
 		private static Bytes make_remoted_mdns_request () {

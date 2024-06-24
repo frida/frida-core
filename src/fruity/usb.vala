@@ -1,12 +1,13 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	internal sealed class UsbDevice : Object, AsyncInitable {
-		public LibUSB.Device raw_device {
-			get;
-			construct;
+		public LibUSB.Device? raw_device {
+			get {
+				return _raw_device;
+			}
 		}
 
-		public LibUSB.DeviceHandle handle {
+		public LibUSB.DeviceHandle? handle {
 			get {
 				return _handle;
 			}
@@ -24,7 +25,8 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private LibUSB.DeviceHandle _handle;
+		private LibUSB.Device? _raw_device;
+		private LibUSB.DeviceHandle? _handle;
 		private string _udid;
 		private uint16 _default_language_id;
 
@@ -41,11 +43,12 @@ namespace Frida.Fruity {
 		}
 
 		private UsbDevice (LibUSB.Device raw_device) {
-			Object (raw_device: raw_device);
+			Object ();
+			_raw_device = raw_device;
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			Usb.check (raw_device.open (out _handle), "Failed to open USB device");
+			Usb.check (_raw_device.open (out _handle), "Failed to open USB device");
 
 			Bytes language_ids_response = yield read_string_descriptor_bytes (0, 0, cancellable);
 			if (language_ids_response.get_size () < sizeof (uint16))
@@ -53,11 +56,16 @@ namespace Frida.Fruity {
 			Buffer language_ids = new Buffer (language_ids_response, LITTLE_ENDIAN);
 			_default_language_id = language_ids.read_uint16 (0);
 
-			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
+			var dev_desc = LibUSB.DeviceDescriptor (_raw_device);
 			string serial_number = yield read_string_descriptor (dev_desc.iSerialNumber, _default_language_id, cancellable);
 			_udid = udid_from_serial_number (serial_number);
 
 			return true;
+		}
+
+		public void close () {
+			_handle = null;
+			_raw_device = null;
 		}
 
 		private static string udid_from_serial_number (string serial) {
