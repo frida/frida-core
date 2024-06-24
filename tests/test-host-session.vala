@@ -3756,6 +3756,12 @@ namespace Frida.HostSessionTest {
 					printerr ("\nFAIL: %s\n\n", e.message);
 				}
 
+				try {
+					yield device_manager.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+
 				h.done ();
 			}
 
