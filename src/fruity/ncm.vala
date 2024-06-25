@@ -107,8 +107,16 @@ namespace Frida.Fruity {
 					}
 				}
 			}
-			if (!found_cdc_header || !found_data_interface)
-				throw new Error.NOT_SUPPORTED ("Failed to find CDC-NCM interface");
+			if (!found_cdc_header || !found_data_interface) {
+#if WINDOWS
+				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found; use https://zadig.akeo.ie to switch from " +
+					"Apple's official driver onto Microsoft's WinUSB driver (so libusb can access it), then run " +
+					"a recent usbmuxd from git to have it automatically modeswitch the device for you");
+#else
+				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found; use a recent usbmuxd from git to have it " +
+					"automatically modeswitch the device for you");
+#endif
+			}
 
 			uint8 mac_address[6];
 			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,

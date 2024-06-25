@@ -19,9 +19,10 @@ namespace Frida.Fruity {
 
 		construct {
 			add_backend (new UsbmuxBackend ());
-			add_backend (new PortableCoreDeviceBackend ());
 #if MACOS
 			add_backend (new MacOSCoreDeviceBackend ());
+#else
+			add_backend (new PortableCoreDeviceBackend ());
 #endif
 		}
 
@@ -49,6 +50,16 @@ namespace Frida.Fruity {
 			yield;
 
 			on_complete = null;
+
+			//var usbmux = (UsbmuxBackend) backends.first_match (b => b is UsbmuxBackend);
+			//if (!usbmux.available) {
+			//	printerr ("YAY\n");
+				var b = (PortableCoreDeviceBackend) backends.first_match (b => b is PortableCoreDeviceBackend);
+				if (b != null)
+					yield b.activate_modeswitch_support (cancellable);
+			//} else {
+			//	printerr ("NAY\n");
+			//}
 
 			state = STARTED;
 
@@ -414,6 +425,12 @@ namespace Frida.Fruity {
 	}
 
 	private sealed class UsbmuxBackend : Object, Backend {
+		public bool available {
+			get {
+				return usbmux != null;
+			}
+		}
+
 		private Gee.Map<UsbmuxDevice, UsbmuxTransport> transports = new Gee.HashMap<UsbmuxDevice, UsbmuxTransport> ();
 
 		private UsbmuxClient? usbmux;
@@ -648,6 +665,9 @@ namespace Frida.Fruity {
 		private State state = CREATED;
 		private Gee.Set<PortableCoreDeviceTransport> transports = new Gee.HashSet<PortableCoreDeviceTransport> ();
 		private Promise<bool> started = new Promise<bool> ();
+		private bool modeswitch_allowed = false;
+		private Promise<bool>? modeswitch_activated;
+		private Gee.Set<string>? modeswitch_udids_pending;
 
 		private Thread<void>? usb_worker;
 		private LibUSB.Context? usb_context;
@@ -716,6 +736,33 @@ namespace Frida.Fruity {
 			state = STOPPED;
 		}
 
+		public async void activate_modeswitch_support (Cancellable? cancellable) throws IOError {
+			modeswitch_allowed = true;
+
+			modeswitch_activated = new Promise<bool> ();
+			modeswitch_udids_pending = new Gee.HashSet<string> ();
+			foreach (var transport in transports.to_array ()) {
+				var usb_device = transport.usb_device;
+				try {
+					if (yield usb_device.maybe_modeswitch (cancellable)) {
+						printerr ("activate_modeswitch_support(): Initiated modeswitch for %s\n", usb_device.udid);
+						modeswitch_udids_pending.add (usb_device.udid);
+					}
+				} catch (Error e) {
+				}
+			}
+			if (!modeswitch_udids_pending.is_empty) {
+				printerr ("activate_modeswitch_support(): Waiting for modeswitches (n=%d)\n", modeswitch_udids_pending.size);
+				try {
+					yield modeswitch_activated.future.wait_async (cancellable);
+				} catch (Error e) {
+					assert_not_reached ();
+				}
+			} else {
+				printerr ("activate_modeswitch_support(): No pending modeswitches\n");
+			}
+		}
+
 		private void perform_usb_work () {
 			LibUSB.Context.init (out usb_context);
 
@@ -779,6 +826,8 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_device_arrival (LibUSB.Device raw_device) {
+			UsbDevice? device = null;
+
 			uint delays[] = { 50, 100, 250 };
 			for (uint attempts = 0; attempts != 3; attempts++) {
 				if (attempts != 0) {
@@ -802,7 +851,17 @@ namespace Frida.Fruity {
 				}
 
 				try {
-					var device = yield UsbDevice.open (raw_device, io_cancellable);
+					device = yield UsbDevice.open (raw_device, io_cancellable);
+
+					if (modeswitch_allowed) {
+						printerr ("handle_device_arrival(): checking if we should modeswitch\n");
+						if (yield device.maybe_modeswitch (io_cancellable)) {
+							printerr ("handle_device_arrival(): yes\n");
+							break;
+						} else {
+							printerr ("handle_device_arrival(): no\n");
+						}
+					}
 
 					var transport = new PortableCoreDeviceTransport (device);
 					transports.add (transport);
@@ -817,6 +876,19 @@ namespace Frida.Fruity {
 
 			if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
 				started.resolve (true);
+
+			if (device != null && modeswitch_udids_pending != null) {
+				printerr ("A: Removing %s\n", device.udid);
+				modeswitch_udids_pending.remove (device.udid);
+				if (modeswitch_udids_pending.is_empty) {
+					printerr ("1\n");
+					modeswitch_activated.resolve (true);
+				} else {
+					printerr ("2\n");
+				}
+			} else {
+				printerr ("B: Keeping %s\n", device.udid);
+			}
 		}
 
 		private async void handle_device_departure (LibUSB.Device raw_device) {
@@ -862,7 +934,6 @@ namespace Frida.Fruity {
 			return ((uint32) device.get_port_number () << 24) |
 				((uint32) device.get_device_address () << 16) |
 				(uint32) desc.idProduct;
-
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {

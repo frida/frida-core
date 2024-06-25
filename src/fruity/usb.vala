@@ -30,6 +30,11 @@ namespace Frida.Fruity {
 		private string _udid;
 		private uint16 _default_language_id;
 
+		private enum AppleSpecificRequest {
+			GET_MODE = 0x45,
+			SET_MODE = 0x52,
+		}
+
 		public static async UsbDevice open (LibUSB.Device raw_device, Cancellable? cancellable = null) throws Error, IOError {
 			var device = new UsbDevice (raw_device);
 
@@ -68,6 +73,38 @@ namespace Frida.Fruity {
 			_raw_device = null;
 		}
 
+		public async bool maybe_modeswitch (Cancellable? cancellable) throws Error, IOError {
+			var response = yield control_transfer (
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
+				AppleSpecificRequest.GET_MODE,
+				0,
+				0,
+				4,
+				1000,
+				cancellable);
+			bool is_initial_mode = response.get_size () == 4 &&
+					response[0] == 0x03 &&
+					response[1] == 0x03 &&
+					response[2] == 0x03 &&
+					response[3] == 0x00;
+			if (!is_initial_mode)
+				return false;
+
+			uint16 mode = 3;
+			response = yield control_transfer (
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
+				AppleSpecificRequest.SET_MODE,
+				0,
+				mode,
+				1,
+				1000,
+				cancellable);
+			if (response.get_size () != 1 || response[0] != 0x00)
+				return false;
+
+			return true;
+		}
+
 		private static string udid_from_serial_number (string serial) {
 			if (serial.length == 24)
 				return serial.substring (0, 8) + "-" + serial.substring (8);
@@ -99,7 +136,7 @@ namespace Frida.Fruity {
 		public async Bytes read_string_descriptor_bytes (uint8 index, uint16 language_id, Cancellable? cancellable)
 				throws Error, IOError {
 			var response = yield control_transfer (
-				LibUSB.RequestType.STANDARD | LibUSB.EndpointDirection.IN,
+				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.STANDARD | LibUSB.EndpointDirection.IN,
 				LibUSB.StandardRequest.GET_DESCRIPTOR,
 				(LibUSB.DescriptorType.STRING << 8) | index,
 				language_id,
@@ -241,5 +278,32 @@ namespace Frida.Fruity {
 					throw new Error.TRANSPORT ("%s", message);
 			}
 		}
+	}
+
+	// https://gist.github.com/phako/96b36b5070beaf7eee27
+	public void hexdump (uint8[] data) {
+		var builder = new StringBuilder.sized (16);
+		var i = 0;
+
+		foreach (var c in data) {
+			if (i % 16 == 0)
+				printerr ("%08x | ", i);
+
+			printerr ("%02x ", c);
+
+			if (((char) c).isprint ())
+				builder.append_c ((char) c);
+			else
+				builder.append (".");
+
+			i++;
+			if (i % 16 == 0) {
+				printerr ("| %s\n", builder.str);
+				builder.erase ();
+			}
+		}
+
+		if (i % 16 != 0)
+			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 }
