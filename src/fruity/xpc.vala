@@ -2030,9 +2030,7 @@ namespace Frida.Fruity {
 
 		public void cancel () {
 			connection = null;
-			printerr (">>> setting socket to null\n");
 			socket = null;
-			printerr ("<<< set socket to null\n");
 
 			io_cancellable.cancel ();
 
@@ -2196,7 +2194,6 @@ namespace Frida.Fruity {
 				try {
 					Udp.send (tx_buf[:n], socket.datagram_based, io_cancellable);
 				} catch (GLib.Error e) {
-					printerr ("Oh no: %s\n", e.message);
 					continue;
 				}
 			}

@@ -147,7 +147,6 @@ namespace Frida.Fruity {
 					size_t n = yield device.bulk_transfer (rx_address, data, uint.MAX, io_cancellable);
 					handle_ncm_frame (data[:n]);
 				} catch (GLib.Error e) {
-					printerr ("Oh noes: %s\n", e.message);
 					return;
 				}
 			}

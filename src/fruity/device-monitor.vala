@@ -654,6 +654,9 @@ namespace Frida.Fruity {
 		private LibUSB.HotCallbackHandle iphone_callback;
 		private LibUSB.HotCallbackHandle ipad_callback;
 		private uint pending_device_arrivals = 0;
+		private Gee.Map<uint32, LibUSB.Device> polled_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
+		private Source? polled_timer;
+		private uint polled_outdated = 0;
 
 		private MainContext main_context;
 
@@ -699,6 +702,11 @@ namespace Frida.Fruity {
 			usb_worker.join ();
 			usb_worker = null;
 
+			if (polled_timer != null) {
+				polled_timer.destroy ();
+				polled_timer = null;
+			}
+
 			foreach (var transport in transports)
 				yield transport.close (cancellable);
 			transports.clear ();
@@ -719,19 +727,16 @@ namespace Frida.Fruity {
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
 					PRODUCT_ID_IPAD, LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
 			} else {
-				foreach (var device in usb_context.get_device_list ()) {
-					var desc = LibUSB.DeviceDescriptor (device);
+				refresh_polled_devices ();
 
-					if (desc.idVendor != VENDOR_ID_APPLE)
-						continue;
-
-					switch (desc.idProduct) {
-						case PRODUCT_ID_IPHONE:
-						case PRODUCT_ID_IPAD:
-							on_device_arrived (device);
-							break;
-					}
-				}
+				var source = new TimeoutSource.seconds (2);
+				source.set_callback (() => {
+					AtomicUint.set (ref polled_outdated, 1);
+					usb_context.interrupt_event_handler ();
+					return Source.CONTINUE;
+				});
+				source.attach (main_context);
+				polled_timer = source;
 			}
 
 			if (AtomicUint.dec_and_test (ref pending_device_arrivals)) {
@@ -744,6 +749,9 @@ namespace Frida.Fruity {
 			while (state != STOPPING) {
 				int completed = 0;
 				usb_context.handle_events_completed (out completed);
+
+				if (AtomicUint.compare_and_exchange (ref polled_outdated, 1, 0))
+					refresh_polled_devices ();
 			}
 		}
 
@@ -822,6 +830,39 @@ namespace Frida.Fruity {
 				yield transport.close (io_cancellable);
 			} catch (IOError e) {
 			}
+		}
+
+		private void refresh_polled_devices () {
+			var current_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
+			foreach (var device in usb_context.get_device_list ()) {
+				var desc = LibUSB.DeviceDescriptor (device);
+
+				if (desc.idVendor != VENDOR_ID_APPLE)
+					continue;
+
+				if (desc.idProduct != PRODUCT_ID_IPHONE && desc.idProduct != PRODUCT_ID_IPAD)
+					continue;
+
+				uint id = make_device_id (device, desc);
+				current_devices[id] = device;
+
+				if (!polled_devices.has_key (id))
+					on_device_arrived (device);
+			}
+
+			foreach (var e in polled_devices.entries) {
+				if (!current_devices.has_key (e.key))
+					on_device_left (e.value);
+			}
+
+			polled_devices = current_devices;
+		}
+
+		private static uint32 make_device_id (LibUSB.Device device, LibUSB.DeviceDescriptor desc) {
+			return ((uint32) device.get_port_number () << 24) |
+				((uint32) device.get_device_address () << 16) |
+				(uint32) desc.idProduct;
+
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
