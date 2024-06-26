@@ -256,6 +256,8 @@ namespace Frida.Fruity {
 			switch (error) {
 				case ACCESS:
 					throw new Error.PERMISSION_DENIED ("%s", message);
+				case NOT_FOUND:
+					throw new Error.INVALID_OPERATION ("%s", message);
 				case TIMEOUT:
 					throw new Error.TIMED_OUT ("%s", message);
 				default:

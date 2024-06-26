@@ -744,22 +744,17 @@ namespace Frida.Fruity {
 			foreach (var transport in transports.to_array ()) {
 				var usb_device = transport.usb_device;
 				try {
-					if (yield usb_device.maybe_modeswitch (cancellable)) {
-						printerr ("activate_modeswitch_support(): Initiated modeswitch for %s\n", usb_device.udid);
+					if (yield usb_device.maybe_modeswitch (cancellable))
 						modeswitch_udids_pending.add (usb_device.udid);
-					}
 				} catch (Error e) {
 				}
 			}
 			if (!modeswitch_udids_pending.is_empty) {
-				printerr ("activate_modeswitch_support(): Waiting for modeswitches (n=%d)\n", modeswitch_udids_pending.size);
 				try {
 					yield modeswitch_activated.future.wait_async (cancellable);
 				} catch (Error e) {
 					assert_not_reached ();
 				}
-			} else {
-				printerr ("activate_modeswitch_support(): No pending modeswitches\n");
 			}
 		}
 
@@ -826,10 +821,11 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_device_arrival (LibUSB.Device raw_device) {
-			UsbDevice? device = null;
+			printerr ("\nhandle_device_arrival() raw_device=%p\n", raw_device);
 
+			UsbDevice? device = null;
 			uint delays[] = { 50, 100, 250 };
-			for (uint attempts = 0; attempts != 3; attempts++) {
+			for (uint attempts = 0; attempts != 7; attempts++) {
 				if (attempts != 0) {
 					uint delay = delays[attempts - 1];
 
@@ -853,22 +849,22 @@ namespace Frida.Fruity {
 				try {
 					device = yield UsbDevice.open (raw_device, io_cancellable);
 
-					if (modeswitch_allowed) {
-						printerr ("handle_device_arrival(): checking if we should modeswitch\n");
-						if (yield device.maybe_modeswitch (io_cancellable)) {
-							printerr ("handle_device_arrival(): yes\n");
-							break;
-						} else {
-							printerr ("handle_device_arrival(): no\n");
-						}
-					}
+					if (modeswitch_allowed && yield device.maybe_modeswitch (io_cancellable))
+						break;
 
 					var transport = new PortableCoreDeviceTransport (device);
 					transports.add (transport);
 					transport_attached (transport);
 				} catch (GLib.Error e) {
-					if (e is Error.PERMISSION_DENIED)
+					printerr ("\toops: %s\n", e.message);
+					if (e is Error.PERMISSION_DENIED) {
+						printerr ("\tretrying due to PERMISSION_DENIED\n");
 						continue; // We might still be waiting for a udev rule to run...
+					}
+					if (e is Error.INVALID_OPERATION) {
+						printerr ("\tretrying due to NOT_FOUND\n");
+						continue; // Hmm
+					}
 				}
 
 				break;
@@ -878,24 +874,21 @@ namespace Frida.Fruity {
 				started.resolve (true);
 
 			if (device != null && modeswitch_udids_pending != null) {
-				printerr ("A: Removing %s\n", device.udid);
 				modeswitch_udids_pending.remove (device.udid);
-				if (modeswitch_udids_pending.is_empty) {
-					printerr ("1\n");
+				if (modeswitch_udids_pending.is_empty)
 					modeswitch_activated.resolve (true);
-				} else {
-					printerr ("2\n");
-				}
-			} else {
-				printerr ("B: Keeping %s\n", device.udid);
 			}
 		}
 
 		private async void handle_device_departure (LibUSB.Device raw_device) {
+			printerr ("\nhandle_device_departure() raw_device=%p\n", raw_device);
+
 			var transport = transports.first_match (t => t.usb_device.raw_device == raw_device);
+			printerr ("\t=> transport=%p\n", transport);
 			if (transport == null)
 				return;
 
+			transport_detached (transport);
 			transports.remove (transport);
 
 			try {

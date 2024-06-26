@@ -972,12 +972,6 @@ namespace Frida.Fruity {
 					pcb.bind_netif (netstack.handle);
 					return OK;
 				});
-
-				printerr ("Ipv6UdpSocket %p\n", this);
-			}
-
-			~Ipv6UdpSocket () {
-				printerr ("~Ipv6UdpSocket %p\n", this);
 			}
 
 			public override void dispose () {

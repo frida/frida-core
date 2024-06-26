@@ -72,6 +72,7 @@ namespace Frida.Fruity {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			unowned LibUSB.DeviceHandle handle = device.handle;
+			printerr ("using handle %p\n", handle);
 
 			LibUSB.ConfigDescriptor config;
 			Usb.check (device.raw_device.get_active_config_descriptor (out config),
