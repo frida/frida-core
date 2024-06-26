@@ -266,6 +266,8 @@ namespace Frida {
 				? Soup.ServerListenOptions.HTTPS
 				: 0;
 
+			var prototype_enumerator = new EndpointEnumerator ();
+
 			SocketAddress? first_effective_address = null;
 			var enumerator = connectable.enumerate ();
 			while (true) {
@@ -987,4 +989,416 @@ namespace Frida {
 			return return_value.get_boolean ();
 		}
 	}
+
+#if DARWIN
+	private class EndpointEnumerator : Object {
+		private int necp;
+		private uint8 client_id[16];
+
+		private static NecpOpenFunc necp_open;
+		private static NecpClientActionFunc necp_client_action;
+
+		private enum NecpClientAction {
+			ADD			= 1,
+			REMOVE			= 2,
+			COPY_PARAMETERS		= 3,
+			COPY_RESULT		= 4,
+			COPY_LIST		= 5,
+			REQUEST_NEXUS_INSTANCE	= 6,
+			AGENT			= 7,
+			COPY_AGENT		= 8,
+			COPY_INTERFACE		= 9,
+			SET_STATISTICS		= 10,
+			COPY_ROUTE_STATISTICS	= 11,
+			AGENT_USE		= 12,
+			MAP_SYSCTLS		= 13,
+			UPDATE_CACHE		= 14,
+			COPY_CLIENT_UPDATE	= 15,
+			COPY_UPDATED_RESULT	= 16,
+			ADD_FLOW		= 17,
+			REMOVE_FLOW		= 18,
+			CLAIM			= 19,
+			SIGN			= 20,
+			GET_INTERFACE_ADDRESS	= 21,
+			ACQUIRE_AGENT_TOKEN	= 22,
+			VALIDATE		= 23,
+			GET_SIGNED_CLIENT_ID	= 24,
+			SET_SIGNED_CLIENT_ID	= 25,
+		}
+
+		private enum NecpClientParameterType {
+			APPLICATION			= 1,
+			REAL_APPLICATION		= 2,
+			DOMAIN				= 3,
+			ACCOUNT				= 4,
+			PID				= 6,
+			UID				= 7,
+			BOUND_INTERFACE			= 9,
+			TRAFFIC_CLASS			= 10,
+			IP_PROTOCOL			= 11,
+			LOCAL_ADDRESS			= 12,
+			REMOTE_ADDRESS			= 13,
+			DOMAIN_OWNER			= 33,
+			DOMAIN_CONTEXT			= 34,
+			TRACKER_DOMAIN			= 35,
+			ATTRIBUTED_BUNDLE_IDENTIFIER	= 36,
+			SCHEME_PORT			= 37,
+			APPLICATION_ID			= 41,
+			URL				= 42,
+			NEXUS_KEY			= 102,
+			PROHIBIT_INTERFACE		= 100,
+			PROHIBIT_IF_TYPE		= 101,
+			PROHIBIT_AGENT			= 102,
+			PROHIBIT_AGENT_TYPE		= 103,
+			REQUIRE_IF_TYPE			= 111,
+			REQUIRE_AGENT			= 112,
+			REQUIRE_AGENT_TYPE		= 113,
+			PREFER_AGENT			= 122,
+			PREFER_AGENT_TYPE		= 123,
+			AVOID_AGENT			= 124,
+			AVOID_AGENT_TYPE		= 125,
+			TRIGGER_AGENT			= 130,
+			ASSERT_AGENT			= 131,
+			UNASSERT_AGENT			= 132,
+			AGENT_ADD_GROUP_MEMBERS		= 133,
+			AGENT_REMOVE_GROUP_MEMBERS	= 134,
+			REPORT_AGENT_ERROR		= 135,
+			FALLBACK_MODE			= 140,
+			PARENT_ID			= 150,
+			LOCAL_ENDPOINT			= 200,
+			REMOTE_ENDPOINT			= 201,
+			BROWSE_DESCRIPTOR		= 202,
+			RESOLVER_TAG			= 203,
+			ADVERTISE_DESCRIPTOR		= 204,
+			GROUP_DESCRIPTOR		= 205,
+			DELEGATED_UPID			= 210,
+			ETHERTYPE			= 220,
+			TRANSPORT_PROTOCOL		= 221,
+			LOCAL_ADDRESS_PREFERENCE	= 230,
+			FLAGS				= 250,
+			FLOW_DEMUX_PATTERN		= 251,
+		}
+
+		[Flags]
+		private enum NecpClientParameterFlags {
+			MULTIPATH			= 0x0001,
+			BROWSE				= 0x0002,
+			PROHIBIT_EXPENSIVE		= 0x0004,
+			LISTENER			= 0x0008,
+			DISCRETIONARY			= 0x0010,
+			ECN_ENABLE			= 0x0020,
+			ECN_DISABLE			= 0x0040,
+			TFO_ENABLE			= 0x0080,
+			ONLY_PRIMARY_REQUIRES_TYPE	= 0x0100,
+			CUSTOM_ETHER			= 0x0200,
+			CUSTOM_IP			= 0x0400,
+			INTERPOSE			= 0x0800,
+			PROHIBIT_CONSTRAINED		= 0x1000,
+			FALLBACK_TRAFFIC		= 0x2000,
+			INBOUND				= 0x4000,
+			SYSTEM_PROXY			= 0x8000,
+			KNOWN_TRACKER			= 0x10000,
+			UNSAFE_SOCKET_ACCESS		= 0x20000,
+			NON_APP_INITIATED		= 0x40000,
+			THIRD_PARTY_WEB_CONTENT		= 0x80000,
+			SILENT				= 0x100000,
+			APPROVED_APP_DOMAIN		= 0x200000,
+			NO_WAKE_FROM_SLEEP		= 0x400000,
+			REUSE_LOCAL			= 0x800000,
+			ENHANCED_PRIVACY		= 0x1000000,
+			WEB_SEARCH_CONTENT		= 0x2000000,
+		}
+
+		private enum NecpClientResultType {
+			CLIENT_ID			= 1,
+			POLICY_RESULT			= 2,
+			POLICY_RESULT_PARAMETER		= 3,
+			FILTER_CONTROL_UNIT		= 4,
+			INTERFACE_INDEX			= 5,
+			NETAGENT			= 6,
+			FLAGS				= 7,
+			INTERFACE			= 8,
+			INTERFACE_OPTION		= 9,
+			EFFECTIVE_MTU			= 10,
+			FLOW				= 11,
+			PROTO_CTL_EVENT			= 12,
+			TFO_COOKIE			= 13,
+			TFO_FLAGS			= 14,
+			RECOMMENDED_MSS			= 15,
+			FLOW_ID				= 16,
+			INTERFACE_TIME_DELTA		= 17,
+			REASON				= 18,
+			FLOW_DIVERT_AGGREGATE_UNIT	= 19,
+			REQUEST_IN_PROCESS_FLOW_DIVERT	= 20,
+			NEXUS_INSTANCE			= 100,
+			NEXUS_PORT			= 101,
+			NEXUS_KEY			= 102,
+			NEXUS_PORT_FLOW_INDEX		= 103,
+			NEXUS_FLOW_STATS		= 104,
+			LOCAL_ENDPOINT			= 200,
+			REMOTE_ENDPOINT			= 201,
+			DISCOVERED_ENDPOINT		= 202,
+			RESOLVED_ENDPOINT		= 203,
+			LOCAL_ETHER_ADDR		= 204,
+			REMOTE_ETHER_ADDR		= 205,
+			EFFECTIVE_TRAFFIC_CLASS		= 210,
+			TRAFFIC_MGMT_BG			= 211,
+			GATEWAY				= 212,
+			GROUP_MEMBER			= 213,
+			NAT64				= 214,
+			ESTIMATED_THROUGHPUT		= 215,
+			AGENT_ERROR			= 216,
+		}
+
+		private struct NecpClientResultInterface {
+			public uint32 generation;
+			public uint32 index;
+		}
+
+		private struct NecpClientInterfaceOption {
+			public uint32 index;
+			public uint32 generation;
+			public Bytes uuid;
+		}
+
+		private struct NecpInterfaceDetails {
+			public char name[24];
+			public uint32 index;
+			public uint32 generation;
+			public uint32 functional_type;
+			public uint32 delegate_index;
+			public uint32 flags;
+			public uint32 mtu;
+			public NecpInterfaceSignature ipv4_signature;
+			public NecpInterfaceSignature ipv6_signature;
+			public uint32 ipv4_netmask;
+			public uint32 ipv4_broadcast;
+			public uint32 tso_max_segment_size_v4;
+			public uint32 tso_max_segment_size_v6;
+			public uint32 hwcsum_flags;
+			public uint8 radio_type;
+			public uint8 radio_channel;
+		}
+
+		private struct NecpInterfaceSignature {
+			public uint8 signature[20];
+			public uint8 signature_len;
+		}
+
+		private enum InterfaceType {
+			UNKNOWN		= 0,
+			LOOPBACK	= 1,
+			WIRED		= 2,
+			WIFI_INFRA	= 3,
+			WIFI_AWDL	= 4,
+			CELLULAR	= 5,
+			INTCOPROC	= 6,
+			COMPANIONLINK	= 7,
+			MANAGEMENT	= 8,
+		}
+
+		private const string LIBSYSTEM_KERNEL = "/usr/lib/system/libsystem_kernel.dylib";
+
+		static construct {
+			necp_open = (NecpOpenFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "necp_open");
+			necp_client_action = (NecpClientActionFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "necp_client_action");
+		}
+
+		construct {
+			for (int i = 0; i != 9; i++) {
+				var iftype = (InterfaceType) i;
+				printerr ("\n=== Trying %s\n", iftype.to_string ());
+
+				necp = necp_open (0);
+
+				var client_params = new NecpClientParametersBuilder ()
+					.add_type (FLAGS)
+					.add_flags (MULTIPATH) // MULTIPATH | ONLY_PRIMARY_REQUIRES_TYPE
+					.add_type (REQUIRE_IF_TYPE)
+					.add_interface_type (iftype)
+					.build ();
+				hexdump (client_params.get_data ());
+				int res = necp_client_action (necp, ADD, client_id, client_params.get_data ());
+
+				uint8 result[1536];
+				var n = necp_client_action (necp, COPY_RESULT, client_id, result);
+				var reader = new NecpClientResultReader (new Bytes (result[:n]));
+				try {
+					while (reader.has_next ()) {
+						var type = reader.read_type ();
+						printerr ("type: %s\n", type.to_string ());
+						switch (type) {
+							case INTERFACE: {
+								var iface = reader.read_interface ();
+								printerr ("\tgeneration=%u index=%u\n", iface.generation, iface.index);
+
+								var details = NecpInterfaceDetails ();
+								res = necp_client_action (necp, COPY_INTERFACE, (uint8[]) &iface.index, (uint8[]) &details);
+								printerr ("\tCOPY_INTERFACE => %d\n", res);
+								hexdump ((uint8[]) &details);
+
+								break;
+							}
+							case INTERFACE_OPTION: {
+								var iface = reader.read_interface_option ();
+								printerr ("\tgeneration=%u index=%u\n", iface.generation, iface.index);
+
+								var details = NecpInterfaceDetails ();
+								res = necp_client_action (necp, COPY_INTERFACE, (uint8[]) &iface.index, (uint8[]) &details);
+								printerr ("\tCOPY_INTERFACE => %d\n", res);
+								hexdump ((uint8[]) &details);
+
+								break;
+							}
+							default:
+								reader.skip_value ();
+						}
+					}
+				} catch (Error e) {
+					printerr ("%s\n", e.message);
+					assert_not_reached ();
+				}
+
+				//Posix.close (necp);
+			}
+		}
+
+		private class NecpClientParametersBuilder {
+			private BufferBuilder builder = new BufferBuilder ();
+
+			public unowned NecpClientParametersBuilder add_type (NecpClientParameterType type) {
+				builder.append_uint8 (type);
+
+				return this;
+			}
+
+			public unowned NecpClientParametersBuilder add_flags (NecpClientParameterFlags flags) {
+				builder
+					.append_uint32 (4)
+					.append_uint32 (flags);
+
+				return this;
+			}
+
+			public unowned NecpClientParametersBuilder add_interface_type (InterfaceType type) {
+				builder
+					.append_uint32 (1)
+					.append_uint8 (type);
+
+				return this;
+			}
+
+			public Bytes build () {
+				return builder.build ();
+			}
+		}
+
+		private class NecpClientResultReader {
+			private Buffer buffer;
+			private size_t cursor = 0;
+			private size_t end;
+
+			public NecpClientResultReader (Bytes result) {
+				buffer = new Buffer (result);
+				end = buffer.bytes.get_size ();
+			}
+
+			public bool has_next () {
+				return cursor != end;
+			}
+
+			public NecpClientResultType read_type () throws Error {
+				check_available (sizeof (uint8));
+				var type = buffer.read_uint8 (cursor);
+				cursor++;
+				return type;
+			}
+
+			public NecpClientResultInterface read_interface () throws Error {
+				var size = read_uint32 ();
+				if (size != 2 * sizeof (uint32))
+					throw new Error.PROTOCOL ("Invalid necp_client_result_interface");
+				return NecpClientResultInterface () {
+					generation = read_uint32 (),
+					index = read_uint32 (),
+				};
+			}
+
+			public NecpClientInterfaceOption read_interface_option () throws Error {
+				var size = read_uint32 ();
+				if (size != 2 * sizeof (uint32) + 16)
+					throw new Error.PROTOCOL ("Invalid necp_client_interface_option");
+				return NecpClientInterfaceOption () {
+					index = read_uint32 (),
+					generation = read_uint32 (),
+					uuid = read_uuid (),
+				};
+			}
+
+			public void skip_value () throws Error {
+				var size = read_uint32 ();
+				check_available (size);
+				cursor += size;
+			}
+
+			private uint32 read_uint32 () throws Error {
+				check_available (sizeof (uint32));
+				var v = buffer.read_uint32 (cursor);
+				cursor += sizeof (uint32);
+				return v;
+			}
+
+			private Bytes read_uuid () throws Error {
+				check_available (16);
+				var v = buffer.bytes[cursor:cursor + 16];
+				cursor += 16;
+				return v;
+			}
+
+			private void check_available (size_t n) throws Error {
+				if (cursor + n > end)
+					throw new Error.PROTOCOL ("Truncated NECP client result");
+			}
+		}
+
+		[CCode (has_target = false)]
+		private delegate int NecpOpenFunc (int flags);
+
+		private delegate int NecpClientActionFunc (int necp_fd, NecpClientAction action,
+			[CCode (array_length_type = "size_t")]
+			uint8[] client_id,
+			[CCode (array_length_type = "size_t")]
+			uint8[] buffer);
+
+		// https://gist.github.com/phako/96b36b5070beaf7eee27
+		private static void hexdump (uint8[] data) {
+			var builder = new StringBuilder.sized (16);
+			var i = 0;
+
+			foreach (var c in data) {
+				if (i % 16 == 0)
+					printerr ("%08x | ", i);
+
+				printerr ("%02x ", c);
+
+				if (((char) c).isprint ())
+					builder.append_c ((char) c);
+				else
+					builder.append (".");
+
+				i++;
+				if (i % 16 == 0) {
+					printerr ("| %s\n", builder.str);
+					builder.erase ();
+				}
+			}
+
+			if (i % 16 != 0)
+				printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
+		}
+}
+#else
+	private class EndpointEnumerator : Object {
+	}
+#endif
 }
