@@ -625,6 +625,10 @@ namespace Frida {
 				os["version"] = properties.get_string ("ProductVersion");
 				parameters["os"] = os;
 
+				parameters["hwmodel"] = properties.get_string ("HWModelStr");
+				parameters["hwplatform"] = properties.get_string ("HardwarePlatform");
+				parameters["build"] = properties.get_string ("BuildVersion");
+
 				parameters["platform"] = "darwin";
 
 				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
