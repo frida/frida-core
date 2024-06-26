@@ -250,6 +250,9 @@ namespace Frida {
 				parameters["os"] = os;
 
 				parameters["model"] = properties.get_string ("ProductType");
+				parameters["hwmodel"] = properties.get_string ("HWModelStr");
+				parameters["hwplatform"] = properties.get_string ("HardwarePlatform");
+				parameters["build"] = properties.get_string ("BuildVersion");
 
 				parameters["platform"] = "darwin";
 
