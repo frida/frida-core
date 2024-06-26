@@ -623,11 +623,11 @@ namespace Frida {
 				os["id"] = "ios";
 				os["name"] = properties.get_string ("ProductName");
 				os["version"] = properties.get_string ("ProductVersion");
+				os["build"] = properties.get_string ("BuildVersion");
 				parameters["os"] = os;
 
 				parameters["hwmodel"] = properties.get_string ("HWModelStr");
 				parameters["hwplatform"] = properties.get_string ("HardwarePlatform");
-				parameters["build"] = properties.get_string ("BuildVersion");
 
 				parameters["platform"] = "darwin";
 
