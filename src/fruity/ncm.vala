@@ -72,7 +72,6 @@ namespace Frida.Fruity {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			unowned LibUSB.DeviceHandle handle = device.handle;
-			printerr ("using handle %p\n", handle);
 
 			LibUSB.ConfigDescriptor config;
 			Usb.check (device.raw_device.get_active_config_descriptor (out config),
@@ -111,11 +110,9 @@ namespace Frida.Fruity {
 			if (!found_cdc_header || !found_data_interface) {
 #if WINDOWS
 				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found; use https://zadig.akeo.ie to switch from " +
-					"Apple's official driver onto Microsoft's WinUSB driver (so libusb can access it), then run " +
-					"a recent usbmuxd from git to have it automatically modeswitch the device for you");
+					"Apple's official driver onto Microsoft's WinUSB driver (so libusb can access it)");
 #else
-				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found; use a recent usbmuxd from git to have it " +
-					"automatically modeswitch the device for you");
+				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found");
 #endif
 			}
 

@@ -35,6 +35,9 @@ namespace Frida.Fruity {
 			SET_MODE = 0x52,
 		}
 
+		private const string MODE_INITIAL_UNTETHERED	= "3:3:3:0"; // => 5:3:3:0
+		private const string MODE_INITIAL_TETHERED	= "4:4:3:4"; // => 5:4:3:4
+
 		public static async UsbDevice open (LibUSB.Device raw_device, Cancellable? cancellable = null) throws Error, IOError {
 			var device = new UsbDevice (raw_device);
 
@@ -82,20 +85,16 @@ namespace Frida.Fruity {
 				4,
 				1000,
 				cancellable);
-			bool is_initial_mode = response.get_size () == 4 &&
-					response[0] == 0x03 &&
-					response[1] == 0x03 &&
-					response[2] == 0x03 &&
-					response[3] == 0x00;
+			string mode = parse_mode (response);
+			bool is_initial_mode = mode == MODE_INITIAL_UNTETHERED || mode == MODE_INITIAL_TETHERED;
 			if (!is_initial_mode)
 				return false;
 
-			uint16 mode = 3;
 			response = yield control_transfer (
 				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
 				AppleSpecificRequest.SET_MODE,
 				0,
-				mode,
+				3,
 				1,
 				1000,
 				cancellable);
@@ -103,6 +102,13 @@ namespace Frida.Fruity {
 				return false;
 
 			return true;
+		}
+
+		private static string parse_mode (Bytes mode) throws Error {
+			if (mode.get_size () != 4)
+				throw new Error.PROTOCOL ("Invalid mode response");
+			unowned uint8[] m = mode.get_data ();
+			return "%u:%u:%u:%u".printf (m[0], m[1], m[2], m[3]);
 		}
 
 		private static string udid_from_serial_number (string serial) {
@@ -280,32 +286,5 @@ namespace Frida.Fruity {
 					throw new Error.TRANSPORT ("%s", message);
 			}
 		}
-	}
-
-	// https://gist.github.com/phako/96b36b5070beaf7eee27
-	public void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 }

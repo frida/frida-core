@@ -51,15 +51,9 @@ namespace Frida.Fruity {
 
 			on_complete = null;
 
-			//var usbmux = (UsbmuxBackend) backends.first_match (b => b is UsbmuxBackend);
-			//if (!usbmux.available) {
-			//	printerr ("YAY\n");
-				var b = (PortableCoreDeviceBackend) backends.first_match (b => b is PortableCoreDeviceBackend);
-				if (b != null)
-					yield b.activate_modeswitch_support (cancellable);
-			//} else {
-			//	printerr ("NAY\n");
-			//}
+			var b = (PortableCoreDeviceBackend) backends.first_match (b => b is PortableCoreDeviceBackend);
+			if (b != null && b.supports_modeswitch)
+				yield b.activate_modeswitch_support (cancellable);
 
 			state = STARTED;
 
@@ -662,6 +656,12 @@ namespace Frida.Fruity {
 	}
 
 	private sealed class PortableCoreDeviceBackend : Object, Backend {
+		public bool supports_modeswitch {
+			get {
+				return LibUSB.has_capability (HAS_HOTPLUG) != 0;
+			}
+		}
+
 		private State state = CREATED;
 		private Gee.Set<PortableCoreDeviceTransport> transports = new Gee.HashSet<PortableCoreDeviceTransport> ();
 		private Promise<bool> started = new Promise<bool> ();
@@ -821,14 +821,12 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_device_arrival (LibUSB.Device raw_device) {
-			printerr ("\nhandle_device_arrival() raw_device=%p\n", raw_device);
-
 			UsbDevice? device = null;
-			uint delays[] = { 50, 100, 250 };
-			for (uint attempts = 0; attempts != 7; attempts++) {
-				if (attempts != 0) {
-					uint delay = delays[attempts - 1];
 
+			uint delays[] = { 0, 50, 250 };
+			for (uint attempts = 0; attempts != delays.length; attempts++) {
+				uint delay = delays[attempts];
+				if (delay != 0) {
 					var timeout_source = new TimeoutSource (delay);
 					timeout_source.set_callback (handle_device_arrival.callback);
 					timeout_source.attach (main_context);
@@ -855,19 +853,13 @@ namespace Frida.Fruity {
 					var transport = new PortableCoreDeviceTransport (device);
 					transports.add (transport);
 					transport_attached (transport);
-				} catch (GLib.Error e) {
-					printerr ("\toops: %s\n", e.message);
-					if (e is Error.PERMISSION_DENIED) {
-						printerr ("\tretrying due to PERMISSION_DENIED\n");
-						continue; // We might still be waiting for a udev rule to run...
-					}
-					if (e is Error.INVALID_OPERATION) {
-						printerr ("\tretrying due to NOT_FOUND\n");
-						continue; // Hmm
-					}
-				}
 
-				break;
+					break;
+				} catch (GLib.Error e) {
+					// We might still be waiting for a udev rule to run...
+					if (!(e is Error.PERMISSION_DENIED))
+						break;
+				}
 			}
 
 			if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
@@ -881,10 +873,7 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_device_departure (LibUSB.Device raw_device) {
-			printerr ("\nhandle_device_departure() raw_device=%p\n", raw_device);
-
 			var transport = transports.first_match (t => t.usb_device.raw_device == raw_device);
-			printerr ("\t=> transport=%p\n", transport);
 			if (transport == null)
 				return;
 
