@@ -107,14 +107,8 @@ namespace Frida.Fruity {
 					}
 				}
 			}
-			if (!found_cdc_header || !found_data_interface) {
-#if WINDOWS
-				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found; use https://zadig.akeo.ie to switch from " +
-					"Apple's official driver onto Microsoft's WinUSB driver (so libusb can access it)");
-#else
+			if (!found_cdc_header || !found_data_interface)
 				throw new Error.NOT_SUPPORTED ("No USB CDC-NCM interface found");
-#endif
-			}
 
 			uint8 mac_address[6];
 			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,
@@ -128,7 +122,16 @@ namespace Frida.Fruity {
 			}
 
 			handle.detach_kernel_driver (data_iface);
-			Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
+			try {
+				Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
+			} catch (Error e) {
+#if WINDOWS
+				throw new Error.NOT_SUPPORTED ("Unable to claim USB CDC-NCM interface (%s); use https://zadig.akeo.ie to " +
+					"switch from Apple's official driver onto Microsoft's WinUSB driver, so libusb can access it", e.message);
+#else
+				throw e;
+#endif
+			}
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
 
