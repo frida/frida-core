@@ -89,7 +89,8 @@ namespace Frida {
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 			host_session.uninjected.connect (notify_uninjected);
 
-			service = new WebService (endpoint_params, CONTROL);
+			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, PortConflictBehavior.FAIL,
+				new TunnelInterfaceObserver ());
 			service.incoming.connect (on_server_connection);
 
 			broker_service.incoming.connect (on_broker_service_connection);
