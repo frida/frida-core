@@ -655,8 +655,9 @@ if cc.get_id() == 'gcc' and cc.compiles('#if __GNUC__ >= 5\n#error NOTNEEDED\n#e
   add_project_arguments('-w', language: 'c')
 endif
 
+vapidir = meson.current_source_dir() / 'vapi'
 vala_flags += [
-  '--vapidir=' + meson.current_source_dir() / 'vapi',
+  '--vapidir=' + vapidir,
   '--pkg', 'config',
 ]
 
@@ -669,11 +670,13 @@ if host_abi != host_arch
   vala_flags += ['--define=' + host_abi.to_upper()]
 endif
 add_project_arguments(vala_flags, language: 'vala')
+add_project_arguments('-I' + vapidir, language: 'c')
 
 native_vala_flags = [
   '--vapidir=' + meson.current_source_dir() / 'vapi',
 ]
 add_project_arguments(native_vala_flags, language: 'vala', native: true)
+add_project_arguments('-I' + vapidir, language: 'c', native: true)
 
 subdir('compat')
 subdir('tools')
