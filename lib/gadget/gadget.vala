@@ -1497,7 +1497,8 @@ namespace Frida.Gadget {
 			var endpoint_params = new EndpointParameters (interaction.address, interaction.port,
 				parse_certificate (interaction.certificate, location), interaction.origin, auth_service, asset_root);
 
-			service = new WebService (endpoint_params, CONTROL, interaction.on_port_conflict);
+			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, interaction.on_port_conflict,
+				new TunnelInterfaceObserver ());
 			service.incoming.connect (on_incoming_connection);
 			yield service.start (io_cancellable);
 		}
