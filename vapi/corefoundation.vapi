@@ -1,7 +1,49 @@
-[CCode (cheader_filename = "CoreFoundation/CFDictionary.h", gir_namespace = "Darwin", gir_version = "1.0")]
+[CCode (cheader_filename = "CoreFoundation/CoreFoundation.h", cprefix = "CF", gir_namespace = "CoreFoundation", gir_version = "1.0")]
 namespace CoreFoundation {
 	[Compact]
-	[CCode (cname = "struct __CFDictionary", ref_function = "CFRetain", unref_function = "CFRelease")]
+	[CCode (cname = "struct __CFArray")]
+	public class Array : Type {
+		[CCode (cname = "CFArrayCreate")]
+		public Array (Allocator? allocator, [CCode (array_length_type = "CFIndex")] Type[] values,
+			ArrayCallBacks callbacks = ArrayCallBacks.DEFAULT);
+
+		public Index length {
+			[CCode (cname = "CFArrayGetCount")]
+			get;
+		}
+
+		[CCode (cname = "CFArrayGetValueAtIndex")]
+		public void * @get (Index i);
+	}
+
+	public struct ArrayCallBacks {
+		[CCode (cname = "kCFTypeArrayCallBacks")]
+		public static ArrayCallBacks DEFAULT;
+
+		public Index version;
+		public ArrayRetainCallBack retain;
+		public ArrayReleaseCallBack release;
+		public ArrayCopyDescriptionCallBack copyDescription;
+		public ArrayEqualCallBack equal;
+	}
+
+	public delegate void * ArrayRetainCallBack (Allocator allocator, void * value);
+	public delegate void ArrayReleaseCallBack (Allocator allocator, void * value);
+	public delegate String ArrayCopyDescriptionCallBack (void * value);
+	public delegate bool ArrayEqualCallBack (void * value1, void * value2);
+
+	[Compact]
+	[CCode (cname = "struct __CFArray")]
+	public class MutableArray : Array {
+		[CCode (cname = "CFArrayRemoveAllValues")]
+		public void clear ();
+
+		[CCode (cname = "CFArrayAppendValue")]
+		public void add (void * value);
+	}
+
+	[Compact]
+	[CCode (cname = "struct __CFDictionary")]
 	public class Dictionary : Type {
 		[CCode (cname = "CFDictionaryGetCount")]
 		public Index count ();
@@ -15,7 +57,7 @@ namespace CoreFoundation {
 	}
 
 	[Compact]
-	[CCode (cname = "struct __CFDictionary", ref_function = "CFRetain", unref_function = "CFRelease")]
+	[CCode (cname = "struct __CFDictionary")]
 	public class MutableDictionary : Dictionary {
 		[CCode (cname = "CFDictionaryRemoveAllValues")]
 		public void clear ();
@@ -27,9 +69,8 @@ namespace CoreFoundation {
 		public void remove (void * key);
 	}
 
-	// TODO: Inherit CFTypeRef? CFStringRef vs __CFString
 	[Compact]
-	[CCode (cname = "const struct __CFString", ref_function = "CFRetain", unref_function = "CFRelease")]
+	[CCode (cname = "const struct __CFString")]
 	public class String : Type {
 		public Index length {
 			get { return _length (); }
