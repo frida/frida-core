@@ -21,6 +21,10 @@ if host_os == 'macos'
   ]
 endif
 
+if host_os_family == 'darwin'
+  base_sources += 'corefoundation.vala'
+endif
+
 extra_deps = []
 if host_os_family != 'windows'
   extra_vala_args += '--pkg=gio-unix-2.0'
@@ -33,6 +37,7 @@ if nice_dep.found()
 endif
 if host_os_family == 'darwin'
   base_vala_args += [
+    '--pkg=corefoundation',
     '--pkg=darwin-gcd',
     '--pkg=darwin-xpc',
   ]
