@@ -195,14 +195,20 @@ namespace Frida {
 			default = FAIL;
 		}
 
+		public DynamicInterfaceObserver? dynamic_interface_observer {
+			get;
+			construct;
+		}
+
 		public SocketAddress? listen_address {
 			get {
 				return _listen_address;
 			}
 		}
 
-		private Soup.Server? server;
+		private Soup.Server? main_server;
 		private SocketAddress? _listen_address;
+		private Gee.Map<string, Soup.Server> dynamic_interface_servers = new Gee.HashMap<string, Soup.Server> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -210,11 +216,12 @@ namespace Frida {
 		private MainContext? dbus_context;
 
 		public WebService (EndpointParameters endpoint_params, WebServiceFlavor flavor,
-				PortConflictBehavior on_port_conflict = FAIL) {
+				PortConflictBehavior on_port_conflict = FAIL, DynamicInterfaceObserver? dynif_observer = null) {
 			Object (
 				endpoint_params: endpoint_params,
 				flavor: flavor,
-				on_port_conflict: on_port_conflict
+				on_port_conflict: on_port_conflict,
+				dynamic_interface_observer: dynif_observer
 			);
 		}
 
@@ -250,25 +257,17 @@ namespace Frida {
 		}
 
 		private async SocketAddress do_start (Cancellable? cancellable) throws Error, IOError {
-			server = (Soup.Server) Object.new (typeof (Soup.Server),
-				"tls-certificate", endpoint_params.certificate);
+			if (dynamic_interface_observer != null) {
+				dynamic_interface_observer.interface_attached.connect (on_dynamic_interface_attached);
+				dynamic_interface_observer.interface_detached.connect (on_dynamic_interface_detached);
+				dynamic_interface_observer.start ();
+			}
 
-			server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
-
-			if (endpoint_params.asset_root != null)
-				server.add_handler (null, on_asset_request);
-
+			main_server = create_server ();
+			SocketAddress? first_effective_address = null;
 			SocketConnectable connectable = (flavor == CONTROL)
 				? parse_control_address (endpoint_params.address, endpoint_params.port)
 				: parse_cluster_address (endpoint_params.address, endpoint_params.port);
-
-			Soup.ServerListenOptions listen_options = (endpoint_params.certificate != null)
-				? Soup.ServerListenOptions.HTTPS
-				: 0;
-
-			var prototype_enumerator = new EndpointEnumerator ();
-
-			SocketAddress? first_effective_address = null;
 			var enumerator = connectable.enumerate ();
 			while (true) {
 				SocketAddress? address;
@@ -283,29 +282,10 @@ namespace Frida {
 				SocketAddress? effective_address = null;
 				InetSocketAddress? inet_address = address as InetSocketAddress;
 				if (inet_address != null) {
-					uint16 start_port = inet_address.get_port ();
-					uint16 candidate_port = start_port;
-					do {
-						try {
-							server.listen (inet_address, listen_options);
-							effective_address = inet_address;
-						} catch (GLib.Error e) {
-							if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
-								candidate_port++;
-								if (candidate_port == start_port)
-									throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
-								if (candidate_port == 0)
-									candidate_port = 1024;
-								inet_address = new InetSocketAddress (inet_address.get_address (),
-									candidate_port);
-							} else {
-								throw_listen_error (e);
-							}
-						}
-					} while (effective_address == null);
+					effective_address = listen_on_inet_address (inet_address, main_server);
 				} else {
 					try {
-						server.listen (address, listen_options);
+						main_server.listen (address, compute_listen_options ());
 						effective_address = address;
 					} catch (GLib.Error e) {
 						throw_listen_error (e);
@@ -320,6 +300,76 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Unable to resolve listening address");
 
 			return first_effective_address;
+		}
+
+		private void on_dynamic_interface_attached (string name, InetAddress ip) {
+			uint16 port = endpoint_params.port;
+			if (port == 0)
+				port = (flavor == CONTROL) ? DEFAULT_CONTROL_PORT : DEFAULT_CLUSTER_PORT;
+
+			var server = create_server ();
+			try {
+				listen_on_inet_address (new InetSocketAddress (ip, port), server);
+			} catch (Error e) {
+				return;
+			}
+			dynamic_interface_servers[name] = server;
+		}
+
+		private void on_dynamic_interface_detached (string name, InetAddress ip) {
+			Soup.Server server;
+			if (dynamic_interface_servers.unset (name, out server))
+				destroy_server (server);
+		}
+
+		private Soup.Server create_server () {
+			var server = (Soup.Server) Object.new (typeof (Soup.Server),
+				"tls-certificate", endpoint_params.certificate);
+
+			server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
+
+			if (endpoint_params.asset_root != null)
+				server.add_handler (null, on_asset_request);
+
+			return server;
+		}
+
+		private void destroy_server (Soup.Server server) {
+			if (endpoint_params.asset_root != null)
+				server.remove_handler ("/");
+			server.remove_handler ("/ws");
+
+			server.disconnect ();
+		}
+
+		private Soup.ServerListenOptions compute_listen_options () {
+			return (endpoint_params.certificate != null)
+				? Soup.ServerListenOptions.HTTPS
+				: 0;
+		}
+
+		private InetSocketAddress listen_on_inet_address (InetSocketAddress address, Soup.Server server) throws Error {
+			InetSocketAddress candidate_address = address;
+			uint16 start_port = address.get_port ();
+			uint16 candidate_port = start_port;
+			do {
+				try {
+					server.listen (candidate_address, compute_listen_options ());
+					return candidate_address;
+				} catch (GLib.Error e) {
+					if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
+						candidate_port++;
+						if (candidate_port == start_port)
+							throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
+						if (candidate_port == 0)
+							candidate_port = 1024;
+						candidate_address = new InetSocketAddress (candidate_address.get_address (),
+							candidate_port);
+					} else {
+						throw_listen_error (e);
+					}
+				}
+			} while (true);
 		}
 
 		[NoReturn]
@@ -343,14 +393,17 @@ namespace Frida {
 		}
 
 		private void do_stop () {
-			if (server == null)
-				return;
+			foreach (var server in dynamic_interface_servers.values)
+				destroy_server (server);
+			dynamic_interface_servers.clear ();
 
-			if (endpoint_params.asset_root != null)
-				server.remove_handler ("/");
-			server.remove_handler ("/ws");
+			if (dynamic_interface_observer != null) {
+				dynamic_interface_observer.interface_attached.disconnect (on_dynamic_interface_attached);
+				dynamic_interface_observer.interface_detached.disconnect (on_dynamic_interface_detached);
+			}
 
-			server.disconnect ();
+			if (main_server != null)
+				destroy_server (main_server);
 		}
 
 		private void on_websocket_opened (Soup.Server server, Soup.ServerMessage msg, string path,
@@ -662,6 +715,13 @@ namespace Frida {
 	public enum PortConflictBehavior {
 		FAIL,
 		PICK_NEXT
+	}
+
+	public interface DynamicInterfaceObserver : Object {
+		public signal void interface_attached (string name, InetAddress ip);
+		public signal void interface_detached (string name, InetAddress ip);
+
+		public abstract void start ();
 	}
 
 	public extern static unowned string _version_string ();
