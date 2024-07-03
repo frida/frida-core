@@ -1393,16 +1393,7 @@ namespace Frida.Fruity {
 						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
 						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
 
-						bool attached_physically = reader
-							.read_member ("connectionState")
-							.read_member ("value")
-							.read_member ("attachedPhysically")
-							.get_bool_value ();
-						reader
-							.end_member ()
-							.end_member ()
-							.end_member ();
-						var connection_type = attached_physically
+						var connection_type = (device_info.get_value ("untrustedRSDDeviceInfo") != null)
 							? ConnectionType.USB
 							: ConnectionType.NETWORK;
 
