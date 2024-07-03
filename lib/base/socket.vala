@@ -257,12 +257,6 @@ namespace Frida {
 		}
 
 		private async SocketAddress do_start (Cancellable? cancellable) throws Error, IOError {
-			if (dynamic_interface_observer != null) {
-				dynamic_interface_observer.interface_attached.connect (on_dynamic_interface_attached);
-				dynamic_interface_observer.interface_detached.connect (on_dynamic_interface_detached);
-				dynamic_interface_observer.start ();
-			}
-
 			main_server = create_server ();
 			SocketAddress? first_effective_address = null;
 			SocketConnectable connectable = (flavor == CONTROL)
@@ -298,6 +292,12 @@ namespace Frida {
 
 			if (first_effective_address == null)
 				throw new Error.NOT_SUPPORTED ("Unable to resolve listening address");
+
+			if (dynamic_interface_observer != null) {
+				dynamic_interface_observer.interface_attached.connect (on_dynamic_interface_attached);
+				dynamic_interface_observer.interface_detached.connect (on_dynamic_interface_detached);
+				dynamic_interface_observer.start ();
+			}
 
 			return first_effective_address;
 		}
