@@ -316,14 +316,23 @@ namespace Frida.Fruity {
 			unowned string location = tokens[1];
 
 			if (protocol == "tcp") {
+				var tunnel = yield find_tunnel (cancellable);
+
+				uint16 port;
 				ulong raw_port;
-				if (!ulong.try_parse (location, out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
-					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
-				uint16 port = (uint16) raw_port;
+				if (ulong.try_parse (location, out raw_port)) {
+					if (raw_port == 0 || raw_port > uint16.MAX)
+						throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
+					port = (uint16) raw_port;
+				} else {
+					if (tunnel == null)
+						throw new Error.NOT_SUPPORTED ("Unable to resolve port name; tunnel not available");
+					var service_info = tunnel.discovery.get_service (location);
+					port = service_info.port;
+				}
 
 				Error? pending_error = null;
 
-				var tunnel = yield find_tunnel (cancellable);
 				if (tunnel != null) {
 					try {
 						return yield tunnel.open_tcp_connection (port, cancellable);
