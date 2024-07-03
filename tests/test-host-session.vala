@@ -61,8 +61,13 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/Manual/xpc", () => {
-			var h = new Harness ((h) => Fruity.Manual.xpc.begin (h as Harness));
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/Xpc/list", () => {
+			var h = new Harness ((h) => Fruity.Manual.Xpc.list.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/Xpc/launch", () => {
+			var h = new Harness ((h) => Fruity.Manual.Xpc.launch.begin (h as Harness));
 			h.run ();
 		});
 #endif
@@ -3632,6 +3637,9 @@ namespace Frida.HostSessionTest {
 
 		namespace Manual {
 
+			private const string DEVICE_ID = "<device-id>";
+			private const string APP_ID = "<app-id>";
+
 			private static async void lockdown (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
@@ -3641,15 +3649,13 @@ namespace Frida.HostSessionTest {
 
 				h.disable_timeout ();
 
-				var device_id = "<device-id>";
-				var app_id = "<app-id>";
 				string? target_name = null;
 				uint target_pid = 0;
 
 				var device_manager = new DeviceManager ();
 
 				try {
-					var device = yield device_manager.get_device_by_id (device_id);
+					var device = yield device_manager.get_device_by_id (DEVICE_ID);
 
 					device.output.connect ((pid, fd, data) => {
 						var chars = data.get_data ();
@@ -3706,7 +3712,7 @@ namespace Frida.HostSessionTest {
 					} else {
 						printerr ("device.spawn()");
 						timer.reset ();
-						pid = yield device.spawn (app_id);
+						pid = yield device.spawn (APP_ID);
 						printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
 					}
 
@@ -3765,40 +3771,136 @@ namespace Frida.HostSessionTest {
 				h.done ();
 			}
 
-			private static async void xpc (Harness h) {
-				if (!GLib.Test.slow ()) {
-					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+			namespace Xpc {
+
+				private static async void list (Harness h) {
+					if (!GLib.Test.slow ()) {
+						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+						h.done ();
+						return;
+					}
+
+					var device_manager = new DeviceManager ();
+
+					try {
+						var timer = new Timer ();
+						var device = yield device_manager.get_device_by_id (DEVICE_ID);
+						printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+						timer.reset ();
+						var appservice = yield device.open_service ("xpc:com.apple.coredevice.appservice");
+						printerr ("[*] Opened service in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+						var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+						parameters["CoreDevice.featureIdentifier"] = "com.apple.coredevice.feature.listprocesses";
+						parameters["CoreDevice.action"] = new HashTable<string, Variant> (str_hash, str_equal);
+						parameters["CoreDevice.input"] = new HashTable<string, Variant> (str_hash, str_equal);
+						timer.reset ();
+						var response = yield appservice.request (parameters);
+						printerr ("[*] Made request in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+						printerr ("Got response: %s\n", response.print (true));
+					} catch (GLib.Error e) {
+						printerr ("\nFAIL: %s\n\n", e.message);
+						yield;
+					}
+
 					h.done ();
-					return;
 				}
 
-				var device_id = "<device-id>";
+				private static async void launch (Harness h) {
+					if (!GLib.Test.slow ()) {
+						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+						h.done ();
+						return;
+					}
 
-				var device_manager = new DeviceManager ();
+					var device_manager = new DeviceManager ();
 
-				try {
-					var timer = new Timer ();
-					var device = yield device_manager.get_device_by_id (device_id);
-					printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+					try {
+						var timer = new Timer ();
+						var device = yield device_manager.get_device_by_id (DEVICE_ID);
+						printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
-					timer.reset ();
-					var appservice = yield device.open_service ("xpc:com.apple.coredevice.appservice");
-					printerr ("[*] Opened service in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+						timer.reset ();
+						var appservice = yield device.open_service ("xpc:com.apple.coredevice.appservice");
+						printerr ("[*] Opened service in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
-					var parameters = new HashTable<string, Variant> (str_hash, str_equal);
-					parameters["CoreDevice.featureIdentifier"] = "com.apple.coredevice.feature.listprocesses";
-					parameters["CoreDevice.action"] = new HashTable<string, Variant> (str_hash, str_equal);
-					parameters["CoreDevice.input"] = new HashTable<string, Variant> (str_hash, str_equal);
-					timer.reset ();
-					var response = yield appservice.request (parameters);
-					printerr ("[*] Made request in %u ms\n", (uint) (timer.elapsed () * 1000.0));
-					printerr ("Got response: %s\n", response.print (true));
-				} catch (GLib.Error e) {
-					printerr ("\nFAIL: %s\n\n", e.message);
-					yield;
+						var stdio_stream = yield device.open_channel ("tcp:com.apple.coredevice.openstdiosocket");
+						uint8 stdio_uuid[16];
+						size_t n;
+						yield stdio_stream.get_input_stream ().read_all_async (stdio_uuid, Priority.DEFAULT, null, out n);
+
+						var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+						parameters["CoreDevice.featureIdentifier"] = "com.apple.coredevice.feature.launchapplication";
+						parameters["CoreDevice.action"] = new HashTable<string, Variant> (str_hash, str_equal);
+
+						var standard_input = Variant.new_from_data<void> (new VariantType ("ay"), stdio_uuid, true);
+						var standard_output = standard_input;
+						var standard_error = standard_output;
+						var input = new Variant.parsed (@"""{
+								'applicationSpecifier': <{
+									'bundleIdentifier': <{
+										'_0': <'$APP_ID'>
+									}>
+								}>,
+								'options': <{
+									'arguments': <@av []>,
+									'environmentVariables': <@a{sv} {}>,
+									'standardIOUsesPseudoterminals': <true>,
+									'startStopped': <false>,
+									'terminateExisting': <true>,
+									'user': <{
+										'active': <true>
+									}>,
+									'platformSpecificOptions': <
+										b'<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>'
+									>
+								}>,
+								'standardIOIdentifiers': <{
+									'standardInput': <('uuid', %@ay)>,
+									'standardOutput': <('uuid', %@ay)>,
+									'standardError': <('uuid', %@ay)>
+								}>
+							}""",
+							standard_input,
+							standard_output,
+							standard_error);
+						printerr ("input: %s\n", input.print (true));
+						parameters["CoreDevice.input"] = input;
+						timer.reset ();
+						var response = yield appservice.request (parameters);
+						printerr ("[*] Made request in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+						printerr ("Got response: %s\n", response.print (true));
+
+						process_stdio.begin (stdio_stream);
+
+						// Wait forever...
+						h.disable_timeout ();
+						yield;
+					} catch (GLib.Error e) {
+						printerr ("\nFAIL: %s\n\n", e.message);
+						yield;
+					}
+
+					h.done ();
 				}
 
-				h.done ();
+				private async void process_stdio (IOStream stream) {
+					try {
+						var input = new DataInputStream (stream.get_input_stream ());
+						while (true) {
+							var line = yield input.read_line_async ();
+							if (line == null) {
+								printerr ("process_stdio: EOF\n");
+								break;
+							}
+							printerr ("process_stdio got line: %s\n", line);
+						}
+					} catch (GLib.Error e) {
+						printerr ("process_stdio: %s\n", e.message);
+					}
+				}
+
 			}
 
 		}
