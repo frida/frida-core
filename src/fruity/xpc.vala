@@ -3481,21 +3481,9 @@ namespace Frida.Fruity {
 			return this;
 		}
 
-		public unowned ObjectBuilder add_uuid_value (string val) {
-			var uuid = new ByteArray.sized (16);
-			int len = val.length;
-			for (int i = 0; i != len;) {
-				if (val[i] == '-') {
-					i++;
-					continue;
-				}
-				var byte = (uint8) uint.parse (val[i:i + 2], 16);
-				uuid.append ({ byte });
-				i += 2;
-			}
-			assert (uuid.len == 16);
-
-			begin_object (UUID).append_data (uuid.data);
+		public unowned ObjectBuilder add_uuid_value (uint8[] val) {
+			assert (val.length == 16);
+			begin_object (UUID).append_data (val);
 			return this;
 		}
 
