@@ -42,7 +42,7 @@ namespace Frida {
 		}
 	}
 
-	public class FruityHostSessionProvider : Object, HostSessionProvider, HostServiceProvider, Pairable {
+	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, HostServiceProvider, Pairable {
 		public Fruity.Device device {
 			get;
 			construct;
@@ -108,6 +108,10 @@ namespace Frida {
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
+		}
+
+		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+			return yield device.open_channel (address, cancellable);
 		}
 
 		public async Service open_service (string address, Cancellable? cancellable) throws Error, IOError {
