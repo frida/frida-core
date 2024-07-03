@@ -13,7 +13,6 @@ namespace Frida {
 		public abstract unowned ObjectBuilder add_uint64_value (uint64 val);
 		public abstract unowned ObjectBuilder add_data_value (Bytes val);
 		public abstract unowned ObjectBuilder add_string_value (string val);
-		public abstract unowned ObjectBuilder add_uuid_value (string val);
 		public abstract unowned ObjectBuilder add_raw_value (Bytes val);
 
 		public abstract Bytes build ();
@@ -235,11 +234,6 @@ namespace Frida {
 		}
 
 		public unowned ObjectBuilder add_string_value (string val) {
-			builder.add_string_value (val);
-			return this;
-		}
-
-		public unowned ObjectBuilder add_uuid_value (string val) {
 			builder.add_string_value (val);
 			return this;
 		}
