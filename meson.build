@@ -92,6 +92,7 @@ else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
 endif
+host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux', 'freebsd']
 gumjs_archs = {
   'x86': 'ia32',
   'x86_64': 'x64',
@@ -348,10 +349,17 @@ else
 endif
 
 have_local_backend = get_option('local_backend').allowed()
-have_fruity_backend = get_option('fruity_backend').allowed()
-have_droidy_backend = get_option('droidy_backend').allowed()
+have_fruity_backend = get_option('fruity_backend') \
+    .disable_auto_if(not host_docks_mobile_devices) \
+    .allowed()
+have_droidy_backend = get_option('droidy_backend') \
+    .disable_auto_if(not host_docks_mobile_devices) \
+    .allowed()
 have_socket_backend = get_option('socket_backend').allowed()
-have_barebone_backend = quickjs_dep.found()
+have_barebone_backend = get_option('barebone_backend') \
+    .disable_if(not quickjs_dep.found()) \
+    .disable_auto_if(not host_docks_mobile_devices) \
+    .allowed()
 have_compiler_backend = get_option('compiler_backend') \
     .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
     .disable_auto_if(host_os == 'watchos') \
