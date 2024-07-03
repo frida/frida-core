@@ -2074,11 +2074,68 @@ namespace Frida {
 					}
 
 					break;
+				case TUPLE:
+					if (val.n_children () != 2) {
+						throw new Error.INVALID_ARGUMENT ("Invalid type annotation: %s",
+							(string) val.get_type ().peek_string ());
+					}
+
+					var type = val.get_child_value (0);
+					if (!type.is_of_type (VariantType.STRING)) {
+						throw new Error.INVALID_ARGUMENT ("Invalid type annotation: %s",
+							(string) val.get_type ().peek_string ());
+					}
+					unowned string type_str = type.get_string ();
+
+					add_variant_value_of_type (val.get_child_value (1), type_str, builder);
+					return;
 				default:
 					break;
 			}
 
 			throw new Error.INVALID_ARGUMENT ("Unsupported type: %s", (string) val.get_type ().peek_string ());
+		}
+
+		private static void add_variant_value_of_type (Variant val, string type, Fruity.XpcBodyBuilder builder) throws Error {
+			switch (type) {
+				case "bool":
+					check_type (val, VariantType.BOOLEAN);
+					builder.add_bool_value (val.get_boolean ());
+					break;
+				case "int64":
+					check_type (val, VariantType.INT64);
+					builder.add_int64_value (val.get_int64 ());
+					break;
+				case "uint64":
+					check_type (val, VariantType.UINT64);
+					builder.add_uint64_value (val.get_uint64 ());
+					break;
+				case "data":
+					check_type (val, new VariantType ("ay"));
+					builder.add_data_value (val.get_data_as_bytes ());
+					break;
+				case "string":
+					check_type (val, VariantType.STRING);
+					builder.add_string_value (val.get_string ());
+					break;
+				case "uuid":
+					check_type (val, new VariantType ("ay"));
+					if (val.get_size () != 16)
+						throw new Error.INVALID_ARGUMENT ("Invalid UUID");
+					unowned uint8[] data = (uint8[]) val.get_data ();
+					builder.add_uuid_value (data[:16]);
+					break;
+				default:
+					throw new Error.INVALID_ARGUMENT ("Unsupported type: %s", type);
+			}
+		}
+
+		private static void check_type (Variant v, VariantType t) throws Error {
+			if (!v.is_of_type (t)) {
+				throw new Error.INVALID_ARGUMENT ("Invalid %s: %s",
+					(string) t.peek_string (),
+					(string) v.get_type ().peek_string ());
+			}
 		}
 	}
 }
