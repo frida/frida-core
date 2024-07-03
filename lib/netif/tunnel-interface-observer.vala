@@ -63,8 +63,8 @@ public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 				foreach (var raw_address in CFArray.wrap<CoreFoundation.String> (val[addresses_str])) {
 					var str = raw_address.to_string ();
 					bool is_reserved_ipv6_range = str.has_prefix ("fc") || str.has_prefix ("fd");
-					bool is_devtunnel = is_reserved_ipv6_range && str.has_suffix ("::1");
-					if (is_devtunnel) {
+					bool is_tunnel = is_reserved_ipv6_range && str.has_suffix ("::1");
+					if (is_tunnel) {
 						address = new InetAddress.from_string (str);
 						break;
 					}
