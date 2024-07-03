@@ -364,6 +364,12 @@ have_compiler_backend = get_option('compiler_backend') \
     .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
     .disable_auto_if(host_os == 'watchos') \
     .allowed()
+if get_option('compiler_snapshot').auto()
+  # Generating our snapshot with V8's CPU simulator takes a very long time.
+  generate_compiler_snapshot = meson.can_run_host_binaries()
+else
+  generate_compiler_snapshot = get_option('compiler_snapshot').enabled()
+endif
 
 build_gadget = get_option('gadget') \
     .disable_auto_if(meson.is_subproject()) \
@@ -705,7 +711,29 @@ endif
 
 summary(
   {
+    'local': have_local_backend,
+    'fruity': have_fruity_backend,
+    'droidy': have_droidy_backend,
+    'socket': have_socket_backend,
+    'barebone': have_barebone_backend,
+    'compiler': have_compiler_backend,
+  },
+  section: 'Backends',
+  bool_yn: true,
+)
+summary(
+  {
     'compat': compat_summary,
+    'assets': get_option('assets'),
+    'mapper': have_mapper,
+    'connectivity': tls_provider_dep.found(),
+    'compiler_snapshot': generate_compiler_snapshot,
+    'gadget': build_gadget,
+    'server': build_server,
+    'portal': build_portal,
+    'inject': build_inject,
+    'tests': build_tests,
   },
   section: 'Features',
+  bool_yn: true,
 )

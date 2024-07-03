@@ -3,13 +3,7 @@ compiler_sources = files(
 )
 
 if have_compiler_backend
-  if get_option('compiler_snapshot').auto()
-    # Generating our snapshot with V8's CPU simulator takes a very long time.
-    use_snapshot = meson.can_run_host_binaries()
-  else
-    use_snapshot = get_option('compiler_snapshot').enabled()
-  endif
-  compiler_mksnapshot = use_snapshot ? v8_mksnapshot : ''
+  compiler_mksnapshot = generate_compiler_snapshot ? v8_mksnapshot : ''
 
   compiler_agent = custom_target('frida-compiler-agent',
     input: [
