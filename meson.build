@@ -92,7 +92,12 @@ else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
 endif
-host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux', 'freebsd']
+if cc.sizeof('void *') == 8
+  host_cpu_mode = '64'
+else
+  host_cpu_mode = '32'
+endif
+host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux', 'freebsd'] and host_cpu_mode == '64'
 gumjs_archs = {
   'x86': 'ia32',
   'x86_64': 'x64',
@@ -155,12 +160,6 @@ if host_os_family == 'darwin'
   if host_arch == 'arm64' and have_ptrauth
     host_abi = 'arm64e'
   endif
-endif
-
-if cc.sizeof('void *') == 8
-  host_cpu_mode = '64'
-else
-  host_cpu_mode = '32'
 endif
 
 if host_os_family == 'darwin' and host_arch == 'arm64'
