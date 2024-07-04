@@ -253,6 +253,7 @@ namespace Frida {
 				var hardware = new HashTable<string, Variant> (str_hash, str_equal);
 				hardware["id"] = properties.get_string ("ProductType");
 				hardware["platform"] = properties.get_string ("HardwarePlatform");
+				hardware["model"] = properties.get_string ("HardwareModel");
 				parameters["hardware"] = hardware;
 
 				parameters["platform"] = "darwin";
