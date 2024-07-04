@@ -152,11 +152,10 @@ namespace Frida {
 		var request = new StringBuilder.sized (256);
 		request.append ("GET /ws HTTP/1.1\r\n");
 		string protocol = (transport == TLS) ? "wss" : "ws";
-		string canonical_host = canonicalize_host (host);
-		string uri = protocol + "://" + canonical_host + "/ws";
-		var msg = new Soup.Message ("GET", uri);
+		var uri = Uri.build (UriFlags.NONE, protocol, null, host, -1, "/ws", null, null);
+		var msg = new Soup.Message.from_uri ("GET", uri);
 		Soup.websocket_client_prepare_handshake (msg, origin, null, null);
-		msg.request_headers.replace ("Host", canonical_host);
+		msg.request_headers.replace ("Host", make_host_header_value (uri));
 		msg.request_headers.replace ("User-Agent", "Frida/" + _version_string ());
 		msg.request_headers.foreach ((name, val) => {
 			request.append (name + ": " + val + "\r\n");
@@ -220,13 +219,9 @@ namespace Frida {
 		return connection;
 	}
 
-	private string canonicalize_host (string raw_host) {
-		if (raw_host.has_suffix (":80") || raw_host.has_suffix (":443")) {
-			string[] tokens = raw_host.split (":", 2);
-			return tokens[0];
-		}
-
-		return raw_host;
+	private string make_host_header_value (Uri uri) {
+		unowned string host = uri.get_host ();
+		return Hostname.is_ip_address (host) ? @"[$host]" : host;
 	}
 
 	public class WebService : Object {
