@@ -1475,11 +1475,11 @@ namespace Frida.Fruity {
 		}
 
 		private void on_state_changed (Object obj, ParamSpec pspec) {
-			printerr ("[MacOSCoreDeviceTransport] new state: %s\n", pairing_device.state.to_string ());
+			// TODO
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
-			// printerr ("[MacOSCoreDeviceTransport] %s\n", obj.to_string ());
+			// TODO
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
