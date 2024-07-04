@@ -846,7 +846,9 @@ namespace Frida.Fruity.Injector {
 			GDB.Breakpoint init_breakpoint = yield lldb.add_breakpoint (SOFT, libdyld_initialize, 4, cancellable);
 
 			GDB.Breakpoint? restart_breakpoint = null;
-			uint64? restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv"];
+			uint64? restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv"];
+			if (restart_with_dyld_in_cache == null)
+				restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv"];
 			if (restart_with_dyld_in_cache != null)
 				restart_breakpoint = yield lldb.add_breakpoint (SOFT, restart_with_dyld_in_cache, 4, cancellable);
 
