@@ -5,21 +5,21 @@ frida_listen (int rx_buffer_size, const FridaUploadApi * api)
 {
   uint8_t error_code;
   int fd;
-  struct sockaddr_in addr;
+  struct sockaddr_in6 addr = {
+    .sin6_family = AF_INET6,
+    .sin6_addr = IN6ADDR_ANY_INIT,
+    .sin6_port = 0,
+  };
   socklen_t addr_len;
   int res;
 
-  fd = api->socket (AF_INET, SOCK_STREAM, 0);
+  fd = api->socket (AF_INET6, SOCK_STREAM, 0);
   if (fd == -1)
     goto socket_failed;
 
   res = api->setsockopt (fd, SOL_SOCKET, SO_RCVBUF, &rx_buffer_size, sizeof (rx_buffer_size));
   if (res == -1)
     goto setsockopt_failed;
-
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
-  addr.sin_port = 0;
 
   addr_len = sizeof (addr);
 
@@ -35,7 +35,7 @@ frida_listen (int rx_buffer_size, const FridaUploadApi * api)
   if (res == -1)
     goto listen_failed;
 
-  return ((uint64_t) fd << 16) | ntohs (addr.sin_port);
+  return ((uint64_t) fd << 16) | ntohs (addr.sin6_port);
 
 socket_failed:
   {
