@@ -1390,20 +1390,17 @@ namespace Frida.Fruity {
 						reader
 							.read_member ("_0")
 							.read_member ("deviceInfo");
-						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
-						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
-
-						var connection_type = (device_info.get_value ("untrustedRSDDeviceInfo") != null)
-							? ConnectionType.USB
-							: ConnectionType.NETWORK;
 
 						var udid = reader.read_member ("udid").get_string_value ();
 						reader.end_member ();
+						if (transports.has_key (udid))
+							return;
 
-						var name = reader.read_member ("name").get_string_value ();
-						reader.end_member ();
+						var device_info = (Darwin.Xpc.Dictionary) reader.current_object;
 
-						on_device_found (pairing_device, connection_type, udid, name);
+						var pairing_device = new XpcClient (device_info.create_connection ("endpoint"), queue);
+
+						on_device_found (udid, pairing_device, device_info);
 					} else if (reader.try_read_member ("allCurrentDevicesListed")) {
 						all_current_devices_listed.resolve (true);
 					}
@@ -1412,15 +1409,22 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private void on_device_found (XpcClient pairing_device, ConnectionType connection_type, string udid, string name)
-				throws Error {
-			var transport = new MacOSCoreDeviceTransport (pairing_device, connection_type, udid, name);
+		private void on_device_found (string udid, XpcClient pairing_device, Darwin.Xpc.Dictionary device_info) throws Error {
+			var transport = new MacOSCoreDeviceTransport (udid, pairing_device, device_info);
+			transport.closed.connect (on_transport_closed);
 			transports[udid] = transport;
 			transport_attached (transport);
+		}
+
+		private void on_transport_closed (MacOSCoreDeviceTransport transport) {
+			transport_detached (transport);
+			transports.unset (transport.udid);
 		}
 	}
 
 	private sealed class MacOSCoreDeviceTransport : Object, Transport, TunnelFinder {
+		public signal void closed ();
+
 		public XpcClient pairing_device {
 			get;
 			construct;
@@ -1462,11 +1466,12 @@ namespace Frida.Fruity {
 
 		private Promise<Tunnel>? tunnel_request;
 
-		public MacOSCoreDeviceTransport (XpcClient pairing_device, ConnectionType connection_type, string udid, string name) {
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public MacOSCoreDeviceTransport (string udid, XpcClient pairing_device, Darwin.Xpc.Dictionary device_info) throws Error {
 			Object (pairing_device: pairing_device);
-			_connection_type = connection_type;
 			_udid = udid;
-			_name = name;
+			update_device_info (device_info);
 		}
 
 		construct {
@@ -1474,12 +1479,70 @@ namespace Frida.Fruity {
 			pairing_device.message.connect (on_message);
 		}
 
+		private void update_device_info (Darwin.Xpc.Dictionary device_info) throws Error {
+			_connection_type = (device_info.get_value ("untrustedRSDDeviceInfo") != null)
+				? ConnectionType.USB
+				: ConnectionType.NETWORK;
+
+			var reader = new XpcObjectReader (device_info);
+			_name = reader.read_member ("name").get_string_value ();
+			reader.end_member ();
+		}
+
 		private void on_state_changed (Object obj, ParamSpec pspec) {
-			// TODO
+			if (pairing_device.state == CLOSED) {
+				io_cancellable.cancel ();
+
+				closed ();
+			}
 		}
 
 		private void on_message (Darwin.Xpc.Object obj) {
-			// TODO
+			var reader = new XpcObjectReader (obj);
+			try {
+				reader.read_member ("mangledTypeName");
+				if (reader.get_string_value () == "RemotePairing.ServiceEvent") {
+					reader
+						.end_member ()
+						.read_member ("value");
+					if (reader.try_read_member ("deviceFound")) {
+						reader
+							.read_member ("_0")
+							.read_member ("deviceInfo");
+						var device_info = (Darwin.Xpc.Dictionary)
+							reader.get_object_value (Darwin.Xpc.Dictionary.TYPE);
+						update_device_info (device_info);
+					} else if (reader.try_read_member ("tunnelUsageAssertionsInvalidated")) {
+						reader.read_member ("assertionIdentifiers");
+						var ids = new Gee.ArrayList<Bytes> ();
+						size_t n = reader.count_elements ();
+						for (size_t i = 0; i != n; i++) {
+							reader.read_element (i);
+							ids.add (new Bytes (reader.get_uuid_value ()));
+							reader.end_element ();
+						}
+						on_tunnel_usage_assertions_invalidated.begin (ids);
+					}
+				}
+			} catch (Error e) {
+			}
+		}
+
+		private async void on_tunnel_usage_assertions_invalidated (Gee.List<Bytes> ids) {
+			if (tunnel_request == null)
+				return;
+
+			try {
+				var tunnel = (MacOSTunnel) yield tunnel_request.future.wait_async (io_cancellable);
+				unowned uint8[] tunnel_assertion_id = tunnel.assertion_identifier.get_bytes ();
+				foreach (var id in ids) {
+					if (Memory.cmp (id.get_data (), tunnel_assertion_id, id.get_size ()) == 0) {
+						tunnel_request = null;
+						return;
+					}
+				}
+			} catch (GLib.Error e) {
+			}
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
@@ -1517,8 +1580,14 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public Darwin.Xpc.Uuid? assertion_identifier {
+			get {
+				return _assertion_identifier;
+			}
+		}
+
 		private XpcClient pairing_device;
-		private Darwin.Xpc.Object? assertion_identifier;
+		private Darwin.Xpc.Uuid? _assertion_identifier;
 		private InetAddress? tunnel_device_address;
 		private DiscoveryService? _discovery;
 
@@ -1528,7 +1597,7 @@ namespace Frida.Fruity {
 
 		public async void close (Cancellable? cancellable) throws IOError {
 			var r = new PairingdRequest ("RemotePairing.ReleaseAssertionRequest");
-			r.body.set_value ("assertionIdentifier", assertion_identifier);
+			r.body.set_value ("assertionIdentifier", _assertion_identifier);
 			try {
 				yield pairing_device.request (r.message, cancellable);
 			} catch (Error e) {
@@ -1543,7 +1612,7 @@ namespace Frida.Fruity {
 			var reader = new XpcObjectReader (response);
 			reader.read_member ("response");
 
-			assertion_identifier = reader
+			_assertion_identifier = (Darwin.Xpc.Uuid) reader
 				.read_member ("assertionIdentifier")
 				.get_object_value (Darwin.Xpc.Uuid.TYPE);
 			reader.end_member ();
