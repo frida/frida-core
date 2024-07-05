@@ -53,7 +53,7 @@ namespace Frida {
 		}
 
 		public string name {
-			get { return device.name; }
+			get { return _name; }
 		}
 
 		public Variant? icon {
@@ -69,9 +69,11 @@ namespace Frida {
 		}
 
 		private FruityHostSession? host_session;
+		private string _name;
 
 		public FruityHostSessionProvider (Fruity.Device device) {
 			Object (device: device);
+			_name = device.name;
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
