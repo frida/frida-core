@@ -1646,28 +1646,52 @@ namespace Frida.Fruity {
 
 		private static async DiscoveryService locate_discovery_service (InetAddress tunnel_device_address, Cancellable? cancellable)
 				throws Error, IOError {
+			var main_context = MainContext.get_thread_default ();
+
 			var path_buf = new char[4096];
 			unowned string path = (string) path_buf;
 
-			foreach (var item in XNU.query_active_tcp_connections ()) {
-				if (item.family != IPV6)
-					continue;
-				if (!item.foreign_address.equal (tunnel_device_address))
-					continue;
-				if (Darwin.XNU.proc_pidpath (item.effective_pid, path_buf) <= 0)
-					continue;
-				if (path != "/usr/libexec/remoted")
-					continue;
+			uint delays[] = { 0, 50, 250 };
+			for (uint attempts = 0; attempts != delays.length; attempts++) {
+				uint delay = delays[attempts];
+				if (delay != 0) {
+					var timeout_source = new TimeoutSource (delay);
+					timeout_source.set_callback (locate_discovery_service.callback);
+					timeout_source.attach (main_context);
 
-				try {
-					var connectable = new InetSocketAddress (tunnel_device_address, item.foreign_port);
+					var cancel_source = new CancellableSource (cancellable);
+					cancel_source.set_callback (locate_discovery_service.callback);
+					cancel_source.attach (main_context);
 
-					var sc = new SocketClient ();
-					SocketConnection connection = yield sc.connect_async (connectable, cancellable);
-					Tcp.enable_nodelay (connection.socket);
+					yield;
 
-					return yield DiscoveryService.open (connection, cancellable);
-				} catch (GLib.Error e) {
+					cancel_source.destroy ();
+					timeout_source.destroy ();
+
+					if (cancellable.is_cancelled ())
+						break;
+				}
+
+				foreach (var item in XNU.query_active_tcp_connections ()) {
+					if (item.family != IPV6)
+						continue;
+					if (!item.foreign_address.equal (tunnel_device_address))
+						continue;
+					if (Darwin.XNU.proc_pidpath (item.effective_pid, path_buf) <= 0)
+						continue;
+					if (path != "/usr/libexec/remoted")
+						continue;
+
+					try {
+						var connectable = new InetSocketAddress (tunnel_device_address, item.foreign_port);
+
+						var sc = new SocketClient ();
+						SocketConnection connection = yield sc.connect_async (connectable, cancellable);
+						Tcp.enable_nodelay (connection.socket);
+
+						return yield DiscoveryService.open (connection, cancellable);
+					} catch (GLib.Error e) {
+					}
 				}
 			}
 
