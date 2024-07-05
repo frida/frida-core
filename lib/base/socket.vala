@@ -152,7 +152,14 @@ namespace Frida {
 		var request = new StringBuilder.sized (256);
 		request.append ("GET /ws HTTP/1.1\r\n");
 		string protocol = (transport == TLS) ? "wss" : "ws";
-		var uri = Uri.build (UriFlags.NONE, protocol, null, host, -1, "/ws", null, null);
+		NetworkAddress addr;
+		try {
+			addr = NetworkAddress.parse (host, 0);
+		} catch (GLib.Error e) {
+			throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		}
+		uint16 port = addr.get_port ();
+		var uri = Uri.build (UriFlags.NONE, protocol, null, addr.get_hostname (), (port != 0) ? port : -1, "/ws", null, null);
 		var msg = new Soup.Message.from_uri ("GET", uri);
 		Soup.websocket_client_prepare_handshake (msg, origin, null, null);
 		msg.request_headers.replace ("Host", make_host_header_value (uri));
@@ -221,7 +228,10 @@ namespace Frida {
 
 	private string make_host_header_value (Uri uri) {
 		unowned string host = uri.get_host ();
-		return Hostname.is_ip_address (host) ? @"[$host]" : host;
+		if (!Hostname.is_ip_address (host))
+			return host;
+		var inet_addr = new InetAddress.from_string (host);
+		return (inet_addr.get_family () == IPV6) ? @"[$host]" : host;
 	}
 
 	public class WebService : Object {
