@@ -250,15 +250,15 @@ namespace Frida {
 				os["build"] = properties.get_string ("BuildVersion");
 				parameters["os"] = os;
 
+				parameters["platform"] = "darwin";
+
+				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
+
 				var hardware = new HashTable<string, Variant> (str_hash, str_equal);
 				hardware["product"] = properties.get_string ("ProductType");
 				hardware["platform"] = properties.get_string ("HardwarePlatform");
 				hardware["model"] = properties.get_string ("HardwareModel");
 				parameters["hardware"] = hardware;
-
-				parameters["platform"] = "darwin";
-
-				parameters["arch"] = properties.get_string ("CPUArchitecture").has_prefix ("arm64") ? "arm64" : "arm";
 
 				parameters["access"] = "jailed";
 
