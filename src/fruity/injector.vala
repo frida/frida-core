@@ -64,7 +64,6 @@ namespace Frida.Fruity.Injector {
 
 		private LLDB.AppleDyldFields? dyld_fields;
 		private uint64 dyld_base;
-		private Gee.Map<string, uint64?>? dyld_symbols;
 
 		private bool libsystem_initialized;
 
@@ -160,7 +159,6 @@ namespace Frida.Fruity.Injector {
 					return true;
 				}, cancellable);
 			}
-			dyld_symbols = yield fetch_dyld_symbols (cancellable);
 
 			return null;
 		}
@@ -810,7 +808,7 @@ namespace Frida.Fruity.Injector {
 			return total;
 		}
 
-		private uint64 resolve_dyld_symbol (string name, string nick) throws Error {
+		private static uint64 resolve_dyld_symbol (string name, string nick, Gee.Map<string, uint64?> dyld_symbols) throws Error {
 			uint64? val = dyld_symbols[name];
 			if (val == null)
 				throw new Error.UNSUPPORTED ("Unsupported iOS version (%s not found)", nick);
@@ -821,13 +819,15 @@ namespace Frida.Fruity.Injector {
 			if (libsystem_initialized)
 				return;
 
+			var dyld_symbols = yield fetch_dyld_symbols (cancellable);
+
 			yield restore_main_thread_state (cancellable);
 
 			uint64? libdyld_initialize = dyld_symbols["__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE"];
 			if (libdyld_initialize != null)
-				yield ensure_libsystem_initialized_for_dyld_v4_and_above (libdyld_initialize, cancellable);
+				yield ensure_libsystem_initialized_for_dyld_v4_and_above (libdyld_initialize, dyld_symbols, cancellable);
 			else
-				yield ensure_libsystem_initialized_for_dyld_v3_and_below (cancellable);
+				yield ensure_libsystem_initialized_for_dyld_v3_and_below (dyld_symbols, cancellable);
 
 			yield save_main_thread_state (cancellable);
 
@@ -836,7 +836,7 @@ namespace Frida.Fruity.Injector {
 		}
 
 		private async void ensure_libsystem_initialized_for_dyld_v4_and_above (uint64 libdyld_initialize,
-				Cancellable? cancellable) throws GLib.Error {
+				Gee.Map<string, uint64?> dyld_symbols, Cancellable? cancellable) throws GLib.Error {
 			uint64? process_info_ptr = dyld_symbols["__ZL12sProcessInfo"];
 			if (process_info_ptr == null)
 				process_info_ptr = dyld_symbols["__ZN5dyld412gProcessInfoE"];
@@ -925,7 +925,8 @@ namespace Frida.Fruity.Injector {
 			yield caller_breakpoint.remove (cancellable);
 		}
 
-		private async void ensure_libsystem_initialized_for_dyld_v3_and_below (Cancellable? cancellable) throws GLib.Error {
+		private async void ensure_libsystem_initialized_for_dyld_v3_and_below (Gee.Map<string, uint64?> dyld_symbols,
+				Cancellable? cancellable) throws GLib.Error {
 			GDB.Breakpoint? modern_breakpoint = null;
 			uint64 launch_with_closure = 0;
 
@@ -945,7 +946,8 @@ namespace Frida.Fruity.Injector {
 				modern_breakpoint = yield lldb.add_breakpoint (SOFT, run_initializers_call, 4, cancellable);
 			}
 
-			uint64 initialize_main_executable = resolve_dyld_symbol ("__ZN4dyld24initializeMainExecutableEv", "initializeMainExecutable");
+			uint64 initialize_main_executable = resolve_dyld_symbol ("__ZN4dyld24initializeMainExecutableEv",
+				"initializeMainExecutable", dyld_symbols);
 			GDB.Breakpoint legacy_breakpoint = yield lldb.add_breakpoint (SOFT, initialize_main_executable, 4, cancellable);
 
 			var exception = yield lldb.continue_until_exception (cancellable);
@@ -960,7 +962,7 @@ namespace Frida.Fruity.Injector {
 				yield modern_breakpoint.remove (cancellable);
 
 			if (hit_breakpoint == legacy_breakpoint)
-				yield initialize_libsystem_from_legacy_codepath (cancellable);
+				yield initialize_libsystem_from_legacy_codepath (dyld_symbols, cancellable);
 			else
 				assert (hit_breakpoint == modern_breakpoint);
 		}
@@ -1001,7 +1003,8 @@ namespace Frida.Fruity.Injector {
 			throw new Error.UNSUPPORTED ("Unable to probe dyld v3 internals; please file a bug");
 		}
 
-		private async void initialize_libsystem_from_legacy_codepath (Cancellable? cancellable) throws GLib.Error {
+		private async void initialize_libsystem_from_legacy_codepath (Gee.Map<string, uint64?> dyld_symbols,
+				Cancellable? cancellable) throws GLib.Error {
 			uint64 code = jit_page;
 
 			var code_builder_pac = lldb.make_buffer_builder ();
@@ -1067,8 +1070,8 @@ namespace Frida.Fruity.Injector {
 			code_builder.write_pointer (error_buf_literal_offset, helpers + error_buffer_offset);
 			yield lldb.write_byte_array (code, code_builder.build (), cancellable);
 
-			uint64 register_thread_helpers =
-				resolve_dyld_symbol ("__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE", "registerThreadHelpers");
+			uint64 register_thread_helpers = resolve_dyld_symbol ("__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE",
+				"registerThreadHelpers", dyld_symbols);
 			yield invoke_remote_function (register_thread_helpers, {
 					helpers
 				}, null, cancellable);
@@ -1087,8 +1090,8 @@ namespace Frida.Fruity.Injector {
 			ExceptionHandler? strcmp_handler = null;
 
 			var dlopen = dyld_symbols.has_key ("_dlopen_internal")
-				? resolve_dyld_symbol ("_dlopen_internal", "dlopen")
-				: resolve_dyld_symbol ("_dlopen", "dlopen");
+				? resolve_dyld_symbol ("_dlopen_internal", "dlopen", dyld_symbols)
+				: resolve_dyld_symbol ("_dlopen", "dlopen", dyld_symbols);
 			yield invoke_remote_function (dlopen, {
 					libsystem_string,
 					9,
