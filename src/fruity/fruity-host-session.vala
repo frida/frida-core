@@ -247,7 +247,14 @@ namespace Frida {
 				os["id"] = "ios";
 				os["name"] = properties.get_string ("ProductName");
 				os["version"] = properties.get_string ("ProductVersion");
+				os["build"] = properties.get_string ("BuildVersion");
 				parameters["os"] = os;
+
+				var hardware = new HashTable<string, Variant> (str_hash, str_equal);
+				hardware["product"] = properties.get_string ("ProductType");
+				hardware["platform"] = properties.get_string ("HardwarePlatform");
+				hardware["model"] = properties.get_string ("HardwareModel");
+				parameters["hardware"] = hardware;
 
 				parameters["platform"] = "darwin";
 
