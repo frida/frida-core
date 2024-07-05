@@ -61,8 +61,7 @@ namespace Frida {
 		}
 
 		construct {
-			_device = new Device (null, "portal", "Portal", HostSessionProviderKind.LOCAL,
-				new PortalHostSessionProvider (this));
+			_device = new Device (null, new PortalHostSessionProvider (this));
 
 			cluster_service = new WebService (cluster_params, CLUSTER);
 			cluster_service.incoming.connect (on_incoming_cluster_connection);
@@ -930,9 +929,8 @@ namespace Frida {
 			}
 
 			public string name {
-				get { return _name; }
+				get { return "Portal"; }
 			}
-			private string _name = "Portal";
 
 			public Variant? icon {
 				get { return _icon; }

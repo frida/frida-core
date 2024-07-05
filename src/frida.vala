@@ -242,7 +242,7 @@ namespace Frida {
 					opts["keepalive_interval"] = interval;
 			}
 
-			var device = new Device (this, id, name, HostSessionProviderKind.REMOTE, socket_device.provider, raw_options);
+			var device = new Device (this, socket_device.provider, id, name, raw_options);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -358,7 +358,7 @@ namespace Frida {
 		}
 
 		private void on_provider_available (HostSessionProvider provider) {
-			var device = new Device (this, provider.id, provider.name, provider.kind, provider);
+			var device = new Device (this, provider);
 			devices.add (device);
 
 			foreach (var observer in on_device_added.to_array ())
@@ -483,13 +483,19 @@ namespace Frida {
 		public signal void lost ();
 
 		public string id {
-			get;
-			construct;
+			get {
+				if (_id != null)
+					return id;
+				return provider.id;
+			}
 		}
 
 		public string name {
-			get;
-			construct;
+			get {
+				if (_name != null)
+					return name;
+				return provider.name;
+			}
 		}
 
 		public Variant? icon {
@@ -498,8 +504,18 @@ namespace Frida {
 		}
 
 		public DeviceType dtype {
-			get;
-			construct;
+			get {
+				switch (provider.kind) {
+					case HostSessionProviderKind.LOCAL:
+						return DeviceType.LOCAL;
+					case HostSessionProviderKind.REMOTE:
+						return DeviceType.REMOTE;
+					case HostSessionProviderKind.USB:
+						return DeviceType.USB;
+					default:
+						assert_not_reached ();
+				}
+			}
 		}
 
 		public Bus bus {
@@ -518,7 +534,8 @@ namespace Frida {
 			construct;
 		}
 
-		public delegate bool ProcessPredicate (Process process);
+		private string? _id;
+		private string? _name;
 
 		private HostSessionOptions? host_session_options;
 		private Promise<HostSession>? host_session_request;
@@ -533,32 +550,18 @@ namespace Frida {
 		private Gee.Set<Service> services = new Gee.HashSet<Service> ();
 		private Bus _bus;
 
-		internal Device (DeviceManager? manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider,
-				HostSessionOptions? options = null) {
-			DeviceType dtype;
-			switch (kind) {
-				case HostSessionProviderKind.LOCAL:
-					dtype = DeviceType.LOCAL;
-					break;
-				case HostSessionProviderKind.REMOTE:
-					dtype = DeviceType.REMOTE;
-					break;
-				case HostSessionProviderKind.USB:
-					dtype = DeviceType.USB;
-					break;
-				default:
-					assert_not_reached ();
-			}
+		public delegate bool ProcessPredicate (Process process);
 
+		internal Device (DeviceManager? manager, HostSessionProvider provider, string? id = null, string? name = null,
+				HostSessionOptions? options = null) {
 			Object (
-				id: id,
-				name: name,
-				icon: provider.icon,
-				dtype: dtype,
+				manager: manager,
 				provider: provider,
-				manager: manager
+				icon: provider.icon
 			);
 
+			_id = id;
+			_name = name;
 			host_session_options = options;
 		}
 
