@@ -485,7 +485,7 @@ namespace Frida {
 		public string id {
 			get {
 				if (_id != null)
-					return id;
+					return _id;
 				return provider.id;
 			}
 		}
@@ -493,7 +493,7 @@ namespace Frida {
 		public string name {
 			get {
 				if (_name != null)
-					return name;
+					return _name;
 				return provider.name;
 			}
 		}
