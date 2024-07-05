@@ -199,6 +199,10 @@ namespace Frida {
 			return peek_scope ().get_object<Darwin.Xpc.String> (Darwin.Xpc.String.TYPE).get_string_ptr ();
 		}
 
+		public unowned uint8[] get_uuid_value () throws Error {
+			return peek_scope ().get_object<Darwin.Xpc.Uuid> (Darwin.Xpc.Uuid.TYPE).get_bytes ()[:16];
+		}
+
 		public unowned string get_error_description () throws Error {
 			var error = peek_scope ().get_object<Darwin.Xpc.Error> (Darwin.Xpc.Error.TYPE);
 			return error.get_string (Darwin.Xpc.Error.KEY_DESCRIPTION);
