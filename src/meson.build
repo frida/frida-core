@@ -498,21 +498,18 @@ if have_fruity_backend
     'fruity' / 'ncm.vala',
   ]
 
+  if host_os == 'macos'
+    backend_sources += 'fruity' / 'device-monitor-macos.vala'
+  elif host_os == 'linux'
+    backend_sources += 'fruity' / 'device-monitor-linux.vala'
+  endif
+
   if host_os_family == 'windows'
     backend_sources += 'fruity' / 'device-monitor-windows.c'
   elif host_os_family == 'darwin'
     backend_sources += 'fruity' / 'device-monitor-darwin.m'
   else
     backend_sources += 'fruity' / 'device-monitor-unix.c'
-  endif
-
-  if host_os_family == 'darwin'
-    backend_sources += 'fruity' / 'xpc-darwin.vala'
-  endif
-  if host_os == 'macos'
-    backend_sources += 'fruity' / 'iokit.vala'
-  elif host_os == 'linux'
-    backend_sources += 'fruity' / 'xpc-linux.vala'
   endif
 
   backend_deps += openssl_dep
@@ -527,11 +524,8 @@ if have_fruity_backend
   if host_os_family == 'darwin'
     backend_vala_args += [
       '--pkg=darwin-xnu',
-      '--pkg=darwin-iokit',
       '--pkg=darwin-xpc',
       '--pkg=darwin-gcd',
-      '--pkg=darwin-net',
-      '--pkg=darwin-dns-sd',
       '--pkg=corefoundation',
     ]
   endif
