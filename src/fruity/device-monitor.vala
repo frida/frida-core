@@ -745,7 +745,8 @@ namespace Frida.Fruity {
 
 			io_cancellable.cancel ();
 
-			usb_context.interrupt_event_handler ();
+			if (usb_context != null)
+				usb_context.interrupt_event_handler ();
 
 			usb_worker.join ();
 			usb_worker = null;
@@ -787,7 +788,8 @@ namespace Frida.Fruity {
 		}
 
 		private void perform_usb_work () {
-			LibUSB.Context.init (out usb_context);
+			if (LibUSB.Context.init (out usb_context) != SUCCESS)
+				return;
 
 			AtomicUint.inc (ref pending_device_arrivals);
 
