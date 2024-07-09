@@ -428,13 +428,17 @@ namespace Frida {
 			return *((double *) &bits);
 		}
 
-		public string read_string (size_t offset) {
+		public string read_string (size_t offset) throws Error {
+			string * start = (string *) get_pointer (offset, sizeof (char));
 			size_t max_length = size - offset;
-			string * val = (string *) get_pointer (offset, sizeof (char));
-			string * end = memchr (val, 0, max_length);
-			assert (end != null);
-			size_t size = end - val;
-			return val->substring (0, (long) size);
+			string * end = memchr (start, 0, max_length);
+			if (end == null)
+				throw new Error.PROTOCOL ("Missing null character");
+			size_t size = end - start;
+			string val = start->substring (0, (long) size);
+			if (!val.validate ())
+				throw new Error.PROTOCOL ("Invalid UTF-8 string");
+			return val;
 		}
 
 		[CCode (cname = "memchr", cheader_filename = "string.h")]
