@@ -444,9 +444,12 @@ namespace Frida {
 		[CCode (cname = "memchr", cheader_filename = "string.h")]
 		private extern static string * memchr (string * s, int c, size_t n);
 
-		public string read_fixed_string (size_t offset, size_t size) {
-			string * val = (string *) get_pointer (offset, size);
-			return val->substring (0, (long) size);
+		public string read_fixed_string (size_t offset, size_t size) throws Error {
+			string * start = (string *) get_pointer (offset, size);
+			string val = start->substring (0, (long) size);
+			if (!val.validate ())
+				throw new Error.PROTOCOL ("Invalid UTF-8 string");
+			return val;
 		}
 
 		public unowned Buffer write_string (size_t offset, string val) {
