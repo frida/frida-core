@@ -465,4 +465,123 @@ namespace Frida {
 			return data + offset;
 		}
 	}
+
+	public class BufferReader {
+		public size_t available {
+			get {
+				return buffer.bytes.get_size () - offset;
+			}
+		}
+
+		private Buffer buffer;
+		private size_t offset = 0;
+
+		public BufferReader (Buffer buf) {
+			buffer = buf;
+		}
+
+		public uint64 read_pointer (size_t offset) throws Error {
+			var pointer_size = buffer.pointer_size;
+			check_available (pointer_size);
+			var ptr = buffer.read_pointer (offset);
+			offset += pointer_size;
+			return ptr;
+		}
+
+		public int8 read_int8 () throws Error {
+			check_available (sizeof (int8));
+			var val = buffer.read_int8 (offset);
+			offset += sizeof (int8);
+			return val;
+		}
+
+		public uint8 read_uint8 () throws Error {
+			check_available (sizeof (uint8));
+			var val = buffer.read_uint8 (offset);
+			offset += sizeof (uint8);
+			return val;
+		}
+
+		public int16 read_int16 () throws Error {
+			check_available (sizeof (int16));
+			var val = buffer.read_int16 (offset);
+			offset += sizeof (int16);
+			return val;
+		}
+
+		public uint16 read_uint16 () throws Error {
+			check_available (sizeof (uint16));
+			var val = buffer.read_uint16 (offset);
+			offset += sizeof (uint16);
+			return val;
+		}
+
+		public int32 read_int32 () throws Error {
+			check_available (sizeof (int32));
+			var val = buffer.read_int32 (offset);
+			offset += sizeof (int32);
+			return val;
+		}
+
+		public uint32 read_uint32 () throws Error {
+			check_available (sizeof (uint32));
+			var val = buffer.read_uint32 (offset);
+			offset += sizeof (uint32);
+			return val;
+		}
+
+		public int64 read_int64 () throws Error {
+			check_available (sizeof (int64));
+			var val = buffer.read_int64 (offset);
+			offset += sizeof (int64);
+			return val;
+		}
+
+		public uint64 read_uint64 () throws Error {
+			check_available (sizeof (uint64));
+			var val = buffer.read_uint64 (offset);
+			offset += sizeof (uint64);
+			return val;
+		}
+
+		public float read_float () throws Error {
+			check_available (sizeof (float));
+			var val = buffer.read_float (offset);
+			offset += sizeof (float);
+			return val;
+		}
+
+		public double read_double () throws Error {
+			check_available (sizeof (double));
+			var val = buffer.read_double (offset);
+			offset += sizeof (double);
+			return val;
+		}
+
+		public string read_string () throws Error {
+			check_available (1);
+			var val = buffer.read_string (offset);
+			offset += val.length + 1;
+			return val;
+		}
+
+		public string read_fixed_string (size_t size) throws Error {
+			check_available (size);
+			var val = buffer.read_fixed_string (offset, size);
+			offset += size;
+			return val;
+		}
+
+		public Bytes read_bytes (size_t size) throws Error {
+			check_available (size);
+			var val = buffer.bytes[offset:offset + size];
+			offset += size;
+			return val;
+		}
+
+		private void check_available (size_t n) throws Error {
+			if (available < n)
+				throw new Error.PROTOCOL ("Malformed buffer: truncated");
+		}
+	}
 }
