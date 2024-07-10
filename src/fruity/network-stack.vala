@@ -154,8 +154,6 @@ namespace Frida.Fruity {
 
 		private MainContext main_context;
 
-		private DataOutputStream? pcap;
-
 		private enum State {
 			STARTED,
 			STOPPED
@@ -249,8 +247,6 @@ namespace Frida.Fruity {
 		public void handle_incoming_datagram (Bytes datagram) throws Error {
 			check_started ();
 
-			log_datagram (datagram);
-
 			check (perform_on_lwip_thread (() => {
 				var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 				pbuf.take (datagram.get_data ());
@@ -282,10 +278,8 @@ namespace Frida.Fruity {
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
 
 			schedule_on_frida_thread (() => {
-				if (state == STARTED) {
-					log_datagram (datagram);
+				if (state == STARTED)
 					outgoing_datagram (datagram);
-				}
 				return Source.REMOVE;
 			});
 		}
@@ -350,45 +344,6 @@ namespace Frida.Fruity {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
 			source.attach (main_context);
-		}
-
-		private void log_datagram (Bytes datagram) {
-			lock (pcap) {
-				try {
-					if (pcap == null) {
-						char buf[40];
-						unowned string addr = raw_ipv6_address.to_string (buf);
-						var f = File.new_build_filename (Environment.get_user_special_dir (DESKTOP),
-							"vns-%s.pcap".printf (addr.replace (":", "")));
-						try {
-							f.delete ();
-						} catch (GLib.Error e) {
-						}
-						pcap = new DataOutputStream (f.create (REPLACE_DESTINATION));
-						pcap.set_byte_order (HOST_ENDIAN);
-						pcap.put_uint32 (0xa1b2c3d4U);
-						pcap.put_uint16 (2);
-						pcap.put_uint16 (4);
-						pcap.put_uint32 (0);
-						pcap.put_uint32 (0);
-						pcap.put_uint32 (16384);
-						pcap.put_uint32 ((ethernet_address != null) ? 1 : 229); // Ethernet or IPv6
-						pcap.flush ();
-					}
-
-					int64 timestamp = get_real_time ();
-					pcap.put_uint32 ((uint32) (timestamp / 1000000));
-					pcap.put_uint32 ((uint32) (timestamp % 1000000));
-					pcap.put_uint32 (datagram.length);
-					pcap.put_uint32 (datagram.length);
-					size_t written;
-					pcap.write_all (datagram.get_data (), out written);
-					pcap.flush ();
-				} catch (GLib.Error e) {
-					printerr ("%s\n", e.message);
-					assert_not_reached ();
-				}
-			}
 		}
 
 		private class TcpConnection : IOStream, AsyncInitable {
