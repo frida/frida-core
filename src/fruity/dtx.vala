@@ -504,6 +504,14 @@ namespace Frida.Fruity {
 			process_incoming_fragments.begin ();
 		}
 
+		public override void dispose () {
+			foreach (var channel in channels.values)
+				channel.transport = null;
+			channels.clear ();
+
+			base.dispose ();
+		}
+
 		private async void close (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
 
@@ -878,9 +886,9 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		public weak DTXTransport transport {
+		public weak DTXTransport? transport {
 			get;
-			construct;
+			set;
 		}
 
 		public State state {
@@ -903,7 +911,7 @@ namespace Frida.Fruity {
 		}
 
 		public override void dispose () {
-			transport.remove_channel (this);
+			close ();
 
 			base.dispose ();
 		}
@@ -915,6 +923,11 @@ namespace Frida.Fruity {
 			var error = new Error.TRANSPORT ("Channel closed");
 			foreach (var request in pending_responses.values.to_array ())
 				request.reject (error);
+
+			if (transport != null) {
+				transport.remove_channel (this);
+				transport = null;
+			}
 		}
 
 		public async NSObject? invoke (string method_name, DTXArgumentListBuilder? args, Cancellable? cancellable)
