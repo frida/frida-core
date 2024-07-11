@@ -490,6 +490,7 @@ if have_fruity_backend
     'fruity' / 'lldb.vala',
     'fruity' / 'injector.vala',
     'fruity' / 'usbmux.vala',
+    'fruity' / 'dns.vala',
     'fruity' / 'keyed-archive.vala',
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
