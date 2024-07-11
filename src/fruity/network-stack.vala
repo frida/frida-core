@@ -251,7 +251,7 @@ namespace Frida.Fruity {
 				var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
 				pbuf.take (datagram.get_data ());
 
-				var err = handle.input (pbuf, handle);
+				var err = handle.input (pbuf, ref handle);
 				if (err == OK)
 					*((void **) &pbuf) = null;
 
@@ -471,7 +471,7 @@ namespace Frida.Fruity {
 						self->on_error (err);
 				});
 				pcb.nagle_disable ();
-				pcb.bind_netif (netstack.handle);
+				pcb.bind_netif (&netstack.handle);
 
 				var err = pcb.connect (ip6_address_from_inet_socket_address (address), address.get_port (), (user_data, pcb, err) => {
 					TcpConnection * self = user_data;
@@ -927,7 +927,7 @@ namespace Frida.Fruity {
 				netstack.perform_on_lwip_thread (() => {
 					pcb = LWIP.UdpPcb.make (V6);
 					pcb.set_recv_callback (on_recv);
-					pcb.bind_netif (netstack.handle);
+					pcb.bind_netif (&netstack.handle);
 					return OK;
 				});
 			}

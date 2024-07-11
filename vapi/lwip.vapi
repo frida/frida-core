@@ -33,7 +33,7 @@ namespace LWIP {
 		public void ip6_addr_set_state (int8 addr_index, IP6AddressState state);
 
 		[CCode (cname = "netif_input")]
-		public static ErrorCode default_input_handler (PacketBuffer pbuf, NetworkInterface netif);
+		public static ErrorCode default_input_handler (PacketBuffer pbuf, ref NetworkInterface netif);
 
 		public IP6Address ip6_addr[IPV6_NUM_ADDRESSES];
 
@@ -56,16 +56,16 @@ namespace LWIP {
 	}
 
 	[CCode (cname = "netif_init_fn", has_target = false)]
-	public delegate ErrorCode NetworkInterfaceInitFunc (NetworkInterface netif);
+	public delegate ErrorCode NetworkInterfaceInitFunc (ref NetworkInterface netif);
 
 	[CCode (cname = "netif_input_fn", has_target = false)]
-	public delegate ErrorCode NetworkInterfaceInputFunc (PacketBuffer pbuf, NetworkInterface netif);
+	public delegate ErrorCode NetworkInterfaceInputFunc (PacketBuffer pbuf, ref NetworkInterface netif);
 
 	[CCode (cname = "netif_linkoutput_fn", has_target = false)]
-	public delegate ErrorCode NetworkInterfaceLinkOutputFunc (NetworkInterface netif, PacketBuffer pbuf);
+	public delegate ErrorCode NetworkInterfaceLinkOutputFunc (ref NetworkInterface netif, PacketBuffer pbuf);
 
 	[CCode (cname = "netif_output_ip6_fn", has_target = false)]
-	public delegate ErrorCode NetworkInterfaceOutputIP6Func (NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
+	public delegate ErrorCode NetworkInterfaceOutputIP6Func (ref NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
 
 	[Flags]
 	[CCode (cheader_filename = "lwip/netif.h", cprefix = "NETIF_FLAG_")]
@@ -85,7 +85,7 @@ namespace LWIP {
 
 		namespace IPv6 {
 			[CCode (cheader_filename = "lwip/ethip6.h", cname = "ethip6_output")]
-			public ErrorCode output (NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
+			public ErrorCode output (ref NetworkInterface netif, PacketBuffer pbuf, IP6Address address);
 		}
 	}
 
@@ -196,7 +196,7 @@ namespace LWIP {
 		public ErrorCode close ();
 		public ErrorCode shutdown (bool shut_rx, bool shut_tx);
 
-		public void bind_netif (NetworkInterface? netif);
+		public void bind_netif (NetworkInterface * netif);
 
 		public ErrorCode connect (IP6Address address, uint16 port, ConnectedFunc connected);
 
@@ -241,7 +241,7 @@ namespace LWIP {
 		public void set_recv_callback (RecvFunc f);
 
 		public ErrorCode bind (IP6Address? ipaddr = null, uint16 port = 0);
-		public void bind_netif (NetworkInterface? netif);
+		public void bind_netif (NetworkInterface * netif);
 
 		public ErrorCode connect (IP6Address ipaddr, uint16 port);
 
