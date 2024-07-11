@@ -499,6 +499,11 @@ namespace Frida.Fruity {
 				});
 			}
 
+			private void detach_from_pcb () {
+				pcb.set_user_data (null);
+				pcb = null;
+			}
+
 			private void on_connect () {
 				lock (state)
 					tx_space_available = pcb.query_available_send_buffer_space ();
@@ -516,7 +521,7 @@ namespace Frida.Fruity {
 
 			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.ErrorCode err) {
 				if (pbuf == null) {
-					pcb = null;
+					detach_from_pcb ();
 					schedule_on_frida_thread (() => {
 						_state = CLOSED;
 						update_events ();
@@ -539,7 +544,7 @@ namespace Frida.Fruity {
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
-				pcb = null;
+				detach_from_pcb ();
 				schedule_on_frida_thread (() => {
 					_state = CLOSED;
 					update_events ();
