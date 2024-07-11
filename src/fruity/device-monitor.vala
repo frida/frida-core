@@ -708,8 +708,9 @@ namespace Frida.Fruity {
 		}
 
 		private State state = CREATED;
-		private Gee.Set<PortableCoreDeviceTransport> transports = new Gee.HashSet<PortableCoreDeviceTransport> ();
-		private Promise<bool> started = new Promise<bool> ();
+
+		private Gee.Set<PortableCoreDeviceUsbTransport> usb_transports = new Gee.HashSet<PortableCoreDeviceUsbTransport> ();
+		private Promise<bool> usb_started = new Promise<bool> ();
 		private bool modeswitch_allowed = false;
 		private Promise<bool>? modeswitch_activated;
 		private Gee.Set<string>? modeswitch_udids_pending;
@@ -718,10 +719,16 @@ namespace Frida.Fruity {
 		private LibUSB.Context? usb_context;
 		private LibUSB.HotCallbackHandle iphone_callback;
 		private LibUSB.HotCallbackHandle ipad_callback;
-		private uint pending_device_arrivals = 0;
-		private Gee.Map<uint32, LibUSB.Device> polled_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
-		private Source? polled_timer;
-		private uint polled_outdated = 0;
+		private uint pending_usb_device_arrivals = 0;
+		private Gee.Map<uint32, LibUSB.Device> polled_usb_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
+		private Source? polled_usb_timer;
+		private uint polled_usb_outdated = 0;
+
+		private PairingBrowser network_browser = PairingBrowser.make_default ();
+		private Gee.Map<string, PortableCoreDeviceNetworkTransport> network_transports =
+			new Gee.HashMap<string, PortableCoreDeviceNetworkTransport> ();
+
+		private Gee.List<PairingIdentity.Peer> peers = PairingIdentity.load_peers ();
 
 		private MainContext main_context;
 
@@ -741,6 +748,8 @@ namespace Frida.Fruity {
 
 		construct {
 			main_context = MainContext.ref_thread_default ();
+
+			network_browser.service_discovered.connect (on_network_pairing_service_discovered);
 		}
 
 		public async void start (Cancellable? cancellable) throws IOError {
@@ -748,8 +757,10 @@ namespace Frida.Fruity {
 
 			usb_worker = new Thread<void> ("frida-core-device-usb", perform_usb_work);
 
+			yield network_browser.start (cancellable);
+
 			try {
-				yield started.future.wait_async (cancellable);
+				yield usb_started.future.wait_async (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
@@ -765,17 +776,23 @@ namespace Frida.Fruity {
 			if (usb_context != null)
 				usb_context.interrupt_event_handler ();
 
+			yield network_browser.stop (cancellable);
+
+			foreach (var transport in network_transports.values.to_array ())
+				yield transport.close (cancellable);
+			network_transports.clear ();
+
 			usb_worker.join ();
 			usb_worker = null;
 
-			if (polled_timer != null) {
-				polled_timer.destroy ();
-				polled_timer = null;
+			if (polled_usb_timer != null) {
+				polled_usb_timer.destroy ();
+				polled_usb_timer = null;
 			}
 
-			foreach (var transport in transports)
+			foreach (var transport in usb_transports.to_array ())
 				yield transport.close (cancellable);
-			transports.clear ();
+			usb_transports.clear ();
 
 			usb_context = null;
 
@@ -787,7 +804,7 @@ namespace Frida.Fruity {
 
 			modeswitch_activated = new Promise<bool> ();
 			modeswitch_udids_pending = new Gee.HashSet<string> ();
-			foreach (var transport in transports.to_array ()) {
+			foreach (var transport in usb_transports.to_array ()) {
 				var usb_device = transport.usb_device;
 				try {
 					if (yield usb_device.maybe_modeswitch (cancellable))
@@ -805,32 +822,37 @@ namespace Frida.Fruity {
 		}
 
 		private void perform_usb_work () {
-			if (LibUSB.Context.init (out usb_context) != SUCCESS)
+			if (LibUSB.Context.init (out usb_context) != SUCCESS) {
+				schedule_on_frida_thread (() => {
+					usb_started.resolve (true);
+					return Source.REMOVE;
+				});
 				return;
+			}
 
-			AtomicUint.inc (ref pending_device_arrivals);
+			AtomicUint.inc (ref pending_usb_device_arrivals);
 
 			if (LibUSB.has_capability (HAS_HOTPLUG) != 0) {
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
-					PRODUCT_ID_IPHONE, LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out iphone_callback);
+					PRODUCT_ID_IPHONE, LibUSB.HotPlugEvent.MATCH_ANY, on_usb_hotplug_event, out iphone_callback);
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
-					PRODUCT_ID_IPAD, LibUSB.HotPlugEvent.MATCH_ANY, on_hotplug_event, out ipad_callback);
+					PRODUCT_ID_IPAD, LibUSB.HotPlugEvent.MATCH_ANY, on_usb_hotplug_event, out ipad_callback);
 			} else {
-				refresh_polled_devices ();
+				refresh_polled_usb_devices ();
 
 				var source = new TimeoutSource.seconds (2);
 				source.set_callback (() => {
-					AtomicUint.set (ref polled_outdated, 1);
+					AtomicUint.set (ref polled_usb_outdated, 1);
 					usb_context.interrupt_event_handler ();
 					return Source.CONTINUE;
 				});
 				source.attach (main_context);
-				polled_timer = source;
+				polled_usb_timer = source;
 			}
 
-			if (AtomicUint.dec_and_test (ref pending_device_arrivals)) {
+			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals)) {
 				schedule_on_frida_thread (() => {
-					started.resolve (true);
+					usb_started.resolve (true);
 					return Source.REMOVE;
 				});
 			}
@@ -839,35 +861,35 @@ namespace Frida.Fruity {
 				int completed = 0;
 				usb_context.handle_events_completed (out completed);
 
-				if (AtomicUint.compare_and_exchange (ref polled_outdated, 1, 0))
-					refresh_polled_devices ();
+				if (AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
+					refresh_polled_usb_devices ();
 			}
 		}
 
-		private int on_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
+		private int on_usb_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
 			if (event == DEVICE_ARRIVED)
-				on_device_arrived (device);
+				on_usb_device_arrived (device);
 			else
-				on_device_left (device);
+				on_usb_device_left (device);
 			return 0;
 		}
 
-		private void on_device_arrived (LibUSB.Device device) {
-			AtomicUint.inc (ref pending_device_arrivals);
+		private void on_usb_device_arrived (LibUSB.Device device) {
+			AtomicUint.inc (ref pending_usb_device_arrivals);
 			schedule_on_frida_thread (() => {
-				handle_device_arrival.begin (device);
+				handle_usb_device_arrival.begin (device);
 				return Source.REMOVE;
 			});
 		}
 
-		private void on_device_left (LibUSB.Device device) {
+		private void on_usb_device_left (LibUSB.Device device) {
 			schedule_on_frida_thread (() => {
-				handle_device_departure.begin (device);
+				handle_usb_device_departure.begin (device);
 				return Source.REMOVE;
 			});
 		}
 
-		private async void handle_device_arrival (LibUSB.Device raw_device) {
+		private async void handle_usb_device_arrival (LibUSB.Device raw_device) {
 			UsbDevice? device = null;
 
 			uint delays[] = { 0, 50, 250 };
@@ -875,11 +897,11 @@ namespace Frida.Fruity {
 				uint delay = delays[attempts];
 				if (delay != 0) {
 					var timeout_source = new TimeoutSource (delay);
-					timeout_source.set_callback (handle_device_arrival.callback);
+					timeout_source.set_callback (handle_usb_device_arrival.callback);
 					timeout_source.attach (main_context);
 
 					var cancel_source = new CancellableSource (io_cancellable);
-					cancel_source.set_callback (handle_device_arrival.callback);
+					cancel_source.set_callback (handle_usb_device_arrival.callback);
 					cancel_source.attach (main_context);
 
 					yield;
@@ -897,8 +919,8 @@ namespace Frida.Fruity {
 					if (modeswitch_allowed && yield device.maybe_modeswitch (io_cancellable))
 						break;
 
-					var transport = new PortableCoreDeviceTransport (device);
-					transports.add (transport);
+					var transport = new PortableCoreDeviceUsbTransport (device);
+					usb_transports.add (transport);
 					transport_attached (transport);
 
 					break;
@@ -909,8 +931,8 @@ namespace Frida.Fruity {
 				}
 			}
 
-			if (AtomicUint.dec_and_test (ref pending_device_arrivals) && state == STARTING)
-				started.resolve (true);
+			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
+				usb_started.resolve (true);
 
 			if (device != null && modeswitch_udids_pending != null) {
 				modeswitch_udids_pending.remove (device.udid);
@@ -919,13 +941,13 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private async void handle_device_departure (LibUSB.Device raw_device) {
-			var transport = transports.first_match (t => t.usb_device.raw_device == raw_device);
+		private async void handle_usb_device_departure (LibUSB.Device raw_device) {
+			var transport = usb_transports.first_match (t => t.usb_device.raw_device == raw_device);
 			if (transport == null)
 				return;
 
 			transport_detached (transport);
-			transports.remove (transport);
+			usb_transports.remove (transport);
 
 			try {
 				yield transport.close (io_cancellable);
@@ -933,7 +955,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private void refresh_polled_devices () {
+		private void refresh_polled_usb_devices () {
 			var current_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
 			foreach (var device in usb_context.get_device_list ()) {
 				var desc = LibUSB.DeviceDescriptor (device);
@@ -944,25 +966,71 @@ namespace Frida.Fruity {
 				if (desc.idProduct != PRODUCT_ID_IPHONE && desc.idProduct != PRODUCT_ID_IPAD)
 					continue;
 
-				uint id = make_device_id (device, desc);
+				uint id = make_usb_device_id (device, desc);
 				current_devices[id] = device;
 
-				if (!polled_devices.has_key (id))
-					on_device_arrived (device);
+				if (!polled_usb_devices.has_key (id))
+					on_usb_device_arrived (device);
 			}
 
-			foreach (var e in polled_devices.entries) {
+			foreach (var e in polled_usb_devices.entries) {
 				if (!current_devices.has_key (e.key))
-					on_device_left (e.value);
+					on_usb_device_left (e.value);
 			}
 
-			polled_devices = current_devices;
+			polled_usb_devices = current_devices;
 		}
 
-		private static uint32 make_device_id (LibUSB.Device device, LibUSB.DeviceDescriptor desc) {
+		private static uint32 make_usb_device_id (LibUSB.Device device, LibUSB.DeviceDescriptor desc) {
 			return ((uint32) device.get_port_number () << 24) |
 				((uint32) device.get_device_address () << 16) |
 				(uint32) desc.idProduct;
+		}
+
+		private void on_network_pairing_service_discovered (PairingServiceDetails service) {
+			var peer = find_peer (service);
+			if (peer == null)
+				return;
+
+			var transport = network_transports[peer.udid];
+			if (transport == null) {
+				transport = new PortableCoreDeviceNetworkTransport (peer, service.endpoint, service.interface_address);
+				network_transports[peer.udid] = transport;
+				transport_attached (transport);
+			} else {
+				transport.endpoint = service.endpoint;
+				transport.interface_address = service.interface_address;
+			}
+		}
+
+		private PairingIdentity.Peer? find_peer (PairingServiceDetails service) {
+			var mac = OpenSSL.Envelope.MessageAuthCode.fetch (null, OpenSSL.ShortName.siphash);
+
+			size_t hash_size = 8;
+			size_t return_size = OpenSSL.ParamReturnSize.UNMODIFIED;
+			OpenSSL.Param mac_params[] = {
+				{ OpenSSL.Envelope.MessageAuthParameter.SIZE, UNSIGNED_INTEGER,
+					(uint8[]) &hash_size, return_size },
+				{ null, INTEGER, null, return_size },
+			};
+
+			foreach (var peer in peers) {
+				var ctx = new OpenSSL.Envelope.MessageAuthCodeContext (mac);
+				ctx.init (peer.irk.get_data (), mac_params);
+				ctx.update (service.identifier.data);
+				uint8 output[8];
+				size_t outlen = 0;
+				ctx.final (output, out outlen);
+
+				uint8 tag[6];
+				for (uint i = 0; i != 6; i++)
+					tag[i] = output[5 - i];
+
+				if (Memory.cmp (tag, service.auth_tag.get_data (), service.auth_tag.get_size ()) == 0)
+					return peer;
+			}
+
+			return null;
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -972,7 +1040,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private sealed class PortableCoreDeviceTransport : Object, Transport {
+	private sealed class PortableCoreDeviceUsbTransport : Object, Transport {
 		public UsbDevice usb_device {
 			get;
 			construct;
@@ -1010,7 +1078,7 @@ namespace Frida.Fruity {
 
 		private Promise<Tunnel>? tunnel_request;
 
-		public PortableCoreDeviceTransport (UsbDevice usb_device) {
+		public PortableCoreDeviceUsbTransport (UsbDevice usb_device) {
 			Object (usb_device: usb_device);
 		}
 
@@ -1041,7 +1109,7 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
-				var tunnel = new PortableTunnel (usb_device);
+				var tunnel = new PortableUsbTunnel (usb_device);
 				yield tunnel.open (cancellable);
 
 				tunnel_request.resolve (tunnel);
@@ -1056,7 +1124,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private sealed class PortableTunnel : Object, Tunnel {
+	private sealed class PortableUsbTunnel : Object, Tunnel {
 		public UsbDevice usb_device {
 			get;
 			construct;
@@ -1072,7 +1140,7 @@ namespace Frida.Fruity {
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 
-		public PortableTunnel (UsbDevice usb_device) {
+		public PortableUsbTunnel (UsbDevice usb_device) {
 			Object (usb_device: usb_device);
 		}
 
@@ -1332,6 +1400,165 @@ namespace Frida.Fruity {
 		}
 	}
 
+	private sealed class PortableCoreDeviceNetworkTransport : Object, Transport {
+		public PairingIdentity.Peer peer {
+			get;
+			construct;
+		}
+
+		public InetSocketAddress endpoint {
+			get;
+			set;
+		}
+
+		public InetSocketAddress interface_address {
+			get;
+			set;
+		}
+
+		public ConnectionType connection_type {
+			get {
+				return NETWORK;
+			}
+		}
+
+		public string udid {
+			get {
+				return peer.udid;
+			}
+		}
+
+		public string? name {
+			get {
+				return peer.name;
+			}
+		}
+
+		public Variant? icon {
+			get {
+				return null;
+			}
+		}
+
+		public UsbmuxDevice? usbmux_device {
+			get {
+				return null;
+			}
+		}
+
+		private Promise<Tunnel>? tunnel_request;
+
+		public PortableCoreDeviceNetworkTransport (PairingIdentity.Peer peer, InetSocketAddress endpoint,
+				InetSocketAddress interface_address) {
+			Object (
+				peer: peer,
+				endpoint: endpoint,
+				interface_address: interface_address
+			);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (tunnel_request != null) {
+				try {
+					var tunnel = yield tunnel_request.future.wait_async (cancellable);
+					yield tunnel.close (cancellable);
+				} catch (Error e) {
+				} finally {
+					tunnel_request = null;
+				}
+			}
+		}
+
+		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+			while (tunnel_request != null) {
+				try {
+					return yield tunnel_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			tunnel_request = new Promise<Tunnel> ();
+
+			try {
+				var tunnel = new PortableNetworkTunnel (endpoint, interface_address);
+				yield tunnel.open (cancellable);
+
+				tunnel_request.resolve (tunnel);
+
+				return tunnel;
+			} catch (GLib.Error e) {
+				tunnel_request.reject (e);
+				tunnel_request = null;
+
+				throw_api_error (e);
+			}
+		}
+	}
+
+	private sealed class PortableNetworkTunnel : Object, Tunnel {
+		public InetSocketAddress endpoint {
+			get;
+			construct;
+		}
+
+		public InetSocketAddress interface_address {
+			get;
+			construct;
+		}
+
+		public DiscoveryService discovery {
+			get {
+				return _discovery_service;
+			}
+		}
+
+		private TunnelConnection? tunnel_connection;
+		private DiscoveryService? _discovery_service;
+
+		public PortableNetworkTunnel (InetSocketAddress endpoint, InetSocketAddress interface_address) {
+			Object (endpoint: endpoint, interface_address: interface_address);
+		}
+
+		public async void open (Cancellable? cancellable) throws Error, IOError {
+			var netstack = new SystemNetworkStack (interface_address.get_address (), interface_address.scope_id);
+
+			var pairing_connection = yield netstack.open_tcp_connection (endpoint, cancellable);
+			var pairing_transport = new PlainPairingTransport (pairing_connection);
+			var pairing_service = yield PairingService.open (pairing_transport, cancellable);
+
+			TunnelConnection tc = yield pairing_service.open_tunnel (endpoint.get_address (), netstack, cancellable);
+
+			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tc.remote_address,
+				port: tc.remote_rsd_port,
+				scope_id: tc.tunnel_netstack.scope_id
+			);
+			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
+			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+
+			tunnel_connection = tc;
+			_discovery_service = disco;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			_discovery_service.close ();
+
+			tunnel_connection.cancel ();
+		}
+
+		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
+			var netstack = tunnel_connection.tunnel_netstack;
+			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tunnel_connection.remote_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
+			return yield netstack.open_tcp_connection (endpoint, cancellable);
+		}
+	}
+
 	public interface FruitFinder : Object {
 		public static FruitFinder make_default () {
 #if LINUX && !ANDROID
@@ -1354,6 +1581,8 @@ namespace Frida.Fruity {
 	internal const string PAIRING_DOMAIN = "local.";
 
 	public interface PairingBrowser : Object {
+		public signal void service_discovered (PairingServiceDetails service);
+
 		public static PairingBrowser make_default () {
 #if LINUX && !ANDROID
 			return new LinuxPairingBrowser ();
@@ -1362,41 +1591,22 @@ namespace Frida.Fruity {
 #endif
 		}
 
-		public signal void services_discovered (PairingServiceDetails[] services);
+		public abstract async void start (Cancellable? cancellable) throws IOError;
+		public abstract async void stop (Cancellable? cancellable) throws IOError;
 	}
 
 	public class NullPairingBrowser : Object, PairingBrowser {
+		public async void start (Cancellable? cancellable) throws IOError {
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+		}
 	}
 
-	public interface PairingServiceDetails : Object {
-		public abstract string name {
-			get;
-		}
-
-		public abstract uint interface_index {
-			get;
-		}
-
-		public abstract string interface_name {
-			get;
-		}
-
-		public abstract async Gee.List<PairingServiceHost> resolve (Cancellable? cancellable = null) throws Error, IOError;
-	}
-
-	public interface PairingServiceHost : Object {
-		public abstract string name {
-			get;
-		}
-
-		public abstract uint16 port {
-			get;
-		}
-
-		public abstract Gee.List<string> txt_record {
-			get;
-		}
-
-		public abstract async Gee.List<InetSocketAddress> resolve (Cancellable? cancellable = null) throws Error, IOError;
+	public class PairingServiceDetails {
+		public string identifier;
+		public Bytes auth_tag;
+		public InetSocketAddress endpoint;
+		public InetSocketAddress interface_address;
 	}
 }

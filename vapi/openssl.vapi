@@ -384,6 +384,44 @@ namespace OpenSSL {
 		public class MessageDigest {
 			public static MessageDigest fetch (LibraryContext? ctx, string algorithm, string? properties = null);
 		}
+
+		[Compact]
+		[CCode (cname = "EVP_MAC_CTX", cprefix = "EVP_MAC_CTX_")]
+		public class MessageAuthCodeContext {
+			public MessageAuthCodeContext (MessageAuthCode mac);
+
+			[CCode (cname = "EVP_MAC_init")]
+			public int init (uint8[] key, [CCode (array_length = false)] Param[]? params = null);
+			[CCode (cname = "EVP_MAC_update")]
+			public int update (uint8[] data);
+			[CCode (cname = "EVP_MAC_final")]
+			public int final ([CCode (array_length_pos = 2)] uint8[]? outdata, out size_t outlen);
+		}
+
+		[Compact]
+		[CCode (cname = "EVP_MAC", cprefix = "EVP_MAC_")]
+		public class MessageAuthCode {
+			public static MessageAuthCode fetch (LibraryContext? ctx, string algorithm, string? properties = null);
+		}
+
+		[CCode (cheader_filename = "openssl/core_names.h", lower_case_cprefix = "OSSL_MAC_PARAM_")]
+		namespace MessageAuthParameter {
+			public const string KEY;
+			public const string IV;
+			public const string CUSTOM;
+			public const string SALT;
+			public const string XOF;
+			public const string DIGEST_NOINIT;
+			public const string DIGEST_ONESHOT;
+			public const string C_ROUNDS;
+			public const string D_ROUNDS;
+			public const string CIPHER;
+			public const string DIGEST;
+			public const string PROPERTIES;
+			public const string SIZE;
+			public const string BLOCK_SIZE;
+			public const string TLS_DATA_SIZE;
+		}
 	}
 
 	[Compact]
@@ -426,6 +464,7 @@ namespace OpenSSL {
 		public const string sha256;
 		public const string sha384;
 		public const string sha512;
+		public const string siphash;
 		public const string chacha20_poly1305;
 	}
 

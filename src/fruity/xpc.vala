@@ -119,7 +119,6 @@ namespace Frida.Fruity {
 		private uint64 next_control_sequence_number = 0;
 		private uint64 next_encrypted_sequence_number = 0;
 
-		private File config_file;
 		private string host_identifier;
 		private Key pair_record_key;
 		private ChaCha20Poly1305? client_cipher;
@@ -146,29 +145,15 @@ namespace Frida.Fruity {
 			transport.close.connect (on_close);
 			transport.message.connect (on_message);
 
-#if DARWIN
-			config_file = File.new_for_path ("/var/db/lockdown/RemotePairing/user_%u/selfIdentity.plist".printf (
-				(uint) Posix.getuid ()));
-#else
-			config_file = File.new_build_filename (Environment.get_user_config_dir (), "frida", "remote-xpc.plist");
-#endif
-
-			Bytes? key = null;
-			try {
-				uint8[] raw_identity;
-				FileUtils.get_data (config_file.get_path (), out raw_identity);
-				Plist identity = new Plist.from_data (raw_identity);
-
-				unowned string identifier = identity.get_string ("identifier");
-				key = identity.get_bytes ("privateKey");
-
-				host_identifier = identifier;
-			} catch (GLib.Error e) {
-				host_identifier = make_host_identifier ();
-			}
-			if (key == null) {
+			Bytes? key;
+			var identity = PairingIdentity.try_load ();
+			if (identity != null) {
+				key = identity.private_key;
+				host_identifier = identity.identifier;
+			} else {
 				uint8 dummy_key[32] = { 0, };
 				key = new Bytes (dummy_key);
+				host_identifier = make_host_identifier ();
 			}
 
 			pair_record_key = new Key.from_raw_private_key (ED25519, null, key.get_data ());
@@ -389,7 +374,7 @@ namespace Frida.Fruity {
 			// TODO: Verify signature using peer's public key.
 			/* var start_inner_response = */ new VariantReader (PairingParamsParser.parse (cipher.decrypt (
 				new Bytes.static ("\x00\x00\x00\x00PV-Msg02".data[:12]),
-				start_response.read_member ("encrypted-data").get_data_value ()).get_data ()));
+				start_response.read_member ("encrypted-data").get_data_value ())));
 
 			var message = new ByteArray.sized (100);
 			message.append (raw_host_pubkey);
@@ -524,7 +509,7 @@ namespace Frida.Fruity {
 			message.append (new_pair_record_pubkey.get_data ());
 			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), new_pair_record_key);
 
-			Bytes info = new OpackBuilder ()
+			Bytes self_info = new OpackBuilder ()
 				.begin_dictionary ()
 					.set_member_name ("name")
 					.add_string_value (Environment.get_host_name ())
@@ -547,7 +532,7 @@ namespace Frida.Fruity {
 				.add_identifier (host_identifier)
 				.add_raw_public_key (new_pair_record_pubkey)
 				.add_signature (signature)
-				.add_info (info)
+				.add_info (self_info)
 				.build ();
 
 			Bytes outer_params = new PairingParamsBuilder ()
@@ -571,27 +556,26 @@ namespace Frida.Fruity {
 				.end_dictionary ()
 				.build ();
 
-			var finish_response = yield request_pairing_data (finish_payload, cancellable);
+			var outer_finish_response = yield request_pairing_data (finish_payload, cancellable);
+			var inner_finish_response = new VariantReader (PairingParamsParser.parse (
+				cipher.decrypt (new Bytes.static ("\x00\x00\x00\x00PS-Msg06".data[:12]),
+					outer_finish_response.read_member ("encrypted-data").get_data_value ())));
 
-			Bytes encrypted_response = finish_response.read_member ("encrypted-data").get_data_value ();
-			Bytes raw_response = cipher.decrypt (new Bytes.static ("\x00\x00\x00\x00PS-Msg06".data[:12]), encrypted_response);
-			// TODO: Wire up if/when needed.
-			/* Variant response = */ PairingParamsParser.parse (raw_response.get_data ());
+			string peer_identifier = inner_finish_response.read_member ("identifier").get_string_value ();
+			inner_finish_response.end_member ();
+			Bytes peer_pubkey = inner_finish_response.read_member ("public-key").get_data_value ();
+			inner_finish_response.end_member ();
+			Bytes peer_info = inner_finish_response.read_member ("info").get_data_value ();
+			inner_finish_response.end_member ();
+			PairingIdentity.save_peer (peer_identifier, peer_pubkey, peer_info);
 
-			var config = new Plist ();
-			config.set_string ("identifier", host_identifier);
-			config.set_bytes ("publicKey", new_pair_record_pubkey);
-			config.set_bytes ("privateKey", get_raw_private_key (new_pair_record_key));
-			config.set_bytes ("irk", irk);
-			try {
-				config_file.get_parent ().make_directory_with_parents (cancellable);
-			} catch (GLib.Error e) {
-			}
-			try {
-				FileUtils.set_contents (config_file.get_path (), config.to_xml ());
-			} catch (GLib.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
+			var identity = new PairingIdentity () {
+				identifier = host_identifier,
+				public_key = new_pair_record_pubkey,
+				private_key = get_raw_private_key (new_pair_record_key),
+				irk = irk
+			};
+			identity.save ();
 
 			pair_record_key = (owned) new_pair_record_key;
 
@@ -636,7 +620,7 @@ namespace Frida.Fruity {
 				.read_member ("_0")
 				.read_member ("data")
 				.get_data_value ();
-			Variant data = PairingParamsParser.parse (raw_data.get_data ());
+			Variant data = PairingParamsParser.parse (raw_data);
 			return new VariantReader (data);
 		}
 
@@ -1345,6 +1329,119 @@ namespace Frida.Fruity {
 		}
 	}
 
+	public class PairingIdentity {
+		public string identifier;
+		public Bytes public_key;
+		public Bytes private_key;
+		public Bytes irk;
+
+		public static PairingIdentity? try_load () {
+			try {
+				Bytes raw_identity = query_self_identity_location ().load_bytes ();
+				Plist identity = new Plist.from_data (raw_identity.get_data ());
+				return new PairingIdentity () {
+					identifier = identity.get_string ("identifier"),
+					public_key = identity.get_bytes ("publicKey"),
+					private_key = identity.get_bytes ("privateKey"),
+					irk = identity.get_bytes ("irk")
+				};
+			} catch (GLib.Error e) {
+				return null;
+			}
+		}
+
+		public void save () throws Error {
+			var plist = new Plist ();
+			plist.set_string ("identifier", identifier);
+			plist.set_bytes ("publicKey", public_key);
+			plist.set_bytes ("privateKey", private_key);
+			plist.set_bytes ("irk", irk);
+			save_plist (plist, query_self_identity_location ());
+		}
+
+		public static Gee.List<Peer> load_peers () {
+			var peers = new Gee.ArrayList<Peer> ();
+
+			try {
+				var enumerator = query_peers_location ().enumerate_children (FileAttribute.STANDARD_NAME, FileQueryInfoFlags.NONE);
+				File? child;
+				while (enumerator.iterate (null, out child) && child != null) {
+					Plist plist = new Plist.from_data (child.load_bytes ().get_data ());
+
+					var reader = new VariantReader (OpackParser.parse (plist.get_bytes ("info")));
+					unowned string udid = reader.read_member ("remotepairing_udid").get_string_value ();
+
+					peers.add (new Peer () {
+						identifier = plist.get_string ("identifier"),
+						public_key = plist.get_bytes ("publicKey"),
+						irk = plist.get_bytes ("irk"),
+						name = plist.get_string ("name"),
+						model = plist.get_string ("model"),
+						udid = udid,
+					});
+				}
+			} catch (GLib.Error e) {
+			}
+
+			return peers;
+		}
+
+		public static void save_peer (string identifier, Bytes public_key, Bytes info) throws Error {
+			var r = new VariantReader (OpackParser.parse (info));
+
+			Bytes irk = r.read_member ("altIRK").get_data_value ();
+			r.end_member ();
+
+			unowned string name = r.read_member ("name").get_string_value ();
+			r.end_member ();
+
+			unowned string model = r.read_member ("model").get_string_value ();
+			r.end_member ();
+
+			var plist = new Plist ();
+			plist.set_string ("identifier", identifier);
+			plist.set_bytes ("publicKey", public_key);
+			plist.set_bytes ("irk", irk);
+			plist.set_string ("name", name);
+			plist.set_string ("model", model);
+			plist.set_bytes ("info", info);
+			save_plist (plist, query_peers_location ().get_child (identifier + ".plist"));
+		}
+
+		public static File query_self_identity_location () {
+			return query_base_location ().get_child ("self-identity.plist");
+		}
+
+		public static File query_peers_location () {
+			return query_base_location ().get_child ("peers");
+		}
+
+		private static File query_base_location () {
+			return File.new_build_filename (Environment.get_user_config_dir (), "frida");
+		}
+
+		private static void save_plist (Plist plist, File location) throws Error {
+			try {
+				location.get_parent ().make_directory_with_parents ();
+			} catch (GLib.Error e) {
+			}
+			try {
+				location.replace_contents (plist.to_xml ().data, null, false, PRIVATE | REPLACE_DESTINATION, null);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		public class Peer {
+			public string identifier;
+			public Bytes public_key;
+			public Bytes irk;
+			public string name;
+			public string model;
+			public string udid;
+		}
+	}
+
 	public class DeviceOptions {
 		public bool allows_pair_setup;
 		public bool allows_pinless_pairing;
@@ -1435,54 +1532,51 @@ namespace Frida.Fruity {
 	}
 
 	private class PairingParamsParser {
-		private Buffer buf;
-		private size_t cursor = 0;
+		private BufferReader reader;
 		private EnumClass param_type_class;
 
-		public static Variant parse (uint8[] data) throws Error {
-			var parser = new PairingParamsParser (new Bytes.static (data));
+		public static Variant parse (Bytes pairing_params) throws Error {
+			var parser = new PairingParamsParser (pairing_params);
 			return parser.read_params ();
 		}
 
 		private PairingParamsParser (Bytes bytes) {
-			this.buf = new Buffer (bytes, LITTLE_ENDIAN);
-			this.param_type_class = (EnumClass) typeof (PairingParamType).class_ref ();
+			reader = new BufferReader (new Buffer (bytes, LITTLE_ENDIAN));
+			param_type_class = (EnumClass) typeof (PairingParamType).class_ref ();
 		}
 
 		private Variant read_params () throws Error {
 			var byte_array = new VariantType.array (VariantType.BYTE);
 
 			var parameters = new Gee.HashMap<string, Variant> ();
-			size_t size = buf.bytes.get_size ();
-			while (cursor != size) {
-				var raw_type = read_raw_uint8 ();
+			while (reader.available != 0) {
+				var raw_type = reader.read_uint8 ();
 				unowned EnumValue? type_enum_val = param_type_class.get_value (raw_type);
 				if (type_enum_val == null)
 					throw new Error.INVALID_ARGUMENT ("Unsupported pairing parameter type (0x%x)", raw_type);
 				var type = (PairingParamType) raw_type;
 				unowned string key = type_enum_val.value_nick;
 
-				var val_size = read_raw_uint8 ();
-				Bytes val_bytes = read_raw_bytes (val_size);
-
+				var val_size = reader.read_uint8 ();
 				Variant val;
 				switch (type) {
+					case IDENTIFIER:
+						val = new Variant.string (reader.read_fixed_string (val_size));
+						break;
 					case STATE:
 					case ERROR:
-						if (val_bytes.length != 1) {
-							throw new Error.INVALID_ARGUMENT ("Invalid value for '%s': length=%d",
-								key, val_bytes.length);
-						}
-						val = new Variant.byte (val_bytes[0]);
+						if (val_size != 1)
+							throw new Error.INVALID_ARGUMENT ("Invalid value for '%s': size=%u", key, val_size);
+						val = new Variant.byte (reader.read_uint8 ());
 						break;
 					case RETRY_DELAY: {
 						uint16 delay;
-						switch (val_bytes.length) {
+						switch (val_size) {
 							case 1:
-								delay = val_bytes[0];
+								delay = reader.read_uint8 ();
 								break;
 							case 2:
-								delay = new Buffer (val_bytes, LITTLE_ENDIAN).read_uint16 (0);
+								delay = reader.read_uint16 ();
 								break;
 							default:
 								throw new Error.INVALID_ARGUMENT ("Invalid value for 'retry-delay'");
@@ -1491,6 +1585,7 @@ namespace Frida.Fruity {
 						break;
 					}
 					default: {
+						Bytes val_bytes = reader.read_bytes (val_size);
 						var val_bytes_copy = new Bytes (val_bytes.get_data ());
 						val = Variant.new_from_data (byte_array, val_bytes_copy.get_data (), true, val_bytes_copy);
 						break;
@@ -1517,26 +1612,6 @@ namespace Frida.Fruity {
 				builder.add ("{sv}", e.key, e.value);
 			return builder.end ();
 		}
-
-		private uint8 read_raw_uint8 () throws Error {
-			check_available (sizeof (uint8));
-			var result = buf.read_uint8 (cursor);
-			cursor += sizeof (uint8);
-			return result;
-		}
-
-		private Bytes read_raw_bytes (size_t n) throws Error {
-			check_available (n);
-			Bytes result = buf.bytes[cursor:cursor + n];
-			cursor += n;
-			return result;
-		}
-
-		private void check_available (size_t required) throws Error {
-			size_t available = buf.bytes.get_size () - cursor;
-			if (available < required)
-				throw new Error.INVALID_ARGUMENT ("Invalid pairing parameters: truncated");
-		}
 	}
 
 	private enum PairingParamType {
@@ -1551,138 +1626,6 @@ namespace Frida.Fruity {
 		RETRY_DELAY /* = 8 */,
 		SIGNATURE = 10,
 		INFO = 17,
-	}
-
-	public class OpackBuilder {
-		protected BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
-		private Gee.Deque<Scope> scopes = new Gee.ArrayQueue<Scope> ();
-
-		public OpackBuilder () {
-			push_scope (new Scope (ROOT));
-		}
-
-		public unowned OpackBuilder begin_dictionary () {
-			begin_value ();
-
-			size_t type_offset = builder.offset;
-			builder.append_uint8 (0x00);
-
-			push_scope (new CollectionScope (type_offset));
-
-			return this;
-		}
-
-		public unowned OpackBuilder set_member_name (string name) {
-			return add_string_value (name);
-		}
-
-		public unowned OpackBuilder end_dictionary () {
-			CollectionScope scope = pop_scope ();
-
-			size_t n = scope.num_values / 2;
-			if (n < 0xf) {
-				builder.write_uint8 (scope.type_offset, 0xe0 | n);
-			} else {
-				builder
-					.write_uint8 (scope.type_offset, 0xef)
-					.append_uint8 (0x03);
-			}
-
-			return this;
-		}
-
-		public unowned OpackBuilder add_string_value (string val) {
-			begin_value ();
-
-			size_t len = val.length;
-
-			if (len > uint32.MAX) {
-				builder
-					.append_uint8 (0x6f)
-					.append_string (val, StringTerminator.NUL);
-
-				return this;
-			}
-
-			if (len <= 0x20)
-				builder.append_uint8 ((uint8) (0x40 + len));
-			else if (len <= uint8.MAX)
-				builder.append_uint8 (0x61).append_uint8 ((uint8) len);
-			else if (len <= uint16.MAX)
-				builder.append_uint8 (0x62).append_uint16 ((uint16) len);
-			else if (len <= 0xffffff)
-				builder.append_uint8 (0x63).append_uint8 ((uint8) (len & 0xff)).append_uint16 ((uint16) (len >> 8));
-			else
-				builder.append_uint8 (0x64).append_uint32 ((uint32) len);
-
-			builder.append_string (val, StringTerminator.NONE);
-
-			return this;
-		}
-
-		public unowned OpackBuilder add_data_value (Bytes val) {
-			begin_value ();
-
-			size_t size = val.get_size ();
-			if (size <= 0x20)
-				builder.append_uint8 ((uint8) (0x70 + size));
-			else if (size <= uint8.MAX)
-				builder.append_uint8 (0x91).append_uint8 ((uint8) size);
-			else if (size <= uint16.MAX)
-				builder.append_uint8 (0x92).append_uint16 ((uint16) size);
-			else if (size <= 0xffffff)
-				builder.append_uint8 (0x93).append_uint8 ((uint8) (size & 0xff)).append_uint16 ((uint16) (size >> 8));
-			else
-				builder.append_uint8 (0x94).append_uint32 ((uint32) size);
-
-			builder.append_bytes (val);
-
-			return this;
-		}
-
-		private unowned OpackBuilder begin_value () {
-			peek_scope ().num_values++;
-			return this;
-		}
-
-		public Bytes build () {
-			return builder.build ();
-		}
-
-		private void push_scope (Scope scope) {
-			scopes.offer_tail (scope);
-		}
-
-		private Scope peek_scope () {
-			return scopes.peek_tail ();
-		}
-
-		private T pop_scope<T> () {
-			return (T) scopes.poll_tail ();
-		}
-
-		private class Scope {
-			public Kind kind;
-			public size_t num_values = 0;
-
-			public enum Kind {
-				ROOT,
-				COLLECTION,
-			}
-
-			public Scope (Kind kind) {
-				this.kind = kind;
-			}
-		}
-
-		private class CollectionScope : Scope {
-			public size_t type_offset;
-
-			public CollectionScope (size_t type_offset) {
-				base (COLLECTION);
-				this.type_offset = type_offset;
-			}
-		}
 	}
 
 	public sealed class TunnelConnection : Object, AsyncInitable {
