@@ -108,8 +108,12 @@ namespace Frida.Fruity {
 			}
 
 			Promise<PairingServiceDetails?>? p;
-			while ((p = promises.poll ()) != null)
-				yield p.future.wait_async (cancellable);
+			while ((p = promises.poll ()) != null) {
+				try {
+					yield p.future.wait_async (cancellable);
+				} catch (Error e) {
+				}
+			}
 		}
 
 		private async void resolve_service (DnsPtrRecord ptr, int32 ifindex, Resolved.Flags flags, Cancellable? cancellable,
@@ -124,10 +128,77 @@ namespace Frida.Fruity {
 
 		private async PairingServiceDetails? do_resolve_service (DnsPtrRecord ptr, int32 ifindex, Resolved.Flags flags,
 				Cancellable? cancellable) throws Error, IOError {
-			char ifname_buf[IF_NAMESIZE];
-			unowned string ifname = Linux.Network.if_indextoname (ifindex, (string) ifname_buf);
+			Resolved.SrvItem[] srv_items;
+			Variant txt_items;
+			string canonical_name;
+			string canonical_type;
+			string canonical_domain;
+			uint64 srv_flags;
+			try {
+				yield resolved.resolve_service (ifindex, "", "", ptr.name, Posix.AF_INET6, flags, cancellable,
+					out srv_items, out txt_items, out canonical_name, out canonical_type, out canonical_domain,
+					out srv_flags);
+			} catch (GLib.Error e) {
+				throw (Error) parse_error (e);
+			}
 
-			InetSocketAddress? interface_address = null;
+			var meta = ServiceMetadata.parse (txt_items);
+			var ip = new InetAddress.from_bytes (srv_items[0].addresses[0].ip, IPV6);
+			var service = new PairingServiceDetails () {
+				identifier = meta.identifier,
+				auth_tag = meta.auth_tag,
+				endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: ip,
+					port: srv_items[0].port,
+					scope_id: ip.get_is_link_local () ? ifindex : 0
+				),
+				interface_address = resolve_interface_address (ifindex),
+			};
+
+			service_discovered (service);
+
+			return service;
+		}
+
+		private class ServiceMetadata {
+			public string identifier;
+			public Bytes auth_tag;
+
+			public static ServiceMetadata parse (Variant txt_items) throws Error {
+				string? identifier = null;
+				Bytes? auth_tag = null;
+				foreach (var raw_item in txt_items) {
+					string item = ((string *) raw_item.get_data ())->substring (0, (long) raw_item.get_size ());
+					if (!item.validate ())
+						throw new Error.PROTOCOL ("Invalid TXT item");
+
+					string[] tokens = item.split ("=", 2);
+					if (tokens.length != 2)
+						continue;
+
+					unowned string key = tokens[0];
+					unowned string val = tokens[1];
+					if (key == "identifier")
+						identifier = val;
+					else if (key == "authTag")
+						auth_tag = new Bytes (Base64.decode (val));
+				}
+				if (identifier == null || auth_tag == null)
+					throw new Error.NOT_SUPPORTED ("Missing TXT metadata");
+
+				return new ServiceMetadata () {
+					identifier = identifier,
+					auth_tag = auth_tag,
+				};
+			}
+		}
+
+		private static InetSocketAddress resolve_interface_address (int32 ifindex) throws Error {
+			char ifname_buf[IF_NAMESIZE];
+			unowned string? ifname = Linux.Network.if_indextoname (ifindex, (string) ifname_buf);
+			if (ifname == null)
+				throw new Error.INVALID_ARGUMENT ("Unable to resolve interface name");
+
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
 			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
@@ -135,85 +206,11 @@ namespace Frida.Fruity {
 					continue;
 				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
 					continue;
-				interface_address = (InetSocketAddress)
+				return (InetSocketAddress)
 					SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6));
 			}
-			if (interface_address == null)
-				return null;
 
-			var address_request = new Promise<InetSocketAddress> ();
-			var txt_request = new Promise<DnsTxtRecord> ();
-			fetch_address.begin (ptr.name, ifindex, flags, cancellable, address_request);
-			fetch_txt_record.begin (ptr.name, ifindex, flags, cancellable, txt_request);
-
-			var address = yield address_request.future.wait_async (cancellable);
-			var txt = yield txt_request.future.wait_async (cancellable);
-
-			string? identifier = null;
-			Bytes? auth_tag = null;
-			foreach (var e in txt.entries) {
-				string[] tokens = e.split ("=", 2);
-				if (tokens.length != 2)
-					continue;
-
-				unowned string key = tokens[0];
-				unowned string val = tokens[1];
-				if (key == "identifier")
-					identifier = val;
-				else if (key == "authTag")
-					auth_tag = new Bytes (Base64.decode (val));
-			}
-			if (identifier == null || auth_tag == null)
-				return null;
-
-			var service = new PairingServiceDetails () {
-				identifier = identifier,
-				auth_tag = auth_tag,
-				endpoint = address,
-				interface_address = interface_address,
-			};
-			service_discovered (service);
-			return service;
-		}
-
-		private async void fetch_address (string name, int32 ifindex, Resolved.Flags flags, Cancellable? cancellable,
-				Promise<InetSocketAddress> promise) {
-			try {
-				Resolved.RRItem[] items;
-				uint64 output_flags;
-				yield resolved.resolve_record (ifindex, name, DnsRecordClass.IN, DnsRecordType.SRV, flags, cancellable,
-					out items, out output_flags);
-				DnsSrvRecord srv = new DnsPacketReader (new Bytes (items[0].data)).read_srv ();
-
-				yield resolved.resolve_record (ifindex, srv.name, DnsRecordClass.IN, DnsRecordType.AAAA, flags, cancellable,
-					out items, out output_flags);
-				DnsAaaaRecord aaaa = new DnsPacketReader (new Bytes (items[0].data)).read_aaaa ();
-
-				var scope_id = aaaa.address.get_is_link_local () ? ifindex : 0;
-
-				promise.resolve ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
-					address: aaaa.address,
-					port: srv.port,
-					scope_id: scope_id
-				));
-			} catch (GLib.Error e) {
-				promise.reject (parse_error (e));
-			}
-		}
-
-		private async void fetch_txt_record (string name, int32 ifindex, Resolved.Flags flags, Cancellable? cancellable,
-				Promise<DnsTxtRecord> promise) {
-			try {
-				Resolved.RRItem[] items;
-				uint64 output_flags;
-				yield resolved.resolve_record (ifindex, name, DnsRecordClass.IN, DnsRecordType.TXT, flags, cancellable,
-					out items, out output_flags);
-
-				var r = new DnsPacketReader (new Bytes (items[0].data));
-				promise.resolve (r.read_txt ());
-			} catch (GLib.Error e) {
-				promise.reject (parse_error (e));
-			}
+			throw new Error.NOT_SUPPORTED ("Unable to resolve interface address");
 		}
 
 		private static GLib.Error parse_error (GLib.Error e) {
@@ -405,6 +402,10 @@ namespace Frida.Fruity {
 		public interface Manager : Object {
 			public abstract async void resolve_record (int32 ifindex, string name, uint16 klass, uint16 type, uint64 flags,
 				Cancellable? cancellable, out RRItem[] items, out uint64 result_flags) throws GLib.Error;
+			public abstract async void resolve_service (int32 ifindex, string name, string type, string domain, int32 family,
+				uint64 flags, Cancellable? cancellable, out SrvItem[] srv_items,
+				[DBus (signature = "aay")] out Variant txt_items, out string canonical_name, out string canonical_type,
+				out string canonical_domain, out uint64 result_flags) throws GLib.Error;
 		}
 
 		[Flags]
@@ -442,6 +443,21 @@ namespace Frida.Fruity {
 			public uint16 klass;
 			public uint16 type;
 			public uint8[] data;
+		}
+
+		public struct SrvItem {
+			public uint16 priority;
+			public uint16 weight;
+			public uint16 port;
+			public string name;
+			public SrvAddress[] addresses;
+			public string canonical_name;
+		}
+
+		public struct SrvAddress {
+			public int32 ifindex;
+			public int32 family;
+			public uint8[] ip;
 		}
 	}
 }
