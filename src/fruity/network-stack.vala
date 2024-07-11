@@ -912,7 +912,6 @@ namespace Frida.Fruity {
 				}
 			}
 
-			//private VirtualNetworkStack? _netstack;
 			private unowned LWIP.UdpPcb? pcb;
 			private IOCondition events = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
