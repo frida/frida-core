@@ -99,6 +99,8 @@ namespace Frida.Fruity {
 	}
 
 	public class PairingService : Object, AsyncInitable {
+		public const string DNS_SD_NAME = "_remotepairing._tcp.local";
+
 		public PairingTransport transport {
 			get;
 			construct;
@@ -1439,6 +1441,35 @@ namespace Frida.Fruity {
 			public string name;
 			public string model;
 			public string udid;
+		}
+	}
+
+	public class PairingServiceMetadata {
+		public string identifier;
+		public Bytes auth_tag;
+
+		public static PairingServiceMetadata from_txt_record (Gee.Iterable<string> record) throws Error {
+			string? identifier = null;
+			Bytes? auth_tag = null;
+			foreach (string item in record) {
+				string[] tokens = item.split ("=", 2);
+				if (tokens.length != 2)
+					continue;
+
+				unowned string key = tokens[0];
+				unowned string val = tokens[1];
+				if (key == "identifier")
+					identifier = val;
+				else if (key == "authTag")
+					auth_tag = new Bytes (Base64.decode (val));
+			}
+			if (identifier == null || auth_tag == null)
+				throw new Error.PROTOCOL ("Missing TXT metadata");
+
+			return new PairingServiceMetadata () {
+				identifier = identifier,
+				auth_tag = auth_tag,
+			};
 		}
 	}
 

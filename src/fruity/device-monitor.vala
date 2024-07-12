@@ -1577,14 +1577,15 @@ namespace Frida.Fruity {
 		}
 	}
 
-	internal const string PAIRING_REGTYPE = "_remoted._tcp";
-	internal const string PAIRING_DOMAIN = "local.";
-
 	public interface PairingBrowser : Object {
+		public const string SERVICE_NAME = "_remotepairing._tcp.local";
+
 		public signal void service_discovered (PairingServiceDetails service);
 
 		public static PairingBrowser make_default () {
-#if LINUX && !ANDROID
+#if WINDOWS
+			return new WindowsPairingBrowser ();
+#elif LINUX && !ANDROID
 			return new LinuxPairingBrowser ();
 #else
 			return new NullPairingBrowser ();

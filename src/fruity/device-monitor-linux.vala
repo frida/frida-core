@@ -92,7 +92,7 @@ namespace Frida.Fruity {
 			Resolved.RRItem[] items;
 			uint64 ptr_flags;
 			try {
-				yield resolved.resolve_record (Resolved.ANY_INTERFACE, "_remotepairing._tcp.local", DnsRecordClass.IN,
+				yield resolved.resolve_record (Resolved.ANY_INTERFACE, PairingService.DNS_SD_NAME, DnsRecordClass.IN,
 					DnsRecordType.PTR, flags, cancellable, out items, out ptr_flags);
 			} catch (GLib.Error e) {
 				throw (Error) parse_error (e);
@@ -142,7 +142,15 @@ namespace Frida.Fruity {
 				throw (Error) parse_error (e);
 			}
 
-			var meta = ServiceMetadata.parse (txt_items);
+			var txt_record = new Gee.ArrayList<string> ();
+			foreach (var raw_item in txt_items) {
+				string item = ((string *) raw_item.get_data ())->substring (0, (long) raw_item.get_size ());
+				if (!item.validate ())
+					throw new Error.PROTOCOL ("Invalid TXT item");
+				txt_record.add (item);
+			}
+
+			var meta = PairingServiceMetadata.from_txt_record (txt_record);
 			var ip = new InetAddress.from_bytes (srv_items[0].addresses[0].ip, IPV6);
 			var service = new PairingServiceDetails () {
 				identifier = meta.identifier,
@@ -158,39 +166,6 @@ namespace Frida.Fruity {
 			service_discovered (service);
 
 			return service;
-		}
-
-		private class ServiceMetadata {
-			public string identifier;
-			public Bytes auth_tag;
-
-			public static ServiceMetadata parse (Variant txt_items) throws Error {
-				string? identifier = null;
-				Bytes? auth_tag = null;
-				foreach (var raw_item in txt_items) {
-					string item = ((string *) raw_item.get_data ())->substring (0, (long) raw_item.get_size ());
-					if (!item.validate ())
-						throw new Error.PROTOCOL ("Invalid TXT item");
-
-					string[] tokens = item.split ("=", 2);
-					if (tokens.length != 2)
-						continue;
-
-					unowned string key = tokens[0];
-					unowned string val = tokens[1];
-					if (key == "identifier")
-						identifier = val;
-					else if (key == "authTag")
-						auth_tag = new Bytes (Base64.decode (val));
-				}
-				if (identifier == null || auth_tag == null)
-					throw new Error.NOT_SUPPORTED ("Missing TXT metadata");
-
-				return new ServiceMetadata () {
-					identifier = identifier,
-					auth_tag = auth_tag,
-				};
-			}
 		}
 
 		private static InetSocketAddress resolve_interface_address (int32 ifindex) throws Error {

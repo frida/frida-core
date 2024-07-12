@@ -500,7 +500,9 @@ if have_fruity_backend
     'fruity' / 'ncm.vala',
   ]
 
-  if host_os == 'macos'
+  if host_os_family == 'windows'
+    backend_sources += 'fruity' / 'device-monitor-windows.vala'
+  elif host_os == 'macos'
     backend_sources += 'fruity' / 'device-monitor-macos.vala'
   elif host_os == 'linux'
     backend_sources += 'fruity' / 'device-monitor-linux.vala'
@@ -523,7 +525,9 @@ if have_fruity_backend
     '--pkg=lwip',
     '--pkg=openssl',
   ]
-  if host_os_family == 'darwin'
+  if host_os_family == 'windows'
+    backend_vala_args += '--pkg=windows-windns'
+  elif host_os_family == 'darwin'
     backend_vala_args += [
       '--pkg=darwin-xnu',
       '--pkg=darwin-xpc',
