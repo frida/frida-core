@@ -71,40 +71,54 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			unowned LibUSB.Device raw_device = device.raw_device;
 			unowned LibUSB.DeviceHandle handle = device.handle;
 
-			LibUSB.ConfigDescriptor config;
-			Usb.check (device.raw_device.get_active_config_descriptor (out config),
-				"Failed to get active USB config descriptor");
+			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
 
+			int current_config;
+			Usb.check (handle.get_configuration (out current_config), "Failed to get current configuration");
+
+			int desired_config = -1;
 			bool found_cdc_header = false;
 			bool found_data_interface = false;
 			uint8 mac_address_index = 0;
-			foreach (var iface in config.@interface) {
-				foreach (var setting in iface.altsetting) {
-					if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
-							setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
-						try {
-							parse_cdc_header (setting.extra, out mac_address_index);
-							found_cdc_header = true;
-						} catch (Error e) {
-							break;
-						}
-					} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
-							setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
-							setting.endpoint.length == 2) {
-						found_data_interface = true;
+			for (uint8 config_value = dev_desc.bNumConfigurations; config_value != 0; config_value--) {
+				LibUSB.ConfigDescriptor config;
+				Usb.check (raw_device.get_config_descriptor_by_value (config_value, out config),
+					"Failed to get config descriptor");
 
-						data_iface = setting.bInterfaceNumber;
-						data_altsetting = setting.bAlternateSetting;
+				foreach (var iface in config.@interface) {
+					foreach (var setting in iface.altsetting) {
+						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
+								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
+							try {
+								parse_cdc_header (setting.extra, out mac_address_index);
+								found_cdc_header = true;
+							} catch (Error e) {
+								break;
+							}
+						} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
+								setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
+								setting.endpoint.length == 2) {
+							found_data_interface = true;
 
-						foreach (var ep in setting.endpoint) {
-							if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
-								rx_address = ep.bEndpointAddress;
-							else
-								tx_address = ep.bEndpointAddress;
+							data_iface = setting.bInterfaceNumber;
+							data_altsetting = setting.bAlternateSetting;
+
+							foreach (var ep in setting.endpoint) {
+								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
+									rx_address = ep.bEndpointAddress;
+								else
+									tx_address = ep.bEndpointAddress;
+							}
 						}
 					}
+				}
+
+				if (found_cdc_header || found_data_interface) {
+					desired_config = config_value;
+					break;
 				}
 			}
 			if (!found_cdc_header || !found_data_interface)
@@ -122,6 +136,8 @@ namespace Frida.Fruity {
 			}
 
 			handle.detach_kernel_driver (data_iface);
+			if (current_config != desired_config)
+				Usb.check (handle.set_configuration (desired_config), "Failed to set configuration");
 			try {
 				Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			} catch (Error e) {
