@@ -107,10 +107,12 @@ namespace Frida.Fruity {
 							data_altsetting = setting.bAlternateSetting;
 
 							foreach (var ep in setting.endpoint) {
-								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) == LibUSB.EndpointDirection.IN)
+								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) ==
+										LibUSB.EndpointDirection.IN) {
 									rx_address = ep.bEndpointAddress;
-								else
+								} else {
 									tx_address = ep.bEndpointAddress;
+								}
 							}
 						}
 					}
