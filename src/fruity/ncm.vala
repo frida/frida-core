@@ -76,10 +76,10 @@ namespace Frida.Fruity {
 
 			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
 
-			int current_config;
-			Usb.check (handle.get_configuration (out current_config), "Failed to get current configuration");
+			LibUSB.ConfigDescriptor current_config;
+			Usb.check (raw_device.get_active_config_descriptor (out current_config), "Failed to get active config descriptor");
 
-			int desired_config = -1;
+			int desired_config_value = -1;
 			bool found_cdc_header = false;
 			bool found_data_interface = false;
 			uint8 mac_address_index = 0;
@@ -117,7 +117,7 @@ namespace Frida.Fruity {
 				}
 
 				if (found_cdc_header || found_data_interface) {
-					desired_config = config_value;
+					desired_config_value = config_value;
 					break;
 				}
 			}
@@ -135,9 +135,15 @@ namespace Frida.Fruity {
 				mac_address[i] = (uint8) v;
 			}
 
-			handle.detach_kernel_driver (data_iface);
-			if (current_config != desired_config)
-				Usb.check (handle.set_configuration (desired_config), "Failed to set configuration");
+			if (current_config.bConfigurationValue != desired_config_value) {
+				foreach (var iface in current_config.@interface) {
+					unowned LibUSB.InterfaceDescriptor setting = iface.altsetting[0];
+					var res = handle.kernel_driver_active (setting.bInterfaceNumber);
+					if (res == 1)
+						handle.detach_kernel_driver (setting.bInterfaceNumber);
+				}
+				Usb.check (handle.set_configuration (desired_config_value), "Failed to set configuration");
+			}
 			try {
 				Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			} catch (Error e) {
