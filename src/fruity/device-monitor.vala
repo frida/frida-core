@@ -728,7 +728,7 @@ namespace Frida.Fruity {
 		private Gee.Map<string, PortableCoreDeviceNetworkTransport> network_transports =
 			new Gee.HashMap<string, PortableCoreDeviceNetworkTransport> ();
 
-		private Gee.List<PairingIdentity.Peer> peers = PairingIdentity.load_peers ();
+		private PairingStore pairing_store = new PairingStore ();
 
 		private MainContext main_context;
 
@@ -919,7 +919,7 @@ namespace Frida.Fruity {
 					if (modeswitch_allowed && yield device.maybe_modeswitch (io_cancellable))
 						break;
 
-					var transport = new PortableCoreDeviceUsbTransport (device);
+					var transport = new PortableCoreDeviceUsbTransport (device, pairing_store);
 					usb_transports.add (transport);
 					transport_attached (transport);
 
@@ -988,49 +988,20 @@ namespace Frida.Fruity {
 		}
 
 		private void on_network_pairing_service_discovered (PairingServiceDetails service) {
-			var peer = find_peer (service);
+			var peer = pairing_store.find_peer_matching_service (service);
 			if (peer == null)
 				return;
 
 			var transport = network_transports[peer.udid];
 			if (transport == null) {
-				transport = new PortableCoreDeviceNetworkTransport (peer, service.endpoint, service.interface_address);
+				transport = new PortableCoreDeviceNetworkTransport (peer, pairing_store, service.endpoint,
+					service.interface_address);
 				network_transports[peer.udid] = transport;
 				transport_attached (transport);
 			} else {
 				transport.endpoint = service.endpoint;
 				transport.interface_address = service.interface_address;
 			}
-		}
-
-		private PairingIdentity.Peer? find_peer (PairingServiceDetails service) {
-			var mac = OpenSSL.Envelope.MessageAuthCode.fetch (null, OpenSSL.ShortName.siphash);
-
-			size_t hash_size = 8;
-			size_t return_size = OpenSSL.ParamReturnSize.UNMODIFIED;
-			OpenSSL.Param mac_params[] = {
-				{ OpenSSL.Envelope.MessageAuthParameter.SIZE, UNSIGNED_INTEGER,
-					(uint8[]) &hash_size, return_size },
-				{ null, INTEGER, null, return_size },
-			};
-
-			foreach (var peer in peers) {
-				var ctx = new OpenSSL.Envelope.MessageAuthCodeContext (mac);
-				ctx.init (peer.irk.get_data (), mac_params);
-				ctx.update (service.identifier.data);
-				uint8 output[8];
-				size_t outlen = 0;
-				ctx.final (output, out outlen);
-
-				uint8 tag[6];
-				for (uint i = 0; i != 6; i++)
-					tag[i] = output[5 - i];
-
-				if (Memory.cmp (tag, service.auth_tag.get_data (), service.auth_tag.get_size ()) == 0)
-					return peer;
-			}
-
-			return null;
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -1042,6 +1013,11 @@ namespace Frida.Fruity {
 
 	private sealed class PortableCoreDeviceUsbTransport : Object, Transport {
 		public UsbDevice usb_device {
+			get;
+			construct;
+		}
+
+		public PairingStore pairing_store {
 			get;
 			construct;
 		}
@@ -1078,8 +1054,8 @@ namespace Frida.Fruity {
 
 		private Promise<Tunnel>? tunnel_request;
 
-		public PortableCoreDeviceUsbTransport (UsbDevice usb_device) {
-			Object (usb_device: usb_device);
+		public PortableCoreDeviceUsbTransport (UsbDevice device, PairingStore store) {
+			Object (usb_device: device, pairing_store: store);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -1109,7 +1085,7 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
-				var tunnel = new PortableUsbTunnel (usb_device);
+				var tunnel = new PortableUsbTunnel (usb_device, pairing_store);
 				yield tunnel.open (cancellable);
 
 				tunnel_request.resolve (tunnel);
@@ -1130,6 +1106,11 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public PairingStore pairing_store {
+			get;
+			construct;
+		}
+
 		public DiscoveryService discovery {
 			get {
 				return _discovery_service;
@@ -1140,8 +1121,8 @@ namespace Frida.Fruity {
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 
-		public PortableUsbTunnel (UsbDevice usb_device) {
-			Object (usb_device: usb_device);
+		public PortableUsbTunnel (UsbDevice device, PairingStore store) {
+			Object (usb_device: device, pairing_store: store);
 		}
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
@@ -1164,7 +1145,7 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
-			var pairing_service = yield PairingService.open (pairing_transport, cancellable);
+			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (peer.ip, netstack, cancellable);
 
@@ -1401,7 +1382,12 @@ namespace Frida.Fruity {
 	}
 
 	private sealed class PortableCoreDeviceNetworkTransport : Object, Transport {
-		public PairingIdentity.Peer peer {
+		public PairingPeer peer {
+			get;
+			construct;
+		}
+
+		public PairingStore pairing_store {
 			get;
 			construct;
 		}
@@ -1448,10 +1434,11 @@ namespace Frida.Fruity {
 
 		private Promise<Tunnel>? tunnel_request;
 
-		public PortableCoreDeviceNetworkTransport (PairingIdentity.Peer peer, InetSocketAddress endpoint,
+		public PortableCoreDeviceNetworkTransport (PairingPeer peer, PairingStore store, InetSocketAddress endpoint,
 				InetSocketAddress interface_address) {
 			Object (
 				peer: peer,
+				pairing_store: store,
 				endpoint: endpoint,
 				interface_address: interface_address
 			);
@@ -1482,7 +1469,7 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
-				var tunnel = new PortableNetworkTunnel (endpoint, interface_address);
+				var tunnel = new PortableNetworkTunnel (endpoint, interface_address, pairing_store);
 				yield tunnel.open (cancellable);
 
 				tunnel_request.resolve (tunnel);
@@ -1508,6 +1495,11 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public PairingStore pairing_store {
+			get;
+			construct;
+		}
+
 		public DiscoveryService discovery {
 			get {
 				return _discovery_service;
@@ -1517,8 +1509,12 @@ namespace Frida.Fruity {
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 
-		public PortableNetworkTunnel (InetSocketAddress endpoint, InetSocketAddress interface_address) {
-			Object (endpoint: endpoint, interface_address: interface_address);
+		public PortableNetworkTunnel (InetSocketAddress endpoint, InetSocketAddress interface_address, PairingStore store) {
+			Object (
+				endpoint: endpoint,
+				interface_address: interface_address,
+				pairing_store: store
+			);
 		}
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
@@ -1526,7 +1522,7 @@ namespace Frida.Fruity {
 
 			var pairing_connection = yield netstack.open_tcp_connection (endpoint, cancellable);
 			var pairing_transport = new PlainPairingTransport (pairing_connection);
-			var pairing_service = yield PairingService.open (pairing_transport, cancellable);
+			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (endpoint.get_address (), netstack, cancellable);
 

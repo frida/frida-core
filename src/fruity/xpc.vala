@@ -106,6 +106,11 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public PairingStore store {
+			get;
+			construct;
+		}
+
 		public DeviceOptions device_options {
 			get;
 			private set;
@@ -121,14 +126,12 @@ namespace Frida.Fruity {
 		private uint64 next_control_sequence_number = 0;
 		private uint64 next_encrypted_sequence_number = 0;
 
-		private string host_identifier;
-		private Key pair_record_key;
 		private ChaCha20Poly1305? client_cipher;
 		private ChaCha20Poly1305? server_cipher;
 
-		public static async PairingService open (PairingTransport transport, Cancellable? cancellable = null)
+		public static async PairingService open (PairingTransport transport, PairingStore store, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var service = new PairingService (transport);
+			var service = new PairingService (transport, store);
 
 			try {
 				yield service.init_async (Priority.DEFAULT, cancellable);
@@ -139,26 +142,13 @@ namespace Frida.Fruity {
 			return service;
 		}
 
-		private PairingService (PairingTransport transport) {
-			Object (transport: transport);
+		private PairingService (PairingTransport transport, PairingStore store) {
+			Object (transport: transport, store: store);
 		}
 
 		construct {
 			transport.close.connect (on_close);
 			transport.message.connect (on_message);
-
-			Bytes? key;
-			var identity = PairingIdentity.try_load ();
-			if (identity != null) {
-				key = identity.private_key;
-				host_identifier = identity.identifier;
-			} else {
-				uint8 dummy_key[32] = { 0, };
-				key = new Bytes (dummy_key);
-				host_identifier = make_host_identifier ();
-			}
-
-			pair_record_key = new Key.from_raw_private_key (ED25519, null, key.get_data ());
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
@@ -378,11 +368,13 @@ namespace Frida.Fruity {
 				new Bytes.static ("\x00\x00\x00\x00PV-Msg02".data[:12]),
 				start_response.read_member ("encrypted-data").get_data_value ())));
 
+			unowned string host_identifier = store.self_identity.identifier;
+
 			var message = new ByteArray.sized (100);
 			message.append (raw_host_pubkey);
 			message.append (host_identifier.data);
 			message.append (raw_device_pubkey);
-			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), pair_record_key);
+			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), store.self_identity.key);
 
 			Bytes inner_params = new PairingParamsBuilder ()
 				.add_identifier (host_identifier)
@@ -494,33 +486,29 @@ namespace Frida.Fruity {
 
 			var cipher = new ChaCha20Poly1305 (operation_key);
 
-			Key new_pair_record_key = make_keypair (ED25519);
-			Bytes new_pair_record_pubkey = get_raw_public_key (new_pair_record_key);
-
-			uint8 raw_irk[16];
-			Rng.generate (raw_irk);
-			Bytes irk = new Bytes (raw_irk);
-
 			Bytes signing_key = derive_chacha_key (shared_key,
 				"Pair-Setup-Controller-Sign-Info",
 				"Pair-Setup-Controller-Sign-Salt");
 
+			unowned PairingIdentity self_identity = store.self_identity;
+			Bytes self_identity_pubkey = get_raw_public_key (self_identity.key);
+
 			var message = new ByteArray.sized (100);
 			message.append (signing_key.get_data ());
-			message.append (host_identifier.data);
-			message.append (new_pair_record_pubkey.get_data ());
-			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), new_pair_record_key);
+			message.append (self_identity.identifier.data);
+			message.append (self_identity_pubkey.get_data ());
+			Bytes signature = compute_message_signature (ByteArray.free_to_bytes ((owned) message), self_identity.key);
 
 			Bytes self_info = new OpackBuilder ()
 				.begin_dictionary ()
 					.set_member_name ("name")
 					.add_string_value (Environment.get_host_name ())
 					.set_member_name ("accountID")
-					.add_string_value (host_identifier)
+					.add_string_value (self_identity.identifier)
 					.set_member_name ("remotepairing_serial_number")
 					.add_string_value ("AAAAAAAAAAAA")
 					.set_member_name ("altIRK")
-					.add_data_value (irk)
+					.add_data_value (self_identity.irk)
 					.set_member_name ("model")
 					.add_string_value ("computer-model")
 					.set_member_name ("mac")
@@ -531,8 +519,8 @@ namespace Frida.Fruity {
 				.build ();
 
 			Bytes inner_params = new PairingParamsBuilder ()
-				.add_identifier (host_identifier)
-				.add_raw_public_key (new_pair_record_pubkey)
+				.add_identifier (self_identity.identifier)
+				.add_raw_public_key (self_identity_pubkey)
 				.add_signature (signature)
 				.add_info (self_info)
 				.build ();
@@ -569,17 +557,7 @@ namespace Frida.Fruity {
 			inner_finish_response.end_member ();
 			Bytes peer_info = inner_finish_response.read_member ("info").get_data_value ();
 			inner_finish_response.end_member ();
-			PairingIdentity.save_peer (peer_identifier, peer_pubkey, peer_info);
-
-			var identity = new PairingIdentity () {
-				identifier = host_identifier,
-				public_key = new_pair_record_pubkey,
-				private_key = get_raw_private_key (new_pair_record_key),
-				irk = irk
-			};
-			identity.save ();
-
-			pair_record_key = (owned) new_pair_record_key;
+			store.add_peer (peer_identifier, peer_pubkey, peer_info);
 
 			return shared_key;
 		}
@@ -743,16 +721,6 @@ namespace Frida.Fruity {
 				promise.resolve (reader);
 			} catch (Error e) {
 			}
-		}
-
-		private static Key make_keypair (KeyType type) {
-			var ctx = new KeyContext.for_key_type (type);
-			ctx.keygen_init ();
-
-			Key? keypair = null;
-			ctx.keygen (ref keypair);
-
-			return keypair;
 		}
 
 		private static uint8[] key_to_der (Key key) {
@@ -1331,64 +1299,36 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PairingIdentity {
-		public string identifier;
-		public Bytes public_key;
-		public Bytes private_key;
-		public Bytes irk;
-
-		public static PairingIdentity? try_load () {
-			try {
-				Bytes raw_identity = query_self_identity_location ().load_bytes ();
-				Plist identity = new Plist.from_data (raw_identity.get_data ());
-				return new PairingIdentity () {
-					identifier = identity.get_string ("identifier"),
-					public_key = identity.get_bytes ("publicKey"),
-					private_key = identity.get_bytes ("privateKey"),
-					irk = identity.get_bytes ("irk")
-				};
-			} catch (GLib.Error e) {
-				return null;
+	public class PairingStore {
+		public PairingIdentity self_identity {
+			get {
+				return _self_identity;
 			}
 		}
 
-		public void save () throws Error {
-			var plist = new Plist ();
-			plist.set_string ("identifier", identifier);
-			plist.set_bytes ("publicKey", public_key);
-			plist.set_bytes ("privateKey", private_key);
-			plist.set_bytes ("irk", irk);
-			save_plist (plist, query_self_identity_location ());
+		public Gee.Iterable<PairingPeer> peers {
+			get {
+				return _peers;
+			}
 		}
 
-		public static Gee.List<Peer> load_peers () {
-			var peers = new Gee.ArrayList<Peer> ();
+		private PairingIdentity _self_identity;
+		private Gee.List<PairingPeer> _peers;
 
-			try {
-				var enumerator = query_peers_location ().enumerate_children (FileAttribute.STANDARD_NAME, FileQueryInfoFlags.NONE);
-				File? child;
-				while (enumerator.iterate (null, out child) && child != null) {
-					Plist plist = new Plist.from_data (child.load_bytes ().get_data ());
-
-					var reader = new VariantReader (OpackParser.parse (plist.get_bytes ("info")));
-					unowned string udid = reader.read_member ("remotepairing_udid").get_string_value ();
-
-					peers.add (new Peer () {
-						identifier = plist.get_string ("identifier"),
-						public_key = plist.get_bytes ("publicKey"),
-						irk = plist.get_bytes ("irk"),
-						name = plist.get_string ("name"),
-						model = plist.get_string ("model"),
-						udid = udid,
-					});
+		public PairingStore () {
+			_self_identity = try_load_identity ();
+			if (_self_identity == null) {
+				_self_identity = PairingIdentity.make ();
+				try {
+					save_identity (_self_identity);
+				} catch (GLib.Error e) {
 				}
-			} catch (GLib.Error e) {
 			}
 
-			return peers;
+			_peers = load_peers ();
 		}
 
-		public static void save_peer (string identifier, Bytes public_key, Bytes info) throws Error {
+		public void add_peer (string identifier, Bytes public_key, Bytes info) throws Error {
 			var r = new VariantReader (OpackParser.parse (info));
 
 			Bytes irk = r.read_member ("altIRK").get_data_value ();
@@ -1400,21 +1340,123 @@ namespace Frida.Fruity {
 			unowned string model = r.read_member ("model").get_string_value ();
 			r.end_member ();
 
-			var plist = new Plist ();
-			plist.set_string ("identifier", identifier);
-			plist.set_bytes ("publicKey", public_key);
-			plist.set_bytes ("irk", irk);
-			plist.set_string ("name", name);
-			plist.set_string ("model", model);
-			plist.set_bytes ("info", info);
-			save_plist (plist, query_peers_location ().get_child (identifier + ".plist"));
+			unowned string udid = r.read_member ("remotepairing_udid").get_string_value ();
+			r.end_member ();
+
+			var peer = new PairingPeer () {
+				identifier = identifier,
+				public_key = public_key,
+				irk = irk,
+				name = name,
+				model = model,
+				udid = udid,
+				info = info,
+			};
+			_peers.add (peer);
+
+			try {
+				save_peer (peer);
+			} catch (Error e) {
+			}
 		}
 
-		public static File query_self_identity_location () {
+		public PairingPeer? find_peer_matching_service (PairingServiceDetails service) {
+			var mac = OpenSSL.Envelope.MessageAuthCode.fetch (null, OpenSSL.ShortName.siphash);
+
+			size_t hash_size = 8;
+			size_t return_size = OpenSSL.ParamReturnSize.UNMODIFIED;
+			OpenSSL.Param mac_params[] = {
+				{ OpenSSL.Envelope.MessageAuthParameter.SIZE, UNSIGNED_INTEGER,
+					(uint8[]) &hash_size, return_size },
+				{ null, INTEGER, null, return_size },
+			};
+
+			foreach (var peer in _peers) {
+				var ctx = new OpenSSL.Envelope.MessageAuthCodeContext (mac);
+				ctx.init (peer.irk.get_data (), mac_params);
+				ctx.update (service.identifier.data);
+				uint8 output[8];
+				size_t outlen = 0;
+				ctx.final (output, out outlen);
+
+				uint8 tag[6];
+				for (uint i = 0; i != 6; i++)
+					tag[i] = output[5 - i];
+
+				if (Memory.cmp (tag, service.auth_tag.get_data (), service.auth_tag.get_size ()) == 0)
+					return peer;
+			}
+
+			return null;
+		}
+
+		private static PairingIdentity? try_load_identity () {
+			try {
+				var plist = new Plist.from_data (query_self_identity_location ().load_bytes ().get_data ());
+				return new PairingIdentity () {
+					identifier = plist.get_string ("identifier"),
+					key = new Key.from_raw_private_key (ED25519, null, plist.get_bytes ("privateKey").get_data ()),
+					irk = plist.get_bytes ("irk"),
+				};
+			} catch (GLib.Error e) {
+				return null;
+			}
+		}
+
+		private static void save_identity (PairingIdentity identity) throws Error {
+			var plist = new Plist ();
+			plist.set_string ("identifier", identity.identifier);
+			plist.set_bytes ("publicKey", get_raw_public_key (identity.key));
+			plist.set_bytes ("privateKey", get_raw_private_key (identity.key));
+			plist.set_bytes ("irk", identity.irk);
+			save_plist (plist, query_self_identity_location ());
+		}
+
+		private static Gee.List<PairingPeer> load_peers () {
+			var peers = new Gee.ArrayList<PairingPeer> ();
+
+			try {
+				var enumerator = query_peers_location ().enumerate_children (FileAttribute.STANDARD_NAME, FileQueryInfoFlags.NONE);
+				File? child;
+				while (enumerator.iterate (null, out child) && child != null) {
+					var plist = new Plist.from_data (child.load_bytes ().get_data ());
+
+					var info = plist.get_bytes ("info");
+					var r = new VariantReader (OpackParser.parse (info));
+					unowned string udid = r.read_member ("remotepairing_udid").get_string_value ();
+
+					peers.add (new PairingPeer () {
+						identifier = plist.get_string ("identifier"),
+						public_key = plist.get_bytes ("publicKey"),
+						irk = plist.get_bytes ("irk"),
+						name = plist.get_string ("name"),
+						model = plist.get_string ("model"),
+						udid = udid,
+						info = info,
+					});
+				}
+			} catch (GLib.Error e) {
+			}
+
+			return peers;
+		}
+
+		private static void save_peer (PairingPeer peer) throws Error {
+			var plist = new Plist ();
+			plist.set_string ("identifier", peer.identifier);
+			plist.set_bytes ("publicKey", peer.public_key);
+			plist.set_bytes ("irk", peer.irk);
+			plist.set_string ("name", peer.name);
+			plist.set_string ("model", peer.model);
+			plist.set_bytes ("info", peer.info);
+			save_plist (plist, query_peers_location ().get_child (peer.identifier + ".plist"));
+		}
+
+		private static File query_self_identity_location () {
 			return query_base_location ().get_child ("self-identity.plist");
 		}
 
-		public static File query_peers_location () {
+		private static File query_peers_location () {
 			return query_base_location ().get_child ("peers");
 		}
 
@@ -1428,20 +1470,38 @@ namespace Frida.Fruity {
 			} catch (GLib.Error e) {
 			}
 			try {
-				location.replace_contents (plist.to_xml ().data, null, false, PRIVATE | REPLACE_DESTINATION, null);
+				location.replace_contents (plist.to_binary (), null, false, PRIVATE | REPLACE_DESTINATION, null);
 			} catch (GLib.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
+	}
 
-		public class Peer {
-			public string identifier;
-			public Bytes public_key;
-			public Bytes irk;
-			public string name;
-			public string model;
-			public string udid;
+	public class PairingIdentity {
+		public string identifier;
+		public Key key;
+		public Bytes irk;
+
+		public static PairingIdentity make () {
+			uint8 raw_irk[16];
+			Rng.generate (raw_irk);
+
+			return new PairingIdentity () {
+				identifier = make_host_identifier (),
+				key = make_keypair (ED25519),
+				irk = new Bytes (raw_irk),
+			};
 		}
+	}
+
+	public class PairingPeer {
+		public string identifier;
+		public Bytes public_key;
+		public Bytes irk;
+		public string name;
+		public string model;
+		public string udid;
+		public Bytes info;
 	}
 
 	public class PairingServiceMetadata {
@@ -3641,6 +3701,16 @@ namespace Frida.Fruity {
 	namespace SerializedXpcObject {
 		public const uint32 MAGIC = 0x42133742;
 		public const uint32 VERSION = 5;
+	}
+
+	private Key make_keypair (KeyType type) {
+		var ctx = new KeyContext.for_key_type (type);
+		ctx.keygen_init ();
+
+		Key? keypair = null;
+		ctx.keygen (ref keypair);
+
+		return keypair;
 	}
 
 	private Bytes get_raw_public_key (Key key) {
