@@ -1201,7 +1201,7 @@ namespace Frida.Fruity {
 
 		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = detect_ncm_ifaddrs_on_system ();
-			if (!device_ifaddrs.is_empty)
+			if (device_ifaddrs.size == 2)
 				return yield locate_ncm_peer_on_system_netifs (device_ifaddrs, cancellable);
 			return yield establish_ncm_peer_using_our_driver (cancellable);
 		}
