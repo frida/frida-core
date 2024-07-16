@@ -72,10 +72,8 @@ frida_test_process_backend_filename_of (void * handle)
   image_count = _dyld_image_count ();
   for (image_idx = 0; image_idx != image_count; image_idx++)
   {
-    const gchar * image_path = _dyld_get_image_name (image_idx);
-
-    if (g_str_has_suffix (image_path, "/frida-tests"))
-      return g_strdup (image_path);
+    if (_dyld_get_image_header (image_idx)->filetype == MH_EXECUTE)
+      return g_strdup (_dyld_get_image_name (image_idx));
   }
 
   g_assert_not_reached ();
