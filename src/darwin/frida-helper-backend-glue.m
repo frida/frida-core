@@ -2108,7 +2108,12 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
     GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
+        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv");
+    if (restart_with_dyld_in_cache == 0)
+    {
+      restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
         "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv");
+    }
     if (restart_with_dyld_in_cache != 0)
       frida_spawn_instance_set_nth_breakpoint (instance, i++, restart_with_dyld_in_cache, FRIDA_BREAKPOINT_REPEAT_NEVER);
   }
