@@ -183,6 +183,7 @@ struct _FridaSpawnInstance
   GumAddress modern_entry_address;
 
   /* V4+ */
+  GumAddress notify_objc_init;
   GumAddress info_ptr_address;
 
   /* V3- */
@@ -2030,6 +2031,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   instance->dyld_flavor = (modern_entry_address != 0) ? FRIDA_DYLD_V4_PLUS : FRIDA_DYLD_V3_MINUS;
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
+    instance->notify_objc_init = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld412RuntimeState14notifyObjCInitEPKNS_6LoaderE");
+    if (instance->notify_objc_init != 0)
+      modern_entry_address = instance->notify_objc_init;
+
     instance->modern_entry_address = modern_entry_address;
     legacy_entry_address = 0;
 
@@ -3090,9 +3095,15 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
     {
       if (pc == self->modern_entry_address)
-        self->breakpoint_phase = FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT;
+      {
+        self->breakpoint_phase = (pc == self->notify_objc_init)
+            ? FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED
+            : FRIDA_BREAKPOINT_SET_LIBDYLD_INITIALIZE_CALLER_BREAKPOINT;
+      }
       else
+      {
         return frida_spawn_instance_handle_dyld_restart (self);
+      }
     }
     else
     {
@@ -3358,6 +3369,7 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   GumAddress * info_ptr;
   struct dyld_all_image_infos * info = NULL;
   GumDarwinModule * dyld = NULL;
+  gssize delta;
 
   info_ptr = (GumAddress *) gum_darwin_read (self->task, self->info_ptr_address, sizeof (GumAddress), NULL);
   if (info_ptr == NULL)
@@ -3372,7 +3384,11 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   if (dyld == NULL)
     goto beach;
 
-  self->modern_entry_address = GUM_ADDRESS (info->dyldImageLoadAddress) + (self->modern_entry_address - self->dyld->base_address);
+  delta = (gssize) info->dyldImageLoadAddress - (gssize) self->dyld->base_address;
+
+  self->modern_entry_address += delta;
+  if (self->notify_objc_init != 0)
+    self->notify_objc_init += delta;
 
   g_object_unref (self->dyld);
   self->dyld = g_steal_pointer (&dyld);
