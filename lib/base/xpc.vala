@@ -65,7 +65,16 @@ namespace Frida {
 				});
 			});
 
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				connection.cancel ();
+				return Source.REMOVE;
+			});
+			cancel_source.attach (main_context);
+
 			yield;
+
+			cancel_source.destroy ();
 
 			if (reply.type == Darwin.Xpc.Error.TYPE) {
 				var e = (Darwin.Xpc.Error) reply;
