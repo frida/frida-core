@@ -113,21 +113,23 @@ namespace Frida {
 			injector = new Winjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
 
-			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
-			var blob64 = Frida.Data.Agent.get_frida_agent_64_dll_blob ();
-			var dbghelp32 = Frida.Data.Agent.get_dbghelp_32_dll_blob ();
-			var dbghelp64 = Frida.Data.Agent.get_dbghelp_64_dll_blob ();
-			var symsrv32 = Frida.Data.Agent.get_symsrv_32_dll_blob ();
-			var symsrv64 = Frida.Data.Agent.get_symsrv_64_dll_blob ();
-
 			agent = new AgentDescriptor (PathTemplate ("<arch>\\frida-agent.dll"),
-				new Bytes.static (blob32.data),
-				new Bytes.static (blob64.data),
+				new Bytes.static (Frida.Data.Agent.get_frida_agent_arm64_dll_blob ().data),
+				new Bytes.static (Frida.Data.Agent.get_frida_agent_x86_64_dll_blob ().data),
+				new Bytes.static (Frida.Data.Agent.get_frida_agent_x86_dll_blob ().data),
 				new AgentResource[] {
-					new AgentResource ("32\\dbghelp.dll", new Bytes.static (dbghelp32.data), tempdir),
-					new AgentResource ("32\\symsrv.dll", new Bytes.static (symsrv32.data), tempdir),
-					new AgentResource ("64\\dbghelp.dll", new Bytes.static (dbghelp64.data), tempdir),
-					new AgentResource ("64\\symsrv.dll", new Bytes.static (symsrv64.data), tempdir)
+					new AgentResource ("arm64\\dbghelp.dll",
+						new Bytes.static (Frida.Data.Agent.get_dbghelp_arm64_dll_blob ().data), tempdir),
+					new AgentResource ("arm64\\symsrv.dll",
+						new Bytes.static (Frida.Data.Agent.get_symsrv_arm64_dll_blob ().data), tempdir),
+					new AgentResource ("x86_64\\dbghelp.dll",
+						new Bytes.static (Frida.Data.Agent.get_dbghelp_x86_64_dll_blob ().data), tempdir),
+					new AgentResource ("x86_64\\symsrv.dll",
+						new Bytes.static (Frida.Data.Agent.get_symsrv_x86_64_dll_blob ().data), tempdir),
+					new AgentResource ("x86\\dbghelp.dll",
+						new Bytes.static (Frida.Data.Agent.get_dbghelp_x86_dll_blob ().data), tempdir),
+					new AgentResource ("x86\\symsrv.dll",
+						new Bytes.static (Frida.Data.Agent.get_symsrv_x86_dll_blob ().data), tempdir),
 				},
 				tempdir
 			);

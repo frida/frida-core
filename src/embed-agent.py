@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import struct
 
 
 def main(argv):
@@ -27,29 +28,36 @@ def main(argv):
 
     embedded_assets = []
     if host_os == "windows":
-        for agent, flavor in [(agent_modern, "64"),
-                              (agent_legacy, "32")]:
-            embedded_agent = priv_dir / f"frida-agent-{flavor}.dll"
-            embedded_dbghelp = priv_dir / f"dbghelp-{flavor}.dll"
-            embedded_symsrv = priv_dir / f"symsrv-{flavor}.dll"
+        pending_archs = {"arm64", "x86_64", "x86"}
+        for agent in {agent_modern, agent_legacy, agent_emulated_modern, agent_emulated_legacy}:
+            if agent is None:
+                continue
+            arch = detect_pefile_arch(agent)
+            embedded_agent = priv_dir / f"frida-agent-{arch}.dll"
+            embedded_dbghelp = priv_dir / f"dbghelp-{arch}.dll"
+            embedded_symsrv = priv_dir / f"symsrv-{arch}.dll"
 
-            if agent is not None:
-                shutil.copy(agent, embedded_agent)
+            shutil.copy(agent, embedded_agent)
 
-                if agent_dbghelp_prefix is not None:
-                    shutil.copy(agent_dbghelp_prefix / flavor / "dbghelp.dll", embedded_dbghelp)
-                else:
-                    embedded_dbghelp.write_bytes(b"")
-
-                if agent_symsrv_prefix is not None:
-                    shutil.copy(agent_symsrv_prefix / flavor / "symsrv.dll", embedded_symsrv)
-                else:
-                    embedded_symsrv.write_bytes(b"")
+            if agent_dbghelp_prefix is not None:
+                shutil.copy(agent_dbghelp_prefix / arch / "dbghelp.dll", embedded_dbghelp)
             else:
-                for f in [embedded_agent, embedded_dbghelp, embedded_symsrv]:
-                    f.write_bytes(b"")
+                embedded_dbghelp.write_bytes(b"")
+
+            if agent_symsrv_prefix is not None:
+                shutil.copy(agent_symsrv_prefix / arch / "symsrv.dll", embedded_symsrv)
+            else:
+                embedded_symsrv.write_bytes(b"")
 
             embedded_assets += [embedded_agent, embedded_dbghelp, embedded_symsrv]
+            pending_archs.remove(arch)
+        for missing_arch in pending_archs:
+            embedded_agent = priv_dir / f"frida-agent-{missing_arch}.dll"
+            embedded_dbghelp = priv_dir / f"dbghelp-{missing_arch}.dll"
+            embedded_symsrv = priv_dir / f"symsrv-{missing_arch}.dll"
+            for asset in {embedded_agent, embedded_dbghelp, embedded_symsrv}:
+                asset.write_bytes(b"")
+                embedded_assets += [asset]
     elif host_os in {"macos", "ios", "watchos", "tvos"}:
         embedded_agent = priv_dir / "frida-agent.dylib"
         if agent_modern is not None and agent_legacy is not None:
@@ -101,6 +109,22 @@ def pop_cmd_array_arg(args):
     if len(result) == 1 and not result[0]:
         return None
     return result
+
+
+def detect_pefile_arch(location):
+    with location.open(mode="rb") as pe:
+        pe.seek(0x3c)
+        e_lfanew, = struct.unpack("<I", pe.read(4))
+        pe.seek(e_lfanew + 4)
+        machine, = struct.unpack("<H", pe.read(2))
+    return PE_MACHINES[machine]
+
+
+PE_MACHINES = {
+    0x014c: "x86",
+    0x8664: "x86_64",
+    0xaa64: "arm64",
+}
 
 
 if __name__ == "__main__":

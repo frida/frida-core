@@ -57,9 +57,7 @@ namespace Frida {
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			bool permission_denied = false;
 			try {
-				unowned string local_arch = sizeof (void *) == 8 ? "64" : "32";
-				unowned string remote_arch = WindowsProcess.is_x64 (pid) ? "64" : "32";
-				if (remote_arch == local_arch) {
+				if (cpu_type_from_pid (pid) == Gum.NATIVE_CPU) {
 					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, dependencies,
 						id, cancellable);
 					return;
@@ -172,15 +170,11 @@ namespace Frida {
 			Error? error = null;
 
 			try {
-				string native_helper_path = WindowsSystem.is_x64 ()
-					? resource_store.helper64.path
-					: resource_store.helper32.path;
 				string level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
-				void * process = spawn (native_helper_path,
+				void * process = spawn (resource_store.native_helper.path,
 					"MANAGER %s %s".printf (level_str, transport.remote_address),
 					level);
-				instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport,
-					stream_request, process);
+				instance = new HelperInstance (resource_store.helpers, transport, stream_request, process);
 			} catch (Error e) {
 				error = e;
 			}
@@ -247,8 +241,7 @@ namespace Frida {
 			}
 		}
 
-		private TemporaryFile helper32;
-		private TemporaryFile helper64;
+		private Gee.Collection<TemporaryFile> helpers;
 		private PipeTransport transport;
 		private Future<IOStream> stream_request;
 		private DBusConnection connection;
@@ -257,10 +250,9 @@ namespace Frida {
 
 		private Gee.Set<uint> injectee_ids = new Gee.HashSet<uint> ();
 
-		public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport,
-				Future<IOStream> stream_request, void * process) {
-			this.helper32 = helper32;
-			this.helper64 = helper64;
+		public HelperInstance (Gee.Collection<TemporaryFile> helpers, PipeTransport transport, Future<IOStream> stream_request,
+				void * process) {
+			this.helpers = helpers;
 			this.transport = transport;
 			this.stream_request = stream_request;
 			this.process = process;
@@ -375,26 +367,43 @@ namespace Frida {
 	}
 
 	private class ResourceStore {
-		public TemporaryFile helper32 {
+		public TemporaryFile native_helper {
 			get;
 			private set;
 		}
 
-		public TemporaryFile helper64 {
+		public Gee.Collection<TemporaryFile> helpers {
 			get;
 			private set;
+			default = new Gee.ArrayList<TemporaryFile> ();
 		}
 
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
-			var blob32 = Frida.Data.Helper.get_frida_helper_32_exe_blob ();
-			helper32 = new TemporaryFile.from_stream ("frida-helper-32.exe",
-				new MemoryInputStream.from_data (blob32.data, null),
-				tempdir);
+			var helper_arm64 = add_helper ("arm64", Frida.Data.Helper.get_frida_helper_arm64_exe_blob (), tempdir);
+			var helper_x86_64 = add_helper ("x86_64", Frida.Data.Helper.get_frida_helper_x86_64_exe_blob (), tempdir);
+			var helper_x86 = add_helper ("x86", Frida.Data.Helper.get_frida_helper_x86_exe_blob (), tempdir);
 
-			var blob64 = Frida.Data.Helper.get_frida_helper_64_exe_blob ();
-			helper64 = new TemporaryFile.from_stream ("frida-helper-64.exe",
-				new MemoryInputStream.from_data (blob64.data, null),
+			switch (Gum.Windows.query_native_cpu_type ()) {
+				case ARM64:
+					native_helper = helper_arm64;
+					break;
+				case AMD64:
+					native_helper = helper_x86_64;
+					break;
+				case IA32:
+					native_helper = helper_x86;
+					break;
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private TemporaryFile add_helper (string name, Frida.Data.Helper.Blob blob, TemporaryDirectory tempdir) throws Error {
+			var file = new TemporaryFile.from_stream (@"frida-helper-$name.exe",
+				new MemoryInputStream.from_data (blob.data, null),
 				tempdir);
+			helpers.add (file);
+			return file;
 		}
 	}
 }

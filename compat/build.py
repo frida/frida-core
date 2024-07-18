@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
-from typing import Any, Literal, Mapping, Optional, Sequence
+from typing import Any, Literal, Mapping, Optional, Sequence, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -140,16 +140,19 @@ def setup(role: Role,
             compat = set()
         else:
             summary = "enabled by user"
+        missing: list[MissingFeature] = []
 
         if "native" in compat:
             have_toolchain = True
+            other_label: Optional[str] = None
             other_triplet: Optional[str] = None
             extra_environ: dict[str, str] = {}
 
             if host_os == "windows" and host_arch == "x86_64" and host_config == "mingw":
-                other_triplet = "i686-w64-mingw32"
-                have_toolchain = shutil.which(other_triplet + "-gcc") is not None
+                other_label = "x86"
+                have_toolchain, other_triplet = detect_mingw_toolchain_for("x86")
             elif host_os == "linux" and host_arch == "x86_64" and host_config is None:
+                other_label = "x86"
                 other_triplet = "i686-linux-gnu"
                 have_toolchain = shutil.which(other_triplet + "-gcc") is not None
                 if not have_toolchain:
@@ -173,7 +176,7 @@ def setup(role: Role,
             if not have_toolchain:
                 if not auto_detect:
                     raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
-                summary = "disabled due to missing toolchain for {other_triplet}"
+                missing.append(MissingFeature(other_label, other_triplet))
 
             if host_os == "windows" and host_arch == "x86_64" and have_toolchain:
                 group = OutputGroup("x86", other_triplet, extra_environ)
@@ -269,6 +272,28 @@ def setup(role: Role,
                     ]
 
         if "emulated" in compat:
+            if host_os == "windows" and host_arch == "arm64":
+                for kind, emulated_arch in [("modern", "x86_64"), ("legacy", "x86")]:
+                    if host_config == "mingw":
+                        found, emulated_triplet = detect_mingw_toolchain_for(emulated_arch)
+                        if not found:
+                            if not auto_detect:
+                                raise ToolchainNotFoundError(f"unable to locate toolchain for {emulated_triplet}")
+                            missing.append(MissingFeature(emulated_arch, emulated_triplet))
+                            continue
+                    else:
+                        emulated_triplet = None
+                    outputs[OutputGroup(emulated_arch, emulated_triplet, extra_environ)] = [
+                        Output(identifier=f"helper_emulated_{kind}",
+                               name=HELPER_FILE_WINDOWS.name.replace(".exe", f"-{emulated_arch}.exe"),
+                               file=HELPER_FILE_WINDOWS,
+                               target=HELPER_TARGET),
+                        Output(identifier=f"agent_emulated_{kind}",
+                               name=AGENT_FILE_WINDOWS.name.replace(".dll", f"-{emulated_arch}.dll"),
+                               file=AGENT_FILE_WINDOWS,
+                               target=AGENT_TARGET),
+                    ]
+
             if host_os == "android" and host_arch in {"x86_64", "x86"}:
                 outputs[OutputGroup("arm")] = [
                     Output(identifier="agent_emulated_legacy",
@@ -290,6 +315,8 @@ def setup(role: Role,
         state = State(role, builddir, top_builddir, frida_version, host_os, host_config, allowed_prebuilds, outputs)
         serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
+        if missing:
+            summary = ", ".join([f"{m.label} disabled due to missing toolchain for {m.triplet}" for m in missing])
         variable_names, output_names = zip(*[(output.identifier, output.name) \
                 for output in itertools.chain.from_iterable(outputs.values())])
         print("ok")
@@ -347,6 +374,12 @@ class Output:
     name: str
     file: Path
     target: str
+
+
+@dataclass
+class MissingFeature:
+    label: str
+    triplet: str
 
 
 def compile(privdir: Path, state: State):
@@ -589,6 +622,12 @@ def configure_import_path(releng_location: Path):
     sys.path.insert(0, str(releng_location.parent))
 
 
+def detect_mingw_toolchain_for(arch: str) -> Tuple[bool, Optional[str]]:
+    triplet = MINGW_ARCHS.get(arch, arch) + "-w64-mingw32"
+    found = shutil.which(triplet + "-gcc") is not None
+    return (found, triplet)
+
+
 STATE_FILENAME = "state.dat"
 DEPFILE_FILENAME = "compat.deps"
 
@@ -614,6 +653,11 @@ MSVS_ENVVARS = {
     "VCINSTALLDIR",
     "INCLUDE",
     "LIB",
+}
+
+MINGW_ARCHS = {
+    "x86": "i686",
+    "arm64": "aarch64",
 }
 
 

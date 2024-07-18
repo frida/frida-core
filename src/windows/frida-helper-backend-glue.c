@@ -2,6 +2,7 @@
 
 #include <gio/gio.h>
 #include <gum/gum.h>
+#include <gum/arch-arm64/gumarm64writer.h>
 #include <gum/arch-x86/gumx86writer.h>
 
 #include <windows.h>
@@ -75,6 +76,7 @@ static void frida_propagate_open_process_error (guint32 pid, DWORD os_error, GEr
 static gboolean frida_enable_debug_privilege (void);
 
 static gboolean frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details, GError ** error);
+static gsize frida_remote_worker_context_emit_payload (FridaRemoteWorkerContext * rwc, gpointer code);
 static void frida_remote_worker_context_destroy (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details);
 
 static gboolean frida_remote_worker_context_has_resolved_all_kernel32_functions (const FridaRemoteWorkerContext * rwc);
@@ -304,16 +306,169 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
 {
   gpointer code;
   guint code_size;
-  GumX86Writer cw;
-  const gchar * loadlibrary_failed = "loadlibrary_failed";
-  const gchar * skip_unload = "skip_unload";
-  const gchar * return_result = "return_result";
   SIZE_T page_size, alloc_size;
   DWORD old_protect;
 
   gum_init ();
 
   code = gum_alloc_n_pages (1, GUM_PAGE_RWX); /* Executable so debugger can be used to inspect code */
+  code_size = frida_remote_worker_context_emit_payload (rwc, code);
+
+  memset (rwc, 0, sizeof (FridaRemoteWorkerContext));
+
+  gum_module_enumerate_exports ("kernel32.dll", frida_remote_worker_context_collect_kernel32_export, rwc);
+  if (!frida_remote_worker_context_has_resolved_all_kernel32_functions (rwc))
+    goto failed_to_resolve_kernel32_functions;
+
+  StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
+  StringCbCopyA (rwc->entrypoint_name, sizeof (rwc->entrypoint_name), details->entrypoint_name);
+  StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
+
+  page_size = gum_query_page_size ();
+  g_assert (code_size <= page_size);
+
+  alloc_size = page_size + sizeof (FridaRemoteWorkerContext);
+  rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
+  if (rwc->entrypoint == NULL)
+    goto virtual_alloc_ex_failed;
+
+  if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, code_size, NULL))
+    goto write_process_memory_failed;
+
+  rwc->argument = GSIZE_TO_POINTER (GPOINTER_TO_SIZE (rwc->entrypoint) + page_size);
+  if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (FridaRemoteWorkerContext), NULL))
+    goto write_process_memory_failed;
+
+  if (!VirtualProtectEx (details->process_handle, rwc->entrypoint, page_size, PAGE_EXECUTE_READ, &old_protect))
+    goto virtual_protect_ex_failed;
+
+  gum_free_pages (code);
+  return TRUE;
+
+  /* ERRORS */
+failed_to_resolve_kernel32_functions:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while resolving kernel32 functions");
+    goto error_common;
+  }
+virtual_alloc_ex_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error allocating memory in target process (VirtualAllocEx returned 0x%08lx)",
+        GetLastError ());
+    goto error_common;
+  }
+write_process_memory_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error writing to memory in target process (WriteProcessMemory returned 0x%08lx)",
+        GetLastError ());
+    goto error_common;
+  }
+virtual_protect_ex_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error changing memory permission in target process (VirtualProtectEx returned 0x%08lx)",
+        GetLastError ());
+    goto error_common;
+  }
+error_common:
+  {
+    frida_remote_worker_context_destroy (rwc, details);
+    gum_free_pages (code);
+    return FALSE;
+  }
+}
+
+#define EMIT_ARM64_LOAD(reg, field) \
+    gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaRemoteWorkerContext, field))
+#define EMIT_ARM64_LOAD_ADDRESS_OF(reg, field) \
+    gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaRemoteWorkerContext, field))
+#define EMIT_ARM64_MOVE(dstreg, srcreg) \
+    gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_##dstreg, ARM64_REG_##srcreg)
+#define EMIT_ARM64_CALL(reg) \
+    gum_arm64_writer_put_blr_reg_no_auth (&cw, ARM64_REG_##reg)
+
+static gsize
+frida_remote_worker_context_emit_payload (FridaRemoteWorkerContext * rwc, gpointer code)
+{
+  gsize code_size;
+  const gchar * loadlibrary_failed = "loadlibrary_failed";
+  const gchar * skip_unload = "skip_unload";
+  const gchar * return_result = "return_result";
+#ifdef HAVE_ARM64
+  GumArm64Writer cw;
+
+  gum_arm64_writer_init (&cw, code);
+
+  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_SP);
+  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
+
+  /* x20 = (FridaRemoteWorkerContext *) lpParameter */
+  EMIT_ARM64_MOVE (X20, X0);
+
+  /* x19 = LoadLibrary (x20->dll_path) */
+  EMIT_ARM64_LOAD_ADDRESS_OF (X0, dll_path);
+  EMIT_ARM64_LOAD (X8, load_library_impl);
+  EMIT_ARM64_CALL (X8);
+  gum_arm64_writer_put_cbz_reg_label (&cw, ARM64_REG_X0, loadlibrary_failed);
+  EMIT_ARM64_MOVE (X19, X0);
+
+  /* x8 = GetProcAddress (x19, x20->entrypoint_name) */
+  EMIT_ARM64_MOVE (X0, X19);
+  EMIT_ARM64_LOAD_ADDRESS_OF (X1, entrypoint_name);
+  EMIT_ARM64_LOAD (X8, get_proc_address_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_MOVE (X8, X0);
+
+  /* x8 (x20->entrypoint_data, &x20->stay_resident, NULL) */
+  EMIT_ARM64_LOAD_ADDRESS_OF (X0, entrypoint_data);
+  EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+  EMIT_ARM64_MOVE (X2, XZR);
+  EMIT_ARM64_CALL (X8);
+
+  /* if (!x20->stay_resident) { */
+  EMIT_ARM64_LOAD (X0, stay_resident);
+  gum_arm64_writer_put_cbnz_reg_label (&cw, ARM64_REG_X0, skip_unload);
+
+  /* FreeLibrary (xsi) */
+  EMIT_ARM64_MOVE (X0, X19);
+  EMIT_ARM64_LOAD (X8, free_library_impl);
+  EMIT_ARM64_CALL (X8);
+
+  /* } */
+  gum_arm64_writer_put_label (&cw, skip_unload);
+
+  /* result = ERROR_SUCCESS */
+  EMIT_ARM64_MOVE (X0, XZR);
+  gum_arm64_writer_put_b_label (&cw, return_result);
+
+  gum_arm64_writer_put_label (&cw, loadlibrary_failed);
+  /* result = GetLastError() */
+  EMIT_ARM64_LOAD (X8, get_last_error_impl);
+  EMIT_ARM64_CALL (X8);
+
+  gum_arm64_writer_put_label (&cw, return_result);
+  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
+  gum_arm64_writer_put_ret (&cw);
+
+  gum_arm64_writer_flush (&cw);
+  code_size = gum_arm64_writer_offset (&cw);
+  gum_arm64_writer_clear (&cw);
+#else
+  GumX86Writer cw;
+
   gum_x86_writer_init (&cw, code);
 
   /* Will clobber these */
@@ -393,80 +548,9 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   gum_x86_writer_flush (&cw);
   code_size = gum_x86_writer_offset (&cw);
   gum_x86_writer_clear (&cw);
+#endif
 
-  memset (rwc, 0, sizeof (FridaRemoteWorkerContext));
-
-  gum_module_enumerate_exports ("kernel32.dll", frida_remote_worker_context_collect_kernel32_export, rwc);
-  if (!frida_remote_worker_context_has_resolved_all_kernel32_functions (rwc))
-    goto failed_to_resolve_kernel32_functions;
-
-  StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
-  StringCbCopyA (rwc->entrypoint_name, sizeof (rwc->entrypoint_name), details->entrypoint_name);
-  StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
-
-  page_size = gum_query_page_size ();
-  g_assert (code_size <= page_size);
-
-  alloc_size = page_size + sizeof (FridaRemoteWorkerContext);
-  rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
-  if (rwc->entrypoint == NULL)
-    goto virtual_alloc_ex_failed;
-
-  if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, code_size, NULL))
-    goto write_process_memory_failed;
-
-  rwc->argument = GSIZE_TO_POINTER (GPOINTER_TO_SIZE (rwc->entrypoint) + page_size);
-  if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (FridaRemoteWorkerContext), NULL))
-    goto write_process_memory_failed;
-
-  if (!VirtualProtectEx (details->process_handle, rwc->entrypoint, page_size, PAGE_EXECUTE_READ, &old_protect))
-    goto virtual_protect_ex_failed;
-
-  gum_free_pages (code);
-  return TRUE;
-
-  /* ERRORS */
-failed_to_resolve_kernel32_functions:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while resolving kernel32 functions");
-    goto error_common;
-  }
-virtual_alloc_ex_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error allocating memory in target process (VirtualAllocEx returned 0x%08lx)",
-        GetLastError ());
-    goto error_common;
-  }
-write_process_memory_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error writing to memory in target process (WriteProcessMemory returned 0x%08lx)",
-        GetLastError ());
-    goto error_common;
-  }
-virtual_protect_ex_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error changing memory permission in target process (VirtualProtectEx returned 0x%08lx)",
-        GetLastError ());
-    goto error_common;
-  }
-error_common:
-  {
-    frida_remote_worker_context_destroy (rwc, details);
-    gum_free_pages (code);
-    return FALSE;
-  }
+  return code_size;
 }
 
 static void
@@ -506,60 +590,6 @@ frida_remote_worker_context_collect_kernel32_export (const GumExportDetails * de
     rwc->get_last_error_impl = GSIZE_TO_POINTER (details->address);
 
   return TRUE;
-}
-
-gboolean
-frida_windows_system_is_x64 (void)
-{
-  static gboolean initialized = FALSE;
-  static gboolean system_is_x64;
-
-  if (!initialized)
-  {
-    SYSTEM_INFO si;
-
-    GetNativeSystemInfo (&si);
-    system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
-
-    initialized = TRUE;
-  }
-
-  return system_is_x64;
-}
-
-gboolean
-frida_windows_process_is_x64 (guint32 pid, GError ** error)
-{
-  HANDLE process_handle;
-  BOOL is_wow64, success;
-
-  if (!frida_windows_system_is_x64 ())
-    return FALSE;
-
-  process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if (process_handle == NULL)
-    goto open_failed;
-  success = IsWow64Process (process_handle, &is_wow64);
-  CloseHandle (process_handle);
-  if (!success)
-    goto query_failed;
-
-  return !is_wow64;
-
-open_failed:
-  {
-    frida_propagate_open_process_error (pid, GetLastError (), error);
-    return FALSE;
-  }
-query_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while interrogating process with pid %u (IsWow64Process failed)",
-        pid);
-    return FALSE;
-  }
 }
 
 static gboolean

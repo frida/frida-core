@@ -5,7 +5,8 @@
 
 G_BEGIN_DECLS
 
-G_GNUC_INTERNAL void * frida_helper_manager_start_services (const char * service_basename, FridaPrivilegeLevel level);
+G_GNUC_INTERNAL void * frida_helper_manager_start_services (const char * service_basename, gchar ** archs, gint archs_length,
+    FridaPrivilegeLevel level);
 G_GNUC_INTERNAL void frida_helper_manager_stop_services (void * context);
 
 G_GNUC_INTERNAL char * frida_helper_service_derive_basename (void);

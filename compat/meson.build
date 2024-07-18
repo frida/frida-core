@@ -1,6 +1,8 @@
 helper_modern = get_option('helper_modern')
 helper_legacy = get_option('helper_legacy')
 helper_compat = ''
+helper_emulated_modern = get_option('helper_emulated_modern')
+helper_emulated_legacy = get_option('helper_emulated_legacy')
 helper_depends = []
 
 agent_modern = get_option('agent_modern')
@@ -18,6 +20,7 @@ server_depends = []
 
 no_overridden_compat_bits = \
     helper_modern == 'auto' and helper_legacy == 'auto' \
+    and helper_emulated_modern == 'auto' and helper_emulated_legacy == 'auto' \
     and agent_modern == 'auto' and agent_legacy == 'auto' \
     and agent_emulated_modern == 'auto' and agent_emulated_legacy == 'auto'
 
