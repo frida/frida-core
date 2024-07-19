@@ -163,7 +163,9 @@ namespace Frida.Fruity {
 
 		public string name {
 			get {
-				var transport = transports.first_match (t => t.name != null);
+				var transport = transports.first_match (t => t.name != null && t.connection_type == USB);
+				if (transport == null)
+					transport = transports.first_match (t => t.name != null);
 				if (transport == null)
 					return "iOS Device";
 				return transport.name;
