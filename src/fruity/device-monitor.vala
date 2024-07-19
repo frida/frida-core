@@ -195,7 +195,9 @@ namespace Frida.Fruity {
 		}
 
 		public UsbmuxDevice? find_usbmux_device () throws Error {
-			var transport = transports.first_match (t => t.usbmux_device != null);
+			var transport = transports.first_match (t => t.usbmux_device != null && t.connection_type == USB);
+			if (transport == null)
+				transport = transports.first_match (t => t.usbmux_device != null);
 			return (transport != null) ? transport.usbmux_device : null;
 		}
 
