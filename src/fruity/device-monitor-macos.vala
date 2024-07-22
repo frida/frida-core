@@ -211,7 +211,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
 			while (tunnel_request != null) {
 				try {
 					return yield tunnel_request.future.wait_async (cancellable);

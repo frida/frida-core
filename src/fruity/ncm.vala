@@ -124,7 +124,7 @@ namespace Frida.Fruity {
 				}
 			}
 			if (!found_cdc_header || !found_data_interface)
-				throw_user_error ("No USB CDC-NCM interface found");
+				throw new Error.NOT_SUPPORTED ("%s", make_user_error_message ("No USB CDC-NCM interface found"));
 
 			uint8 mac_address[6];
 			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,
@@ -149,7 +149,8 @@ namespace Frida.Fruity {
 			try {
 				Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
 			} catch (Error e) {
-				throw_user_error (@"Unable to claim USB CDC-NCM interface ($(e.message))");
+				throw new Error.PERMISSION_DENIED ("%s",
+					make_user_error_message (@"Unable to claim USB CDC-NCM interface ($(e.message))"));
 			}
 			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
 				"Failed to set USB interface alt setting");
@@ -162,13 +163,12 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		[NoReturn]
-		private void throw_user_error (string message) throws Error {
+		private string make_user_error_message (string message) {
 #if WINDOWS
-			throw new Error.NOT_SUPPORTED ("%s; use https://zadig.akeo.ie to switch from Apple's official driver onto " +
-				"Microsoft's WinUSB driver, so libusb can access it", message);
+			return message + "; use https://zadig.akeo.ie to switch from Apple's official driver onto Microsoft's WinUSB " +
+				"driver, so libusb can access it";
 #else
-			throw new Error.NOT_SUPPORTED ("%s", message);
+			return message;
 #endif
 		}
 

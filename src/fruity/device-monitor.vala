@@ -209,8 +209,9 @@ namespace Frida.Fruity {
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+			var usbmux_device = find_usbmux_device ();
 			foreach (var transport in transports) {
-				Tunnel? tunnel = yield transport.find_tunnel (cancellable);
+				Tunnel? tunnel = yield transport.find_tunnel (usbmux_device, cancellable);
 				if (tunnel != null)
 					return tunnel;
 			}
@@ -438,7 +439,7 @@ namespace Frida.Fruity {
 			get;
 		}
 
-		public abstract async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError;
+		public abstract async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public enum ConnectionType {
@@ -699,7 +700,7 @@ namespace Frida.Fruity {
 			Object (device: device);
 		}
 
-		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
 			return null;
 		}
 	}
@@ -1066,7 +1067,8 @@ namespace Frida.Fruity {
 			if (tunnel_request != null) {
 				try {
 					var tunnel = yield tunnel_request.future.wait_async (cancellable);
-					yield tunnel.close (cancellable);
+					if (tunnel != null)
+						yield tunnel.close (cancellable);
 				} catch (Error e) {
 				} finally {
 					tunnel_request = null;
@@ -1076,7 +1078,7 @@ namespace Frida.Fruity {
 			usb_device.close ();
 		}
 
-		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
 			while (tunnel_request != null) {
 				try {
 					return yield tunnel_request.future.wait_async (cancellable);
@@ -1089,8 +1091,28 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
-				var tunnel = new PortableUsbTunnel (usb_device, pairing_store);
-				yield tunnel.open (cancellable);
+				bool supported_by_os = true;
+				if (device != null) {
+					var lockdown = yield LockdownClient.open (device, cancellable);
+					yield lockdown.start_session (cancellable);
+					var response = yield lockdown.get_value (null, null, cancellable);
+					Fruity.PlistDict properties = response.get_dict ("Value");
+					if (properties.get_string ("ProductName") == "iPhone OS") {
+						uint ios_major_version = uint.parse (properties.get_string ("ProductVersion").split (".")[0]);
+						supported_by_os = ios_major_version >= 17;
+					}
+				}
+
+				PortableUsbTunnel? tunnel = null;
+				if (supported_by_os) {
+					tunnel = new PortableUsbTunnel (usb_device, pairing_store);
+					try {
+						yield tunnel.open (cancellable);
+					} catch (Error e) {
+						if (!(e is Error.NOT_SUPPORTED))
+							throw e;
+					}
+				}
 
 				tunnel_request.resolve (tunnel);
 
@@ -1460,7 +1482,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
+		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
 			while (tunnel_request != null) {
 				try {
 					return yield tunnel_request.future.wait_async (cancellable);
