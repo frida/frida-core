@@ -275,7 +275,7 @@ namespace Frida {
 						new Json.Node.alloc ().init_string (entrypoint),
 						new Json.Node.alloc ().init_string (opts.source_maps.to_nick ()),
 						new Json.Node.alloc ().init_string (opts.compression.to_nick ()),
-					}, cancellable);
+					}, null, cancellable);
 				return bundle.get_string ();
 			}
 
@@ -288,7 +288,7 @@ namespace Frida {
 						new Json.Node.alloc ().init_string (entrypoint),
 						new Json.Node.alloc ().init_string (opts.source_maps.to_nick ()),
 						new Json.Node.alloc ().init_string (opts.compression.to_nick ()),
-					}, cancellable);
+					}, null, cancellable);
 			}
 
 			private static string compute_project_root (string entrypoint, CompilerOptions options) {
