@@ -129,8 +129,8 @@ _frida_fruity_windows_pairing_browser_enumerate_network_interfaces (FridaFruityW
 
     if (adapter->FirstUnicastAddress == NULL)
       continue;
-    raw_addr = &adapter->FirstUnicastAddress->Address;
 
+    raw_addr = &adapter->FirstUnicastAddress->Address;
     addr = G_INET_SOCKET_ADDRESS (g_socket_address_new_from_native (raw_addr->lpSockaddr, raw_addr->iSockaddrLength));
 
     func (adapter->IfIndex, adapter->AdapterName, addr, func_target);
