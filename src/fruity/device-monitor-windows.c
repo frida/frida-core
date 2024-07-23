@@ -121,12 +121,16 @@ _frida_fruity_windows_pairing_browser_enumerate_network_interfaces (FridaFruityW
 
   for (adapter = adapters; adapter != NULL; adapter = adapter->Next)
   {
-    SOCKET_ADDRESS * raw_addr = &adapter->FirstUnicastAddress->Address;
+    SOCKET_ADDRESS * raw_addr;
     GInetSocketAddress * addr;
 
     if (adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
       continue;
 
+    if (adapter->FirstUnicastAddress == NULL)
+      continue;
+
+    raw_addr = &adapter->FirstUnicastAddress->Address;
     addr = G_INET_SOCKET_ADDRESS (g_socket_address_new_from_native (raw_addr->lpSockaddr, raw_addr->iSockaddrLength));
 
     func (adapter->IfIndex, adapter->AdapterName, addr, func_target);
