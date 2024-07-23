@@ -121,6 +121,9 @@ _frida_fruity_windows_pairing_browser_enumerate_network_interfaces (FridaFruityW
 
   for (adapter = adapters; adapter != NULL; adapter = adapter->Next)
   {
+    if (adapter->FirstUnicastAddress == NULL)
+      continue;
+
     SOCKET_ADDRESS * raw_addr = &adapter->FirstUnicastAddress->Address;
     GInetSocketAddress * addr;
 
