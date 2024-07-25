@@ -29,6 +29,11 @@ if host_os_family == 'darwin'
   extra_link_args += '-Wl,-framework,Foundation'
 endif
 
+if host_os == 'android'
+  extra_vala_args += '--pkg=minizip'
+  platform_deps += minizip_dep
+endif
+
 if host_os_family == 'windows'
   if host_toolchain != 'microsoft'
     symfile = 'frida-gadget.symbols'

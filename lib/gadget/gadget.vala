@@ -751,7 +751,7 @@ namespace Frida.Gadget {
 
 		string config_data;
 		try {
-			FileUtils.get_contents (config_path, out config_data);
+			load_asset_text (config_path, out config_data);
 		} catch (FileError e) {
 			if (e is FileError.NOENT)
 				return new Config ();
@@ -1226,7 +1226,7 @@ namespace Frida.Gadget {
 		private ScriptConfig load_config (string path) throws Error {
 			string data;
 			try {
-				FileUtils.get_contents (path, out data);
+				load_asset_text (path, out data);
 			} catch (FileError e) {
 				if (e is FileError.NOENT)
 					return new ScriptConfig ();
@@ -1349,9 +1349,9 @@ namespace Frida.Gadget {
 			try {
 				var path = this.path;
 
-				uint8[] contents;
+				Bytes contents;
 				try {
-					FileUtils.get_data (path, out contents);
+					load_asset_bytes (path, out contents);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT ("%s", e.message);
 				}
@@ -1360,11 +1360,10 @@ namespace Frida.Gadget {
 				options.name = Path.get_basename (path).split (".", 2)[0];
 
 				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC) {
-					instance = yield engine.create_script (null, new Bytes (contents), options);
-				} else {
-					instance = yield engine.create_script ((string) contents, null, options);
-				}
+				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+					instance = yield engine.create_script (null, contents, options);
+				else
+					instance = yield engine.create_script ((string) contents.get_data (), null, options);
 
 				if (id.handle != 0)
 					yield engine.destroy_script (id);
@@ -2073,6 +2072,60 @@ namespace Frida.Gadget {
 			return null;
 		return module_dir;
 #endif
+	}
+#endif
+
+	private void load_asset_text (string filename, out string text) throws FileError {
+		Bytes raw_contents;
+		load_asset_bytes (filename, out raw_contents);
+
+		unowned string str = (string) raw_contents.get_data ();
+		if (!str.validate ())
+			throw new FileError.FAILED ("%s: invalid UTF-8", filename);
+
+		text = str;
+	}
+
+	private void load_asset_bytes (string filename, out Bytes bytes) throws FileError {
+#if ANDROID
+		if (maybe_load_asset_bytes_from_apk (filename, out bytes))
+			return;
+#endif
+
+		uint8[] data;
+		FileUtils.get_data (filename, out data);
+		bytes = new Bytes.take ((owned) data);
+	}
+
+#if ANDROID
+	private bool maybe_load_asset_bytes_from_apk (string filename, out Bytes contents) throws FileError {
+		contents = null;
+
+		var tokens = filename.split ("!", 2);
+		if (tokens.length != 2 || !tokens[0].has_suffix (".apk"))
+			return false;
+		unowned string apk_path = tokens[0];
+		unowned string file_path = tokens[1];
+
+		var reader = Minizip.Reader.create ();
+		try {
+			if (reader.open_file (apk_path) != OK)
+				throw new FileError.FAILED ("Unable to open APK");
+
+			if (reader.locate_entry (file_path[1:], true) != OK)
+				throw new FileError.FAILED ("Unable to locate %s inside APK", file_path);
+
+			var size = reader.entry_save_buffer_length ();
+			var data = new uint8[size + 1];
+			if (reader.entry_save_buffer (data[:size]) != OK)
+				throw new FileError.FAILED ("Unable to extract %s from APK", file_path);
+
+			contents = new Bytes.take ((owned) data);
+			return true;
+		} finally {
+			reader.close ();
+			Minizip.Reader.destroy (ref reader);
+		}
 	}
 #endif
 

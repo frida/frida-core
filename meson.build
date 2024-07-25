@@ -347,6 +347,13 @@ else
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
 
+if host_os == 'android'
+  minizip_dep = dependency('minizip', required: false, default_options: [
+    'zlib=enabled',
+    'lzma=disabled',
+  ])
+endif
+
 have_local_backend = get_option('local_backend').allowed()
 have_fruity_backend = get_option('fruity_backend') \
     .disable_auto_if(not host_docks_mobile_devices) \
