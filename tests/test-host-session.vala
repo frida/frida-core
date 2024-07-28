@@ -46,6 +46,11 @@ namespace Frida.HostSessionTest {
 			Fruity.Plist.to_xml_yields_complete_document ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Fruity/PlistServiceClient/handles-write-after-disconnect", () => {
+			var h = new Harness ((h) => Fruity.PlistServiceClient.handles_write_after_disconnect.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
 			var h = new Harness ((h) => Fruity.backend.begin (h as Harness));
 			h.run ();
@@ -4028,6 +4033,82 @@ namespace Frida.HostSessionTest {
 				assert_true (actual_xml == expected_xml);
 			}
 
+		}
+
+		namespace PlistServiceClient {
+			private async void handles_write_after_disconnect (Harness h) {
+				var cancellable = new Cancellable ();
+
+				try {
+					uint8[] cert_der;
+					string cert_pem;
+					string key_pem;
+					yield generate_certificate (out cert_der, out cert_pem, out key_pem);
+					var certificate = new TlsCertificate.from_pem (cert_pem + "\n" + key_pem, -1);
+
+					var listener = new SocketListener ();
+					uint16 port = listener.add_any_inet_port (null);
+					run_server.begin (listener, certificate, cancellable);
+
+					var sc = new SocketClient ();
+					SocketConnection base_connection = yield sc.connect_to_host_async ("127.0.0.1", port, cancellable);
+					var connection = TlsClientConnection.new (base_connection, null);
+					connection.set_database (null);
+					connection.accept_certificate.connect ((peer_cert, errors) => {
+						return peer_cert.verify (null, certificate) == 0;
+					});
+					yield connection.handshake_async (Priority.DEFAULT, cancellable);
+
+					var client = new Frida.Fruity.PlistServiceClient (connection);
+
+					var request = new Frida.Fruity.Plist ();
+					request.set_string ("Command", "Ping");
+					try {
+						yield client.query (request, cancellable);
+					} catch (Frida.Fruity.PlistServiceError e) {
+						assert (e is Frida.Fruity.PlistServiceError.CONNECTION_CLOSED);
+					}
+					printerr ("OK\n");
+
+					Timeout.add (250, handles_write_after_disconnect.callback);
+					printerr ("Before sleep\n");
+					yield;
+					printerr ("After sleep\n");
+
+					client.write_message (request);
+					printerr ("Ready to hang...\n");
+					yield;
+				} catch (GLib.Error e) {
+					printerr ("Client: %s\n", e.message);
+					//assert_not_reached ();
+				} finally {
+					cancellable.cancel ();
+				}
+
+				h.done ();
+			}
+
+			private async void run_server (SocketListener listener, TlsCertificate certificate, Cancellable cancellable) {
+				try {
+					var io_priority = Priority.DEFAULT;
+
+					while (true) {
+						SocketConnection base_connection = yield listener.accept_async (cancellable);
+						var connection = TlsServerConnection.new (base_connection, certificate);
+						connection.set_database (null);
+						yield connection.handshake_async (io_priority, cancellable);
+
+						var client = new Frida.Fruity.PlistServiceClient (connection);
+						var message = yield client.read_message (cancellable);
+						printerr ("Server got message: %s\n", message.to_xml ());
+						yield connection.close_async (io_priority, cancellable);
+						printerr ("Server closed the connection\n");
+					}
+				} catch (GLib.Error e) {
+					printerr ("Server: %s\n", e.message);
+					//assert_not_reached ();
+				}
+			}
 		}
 
 	}
