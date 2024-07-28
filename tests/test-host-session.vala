@@ -4047,11 +4047,15 @@ namespace Frida.HostSessionTest {
 					var certificate = new TlsCertificate.from_pem (cert_pem + "\n" + key_pem, -1);
 
 					var listener = new SocketListener ();
-					uint16 port = listener.add_any_inet_port (null);
+					var address = new UnixSocketAddress.with_type ("/tmp/fruity-" + Uuid.string_random (), -1, PATH);
+					SocketAddress effective_address;
+					listener.add_address (address, STREAM, DEFAULT, null, out effective_address);
+					//uint16 port = listener.add_any_inet_port (null);
 					run_server.begin (listener, certificate, cancellable);
 
 					var sc = new SocketClient ();
-					SocketConnection base_connection = yield sc.connect_to_host_async ("127.0.0.1", port, cancellable);
+					//SocketConnection base_connection = yield sc.connect_to_host_async ("127.0.0.1", port, cancellable);
+					SocketConnection base_connection = yield sc.connect_async (effective_address, cancellable);
 					var connection = TlsClientConnection.new (base_connection, null);
 					connection.set_database (null);
 					connection.accept_certificate.connect ((peer_cert, errors) => {
