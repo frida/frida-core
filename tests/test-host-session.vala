@@ -4039,12 +4039,17 @@ namespace Frida.HostSessionTest {
 			private async void handles_write_after_disconnect (Harness h) {
 				var cancellable = new Cancellable ();
 
+				bool enable_tls = true;
+
 				try {
-					uint8[] cert_der;
-					string cert_pem;
-					string key_pem;
-					yield generate_certificate (out cert_der, out cert_pem, out key_pem);
-					var certificate = new TlsCertificate.from_pem (cert_pem + "\n" + key_pem, -1);
+					TlsCertificate? certificate = null;
+					if (enable_tls) {
+						uint8[] cert_der;
+						string cert_pem;
+						string key_pem;
+						yield generate_certificate (out cert_der, out cert_pem, out key_pem);
+						certificate = new TlsCertificate.from_pem (cert_pem + "\n" + key_pem, -1);
+					}
 
 					var listener = new SocketListener ();
 					var address = new UnixSocketAddress.with_type ("/tmp/fruity-" + Uuid.string_random (), -1, PATH);
@@ -4054,16 +4059,22 @@ namespace Frida.HostSessionTest {
 					run_server.begin (listener, certificate, cancellable);
 
 					var sc = new SocketClient ();
+					IOStream stream;
 					//SocketConnection base_connection = yield sc.connect_to_host_async ("127.0.0.1", port, cancellable);
 					SocketConnection base_connection = yield sc.connect_async (effective_address, cancellable);
-					var connection = TlsClientConnection.new (base_connection, null);
-					connection.set_database (null);
-					connection.accept_certificate.connect ((peer_cert, errors) => {
-						return peer_cert.verify (null, certificate) == 0;
-					});
-					yield connection.handshake_async (Priority.DEFAULT, cancellable);
+					if (certificate != null) {
+						var connection = TlsClientConnection.new (base_connection, null);
+						connection.set_database (null);
+						connection.accept_certificate.connect ((peer_cert, errors) => {
+							return peer_cert.verify (null, certificate) == 0;
+						});
+						yield connection.handshake_async (Priority.DEFAULT, cancellable);
+						stream = connection;
+					} else {
+						stream = base_connection;
+					}
 
-					var client = new Frida.Fruity.PlistServiceClient (connection);
+					var client = new Frida.Fruity.PlistServiceClient (stream);
 
 					var request = new Frida.Fruity.Plist ();
 					request.set_string ("Command", "Ping");
@@ -4092,20 +4103,27 @@ namespace Frida.HostSessionTest {
 				h.done ();
 			}
 
-			private async void run_server (SocketListener listener, TlsCertificate certificate, Cancellable cancellable) {
+			private async void run_server (SocketListener listener, TlsCertificate? certificate, Cancellable cancellable) {
 				try {
 					var io_priority = Priority.DEFAULT;
 
 					while (true) {
 						SocketConnection base_connection = yield listener.accept_async (cancellable);
-						var connection = TlsServerConnection.new (base_connection, certificate);
-						connection.set_database (null);
-						yield connection.handshake_async (io_priority, cancellable);
 
-						var client = new Frida.Fruity.PlistServiceClient (connection);
+						IOStream stream;
+						if (certificate != null) {
+							var connection = TlsServerConnection.new (base_connection, certificate);
+							connection.set_database (null);
+							yield connection.handshake_async (io_priority, cancellable);
+							stream = connection;
+						} else {
+							stream = base_connection;
+						}
+
+						var client = new Frida.Fruity.PlistServiceClient (stream);
 						var message = yield client.read_message (cancellable);
 						printerr ("Server got message: %s\n", message.to_xml ());
-						yield connection.close_async (io_priority, cancellable);
+						yield stream.close_async (io_priority, cancellable);
 						printerr ("Server closed the connection\n");
 					}
 				} catch (GLib.Error e) {
