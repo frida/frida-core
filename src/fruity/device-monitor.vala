@@ -294,7 +294,7 @@ namespace Frida.Fruity {
 					var stream = yield cached_usbmux_lockdown_client.start_service (req.service_name, req.cancellable);
 					req.promise.resolve (stream);
 				} catch (GLib.Error e) {
-					if (e is Error.TRANSPORT && cached_usbmux_lockdown_client != null) {
+					if (e is LockdownError.CONNECTION_CLOSED && cached_usbmux_lockdown_client != null) {
 						cached_usbmux_lockdown_client = null;
 						continue;
 					}
