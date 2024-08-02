@@ -265,6 +265,8 @@ namespace Frida.Fruity {
 		}
 
 		private static LockdownError error_from_service (PlistServiceError e) {
+			if (e is PlistServiceError.CONNECTION_CLOSED)
+				return new LockdownError.CONNECTION_CLOSED ("%s", e.message);
 			return new LockdownError.PROTOCOL ("%s", e.message);
 		}
 
@@ -274,6 +276,7 @@ namespace Frida.Fruity {
 	}
 
 	public errordomain LockdownError {
+		CONNECTION_CLOSED,
 		INVALID_SERVICE,
 		NOT_PAIRED,
 		UNSUPPORTED,
