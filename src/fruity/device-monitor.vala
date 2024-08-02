@@ -287,6 +287,7 @@ namespace Frida.Fruity {
 
 		private async void process_usbmux_lockdown_service_requests () {
 			UsbmuxLockdownServiceRequest? req;
+			bool already_invalidated = false;
 			while ((req = usbmux_lockdown_service_requests.peek ()) != null) {
 				try {
 					if (cached_usbmux_lockdown_client == null)
@@ -294,8 +295,10 @@ namespace Frida.Fruity {
 					var stream = yield cached_usbmux_lockdown_client.start_service (req.service_name, req.cancellable);
 					req.promise.resolve (stream);
 				} catch (GLib.Error e) {
-					if (e is LockdownError.CONNECTION_CLOSED && cached_usbmux_lockdown_client != null) {
+					if (e is LockdownError.CONNECTION_CLOSED && cached_usbmux_lockdown_client != null &&
+							!already_invalidated) {
 						cached_usbmux_lockdown_client = null;
+						already_invalidated = true;
 						continue;
 					}
 					req.promise.reject ((e is LockdownError.INVALID_SERVICE)
