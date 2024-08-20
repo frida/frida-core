@@ -30,11 +30,16 @@ public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 		context.info = this;
 		store = new Darwin.SystemConfiguration.DynamicStore (null, CoreFoundation.String.make ("Frida"),
 			on_interfaces_changed_wrapper, context);
+
 		var pattern = CoreFoundation.String.make ("State:/Network/Interface/utun.*/IPv6");
 		var patterns = new CoreFoundation.Array (null, ((CoreFoundation.Type[]) &pattern)[:1]);
 		store.set_notification_keys (null, patterns);
+
 		store.set_dispatch_queue (event_queue);
-		handle_interface_changes (store.copy_key_list (pattern));
+
+		var initial_keys = store.copy_key_list (pattern);
+		if (initial_keys != null)
+			handle_interface_changes (initial_keys);
 	}
 
 	private static void on_interfaces_changed_wrapper (Darwin.SystemConfiguration.DynamicStore store,
