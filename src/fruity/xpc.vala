@@ -2217,6 +2217,13 @@ namespace Frida.Fruity {
 		}
 
 		private int on_stream_close (uint32 flags, int64 stream_id, uint64 app_error_code) {
+			if (!established.future.ready) {
+				established.reject (new Error.TRANSPORT ("Connection closed early with QUIC app error code %" +
+					uint64.FORMAT_MODIFIER + "u", app_error_code));
+			}
+
+			cancel ();
+
 			return 0;
 		}
 
