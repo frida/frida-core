@@ -2062,8 +2062,6 @@ namespace Frida.Fruity {
 		}
 
 		private void send_datagram (Bytes datagram) {
-			if (connection == null)
-				return;
 			tx_datagrams.offer (datagram);
 			process_pending_writes ();
 		}
@@ -2093,7 +2091,7 @@ namespace Frida.Fruity {
 		}
 
 		private void process_pending_writes () {
-			if (write_idle != null)
+			if (connection == null || write_idle != null)
 				return;
 
 			var source = new IdleSource ();
