@@ -147,6 +147,7 @@ namespace Frida.Fruity {
 		private State state = STARTED;
 
 		private Gee.Queue<Request> requests = new Gee.ArrayQueue<Request> ();
+		private unowned Thread<bool>? lwip_thread;
 
 		private LWIP.NetworkInterface handle;
 		private LWIP.IP6Address raw_ipv6_address;
@@ -289,12 +290,19 @@ namespace Frida.Fruity {
 
 			lock (requests)
 				requests.offer (req);
-			LWIP.Runtime.schedule (perform_next_request);
+
+			if (Thread.self<bool> () != lwip_thread)
+				LWIP.Runtime.schedule (perform_next_request);
+			else
+				perform_next_request ();
 
 			return req.join ();
 		}
 
 		private void perform_next_request () {
+			if (lwip_thread == null)
+				lwip_thread = Thread.self ();
+
 			Request req;
 			lock (requests)
 				req = requests.poll ();
