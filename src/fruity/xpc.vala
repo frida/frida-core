@@ -1930,7 +1930,7 @@ namespace Frida.Fruity {
 		}
 
 		private void on_control_stream_opened () {
-			var zeroed_padding_packet = new uint8[1024];
+			var zeroed_padding_packet = new uint8[PREFERRED_MTU];
 			send_datagram (new Bytes.take ((owned) zeroed_padding_packet));
 
 			send_request (Json.to_string (
