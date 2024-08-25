@@ -568,7 +568,7 @@ subdir('compiler')
 
 core_sources = base_sources + backend_sources + compiler_sources
 
-internal_libs = [base, pipe] + backend_libs
+internal_libs = [base, netif, pipe] + backend_libs
 internal_deps = [base_dep, netif_dep, pipe_dep]
 
 if host_os_family == 'windows'
