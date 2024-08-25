@@ -60,8 +60,7 @@ namespace Frida {
 
 		private DBusConnection connection;
 		private uint registration_id;
-		private ServiceConnection helper32;
-		private ServiceConnection? helper64;
+		private Gee.Collection<ServiceConnection> helpers = new Gee.ArrayList<ServiceConnection> ();
 		private void * context;
 
 		public HelperManager (string parent_address, PrivilegeLevel level) {
@@ -98,18 +97,23 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				helper32 = new ServiceConnection (HelperService.derive_svcname_for_suffix ("32"));
-				if (WindowsSystem.is_x64 ())
-					helper64 = new ServiceConnection (HelperService.derive_svcname_for_suffix ("64"));
+				var archs = new Gee.ArrayList<string> ();
+				if (Gum.Windows.query_native_cpu_type () == ARM64)
+					archs.add ("arm64");
+				if (Gum.Windows.query_native_cpu_type () != IA32)
+					archs.add ("x86_64");
+				archs.add ("x86");
 
-				context = start_services (HelperService.derive_basename (), level);
+				foreach (string arch in archs) {
+					var helper = new ServiceConnection (HelperService.derive_svcname_for_suffix (arch));
+					helpers.add (helper);
+				}
 
-				yield helper32.open ();
-				helper32.proxy.uninjected.connect (on_uninjected);
+				context = start_services (HelperService.derive_basename (), archs.to_array (), level);
 
-				if (helper64 != null) {
-					yield helper64.open ();
-					helper64.proxy.uninjected.connect (on_uninjected);
+				foreach (var helper in helpers) {
+					yield helper.open ();
+					helper.proxy.uninjected.connect (on_uninjected);
 				}
 
 				var stream_request = Pipe.open (parent_address, null);
@@ -130,19 +134,13 @@ namespace Frida {
 		}
 
 		public async void stop (Cancellable? cancellable) throws Error, IOError {
-			if (helper64 != null) {
+			foreach (var helper in helpers) {
 				try {
-					yield helper64.proxy.stop (cancellable);
+					yield helper.proxy.stop (cancellable);
 				} catch (GLib.Error e) {
 					if (e is IOError.CANCELLED)
 						throw (IOError) e;
 				}
-			}
-			try {
-				yield helper32.proxy.stop (cancellable);
-			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
 			}
 
 			Timeout.add (20, () => {
@@ -158,13 +156,14 @@ namespace Frida {
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				if (helper64 != null && yield helper64.proxy.can_handle_target (pid, cancellable)) {
-					yield helper64.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
-						cancellable);
-				} else {
-					yield helper32.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
-						cancellable);
+				foreach (var helper in helpers) {
+					if (yield helper.proxy.can_handle_target (pid, cancellable)) {
+						yield helper.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies,
+							id, cancellable);
+						return;
+					}
 				}
+				throw new Error.NOT_SUPPORTED ("Missing helper able to handle the given target");
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -210,7 +209,7 @@ namespace Frida {
 			}
 		}
 
-		private extern static void * start_services (string service_basename, PrivilegeLevel level);
+		private extern static void * start_services (string service_basename, string[] archs, PrivilegeLevel level);
 		private extern static void stop_services (void * context);
 	}
 
@@ -286,9 +285,7 @@ namespace Frida {
 		}
 
 		public async bool can_handle_target (uint pid, Cancellable? cancellable) throws Error, IOError {
-			uint local_arch = sizeof (void *) == 8 ? 64 : 32;
-			uint remote_arch = WindowsProcess.is_x64 (pid) ? 64 : 32;
-			return local_arch == remote_arch;
+			return cpu_type_from_pid (pid) == Gum.NATIVE_CPU;
 		}
 
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,

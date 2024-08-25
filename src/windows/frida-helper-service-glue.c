@@ -2,10 +2,12 @@
 
 #include <windows.h>
 
-#if GLIB_SIZEOF_VOID_P == 8
-# define FRIDA_HELPER_SERVICE_ARCH "64"
+#if defined (HAVE_ARM64)
+# define FRIDA_HELPER_SERVICE_ARCH "arm64"
+#elif GLIB_SIZEOF_VOID_P == 8
+# define FRIDA_HELPER_SERVICE_ARCH "x86_64"
 #else
-# define FRIDA_HELPER_SERVICE_ARCH "32"
+# define FRIDA_HELPER_SERVICE_ARCH "x86"
 #endif
 
 #define STANDALONE_JOIN_TIMEOUT_MSEC (5 * 1000)
@@ -17,25 +19,23 @@ struct _FridaServiceContext
   gchar * service_basename;
 
   SC_HANDLE scm;
-  SC_HANDLE service32;
-  SC_HANDLE service64;
 
-  HANDLE standalone32;
-  HANDLE standalone64;
+  GQueue system_services;
+  GQueue standalone_services;
 };
 
 static void WINAPI frida_managed_helper_service_main (DWORD argc, WCHAR ** argv);
 static DWORD WINAPI frida_managed_helper_service_handle_control_code (DWORD control, DWORD event_type, void * event_data, void * context);
 static void frida_managed_helper_service_report_status (DWORD current_state, DWORD exit_code, DWORD wait_hint);
 
-static gboolean frida_register_and_start_services (FridaServiceContext * self);
+static gboolean frida_register_and_start_services (FridaServiceContext * self, gchar ** archs, gint archs_length);
 static void frida_stop_and_unregister_services (FridaServiceContext * self);
-static gboolean frida_spawn_standalone_services (FridaServiceContext * self);
+static gboolean frida_spawn_standalone_services (FridaServiceContext * self, gchar ** archs, gint archs_length);
 static gboolean frida_join_standalone_services (FridaServiceContext * self);
 static void frida_kill_standalone_services (FridaServiceContext * self);
 static void frida_release_standalone_services (FridaServiceContext * self);
 
-static gboolean frida_register_services (FridaServiceContext * self);
+static gboolean frida_register_services (FridaServiceContext * self, gchar ** archs, gint archs_length);
 static gboolean frida_unregister_services (FridaServiceContext * self);
 static gboolean frida_start_services (FridaServiceContext * self);
 static gboolean frida_stop_services (FridaServiceContext * self);
@@ -59,7 +59,7 @@ static WCHAR * frida_managed_helper_service_name = NULL;
 static SERVICE_STATUS_HANDLE frida_managed_helper_service_status_handle = NULL;
 
 void *
-frida_helper_manager_start_services (const char * service_basename, FridaPrivilegeLevel level)
+frida_helper_manager_start_services (const char * service_basename, gchar ** archs, gint archs_length, FridaPrivilegeLevel level)
 {
   FridaServiceContext * self;
 
@@ -72,7 +72,7 @@ frida_helper_manager_start_services (const char * service_basename, FridaPrivile
   {
     frida_unregister_stale_services (self);
 
-    if (!frida_register_and_start_services (self))
+    if (!frida_register_and_start_services (self, archs, archs_length))
     {
       CloseServiceHandle (self->scm);
       self->scm = NULL;
@@ -81,7 +81,7 @@ frida_helper_manager_start_services (const char * service_basename, FridaPrivile
 
   if (self->scm == NULL)
   {
-    if (!frida_spawn_standalone_services (self))
+    if (!frida_spawn_standalone_services (self, archs, archs_length))
     {
       frida_service_context_free (self);
       self = NULL;
@@ -138,15 +138,16 @@ char *
 frida_helper_service_derive_filename_for_suffix (const char * suffix)
 {
   WCHAR filename_utf16[MAX_PATH + 1] = { 0, };
-  gchar * name, * tmp;
+  gchar * name, * tail, * tmp;
   glong len;
 
   GetModuleFileNameW (NULL, filename_utf16, MAX_PATH);
 
   name = g_utf16_to_utf8 (filename_utf16, -1, NULL, &len, NULL);
-  if (g_str_has_suffix (name, "-32.exe") || g_str_has_suffix (name, "-64.exe"))
+  tail = strrchr (name, '-');
+  if (tail != NULL)
   {
-    name[len - 6] = '\0';
+    tail[1] = '\0';
     tmp = g_strconcat (name, suffix, ".exe", NULL);
     g_free (name);
     name = tmp;
@@ -293,9 +294,9 @@ frida_managed_helper_service_report_status (DWORD current_state, DWORD exit_code
 }
 
 static gboolean
-frida_register_and_start_services (FridaServiceContext * self)
+frida_register_and_start_services (FridaServiceContext * self, gchar ** archs, gint archs_length)
 {
-  if (!frida_register_services (self))
+  if (!frida_register_services (self, archs, archs_length))
     return FALSE;
 
   if (!frida_start_services (self))
@@ -315,44 +316,35 @@ frida_stop_and_unregister_services (FridaServiceContext * self)
 }
 
 static gboolean
-frida_spawn_standalone_services (FridaServiceContext * self)
+frida_spawn_standalone_services (FridaServiceContext * self, gchar ** archs, gint archs_length)
 {
-  HANDLE standalone32, standalone64;
+  gint i;
 
-  standalone32 = frida_spawn_standalone_service (self, "32");
-  if (standalone32 == NULL)
-    return FALSE;
-
-  if (frida_windows_system_is_x64 ())
+  for (i = 0; i != archs_length; i++)
   {
-    standalone64 = frida_spawn_standalone_service (self, "64");
-    if (standalone64 == NULL)
-    {
-      frida_kill_standalone_service (self, standalone32);
-      CloseHandle (standalone32);
-      return FALSE;
-    }
+    HANDLE service = frida_spawn_standalone_service (self, archs[i]);
+    if (service == NULL)
+      goto unable_to_spawn;
+    g_queue_push_tail (&self->standalone_services, service);
   }
-  else
-  {
-    standalone64 = NULL;
-  }
-
-  self->standalone32 = standalone32;
-  self->standalone64 = standalone64;
 
   return TRUE;
+
+unable_to_spawn:
+  {
+    frida_kill_standalone_services (self);
+    return FALSE;
+  }
 }
 
 static gboolean
 frida_join_standalone_services (FridaServiceContext * self)
 {
   gboolean success = TRUE;
+  GList * cur;
 
-  if (frida_windows_system_is_x64 ())
-    success &= frida_join_standalone_service (self, self->standalone64);
-
-  success &= frida_join_standalone_service (self, self->standalone32);
+  for (cur = self->standalone_services.head; cur != NULL; cur = cur->next)
+    success &= frida_join_standalone_service (self, cur->data);
 
   if (success)
     frida_release_standalone_services (self);
@@ -363,10 +355,10 @@ frida_join_standalone_services (FridaServiceContext * self)
 static void
 frida_kill_standalone_services (FridaServiceContext * self)
 {
-  if (frida_windows_system_is_x64 ())
-    frida_kill_standalone_service (self, self->standalone64);
+  GList * cur;
 
-  frida_kill_standalone_service (self, self->standalone32);
+  for (cur = self->standalone_services.head; cur != NULL; cur = cur->next)
+    frida_kill_standalone_service (self, cur->data);
 
   frida_release_standalone_services (self);
 }
@@ -374,63 +366,45 @@ frida_kill_standalone_services (FridaServiceContext * self)
 static void
 frida_release_standalone_services (FridaServiceContext * self)
 {
-  if (frida_windows_system_is_x64 ())
-  {
-    g_assert (self->standalone64 != NULL);
-    CloseHandle (self->standalone64);
-    self->standalone64 = NULL;
-  }
+  HANDLE service;
 
-  g_assert (self->standalone32 != NULL);
-  CloseHandle (self->standalone32);
-  self->standalone32 = NULL;
+  while ((service = g_queue_pop_tail (&self->standalone_services)) != NULL)
+    CloseHandle (service);
 }
 
 static gboolean
-frida_register_services (FridaServiceContext * self)
+frida_register_services (FridaServiceContext * self, gchar ** archs, gint archs_length)
 {
-  SC_HANDLE service32, service64;
+  gint i;
 
-  service32 = frida_register_service (self, "32");
-  if (service32 == NULL)
-    return FALSE;
-
-  if (frida_windows_system_is_x64 ())
+  for (i = 0; i != archs_length; i++)
   {
-    service64 = frida_register_service (self, "64");
-    if (service64 == NULL)
-    {
-      frida_unregister_service (self, service32);
-      CloseServiceHandle (service32);
-      return FALSE;
-    }
+    SC_HANDLE service = frida_register_service (self, archs[i]);
+    if (service == NULL)
+      goto unable_to_register;
+    g_queue_push_tail (&self->system_services, service);
   }
-  else
-  {
-    service64 = NULL;
-  }
-
-  self->service32 = service32;
-  self->service64 = service64;
 
   return TRUE;
+
+unable_to_register:
+  {
+    frida_unregister_services (self);
+    return FALSE;
+  }
 }
 
 static gboolean
 frida_unregister_services (FridaServiceContext * self)
 {
   gboolean success = TRUE;
+  SC_HANDLE service;
 
-  if (frida_windows_system_is_x64 ())
+  while ((service = g_queue_pop_tail (&self->system_services)) != NULL)
   {
-    success &= frida_unregister_service (self, self->service64);
-    CloseServiceHandle (self->service64);
-    self->service64 = NULL;
+    success &= frida_unregister_service (self, service);
+    CloseServiceHandle (service);
   }
-
-  success &= frida_unregister_service (self, self->service32);
-  CloseServiceHandle (self->service32);
-  self->service32 = NULL;
 
   return success;
 }
@@ -438,30 +412,31 @@ frida_unregister_services (FridaServiceContext * self)
 static gboolean
 frida_start_services (FridaServiceContext * self)
 {
-  if (!frida_start_service (self, self->service32))
-    return FALSE;
+  GList * cur;
 
-  if (frida_windows_system_is_x64 ())
+  for (cur = self->system_services.head; cur != NULL; cur = cur->next)
   {
-    if (!frida_start_service (self, self->service64))
-    {
-      frida_stop_service (self, self->service32);
-      return FALSE;
-    }
+    if (!frida_start_service (self, cur->data))
+      goto unable_to_start;
   }
 
   return TRUE;
+
+unable_to_start:
+  {
+    frida_stop_services (self);
+    return FALSE;
+  }
 }
 
 static gboolean
 frida_stop_services (FridaServiceContext * self)
 {
   gboolean success = TRUE;
+  GList * cur;
 
-  if (frida_windows_system_is_x64 ())
-    success &= frida_stop_service (self, self->service64);
-
-  success &= frida_stop_service (self, self->service32);
+  for (cur = self->system_services.head; cur != NULL; cur = cur->next)
+    success &= frida_stop_service (self, cur->data);
 
   return success;
 }
@@ -480,7 +455,7 @@ frida_register_service (FridaServiceContext * self, const gchar * suffix)
   servicename_utf8 = g_strconcat (self->service_basename, suffix, NULL);
   servicename = g_utf8_to_utf16 (servicename_utf8, -1, NULL, NULL, NULL);
 
-  displayname_utf8 = g_strdup_printf ("Frida %s-bit helper (%s)", suffix, servicename_utf8);
+  displayname_utf8 = g_strdup_printf ("Frida %s helper (%s)", suffix, servicename_utf8);
   displayname = g_utf8_to_utf16 (displayname_utf8, -1, NULL, NULL, NULL);
 
   filename_utf8 = frida_helper_service_derive_filename_for_suffix (suffix);
@@ -714,6 +689,7 @@ frida_service_context_new (const gchar * service_basename)
 
   self = g_slice_new0 (FridaServiceContext);
   self->service_basename = g_strdup (service_basename);
+  g_queue_init (&self->standalone_services);
 
   return self;
 }
@@ -721,11 +697,8 @@ frida_service_context_new (const gchar * service_basename)
 static void
 frida_service_context_free (FridaServiceContext * self)
 {
-  g_assert (self->standalone64 == NULL);
-  g_assert (self->standalone32 == NULL);
-
-  g_assert (self->service64 == NULL);
-  g_assert (self->service32 == NULL);
+  g_assert (g_queue_is_empty (&self->system_services));
+  g_assert (g_queue_is_empty (&self->standalone_services));
 
   if (self->scm != NULL)
     CloseServiceHandle (self->scm);

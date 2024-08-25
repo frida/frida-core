@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import struct
 
 
 def main(argv):
@@ -14,12 +15,28 @@ def main(argv):
     output_dir = Path(args.pop(0))
     priv_dir = Path(args.pop(0))
     resource_config = args.pop(0)
-    helper_modern, helper_legacy = [Path(p) if p else None for p in args[:2]]
+    helper_modern, helper_legacy, \
+            helper_emulated_modern, helper_emulated_legacy \
+            = [Path(p) if p else None for p in args[:4]]
 
     priv_dir.mkdir(exist_ok=True)
 
     embedded_assets = []
-    if host_os in {"macos", "ios", "watchos", "tvos"}:
+    if host_os == "windows":
+        pending_archs = {"arm64", "x86_64", "x86"}
+        for helper in {helper_modern, helper_legacy, helper_emulated_modern, helper_emulated_legacy}:
+            if helper is None:
+                continue
+            arch = detect_pefile_arch(helper)
+            embedded_helper = priv_dir / f"frida-helper-{arch}.exe"
+            shutil.copy(helper, embedded_helper)
+            embedded_assets += [embedded_helper]
+            pending_archs.remove(arch)
+        for missing_arch in pending_archs:
+            embedded_helper = priv_dir / f"frida-helper-{missing_arch}.exe"
+            embedded_helper.write_bytes(b"")
+            embedded_assets += [embedded_helper]
+    elif host_os in {"macos", "ios", "watchos", "tvos"}:
         embedded_helper = priv_dir / "frida-helper"
 
         if helper_modern is not None and helper_legacy is not None:
@@ -34,10 +51,8 @@ def main(argv):
 
         embedded_assets += [embedded_helper]
     else:
-        exe_suffix = ".exe" if host_os == "windows" else ""
-
-        embedded_helper_modern = priv_dir / f"frida-helper-64{exe_suffix}"
-        embedded_helper_legacy = priv_dir / f"frida-helper-32{exe_suffix}"
+        embedded_helper_modern = priv_dir / f"frida-helper-64"
+        embedded_helper_legacy = priv_dir / f"frida-helper-32"
 
         if helper_modern is not None:
             shutil.copy(helper_modern, embedded_helper_modern)
@@ -72,6 +87,22 @@ def pop_cmd_array_arg(args):
     if len(result) == 1 and not result[0]:
         return None
     return result
+
+
+def detect_pefile_arch(location):
+    with location.open(mode="rb") as pe:
+        pe.seek(0x3c)
+        e_lfanew, = struct.unpack("<I", pe.read(4))
+        pe.seek(e_lfanew + 4)
+        machine, = struct.unpack("<H", pe.read(2))
+    return PE_MACHINES[machine]
+
+
+PE_MACHINES = {
+    0x014c: "x86",
+    0x8664: "x86_64",
+    0xaa64: "arm64",
+}
 
 
 if __name__ == "__main__":

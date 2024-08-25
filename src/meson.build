@@ -44,6 +44,14 @@ if have_local_backend
     '@INPUT0@',
   ]
 
+  if helper_emulated_modern == 'auto'
+    helper_emulated_modern = ''
+  endif
+
+  if helper_emulated_legacy == 'auto'
+    helper_emulated_legacy = ''
+  endif
+
   if host_os_family == 'windows'
     backend_sources += [
       'windows' / 'windows-host-session.vala',
@@ -54,6 +62,7 @@ if have_local_backend
       'windows' / 'frida-helper-process-glue.c',
       'windows' / 'access-helpers.c',
     ]
+    backend_vala_args += '--pkg=frida-gum-windows-1.0'
 
     helper_backend_sources = [
       'windows' / 'frida-helper-backend.vala',
@@ -61,7 +70,10 @@ if have_local_backend
       'windows' / 'frida-helper-types.vala',
       'windows' / 'wait-handle-source.c',
     ]
-    helper_backend_vala_args = base_vala_args
+    helper_backend_vala_args = [
+      base_vala_args,
+      '--pkg=frida-gum-windows-1.0',
+    ]
     helper_backend = static_library('frida-helper-backend', helper_backend_sources,
       vala_args: helper_backend_vala_args,
       c_args: frida_component_cflags,
@@ -105,7 +117,7 @@ if have_local_backend
           'frida-data-helper-process.c',
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
-        command: embed_helper + [helper_modern, helper_legacy],
+        command: embed_helper + [helper_modern, helper_legacy, helper_emulated_modern, helper_emulated_legacy],
         depends: helper_depends,
       )
       backend_sources += [helper_process_data]
@@ -253,7 +265,7 @@ if have_local_backend
           'frida-data-helper-process.c',
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
-        command: embed_helper + [helper_modern, helper_legacy],
+        command: embed_helper + [helper_modern, helper_legacy, helper_emulated_modern, helper_emulated_legacy],
         depends: helper_depends,
       )
       backend_sources += [helper_process_data]
@@ -406,7 +418,7 @@ if have_local_backend
           'frida-data-helper-process.c',
           'frida-data-helper-process-blob' + resource_blob_extension,
         ],
-        command: embed_helper + [helper_modern, helper_legacy],
+        command: embed_helper + [helper_modern, helper_legacy, helper_emulated_modern, helper_emulated_legacy],
         depends: helper_depends,
       )
       backend_sources += [helper_process_data]

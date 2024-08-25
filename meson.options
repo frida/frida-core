@@ -68,13 +68,25 @@ option('compat',
 option('helper_modern',
   type: 'string',
   value: 'auto',
-  description: 'Prebuilt frida-helper to embed for use on modern systems'
+  description: 'Prebuilt frida-helper to embed for supporting modern targets'
 )
 
 option('helper_legacy',
   type: 'string',
   value: 'auto',
-  description: 'Prebuilt frida-helper to embed for use on legacy systems'
+  description: 'Prebuilt frida-helper to embed for supporting legacy targets'
+)
+
+option('helper_emulated_modern',
+  type: 'string',
+  value: 'auto',
+  description: 'Prebuilt frida-helper to embed for supporting modern emulated targets'
+)
+
+option('helper_emulated_legacy',
+  type: 'string',
+  value: 'auto',
+  description: 'Prebuilt frida-helper to embed for supporting legacy emulated targets'
 )
 
 option('agent_modern',
