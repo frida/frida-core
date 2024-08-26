@@ -166,7 +166,23 @@ namespace Frida {
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
 			var path_template = agent.get_path_template ();
-			var agent_path = path_template.expand (sizeof (void *) == 8 ? "64" : "32");
+
+			unowned string arch;
+			switch (Gum.NATIVE_CPU) {
+				case ARM64:
+					arch = "arm64";
+					break;
+				case AMD64:
+					arch = "x86_64";
+					break;
+				case IA32:
+					arch = "x86";
+					break;
+				default:
+					assert_not_reached ();
+			}
+
+			var agent_path = path_template.expand (arch);
 
 			system_session_container = yield AgentContainer.create (agent_path, cancellable);
 
