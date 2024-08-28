@@ -1931,6 +1931,11 @@ namespace Frida {
 			try {
 				yield suspend (null);
 				close ();
+			} catch (Error e) {
+				// If the process is gone, then there's no point in retrying.
+				if (e is Error.PROCESS_NOT_FOUND) {
+					attach_state = ALREADY_ATTACHED;
+				}
 			} catch (GLib.Error e) {
 			}
 		}
