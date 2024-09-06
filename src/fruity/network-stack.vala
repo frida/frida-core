@@ -288,13 +288,13 @@ namespace Frida.Fruity {
 		internal LWIP.ErrorCode perform_on_lwip_thread (owned WorkFunc work) {
 			var req = new Request ((owned) work);
 
-			lock (requests)
-				requests.offer (req);
-
-			if (Thread.self<bool> () != lwip_thread)
+			if (Thread.self<bool> () == lwip_thread) {
+				perform_request (req);
+			} else {
+				lock (requests)
+					requests.offer (req);
 				LWIP.Runtime.schedule (perform_next_request);
-			else
-				perform_next_request ();
+			}
 
 			return req.join ();
 		}
@@ -307,6 +307,10 @@ namespace Frida.Fruity {
 			lock (requests)
 				req = requests.poll ();
 
+			perform_request (req);
+		}
+
+		private static void perform_request (Request req) {
 			LWIP.ErrorCode err = req.work ();
 			req.complete (err);
 		}
