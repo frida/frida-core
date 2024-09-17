@@ -2,19 +2,15 @@ top_srcdir := ../../..
 releng := $(top_srcdir)/releng
 
 BUILDDIR ?= $(top_srcdir)/build
-FRIDA_MONOREPO ?= $(top_srcdir)/..
 
 ifdef FRIDA_HOST
-host_os := $(shell echo $(FRIDA_HOST) | cut -f1 -d"-")
-host_arch := $(shell echo $(FRIDA_HOST) | cut -f2 -d"-")
+host_machine := $(FRIDA_HOST)
 else
-host_os := $(shell $(releng)/detect-os.sh)
-host_arch := $(shell $(releng)/detect-arch.sh)
+host_machine := $(shell basename $$(ls -1 $(BUILDDIR)/frida-linux-*.txt | tail -1) | cut -d"." -f1 | cut -d"-" -f2-)
 endif
+host_arch := $(shell echo $(host_machine) | cut -d"-" -f2)
 
-crossfile := $(shell test -d "$(BUILDDIR)" \
-		&& echo "$(BUILDDIR)/frida-$(host_os)-$(host_arch).txt" \
-		|| echo $(FRIDA_MONOREPO)/build/frida*-$(host_os)-$(host_arch).txt)
+crossfile := $(BUILDDIR)/frida-$(host_machine).txt
 
 build: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
