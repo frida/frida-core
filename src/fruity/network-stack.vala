@@ -561,9 +561,8 @@ namespace Frida.Fruity {
 					_state = CLOSED;
 					update_events ();
 
-					if (!established.future.ready) {
+					if (!established.future.ready)
 						established.reject (parse_error (err));
-					}
 
 					return Source.REMOVE;
 				});
