@@ -1099,13 +1099,17 @@ namespace Frida.Fruity {
 			try {
 				bool supported_by_os = true;
 				if (device != null) {
-					var lockdown = yield LockdownClient.open (device, cancellable);
-					yield lockdown.start_session (cancellable);
-					var response = yield lockdown.get_value (null, null, cancellable);
-					Fruity.PlistDict properties = response.get_dict ("Value");
-					if (properties.get_string ("ProductName") == "iPhone OS") {
-						uint ios_major_version = uint.parse (properties.get_string ("ProductVersion").split (".")[0]);
-						supported_by_os = ios_major_version >= 17;
+					try {
+						var lockdown = yield LockdownClient.open (device, cancellable);
+						yield lockdown.start_session (cancellable);
+						var response = yield lockdown.get_value (null, null, cancellable);
+						Fruity.PlistDict properties = response.get_dict ("Value");
+						if (properties.get_string ("ProductName") == "iPhone OS") {
+							uint ios_major_version = uint.parse (properties.get_string ("ProductVersion").split (".")[0]);
+							supported_by_os = ios_major_version >= 17;
+						}
+					} catch (LockdownError e) {
+						throw new Error.PERMISSION_DENIED ("%s", e.message);
 					}
 				}
 
