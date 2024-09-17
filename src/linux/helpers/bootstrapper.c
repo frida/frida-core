@@ -550,7 +550,9 @@ frida_infer_rtld_flavor_from_filename (const char * name)
   if (frida_str_has_prefix (name, "ld-uClibc"))
     return FRIDA_RTLD_UCLIBC;
 
-  if (strcmp (name, "libc.so") == 0)
+  if (strcmp (name, "libc.so") == 0 ||
+      frida_str_has_prefix (name, "libc.musl") ||
+      frida_str_has_prefix (name, "ld-musl"))
     return FRIDA_RTLD_MUSL;
 
   if (strcmp (name, "ld-android.so") == 0)
@@ -607,7 +609,9 @@ frida_path_is_libc (const char * path, FridaRtldFlavor rtld_flavor)
   else
     name = path;
 
-  return frida_str_has_prefix (name, "libc.so");
+  return frida_str_has_prefix (name, "libc.so") ||
+      frida_str_has_prefix (name, "libc.musl") ||
+      frida_str_has_prefix (name, "ld-musl");
 }
 
 static ssize_t
