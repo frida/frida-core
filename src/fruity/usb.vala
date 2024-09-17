@@ -7,6 +7,11 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public UsbDeviceBackend backend {
+			get;
+			construct;
+		}
+
 		public LibUSB.DeviceHandle? handle {
 			get {
 				return _handle;
@@ -29,6 +34,8 @@ namespace Frida.Fruity {
 		private LibUSB.DeviceHandle? _handle;
 		private string _udid;
 		private uint16 _default_language_id;
+		private uint num_pending_operations;
+		private Promise<bool>? pending_operations_completed;
 
 		private enum AppleSpecificRequest {
 			GET_MODE = 0x45,
@@ -38,8 +45,9 @@ namespace Frida.Fruity {
 		private const string MODE_INITIAL_UNTETHERED	= "3:3:3:0"; // => 5:3:3:0
 		private const string MODE_INITIAL_TETHERED	= "4:4:3:4"; // => 5:4:3:4
 
-		public static async UsbDevice open (LibUSB.Device raw_device, Cancellable? cancellable = null) throws Error, IOError {
-			var device = new UsbDevice (raw_device);
+		public static async UsbDevice open (LibUSB.Device raw_device, UsbDeviceBackend backend, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var device = new UsbDevice (raw_device, backend);
 
 			try {
 				yield device.init_async (Priority.DEFAULT, cancellable);
@@ -50,8 +58,8 @@ namespace Frida.Fruity {
 			return device;
 		}
 
-		private UsbDevice (LibUSB.Device raw_device) {
-			Object ();
+		private UsbDevice (LibUSB.Device raw_device, UsbDeviceBackend backend) {
+			Object (backend: backend);
 			_raw_device = raw_device;
 		}
 
@@ -71,7 +79,17 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (num_pending_operations != 0) {
+				pending_operations_completed = new Promise<bool> ();
+				try {
+					yield pending_operations_completed.future.wait_async (cancellable);
+				} catch (Error e) {
+					assert_not_reached ();
+				}
+				pending_operations_completed = null;
+			}
+
 			_handle = null;
 			_raw_device = null;
 		}
@@ -174,7 +192,8 @@ namespace Frida.Fruity {
 
 		public async Bytes control_transfer (uint8 request_type, uint8 request, uint16 val, uint16 index, uint16 length,
 				uint timeout, Cancellable? cancellable) throws Error, IOError {
-			var transfer = new LibUSB.Transfer ();
+			var op = backend.allocate_usb_operation ();
+			unowned LibUSB.Transfer transfer = op.transfer;
 			var ready_closure = new TransferReadyClosure (control_transfer.callback);
 
 			var buffer = new uint8[sizeof (LibUSB.ControlSetup) + length];
@@ -190,7 +209,9 @@ namespace Frida.Fruity {
 
 			try {
 				Usb.check (transfer.submit (), "Failed to submit control transfer");
+				on_operation_started ();
 				yield;
+				on_operation_ended ();
 			} finally {
 				cancel_source.destroy ();
 			}
@@ -202,7 +223,8 @@ namespace Frida.Fruity {
 
 		public async size_t bulk_transfer (uint8 endpoint, uint8[] buffer, uint timeout, Cancellable? cancellable)
 				throws Error, IOError {
-			var transfer = new LibUSB.Transfer ();
+			var op = backend.allocate_usb_operation ();
+			unowned LibUSB.Transfer transfer = op.transfer;
 			var ready_closure = new TransferReadyClosure (bulk_transfer.callback);
 
 			transfer.fill_bulk_transfer (_handle, endpoint, buffer, on_transfer_ready, ready_closure, timeout);
@@ -216,7 +238,9 @@ namespace Frida.Fruity {
 
 			try {
 				Usb.check (transfer.submit (), "Failed to submit bulk transfer");
+				on_operation_started ();
 				yield;
+				on_operation_ended ();
 			} finally {
 				cancel_source.destroy ();
 			}
@@ -224,6 +248,16 @@ namespace Frida.Fruity {
 			Usb.check_transfer (transfer.status, "Bulk transfer failed");
 
 			return transfer.actual_length;
+		}
+
+		private void on_operation_started () {
+			num_pending_operations++;
+		}
+
+		private void on_operation_ended () {
+			num_pending_operations--;
+			if (num_pending_operations == 0 && pending_operations_completed != null)
+				pending_operations_completed.resolve (true);
 		}
 
 		private static void on_transfer_ready (LibUSB.Transfer transfer) {
@@ -249,6 +283,16 @@ namespace Frida.Fruity {
 				});
 				source.attach (main_context);
 			}
+		}
+	}
+
+	internal interface UsbDeviceBackend : Object {
+		public abstract UsbOperation allocate_usb_operation ();
+	}
+
+	internal interface UsbOperation : Object {
+		public abstract LibUSB.Transfer transfer {
+			get;
 		}
 	}
 

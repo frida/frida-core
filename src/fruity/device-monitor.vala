@@ -708,7 +708,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private sealed class PortableCoreDeviceBackend : Object, Backend {
+	private sealed class PortableCoreDeviceBackend : Object, Backend, UsbDeviceBackend {
 		public bool supports_modeswitch {
 			get {
 				return LibUSB.has_capability (HAS_HOTPLUG) != 0;
@@ -719,6 +719,7 @@ namespace Frida.Fruity {
 
 		private Gee.Set<PortableCoreDeviceUsbTransport> usb_transports = new Gee.HashSet<PortableCoreDeviceUsbTransport> ();
 		private Promise<bool> usb_started = new Promise<bool> ();
+		private Promise<bool> usb_stopped = new Promise<bool> ();
 		private bool modeswitch_allowed = false;
 		private Promise<bool>? modeswitch_activated;
 		private Gee.Set<string>? modeswitch_udids_pending;
@@ -731,6 +732,7 @@ namespace Frida.Fruity {
 		private Gee.Map<uint32, LibUSB.Device> polled_usb_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
 		private Source? polled_usb_timer;
 		private uint polled_usb_outdated = 0;
+		private Gee.Set<unowned PendingUsbOperation> pending_usb_ops = new Gee.HashSet<unowned PendingUsbOperation> ();
 
 		private PairingBrowser network_browser = PairingBrowser.make_default ();
 		private Gee.Map<string, PortableCoreDeviceNetworkTransport> network_transports =
@@ -746,6 +748,7 @@ namespace Frida.Fruity {
 			CREATED,
 			STARTING,
 			STARTED,
+			FLUSHING,
 			STOPPING,
 			STOPPED,
 		}
@@ -777,7 +780,7 @@ namespace Frida.Fruity {
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
-			state = STOPPING;
+			state = FLUSHING;
 
 			io_cancellable.cancel ();
 
@@ -790,17 +793,18 @@ namespace Frida.Fruity {
 				yield transport.close (cancellable);
 			network_transports.clear ();
 
-			usb_worker.join ();
-			usb_worker = null;
-
-			if (polled_usb_timer != null) {
-				polled_usb_timer.destroy ();
-				polled_usb_timer = null;
-			}
-
 			foreach (var transport in usb_transports.to_array ())
 				yield transport.close (cancellable);
 			usb_transports.clear ();
+
+			try {
+				yield usb_stopped.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			usb_worker.join ();
+			usb_worker = null;
 
 			usb_context = null;
 
@@ -833,6 +837,7 @@ namespace Frida.Fruity {
 			if (LibUSB.Context.init (out usb_context) != SUCCESS) {
 				schedule_on_frida_thread (() => {
 					usb_started.resolve (true);
+					usb_stopped.resolve (true);
 					return Source.REMOVE;
 				});
 				return;
@@ -840,6 +845,7 @@ namespace Frida.Fruity {
 
 			AtomicUint.inc (ref pending_usb_device_arrivals);
 
+			bool callbacks_registered = true;
 			if (LibUSB.has_capability (HAS_HOTPLUG) != 0) {
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
 					PRODUCT_ID_IPHONE, LibUSB.HotPlugEvent.MATCH_ANY, on_usb_hotplug_event, out iphone_callback);
@@ -871,7 +877,30 @@ namespace Frida.Fruity {
 
 				if (AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
 					refresh_polled_usb_devices ();
+
+				if (state == FLUSHING) {
+					if (callbacks_registered) {
+						usb_context.hotplug_deregister_callback (iphone_callback);
+						usb_context.hotplug_deregister_callback (ipad_callback);
+						callbacks_registered = false;
+					}
+
+					if (polled_usb_timer != null) {
+						polled_usb_timer.destroy ();
+						polled_usb_timer = null;
+					}
+
+					lock (pending_usb_ops) {
+						if (pending_usb_ops.is_empty)
+							state = STOPPING;
+					}
+				}
 			}
+
+			schedule_on_frida_thread (() => {
+				usb_stopped.resolve (true);
+				return Source.REMOVE;
+			});
 		}
 
 		private int on_usb_hotplug_event (LibUSB.Context ctx, LibUSB.Device device, LibUSB.HotPlugEvent event) {
@@ -922,7 +951,7 @@ namespace Frida.Fruity {
 				}
 
 				try {
-					device = yield UsbDevice.open (raw_device, io_cancellable);
+					device = yield UsbDevice.open (raw_device, this, io_cancellable);
 
 					if (modeswitch_allowed && yield device.maybe_modeswitch (io_cancellable))
 						break;
@@ -989,6 +1018,19 @@ namespace Frida.Fruity {
 			polled_usb_devices = current_devices;
 		}
 
+		private UsbOperation allocate_usb_operation () {
+			var op = new PendingUsbOperation (this);
+			lock (pending_usb_ops)
+				pending_usb_ops.add (op);
+			return op;
+		}
+
+		private void on_usb_operation_complete (PendingUsbOperation op) {
+			lock (pending_usb_ops)
+				pending_usb_ops.remove (op);
+			usb_context.interrupt_event_handler ();
+		}
+
 		private static uint32 make_usb_device_id (LibUSB.Device device, LibUSB.DeviceDescriptor desc) {
 			return ((uint32) device.get_port_number () << 24) |
 				((uint32) device.get_device_address () << 16) |
@@ -1016,6 +1058,34 @@ namespace Frida.Fruity {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
 			source.attach (main_context);
+		}
+
+		private class PendingUsbOperation : Object, UsbOperation {
+			public LibUSB.Transfer transfer {
+				get {
+					return _transfer;
+				}
+			}
+
+			private weak PortableCoreDeviceBackend backend;
+			private LibUSB.Transfer _transfer;
+
+			public PendingUsbOperation (PortableCoreDeviceBackend backend) {
+				this.backend = backend;
+			}
+
+			construct {
+				_transfer = new LibUSB.Transfer ();
+			}
+
+			public override void dispose () {
+				if (_transfer != null) {
+					_transfer = null;
+					backend.on_usb_operation_complete (this);
+				}
+
+				base.dispose ();
+			}
 		}
 	}
 
@@ -1081,7 +1151,7 @@ namespace Frida.Fruity {
 
 			ncm_peer = null;
 
-			usb_device.close ();
+			yield usb_device.close (cancellable);
 		}
 
 		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
