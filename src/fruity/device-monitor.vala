@@ -1061,6 +1061,7 @@ namespace Frida.Fruity {
 		}
 
 		private Promise<Tunnel>? tunnel_request;
+		private NcmPeer? ncm_peer;
 
 		public PortableCoreDeviceUsbTransport (UsbDevice device, PairingStore store) {
 			Object (usb_device: device, pairing_store: store);
@@ -1077,6 +1078,8 @@ namespace Frida.Fruity {
 					tunnel_request = null;
 				}
 			}
+
+			ncm_peer = null;
 
 			usb_device.close ();
 		}
@@ -1108,7 +1111,10 @@ namespace Frida.Fruity {
 
 				PortableUsbTunnel? tunnel = null;
 				if (supported_by_os) {
-					tunnel = new PortableUsbTunnel (usb_device, pairing_store);
+					if (ncm_peer == null)
+						ncm_peer = yield NcmPeer.locate (usb_device, cancellable);
+
+					tunnel = new PortableUsbTunnel (usb_device, ncm_peer, pairing_store);
 					try {
 						yield tunnel.open (cancellable);
 					} catch (Error e) {
@@ -1129,99 +1135,24 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private sealed class PortableUsbTunnel : Object, Tunnel {
-		public UsbDevice usb_device {
-			get;
-			construct;
-		}
+	private class NcmPeer {
+		public NetworkStack netstack;
+		public InetAddress ip;
+		public UsbNcmDriver? ncm;
 
-		public PairingStore pairing_store {
-			get;
-			construct;
-		}
-
-		public DiscoveryService discovery {
-			get {
-				return _discovery_service;
-			}
-		}
-
-		private UsbNcmDriver? ncm;
-		private TunnelConnection? tunnel_connection;
-		private DiscoveryService? _discovery_service;
-
-		public PortableUsbTunnel (UsbDevice device, PairingStore store) {
-			Object (usb_device: device, pairing_store: store);
-		}
-
-		public async void open (Cancellable? cancellable) throws Error, IOError {
-			var peer = yield locate_ncm_peer (cancellable);
-
-			var netstack = peer.netstack;
-
-			var bootstrap_rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: peer.ip,
-				port: 58783,
-				scope_id: netstack.scope_id
-			);
-			var bootstrap_stream = yield netstack.open_tcp_connection (bootstrap_rsd_endpoint, cancellable);
-			var bootstrap_disco = yield DiscoveryService.open (bootstrap_stream, cancellable);
-
-			var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
-			var tunnel_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: peer.ip,
-				port: tunnel_service.port,
-				scope_id: netstack.scope_id
-			);
-			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
-			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
-
-			TunnelConnection tc = yield pairing_service.open_tunnel (peer.ip, netstack, cancellable);
-
-			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tc.remote_address,
-				port: tc.remote_rsd_port,
-				scope_id: tc.tunnel_netstack.scope_id
-			);
-			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
-			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
-
-			tunnel_connection = tc;
-			_discovery_service = disco;
-		}
-
-		public async void close (Cancellable? cancellable) throws IOError {
-			_discovery_service.close ();
-
-			tunnel_connection.cancel ();
-
+		~NcmPeer () {
 			if (ncm != null)
 				ncm.close ();
 		}
 
-		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			var netstack = tunnel_connection.tunnel_netstack;
-			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tunnel_connection.remote_address,
-				port: port,
-				scope_id: netstack.scope_id
-			);
-			return yield netstack.open_tcp_connection (endpoint, cancellable);
-		}
-
-		private async NcmPeer locate_ncm_peer (Cancellable? cancellable) throws Error, IOError {
-			var device_ifaddrs = detect_ncm_ifaddrs_on_system ();
+		public static async NcmPeer locate (UsbDevice usb_device, Cancellable? cancellable) throws Error, IOError {
+			var device_ifaddrs = detect_ncm_ifaddrs_on_system (usb_device);
 			if (device_ifaddrs.size == 2)
-				return yield locate_ncm_peer_on_system_netifs (device_ifaddrs, cancellable);
-			return yield establish_ncm_peer_using_our_driver (cancellable);
+				return yield locate_on_system_netifs (device_ifaddrs, cancellable);
+			return yield establish_using_our_driver (usb_device, cancellable);
 		}
 
-		private class NcmPeer {
-			public NetworkStack netstack;
-			public InetAddress ip;
-		}
-
-		private Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system () throws Error {
+		private static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
@@ -1245,7 +1176,7 @@ namespace Frida.Fruity {
 			return device_ifaddrs;
 		}
 
-		private async NcmPeer locate_ncm_peer_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
+		private static async NcmPeer locate_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
 				throws Error, IOError {
 			var main_context = MainContext.ref_thread_default ();
 
@@ -1258,18 +1189,18 @@ namespace Frida.Fruity {
 				var handler = probe.response_received.connect ((probe, response, sender) => {
 					successful_probe = probe;
 					observed_sender = sender;
-					locate_ncm_peer_on_system_netifs.callback ();
+					locate_on_system_netifs.callback ();
 				});
 				probes.add (probe);
 				handlers[probe] = handler;
 			}
 
 			var timeout_source = new TimeoutSource.seconds (2);
-			timeout_source.set_callback (locate_ncm_peer_on_system_netifs.callback);
+			timeout_source.set_callback (locate_on_system_netifs.callback);
 			timeout_source.attach (main_context);
 
 			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (locate_ncm_peer_on_system_netifs.callback);
+			cancel_source.set_callback (locate_on_system_netifs.callback);
 			cancel_source.attach (main_context);
 
 			yield;
@@ -1289,6 +1220,7 @@ namespace Frida.Fruity {
 			return new NcmPeer () {
 				netstack = successful_probe.netstack,
 				ip = observed_sender.get_address (),
+				ncm = null,
 			};
 		}
 
@@ -1345,22 +1277,23 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private async NcmPeer establish_ncm_peer_using_our_driver (Cancellable? cancellable) throws Error, IOError {
-			ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+		private static async NcmPeer establish_using_our_driver (UsbDevice usb_device, Cancellable? cancellable)
+				throws Error, IOError {
+			var ncm = yield UsbNcmDriver.open (usb_device, cancellable);
 
 			if (ncm.remote_ipv6_address == null) {
 				ulong change_handler = ncm.notify["remote-ipv6-address"].connect ((obj, pspec) => {
-					establish_ncm_peer_using_our_driver.callback ();
+					establish_using_our_driver.callback ();
 				});
 
 				var main_context = MainContext.get_thread_default ();
 
 				var timeout_source = new TimeoutSource.seconds (2);
-				timeout_source.set_callback (establish_ncm_peer_using_our_driver.callback);
+				timeout_source.set_callback (establish_using_our_driver.callback);
 				timeout_source.attach (main_context);
 
 				var cancel_source = new CancellableSource (cancellable);
-				cancel_source.set_callback (establish_ncm_peer_using_our_driver.callback);
+				cancel_source.set_callback (establish_using_our_driver.callback);
 				cancel_source.attach (main_context);
 
 				yield;
@@ -1377,7 +1310,8 @@ namespace Frida.Fruity {
 
 			return new NcmPeer () {
 				netstack = ncm.netstack,
-				ip = ncm.remote_ipv6_address
+				ip = ncm.remote_ipv6_address,
+				ncm = ncm,
 			};
 		}
 
@@ -1407,6 +1341,94 @@ namespace Frida.Fruity {
 				.append_uint16 (record_type)
 				.append_uint16 (dns_class)
 				.build ();
+		}
+	}
+
+	private sealed class PortableUsbTunnel : Object, Tunnel {
+		public UsbDevice usb_device {
+			get;
+			construct;
+		}
+
+		public NcmPeer ncm_peer {
+			get;
+			construct;
+		}
+
+		public PairingStore pairing_store {
+			get;
+			construct;
+		}
+
+		public DiscoveryService discovery {
+			get {
+				return _discovery_service;
+			}
+		}
+
+		private UsbNcmDriver? ncm;
+		private TunnelConnection? tunnel_connection;
+		private DiscoveryService? _discovery_service;
+
+		public PortableUsbTunnel (UsbDevice device, NcmPeer peer, PairingStore store) {
+			Object (
+				usb_device: device,
+				ncm_peer: peer,
+				pairing_store: store
+			);
+		}
+
+		public async void open (Cancellable? cancellable) throws Error, IOError {
+			var netstack = ncm_peer.netstack;
+
+			var bootstrap_rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: ncm_peer.ip,
+				port: 58783,
+				scope_id: netstack.scope_id
+			);
+			var bootstrap_stream = yield netstack.open_tcp_connection (bootstrap_rsd_endpoint, cancellable);
+			var bootstrap_disco = yield DiscoveryService.open (bootstrap_stream, cancellable);
+
+			var tunnel_service = bootstrap_disco.get_service ("com.apple.internal.dt.coredevice.untrusted.tunnelservice");
+			var tunnel_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: ncm_peer.ip,
+				port: tunnel_service.port,
+				scope_id: netstack.scope_id
+			);
+			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
+			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
+
+			TunnelConnection tc = yield pairing_service.open_tunnel (ncm_peer.ip, netstack, cancellable);
+
+			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tc.remote_address,
+				port: tc.remote_rsd_port,
+				scope_id: tc.tunnel_netstack.scope_id
+			);
+			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
+			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+
+			tunnel_connection = tc;
+			_discovery_service = disco;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			_discovery_service.close ();
+
+			tunnel_connection.cancel ();
+
+			if (ncm != null)
+				ncm.close ();
+		}
+
+		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
+			var netstack = tunnel_connection.tunnel_netstack;
+			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: tunnel_connection.remote_address,
+				port: port,
+				scope_id: netstack.scope_id
+			);
+			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 	}
 
