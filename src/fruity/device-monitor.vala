@@ -1190,6 +1190,7 @@ namespace Frida.Fruity {
 						ncm_peer = yield NcmPeer.locate (usb_device, cancellable);
 
 					tunnel = new PortableUsbTunnel (usb_device, ncm_peer, pairing_store);
+					tunnel.lost.connect (on_tunnel_lost);
 					try {
 						yield tunnel.open (cancellable);
 					} catch (Error e) {
@@ -1207,6 +1208,10 @@ namespace Frida.Fruity {
 
 				throw_api_error (e);
 			}
+		}
+
+		private void on_tunnel_lost () {
+			tunnel_request = null;
 		}
 	}
 
@@ -1420,6 +1425,8 @@ namespace Frida.Fruity {
 	}
 
 	private sealed class PortableUsbTunnel : Object, Tunnel {
+		public signal void lost ();
+
 		public UsbDevice usb_device {
 			get;
 			construct;
@@ -1474,6 +1481,7 @@ namespace Frida.Fruity {
 			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (ncm_peer.ip, netstack, cancellable);
+			tc.close.connect (on_tunnel_connection_close);
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
@@ -1504,6 +1512,10 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 			return yield netstack.open_tcp_connection (endpoint, cancellable);
+		}
+
+		private void on_tunnel_connection_close () {
+			lost ();
 		}
 	}
 

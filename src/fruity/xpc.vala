@@ -1753,6 +1753,8 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class TunnelConnection : Object, AsyncInitable {
+		public signal void close ();
+
 		public InetSocketAddress address {
 			get;
 			construct;
@@ -2021,6 +2023,8 @@ namespace Frida.Fruity {
 		}
 
 		public void cancel () {
+			if (connection != null)
+				close ();
 			connection = null;
 			socket = null;
 
