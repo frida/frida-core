@@ -814,7 +814,6 @@ namespace Frida.Fruity {
 		public async void activate_modeswitch_support (Cancellable? cancellable) throws IOError {
 			modeswitch_allowed = true;
 
-			modeswitch_activated = new Promise<bool> ();
 			modeswitch_udids_pending = new Gee.HashSet<string> ();
 			foreach (var transport in usb_transports.to_array ()) {
 				var usb_device = transport.usb_device;
@@ -825,12 +824,15 @@ namespace Frida.Fruity {
 				}
 			}
 			if (!modeswitch_udids_pending.is_empty) {
+				modeswitch_activated = new Promise<bool> ();
 				try {
 					yield modeswitch_activated.future.wait_async (cancellable);
 				} catch (Error e) {
 					assert_not_reached ();
 				}
+				modeswitch_activated = null;
 			}
+			modeswitch_udids_pending = null;
 		}
 
 		private void perform_usb_work () {
@@ -971,9 +973,8 @@ namespace Frida.Fruity {
 			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
 				usb_started.resolve (true);
 
-			if (device != null && modeswitch_udids_pending != null) {
-				modeswitch_udids_pending.remove (device.udid);
-				if (modeswitch_udids_pending.is_empty)
+			if (device != null && modeswitch_udids_pending != null && modeswitch_udids_pending.remove (device.udid)) {
+				if (modeswitch_udids_pending.is_empty && modeswitch_activated != null)
 					modeswitch_activated.resolve (true);
 			}
 		}
