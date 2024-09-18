@@ -351,6 +351,10 @@ namespace Frida.Fruity {
 				.build ();
 
 			var start_response = yield request_pairing_data (start_payload, cancellable);
+			if (start_response.has_member ("error")) {
+				yield notify_pair_verify_failed (cancellable);
+				return null;
+			}
 			uint8[] raw_device_pubkey = start_response.read_member ("public-key").get_data_value ().get_data ();
 			start_response.end_member ();
 			var device_pubkey = new Key.from_raw_public_key (X25519, null, raw_device_pubkey);
@@ -402,23 +406,27 @@ namespace Frida.Fruity {
 
 			ObjectReader finish_response = yield request_pairing_data (finish_payload, cancellable);
 			if (finish_response.has_member ("error")) {
-				yield post_plain (transport.make_object_builder ()
-					.begin_dictionary ()
-						.set_member_name ("event")
-						.begin_dictionary ()
-							.set_member_name ("_0")
-							.begin_dictionary ()
-								.set_member_name ("pairVerifyFailed")
-								.begin_dictionary ()
-								.end_dictionary ()
-							.end_dictionary ()
-						.end_dictionary ()
-					.end_dictionary ()
-					.build (), cancellable);
+				yield notify_pair_verify_failed (cancellable);
 				return null;
 			}
 
 			return shared_key;
+		}
+
+		private async void notify_pair_verify_failed (Cancellable? cancellable) throws Error, IOError {
+			yield post_plain (transport.make_object_builder ()
+				.begin_dictionary ()
+					.set_member_name ("event")
+					.begin_dictionary ()
+						.set_member_name ("_0")
+						.begin_dictionary ()
+							.set_member_name ("pairVerifyFailed")
+							.begin_dictionary ()
+							.end_dictionary ()
+						.end_dictionary ()
+					.end_dictionary ()
+				.end_dictionary ()
+				.build (), cancellable);
 		}
 
 		private async Bytes setup_manual_pairing (Cancellable? cancellable) throws Error, IOError {
