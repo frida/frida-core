@@ -14,6 +14,8 @@ namespace Frida.Fruity {
 		private Promise<Variant> handshake_promise = new Promise<Variant> ();
 		private Variant handshake_body;
 
+		private Cancellable io_cancellable = new Cancellable ();
+
 		public static async DiscoveryService open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
 			var service = new DiscoveryService (stream);
 
@@ -42,6 +44,7 @@ namespace Frida.Fruity {
 		}
 
 		public void close () {
+			io_cancellable.cancel ();
 			connection.cancel ();
 		}
 
@@ -87,8 +90,30 @@ namespace Frida.Fruity {
 				reader.read_member ("MessageType");
 				unowned string message_type = reader.get_string_value ();
 
-				if (message_type == "Handshake")
+				if (message_type == "Handshake") {
 					handshake_promise.resolve (msg.body);
+
+					connection.post.begin (
+						new XpcBodyBuilder ()
+							.begin_dictionary ()
+								.set_member_name ("MessageType")
+								.add_string_value ("Handshake")
+								.set_member_name ("MessagingProtocolVersion")
+								.add_uint64_value (5)
+								.set_member_name ("Services")
+								.begin_dictionary ()
+								.end_dictionary ()
+								.set_member_name ("Properties")
+								.begin_dictionary ()
+									.set_member_name ("RemoteXPCVersionFlags")
+									.add_uint64_value (0x100000000000006)
+								.end_dictionary ()
+								.set_member_name ("UUID")
+								.add_uuid_value (make_random_v4_uuid ())
+							.end_dictionary ()
+							.build (),
+						io_cancellable);
+				}
 			} catch (Error e) {
 			}
 		}
@@ -3777,5 +3802,16 @@ namespace Frida.Fruity {
 		}
 
 		return result.str;
+	}
+
+	private uint8[] make_random_v4_uuid () {
+		uint8 uuid[16];
+		OpenSSL.Rng.generate (uuid);
+
+		const uint8 uuid_version = 4;
+		uuid[6] = (uuid_version << 4) | (uuid[6] & 0xf);
+		uuid[8] = 0x80 | (uuid[8] & 0x3f);
+
+		return uuid;
 	}
 }
