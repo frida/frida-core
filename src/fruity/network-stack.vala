@@ -765,10 +765,12 @@ namespace Frida.Fruity {
 						});
 					}
 
-					mutex.lock ();
-					while (!done)
-						cond.wait (mutex);
-					mutex.unlock ();
+					if (!is_readable ()) {
+						mutex.lock ();
+						while (!done)
+							cond.wait (mutex);
+						mutex.unlock ();
+					}
 
 					if (cancellation_handler != 0)
 						cancellable.disconnect (cancellation_handler);
