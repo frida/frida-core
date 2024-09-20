@@ -509,6 +509,9 @@ namespace Frida.Fruity {
 					pcb = null;
 					return OK;
 				});
+
+				_state = CLOSED;
+				update_events ();
 			}
 
 			private void detach_from_pcb () {
