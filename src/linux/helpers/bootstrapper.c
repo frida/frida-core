@@ -155,6 +155,12 @@ frida_bootstrap (FridaBootstrapContext * ctx)
   FridaLibcApi * libc = ctx->libc;
   FridaProcessLayout process;
 
+  if (ctx->stack_base == NULL && ctx->stack_size > 0)
+  {
+    ctx->stack_base = mmap (NULL, ctx->stack_size, PROT_READ | PROT_WRITE , MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (ctx->stack_base == MAP_FAILED)
+      return FRIDA_BOOTSTRAP_ALLOCATION_ERROR;
+  }
   if (ctx->allocation_base == NULL)
   {
     ctx->allocation_base = mmap (NULL, ctx->allocation_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

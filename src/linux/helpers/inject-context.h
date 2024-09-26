@@ -50,6 +50,9 @@ struct _FridaBootstrapContext
   int enable_ctrlfds;
   int ctrlfds[2];
   FridaLibcApi * libc;
+
+  void * stack_base;
+  size_t stack_size;
 };
 
 struct _FridaLoaderContext
