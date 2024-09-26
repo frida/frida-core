@@ -24,6 +24,10 @@ if host_machine.cpu_family() == 'arm'
   extra_flags += '-marm'
 endif
 
+if host_machine.cpu_family() == 'x86'
+  extra_flags += '-fno-stack-protector'
+endif
+
 common_objcopy_flags = [
   '-O', 'binary',
   '-S',
@@ -53,8 +57,9 @@ extra_link_args = [
   '-Wl,-T,' + helper_lds,
 ]
 if host_machine.cpu_family() == 'arm'
-  extra_link_args += run_command('../../../../build/frida-android-arm-clang', '-print-libgcc-file-name', check: false).stdout().strip()
+  extra_link_args += run_command(cc, '-print-libgcc-file-name', check: false).stdout().strip()
 endif
+
 
 bootstrapper_sources = [
   'bootstrapper.c',
