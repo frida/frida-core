@@ -601,9 +601,6 @@ namespace Frida.Fruity {
 				ssize_t n = 0;
 
 				netstack.perform_on_lwip_thread (() => {
-					if (pcb == null)
-						return OK;
-
 					lock (state) {
 						n = ssize_t.min (buffer.length, rx_buf.len);
 						if (n == 0)
@@ -611,6 +608,9 @@ namespace Frida.Fruity {
 						Memory.copy (buffer, rx_buf.data, n);
 						rx_buf.remove_range (0, (uint) n);
 					}
+
+					if (pcb == null)
+						return OK;
 
 					size_t remainder = n;
 					while (remainder != 0) {
