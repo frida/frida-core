@@ -198,12 +198,15 @@ namespace Frida {
 
 		public async void close (Cancellable? cancellable) throws IOError {
 			if (remote_server_request != null) {
-				var server = yield try_get_remote_server (cancellable);
-				if (server != null) {
-					try {
-						yield server.connection.close (cancellable);
-					} catch (GLib.Error e) {
+				try {
+					var server = yield try_get_remote_server (cancellable);
+					if (server != null) {
+						try {
+							yield server.connection.close (cancellable);
+						} catch (GLib.Error e) {
+						}
 					}
+				} catch (Error e) {
 				}
 			}
 
@@ -1052,10 +1055,12 @@ namespace Frida {
 			entry.close.begin (io_cancellable);
 		}
 
-		private async RemoteServer? try_get_remote_server (Cancellable? cancellable) throws IOError {
+		private async RemoteServer? try_get_remote_server (Cancellable? cancellable) throws Error, IOError {
 			try {
 				return yield get_remote_server (cancellable);
 			} catch (Error e) {
+				if (e is Error.PERMISSION_DENIED)
+					throw e;
 				return null;
 			}
 		}
@@ -1131,7 +1136,9 @@ namespace Frida {
 					last_server_check_timer = null;
 					last_server_check_error = null;
 				} else {
-					if (e is Error.SERVER_NOT_RUNNING) {
+					if (e is Error.PERMISSION_DENIED) {
+						api_error = e;
+					} else if (e is Error.SERVER_NOT_RUNNING) {
 						api_error = new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 					} else if (connection != null) {
 						api_error = new Error.PROTOCOL ("Incompatible frida-server version");
