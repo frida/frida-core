@@ -97,7 +97,7 @@ if cc.sizeof('void *') == 8
 else
   host_cpu_mode = '32'
 endif
-host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux', 'freebsd'] and host_cpu_mode == '64'
+host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux'] and host_cpu_mode == '64'
 gumjs_archs = {
   'x86': 'ia32',
   'x86_64': 'x64',
