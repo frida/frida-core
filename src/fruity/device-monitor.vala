@@ -1138,7 +1138,7 @@ namespace Frida.Fruity {
 
 		public string? name {
 			get {
-				return null;
+				return _name;
 			}
 		}
 
@@ -1168,6 +1168,7 @@ namespace Frida.Fruity {
 		private weak PortableCoreDeviceBackend parent;
 		private LibUSB.Device _raw_device;
 		private string _udid;
+		private string? _name;
 
 		private Promise<UsbDevice>? device_request;
 		private Promise<LibUSB.Device>? modeswitch_request;
@@ -1181,6 +1182,13 @@ namespace Frida.Fruity {
 			this.parent = parent;
 			_raw_device = raw_device;
 			_udid = udid;
+
+			char product[LibUSB.DEVICE_STRING_BYTES_MAX + 1];
+			var res = raw_device.get_device_string (PRODUCT, product);
+			if (res >= LibUSB.Error.SUCCESS) {
+				product[res] = '\0';
+				_name = (string) product;
+			}
 		}
 
 		public async UsbDevice open (Cancellable? cancellable) throws Error, IOError {
