@@ -218,7 +218,7 @@ namespace Frida {
 			frida_source.set_callback (negotiate_connection.callback);
 			frida_source.attach (frida_context);
 
-			return false;
+			return Source.REMOVE;
 		});
 		dbus_source.attach (dbus_context);
 		yield;
@@ -292,7 +292,7 @@ namespace Frida {
 			var start_request = new Promise<SocketAddress> ();
 			schedule_on_dbus_thread (() => {
 				handle_start_request.begin (start_request, cancellable);
-				return false;
+				return Source.REMOVE;
 			});
 
 			_listen_address = yield start_request.future.wait_async (cancellable);
@@ -303,13 +303,13 @@ namespace Frida {
 				SocketAddress effective_address = yield do_start (cancellable);
 				schedule_on_frida_thread (() => {
 					start_request.resolve (effective_address);
-					return false;
+					return Source.REMOVE;
 				});
 			} catch (GLib.Error e) {
 				GLib.Error start_error = e;
 				schedule_on_frida_thread (() => {
 					start_request.reject (start_error);
-					return false;
+					return Source.REMOVE;
 				});
 			}
 		}
@@ -446,7 +446,7 @@ namespace Frida {
 
 			schedule_on_dbus_thread (() => {
 				do_stop ();
-				return false;
+				return Source.REMOVE;
 			});
 		}
 
@@ -862,7 +862,7 @@ namespace Frida {
 				var source = new IdleSource ();
 				source.set_callback (() => {
 					do_close ();
-					return false;
+					return Source.REMOVE;
 				});
 				source.attach (main_context);
 			}
@@ -907,7 +907,7 @@ namespace Frida {
 				var source = new IdleSource ();
 				source.set_callback (() => {
 					process_send_queue ();
-					return false;
+					return Source.REMOVE;
 				});
 				source.attach (main_context);
 			}
