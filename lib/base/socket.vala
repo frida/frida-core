@@ -264,9 +264,9 @@ namespace Frida {
 			}
 		}
 
-		private Soup.Server? main_server;
+		private ConnectionHandler main_handler;
 		private SocketAddress? _listen_address;
-		private Gee.Map<string, Soup.Server> dynamic_interface_servers = new Gee.HashMap<string, Soup.Server> ();
+		private Gee.Map<string, ConnectionHandler> dynamic_interface_handlers = new Gee.HashMap<string, ConnectionHandler> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -315,7 +315,7 @@ namespace Frida {
 		}
 
 		private async SocketAddress do_start (Cancellable? cancellable) throws Error, IOError {
-			main_server = create_server ();
+			main_handler = make_connection_handler ();
 			SocketAddress? first_effective_address = null;
 			SocketConnectable connectable = (flavor == CONTROL)
 				? parse_control_address (endpoint_params.address, endpoint_params.port)
@@ -334,14 +334,10 @@ namespace Frida {
 				SocketAddress? effective_address = null;
 				InetSocketAddress? inet_address = address as InetSocketAddress;
 				if (inet_address != null) {
-					effective_address = listen_on_inet_address (inet_address, main_server);
+					effective_address = main_handler.listen_on_inet_address (inet_address);
 				} else {
-					try {
-						main_server.listen (address, compute_listen_options ());
-						effective_address = address;
-					} catch (GLib.Error e) {
-						throw_listen_error (e);
-					}
+					main_handler.listen_on_socket_address (address);
+					effective_address = address;
 				}
 
 				if (first_effective_address == null)
@@ -365,80 +361,32 @@ namespace Frida {
 			if (port == 0)
 				port = (flavor == CONTROL) ? DEFAULT_CONTROL_PORT : DEFAULT_CLUSTER_PORT;
 
-			var server = create_server ();
+			var handler = make_connection_handler ();
 			try {
-				listen_on_inet_address (new InetSocketAddress (ip, port), server);
+				handler.listen_on_inet_address (new InetSocketAddress (ip, port));
 			} catch (Error e) {
 				return;
 			}
-			dynamic_interface_servers[name] = server;
+			dynamic_interface_handlers[name] = handler;
 		}
 
 		private void on_dynamic_interface_detached (string name, InetAddress ip) {
-			Soup.Server server;
-			if (dynamic_interface_servers.unset (name, out server))
-				destroy_server (server);
+			ConnectionHandler handler;
+			if (dynamic_interface_handlers.unset (name, out handler))
+				handler.close ();
 		}
 
-		private Soup.Server create_server () {
-			var server = (Soup.Server) Object.new (typeof (Soup.Server),
-				"tls-certificate", endpoint_params.certificate);
-
-			server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
-
-			if (endpoint_params.asset_root != null)
-				server.add_handler (null, on_asset_request);
-
-			return server;
+		private ConnectionHandler make_connection_handler () {
+			var handler = new ConnectionHandler (endpoint_params, on_port_conflict);
+			handler.incoming.connect (on_incoming_connection);
+			return handler;
 		}
 
-		private void destroy_server (Soup.Server server) {
-			if (endpoint_params.asset_root != null)
-				server.remove_handler ("/");
-			server.remove_handler ("/ws");
-
-			server.disconnect ();
-		}
-
-		private Soup.ServerListenOptions compute_listen_options () {
-			return (endpoint_params.certificate != null)
-				? Soup.ServerListenOptions.HTTPS
-				: 0;
-		}
-
-		private InetSocketAddress listen_on_inet_address (InetSocketAddress address, Soup.Server server) throws Error {
-			InetSocketAddress candidate_address = address;
-			uint16 start_port = address.get_port ();
-			uint16 candidate_port = start_port;
-			do {
-				try {
-					server.listen (candidate_address, compute_listen_options ());
-					return candidate_address;
-				} catch (GLib.Error e) {
-					if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
-						candidate_port++;
-						if (candidate_port == start_port)
-							throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
-						if (candidate_port == 0)
-							candidate_port = 1024;
-						candidate_address = new InetSocketAddress (candidate_address.get_address (),
-							candidate_port);
-					} else {
-						throw_listen_error (e);
-					}
-				}
-			} while (true);
-		}
-
-		[NoReturn]
-		private static void throw_listen_error (GLib.Error e) throws Error {
-			if (e is IOError.ADDRESS_IN_USE)
-				throw new Error.ADDRESS_IN_USE ("%s", e.message);
-
-			if (e is IOError.PERMISSION_DENIED)
-				throw new Error.PERMISSION_DENIED ("%s", e.message);
-
-			throw new Error.NOT_SUPPORTED ("%s", e.message);
+		private void on_incoming_connection (IOStream connection, SocketAddress remote_address) {
+			schedule_on_frida_thread (() => {
+				incoming (connection, remote_address);
+				return Source.REMOVE;
+			});
 		}
 
 		public void stop () {
@@ -451,296 +399,17 @@ namespace Frida {
 		}
 
 		private void do_stop () {
-			foreach (var server in dynamic_interface_servers.values)
-				destroy_server (server);
-			dynamic_interface_servers.clear ();
+			foreach (var handler in dynamic_interface_handlers.values)
+				handler.close ();
+			dynamic_interface_handlers.clear ();
 
 			if (dynamic_interface_observer != null) {
 				dynamic_interface_observer.interface_attached.disconnect (on_dynamic_interface_attached);
 				dynamic_interface_observer.interface_detached.disconnect (on_dynamic_interface_detached);
 			}
 
-			if (main_server != null)
-				destroy_server (main_server);
-		}
-
-		private void on_websocket_opened (Soup.Server server, Soup.ServerMessage msg, string path,
-				Soup.WebsocketConnection connection) {
-			var peer = new WebConnection (connection);
-
-			IOStream soup_stream = connection.get_io_stream ();
-
-			SocketConnection socket_stream;
-			soup_stream.get ("base-iostream", out socket_stream);
-
-			SocketAddress remote_address;
-			try {
-				remote_address = socket_stream.get_remote_address ();
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-
-			schedule_on_frida_thread (() => {
-				incoming (peer, remote_address);
-				return false;
-			});
-		}
-
-		private void on_asset_request (Soup.Server server, Soup.ServerMessage msg, string path, HashTable<string, string>? query) {
-			msg.get_response_headers ().replace ("Server", "Frida/" + _version_string ());
-
-			unowned string method = msg.get_method ();
-			if (method != "GET" && method != "HEAD") {
-				msg.set_status (Soup.Status.METHOD_NOT_ALLOWED, null);
-				return;
-			}
-
-			File location = endpoint_params.asset_root.resolve_relative_path (path.next_char ());
-
-			msg.pause ();
-			handle_asset_request.begin (path, location, msg);
-		}
-
-		private async void handle_asset_request (string path, File file, Soup.ServerMessage msg) {
-			int priority = Priority.DEFAULT;
-
-			string attributes = FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE;
-
-			FileInfo info;
-			FileInputStream? stream = null;
-			try {
-				info = yield file.query_info_async (attributes, FileQueryInfoFlags.NONE, priority, io_cancellable);
-
-				FileType type = info.get_file_type ();
-				if (type == DIRECTORY) {
-					if (!path.has_suffix ("/")) {
-						handle_misplaced_request (path + "/", msg);
-						return;
-					}
-
-					File index_file = file.get_child ("index.html");
-					try {
-						var index_info = yield index_file.query_info_async (attributes, FileQueryInfoFlags.NONE,
-							priority, io_cancellable);
-						file = index_file;
-						info = index_info;
-						type = index_info.get_file_type ();
-					} catch (GLib.Error e) {
-					}
-				}
-
-				if (type != DIRECTORY)
-					stream = yield file.read_async (priority, io_cancellable);
-			} catch (GLib.Error e) {
-				msg.set_status (Soup.Status.NOT_FOUND, null);
-				msg.unpause ();
-				return;
-			}
-
-			if (stream == null)
-				yield handle_directory_request (path, file, msg);
-			else
-				yield handle_file_request (file, info, stream, msg);
-		}
-
-		private async void handle_directory_request (string path, File file, Soup.ServerMessage msg) {
-			var listing = new StringBuilder.sized (1024);
-
-			string escaped_path = Markup.escape_text (path);
-			listing.append ("""<html>
-<head><title>Index of %s</title></head>
-<body>
-<h1>Index of %s</h1><hr><pre>""".printf (escaped_path, escaped_path));
-
-			if (path != "/")
-				listing.append ("<a href=\"../\">../</a>");
-
-			listing.append_c ('\n');
-
-			string attributes =
-				FileAttribute.STANDARD_DISPLAY_NAME + "," +
-				FileAttribute.STANDARD_TYPE + "," +
-				FileAttribute.TIME_MODIFIED + "," +
-				FileAttribute.STANDARD_SIZE;
-			int priority = Priority.DEFAULT;
-
-			try {
-				var enumerator = yield file.enumerate_children_async (attributes, FileQueryInfoFlags.NONE, priority,
-					io_cancellable);
-
-				List<FileInfo> files = yield enumerator.next_files_async (int.MAX, priority, io_cancellable);
-
-				files.sort ((a, b) => {
-					bool a_is_dir = a.get_file_type () == DIRECTORY;
-					bool b_is_dir = b.get_file_type () == DIRECTORY;
-					if (a_is_dir == b_is_dir)
-						return strcmp (a.get_display_name (), b.get_display_name ());
-					else if (a_is_dir)
-						return -1;
-					else
-						return 1;
-				});
-
-				foreach (FileInfo info in files) {
-					string display_name = info.get_display_name ();
-					FileType type = info.get_file_type ();
-					DateTime modified = info.get_modification_date_time ().to_local ();
-
-					string link = Markup.escape_text (display_name);
-					if (type == DIRECTORY)
-						link += "/";
-
-					listing
-						.append ("<a href=\"")
-						.append (link)
-						.append ("\">")
-						.append (link)
-						.append ("</a>");
-
-					int padding_needed = 50 - link.length;
-					while (padding_needed > 0) {
-						listing.append_c (' ');
-						padding_needed--;
-					}
-
-					listing
-						.append_c (' ')
-						.append (modified.format ("%d-%b-%Y %H:%M"))
-						.append ("            ");
-
-					string size_info;
-					if (type != DIRECTORY)
-						size_info = info.get_size ().to_string ();
-					else
-						size_info = "-";
-					listing.append_printf ("%8s\n", size_info);
-				}
-			} catch (GLib.Error e) {
-				msg.set_status (Soup.Status.NOT_FOUND, null);
-				msg.unpause ();
-				return;
-			}
-
-			listing.append ("</pre><hr></body>\n</html>");
-
-			msg.set_status (Soup.Status.OK, null);
-
-			if (msg.get_method () == "HEAD") {
-				var headers = msg.get_response_headers ();
-				headers.replace ("Content-Type", "text/html");
-				headers.replace ("Content-Length", listing.len.to_string ());
-			} else {
-				msg.set_response ("text/html", Soup.MemoryUse.COPY, listing.str.data);
-			}
-
-			msg.unpause ();
-		}
-
-		private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.ServerMessage msg) {
-			msg.set_status (Soup.Status.OK, null);
-
-			var headers = msg.get_response_headers ();
-			headers.replace ("Content-Type", guess_mime_type_for (file.get_path ()));
-			headers.replace ("Content-Length", info.get_size ().to_string ());
-
-			if (msg.get_method () == "HEAD") {
-				msg.unpause ();
-				return;
-			}
-
-			var body = msg.get_response_body ();
-			body.set_accumulate (false);
-
-			bool finished = false;
-			bool waiting = false;
-			ulong finished_handler = msg.finished.connect (() => {
-				finished = true;
-				if (waiting)
-					handle_file_request.callback ();
-			});
-			ulong write_handler = msg.wrote_body_data.connect (chunk => {
-				if (waiting)
-					handle_file_request.callback ();
-			});
-			try {
-				var buffer = new uint8[64 * 1024];
-				while (true) {
-					ssize_t n;
-					try {
-						n = yield stream.read_async (buffer, Priority.DEFAULT, io_cancellable);
-					} catch (IOError e) {
-						break;
-					}
-					if (n == 0 || finished)
-						break;
-
-					body.append_take (buffer[0:n]);
-
-					msg.unpause ();
-
-					waiting = true;
-					yield;
-					waiting = false;
-
-					if (finished)
-						break;
-
-					msg.pause ();
-				}
-			} finally {
-				msg.disconnect (write_handler);
-				msg.disconnect (finished_handler);
-				if (!finished)
-					msg.unpause ();
-			}
-		}
-
-		private void handle_misplaced_request (string redirect_uri, Soup.ServerMessage msg) {
-			msg.set_redirect (Soup.Status.MOVED_PERMANENTLY, redirect_uri);
-
-			string body = """<html>
-<head><title>301 Moved Permanently</title></head>
-<body>
-<center><h1>301 Moved Permanently</h1></center>
-<hr><center>%s</center>
-</body>
-</html>""".printf ("Frida/" + _version_string ());
-
-			if (msg.get_method () == "HEAD") {
-				var headers = msg.get_response_headers ();
-				headers.replace ("Content-Type", "text/html");
-				headers.replace ("Content-Length", body.length.to_string ());
-			} else {
-				msg.set_response ("text/html", Soup.MemoryUse.COPY, body.data);
-			}
-
-			msg.unpause ();
-		}
-
-		private static string guess_mime_type_for (string path) {
-			if (path.has_suffix (".html"))
-				return "text/html";
-
-			if (path.has_suffix (".js"))
-				return "text/javascript";
-
-			if (path.has_suffix (".json"))
-				return "application/json";
-
-			if (path.has_suffix (".css"))
-				return "text/css";
-
-			if (path.has_suffix (".jpeg") || path.has_suffix (".jpg"))
-				return "image/jpeg";
-
-			if (path.has_suffix (".png"))
-				return "image/png";
-
-			if (path.has_suffix (".gif"))
-				return "image/gif";
-
-			bool uncertain;
-			return ContentType.guess (path, null, out uncertain);
+			if (main_handler != null)
+				main_handler.close ();
 		}
 
 		private void schedule_on_frida_thread (owned SourceFunc function) {
@@ -757,6 +426,395 @@ namespace Frida {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
 			source.attach (dbus_context);
+		}
+
+		private class ConnectionHandler : Object {
+			public signal void incoming (IOStream connection, SocketAddress remote_address);
+
+			public EndpointParameters endpoint_params {
+				get;
+				construct;
+			}
+
+			public PortConflictBehavior on_port_conflict {
+				get;
+				construct;
+				default = FAIL;
+			}
+
+			private Soup.Server server;
+			private Gee.Set<WebConnection> connections = new Gee.HashSet<WebConnection> ();
+			private Cancellable io_cancellable = new Cancellable ();
+
+			public ConnectionHandler (EndpointParameters endpoint_params, PortConflictBehavior on_port_conflict) {
+				Object (endpoint_params: endpoint_params, on_port_conflict: on_port_conflict);
+			}
+
+			construct {
+				server = (Soup.Server) Object.new (typeof (Soup.Server),
+					"tls-certificate", endpoint_params.certificate);
+
+				server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
+
+				if (endpoint_params.asset_root != null)
+					server.add_handler (null, on_asset_request);
+			}
+
+			public void close () {
+				io_cancellable.cancel ();
+
+				if (endpoint_params.asset_root != null)
+					server.remove_handler ("/");
+				server.remove_handler ("/ws");
+
+				server.disconnect ();
+
+				foreach (var connection in connections.to_array ()) {
+					try {
+						connection.close (null);
+					} catch (IOError e) {
+						assert_not_reached ();
+					}
+					remove_connection (connection);
+				}
+			}
+
+			public InetSocketAddress listen_on_inet_address (InetSocketAddress address) throws Error {
+				InetSocketAddress candidate_address = address;
+				uint16 start_port = address.get_port ();
+				uint16 candidate_port = start_port;
+				do {
+					try {
+						server.listen (candidate_address, compute_listen_options ());
+						return candidate_address;
+					} catch (GLib.Error e) {
+						if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
+							candidate_port++;
+							if (candidate_port == start_port)
+								throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
+							if (candidate_port == 0)
+								candidate_port = 1024;
+							candidate_address = new InetSocketAddress (candidate_address.get_address (),
+								candidate_port);
+						} else {
+							throw_listen_error (e);
+						}
+					}
+				} while (true);
+			}
+
+			public void listen_on_socket_address (SocketAddress address) throws Error {
+				try {
+					server.listen (address, compute_listen_options ());
+				} catch (GLib.Error e) {
+					throw_listen_error (e);
+				}
+			}
+
+			private Soup.ServerListenOptions compute_listen_options () {
+				return (endpoint_params.certificate != null)
+					? Soup.ServerListenOptions.HTTPS
+					: 0;
+			}
+
+			[NoReturn]
+			private static void throw_listen_error (GLib.Error e) throws Error {
+				if (e is IOError.ADDRESS_IN_USE)
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
+
+				if (e is IOError.PERMISSION_DENIED)
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
+
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			private void on_websocket_opened (Soup.Server server, Soup.ServerMessage msg, string path,
+					Soup.WebsocketConnection connection) {
+				var peer = new WebConnection (connection);
+				peer.websocket_closed.connect (on_websocket_closed);
+				connections.add (peer);
+
+				IOStream soup_stream = connection.get_io_stream ();
+
+				SocketConnection socket_stream;
+				soup_stream.get ("base-iostream", out socket_stream);
+
+				SocketAddress remote_address;
+				try {
+					remote_address = socket_stream.get_remote_address ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				incoming (peer, remote_address);
+			}
+
+			private void on_websocket_closed (WebConnection connection) {
+				remove_connection (connection);
+			}
+
+			private void remove_connection (WebConnection connection) {
+				connection.websocket_closed.disconnect (on_websocket_closed);
+				connections.remove (connection);
+			}
+
+			private void on_asset_request (Soup.Server server, Soup.ServerMessage msg, string path,
+					HashTable<string, string>? query) {
+				msg.get_response_headers ().replace ("Server", "Frida/" + _version_string ());
+
+				unowned string method = msg.get_method ();
+				if (method != "GET" && method != "HEAD") {
+					msg.set_status (Soup.Status.METHOD_NOT_ALLOWED, null);
+					return;
+				}
+
+				File location = endpoint_params.asset_root.resolve_relative_path (path.next_char ());
+
+				msg.pause ();
+				handle_asset_request.begin (path, location, msg);
+			}
+
+			private async void handle_asset_request (string path, File file, Soup.ServerMessage msg) {
+				int priority = Priority.DEFAULT;
+
+				string attributes = FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE;
+
+				FileInfo info;
+				FileInputStream? stream = null;
+				try {
+					info = yield file.query_info_async (attributes, FileQueryInfoFlags.NONE, priority, io_cancellable);
+
+					FileType type = info.get_file_type ();
+					if (type == DIRECTORY) {
+						if (!path.has_suffix ("/")) {
+							handle_misplaced_request (path + "/", msg);
+							return;
+						}
+
+						File index_file = file.get_child ("index.html");
+						try {
+							var index_info = yield index_file.query_info_async (attributes,
+								FileQueryInfoFlags.NONE, priority, io_cancellable);
+							file = index_file;
+							info = index_info;
+							type = index_info.get_file_type ();
+						} catch (GLib.Error e) {
+						}
+					}
+
+					if (type != DIRECTORY)
+						stream = yield file.read_async (priority, io_cancellable);
+				} catch (GLib.Error e) {
+					msg.set_status (Soup.Status.NOT_FOUND, null);
+					msg.unpause ();
+					return;
+				}
+
+				if (stream == null)
+					yield handle_directory_request (path, file, msg);
+				else
+					yield handle_file_request (file, info, stream, msg);
+			}
+
+			private async void handle_directory_request (string path, File file, Soup.ServerMessage msg) {
+				var listing = new StringBuilder.sized (1024);
+
+				string escaped_path = Markup.escape_text (path);
+				listing.append ("""<html>
+<head><title>Index of %s</title></head>
+<body>
+<h1>Index of %s</h1><hr><pre>""".printf (escaped_path, escaped_path));
+
+				if (path != "/")
+					listing.append ("<a href=\"../\">../</a>");
+
+				listing.append_c ('\n');
+
+				string attributes =
+					FileAttribute.STANDARD_DISPLAY_NAME + "," +
+					FileAttribute.STANDARD_TYPE + "," +
+					FileAttribute.TIME_MODIFIED + "," +
+					FileAttribute.STANDARD_SIZE;
+				int priority = Priority.DEFAULT;
+
+				try {
+					var enumerator = yield file.enumerate_children_async (attributes, FileQueryInfoFlags.NONE, priority,
+						io_cancellable);
+
+					List<FileInfo> files = yield enumerator.next_files_async (int.MAX, priority, io_cancellable);
+
+					files.sort ((a, b) => {
+						bool a_is_dir = a.get_file_type () == DIRECTORY;
+						bool b_is_dir = b.get_file_type () == DIRECTORY;
+						if (a_is_dir == b_is_dir)
+							return strcmp (a.get_display_name (), b.get_display_name ());
+						else if (a_is_dir)
+							return -1;
+						else
+							return 1;
+					});
+
+					foreach (FileInfo info in files) {
+						string display_name = info.get_display_name ();
+						FileType type = info.get_file_type ();
+						DateTime modified = info.get_modification_date_time ().to_local ();
+
+						string link = Markup.escape_text (display_name);
+						if (type == DIRECTORY)
+							link += "/";
+
+						listing
+							.append ("<a href=\"")
+							.append (link)
+							.append ("\">")
+							.append (link)
+							.append ("</a>");
+
+						int padding_needed = 50 - link.length;
+						while (padding_needed > 0) {
+							listing.append_c (' ');
+							padding_needed--;
+						}
+
+						listing
+							.append_c (' ')
+							.append (modified.format ("%d-%b-%Y %H:%M"))
+							.append ("            ");
+
+						string size_info;
+						if (type != DIRECTORY)
+							size_info = info.get_size ().to_string ();
+						else
+							size_info = "-";
+						listing.append_printf ("%8s\n", size_info);
+					}
+				} catch (GLib.Error e) {
+					msg.set_status (Soup.Status.NOT_FOUND, null);
+					msg.unpause ();
+					return;
+				}
+
+				listing.append ("</pre><hr></body>\n</html>");
+
+				msg.set_status (Soup.Status.OK, null);
+
+				if (msg.get_method () == "HEAD") {
+					var headers = msg.get_response_headers ();
+					headers.replace ("Content-Type", "text/html");
+					headers.replace ("Content-Length", listing.len.to_string ());
+				} else {
+					msg.set_response ("text/html", Soup.MemoryUse.COPY, listing.str.data);
+				}
+
+				msg.unpause ();
+			}
+
+			private async void handle_file_request (File file, FileInfo info, FileInputStream stream, Soup.ServerMessage msg) {
+				msg.set_status (Soup.Status.OK, null);
+
+				var headers = msg.get_response_headers ();
+				headers.replace ("Content-Type", guess_mime_type_for (file.get_path ()));
+				headers.replace ("Content-Length", info.get_size ().to_string ());
+
+				if (msg.get_method () == "HEAD") {
+					msg.unpause ();
+					return;
+				}
+
+				var body = msg.get_response_body ();
+				body.set_accumulate (false);
+
+				bool finished = false;
+				bool waiting = false;
+				ulong finished_handler = msg.finished.connect (() => {
+					finished = true;
+					if (waiting)
+						handle_file_request.callback ();
+				});
+				ulong write_handler = msg.wrote_body_data.connect (chunk => {
+					if (waiting)
+						handle_file_request.callback ();
+				});
+				try {
+					var buffer = new uint8[64 * 1024];
+					while (true) {
+						ssize_t n;
+						try {
+							n = yield stream.read_async (buffer, Priority.DEFAULT, io_cancellable);
+						} catch (IOError e) {
+							break;
+						}
+						if (n == 0 || finished)
+							break;
+
+						body.append_take (buffer[0:n]);
+
+						msg.unpause ();
+
+						waiting = true;
+						yield;
+						waiting = false;
+
+						if (finished)
+							break;
+
+						msg.pause ();
+					}
+				} finally {
+					msg.disconnect (write_handler);
+					msg.disconnect (finished_handler);
+					if (!finished)
+						msg.unpause ();
+				}
+			}
+
+			private void handle_misplaced_request (string redirect_uri, Soup.ServerMessage msg) {
+				msg.set_redirect (Soup.Status.MOVED_PERMANENTLY, redirect_uri);
+
+				string body = """<html>
+<head><title>301 Moved Permanently</title></head>
+<body>
+<center><h1>301 Moved Permanently</h1></center>
+<hr><center>%s</center>
+</body>
+</html>""".printf ("Frida/" + _version_string ());
+
+				if (msg.get_method () == "HEAD") {
+					var headers = msg.get_response_headers ();
+					headers.replace ("Content-Type", "text/html");
+					headers.replace ("Content-Length", body.length.to_string ());
+				} else {
+					msg.set_response ("text/html", Soup.MemoryUse.COPY, body.data);
+				}
+
+				msg.unpause ();
+			}
+
+			private static string guess_mime_type_for (string path) {
+				if (path.has_suffix (".html"))
+					return "text/html";
+
+				if (path.has_suffix (".js"))
+					return "text/javascript";
+
+				if (path.has_suffix (".json"))
+					return "application/json";
+
+				if (path.has_suffix (".css"))
+					return "text/css";
+
+				if (path.has_suffix (".jpeg") || path.has_suffix (".jpg"))
+					return "image/jpeg";
+
+				if (path.has_suffix (".png"))
+					return "image/png";
+
+				if (path.has_suffix (".gif"))
+					return "image/gif";
+
+				bool uncertain;
+				return ContentType.guess (path, null, out uncertain);
+			}
 		}
 	}
 
@@ -785,6 +843,8 @@ namespace Frida {
 	public extern static unowned string _version_string ();
 
 	private class WebConnection : IOStream {
+		public signal void websocket_closed ();
+
 		public Soup.WebsocketConnection websocket {
 			get;
 			construct;
@@ -950,6 +1010,8 @@ namespace Frida {
 				state = websocket.state;
 				recompute_pending_io_unlocked ();
 			}
+
+			websocket_closed ();
 		}
 
 		private void on_message (int type, Bytes message) {
