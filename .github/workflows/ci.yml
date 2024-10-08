@@ -150,6 +150,14 @@ jobs:
           certificates-p12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
           certificates-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+      - uses: nttld/setup-ndk@v1
+        if: startsWith(matrix.id, 'android-')
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+      - name: Add NDK to env
+        if: startsWith(matrix.id, 'android-')
+        run: echo ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} >> $GITHUB_ENV
       - name: Build
         run: |
           ./configure --host=${{ matrix.id }} ${{ env.FRIDA_CORE_OPTIONS }}
