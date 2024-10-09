@@ -751,7 +751,7 @@ namespace Frida.Gadget {
 
 		string config_data;
 		try {
-			FileUtils.get_contents (config_path, out config_data);
+			get_maybe_zipped_contents (config_path, out config_data);
 		} catch (FileError e) {
 			if (e is FileError.NOENT)
 				return new Config ();
@@ -1226,7 +1226,7 @@ namespace Frida.Gadget {
 		private ScriptConfig load_config (string path) throws Error {
 			string data;
 			try {
-				FileUtils.get_contents (path, out data);
+				get_maybe_zipped_contents (path, out data);
 			} catch (FileError e) {
 				if (e is FileError.NOENT)
 					return new ScriptConfig ();
@@ -1351,7 +1351,7 @@ namespace Frida.Gadget {
 
 				uint8[] contents;
 				try {
-					FileUtils.get_data (path, out contents);
+					get_maybe_zipped_data (path, out contents);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT ("%s", e.message);
 				}
@@ -1363,7 +1363,7 @@ namespace Frida.Gadget {
 				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC) {
 					instance = yield engine.create_script (null, new Bytes (contents), options);
 				} else {
-					instance = yield engine.create_script ((string) contents, null, options);
+					instance = yield engine.create_script (((string) contents)[:(long) contents.length ], null, options);
 				}
 
 				if (id.handle != 0)
@@ -2145,4 +2145,40 @@ namespace Frida.Gadget {
 			return repeat;
 		});
 	}
+
+	public bool get_maybe_zipped_contents (string filename, out string contents, out size_t length = null) throws FileError {
+		try {
+			return FileUtils.get_contents (filename, out contents, out length);
+		} catch (FileError e) {
+#if ANDROID
+			Bytes contents_bytes;
+			if (Gum.ElfModule.maybe_extract_from_apk (filename, out contents_bytes)) {
+				contents = ((string) contents_bytes.get_data ())[:(long) contents_bytes.get_size ()];
+				length = contents_bytes.get_size ();
+				return true;
+			}
+#else
+			throw e;
+#endif
+			return false; // Unreachable, required for compilation
+		}
+	}
+
+	public bool get_maybe_zipped_data (string filename, out uint8[] contents) throws FileError {
+		try {
+			return FileUtils.get_data (filename, out contents);
+		} catch (FileError e) {
+#if ANDROID
+			Bytes contents_bytes;
+			if (Gum.ElfModule.maybe_extract_from_apk (filename, out contents_bytes)) {
+				contents = contents_bytes.get_data ();
+				return true;
+			}
+#else
+			throw e;
+#endif
+			return false; // Unreachable, required for compilation
+		}
+	}
+
 }
