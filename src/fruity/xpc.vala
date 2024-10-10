@@ -234,7 +234,8 @@ namespace Frida.Fruity {
 			reader.read_member ("_1");
 			reader.read_member ("createListener");
 
-			reader.read_member ("devicePublicKey");
+			if (!reader.read_member ("devicePublicKey"))
+				throw new Error.NOT_SUPPORTED ("Unsupported tunnel service");
 			string? device_pubkey = reader.get_string_value ();
 			reader.end_member ();
 
