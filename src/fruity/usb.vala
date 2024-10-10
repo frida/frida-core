@@ -123,10 +123,13 @@ namespace Frida.Fruity {
 		}
 
 		private static string parse_mode (Bytes mode) throws Error {
-			if (mode.get_size () != 4)
-				throw new Error.PROTOCOL ("Invalid mode response");
-			unowned uint8[] m = mode.get_data ();
-			return "%u:%u:%u:%u".printf (m[0], m[1], m[2], m[3]);
+			var result = new StringBuilder.sized (7);
+			foreach (uint8 byte in mode.get_data ()) {
+				if (result.len != 0)
+					result.append_c (':');
+				result.append_printf ("%u", byte);
+			}
+			return result.str;
 		}
 
 		private static string udid_from_serial_number (string serial) {
