@@ -189,6 +189,7 @@ if have_local_backend
         helper_backend_vala_args,
         gum_vala_args,
         '--pkg=frida-gum-darwin-1.0',
+        '--pkg=gmodule-2.0',
         '--pkg=gio-unix-2.0',
         '--pkg=posix',
       ],
