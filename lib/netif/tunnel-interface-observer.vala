@@ -1,6 +1,6 @@
 public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 #if IOS || TVOS
-	private Gee.Map<string, InetAddress> interfaces = new Gee.HashMap<string, InetAddress> ();
+	private Gee.Map<string, DynamicInterface> interfaces = new Gee.HashMap<string, DynamicInterface> ();
 
 	private Darwin.SystemConfiguration.DynamicStore? store;
 	private Darwin.GCD.DispatchQueue event_queue =
@@ -62,9 +62,9 @@ public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 		foreach (var key in CFArray.wrap<CoreFoundation.String> (changed_keys)) {
 			string name = key.to_string ().split ("/")[3];
 
-			InetAddress? address = null;
 			var val = (CoreFoundation.Dictionary) store.copy_value (key);
 			if (val != null) {
+				InetAddress? address = null;
 				foreach (var raw_address in CFArray.wrap<CoreFoundation.String> (val[addresses_str])) {
 					var str = raw_address.to_string ();
 					bool is_reserved_ipv6_range = str.has_prefix ("fc") || str.has_prefix ("fd");
@@ -75,12 +75,14 @@ public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 					}
 				}
 				if (address != null && !interfaces.has_key (name)) {
-					interfaces[name] = address;
-					interface_attached (name, address);
+					var iface = new DynamicInterface (name, address);
+					interfaces[name] = iface;
+					interface_attached (iface);
 				}
 			} else {
-				if (interfaces.unset (name, out address))
-					interface_detached (name, address);
+				DynamicInterface iface;
+				if (interfaces.unset (name, out iface))
+					interface_detached (iface);
 			}
 		}
 	}

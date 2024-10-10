@@ -19,20 +19,17 @@ namespace Frida {
 		private State state = STOPPED;
 
 		private WebService service;
-		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
+		private ConnectionHandler main_handler;
+		private Gee.Map<string, ConnectionHandler> dynamic_interface_handlers = new Gee.HashMap<string, ConnectionHandler> ();
 
 		private Gee.Set<ControlChannel> spawn_gaters = new Gee.HashSet<ControlChannel> ();
 		private Gee.Map<uint, PendingSpawn> pending_spawn = new Gee.HashMap<uint, PendingSpawn> ();
 		private Gee.Map<AgentSessionId?, AgentSessionEntry> sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
-		private SocketService broker_service = new SocketService ();
-#if !WINDOWS
-		private uint16 broker_port = 0;
-#endif
-		private Gee.Map<string, Transport> transports = new Gee.HashMap<string, Transport> ();
-
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private MainContext? main_context;
 
 		private enum State {
 			STOPPED,
@@ -89,17 +86,22 @@ namespace Frida {
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 			host_session.uninjected.connect (notify_uninjected);
 
-			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, PortConflictBehavior.FAIL,
-				new TunnelInterfaceObserver ());
-			service.incoming.connect (on_server_connection);
+			var iface_observer = new TunnelInterfaceObserver ();
+			iface_observer.interface_detached.connect (on_interface_detached);
 
-			broker_service.incoming.connect (on_broker_service_connection);
+			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, PortConflictBehavior.FAIL, iface_observer);
+
+			main_handler = new ConnectionHandler (this, null);
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 			state = STARTING;
+
+			main_context = MainContext.ref_thread_default ();
+
+			service.incoming.connect (on_server_connection);
 
 			try {
 				yield service.start (cancellable);
@@ -132,21 +134,17 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 			state = STOPPING;
 
-			broker_service.stop ();
-			service.stop ();
+			service.incoming.disconnect (on_server_connection);
 
 			io_cancellable.cancel ();
 
-			transports.clear ();
+			service.stop ();
 
-			foreach (var peer in peers.values.to_array ()) {
-				try {
-					yield peer.close ();
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-			}
-			peers.clear ();
+			foreach (var handler in dynamic_interface_handlers.values.to_array ())
+				yield handler.close (cancellable);
+			dynamic_interface_handlers.clear ();
+
+			yield main_handler.close (cancellable);
 
 			var base_host_session = host_session as BaseDBusHostSession;
 			if (base_host_session != null)
@@ -176,7 +174,7 @@ namespace Frida {
 			}
 		}
 
-		private void on_server_connection (IOStream connection, SocketAddress remote_address) {
+		private void on_server_connection (IOStream connection, SocketAddress remote_address, DynamicInterface? dynamic_iface) {
 #if IOS || TVOS
 			/*
 			 * We defer the launchd injection until the first connection is established in order
@@ -187,50 +185,28 @@ namespace Frida {
 				darwin_host_session.activate_crash_reporter_integration ();
 #endif
 
-			handle_server_connection.begin (connection);
+			ConnectionHandler handler;
+			unowned string iface_name = dynamic_iface.name;
+			if (iface_name != null) {
+				handler = dynamic_interface_handlers[iface_name];
+				if (handler == null) {
+					handler = new ConnectionHandler (this, dynamic_iface);
+					dynamic_interface_handlers[iface_name] = handler;
+				}
+			} else {
+				handler = main_handler;
+			}
+
+			handler.handle_server_connection.begin (connection);
 		}
 
-		private async void handle_server_connection (IOStream raw_connection) throws GLib.Error {
-			var connection = yield new DBusConnection (raw_connection, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
-			connection.on_closed.connect (on_connection_closed);
-
-			Peer peer;
-			AuthenticationService? auth_service = endpoint_params.auth_service;
-			if (auth_service != null)
-				peer = new AuthenticationChannel (this, connection, auth_service);
-			else
-				peer = setup_control_channel (connection);
-			peers[connection] = peer;
-
-			connection.start_message_processing ();
-		}
-
-		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			Peer peer;
-			if (peers.unset (connection, out peer))
-				peer.close.begin (io_cancellable);
-		}
-
-		private async void promote_authentication_channel (AuthenticationChannel channel) throws GLib.Error {
-			DBusConnection connection = channel.connection;
-
-			peers.unset (connection);
-			yield channel.close (io_cancellable);
-
-			peers[connection] = setup_control_channel (connection);
-		}
-
-		private void kick_authentication_channel (AuthenticationChannel channel) {
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				channel.connection.close.begin (io_cancellable);
-				return false;
+		private void on_interface_detached (DynamicInterface iface) {
+			schedule_on_frida_thread (() => {
+				ConnectionHandler handler;
+				if (dynamic_interface_handlers.unset (iface.name, out handler))
+					handler.close.begin (io_cancellable);
+				return Source.REMOVE;
 			});
-			source.attach (MainContext.get_thread_default ());
-		}
-
-		private ControlChannel setup_control_channel (DBusConnection connection) {
-			return new ControlChannel (this, connection);
 		}
 
 		private async void teardown_control_channel (ControlChannel channel) {
@@ -259,8 +235,235 @@ namespace Frida {
 			}
 		}
 
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			assert (main_context != null);
+
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
+		}
+
+		private class ConnectionHandler : Object {
+			public weak ControlService parent {
+				get;
+				construct;
+			}
+
+			public DynamicInterface? dynamic_iface {
+				get;
+				construct;
+			}
+
+			public HostSession host_session {
+				get {
+					return parent.host_session;
+				}
+			}
+
+			private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
+
+			private SocketService broker_service = new SocketService ();
+#if !WINDOWS
+			private uint16 broker_port = 0;
+#endif
+			private Gee.Map<string, Transport> transports = new Gee.HashMap<string, Transport> ();
+
+			private Cancellable io_cancellable = new Cancellable ();
+
+			public ConnectionHandler (ControlService parent, DynamicInterface? dynamic_iface) {
+				Object (parent: parent, dynamic_iface: dynamic_iface);
+			}
+
+			construct {
+				broker_service.incoming.connect (on_broker_service_connection);
+			}
+
+			public async void close (Cancellable? cancellable) throws IOError {
+				broker_service.incoming.disconnect (on_broker_service_connection);
+
+				io_cancellable.cancel ();
+
+				broker_service.stop ();
+
+				transports.clear ();
+
+				foreach (var peer in peers.values.to_array ())
+					yield peer.close (cancellable);
+				peers.clear ();
+			}
+
+			public Gee.Iterator<ControlChannel> all_control_channels () {
+				return (Gee.Iterator<ControlChannel>) peers.values.filter (peer => peer is ControlChannel);
+			}
+
+			public async void handle_server_connection (IOStream raw_connection) throws GLib.Error {
+				var connection = yield new DBusConnection (raw_connection, null, DELAY_MESSAGE_PROCESSING, null,
+					io_cancellable);
+				connection.on_closed.connect (on_connection_closed);
+
+				AuthenticationService? auth_service = parent.endpoint_params.auth_service;
+				peers[connection] = (auth_service != null)
+					? (Peer) new AuthenticationChannel (this, connection, auth_service)
+					: (Peer) new ControlChannel (this, connection);
+
+				connection.start_message_processing ();
+			}
+
+			private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+				Peer peer;
+				if (peers.unset (connection, out peer))
+					peer.close.begin (io_cancellable);
+			}
+
+			public async void promote_authentication_channel (AuthenticationChannel channel) throws GLib.Error {
+				DBusConnection connection = channel.connection;
+
+				peers.unset (connection);
+				yield channel.close (io_cancellable);
+
+				peers[connection] = new ControlChannel (this, connection);
+			}
+
+			public void kick_authentication_channel (AuthenticationChannel channel) {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					channel.connection.close.begin (io_cancellable);
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+
+			public async void teardown_control_channel (ControlChannel channel) {
+				yield parent.teardown_control_channel (channel);
+			}
+
+			public async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
+				yield parent.enable_spawn_gating (requester);
+			}
+
+			public async void disable_spawn_gating (ControlChannel requester) throws GLib.Error {
+				yield parent.disable_spawn_gating (requester);
+			}
+
+			public HostSpawnInfo[] enumerate_pending_spawn () {
+				return parent.enumerate_pending_spawn ();
+			}
+
+			public async void resume (uint pid, ControlChannel requester) throws GLib.Error {
+				yield parent.resume (pid, requester);
+			}
+
+			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options, ControlChannel requester,
+					Cancellable? cancellable) throws Error, IOError {
+				return yield parent.attach (pid, options, requester, cancellable);
+			}
+
+			public async void reattach (AgentSessionId id, ControlChannel requester, Cancellable? cancellable)
+					throws Error, IOError {
+				yield parent.reattach (id, requester, cancellable);
+			}
+
+			public void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port, out string token)
+					throws Error {
+#if WINDOWS
+				throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
+#else
+				var base_host_session = host_session as BaseDBusHostSession;
+				if (base_host_session == null)
+					throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
+				if (!base_host_session.can_pass_file_descriptors_to_agent_session (id))
+					throw new Error.INVALID_ARGUMENT ("Not supported by this particular agent session");
+
+				if (broker_port == 0) {
+					try {
+						if (dynamic_iface != null) {
+							SocketAddress effective_address;
+							broker_service.add_address (
+								new InetSocketAddress (dynamic_iface.ip, 0),
+								STREAM,
+								TCP,
+								null,
+								out effective_address);
+							broker_port = ((InetSocketAddress) effective_address).get_port ();
+						} else {
+							broker_port = broker_service.add_any_inet_port (null);
+						}
+					} catch (GLib.Error e) {
+						throw new Error.NOT_SUPPORTED ("Unable to listen: %s", e.message);
+					}
+
+					broker_service.start ();
+				}
+
+				string transport_id = Uuid.string_random ();
+
+				var expiry_source = new TimeoutSource.seconds (20);
+				expiry_source.set_callback (() => {
+					transports.unset (transport_id);
+					return false;
+				});
+				expiry_source.attach (MainContext.get_thread_default ());
+
+				transports[transport_id] = new Transport (id, expiry_source);
+
+				port = broker_port;
+				token = transport_id;
+#endif
+			}
+
+			private bool on_broker_service_connection (SocketConnection connection, Object? source_object) {
+				handle_broker_connection.begin (connection);
+				return true;
+			}
+
+			private async void handle_broker_connection (SocketConnection connection) throws GLib.Error {
+				var socket = connection.socket;
+				if (socket.get_family () != UNIX)
+					Tcp.enable_nodelay (socket);
+
+				const size_t uuid_length = 36;
+
+				var raw_token = new uint8[uuid_length + 1];
+				size_t bytes_read;
+				yield connection.input_stream.read_all_async (raw_token[0:uuid_length], Priority.DEFAULT, io_cancellable,
+					out bytes_read);
+				unowned string token = (string) raw_token;
+
+				Transport transport;
+				if (!transports.unset (token, out transport))
+					return;
+
+				transport.expiry_source.destroy ();
+
+#if !WINDOWS
+				AgentSessionId session_id = transport.session_id;
+
+				var base_host_session = host_session as BaseDBusHostSession;
+				if (base_host_session == null)
+					throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
+
+				AgentSessionProvider provider = base_host_session.obtain_session_provider (session_id);
+				yield provider.migrate (session_id, socket, io_cancellable);
+#endif
+			}
+
+			private class Transport {
+				public AgentSessionId session_id;
+				public Source expiry_source;
+
+				public Transport (AgentSessionId session_id, Source expiry_source) {
+					this.session_id = session_id;
+					this.expiry_source = expiry_source;
+				}
+			}
+		}
+
 		private Gee.Iterator<ControlChannel> all_control_channels () {
-			return (Gee.Iterator<ControlChannel>) peers.values.filter (peer => peer is ControlChannel);
+			var channels = new Gee.ArrayList<ControlChannel> ();
+			channels.add_all_iterator (main_handler.all_control_channels ());
+			foreach (var handler in dynamic_interface_handlers.values)
+				channels.add_all_iterator (handler.all_control_channels ());
+			return channels.iterator ();
 		}
 
 		private async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
@@ -447,85 +650,12 @@ namespace Frida {
 			sessions.unset (entry.id);
 		}
 
-		private void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
-				out string token) throws Error {
-#if WINDOWS
-			throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
-#else
-			var base_host_session = host_session as BaseDBusHostSession;
-			if (base_host_session == null)
-				throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
-			if (!base_host_session.can_pass_file_descriptors_to_agent_session (id))
-				throw new Error.INVALID_ARGUMENT ("Not supported by this particular agent session");
-
-			if (broker_port == 0) {
-				try {
-					broker_port = broker_service.add_any_inet_port (null);
-				} catch (GLib.Error e) {
-					throw new Error.NOT_SUPPORTED ("Unable to listen: %s", e.message);
-				}
-
-				broker_service.start ();
-			}
-
-			string transport_id = Uuid.string_random ();
-
-			var expiry_source = new TimeoutSource.seconds (20);
-			expiry_source.set_callback (() => {
-				transports.unset (transport_id);
-				return false;
-			});
-			expiry_source.attach (MainContext.get_thread_default ());
-
-			transports[transport_id] = new Transport (id, expiry_source);
-
-			port = broker_port;
-			token = transport_id;
-#endif
-		}
-
-		private bool on_broker_service_connection (SocketConnection connection, Object? source_object) {
-			handle_broker_connection.begin (connection);
-			return true;
-		}
-
-		private async void handle_broker_connection (SocketConnection connection) throws GLib.Error {
-			var socket = connection.socket;
-			if (socket.get_family () != UNIX)
-				Tcp.enable_nodelay (socket);
-
-			const size_t uuid_length = 36;
-
-			var raw_token = new uint8[uuid_length + 1];
-			size_t bytes_read;
-			yield connection.input_stream.read_all_async (raw_token[0:uuid_length], Priority.DEFAULT, io_cancellable,
-				out bytes_read);
-			unowned string token = (string) raw_token;
-
-			Transport transport;
-			if (!transports.unset (token, out transport))
-				return;
-
-			transport.expiry_source.destroy ();
-
-#if !WINDOWS
-			AgentSessionId session_id = transport.session_id;
-
-			var base_host_session = host_session as BaseDBusHostSession;
-			if (base_host_session == null)
-				throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
-
-			AgentSessionProvider provider = base_host_session.obtain_session_provider (session_id);
-			yield provider.migrate (session_id, socket, io_cancellable);
-#endif
-		}
-
 		private interface Peer : Object {
 			public abstract async void close (Cancellable? cancellable = null) throws IOError;
 		}
 
 		private class AuthenticationChannel : Object, Peer, AuthenticationService {
-			public weak ControlService parent {
+			public weak ConnectionHandler parent {
 				get;
 				construct;
 			}
@@ -542,7 +672,7 @@ namespace Frida {
 
 			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 
-			public AuthenticationChannel (ControlService parent, DBusConnection connection, AuthenticationService service) {
+			public AuthenticationChannel (ConnectionHandler parent, DBusConnection connection, AuthenticationService service) {
 				Object (
 					parent: parent,
 					connection: connection,
@@ -582,7 +712,7 @@ namespace Frida {
 		}
 
 		private class ControlChannel : Object, Peer, HostSession, TransportBroker {
-			public weak ControlService parent {
+			public weak ConnectionHandler parent {
 				get;
 				construct;
 			}
@@ -600,7 +730,7 @@ namespace Frida {
 			private Gee.Set<uint> registrations = new Gee.HashSet<uint> ();
 			private TimeoutSource? ping_timer;
 
-			public ControlChannel (ControlService parent, DBusConnection connection) {
+			public ControlChannel (ConnectionHandler parent, DBusConnection connection) {
 				Object (parent: parent, connection: connection);
 			}
 
@@ -847,16 +977,6 @@ namespace Frida {
 					return;
 				expiry_timer.destroy ();
 				expiry_timer = null;
-			}
-		}
-
-		private class Transport {
-			public AgentSessionId session_id;
-			public Source expiry_source;
-
-			public Transport (AgentSessionId session_id, Source expiry_source) {
-				this.session_id = session_id;
-				this.expiry_source = expiry_source;
 			}
 		}
 	}

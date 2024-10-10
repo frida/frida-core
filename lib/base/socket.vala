@@ -235,7 +235,7 @@ namespace Frida {
 	}
 
 	public class WebService : Object {
-		public signal void incoming (IOStream connection, SocketAddress remote_address);
+		public signal void incoming (IOStream connection, SocketAddress remote_address, DynamicInterface? dynamic_iface);
 
 		public EndpointParameters endpoint_params {
 			get;
@@ -315,7 +315,7 @@ namespace Frida {
 		}
 
 		private async SocketAddress do_start (Cancellable? cancellable) throws Error, IOError {
-			main_handler = make_connection_handler ();
+			main_handler = make_connection_handler (null);
 			SocketAddress? first_effective_address = null;
 			SocketConnectable connectable = (flavor == CONTROL)
 				? parse_control_address (endpoint_params.address, endpoint_params.port)
@@ -356,35 +356,37 @@ namespace Frida {
 			return first_effective_address;
 		}
 
-		private void on_dynamic_interface_attached (string name, InetAddress ip) {
+		private void on_dynamic_interface_attached (DynamicInterface iface) {
+			unowned string name = iface.name;
+
 			uint16 port = endpoint_params.port;
 			if (port == 0)
 				port = (flavor == CONTROL) ? DEFAULT_CONTROL_PORT : DEFAULT_CLUSTER_PORT;
 
-			var handler = make_connection_handler ();
+			var handler = make_connection_handler (iface);
 			try {
-				handler.listen_on_inet_address (new InetSocketAddress (ip, port));
+				handler.listen_on_inet_address (new InetSocketAddress (iface.ip, port));
 			} catch (Error e) {
 				return;
 			}
 			dynamic_interface_handlers[name] = handler;
 		}
 
-		private void on_dynamic_interface_detached (string name, InetAddress ip) {
+		private void on_dynamic_interface_detached (DynamicInterface iface) {
 			ConnectionHandler handler;
-			if (dynamic_interface_handlers.unset (name, out handler))
+			if (dynamic_interface_handlers.unset (iface.name, out handler))
 				handler.close ();
 		}
 
-		private ConnectionHandler make_connection_handler () {
-			var handler = new ConnectionHandler (endpoint_params, on_port_conflict);
+		private ConnectionHandler make_connection_handler (DynamicInterface? dynamic_iface) {
+			var handler = new ConnectionHandler (dynamic_iface, endpoint_params, on_port_conflict);
 			handler.incoming.connect (on_incoming_connection);
 			return handler;
 		}
 
-		private void on_incoming_connection (IOStream connection, SocketAddress remote_address) {
+		private void on_incoming_connection (ConnectionHandler handler, IOStream connection, SocketAddress remote_address) {
 			schedule_on_frida_thread (() => {
-				incoming (connection, remote_address);
+				incoming (connection, remote_address, handler.dynamic_iface);
 				return Source.REMOVE;
 			});
 		}
@@ -431,6 +433,11 @@ namespace Frida {
 		private class ConnectionHandler : Object {
 			public signal void incoming (IOStream connection, SocketAddress remote_address);
 
+			public DynamicInterface? dynamic_iface {
+				get;
+				construct;
+			}
+
 			public EndpointParameters endpoint_params {
 				get;
 				construct;
@@ -446,8 +453,13 @@ namespace Frida {
 			private Gee.Set<WebConnection> connections = new Gee.HashSet<WebConnection> ();
 			private Cancellable io_cancellable = new Cancellable ();
 
-			public ConnectionHandler (EndpointParameters endpoint_params, PortConflictBehavior on_port_conflict) {
-				Object (endpoint_params: endpoint_params, on_port_conflict: on_port_conflict);
+			public ConnectionHandler (DynamicInterface? dynamic_iface, EndpointParameters endpoint_params,
+					PortConflictBehavior on_port_conflict) {
+				Object (
+					dynamic_iface: dynamic_iface,
+					endpoint_params: endpoint_params,
+					on_port_conflict: on_port_conflict
+				);
 			}
 
 			construct {
@@ -834,10 +846,26 @@ namespace Frida {
 	}
 
 	public interface DynamicInterfaceObserver : Object {
-		public signal void interface_attached (string name, InetAddress ip);
-		public signal void interface_detached (string name, InetAddress ip);
+		public signal void interface_attached (DynamicInterface iface);
+		public signal void interface_detached (DynamicInterface iface);
 
 		public abstract void start ();
+	}
+
+	public class DynamicInterface : Object {
+		public string name {
+			get;
+			construct;
+		}
+
+		public InetAddress ip {
+			get;
+			construct;
+		}
+
+		public DynamicInterface (string name, InetAddress ip) {
+			Object (name: name, ip: ip);
+		}
 	}
 
 	public extern static unowned string _version_string ();
