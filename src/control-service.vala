@@ -186,7 +186,7 @@ namespace Frida {
 #endif
 
 			ConnectionHandler handler;
-			unowned string iface_name = dynamic_iface.name;
+			unowned string iface_name = dynamic_iface?.name;
 			if (iface_name != null) {
 				handler = dynamic_interface_handlers[iface_name];
 				if (handler == null) {
