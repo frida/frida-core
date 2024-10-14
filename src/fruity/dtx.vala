@@ -1116,7 +1116,7 @@ namespace Frida.Fruity {
 						NSObject? obj = NSKeyedArchive.decode (buf);
 						if (obj != null) {
 							var gval = Value (Type.from_instance (obj));
-							gval.set_boxed (obj);
+							gval.set_instance (obj);
 							elements += (owned) gval;
 						} else {
 							var gval = Value (typeof (NSObject));
