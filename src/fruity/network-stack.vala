@@ -559,7 +559,11 @@ namespace Frida.Fruity {
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
-				detach_from_pcb ();
+				bool pcb_already_freed = err == ABRT;
+				if (pcb_already_freed)
+					pcb = null;
+				else
+					detach_from_pcb ();
 				schedule_on_frida_thread (() => {
 					_state = CLOSED;
 					update_events ();
