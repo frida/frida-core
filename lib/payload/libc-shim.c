@@ -25,6 +25,24 @@ frida_run_atexit_handlers (void)
 {
 }
 
+# ifdef HAVE_ASAN
+
+__attribute__ ((constructor)) static void
+frida_init_memory (void)
+{
+  asm volatile ("");
+}
+
+#  ifndef HAVE_DARWIN
+__attribute__ ((destructor)) static void
+frida_deinit_memory (void)
+{
+  asm volatile ("");
+}
+#  endif
+
+# endif
+
 #else
 
 #define FRIDA_SHIM_LOCK() gum_spinlock_acquire (&frida_shim_lock)
