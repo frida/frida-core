@@ -1017,8 +1017,10 @@ namespace Frida {
 				establish_connection (launch, spec, bres, agent_ctrl, fallback_address, cancellable);
 
 			uint64 loader_base = (uintptr) bres.context.allocation_base;
-
-			var call_builder = new RemoteCallBuilder (loader_base, saved_regs);
+			// Set the stack pointer to the allocated stack root.
+			GPRegs regs = saved_regs;
+			regs.stack_pointer = bres.allocated_stack.stack_root;
+			var call_builder = new RemoteCallBuilder (loader_base, regs);
 			call_builder.add_argument (loader_base + loader_layout.ctx_offset);
 			RemoteCall loader_call = call_builder.build (this);
 			RemoteCallResult loader_result = yield loader_call.execute (cancellable);
@@ -1088,8 +1090,12 @@ namespace Frida {
 				remote_munmap = remote_libc.base_address + munmap_offset;
 			}
 
+			uint64 stack_base = 0;
+			size_t stack_size = 64 << 10; // enough for the bootstrapper
 			if (remote_mmap != 0) {
 				allocation_base = yield allocate_memory (remote_mmap, allocation_size,
+					Posix.PROT_READ | Posix.PROT_WRITE | Posix.PROT_EXEC, cancellable);
+				stack_base = yield allocate_memory (remote_mmap, stack_size,
 					Posix.PROT_READ | Posix.PROT_WRITE | Posix.PROT_EXEC, cancellable);
 			} else {
 				var code_swap = yield new ProcessCodeSwapScope (this, bootstrapper_code, cancellable);
@@ -1104,6 +1110,7 @@ namespace Frida {
 
 				var bootstrap_ctx = HelperBootstrapContext ();
 				bootstrap_ctx.allocation_size = allocation_size;
+				bootstrap_ctx.stack_size = stack_size;
 				write_memory (bootstrap_ctx_location, (uint8[]) &bootstrap_ctx);
 
 				call_builder.add_argument (bootstrap_ctx_location);
@@ -1117,9 +1124,12 @@ namespace Frida {
 				Memory.copy (&bootstrap_ctx, output_context, output_context.length);
 
 				allocation_base = (uintptr) bootstrap_ctx.allocation_base;
-
+				stack_base = (uintptr) bootstrap_ctx.stack_base;
 				code_swap.revert ();
 			}
+
+			result.allocated_stack.stack_base = (void *)stack_base;
+			result.allocated_stack.stack_size = stack_size;
 
 			try {
 				write_memory (allocation_base, bootstrapper_code);
@@ -1129,7 +1139,9 @@ namespace Frida {
 
 				HelperBootstrapStatus status = SUCCESS;
 				do {
-					var call_builder = new RemoteCallBuilder (code_start, saved_regs);
+					GPRegs regs = saved_regs;
+					regs.stack_pointer = result.allocated_stack.stack_root;
+					var call_builder = new RemoteCallBuilder (code_start, regs);
 
 					unowned uint8[] fallback_ld_data = fallback_ld.data;
 					unowned uint8[] fallback_libc_data = fallback_libc.data;
@@ -1196,6 +1208,10 @@ namespace Frida {
 				if (remote_munmap != 0) {
 					try {
 						yield deallocate_memory (remote_munmap, allocation_base, allocation_size, null);
+					} catch (GLib.Error e) {
+					}
+					try {
+						yield deallocate_memory (remote_munmap, stack_base, stack_size, null);
 					} catch (GLib.Error e) {
 					}
 				}
@@ -1395,6 +1411,8 @@ namespace Frida {
 		public async void deallocate (BootstrapResult bres, Cancellable? cancellable) throws Error, IOError {
 			yield deallocate_memory ((uintptr) bres.libc.munmap, (uintptr) bres.context.allocation_base,
 				bres.context.allocation_size, cancellable);
+			yield deallocate_memory ((uintptr) bres.libc.munmap, (uintptr) bres.allocated_stack.stack_base,
+				bres.allocated_stack.stack_size, cancellable);
 		}
 	}
 
@@ -1416,14 +1434,28 @@ namespace Frida {
 		}
 	}
 
+	private struct AllocatedStack {
+		public void * stack_base;
+		public size_t stack_size;
+
+		public uint64 stack_root {
+			get {
+				return (uint64) stack_base + (uint64) stack_size;
+			}
+		}
+	}
+
+
 	private class BootstrapResult {
 		public HelperBootstrapContext context;
 		public HelperLibcApi libc;
+		public AllocatedStack allocated_stack;
 
 		public BootstrapResult clone () {
 			var res = new BootstrapResult ();
 			res.context = context;
 			res.libc = libc;
+			res.allocated_stack = allocated_stack;
 			return res;
 		}
 	}
@@ -1717,6 +1749,9 @@ namespace Frida {
 		bool enable_ctrlfds;
 		int ctrlfds[2];
 		HelperLibcApi * libc;
+
+		void * stack_base;
+		size_t stack_size;
 	}
 
 	protected struct HelperLoaderContext {
