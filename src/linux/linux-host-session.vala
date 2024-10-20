@@ -894,7 +894,7 @@ namespace Frida {
 			var scope = options.scope;
 			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
 
-			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, cancellable);
+			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, null, cancellable);
 
 			if (result.get_node_type () == NULL)
 				return HostApplicationInfo.empty ();
@@ -920,7 +920,7 @@ namespace Frida {
 			var scope = options.scope;
 			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
 
-			Json.Node apps = yield call ("enumerateApplications", new Json.Node[] { identifiers_node, scope_node },
+			Json.Node apps = yield call ("enumerateApplications", new Json.Node[] { identifiers_node, scope_node }, null,
 				cancellable);
 
 			var items = apps.get_array ();
@@ -946,7 +946,7 @@ namespace Frida {
 			var package_name_node = new Json.Node.alloc ().init_string (package);
 			var uid_node = new Json.Node.alloc ().init_int (uid);
 
-			Json.Node name = yield call ("getProcessName", new Json.Node[] { package_name_node, uid_node }, cancellable);
+			Json.Node name = yield call ("getProcessName", new Json.Node[] { package_name_node, uid_node }, null, cancellable);
 
 			return name.get_string ();
 		}
@@ -960,7 +960,8 @@ namespace Frida {
 
 			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
 
-			Json.Node by_pid = yield call ("getProcessParameters", new Json.Node[] { pids_node, scope_node }, cancellable);
+			Json.Node by_pid = yield call ("getProcessParameters", new Json.Node[] { pids_node, scope_node }, null,
+				cancellable);
 
 			var result = new Gee.HashMap<uint, HashTable<string, Variant>> ();
 			by_pid.get_object ().foreach_member ((object, pid_str, parameters_node) => {
@@ -982,20 +983,20 @@ namespace Frida {
 			if (entrypoint is DefaultActivityEntrypoint) {
 				var activity_node = new Json.Node.alloc ().init_null ();
 
-				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, null, cancellable);
 			} else if (entrypoint is ActivityEntrypoint) {
 				var e = entrypoint as ActivityEntrypoint;
 
 				var activity_node = new Json.Node.alloc ().init_string (e.activity);
 
-				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, null, cancellable);
 			} else if (entrypoint is BroadcastReceiverEntrypoint) {
 				var e = entrypoint as BroadcastReceiverEntrypoint;
 
 				var receiver_node = new Json.Node.alloc ().init_string (e.receiver);
 				var action_node = new Json.Node.alloc ().init_string (e.action);
 
-				yield call ("sendBroadcast", new Json.Node[] { package_node, receiver_node, action_node, uid_node },
+				yield call ("sendBroadcast", new Json.Node[] { package_node, receiver_node, action_node, uid_node }, null,
 					cancellable);
 			} else {
 				assert_not_reached ();
@@ -1006,13 +1007,13 @@ namespace Frida {
 			var package_node = new Json.Node.alloc ().init_string (package);
 			var uid_node = new Json.Node.alloc ().init_int (uid);
 
-			yield call ("stopPackage", new Json.Node[] { package_node, uid_node }, cancellable);
+			yield call ("stopPackage", new Json.Node[] { package_node, uid_node }, null, cancellable);
 		}
 
 		public async bool try_stop_package_by_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var pid_node = new Json.Node.alloc ().init_int (pid);
 
-			Json.Node success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_node }, cancellable);
+			Json.Node success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_node }, null, cancellable);
 
 			return success.get_boolean ();
 		}
