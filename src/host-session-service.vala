@@ -1335,10 +1335,11 @@ namespace Frida {
 		protected virtual void on_event (string type, Json.Array event) {
 		}
 
-		protected async Json.Node call (string method, Json.Node[] args, Cancellable? cancellable) throws Error, IOError {
+		protected async Json.Node call (string method, Json.Node[] args, Bytes? data, Cancellable? cancellable)
+				throws Error, IOError {
 			yield ensure_loaded (cancellable);
 
-			return yield rpc_client.call (method, args, cancellable);
+			return yield rpc_client.call (method, args, data, cancellable);
 		}
 
 		protected async void post (Json.Node message, Cancellable? cancellable) throws Error, IOError {
@@ -1508,9 +1509,11 @@ namespace Frida {
 				printerr ("%s\n", json);
 		}
 
-		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
+		private async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError {
+			var has_data = data != null;
+			var data_param = has_data ? data.get_data () : new uint8[0];
 			try {
-				yield session.post_messages ({ AgentMessage (SCRIPT, script, json, false, {}) }, 0, cancellable);
+				yield session.post_messages ({ AgentMessage (SCRIPT, script, json, has_data, data_param) }, 0, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

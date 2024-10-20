@@ -420,7 +420,7 @@ namespace Frida {
 					var reason_value = new Json.Node.alloc ().init_string (reason.to_nick ());
 
 					try {
-						yield rpc_client.call ("dispose", new Json.Node[] { reason_value }, null);
+						yield rpc_client.call ("dispose", new Json.Node[] { reason_value }, null, null);
 					} catch (GLib.Error e) {
 					}
 
@@ -467,10 +467,10 @@ namespace Frida {
 				this.debug_message (message);
 			}
 
-			private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
+			private async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError {
 				if (script == null)
 					throw new Error.INVALID_OPERATION ("Script is destroyed");
-				script.post (json);
+				script.post (json, data);
 			}
 		}
 	}
