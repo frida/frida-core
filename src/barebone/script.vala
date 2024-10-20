@@ -420,7 +420,9 @@ namespace Frida {
 
 		public void post (string json, Bytes? data) {
 			var json_val = ctx.make_string (json);
-			invoke_void (dispatch_message_func, { json_val }, runtime_obj);
+			var data_val = (data != null) ? ctx.make_array_buffer (data.get_data ()) : QuickJS.Null;
+			invoke_void (dispatch_message_func, { json_val, data_val }, runtime_obj);
+			ctx.free_value (data_val);
 			ctx.free_value (json_val);
 
 			perform_pending_io ();
