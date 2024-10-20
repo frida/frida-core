@@ -933,27 +933,28 @@ namespace Frida {
 		}
 
 		public async void prepare_for_launch (string identifier, Cancellable? cancellable) throws Error, IOError {
-			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, cancellable);
+			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, null,
+				cancellable);
 		}
 
 		public async void cancel_launch (string identifier, Cancellable? cancellable) throws Error, IOError {
-			yield call ("cancelLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, cancellable);
+			yield call ("cancelLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, null, cancellable);
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			yield call ("enableSpawnGating", new Json.Node[] {}, cancellable);
+			yield call ("enableSpawnGating", new Json.Node[] {}, null, cancellable);
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			yield call ("disableSpawnGating", new Json.Node[] {}, cancellable);
+			yield call ("disableSpawnGating", new Json.Node[] {}, null, cancellable);
 		}
 
 		public async void claim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
-			yield call ("claimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+			yield call ("claimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, null, cancellable);
 		}
 
 		public async void unclaim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
-			yield call ("unclaimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+			yield call ("unclaimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, null, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {
