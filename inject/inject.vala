@@ -388,7 +388,7 @@ namespace Frida.Inject {
 				return false;
 			}
 
-			script_runner.on_stdin (line);
+			script_runner.on_stdin (line, null);
 
 			return true;
 		}
@@ -414,7 +414,12 @@ namespace Frida.Inject {
 
 			buf[n] = 0;
 
-			script_runner.on_stdin ((string) buf);
+			if (script_runner.terminal_mode == TerminalMode.BINARY) {
+				var bytes = new Bytes (buf[:n]);
+				script_runner.on_stdin ("", bytes);
+			} else {
+				script_runner.on_stdin ((string) buf, null);
+			}
 
 			return true;
 		}
@@ -549,7 +554,7 @@ namespace Frida.Inject {
 			var stage = new Json.Node.alloc ().init_string ("early");
 
 			try {
-				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, io_cancellable);
+				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null, io_cancellable);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -591,7 +596,7 @@ namespace Frida.Inject {
 		private async TerminalMode query_terminal_mode () {
 			Json.Node mode_value;
 			try {
-				mode_value = yield rpc_client.call ("getFridaTerminalMode", new Json.Node[] {}, io_cancellable);
+				mode_value = yield rpc_client.call ("getFridaTerminalMode", new Json.Node[] {}, null, io_cancellable);
 			} catch (GLib.Error e) {
 				return COOKED;
 			}
@@ -599,7 +604,14 @@ namespace Frida.Inject {
 			if (mode_value.get_value_type () != typeof (string))
 				return COOKED;
 
-			return (mode_value.get_string () == "raw") ? TerminalMode.RAW : TerminalMode.COOKED;
+			switch (mode_value.get_string ()) {
+				case "raw":
+					return TerminalMode.RAW;
+				case "binary":
+					return TerminalMode.BINARY;
+				default:
+					return TerminalMode.COOKED;
+			}
 		}
 
 		private void apply_terminal_mode (TerminalMode mode) throws Error {
@@ -632,10 +644,10 @@ namespace Frida.Inject {
 		}
 #endif
 
-		public void on_stdin (string data) {
-			var data_value = new Json.Node.alloc ().init_string (data);
+		public void on_stdin (string str, Bytes? data) {
+			var str_value = new Json.Node.alloc ().init_string (str);
 
-			rpc_client.call.begin ("onFridaStdin", new Json.Node[] { data_value }, io_cancellable);
+			rpc_client.call.begin ("onFridaStdin", new Json.Node[] { str_value }, data, io_cancellable);
 		}
 
 		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
@@ -675,7 +687,7 @@ namespace Frida.Inject {
 					handled = try_handle_log_message (message);
 					break;
 				case "send":
-					handled = try_handle_stdout_message (message);
+					handled = try_handle_stdout_message (message, data);
 					break;
 				default:
 					handled = false;
@@ -722,20 +734,19 @@ namespace Frida.Inject {
 		 *
 		 * {"type":"send","payload":["frida:stdout","DATA"]}
 		 */
-		private bool try_handle_stdout_message (Json.Object message) {
+		private bool try_handle_stdout_message (Json.Object message, Bytes? data) {
 			var payload = message.get_member ("payload");
 			if (payload.get_node_type () != Json.NodeType.ARRAY)
 				return false;
 
 			var tuple = payload.get_array ();
-			if (tuple.get_length () != 2)
+			var tuple_len = tuple.get_length ();
+			if (tuple_len == 0)
 				return false;
 
-			var first_element = tuple.get_element (0);
-			if (first_element.get_value_type () != typeof (string))
+			var type = tuple.get_element (0).get_string ();
+			if (type == null)
 				return false;
-
-			var type = first_element.get_string ();
 			switch (type) {
 				case "frida:stdout":
 				case "frida:stderr":
@@ -744,31 +755,49 @@ namespace Frida.Inject {
 					return false;
 			}
 
-			var second_element = tuple.get_element (1);
-			if (second_element.get_value_type () != typeof (string))
-				return false;
-			var str = second_element.get_string ();
-
-			switch (type) {
-				case "frida:stdout":
-					stdout.write (str.data);
-					stdout.flush ();
-					return true;
-				case "frida:stderr":
-					stderr.write (str.data);
-					return true;
-				default:
+			if (tuple_len >= 2) {
+				var str = tuple.get_element (1).get_string ();
+				if (str == null)
 					return false;
+
+				switch (type) {
+					case "frida:stdout":
+						stdout.write (str.data);
+						stdout.flush ();
+						break;
+					case "frida:stderr":
+						stderr.write (str.data);
+						break;
+					default:
+						return false;
+				}
 			}
+
+			if (data != null) {
+				switch (type) {
+					case "frida:stdout":
+						stdout.write (data.get_data ());
+						stdout.flush ();
+						break;
+					case "frida:stderr":
+						stderr.write (data.get_data ());
+						break;
+					default:
+						return false;
+				}
+			}
+
+			return true;
 		}
 
-		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
-			script.post (json, null);
+		private async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError {
+			script.post (json, data);
 		}
 	}
 
 	private enum TerminalMode {
 		COOKED,
-		RAW
+		RAW,
+		BINARY
 	}
 }
