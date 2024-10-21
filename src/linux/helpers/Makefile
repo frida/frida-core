@@ -2,6 +2,7 @@ top_srcdir := ../../..
 releng := $(top_srcdir)/releng
 
 BUILDDIR ?= $(top_srcdir)/build
+MESON ?= $(releng)/meson/meson.py
 
 ifdef FRIDA_HOST
 host_machine := $(FRIDA_HOST)
@@ -14,8 +15,8 @@ crossfile := $(BUILDDIR)/frida-$(host_machine).txt
 
 build: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
-	meson setup --cross-file $(crossfile) -Db_lto=true build
-	meson compile -C build
+	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
+	$(MESON) compile -C build
 	cp build/bootstrapper.bin bootstrapper-$(host_arch).bin
 	cp build/loader.bin loader-$(host_arch).bin
 
