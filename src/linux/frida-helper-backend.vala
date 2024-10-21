@@ -1017,8 +1017,9 @@ namespace Frida {
 				establish_connection (launch, spec, bres, agent_ctrl, fallback_address, cancellable);
 
 			uint64 loader_base = (uintptr) bres.context.allocation_base;
-
-			var call_builder = new RemoteCallBuilder (loader_base, saved_regs);
+			GPRegs regs = saved_regs;
+			regs.stack_pointer = bres.allocated_stack.stack_root;
+			var call_builder = new RemoteCallBuilder (loader_base, regs);
 			call_builder.add_argument (loader_base + loader_layout.ctx_offset);
 			RemoteCall loader_call = call_builder.build (this);
 			RemoteCallResult loader_result = yield loader_call.execute (cancellable);
@@ -1076,8 +1077,10 @@ namespace Frida {
 			unowned uint8[] bootstrapper_code = Frida.Data.HelperBackend.get_bootstrapper_bin_blob ().data;
 			size_t bootstrapper_size = round_size_to_page_size (bootstrapper_code.length);
 
+			size_t stack_size = 64 * 1024;
+
 			uint64 allocation_base = 0;
-			size_t allocation_size = size_t.max (bootstrapper_size, loader_size);
+			size_t allocation_size = size_t.max (bootstrapper_size, loader_size) + stack_size;
 
 			uint64 remote_mmap = 0;
 			uint64 remote_munmap = 0;
@@ -1117,9 +1120,11 @@ namespace Frida {
 				Memory.copy (&bootstrap_ctx, output_context, output_context.length);
 
 				allocation_base = (uintptr) bootstrap_ctx.allocation_base;
-
 				code_swap.revert ();
 			}
+
+			result.allocated_stack.stack_base = (void *) (allocation_base + allocation_size - stack_size);
+			result.allocated_stack.stack_size = stack_size;
 
 			try {
 				write_memory (allocation_base, bootstrapper_code);
@@ -1129,7 +1134,9 @@ namespace Frida {
 
 				HelperBootstrapStatus status = SUCCESS;
 				do {
-					var call_builder = new RemoteCallBuilder (code_start, saved_regs);
+					GPRegs regs = saved_regs;
+					regs.stack_pointer = result.allocated_stack.stack_root;
+					var call_builder = new RemoteCallBuilder (code_start, regs);
 
 					unowned uint8[] fallback_ld_data = fallback_ld.data;
 					unowned uint8[] fallback_libc_data = fallback_libc.data;
@@ -1416,14 +1423,28 @@ namespace Frida {
 		}
 	}
 
+	private struct AllocatedStack {
+		public void * stack_base;
+		public size_t stack_size;
+
+		public uint64 stack_root {
+			get {
+				return (uint64) stack_base + (uint64) stack_size;
+			}
+		}
+	}
+
+
 	private class BootstrapResult {
 		public HelperBootstrapContext context;
 		public HelperLibcApi libc;
+		public AllocatedStack allocated_stack;
 
 		public BootstrapResult clone () {
 			var res = new BootstrapResult ();
 			res.context = context;
 			res.libc = libc;
+			res.allocated_stack = allocated_stack;
 			return res;
 		}
 	}
