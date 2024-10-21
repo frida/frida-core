@@ -44,12 +44,6 @@ usage () {
   exit 1
 }
 
-setup_meson () {
-  ln -s "$RELENG_DIR/meson/meson.py" "$TMP_MESON_DIR/meson"
-  chmod +x "$TMP_MESON_DIR/meson"
-  export PATH="$TMP_MESON_DIR:$PATH"
-}
-
 ARCHS=(
   x86
   x86_64
@@ -83,8 +77,6 @@ build_arch () {
     EXTRA_FLAGS+=("--build=linux-x86")
     export CC="gcc -m32" CXX="g++ -m32" STRIP="strip"
   fi
-
-  setup_meson
 
   cd "$FRIDA_CORE_DIR"
 
