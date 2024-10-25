@@ -549,7 +549,10 @@ if have_fruity_backend
     ]
   endif
   if host_os_family == 'linux'
-    backend_vala_args += '--pkg=linux'
+    backend_vala_args += [
+      '--pkg=linux',
+      '--pkg=linux-if',
+    ]
   endif
 endif
 
