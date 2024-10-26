@@ -954,6 +954,8 @@ namespace Frida.Fruity {
 			if (res >= LibUSB.Error.SUCCESS) {
 				serial[res] = '\0';
 				udid = (string) serial;
+				if (udid.length == 24)
+					udid = udid[:8] + "-" + udid[8:];
 
 				var transport = usb_transports.first_match (t => t.udid == udid);
 				if (transport != null) {
