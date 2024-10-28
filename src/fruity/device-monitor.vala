@@ -1174,7 +1174,7 @@ namespace Frida.Fruity {
 
 		private Promise<UsbDevice>? device_request;
 		private Promise<LibUSB.Device>? modeswitch_request;
-		private Promise<Tunnel>? tunnel_request;
+		private Promise<Tunnel?>? tunnel_request;
 		private NcmPeer? ncm_peer;
 
 		public PortableCoreDeviceUsbTransport (PortableCoreDeviceBackend parent, LibUSB.Device raw_device, string udid,
@@ -1318,7 +1318,9 @@ namespace Frida.Fruity {
 					try {
 						yield tunnel.open (cancellable);
 					} catch (Error e) {
-						if (!(e is Error.NOT_SUPPORTED))
+						if (e is Error.NOT_SUPPORTED)
+							tunnel = null;
+						else
 							throw e;
 					}
 				}
