@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import base64
+import locale
 from collections import OrderedDict
 from dataclasses import dataclass, field
 import itertools
@@ -400,7 +401,7 @@ def compile(privdir: Path, state: State):
                 **kwargs,
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
-                "encoding": "utf-8",
+                "encoding": locale.getpreferredencoding(),
             }
         else:
             silenced_kwargs = kwargs
