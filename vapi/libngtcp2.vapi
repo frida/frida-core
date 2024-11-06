@@ -19,6 +19,7 @@ namespace NGTcp2 {
 		public int read_packet (Path path, PacketInfo * pi, uint8[] pkt, Timestamp ts);
 
 		public int open_bidi_stream (out int64 stream_id, void * stream_user_data);
+		public int shutdown_stream (uint32 flags, int64 stream_id, uint64 app_error_code);
 
 		public ssize_t write_stream (Path * path, PacketInfo * pi, uint8[] dest, ssize_t * pdatalen, WriteStreamFlags flags,
 			int64 stream_id, uint8[]? data, Timestamp ts);

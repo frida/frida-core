@@ -1789,7 +1789,7 @@ namespace Frida.Fruity {
 			get;
 		}
 
-		public abstract void cancel ();
+		public abstract async void cancel (Cancellable? cancellable) throws IOError;
 
 		protected static Bytes make_handshake_request (size_t mtu) {
 			string body = Json.to_string (
@@ -1888,6 +1888,8 @@ namespace Frida.Fruity {
 			}
 		}
 
+		private Promise<bool> cancelled = new Promise<bool> ();
+
 		private TunnelParameters tunnel_params;
 		private VirtualNetworkStack _tunnel_netstack;
 
@@ -1924,12 +1926,6 @@ namespace Frida.Fruity {
 				local_keypair: local_keypair,
 				remote_pubkey: remote_pubkey
 			);
-		}
-
-		public override void dispose () {
-			cancel ();
-
-			base.dispose ();
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
@@ -1975,8 +1971,14 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public void cancel () {
+		public async void cancel (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
+
+			try {
+				yield cancelled.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 
 			if (_tunnel_netstack != null)
 				_tunnel_netstack.stop ();
@@ -1991,6 +1993,18 @@ namespace Frida.Fruity {
 				}
 			} catch (GLib.Error e) {
 			}
+
+			var source = new IdleSource ();
+			source.set_callback (process_incoming_messages.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
+			try {
+				yield connection.close_async ();
+			} catch (IOError e) {
+			}
+
+			cancelled.resolve (true);
 
 			close ();
 		}
@@ -2155,6 +2169,7 @@ namespace Frida.Fruity {
 		}
 
 		private Promise<bool> established = new Promise<bool> ();
+		private Promise<bool> cancelled = new Promise<bool> ();
 
 		private Stream? control_stream;
 		private TunnelParameters tunnel_params;
@@ -2240,7 +2255,7 @@ namespace Frida.Fruity {
 		}
 
 		public override void dispose () {
-			cancel ();
+			perform_teardown ();
 
 			base.dispose ();
 		}
@@ -2340,7 +2355,30 @@ namespace Frida.Fruity {
 			established.resolve (true);
 		}
 
-		public void cancel () {
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			if (connection == null)
+				return;
+
+			if (streams.is_empty) {
+				perform_teardown ();
+				return;
+			}
+
+			foreach (int64 id in streams.keys)
+				connection.shutdown_stream (0, id, 0);
+			process_pending_writes ();
+
+			try {
+				yield cancelled.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void perform_teardown () {
+			if (cancelled.future.ready)
+				return;
+
 			if (connection != null)
 				close ();
 			connection = null;
@@ -2365,6 +2403,8 @@ namespace Frida.Fruity {
 
 			if (_tunnel_netstack != null)
 				_tunnel_netstack.stop ();
+
+			cancelled.resolve (true);
 		}
 
 		private void on_stream_data_available (Stream stream, uint8[] data, out size_t consumed) {
@@ -2425,7 +2465,9 @@ namespace Frida.Fruity {
 
 				unowned uint8[] data = rx_buf[:n];
 
-				connection.read_packet (path, null, data, make_timestamp ());
+				var res = connection.read_packet (path, null, data, make_timestamp ());
+				if (res == NGTcp2.ErrorCode.DRAINING)
+					perform_teardown ();
 			} catch (GLib.Error e) {
 				return Source.REMOVE;
 			} finally {
@@ -2528,7 +2570,7 @@ namespace Frida.Fruity {
 		private bool on_expiry () {
 			int res = connection.handle_expiry (make_timestamp ());
 			if (res != 0) {
-				cancel ();
+				perform_teardown ();
 				return Source.REMOVE;
 			}
 
@@ -2567,7 +2609,7 @@ namespace Frida.Fruity {
 					uint64.FORMAT_MODIFIER + "u", app_error_code));
 			}
 
-			cancel ();
+			perform_teardown ();
 
 			return 0;
 		}
