@@ -21,10 +21,15 @@ namespace OpenSSL {
 		public void set_connect_state ();
 		public void set_accept_state ();
 
+		public int set_cipher_list (string str);
 		public int set_alpn_protos (uint8[] protos);
+		public void set_psk_client_callback (PskClientCallback callback);
 
 		public void set_quic_transport_version (int version);
 	}
+
+	[CCode (has_target = false)]
+	public delegate uint PskClientCallback (SSL ssl, string? hint, char[] identity, uint8[] psk);
 
 	[Compact]
 	[CCode (cname = "SSL_METHOD", cprefix = "SSL_METHOD_", free_function = "")]

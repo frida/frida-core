@@ -200,7 +200,19 @@ namespace Frida.Fruity {
 
 		public async TunnelConnection open_tunnel (InetAddress device_address, NetworkStack netstack,
 				Cancellable? cancellable = null) throws Error, IOError {
-			Key local_keypair = make_keypair (RSA);
+			string? protocol = Environment.get_variable ("FRIDA_FRUITY_TUNNEL_PROTOCOL");
+			if (protocol == null)
+				protocol = "tcp";
+
+			Key local_keypair;
+			uint8[] key;
+			if (protocol == "quic") {
+				local_keypair = make_keypair (RSA);
+				key = key_to_der (local_keypair);
+			} else {
+				local_keypair = make_keypair (ED25519);
+				key = get_raw_private_key (local_keypair).get_data ();
+			}
 
 			string request = Json.to_string (
 				new Json.Builder ()
@@ -212,9 +224,9 @@ namespace Frida.Fruity {
 							.set_member_name ("createListener")
 							.begin_object ()
 								.set_member_name ("transportProtocolType")
-								.add_string_value ("quic")
+								.add_string_value (protocol)
 								.set_member_name ("key")
-								.add_string_value (Base64.encode (key_to_der (local_keypair)))
+								.add_string_value (Base64.encode (key))
 							.end_object ()
 						.end_object ()
 					.end_object ()
@@ -255,12 +267,21 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 
-			return yield TunnelConnection.open (
-				tunnel_endpoint,
-				netstack,
-				new TunnelKey ((owned) local_keypair),
-				new TunnelKey ((owned) remote_pubkey),
-				cancellable);
+			if (protocol == "quic") {
+				return yield QuicTunnelConnection.open (
+					tunnel_endpoint,
+					netstack,
+					new TunnelKey ((owned) local_keypair),
+					new TunnelKey ((owned) remote_pubkey),
+					cancellable);
+			} else {
+				return yield TcpTunnelConnection.open (
+					tunnel_endpoint,
+					netstack,
+					new TunnelKey ((owned) local_keypair),
+					new TunnelKey ((owned) remote_pubkey),
+					cancellable);
+			}
 		}
 
 		private async void attempt_pair_verify (Cancellable? cancellable) throws Error, IOError {
@@ -1753,9 +1774,82 @@ namespace Frida.Fruity {
 		INFO = 17,
 	}
 
-	public sealed class TunnelConnection : Object, AsyncInitable {
+	public interface TunnelConnection : Object {
 		public signal void close ();
 
+		public abstract NetworkStack tunnel_netstack {
+			get;
+		}
+
+		public abstract InetAddress remote_address {
+			get;
+		}
+
+		public abstract uint16 remote_rsd_port {
+			get;
+		}
+
+		public abstract void cancel ();
+
+		protected static Bytes make_handshake_request (size_t mtu) {
+			string body = Json.to_string (
+				new Json.Builder ()
+				.begin_object ()
+					.set_member_name ("type")
+					.add_string_value ("clientHandshakeRequest")
+					.set_member_name ("mtu")
+					.add_int_value (mtu)
+				.end_object ()
+				.get_root (), false);
+			return make_request (body.data);
+		}
+
+		protected static Bytes make_request (uint8[] body) {
+			return new BufferBuilder (BIG_ENDIAN)
+				.append_string ("CDTunnel", StringTerminator.NONE)
+				.append_uint16 ((uint16) body.length)
+				.append_data (body)
+				.build ();
+		}
+	}
+
+	public class TunnelParameters {
+		public InetAddress address;
+		public uint16 mtu;
+		public InetAddress server_address;
+		public uint16 server_rsd_port;
+
+		public static TunnelParameters from_json (JsonObjectReader reader) throws Error {
+			reader.read_member ("clientParameters");
+
+			reader.read_member ("address");
+			string address = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("mtu");
+			uint16 mtu = reader.get_uint16_value ();
+			reader.end_member ();
+
+			reader.end_member ();
+
+			reader.read_member ("serverAddress");
+			string server_address = reader.get_string_value ();
+			reader.end_member ();
+
+			reader.read_member ("serverRSDPort");
+			uint16 server_rsd_port = reader.get_uint16_value ();
+			reader.end_member ();
+
+			return new TunnelParameters () {
+				address = new InetAddress.from_string (address),
+				mtu = (uint16) mtu,
+				server_address = new InetAddress.from_string (server_address),
+				server_rsd_port = server_rsd_port,
+			};
+		}
+	}
+
+	public sealed class TcpTunnelConnection : Object, TunnelConnection, AsyncInitable {
 		public InetSocketAddress address {
 			get;
 			construct;
@@ -1784,22 +1878,286 @@ namespace Frida.Fruity {
 
 		public InetAddress remote_address {
 			get {
-				return _remote_address;
+				return tunnel_params.server_address;
 			}
 		}
 
 		public uint16 remote_rsd_port {
 			get {
-				return _remote_rsd_port;
+				return tunnel_params.server_rsd_port;
+			}
+		}
+
+		private TunnelParameters tunnel_params;
+		private VirtualNetworkStack _tunnel_netstack;
+
+		private TlsClientConnection connection;
+		private BufferedInputStream input;
+		private OutputStream output;
+
+		private ByteArray pending_output = new ByteArray ();
+		private bool writing = false;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private const size_t PREFERRED_MTU = 16000;
+		private const string PSK_IDENTITY = "com.apple.CoreDevice.TunnelService.Identity";
+
+		public static async TcpTunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+				TunnelKey remote_pubkey, Cancellable? cancellable = null) throws Error, IOError {
+			var connection = new TcpTunnelConnection (address, netstack, local_keypair, remote_pubkey);
+
+			try {
+				yield connection.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return connection;
+		}
+
+		private TcpTunnelConnection (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+				TunnelKey remote_pubkey) {
+			Object (
+				address: address,
+				netstack: netstack,
+				local_keypair: local_keypair,
+				remote_pubkey: remote_pubkey
+			);
+		}
+
+		public override void dispose () {
+			cancel ();
+
+			base.dispose ();
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var stream = yield netstack.open_tcp_connection (address, cancellable);
+
+			try {
+				connection = TlsClientConnection.new (stream, null);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			connection.set_data_full ("tcp-tunnel-connection", this, null);
+			connection.set_database (null);
+
+			unowned SSL ssl = get_ssl_handle_from_connection (connection);
+			ssl.set_cipher_list ("PSK-AES128-GCM-SHA256:PSK-AES256-GCM-SHA384:PSK-AES256-CBC-SHA384:PSK-AES128-CBC-SHA256");
+			ssl.set_psk_client_callback ((ssl, hint, identity, psk) => {
+				unowned TlsClientConnection conn = (TlsClientConnection) get_connection_from_ssl_handle (ssl);
+				TcpTunnelConnection self = conn.get_data ("tcp-tunnel-connection");
+				return self.on_psk_request (ssl, hint, identity, psk);
+			});
+
+			try {
+				yield connection.handshake_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+
+			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+				"base-stream", connection.get_input_stream (),
+				"close-base-stream", false,
+				"buffer-size", 128 * 1024);
+			output = connection.get_output_stream ();
+
+			post (make_handshake_request (PREFERRED_MTU));
+
+			tunnel_params = TunnelParameters.from_json (yield read_message (cancellable));
+
+			_tunnel_netstack = new VirtualNetworkStack (null, tunnel_params.address, tunnel_params.mtu);
+			_tunnel_netstack.outgoing_datagram.connect (post);
+
+			process_incoming_messages.begin ();
+
+			return true;
+		}
+
+		public void cancel () {
+			io_cancellable.cancel ();
+
+			if (_tunnel_netstack != null)
+				_tunnel_netstack.stop ();
+		}
+
+		private async void process_incoming_messages () {
+			try {
+				while (true) {
+					var datagram = yield read_datagram (io_cancellable);
+
+					_tunnel_netstack.handle_incoming_datagram (datagram);
+				}
+			} catch (GLib.Error e) {
+			}
+
+			close ();
+		}
+
+		private void post (Bytes bytes) {
+			pending_output.append (bytes.get_data ());
+
+			if (!writing) {
+				writing = true;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					process_pending_output.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private async void process_pending_output () {
+			while (pending_output.len > 0) {
+				uint8[] batch = pending_output.steal ();
+
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (batch, Priority.DEFAULT, io_cancellable, out bytes_written);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+
+		private async JsonObjectReader read_message (Cancellable? cancellable) throws Error, IOError {
+			size_t header_size = 10;
+			if (input.get_available () < header_size)
+				yield fill_until_n_bytes_available (header_size, cancellable);
+
+			uint8 raw_magic[8];
+			input.peek (raw_magic);
+			string magic = ((string) raw_magic).make_valid (raw_magic.length);
+			if (magic != "CDTunnel")
+				throw new Error.PROTOCOL ("Invalid message magic: '%s'", magic);
+
+			uint16 body_size = 0;
+			unowned uint8[] size_buf = ((uint8[]) &body_size)[:2];
+			input.peek (size_buf, raw_magic.length);
+			body_size = uint16.from_big_endian (body_size);
+
+			size_t full_size = header_size + body_size;
+			if (input.get_available () < full_size)
+				yield fill_until_n_bytes_available (full_size, cancellable);
+
+			var body = new uint8[body_size + 1];
+			input.peek (body[:body_size], header_size);
+			body.length = body_size;
+
+			input.skip (full_size, cancellable);
+
+			unowned string json = (string) body;
+			if (!json.validate ())
+				throw new Error.PROTOCOL ("Invalid UTF-8");
+
+			return new JsonObjectReader (json);
+		}
+
+		private async Bytes read_datagram (Cancellable? cancellable) throws Error, IOError {
+			size_t header_size = 40;
+			if (input.get_available () < header_size)
+				yield fill_until_n_bytes_available (header_size, cancellable);
+
+			uint16 payload_size = 0;
+			unowned uint8[] size_buf = ((uint8[]) &payload_size)[:2];
+			input.peek (size_buf, 4);
+			payload_size = uint16.from_big_endian (payload_size);
+
+			size_t full_size = header_size + payload_size;
+			if (input.get_available () < full_size)
+				yield fill_until_n_bytes_available (full_size, cancellable);
+
+			var datagram = new uint8[full_size];
+			input.read (datagram, cancellable);
+
+			return new Bytes.take ((owned) datagram);
+		}
+
+		private async void fill_until_n_bytes_available (size_t minimum, Cancellable? cancellable) throws Error, IOError {
+			size_t available = input.get_available ();
+			while (available < minimum) {
+				if (input.get_buffer_size () < minimum)
+					input.set_buffer_size (minimum);
+
+				ssize_t n;
+				try {
+					n = yield input.fill_async ((ssize_t) (input.get_buffer_size () - available), Priority.DEFAULT,
+						cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Connection closed");
+				}
+
+				if (n == 0)
+					throw new Error.TRANSPORT ("Connection closed");
+
+				available += n;
+			}
+		}
+
+		private uint on_psk_request (SSL ssl, string? hint, char[] identity, uint8[] psk) {
+			Memory.copy (identity, PSK_IDENTITY.data, PSK_IDENTITY.data.length);
+
+			var key = get_raw_private_key (local_keypair.handle).get_data ();
+			Memory.copy (psk, key, key.length);
+
+			return key.length;
+		}
+
+		[CCode (cname = "g_tls_connection_openssl_get_ssl")]
+		private extern static unowned SSL get_ssl_handle_from_connection (void * connection);
+
+		[CCode (cname = "g_tls_connection_openssl_get_connection_from_ssl")]
+		private extern static void * get_connection_from_ssl_handle (SSL ssl);
+	}
+
+	public sealed class QuicTunnelConnection : Object, TunnelConnection, AsyncInitable {
+		public InetSocketAddress address {
+			get;
+			construct;
+		}
+
+		public NetworkStack netstack {
+			get;
+			construct;
+		}
+
+		public NetworkStack tunnel_netstack {
+			get {
+				return _tunnel_netstack;
+			}
+		}
+
+		public TunnelKey local_keypair {
+			get;
+			construct;
+		}
+
+		public TunnelKey remote_pubkey {
+			get;
+			construct;
+		}
+
+		public InetAddress remote_address {
+			get {
+				return tunnel_params.server_address;
+			}
+		}
+
+		public uint16 remote_rsd_port {
+			get {
+				return tunnel_params.server_rsd_port;
 			}
 		}
 
 		private Promise<bool> established = new Promise<bool> ();
 
 		private Stream? control_stream;
-		private InetAddress? _remote_address;
-		private uint16 _remote_rsd_port;
-		private uint16 mtu;
+		private TunnelParameters tunnel_params;
 		private VirtualNetworkStack? _tunnel_netstack;
 
 		private Gee.Map<int64?, Stream> streams = new Gee.HashMap<int64?, Stream> (Numeric.int64_hash, Numeric.int64_equal);
@@ -1833,12 +2191,13 @@ namespace Frida.Fruity {
 
 		private const size_t MAX_UDP_PAYLOAD_SIZE = NETWORK_MTU - ETHERNET_HEADER_SIZE - IPV6_HEADER_SIZE - UDP_HEADER_SIZE;
 		private const size_t PREFERRED_MTU = MAX_UDP_PAYLOAD_SIZE - QUIC_HEADER_MAX_SIZE;
+
 		private const size_t MAX_QUIC_DATAGRAM_SIZE = 14000;
 		private const NGTcp2.Duration KEEP_ALIVE_TIMEOUT = 15ULL * NGTcp2.SECONDS;
 
-		public static async TunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+		public static async QuicTunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
 				TunnelKey remote_pubkey, Cancellable? cancellable = null) throws Error, IOError {
-			var connection = new TunnelConnection (address, netstack, local_keypair, remote_pubkey);
+			var connection = new QuicTunnelConnection (address, netstack, local_keypair, remote_pubkey);
 
 			try {
 				yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -1849,7 +2208,7 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
-		private TunnelConnection (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
+		private QuicTunnelConnection (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
 				TunnelKey remote_pubkey) {
 			Object (
 				address: address,
@@ -1861,7 +2220,7 @@ namespace Frida.Fruity {
 
 		construct {
 			connection_ref.get_conn = conn_ref => {
-				TunnelConnection * self = conn_ref.user_data;
+				QuicTunnelConnection * self = conn_ref.user_data;
 				return self->connection;
 			};
 			connection_ref.user_data = this;
@@ -1908,19 +2267,19 @@ namespace Frida.Fruity {
 			var callbacks = NGTcp2.Callbacks () {
 				get_new_connection_id = on_get_new_connection_id,
 				extend_max_local_streams_bidi = (conn, max_streams, user_data) => {
-					TunnelConnection * self = user_data;
+					QuicTunnelConnection * self = user_data;
 					return self->on_extend_max_local_streams_bidi (max_streams);
 				},
 				stream_close = (conn, flags, stream_id, app_error_code, user_data, stream_user_data) => {
-					TunnelConnection * self = user_data;
+					QuicTunnelConnection * self = user_data;
 					return self->on_stream_close (flags, stream_id, app_error_code);
 				},
 				recv_stream_data = (conn, flags, stream_id, offset, data, user_data, stream_user_data) => {
-					TunnelConnection * self = user_data;
+					QuicTunnelConnection * self = user_data;
 					return self->on_recv_stream_data (flags, stream_id, offset, data);
 				},
 				recv_datagram = (conn, flags, data, user_data) => {
-					TunnelConnection * self = user_data;
+					QuicTunnelConnection * self = user_data;
 					return self->on_recv_datagram (flags, data);
 				},
 				rand = on_rand,
@@ -1969,55 +2328,13 @@ namespace Frida.Fruity {
 			var zeroed_padding_packet = new uint8[PREFERRED_MTU];
 			send_datagram (new Bytes.take ((owned) zeroed_padding_packet));
 
-			send_request (Json.to_string (
-				new Json.Builder ()
-				.begin_object ()
-					.set_member_name ("type")
-					.add_string_value ("clientHandshakeRequest")
-					.set_member_name ("mtu")
-					.add_int_value (PREFERRED_MTU)
-				.end_object ()
-				.get_root (), false));
+			control_stream.send (make_handshake_request (PREFERRED_MTU).get_data ());
 		}
 
 		private void on_control_stream_response (string json) throws Error {
-			Json.Reader reader;
-			try {
-				reader = new Json.Reader (Json.from_string (json));
-			} catch (GLib.Error e) {
-				throw new Error.PROTOCOL ("Invalid response JSON");
-			}
+			tunnel_params = TunnelParameters.from_json (new JsonObjectReader (json));
 
-			reader.read_member ("clientParameters");
-
-			reader.read_member ("address");
-			string? address = reader.get_string_value ();
-			reader.end_member ();
-
-			reader.read_member ("mtu");
-			int64 raw_mtu = reader.get_int_value ();
-			reader.end_member ();
-
-			reader.end_member ();
-
-			reader.read_member ("serverAddress");
-			string? server_address = reader.get_string_value ();
-			reader.end_member ();
-
-			reader.read_member ("serverRSDPort");
-			int64 server_rsd_port = reader.get_int_value ();
-			reader.end_member ();
-
-			GLib.Error? error = reader.get_error ();
-			if (error != null)
-				throw new Error.PROTOCOL ("Invalid response: %s", error.message);
-
-			var local_address = new InetAddress.from_string (address);
-			_remote_address = new InetAddress.from_string (server_address);
-			_remote_rsd_port = (uint16) server_rsd_port;
-			mtu = (uint16) raw_mtu;
-
-			_tunnel_netstack = new VirtualNetworkStack (null, local_address, mtu);
+			_tunnel_netstack = new VirtualNetworkStack (null, tunnel_params.address, tunnel_params.mtu);
 			_tunnel_netstack.outgoing_datagram.connect (send_datagram);
 
 			established.resolve (true);
@@ -2048,16 +2365,6 @@ namespace Frida.Fruity {
 
 			if (_tunnel_netstack != null)
 				_tunnel_netstack.stop ();
-		}
-
-		private void send_request (string json) {
-			unowned uint8[] body = json.data;
-			Bytes request = new BufferBuilder (BIG_ENDIAN)
-				.append_string ("CDTunnel", StringTerminator.NONE)
-				.append_uint16 ((uint16) body.length)
-				.append_data (body)
-				.build ();
-			control_stream.send (request.get_data ());
 		}
 
 		private void on_stream_data_available (Stream stream, uint8[] data, out size_t consumed) {
@@ -2342,12 +2649,12 @@ namespace Frida.Fruity {
 		private class Stream {
 			public int64 id;
 
-			private weak TunnelConnection parent;
+			private weak QuicTunnelConnection parent;
 
 			public ByteArray rx_buf = new ByteArray.sized (256);
 			public ByteArray tx_buf = new ByteArray.sized (128);
 
-			public Stream (TunnelConnection parent, int64 id) {
+			public Stream (QuicTunnelConnection parent, int64 id) {
 				this.parent = parent;
 				this.id = id;
 			}
