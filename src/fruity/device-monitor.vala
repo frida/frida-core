@@ -19,11 +19,11 @@ namespace Frida.Fruity {
 
 		construct {
 			add_backend (new UsbmuxBackend ());
-#if MACOS
-			add_backend (new MacOSCoreDeviceBackend ());
-#else
+//#if MACOS
+//			add_backend (new MacOSCoreDeviceBackend ());
+//#else
 			add_backend (new PortableCoreDeviceBackend ());
-#endif
+//#endif
 		}
 
 		public async void start (Cancellable? cancellable = null) throws IOError {
@@ -1361,7 +1361,12 @@ namespace Frida.Fruity {
 		private static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
-#if LINUX
+#if MACOS
+			device_ifaddrs.add ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				address: new InetAddress.from_string ("fe80::c4bb:8eff:feff:72d"),
+				scope_id: 0xd
+			));
+#elif LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
 			string raw_udid = udid.replace ("-", "");
