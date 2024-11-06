@@ -1353,7 +1353,7 @@ namespace Frida.Fruity {
 
 		public static async NcmPeer locate (UsbDevice usb_device, Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = detect_ncm_ifaddrs_on_system (usb_device);
-			if (device_ifaddrs.size == 2)
+			if (!device_ifaddrs.is_empty)
 				return yield locate_on_system_netifs (device_ifaddrs, cancellable);
 			return yield establish_using_our_driver (usb_device, cancellable);
 		}
