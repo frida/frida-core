@@ -3333,8 +3333,13 @@ namespace Frida {
 			var iter = MapsIter.for_pid (pid);
 			while (iter.next ()) {
 				string candidate_path = iter.path;
-				if (candidate_path == path)
+				if (candidate_path == path) {
+#if ANDROID
+					if (candidate_path == Gum.Process.query_libc_name () && iter.flags[3] == 's')
+						continue;
+#endif
 					return new ProcMapsEntry (iter.start_address, candidate_path, iter.identity);
+				}
 			}
 
 			return null;
@@ -3357,15 +3362,21 @@ namespace Frida {
 				}
 			}
 
-			public string identity {
+			public string flags {
 				owned get {
 					return info.fetch (3);
 				}
 			}
 
-			public string path {
+			public string identity {
 				owned get {
 					return info.fetch (4);
+				}
+			}
+
+			public string path {
+				owned get {
+					return info.fetch (5);
 				}
 			}
 
@@ -3380,8 +3391,8 @@ namespace Frida {
 					return;
 				}
 
-				if (!/^([0-9a-f]+)-([0-9a-f]+) \S{4} [0-9a-f]+ ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (contents,
-						0, out info)) {
+				if (!/^([0-9a-f]+)-([0-9a-f]+) (\S{4}) [0-9a-f]+ ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (
+						contents, 0, out info)) {
 					assert_not_reached ();
 				}
 			}
