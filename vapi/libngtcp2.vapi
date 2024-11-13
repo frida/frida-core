@@ -18,6 +18,8 @@ namespace NGTcp2 {
 		[CCode (cname = "ngtcp2_conn_read_pkt")]
 		public int read_packet (Path path, PacketInfo * pi, uint8[] pkt, Timestamp ts);
 
+		public ssize_t write_connection_close (Path * path, PacketInfo * pi, uint8[] dest, ConnectionError error, Timestamp ts);
+
 		public int open_bidi_stream (out int64 stream_id, void * stream_user_data);
 		public int shutdown_stream (uint32 flags, int64 stream_id, uint64 app_error_code);
 
@@ -88,6 +90,26 @@ namespace NGTcp2 {
 		public uint8 data[MAX_CIDLEN];
 	}
 
+	[CCode (cname = "ngtcp2_ccerr", has_destroy_function = false)]
+	public struct ConnectionError {
+		[CCode (cname = "ngtcp2_ccerr_set_application_error")]
+		public ConnectionError.application (uint64 error_code, uint8[]? reason = null);
+
+		public ConnectionErrorType type;
+		public uint64 error_code;
+		public uint64 frame_type;
+		[CCode (array_length_cname = "reasonlen")]
+		public uint8[]? reason;
+	}
+
+	[CCode (cname = "ngtcp2_ccerr_type", cprefix = "NGTCP2_CCERR_TYPE_", has_type_id = false)]
+	public enum ConnectionErrorType {
+		TRANSPORT,
+		APPLICATION,
+		VERSION_NEGOTIATION,
+		IDLE_CLOSE,
+	}
+
 	[CCode (cname = "ngtcp2_connection_id_status_type", cprefix = "NGTCP2_CONNECTION_ID_STATUS_TYPE_", has_type_id = false)]
 	public enum ConnectionIdStatusType {
 		ACTIVATE,
@@ -148,6 +170,13 @@ namespace NGTcp2 {
 		NONE,
 		MORE,
 		FIN,
+	}
+
+	[Flags]
+	[CCode (cname = "uint32_t", cprefix = "NGTCP2_WRITE_DATAGRAM_FLAG_", has_type_id = false)]
+	public enum WriteDatagramFlags {
+		NONE,
+		MORE,
 	}
 
 	[CCode (cname = "NGTCP2_MAX_CIDLEN")]

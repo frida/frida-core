@@ -1631,7 +1631,7 @@ namespace Frida.Fruity {
 			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (ncm_peer.ip, netstack, cancellable);
-			tc.close.connect (on_tunnel_connection_close);
+			tc.closed.connect (on_tunnel_connection_close);
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
@@ -1648,7 +1648,7 @@ namespace Frida.Fruity {
 		public async void close (Cancellable? cancellable) throws IOError {
 			_discovery_service.close ();
 
-			yield tunnel_connection.cancel (cancellable);
+			yield tunnel_connection.close (cancellable);
 
 			if (ncm != null)
 				ncm.close ();
@@ -1829,7 +1829,7 @@ namespace Frida.Fruity {
 		public async void close (Cancellable? cancellable) throws IOError {
 			_discovery_service.close ();
 
-			yield tunnel_connection.cancel (cancellable);
+			yield tunnel_connection.close (cancellable);
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
