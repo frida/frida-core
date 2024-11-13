@@ -4,6 +4,7 @@ import base64
 from collections import OrderedDict
 from dataclasses import dataclass, field
 import itertools
+import locale
 import os
 from pathlib import Path
 import pickle
@@ -400,7 +401,7 @@ def compile(privdir: Path, state: State):
                 **kwargs,
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
-                "encoding": "utf-8",
+                "encoding": locale.getpreferredencoding(),
             }
         else:
             silenced_kwargs = kwargs
