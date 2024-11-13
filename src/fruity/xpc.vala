@@ -2001,7 +2001,7 @@ namespace Frida.Fruity {
 
 			try {
 				yield connection.close_async ();
-			} catch (IOError e) {
+			} catch (GLib.Error e) {
 			}
 
 			close_request.resolve (true);
