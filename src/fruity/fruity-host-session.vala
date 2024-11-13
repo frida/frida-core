@@ -1059,7 +1059,7 @@ namespace Frida {
 			try {
 				return yield get_remote_server (cancellable);
 			} catch (Error e) {
-				if (e is Error.PERMISSION_DENIED)
+				if (e is Error.PERMISSION_DENIED || e is Error.TIMED_OUT)
 					throw e;
 				return null;
 			}
@@ -1136,7 +1136,7 @@ namespace Frida {
 					last_server_check_timer = null;
 					last_server_check_error = null;
 				} else {
-					if (e is Error.PERMISSION_DENIED) {
+					if (e is Error.PERMISSION_DENIED || e is Error.TIMED_OUT) {
 						api_error = e;
 					} else if (e is Error.SERVER_NOT_RUNNING) {
 						api_error = new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
