@@ -290,7 +290,7 @@ namespace Frida.Fruity {
 	}
 
 	internal interface UsbDeviceBackend : Object {
-		public abstract UsbOperation allocate_usb_operation ();
+		public abstract UsbOperation allocate_usb_operation () throws Error;
 	}
 
 	internal interface UsbOperation : Object {

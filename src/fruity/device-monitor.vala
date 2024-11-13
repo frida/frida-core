@@ -770,7 +770,8 @@ namespace Frida.Fruity {
 		}
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			state = STARTING;
+			lock (state)
+				state = STARTING;
 
 			usb_worker = new Thread<void> ("frida-core-device-usb", perform_usb_work);
 
@@ -782,11 +783,13 @@ namespace Frida.Fruity {
 				assert_not_reached ();
 			}
 
-			state = STARTED;
+			lock (state)
+				state = STARTED;
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
-			state = FLUSHING;
+			lock (state)
+				state = FLUSHING;
 
 			io_cancellable.cancel ();
 
@@ -814,7 +817,8 @@ namespace Frida.Fruity {
 
 			usb_context = null;
 
-			state = STOPPED;
+			lock (state)
+				state = STOPPED;
 		}
 
 		public async void activate_modeswitch_support (Cancellable? cancellable) throws IOError {
@@ -911,7 +915,7 @@ namespace Frida.Fruity {
 						polled_usb_timer = null;
 					}
 
-					lock (pending_usb_ops) {
+					lock (state) {
 						if (pending_usb_ops.is_empty)
 							state = STOPPING;
 					}
@@ -1048,16 +1052,36 @@ namespace Frida.Fruity {
 			polled_usb_devices = current_devices;
 		}
 
-		private UsbOperation allocate_usb_operation () {
+		private UsbOperation allocate_usb_operation () throws Error {
 			var op = new PendingUsbOperation (this);
-			lock (pending_usb_ops)
-				pending_usb_ops.add (op);
+
+			bool added = false;
+			lock (state) {
+				switch (state) {
+					case CREATED:
+						break;
+					case STARTING:
+					case STARTED:
+						pending_usb_ops.add (op);
+						added = true;
+						break;
+					case FLUSHING:
+					case STOPPING:
+					case STOPPED:
+						break;
+				}
+			}
+
+			if (!added)
+				throw new Error.INVALID_OPERATION ("Unable to allocate USB operation in the current state");
+
 			return op;
 		}
 
 		private void on_usb_operation_complete (PendingUsbOperation op) {
-			lock (pending_usb_ops)
+			lock (state)
 				pending_usb_ops.remove (op);
+
 			usb_context.interrupt_event_handler ();
 		}
 
