@@ -11,6 +11,42 @@ namespace Frida.Fruity {
 
 		public abstract async IOStream open_tcp_connection (InetSocketAddress address, Cancellable? cancellable)
 			throws Error, IOError;
+
+		public async IOStream open_tcp_connection_with_timeout (InetSocketAddress address, uint timeout, Cancellable? cancellable)
+				throws Error, IOError {
+			bool timed_out = false;
+			var open_cancellable = new Cancellable ();
+
+			var main_context = MainContext.get_thread_default ();
+
+			var timeout_source = new TimeoutSource (timeout);
+			timeout_source.set_callback (() => {
+				timed_out = true;
+				open_cancellable.cancel ();
+				return Source.REMOVE;
+			});
+			timeout_source.attach (main_context);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				open_cancellable.cancel ();
+				return Source.REMOVE;
+			});
+			cancel_source.attach (main_context);
+
+			try {
+				return yield open_tcp_connection (address, open_cancellable);
+			} catch (IOError e) {
+				assert (e is IOError.CANCELLED);
+				if (timed_out)
+					throw new Error.TIMED_OUT ("Networked Apple device is not responding");
+				throw e;
+			} finally {
+				timeout_source.destroy ();
+				cancel_source.destroy ();
+			}
+		}
+
 		public abstract UdpSocket create_udp_socket () throws Error;
 	}
 
