@@ -163,9 +163,7 @@ namespace Frida.Fruity {
 
 		public string name {
 			get {
-				var transport = transports.first_match (t => t.name != null && t.connection_type == USB);
-				if (transport == null)
-					transport = transports.first_match (t => t.name != null);
+				var transport = transports.first_match (t => t.name != null);
 				if (transport == null)
 					return "iOS Device";
 				return transport.name;
@@ -183,7 +181,7 @@ namespace Frida.Fruity {
 
 		public Gee.Set<Transport> transports {
 			get;
-			default = new Gee.HashSet<Transport> ();
+			default = new Gee.TreeSet<Transport> (compare_transports);
 		}
 
 		private Gee.Queue<UsbmuxLockdownServiceRequest> usbmux_lockdown_service_requests =
@@ -407,6 +405,19 @@ namespace Frida.Fruity {
 				return yield open_lockdown_service (location, cancellable);
 
 			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
+		}
+
+		private static int compare_transports (Transport a, Transport b) {
+			return score_transport (b) - score_transport (a);
+		}
+
+		private static int score_transport (Transport t) {
+			int score = 0;
+			if (t.connection_type == USB)
+				score++;
+			if (t.usbmux_device != null)
+				score++;
+			return score;
 		}
 
 		private class UsbmuxLockdownServiceRequest {
