@@ -1808,6 +1808,8 @@ namespace Frida.Fruity {
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 
+		private const uint PAIRING_CONNECTION_TIMEOUT = 2000;
+
 		public PortableNetworkTunnel (InetSocketAddress endpoint, InetSocketAddress interface_address, PairingStore store) {
 			Object (
 				endpoint: endpoint,
@@ -1819,7 +1821,8 @@ namespace Frida.Fruity {
 		public async void open (Cancellable? cancellable) throws Error, IOError {
 			var netstack = new SystemNetworkStack (interface_address.get_address (), interface_address.scope_id);
 
-			var pairing_connection = yield netstack.open_tcp_connection (endpoint, cancellable);
+			var pairing_connection = yield netstack.open_tcp_connection_with_timeout (endpoint, PAIRING_CONNECTION_TIMEOUT,
+				cancellable);
 			var pairing_transport = new PlainPairingTransport (pairing_connection);
 			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
