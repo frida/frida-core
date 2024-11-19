@@ -24,7 +24,9 @@ namespace Frida.Fruity {
 		private uint8 tx_address;
 
 		private VirtualNetworkStack? _netstack;
-		private uint16 next_outgoing_sequence = 1;
+		private Gee.List<Bytes> pending_output = new Gee.ArrayList<Bytes> ();
+		private bool writing = false;
+		private uint16 next_outgoing_sequence = 0;
 
 		private InetAddress? _remote_ipv6_address;
 
@@ -242,45 +244,94 @@ namespace Frida.Fruity {
 			} while (ndp_index != 0);
 		}
 
-		private async void on_netif_outgoing_datagram (Bytes datagram) {
-			uint16 transfer_header_length = 12;
-			uint16 ndp_header_length = 16;
-			uint16 alignment_padding_length = 2;
+		private void on_netif_outgoing_datagram (Bytes datagram) {
+			pending_output.add (datagram);
 
-			uint16 datagram_start_index = transfer_header_length + ndp_header_length + alignment_padding_length;
-			uint16 datagram_length = (uint16) datagram.length;
+			if (!writing) {
+				writing = true;
 
-			uint16 sentinel_start_index = 0;
-			uint16 sentinel_size = 0;
+				var source = new TimeoutSource (1);
+				source.set_callback (() => {
+					process_pending_output.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private async void process_pending_output () {
+			while (!pending_output.is_empty) {
+				var batch = pending_output;
+				pending_output = new Gee.ArrayList<Bytes> ();
+
+				try {
+					yield write_datagrams (batch);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+
+		private async void write_datagrams (Gee.List<Bytes> datagrams) throws Error, IOError {
+			uint16 transfer_header_size = 4 + 2 + 2 + 2 + 2;
+			uint16 ndp_header_base_size = 4 + 2 + 2;
+			uint16 ndp_entry_size = 2 + 2;
+			uint16 ethernet_header_size = 14;
+			uint16 alignment = 4;
+
+			var offsets = new Gee.ArrayList<uint> ();
+			uint current_offset = transfer_header_size + ndp_header_base_size + ((datagrams.size + 1) * ndp_entry_size);
+			var header_delta = (current_offset - transfer_header_size) % alignment;
+			if (header_delta != 0)
+				current_offset += alignment - header_delta;
+			uint16 ndp_header_size = (uint16) (current_offset - transfer_header_size);
+			foreach (var datagram in datagrams) {
+				var delta = (current_offset + ethernet_header_size) % alignment;
+				if (delta != 0)
+					current_offset += alignment - delta;
+				offsets.add (current_offset);
+				current_offset += (uint) datagram.get_size ();
+			}
 
 			uint16 sequence = next_outgoing_sequence++;
-			uint16 block_length = datagram_start_index + datagram_length;
-			uint16 ndp_index = transfer_header_length;
+			uint16 block_size = (uint16) (offsets.last () + datagrams.last ().get_size ());
+			uint16 ndp_index = transfer_header_size;
+
+			var builder = new BufferBuilder (LITTLE_ENDIAN)
+				.append_string ("NCMH", StringTerminator.NONE)
+				.append_uint16 (transfer_header_size)
+				.append_uint16 (sequence)
+				.append_uint16 (block_size)
+				.append_uint16 (ndp_index);
+
 			uint16 next_ndp_index = 0;
 
-			uint16 alignment_padding_value = 0;
-
-			var frame = new BufferBuilder (LITTLE_ENDIAN)
-				.append_string ("NCMH", StringTerminator.NONE)
-				.append_uint16 (transfer_header_length)
-				.append_uint16 (sequence)
-				.append_uint16 (block_length)
-				.append_uint16 (ndp_index)
+			builder
 				.append_string ("NCM0", StringTerminator.NONE)
-				.append_uint16 (ndp_header_length)
-				.append_uint16 (next_ndp_index)
-				.append_uint16 (datagram_start_index)
-				.append_uint16 (datagram_length)
-				.append_uint16 (sentinel_start_index)
-				.append_uint16 (sentinel_size)
-				.append_uint16 (alignment_padding_value)
-				.append_bytes (datagram)
-				.build ();
+				.append_uint16 (ndp_header_size)
+				.append_uint16 (next_ndp_index);
 
-			try {
-				yield device.bulk_transfer (tx_address, frame.get_data (), uint.MAX, io_cancellable);
-			} catch (GLib.Error e) {
+			int i;
+
+			i = 0;
+			foreach (var datagram in datagrams) {
+				builder
+					.append_uint16 ((uint16) offsets[i])
+					.append_uint16 ((uint16) datagram.get_size ());
+				i++;
 			}
+
+			i = 0;
+			foreach (var datagram in datagrams) {
+				builder
+					.seek (offsets[i])
+					.append_bytes (datagram);
+				i++;
+			}
+
+			yield device.bulk_transfer (tx_address, builder.build ().get_data (), uint.MAX, io_cancellable);
 		}
 
 		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
