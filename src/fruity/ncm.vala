@@ -24,13 +24,15 @@ namespace Frida.Fruity {
 		private uint8 tx_address;
 
 		private VirtualNetworkStack? _netstack;
-		private Gee.List<Bytes> pending_output = new Gee.ArrayList<Bytes> ();
+		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private bool writing = false;
 		private uint16 next_outgoing_sequence = 0;
 
 		private InetAddress? _remote_ipv6_address;
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private const uint16 TRANSFER_HEADER_SIZE = 4 + 2 + 2 + 2 + 2;
 
 		private enum UsbDescriptorType {
 			INTERFACE = 0x04,
@@ -245,7 +247,7 @@ namespace Frida.Fruity {
 		}
 
 		private void on_netif_outgoing_datagram (Bytes datagram) {
-			pending_output.add (datagram);
+			pending_output.offer (datagram);
 
 			if (!writing) {
 				writing = true;
@@ -260,12 +262,23 @@ namespace Frida.Fruity {
 		}
 
 		private async void process_pending_output () {
+			uint16 tx_max_datagrams = 40;
+			uint16 tx_max_transfer_size = 32764;
+
 			while (!pending_output.is_empty) {
-				var batch = pending_output;
-				pending_output = new Gee.ArrayList<Bytes> ();
+				uint16 num_datagrams = tx_max_datagrams;
+				TransferLayout layout;
+				while ((layout = TransferLayout.compute (pending_output, num_datagrams)).size > tx_max_transfer_size)
+					num_datagrams--;
+
+				var batch = new Gee.ArrayList<Bytes> ();
+				for (var i = 0; i != layout.offsets.size; i++)
+					batch.add (pending_output.poll ());
+
+				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
 
 				try {
-					yield write_datagrams (batch);
+					yield device.bulk_transfer (tx_address, transfer.get_data (), uint.MAX, io_cancellable);
 				} catch (GLib.Error e) {
 					break;
 				}
@@ -274,43 +287,70 @@ namespace Frida.Fruity {
 			writing = false;
 		}
 
-		private async void write_datagrams (Gee.List<Bytes> datagrams) throws Error, IOError {
-			uint16 transfer_header_size = 4 + 2 + 2 + 2 + 2;
-			uint16 ndp_header_base_size = 4 + 2 + 2;
-			uint16 ndp_entry_size = 2 + 2;
-			uint16 ethernet_header_size = 14;
-			uint16 alignment = 4;
+		private class TransferLayout {
+			public uint16 size;
+			public uint16 ndp_header_size;
+			public Gee.List<uint16> offsets;
 
-			var offsets = new Gee.ArrayList<uint> ();
-			uint current_offset = transfer_header_size + ndp_header_base_size + ((datagrams.size + 1) * ndp_entry_size);
-			var header_delta = (current_offset - transfer_header_size) % alignment;
-			if (header_delta != 0)
-				current_offset += alignment - header_delta;
-			uint16 ndp_header_size = (uint16) (current_offset - transfer_header_size);
-			foreach (var datagram in datagrams) {
-				var delta = (current_offset + ethernet_header_size) % alignment;
-				if (delta != 0)
-					current_offset += alignment - delta;
-				offsets.add (current_offset);
-				current_offset += (uint) datagram.get_size ();
+			public static TransferLayout? compute (Gee.Collection<Bytes> datagrams, uint16 max_datagrams) {
+				uint16 ndp_header_base_size = 4 + 2 + 2;
+				uint16 ndp_entry_size = 2 + 2;
+				uint16 ethernet_header_size = 14;
+				uint16 alignment = 4;
+
+				uint16 num_datagrams = uint16.min ((uint16) datagrams.size, max_datagrams);
+
+				uint16 ndp_header_size = ndp_header_base_size + ((num_datagrams + 1) * ndp_entry_size);
+				uint16 current_transfer_size = TRANSFER_HEADER_SIZE + ndp_header_size;
+				var offsets = new Gee.ArrayList<uint16> ();
+
+				uint i = 0;
+				foreach (var datagram in datagrams) {
+					var size = (uint16) datagram.get_size ();
+
+					uint16 start_offset = current_transfer_size;
+					var delta = (start_offset + ethernet_header_size) % alignment;
+					if (delta != 0)
+						start_offset += alignment - delta;
+
+					uint16 end_offset = start_offset + size;
+					if (i == num_datagrams - 1) {
+						delta = end_offset % alignment;
+						if (delta != 0)
+							end_offset += alignment - delta;
+					}
+
+					current_transfer_size = end_offset;
+					offsets.add (start_offset);
+
+					i++;
+					if (i == max_datagrams)
+						break;
+				}
+
+				return new TransferLayout () {
+					size = current_transfer_size,
+					ndp_header_size = ndp_header_size,
+					offsets = offsets,
+				};
 			}
+		}
 
-			uint16 sequence = next_outgoing_sequence++;
-			uint16 block_size = (uint16) (offsets.last () + datagrams.last ().get_size ());
-			uint16 ndp_index = transfer_header_size;
+		private static Bytes build_output_transfer (Gee.List<Bytes> datagrams, TransferLayout layout, uint16 sequence_number) {
+			uint16 ndp_index = TRANSFER_HEADER_SIZE;
 
 			var builder = new BufferBuilder (LITTLE_ENDIAN)
 				.append_string ("NCMH", StringTerminator.NONE)
-				.append_uint16 (transfer_header_size)
-				.append_uint16 (sequence)
-				.append_uint16 (block_size)
+				.append_uint16 (TRANSFER_HEADER_SIZE)
+				.append_uint16 (sequence_number)
+				.append_uint16 (layout.size)
 				.append_uint16 (ndp_index);
 
 			uint16 next_ndp_index = 0;
 
 			builder
 				.append_string ("NCM0", StringTerminator.NONE)
-				.append_uint16 (ndp_header_size)
+				.append_uint16 (layout.ndp_header_size)
 				.append_uint16 (next_ndp_index);
 
 			int i;
@@ -318,20 +358,21 @@ namespace Frida.Fruity {
 			i = 0;
 			foreach (var datagram in datagrams) {
 				builder
-					.append_uint16 ((uint16) offsets[i])
+					.append_uint16 (layout.offsets[i])
 					.append_uint16 ((uint16) datagram.get_size ());
-				i++;
 			}
 
 			i = 0;
 			foreach (var datagram in datagrams) {
 				builder
-					.seek (offsets[i])
+					.seek (layout.offsets[i])
 					.append_bytes (datagram);
 				i++;
 			}
 
-			yield device.bulk_transfer (tx_address, builder.build ().get_data (), uint.MAX, io_cancellable);
+			builder.seek (layout.size);
+
+			return builder.build ();
 		}
 
 		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
