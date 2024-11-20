@@ -26,7 +26,7 @@ namespace Frida.Fruity {
 		private VirtualNetworkStack? _netstack;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private bool writing = false;
-		private uint16 next_outgoing_sequence = 0;
+		private uint16 next_outgoing_sequence = 1;
 
 		private InetAddress? _remote_ipv6_address;
 
@@ -360,6 +360,7 @@ namespace Frida.Fruity {
 				builder
 					.append_uint16 (layout.offsets[i])
 					.append_uint16 ((uint16) datagram.get_size ());
+				i++;
 			}
 
 			i = 0;
