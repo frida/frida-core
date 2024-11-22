@@ -43,14 +43,17 @@ if host_os_family == 'darwin'
   ]
 endif
 
+base_gir_name = f'FridaBase-@api_version@.gir'
+
 base = static_library('frida-base-' + api_version, base_sources,
   c_args: frida_component_cflags,
   vala_args: [base_vala_args, '--pkg=libsoup-3.0'] + extra_vala_args,
   vala_header: 'frida-base.h',
+  vala_gir: base_gir_name,
   vala_vapi: f'frida-base-@api_version@.vapi',
   dependencies: [glib_dep, gobject_dep, gio_dep, libsoup_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep, openssl_dep] + extra_deps,
   install: true,
-  install_dir: [true, header_install_dir, true],
+  install_dir: [true, header_install_dir, true, false],
 )
 
 base_dep = declare_dependency(

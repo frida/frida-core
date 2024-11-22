@@ -4,7 +4,20 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import List, Set
+import xml.etree.ElementTree as ET
 
+CORE_NAMESPACE = "http://www.gtk.org/introspection/core/1.0"
+C_NAMESPACE = "http://www.gtk.org/introspection/c/1.0"
+GLIB_NAMESPACE = "http://www.gtk.org/introspection/glib/1.0"
+GIR_NAMESPACES = {
+    "": CORE_NAMESPACE,
+    "c": C_NAMESPACE,
+    "glib": GLIB_NAMESPACE,
+}
+
+CORE_TAG_FIELD = f"{{{CORE_NAMESPACE}}}field"
+CORE_TAG_CONSTRUCTOR = f"{{{CORE_NAMESPACE}}}constructor"
+CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
 
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
@@ -14,6 +27,7 @@ def main():
     parser.add_argument('core_gir', metavar='/path/to/Frida-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('base_header', metavar='/path/to/frida-base.h', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('base_gir', metavar='/path/to/FridaBase-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('base_vapi', metavar='/path/to/frida-base.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('output_dir', metavar='/output/dir')
 
@@ -28,10 +42,6 @@ def main():
     base_gir = args.base_gir.read()
     base_vapi = args.base_vapi.read()
     output_dir = Path(args.output_dir)
-
-    if output_type == 'gir':
-        (output_dir / f"Frida-{api_version}.gir").write_text(core_gir, encoding='utf-8')
-        return
 
     if output_type == 'vapi-stamp':
         (output_dir / f"frida-core-{api_version}.vapi.stamp").write_bytes(b"")
@@ -51,12 +61,16 @@ def main():
     toplevel_code = "\n".join(toplevel_sources)
 
     enable_header = False
+    enable_gir = False
     enable_vapi = False
     if output_type == 'bundle':
         enable_header = True
+        enable_gir = True
         enable_vapi = True
     elif output_type == 'header':
         enable_header = True
+    elif output_type == 'gir':
+        enable_gir = True
     elif output_type == 'vapi':
         enable_vapi = True
 
@@ -64,6 +78,9 @@ def main():
 
     if enable_header:
         emit_header(api, output_dir)
+
+    if enable_gir:
+        emit_gir(api, core_gir, base_gir, output_dir)
 
     if enable_vapi:
         emit_vapi(api, output_dir)
@@ -149,6 +166,76 @@ def emit_header(api, output_dir):
         output_header_file.write("\n\nG_END_DECLS")
 
         output_header_file.write("\n\n#endif\n")
+
+def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> str:
+    ET.register_namespace("", CORE_NAMESPACE)
+    ET.register_namespace("c", C_NAMESPACE)
+    ET.register_namespace("glib", GLIB_NAMESPACE)
+
+    core_tree = ET.ElementTree(ET.fromstring(core_gir))
+    base_tree = ET.ElementTree(ET.fromstring(base_gir))
+
+    core_root = core_tree.getroot()
+    base_root = base_tree.getroot()
+
+    merged_root = ET.Element(core_root.tag, core_root.attrib)
+
+    for elem in core_root.findall("include", GIR_NAMESPACES):
+        name = elem.get("name")
+        if name in {"GLib", "GObject", "Gio"}:
+            merged_root.append(elem)
+
+    for tag in ["package", "c:include"]:
+        for elem in core_root.findall(tag, GIR_NAMESPACES):
+            merged_root.append(elem)
+
+    core_namespace = core_root.find("namespace", GIR_NAMESPACES)
+    merged_namespace = ET.SubElement(merged_root, core_namespace.tag, core_namespace.attrib)
+
+    object_type_names = {obj.name for obj in api.object_types}
+    enum_type_names = {enum.name for enum in api.enum_types}
+    error_type_names = {error.name for error in api.error_types}
+
+    internal_type_names = {
+        "Frida.HostSessionProvider",
+        "FridaBase.HostSession",
+        "FridaBase.AgentSession",
+        "FridaBase.AgentSessionId",
+        "FridaBase.AgentScriptId",
+    }
+
+    def merge_and_transform_elements(tag_name: str, spec_set: Set[str]):
+        core_elements = filter_elements(core_root.findall(f".//{tag_name}", GIR_NAMESPACES), spec_set)
+        base_elements = filter_elements(base_root.findall(f".//{tag_name}", GIR_NAMESPACES), spec_set)
+        for elem in core_elements + base_elements:
+            if tag_name == "class":
+                class_name = elem.get("name")
+                for child in list(elem):
+                    if (child.get("name").startswith("_")
+                            or child.tag == CORE_TAG_FIELD
+                            or class_name == "Device" and child.tag == CORE_TAG_METHOD and child.get("name") == "get_host_session"
+                            or has_type_child_with_name_matching(child, internal_type_names)):
+                        elem.remove(child)
+            merged_namespace.append(elem)
+
+    merge_and_transform_elements("class", object_type_names)
+    merge_and_transform_elements("interface", object_type_names)
+    merge_and_transform_elements("enumeration", enum_type_names | error_type_names)
+
+    ET.indent(merged_root, space="  ")
+    result = ET.tostring(merged_root,
+                         encoding="unicode",
+                         xml_declaration=True)
+    (output_dir / f"Frida-{api.version}.gir").write_text(result, encoding='utf-8')
+
+def filter_elements(elements: List[ET.Element], spec_set: Set[str]):
+    return [elem for elem in elements if elem.get("name") in spec_set]
+
+def has_type_child_with_name_matching(element: ET.Element, names: Set[str]) -> bool:
+    for type_elem in element.findall(".//type", GIR_NAMESPACES):
+        if type_elem.get("name") in names:
+            return True
+    return False
 
 def emit_vapi(api, output_dir):
     with (output_dir / f"frida-core-{api.version}.vapi").open("w", encoding='utf-8') as output_vapi_file:

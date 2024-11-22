@@ -6,6 +6,7 @@ generate_api_args = [
   core_build_dir / core_gir_name,
   core_build_dir / 'frida-core.vapi',
   base_build_dir / 'frida-base.h',
+  base_build_dir / base_gir_name,
   base_build_dir / f'frida-base-@api_version@.vapi',
   meson.current_build_dir(),
 ]
