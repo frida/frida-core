@@ -1979,9 +1979,6 @@ namespace Frida.Fruity {
 			} catch (Error e) {
 				assert_not_reached ();
 			}
-
-			if (_tunnel_netstack != null)
-				_tunnel_netstack.stop ();
 		}
 
 		private async void process_incoming_messages () {
@@ -1994,6 +1991,8 @@ namespace Frida.Fruity {
 			} catch (GLib.Error e) {
 			}
 
+			io_cancellable.cancel ();
+
 			var source = new IdleSource ();
 			source.set_callback (process_incoming_messages.callback);
 			source.attach (MainContext.get_thread_default ());
@@ -2003,6 +2002,9 @@ namespace Frida.Fruity {
 				yield connection.close_async ();
 			} catch (GLib.Error e) {
 			}
+
+			if (_tunnel_netstack != null)
+				_tunnel_netstack.stop ();
 
 			close_request.resolve (true);
 
