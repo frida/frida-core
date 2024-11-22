@@ -2,11 +2,11 @@ generate_api = [python, files('generate.py')]
 
 generate_api_args = [
   api_version,
+  core_build_dir / 'frida-core.h',
   core_build_dir / core_gir_name,
   core_build_dir / 'frida-core.vapi',
-  core_build_dir / 'frida-core.h',
-  base_build_dir / f'frida-base-@api_version@.vapi',
   base_build_dir / 'frida-base.h',
+  base_build_dir / f'frida-base-@api_version@.vapi',
   meson.current_build_dir(),
 ]
 
@@ -49,7 +49,7 @@ core_public_vapi = custom_target('frida-core-vapi',
   install_dir: vapidir,
 )
 
-core_public_vapi_stamp =  custom_target('frida-core-vapi-stamp',
+core_public_vapi_stamp = custom_target('frida-core-vapi-stamp',
   input: core_public_vapi,
   output: f'frida-core-@api_version@.vapi.stamp',
   command: [

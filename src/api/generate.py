@@ -1,30 +1,32 @@
+from __future__ import annotations
 import argparse
-import os
+from dataclasses import dataclass
 from pathlib import Path
 import re
-import sys
+from typing import List, Set
 
 
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
     parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp'], default='bundle')
     parser.add_argument('api_version', metavar='api-version', type=str)
+    parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_gir', metavar='/path/to/Frida-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('base_vapi', metavar='/path/to/frida-base.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('base_header', metavar='/path/to/frida-base.h', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('base_vapi', metavar='/path/to/frida-base.vapi', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('output_dir', metavar='/output/dir')
 
     args = parser.parse_args()
 
     output_type = args.output_type
     api_version = args.api_version
+    core_header = args.core_header.read()
     core_gir = args.core_gir.read()
     core_vapi = args.core_vapi.read()
-    core_header = args.core_header.read()
-    base_vapi = args.base_vapi.read()
     base_header = args.base_header.read()
+    base_gir = args.base_gir.read()
+    base_vapi = args.base_vapi.read()
     output_dir = Path(args.output_dir)
 
     if output_type == 'gir':
@@ -45,8 +47,7 @@ def main():
     toplevel_sources = []
     src_dir = Path(__file__).parent.parent.resolve()
     for name in toplevel_names:
-        with open(src_dir / name, 'r', encoding='utf-8') as f:
-            toplevel_sources.append(f.read())
+        toplevel_sources.append((src_dir / name).read_text(encoding='utf-8'))
     toplevel_code = "\n".join(toplevel_sources)
 
     enable_header = False
@@ -59,7 +60,7 @@ def main():
     elif output_type == 'vapi':
         enable_vapi = True
 
-    api = parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, base_header)
+    api = parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi)
 
     if enable_header:
         emit_header(api, output_dir)
@@ -68,7 +69,7 @@ def main():
         emit_vapi(api, output_dir)
 
 def emit_header(api, output_dir):
-    with open(output_dir / 'frida-core.h', 'w', encoding='utf-8') as output_header_file:
+    with (output_dir / 'frida-core.h').open("w", encoding='utf-8') as output_header_file:
         output_header_file.write("#ifndef __FRIDA_CORE_H__\n#define __FRIDA_CORE_H__\n\n")
 
         output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n#include <json-glib/json-glib.h>\n")
@@ -151,7 +152,7 @@ def emit_header(api, output_dir):
         output_header_file.write("\n\n#endif\n")
 
 def emit_vapi(api, output_dir):
-    with open(output_dir / "frida-core-{0}.vapi".format(api.version), "w", encoding='utf-8') as output_vapi_file:
+    with (output_dir / f"frida-core-{api.version}.vapi").open("w", encoding='utf-8') as output_vapi_file:
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
         output_vapi_file.write("\n\tpublic static void init ();")
@@ -189,12 +190,12 @@ def emit_vapi(api, output_dir):
 
         output_vapi_file.write("\n}\n")
 
-    with open(output_dir / "frida-core-{0}.deps".format(api.version), "w", encoding='utf-8') as output_deps_file:
+    with (output_dir / f"frida-core-{api.version}.deps").open("w", encoding='utf-8') as output_deps_file:
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
 
-def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, base_header):
+def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi):
     all_headers = core_header + "\n" + base_header
 
     all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", toplevel_code + "\n" + base_vapi, re.MULTILINE)]
@@ -400,19 +401,19 @@ def function_is_public(name):
                 "negotiate_connection"
             ]
 
-def parse_vala_object_types(source):
+def parse_vala_object_types(source) -> List[ApiObjectType]:
     return [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]
 
-def parse_vapi_functions(vapi):
+def parse_vapi_functions(vapi) -> List[ApiFunction]:
     return [ApiFunction(m.group(1), m.group(0)) for m in re.finditer(r"^\tpublic static .+ (\w+) \(.+;", vapi, re.MULTILINE)]
 
+@dataclass
 class ApiSpec:
-    def __init__(self, version, object_types, functions, enum_types, error_types):
-        self.version = version
-        self.object_types = object_types
-        self.functions = functions
-        self.enum_types = enum_types
-        self.error_types = error_types
+    version: str
+    object_types: List[ApiObjectType]
+    functions: List[ApiFunction]
+    enum_types: List[ApiEnum]
+    error_types: List[ApiEnum]
 
 class ApiEnum:
     def __init__(self, name):
