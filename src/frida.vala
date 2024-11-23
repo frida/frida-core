@@ -2999,6 +2999,10 @@ namespace Frida {
 		}
 #endif
 
+		public DBusConnection _get_connection () {
+			return ((DBusProxy) active_session).g_connection;
+		}
+
 		private T create<T> () {
 			return Object.new (typeof (T), parent: this);
 		}

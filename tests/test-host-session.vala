@@ -1140,7 +1140,7 @@ namespace Frida.HostSessionTest {
 				if (strategy == PEER) {
 					yield session.setup_peer_connection ();
 
-					peer_connection = ((DBusProxy) session.session).g_connection;
+					peer_connection = session._get_connection ();
 					bool disrupting = false;
 					var main_context = MainContext.ref_thread_default ();
 					filter_id = peer_connection.add_filter ((conn, message, incoming) => {
