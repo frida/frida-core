@@ -196,25 +196,13 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
     enum_type_names = {enum.name for enum in api.enum_types}
     error_type_names = {error.name for error in api.error_types}
 
-    internal_type_names = {
-        "Frida.HostSessionProvider",
-        "FridaBase.HostSession",
-        "FridaBase.AgentSession",
-        "FridaBase.AgentSessionId",
-        "FridaBase.AgentScriptId",
-    }
-
     def merge_and_transform_elements(tag_name: str, spec_set: Set[str]):
         core_elements = filter_elements(core_root.findall(f".//{tag_name}", GIR_NAMESPACES), spec_set)
         base_elements = filter_elements(base_root.findall(f".//{tag_name}", GIR_NAMESPACES), spec_set)
         for elem in core_elements + base_elements:
             if tag_name == "class":
-                class_name = elem.get("name")
                 for child in list(elem):
-                    if (child.get("name").startswith("_")
-                            or child.tag == CORE_TAG_FIELD
-                            or class_name == "Device" and child.tag == CORE_TAG_METHOD and child.get("name") == "get_host_session"
-                            or has_type_child_with_name_matching(child, internal_type_names)):
+                    if child.tag == CORE_TAG_FIELD or child.get("name").startswith("_"):
                         elem.remove(child)
             merged_namespace.append(elem)
 
@@ -230,12 +218,6 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
 
 def filter_elements(elements: List[ET.Element], spec_set: Set[str]):
     return [elem for elem in elements if elem.get("name") in spec_set]
-
-def has_type_child_with_name_matching(element: ET.Element, names: Set[str]) -> bool:
-    for type_elem in element.findall(".//type", GIR_NAMESPACES):
-        if type_elem.get("name") in names:
-            return True
-    return False
 
 def emit_vapi(api, output_dir):
     with (output_dir / f"frida-core-{api.version}.vapi").open("w", encoding='utf-8') as output_vapi_file:
@@ -374,10 +356,7 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
             method_cname_lc = object_type.c_name_lc + '_' + method_name
             if method_cname_lc not in seen_cfunctions:
                 seen_cfunctions.add(method_cname_lc)
-                if method_name not in ('construct', 'construct_with_host_session', 'get_main_context', 'get_provider', 'get_session') \
-                        and not "FridaHostSession *" in method_cprototype \
-                        and not (object_type.name == "Device" and method_name == 'get_host_session') \
-                        and not (object_type.name in ("Session", "Script") and method_name == 'get_id'):
+                if method_name != 'construct':
                     if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new' or method_name.startswith('new_'):
                             object_type.c_constructors.append(method_cprototype)
@@ -451,8 +430,7 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
                 current_object_type.vapi_signals.append(stripped_line)
             elif "{ get" in stripped_line:
                 name = re.match(r".+?(\w+)\s+{", stripped_line).group(1)
-                if name not in ('main_context', 'provider', 'session'):
-                    current_object_type.vapi_properties.append(stripped_line)
+                current_object_type.vapi_properties.append(stripped_line)
             else:
                 m = re.match(r".+?(\w+)\s+\(", stripped_line)
                 if m is not None:

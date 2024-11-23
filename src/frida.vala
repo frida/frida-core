@@ -303,7 +303,7 @@ namespace Frida {
 			}
 		}
 
-		public void _release_device (Device device) {
+		internal void _release_device (Device device) {
 			var device_did_exist = devices.remove (device);
 			assert (device_did_exist);
 		}
@@ -524,18 +524,10 @@ namespace Frida {
 			}
 		}
 
-		public HostSessionProvider provider {
-			get;
-			construct;
-		}
-
-		public weak DeviceManager? manager {
-			get;
-			construct;
-		}
-
 		private string? _id;
 		private string? _name;
+		internal HostSessionProvider provider;
+		private unowned DeviceManager? manager;
 
 		private HostSessionOptions? host_session_options;
 		private Promise<HostSession>? host_session_request;
@@ -552,16 +544,14 @@ namespace Frida {
 
 		public delegate bool ProcessPredicate (Process process);
 
-		internal Device (DeviceManager? manager, HostSessionProvider provider, string? id = null, string? name = null,
+		internal Device (DeviceManager? mgr, HostSessionProvider prov, string? id = null, string? name = null,
 				HostSessionOptions? options = null) {
-			Object (
-				manager: manager,
-				provider: provider,
-				icon: provider.icon
-			);
+			Object (icon: provider.icon);
 
 			_id = id;
 			_name = name;
+			provider = prov;
+			manager = mgr;
 			host_session_options = options;
 		}
 
@@ -1310,7 +1300,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Device is gone");
 		}
 
-		public async HostSession get_host_session (Cancellable? cancellable) throws Error, IOError {
+		internal async HostSession get_host_session (Cancellable? cancellable) throws Error, IOError {
 			while (host_session_request != null) {
 				try {
 					return yield host_session_request.future.wait_async (cancellable);
@@ -1335,16 +1325,6 @@ namespace Frida {
 				host_session_request = null;
 
 				throw_api_error (e);
-			}
-		}
-
-		public HostSession get_host_session_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return create<GetHostSessionTask> ().execute (cancellable);
-		}
-
-		private class GetHostSessionTask : DeviceTask<HostSession> {
-			protected override async HostSession perform_operation () throws Error, IOError {
-				return yield parent.get_host_session (cancellable);
 			}
 		}
 
@@ -1462,7 +1442,7 @@ namespace Frida {
 			}
 		}
 
-		public async void _release_session (Session session, bool may_block, Cancellable? cancellable) throws IOError {
+		internal async void _release_session (Session session, bool may_block, Cancellable? cancellable) throws IOError {
 			AgentSessionId? session_id = null;
 			foreach (var entry in agent_sessions.entries) {
 				if (entry.value == session) {
@@ -2074,26 +2054,13 @@ namespace Frida {
 			construct;
 		}
 
-		public AgentSessionId id {
-			get;
-			construct;
-		}
-
-		public AgentSession session {
-			get {
-				return active_session;
-			}
-		}
-
 		public uint persist_timeout {
 			get;
 			construct;
 		}
 
-		public weak Device device {
-			get;
-			construct;
-		}
+		private AgentSessionId id;
+		private unowned Device device;
 
 		private State state = ATTACHED;
 		private Promise<bool> close_request;
@@ -2131,12 +2098,10 @@ namespace Frida {
 		}
 
 		internal Session (Device device, uint pid, AgentSessionId id, SessionOptions options) {
-			Object (
-				pid: pid,
-				id: id,
-				persist_timeout: options.persist_timeout,
-				device: device
-			);
+			Object (pid: pid, persist_timeout: options.persist_timeout);
+
+			this.id = id;
+			this.device = device;
 		}
 
 		public bool is_detached () {
@@ -2192,7 +2157,7 @@ namespace Frida {
 
 			uint last_tx_batch_id;
 			try {
-				yield session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
+				yield active_session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2224,7 +2189,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.enable_child_gating (cancellable);
+				yield active_session.enable_child_gating (cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2244,7 +2209,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.disable_child_gating (cancellable);
+				yield active_session.disable_child_gating (cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2268,7 +2233,7 @@ namespace Frida {
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script (source, raw_options, cancellable);
+				script_id = yield active_session.create_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2306,7 +2271,7 @@ namespace Frida {
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_from_bytes (bytes.get_data (), raw_options,
+				script_id = yield active_session.create_script_from_bytes (bytes.get_data (), raw_options,
 					cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
@@ -2345,7 +2310,7 @@ namespace Frida {
 
 			uint8[] data;
 			try {
-				data = yield session.compile_script (source, raw_options, cancellable);
+				data = yield active_session.compile_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2378,7 +2343,7 @@ namespace Frida {
 
 			uint8[] data;
 			try {
-				data = yield session.snapshot_script (embed_script, raw_options, cancellable);
+				data = yield active_session.snapshot_script (embed_script, raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2782,7 +2747,7 @@ namespace Frida {
 
 			PortalMembershipId membership_id;
 			try {
-				membership_id = yield session.join_portal (address, raw_options, cancellable);
+				membership_id = yield active_session.join_portal (address, raw_options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2944,7 +2909,7 @@ namespace Frida {
 			}
 		}
 
-		public void _release_script (AgentScriptId script_id) {
+		internal void _release_script (AgentScriptId script_id) {
 			var script_did_exist = scripts.unset (script_id);
 			assert (script_did_exist);
 		}
@@ -3010,7 +2975,7 @@ namespace Frida {
 
 		private async void close_session_and_peer_connection (Cancellable? cancellable) throws IOError {
 			try {
-				yield session.close (cancellable);
+				yield active_session.close (cancellable);
 			} catch (GLib.Error e) {
 				if (e is IOError.CANCELLED) {
 					discard_peer_connection ();
@@ -3049,22 +3014,17 @@ namespace Frida {
 		public signal void destroyed ();
 		public signal void message (string json, Bytes? data);
 
-		public AgentScriptId id {
-			get;
-			construct;
-		}
-
-		public weak Session session {
-			get;
-			construct;
-		}
+		private AgentScriptId id;
+		private unowned Session session;
 
 		private Promise<bool> close_request;
 
 		private Gum.InspectorServer? inspector_server;
 
 		internal Script (Session session, AgentScriptId script_id) {
-			Object (id: script_id, session: session);
+			Object ();
+			this.id = script_id;
+			this.session = session;
 		}
 
 		public bool is_destroyed () {
@@ -3075,7 +3035,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.load_script (id, cancellable);
+				yield session.active_session.load_script (id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -3111,7 +3071,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.eternalize_script (id, cancellable);
+				yield session.active_session.eternalize_script (id, cancellable);
 
 				yield _do_close (false, cancellable);
 			} catch (GLib.Error e) {
@@ -3162,7 +3122,7 @@ namespace Frida {
 			inspector_server.message.connect (on_debugger_message_from_frontend);
 
 			try {
-				yield session.session.enable_debugger (id, cancellable);
+				yield session.active_session.enable_debugger (id, cancellable);
 			} catch (GLib.Error e) {
 				inspector_server = null;
 
@@ -3176,7 +3136,7 @@ namespace Frida {
 					inspector_server = null;
 
 					try {
-						yield session.session.disable_debugger (id, cancellable);
+						yield session.active_session.disable_debugger (id, cancellable);
 					} catch (GLib.Error e) {
 					}
 
@@ -3210,7 +3170,7 @@ namespace Frida {
 			inspector_server = null;
 
 			try {
-				yield session.session.disable_debugger (id, cancellable);
+				yield session.active_session.disable_debugger (id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -3264,7 +3224,7 @@ namespace Frida {
 
 			if (may_block) {
 				try {
-					yield parent.session.destroy_script (id, cancellable);
+					yield parent.active_session.destroy_script (id, cancellable);
 				} catch (GLib.Error e) {
 				}
 			}
@@ -3287,23 +3247,18 @@ namespace Frida {
 	}
 
 	public class PortalMembership : Object {
-		public uint id {
-			get;
-			construct;
-		}
-
-		public Session session {
-			get;
-			construct;
-		}
+		private uint id;
+		private Session session;
 
 		internal PortalMembership (Session session, PortalMembershipId membership_id) {
-			Object (id: membership_id.handle, session: session);
+			Object ();
+			this.id = membership_id.handle;
+			this.session = session;
 		}
 
 		public async void terminate (Cancellable? cancellable = null) throws Error, IOError {
 			try {
-				yield session.session.leave_portal (PortalMembershipId (id), cancellable);
+				yield session.active_session.leave_portal (PortalMembershipId (id), cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

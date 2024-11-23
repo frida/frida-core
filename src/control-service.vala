@@ -1,11 +1,6 @@
 namespace Frida {
 #if HAVE_LOCAL_BACKEND
 	public class ControlService : Object {
-		public HostSession host_session {
-			get;
-			construct;
-		}
-
 		public EndpointParameters endpoint_params {
 			get;
 			construct;
@@ -15,6 +10,8 @@ namespace Frida {
 			get;
 			construct;
 		}
+
+		private HostSession host_session;
 
 		private State state = STOPPED;
 
@@ -41,43 +38,53 @@ namespace Frida {
 		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) {
 			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
 
-			HostSession host_session;
+			HostSession session;
 #if WINDOWS
 			var tempdir = new TemporaryDirectory ();
-			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
+			session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 #endif
 #if DARWIN
-			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory (),
+			session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory (),
 				opts.sysroot, opts.report_crashes);
 #endif
 #if LINUX
 			var tempdir = new TemporaryDirectory ();
-			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir, opts.report_crashes);
+			session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir, opts.report_crashes);
 #endif
 #if FREEBSD
-			host_session = new FreebsdHostSession ();
+			session = new FreebsdHostSession ();
 #endif
 #if QNX
-			host_session = new QnxHostSession ();
+			session = new QnxHostSession ();
 #endif
 
 			Object (
-				host_session: host_session,
 				endpoint_params: endpoint_params,
 				options: opts
 			);
+			link (session);
 		}
 
-		public ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
+		internal ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
 				ControlServiceOptions? options = null) {
 			Object (
-				host_session: host_session,
 				endpoint_params: endpoint_params,
 				options: (options != null) ? options : new ControlServiceOptions ()
 			);
+			link (host_session);
 		}
 
 		construct {
+			var iface_observer = new TunnelInterfaceObserver ();
+			iface_observer.interface_detached.connect (on_interface_detached);
+
+			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, PortConflictBehavior.FAIL, iface_observer);
+
+			main_handler = new ConnectionHandler (this, null);
+		}
+
+		private void link (HostSession session) {
+			host_session = session;
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.child_added.connect (notify_child_added);
 			host_session.child_removed.connect (notify_child_removed);
@@ -85,13 +92,6 @@ namespace Frida {
 			host_session.output.connect (notify_output);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 			host_session.uninjected.connect (notify_uninjected);
-
-			var iface_observer = new TunnelInterfaceObserver ();
-			iface_observer.interface_detached.connect (on_interface_detached);
-
-			service = new WebService (endpoint_params, WebServiceFlavor.CONTROL, PortConflictBehavior.FAIL, iface_observer);
-
-			main_handler = new ConnectionHandler (this, null);
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
