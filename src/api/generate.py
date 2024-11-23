@@ -80,7 +80,6 @@ def emit_header(api, output_dir):
             output_header_file.write("\ntypedef struct _%s %s;" % (object_type.c_name, object_type.c_name))
             if object_type.c_iface_definition is not None:
                 output_header_file.write("\ntypedef struct _%sIface %sIface;" % (object_type.c_name, object_type.c_name))
-        output_header_file.write("\ntypedef struct _FridaHostSession FridaHostSession;")
 
         for enum in api.enum_types:
             output_header_file.write("\n\n" + enum.c_definition)
@@ -289,6 +288,8 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
             if method_cname_lc not in seen_cfunctions:
                 seen_cfunctions.add(method_cname_lc)
                 if method_name not in ('construct', 'construct_with_host_session', 'get_main_context', 'get_provider', 'get_session') \
+                        and not "FridaHostSession *" in method_cprototype \
+                        and not (object_type.name == "Device" and method_name == 'get_host_session') \
                         and not (object_type.name in ("Session", "Script") and method_name == 'get_id'):
                     if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new' or method_name.startswith('new_'):
