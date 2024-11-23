@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "Frida", gir_version = "1.0")]
 namespace Frida {
 	public extern void init ();
 	public extern void init_with_runtime (Runtime runtime);
