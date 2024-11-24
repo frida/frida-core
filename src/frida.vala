@@ -3028,6 +3028,7 @@ namespace Frida {
 
 		internal Script (Session session, AgentScriptId script_id) {
 			Object ();
+
 			this.id = script_id;
 			this.session = session;
 		}
@@ -3257,6 +3258,7 @@ namespace Frida {
 
 		internal PortalMembership (Session session, PortalMembershipId membership_id) {
 			Object ();
+
 			this.id = membership_id.handle;
 			this.session = session;
 		}

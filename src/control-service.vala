@@ -62,7 +62,8 @@ namespace Frida {
 				endpoint_params: endpoint_params,
 				options: opts
 			);
-			link (session);
+
+			assign_session (session);
 		}
 
 		internal ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
@@ -71,7 +72,8 @@ namespace Frida {
 				endpoint_params: endpoint_params,
 				options: (options != null) ? options : new ControlServiceOptions ()
 			);
-			link (host_session);
+
+			assign_session (host_session);
 		}
 
 		construct {
@@ -83,7 +85,7 @@ namespace Frida {
 			main_handler = new ConnectionHandler (this, null);
 		}
 
-		private void link (HostSession session) {
+		private void assign_session (HostSession session) {
 			host_session = session;
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.child_added.connect (notify_child_added);
