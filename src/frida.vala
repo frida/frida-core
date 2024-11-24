@@ -547,20 +547,24 @@ namespace Frida {
 
 		internal Device (DeviceManager? mgr, HostSessionProvider prov, string? id = null, string? name = null,
 				HostSessionOptions? options = null) {
-			Object (icon: provider.icon);
+			Object (icon: prov.icon);
 
 			_id = id;
 			_name = name;
-			provider = prov;
 			manager = mgr;
 			host_session_options = options;
+
+			assign_provider (prov);
 		}
 
 		construct {
+			_bus = new Bus (this);
+		}
+
+		private void assign_provider (HostSessionProvider prov) {
+			provider = prov;
 			provider.host_session_detached.connect (on_host_session_detached);
 			provider.agent_session_detached.connect (on_agent_session_detached);
-
-			_bus = new Bus (this);
 		}
 
 		public bool is_lost () {
