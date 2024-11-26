@@ -71,6 +71,8 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			device.ensure_open ();
+
 			unowned LibUSB.Device raw_device = device.raw_device;
 			unowned LibUSB.DeviceHandle handle = device.handle;
 
@@ -126,9 +128,10 @@ namespace Frida.Fruity {
 			if (!found_cdc_header || !found_data_interface)
 				throw new Error.NOT_SUPPORTED ("%s", make_user_error_message ("No USB CDC-NCM interface found"));
 
+			var language_id = yield device.query_default_language_id (cancellable);
+
 			uint8 mac_address[6];
-			string mac_address_str = yield device.read_string_descriptor (mac_address_index, device.default_language_id,
-				cancellable);
+			string mac_address_str = yield device.read_string_descriptor (mac_address_index, language_id, cancellable);
 			if (mac_address_str.length != 12)
 				throw new Error.PROTOCOL ("Invalid MAC address");
 			for (uint i = 0; i != 6; i++) {

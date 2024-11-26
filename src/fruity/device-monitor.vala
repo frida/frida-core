@@ -993,60 +993,58 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_usb_device_arrival (LibUSB.Device raw_device) {
-			string? udid = null;
-			char serial[LibUSB.DEVICE_STRING_BYTES_MAX + 1];
-			var res = raw_device.get_device_string (SERIAL_NUMBER, serial);
-			if (res >= LibUSB.Error.SUCCESS) {
-				serial[res] = '\0';
-				udid = (string) serial;
-				if (udid.length == 24)
-					udid = udid[:8] + "-" + udid[8:];
+			UsbDevice usb_device;
+			try {
+				usb_device = new UsbDevice (raw_device, this);
+			} catch (Error e) {
+				return;
+			}
 
-				var transport = usb_transports.first_match (t => t.udid == udid);
-				if (transport != null) {
-					if (!transport.try_complete_modeswitch (raw_device))
-						transport = null;
-				}
+			unowned string udid = usb_device.udid;
+			var transport = usb_transports.first_match (t => t.udid == udid);
+			if (transport != null) {
+				if (!transport.try_complete_modeswitch (raw_device))
+					transport = null;
+			}
 
-				if (transport == null) {
-					transport = new PortableCoreDeviceUsbTransport (this, raw_device, udid, pairing_store);
-					usb_transports.add (transport);
+			if (transport == null) {
+				transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
+				usb_transports.add (transport);
 
-					if (state != STARTING) {
-						uint delays[] = { 0, 50, 250 };
-						for (uint attempts = 0; attempts != delays.length; attempts++) {
-							uint delay = delays[attempts];
-							if (delay != 0) {
-								var timeout_source = new TimeoutSource (delay);
-								timeout_source.set_callback (handle_usb_device_arrival.callback);
-								timeout_source.attach (main_context);
+				if (state != STARTING) {
+					uint delays[] = { 0, 50, 250 };
+					for (uint attempts = 0; attempts != delays.length; attempts++) {
+						uint delay = delays[attempts];
+						if (delay != 0) {
+							var timeout_source = new TimeoutSource (delay);
+							timeout_source.set_callback (handle_usb_device_arrival.callback);
+							timeout_source.attach (main_context);
 
-								var cancel_source = new CancellableSource (io_cancellable);
-								cancel_source.set_callback (handle_usb_device_arrival.callback);
-								cancel_source.attach (main_context);
+							var cancel_source = new CancellableSource (io_cancellable);
+							cancel_source.set_callback (handle_usb_device_arrival.callback);
+							cancel_source.attach (main_context);
 
-								yield;
+							yield;
 
-								cancel_source.destroy ();
-								timeout_source.destroy ();
+							cancel_source.destroy ();
+							timeout_source.destroy ();
 
-								if (io_cancellable.is_cancelled ())
-									break;
-							}
-
-							try {
-								yield transport.open (io_cancellable);
+							if (io_cancellable.is_cancelled ())
 								break;
-							} catch (GLib.Error e) {
-								// We might still be waiting for a udev rule to run...
-								if (!(e is Error.PERMISSION_DENIED))
-									break;
-							}
+						}
+
+						try {
+							yield transport.open (io_cancellable);
+							break;
+						} catch (GLib.Error e) {
+							// We might still be waiting for a udev rule to run...
+							if (!(e is Error.PERMISSION_DENIED))
+								break;
 						}
 					}
-
-					transport_attached (transport);
 				}
+
+				transport_attached (transport);
 			}
 
 			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
@@ -1054,7 +1052,7 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_usb_device_departure (LibUSB.Device raw_device) {
-			var transport = usb_transports.first_match (t => t.raw_device == raw_device && !t.modeswitch_in_progress);
+			var transport = usb_transports.first_match (t => t.usb_device.raw_device == raw_device && !t.modeswitch_in_progress);
 			if (transport == null)
 				return;
 
@@ -1185,9 +1183,9 @@ namespace Frida.Fruity {
 	}
 
 	private sealed class PortableCoreDeviceUsbTransport : Object, Transport {
-		public LibUSB.Device raw_device {
+		public UsbDevice usb_device {
 			get {
-				return _raw_device;
+				return _usb_device;
 			}
 		}
 
@@ -1199,7 +1197,7 @@ namespace Frida.Fruity {
 
 		public string udid {
 			get {
-				return _udid;
+				return _usb_device.udid;
 			}
 		}
 
@@ -1232,9 +1230,8 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private weak PortableCoreDeviceBackend parent;
-		private LibUSB.Device _raw_device;
-		private string _udid;
+		private unowned PortableCoreDeviceBackend parent;
+		private UsbDevice _usb_device;
 		private string? _name;
 
 		private Promise<UsbDevice>? device_request;
@@ -1242,16 +1239,14 @@ namespace Frida.Fruity {
 		private Promise<Tunnel?>? tunnel_request;
 		private NcmPeer? ncm_peer;
 
-		public PortableCoreDeviceUsbTransport (PortableCoreDeviceBackend parent, LibUSB.Device raw_device, string udid,
-				PairingStore store) {
+		public PortableCoreDeviceUsbTransport (PortableCoreDeviceBackend parent, UsbDevice device, PairingStore store) {
 			Object (pairing_store: store);
 
 			this.parent = parent;
-			_raw_device = raw_device;
-			_udid = udid;
+			_usb_device = device;
 
 			char product[LibUSB.DEVICE_STRING_BYTES_MAX + 1];
-			var res = raw_device.get_device_string (PRODUCT, product);
+			var res = device.raw_device.get_device_string (PRODUCT, product);
 			if (res >= LibUSB.Error.SUCCESS) {
 				product[res] = '\0';
 				_name = (string) product;
@@ -1271,11 +1266,11 @@ namespace Frida.Fruity {
 			device_request = new Promise<UsbDevice> ();
 
 			try {
-				var device = yield UsbDevice.open (_raw_device, parent, cancellable);
+				if (NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device).is_empty && parent.modeswitch_allowed) {
+					_usb_device.ensure_open ();
 
-				if (parent.modeswitch_allowed) {
 					modeswitch_request = new Promise<LibUSB.Device> ();
-					if (yield device.maybe_modeswitch (cancellable)) {
+					if (yield _usb_device.maybe_modeswitch (cancellable)) {
 						var source = new TimeoutSource.seconds (2);
 						source.set_callback (() => {
 							if (modeswitch_request != null) {
@@ -1286,21 +1281,22 @@ namespace Frida.Fruity {
 						});
 						source.attach (MainContext.get_thread_default ());
 
+						LibUSB.Device raw_device = null;
 						try {
-							_raw_device = yield modeswitch_request.future.wait_async (cancellable);
+							raw_device = yield modeswitch_request.future.wait_async (cancellable);
 						} finally {
 							source.destroy ();
 						}
 
-						device = yield UsbDevice.open (_raw_device, parent, cancellable);
+						_usb_device = new UsbDevice (raw_device, parent);
 					} else {
 						modeswitch_request = null;
 					}
 				}
 
-				device_request.resolve (device);
+				device_request.resolve (_usb_device);
 
-				return device;
+				return _usb_device;
 			} catch (GLib.Error e) {
 				device_request.reject (e);
 				device_request = null;
@@ -1423,7 +1419,7 @@ namespace Frida.Fruity {
 			return yield establish_using_our_driver (usb_device, cancellable);
 		}
 
-		private static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
+		public static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
