@@ -971,7 +971,7 @@ namespace Frida {
 			var transport_broker = server.transport_broker;
 			if (transport_broker != null) {
 				try {
-					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id, device,
+					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id, server,
 						cancellable);
 				} catch (Error e) {
 					if (e is Error.NOT_SUPPORTED)
@@ -1087,10 +1087,10 @@ namespace Frida {
 
 			DBusConnection? connection = null;
 			try {
-				var stream = yield device.open_channel (
-					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
-					cancellable);
+				var channel =
+					yield device.open_tcp_channel (DEFAULT_CONTROL_PORT.to_string (), ALLOW_ANY_TRANSPORT, cancellable);
 
+				IOStream stream = channel.stream;
 				WebServiceTransport transport = PLAIN;
 				string? origin = null;
 
@@ -1118,7 +1118,7 @@ namespace Frida {
 				if (connection.closed)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 
-				var server = new RemoteServer (session, connection, flavor, transport_broker);
+				var server = new RemoteServer (flavor, session, connection, channel, device, transport_broker);
 				attach_remote_server (server);
 				current_remote_server = server;
 				last_server_check_timer = null;
@@ -1452,7 +1452,12 @@ namespace Frida {
 			}
 		}
 
-		private class RemoteServer : Object {
+		private class RemoteServer : Object, HostChannelProvider {
+			public Flavor flavor {
+				get;
+				construct;
+			}
+
 			public HostSession session {
 				get;
 				construct;
@@ -1463,7 +1468,12 @@ namespace Frida {
 				construct;
 			}
 
-			public Flavor flavor {
+			public Fruity.TcpChannel channel {
+				get;
+				construct;
+			}
+
+			public Fruity.Device device {
 				get;
 				construct;
 			}
@@ -1478,14 +1488,26 @@ namespace Frida {
 				set;
 			}
 
-			public RemoteServer (HostSession session, DBusConnection connection, Flavor flavor,
-					TransportBroker? transport_broker) {
+			public RemoteServer (Flavor flavor, HostSession session, DBusConnection connection, Fruity.TcpChannel channel,
+					Fruity.Device device, TransportBroker? transport_broker) {
 				Object (
+					flavor: flavor,
 					session: session,
 					connection: connection,
-					flavor: flavor,
+					channel: channel,
+					device: device,
 					transport_broker: transport_broker
 				);
+			}
+
+			public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+				if (!address.has_prefix ("tcp:"))
+					throw new Error.NOT_SUPPORTED ("Unsupported channel address");
+				var flags = (channel.kind == TUNNEL)
+					? Fruity.OpenTcpChannelFlags.ALLOW_TUNNEL
+					: Fruity.OpenTcpChannelFlags.ALLOW_USBMUX;
+				var channel = yield device.open_tcp_channel (address[4:], flags, cancellable);
+				return channel.stream;
 			}
 		}
 	}

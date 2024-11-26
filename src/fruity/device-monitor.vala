@@ -324,87 +324,96 @@ namespace Frida.Fruity {
 			unowned string location = tokens[1];
 
 			if (protocol == "tcp") {
-				var tunnel = yield find_tunnel (cancellable);
-
-				uint16 port;
-				ulong raw_port;
-				if (ulong.try_parse (location, out raw_port)) {
-					if (raw_port == 0 || raw_port > uint16.MAX)
-						throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
-					port = (uint16) raw_port;
-				} else {
-					if (tunnel == null)
-						throw new Error.NOT_SUPPORTED ("Unable to resolve port name; tunnel not available");
-					var service_info = tunnel.discovery.get_service (location);
-					port = service_info.port;
-				}
-
-				Error? pending_error = null;
-
-				if (tunnel != null) {
-					try {
-						return yield tunnel.open_tcp_connection (port, cancellable);
-					} catch (Error e) {
-						if (e is Error.SERVER_NOT_RUNNING)
-							pending_error = e;
-						else
-							throw e;
-					}
-				}
-
-				var usbmux_device = find_usbmux_device ();
-				if (usbmux_device != null) {
-					if (usbmux_device.connection_type == USB) {
-						UsbmuxClient client = null;
-						try {
-							client = yield UsbmuxClient.open (cancellable);
-
-							yield client.connect_to_port (usbmux_device.id, port, cancellable);
-
-							return client.connection;
-						} catch (GLib.Error e) {
-							if (client != null)
-								client.close.begin ();
-
-							if (e is UsbmuxError.CONNECTION_REFUSED)
-								throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
-
-							throw new Error.TRANSPORT ("%s", e.message);
-						}
-					}
-
-					InetSocketAddress device_address = usbmux_device.network_address;
-					var target_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-						address: device_address.address,
-						port: port,
-						flowinfo: device_address.flowinfo,
-						scope_id: device_address.scope_id
-					);
-
-					var client = new SocketClient ();
-					try {
-						var connection = yield client.connect_async (target_address, cancellable);
-
-						Tcp.enable_nodelay (connection.socket);
-
-						return connection;
-					} catch (GLib.Error e) {
-						if (e is IOError.CONNECTION_REFUSED)
-							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
-
-						throw new Error.TRANSPORT ("%s", e.message);
-					}
-				}
-
-				if (pending_error != null)
-					throw pending_error;
-				throw new Error.TRANSPORT ("No viable transport found");
+				var channel = yield open_tcp_channel (location, ALLOW_ANY_TRANSPORT, cancellable);
+				return channel.stream;
 			}
 
 			if (protocol == "lockdown")
 				return yield open_lockdown_service (location, cancellable);
 
 			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
+		}
+
+		public async TcpChannel open_tcp_channel (string location, OpenTcpChannelFlags flags, Cancellable? cancellable)
+				throws Error, IOError {
+			var usbmux_device = find_usbmux_device ();
+			var tunnel = yield find_tunnel (cancellable);
+
+			uint16 port;
+			ulong raw_port;
+			if (ulong.try_parse (location, out raw_port)) {
+				if (raw_port == 0 || raw_port > uint16.MAX)
+					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
+				port = (uint16) raw_port;
+			} else {
+				if (tunnel == null)
+					throw new Error.NOT_SUPPORTED ("Unable to resolve port name; tunnel not available");
+				if ((flags & OpenTcpChannelFlags.ALLOW_TUNNEL) == 0)
+					throw new Error.NOT_SUPPORTED ("Connection to tunnel service not allowed by flags");
+				var service_info = tunnel.discovery.get_service (location);
+				port = service_info.port;
+			}
+
+			Error? pending_error = null;
+
+			if ((flags & OpenTcpChannelFlags.ALLOW_TUNNEL) != 0 && tunnel != null) {
+				try {
+					var stream = yield tunnel.open_tcp_connection (port, cancellable);
+					return new TcpChannel () { stream = stream, kind = TUNNEL };
+				} catch (Error e) {
+					if (e is Error.SERVER_NOT_RUNNING)
+						pending_error = e;
+					else
+						throw e;
+				}
+			}
+
+			if ((flags & OpenTcpChannelFlags.ALLOW_USBMUX) != 0 && usbmux_device != null) {
+				if (usbmux_device.connection_type == USB) {
+					UsbmuxClient client = null;
+					try {
+						client = yield UsbmuxClient.open (cancellable);
+
+						yield client.connect_to_port (usbmux_device.id, port, cancellable);
+
+						return new TcpChannel () { stream = client.connection, kind = USBMUX };
+					} catch (GLib.Error e) {
+						if (client != null)
+							client.close.begin ();
+
+						if (e is UsbmuxError.CONNECTION_REFUSED)
+							throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
+
+						throw new Error.TRANSPORT ("%s", e.message);
+					}
+				}
+
+				InetSocketAddress device_address = usbmux_device.network_address;
+				var target_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: device_address.address,
+					port: port,
+					flowinfo: device_address.flowinfo,
+					scope_id: device_address.scope_id
+				);
+
+				var client = new SocketClient ();
+				try {
+					var connection = yield client.connect_async (target_address, cancellable);
+
+					Tcp.enable_nodelay (connection.socket);
+
+					return new TcpChannel () { stream = connection, kind = USBMUX };
+				} catch (GLib.Error e) {
+					if (e is IOError.CONNECTION_REFUSED)
+						throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
+
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			if (pending_error != null)
+				throw pending_error;
+			throw new Error.TRANSPORT ("No viable transport found");
 		}
 
 		private static int compare_transports (Transport a, Transport b) {
@@ -430,6 +439,23 @@ namespace Frida.Fruity {
 				this.cancellable = cancellable;
 			}
 		}
+	}
+
+	public class TcpChannel {
+		public IOStream stream;
+		public Kind kind;
+
+		public enum Kind {
+			USBMUX,
+			TUNNEL
+		}
+	}
+
+	[Flags]
+	public enum OpenTcpChannelFlags {
+		ALLOW_USBMUX,
+		ALLOW_TUNNEL,
+		ALLOW_ANY_TRANSPORT = ALLOW_USBMUX | ALLOW_TUNNEL,
 	}
 
 	public interface Transport : Object {
