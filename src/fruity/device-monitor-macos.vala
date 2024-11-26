@@ -246,6 +246,12 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public int64 opened_at {
+			get {
+				return _opened_at;
+			}
+		}
+
 		public Darwin.Xpc.Uuid? assertion_identifier {
 			get {
 				return _assertion_identifier;
@@ -256,6 +262,7 @@ namespace Frida.Fruity {
 		private Darwin.Xpc.Uuid? _assertion_identifier;
 		private InetAddress? tunnel_device_address;
 		private DiscoveryService? _discovery;
+		private int64 _opened_at = -1;
 
 		public MacOSTunnel (XpcClient pairing_device) {
 			this.pairing_device = pairing_device;
@@ -274,6 +281,8 @@ namespace Frida.Fruity {
 			var r = new PairingdRequest ("RemotePairing.CreateAssertionCommand");
 			r.body.set_int64 ("flags", 0);
 			var response = yield pairing_device.request (r.message, cancellable);
+
+			_opened_at = get_monotonic_time ();
 
 			var reader = new XpcObjectReader (response);
 			reader.read_member ("response");

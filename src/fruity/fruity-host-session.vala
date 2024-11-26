@@ -1087,8 +1087,7 @@ namespace Frida {
 
 			DBusConnection? connection = null;
 			try {
-				var channel =
-					yield device.open_tcp_channel (DEFAULT_CONTROL_PORT.to_string (), ALLOW_ANY_TRANSPORT, cancellable);
+				var channel = yield connect_to_remote_server (cancellable);
 
 				IOStream stream = channel.stream;
 				WebServiceTransport transport = PLAIN;
@@ -1155,6 +1154,51 @@ namespace Frida {
 
 				throw_api_error (api_error);
 			}
+		}
+
+		private async Fruity.TcpChannel connect_to_remote_server (Cancellable? cancellable) throws Error, IOError {
+			var tunnel = yield device.find_tunnel (cancellable);
+			bool tunnel_recently_opened = tunnel != null && get_monotonic_time () - tunnel.opened_at < 1000000;
+
+			uint delays[] = { 0, 50, 250 };
+			uint max_attempts = tunnel_recently_opened ? delays.length : 1;
+			var main_context = MainContext.ref_thread_default ();
+
+			Error? pending_error = null;
+			for (uint attempts = 0; attempts != max_attempts; attempts++) {
+				uint delay = delays[attempts];
+				if (delay != 0) {
+					var timeout_source = new TimeoutSource (delay);
+					timeout_source.set_callback (connect_to_remote_server.callback);
+					timeout_source.attach (main_context);
+
+					var cancel_source = new CancellableSource (cancellable);
+					cancel_source.set_callback (connect_to_remote_server.callback);
+					cancel_source.attach (main_context);
+
+					yield;
+
+					cancel_source.destroy ();
+					timeout_source.destroy ();
+
+					if (cancellable.is_cancelled ())
+						break;
+				}
+
+				bool is_last_attempt = attempts == max_attempts - 1;
+				var open_flags = is_last_attempt
+					? Fruity.OpenTcpChannelFlags.ALLOW_ANY_TRANSPORT
+					: Fruity.OpenTcpChannelFlags.ALLOW_TUNNEL;
+
+				try {
+					return yield device.open_tcp_channel (DEFAULT_CONTROL_PORT.to_string (), open_flags, cancellable);
+				} catch (Error e) {
+					pending_error = e;
+					if (!(e is Error.SERVER_NOT_RUNNING))
+						break;
+				}
+			}
+			throw pending_error;
 		}
 
 		private void attach_remote_server (RemoteServer server) {

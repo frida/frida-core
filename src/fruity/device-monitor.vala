@@ -492,6 +492,10 @@ namespace Frida.Fruity {
 			get;
 		}
 
+		public abstract int64 opened_at {
+			get;
+		}
+
 		public abstract async void close (Cancellable? cancellable) throws IOError;
 		public abstract async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError;
 	}
@@ -1635,9 +1639,16 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public int64 opened_at {
+			get {
+				return _opened_at;
+			}
+		}
+
 		private UsbNcmDriver? ncm;
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
+		private int64 _opened_at = -1;
 
 		public PortableUsbTunnel (UsbDevice device, NcmPeer peer, PairingStore store) {
 			Object (
@@ -1669,6 +1680,8 @@ namespace Frida.Fruity {
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (ncm_peer.ip, netstack, cancellable);
 			tc.closed.connect (on_tunnel_connection_close);
+
+			_opened_at = get_monotonic_time ();
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
@@ -1831,8 +1844,15 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public int64 opened_at {
+			get {
+				return _opened_at;
+			}
+		}
+
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
+		private int64 _opened_at = -1;
 
 		private const uint PAIRING_CONNECTION_TIMEOUT = 2000;
 
@@ -1853,6 +1873,8 @@ namespace Frida.Fruity {
 			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
 
 			TunnelConnection tc = yield pairing_service.open_tunnel (endpoint.get_address (), netstack, cancellable);
+
+			_opened_at = get_monotonic_time ();
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
