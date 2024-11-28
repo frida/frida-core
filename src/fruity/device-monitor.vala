@@ -993,36 +993,60 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_usb_device_arrival (LibUSB.Device raw_device) {
-			UsbDevice usb_device;
 			try {
-				usb_device = new UsbDevice (raw_device, this);
-			} catch (Error e) {
-				return;
-			}
-
-			unowned string udid = usb_device.udid;
-			var transport = usb_transports.first_match (t => t.udid == udid);
-			if (transport != null) {
-				if (!transport.try_complete_modeswitch (raw_device))
-					transport = null;
-			}
-
-			if (transport == null) {
-				transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
-				usb_transports.add (transport);
-
-				if (state != STARTING) {
-					try {
-						yield transport.open (io_cancellable);
-					} catch (GLib.Error e) {
-					}
+				UsbDevice usb_device;
+				try {
+					usb_device = new UsbDevice (raw_device, this);
+				} catch (Error e) {
+					return;
 				}
 
-				transport_attached (transport);
-			}
+				unowned string udid = usb_device.udid;
+				var transport = usb_transports.first_match (t => t.udid == udid);
 
-			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
-				usb_started.resolve (true);
+				bool may_need_time_to_settle = state != STARTING && (transport == null || transport.modeswitch_in_progress);
+				if (may_need_time_to_settle) {
+					var main_context = MainContext.get_thread_default ();
+
+					var delay_source = new TimeoutSource (250);
+					delay_source.set_callback (handle_usb_device_arrival.callback);
+					delay_source.attach (main_context);
+
+					var cancel_source = new CancellableSource (io_cancellable);
+					cancel_source.set_callback (handle_usb_device_arrival.callback);
+					cancel_source.attach (main_context);
+
+					yield;
+
+					cancel_source.destroy ();
+					delay_source.destroy ();
+				}
+
+				if (transport != null) {
+					if (!transport.try_complete_modeswitch (raw_device))
+						transport = null;
+				}
+
+				if (io_cancellable.is_cancelled ())
+					return;
+
+				if (transport == null) {
+					transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
+					usb_transports.add (transport);
+
+					if (state != STARTING) {
+						try {
+							yield transport.open (io_cancellable);
+						} catch (GLib.Error e) {
+						}
+					}
+
+					transport_attached (transport);
+				}
+			} finally {
+				if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
+					usb_started.resolve (true);
+			}
 		}
 
 		private async void handle_usb_device_departure (LibUSB.Device raw_device) {
@@ -1242,7 +1266,7 @@ namespace Frida.Fruity {
 			try {
 				var ncm_ifaddrs = yield NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device, cancellable);
 				if (ncm_ifaddrs.is_empty && parent.modeswitch_allowed) {
-					yield open_usb_device (_usb_device, cancellable);
+					_usb_device.ensure_open ();
 
 					modeswitch_request = new Promise<LibUSB.Device> ();
 					if (yield _usb_device.maybe_modeswitch (cancellable)) {
@@ -1264,8 +1288,7 @@ namespace Frida.Fruity {
 						}
 
 						_usb_device = new UsbDevice (raw_device, parent);
-
-						yield open_usb_device (_usb_device, cancellable);
+						_usb_device.ensure_open ();
 					} else {
 						modeswitch_request = null;
 					}
@@ -1280,44 +1303,6 @@ namespace Frida.Fruity {
 
 				throw_api_error (e);
 			}
-		}
-
-		private static async void open_usb_device (UsbDevice device, Cancellable? cancellable) throws Error, IOError {
-			Error? pending_error = null;
-			uint delays[] = { 0, 50, 250 };
-			var main_context = MainContext.get_thread_default ();
-			for (uint attempts = 0; attempts != delays.length; attempts++) {
-				uint delay = delays[attempts];
-				if (delay != 0) {
-					var timeout_source = new TimeoutSource (delay);
-					timeout_source.set_callback (open_usb_device.callback);
-					timeout_source.attach (main_context);
-
-					var cancel_source = new CancellableSource (cancellable);
-					cancel_source.set_callback (open_usb_device.callback);
-					cancel_source.attach (main_context);
-
-					yield;
-
-					cancel_source.destroy ();
-					timeout_source.destroy ();
-
-					if (cancellable.is_cancelled ())
-						break;
-				}
-
-				try {
-					device.ensure_open ();
-					return;
-				} catch (Error e) {
-					printerr ("Considering retry based on: %s\n", e.message);
-					// We might still be waiting for a udev rule to run...
-					pending_error = e;
-					if (!(e is Error.PERMISSION_DENIED))
-						break;
-				}
-			}
-			throw pending_error;
 		}
 
 		public bool try_complete_modeswitch (LibUSB.Device device) {
@@ -1434,8 +1419,8 @@ namespace Frida.Fruity {
 			return yield establish_using_our_driver (usb_device, cancellable);
 		}
 
-		public static async Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device, Cancellable? cancellable)
-				throws Error {
+		public static async Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device,
+				Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
@@ -1455,16 +1440,10 @@ namespace Frida.Fruity {
 			} finally {
 				if_freenameindex (names);
 			}
-			printerr ("ncm_interfaces.size=%d\n", ncm_interfaces.size);
-			foreach (var name in ncm_interfaces) {
-				//var lni = new LinuxNetworkdInterface (name);
-				//yield lni.query_status (cancellable);
-				printerr ("\tchecking: %s\n", name);
-				if (name == "eth1" || name.has_suffix ("i4"))
-					yield NetworkManager.wait_until_interface_ready (name, cancellable);
-			}
 			if (ncm_interfaces.is_empty)
 				return device_ifaddrs;
+
+			yield NetworkManager.wait_until_interfaces_ready (ncm_interfaces, cancellable);
 
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
@@ -1475,7 +1454,6 @@ namespace Frida.Fruity {
 				if (!ncm_interfaces.contains (candidate.ifa_name))
 					continue;
 
-				printerr ("Viable address on interface %s\n", candidate.ifa_name);
 				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
 			}
 			if (device_ifaddrs.is_empty && !ncm_interfaces.is_empty)

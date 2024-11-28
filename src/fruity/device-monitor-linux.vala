@@ -56,7 +56,6 @@ namespace Frida.Fruity {
 				int32 ifindex;
 				string path;
 				yield networkd.get_link_by_name (name, out ifindex, out path);
-				printerr ("Got ifindex=%d path=\"%s\"\n", ifindex, path);
 			} catch (GLib.Error e) {
 				printerr ("Oops: %s\n", e.message);
 			}
@@ -235,64 +234,86 @@ namespace Frida.Fruity {
 	}
 
 	namespace NetworkManager {
-		public const string SERVICE_NAME = "org.freedesktop.NetworkManager";
-		public const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
+		private const string SERVICE_NAME = "org.freedesktop.NetworkManager";
+		private const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
 
-		public static async void wait_until_interface_ready (string name, Cancellable? cancellable) throws Error, IOError {
+		private delegate void NotifyCompleteFunc ();
+
+		public static async void wait_until_interfaces_ready (Gee.Collection<string> interface_names, Cancellable? cancellable)
+				throws Error, IOError {
 			try {
 				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
 
 				Manager manager = yield connection.get_proxy (SERVICE_NAME, SERVICE_PATH, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
+				var remaining = interface_names.size + 1;
+
+				NotifyCompleteFunc on_complete = () => {
+					remaining--;
+					if (remaining == 0)
+						wait_until_interfaces_ready.callback ();
+				};
+
+				foreach (var name in interface_names)
+					wait_until_interface_ready.begin (name, manager, connection, cancellable, on_complete);
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					on_complete ();
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
+
+				yield;
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private static async void wait_until_interface_ready (string name, Manager manager, DBusConnection connection,
+				Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
 				string device_path = yield manager.get_device_by_ip_iface (name);
-				printerr ("Resolved %s to %s\n", name, device_path);
 
 				Device device = yield connection.get_proxy (SERVICE_NAME, device_path, DBusProxyFlags.NONE, cancellable);
 
-				var timer = new Timer ();
-				ulong handler = ((DBusProxy) device).g_properties_changed.connect ((changed, invalidated) => {
-					printerr ("g_properties_changed after %u ms! changed: %s\n", (uint) (timer.elapsed () * 1000.0), changed.print (true));
+				var device_proxy = (DBusProxy) device;
 
-					var sr = device.state_reason;
-					printerr ("state changed after %u ms! state=%u reason=%u\n", (uint) (timer.elapsed () * 1000.0), sr.state, sr.reason);
-					wait_until_interface_ready.callback ();
+				ulong handler = device_proxy.g_properties_changed.connect ((changed, invalidated) => {
+					if (changed.lookup_value ("StateReason", null) != null)
+						wait_until_interface_ready.callback ();
 				});
 
-				while (true) {
-					var sr = device.state_reason;
-					if (sr.state == DEVICE_STATE_ACTIVATED)
+				while (!cancellable.is_cancelled ()) {
+					uint32 state, reason;
+					device_proxy.get_cached_property ("StateReason").get ("(uu)", out state, out reason);
+					if (state == DEVICE_STATE_ACTIVATED)
 						break;
-					if (sr.state == DEVICE_STATE_DISCONNECTED && sr.reason == DEVICE_STATE_REASON_USER_REQUESTED)
+					if (state == DEVICE_STATE_DISCONNECTED && reason != DEVICE_STATE_REASON_NONE)
 						break;
 					yield;
 				}
 
 				device.disconnect (handler);
 			} catch (GLib.Error e) {
-				printerr ("Oops: %s\n", e.message);
 			}
+
+			on_complete ();
 		}
 
 		[DBus (name = "org.freedesktop.NetworkManager")]
-		public interface Manager : Object {
+		private interface Manager : Object {
 			public abstract async string get_device_by_ip_iface (string iface) throws GLib.Error;
 		}
 
 		[DBus (name = "org.freedesktop.NetworkManager.Device")]
-		public interface Device : Object {
-			public abstract DeviceStateReason state_reason { get; }
-		}
-
-		public struct DeviceStateReason {
-			public uint32 state;
-			public uint32 reason;
+		private interface Device : Object {
 		}
 
 		private const uint32 DEVICE_STATE_DISCONNECTED = 30;
 		private const uint32 DEVICE_STATE_ACTIVATED = 100;
 
-		private const uint32 DEVICE_STATE_REASON_USER_REQUESTED = 39;
+		private const uint32 DEVICE_STATE_REASON_NONE = 0;
 	}
 
 	namespace Resolved {
@@ -362,5 +383,10 @@ namespace Frida.Fruity {
 			public int32 family;
 			public uint8[] ip;
 		}
+	}
+
+	[DBus (name = "org.freedesktop.DBus.Properties")]
+	private interface DBusProperties : Object {
+		public abstract async Variant get (string interface_name, string property_name) throws GLib.Error;
 	}
 }
