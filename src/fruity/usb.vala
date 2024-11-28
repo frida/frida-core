@@ -109,7 +109,7 @@ namespace Frida.Fruity {
 			return result.str;
 		}
 
-		private static string udid_from_serial_number (string serial) {
+		public static string udid_from_serial_number (string serial) {
 			if (serial.length == 24)
 				return serial[:8] + "-" + serial[8:];
 			return serial;

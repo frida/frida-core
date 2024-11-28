@@ -19,7 +19,7 @@ namespace Frida.Fruity {
 					return null;
 				var iface_stream = new DataInputStream (iface.read ());
 				string iface_name = iface_stream.read_line ();
-				if (iface_name != "NCM Control" && iface_name != "AppleUSBEthernet")
+				if (iface_name != "NCM Control")
 					return null;
 
 				var serial = File.new_build_filename (dev_path, "..", "..", "..", "serial");
@@ -27,9 +27,38 @@ namespace Frida.Fruity {
 					return null;
 
 				var serial_stream = new DataInputStream (serial.read ());
-				return serial_stream.read_line ();
+				return UsbDevice.udid_from_serial_number (serial_stream.read_line ());
 			} catch (GLib.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+	}
+
+	public class LinuxNetworkdInterface : Object {
+		public string name {
+			get;
+			construct;
+		}
+
+		private Networkd.Manager? networkd;
+
+		public LinuxNetworkdInterface (string name) {
+			Object (name: name);
+		}
+
+		public async void query_status (Cancellable? cancellable) throws Error, IOError {
+			try {
+				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
+
+				networkd = yield connection.get_proxy (Networkd.SERVICE_NAME, Networkd.SERVICE_PATH, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+
+				int32 ifindex;
+				string path;
+				yield networkd.get_link_by_name (name, out ifindex, out path);
+				printerr ("Got ifindex=%d path=\"%s\"\n", ifindex, path);
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
 			}
 		}
 	}
@@ -193,6 +222,77 @@ namespace Frida.Fruity {
 				return e;
 			return new Error.TRANSPORT ("%s", e.message);
 		}
+	}
+
+	namespace Networkd {
+		public const string SERVICE_NAME = "org.freedesktop.network1";
+		public const string SERVICE_PATH = "/org/freedesktop/network1";
+
+		[DBus (name = "org.freedesktop.network1.Manager")]
+		public interface Manager : Object {
+			public abstract async void get_link_by_name (string name, out int32 ifindex, out string path) throws GLib.Error;
+		}
+	}
+
+	namespace NetworkManager {
+		public const string SERVICE_NAME = "org.freedesktop.NetworkManager";
+		public const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
+
+		public static async void wait_until_interface_ready (string name, Cancellable? cancellable) throws Error, IOError {
+			try {
+				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
+
+				Manager manager = yield connection.get_proxy (SERVICE_NAME, SERVICE_PATH, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+
+				string device_path = yield manager.get_device_by_ip_iface (name);
+				printerr ("Resolved %s to %s\n", name, device_path);
+
+				Device device = yield connection.get_proxy (SERVICE_NAME, device_path, DBusProxyFlags.NONE, cancellable);
+
+				var timer = new Timer ();
+				ulong handler = ((DBusProxy) device).g_properties_changed.connect ((changed, invalidated) => {
+					printerr ("g_properties_changed after %u ms! changed: %s\n", (uint) (timer.elapsed () * 1000.0), changed.print (true));
+
+					var sr = device.state_reason;
+					printerr ("state changed after %u ms! state=%u reason=%u\n", (uint) (timer.elapsed () * 1000.0), sr.state, sr.reason);
+					wait_until_interface_ready.callback ();
+				});
+
+				while (true) {
+					var sr = device.state_reason;
+					if (sr.state == DEVICE_STATE_ACTIVATED)
+						break;
+					if (sr.state == DEVICE_STATE_DISCONNECTED && sr.reason == DEVICE_STATE_REASON_USER_REQUESTED)
+						break;
+					yield;
+				}
+
+				device.disconnect (handler);
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+			}
+		}
+
+		[DBus (name = "org.freedesktop.NetworkManager")]
+		public interface Manager : Object {
+			public abstract async string get_device_by_ip_iface (string iface) throws GLib.Error;
+		}
+
+		[DBus (name = "org.freedesktop.NetworkManager.Device")]
+		public interface Device : Object {
+			public abstract DeviceStateReason state_reason { get; }
+		}
+
+		public struct DeviceStateReason {
+			public uint32 state;
+			public uint32 reason;
+		}
+
+		private const uint32 DEVICE_STATE_DISCONNECTED = 30;
+		private const uint32 DEVICE_STATE_ACTIVATED = 100;
+
+		private const uint32 DEVICE_STATE_REASON_USER_REQUESTED = 39;
 	}
 
 	namespace Resolved {

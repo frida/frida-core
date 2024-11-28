@@ -75,8 +75,6 @@ namespace Frida.Fruity {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			device.ensure_open ();
-
 			unowned LibUSB.Device raw_device = device.raw_device;
 			unowned LibUSB.DeviceHandle handle = device.handle;
 

@@ -1012,35 +1012,9 @@ namespace Frida.Fruity {
 				usb_transports.add (transport);
 
 				if (state != STARTING) {
-					uint delays[] = { 0, 50, 250 };
-					for (uint attempts = 0; attempts != delays.length; attempts++) {
-						uint delay = delays[attempts];
-						if (delay != 0) {
-							var timeout_source = new TimeoutSource (delay);
-							timeout_source.set_callback (handle_usb_device_arrival.callback);
-							timeout_source.attach (main_context);
-
-							var cancel_source = new CancellableSource (io_cancellable);
-							cancel_source.set_callback (handle_usb_device_arrival.callback);
-							cancel_source.attach (main_context);
-
-							yield;
-
-							cancel_source.destroy ();
-							timeout_source.destroy ();
-
-							if (io_cancellable.is_cancelled ())
-								break;
-						}
-
-						try {
-							yield transport.open (io_cancellable);
-							break;
-						} catch (GLib.Error e) {
-							// We might still be waiting for a udev rule to run...
-							if (!(e is Error.PERMISSION_DENIED))
-								break;
-						}
+					try {
+						yield transport.open (io_cancellable);
+					} catch (GLib.Error e) {
 					}
 				}
 
@@ -1266,8 +1240,9 @@ namespace Frida.Fruity {
 			device_request = new Promise<UsbDevice> ();
 
 			try {
-				if (NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device).is_empty && parent.modeswitch_allowed) {
-					_usb_device.ensure_open ();
+				var ncm_ifaddrs = yield NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device, cancellable);
+				if (ncm_ifaddrs.is_empty && parent.modeswitch_allowed) {
+					yield open_usb_device (_usb_device, cancellable);
 
 					modeswitch_request = new Promise<LibUSB.Device> ();
 					if (yield _usb_device.maybe_modeswitch (cancellable)) {
@@ -1289,6 +1264,8 @@ namespace Frida.Fruity {
 						}
 
 						_usb_device = new UsbDevice (raw_device, parent);
+
+						yield open_usb_device (_usb_device, cancellable);
 					} else {
 						modeswitch_request = null;
 					}
@@ -1303,6 +1280,44 @@ namespace Frida.Fruity {
 
 				throw_api_error (e);
 			}
+		}
+
+		private static async void open_usb_device (UsbDevice device, Cancellable? cancellable) throws Error, IOError {
+			Error? pending_error = null;
+			uint delays[] = { 0, 50, 250 };
+			var main_context = MainContext.get_thread_default ();
+			for (uint attempts = 0; attempts != delays.length; attempts++) {
+				uint delay = delays[attempts];
+				if (delay != 0) {
+					var timeout_source = new TimeoutSource (delay);
+					timeout_source.set_callback (open_usb_device.callback);
+					timeout_source.attach (main_context);
+
+					var cancel_source = new CancellableSource (cancellable);
+					cancel_source.set_callback (open_usb_device.callback);
+					cancel_source.attach (main_context);
+
+					yield;
+
+					cancel_source.destroy ();
+					timeout_source.destroy ();
+
+					if (cancellable.is_cancelled ())
+						break;
+				}
+
+				try {
+					device.ensure_open ();
+					return;
+				} catch (Error e) {
+					printerr ("Considering retry based on: %s\n", e.message);
+					// We might still be waiting for a udev rule to run...
+					pending_error = e;
+					if (!(e is Error.PERMISSION_DENIED))
+						break;
+				}
+			}
+			throw pending_error;
 		}
 
 		public bool try_complete_modeswitch (LibUSB.Device device) {
@@ -1413,35 +1428,70 @@ namespace Frida.Fruity {
 		}
 
 		public static async NcmPeer locate (UsbDevice usb_device, Cancellable? cancellable) throws Error, IOError {
-			var device_ifaddrs = detect_ncm_ifaddrs_on_system (usb_device);
+			var device_ifaddrs = yield detect_ncm_ifaddrs_on_system (usb_device, cancellable);
 			if (!device_ifaddrs.is_empty)
 				return yield locate_on_system_netifs (device_ifaddrs, cancellable);
 			return yield establish_using_our_driver (usb_device, cancellable);
 		}
 
-		public static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
+		public static async Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device, Cancellable? cancellable)
+				throws Error {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
-			string raw_udid = udid.replace ("-", "");
+
+			var ncm_interfaces = new Gee.HashSet<string> ();
+			var names = if_nameindex ();
+			try {
+				for (Linux.Network.IfNameindex * cur = names; cur->if_index != 0; cur++) {
+					string? candidate_udid = fruit_finder.udid_from_iface (cur->if_name);
+					if (candidate_udid != udid)
+						continue;
+
+					ncm_interfaces.add (cur->if_name);
+				}
+			} finally {
+				if_freenameindex (names);
+			}
+			printerr ("ncm_interfaces.size=%d\n", ncm_interfaces.size);
+			foreach (var name in ncm_interfaces) {
+				//var lni = new LinuxNetworkdInterface (name);
+				//yield lni.query_status (cancellable);
+				printerr ("\tchecking: %s\n", name);
+				if (name == "eth1" || name.has_suffix ("i4"))
+					yield NetworkManager.wait_until_interface_ready (name, cancellable);
+			}
+			if (ncm_interfaces.is_empty)
+				return device_ifaddrs;
+
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
 			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
 				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
 					continue;
 
-				string? candidate_udid = fruit_finder.udid_from_iface (candidate.ifa_name);
-				if (candidate_udid != raw_udid)
+				if (!ncm_interfaces.contains (candidate.ifa_name))
 					continue;
 
+				printerr ("Viable address on interface %s\n", candidate.ifa_name);
 				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
 			}
+			if (device_ifaddrs.is_empty && !ncm_interfaces.is_empty)
+				throw new Error.NOT_SUPPORTED ("no IPv6 address on NCM network interface");
 #endif
 
 			return device_ifaddrs;
 		}
+
+#if LINUX
+		[CCode (cheader_filename = "net/if.h", cname = "if_nameindex")]
+		private extern static Linux.Network.IfNameindex* if_nameindex ();
+
+		[CCode (cheader_filename = "net/if.h", cname = "if_freenameindex")]
+		private extern static void if_freenameindex (Linux.Network.IfNameindex* index);
+#endif
 
 		private static async NcmPeer locate_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
 				throws Error, IOError {
