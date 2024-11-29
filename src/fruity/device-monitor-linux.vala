@@ -224,21 +224,104 @@ namespace Frida.Fruity {
 	}
 
 	namespace Networkd {
-		public const string SERVICE_NAME = "org.freedesktop.network1";
-		public const string SERVICE_PATH = "/org/freedesktop/network1";
+		public static async void wait_until_interfaces_ready (Gee.Collection<string> interface_names, Cancellable? cancellable)
+				throws Error, IOError {
+			try {
+				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
+
+				Manager manager = yield connection.get_proxy (SERVICE_NAME, SERVICE_PATH, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+
+				var remaining = interface_names.size + 1;
+
+				NotifyCompleteFunc on_complete = () => {
+					remaining--;
+					if (remaining == 0)
+						wait_until_interfaces_ready.callback ();
+				};
+
+				foreach (var name in interface_names)
+					wait_until_interface_ready.begin (name, manager, connection, cancellable, on_complete);
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					on_complete ();
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
+
+				yield;
+			} catch (GLib.Error e) {
+				printerr ("oooooooooooooooooooops: %s\n", e.message);
+			}
+			
+		}
+
+		//  static const char* const link_operstate_table[_LINK_OPERSTATE_MAX] = {
+		//  	[LINK_OPERSTATE_MISSING]          = "missing",
+		//  	[LINK_OPERSTATE_OFF]              = "off",
+		//  	[LINK_OPERSTATE_NO_CARRIER]       = "no-carrier",
+		//  	[LINK_OPERSTATE_DORMANT]          = "dormant",
+		//  	[LINK_OPERSTATE_DEGRADED_CARRIER] = "degraded-carrier",
+		//  	[LINK_OPERSTATE_CARRIER]          = "carrier",
+		//  	[LINK_OPERSTATE_DEGRADED]         = "degraded",
+		//  	[LINK_OPERSTATE_ENSLAVED]         = "enslaved",
+		//  	[LINK_OPERSTATE_ROUTABLE]         = "routable",
+		//  };
+		
+		
+		private static async void wait_until_interface_ready (string name, Manager manager, DBusConnection connection,
+				Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				int32 ifindex;
+				string link_path;
+				yield manager.get_link_by_name (name, out ifindex, out link_path);
+
+				Link link = yield connection.get_proxy (SERVICE_NAME, link_path, DBusProxyFlags.NONE, cancellable);
+
+				var link_proxy = (DBusProxy) link;
+
+				ulong handler = link_proxy.g_properties_changed.connect ((changed, invalidated) => {
+					wait_until_interface_ready.callback ();
+				});
+				
+				//off -> carrier -> degraded
+
+				while (!cancellable.is_cancelled ()) {
+					string operational_state;
+					printerr ("%s: describe: %s\n", name, yield link.describe ());
+					link_proxy.get_cached_property ("OperationalState").get ("s", out operational_state);
+					printerr ("OperationalState: %s\n", operational_state);
+					if (operational_state != "carrier") 
+						break;
+					yield;
+				}
+
+				link_proxy.disconnect (handler);
+			} catch (GLib.Error e) {
+				printerr ("bloopsie: %s\n", e.message);
+			}
+
+			on_complete ();
+		}
+
+		private delegate void NotifyCompleteFunc ();
+
+		private const string SERVICE_NAME = "org.freedesktop.network1";
+		private const string SERVICE_PATH = "/org/freedesktop/network1";
 
 		[DBus (name = "org.freedesktop.network1.Manager")]
-		public interface Manager : Object {
+		private interface Manager : Object {
 			public abstract async void get_link_by_name (string name, out int32 ifindex, out string path) throws GLib.Error;
+		}
+		
+		[DBus (name = "org.freedesktop.network1.Link")]
+		private interface Link : Object {
+			public abstract async string describe () throws GLib.Error;
 		}
 	}
 
 	namespace NetworkManager {
-		private const string SERVICE_NAME = "org.freedesktop.NetworkManager";
-		private const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
-
-		private delegate void NotifyCompleteFunc ();
-
 		public static async void wait_until_interfaces_ready (Gee.Collection<string> interface_names, Cancellable? cancellable)
 				throws Error, IOError {
 			try {
@@ -294,12 +377,17 @@ namespace Frida.Fruity {
 					yield;
 				}
 
-				device.disconnect (handler);
+				device_proxy.disconnect (handler);
 			} catch (GLib.Error e) {
 			}
 
 			on_complete ();
 		}
+
+		private delegate void NotifyCompleteFunc ();
+
+		private const string SERVICE_NAME = "org.freedesktop.NetworkManager";
+		private const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
 
 		[DBus (name = "org.freedesktop.NetworkManager")]
 		private interface Manager : Object {

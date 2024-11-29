@@ -1444,6 +1444,7 @@ namespace Frida.Fruity {
 				return device_ifaddrs;
 
 			yield NetworkManager.wait_until_interfaces_ready (ncm_interfaces, cancellable);
+			yield Networkd.wait_until_interfaces_ready (ncm_interfaces, cancellable);
 
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
