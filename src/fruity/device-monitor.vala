@@ -1010,22 +1010,10 @@ namespace Frida.Fruity {
 
 				bool may_need_time_to_settle = state != STARTING && (transport == null || transport.modeswitch_in_progress);
 				if (may_need_time_to_settle) {
-					var main_context = MainContext.get_thread_default ();
-
-					var delay_source = new TimeoutSource (250);
-					delay_source.set_callback (handle_usb_device_arrival.callback);
-					delay_source.attach (main_context);
-
-					var cancel_source = new CancellableSource (io_cancellable);
-					cancel_source.set_callback (handle_usb_device_arrival.callback);
-					cancel_source.attach (main_context);
-
-					printerr ("\n=== the big sleep\n");
-					yield;
-					printerr ("\n=== haz slept\n");
-
-					cancel_source.destroy ();
-					delay_source.destroy ();
+					try {
+						yield sleep (250, io_cancellable);
+					} catch (IOError e) {
+					}
 				}
 
 				if (transport != null) {
@@ -1303,9 +1291,16 @@ namespace Frida.Fruity {
 						modeswitch_request = null;
 					}
 
-					ncm_config = UsbNcmConfig.prepare (_usb_device);
-
-					// TODO: delay
+					bool device_configuration_changed;
+					try {
+						ncm_config = UsbNcmConfig.prepare (_usb_device, out device_configuration_changed);
+						if (device_configuration_changed) {
+							printerr ("\n=== config change sleep\n");
+							yield sleep (250, cancellable);
+							printerr ("\n=== config change end\n");
+						}
+					} catch (Error e) {
+					}
 				}
 
 				device_request.resolve (_usb_device);
@@ -1995,5 +1990,24 @@ namespace Frida.Fruity {
 		public Bytes auth_tag;
 		public InetSocketAddress endpoint;
 		public InetSocketAddress interface_address;
+	}
+
+	private async void sleep (uint duration_msec, Cancellable? cancellable) throws IOError {
+		var main_context = MainContext.get_thread_default ();
+
+		var delay_source = new TimeoutSource (duration_msec);
+		delay_source.set_callback (sleep.callback);
+		delay_source.attach (main_context);
+
+		var cancel_source = new CancellableSource (cancellable);
+		cancel_source.set_callback (sleep.callback);
+		cancel_source.attach (main_context);
+
+		yield;
+
+		cancel_source.destroy ();
+		delay_source.destroy ();
+
+		cancellable.set_error_if_cancelled ();
 	}
 }

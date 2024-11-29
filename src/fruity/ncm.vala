@@ -328,7 +328,7 @@ namespace Frida.Fruity {
 			ETHERNET = 0x0f,
 		}
 
-		public static UsbNcmConfig prepare (UsbDevice device) throws Error {
+		public static UsbNcmConfig prepare (UsbDevice device, out bool device_configuration_changed) throws Error {
 			unowned LibUSB.Device raw_device = device.raw_device;
 
 			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
@@ -393,6 +393,9 @@ namespace Frida.Fruity {
 				}
 				printerr ("\n=== changing configuration to %d (was %d)\n", desired_config_value, current_config.bConfigurationValue);
 				Usb.check (handle.set_configuration (desired_config_value), "Failed to set configuration");
+				device_configuration_changed = true;
+			} else {
+				device_configuration_changed = false;
 			}
 
 			return config;
