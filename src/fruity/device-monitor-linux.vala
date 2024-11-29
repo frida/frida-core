@@ -273,7 +273,6 @@ namespace Frida.Fruity {
 
 				while (!cancellable.is_cancelled ()) {
 					string operational_state;
-					printerr ("%s: describe: %s\n", name, yield link.describe ());
 					link_proxy.get_cached_property ("OperationalState").get ("s", out operational_state);
 					printerr ("OperationalState: %s\n", operational_state);
 					if (operational_state != "carrier")

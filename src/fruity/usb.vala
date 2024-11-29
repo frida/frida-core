@@ -53,7 +53,9 @@ namespace Frida.Fruity {
 		public void ensure_open (Cancellable? cancellable = null) throws Error {
 			if (_handle != null)
 				return;
+			printerr ("UsbDevice.open() using dev=%p\n", _raw_device);
 			Usb.check (_raw_device.open (out _handle), "Failed to open USB device");
+			printerr ("\t=> %p\n", _handle);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -67,6 +69,7 @@ namespace Frida.Fruity {
 				pending_operations_completed = null;
 			}
 
+			printerr ("UsbDevice.close() using dev=%p handle=%p\n", _raw_device, _handle);
 			_handle = null;
 			_raw_device = null;
 		}
