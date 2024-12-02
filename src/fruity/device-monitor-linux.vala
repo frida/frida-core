@@ -34,34 +34,6 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class LinuxNetworkdInterface : Object {
-		public string name {
-			get;
-			construct;
-		}
-
-		private Networkd.Manager? networkd;
-
-		public LinuxNetworkdInterface (string name) {
-			Object (name: name);
-		}
-
-		public async void query_status (Cancellable? cancellable) throws Error, IOError {
-			try {
-				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
-
-				networkd = yield connection.get_proxy (Networkd.SERVICE_NAME, Networkd.SERVICE_PATH, DO_NOT_LOAD_PROPERTIES,
-					cancellable);
-
-				int32 ifindex;
-				string path;
-				yield networkd.get_link_by_name (name, out ifindex, out path);
-			} catch (GLib.Error e) {
-				printerr ("Oops: %s\n", e.message);
-			}
-		}
-	}
-
 	public class LinuxPairingBrowser : Object, PairingBrowser {
 		private Resolved.Manager? resolved;
 		private Source? timer;

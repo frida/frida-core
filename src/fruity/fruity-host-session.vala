@@ -1062,6 +1062,7 @@ namespace Frida {
 				if (e is Error.PERMISSION_DENIED || e is Error.TIMED_OUT)
 					throw e;
 				return null;
+				printerr ("try_get_remote_server failed: %s\n", e.message);
 			}
 		}
 
