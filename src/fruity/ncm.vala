@@ -23,12 +23,25 @@ namespace Frida.Fruity {
 			}
 		}
 
+		private uint32 ntb_out_max_size;
+		private uint16 ndp_out_divisor;
+		private uint16 ntb_out_max_datagrams;
 		private VirtualNetworkStack? _netstack;
+		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
+		private bool writing = false;
 		private uint16 next_outgoing_sequence = 1;
 
 		private InetAddress? _remote_ipv6_address;
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private const uint16 TRANSFER_HEADER_SIZE = 4 + 2 + 2 + 2 + 2;
+
+		private enum CdcRequest {
+			GET_NTB_PARAMETERS = 0x80,
+		}
+
+		private const uint16 NTB_PARAMETERS_MIN_SIZE = 28;
 
 		private enum EtherType {
 			IPV6 = 0x86dd,
@@ -70,11 +83,31 @@ namespace Frida.Fruity {
 
 			unowned LibUSB.DeviceHandle handle = device.handle;
 			try {
-				Usb.check (handle.claim_interface (config.data_iface), "Failed to claim USB interface");
+				Usb.check (handle.claim_interface (config.ctrl_iface), "Failed to claim control interface");
+				Usb.check (handle.claim_interface (config.data_iface), "Failed to claim data interface");
 			} catch (Error e) {
 				throw new Error.PERMISSION_DENIED ("%s",
 					make_user_error_message (@"Unable to claim USB CDC-NCM interface ($(e.message))"));
 			}
+
+			var raw_ntb_params = yield device.control_transfer (
+				LibUSB.RequestRecipient.INTERFACE | LibUSB.RequestType.CLASS | LibUSB.EndpointDirection.IN,
+				CdcRequest.GET_NTB_PARAMETERS,
+				0,
+				config.ctrl_iface,
+				NTB_PARAMETERS_MIN_SIZE,
+				1000,
+				cancellable);
+			if (raw_ntb_params.get_size () < NTB_PARAMETERS_MIN_SIZE)
+				throw new Error.PROTOCOL ("Truncated NTB parameters response");
+			var ntb_params = new Buffer (raw_ntb_params, LITTLE_ENDIAN);
+			ntb_out_max_size = ntb_params.read_uint32 (16);
+			ndp_out_divisor = ntb_params.read_uint16 (20);
+			var ndp_out_payload_remainder = ntb_params.read_uint16 (22);
+			if (ndp_out_payload_remainder != 0)
+				throw new Error.PROTOCOL ("Unhandled wNdpOutPayloadRemainder");
+			ntb_out_max_datagrams = ntb_params.read_uint16 (26);
+
 			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
 
@@ -153,45 +186,131 @@ namespace Frida.Fruity {
 			} while (ndp_index != 0);
 		}
 
-		private async void on_netif_outgoing_datagram (Bytes datagram) {
-			uint16 transfer_header_length = 12;
-			uint16 ndp_header_length = 16;
-			uint16 alignment_padding_length = 2;
+		private void on_netif_outgoing_datagram (Bytes datagram) {
+			pending_output.offer (datagram);
 
-			uint16 datagram_start_index = transfer_header_length + ndp_header_length + alignment_padding_length;
-			uint16 datagram_length = (uint16) datagram.length;
+			if (!writing) {
+				writing = true;
+				var source = new TimeoutSource (1);
+				source.set_callback (() => {
+					process_pending_output.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
 
-			uint16 sentinel_start_index = 0;
-			uint16 sentinel_size = 0;
+		private async void process_pending_output () {
+			while (!pending_output.is_empty) {
+				uint16 num_datagrams = ntb_out_max_datagrams;
+				TransferLayout layout;
+				while ((layout = TransferLayout.compute (pending_output, num_datagrams,
+						ndp_out_divisor)).size > ntb_out_max_size) {
+					num_datagrams--;
+				}
 
-			uint16 sequence = next_outgoing_sequence++;
-			uint16 block_length = datagram_start_index + datagram_length;
-			uint16 ndp_index = transfer_header_length;
+				var batch = new Gee.ArrayList<Bytes> ();
+				for (var i = 0; i != layout.offsets.size; i++)
+					batch.add (pending_output.poll ());
+
+				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+
+				try {
+					yield device.bulk_transfer (config.tx_address, transfer.get_data (), uint.MAX, io_cancellable);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+
+		private class TransferLayout {
+			public uint16 size;
+			public uint16 ndp_header_size;
+			public Gee.List<uint16> offsets;
+
+			public static TransferLayout? compute (Gee.Collection<Bytes> datagrams, uint16 max_datagrams, uint16 alignment) {
+				uint16 ndp_header_base_size = 4 + 2 + 2;
+				uint16 ndp_entry_size = 2 + 2;
+				uint16 ethernet_header_size = 14;
+
+				uint16 num_datagrams = uint16.min ((uint16) datagrams.size, max_datagrams);
+
+				uint16 ndp_header_size = ndp_header_base_size + ((num_datagrams + 1) * ndp_entry_size);
+				uint16 current_transfer_size = TRANSFER_HEADER_SIZE + ndp_header_size;
+				var offsets = new Gee.ArrayList<uint16> ();
+
+				uint i = 0;
+				foreach (var datagram in datagrams) {
+					var size = (uint16) datagram.get_size ();
+
+					uint16 start_offset = current_transfer_size;
+					var delta = (start_offset + ethernet_header_size) % alignment;
+					if (delta != 0)
+						start_offset += alignment - delta;
+
+					uint16 end_offset = start_offset + size;
+					if (i == num_datagrams - 1) {
+						delta = end_offset % alignment;
+						if (delta != 0)
+							end_offset += alignment - delta;
+					}
+
+					current_transfer_size = end_offset;
+					offsets.add (start_offset);
+
+					i++;
+					if (i == max_datagrams)
+						break;
+				}
+
+				return new TransferLayout () {
+					size = current_transfer_size,
+					ndp_header_size = ndp_header_size,
+					offsets = offsets,
+				};
+			}
+		}
+
+		private static Bytes build_output_transfer (Gee.List<Bytes> datagrams, TransferLayout layout, uint16 sequence_number) {
+			uint16 ndp_index = TRANSFER_HEADER_SIZE;
+
+			var builder = new BufferBuilder (LITTLE_ENDIAN)
+				.append_string ("NCMH", StringTerminator.NONE)
+				.append_uint16 (TRANSFER_HEADER_SIZE)
+				.append_uint16 (sequence_number)
+				.append_uint16 (layout.size)
+				.append_uint16 (ndp_index);
+
 			uint16 next_ndp_index = 0;
 
-			uint16 alignment_padding_value = 0;
-
-			var frame = new BufferBuilder (LITTLE_ENDIAN)
-				.append_string ("NCMH", StringTerminator.NONE)
-				.append_uint16 (transfer_header_length)
-				.append_uint16 (sequence)
-				.append_uint16 (block_length)
-				.append_uint16 (ndp_index)
+			builder
 				.append_string ("NCM0", StringTerminator.NONE)
-				.append_uint16 (ndp_header_length)
-				.append_uint16 (next_ndp_index)
-				.append_uint16 (datagram_start_index)
-				.append_uint16 (datagram_length)
-				.append_uint16 (sentinel_start_index)
-				.append_uint16 (sentinel_size)
-				.append_uint16 (alignment_padding_value)
-				.append_bytes (datagram)
-				.build ();
+				.append_uint16 (layout.ndp_header_size)
+				.append_uint16 (next_ndp_index);
 
-			try {
-				yield device.bulk_transfer (config.tx_address, frame.get_data (), uint.MAX, io_cancellable);
-			} catch (GLib.Error e) {
+			int i;
+
+			i = 0;
+			foreach (var datagram in datagrams) {
+				builder
+					.append_uint16 (layout.offsets[i])
+					.append_uint16 ((uint16) datagram.get_size ());
+				i++;
 			}
+
+			i = 0;
+			foreach (var datagram in datagrams) {
+				builder
+					.seek (layout.offsets[i])
+					.append_bytes (datagram);
+				i++;
+			}
+
+			builder.seek (layout.size);
+
+			return builder.build ();
 		}
 
 		private static InetAddress? try_infer_remote_address_from_datagram (Bytes datagram) {
@@ -213,6 +332,7 @@ namespace Frida.Fruity {
 	}
 
 	internal class UsbNcmConfig {
+		public uint8 ctrl_iface;
 		public uint8 data_iface;
 		public int data_altsetting;
 		public uint8 rx_address;
@@ -256,6 +376,8 @@ namespace Frida.Fruity {
 					foreach (var setting in iface.altsetting) {
 						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
 								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
+							config.ctrl_iface = setting.bInterfaceNumber;
+
 							try {
 								parse_cdc_header (setting.extra, out config.mac_address_index);
 								found_cdc_header = true;
