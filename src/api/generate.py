@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 import re
 from typing import List, Set
@@ -86,7 +87,7 @@ def main():
         emit_vapi(api, output_dir)
 
 def emit_header(api, output_dir):
-    with (output_dir / 'frida-core.h').open("w", encoding='utf-8') as output_header_file:
+    with OutputFile(output_dir / 'frida-core.h') as output_header_file:
         output_header_file.write("#ifndef __FRIDA_CORE_H__\n#define __FRIDA_CORE_H__\n\n")
 
         output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n#include <json-glib/json-glib.h>\n")
@@ -214,13 +215,14 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
     result = ET.tostring(merged_root,
                          encoding="unicode",
                          xml_declaration=True)
-    (output_dir / f"Frida-{api.version}.gir").write_text(result, encoding='utf-8')
+    with OutputFile(output_dir / f"Frida-{api.version}.gir") as output_gir:
+        output_gir.write(result)
 
 def filter_elements(elements: List[ET.Element], spec_set: Set[str]):
     return [elem for elem in elements if elem.get("name") in spec_set]
 
 def emit_vapi(api, output_dir):
-    with (output_dir / f"frida-core-{api.version}.vapi").open("w", encoding='utf-8') as output_vapi_file:
+    with OutputFile(output_dir / f"frida-core-{api.version}.vapi") as output_vapi_file:
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
         output_vapi_file.write("\n\tpublic static void init ();")
@@ -258,7 +260,7 @@ def emit_vapi(api, output_dir):
 
         output_vapi_file.write("\n}\n")
 
-    with (output_dir / f"frida-core-{api.version}.deps").open("w", encoding='utf-8') as output_deps_file:
+    with OutputFile(output_dir / f"frida-core-{api.version}.deps") as output_deps_file:
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
@@ -580,6 +582,23 @@ def fuzzysort(items, keys):
                 break
     result.extend(remaining)
     return result
+
+class OutputFile:
+    def __init__(self, output_path):
+        self._output_path = output_path
+        self._io = StringIO()
+
+    def __enter__(self):
+        return self._io
+
+    def __exit__(self, *exc):
+        result = self._io.getvalue()
+        if self._output_path.exists():
+            existing_contents = self._output_path.read_text(encoding='utf-8')
+            if existing_contents == result:
+                return False
+        self._output_path.write_text(result, encoding='utf-8')
+        return False
 
 
 if __name__ == '__main__':
