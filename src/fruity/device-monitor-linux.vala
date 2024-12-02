@@ -19,7 +19,7 @@ namespace Frida.Fruity {
 					return null;
 				var iface_stream = new DataInputStream (iface.read ());
 				string iface_name = iface_stream.read_line ();
-				if (iface_name != "NCM Control" && iface_name != "AppleUSBEthernet")
+				if (iface_name != "NCM Control")
 					return null;
 
 				var serial = File.new_build_filename (dev_path, "..", "..", "..", "serial");
@@ -27,7 +27,7 @@ namespace Frida.Fruity {
 					return null;
 
 				var serial_stream = new DataInputStream (serial.read ());
-				return serial_stream.read_line ();
+				return UsbDevice.udid_from_serial_number (serial_stream.read_line ());
 			} catch (GLib.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
@@ -192,6 +192,164 @@ namespace Frida.Fruity {
 			if (e is Error || e is IOError.CANCELLED)
 				return e;
 			return new Error.TRANSPORT ("%s", e.message);
+		}
+	}
+
+	namespace Network {
+		public async void wait_until_interfaces_ready (Gee.Collection<string> interface_names, Cancellable? cancellable)
+				throws Error, IOError {
+			try {
+				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
+
+				NetworkManager.Service? nm = null;
+				Networkd.Service? netd = null;
+				if (yield system_has_service (NetworkManager.SERVICE_NAME, connection, cancellable)) {
+					nm = yield connection.get_proxy (NetworkManager.SERVICE_NAME, NetworkManager.SERVICE_PATH,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+				} else if (yield system_has_service (Networkd.SERVICE_NAME, connection, cancellable)) {
+					netd = yield connection.get_proxy (Networkd.SERVICE_NAME, Networkd.SERVICE_PATH,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+				} else {
+					return;
+				}
+
+				var remaining = interface_names.size + 1;
+
+				NotifyCompleteFunc on_complete = () => {
+					remaining--;
+					if (remaining == 0)
+						wait_until_interfaces_ready.callback ();
+				};
+
+				foreach (var name in interface_names) {
+					if (nm != null) {
+						NetworkManager.wait_until_interface_ready.begin (name, nm, connection, cancellable,
+							on_complete);
+					} else {
+						Networkd.wait_until_interface_ready.begin (name, netd, connection, cancellable,
+							on_complete);
+					}
+				}
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					on_complete ();
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
+
+				yield;
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private async bool system_has_service (string name, DBusConnection connection, Cancellable? cancellable) throws GLib.Error {
+			var v = yield connection.call (
+				"org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+				"NameHasOwner",
+				new Variant.tuple ({ name }),
+				new VariantType.tuple ({ VariantType.BOOLEAN }),
+				DBusCallFlags.NONE, -1, cancellable);
+
+			bool has_owner;
+			v.get ("(b)", out has_owner);
+			return has_owner;
+		}
+	}
+
+	private delegate void NotifyCompleteFunc ();
+
+	namespace NetworkManager {
+		private async void wait_until_interface_ready (string name, Service service, DBusConnection connection,
+				Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				string device_path = yield service.get_device_by_ip_iface (name);
+
+				Device device = yield connection.get_proxy (SERVICE_NAME, device_path, DBusProxyFlags.NONE, cancellable);
+
+				var device_proxy = (DBusProxy) device;
+
+				ulong handler = device_proxy.g_properties_changed.connect ((changed, invalidated) => {
+					if (changed.lookup_value ("StateReason", null) != null)
+						wait_until_interface_ready.callback ();
+				});
+
+				while (!cancellable.is_cancelled ()) {
+					uint32 state, reason;
+					device_proxy.get_cached_property ("StateReason").get ("(uu)", out state, out reason);
+					if (state == DEVICE_STATE_ACTIVATED)
+						break;
+					if (state == DEVICE_STATE_DISCONNECTED && reason != DEVICE_STATE_REASON_NONE)
+						break;
+					yield;
+				}
+
+				device_proxy.disconnect (handler);
+			} catch (GLib.Error e) {
+			}
+
+			on_complete ();
+		}
+
+		private const string SERVICE_NAME = "org.freedesktop.NetworkManager";
+		private const string SERVICE_PATH = "/org/freedesktop/NetworkManager";
+
+		[DBus (name = "org.freedesktop.NetworkManager")]
+		private interface Service : Object {
+			public abstract async string get_device_by_ip_iface (string iface) throws GLib.Error;
+		}
+
+		[DBus (name = "org.freedesktop.NetworkManager.Device")]
+		private interface Device : Object {
+		}
+
+		private const uint32 DEVICE_STATE_DISCONNECTED = 30;
+		private const uint32 DEVICE_STATE_ACTIVATED = 100;
+
+		private const uint32 DEVICE_STATE_REASON_NONE = 0;
+	}
+
+	namespace Networkd {
+		private async void wait_until_interface_ready (string name, Service service, DBusConnection connection,
+				Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				int32 ifindex;
+				string link_path;
+				yield service.get_link_by_name (name, out ifindex, out link_path);
+
+				Link link = yield connection.get_proxy (SERVICE_NAME, link_path, DBusProxyFlags.NONE, cancellable);
+
+				var link_proxy = (DBusProxy) link;
+
+				ulong handler = link_proxy.g_properties_changed.connect ((changed, invalidated) => {
+					wait_until_interface_ready.callback ();
+				});
+
+				while (!cancellable.is_cancelled ()) {
+					string operational_state;
+					link_proxy.get_cached_property ("OperationalState").get ("s", out operational_state);
+					if (operational_state != "carrier")
+						break;
+					yield;
+				}
+
+				link_proxy.disconnect (handler);
+			} catch (GLib.Error e) {
+			}
+
+			on_complete ();
+		}
+
+		private const string SERVICE_NAME = "org.freedesktop.network1";
+		private const string SERVICE_PATH = "/org/freedesktop/network1";
+
+		[DBus (name = "org.freedesktop.network1.Manager")]
+		private interface Service : Object {
+			public abstract async void get_link_by_name (string name, out int32 ifindex, out string path) throws GLib.Error;
+		}
+
+		[DBus (name = "org.freedesktop.network1.Link")]
+		private interface Link : Object {
 		}
 	}
 

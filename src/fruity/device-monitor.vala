@@ -993,62 +993,50 @@ namespace Frida.Fruity {
 		}
 
 		private async void handle_usb_device_arrival (LibUSB.Device raw_device) {
-			UsbDevice usb_device;
 			try {
-				usb_device = new UsbDevice (raw_device, this);
-			} catch (Error e) {
-				return;
-			}
+				UsbDevice usb_device;
+				try {
+					usb_device = new UsbDevice (raw_device, this);
+				} catch (Error e) {
+					return;
+				}
 
-			unowned string udid = usb_device.udid;
-			var transport = usb_transports.first_match (t => t.udid == udid);
-			if (transport != null) {
-				if (!transport.try_complete_modeswitch (raw_device))
-					transport = null;
-			}
+				unowned string udid = usb_device.udid;
+				var transport = usb_transports.first_match (t => t.udid == udid);
 
-			if (transport == null) {
-				transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
-				usb_transports.add (transport);
-
-				if (state != STARTING) {
-					uint delays[] = { 0, 50, 250 };
-					for (uint attempts = 0; attempts != delays.length; attempts++) {
-						uint delay = delays[attempts];
-						if (delay != 0) {
-							var timeout_source = new TimeoutSource (delay);
-							timeout_source.set_callback (handle_usb_device_arrival.callback);
-							timeout_source.attach (main_context);
-
-							var cancel_source = new CancellableSource (io_cancellable);
-							cancel_source.set_callback (handle_usb_device_arrival.callback);
-							cancel_source.attach (main_context);
-
-							yield;
-
-							cancel_source.destroy ();
-							timeout_source.destroy ();
-
-							if (io_cancellable.is_cancelled ())
-								break;
-						}
-
-						try {
-							yield transport.open (io_cancellable);
-							break;
-						} catch (GLib.Error e) {
-							// We might still be waiting for a udev rule to run...
-							if (!(e is Error.PERMISSION_DENIED))
-								break;
-						}
+				bool may_need_time_to_settle = state != STARTING && (transport == null || transport.modeswitch_in_progress);
+				if (may_need_time_to_settle) {
+					try {
+						yield sleep (250, io_cancellable);
+					} catch (IOError e) {
 					}
 				}
 
-				transport_attached (transport);
-			}
+				if (transport != null) {
+					if (!transport.try_complete_modeswitch (raw_device))
+						transport = null;
+				}
 
-			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
-				usb_started.resolve (true);
+				if (io_cancellable.is_cancelled ())
+					return;
+
+				if (transport == null) {
+					transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
+					usb_transports.add (transport);
+
+					if (state != STARTING) {
+						try {
+							yield transport.open (io_cancellable);
+						} catch (GLib.Error e) {
+						}
+					}
+
+					transport_attached (transport);
+				}
+			} finally {
+				if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
+					usb_started.resolve (true);
+			}
 		}
 
 		private async void handle_usb_device_departure (LibUSB.Device raw_device) {
@@ -1232,6 +1220,8 @@ namespace Frida.Fruity {
 
 		private unowned PortableCoreDeviceBackend parent;
 		private UsbDevice _usb_device;
+		private Gee.List<InetSocketAddress> ncm_ifaddrs;
+		private UsbNcmConfig? ncm_config;
 		private string? _name;
 
 		private Promise<UsbDevice>? device_request;
@@ -1266,32 +1256,46 @@ namespace Frida.Fruity {
 			device_request = new Promise<UsbDevice> ();
 
 			try {
-				if (NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device).is_empty && parent.modeswitch_allowed) {
+				ncm_ifaddrs = yield NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device, cancellable);
+				if (ncm_ifaddrs.is_empty) {
 					_usb_device.ensure_open ();
 
-					modeswitch_request = new Promise<LibUSB.Device> ();
-					if (yield _usb_device.maybe_modeswitch (cancellable)) {
-						var source = new TimeoutSource.seconds (2);
-						source.set_callback (() => {
-							if (modeswitch_request != null) {
-								modeswitch_request.reject (new Error.TRANSPORT ("Modeswitch timed out"));
-								modeswitch_request = null;
+					if (parent.modeswitch_allowed) {
+						modeswitch_request = new Promise<LibUSB.Device> ();
+						if (yield _usb_device.maybe_modeswitch (cancellable)) {
+							var source = new TimeoutSource.seconds (2);
+							source.set_callback (() => {
+								if (modeswitch_request != null) {
+									modeswitch_request.reject (new Error.TRANSPORT ("Modeswitch timed out"));
+									modeswitch_request = null;
+								}
+								return Source.REMOVE;
+							});
+							source.attach (MainContext.get_thread_default ());
+
+							LibUSB.Device raw_device = null;
+							try {
+								raw_device = yield modeswitch_request.future.wait_async (cancellable);
+							} finally {
+								source.destroy ();
 							}
-							return Source.REMOVE;
-						});
-						source.attach (MainContext.get_thread_default ());
 
-						LibUSB.Device raw_device = null;
-						try {
-							raw_device = yield modeswitch_request.future.wait_async (cancellable);
-						} finally {
-							source.destroy ();
+							_usb_device = new UsbDevice (raw_device, parent);
+							_usb_device.ensure_open ();
+						} else {
+							modeswitch_request = null;
 						}
-
-						_usb_device = new UsbDevice (raw_device, parent);
-					} else {
-						modeswitch_request = null;
 					}
+
+					bool device_configuration_changed;
+					try {
+						ncm_config = UsbNcmConfig.prepare (_usb_device, out device_configuration_changed);
+						if (device_configuration_changed)
+							yield sleep (250, cancellable);
+					} catch (Error e) {
+					}
+
+					ncm_ifaddrs = yield NcmPeer.detect_ncm_ifaddrs_on_system (_usb_device, cancellable);
 				}
 
 				device_request.resolve (_usb_device);
@@ -1371,18 +1375,26 @@ namespace Frida.Fruity {
 
 				PortableUsbTunnel? tunnel = null;
 				if (supported_by_os) {
-					if (ncm_peer == null)
-						ncm_peer = yield NcmPeer.locate (usb_device, cancellable);
+					if (ncm_peer == null) {
+						if (!ncm_ifaddrs.is_empty) {
+							ncm_peer = yield NcmPeer.locate_on_system_netifs (ncm_ifaddrs, cancellable);
+						} else if (ncm_config != null) {
+							ncm_peer = yield NcmPeer.establish_using_our_driver (usb_device, ncm_config,
+								cancellable);
+						}
+					}
 
-					tunnel = new PortableUsbTunnel (usb_device, ncm_peer, pairing_store);
-					tunnel.lost.connect (on_tunnel_lost);
-					try {
-						yield tunnel.open (cancellable);
-					} catch (Error e) {
-						if (e is Error.NOT_SUPPORTED)
-							tunnel = null;
-						else
-							throw e;
+					if (ncm_peer != null) {
+						tunnel = new PortableUsbTunnel (usb_device, ncm_peer, pairing_store);
+						tunnel.lost.connect (on_tunnel_lost);
+						try {
+							yield tunnel.open (cancellable);
+						} catch (Error e) {
+							if (e is Error.NOT_SUPPORTED)
+								tunnel = null;
+							else
+								throw e;
+						}
 					}
 				}
 
@@ -1412,38 +1424,59 @@ namespace Frida.Fruity {
 				ncm.close ();
 		}
 
-		public static async NcmPeer locate (UsbDevice usb_device, Cancellable? cancellable) throws Error, IOError {
-			var device_ifaddrs = detect_ncm_ifaddrs_on_system (usb_device);
-			if (!device_ifaddrs.is_empty)
-				return yield locate_on_system_netifs (device_ifaddrs, cancellable);
-			return yield establish_using_our_driver (usb_device, cancellable);
-		}
-
-		public static Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device) throws Error {
+		public static async Gee.List<InetSocketAddress> detect_ncm_ifaddrs_on_system (UsbDevice usb_device,
+				Cancellable? cancellable) throws Error, IOError {
 			var device_ifaddrs = new Gee.ArrayList<InetSocketAddress> ();
 
 #if LINUX
 			var fruit_finder = FruitFinder.make_default ();
 			unowned string udid = usb_device.udid;
-			string raw_udid = udid.replace ("-", "");
+
+			var ncm_interfaces = new Gee.HashSet<string> ();
+			var names = if_nameindex ();
+			try {
+				for (Linux.Network.IfNameindex * cur = names; cur->if_index != 0; cur++) {
+					string? candidate_udid = fruit_finder.udid_from_iface (cur->if_name);
+					if (candidate_udid != udid)
+						continue;
+
+					ncm_interfaces.add (cur->if_name);
+				}
+			} finally {
+				if_freenameindex (names);
+			}
+			if (ncm_interfaces.is_empty)
+				return device_ifaddrs;
+
+			yield Network.wait_until_interfaces_ready (ncm_interfaces, cancellable);
+
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
 			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
 				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
 					continue;
 
-				string? candidate_udid = fruit_finder.udid_from_iface (candidate.ifa_name);
-				if (candidate_udid != raw_udid)
+				if (!ncm_interfaces.contains (candidate.ifa_name))
 					continue;
 
 				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
 			}
+			if (device_ifaddrs.is_empty && !ncm_interfaces.is_empty)
+				throw new Error.NOT_SUPPORTED ("no IPv6 address on NCM network interface");
 #endif
 
 			return device_ifaddrs;
 		}
 
-		private static async NcmPeer locate_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
+#if LINUX
+		[CCode (cheader_filename = "net/if.h", cname = "if_nameindex")]
+		private extern static Linux.Network.IfNameindex* if_nameindex ();
+
+		[CCode (cheader_filename = "net/if.h", cname = "if_freenameindex")]
+		private extern static void if_freenameindex (Linux.Network.IfNameindex* index);
+#endif
+
+		public static async NcmPeer locate_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)
 				throws Error, IOError {
 			var main_context = MainContext.ref_thread_default ();
 
@@ -1544,9 +1577,9 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private static async NcmPeer establish_using_our_driver (UsbDevice usb_device, Cancellable? cancellable)
-				throws Error, IOError {
-			var ncm = yield UsbNcmDriver.open (usb_device, cancellable);
+		public static async NcmPeer establish_using_our_driver (UsbDevice usb_device, UsbNcmConfig ncm_config,
+				Cancellable? cancellable) throws Error, IOError {
+			var ncm = yield UsbNcmDriver.open (usb_device, ncm_config, cancellable);
 
 			if (ncm.remote_ipv6_address == null) {
 				ulong change_handler = ncm.notify["remote-ipv6-address"].connect ((obj, pspec) => {
@@ -1951,5 +1984,24 @@ namespace Frida.Fruity {
 		public Bytes auth_tag;
 		public InetSocketAddress endpoint;
 		public InetSocketAddress interface_address;
+	}
+
+	private async void sleep (uint duration_msec, Cancellable? cancellable) throws IOError {
+		var main_context = MainContext.get_thread_default ();
+
+		var delay_source = new TimeoutSource (duration_msec);
+		delay_source.set_callback (sleep.callback);
+		delay_source.attach (main_context);
+
+		var cancel_source = new CancellableSource (cancellable);
+		cancel_source.set_callback (sleep.callback);
+		cancel_source.attach (main_context);
+
+		yield;
+
+		cancel_source.destroy ();
+		delay_source.destroy ();
+
+		cancellable.set_error_if_cancelled ();
 	}
 }

@@ -6,6 +6,11 @@ namespace Frida.Fruity {
 			construct;
 		}
 
+		public UsbNcmConfig config {
+			get;
+			construct;
+		}
+
 		public VirtualNetworkStack netstack {
 			get {
 				return _netstack;
@@ -18,33 +23,12 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private uint8 data_iface;
-		private int data_altsetting;
-		private uint8 rx_address;
-		private uint8 tx_address;
-
 		private VirtualNetworkStack? _netstack;
 		private uint16 next_outgoing_sequence = 1;
 
 		private InetAddress? _remote_ipv6_address;
 
 		private Cancellable io_cancellable = new Cancellable ();
-
-		private enum UsbDescriptorType {
-			INTERFACE = 0x04,
-		}
-
-		private enum UsbCommSubclass {
-			NCM = 0x0d,
-		}
-
-		private enum UsbDataSubclass {
-			UNDEFINED = 0x00,
-		}
-
-		private enum UsbCdcDescriptorSubtype {
-			ETHERNET = 0x0f,
-		}
 
 		private enum EtherType {
 			IPV6 = 0x86dd,
@@ -54,8 +38,9 @@ namespace Frida.Fruity {
 			UDP = 0x11,
 		}
 
-		public static async UsbNcmDriver open (UsbDevice device, Cancellable? cancellable = null) throws Error, IOError {
-			var driver = new UsbNcmDriver (device);
+		public static async UsbNcmDriver open (UsbDevice device, UsbNcmConfig config, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var driver = new UsbNcmDriver (device, config);
 
 			try {
 				yield driver.init_async (Priority.DEFAULT, cancellable);
@@ -66,72 +51,15 @@ namespace Frida.Fruity {
 			return driver;
 		}
 
-		private UsbNcmDriver (UsbDevice device) {
-			Object (device: device);
+		private UsbNcmDriver (UsbDevice device, UsbNcmConfig config) {
+			Object (device: device, config: config);
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			device.ensure_open ();
-
-			unowned LibUSB.Device raw_device = device.raw_device;
-			unowned LibUSB.DeviceHandle handle = device.handle;
-
-			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
-
-			LibUSB.ConfigDescriptor current_config;
-			Usb.check (raw_device.get_active_config_descriptor (out current_config), "Failed to get active config descriptor");
-
-			int desired_config_value = -1;
-			bool found_cdc_header = false;
-			bool found_data_interface = false;
-			uint8 mac_address_index = 0;
-			for (uint8 config_value = dev_desc.bNumConfigurations; config_value != 0; config_value--) {
-				LibUSB.ConfigDescriptor config;
-				Usb.check (raw_device.get_config_descriptor_by_value (config_value, out config),
-					"Failed to get config descriptor");
-
-				foreach (var iface in config.@interface) {
-					foreach (var setting in iface.altsetting) {
-						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
-								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
-							try {
-								parse_cdc_header (setting.extra, out mac_address_index);
-								found_cdc_header = true;
-							} catch (Error e) {
-								break;
-							}
-						} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
-								setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
-								setting.endpoint.length == 2) {
-							found_data_interface = true;
-
-							data_iface = setting.bInterfaceNumber;
-							data_altsetting = setting.bAlternateSetting;
-
-							foreach (var ep in setting.endpoint) {
-								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) ==
-										LibUSB.EndpointDirection.IN) {
-									rx_address = ep.bEndpointAddress;
-								} else {
-									tx_address = ep.bEndpointAddress;
-								}
-							}
-						}
-					}
-				}
-
-				if (found_cdc_header || found_data_interface) {
-					desired_config_value = config_value;
-					break;
-				}
-			}
-			if (!found_cdc_header || !found_data_interface)
-				throw new Error.NOT_SUPPORTED ("%s", make_user_error_message ("No USB CDC-NCM interface found"));
-
 			var language_id = yield device.query_default_language_id (cancellable);
 
 			uint8 mac_address[6];
-			string mac_address_str = yield device.read_string_descriptor (mac_address_index, language_id, cancellable);
+			string mac_address_str = yield device.read_string_descriptor (config.mac_address_index, language_id, cancellable);
 			if (mac_address_str.length != 12)
 				throw new Error.PROTOCOL ("Invalid MAC address");
 			for (uint i = 0; i != 6; i++) {
@@ -140,22 +68,14 @@ namespace Frida.Fruity {
 				mac_address[i] = (uint8) v;
 			}
 
-			if (current_config.bConfigurationValue != desired_config_value) {
-				foreach (var iface in current_config.@interface) {
-					unowned LibUSB.InterfaceDescriptor setting = iface.altsetting[0];
-					var res = handle.kernel_driver_active (setting.bInterfaceNumber);
-					if (res == 1)
-						handle.detach_kernel_driver (setting.bInterfaceNumber);
-				}
-				Usb.check (handle.set_configuration (desired_config_value), "Failed to set configuration");
-			}
+			unowned LibUSB.DeviceHandle handle = device.handle;
 			try {
-				Usb.check (handle.claim_interface (data_iface), "Failed to claim USB interface");
+				Usb.check (handle.claim_interface (config.data_iface), "Failed to claim USB interface");
 			} catch (Error e) {
 				throw new Error.PERMISSION_DENIED ("%s",
 					make_user_error_message (@"Unable to claim USB CDC-NCM interface ($(e.message))"));
 			}
-			Usb.check (handle.set_interface_alt_setting (data_iface, data_altsetting),
+			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
 
 			_netstack = new VirtualNetworkStack (new Bytes (mac_address), null, 1500);
@@ -164,15 +84,6 @@ namespace Frida.Fruity {
 			process_incoming_datagrams.begin ();
 
 			return true;
-		}
-
-		private string make_user_error_message (string message) {
-#if WINDOWS
-			return message + "; use https://zadig.akeo.ie to switch from Apple's official driver onto Microsoft's WinUSB " +
-				"driver, so libusb can access it";
-#else
-			return message;
-#endif
 		}
 
 		public void close () {
@@ -185,7 +96,7 @@ namespace Frida.Fruity {
 
 			while (true) {
 				try {
-					size_t n = yield device.bulk_transfer (rx_address, data, uint.MAX, io_cancellable);
+					size_t n = yield device.bulk_transfer (config.rx_address, data, uint.MAX, io_cancellable);
 					handle_ncm_frame (data[:n]);
 				} catch (GLib.Error e) {
 					return;
@@ -278,9 +189,122 @@ namespace Frida.Fruity {
 				.build ();
 
 			try {
-				yield device.bulk_transfer (tx_address, frame.get_data (), uint.MAX, io_cancellable);
+				yield device.bulk_transfer (config.tx_address, frame.get_data (), uint.MAX, io_cancellable);
 			} catch (GLib.Error e) {
 			}
+		}
+
+		private static InetAddress? try_infer_remote_address_from_datagram (Bytes datagram) {
+			if (datagram.get_size () < 0x3e)
+				return null;
+
+			var buf = new Buffer (datagram, BIG_ENDIAN);
+
+			var ethertype = (EtherType) buf.read_uint16 (12);
+			if (ethertype != IPV6)
+				return null;
+
+			var next_header = (IPV6NextHeader) buf.read_uint8 (20);
+			if (next_header != UDP)
+				return null;
+
+			return new InetAddress.from_bytes (datagram[22:22 + 16].get_data (), IPV6);
+		}
+	}
+
+	internal class UsbNcmConfig {
+		public uint8 data_iface;
+		public int data_altsetting;
+		public uint8 rx_address;
+		public uint8 tx_address;
+		public uint8 mac_address_index;
+
+		private enum UsbDescriptorType {
+			INTERFACE = 0x04,
+		}
+
+		private enum UsbCommSubclass {
+			NCM = 0x0d,
+		}
+
+		private enum UsbDataSubclass {
+			UNDEFINED = 0x00,
+		}
+
+		private enum UsbCdcDescriptorSubtype {
+			ETHERNET = 0x0f,
+		}
+
+		public static UsbNcmConfig prepare (UsbDevice device, out bool device_configuration_changed) throws Error {
+			unowned LibUSB.Device raw_device = device.raw_device;
+
+			var dev_desc = LibUSB.DeviceDescriptor (raw_device);
+
+			LibUSB.ConfigDescriptor current_config;
+			Usb.check (raw_device.get_active_config_descriptor (out current_config), "Failed to get active config descriptor");
+
+			var config = new UsbNcmConfig ();
+			int desired_config_value = -1;
+			bool found_cdc_header = false;
+			bool found_data_interface = false;
+			for (uint8 config_value = dev_desc.bNumConfigurations; config_value != 0; config_value--) {
+				LibUSB.ConfigDescriptor config_desc;
+				Usb.check (raw_device.get_config_descriptor_by_value (config_value, out config_desc),
+					"Failed to get config descriptor");
+
+				foreach (var iface in config_desc.@interface) {
+					foreach (var setting in iface.altsetting) {
+						if (setting.bInterfaceClass == LibUSB.ClassCode.COMM &&
+								setting.bInterfaceSubClass == UsbCommSubclass.NCM) {
+							try {
+								parse_cdc_header (setting.extra, out config.mac_address_index);
+								found_cdc_header = true;
+							} catch (Error e) {
+								break;
+							}
+						} else if (setting.bInterfaceClass == LibUSB.ClassCode.DATA &&
+								setting.bInterfaceSubClass == UsbDataSubclass.UNDEFINED &&
+								setting.endpoint.length == 2) {
+							found_data_interface = true;
+
+							config.data_iface = setting.bInterfaceNumber;
+							config.data_altsetting = setting.bAlternateSetting;
+
+							foreach (var ep in setting.endpoint) {
+								if ((ep.bEndpointAddress & LibUSB.EndpointDirection.MASK) ==
+										LibUSB.EndpointDirection.IN) {
+									config.rx_address = ep.bEndpointAddress;
+								} else {
+									config.tx_address = ep.bEndpointAddress;
+								}
+							}
+						}
+					}
+				}
+
+				if (found_cdc_header || found_data_interface) {
+					desired_config_value = config_value;
+					break;
+				}
+			}
+			if (!found_cdc_header || !found_data_interface)
+				throw new Error.NOT_SUPPORTED ("%s", make_user_error_message ("No USB CDC-NCM interface found"));
+
+			if (current_config.bConfigurationValue != desired_config_value) {
+				unowned LibUSB.DeviceHandle handle = device.handle;
+				foreach (var iface in current_config.@interface) {
+					unowned LibUSB.InterfaceDescriptor setting = iface.altsetting[0];
+					var res = handle.kernel_driver_active (setting.bInterfaceNumber);
+					if (res == 1)
+						handle.detach_kernel_driver (setting.bInterfaceNumber);
+				}
+				Usb.check (handle.set_configuration (desired_config_value), "Failed to set configuration");
+				device_configuration_changed = true;
+			} else {
+				device_configuration_changed = false;
+			}
+
+			return config;
 		}
 
 		private static void parse_cdc_header (uint8[] header, out uint8 mac_address_index) throws Error {
@@ -312,22 +336,14 @@ namespace Frida.Fruity {
 
 			throw new Error.PROTOCOL ("CDC Ethernet descriptor not found");
 		}
+	}
 
-		private static InetAddress? try_infer_remote_address_from_datagram (Bytes datagram) {
-			if (datagram.get_size () < 0x3e)
-				return null;
-
-			var buf = new Buffer (datagram, BIG_ENDIAN);
-
-			var ethertype = (EtherType) buf.read_uint16 (12);
-			if (ethertype != IPV6)
-				return null;
-
-			var next_header = (IPV6NextHeader) buf.read_uint8 (20);
-			if (next_header != UDP)
-				return null;
-
-			return new InetAddress.from_bytes (datagram[22:22 + 16].get_data (), IPV6);
-		}
+	private string make_user_error_message (string message) {
+#if WINDOWS
+			return message + "; use https://zadig.akeo.ie to switch from Apple's official driver onto Microsoft's WinUSB " +
+				"driver, so libusb can access it";
+#else
+			return message;
+#endif
 	}
 }
