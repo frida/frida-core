@@ -1059,10 +1059,10 @@ namespace Frida {
 			try {
 				return yield get_remote_server (cancellable);
 			} catch (Error e) {
-				if (e is Error.PERMISSION_DENIED || e is Error.TIMED_OUT)
-					throw e;
-				return null;
 				printerr ("try_get_remote_server failed: %s\n", e.message);
+				if (e is Error.SERVER_NOT_RUNNING)
+					return null;
+				throw e;
 			}
 		}
 
@@ -1136,10 +1136,8 @@ namespace Frida {
 					last_server_check_timer = null;
 					last_server_check_error = null;
 				} else {
-					if (e is Error.PERMISSION_DENIED || e is Error.TIMED_OUT) {
+					if (e is Error) {
 						api_error = e;
-					} else if (e is Error.SERVER_NOT_RUNNING) {
-						api_error = new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 					} else if (connection != null) {
 						api_error = new Error.PROTOCOL ("Incompatible frida-server version");
 					} else {
