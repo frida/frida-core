@@ -11,44 +11,26 @@ generate_api_args = [
   meson.current_build_dir(),
 ]
 
-core_public_h = custom_target('frida-core-header',
-  input: [core, base],
-  output: ['frida-core.h'],
-  command: [
-    generate_api,
-    '--output=header',
-    generate_api_args,
-  ],
-  install: true,
-  install_dir: header_install_dir,
-)
-
-core_public_gir = custom_target('frida-core-gir',
-  input: [core, base],
-  output: [core_gir_name],
-  command: [
-    generate_api,
-    '--output=gir',
-    generate_api_args,
-  ],
-  install: true,
-  install_dir: girdir,
-)
-
-core_public_vapi = custom_target('frida-core-vapi',
+core_api = custom_target('frida-core-api',
   input: [core, base],
   output: [
+    'frida-core.h',
+    core_gir_name,
     f'frida-core-@api_version@.vapi',
     f'frida-core-@api_version@.deps',
   ],
   command: [
     generate_api,
-    '--output=vapi',
+    '--output=bundle',
     generate_api_args,
   ],
   install: true,
-  install_dir: vapidir,
+  install_dir: [header_install_dir, girdir, vapidir, vapidir],
 )
+
+core_public_h = core_api[0]
+core_public_gir = core_api[1]
+core_public_vapi = [core_api[2], core_api[3]]
 
 core_public_vapi_stamp = custom_target('frida-core-vapi-stamp',
   input: core_public_vapi,
