@@ -204,6 +204,13 @@ namespace NGTcp2 {
 	public struct InternetPort : uint16 {
 	}
 
+	[CCode (cname = "ngtcp2_sockaddr_union", has_destroy_function = false)]
+	public struct SocketAddressUnion {
+		public SocketAddress sa;
+		public SocketAddressInternet in;
+		public SocketAddressInternet6 in6;
+	}
+
 	[CCode (cname = "ngtcp2_sockaddr", has_destroy_function = false)]
 	public struct SocketAddress {
 		public SocketAddressFamily sa_family;
