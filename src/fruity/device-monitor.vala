@@ -1691,6 +1691,13 @@ namespace Frida.Fruity {
 		public async void open (Cancellable? cancellable) throws Error, IOError {
 			var netstack = ncm_peer.netstack;
 
+			var source = new TimeoutSource.seconds (2);
+			source.set_callback (open.callback);
+			source.attach (MainContext.get_thread_default ());
+			printerr ("Before sleep\n");
+			yield;
+			printerr ("After sleep\n");
+
 			var bootstrap_rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: ncm_peer.ip,
 				port: 58783,

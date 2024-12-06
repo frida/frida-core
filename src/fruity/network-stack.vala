@@ -364,6 +364,9 @@ namespace Frida.Fruity {
 			public uint8[] data;
 			public size_t size;
 
+			private const uint8 IFA_F_NODAD = 0x02;
+			private const uint8 IFA_F_PERMANENT = 0x80;
+
 			public NewAddrRequest (uint interface_index, InetAddress ip) {
 				data = new uint8[sizeof (Linux.Netlink.NlMsgHdr) + sizeof (Linux.Network.IfAddrMsg) + 64];
 
@@ -375,6 +378,7 @@ namespace Frida.Fruity {
 				var payload = (Linux.Network.IfAddrMsg *) (header + 1);
 				payload->ifa_family = (uint8) Posix.AF_INET6;
 				payload->ifa_prefixlen = 64;
+				payload->ifa_flags = IFA_F_NODAD | IFA_F_PERMANENT;
 				payload->ifa_index = interface_index;
 
 				var attr = Linux.Network.IFA_RTA (payload);
