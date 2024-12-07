@@ -604,7 +604,7 @@ def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_location: 
             continue
 
         try:
-            subp_here.symlink_to(location, target_is_directory=True)
+            subp_here.symlink_to(Path("..") / ".." / name, target_is_directory=True)
             continue
         except OSError as e:
             if not getattr(e, "winerror", None) == 1314:
