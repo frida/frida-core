@@ -607,7 +607,7 @@ def grab_subprojects_from_parent(subprojects: dict[str, Path], releng_location: 
             subp_here.symlink_to(location, target_is_directory=True)
             continue
         except OSError as e:
-            if not getattr(e, "winerror") == 1314:
+            if not getattr(e, "winerror", None) == 1314:
                 raise e
 
         subprocess.run(["git", "worktree", "add", subp_here],
