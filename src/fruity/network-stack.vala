@@ -518,6 +518,7 @@ namespace Frida.Fruity {
 					if (self != null)
 						self->on_error (err);
 				});
+				pcb.set_flags (TIMESTAMP | SACK);
 				pcb.nagle_disable ();
 				pcb.bind_netif (&netstack.handle);
 

@@ -189,6 +189,8 @@ namespace LWIP {
 		[CCode (cname = "tcp_err")]
 		public void set_error_callback (ErrorFunc f);
 
+		public void set_flags (Flags flags);
+
 		public void nagle_disable ();
 		public void nagle_enable ();
 
@@ -220,6 +222,24 @@ namespace LWIP {
 
 		[CCode (cname = "tcp_connected_fn", has_target = false)]
 		public delegate ErrorCode ConnectedFunc (void * user_data, TcpPcb pcb, ErrorCode err);
+
+		[Flags]
+		[CCode (cname = "tcpflags_t", cprefix = "TF_", has_type_id = false)]
+		public enum Flags {
+			ACK_DELAY,
+			ACK_NOW,
+			INFR,
+			CLOSEPEND,
+			RXCLOSED,
+			FIN,
+			NODELAY,
+			NAGLEMEMERR,
+			WND_SCALE,
+			BACKLOGPEND,
+			TIMESTAMP,
+			RTO,
+			SACK,
+		}
 
 		[Flags]
 		[CCode (cname = "u8_t", cprefix = "TCP_WRITE_FLAG_", has_type_id = false)]
