@@ -1109,7 +1109,8 @@ namespace Frida.Fruity {
 			lock (state)
 				pending_usb_ops.remove (op);
 
-			usb_context.interrupt_event_handler ();
+			if (usb_context != null)
+				usb_context.interrupt_event_handler ();
 		}
 
 		private static uint32 make_usb_device_id (LibUSB.Device device, LibUSB.DeviceDescriptor desc) {
