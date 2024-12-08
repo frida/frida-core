@@ -29,6 +29,8 @@ namespace Frida.Fruity {
 		private uint16 ndp_out_payload_remainder;
 		private uint16 ndp_out_alignment;
 		private uint16 ntb_out_max_datagrams;
+		private size_t max_in_transfers;
+		private size_t max_out_transfers;
 		private VirtualNetworkStack? _netstack;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private bool writing = false;
@@ -39,9 +41,11 @@ namespace Frida.Fruity {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const uint16 TRANSFER_HEADER_SIZE = 4 + 2 + 2 + 2 + 2;
+		private const size_t MAX_TRANSFER_MEMORY = 60 * 1518;
 
 		private enum CdcRequest {
 			GET_NTB_PARAMETERS = 0x80,
+			SET_NTB_INPUT_SIZE = 0x86,
 		}
 
 		private const uint16 NTB_PARAMETERS_MIN_SIZE = 28;
@@ -93,23 +97,51 @@ namespace Frida.Fruity {
 					make_user_error_message (@"Unable to claim USB CDC-NCM interface ($(e.message))"));
 			}
 
-			var raw_ntb_params = yield device.control_transfer (
+			uint8 raw_ntb_params[NTB_PARAMETERS_MIN_SIZE];
+			var raw_ntb_params_size = yield device.control_transfer (
 				LibUSB.RequestRecipient.INTERFACE | LibUSB.RequestType.CLASS | LibUSB.EndpointDirection.IN,
 				CdcRequest.GET_NTB_PARAMETERS,
 				0,
 				config.ctrl_iface,
-				NTB_PARAMETERS_MIN_SIZE,
+				raw_ntb_params,
 				1000,
 				cancellable);
-			if (raw_ntb_params.get_size () < NTB_PARAMETERS_MIN_SIZE)
+			if (raw_ntb_params_size < NTB_PARAMETERS_MIN_SIZE)
 				throw new Error.PROTOCOL ("Truncated NTB parameters response");
-			var ntb_params = new Buffer (raw_ntb_params, LITTLE_ENDIAN);
-			ntb_in_max_size = ntb_params.read_uint32 (4);
-			ntb_out_max_size = ntb_params.read_uint32 (16);
+			var ntb_params = new Buffer (new Bytes (raw_ntb_params[:raw_ntb_params_size]), LITTLE_ENDIAN);
+			uint32 device_ntb_in_max_size = ntb_params.read_uint32 (4);
+			ntb_in_max_size = uint32.min (device_ntb_in_max_size, 16384);
+			ntb_out_max_size = uint32.min (ntb_params.read_uint32 (16), 16384);
 			ndp_out_divisor = ntb_params.read_uint16 (20);
 			ndp_out_payload_remainder = ntb_params.read_uint16 (22);
 			ndp_out_alignment = ntb_params.read_uint16 (24);
 			ntb_out_max_datagrams = ntb_params.read_uint16 (26);
+
+			if (ntb_in_max_size != device_ntb_in_max_size) {
+				var ntb_size_buf = new BufferBuilder (LITTLE_ENDIAN)
+					.append_uint32 (ntb_in_max_size)
+					.build ();
+				yield device.control_transfer (
+					LibUSB.RequestRecipient.INTERFACE | LibUSB.RequestType.CLASS | LibUSB.EndpointDirection.OUT,
+					CdcRequest.SET_NTB_INPUT_SIZE,
+					0,
+					config.ctrl_iface,
+					ntb_size_buf.get_data (),
+					1000,
+					cancellable);
+			}
+
+			var speed = device.raw_device.get_device_speed ();
+			if (speed >= LibUSB.Speed.SUPER) {
+				max_in_transfers = (5 * MAX_TRANSFER_MEMORY) / ntb_in_max_size;
+				max_out_transfers = (5 * MAX_TRANSFER_MEMORY) / ntb_out_max_size;
+			} else if (speed == LibUSB.Speed.HIGH) {
+				max_in_transfers = MAX_TRANSFER_MEMORY / ntb_in_max_size;
+				max_out_transfers = MAX_TRANSFER_MEMORY / ntb_out_max_size;
+			} else {
+				max_in_transfers = 4;
+				max_out_transfers = 4;
+			}
 
 			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
@@ -128,20 +160,40 @@ namespace Frida.Fruity {
 		}
 
 		private async void process_incoming_datagrams () {
-			var data = new uint8[ntb_in_max_size];
-
+			var pending = new Gee.ArrayQueue<Promise<Bytes>> ();
 			while (true) {
+				for (uint i = pending.size; i != max_in_transfers; i++) {
+					var request = transfer_next_input_batch ();
+					pending.offer (request);
+				}
+
 				try {
-					size_t n = yield device.bulk_transfer (config.rx_address, data, uint.MAX, io_cancellable);
-					handle_ncm_frame (data[:n]);
+					var frame = yield pending.poll ().future.wait_async (io_cancellable);
+					handle_ncm_frame (frame);
 				} catch (GLib.Error e) {
 					return;
 				}
 			}
 		}
 
-		private void handle_ncm_frame (uint8[] data) throws GLib.Error {
-			var input = new DataInputStream (new MemoryInputStream.from_data (data));
+		private Promise<Bytes> transfer_next_input_batch () {
+			var request = new Promise<Bytes> ();
+			do_transfer_input_batch.begin (request);
+			return request;
+		}
+
+		private async void do_transfer_input_batch (Promise<Bytes> request) {
+			var data = new uint8[ntb_in_max_size];
+			try {
+				size_t n = yield device.bulk_transfer (config.rx_address, data, uint.MAX, io_cancellable);
+				request.resolve (new Bytes (data[:n]));
+			} catch (GLib.Error e) {
+				request.reject (e);
+			}
+		}
+
+		private void handle_ncm_frame (Bytes frame) throws GLib.Error {
+			var input = new DataInputStream (new MemoryInputStream.from_bytes (frame));
 			input.byte_order = LITTLE_ENDIAN;
 
 			uint8 raw_signature[4 + 1];
@@ -204,28 +256,50 @@ namespace Frida.Fruity {
 		}
 
 		private async void process_pending_output () {
-			while (!pending_output.is_empty) {
-				size_t num_datagrams = ntb_out_max_datagrams;
-				TransferLayout layout;
-				while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment,
-						ndp_out_divisor, ndp_out_payload_remainder)).size > ntb_out_max_size) {
-					num_datagrams--;
+			try {
+				while (!pending_output.is_empty) {
+					var pending = new Gee.ArrayList<Promise<uint>> ();
+
+					do {
+						var request = transfer_next_output_batch ();
+						pending.add (request);
+					} while (pending.size < max_out_transfers && !pending_output.is_empty);
+
+					foreach (var request in pending)
+						yield request.future.wait_async (io_cancellable);
 				}
+			} catch (GLib.Error e) {
+			} finally {
+				writing = false;
+			}
+		}
 
-				var batch = new Gee.ArrayList<Bytes> ();
-				for (var i = 0; i != layout.offsets.size; i++)
-					batch.add (pending_output.poll ());
-
-				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
-
-				try {
-					yield device.bulk_transfer (config.tx_address, transfer.get_data (), uint.MAX, io_cancellable);
-				} catch (GLib.Error e) {
-					break;
-				}
+		private Promise<uint> transfer_next_output_batch () {
+			size_t num_datagrams = ntb_out_max_datagrams;
+			TransferLayout layout;
+			while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment,
+					ndp_out_divisor, ndp_out_payload_remainder)).size > ntb_out_max_size) {
+				num_datagrams--;
 			}
 
-			writing = false;
+			var batch = new Gee.ArrayList<Bytes> ();
+			for (var i = 0; i != layout.offsets.size; i++)
+				batch.add (pending_output.poll ());
+
+			var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+
+			var request = new Promise<uint> ();
+			do_transfer_output_batch.begin (transfer, request);
+			return request;
+		}
+
+		private async void do_transfer_output_batch (Bytes transfer, Promise<uint> request) {
+			try {
+				var size = yield device.bulk_transfer (config.tx_address, transfer.get_data (), uint.MAX, io_cancellable);
+				request.resolve ((uint) size);
+			} catch (GLib.Error e) {
+				request.reject (e);
+			}
 		}
 
 		private class TransferLayout {

@@ -72,36 +72,38 @@ namespace Frida.Fruity {
 		}
 
 		public async bool maybe_modeswitch (Cancellable? cancellable) throws Error, IOError {
-			var response = yield control_transfer (
+			uint8 current_mode[4];
+			var n = yield control_transfer (
 				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
 				AppleSpecificRequest.GET_MODE,
 				0,
 				0,
-				4,
+				current_mode,
 				1000,
 				cancellable);
-			string mode = parse_mode (response);
+			string mode = parse_mode (current_mode[:n]);
 			bool is_initial_mode = mode == MODE_INITIAL_UNTETHERED || mode == MODE_INITIAL_TETHERED;
 			if (!is_initial_mode)
 				return false;
 
-			response = yield control_transfer (
+			uint8 set_mode_result[1];
+			var set_mode_result_size = yield control_transfer (
 				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.VENDOR | LibUSB.EndpointDirection.IN,
 				AppleSpecificRequest.SET_MODE,
 				0,
 				3,
-				1,
+				set_mode_result,
 				1000,
 				cancellable);
-			if (response.get_size () != 1 || response[0] != 0x00)
+			if (set_mode_result_size != 1 || set_mode_result[0] != 0x00)
 				return false;
 
 			return true;
 		}
 
-		private static string parse_mode (Bytes mode) throws Error {
+		private static string parse_mode (uint8[] mode) throws Error {
 			var result = new StringBuilder.sized (7);
-			foreach (uint8 byte in mode.get_data ()) {
+			foreach (uint8 byte in mode) {
 				if (result.len != 0)
 					result.append_c (':');
 				result.append_printf ("%u", byte);
@@ -147,16 +149,17 @@ namespace Frida.Fruity {
 
 		public async Bytes read_string_descriptor_bytes (uint8 index, uint16 language_id, Cancellable? cancellable)
 				throws Error, IOError {
-			var response = yield control_transfer (
+			uint8 response[1024];
+			var response_size = yield control_transfer (
 				LibUSB.RequestRecipient.DEVICE | LibUSB.RequestType.STANDARD | LibUSB.EndpointDirection.IN,
 				LibUSB.StandardRequest.GET_DESCRIPTOR,
 				(LibUSB.DescriptorType.STRING << 8) | index,
 				language_id,
-				1024,
+				response,
 				1000,
 				cancellable);
 			try {
-				var input = new DataInputStream (new MemoryInputStream.from_bytes (response));
+				var input = new DataInputStream (new MemoryInputStream.from_data (response[:response_size]));
 				input.byte_order = LITTLE_ENDIAN;
 
 				uint8 length = input.read_byte ();
@@ -167,26 +170,29 @@ namespace Frida.Fruity {
 				if (type != LibUSB.DescriptorType.STRING)
 					throw new Error.PROTOCOL ("Invalid string descriptor type");
 
-				size_t remainder = response.get_size () - 2;
+				size_t remainder = response_size - 2;
 				length -= 2;
 				if (length > remainder)
 					throw new Error.PROTOCOL ("Invalid string descriptor length");
 
-				return response[2:2 + length];
+				return new Bytes (response[2:2 + length]);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL ("%s", e.message);
 			}
 		}
 
-		public async Bytes control_transfer (uint8 request_type, uint8 request, uint16 val, uint16 index, uint16 length,
+		public async size_t control_transfer (uint8 request_type, uint8 request, uint16 val, uint16 index, uint8[] buffer,
 				uint timeout, Cancellable? cancellable) throws Error, IOError {
 			var op = backend.allocate_usb_operation ();
 			unowned LibUSB.Transfer transfer = op.transfer;
 			var ready_closure = new TransferReadyClosure (control_transfer.callback);
 
-			var buffer = new uint8[sizeof (LibUSB.ControlSetup) + length];
-			LibUSB.Transfer.fill_control_setup (buffer, request_type, request, val, index, length);
-			transfer.fill_control_transfer (_handle, buffer, on_transfer_ready, ready_closure, timeout);
+			size_t control_setup_size = 8;
+			var transfer_buffer = new uint8[control_setup_size + buffer.length];
+			LibUSB.Transfer.fill_control_setup (transfer_buffer, request_type, request, val, index, (uint16) buffer.length);
+			if ((request_type & LibUSB.EndpointDirection.IN) == 0)
+				Memory.copy ((uint8 *) transfer_buffer + control_setup_size, buffer, buffer.length);
+			transfer.fill_control_transfer (_handle, transfer_buffer, on_transfer_ready, ready_closure, timeout);
 
 			var cancel_source = new CancellableSource (cancellable);
 			cancel_source.set_callback (() => {
@@ -206,7 +212,12 @@ namespace Frida.Fruity {
 
 			Usb.check_transfer (transfer.status, "Control transfer failed");
 
-			return new Bytes (((uint8[]) transfer.control_get_data ())[:transfer.actual_length]);
+			var n = transfer.actual_length;
+
+			if ((request_type & LibUSB.EndpointDirection.IN) != 0)
+				Memory.copy (buffer, transfer.control_get_data (), n);
+
+			return n;
 		}
 
 		public async size_t bulk_transfer (uint8 endpoint, uint8[] buffer, uint timeout, Cancellable? cancellable)
