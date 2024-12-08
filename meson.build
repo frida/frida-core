@@ -481,7 +481,7 @@ if have_fruity_backend
     'dns=disabled',
     'arp=disabled',
     'ethernet=enabled',
-    'tcp_mss=1360',
+    'tcp_mss=4036',
     'tcp_snd_buf=65535',
     'tcp_wnd=65535',
   ]
