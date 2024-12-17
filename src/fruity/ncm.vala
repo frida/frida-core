@@ -115,7 +115,7 @@ namespace Frida.Fruity {
 			ndp_out_divisor = ntb_params.read_uint16 (20);
 			ndp_out_payload_remainder = ntb_params.read_uint16 (22);
 			ndp_out_alignment = ntb_params.read_uint16 (24);
-			ntb_out_max_datagrams = ntb_params.read_uint16 (26);
+			ntb_out_max_datagrams = uint16.min (ntb_params.read_uint16 (26), 16);
 
 			if (ntb_in_max_size != device_ntb_in_max_size) {
 				var ntb_size_buf = new BufferBuilder (LITTLE_ENDIAN)
