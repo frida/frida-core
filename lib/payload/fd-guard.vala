@@ -26,7 +26,7 @@ namespace Frida {
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			var close = Gum.Module.find_export_by_name (Gum.Process.query_libc_name (), "close");
+			var close = Gum.Process.get_libc_module ().find_export_by_name ("close");
 			close_listener = new CloseListener (this);
 			interceptor.attach ((void *) close, close_listener);
 		}

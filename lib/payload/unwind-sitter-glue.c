@@ -300,6 +300,7 @@ static gpointer
 frida_find_vtable (void)
 {
   GumAddress result = 0;
+  GumModule * libunwind;
   GumAddress export;
   uint64_t address;
   G_GNUC_UNUSED cs_err err;
@@ -309,11 +310,15 @@ frida_find_vtable (void)
   size_t size;
   const size_t max_size = 2048;
 
-  export = gum_module_find_export_by_name (FRIDA_LIBUNWIND_PATH, "unw_init_local");
+  libunwind = gum_process_find_module_by_name (FRIDA_LIBUNWIND_PATH);
+  if (libunwind == NULL)
+    goto beach;
+
+  export = gum_module_find_export_by_name (libunwind, "unw_init_local");
   if (export == 0)
-    export = gum_module_find_export_by_name (FRIDA_LIBUNWIND_PATH, "_Unwind_RaiseException");
+    export = gum_module_find_export_by_name (libunwind, "_Unwind_RaiseException");
   if (export == 0)
-    return NULL;
+    goto beach;
   export = gum_strip_code_address (export);
   address = export;
 
@@ -340,7 +345,7 @@ frida_find_vtable (void)
     GumMemoryRange bss_range;
 
     bss_range.base_address = 0;
-    gum_module_enumerate_sections (FRIDA_LIBUNWIND_PATH, (GumFoundSectionFunc) frida_find_bss_range, &bss_range);
+    gum_module_enumerate_sections (libunwind, (GumFoundSectionFunc) frida_find_bss_range, &bss_range);
 
     while (cs_disasm_iter (capstone, &code, &size, &address, insn))
     {
@@ -403,6 +408,9 @@ frida_find_vtable (void)
   if (insn != NULL)
     cs_free (insn, 1);
   cs_close (&capstone);
+
+beach:
+  g_clear_object (&libunwind);
 
   return GSIZE_TO_POINTER (result);
 }

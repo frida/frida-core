@@ -207,7 +207,7 @@ frida_is_directory_noexec (const gchar * directory)
 static gchar *
 frida_get_application_directory (void)
 {
-  return g_path_get_dirname (gum_process_get_main_module ()->path);
+  return g_path_get_dirname (gum_module_get_path (gum_process_get_main_module ()));
 }
 
 static gboolean

@@ -854,12 +854,12 @@ namespace Frida {
 		private static ProcMapsEntry? local_android_ld;
 
 		static construct {
-			string libc_name = Gum.Process.query_libc_name ();
+			var libc = Gum.Process.get_libc_module ();
 			uint local_pid = Posix.getpid ();
-			local_libc = ProcMapsEntry.find_by_path (local_pid, libc_name);
+			local_libc = ProcMapsEntry.find_by_path (local_pid, libc.path);
 			assert (local_libc != null);
-			mmap_offset = (uint64) (uintptr) Gum.Module.find_export_by_name (libc_name, "mmap") - local_libc.base_address;
-			munmap_offset = (uint64) (uintptr) Gum.Module.find_export_by_name (libc_name, "munmap") - local_libc.base_address;
+			mmap_offset = (uint64) (uintptr) libc.find_export_by_name ("mmap") - local_libc.base_address;
+			munmap_offset = (uint64) (uintptr) libc.find_export_by_name ("munmap") - local_libc.base_address;
 
 			try {
 				var program = new Gum.ElfModule.from_file ("/proc/self/exe");
@@ -3331,11 +3331,14 @@ namespace Frida {
 
 		public static ProcMapsEntry? find_by_path (uint pid, string path) {
 			var iter = MapsIter.for_pid (pid);
+#if ANDROID
+			unowned string libc_path = Gum.Process.get_libc_module ().path;
+#endif
 			while (iter.next ()) {
 				string candidate_path = iter.path;
 				if (candidate_path == path) {
 #if ANDROID
-					if (candidate_path == Gum.Process.query_libc_name () && iter.flags[3] == 's')
+					if (candidate_path == libc_path && iter.flags[3] == 's')
 						continue;
 #endif
 					return new ProcMapsEntry (iter.start_address, candidate_path, iter.identity);

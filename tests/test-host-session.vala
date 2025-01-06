@@ -113,7 +113,7 @@ namespace Frida.HostSessionTest {
 			"execvp",
 			"execve",
 		};
-		if (Gum.Module.find_export_by_name (null, "execvpe") != 0) {
+		if (Gum.Module.find_global_export_by_name ("execvpe") != 0) {
 			exec_symbol_names += "execvpe";
 		}
 		foreach (var fork_symbol_name in fork_symbol_names) {

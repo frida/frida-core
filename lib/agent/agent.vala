@@ -1509,13 +1509,14 @@ namespace Frida.Agent {
 			}
 
 			public static NativeBridgeApi open () throws Error {
-				string? nb_mod = null;
-				string? vm_mod = null;
-				Gum.Process.enumerate_modules ((details) => {
-					if (/\/lib(64)?\/libnativebridge.so$/.match (details.path))
-						nb_mod = details.path;
-					else if (/^lib(art|dvm).so$/.match (details.name) && !/\/system\/fake-libs/.match (details.path))
-						vm_mod = details.path;
+				Gum.Module? nb_mod = null;
+				Gum.Module? vm_mod = null;
+				Gum.Process.enumerate_modules (module => {
+					unowned string path = module.path;
+					if (/\/lib(64)?\/libnativebridge.so$/.match (path))
+						nb_mod = module;
+					else if (/^lib(art|dvm).so$/.match (module.name) && !/\/system\/fake-libs/.match (path))
+						vm_mod = module;
 					bool carry_on = nb_mod == null || vm_mod == null;
 					return carry_on;
 				});
@@ -1530,29 +1531,27 @@ namespace Frida.Agent {
 				NBUnloadLibraryFunc? unload;
 				NBGetTrampolineFunc get_trampoline;
 
-				load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibrary");;
+				load = (NBLoadLibraryFunc) nb_mod.find_export_by_name ("NativeBridgeLoadLibrary");;
 				if (load != null) {
 					flavor = MODERN;
-					load_ext = (NBLoadLibraryExtFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibraryExt");
+					load_ext = (NBLoadLibraryExtFunc) nb_mod.find_export_by_name ("NativeBridgeLoadLibraryExt");
 					// XXX: NativeBridgeUnloadLibrary() is only a stub as of Android 11 w/ libndk_translation.so
 					unload = null;
-					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
-						"NativeBridgeGetTrampoline");
+					get_trampoline = (NBGetTrampolineFunc) nb_mod.find_export_by_name ("NativeBridgeGetTrampoline");
 				} else {
 					flavor = LEGACY;
-					load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod,
-						"_ZN7android23NativeBridgeLoadLibraryEPKci");
-					load_ext = (NBLoadLibraryExtFunc) Gum.Module.find_export_by_name (nb_mod,
+					load = (NBLoadLibraryFunc) nb_mod.find_export_by_name ("_ZN7android23NativeBridgeLoadLibraryEPKci");
+					load_ext = (NBLoadLibraryExtFunc) nb_mod.find_export_by_name (
 						"_ZN7android26NativeBridgeLoadLibraryExtEPKciPNS_25native_bridge_namespace_tE");
 					// XXX: Unload implementation seems to be unreliable.
 					unload = null;
-					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
+					get_trampoline = (NBGetTrampolineFunc) nb_mod.find_export_by_name (
 						"_ZN7android25NativeBridgeGetTrampolineEPvPKcS2_j");
 				}
 				if (load == null || get_trampoline == null)
 					throw new Error.NOT_SUPPORTED ("NativeBridge API is not available on this system");
 
-				var get_vms = (JNIGetCreatedJavaVMsFunc) Gum.Module.find_export_by_name (vm_mod, "JNI_GetCreatedJavaVMs");
+				var get_vms = (JNIGetCreatedJavaVMsFunc) vm_mod.find_export_by_name ("JNI_GetCreatedJavaVMs");
 				if (get_vms == null)
 					throw new Error.NOT_SUPPORTED ("Unable to locate Java VM");
 

@@ -396,7 +396,7 @@ static gboolean frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * detai
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
-static gboolean frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data);
+static gboolean frida_find_cf_initialize (GumModule * module, gpointer user_data);
 static void frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state);
 static void frida_spawn_instance_set_nth_breakpoint (FridaSpawnInstance * self, guint n, GumAddress break_at, FridaBreakpointRepeat repeat);
 static void frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n);
@@ -3824,15 +3824,15 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 }
 
 static gboolean
-frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
+frida_find_cf_initialize (GumModule * module, gpointer user_data)
 {
   FridaSpawnInstance * self = user_data;
   GumDarwinModule * core_foundation;
 
-  if (strcmp (details->path, CORE_FOUNDATION) != 0)
+  if (strcmp (gum_module_get_path (module), CORE_FOUNDATION) != 0)
     return TRUE;
 
-  core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION, self->task, details->range->base_address,
+  core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION, self->task, gum_module_get_range (module)->base_address,
       GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
   self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
@@ -4291,7 +4291,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 {
   GumDarwinModule * module;
 
-  module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_kernel.dylib");
+  module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_kernel.dylib");
   if (module == NULL)
     goto no_libc;
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_task_self);
@@ -4301,7 +4301,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_destroy);
   FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
 
-  module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_pthread.dylib");
+  module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
     goto no_libc;
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
@@ -4315,7 +4315,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 
   if (mapper == NULL)
   {
-    module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libdyld.dylib");
+    module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libdyld.dylib");
     if (module == NULL)
       goto no_libc;
     FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);

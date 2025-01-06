@@ -21,7 +21,7 @@ namespace Frida {
 			var interceptor = Gum.Interceptor.obtain ();
 
 			dyld_find_unwind_sections = (DyldFindUnwindSectionsFunc)
-				Gum.Module.find_export_by_name (LIBDYLD, "_dyld_find_unwind_sections");
+				Gum.Process.find_module_by_name (LIBDYLD).find_export_by_name ("_dyld_find_unwind_sections");
 
 			interceptor.replace ((void *) dyld_find_unwind_sections, (void *) replacement_dyld_find_unwind_sections, this);
 
