@@ -391,7 +391,7 @@ static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
-static gboolean frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data);
+static gboolean frida_pick_ios_tvos_bootstrapper (GumModule * module, gpointer user_data);
 #endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
@@ -3646,22 +3646,25 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
 #if defined (HAVE_IOS) || defined (HAVE_TVOS)
 
 static gboolean
-frida_pick_ios_tvos_bootstrapper (const GumModuleDetails * details, gpointer user_data)
+frida_pick_ios_tvos_bootstrapper (GumModule * module, gpointer user_data)
 {
   FridaSpawnInstanceDyldData * data = user_data;
+  const gchar * path;
   const gchar * candidates[] = {
     "/usr/lib/substitute-inserter.dylib",
     "/usr/lib/pspawn_payload-stg2.dylib"
   };
   guint i;
 
+  path = gum_module_get_path (module);
+
   for (i = 0; i != G_N_ELEMENTS (candidates); i++)
   {
     const gchar * bootstrapper = candidates[i];
 
-    if (strcmp (details->path, bootstrapper) == 0)
+    if (strcmp (path, bootstrapper) == 0)
     {
-      strcpy (data->bootstrapper, details->path);
+      strcpy (data->bootstrapper, path);
       return FALSE;
     }
   }

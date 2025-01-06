@@ -151,10 +151,12 @@ frida_replacement_xpc_look_up_endpoint (const char * service_name, uint32_t type
 static FridaXpcLookUpEndpointFunc
 frida_find_xpc_look_up_endpoint_implementation (void)
 {
+  GumModule * libxpc;
   guint32 * cursor;
 
-  cursor = GSIZE_TO_POINTER (
-      gum_strip_code_address (gum_module_find_export_by_name ("/usr/lib/system/libxpc.dylib", "xpc_endpoint_create_bs_named")));
+  libxpc = gum_process_find_module_by_name ("/usr/lib/system/libxpc.dylib");
+  cursor = GSIZE_TO_POINTER (gum_strip_code_address (gum_module_find_export_by_name (libxpc, "xpc_endpoint_create_bs_named")));
+  g_object_unref (libxpc);
   if (cursor == NULL)
     return NULL;
 
