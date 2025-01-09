@@ -28,7 +28,7 @@ if host_os_family == 'windows'
 elif host_os_family == 'darwin'
   extra_link_args += '-Wl,-exported_symbol,_frida_agent_main'
 else
-  symscript = 'frida-agent.version'
+  symscript = (host_os == 'android') ? 'frida-agent-android.version' : 'frida-agent.version'
   extra_link_args += '-Wl,--version-script,' + meson.current_source_dir() / symscript
   extra_link_depends += symscript
 endif
