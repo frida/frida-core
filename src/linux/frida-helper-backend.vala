@@ -1996,7 +1996,11 @@ namespace Frida {
 			else
 				breakpoint_data = (uint8[]) &arm_breakpoint_val;
 #elif ARM64
+# if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			uint32 breakpoint_val = 0x000020d4U;
+# else
 			uint32 breakpoint_val = 0xd4200000U;
+# endif			
 			breakpoint_data = (uint8[]) &breakpoint_val;
 #elif MIPS
 			uint32 breakpoint_val = 0x0000000dU;
