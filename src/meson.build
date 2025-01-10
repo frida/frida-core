@@ -319,6 +319,9 @@ if have_local_backend
     else
       host_lowlevel_abi = host_abi
     endif
+    if host_lowlevel_abi == 'arm' and host_machine.endian() == 'big'
+      host_lowlevel_abi = 'armbe8'
+    endif
     fs = import('fs')
     helper_backend_data = custom_target('frida-data-helper-backend',
       input: [

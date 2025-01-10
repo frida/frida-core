@@ -1988,7 +1988,11 @@ namespace Frida {
 #elif ARM
 			target_address &= ~1;
 
+# if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			uint32 arm_breakpoint_val = 0xf001f0e7U;
+# else
 			uint32 arm_breakpoint_val = 0xe7f001f0U;
+# endif
 			uint16 thumb_breakpoint_val = 0xde01;
 			bool is_thumb = (target & 1) != 0;
 			if (is_thumb)

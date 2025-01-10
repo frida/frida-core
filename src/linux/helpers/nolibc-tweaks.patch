@@ -197,7 +197,7 @@ diff --git a/tools/include/nolibc/std.h b/tools/include/nolibc/std.h
 index 1747ae125..5f30e6e0c 100644
 --- a/tools/include/nolibc/std.h
 +++ b/tools/include/nolibc/std.h
-@@ -25,25 +25,53 @@ typedef unsigned short     uint16_t;
+@@ -25,25 +25,61 @@ typedef unsigned short     uint16_t;
  typedef   signed short      int16_t;
  typedef unsigned int       uint32_t;
  typedef   signed int        int32_t;
@@ -211,6 +211,14 @@ index 1747ae125..5f30e6e0c 100644
  typedef unsigned long     uintptr_t;
  typedef   signed long      intptr_t;
  typedef   signed long     ptrdiff_t;
++#elif defined(__arm__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++typedef unsigned long long uint64_t;
++typedef   signed long long  int64_t;
++typedef unsigned int         size_t;
++typedef   signed int        ssize_t;
++typedef unsigned long     uintptr_t;
++typedef   signed int       intptr_t;
++typedef   signed int      ptrdiff_t;
 +#else
 +typedef unsigned long long uint64_t;
 +typedef   signed long long  int64_t;
