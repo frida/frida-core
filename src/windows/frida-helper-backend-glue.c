@@ -306,6 +306,7 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
 {
   gpointer code;
   guint code_size;
+  GumModule * kernel32;
   SIZE_T page_size, alloc_size;
   DWORD old_protect;
 
@@ -316,7 +317,9 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
 
   memset (rwc, 0, sizeof (FridaRemoteWorkerContext));
 
-  gum_module_enumerate_exports ("kernel32.dll", frida_remote_worker_context_collect_kernel32_export, rwc);
+  kernel32 = gum_process_find_module_by_name ("kernel32.dll");
+  gum_module_enumerate_exports (kernel32, frida_remote_worker_context_collect_kernel32_export, rwc);
+  g_object_unref (kernel32);
   if (!frida_remote_worker_context_has_resolved_all_kernel32_functions (rwc))
     goto failed_to_resolve_kernel32_functions;
 
