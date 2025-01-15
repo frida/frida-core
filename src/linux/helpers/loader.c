@@ -303,15 +303,19 @@ frida_receive_chunk (int sockfd, void * buffer, size_t length, const FridaLibcAp
       .iov_base = cursor,
       .iov_len = remaining
     };
-    struct msghdr msg = {
-      .msg_name = NULL,
-      .msg_namelen = 0,
-      .msg_iov = &io,
-      .msg_iovlen = 1,
-      .msg_control = NULL,
-      .msg_controllen = 0,
-    };
+    struct msghdr msg;
     ssize_t n;
+
+    /*
+     * Avoid inline initialization to prevent the compiler attempting to insert
+     * a call to memset.
+     */
+    msg.msg_name = NULL,
+    msg.msg_namelen = 0,
+    msg.msg_iov = &io,
+    msg.msg_iovlen = 1,
+    msg.msg_control = NULL,
+    msg.msg_controllen = 0,
 
     n = libc->recvmsg (sockfd, &msg, 0);
     if (n <= 0)
@@ -334,14 +338,18 @@ frida_receive_fd (int sockfd, const FridaLibcApi * libc)
     .iov_len = sizeof (dummy)
   };
   FridaControlMessage control;
-  struct msghdr msg = {
-    .msg_name = NULL,
-    .msg_namelen = 0,
-    .msg_iov = &io,
-    .msg_iovlen = 1,
-    .msg_control = &control,
-    .msg_controllen = sizeof (control),
-  };
+  struct msghdr msg;
+
+  /*
+   * Avoid inline initialization to prevent the compiler attempting to insert
+   * a call to memset.
+   */
+  msg.msg_name = NULL,
+  msg.msg_namelen = 0,
+  msg.msg_iov = &io,
+  msg.msg_iovlen = 1,
+  msg.msg_control = &control,
+  msg.msg_controllen = sizeof (control),
 
   res = libc->recvmsg (sockfd, &msg, 0);
   if (res == -1 || res == 0 || msg.msg_controllen == 0)
