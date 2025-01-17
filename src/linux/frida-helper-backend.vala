@@ -1988,8 +1988,8 @@ namespace Frida {
 #elif ARM
 			target_address &= ~1;
 
-			uint32 arm_breakpoint_val = 0xe7f001f0U;
-			uint16 thumb_breakpoint_val = 0xde01;
+			uint32 arm_breakpoint_val = (0xe7f001f0U).to_little_endian ();
+			uint16 thumb_breakpoint_val = ((uint16) 0xde01).to_little_endian ();
 			bool is_thumb = (target & 1) != 0;
 			if (is_thumb)
 				breakpoint_data = (uint8[]) &thumb_breakpoint_val;
