@@ -1085,7 +1085,17 @@ namespace Frida {
 			uint64 remote_mmap = 0;
 			uint64 remote_munmap = 0;
 			ProcMapsEntry? remote_libc = ProcMapsEntry.find_by_path (pid, local_libc.path);
+#if ANDROID
+			bool same_libc = false;
+			if (remote_libc != null) {
+				bool same_device = remote_libc.identity.split (":")[0] == local_libc.identity.split (":")[0];
+				bool same_inode = remote_libc.identity.split (" ")[1] == local_libc.identity.split (" ")[1];
+				bool same_path = remote_libc.path == local_libc.path;
+				same_libc = same_device && same_inode && same_path;
+			}
+#else
 			bool same_libc = remote_libc != null && remote_libc.identity == local_libc.identity;
+#endif
 			if (same_libc) {
 				remote_mmap = remote_libc.base_address + mmap_offset;
 				remote_munmap = remote_libc.base_address + munmap_offset;
