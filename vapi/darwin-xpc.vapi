@@ -78,6 +78,20 @@ namespace Darwin.Xpc {
 
 	[Compact]
 	[CCode (cname = "gpointer")]
+	public class Data : Object {
+		[CCode (cname = "XPC_TYPE_DATA")]
+		public static Type TYPE;
+
+		[CCode (cname = "xpc_data_create")]
+		public Data (uint8[] bytes);
+
+		public size_t get_length ();
+
+		public void * get_bytes_ptr ();
+	}
+
+	[Compact]
+	[CCode (cname = "gpointer")]
 	public class String : Object {
 		[CCode (cname = "XPC_TYPE_STRING")]
 		public static Type TYPE;
@@ -132,6 +146,10 @@ namespace Darwin.Xpc {
 
 		public uint64 get_uint64 (string key);
 		public void set_uint64 (string key, uint64 val);
+
+		[CCode (array_length_type = "size_t")]
+		public unowned uint8[]? get_data (string key);
+		public void set_data (string key, uint8[] bytes);
 
 		public unowned string? get_string (string key);
 		public void set_string (string key, string val);
