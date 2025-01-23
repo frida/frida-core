@@ -146,6 +146,11 @@ namespace Frida.Fruity {
 			private set;
 		}
 
+		public PairingPeer? established_peer {
+			get;
+			private set;
+		}
+
 		private Gee.Map<uint64?, Promise<ObjectReader>> requests =
 			new Gee.HashMap<uint64?, Promise<ObjectReader>> (Numeric.uint64_hash, Numeric.uint64_equal);
 		private uint64 next_control_sequence_number = 0;
@@ -181,15 +186,35 @@ namespace Frida.Fruity {
 
 			yield attempt_pair_verify (cancellable);
 
-			Bytes? shared_key = yield verify_manual_pairing (cancellable);
-			if (shared_key == null) {
+			PairingPeer? peer = yield verify_manual_pairing (cancellable);
+			if (peer == null) {
 				if (!device_options.allows_pair_setup)
 					throw new Error.NOT_SUPPORTED ("Device not paired and pairing not allowed on current transport");
-				shared_key = yield setup_manual_pairing (cancellable);
+				peer = yield setup_manual_pairing (cancellable);
 			}
 
-			client_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ClientEncrypt-main"));
-			server_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ServerEncrypt-main"));
+			if (peer.remote_unlock_host_key == null) {
+				bool peer_modified = false;
+				try {
+					peer.remote_unlock_host_key = yield create_remote_unlock_key (cancellable);
+					peer_modified = true;
+				} catch (Error e) {
+					if (e is Error.INVALID_OPERATION) {
+						store.forget_peer (peer);
+						throw e;
+					}
+					if (!(e is Error.NOT_SUPPORTED))
+						throw e;
+				}
+				if (peer_modified) {
+					try {
+						store.save_peer (peer);
+					} catch (Error e) {
+					}
+				}
+			}
+
+			established_peer = peer;
 
 			return true;
 		}
@@ -377,7 +402,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private async Bytes? verify_manual_pairing (Cancellable? cancellable) throws Error, IOError {
+		private async PairingPeer? verify_manual_pairing (Cancellable? cancellable) throws Error, IOError {
 			Key host_keypair = make_keypair (X25519);
 			uint8[] raw_host_pubkey = get_raw_public_key (host_keypair).get_data ();
 
@@ -414,10 +439,18 @@ namespace Frida.Fruity {
 
 			var cipher = new ChaCha20Poly1305 (operation_key);
 
-			// TODO: Verify signature using peer's public key.
-			/* var start_inner_response = */ new VariantReader (PairingParamsParser.parse (cipher.decrypt (
+			var start_inner_response = new VariantReader (PairingParamsParser.parse (cipher.decrypt (
 				new Bytes.static ("\x00\x00\x00\x00PV-Msg02".data[:12]),
 				start_response.read_member ("encrypted-data").get_data_value ())));
+			string peer_identifier = start_inner_response
+				.read_member ("identifier")
+				.get_uuid_value ();
+			PairingPeer? peer = store.find_peer_by_identifier (peer_identifier);
+			if (peer == null) {
+				yield notify_pair_verify_failed (cancellable);
+				return null;
+			}
+			// TODO: Verify signature using peer's public key.
 
 			unowned string host_identifier = store.self_identity.identifier;
 
@@ -457,7 +490,9 @@ namespace Frida.Fruity {
 				return null;
 			}
 
-			return shared_key;
+			setup_main_encryption_keys (shared_key);
+
+			return peer;
 		}
 
 		private async void notify_pair_verify_failed (Cancellable? cancellable) throws Error, IOError {
@@ -476,7 +511,7 @@ namespace Frida.Fruity {
 				.build (), cancellable);
 		}
 
-		private async Bytes setup_manual_pairing (Cancellable? cancellable) throws Error, IOError {
+		private async PairingPeer setup_manual_pairing (Cancellable? cancellable) throws Error, IOError {
 			Bytes start_params = new PairingParamsBuilder ()
 				.add_method (0)
 				.add_state (1)
@@ -612,9 +647,78 @@ namespace Frida.Fruity {
 			inner_finish_response.end_member ();
 			Bytes peer_info = inner_finish_response.read_member ("info").get_data_value ();
 			inner_finish_response.end_member ();
-			store.add_peer (peer_identifier, peer_pubkey, peer_info);
 
-			return shared_key;
+			PairingPeer peer = store.add_peer (peer_identifier, peer_pubkey, peer_info);
+
+			setup_main_encryption_keys (shared_key);
+
+			return peer;
+		}
+
+		private async Bytes? create_remote_unlock_key (Cancellable? cancellable) throws Error, IOError {
+			string request = Json.to_string (
+				new Json.Builder ()
+				.begin_object ()
+					.set_member_name ("request")
+					.begin_object ()
+						.set_member_name ("_0")
+						.begin_object ()
+							.set_member_name ("createRemoteUnlockKey")
+							.begin_object ()
+							.end_object ()
+						.end_object ()
+					.end_object ()
+				.end_object ()
+				.get_root (), false);
+
+			string response = yield request_encrypted (request, cancellable);
+
+			Json.Reader reader;
+			try {
+				reader = new Json.Reader (Json.from_string (response));
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("Invalid createRemoteUnlockKey response JSON");
+			}
+
+			reader.read_member ("response");
+			reader.read_member ("_1");
+
+			if (reader.read_member ("errorExtended")) {
+				reader.read_member ("_0");
+
+				reader.read_member ("domain");
+				unowned string? domain = reader.get_string_value ();
+				reader.end_member ();
+
+				reader.read_member ("code");
+				int64 code = reader.get_int_value ();
+				reader.end_member ();
+
+				reader.read_member ("userInfo");
+				reader.read_member ("NSLocalizedDescription");
+				unowned string? description = reader.get_string_value ();
+
+				if (domain == null || description == null)
+					throw new Error.PROTOCOL ("Invalid createRemoteUnlockKey error response");
+
+				if (domain == "com.apple.CoreDevice.ControlChannelConnectionError" && code == 2)
+					throw new Error.INVALID_OPERATION ("%s", description);
+
+				throw new Error.NOT_SUPPORTED ("%s", description);
+			}
+			reader.end_member ();
+
+			reader.read_member ("createRemoteUnlockKey");
+			reader.read_member ("hostKey");
+			unowned string? key = reader.get_string_value ();
+			if (key == null)
+				throw new Error.PROTOCOL ("Malformed createRemoteUnlockKey response");
+			return new Bytes (Base64.decode (key));
+		}
+
+		private void setup_main_encryption_keys (Bytes shared_key) {
+			client_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ClientEncrypt-main"));
+			server_cipher = new ChaCha20Poly1305 (derive_chacha_key (shared_key, "ServerEncrypt-main"));
 		}
 
 		private async ObjectReader request_pairing_data (Bytes payload, Cancellable? cancellable) throws Error, IOError {
@@ -1383,7 +1487,7 @@ namespace Frida.Fruity {
 			_peers = load_peers ();
 		}
 
-		public void add_peer (string identifier, Bytes public_key, Bytes info) throws Error {
+		public PairingPeer add_peer (string identifier, Bytes public_key, Bytes info) throws Error {
 			var r = new VariantReader (OpackParser.parse (info));
 
 			Bytes irk = r.read_member ("altIRK").get_data_value ();
@@ -1406,6 +1510,7 @@ namespace Frida.Fruity {
 				model = model,
 				udid = udid,
 				info = info,
+				remote_unlock_host_key = null,
 			};
 			_peers.add (peer);
 
@@ -1413,6 +1518,12 @@ namespace Frida.Fruity {
 				save_peer (peer);
 			} catch (Error e) {
 			}
+
+			return peer;
+		}
+
+		public PairingPeer? find_peer_by_identifier (string identifier) {
+			return peers.first_match (p => p.identifier == identifier);
 		}
 
 		public PairingPeer? find_peer_matching_service (PairingServiceDetails service) {
@@ -1480,6 +1591,10 @@ namespace Frida.Fruity {
 					var r = new VariantReader (OpackParser.parse (info));
 					unowned string udid = r.read_member ("remotepairing_udid").get_string_value ();
 
+					Bytes? remote_unlock_host_key = null;
+					if (plist.has ("remoteUnlockHostKey"))
+						remote_unlock_host_key = plist.get_bytes ("remoteUnlockHostKey");
+
 					peers.add (new PairingPeer () {
 						identifier = plist.get_string ("identifier"),
 						public_key = plist.get_bytes ("publicKey"),
@@ -1488,6 +1603,7 @@ namespace Frida.Fruity {
 						model = plist.get_string ("model"),
 						udid = udid,
 						info = info,
+						remote_unlock_host_key = remote_unlock_host_key,
 					});
 				}
 			} catch (GLib.Error e) {
@@ -1496,7 +1612,7 @@ namespace Frida.Fruity {
 			return peers;
 		}
 
-		private static void save_peer (PairingPeer peer) throws Error {
+		public void save_peer (PairingPeer peer) throws Error {
 			var plist = new Plist ();
 			plist.set_string ("identifier", peer.identifier);
 			plist.set_bytes ("publicKey", peer.public_key);
@@ -1504,11 +1620,27 @@ namespace Frida.Fruity {
 			plist.set_string ("name", peer.name);
 			plist.set_string ("model", peer.model);
 			plist.set_bytes ("info", peer.info);
-			save_plist (plist, query_peers_location ().get_child (peer.identifier + ".plist"));
+			if (peer.remote_unlock_host_key != null)
+				plist.set_bytes ("remoteUnlockHostKey", peer.remote_unlock_host_key);
+
+			save_plist (plist, query_peer_location (peer));
+		}
+
+		public void forget_peer (PairingPeer peer) {
+			try {
+				query_peer_location (peer).delete ();
+			} catch (GLib.Error e) {
+			}
+
+			_peers.remove (peer);
 		}
 
 		private static File query_self_identity_location () {
 			return query_base_location ().get_child ("self-identity.plist");
+		}
+
+		private static File query_peer_location (PairingPeer peer) {
+			return query_peers_location ().get_child (peer.identifier + ".plist");
 		}
 
 		private static File query_peers_location () {
@@ -1557,6 +1689,7 @@ namespace Frida.Fruity {
 		public string model;
 		public string udid;
 		public Bytes info;
+		public Bytes? remote_unlock_host_key;
 	}
 
 	public class PairingServiceMetadata {

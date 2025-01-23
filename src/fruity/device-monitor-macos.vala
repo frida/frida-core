@@ -129,6 +129,7 @@ namespace Frida.Fruity {
 		private ConnectionType _connection_type;
 		private string _udid;
 		private string _name;
+		private Bytes? _remote_unlock_host_key;
 
 		private Promise<Tunnel>? tunnel_request;
 
@@ -153,6 +154,13 @@ namespace Frida.Fruity {
 			var reader = new XpcObjectReader (device_info);
 			_name = reader.read_member ("name").get_string_value ();
 			reader.end_member ();
+
+			if (reader.has_member ("remoteUnlockHostKey")) {
+				_remote_unlock_host_key = new Bytes (reader.read_member ("remoteUnlockHostKey").get_data_value ());
+				reader.end_member ();
+			} else {
+				_remote_unlock_host_key = null;
+			}
 		}
 
 		private void on_state_changed (Object obj, ParamSpec pspec) {
@@ -224,7 +232,7 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
-				var tunnel = new MacOSTunnel (pairing_device);
+				var tunnel = new MacOSTunnel (pairing_device, _remote_unlock_host_key);
 				yield tunnel.attach (cancellable);
 
 				tunnel_request.resolve (tunnel);
@@ -252,6 +260,12 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public Bytes? remote_unlock_host_key {
+			get {
+				return _remote_unlock_host_key;
+			}
+		}
+
 		public Darwin.Xpc.Uuid? assertion_identifier {
 			get {
 				return _assertion_identifier;
@@ -259,13 +273,15 @@ namespace Frida.Fruity {
 		}
 
 		private XpcClient pairing_device;
+		private Bytes? _remote_unlock_host_key;
 		private Darwin.Xpc.Uuid? _assertion_identifier;
 		private InetAddress? tunnel_device_address;
 		private DiscoveryService? _discovery;
 		private int64 _opened_at = -1;
 
-		public MacOSTunnel (XpcClient pairing_device) {
+		public MacOSTunnel (XpcClient pairing_device, Bytes? remote_unlock_host_key) {
 			this.pairing_device = pairing_device;
+			_remote_unlock_host_key = remote_unlock_host_key;
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

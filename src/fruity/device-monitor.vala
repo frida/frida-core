@@ -247,6 +247,9 @@ namespace Frida.Fruity {
 					checkin.set_string ("Request", "RSDCheckin");
 					checkin.set_string ("Label", "Xcode");
 					checkin.set_string ("ProtocolVersion", "2");
+					unowned Bytes? key = tunnel.remote_unlock_host_key;
+					if (key != null)
+						checkin.set_bytes ("EscrowBag", key);
 
 					try {
 						yield service.query (checkin, cancellable);
@@ -493,6 +496,10 @@ namespace Frida.Fruity {
 		}
 
 		public abstract int64 opened_at {
+			get;
+		}
+
+		public abstract Bytes? remote_unlock_host_key {
 			get;
 		}
 
@@ -1675,10 +1682,17 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public Bytes? remote_unlock_host_key {
+			get {
+				return _remote_unlock_host_key;
+			}
+		}
+
 		private UsbNcmDriver? ncm;
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 		private int64 _opened_at = -1;
+		private Bytes? _remote_unlock_host_key;
 
 		public PortableUsbTunnel (UsbDevice device, NcmPeer peer, PairingStore store) {
 			Object (
@@ -1707,11 +1721,11 @@ namespace Frida.Fruity {
 			);
 			var pairing_transport = new XpcPairingTransport (yield netstack.open_tcp_connection (tunnel_endpoint, cancellable));
 			var pairing_service = yield PairingService.open (pairing_transport, pairing_store, cancellable);
-
 			TunnelConnection tc = yield pairing_service.open_tunnel (ncm_peer.ip, netstack, cancellable);
 			tc.closed.connect (on_tunnel_connection_close);
 
 			_opened_at = get_monotonic_time ();
+			_remote_unlock_host_key = pairing_service.established_peer.remote_unlock_host_key;
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
@@ -1880,9 +1894,16 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public Bytes? remote_unlock_host_key {
+			get {
+				return _remote_unlock_host_key;
+			}
+		}
+
 		private TunnelConnection? tunnel_connection;
 		private DiscoveryService? _discovery_service;
 		private int64 _opened_at = -1;
+		private Bytes? _remote_unlock_host_key;
 
 		private const uint PAIRING_CONNECTION_TIMEOUT = 2000;
 
@@ -1905,6 +1926,7 @@ namespace Frida.Fruity {
 			TunnelConnection tc = yield pairing_service.open_tunnel (endpoint.get_address (), netstack, cancellable);
 
 			_opened_at = get_monotonic_time ();
+			_remote_unlock_host_key = pairing_service.established_peer.remote_unlock_host_key;
 
 			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 				address: tc.remote_address,
