@@ -188,6 +188,18 @@ namespace Frida.Fruity {
 			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
 		private LockdownClient? cached_usbmux_lockdown_client;
 
+		private const string[] LOCKDOWN_SERVICES_WITHOUT_ESCROW_BAG_SUPPORT = {
+			"com.apple.accessibility.axAuditDaemon.remoteserver",
+			"com.apple.afc",
+			"com.apple.companion_proxy",
+			"com.apple.crashreportcopymobile",
+			"com.apple.GPUTools.MobileService",
+			"com.apple.idamd",
+			"com.apple.PurpleReverseProxy.Conn",
+			"com.apple.streaming_zip_conduit",
+			"com.apple.webinspector",
+		};
+
 		internal void close () {
 			transports.clear ();
 		}
@@ -248,7 +260,7 @@ namespace Frida.Fruity {
 					checkin.set_string ("Label", "Xcode");
 					checkin.set_string ("ProtocolVersion", "2");
 					unowned Bytes? key = tunnel.remote_unlock_host_key;
-					if (key != null)
+					if (key != null && lockdown_service_supports_escrow_bag (service_name))
 						checkin.set_bytes ("EscrowBag", key);
 
 					try {
@@ -284,6 +296,15 @@ namespace Frida.Fruity {
 				process_usbmux_lockdown_service_requests.begin ();
 
 			return yield request.promise.future.wait_async (cancellable);
+		}
+
+		// FIXME: Replace with `element in array`-check once Vala compiler bug has been fixed so generated C code is warning-free.
+		private static bool lockdown_service_supports_escrow_bag (string name) {
+			foreach (unowned string s in LOCKDOWN_SERVICES_WITHOUT_ESCROW_BAG_SUPPORT) {
+				if (s == name)
+					return false;
+			}
+			return true;
 		}
 
 		private async void process_usbmux_lockdown_service_requests () {
