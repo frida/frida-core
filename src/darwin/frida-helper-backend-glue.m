@@ -4292,6 +4292,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 static gboolean
 frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
 {
+  gboolean success = FALSE;
   GumDarwinModule * module;
 
   module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_kernel.dylib");
@@ -4303,6 +4304,8 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_msg_receive);
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_destroy);
   FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
+  g_object_unref (module);
+  module = NULL;
 
   module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
@@ -4315,6 +4318,8 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_threadid_np);
   FRIDA_AGENT_CONTEXT_RESOLVE (pthread_detach);
   FRIDA_AGENT_CONTEXT_RESOLVE (pthread_self);
+  g_object_unref (module);
+  module = NULL;
 
   if (mapper == NULL)
   {
@@ -4324,9 +4329,12 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
     FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlsym);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlclose);
+    g_object_unref (module);
+    module = NULL;
   }
 
-  return TRUE;
+  success = TRUE;
+  goto beach;
 
 no_libc:
   {
@@ -4334,7 +4342,7 @@ no_libc:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to attach to processes without Apple's libc (for now)");
-    goto failure;
+    goto beach;
   }
 missing_symbol:
   {
@@ -4342,11 +4350,13 @@ missing_symbol:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while resolving functions");
-    goto failure;
+    goto beach;
   }
-failure:
+beach:
   {
-    return FALSE;
+    g_clear_object (&module);
+
+    return success;
   }
 }
 
