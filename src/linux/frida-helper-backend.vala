@@ -844,19 +844,19 @@ namespace Frida {
 	private const uint64 SOCK_CLOEXEC = 0x80000;
 
 	private class InjectSession : SeizeSession {
-		private static ProcMapsEntry local_libc;
+		private static ProcMapsSoEntry local_libc;
 		private static uint64 mmap_offset;
 		private static uint64 munmap_offset;
 
 		private static string fallback_ld;
 		private static string fallback_libc;
 
-		private static ProcMapsEntry? local_android_ld;
+		private static ProcMapsSoEntry? local_android_ld;
 
 		static construct {
 			var libc = Gum.Process.get_libc_module ();
 			uint local_pid = Posix.getpid ();
-			local_libc = ProcMapsEntry.find_by_path (local_pid, libc.path);
+			local_libc = ProcMapsSoEntry.find_by_path (local_pid, libc.path);
 			assert (local_libc != null);
 			mmap_offset = (uint64) (uintptr) libc.find_export_by_name ("mmap") - local_libc.base_address;
 			munmap_offset = (uint64) (uintptr) libc.find_export_by_name ("munmap") - local_libc.base_address;
@@ -877,7 +877,7 @@ namespace Frida {
 			}
 
 #if ANDROID
-			local_android_ld = ProcMapsEntry.find_by_path (local_pid, fallback_ld);
+			local_android_ld = ProcMapsSoEntry.find_by_path (local_pid, fallback_ld);
 #endif
 		}
 
@@ -1084,7 +1084,7 @@ namespace Frida {
 
 			uint64 remote_mmap = 0;
 			uint64 remote_munmap = 0;
-			ProcMapsEntry? remote_libc = ProcMapsEntry.find_by_path (pid, local_libc.path);
+			ProcMapsSoEntry? remote_libc = ProcMapsSoEntry.find_by_path (pid, local_libc.path);
 #if ANDROID
 			bool same_libc = false;
 			if (remote_libc != null) {
@@ -1196,7 +1196,7 @@ namespace Frida {
 					result.context.libc = &result.libc;
 
 					if (result.context.rtld_flavor == ANDROID && result.libc.dlopen == null) {
-						ProcMapsEntry? remote_ld = ProcMapsEntry.find_by_address (pid, (uintptr) result.context.rtld_base);
+						ProcMapsSoEntry? remote_ld = ProcMapsSoEntry.find_by_address (pid, (uintptr) result.context.rtld_base);
 						bool same_ld = remote_ld != null && local_android_ld != null && remote_ld.identity == local_android_ld.identity;
 						if (!same_ld)
 							throw new Error.NOT_SUPPORTED ("Unable to locate Android dynamic linker; please file a bug");
@@ -1246,7 +1246,7 @@ namespace Frida {
 			}
 		}
 
-		private static void * rebase_pointer (uintptr local_ptr, ProcMapsEntry local_module, ProcMapsEntry remote_module) {
+		private static void * rebase_pointer (uintptr local_ptr, ProcMapsSoEntry local_module, ProcMapsSoEntry remote_module) {
 			var offset = local_ptr - local_module.base_address;
 			return (void *) (remote_module.base_address + offset);
 		}
@@ -3319,46 +3319,85 @@ namespace Frida {
 	}
 #endif
 
-	private class ProcMapsEntry {
+	private class ProcMapsSoEntry {
 		public uint64 base_address;
 		public string path;
 		public string identity;
 
-		private ProcMapsEntry (uint64 base_address, string path, string identity) {
+		private ProcMapsSoEntry (uint64 base_address, string path, string identity) {
 			this.base_address = base_address;
 			this.path = path;
 			this.identity = identity;
 		}
 
-		public static ProcMapsEntry? find_by_address (uint pid, uint64 address) {
+		public static ProcMapsSoEntry? find_by_address (uint pid, uint64 address) {
 			var iter = MapsIter.for_pid (pid);
 			while (iter.next ()) {
 				uint64 start = iter.start_address;
 				uint64 end = iter.end_address;
 				if (address >= start && address < end)
-					return new ProcMapsEntry (start, iter.path, iter.identity);
+					return new ProcMapsSoEntry (start, iter.path, iter.identity);
 			}
 
 			return null;
 		}
 
-		public static ProcMapsEntry? find_by_path (uint pid, string path) {
+		public static ProcMapsSoEntry? find_by_path (uint pid, string path) {
+			var candidates = new Gee.ArrayList<Candidate> ();
+			Candidate? latest_candidate = null;
 			var iter = MapsIter.for_pid (pid);
 #if ANDROID
 			unowned string libc_path = Gum.Process.get_libc_module ().path;
 #endif
 			while (iter.next ()) {
-				string candidate_path = iter.path;
-				if (candidate_path == path) {
+				string current_path = iter.path;
+				if (current_path != path) {
+					latest_candidate = null;
+					continue;
+				}
+
+				string flags = iter.flags;
+
 #if ANDROID
-					if (candidate_path == libc_path && iter.flags[3] == 's')
-						continue;
+				if (current_path == libc_path && flags[3] == 's')
+					continue;
 #endif
-					return new ProcMapsEntry (iter.start_address, candidate_path, iter.identity);
+
+				if (iter.file_offset == 0) {
+					latest_candidate = new Candidate () {
+						entry = new ProcMapsSoEntry (iter.start_address, current_path, iter.identity),
+						total_ranges = 0,
+						executable_ranges = 0,
+					};
+					candidates.add (latest_candidate);
+				}
+
+				if (latest_candidate != null) {
+					latest_candidate.total_ranges++;
+					if (flags[2] == 'x')
+						latest_candidate.executable_ranges++;
 				}
 			}
 
-			return null;
+			candidates.sort ((a, b) => b.score () - a.score ());
+
+			if (candidates.is_empty)
+				return null;
+
+			return candidates.first ().entry;
+		}
+
+		private class Candidate {
+			public ProcMapsSoEntry entry;
+			public uint total_ranges;
+			public uint executable_ranges;
+
+			public int score () {
+				int result = (int) total_ranges;
+				if (executable_ranges == 0)
+					result = -result;
+				return result;
+			}
 		}
 
 		private class MapsIter {
@@ -3384,15 +3423,21 @@ namespace Frida {
 				}
 			}
 
+			public uint64 file_offset {
+				get {
+					return uint64.parse (info.fetch (4), 16);
+				}
+			}
+
 			public string identity {
 				owned get {
-					return info.fetch (4);
+					return info.fetch (5);
 				}
 			}
 
 			public string path {
 				owned get {
-					return info.fetch (5);
+					return info.fetch (6);
 				}
 			}
 
@@ -3407,7 +3452,7 @@ namespace Frida {
 					return;
 				}
 
-				if (!/^([0-9a-f]+)-([0-9a-f]+) (\S{4}) [0-9a-f]+ ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (
+				if (!/^([0-9a-f]+)-([0-9a-f]+) (\S{4}) ([0-9a-f]+) ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (
 						contents, 0, out info)) {
 					assert_not_reached ();
 				}
