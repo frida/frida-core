@@ -177,12 +177,14 @@ namespace Frida.Fruity {
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
 			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
+				unowned Posix.SockAddr? address = candidate.ifa_addr;
+				if (address == null || address.sa_family != Posix.AF_INET6)
+					continue;
+
 				if (candidate.ifa_name != ifname)
 					continue;
-				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
-					continue;
-				return (InetSocketAddress)
-					SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6));
+
+				return (InetSocketAddress) SocketAddress.from_native ((void *) address, sizeof (Posix.SockAddrIn6));
 			}
 
 			throw new Error.NOT_SUPPORTED ("Unable to resolve interface address");

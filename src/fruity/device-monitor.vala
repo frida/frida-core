@@ -1482,13 +1482,15 @@ namespace Frida.Fruity {
 			Linux.Network.IfAddrs ifaddrs;
 			Linux.Network.getifaddrs (out ifaddrs);
 			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
-				if (candidate.ifa_addr.sa_family != Posix.AF_INET6)
+				unowned Posix.SockAddr? address = candidate.ifa_addr;
+				if (address == null || address.sa_family != Posix.AF_INET6)
 					continue;
 
 				if (!ncm_interfaces.contains (candidate.ifa_name))
 					continue;
 
-				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) candidate.ifa_addr, sizeof (Posix.SockAddrIn6)));
+				device_ifaddrs.add ((InetSocketAddress) SocketAddress.from_native ((void *) address,
+					sizeof (Posix.SockAddrIn6)));
 			}
 			if (device_ifaddrs.is_empty && !ncm_interfaces.is_empty)
 				throw new Error.NOT_SUPPORTED ("no IPv6 address on NCM network interface");
