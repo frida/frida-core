@@ -376,7 +376,7 @@ enum _FridaAslr
 };
 
 static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend * backend);
-static void frida_spawn_instance_free (FridaSpawnInstance * instance);
+static void frida_spawn_instance_close (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
 static void frida_spawn_instance_on_server_cancel (void * context);
@@ -410,7 +410,7 @@ static void frida_configure_terminal_attributes (gint fd);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint pid);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
-static void frida_inject_instance_free (FridaInjectInstance * instance);
+static void frida_inject_instance_close (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
 
 static gboolean frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error);
@@ -934,7 +934,7 @@ any_failure:
   {
     if (instance->pid != 0)
       kill (instance->pid, SIGKILL);
-    frida_spawn_instance_free (instance);
+    frida_spawn_instance_close (instance);
 
     pid = 0;
 
@@ -2200,9 +2200,9 @@ _frida_darwin_helper_backend_resume_spawn_instance (FridaDarwinHelperBackend * s
 }
 
 void
-_frida_darwin_helper_backend_free_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
+_frida_darwin_helper_backend_close_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
 {
-  frida_spawn_instance_free (instance);
+  frida_spawn_instance_close (instance);
 }
 
 guint
@@ -2489,7 +2489,7 @@ mach_failure:
   }
 failure:
   {
-    frida_inject_instance_free (instance);
+    frida_inject_instance_close (instance);
     goto beach;
   }
 beach:
@@ -2646,7 +2646,7 @@ frida_inject_instance_on_thread_monitor_cancel (void * context)
   FridaInjectInstance * self = context;
 
   dispatch_release (g_steal_pointer (&self->thread_monitor_source));
-  frida_inject_instance_free (self);
+  frida_inject_instance_close (self);
 }
 
 static void
@@ -2738,9 +2738,9 @@ _frida_darwin_helper_backend_get_pid_of_inject_instance (FridaDarwinHelperBacken
 }
 
 void
-_frida_darwin_helper_backend_free_inject_instance (FridaDarwinHelperBackend * self, void * instance)
+_frida_darwin_helper_backend_close_inject_instance (FridaDarwinHelperBackend * self, void * instance)
 {
-  frida_inject_instance_free (instance);
+  frida_inject_instance_close (instance);
 }
 
 static FridaSpawnInstance *
@@ -2750,7 +2750,7 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
   guint i;
 
   instance = g_slice_new0 (FridaSpawnInstance);
-  instance->backend = backend;
+  instance->backend = g_object_ref (backend);
   instance->thread = MACH_PORT_NULL;
 
   instance->server_port = MACH_PORT_NULL;
@@ -2773,11 +2773,13 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
     instance->page_pool[i].scratch_page = 0;
   }
 
+  _frida_darwin_helper_backend_on_instance_created (backend, instance);
+
   return instance;
 }
 
 static void
-frida_spawn_instance_free (FridaSpawnInstance * instance)
+frida_spawn_instance_close (FridaSpawnInstance * instance)
 {
   task_t self_task;
   FridaExceptionPortSet * previous_ports;
@@ -2815,6 +2817,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->dyld != NULL)
     g_object_unref (instance->dyld);
+
+  _frida_darwin_helper_backend_on_instance_destroyed (instance->backend, instance);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -2858,7 +2863,7 @@ frida_spawn_instance_on_server_cancel (void * context)
   FridaSpawnInstance * self = context;
 
   dispatch_release (g_steal_pointer (&self->server_recv_source));
-  frida_spawn_instance_free (self);
+  frida_spawn_instance_close (self);
 }
 
 static void
@@ -4114,6 +4119,8 @@ frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint p
 
   instance->backend = g_object_ref (backend);
 
+  _frida_darwin_helper_backend_on_instance_created (backend, instance);
+
   return instance;
 }
 
@@ -4143,11 +4150,13 @@ frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
 
   g_object_ref (clone->backend);
 
+  _frida_darwin_helper_backend_on_instance_created (clone->backend, clone);
+
   return clone;
 }
 
 static void
-frida_inject_instance_free (FridaInjectInstance * instance)
+frida_inject_instance_close (FridaInjectInstance * instance)
 {
   FridaAgentContext * agent_context = instance->agent_context;
   task_t self_task;
@@ -4187,6 +4196,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
 
+  _frida_darwin_helper_backend_on_instance_destroyed (instance->backend, instance);
   g_object_unref (instance->backend);
 
   g_slice_free (FridaInjectInstance, instance);
