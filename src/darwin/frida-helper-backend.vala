@@ -20,7 +20,8 @@ namespace Frida {
 		protected delegate void DispatchWorker ();
 		protected delegate void LaunchCompletionHandler (owned StdioPipes? pipes, owned Error? error);
 
-		public void * context;
+		private MainContext main_context;
+		public void * dispatch_context;
 
 		public Gee.HashMap<uint, void *> spawn_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
@@ -40,7 +41,8 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		construct {
-			_create_context ();
+			main_context = MainContext.ref_thread_default ();
+			_create_dispatch_context ();
 
 			dtrace_agent = DTraceAgent.try_open ();
 			if (dtrace_agent != null) {
@@ -67,7 +69,7 @@ namespace Frida {
 				_free_spawn_instance (instance);
 			foreach (var instance in inject_instances.values)
 				_free_inject_instance (instance);
-			_destroy_context ();
+			_destroy_dispatch_context ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -139,11 +141,11 @@ namespace Frida {
 			Error error = null;
 
 			_launch (identifier, options, (p, e) => {
-				Idle.add (() => {
+				schedule_on_frida_thread (() => {
 					pipes = p;
 					error = e;
 					launch.callback ();
-					return false;
+					return Source.REMOVE;
 				});
 			});
 
@@ -495,21 +497,21 @@ namespace Frida {
 		}
 
 		public void _on_spawn_instance_ready (uint pid) {
-			Idle.add (() => {
+			schedule_on_frida_thread (() => {
 				spawn_instance_ready (pid);
-				return false;
+				return Source.REMOVE;
 			});
 		}
 
 		public void _on_spawn_instance_error (uint pid, Error error) {
-			Idle.add (() => {
+			schedule_on_frida_thread (() => {
 				spawn_instance_error (pid, error);
-				return false;
+				return Source.REMOVE;
 			});
 		}
 
 		public void _on_mach_thread_dead (uint id, void * posix_thread) {
-			Idle.add (() => {
+			schedule_on_frida_thread (() => {
 				var instance = inject_instances[id];
 				assert (instance != null);
 
@@ -518,14 +520,14 @@ namespace Frida {
 				else
 					_destroy_inject_instance (id);
 
-				return false;
+				return Source.REMOVE;
 			});
 		}
 
 		public void _on_posix_thread_dead (uint id) {
-			Idle.add (() => {
+			schedule_on_frida_thread (() => {
 				_destroy_inject_instance (id);
-				return false;
+				return Source.REMOVE;
 			});
 		}
 
@@ -611,9 +613,15 @@ namespace Frida {
 
 		private async void flush_dispatch_queue () {
 			_schedule_on_dispatch_queue (() => {
-				Idle.add (flush_dispatch_queue.callback);
+				schedule_on_frida_thread (flush_dispatch_queue.callback);
 			});
 			yield;
+		}
+
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
 		}
 
 		public extern static PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
@@ -626,8 +634,8 @@ namespace Frida {
 		public extern static bool is_mmap_available ();
 		public extern static MappedLibraryBlob mmap (uint task, Bytes blob) throws Error;
 
-		protected extern void _create_context ();
-		protected extern void _destroy_context ();
+		protected extern void _create_dispatch_context ();
+		protected extern void _destroy_dispatch_context ();
 		protected extern void _schedule_on_dispatch_queue (DispatchWorker worker);
 
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;

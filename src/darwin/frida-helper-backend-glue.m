@@ -86,7 +86,7 @@
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
 #endif
 
-typedef struct _FridaHelperContext FridaHelperContext;
+typedef struct _FridaDispatchContext FridaDispatchContext;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef guint FridaDyldFlavor;
 typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
@@ -106,7 +106,7 @@ typedef union _FridaDebugState FridaDebugState;
 typedef int FridaConvertThreadStateDirection;
 typedef guint FridaAslr;
 
-struct _FridaHelperContext
+struct _FridaDispatchContext
 {
   dispatch_queue_t dispatch_queue;
 };
@@ -762,30 +762,30 @@ permission_denied:
 }
 
 void
-_frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
+_frida_darwin_helper_backend_create_dispatch_context (FridaDarwinHelperBackend * self)
 {
-  FridaHelperContext * ctx;
+  FridaDispatchContext * ctx;
 
-  ctx = g_slice_new (FridaHelperContext);
+  ctx = g_slice_new (FridaDispatchContext);
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", DISPATCH_QUEUE_SERIAL);
 
-  self->context = ctx;
+  self->dispatch_context = ctx;
 }
 
 void
-_frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
+_frida_darwin_helper_backend_destroy_dispatch_context (FridaDarwinHelperBackend * self)
 {
-  FridaHelperContext * ctx = self->context;
+  FridaDispatchContext * ctx = self->dispatch_context;
 
   dispatch_release (ctx->dispatch_queue);
 
-  g_slice_free (FridaHelperContext, ctx);
+  g_slice_free (FridaDispatchContext, ctx);
 }
 
 void
 _frida_darwin_helper_backend_schedule_on_dispatch_queue (FridaDarwinHelperBackend * self, FridaDarwinHelperBackendDispatchWorker worker, gpointer user_data)
 {
-  FridaHelperContext * ctx = self->context;
+  FridaDispatchContext * ctx = self->dispatch_context;
 
   dispatch_async (ctx->dispatch_queue, ^
   {
@@ -1869,7 +1869,7 @@ void
 _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHelperBackend * self, void * opaque_instance, guint task, GError ** error)
 {
   FridaSpawnInstance * instance = opaque_instance;
-  FridaHelperContext * ctx = self->context;
+  FridaDispatchContext * ctx = self->dispatch_context;
   const gchar * failed_operation;
   kern_return_t kr;
   mach_port_t self_task, child_thread;
@@ -2599,7 +2599,7 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   mach_msg_type_number_t thread_state_count;
   kern_return_t kr;
   const gchar * failed_operation;
-  FridaHelperContext * ctx = self->backend->context;
+  FridaDispatchContext * ctx = self->backend->dispatch_context;
   dispatch_source_t source;
 
   thread_state = g_alloca (self->thread_state_count * sizeof (natural_t));
@@ -2705,7 +2705,7 @@ _frida_darwin_helper_backend_join_inject_instance_posix_thread (FridaDarwinHelpe
 static void
 frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread)
 {
-  FridaHelperContext * ctx = self->backend->context;
+  FridaDispatchContext * ctx = self->backend->dispatch_context;
   mach_port_t self_task;
   dispatch_source_t source;
 
