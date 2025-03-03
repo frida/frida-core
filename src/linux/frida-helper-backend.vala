@@ -3351,6 +3351,8 @@ namespace Frida {
 #endif
 			while (iter.next ()) {
 				string current_path = iter.path;
+				if (current_path == "[page size compat]")
+					continue;
 				if (current_path != path) {
 					latest_candidate = null;
 					continue;
