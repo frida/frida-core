@@ -76,7 +76,6 @@ build_arch () {
     ;;
   esac
 
-
   EXTRA_FLAGS=()
   if [ "$FRIDA_HOST" == "linux-x86" ]; then
     EXTRA_FLAGS+=("--build=linux-x86")
