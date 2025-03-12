@@ -2006,7 +2006,7 @@ namespace Frida {
 			else
 				breakpoint_data = (uint8[]) &arm_breakpoint_val;
 #elif ARM64
-			uint32 breakpoint_val = 0xd4200000U;
+			uint32 breakpoint_val = (0xd4200000U).to_little_endian ();
 			breakpoint_data = (uint8[]) &breakpoint_val;
 #elif MIPS
 			uint32 breakpoint_val = 0x0000000dU;
