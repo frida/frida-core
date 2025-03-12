@@ -50,6 +50,8 @@ ARCHS=(
   arm
   armbe8
   arm64
+  arm64be
+  arm64beilp32
   mips
   mipsel
   mips64
