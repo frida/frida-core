@@ -48,6 +48,7 @@ ARCHS=(
   x86
   x86_64
   arm
+  armbe8
   arm64
   mips
   mipsel
@@ -66,17 +67,26 @@ build_arch () {
     exit 1
   fi
 
-  if [[ "$ARCH" == arm* ]]; then
+  case "$ARCH" in
+  arm | arm64)
     export FRIDA_HOST=android-$ARCH
-  else
+    ;;
+  *)
     export FRIDA_HOST=linux-$ARCH
-  fi
+    ;;
+  esac
 
   EXTRA_FLAGS=()
   if [ "$FRIDA_HOST" == "linux-x86" ]; then
     EXTRA_FLAGS+=("--build=linux-x86")
     export CC="gcc -m32" CXX="g++ -m32" STRIP="strip"
   fi
+
+  case "$ARCH" in
+  armbe8 | arm64be | arm64beilp32)
+    EXTRA_FLAGS+=("--without-prebuilds=sdk:host")
+    ;;
+  esac
 
   cd "$FRIDA_CORE_DIR"
 
