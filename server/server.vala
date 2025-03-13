@@ -285,8 +285,8 @@ namespace Frida.Server {
 
 		private async void start () {
 			try {
-				if (device_id != null) {
-					manager = new DeviceManager ();
+				if (device_id != null && device_id != "local") {
+					manager = new DeviceManager.with_nonlocal_backends_only ();
 
 					var device = yield manager.get_device_by_id (device_id, 0, io_cancellable);
 					device.lost.connect (on_device_lost);
