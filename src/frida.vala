@@ -34,11 +34,23 @@ namespace Frida {
 		private Promise<bool> start_request;
 		private Promise<bool> stop_request;
 
-		private HostSessionService service = null;
+		private HostSessionService service;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		public DeviceManager () {
+			service = new HostSessionService.with_default_backends ();
+		}
+
+		public DeviceManager.with_nonlocal_backends_only () {
+			service = new HostSessionService.with_nonlocal_backends_only ();
+		}
+
+		public DeviceManager.with_socket_backend_only () {
+			service = new HostSessionService.with_socket_backend_only ();
+		}
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			yield stop_service (cancellable);
@@ -340,7 +352,6 @@ namespace Frida {
 		}
 
 		private async void start_service () {
-			service = new HostSessionService.with_default_backends ();
 			try {
 				service.provider_available.connect (on_provider_available);
 				service.provider_unavailable.connect (on_provider_unavailable);

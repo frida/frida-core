@@ -9,24 +9,15 @@ namespace Frida {
 
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
-#if !IOS && !ANDROID && !TVOS
-#if HAVE_FRUITY_BACKEND
-			add_backend (new FruityHostSessionBackend ());
-#endif
-#if HAVE_DROIDY_BACKEND
-			add_backend (new DroidyHostSessionBackend ());
-#endif
-#endif
-#if HAVE_SOCKET_BACKEND
-			add_backend (new SocketHostSessionBackend ());
-#endif
-#if HAVE_BAREBONE_BACKEND
-			add_backend (new BareboneHostSessionBackend ());
-#endif
+			add_nonlocal_backends ();
 		}
 
 		public HostSessionService.with_local_backend_only () {
 			add_local_backends ();
+		}
+
+		public HostSessionService.with_nonlocal_backends_only () {
+			add_nonlocal_backends ();
 		}
 
 		public HostSessionService.with_socket_backend_only () {
@@ -52,6 +43,23 @@ namespace Frida {
 #if QNX
 			add_backend (new QnxHostSessionBackend ());
 #endif
+#endif
+		}
+
+		private void add_nonlocal_backends () {
+#if !IOS && !ANDROID && !TVOS
+#if HAVE_FRUITY_BACKEND
+			add_backend (new FruityHostSessionBackend ());
+#endif
+#if HAVE_DROIDY_BACKEND
+			add_backend (new DroidyHostSessionBackend ());
+#endif
+#endif
+#if HAVE_SOCKET_BACKEND
+			add_backend (new SocketHostSessionBackend ());
+#endif
+#if HAVE_BAREBONE_BACKEND
+			add_backend (new BareboneHostSessionBackend ());
 #endif
 		}
 
