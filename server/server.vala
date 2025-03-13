@@ -3,6 +3,7 @@ namespace Frida.Server {
 
 	private const string DEFAULT_DIRECTORY = "re.frida.server";
 	private static bool output_version = false;
+	private static string? device_id = null;
 	private static string? listen_address = null;
 	private static string? certpath = null;
 	private static string? origin = null;
@@ -30,6 +31,7 @@ namespace Frida.Server {
 
 	const OptionEntry[] option_entries = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
+		{ "device", 0, 0, OptionArg.STRING, ref device_id, "Serve device with the given ID", "ID" },
 		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
 		{ "certificate", 0, 0, OptionArg.FILENAME, ref certpath, "Enable TLS using CERTIFICATE", "CERTIFICATE" },
 		{ "origin", 0, 0, OptionArg.STRING, ref origin, "Only accept requests with “Origin” header matching ORIGIN " +
@@ -178,7 +180,7 @@ namespace Frida.Server {
 
 #if DARWIN
 		var worker = new Thread<int> ("frida-server-main-loop", () => {
-			var exit_code = run_application (endpoint_params, options, on_ready);
+			var exit_code = run_application (device_id, endpoint_params, options, on_ready);
 
 			_stop_run_loop ();
 
@@ -190,15 +192,16 @@ namespace Frida.Server {
 
 		return exit_code;
 #else
-		return run_application (endpoint_params, options, on_ready);
+		return run_application (device_id, endpoint_params, options, on_ready);
 #endif
 	}
 
-	private static int run_application (EndpointParameters endpoint_params, ControlServiceOptions options, ReadyHandler on_ready) {
+	private static int run_application (string? device_id, EndpointParameters endpoint_params, ControlServiceOptions options,
+			ReadyHandler on_ready) {
 		TemporaryDirectory.always_use ((directory != null) ? directory : DEFAULT_DIRECTORY);
 		TemporaryDirectory.use_sysroot (options.sysroot);
 
-		application = new Application (new ControlService (endpoint_params, options));
+		application = new Application (device_id, endpoint_params, options);
 
 		Posix.signal (Posix.Signal.INT, (sig) => {
 			application.stop ();
@@ -235,10 +238,23 @@ namespace Frida.Server {
 	private class Application : Object {
 		public signal void ready (bool success);
 
-		public ControlService service {
+		public string? device_id {
 			get;
 			construct;
 		}
+
+		public EndpointParameters endpoint_params {
+			get;
+			construct;
+		}
+
+		public ControlServiceOptions options {
+			get;
+			construct;
+		}
+
+		private DeviceManager? manager;
+		private ControlService? service;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -246,8 +262,12 @@ namespace Frida.Server {
 		private int exit_code;
 		private bool stopping;
 
-		public Application (ControlService service) {
-			Object (service: service);
+		public Application (string? device_id, EndpointParameters endpoint_params, ControlServiceOptions options) {
+			Object (
+				device_id: device_id,
+				endpoint_params: endpoint_params,
+				options: options
+			);
 		}
 
 		public int run () {
@@ -265,6 +285,17 @@ namespace Frida.Server {
 
 		private async void start () {
 			try {
+				if (device_id != null) {
+					manager = new DeviceManager ();
+
+					var device = yield manager.get_device_by_id (device_id, 0, io_cancellable);
+					device.lost.connect (on_device_lost);
+
+					service = yield new ControlService.with_device (device, endpoint_params, options);
+				} else {
+					service = new ControlService (endpoint_params, options);
+				}
+
 				yield service.start (io_cancellable);
 			} catch (GLib.Error e) {
 				if (e is IOError.CANCELLED)
@@ -297,7 +328,15 @@ namespace Frida.Server {
 			io_cancellable.cancel ();
 
 			try {
-				yield service.stop ();
+				if (service != null) {
+					yield service.stop ();
+					service = null;
+				}
+
+				if (manager != null) {
+					yield manager.close ();
+					manager = null;
+				}
 			} catch (GLib.Error e) {
 			}
 
@@ -305,6 +344,10 @@ namespace Frida.Server {
 				loop.quit ();
 				return false;
 			});
+		}
+
+		private void on_device_lost () {
+			stop ();
 		}
 	}
 
