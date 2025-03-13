@@ -66,6 +66,20 @@ namespace Frida {
 			assign_session (session);
 		}
 
+		public async ControlService.with_device (Device device, EndpointParameters endpoint_params,
+				ControlServiceOptions? options = null, Cancellable? cancellable = null) throws Error, IOError {
+			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
+
+			var session = yield device.get_host_session (cancellable);
+
+			Object (
+				endpoint_params: endpoint_params,
+				options: opts
+			);
+
+			assign_session (session);
+		}
+
 		internal ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
 				ControlServiceOptions? options = null) {
 			Object (
