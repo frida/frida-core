@@ -1030,6 +1030,11 @@ namespace Frida.Fruity {
 				}
 
 				unowned string udid = usb_device.udid;
+
+				// iPhones before iOS 17 on Windows are sometimes misdetected with an empty udid -> skip those devices
+				if (udid.length == 0)
+					return;
+
 				var transport = usb_transports.first_match (t => t.udid == udid);
 
 				bool may_need_time_to_settle = state != STARTING && (transport == null || transport.modeswitch_in_progress);
