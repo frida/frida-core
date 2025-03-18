@@ -1,6 +1,7 @@
 #ifndef __FRIDA_SYSCALL_H__
 #define __FRIDA_SYSCALL_H__
 
+#include <linux/unistd.h>
 #include <sys/syscall.h>
 
 #undef SYS_process_vm_readv
