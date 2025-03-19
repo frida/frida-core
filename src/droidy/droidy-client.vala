@@ -791,7 +791,7 @@ namespace Frida.Droidy {
 		}
 
 		private const uint16 ADB_SERVER_DEFAULT_PORT = 5037;
-		private const uint16 MAX_MESSAGE_LENGTH = 1024;
+		private const uint16 MAX_MESSAGE_LENGTH = 65536;
 
 		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
 			SocketConnectable? connectable = null;
