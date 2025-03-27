@@ -1,5 +1,4 @@
 namespace Frida {
-#if HAVE_LOCAL_BACKEND
 	public class ControlService : Object {
 		public EndpointParameters endpoint_params {
 			get;
@@ -12,6 +11,7 @@ namespace Frida {
 		}
 
 		private HostSession host_session;
+		private HostSessionProvider provider;
 
 		private State state = STOPPED;
 
@@ -35,7 +35,8 @@ namespace Frida {
 			STOPPING
 		}
 
-		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) {
+		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) throws Error {
+#if HAVE_LOCAL_BACKEND
 			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
 
 			HostSession session;
@@ -63,7 +64,10 @@ namespace Frida {
 				options: opts
 			);
 
-			assign_session (session);
+			assign_session (session, new LocalHostSessionProvider ((BaseDBusHostSession) session));
+#else
+			throw new Error.NOT_SUPPORTED ("Local backend not available");
+#endif
 		}
 
 		public async ControlService.with_device (Device device, EndpointParameters endpoint_params,
@@ -77,17 +81,7 @@ namespace Frida {
 				options: opts
 			);
 
-			assign_session (session);
-		}
-
-		internal ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
-				ControlServiceOptions? options = null) {
-			Object (
-				endpoint_params: endpoint_params,
-				options: (options != null) ? options : new ControlServiceOptions ()
-			);
-
-			assign_session (host_session);
+			assign_session (session, device.provider);
 		}
 
 		construct {
@@ -99,7 +93,7 @@ namespace Frida {
 			main_handler = new ConnectionHandler (this, null);
 		}
 
-		private void assign_session (HostSession session) {
+		private void assign_session (HostSession session, HostSessionProvider provider) {
 			host_session = session;
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.child_added.connect (notify_child_added);
@@ -108,6 +102,8 @@ namespace Frida {
 			host_session.output.connect (notify_output);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 			host_session.uninjected.connect (notify_uninjected);
+
+			this.provider = provider;
 		}
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
@@ -162,9 +158,8 @@ namespace Frida {
 
 			yield main_handler.close (cancellable);
 
-			var base_host_session = host_session as BaseDBusHostSession;
-			if (base_host_session != null)
-				yield base_host_session.close (cancellable);
+			if (provider is LocalHostSessionProvider)
+				yield provider.destroy (host_session, cancellable);
 
 			state = STOPPED;
 		}
@@ -229,9 +224,7 @@ namespace Frida {
 			foreach (AgentSessionId id in channel.sessions) {
 				AgentSessionEntry entry = sessions[id];
 
-				var base_host_session = host_session as BaseDBusHostSession;
-				if (base_host_session != null)
-					base_host_session.unlink_agent_session (id);
+				provider.unlink_agent_session (host_session, id);
 
 				AgentSession? session = entry.session;
 
@@ -574,28 +567,7 @@ namespace Frida {
 				throw_dbus_error (e);
 			}
 
-			AgentSession session;
-			var base_host_session = host_session as BaseDBusHostSession;
-			if (base_host_session != null) {
-				session = yield base_host_session.link_agent_session (id, sink, cancellable);
-			} else {
-				DBusConnection internal_connection = ((DBusProxy) host_session).g_connection;
-
-				try {
-					session = yield internal_connection.get_proxy (null, ObjectPath.for_agent_session (id),
-						DO_NOT_LOAD_PROPERTIES, cancellable);
-				} catch (IOError e) {
-					throw_dbus_error (e);
-				}
-
-				entry.internal_connection = internal_connection;
-				try {
-					entry.take_internal_registration (
-						internal_connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-			}
+			var session = yield provider.link_agent_session (host_session, id, sink, cancellable);
 
 			entry.session = session;
 			try {
@@ -913,17 +885,11 @@ namespace Frida {
 				private set;
 			}
 
-			public DBusConnection? internal_connection {
-				get;
-				set;
-			}
-
 			public Cancellable io_cancellable {
 				get;
 				private set;
 			}
 
-			private Gee.Collection<uint> internal_registrations = new Gee.ArrayList<uint> ();
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
 
 			private TimeoutSource? expiry_timer;
@@ -956,10 +922,6 @@ namespace Frida {
 				controller = c;
 			}
 
-			public void take_internal_registration (uint id) {
-				internal_registrations.add (id);
-			}
-
 			public void take_controller_registration (uint id) {
 				controller_registrations.add (id);
 			}
@@ -967,8 +929,6 @@ namespace Frida {
 			private void unregister_all () {
 				if (controller != null)
 					unregister_all_in (controller_registrations, controller.connection);
-				if (internal_connection != null)
-					unregister_all_in (internal_registrations, internal_connection);
 			}
 
 			private void unregister_all_in (Gee.Collection<uint> ids, DBusConnection connection) {
@@ -996,54 +956,64 @@ namespace Frida {
 			}
 		}
 	}
-#else
-	public class ControlService : Object {
-		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) {
+
+	private class LocalHostSessionProvider : Object, HostSessionProvider {
+		public string id {
+			get { return "local"; }
 		}
 
-		public ControlService.with_host_session (HostSession host_session, EndpointParameters endpoint_params,
-				ControlServiceOptions? options = null) {
+		public string name {
+			get { return "Local System"; }
 		}
 
-		public async void start (Cancellable? cancellable = null) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Local backend not available");
+		public Variant? icon {
+			get { return null; }
 		}
 
-		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<StartTask> ().execute (cancellable);
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.LOCAL; }
 		}
 
-		private class StartTask : ControlServiceTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.start (cancellable);
-			}
+		private BaseDBusHostSession? host_session;
+
+		public LocalHostSessionProvider (BaseDBusHostSession host_session) {
+			this.host_session = host_session;
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 		}
 
-		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not supported");
 		}
 
-		public void stop_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<StopTask> ().execute (cancellable);
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
+			if (session != host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
+			yield host_session.close (cancellable);
+			host_session = null;
 		}
 
-		private class StopTask : ControlServiceTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.stop (cancellable);
-			}
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
-		private T create<T> () {
-			return Object.new (typeof (T), parent: this);
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_agent_session (id);
 		}
 
-		private abstract class ControlServiceTask<T> : AsyncTask<T> {
-			public weak ControlService parent {
-				get;
-				construct;
-			}
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 	}
-#endif
 
 	public class ControlServiceOptions : Object {
 		public string? sysroot {
