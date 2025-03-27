@@ -226,6 +226,15 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			foreach (var entry in hosts) {
+				if (entry.host_session == host_session) {
+					entry.unlink_agent_session (id);
+					return;
+				}
+			}
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -313,6 +322,15 @@ namespace Frida {
 				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
 
 				return session;
+			}
+
+			public void unlink_agent_session (AgentSessionId id) {
+				AgentSessionEntry? entry = agent_sessions[id];
+				if (entry == null || entry.sink_registration_id == 0)
+					return;
+
+				entry.connection.unregister_object (entry.sink_registration_id);
+				entry.sink_registration_id = 0;
 			}
 
 			private bool on_keepalive_tick () {

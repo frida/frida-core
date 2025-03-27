@@ -471,6 +471,10 @@ namespace Frida.HostSessionTest {
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
+
+			public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+				assert_not_reached ();
+			}
 		}
 
 #if HAVE_LOCAL_BACKEND

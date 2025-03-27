@@ -141,6 +141,13 @@ namespace Frida {
 			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_agent_session (id);
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -258,6 +265,14 @@ namespace Frida {
 			session.message_sink = sink;
 
 			return session;
+		}
+
+		public void unlink_agent_session (AgentSessionId id) {
+			BareboneAgentSession? session = agent_sessions[id];
+			if (session == null)
+				return;
+
+			session.message_sink = null;
 		}
 
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,

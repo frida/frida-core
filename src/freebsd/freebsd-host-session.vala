@@ -71,6 +71,13 @@ namespace Frida {
 			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_agent_session (id);
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}

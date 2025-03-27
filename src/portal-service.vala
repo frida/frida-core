@@ -986,7 +986,7 @@ namespace Frida {
 				if (host_session != channel)
 					throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-				AgentSessionEntry entry = parent.sessions[id];
+				AgentSessionEntry? entry = parent.sessions[id];
 				if (entry == null)
 					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 
@@ -998,6 +998,17 @@ namespace Frida {
 				}
 
 				return entry.session;
+			}
+
+			public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+				if (host_session != channel)
+					return;
+
+				AgentSessionEntry? entry = parent.sessions[id];
+				if (entry == null)
+					return;
+
+				entry.clear_node_registrations ();
 			}
 
 			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -1516,8 +1527,16 @@ namespace Frida {
 			}
 
 			private void unregister_all () {
+				clear_controller_registrations ();
+				clear_node_registrations ();
+			}
+
+			private void clear_controller_registrations () {
 				if (controller != null)
 					unregister_all_in (controller_registrations, controller.connection);
+			}
+
+			public void clear_node_registrations () {
 				if (node != null)
 					unregister_all_in (node_registrations, node.connection);
 			}
