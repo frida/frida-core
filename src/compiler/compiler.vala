@@ -199,7 +199,7 @@ namespace Frida {
 			try {
 				var device = yield manager.get_device_by_type (LOCAL, 0, io_cancellable);
 				var session = yield device.get_host_session (io_cancellable);
-				var agent = new Agent (this, (BaseDBusHostSession) session);
+				var agent = new Agent (this, (LocalHostSession) session);
 
 				load_request.resolve (agent);
 			} catch (GLib.Error e) {
@@ -238,7 +238,7 @@ namespace Frida {
 			private Promise<string> source_request = new Promise<string> ();
 			private Promise<Bytes?> snapshot_request = new Promise<Bytes?> ();
 
-			public Agent (Compiler parent, BaseDBusHostSession host_session) {
+			public Agent (Compiler parent, LocalHostSession host_session) {
 				Object (
 					parent: parent,
 					host_session: host_session,

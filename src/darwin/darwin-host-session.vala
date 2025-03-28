@@ -92,7 +92,7 @@ namespace Frida {
 		public extern static Variant? _try_extract_icon ();
 	}
 
-	public class DarwinHostSession : BaseDBusHostSession {
+	public class DarwinHostSession : LocalHostSession {
 		public DarwinHelper helper {
 			get;
 			construct;

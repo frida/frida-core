@@ -64,7 +64,7 @@ namespace Frida {
 				options: opts
 			);
 
-			assign_session (session, new LocalHostSessionProvider ((BaseDBusHostSession) session));
+			assign_session (session, new LocalHostSessionProvider ((LocalHostSession) session));
 #else
 			throw new Error.NOT_SUPPORTED ("Local backend not available");
 #endif
@@ -119,7 +119,7 @@ namespace Frida {
 				yield service.start (cancellable);
 
 				if (options.enable_preload) {
-					var base_host_session = host_session as BaseDBusHostSession;
+					var base_host_session = host_session as LocalHostSession;
 					if (base_host_session != null)
 						base_host_session.preload.begin (io_cancellable);
 				}
@@ -377,7 +377,7 @@ namespace Frida {
 #if WINDOWS
 				throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
 #else
-				var base_host_session = host_session as BaseDBusHostSession;
+				var base_host_session = host_session as LocalHostSession;
 				if (base_host_session == null)
 					throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
 				if (!base_host_session.can_pass_file_descriptors_to_agent_session (id))
@@ -447,7 +447,7 @@ namespace Frida {
 #if !WINDOWS
 				AgentSessionId session_id = transport.session_id;
 
-				var base_host_session = host_session as BaseDBusHostSession;
+				var base_host_session = host_session as LocalHostSession;
 				if (base_host_session == null)
 					throw new Error.NOT_SUPPORTED ("Not supported for remote host sessions");
 
@@ -974,9 +974,9 @@ namespace Frida {
 			get { return HostSessionProviderKind.LOCAL; }
 		}
 
-		private BaseDBusHostSession? host_session;
+		private LocalHostSession? host_session;
 
-		public LocalHostSessionProvider (BaseDBusHostSession host_session) {
+		public LocalHostSessionProvider (LocalHostSession host_session) {
 			this.host_session = host_session;
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 		}

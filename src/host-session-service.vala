@@ -206,7 +206,7 @@ namespace Frida {
 		public abstract async void stop (Cancellable? cancellable = null) throws IOError;
 	}
 
-	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
+	public abstract class LocalHostSession : Object, HostSession, AgentController {
 		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
 
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
@@ -1289,7 +1289,7 @@ namespace Frida {
 	public abstract class InternalAgent : Object, AgentMessageSink, RpcPeer {
 		public signal void unloaded ();
 
-		public weak BaseDBusHostSession host_session {
+		public weak LocalHostSession host_session {
 			get;
 			construct;
 		}

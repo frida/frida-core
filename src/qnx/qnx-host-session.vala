@@ -83,7 +83,7 @@ namespace Frida {
 		}
 	}
 
-	public class QnxHostSession : BaseDBusHostSession {
+	public class QnxHostSession : LocalHostSession {
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor agent_desc;

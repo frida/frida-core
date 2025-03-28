@@ -92,7 +92,7 @@ namespace Frida {
 		public extern static Variant? _try_extract_icon ();
 	}
 
-	public class WindowsHostSession : BaseDBusHostSession {
+	public class WindowsHostSession : LocalHostSession {
 		public WindowsHelper helper {
 			get;
 			construct;

@@ -83,7 +83,7 @@ namespace Frida {
 		}
 	}
 
-	public class FreebsdHostSession : BaseDBusHostSession {
+	public class FreebsdHostSession : LocalHostSession {
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor agent_desc;

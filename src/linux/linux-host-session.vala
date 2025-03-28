@@ -85,7 +85,7 @@ namespace Frida {
 		}
 	}
 
-	public class LinuxHostSession : BaseDBusHostSession {
+	public class LinuxHostSession : LocalHostSession {
 		public LinuxHelper helper {
 			get;
 			construct;
