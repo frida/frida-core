@@ -64,7 +64,7 @@ namespace Frida {
 				options: opts
 			);
 
-			assign_session (session, new LocalHostSessionProvider ((LocalHostSession) session));
+			assign_session (session, new PrecreatedLocalHostSessionProvider ((LocalHostSession) session));
 #else
 			throw new Error.NOT_SUPPORTED ("Local backend not available");
 #endif
@@ -158,7 +158,7 @@ namespace Frida {
 
 			yield main_handler.close (cancellable);
 
-			if (provider is LocalHostSessionProvider)
+			if (provider is PrecreatedLocalHostSessionProvider)
 				yield provider.destroy (host_session, cancellable);
 
 			state = STOPPED;
@@ -957,61 +957,13 @@ namespace Frida {
 		}
 	}
 
-	private class LocalHostSessionProvider : Object, HostSessionProvider {
-		public string id {
-			get { return "local"; }
+	private class PrecreatedLocalHostSessionProvider : LocalHostSessionProvider {
+		public PrecreatedLocalHostSessionProvider (LocalHostSession session) {
+			take_host_session (session);
 		}
 
-		public string name {
-			get { return "Local System"; }
-		}
-
-		public Variant? icon {
-			get { return null; }
-		}
-
-		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.LOCAL; }
-		}
-
-		private LocalHostSession? host_session;
-
-		public LocalHostSessionProvider (LocalHostSession host_session) {
-			this.host_session = host_session;
-			host_session.agent_session_detached.connect (on_agent_session_detached);
-		}
-
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			throw new Error.NOT_SUPPORTED ("Not supported");
-		}
-
-		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
-			if (session != host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			host_session.agent_session_detached.disconnect (on_agent_session_detached);
-
-			yield host_session.close (cancellable);
-			host_session = null;
-		}
-
-		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
-				Cancellable? cancellable) throws Error, IOError {
-			if (host_session != this.host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			return yield this.host_session.link_agent_session (id, sink, cancellable);
-		}
-
-		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
-			if (host_session != this.host_session)
-				return;
-
-			this.host_session.unlink_agent_session (id);
-		}
-
-		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
-			agent_session_detached (id, reason, crash);
 		}
 	}
 

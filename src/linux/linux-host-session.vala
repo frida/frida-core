@@ -1,87 +1,14 @@
 namespace Frida {
-	public class LinuxHostSessionBackend : Object, HostSessionBackend {
-		private LinuxHostSessionProvider local_provider;
-
-		public async void start (Cancellable? cancellable) throws IOError {
-			assert (local_provider == null);
-			local_provider = new LinuxHostSessionProvider ();
-			provider_available (local_provider);
-		}
-
-		public async void stop (Cancellable? cancellable) throws IOError {
-			assert (local_provider != null);
-			provider_unavailable (local_provider);
-			yield local_provider.close (cancellable);
-			local_provider = null;
+	public class LinuxHostSessionBackend : LocalHostSessionBackend {
+		protected override LocalHostSessionProvider make_provider () {
+			return new LinuxHostSessionProvider ();
 		}
 	}
 
-	public class LinuxHostSessionProvider : Object, HostSessionProvider {
-		public string id {
-			get { return "local"; }
-		}
-
-		public string name {
-			get { return "Local System"; }
-		}
-
-		public Variant? icon {
-			get { return null; }
-		}
-
-		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.LOCAL; }
-		}
-
-		private LinuxHostSession host_session;
-
-		public async void close (Cancellable? cancellable) throws IOError {
-			if (host_session == null)
-				return;
-			host_session.agent_session_detached.disconnect (on_agent_session_detached);
-			yield host_session.close (cancellable);
-			host_session = null;
-		}
-
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
-			if (host_session != null)
-				throw new Error.INVALID_OPERATION ("Already created");
-
+	public class LinuxHostSessionProvider : LocalHostSessionProvider {
+		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			var tempdir = new TemporaryDirectory ();
-
-			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
-			host_session.agent_session_detached.connect (on_agent_session_detached);
-
-			return host_session;
-		}
-
-		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
-			if (session != host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			host_session.agent_session_detached.disconnect (on_agent_session_detached);
-
-			yield host_session.close (cancellable);
-			host_session = null;
-		}
-
-		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
-				Cancellable? cancellable) throws Error, IOError {
-			if (host_session != this.host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			return yield this.host_session.link_agent_session (id, sink, cancellable);
-		}
-
-		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
-			if (host_session != this.host_session)
-				return;
-
-			this.host_session.unlink_agent_session (id);
-		}
-
-		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
-			agent_session_detached (id, reason, crash);
+			return new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
 		}
 	}
 

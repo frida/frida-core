@@ -206,6 +206,112 @@ namespace Frida {
 		public abstract async void stop (Cancellable? cancellable = null) throws IOError;
 	}
 
+	public abstract class LocalHostSessionBackend : Object, HostSessionBackend {
+		private LocalHostSessionProvider local_provider;
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			assert (local_provider == null);
+			local_provider = make_provider ();
+
+			provider_available (local_provider);
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+			assert (local_provider != null);
+
+			provider_unavailable (local_provider);
+
+			yield local_provider.close (cancellable);
+			local_provider = null;
+		}
+
+		protected abstract LocalHostSessionProvider make_provider ();
+	}
+
+	public abstract class LocalHostSessionProvider : Object, HostSessionProvider {
+		public string id {
+			get { return "local"; }
+		}
+
+		public string name {
+			get { return "Local System"; }
+		}
+
+		public Variant? icon {
+			get { return _icon; }
+		}
+		private Variant? _icon;
+
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.LOCAL; }
+		}
+
+		private LocalHostSession host_session;
+
+		construct {
+			_icon = load_icon ();
+		}
+
+		protected abstract LocalHostSession make_host_session (HostSessionOptions? options) throws Error;
+
+		protected void take_host_session (LocalHostSession session) {
+			host_session = session;
+			host_session.agent_session_detached.connect (on_agent_session_detached);
+		}
+
+		protected virtual Variant? load_icon () {
+			return null;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (host_session == null)
+				return;
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
+			yield host_session.close (cancellable);
+			host_session = null;
+		}
+
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+			if (host_session != null)
+				throw new Error.INVALID_OPERATION ("Already created");
+
+			take_host_session (make_host_session (options));
+
+			return host_session;
+		}
+
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
+			if (session != host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
+			yield host_session.close (cancellable);
+			host_session = null;
+		}
+
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
+		}
+
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_agent_session (id);
+		}
+
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
+		}
+	}
+
 	public abstract class LocalHostSession : Object, HostSession, AgentController {
 		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
 
