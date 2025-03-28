@@ -27,6 +27,8 @@ namespace Frida {
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
 
+		public abstract async ChannelId open_channel (string address, Cancellable? cancellable) throws GLib.Error;
+
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void child_added (HostChildInfo info);
@@ -743,6 +745,13 @@ namespace Frida {
 		}
 	}
 
+	[DBus (name = "re.frida.Channel16")]
+	public interface Channel : Object {
+		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void input (uint8[] data, Cancellable? cancellable) throws GLib.Error;
+		public signal void output (uint8[] data);
+	}
+
 	[DBus (name = "re.frida.TransportBroker16")]
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
@@ -873,6 +882,10 @@ namespace Frida {
 
 		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 	}
@@ -1502,6 +1515,26 @@ namespace Frida {
 		}
 	}
 
+	public struct ChannelId {
+		public string handle;
+
+		public ChannelId (string handle) {
+			this.handle = handle;
+		}
+
+		public ChannelId.generate () {
+			this.handle = Uuid.string_random ().replace ("-", "");
+		}
+
+		public static uint hash (ChannelId? id) {
+			return id.handle.hash ();
+		}
+
+		public static bool equal (ChannelId? a, ChannelId? b) {
+			return a.handle == b.handle;
+		}
+	}
+
 	public struct AgentScriptId {
 		public uint handle;
 
@@ -2048,7 +2081,7 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
-		public const string CHILD_SESSION = "/re/frida/ChildSession";
+		public const string CHANNEL = "/re/frida/Channel";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
 		public const string PORTAL_SESSION = "/re/frida/PortalSession";
 		public const string BUS_SESSION = "/re/frida/BusSession";
@@ -2060,6 +2093,10 @@ namespace Frida {
 
 		public static string for_agent_message_sink (AgentSessionId id) {
 			return AGENT_MESSAGE_SINK + "/" + id.handle;
+		}
+
+		public static string for_channel (ChannelId id) {
+			return CHANNEL + "/" + id.handle;
 		}
 	}
 

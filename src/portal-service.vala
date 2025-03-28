@@ -1011,6 +1011,14 @@ namespace Frida {
 				entry.clear_node_registrations ();
 			}
 
+			public async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable)
+					throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
+			}
+
+			public void unlink_channel (HostSession host_session, ChannelId id) {
+			}
+
 			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 				agent_session_detached (id, reason, crash);
 			}
@@ -1288,6 +1296,10 @@ namespace Frida {
 			public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
+			}
+
+			public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
 			}
 		}
 
