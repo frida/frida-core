@@ -240,6 +240,18 @@ namespace Frida {
 				}
 			}
 
+			foreach (ChannelId id in channel.channels) {
+				ChannelEntry entry = channels[id];
+
+				provider.unlink_channel (host_session, id);
+
+				channels.unset (id);
+
+				Channel? ch = entry.channel;
+				if (ch != null)
+					ch.close.begin (null);
+			}
+
 			try {
 				yield disable_spawn_gating (channel);
 			} catch (GLib.Error e) {
@@ -602,6 +614,7 @@ namespace Frida {
 			var stream = yield provider.link_channel (host_session, id, cancellable);
 
 			Channel channel = new ChannelEndpoint (stream);
+			entry.channel = channel;
 			entry.take_controller_registration (requester.connection.register_object (ObjectPath.for_channel (id), channel));
 
 			return id;
@@ -994,6 +1007,11 @@ namespace Frida {
 			public ChannelId id {
 				get;
 				private set;
+			}
+
+			public Channel? channel {
+				get;
+				set;
 			}
 
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();

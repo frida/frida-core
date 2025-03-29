@@ -119,7 +119,7 @@ namespace Frida {
 		public IOCondition pending_io {
 			get {
 				lock (state)
-					return _pending_io;
+					return events;
 			}
 		}
 
@@ -128,7 +128,7 @@ namespace Frida {
 		private ChannelInputStream _input_stream;
 		private ChannelOutputStream _output_stream;
 
-		private IOCondition _pending_io;
+		private IOCondition events = OUT;
 		private ByteArray recv_queue = new ByteArray ();
 		private ByteArray send_queue = new ByteArray ();
 
@@ -151,11 +151,18 @@ namespace Frida {
 			_input_stream = new ChannelInputStream (this);
 			_output_stream = new ChannelOutputStream (this);
 
-			_pending_io = IOCondition.OUT;
-
 			main_context = MainContext.ref_thread_default ();
 
 			channel.output.connect (on_output);
+		}
+
+		public override void dispose () {
+			_output_stream.detach ();
+			_input_stream.detach ();
+
+			abandon ();
+
+			base.dispose ();
 		}
 
 		public void abandon () {
@@ -200,7 +207,7 @@ namespace Frida {
 					Memory.copy (buffer, recv_queue.data, n);
 					recv_queue.remove_range (0, (uint) n);
 
-					recompute_pending_io_unlocked ();
+					update_events ();
 				} else {
 					if (state == OPEN)
 						n = -1;
@@ -261,35 +268,42 @@ namespace Frida {
 					recv_queue.append (data);
 				else
 					state = CLOSED;
-				recompute_pending_io_unlocked ();
+				update_events ();
 			}
 		}
 
-		private void recompute_pending_io_unlocked () {
-			IOCondition new_io = 0;
-			if (recv_queue.len > 0 || state != OPEN)
-				new_io |= IN;
+		private void update_events () {
+			IOCondition new_events = 0;
+
+			if (recv_queue.len != 0 || state == CLOSED)
+				new_events |= IN;
+
 			if (state == OPEN)
-				new_io |= OUT;
-			_pending_io = new_io;
+				new_events |= OUT;
+
+			events = new_events;
 
 			foreach (var entry in sources.entries) {
 				unowned Source source = entry.key;
 				IOCondition c = entry.value;
-				if ((new_io & c) != 0)
+				if ((new_events & c) != 0)
 					source.set_ready_time (0);
 			}
+
+			notify_property ("pending-io");
 		}
 	}
 
 	private class ChannelInputStream : InputStream, PollableInputStream {
-		public weak ChannelStream connection {
-			get;
-			construct;
+		private weak ChannelStream channel;
+
+		public ChannelInputStream (ChannelStream channel) {
+			Object ();
+			this.channel = channel;
 		}
 
-		public ChannelInputStream (ChannelStream connection) {
-			Object (connection: connection);
+		internal void detach () {
+			channel = null;
 		}
 
 		public override bool close (Cancellable? cancellable) throws IOError {
@@ -301,7 +315,47 @@ namespace Frida {
 		}
 
 		public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
+			if (channel == null)
+				return 0;
+
+			if (!is_readable ()) {
+				bool done = false;
+				var mutex = Mutex ();
+				var cond = Cond ();
+
+				ulong io_handler = channel.notify["pending-io"].connect ((obj, pspec) => {
+					if (is_readable ()) {
+						mutex.lock ();
+						done = true;
+						cond.signal ();
+						mutex.unlock ();
+					}
+				});
+				ulong cancellation_handler = 0;
+				if (cancellable != null) {
+					cancellation_handler = cancellable.connect (() => {
+						mutex.lock ();
+						done = true;
+						cond.signal ();
+						mutex.unlock ();
+					});
+				}
+
+				if (!is_readable ()) {
+					mutex.lock ();
+					while (!done)
+						cond.wait (mutex);
+					mutex.unlock ();
+				}
+
+				if (cancellation_handler != 0)
+					cancellable.disconnect (cancellation_handler);
+				channel.disconnect (io_handler);
+
+				cancellable.set_error_if_cancelled ();
+			}
+
+			return channel.recv (buffer);
 		}
 
 		public bool can_poll () {
@@ -309,26 +363,32 @@ namespace Frida {
 		}
 
 		public bool is_readable () {
-			return (connection.pending_io & IOCondition.IN) != 0;
+			if (channel == null)
+				return true;
+			return (channel.pending_io & IOCondition.IN) != 0;
 		}
 
 		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new ChannelIOSource (connection, IOCondition.IN), cancellable);
+			return new PollableSource.full (this, new ChannelIOSource (channel, IOCondition.IN), cancellable);
 		}
 
 		public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
-			return connection.recv (buffer);
+			if (channel == null)
+				return 0;
+			return channel.recv (buffer);
 		}
 	}
 
 	private class ChannelOutputStream : OutputStream, PollableOutputStream {
-		public weak ChannelStream connection {
-			get;
-			construct;
+		private weak ChannelStream? channel;
+
+		public ChannelOutputStream (ChannelStream channel) {
+			Object ();
+			this.channel = channel;
 		}
 
-		public ChannelOutputStream (ChannelStream connection) {
-			Object (connection: connection);
+		internal void detach () {
+			channel = null;
 		}
 
 		public override bool close (Cancellable? cancellable) throws IOError {
@@ -348,7 +408,7 @@ namespace Frida {
 		}
 
 		public override ssize_t write (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
+			return channel.send (buffer);
 		}
 
 		public bool can_poll () {
@@ -356,15 +416,19 @@ namespace Frida {
 		}
 
 		public bool is_writable () {
-			return (connection.pending_io & IOCondition.OUT) != 0;
+			if (channel == null)
+				return false;
+			return (channel.pending_io & IOCondition.OUT) != 0;
 		}
 
 		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new ChannelIOSource (connection, IOCondition.OUT), cancellable);
+			return new PollableSource.full (this, new ChannelIOSource (channel, IOCondition.OUT), cancellable);
 		}
 
 		public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
-			return connection.send (buffer);
+			if (channel == null)
+				throw new IOError.CLOSED ("Connection is closed");
+			return channel.send (buffer);
 		}
 
 		public PollableReturn writev_nonblocking_fn (OutputVector[] vectors, out size_t bytes_written) throws GLib.Error {
@@ -373,27 +437,27 @@ namespace Frida {
 	}
 
 	private class ChannelIOSource : Source {
-		public ChannelStream connection;
+		public ChannelStream channel;
 		public IOCondition condition;
 
-		public ChannelIOSource (ChannelStream connection, IOCondition condition) {
-			this.connection = connection;
+		public ChannelIOSource (ChannelStream channel, IOCondition condition) {
+			this.channel = channel;
 			this.condition = condition;
 
-			connection.register_source (this, condition);
+			channel.register_source (this, condition);
 		}
 
 		~ChannelIOSource () {
-			connection.unregister_source (this);
+			channel.unregister_source (this);
 		}
 
 		protected override bool prepare (out int timeout) {
 			timeout = -1;
-			return (connection.pending_io & condition) != 0;
+			return (channel.pending_io & condition) != 0;
 		}
 
 		protected override bool check () {
-			return (connection.pending_io & condition) != 0;
+			return (channel.pending_io & condition) != 0;
 		}
 
 		protected override bool dispatch (SourceFunc? callback) {
