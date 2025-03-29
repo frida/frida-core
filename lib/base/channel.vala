@@ -21,6 +21,83 @@ namespace Frida {
 		}
 	}
 
+	public class ChannelEndpoint : Object, Channel {
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private ByteArray write_queue = new ByteArray ();
+		private bool writing = false;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public ChannelEndpoint (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			read_loop.begin ();
+		}
+
+		public async void close (Cancellable? cancellable) throws Error, IOError {
+			io_cancellable.cancel ();
+		}
+
+		public async void input (uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			if (io_cancellable.is_cancelled ())
+				throw new Error.INVALID_OPERATION ("Channel is closed");
+
+			write_queue.append (data);
+
+			if (!writing) {
+				writing = true;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					process_write_queue.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private async void read_loop () {
+			var input = stream.get_input_stream ();
+			var buffer = new uint8[64 * 1024];
+
+			while (true) {
+				ssize_t n;
+				try {
+					n = yield input.read_async (buffer, Priority.DEFAULT, io_cancellable);
+				} catch (GLib.Error e) {
+					break;
+				}
+
+				output (buffer[:n]);
+			}
+
+			stream.close_async.begin ();
+		}
+
+		private async void process_write_queue () {
+			var output = stream.get_output_stream ();
+
+			while (write_queue.len > 0) {
+				uint8[] batch = write_queue.steal ();
+
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (batch, Priority.DEFAULT, io_cancellable, out bytes_written);
+				} catch (GLib.Error e) {
+					break;
+				}
+			}
+
+			writing = false;
+		}
+	}
+
 	public class ChannelStream : IOStream {
 		public Channel channel {
 			get;

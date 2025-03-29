@@ -587,7 +587,12 @@ namespace Frida {
 
 		private async ChannelId open_channel (string address, ControlChannel requester, Cancellable? cancellable)
 				throws Error, IOError {
-			var id = yield host_session.open_channel (address, cancellable);
+			ChannelId id;
+			try {
+				id = yield host_session.open_channel (address, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 
 			requester.channels.add (id);
 
@@ -595,6 +600,9 @@ namespace Frida {
 			channels[id] = entry;
 
 			var stream = yield provider.link_channel (host_session, id, cancellable);
+
+			Channel channel = new ChannelEndpoint (stream);
+			entry.take_controller_registration (requester.connection.register_object (ObjectPath.for_channel (id), channel));
 
 			return id;
 		}
@@ -986,11 +994,6 @@ namespace Frida {
 			public ChannelId id {
 				get;
 				private set;
-			}
-
-			public Channel? channel {
-				get;
-				set;
 			}
 
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
