@@ -2048,7 +2048,6 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
-		public const string CHILD_SESSION = "/re/frida/ChildSession";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
 		public const string PORTAL_SESSION = "/re/frida/PortalSession";
 		public const string BUS_SESSION = "/re/frida/BusSession";
