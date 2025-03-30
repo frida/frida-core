@@ -23,6 +23,8 @@ namespace Frida {
 		private Gee.Map<uint, PendingSpawn> pending_spawn = new Gee.HashMap<uint, PendingSpawn> ();
 		private Gee.Map<AgentSessionId?, AgentSessionEntry> sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.Map<ChannelId?, ChannelEntry> channels =
+			new Gee.HashMap<ChannelId?, ChannelEntry> (ChannelId.hash, ChannelId.equal);
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -101,6 +103,7 @@ namespace Frida {
 			host_session.process_crashed.connect (notify_process_crashed);
 			host_session.output.connect (notify_output);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
+			host_session.channel_closed.connect (on_channel_closed);
 			host_session.uninjected.connect (notify_uninjected);
 
 			this.provider = provider;
@@ -238,6 +241,18 @@ namespace Frida {
 				}
 			}
 
+			foreach (ChannelId id in channel.channels.to_array ()) {
+				ChannelEntry entry = channels[id];
+
+				provider.unlink_channel (host_session, id);
+
+				channels.unset (id);
+
+				Channel? ch = entry.channel;
+				if (ch != null)
+					ch.close.begin (null);
+			}
+
 			try {
 				yield disable_spawn_gating (channel);
 			} catch (GLib.Error e) {
@@ -370,6 +385,11 @@ namespace Frida {
 			public async void reattach (AgentSessionId id, ControlChannel requester, Cancellable? cancellable)
 					throws Error, IOError {
 				yield parent.reattach (id, requester, cancellable);
+			}
+
+			public async ChannelId open_channel (string address, ControlChannel requester, Cancellable? cancellable)
+					throws Error, IOError {
+				return yield parent.open_channel (address, requester, cancellable);
 			}
 
 			public void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port, out string token)
@@ -534,7 +554,7 @@ namespace Frida {
 
 			var opts = SessionOptions._deserialize (options);
 
-			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout, io_cancellable);
+			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout);
 			sessions[id] = entry;
 			entry.expired.connect (on_agent_session_expired);
 
@@ -576,6 +596,29 @@ namespace Frida {
 			} catch (IOError e) {
 				assert_not_reached ();
 			}
+		}
+
+		private async ChannelId open_channel (string address, ControlChannel requester, Cancellable? cancellable)
+				throws Error, IOError {
+			ChannelId id;
+			try {
+				id = yield host_session.open_channel (address, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			requester.channels.add (id);
+
+			var entry = new ChannelEntry (requester, id);
+			channels[id] = entry;
+
+			var stream = yield provider.link_channel (host_session, id, cancellable);
+
+			Channel channel = new ChannelEndpoint (stream);
+			entry.channel = channel;
+			entry.take_controller_registration (requester.connection.register_object (ObjectPath.for_channel (id), channel));
+
+			return id;
 		}
 
 		private void notify_spawn_added (HostSpawnInfo info) {
@@ -624,6 +667,15 @@ namespace Frida {
 					controller.sessions.remove (id);
 					controller.agent_session_detached (id, reason, crash);
 				}
+			}
+		}
+
+		private void on_channel_closed (ChannelId id) {
+			ChannelEntry entry;
+			if (channels.unset (id, out entry)) {
+				ControlChannel controller = entry.controller;
+				controller.channels.remove (id);
+				controller.channel_closed (id);
 			}
 		}
 
@@ -713,6 +765,11 @@ namespace Frida {
 			public Gee.Set<AgentSessionId?> sessions {
 				get;
 				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
+			}
+
+			public Gee.Set<ChannelId?> channels {
+				get;
+				default = new Gee.HashSet<ChannelId?> (ChannelId.hash, ChannelId.equal);
 			}
 
 			private Gee.Set<uint> registrations = new Gee.HashSet<uint> ();
@@ -839,6 +896,10 @@ namespace Frida {
 				return yield parent.host_session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
 			}
 
+			public async ChannelId open_channel (string address, Cancellable? cancellable) throws GLib.Error {
+				return yield parent.open_channel (address, this, cancellable);
+			}
+
 			private async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
 					out string token) throws Error {
 				parent.open_tcp_transport (id, cancellable, out port, out token);
@@ -885,21 +946,14 @@ namespace Frida {
 				private set;
 			}
 
-			public Cancellable io_cancellable {
-				get;
-				private set;
-			}
-
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
 
 			private TimeoutSource? expiry_timer;
 
-			public AgentSessionEntry (ControlChannel controller, AgentSessionId id, uint persist_timeout,
-					Cancellable io_cancellable) {
+			public AgentSessionEntry (ControlChannel controller, AgentSessionId id, uint persist_timeout) {
 				this.controller = controller;
 				this.id = id;
 				this.persist_timeout = persist_timeout;
-				this.io_cancellable = io_cancellable;
 			}
 
 			~AgentSessionEntry () {
@@ -927,14 +981,12 @@ namespace Frida {
 			}
 
 			private void unregister_all () {
-				if (controller != null)
-					unregister_all_in (controller_registrations, controller.connection);
-			}
-
-			private void unregister_all_in (Gee.Collection<uint> ids, DBusConnection connection) {
-				foreach (uint id in ids)
+				if (controller == null)
+					return;
+				var connection = controller.connection;
+				foreach (uint id in controller_registrations)
 					connection.unregister_object (id);
-				ids.clear ();
+				controller_registrations.clear ();
 			}
 
 			private void start_expiry_timer () {
@@ -953,6 +1005,45 @@ namespace Frida {
 					return;
 				expiry_timer.destroy ();
 				expiry_timer = null;
+			}
+		}
+
+		private class ChannelEntry {
+			public ControlChannel controller {
+				get;
+				private set;
+			}
+
+			public ChannelId id {
+				get;
+				private set;
+			}
+
+			public Channel? channel {
+				get;
+				set;
+			}
+
+			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
+
+			public ChannelEntry (ControlChannel controller, ChannelId id) {
+				this.controller = controller;
+				this.id = id;
+			}
+
+			~ChannelEntry () {
+				unregister_all ();
+			}
+
+			public void take_controller_registration (uint id) {
+				controller_registrations.add (id);
+			}
+
+			private void unregister_all () {
+				var connection = controller.connection;
+				foreach (uint id in controller_registrations)
+					connection.unregister_object (id);
+				controller_registrations.clear ();
 			}
 		}
 	}

@@ -1238,11 +1238,16 @@ namespace Frida {
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			var channel_provider = provider as HostChannelProvider;
-			if (channel_provider == null)
-				throw new Error.NOT_SUPPORTED ("Channels are not supported by this device");
+			var host_session = yield get_host_session (cancellable);
 
-			return yield channel_provider.open_channel (address, cancellable);
+			ChannelId id;
+			try {
+				id = yield host_session.open_channel (address, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			return yield provider.link_channel (host_session, id, cancellable);
 		}
 
 		public IOStream open_channel_sync (string address, Cancellable? cancellable = null) throws Error, IOError {

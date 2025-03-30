@@ -170,6 +170,10 @@ namespace Frida {
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract void unlink_agent_session (HostSession host_session, AgentSessionId id);
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
+
+		public abstract async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable = null)
+			throws Error, IOError;
+		public abstract void unlink_channel (HostSession host_session, ChannelId id);
 	}
 
 	public enum HostSessionProviderKind {
@@ -305,6 +309,14 @@ namespace Frida {
 				return;
 
 			this.host_session.unlink_agent_session (id);
+		}
+
+		public async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable)
+				throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
+		}
+
+		public void unlink_channel (HostSession host_session, ChannelId id) {
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -875,6 +887,10 @@ namespace Frida {
 			var blob_bytes = new Bytes (blob);
 			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data, cancellable);
 			return InjectorPayloadId (raw_id);
+		}
+
+		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
 		}
 
 #if !WINDOWS

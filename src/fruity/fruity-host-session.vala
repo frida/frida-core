@@ -115,6 +115,21 @@ namespace Frida {
 			this.host_session.unlink_agent_session (id);
 		}
 
+		public async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable)
+				throws Error, IOError {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return this.host_session.link_channel (id);
+		}
+
+		public void unlink_channel (HostSession host_session, ChannelId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_channel (id);
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -186,6 +201,8 @@ namespace Frida {
 		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
+		private ChannelRegistry channel_registry = new ChannelRegistry ();
+
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
@@ -201,6 +218,10 @@ namespace Frida {
 
 		public FruityHostSession (Fruity.Device device) {
 			Object (device: device);
+		}
+
+		construct {
+			channel_registry.channel_closed.connect (on_channel_closed);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -1033,6 +1054,27 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+		}
+
+		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+			var stream = yield device.open_channel (address, cancellable);
+
+			var id = ChannelId.generate ();
+			channel_registry.register (id, stream);
+
+			return id;
+		}
+
+		public IOStream link_channel (ChannelId id) throws Error {
+			return channel_registry.link (id);
+		}
+
+		public void unlink_channel (ChannelId id) {
+			channel_registry.unlink (id);
+		}
+
+		private void on_channel_closed (ChannelId id) {
+			channel_closed (id);
 		}
 
 		private void add_lldb_session (LLDBSession session) {
