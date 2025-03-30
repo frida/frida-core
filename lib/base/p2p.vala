@@ -452,6 +452,8 @@ namespace Frida {
 				if ((_pending_io & c) != 0)
 					source.set_ready_time (0);
 			}
+
+			notify_property ("pending-io");
 		}
 
 		private void prepare_for_io (int64 timeout, Cancellable? cancellable, out int64 deadline) throws IOError {
@@ -563,7 +565,7 @@ namespace Frida {
 		}
 	}
 
-	public class SctpConnection : IOStream {
+	public class SctpConnection : VirtualStream {
 		public DatagramBased transport_socket {
 			get;
 			construct;
@@ -584,54 +586,13 @@ namespace Frida {
 			construct;
 		}
 
-		public State state {
-			get {
-				return _state;
-			}
-		}
-
-		public override InputStream input_stream {
-			get {
-				return _input_stream;
-			}
-		}
-
-		public override OutputStream output_stream {
-			get {
-				return _output_stream;
-			}
-		}
-
-		public IOCondition pending_io {
-			get {
-				lock (state)
-					return sctp_events;
-			}
-		}
-
-		private State _state = CREATED;
-		private SctpInputStream _input_stream;
-		private SctpOutputStream _output_stream;
-
 		private DatagramBasedSource transport_source;
 		private uint8[] transport_buffer = new uint8[65536];
 
 		private void * sctp_socket;
-		private IOCondition sctp_events = 0;
 		private SctpTimerSource sctp_source;
 		private uint16 stream_id;
 		private ByteArray dcep_message = new ByteArray ();
-
-		private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
-
-		private Cancellable io_cancellable = new Cancellable ();
-
-		public enum State {
-			CREATED,
-			OPENING,
-			OPENED,
-			CLOSED
-		}
 
 		public SctpConnection (DatagramBased transport_socket, PeerSetup setup, uint16 port, size_t max_message_size) {
 			Object (
@@ -649,13 +610,8 @@ namespace Frida {
 		protected extern static void _initialize_sctp_backend ();
 
 		construct {
-			_input_stream = new SctpInputStream (this);
-			_output_stream = new SctpOutputStream (this);
-
 			sctp_socket = _create_sctp_socket ();
 			_connect_sctp_socket (sctp_socket, port);
-
-			var main_context = MainContext.get_thread_default ();
 
 			transport_source = transport_socket.create_source (IOCondition.IN, io_cancellable);
 			transport_source.set_callback (on_transport_socket_readable);
@@ -669,17 +625,22 @@ namespace Frida {
 
 		protected extern void _connect_sctp_socket (void * sock, uint16 port);
 
-		public override bool close (GLib.Cancellable? cancellable) throws IOError {
-			do_close ();
-			return true;
+		protected override VirtualStream.State query_initial_state () {
+			return CREATED;
 		}
 
-		public override async bool close_async (int io_priority, GLib.Cancellable? cancellable) throws IOError {
-			do_close ();
-			return true;
+		protected override IOCondition query_events () {
+			return _query_sctp_socket_events (sctp_socket);
 		}
 
-		private void do_close () {
+		protected override void update_pending_io () {
+			base.update_pending_io ();
+			sctp_source.invalidate ();
+		}
+
+		protected extern static IOCondition _query_sctp_socket_events (void * sock);
+
+		protected override void handle_close () {
 			sctp_source.destroy ();
 			transport_source.destroy ();
 
@@ -689,13 +650,17 @@ namespace Frida {
 
 		public extern static void _close (void * sock);
 
-		public void shutdown (SctpShutdownType type) throws IOError {
-			_shutdown (sctp_socket, type);
+		public override void shutdown_read () throws IOError {
+			_shutdown (sctp_socket, READ);
+		}
+
+		public override void shutdown_write () throws IOError {
+			_shutdown (sctp_socket, WRITE);
 		}
 
 		public extern static void _shutdown (void * sock, SctpShutdownType type) throws IOError;
 
-		public ssize_t recv (uint8[] buffer) throws IOError {
+		public override ssize_t read (uint8[] buffer) throws IOError {
 			ssize_t n = -1;
 
 			try {
@@ -711,18 +676,18 @@ namespace Frida {
 						handle_dcep_message (stream_id, dcep_message.steal ());
 					}
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
-				} else if (protocol_id == NONE || _state != OPENED) {
+				} else if (protocol_id == NONE || state != OPEN) {
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 				}
 			} finally {
-				update_sctp_events ();
+				update_pending_io ();
 			}
 
 			return n;
 		}
 
-		public ssize_t send (uint8[] buffer) throws IOError {
-			if (_state != OPENED)
+		public override ssize_t write (uint8[] buffer) throws IOError {
+			if (state != OPEN)
 				throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 
 			ssize_t n = ssize_t.min (buffer.length, (ssize_t) max_message_size);
@@ -730,18 +695,8 @@ namespace Frida {
 			try {
 				return _send (sctp_socket, stream_id, WEBRTC_BINARY, buffer[0:n]);
 			} finally {
-				update_sctp_events ();
+				update_pending_io ();
 			}
-		}
-
-		public void register_source (Source source, IOCondition condition) {
-			lock (state)
-				sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
-		}
-
-		public void unregister_source (Source source) {
-			lock (state)
-				sources.unset (source);
 		}
 
 		private bool on_transport_socket_readable (DatagramBased datagram_based, IOCondition condition) {
@@ -783,9 +738,9 @@ namespace Frida {
 		}
 
 		protected void _on_sctp_socket_events_changed () {
-			update_sctp_events ();
+			update_pending_io ();
 
-			if (_state == CREATED && setup == ACTIVE && (sctp_events & IOCondition.OUT) != 0) {
+			if (state == CREATED && setup == ACTIVE && (pending_io & IOCondition.OUT) != 0) {
 				stream_id = 1;
 
 				uint8[] open_message = {
@@ -799,30 +754,11 @@ namespace Frida {
 				};
 				try {
 					_send (sctp_socket, stream_id, WEBRTC_DCEP, open_message);
-					_state = OPENING;
+					state = OPENING;
 				} catch (IOError e) {
 				}
 			}
 		}
-
-		private void update_sctp_events () {
-			IOCondition new_events = _query_sctp_socket_events (sctp_socket);
-
-			lock (state) {
-				sctp_events = new_events;
-
-				foreach (var entry in sources.entries) {
-					unowned Source source = entry.key;
-					IOCondition c = entry.value;
-					if ((new_events & c) != 0)
-						source.set_ready_time (0);
-				}
-
-				sctp_source.invalidate ();
-			}
-		}
-
-		protected extern static IOCondition _query_sctp_socket_events (void * sock);
 
 		protected extern static ssize_t _recv (void * sock, uint8[] buffer, out uint16 stream_id,
 			out PayloadProtocolId protocol_id, out SctpMessageFlags message_flags) throws IOError;
@@ -835,7 +771,7 @@ namespace Frida {
 
 			switch (type) {
 				case DATA_CHANNEL_OPEN: {
-					if (_state != CREATED || setup == ACTIVE)
+					if (state != CREATED || setup == ACTIVE)
 						return;
 
 					this.stream_id = stream_id;
@@ -843,15 +779,15 @@ namespace Frida {
 					uint8[] reply = { DcepMessageType.DATA_CHANNEL_ACK };
 					_send (sctp_socket, stream_id, WEBRTC_DCEP, reply);
 
-					_state = OPENED;
+					state = OPEN;
 
 					break;
 				}
 				case DATA_CHANNEL_ACK:
-					if (_state != OPENING)
+					if (state != OPENING)
 						return;
 
-					_state = OPENED;
+					state = OPEN;
 
 					break;
 			}
@@ -884,140 +820,6 @@ namespace Frida {
 	protected enum DcepMessageType {
 		DATA_CHANNEL_OPEN = 0x03,
 		DATA_CHANNEL_ACK = 0x02
-	}
-
-	private class SctpInputStream : InputStream, PollableInputStream {
-		public weak SctpConnection connection {
-			get;
-			construct;
-		}
-
-		public SctpInputStream (SctpConnection connection) {
-			Object (connection: connection);
-		}
-
-		public override bool close (Cancellable? cancellable) throws IOError {
-			connection.shutdown (READ);
-			return true;
-		}
-
-		public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-			return close (cancellable);
-		}
-
-		public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
-		}
-
-		public bool can_poll () {
-			return true;
-		}
-
-		public bool is_readable () {
-			return (connection.pending_io & IOCondition.IN) != 0;
-		}
-
-		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new SctpIOSource (connection, IOCondition.IN), cancellable);
-		}
-
-		public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
-			return connection.recv (buffer);
-		}
-	}
-
-	private class SctpOutputStream : OutputStream, PollableOutputStream {
-		public weak SctpConnection connection {
-			get;
-			construct;
-		}
-
-		public SctpOutputStream (SctpConnection connection) {
-			Object (connection: connection);
-		}
-
-		public override bool close (Cancellable? cancellable) throws IOError {
-			connection.shutdown (WRITE);
-			return true;
-		}
-
-		public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-			return close (cancellable);
-		}
-
-		public override bool flush (GLib.Cancellable? cancellable) throws GLib.Error {
-			return true;
-		}
-
-		public override async bool flush_async (int io_priority, GLib.Cancellable? cancellable) throws GLib.Error {
-			return true;
-		}
-
-		public override ssize_t write (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
-		}
-
-		public bool can_poll () {
-			return true;
-		}
-
-		public bool is_writable () {
-			return (connection.pending_io & IOCondition.OUT) != 0;
-		}
-
-		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new SctpIOSource (connection, IOCondition.OUT), cancellable);
-		}
-
-		public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
-			return connection.send (buffer);
-		}
-
-		public PollableReturn writev_nonblocking_fn (OutputVector[] vectors, out size_t bytes_written) throws GLib.Error {
-			assert_not_reached ();
-		}
-	}
-
-	private class SctpIOSource : Source {
-		public SctpConnection connection;
-		public IOCondition condition;
-
-		public SctpIOSource (SctpConnection connection, IOCondition condition) {
-			this.connection = connection;
-			this.condition = condition;
-
-			connection.register_source (this, condition);
-		}
-
-		~SctpIOSource () {
-			connection.unregister_source (this);
-		}
-
-		protected override bool prepare (out int timeout) {
-			timeout = -1;
-			return (connection.pending_io & condition) != 0;
-		}
-
-		protected override bool check () {
-			return (connection.pending_io & condition) != 0;
-		}
-
-		protected override bool dispatch (SourceFunc? callback) {
-			set_ready_time (-1);
-
-			if (callback == null)
-				return Source.REMOVE;
-
-			return callback ();
-		}
-
-		protected static bool closure_callback (Closure closure) {
-			var return_value = Value (typeof (bool));
-
-			closure.invoke (ref return_value, {});
-
-			return return_value.get_boolean ();
-		}
 	}
 
 	private class SctpTimerSource : Source {

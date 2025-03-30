@@ -870,7 +870,7 @@ namespace Frida {
 
 	public extern static unowned string _version_string ();
 
-	private class WebConnection : IOStream {
+	private class WebConnection : VirtualStream {
 		public signal void websocket_closed ();
 
 		public Soup.WebsocketConnection websocket {
@@ -878,36 +878,8 @@ namespace Frida {
 			construct;
 		}
 
-		public override InputStream input_stream {
-			get {
-				return _input_stream;
-			}
-		}
-
-		public override OutputStream output_stream {
-			get {
-				return _output_stream;
-			}
-		}
-
-		public IOCondition pending_io {
-			get {
-				lock (state)
-					return _pending_io;
-			}
-		}
-
-		private WebInputStream _input_stream;
-		private WebOutputStream _output_stream;
-
-		private Soup.WebsocketState state;
-		private IOCondition _pending_io;
 		private ByteArray recv_queue = new ByteArray ();
 		private ByteArray send_queue = new ByteArray ();
-
-		private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
-
-		private MainContext main_context;
 
 		public WebConnection (Soup.WebsocketConnection websocket) {
 			Object (websocket: websocket);
@@ -915,14 +887,6 @@ namespace Frida {
 
 		construct {
 			websocket.max_incoming_payload_size = (256 * 1024) + 1; // XXX: There's an off-by-one error in libsoup
-
-			_input_stream = new WebInputStream (this);
-			_output_stream = new WebOutputStream (this);
-
-			state = websocket.state;
-			_pending_io = (state == OPEN) ? IOCondition.OUT : IOCondition.IN;
-
-			main_context = MainContext.ref_thread_default ();
 
 			websocket.closed.connect (on_closed);
 			websocket.message.connect (on_message);
@@ -933,51 +897,50 @@ namespace Frida {
 			websocket.closed.disconnect (on_closed);
 		}
 
-		public override bool close (GLib.Cancellable? cancellable) throws IOError {
-			_close ();
-			return true;
-		}
-
-		public override async bool close_async (int io_priority, GLib.Cancellable? cancellable) throws IOError {
-			_close ();
-			return true;
-		}
-
-		private void _close () {
-			if (main_context.is_owner ()) {
-				do_close ();
-			} else {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					do_close ();
-					return Source.REMOVE;
-				});
-				source.attach (main_context);
+		protected override VirtualStream.State query_initial_state () {
+			switch (websocket.state) {
+				case OPEN:
+				case CLOSING:
+					return OPEN;
+				case CLOSED:
+					return CLOSED;
 			}
+			assert_not_reached ();
 		}
 
-		private void do_close () {
+		protected override IOCondition query_events () {
+			IOCondition new_events = 0;
+
+			if (recv_queue.len > 0 || state != OPEN)
+				new_events |= IN;
+
+			if (state == OPEN)
+				new_events |= OUT;
+
+			return new_events;
+		}
+
+		protected override void handle_close () {
 			if (websocket.state != OPEN)
 				return;
 
 			websocket.close (1000, "Closing");
 		}
 
-		public ssize_t recv (uint8[] buffer) throws IOError {
-			ssize_t n;
-			lock (state) {
+		public override ssize_t read (uint8[] buffer) throws IOError {
+			ssize_t n = 0;
+			with_state_lock (() => {
 				n = ssize_t.min (recv_queue.len, buffer.length);
 				if (n > 0) {
 					Memory.copy (buffer, recv_queue.data, n);
 					recv_queue.remove_range (0, (uint) n);
 
-					recompute_pending_io_unlocked ();
+					update_pending_io ();
 				} else {
 					if (state == OPEN)
 						n = -1;
 				}
-
-			}
+			});
 
 			if (n == -1)
 				throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
@@ -985,9 +948,10 @@ namespace Frida {
 			return n;
 		}
 
-		public ssize_t send (uint8[] buffer) {
-			lock (state)
+		public override ssize_t write (uint8[] buffer) {
+			with_state_lock (() => {
 				send_queue.append (buffer);
+			});
 
 			if (main_context.is_owner ()) {
 				process_send_queue ();
@@ -1011,190 +975,34 @@ namespace Frida {
 
 			while (true) {
 				uint8[]? chunk = null;
-				lock (state) {
+				with_state_lock (() => {
 					size_t n = size_t.min (send_queue.len, max_message_size);
 					if (n == 0)
 						return;
 					chunk = send_queue.data[0:n];
 					send_queue.remove_range (0, (uint) n);
-				}
+				});
+				if (chunk == null)
+					return;
 
 				websocket.send_binary (chunk);
 			}
 		}
 
-		public void register_source (Source source, IOCondition condition) {
-			lock (state)
-				sources[source] = condition;
-		}
-
-		public void unregister_source (Source source) {
-			lock (state)
-				sources.unset (source);
-		}
-
 		private void on_closed () {
-			lock (state) {
-				state = websocket.state;
-				recompute_pending_io_unlocked ();
-			}
+			with_state_lock (() => {
+				state = CLOSED;
+				update_pending_io ();
+			});
 
 			websocket_closed ();
 		}
 
 		private void on_message (int type, Bytes message) {
-			lock (state) {
+			with_state_lock (() => {
 				recv_queue.append (message.get_data ());
-				recompute_pending_io_unlocked ();
-			}
-		}
-
-		private void recompute_pending_io_unlocked () {
-			IOCondition new_io = 0;
-			if (recv_queue.len > 0 || state != OPEN)
-				new_io |= IN;
-			if (state == OPEN)
-				new_io |= OUT;
-			_pending_io = new_io;
-
-			foreach (var entry in sources.entries) {
-				unowned Source source = entry.key;
-				IOCondition c = entry.value;
-				if ((new_io & c) != 0)
-					source.set_ready_time (0);
-			}
-		}
-	}
-
-	private class WebInputStream : InputStream, PollableInputStream {
-		public weak WebConnection connection {
-			get;
-			construct;
-		}
-
-		public WebInputStream (WebConnection connection) {
-			Object (connection: connection);
-		}
-
-		public override bool close (Cancellable? cancellable) throws IOError {
-			return true;
-		}
-
-		public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-			return close (cancellable);
-		}
-
-		public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
-		}
-
-		public bool can_poll () {
-			return true;
-		}
-
-		public bool is_readable () {
-			return (connection.pending_io & IOCondition.IN) != 0;
-		}
-
-		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new WebIOSource (connection, IOCondition.IN), cancellable);
-		}
-
-		public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
-			return connection.recv (buffer);
-		}
-	}
-
-	private class WebOutputStream : OutputStream, PollableOutputStream {
-		public weak WebConnection connection {
-			get;
-			construct;
-		}
-
-		public WebOutputStream (WebConnection connection) {
-			Object (connection: connection);
-		}
-
-		public override bool close (Cancellable? cancellable) throws IOError {
-			return true;
-		}
-
-		public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-			return close (cancellable);
-		}
-
-		public override bool flush (GLib.Cancellable? cancellable) throws GLib.Error {
-			return true;
-		}
-
-		public override async bool flush_async (int io_priority, GLib.Cancellable? cancellable) throws GLib.Error {
-			return true;
-		}
-
-		public override ssize_t write (uint8[] buffer, Cancellable? cancellable) throws IOError {
-			assert_not_reached ();
-		}
-
-		public bool can_poll () {
-			return true;
-		}
-
-		public bool is_writable () {
-			return (connection.pending_io & IOCondition.OUT) != 0;
-		}
-
-		public PollableSource create_source (Cancellable? cancellable) {
-			return new PollableSource.full (this, new WebIOSource (connection, IOCondition.OUT), cancellable);
-		}
-
-		public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
-			return connection.send (buffer);
-		}
-
-		public PollableReturn writev_nonblocking_fn (OutputVector[] vectors, out size_t bytes_written) throws GLib.Error {
-			assert_not_reached ();
-		}
-	}
-
-	private class WebIOSource : Source {
-		public WebConnection connection;
-		public IOCondition condition;
-
-		public WebIOSource (WebConnection connection, IOCondition condition) {
-			this.connection = connection;
-			this.condition = condition;
-
-			connection.register_source (this, condition);
-		}
-
-		~WebIOSource () {
-			connection.unregister_source (this);
-		}
-
-		protected override bool prepare (out int timeout) {
-			timeout = -1;
-			return (connection.pending_io & condition) != 0;
-		}
-
-		protected override bool check () {
-			return (connection.pending_io & condition) != 0;
-		}
-
-		protected override bool dispatch (SourceFunc? callback) {
-			set_ready_time (-1);
-
-			if (callback == null)
-				return Source.REMOVE;
-
-			return callback ();
-		}
-
-		protected static bool closure_callback (Closure closure) {
-			var return_value = Value (typeof (bool));
-
-			closure.invoke (ref return_value, {});
-
-			return return_value.get_boolean ();
+				update_pending_io ();
+			});
 		}
 	}
 }

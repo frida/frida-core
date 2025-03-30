@@ -394,7 +394,7 @@ namespace Frida.Fruity {
 			source.attach (main_context);
 		}
 
-		private class TcpConnection : IOStream, AsyncInitable {
+		private class TcpConnection : VirtualStream, AsyncInitable {
 			public VirtualNetworkStack netstack {
 				get;
 				construct;
@@ -405,52 +405,12 @@ namespace Frida.Fruity {
 				construct;
 			}
 
-			public State state {
-				get {
-					return _state;
-				}
-			}
-
-			public override InputStream input_stream {
-				get {
-					return _input_stream;
-				}
-			}
-
-			public override OutputStream output_stream {
-				get {
-					return _output_stream;
-				}
-			}
-
-			public IOCondition pending_io {
-				get {
-					lock (state)
-						return events;
-				}
-			}
-
 			private Promise<bool> established = new Promise<bool> ();
 
-			private State _state = OPENING;
-			private TcpInputStream _input_stream;
-			private TcpOutputStream _output_stream;
-
 			private unowned LWIP.TcpPcb? pcb;
-			private IOCondition events = 0;
 			private ByteArray rx_buf = new ByteArray.sized (64 * 1024);
 			private ByteArray tx_buf = new ByteArray.sized (64 * 1024);
 			private size_t tx_space_available = 0;
-
-			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
-
-			private MainContext main_context;
-
-			public enum State {
-				OPENING,
-				OPENED,
-				CLOSED
-			}
 
 			public static async TcpConnection open (VirtualNetworkStack netstack, InetSocketAddress address,
 					Cancellable? cancellable) throws Error, IOError {
@@ -469,20 +429,26 @@ namespace Frida.Fruity {
 				Object (netstack: netstack, address: address);
 			}
 
-			construct {
-				_input_stream = new TcpInputStream (this);
-				_output_stream = new TcpOutputStream (this);
-
-				main_context = MainContext.ref_thread_default ();
-			}
-
 			public override void dispose () {
-				_output_stream.detach ();
-				_input_stream.detach ();
-
 				stop ();
 
 				base.dispose ();
+			}
+
+			protected override VirtualStream.State query_initial_state () {
+				return OPENING;
+			}
+
+			protected override IOCondition query_events () {
+				IOCondition new_events = 0;
+
+				if (rx_buf.len != 0 || state == CLOSED)
+					new_events |= IN;
+
+				if (tx_space_available != 0)
+					new_events |= OUT;
+
+				return new_events;
 			}
 
 			private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
@@ -547,8 +513,8 @@ namespace Frida.Fruity {
 					return OK;
 				});
 
-				_state = CLOSED;
-				update_events ();
+				state = CLOSED;
+				update_pending_io ();
 			}
 
 			private void detach_from_pcb () {
@@ -557,12 +523,13 @@ namespace Frida.Fruity {
 			}
 
 			private void on_connect () {
-				lock (state)
+				with_state_lock (() => {
 					tx_space_available = pcb.query_available_send_buffer_space ();
-				update_events ();
+				});
+				update_pending_io ();
 
 				schedule_on_frida_thread (() => {
-					_state = OPENED;
+					state = OPEN;
 
 					if (!established.future.ready)
 						established.resolve (true);
@@ -575,8 +542,8 @@ namespace Frida.Fruity {
 				if (pbuf == null) {
 					detach_from_pcb ();
 					schedule_on_frida_thread (() => {
-						_state = CLOSED;
-						update_events ();
+						state = CLOSED;
+						update_pending_io ();
 						return Source.REMOVE;
 					});
 					return;
@@ -584,15 +551,17 @@ namespace Frida.Fruity {
 
 				var buffer = new uint8[pbuf.tot_len];
 				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
-				lock (state)
+				with_state_lock (() => {
 					rx_buf.append (chunk[:pbuf.tot_len]);
-				update_events ();
+				});
+				update_pending_io ();
 			}
 
 			private void on_sent (uint16 len) {
-				lock (state)
+				with_state_lock (() => {
 					tx_space_available = pcb.query_available_send_buffer_space () - tx_buf.len;
-				update_events ();
+				});
+				update_pending_io ();
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
@@ -602,8 +571,8 @@ namespace Frida.Fruity {
 				else
 					detach_from_pcb ();
 				schedule_on_frida_thread (() => {
-					_state = CLOSED;
-					update_events ();
+					state = CLOSED;
+					update_pending_io ();
 
 					if (!established.future.ready)
 						established.reject (parse_error (err));
@@ -612,17 +581,11 @@ namespace Frida.Fruity {
 				});
 			}
 
-			public override bool close (GLib.Cancellable? cancellable) throws IOError {
+			protected override void handle_close () {
 				stop ();
-				return true;
 			}
 
-			public override async bool close_async (int io_priority, GLib.Cancellable? cancellable) throws IOError {
-				stop ();
-				return true;
-			}
-
-			public void shutdown_rx () throws IOError {
+			public override void shutdown_read () throws IOError {
 				check_io (netstack.perform_on_lwip_thread (() => {
 					if (pcb == null)
 						return OK;
@@ -630,7 +593,7 @@ namespace Frida.Fruity {
 				}));
 			}
 
-			public void shutdown_tx () throws IOError {
+			public override void shutdown_write () throws IOError {
 				check_io (netstack.perform_on_lwip_thread (() => {
 					if (pcb == null)
 						return OK;
@@ -638,17 +601,19 @@ namespace Frida.Fruity {
 				}));
 			}
 
-			public ssize_t recv (uint8[] buffer) throws IOError {
+			public override ssize_t read (uint8[] buffer) throws IOError {
 				ssize_t n = 0;
 
 				netstack.perform_on_lwip_thread (() => {
-					lock (state) {
+					with_state_lock (() => {
 						n = ssize_t.min (buffer.length, rx_buf.len);
 						if (n == 0)
-							return OK;
+							return;
 						Memory.copy (buffer, rx_buf.data, n);
 						rx_buf.remove_range (0, (uint) n);
-					}
+					});
+					if (n == 0)
+						return OK;
 
 					if (pcb == null)
 						return OK;
@@ -664,41 +629,43 @@ namespace Frida.Fruity {
 				});
 
 				if (n == 0) {
-					if (_state == CLOSED)
+					if (state == CLOSED)
 						return 0;
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 				}
 
-				update_events ();
+				update_pending_io ();
 
 				return n;
 			}
 
-			public ssize_t send (uint8[] buffer) throws IOError {
+			public override ssize_t write (uint8[] buffer) throws IOError {
 				ssize_t n = 0;
 
 				netstack.perform_on_lwip_thread (() => {
 					if (pcb == null)
 						return OK;
 
-					lock (state) {
+					with_state_lock (() => {
 						n = ssize_t.min (buffer.length, (ssize_t) tx_space_available);
 						if (n == 0)
-							return OK;
+							return;
 						tx_buf.append (buffer[:n]);
 						tx_space_available -= n;
-					}
+					});
+					if (n == 0)
+						return OK;
 
 					size_t available_space = pcb.query_available_send_buffer_space ();
 
 					uint8[]? data = null;
-					lock (state) {
+					with_state_lock (() => {
 						size_t num_bytes_to_write = size_t.min (tx_buf.len, available_space);
 						if (num_bytes_to_write != 0) {
 							data = tx_buf.data[:num_bytes_to_write];
 							tx_buf.remove_range (0, (uint) num_bytes_to_write);
 						}
-					}
+					});
 					if (data == null)
 						return OK;
 
@@ -706,8 +673,9 @@ namespace Frida.Fruity {
 					pcb.output ();
 
 					available_space = pcb.query_available_send_buffer_space ();
-					lock (state)
+					with_state_lock (() => {
 						tx_space_available = available_space - tx_buf.len;
+					});
 
 					return OK;
 				});
@@ -715,243 +683,15 @@ namespace Frida.Fruity {
 				if (n == 0)
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 
-				update_events ();
+				update_pending_io ();
 
 				return n;
-			}
-
-			public void register_source (Source source, IOCondition condition) {
-				lock (state)
-					sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
-			}
-
-			public void unregister_source (Source source) {
-				lock (state)
-					sources.unset (source);
-			}
-
-			private void update_events () {
-				lock (state) {
-					IOCondition new_events = 0;
-
-					if (rx_buf.len != 0 || _state == CLOSED)
-						new_events |= IN;
-
-					if (tx_space_available != 0)
-						new_events |= OUT;
-
-					events = new_events;
-
-					foreach (var entry in sources.entries) {
-						unowned Source source = entry.key;
-						IOCondition c = entry.value;
-						if ((new_events & c) != 0)
-							source.set_ready_time (0);
-					}
-				}
-
-				notify_property ("pending-io");
 			}
 
 			private void schedule_on_frida_thread (owned SourceFunc function) {
 				var source = new IdleSource ();
 				source.set_callback ((owned) function);
 				source.attach (main_context);
-			}
-		}
-
-		private class TcpInputStream : InputStream, PollableInputStream {
-			private weak TcpConnection connection;
-
-			public TcpInputStream (TcpConnection connection) {
-				Object ();
-				this.connection = connection;
-			}
-
-			internal void detach () {
-				connection = null;
-			}
-
-			public override bool close (Cancellable? cancellable) throws IOError {
-				if (connection != null)
-					connection.shutdown_rx ();
-				return true;
-			}
-
-			public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-				return close (cancellable);
-			}
-
-			public override ssize_t read (uint8[] buffer, Cancellable? cancellable) throws IOError {
-				if (connection == null)
-					return 0;
-
-				if (!is_readable ()) {
-					bool done = false;
-					var mutex = Mutex ();
-					var cond = Cond ();
-
-					ulong io_handler = connection.notify["pending-io"].connect ((obj, pspec) => {
-						if (is_readable ()) {
-							mutex.lock ();
-							done = true;
-							cond.signal ();
-							mutex.unlock ();
-						}
-					});
-					ulong cancellation_handler = 0;
-					if (cancellable != null) {
-						cancellation_handler = cancellable.connect (() => {
-							mutex.lock ();
-							done = true;
-							cond.signal ();
-							mutex.unlock ();
-						});
-					}
-
-					if (!is_readable ()) {
-						mutex.lock ();
-						while (!done)
-							cond.wait (mutex);
-						mutex.unlock ();
-					}
-
-					if (cancellation_handler != 0)
-						cancellable.disconnect (cancellation_handler);
-					connection.disconnect (io_handler);
-
-					cancellable.set_error_if_cancelled ();
-				}
-
-				return connection.recv (buffer);
-			}
-
-			public bool can_poll () {
-				return true;
-			}
-
-			public bool is_readable () {
-				if (connection == null)
-					return true;
-				return (connection.pending_io & IOCondition.IN) != 0;
-			}
-
-			public PollableSource create_source (Cancellable? cancellable) {
-				return new PollableSource.full (this, new TcpIOSource (connection, IOCondition.IN), cancellable);
-			}
-
-			public ssize_t read_nonblocking_fn (uint8[] buffer) throws GLib.Error {
-				if (connection == null)
-					return 0;
-				return connection.recv (buffer);
-			}
-		}
-
-		private class TcpOutputStream : OutputStream, PollableOutputStream {
-			private weak TcpConnection? connection;
-
-			public TcpOutputStream (TcpConnection connection) {
-				Object ();
-				this.connection = connection;
-			}
-
-			internal void detach () {
-				connection = null;
-			}
-
-			public override bool close (Cancellable? cancellable) throws IOError {
-				if (connection != null)
-					connection.shutdown_tx ();
-				return true;
-			}
-
-			public override async bool close_async (int io_priority, Cancellable? cancellable) throws GLib.IOError {
-				return close (cancellable);
-			}
-
-			public override bool flush (GLib.Cancellable? cancellable) throws GLib.Error {
-				return true;
-			}
-
-			public override async bool flush_async (int io_priority, GLib.Cancellable? cancellable) throws GLib.Error {
-				return true;
-			}
-
-			public override ssize_t write (uint8[] buffer, Cancellable? cancellable) throws IOError {
-				assert_not_reached ();
-			}
-
-			public bool can_poll () {
-				return true;
-			}
-
-			public bool is_writable () {
-				if (connection == null)
-					return false;
-				return (connection.pending_io & IOCondition.OUT) != 0;
-			}
-
-			public PollableSource create_source (Cancellable? cancellable) {
-				return new PollableSource.full (this, new TcpIOSource (connection, IOCondition.OUT), cancellable);
-			}
-
-			public ssize_t write_nonblocking_fn (uint8[]? buffer) throws GLib.Error {
-				if (connection == null)
-					throw new IOError.CLOSED ("Connection is closed");
-				return connection.send (buffer);
-			}
-
-			public PollableReturn writev_nonblocking_fn (OutputVector[] vectors, out size_t bytes_written) throws GLib.Error {
-				assert_not_reached ();
-			}
-		}
-
-		private class TcpIOSource : Source {
-			public TcpConnection connection;
-			public IOCondition condition;
-
-			public TcpIOSource (TcpConnection? connection, IOCondition condition) {
-				this.connection = connection;
-				this.condition = condition;
-
-				if (connection != null)
-					connection.register_source (this, condition);
-			}
-
-			~TcpIOSource () {
-				if (connection != null)
-					connection.unregister_source (this);
-			}
-
-			protected override bool prepare (out int timeout) {
-				timeout = -1;
-				return is_ready ();
-			}
-
-			protected override bool check () {
-				return is_ready ();
-			}
-
-			private bool is_ready () {
-				IOCondition pending_io = (connection != null) ? connection.pending_io : IOCondition.IN;
-				return (pending_io & condition) != 0;
-			}
-
-			protected override bool dispatch (SourceFunc? callback) {
-				set_ready_time (-1);
-
-				if (callback == null)
-					return Source.REMOVE;
-
-				return callback ();
-			}
-
-			protected static bool closure_callback (Closure closure) {
-				var return_value = Value (typeof (bool));
-
-				closure.invoke (ref return_value, {});
-
-				return return_value.get_boolean ();
 			}
 		}
 
@@ -969,13 +709,13 @@ namespace Frida.Fruity {
 
 			public IOCondition pending_io {
 				get {
-					lock (events)
-						return events;
+					lock (_pending_io)
+						return _pending_io;
 				}
 			}
 
 			private unowned LWIP.UdpPcb? pcb;
-			private IOCondition events = OUT;
+			private IOCondition _pending_io = OUT;
 			private Gee.Queue<Packet> rx_queue = new Gee.ArrayQueue<Packet> ();
 
 			private Gee.Map<unowned Source, IOCondition> sources = new Gee.HashMap<unowned Source, IOCondition> ();
@@ -1011,9 +751,9 @@ namespace Frida.Fruity {
 				var sender = ip6_address_to_inet_socket_address (addr, port);
 				var packet = new Packet (bytes, sender);
 
-				lock (events)
+				lock (pending_io)
 					rx_queue.offer (packet);
-				update_events ();
+				update_pending_io ();
 			}
 
 			public void bind (InetSocketAddress address) throws Error {
@@ -1047,14 +787,14 @@ namespace Frida.Fruity {
 				int received;
 				for (received = 0; received != messages.length; received++) {
 					Packet? packet;
-					lock (events)
+					lock (pending_io)
 						packet = rx_queue.poll ();
 					if (packet == null) {
 						if (received == 0)
 							throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 						break;
 					}
-					update_events ();
+					update_pending_io ();
 
 					if (messages[received].address != null)
 						*messages[received].address = packet.address.ref ();
@@ -1133,28 +873,26 @@ namespace Frida.Fruity {
 			}
 
 			public void register_source (Source source, IOCondition condition) {
-				lock (events)
+				lock (pending_io)
 					sources[source] = condition | IOCondition.ERR | IOCondition.HUP;
 			}
 
 			public void unregister_source (Source source) {
-				lock (events)
+				lock (pending_io)
 					sources.unset (source);
 			}
 
-			private void update_events () {
-				lock (events) {
-					IOCondition new_events = OUT;
+			private void update_pending_io () {
+				lock (pending_io) {
+					_pending_io = OUT;
 
 					if (!rx_queue.is_empty)
-						new_events |= IN;
-
-					events = new_events;
+						_pending_io |= IN;
 
 					foreach (var entry in sources.entries) {
 						unowned Source source = entry.key;
 						IOCondition c = entry.value;
-						if ((new_events & c) != 0)
+						if ((_pending_io & c) != 0)
 							source.set_ready_time (0);
 					}
 				}
