@@ -484,6 +484,14 @@ namespace Frida.HostSessionTest {
 			public void unlink_channel (HostSession host_session, ChannelId id) {
 				assert_not_reached ();
 			}
+
+			public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id,
+					Cancellable? cancellable) throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Not implemented");
+			}
+
+			public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+			}
 		}
 
 #if HAVE_LOCAL_BACKEND

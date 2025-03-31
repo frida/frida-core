@@ -174,6 +174,10 @@ namespace Frida {
 		public abstract async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable = null)
 			throws Error, IOError;
 		public abstract void unlink_channel (HostSession host_session, ChannelId id);
+
+		public abstract async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id,
+			Cancellable? cancellable = null) throws Error, IOError;
+		public abstract void unlink_service_session (HostSession host_session, ServiceSessionId id);
 	}
 
 	public enum HostSessionProviderKind {
@@ -192,10 +196,6 @@ namespace Frida {
 
 	public interface HostChannelProvider : Object {
 		public abstract async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError;
-	}
-
-	public interface HostServiceProvider : Object {
-		public abstract async Service open_service (string address, Cancellable? cancellable = null) throws Error, IOError;
 	}
 
 	public interface Pairable : Object {
@@ -317,6 +317,14 @@ namespace Frida {
 		}
 
 		public void unlink_channel (HostSession host_session, ChannelId id) {
+		}
+
+		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
+				throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+		}
+
+		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -891,6 +899,10 @@ namespace Frida {
 
 		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
+		}
+
+		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
 		}
 
 #if !WINDOWS

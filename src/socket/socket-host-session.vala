@@ -256,6 +256,18 @@ namespace Frida {
 				entry.unlink_channel (id);
 		}
 
+		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
+				throws Error, IOError {
+			var entry = get_host_entry_by_session (host_session);
+			return yield entry.link_service_session (id, cancellable);
+		}
+
+		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+			var entry = find_host_entry_by_session (host_session);
+			if (entry != null)
+				entry.unlink_service_session (id);
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -283,6 +295,7 @@ namespace Frida {
 			private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
 				new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 			private ChannelRegistry channel_registry = new ChannelRegistry ();
+			private ServiceSessionRegistry service_session_registry = new ServiceSessionRegistry ();
 
 			private Cancellable io_cancellable = new Cancellable ();
 
@@ -323,6 +336,8 @@ namespace Frida {
 				agent_sessions.clear ();
 
 				channel_registry.clear ();
+
+				service_session_registry.clear ();
 
 				if (reason != CONNECTION_TERMINATED) {
 					try {
@@ -369,6 +384,18 @@ namespace Frida {
 
 			public void unlink_channel (ChannelId id) {
 				channel_registry.unlink (id);
+			}
+
+			public async ServiceSession link_service_session (ServiceSessionId id, Cancellable? cancellable)
+					throws Error, IOError {
+				ServiceSession session = yield connection.get_proxy (null, ObjectPath.for_service_session (id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
+				service_session_registry.register (id, session);
+				return session;
+			}
+
+			public void unlink_service_session (ServiceSessionId id) {
+				service_session_registry.unlink (id);
 			}
 
 			private bool on_keepalive_tick () {

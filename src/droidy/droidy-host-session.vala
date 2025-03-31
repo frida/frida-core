@@ -180,6 +180,14 @@ namespace Frida {
 			this.host_session.unlink_channel (id);
 		}
 
+		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
+				throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+		}
+
+		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -908,6 +916,10 @@ namespace Frida {
 
 		private void on_channel_closed (ChannelId id) {
 			channel_closed (id);
+		}
+
+		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
 		}
 
 		private void on_gadget_entry_detached (GadgetEntry entry, SessionDetachReason reason) {

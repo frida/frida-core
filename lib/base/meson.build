@@ -2,6 +2,7 @@ base_sources = [
   'session.vala',
   'session-glue.c',
   'channel.vala',
+  'service.vala',
   'stream.vala',
   'rpc.vala',
   'p2p.vala',

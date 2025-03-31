@@ -551,7 +551,6 @@ namespace Frida {
 		private Gee.HashSet<Promise<Session>> pending_attach_requests = new Gee.HashSet<Promise<Session>> ();
 		private Gee.HashMap<AgentSessionId?, Promise<bool>> pending_detach_requests =
 			new Gee.HashMap<AgentSessionId?, Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
-		private Gee.Set<Service> services = new Gee.HashSet<Service> ();
 		private Bus _bus;
 
 		public delegate bool ProcessPredicate (Process process);
@@ -1267,15 +1266,18 @@ namespace Frida {
 		public async Service open_service (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			var service_provider = provider as HostServiceProvider;
-			if (service_provider == null)
-				throw new Error.NOT_SUPPORTED ("Services are not supported by this device");
+			var host_session = yield get_host_session (cancellable);
 
-			var service = yield service_provider.open_service (address, cancellable);
-			service.close.connect (on_service_closed);
-			services.add (service);
+			ServiceSessionId id;
+			try {
+				id = yield host_session.open_service (address, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 
-			return service;
+			var service_session = yield provider.link_service_session (host_session, id, cancellable);
+
+			return new Service (service_session);
 		}
 
 		public Service open_service_sync (string address, Cancellable? cancellable = null) throws Error, IOError {
@@ -1290,10 +1292,6 @@ namespace Frida {
 			protected override async Service perform_operation () throws Error, IOError {
 				return yield parent.open_service (address, cancellable);
 			}
-		}
-
-		private void on_service_closed (Service service) {
-			services.remove (service);
 		}
 
 		public async void unpair (Cancellable? cancellable = null) throws Error, IOError {
@@ -1394,10 +1392,6 @@ namespace Frida {
 			close_request = new Promise<bool> ();
 
 			try {
-				foreach (var service in services.to_array ())
-					yield service.cancel (cancellable);
-				services.clear ();
-
 				while (!pending_detach_requests.is_empty) {
 					var iterator = pending_detach_requests.entries.iterator ();
 					iterator.next ();
@@ -2005,13 +1999,71 @@ namespace Frida {
 		}
 	}
 
-	public interface Service : Object {
+	public sealed class Service : Object {
 		public signal void close ();
 		public signal void message (Variant message);
 
-		public abstract bool is_closed ();
+		private ServiceSession? session;
+		private bool disposed = false;
 
-		public abstract async void activate (Cancellable? cancellable = null) throws Error, IOError;
+		internal Service (ServiceSession session) {
+			this.session = session;
+
+			session.close.connect (on_close);
+			session.message.connect (on_message);
+		}
+
+		public override void dispose () {
+			if (!disposed) {
+				disposed = true;
+
+				MainContext context = get_main_context ();
+				if (context.is_owner ()) {
+					abandon ();
+				} else {
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						abandon ();
+						return false;
+					});
+					source.attach (context);
+				}
+			}
+
+			base.dispose ();
+		}
+
+		~Service () {
+			forget_session ();
+		}
+
+		private void abandon () {
+			var s = session;
+			if (s != null) {
+				forget_session ();
+				s.cancel.begin (null);
+			}
+		}
+
+		private void forget_session () {
+			session.close.disconnect (on_close);
+			session.message.disconnect (on_message);
+			session = null;
+		}
+
+		public bool is_closed () {
+			return session == null;
+		}
+
+		public async void activate (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			try {
+				yield session.activate (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
 
 		public void activate_sync (Cancellable? cancellable = null) throws Error, IOError {
 			create<ActivateTask> ().execute (cancellable);
@@ -2023,7 +2075,17 @@ namespace Frida {
 			}
 		}
 
-		public abstract async void cancel (Cancellable? cancellable = null) throws IOError;
+		public async void cancel (Cancellable? cancellable = null) throws IOError {
+			if (session == null)
+				return;
+
+			try {
+				yield session.cancel (cancellable);
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					cancellable.set_error_if_cancelled ();
+			}
+		}
 
 		public void cancel_sync (Cancellable? cancellable = null) throws IOError {
 			try {
@@ -2039,7 +2101,15 @@ namespace Frida {
 			}
 		}
 
-		public abstract async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError;
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			try {
+				return yield session.request (parameters, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
 
 		public Variant request_sync (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<RequestTask> () as RequestTask;
@@ -2053,6 +2123,20 @@ namespace Frida {
 			protected override async Variant perform_operation () throws Error, IOError {
 				return yield parent.request (parameters, cancellable);
 			}
+		}
+
+		private void check_open () throws Error {
+			if (session == null)
+				throw new Error.INVALID_OPERATION ("Session is gone");
+		}
+
+		private void on_close () {
+			forget_session ();
+			close ();
+		}
+
+		private void on_message (Variant v) {
+			message (v);
 		}
 
 		private T create<T> () {

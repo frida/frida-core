@@ -42,7 +42,7 @@ namespace Frida {
 		}
 	}
 
-	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, HostServiceProvider, Pairable {
+	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, Pairable {
 		public Fruity.Device device {
 			get;
 			construct;
@@ -130,43 +130,27 @@ namespace Frida {
 			this.host_session.unlink_channel (id);
 		}
 
+		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
+				throws Error, IOError {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return this.host_session.link_service_session (id);
+		}
+
+		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_service_session (id);
+		}
+
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
 			return yield device.open_channel (address, cancellable);
-		}
-
-		public async Service open_service (string address, Cancellable? cancellable) throws Error, IOError {
-			string[] tokens = address.split (":", 2);
-			unowned string protocol = tokens[0];
-			unowned string service_name = tokens[1];
-
-			if (protocol == "plist") {
-				var stream = yield device.open_lockdown_service (service_name, cancellable);
-
-				return new PlistService (stream);
-			}
-
-			if (protocol == "dtx") {
-				var connection = yield Fruity.DTXConnection.obtain (device, cancellable);
-
-				return new DTXService (service_name, connection);
-			}
-
-			if (protocol == "xpc") {
-				var tunnel = yield device.find_tunnel (cancellable);
-				if (tunnel == null)
-					throw new Error.NOT_SUPPORTED ("RemoteXPC not supported by device");
-
-				var service_info = tunnel.discovery.get_service (service_name);
-				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
-
-				return new XpcService (new Fruity.XpcConnection (stream));
-			}
-
-			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
 
 		private async void unpair (Cancellable? cancellable) throws Error, IOError {
@@ -203,6 +187,8 @@ namespace Frida {
 
 		private ChannelRegistry channel_registry = new ChannelRegistry ();
 
+		private ServiceSessionRegistry service_session_registry = new ServiceSessionRegistry ();
+
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
@@ -222,6 +208,7 @@ namespace Frida {
 
 		construct {
 			channel_registry.channel_closed.connect (on_channel_closed);
+			service_session_registry.session_closed.connect (on_service_session_closed);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -1077,6 +1064,58 @@ namespace Frida {
 			channel_closed (id);
 		}
 
+		private void on_service_session_closed (ServiceSessionId id) {
+			service_session_closed (id);
+		}
+
+		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			var session = yield do_open_service (address, cancellable);
+
+			var id = ServiceSessionId.generate ();
+			service_session_registry.register (id, session);
+
+			return id;
+		}
+
+		private async ServiceSession do_open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			string[] tokens = address.split (":", 2);
+			unowned string protocol = tokens[0];
+			unowned string service_name = tokens[1];
+
+			if (protocol == "plist") {
+				var stream = yield device.open_lockdown_service (service_name, cancellable);
+
+				return new PlistServiceSession (stream);
+			}
+
+			if (protocol == "dtx") {
+				var connection = yield Fruity.DTXConnection.obtain (device, cancellable);
+
+				return new DTXServiceSession (service_name, connection);
+			}
+
+			if (protocol == "xpc") {
+				var tunnel = yield device.find_tunnel (cancellable);
+				if (tunnel == null)
+					throw new Error.NOT_SUPPORTED ("RemoteXPC not supported by device");
+
+				var service_info = tunnel.discovery.get_service (service_name);
+				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
+
+				return new XpcServiceSession (new Fruity.XpcConnection (stream));
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unsupported service address");
+		}
+
+		public ServiceSession link_service_session (ServiceSessionId id) throws Error {
+			return service_session_registry.link (id);
+		}
+
+		public void unlink_service_session (ServiceSessionId id) {
+			service_session_registry.unlink (id);
+		}
+
 		private void add_lldb_session (LLDBSession session) {
 			lldb_sessions[session.process.pid] = session;
 
@@ -1612,22 +1651,16 @@ namespace Frida {
 		}
 	}
 
-	private sealed class PlistService : Object, Service {
+	private sealed class PlistServiceSession : Object, ServiceSession {
 		public IOStream stream {
 			get;
 			construct;
 		}
 
-		private State state = INACTIVE;
 		private Fruity.PlistServiceClient client;
 		private bool client_closed = false;
 
-		private enum State {
-			INACTIVE,
-			ACTIVE,
-		}
-
-		public PlistService (IOStream stream) {
+		public PlistServiceSession (IOStream stream) {
 			Object (stream: stream);
 		}
 
@@ -1636,8 +1669,8 @@ namespace Frida {
 			client.closed.connect (on_client_closed);
 		}
 
-		public bool is_closed () {
-			return client_closed;
+		~PlistServiceSession () {
+			client.closed.disconnect (on_client_closed);
 		}
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
@@ -1645,14 +1678,8 @@ namespace Frida {
 		}
 
 		private void ensure_active () throws Error {
-			if (state == INACTIVE) {
-				state = ACTIVE;
-
-				if (client_closed) {
-					close ();
-					throw new Error.INVALID_OPERATION ("Service is closed");
-				}
-			}
+			if (client_closed)
+				throw new Error.INVALID_OPERATION ("Service is closed");
 		}
 
 		public async void cancel (Cancellable? cancellable) throws IOError {
@@ -1661,6 +1688,8 @@ namespace Frida {
 			client_closed = true;
 
 			yield client.close (cancellable);
+
+			close ();
 		}
 
 		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
@@ -1815,7 +1844,7 @@ namespace Frida {
 		}
 	}
 
-	private sealed class DTXService : Object, Service {
+	private sealed class DTXServiceSession : Object, ServiceSession {
 		public string identifier {
 			get;
 			construct;
@@ -1835,7 +1864,7 @@ namespace Frida {
 			ACTIVE,
 		}
 
-		public DTXService (string identifier, Fruity.DTXConnection connection) {
+		public DTXServiceSession (string identifier, Fruity.DTXConnection connection) {
 			Object (identifier: identifier, connection: connection);
 		}
 
@@ -1843,8 +1872,8 @@ namespace Frida {
 			connection.notify["state"].connect (on_connection_state_changed);
 		}
 
-		public bool is_closed () {
-			return connection_closed;
+		~DTXServiceSession () {
+			connection.notify["state"].disconnect (on_connection_state_changed);
 		}
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
@@ -1852,13 +1881,11 @@ namespace Frida {
 		}
 
 		private void ensure_active () throws Error {
+			if (connection_closed)
+				throw new Error.INVALID_OPERATION ("Service is closed");
+
 			if (state == INACTIVE) {
 				state = ACTIVE;
-
-				if (connection_closed) {
-					close ();
-					throw new Error.INVALID_OPERATION ("Service is closed");
-				}
 
 				channel = connection.make_channel (identifier);
 				channel.invocation.connect (on_channel_invocation);
@@ -1870,7 +1897,13 @@ namespace Frida {
 			if (connection_closed)
 				return;
 			connection_closed = true;
-			channel = null;
+
+			if (channel != null) {
+				channel.invocation.disconnect (on_channel_invocation);
+				channel.notification.disconnect (on_channel_notification);
+				channel = null;
+			}
+
 			close ();
 		}
 
@@ -2084,7 +2117,7 @@ namespace Frida {
 		}
 	}
 
-	private sealed class XpcService : Object, Service {
+	private sealed class XpcServiceSession : Object, ServiceSession {
 		public Fruity.XpcConnection connection {
 			get;
 			construct;
@@ -2098,7 +2131,7 @@ namespace Frida {
 			ACTIVE,
 		}
 
-		public XpcService (Fruity.XpcConnection connection) {
+		public XpcServiceSession (Fruity.XpcConnection connection) {
 			Object (connection: connection);
 		}
 
@@ -2107,8 +2140,11 @@ namespace Frida {
 			connection.message.connect (on_message);
 		}
 
-		public bool is_closed () {
-			return connection_closed;
+		~XpcServiceSession () {
+			connection.close.disconnect (on_close);
+			connection.message.disconnect (on_message);
+
+			connection.cancel ();
 		}
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
@@ -2116,20 +2152,21 @@ namespace Frida {
 		}
 
 		private void ensure_active () throws Error {
+			if (connection_closed)
+				throw new Error.INVALID_OPERATION ("Service is closed");
+
 			if (state == INACTIVE) {
 				state = ACTIVE;
-
-				if (connection_closed) {
-					close ();
-					throw new Error.INVALID_OPERATION ("Service is closed");
-				}
 
 				connection.activate ();
 			}
 		}
 
 		public async void cancel (Cancellable? cancellable) throws IOError {
-			connection.cancel ();
+			if (state == ACTIVE)
+				connection.cancel ();
+			else if (!connection_closed)
+				on_close (null);
 		}
 
 		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
@@ -2153,6 +2190,7 @@ namespace Frida {
 
 		private void on_close (Error? error) {
 			connection_closed = true;
+
 			close ();
 		}
 

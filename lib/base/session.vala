@@ -29,6 +29,8 @@ namespace Frida {
 
 		public abstract async ChannelId open_channel (string address, Cancellable? cancellable) throws GLib.Error;
 
+		public abstract async ServiceSessionId open_service (string address, Cancellable? cancellable) throws GLib.Error;
+
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void child_added (HostChildInfo info);
@@ -37,6 +39,7 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 		public signal void channel_closed (ChannelId id);
+		public signal void service_session_closed (ServiceSessionId id);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
@@ -753,6 +756,16 @@ namespace Frida {
 		public signal void output (uint8[] data);
 	}
 
+	[DBus (name = "re.frida.ServiceSession16")]
+	public interface ServiceSession : Object {
+		public signal void close ();
+		public signal void message (Variant message);
+
+		public abstract async void activate (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void cancel (Cancellable? cancellable) throws GLib.Error;
+		public abstract async Variant request (Variant parameters, Cancellable? cancellable) throws GLib.Error;
+	}
+
 	[DBus (name = "re.frida.TransportBroker16")]
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
@@ -887,6 +900,10 @@ namespace Frida {
 		}
 
 		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 	}
@@ -1536,6 +1553,26 @@ namespace Frida {
 		}
 	}
 
+	public struct ServiceSessionId {
+		public string handle;
+
+		public ServiceSessionId (string handle) {
+			this.handle = handle;
+		}
+
+		public ServiceSessionId.generate () {
+			this.handle = Uuid.string_random ().replace ("-", "");
+		}
+
+		public static uint hash (ServiceSessionId? id) {
+			return id.handle.hash ();
+		}
+
+		public static bool equal (ServiceSessionId? a, ServiceSessionId? b) {
+			return a.handle == b.handle;
+		}
+	}
+
 	public struct AgentScriptId {
 		public uint handle;
 
@@ -2083,6 +2120,7 @@ namespace Frida {
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
 		public const string CHANNEL = "/re/frida/Channel";
+		public const string SERVICE = "/re/frida/Service";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
 		public const string PORTAL_SESSION = "/re/frida/PortalSession";
 		public const string BUS_SESSION = "/re/frida/BusSession";
@@ -2098,6 +2136,10 @@ namespace Frida {
 
 		public static string for_channel (ChannelId id) {
 			return CHANNEL + "/" + id.handle;
+		}
+
+		public static string for_service_session (ServiceSessionId id) {
+			return SERVICE + "/" + id.handle;
 		}
 	}
 

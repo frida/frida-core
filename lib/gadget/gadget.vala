@@ -1931,6 +1931,10 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Unable to open channels when embedded");
 			}
 
+			public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
+			}
+
 			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
 					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
