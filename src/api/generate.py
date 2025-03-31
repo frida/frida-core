@@ -470,7 +470,7 @@ def function_is_public(name):
             ]
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
-    return [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]
+    return [ApiObjectType(m.group(3), m.group(2)) for m in re.finditer(r"^\t+public\s+(sealed )?(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]
 
 def parse_vapi_functions(vapi) -> List[ApiFunction]:
     return [ApiFunction(m.group(1), m.group(0)) for m in re.finditer(r"^\tpublic static .+ (\w+) \(.+;", vapi, re.MULTILINE)]
