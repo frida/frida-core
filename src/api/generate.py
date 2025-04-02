@@ -288,12 +288,18 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
         "StaticAuthenticationService": "AuthenticationService",
     }
     internal_type_prefixes = [
+        "AgentMessageKind",
         "Fruity",
         "HostSession",
         "MessageType",
+        "PeerSetup",
+        "PortConflictBehavior",
         "ResultCode",
         "SpawnStartState",
         "State",
+        "StringTerminator",
+        "UnloadPolicy",
+        "WebService",
         "Winjector"
     ]
     seen_enum_names = set()
