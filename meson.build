@@ -431,7 +431,6 @@ if gi_dep.found()
 else
   girdir = get_option('prefix') / get_option('datadir') / 'gir-1.0'
 endif
-uninstalled_girdir = meson.current_build_dir() / 'src'
 
 vapidir = get_option('prefix') / get_option('datadir') / 'vala' / 'vapi'
 

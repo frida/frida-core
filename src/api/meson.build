@@ -71,6 +71,7 @@ if build_machine.system() == 'windows'
 else
   uninstalled_incdir = meson.current_build_dir()
 endif
+uninstalled_girdir = uninstalled_incdir
 uninstalled_vapidir = uninstalled_incdir
 
 uninstalled_variables = {
