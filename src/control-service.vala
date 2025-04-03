@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ControlService : Object {
+	public sealed class ControlService : Object {
 		public EndpointParameters endpoint_params {
 			get;
 			construct;
@@ -1115,7 +1115,7 @@ namespace Frida {
 		}
 	}
 
-	private class PrecreatedLocalHostSessionProvider : LocalHostSessionProvider {
+	private sealed class PrecreatedLocalHostSessionProvider : LocalHostSessionProvider {
 		public PrecreatedLocalHostSessionProvider (LocalHostSession session) {
 			take_host_session (session);
 		}
@@ -1125,7 +1125,7 @@ namespace Frida {
 		}
 	}
 
-	public class ControlServiceOptions : Object {
+	public sealed class ControlServiceOptions : Object {
 		public string? sysroot {
 			get;
 			set;

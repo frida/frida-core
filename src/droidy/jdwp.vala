@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaJDWP", gir_version = "1.0")]
 namespace Frida.JDWP {
-	public class Client : GLib.Object, AsyncInitable {
+	public sealed class Client : GLib.Object, AsyncInitable {
 		public signal void closed ();
 		public signal void events_received (Events events);
 
@@ -593,7 +593,7 @@ namespace Frida.JDWP {
 		public abstract string to_string ();
 	}
 
-	public class Byte : Value {
+	public sealed class Byte : Value {
 		public uint8 val {
 			get;
 			construct;
@@ -608,7 +608,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Char : Value {
+	public sealed class Char : Value {
 		public string val {
 			get;
 			construct;
@@ -623,7 +623,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Double : Value {
+	public sealed class Double : Value {
 		public double val {
 			get;
 			construct;
@@ -638,7 +638,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Float : Value {
+	public sealed class Float : Value {
 		public float val {
 			get;
 			construct;
@@ -653,7 +653,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Int : Value {
+	public sealed class Int : Value {
 		public int32 val {
 			get;
 			construct;
@@ -668,7 +668,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Long : Value {
+	public sealed class Long : Value {
 		public int64 val {
 			get;
 			construct;
@@ -698,7 +698,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Short : Value {
+	public sealed class Short : Value {
 		public int16 val {
 			get;
 			construct;
@@ -713,7 +713,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Void : Value {
+	public sealed class Void : Value {
 		public Void () {
 			GLib.Object (tag: ValueTag.VOID);
 		}
@@ -723,7 +723,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Boolean : Value {
+	public sealed class Boolean : Value {
 		public bool val {
 			get;
 			construct;
@@ -738,43 +738,43 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Array : Object {
+	public sealed class Array : Object {
 		public Array (ObjectID val) {
 			GLib.Object (tag: ValueTag.ARRAY, val: val);
 		}
 	}
 
-	public class ClassObject : Object {
+	public sealed class ClassObject : Object {
 		public ClassObject (ObjectID val) {
 			GLib.Object (tag: ValueTag.CLASS_OBJECT, val: val);
 		}
 	}
 
-	public class ThreadGroup : Object {
+	public sealed class ThreadGroup : Object {
 		public ThreadGroup (ObjectID val) {
 			GLib.Object (tag: ValueTag.THREAD_GROUP, val: val);
 		}
 	}
 
-	public class ClassLoader : Object {
+	public sealed class ClassLoader : Object {
 		public ClassLoader (ObjectID val) {
 			GLib.Object (tag: ValueTag.CLASS_LOADER, val: val);
 		}
 	}
 
-	public class String : Object {
+	public sealed class String : Object {
 		public String (ObjectID val) {
 			GLib.Object (tag: ValueTag.STRING, val: val);
 		}
 	}
 
-	public class Thread : Object {
+	public sealed class Thread : Object {
 		public Thread (ObjectID val) {
 			GLib.Object (tag: ValueTag.THREAD, val: val);
 		}
 	}
 
-	public class ClassInfo : GLib.Object {
+	public sealed class ClassInfo : GLib.Object {
 		public TaggedReferenceTypeID ref_type {
 			get;
 			construct;
@@ -815,7 +815,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodInfo : GLib.Object {
+	public sealed class MethodInfo : GLib.Object {
 		public MethodID id {
 			get;
 			construct;
@@ -992,7 +992,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Location : GLib.Object {
+	public sealed class Location : GLib.Object {
 		public TaggedReferenceTypeID declaring {
 			get;
 			construct;
@@ -1071,7 +1071,7 @@ namespace Frida.JDWP {
 		ALL          = 2,
 	}
 
-	public class Events : GLib.Object {
+	public sealed class Events : GLib.Object {
 		public SuspendPolicy suspend_policy {
 			get;
 			construct;
@@ -1119,7 +1119,7 @@ namespace Frida.JDWP {
 		public abstract string to_string ();
 	}
 
-	public class SingleStepEvent : Event {
+	public sealed class SingleStepEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1155,7 +1155,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class BreakpointEvent : Event {
+	public sealed class BreakpointEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1191,7 +1191,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class FramePopEvent : Event {
+	public sealed class FramePopEvent : Event {
 		public override string to_string () {
 			return "FramePopEvent()";
 		}
@@ -1201,7 +1201,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ExceptionEvent : Event {
+	public sealed class ExceptionEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1254,7 +1254,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class UserDefinedEvent : Event {
+	public sealed class UserDefinedEvent : Event {
 		public override string to_string () {
 			return "UserDefinedEvent()";
 		}
@@ -1264,7 +1264,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ThreadStartEvent : Event {
+	public sealed class ThreadStartEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1292,7 +1292,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ThreadDeathEvent : Event {
+	public sealed class ThreadDeathEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1320,7 +1320,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassPrepareEvent : Event {
+	public sealed class ClassPrepareEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1373,7 +1373,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassUnloadEvent : Event {
+	public sealed class ClassUnloadEvent : Event {
 		public string signature {
 			get;
 			construct;
@@ -1398,7 +1398,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassLoadEvent : Event {
+	public sealed class ClassLoadEvent : Event {
 		public override string to_string () {
 			return "ClassLoadEvent()";
 		}
@@ -1435,7 +1435,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class FieldAccessEvent : FieldEvent {
+	public sealed class FieldAccessEvent : FieldEvent {
 		public FieldAccessEvent (EventRequestID request, ThreadID thread, Location location, TaggedReferenceTypeID ref_type,
 				FieldID field, TaggedObjectID object) {
 			GLib.Object (
@@ -1471,7 +1471,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class FieldModificationEvent : FieldEvent {
+	public sealed class FieldModificationEvent : FieldEvent {
 		public Value value_to_be {
 			get;
 			construct;
@@ -1516,7 +1516,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ExceptionCatchEvent : Event {
+	public sealed class ExceptionCatchEvent : Event {
 		public override string to_string () {
 			return "ExceptionCatchEvent()";
 		}
@@ -1538,7 +1538,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodEntryEvent : MethodEvent {
+	public sealed class MethodEntryEvent : MethodEvent {
 		public MethodEntryEvent (EventRequestID request, ThreadID thread, Location location) {
 			GLib.Object (
 				kind: EventKind.METHOD_ENTRY,
@@ -1564,7 +1564,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodExitEvent : MethodEvent {
+	public sealed class MethodExitEvent : MethodEvent {
 		public MethodExitEvent (EventRequestID request, ThreadID thread, Location location) {
 			GLib.Object (
 				kind: EventKind.METHOD_EXIT,
@@ -1590,7 +1590,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodExitWithReturnValueEvent : MethodEvent {
+	public sealed class MethodExitWithReturnValueEvent : MethodEvent {
 		public Value retval {
 			get;
 			construct;
@@ -1641,7 +1641,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MonitorContendedEnterEvent : MonitorEvent {
+	public sealed class MonitorContendedEnterEvent : MonitorEvent {
 		public MonitorContendedEnterEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location) {
 			GLib.Object (
 				kind: EventKind.MONITOR_CONTENDED_ENTER,
@@ -1670,7 +1670,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MonitorContendedEnteredEvent : MonitorEvent {
+	public sealed class MonitorContendedEnteredEvent : MonitorEvent {
 		public MonitorContendedEnteredEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location) {
 			GLib.Object (
 				kind: EventKind.MONITOR_CONTENDED_ENTERED,
@@ -1699,7 +1699,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MonitorWaitEvent : MonitorEvent {
+	public sealed class MonitorWaitEvent : MonitorEvent {
 		public int64 timeout {
 			get;
 			construct;
@@ -1736,7 +1736,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MonitorWaitedEvent : MonitorEvent {
+	public sealed class MonitorWaitedEvent : MonitorEvent {
 		public bool timed_out {
 			get;
 			construct;
@@ -1774,7 +1774,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class VMStartEvent : Event {
+	public sealed class VMStartEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1799,7 +1799,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class VMDeathEvent : Event {
+	public sealed class VMDeathEvent : Event {
 		public VMDeathEvent (EventRequestID request) {
 			GLib.Object (kind: EventKind.VM_DEATH, request: request);
 		}
@@ -1814,7 +1814,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class VMDisconnectedEvent : Event {
+	public sealed class VMDisconnectedEvent : Event {
 		public override string to_string () {
 			return "VMDisconnectedEvent()";
 		}
@@ -1828,7 +1828,7 @@ namespace Frida.JDWP {
 		internal abstract void serialize (PacketBuilder builder);
 	}
 
-	public class CountModifier : EventModifier {
+	public sealed class CountModifier : EventModifier {
 		public int32 count {
 			get;
 			construct;
@@ -1845,7 +1845,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ThreadOnlyModifier : EventModifier {
+	public sealed class ThreadOnlyModifier : EventModifier {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1862,7 +1862,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassOnlyModifier : EventModifier {
+	public sealed class ClassOnlyModifier : EventModifier {
 		public ReferenceTypeID clazz {
 			get;
 			construct;
@@ -1879,7 +1879,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassMatchModifier : EventModifier {
+	public sealed class ClassMatchModifier : EventModifier {
 		public string class_pattern {
 			get;
 			construct;
@@ -1896,7 +1896,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassExcludeModifier : EventModifier {
+	public sealed class ClassExcludeModifier : EventModifier {
 		public string class_pattern {
 			get;
 			construct;
@@ -1913,7 +1913,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class LocationOnlyModifier : EventModifier {
+	public sealed class LocationOnlyModifier : EventModifier {
 		public Location location {
 			get;
 			construct;
@@ -1929,7 +1929,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ExceptionOnlyModifier : EventModifier {
+	public sealed class ExceptionOnlyModifier : EventModifier {
 		public ReferenceTypeID exception_or_null {
 			get;
 			construct;
@@ -1962,7 +1962,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class FieldOnlyModifier : EventModifier {
+	public sealed class FieldOnlyModifier : EventModifier {
 		public ReferenceTypeID declaring {
 			get;
 			construct;
@@ -1988,7 +1988,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class StepModifier : EventModifier {
+	public sealed class StepModifier : EventModifier {
 		public ThreadID thread {
 			get;
 			construct;
@@ -2032,7 +2032,7 @@ namespace Frida.JDWP {
 		OUT  = 2,
 	}
 
-	public class InstanceOnlyModifier : EventModifier {
+	public sealed class InstanceOnlyModifier : EventModifier {
 		public ObjectID instance {
 			get;
 			construct;
@@ -2049,7 +2049,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class SourceNameMatchModifier : EventModifier {
+	public sealed class SourceNameMatchModifier : EventModifier {
 		public string source_name_pattern {
 			get;
 			construct;
@@ -2149,7 +2149,7 @@ namespace Frida.JDWP {
 		REPLY = (1 << 7),
 	}
 
-	private class CommandBuilder : PacketBuilder {
+	private sealed class CommandBuilder : PacketBuilder {
 		public CommandBuilder (uint32 id, CommandSet command_set, uint8 command, IDSizes id_sizes) {
 			base (id, 0, id_sizes);
 
@@ -2354,7 +2354,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	private class PacketReader {
+	private sealed class PacketReader {
 		public size_t available_bytes {
 			get {
 				return end - cursor;
@@ -2574,7 +2574,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	private class IDSizes {
+	private sealed class IDSizes {
 		private bool valid;
 		private int field_id_size = -1;
 		private int method_id_size = -1;

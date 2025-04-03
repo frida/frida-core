@@ -1,5 +1,5 @@
 namespace Frida.Test {
-	public class Process : Object {
+	public sealed class Process : Object {
 		public void * handle {
 			get;
 			set;
@@ -97,14 +97,18 @@ namespace Frida.Test {
 		}
 	}
 
-	public class ResourceUsageSnapshot : Object {
-		protected HashTable<string, uint> metrics = new HashTable<string, uint> (str_hash, str_equal);
+	public sealed class ResourceUsageSnapshot : Object {
+		private HashTable<string, uint> metrics = new HashTable<string, uint> (str_hash, str_equal);
 
 		public static ResourceUsageSnapshot create_for_self () {
 			return create_for_pid (0);
 		}
 
 		public extern static ResourceUsageSnapshot create_for_pid (uint pid);
+
+		public void _add (string name, uint val) {
+			metrics[name] = val;
+		}
 
 		public void print () {
 			printerr ("TYPE\tCOUNT\n");

@@ -1,6 +1,6 @@
 namespace Frida {
 #if WINDOWS
-	public class FileDescriptorTablePadder {
+	public sealed class FileDescriptorTablePadder {
 		public static FileDescriptorTablePadder obtain () {
 			return new FileDescriptorTablePadder ();
 		}
@@ -9,7 +9,7 @@ namespace Frida {
 		}
 	}
 #else
-	public class FileDescriptorTablePadder {
+	public sealed class FileDescriptorTablePadder {
 		private const int MIN_TABLE_SIZE = 32;
 
 		private static unowned FileDescriptorTablePadder shared_instance = null;

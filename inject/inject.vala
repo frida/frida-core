@@ -147,7 +147,7 @@ namespace Frida.Inject {
 		public extern void init ();
 	}
 
-	public class Application : Object {
+	public sealed class Application : Object {
 		public string? device_id {
 			get;
 			construct;
@@ -426,7 +426,7 @@ namespace Frida.Inject {
 #endif
 	}
 
-	private class ScriptRunner : Object, RpcPeer {
+	private sealed class ScriptRunner : Object, RpcPeer {
 		public TerminalMode terminal_mode {
 			get;
 			private set;

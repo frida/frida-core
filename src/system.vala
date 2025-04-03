@@ -6,7 +6,7 @@ namespace Frida {
 		public extern static void kill (uint pid);
 	}
 
-	public class ApplicationEnumerator : Object {
+	public sealed class ApplicationEnumerator : Object {
 		private ThreadPool<EnumerateRequest> pool;
 		private MainContext main_context;
 
@@ -68,7 +68,7 @@ namespace Frida {
 		}
 	}
 
-	public class ProcessEnumerator : Object {
+	public sealed class ProcessEnumerator : Object {
 		private ThreadPool<EnumerateRequest> pool;
 		private MainContext main_context;
 
@@ -130,7 +130,7 @@ namespace Frida {
 		}
 	}
 
-	public class TemporaryDirectory {
+	public sealed class TemporaryDirectory {
 		private string? name;
 
 		public string path {
@@ -247,7 +247,7 @@ namespace Frida {
 		private extern static string get_system_tmp ();
 	}
 
-	public class TemporaryFile {
+	public sealed class TemporaryFile {
 		public string path {
 			owned get {
 				return file.get_path ();

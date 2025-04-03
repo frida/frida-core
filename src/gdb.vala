@@ -1087,7 +1087,7 @@ namespace Frida.GDB {
 			return sum;
 		}
 
-		public class Packet {
+		public sealed class Packet {
 			public const size_t OVERHEAD = 1 + 1 + 2;
 
 			public string payload {
@@ -1106,7 +1106,7 @@ namespace Frida.GDB {
 			}
 		}
 
-		public class PacketBuilder {
+		public sealed class PacketBuilder {
 			private StringBuilder? buffer;
 			private size_t initial_capacity;
 			private ChecksumType checksum_type;
@@ -1727,7 +1727,7 @@ namespace Frida.GDB {
 		}
 	}
 
-	public class Breakpoint : Object {
+	public sealed class Breakpoint : Object {
 		public signal void removed ();
 
 		public Kind kind {

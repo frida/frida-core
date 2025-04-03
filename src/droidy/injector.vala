@@ -6,7 +6,7 @@ namespace Frida.Droidy.Injector {
 		return yield session.run (cancellable);
 	}
 
-	public class GadgetDetails : Object {
+	public sealed class GadgetDetails : Object {
 		public uint pid {
 			get;
 			construct;
@@ -31,7 +31,7 @@ namespace Frida.Droidy.Injector {
 		}
 	}
 
-	private class Session : Object {
+	private sealed class Session : Object {
 		public InputStream gadget {
 			get;
 			construct;

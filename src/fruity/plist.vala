@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class Plist : PlistDict {
+	public sealed class Plist : PlistDict {
 		public enum Format {
 			AUTO,
 			BINARY,
@@ -1355,7 +1355,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PlistArray : Object {
+	public sealed class PlistArray : Object {
 		public bool is_empty {
 			get {
 				return storage.is_empty;
@@ -1511,10 +1511,10 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PlistNull : Object {
+	public sealed class PlistNull : Object {
 	}
 
-	public class PlistDate : Object {
+	public sealed class PlistDate : Object {
 		private DateTime time;
 
 		public PlistDate (DateTime time) {
@@ -1526,7 +1526,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PlistUid : Object {
+	public sealed class PlistUid : Object {
 		public uint64 uid {
 			get;
 			construct;

@@ -139,7 +139,7 @@ namespace Frida.CompilerTest {
 		}
 	}
 
-	private class Harness : Frida.Test.AsyncHarness {
+	private sealed class Harness : Frida.Test.AsyncHarness {
 		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
 		}

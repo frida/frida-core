@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public class IA32Machine : Object, Machine {
+	public sealed class IA32Machine : Object, Machine {
 		public override GDB.Client gdb {
 			get;
 			set;

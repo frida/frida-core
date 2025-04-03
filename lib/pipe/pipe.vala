@@ -1,5 +1,5 @@
 namespace Frida {
-	public class PipeTransport : Object {
+	public sealed class PipeTransport : Object {
 		public string local_address {
 			get;
 			construct;
@@ -42,7 +42,7 @@ namespace Frida {
 	}
 
 #if WINDOWS
-	public class WindowsPipe : IOStream {
+	public sealed class WindowsPipe : IOStream {
 		public string address {
 			get;
 			construct;

@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaLLDB", gir_version = "1.0")]
 namespace Frida.LLDB {
-	public class Client : GDB.Client {
+	public sealed class Client : GDB.Client {
 		public Process? process {
 			get {
 				return _process;
@@ -438,7 +438,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public class LaunchOptions : Object {
+	public sealed class LaunchOptions : Object {
 		public string[] env {
 			get;
 			set;
@@ -457,7 +457,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public class Process : Object {
+	public sealed class Process : Object {
 		public uint pid {
 			get;
 			set;
@@ -556,7 +556,7 @@ namespace Frida.LLDB {
 		ARM64E		= 2,
 	}
 
-	public class Thread : GDB.Thread {
+	public sealed class Thread : GDB.Thread {
 		private const uint PAGE_SIZE = 16384U;
 		private const uint32 THREAD_MAGIC = 0x54485244U;
 
@@ -656,7 +656,7 @@ namespace Frida.LLDB {
 			return address & ~((uint64) (PAGE_SIZE - 1));
 		}
 
-		public class Snapshot {
+		public sealed class Snapshot {
 			public uint handle {
 				get;
 				private set;
@@ -667,7 +667,7 @@ namespace Frida.LLDB {
 			}
 		}
 
-		public class Frame {
+		public sealed class Frame {
 			public uint64 address {
 				get;
 				private set;
@@ -695,7 +695,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public class Module : Object {
+	public sealed class Module : Object {
 		public uint64 load_address {
 			get;
 			construct;
@@ -719,7 +719,7 @@ namespace Frida.LLDB {
 			);
 		}
 
-		public class Segment {
+		public sealed class Segment {
 			public string name;
 
 			public uint64 vmaddr;
@@ -730,7 +730,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public class Exception : GDB.Exception {
+	public sealed class Exception : GDB.Exception {
 		public MachExceptionType metype {
 			get;
 			construct;
@@ -896,7 +896,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public class AppleDyldFields : Object {
+	public sealed class AppleDyldFields : Object {
 		public uint64 all_image_info {
 			get;
 			construct;

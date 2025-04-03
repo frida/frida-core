@@ -97,7 +97,7 @@ namespace Frida {
 		}
 	}
 
-	public class EndpointParameters : Object {
+	public sealed class EndpointParameters : Object {
 		public string? address {
 			get;
 			construct;
@@ -234,7 +234,7 @@ namespace Frida {
 		return (inet_addr.get_family () == IPV6) ? @"[$host]" : host;
 	}
 
-	public class WebService : Object {
+	public sealed class WebService : Object {
 		public signal void incoming (IOStream connection, SocketAddress remote_address, DynamicInterface? dynamic_iface);
 
 		public EndpointParameters endpoint_params {
@@ -852,7 +852,7 @@ namespace Frida {
 		public abstract void start ();
 	}
 
-	public class DynamicInterface : Object {
+	public sealed class DynamicInterface : Object {
 		public string name {
 			get;
 			construct;
@@ -870,7 +870,7 @@ namespace Frida {
 
 	public extern static unowned string _version_string ();
 
-	private class WebConnection : VirtualStream {
+	private sealed class WebConnection : VirtualStream {
 		public signal void websocket_closed ();
 
 		public Soup.WebsocketConnection websocket {

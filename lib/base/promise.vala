@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Promise<T> {
+	public sealed class Promise<T> {
 		private Impl<T> impl;
 
 		public Future<T> future {

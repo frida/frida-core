@@ -1,5 +1,5 @@
 namespace Frida {
-	public class WindowsHelperProcess : Object, WindowsHelper {
+	public sealed class WindowsHelperProcess : Object, WindowsHelper {
 		public TemporaryDirectory tempdir {
 			get;
 			construct;
@@ -98,7 +98,7 @@ namespace Frida {
 		}
 	}
 
-	private class HelperFactory {
+	private sealed class HelperFactory {
 		public signal void uninjected (uint id);
 
 		public bool running {
@@ -231,7 +231,7 @@ namespace Frida {
 		private extern static void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
 	}
 
-	private class HelperInstance {
+	private sealed class HelperInstance {
 		public signal void terminated ();
 		public signal void uninjected (uint id);
 
@@ -366,7 +366,7 @@ namespace Frida {
 		private extern static void close_process_handle (void * handle);
 	}
 
-	private class ResourceStore {
+	private sealed class ResourceStore {
 		public TemporaryFile native_helper {
 			get;
 			private set;

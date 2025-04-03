@@ -1,17 +1,17 @@
 namespace Frida {
-	public class FreebsdHostSessionBackend : LocalHostSessionBackend {
+	public sealed class FreebsdHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
 			return new FreebsdHostSessionProvider ();
 		}
 	}
 
-	public class FreebsdHostSessionProvider : LocalHostSessionProvider {
+	public sealed class FreebsdHostSessionProvider : LocalHostSessionProvider {
 		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			return new FreebsdHostSession ();
 		}
 	}
 
-	public class FreebsdHostSession : LocalHostSession {
+	public sealed class FreebsdHostSession : LocalHostSession {
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor agent_desc;

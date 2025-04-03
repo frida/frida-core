@@ -1,5 +1,5 @@
 namespace Frida {
-	public class BareboneHostSessionBackend : Object, HostSessionBackend {
+	public sealed class BareboneHostSessionBackend : Object, HostSessionBackend {
 		private BareboneHostSessionProvider? provider;
 
 		private const uint16 DEFAULT_PORT = 3333;
@@ -30,7 +30,7 @@ namespace Frida {
 		}
 	}
 
-	public class BareboneHostSessionProvider : Object, HostSessionProvider {
+	public sealed class BareboneHostSessionProvider : Object, HostSessionProvider {
 		public string id {
 			get { return "barebone"; }
 		}
@@ -169,7 +169,7 @@ namespace Frida {
 		}
 	}
 
-	public class BareboneHostSession : Object, HostSession {
+	public sealed class BareboneHostSession : Object, HostSession {
 		public Barebone.Services services {
 			get;
 			construct;
@@ -321,7 +321,7 @@ namespace Frida {
 		}
 	}
 
-	private class BareboneAgentSession : Object, AgentSession {
+	private sealed class BareboneAgentSession : Object, AgentSession {
 		public signal void closed ();
 
 		public AgentSessionId id {
@@ -564,7 +564,7 @@ namespace Frida {
 	}
 
 	namespace Barebone {
-		public class Services : Object {
+		public sealed class Services : Object {
 			public Machine machine {
 				get;
 				construct;

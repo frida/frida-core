@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public class Interceptor : Object {
+	public sealed class Interceptor : Object {
 		public Machine machine {
 			get;
 			construct;

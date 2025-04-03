@@ -1,6 +1,6 @@
 namespace Frida {
 #if WINDOWS
-	public class FileDescriptorGuard : Object {
+	public sealed class FileDescriptorGuard : Object {
 		public Gum.MemoryRange agent_range {
 			get;
 			construct;
@@ -11,7 +11,7 @@ namespace Frida {
 		}
 	}
 #else
-	public class FileDescriptorGuard : Object {
+	public sealed class FileDescriptorGuard : Object {
 		public Gum.MemoryRange agent_range {
 			get;
 			construct;

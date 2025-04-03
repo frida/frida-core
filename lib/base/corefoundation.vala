@@ -1,5 +1,5 @@
 namespace Frida {
-	public class CFArray<T> {
+	public sealed class CFArray<T> {
 		private CoreFoundation.Array handle;
 
 		public static CFArray<T> wrap<T> (void * handle) {

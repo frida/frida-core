@@ -137,7 +137,7 @@ namespace Frida {
 		}
 	}
 
-	private class VirtualInputStream : InputStream, PollableInputStream {
+	private sealed class VirtualInputStream : InputStream, PollableInputStream {
 		private weak VirtualStream stream;
 
 		public VirtualInputStream (VirtualStream stream) {
@@ -224,7 +224,7 @@ namespace Frida {
 		}
 	}
 
-	private class VirtualOutputStream : OutputStream, PollableOutputStream {
+	private sealed class VirtualOutputStream : OutputStream, PollableOutputStream {
 		private weak VirtualStream? stream;
 
 		public VirtualOutputStream (VirtualStream stream) {

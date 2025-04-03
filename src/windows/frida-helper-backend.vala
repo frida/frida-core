@@ -1,5 +1,5 @@
 namespace Frida {
-	public class WindowsHelperBackend : Object, WindowsHelper {
+	public sealed class WindowsHelperBackend : Object, WindowsHelper {
 		public PrivilegeLevel level {
 			get;
 			construct;
@@ -127,7 +127,7 @@ namespace Frida {
 		}
 	}
 
-	private class AssetDirectory {
+	private sealed class AssetDirectory {
 		public File file {
 			get;
 			private set;
@@ -170,7 +170,7 @@ namespace Frida {
 		}
 	}
 
-	private class AssetBundle {
+	private sealed class AssetBundle {
 		public Gee.List<File> files {
 			get;
 			private set;

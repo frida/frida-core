@@ -411,7 +411,7 @@ namespace Frida.Fruity {
 			return new PcbList (pcbs);
 		}
 
-		public class PcbList {
+		public sealed class PcbList {
 			private uint8[] pcbs;
 
 			internal PcbList (owned uint8[] pcbs) {
@@ -422,7 +422,7 @@ namespace Frida.Fruity {
 				return new Iterator (this);
 			}
 
-			public class Iterator {
+			public sealed class Iterator {
 				private PcbList list;
 				private InetItem * cursor;
 
@@ -461,7 +461,7 @@ namespace Frida.Fruity {
 				}
 			}
 
-			public class Item {
+			public sealed class Item {
 				public SocketFamily family {
 					get {
 						return ((pcb.version_flag & Darwin.XNU.InetVersionFlags.IPV6) != 0)

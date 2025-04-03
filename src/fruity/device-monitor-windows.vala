@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class WindowsPairingBrowser : Object, PairingBrowser {
+	public sealed class WindowsPairingBrowser : Object, PairingBrowser {
 		private Gee.Map<string, Monitor> monitors = new Gee.HashMap<string, Monitor> ();
 
 		private MainContext main_context = MainContext.ref_thread_default ();

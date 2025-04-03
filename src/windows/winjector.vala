@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Winjector : Object, Injector {
+	public sealed class Winjector : Object, Injector {
 		public WindowsHelper helper {
 			get;
 			construct;
@@ -119,7 +119,7 @@ namespace Frida {
 		protected extern static void set_acls_as_needed (string path) throws Error;
 	}
 
-	public class AgentDescriptor : Object {
+	public sealed class AgentDescriptor : Object {
 		public PathTemplate name_template {
 			get;
 			construct;
@@ -177,7 +177,7 @@ namespace Frida {
 		}
 	}
 
-	public class AgentResource : Object {
+	public sealed class AgentResource : Object {
 		public string name {
 			get;
 			construct;

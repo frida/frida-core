@@ -686,7 +686,7 @@ namespace Frida {
 		protected extern void _close_inject_instance (void * instance);
 	}
 
-	public class DTraceAgent : Object {
+	public sealed class DTraceAgent : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
@@ -845,7 +845,7 @@ namespace Frida {
 		}
 	}
 
-	private class PendingLaunch : Object {
+	private sealed class PendingLaunch : Object {
 		public signal void completed ();
 
 		public string identifier {
@@ -889,7 +889,7 @@ namespace Frida {
 		}
 	}
 
-	public class StdioPipes : Object {
+	public sealed class StdioPipes : Object {
 		public int input {
 			get;
 			construct;

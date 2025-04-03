@@ -1,5 +1,5 @@
 namespace Frida {
-	public class PortalClient : Object, AgentSessionProvider {
+	public sealed class PortalClient : Object, AgentSessionProvider {
 		public signal void resume ();
 		public signal void kill ();
 

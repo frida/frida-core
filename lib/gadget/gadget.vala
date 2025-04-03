@@ -1,5 +1,5 @@
 namespace Frida.Gadget {
-	private class Config : Object, Json.Serializable {
+	private sealed class Config : Object, Json.Serializable {
 		public Object interaction {
 			get;
 			set;
@@ -93,7 +93,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptInteraction : Object, Json.Serializable {
+	private sealed class ScriptInteraction : Object, Json.Serializable {
 		public string path {
 			get;
 			set;
@@ -145,7 +145,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptDirectoryInteraction : Object {
+	private sealed class ScriptDirectoryInteraction : Object {
 		public string path {
 			get;
 			set;
@@ -164,7 +164,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptConfig : Object, Json.Serializable {
+	private sealed class ScriptConfig : Object, Json.Serializable {
 		public ProcessFilter? filter {
 			get;
 			set;
@@ -216,7 +216,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ProcessFilter : Object {
+	private sealed class ProcessFilter : Object {
 		public string[] executables {
 			get;
 			set;
@@ -258,7 +258,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ListenInteraction : SocketInteraction {
+	private sealed class ListenInteraction : SocketInteraction {
 		public PortConflictBehavior on_port_conflict {
 			get;
 			set;
@@ -287,7 +287,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ConnectInteraction : SocketInteraction, Json.Serializable {
+	private sealed class ConnectInteraction : SocketInteraction, Json.Serializable {
 		public string[]? acl {
 			get;
 			set;
@@ -328,7 +328,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class Location : Object {
+	private sealed class Location : Object {
 		public string executable_name {
 			get;
 			construct;
@@ -988,7 +988,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptRunner : BaseController {
+	private sealed class ScriptRunner : BaseController {
 		private ScriptEngine engine;
 		private Script script;
 
@@ -1036,7 +1036,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptDirectoryRunner : BaseController {
+	private sealed class ScriptDirectoryRunner : BaseController {
 		public string directory_path {
 			get;
 			construct;
@@ -1241,7 +1241,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class Script : Object, RpcPeer {
+	private sealed class Script : Object, RpcPeer {
 		private const uint8 QUICKJS_BYTECODE_MAGIC = 0x02;
 
 		public enum ChangeBehavior {
@@ -1453,7 +1453,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ControlServer : BaseController {
+	private sealed class ControlServer : BaseController {
 		public EndpointParameters endpoint_params {
 			get;
 			construct;
@@ -1694,7 +1694,7 @@ namespace Frida.Gadget {
 			public abstract async void close (Cancellable? cancellable = null) throws IOError;
 		}
 
-		private class AuthenticationChannel : Object, Peer, AuthenticationService {
+		private sealed class AuthenticationChannel : Object, Peer, AuthenticationService {
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1742,7 +1742,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession {
+		private sealed class ControlChannel : Object, Peer, HostSession {
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1941,7 +1941,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class LiveAgentSession : BaseAgentSession {
+		private sealed class LiveAgentSession : BaseAgentSession {
 			public ControlChannel? controller {
 				get;
 				set;
@@ -1966,7 +1966,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ClusterClient : BaseController {
+	private sealed class ClusterClient : BaseController {
 		public SocketConnectable connectable {
 			get;
 			construct;

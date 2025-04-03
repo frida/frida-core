@@ -60,7 +60,7 @@ namespace Frida {
 		return yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
 	}
 
-	private class DummyInputStream : InputStream {
+	private sealed class DummyInputStream : InputStream {
 		private bool done = false;
 		private Mutex mutex;
 		private Cond cond;

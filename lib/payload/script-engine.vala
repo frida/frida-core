@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ScriptEngine : Object {
+	public sealed class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId script_id, string json, Bytes? data);
 		public signal void message_from_debugger (AgentScriptId script_id, string message);
 
@@ -223,7 +223,7 @@ namespace Frida {
 			source.attach (Gum.ScriptBackend.get_scheduler ().get_js_context ());
 		}
 
-		public class ScriptInstance : Object, RpcPeer {
+		public sealed class ScriptInstance : Object, RpcPeer {
 			public signal void closed ();
 			public signal void message (string json, Bytes? data);
 			public signal void debug_message (string message);

@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class SpringboardServicesClient : Object, AsyncInitable {
+	public sealed class SpringboardServicesClient : Object, AsyncInitable {
 		public Device device {
 			get;
 			construct;

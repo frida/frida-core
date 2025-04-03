@@ -1,5 +1,5 @@
 namespace Frida {
-	public class PortalService : Object {
+	public sealed class PortalService : Object {
 		public signal void node_connected (uint connection_id, SocketAddress remote_address);
 		public signal void node_joined (uint connection_id, Application application);
 		public signal void node_left (uint connection_id, Application application);

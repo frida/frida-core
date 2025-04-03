@@ -1,11 +1,11 @@
 namespace Frida {
-	public class DarwinHostSessionBackend : LocalHostSessionBackend {
+	public sealed class DarwinHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
 			return new DarwinHostSessionProvider ();
 		}
 	}
 
-	public class DarwinHostSessionProvider : LocalHostSessionProvider {
+	public sealed class DarwinHostSessionProvider : LocalHostSessionProvider {
 		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			var tempdir = new TemporaryDirectory ();
 			return new DarwinHostSession (new DarwinHelperProcess (tempdir), tempdir);
@@ -18,7 +18,7 @@ namespace Frida {
 		public extern static Variant? _try_extract_icon ();
 	}
 
-	public class DarwinHostSession : LocalHostSession {
+	public sealed class DarwinHostSession : LocalHostSession {
 		public DarwinHelper helper {
 			get;
 			construct;
@@ -336,7 +336,7 @@ namespace Frida {
 	}
 
 #if IOS || TVOS
-	private class FruitController : Object, MappedAgentContainer {
+	private sealed class FruitController : Object, MappedAgentContainer {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void process_crashed (CrashInfo crash);
@@ -741,7 +741,7 @@ namespace Frida {
 			crash_deliveries.unset (delivery.pid);
 		}
 
-		private class CrashDelivery : Object {
+		private sealed class CrashDelivery : Object {
 			public signal void expired ();
 
 			public uint pid {
@@ -808,7 +808,7 @@ namespace Frida {
 
 	private delegate void FoundMappedAgentFunc (MappedAgent agent);
 
-	private class MappedAgent {
+	private sealed class MappedAgent {
 		public uint id {
 			get;
 			private set;
@@ -831,7 +831,7 @@ namespace Frida {
 		}
 	}
 
-	private class LaunchdAgent : InternalAgent {
+	private sealed class LaunchdAgent : InternalAgent {
 		public signal void app_launch_started (string identifier, uint pid);
 		public signal void app_launch_completed (string identifier, uint pid, GLib.Error? error);
 		public signal void spawn_preparation_started (HostSpawnInfo info);
@@ -941,7 +941,7 @@ namespace Frida {
 		}
 	}
 
-	private class XpcProxyAgent : InternalAgent {
+	private sealed class XpcProxyAgent : InternalAgent {
 		public string identifier {
 			get;
 			construct;
@@ -983,7 +983,7 @@ namespace Frida {
 		}
 	}
 
-	private class ReportCrashAgent : InternalAgent {
+	private sealed class ReportCrashAgent : InternalAgent {
 		public signal void crash_detected (uint pid);
 		public signal void crash_received (CrashInfo crash);
 
@@ -1215,7 +1215,7 @@ namespace Frida {
 		}
 	}
 
-	private class OSAnalyticsAgent : InternalAgent {
+	private sealed class OSAnalyticsAgent : InternalAgent {
 		public uint pid {
 			get;
 			construct;

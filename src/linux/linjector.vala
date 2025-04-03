@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Linjector : Object, Injector {
+	public sealed class Linjector : Object, Injector {
 		public LinuxHelper helper {
 			get;
 			construct;
@@ -158,7 +158,7 @@ namespace Frida {
 		SINGLETON
 	}
 
-	public class AgentDescriptor : Object {
+	public sealed class AgentDescriptor : Object {
 		public PathTemplate name_template {
 			get;
 			construct;
@@ -219,7 +219,7 @@ namespace Frida {
 		internal extern static Bytes _clone_so (Bytes so);
 	}
 
-	public class AgentResource : Object {
+	public sealed class AgentResource : Object {
 		public string name {
 			get;
 			construct;

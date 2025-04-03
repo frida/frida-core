@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ThreadIgnoreScope {
+	public sealed class ThreadIgnoreScope {
 		public enum Kind {
 			APPLICATION_THREAD,
 			FRIDA_THREAD
@@ -43,7 +43,7 @@ namespace Frida {
 	}
 
 #if ANDROID
-	public class ThreadCountCloaker : Object {
+	public sealed class ThreadCountCloaker : Object {
 		private ReadFunc * read_slot;
 		private static ReadFunc old_read_impl;
 
@@ -156,12 +156,12 @@ namespace Frida {
 		}
 	}
 #else
-	public class ThreadCountCloaker : Object {
+	public sealed class ThreadCountCloaker : Object {
 	}
 #endif
 
 #if LINUX
-	public class ThreadListCloaker : Object, DirListFilter {
+	public sealed class ThreadListCloaker : Object, DirListFilter {
 		private string our_dir_by_pid;
 		private DirListCloaker cloaker;
 
@@ -180,7 +180,7 @@ namespace Frida {
 		}
 	}
 
-	public class FDListCloaker : Object, DirListFilter {
+	public sealed class FDListCloaker : Object, DirListFilter {
 		private string our_dir_by_pid;
 		private DirListCloaker cloaker;
 
@@ -199,7 +199,7 @@ namespace Frida {
 		}
 	}
 
-	private class DirListCloaker : Object {
+	private sealed class DirListCloaker : Object {
 		public weak DirListFilter filter {
 			get;
 			construct;
@@ -467,10 +467,10 @@ namespace Frida {
 		public abstract bool matches_file (string name);
 	}
 #else
-	public class ThreadListCloaker : Object {
+	public sealed class ThreadListCloaker : Object {
 	}
 
-	public class FDListCloaker : Object {
+	public sealed class FDListCloaker : Object {
 	}
 #endif
 }

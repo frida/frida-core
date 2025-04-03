@@ -265,11 +265,9 @@ frida_test_resource_usage_snapshot_create_for_pid (guint pid)
 
   for (entry = frida_metric_collectors; entry->name != NULL; entry++)
   {
-    guint value;
+    guint value = entry->collect (real_pid, process);
 
-    value = entry->collect (real_pid, process);
-
-    g_hash_table_insert (snapshot->metrics, g_strdup (entry->name), GSIZE_TO_POINTER (value));
+    _frida_test_resource_usage_snapshot_add (snapshot, entry->name, value);
   }
 
   frida_close_process (process, pid);

@@ -1,5 +1,5 @@
 namespace Frida {
-	public class HostSessionService : Object {
+	public sealed class HostSessionService : Object {
 		private Gee.ArrayList<HostSessionBackend> backends = new Gee.ArrayList<HostSessionBackend> ();
 
 		public signal void provider_available (HostSessionProvider provider);
@@ -186,7 +186,7 @@ namespace Frida {
 		USB
 	}
 
-	public class HostSessionOptions : Object {
+	public sealed class HostSessionOptions : Object {
 		public Gee.Map<string, Value?> map {
 			get;
 			set;
@@ -1386,7 +1386,7 @@ namespace Frida {
 		}
 	}
 
-	internal class InstalledHelperFile : Object, HelperFile {
+	internal sealed class InstalledHelperFile : Object, HelperFile {
 		public string path {
 			owned get {
 				return installed_path;
@@ -1403,7 +1403,7 @@ namespace Frida {
 		}
 	}
 
-	internal class TemporaryHelperFile : Object, HelperFile {
+	internal sealed class TemporaryHelperFile : Object, HelperFile {
 		public string path {
 			owned get {
 				return file.path;

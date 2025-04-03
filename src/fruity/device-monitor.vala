@@ -1997,7 +1997,7 @@ namespace Frida.Fruity {
 		public abstract string? udid_from_iface (string ifname) throws Error;
 	}
 
-	public class NullFruitFinder : Object, FruitFinder {
+	public sealed class NullFruitFinder : Object, FruitFinder {
 		public string? udid_from_iface (string ifname) throws Error {
 			return null;
 		}
@@ -2022,7 +2022,7 @@ namespace Frida.Fruity {
 		public abstract async void stop (Cancellable? cancellable) throws IOError;
 	}
 
-	public class NullPairingBrowser : Object, PairingBrowser {
+	public sealed class NullPairingBrowser : Object, PairingBrowser {
 		public async void start (Cancellable? cancellable) throws IOError {
 		}
 

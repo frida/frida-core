@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class DeviceInfoService : Object, AsyncInitable {
+	public sealed class DeviceInfoService : Object, AsyncInitable {
 		public HostChannelProvider channel_provider {
 			get;
 			construct;
@@ -75,7 +75,7 @@ namespace Frida.Fruity {
 			return name;
 		}
 
-		public class ProcessInfo : Object {
+		public sealed class ProcessInfo : Object {
 			public uint pid {
 				get;
 				set;
@@ -108,7 +108,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class ApplicationListingService : Object, AsyncInitable {
+	public sealed class ApplicationListingService : Object, AsyncInitable {
 		public HostChannelProvider channel_provider {
 			get;
 			construct;
@@ -211,7 +211,7 @@ namespace Frida.Fruity {
 			return result;
 		}
 
-		public class ApplicationInfo : Object {
+		public sealed class ApplicationInfo : Object {
 			public ApplicationType app_type {
 				get;
 				set;
@@ -306,7 +306,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class ProcessControlService : Object, AsyncInitable {
+	public sealed class ProcessControlService : Object, AsyncInitable {
 		public HostChannelProvider channel_provider {
 			get;
 			construct;
@@ -346,7 +346,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class DTXConnection : Object, DTXTransport {
+	public sealed class DTXConnection : Object, DTXTransport {
 		public IOStream stream {
 			get;
 			construct;
@@ -847,7 +847,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private class DTXControlChannel : DTXChannel {
+	private sealed class DTXControlChannel : DTXChannel {
 		public DTXControlChannel (DTXTransport transport) {
 			Object (code: 0, transport: transport);
 		}
@@ -1161,7 +1161,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class DTXArgumentListBuilder {
+	public sealed class DTXArgumentListBuilder {
 		private PrimitiveBuilder blob = new PrimitiveBuilder ();
 
 		public DTXArgumentListBuilder () {
@@ -1227,7 +1227,7 @@ namespace Frida.Fruity {
 
 	private const size_t PRIMITIVE_DICTIONARY_HEADER_SIZE = 16;
 
-	private class PrimitiveReader {
+	private sealed class PrimitiveReader {
 		public size_t available_bytes {
 			get {
 				return end - cursor;
@@ -1317,7 +1317,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private class PrimitiveBuilder {
+	private sealed class PrimitiveBuilder {
 		public size_t offset {
 			get {
 				return cursor;

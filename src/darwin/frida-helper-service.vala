@@ -22,7 +22,7 @@ namespace Frida {
 	public extern void _start_run_loop ();
 	public extern void _stop_run_loop ();
 
-	public class DarwinHelperService : Object, DarwinRemoteHelper {
+	public sealed class DarwinHelperService : Object, DarwinRemoteHelper {
 		public string parent_address {
 			get;
 			construct;

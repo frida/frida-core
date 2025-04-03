@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ServiceSessionRegistry : Object {
+	public sealed class ServiceSessionRegistry : Object {
 		public signal void session_closed (ServiceSessionId id);
 
 		private Gee.Map<ServiceSessionId?, ServiceSession> sessions =

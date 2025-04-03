@@ -11,7 +11,7 @@ namespace Frida.Agent {
 		PROCESS_TRANSITION
 	}
 
-	private class Runner : Object, ProcessInvader, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
+	private sealed class Runner : Object, ProcessInvader, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 		private static string? cached_agent_path = null;
@@ -1621,7 +1621,7 @@ namespace Frida.Agent {
 	}
 #endif
 
-	private class LiveAgentSession : BaseAgentSession {
+	private sealed class LiveAgentSession : BaseAgentSession {
 		public uint registration_id {
 			get;
 			set;

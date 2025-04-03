@@ -6,7 +6,7 @@ namespace Frida {
 		public abstract void forget (uint pid);
 	}
 
-	public class NullPolicySoftener : Object, PolicySoftener {
+	public sealed class NullPolicySoftener : Object, PolicySoftener {
 		public void soften (uint pid) throws Error {
 		}
 
@@ -164,7 +164,7 @@ namespace Frida {
 		}
 	}
 
-	public class InternalIOSTVOSPolicySoftener : IOSTVOSPolicySoftener {
+	public sealed class InternalIOSTVOSPolicySoftener : IOSTVOSPolicySoftener {
 		private static bool enabled = false;
 
 		public static void enable () {
@@ -184,7 +184,7 @@ namespace Frida {
 		private extern static void _soften (uint pid) throws Error;
 	}
 
-	public class ElectraPolicySoftener : IOSTVOSPolicySoftener {
+	public sealed class ElectraPolicySoftener : IOSTVOSPolicySoftener {
 		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
 		private Module libjailbreak;
@@ -237,7 +237,7 @@ namespace Frida {
 		private extern static int _internal_jb_entitle_now (void * jbd_call, uint connection, uint pid);
 	}
 
-	public class Unc0verPolicySoftener : IOSTVOSPolicySoftener {
+	public sealed class Unc0verPolicySoftener : IOSTVOSPolicySoftener {
 		private const string SUBSTITUTED_PATH = "/usr/libexec/substituted";
 
 		private uint connection;

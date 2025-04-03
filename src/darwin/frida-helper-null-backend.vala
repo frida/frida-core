@@ -1,5 +1,5 @@
 namespace Frida {
-	public class DarwinHelperBackend : Object, DarwinHelper {
+	public sealed class DarwinHelperBackend : Object, DarwinHelper {
 		public signal void idle ();
 		public signal void child_dead (uint pid);
 		public signal void spawn_instance_ready (uint pid);

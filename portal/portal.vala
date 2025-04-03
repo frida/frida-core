@@ -142,7 +142,7 @@ namespace Frida.Portal {
 		return application.run ();
 	}
 
-	private class Application : Object {
+	private sealed class Application : Object {
 		public signal void ready (bool success);
 
 		public PortalService service {

@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ChannelRegistry : Object {
+	public sealed class ChannelRegistry : Object {
 		public signal void channel_closed (ChannelId id);
 
 		private Gee.Map<ChannelId?, weak IOStream> channels =
@@ -57,7 +57,7 @@ namespace Frida {
 		}
 	}
 
-	public class ChannelEndpoint : Object, Channel {
+	public sealed class ChannelEndpoint : Object, Channel {
 		private IOStream? stream;
 
 		private ByteArray write_queue = new ByteArray ();
@@ -132,7 +132,7 @@ namespace Frida {
 		}
 	}
 
-	public class ChannelStream : VirtualStream {
+	public sealed class ChannelStream : VirtualStream {
 		public Channel channel {
 			get;
 			construct;

@@ -169,7 +169,7 @@ namespace Frida {
 		}
 	}
 
-	public class PeerSocket : Object, DatagramBased {
+	public sealed class PeerSocket : Object, DatagramBased {
 		public Nice.Agent agent {
 			get;
 			construct;
@@ -565,7 +565,7 @@ namespace Frida {
 		}
 	}
 
-	public class SctpConnection : VirtualStream {
+	public sealed class SctpConnection : VirtualStream {
 		public DatagramBased transport_socket {
 			get;
 			construct;

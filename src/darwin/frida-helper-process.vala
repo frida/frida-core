@@ -1,5 +1,5 @@
 namespace Frida {
-	public class DarwinHelperProcess : Object, DarwinHelper {
+	public sealed class DarwinHelperProcess : Object, DarwinHelper {
 		public uint pid {
 			get {
 				return (uint) process_pid;
@@ -473,7 +473,7 @@ namespace Frida {
 		}
 	}
 
-	private class ResourceStore {
+	private sealed class ResourceStore {
 		public HelperFile helper {
 			get;
 			private set;

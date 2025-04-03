@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class LinuxFruitFinder : Object, FruitFinder {
+	public sealed class LinuxFruitFinder : Object, FruitFinder {
 		public string? udid_from_iface (string ifname) throws Error {
 			var net = "/sys/class/net";
 
@@ -34,7 +34,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class LinuxPairingBrowser : Object, PairingBrowser {
+	public sealed class LinuxPairingBrowser : Object, PairingBrowser {
 		private Resolved.Manager? resolved;
 		private Source? timer;
 

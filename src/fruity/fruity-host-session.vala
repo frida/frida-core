@@ -1,5 +1,5 @@
 namespace Frida {
-	public class FruityHostSessionBackend : Object, HostSessionBackend {
+	public sealed class FruityHostSessionBackend : Object, HostSessionBackend {
 		private Fruity.DeviceMonitor device_monitor = new Fruity.DeviceMonitor ();
 		private Gee.Map<Fruity.Device, FruityHostSessionProvider> providers =
 			new Gee.HashMap<Fruity.Device, FruityHostSessionProvider> ();
@@ -42,7 +42,7 @@ namespace Frida {
 		}
 	}
 
-	public class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, Pairable {
+	public sealed class FruityHostSessionProvider : Object, HostSessionProvider, HostChannelProvider, Pairable {
 		public Fruity.Device device {
 			get;
 			construct;
@@ -165,7 +165,7 @@ namespace Frida {
 		}
 	}
 
-	public class FruityHostSession : Object, HostSession {
+	public sealed class FruityHostSession : Object, HostSession {
 		public Fruity.Device device {
 			get;
 			construct;

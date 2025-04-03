@@ -422,7 +422,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private class StubBackend : Object, HostSessionBackend {
+		private sealed class StubBackend : Object, HostSessionBackend {
 			private StubProvider provider = new StubProvider ();
 
 			public async void start (Cancellable? cancellable) {
@@ -442,7 +442,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		private class StubProvider : Object, HostSessionProvider {
+		private sealed class StubProvider : Object, HostSessionProvider {
 			public string id {
 				get { return "stub"; }
 			}
@@ -1263,7 +1263,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private class ChaosProxy : Object {
+		private sealed class ChaosProxy : Object {
 			public uint16 proxy_port {
 				get {
 					return _proxy_port;
@@ -2090,7 +2090,7 @@ namespace Frida.HostSessionTest {
 			return result;
 		}
 
-		private class Range {
+		private sealed class Range {
 			public string start;
 			public string end;
 			public string protection;
@@ -4146,7 +4146,7 @@ namespace Frida.HostSessionTest {
 	}
 #endif
 
-	public class Harness : Frida.Test.AsyncHarness, AgentMessageSink {
+	public sealed class Harness : Frida.Test.AsyncHarness, AgentMessageSink {
 		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
 
 		public HostSessionService service {

@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaDroidy", gir_version = "1.0")]
 namespace Frida.Droidy {
-	public class DeviceTracker : Object {
+	public sealed class DeviceTracker : Object {
 		public signal void device_attached (DeviceDetails details);
 		public signal void device_detached (string serial);
 
@@ -149,7 +149,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class DeviceDetails : Object {
+	public sealed class DeviceDetails : Object {
 		public string serial {
 			get;
 			construct;
@@ -205,7 +205,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class ShellSession : Object {
+	public sealed class ShellSession : Object {
 		public signal void output (StdioPipe pipe, Bytes bytes);
 		public signal void closed ();
 
@@ -594,7 +594,7 @@ namespace Frida.Droidy {
 		STDERR
 	}
 
-	public class ShellCommandResult : Object {
+	public sealed class ShellCommandResult : Object {
 		public uint8 status {
 			get;
 			construct;
@@ -686,7 +686,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class FileMetadata : Object {
+	public sealed class FileMetadata : Object {
 		public uint32 mode {
 			get;
 			set;
@@ -700,7 +700,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class JDWPTracker : Object {
+	public sealed class JDWPTracker : Object {
 		public signal void debugger_attached (uint pid);
 		public signal void debugger_detached (uint pid);
 
@@ -768,7 +768,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class Client : Object {
+	public sealed class Client : Object {
 		public signal void closed ();
 		public signal void message (string payload);
 
@@ -1154,7 +1154,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class SyncSession : Object {
+	public sealed class SyncSession : Object {
 		public Client client {
 			get;
 			construct;

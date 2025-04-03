@@ -1,17 +1,17 @@
 namespace Frida {
-	public class QnxHostSessionBackend : LocalHostSessionBackend {
+	public sealed class QnxHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
 			return new QnxHostSessionProvider ();
 		}
 	}
 
-	public class QnxHostSessionProvider : LocalHostSessionProvider {
+	public sealed class QnxHostSessionProvider : LocalHostSessionProvider {
 		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			return new QnxHostSession ();
 		}
 	}
 
-	public class QnxHostSession : LocalHostSession {
+	public sealed class QnxHostSession : LocalHostSession {
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor agent_desc;

@@ -178,7 +178,7 @@ namespace Frida.InjectorTest {
 		}
 	}
 
-	private class Labrat {
+	private sealed class Labrat {
 		public Frida.Test.Process? process {
 			get;
 			private set;

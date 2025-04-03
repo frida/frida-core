@@ -1,11 +1,11 @@
 namespace Frida {
-	public class WindowsHostSessionBackend : LocalHostSessionBackend {
+	public sealed class WindowsHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
 			return new WindowsHostSessionProvider ();
 		}
 	}
 
-	public class WindowsHostSessionProvider : LocalHostSessionProvider {
+	public sealed class WindowsHostSessionProvider : LocalHostSessionProvider {
 		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			var tempdir = new TemporaryDirectory ();
 			return new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
@@ -18,7 +18,7 @@ namespace Frida {
 		public extern static Variant? _try_extract_icon ();
 	}
 
-	public class WindowsHostSession : LocalHostSession {
+	public sealed class WindowsHostSession : LocalHostSession {
 		public WindowsHelper helper {
 			get;
 			construct;
@@ -238,7 +238,7 @@ namespace Frida {
 		public extern static bool _process_is_alive (uint pid);
 	}
 
-	public class ChildProcess : Object {
+	public sealed class ChildProcess : Object {
 		public unowned Object parent {
 			get;
 			construct;
@@ -280,12 +280,26 @@ namespace Frida {
 			close ();
 		}
 
-		public extern void close ();
+		public void close () {
+			if (closed)
+				return;
+			_do_close ();
+			closed = true;
+		}
 
-		public extern void resume () throws Error;
+		public extern void _do_close ();
+
+		public void resume () throws Error {
+			if (resumed)
+				throw new Error.INVALID_OPERATION ("Already resumed");
+			_do_resume ();
+			resumed = true;
+		}
+
+		public extern void _do_resume ();
 	}
 
-	public class StdioPipes : Object {
+	public sealed class StdioPipes : Object {
 		public OutputStream input {
 			get;
 			construct;

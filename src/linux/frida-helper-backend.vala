@@ -1,5 +1,5 @@
 namespace Frida {
-	public class LinuxHelperBackend : Object, LinuxHelper {
+	public sealed class LinuxHelperBackend : Object, LinuxHelper {
 		public signal void idle ();
 
 		public bool is_idle {
@@ -597,7 +597,7 @@ namespace Frida {
 		}
 	}
 
-	private class SpawnedProcess : Object {
+	private sealed class SpawnedProcess : Object {
 		public signal void terminated ();
 		public signal void output (int fd, uint8[] data);
 
@@ -703,7 +703,7 @@ namespace Frida {
 		}
 	}
 
-	private class StdioPipes : Object {
+	private sealed class StdioPipes : Object {
 		public FileDescriptor input {
 			get;
 			construct;
@@ -734,7 +734,7 @@ namespace Frida {
 		}
 	}
 
-	private class ExecTransitionSession : SeizeSession {
+	private sealed class ExecTransitionSession : SeizeSession {
 		private ExecTransitionSession (uint pid) {
 			Object (pid: pid, on_init: SeizeSession.InitBehavior.CONTINUE);
 		}
@@ -758,7 +758,7 @@ namespace Frida {
 		}
 	}
 
-	private class PausedSyscallSession : SeizeSession {
+	private sealed class PausedSyscallSession : SeizeSession {
 		private State state = PENDING;
 
 		private enum State {
@@ -843,7 +843,7 @@ namespace Frida {
 
 	private const uint64 SOCK_CLOEXEC = 0x80000;
 
-	private class InjectSession : SeizeSession {
+	private sealed class InjectSession : SeizeSession {
 		private static ProcMapsSoEntry local_libc;
 		private static uint64 mmap_offset;
 		private static uint64 munmap_offset;
@@ -1353,7 +1353,7 @@ namespace Frida {
 		}
 	}
 
-	public class InjectSpec {
+	public sealed class InjectSpec {
 		public FileDescriptorBased library_so {
 			get;
 			private set;
@@ -1392,7 +1392,7 @@ namespace Frida {
 		}
 	}
 
-	private class CleanupSession : SeizeSession {
+	private sealed class CleanupSession : SeizeSession {
 		private CleanupSession (uint pid) {
 			Object (pid: pid);
 		}
@@ -1415,7 +1415,7 @@ namespace Frida {
 		}
 	}
 
-	private class ThreadSuspendSession : SeizeSession {
+	private sealed class ThreadSuspendSession : SeizeSession {
 		private ThreadSuspendSession (uint pid, uint tid) {
 			Object (pid: pid, tid: tid);
 		}
@@ -1445,7 +1445,7 @@ namespace Frida {
 	}
 
 
-	private class BootstrapResult {
+	private sealed class BootstrapResult {
 		public HelperBootstrapContext context;
 		public HelperLibcApi libc;
 		public AllocatedStack allocated_stack;
@@ -1464,7 +1464,7 @@ namespace Frida {
 		RELAUNCH
 	}
 
-	private class RemoteAgent : Object {
+	private sealed class RemoteAgent : Object {
 		public uint pid {
 			get;
 			construct;
@@ -2272,7 +2272,7 @@ namespace Frida {
 		ALREADY_ATTACHED,
 	}
 
-	private class ProcessCodeSwapScope {
+	private sealed class ProcessCodeSwapScope {
 		private State state = INACTIVE;
 
 		private SeizeSession session;
@@ -2329,7 +2329,7 @@ namespace Frida {
 		}
 	}
 
-	private class ThreadSuspendScope {
+	private sealed class ThreadSuspendScope {
 		private State state = INACTIVE;
 
 		private uint pid;
@@ -2427,7 +2427,7 @@ namespace Frida {
 		}
 	}
 
-	private class RemoteCallBuilder {
+	private sealed class RemoteCallBuilder {
 		private uint64 target;
 		private uint64[] args = {};
 		private GPRegs regs;
@@ -2478,7 +2478,7 @@ namespace Frida {
 		}
 	}
 
-	private class RemoteCall {
+	private sealed class RemoteCall {
 		private SeizeSession session;
 		private uint64 target;
 		private uint64[] args;
@@ -2660,7 +2660,7 @@ namespace Frida {
 		}
 	}
 
-	private class RemoteCallResult {
+	private sealed class RemoteCallResult {
 		public RemoteCallStatus status;
 		public int stop_signal;
 		public uint64 return_value;
@@ -3204,7 +3204,7 @@ namespace Frida {
 		}
 	}
 
-	public class PidFileDescriptor : FileDescriptor {
+	public sealed class PidFileDescriptor : FileDescriptor {
 		private uint pid;
 
 		private PidFileDescriptor (int fd, uint pid) {
@@ -3319,7 +3319,7 @@ namespace Frida {
 	}
 #endif
 
-	private class ProcMapsSoEntry {
+	private sealed class ProcMapsSoEntry {
 		public uint64 base_address;
 		public string path;
 		public string identity;

@@ -17,7 +17,7 @@ namespace Frida.Barebone {
 		public abstract async void deallocate (Cancellable? cancellable) throws Error, IOError;
 	}
 
-	public class SimpleAllocator : Object, Allocator {
+	public sealed class SimpleAllocator : Object, Allocator {
 		public size_t page_size {
 			get { return _page_size; }
 		}

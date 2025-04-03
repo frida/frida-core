@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Qinjector : Object, Injector {
+	public sealed class Qinjector : Object, Injector {
 		public string temp_directory {
 			owned get {
 				return resource_store.tempdir.path;
@@ -133,7 +133,7 @@ namespace Frida {
 		public extern void _free_instance (void * instance, UnloadPolicy unload_policy);
 		public extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
 
-		public class ResourceStore {
+		public sealed class ResourceStore {
 			public TemporaryDirectory tempdir {
 				get;
 				private set;
@@ -164,7 +164,7 @@ namespace Frida {
 		}
 	}
 
-	public class AgentDescriptor : Object {
+	public sealed class AgentDescriptor : Object {
 		public string name {
 			get;
 			construct;
@@ -197,7 +197,7 @@ namespace Frida {
 		}
 	}
 
-	private class RemoteThreadSession : Object {
+	private sealed class RemoteThreadSession : Object {
 		public signal void ended (UnloadPolicy unload_policy);
 
 		public uint id {

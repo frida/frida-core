@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class OpackBuilder {
+	public sealed class OpackBuilder {
 		protected BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
 		private Gee.Deque<Scope> scopes = new Gee.ArrayQueue<Scope> ();
 
@@ -132,7 +132,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class OpackParser {
+	public sealed class OpackParser {
 		private BufferReader reader;
 
 		[Flags]

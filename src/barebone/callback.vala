@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public class Callback : Object {
+	public sealed class Callback : Object {
 		private uint64 code;
 		private CallbackHandler handler;
 		private Machine machine;

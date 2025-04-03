@@ -1,4 +1,4 @@
-public class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
+public sealed class Frida.TunnelInterfaceObserver : Object, DynamicInterfaceObserver {
 #if IOS || TVOS
 	private Gee.Map<string, DynamicInterface> interfaces = new Gee.HashMap<string, DynamicInterface> ();
 

@@ -1,6 +1,6 @@
 namespace Frida {
 #if WINDOWS
-	public class ForkMonitor : Object {
+	public sealed class ForkMonitor : Object {
 		public weak ForkHandler handler {
 			get;
 			construct;
@@ -11,7 +11,7 @@ namespace Frida {
 		}
 	}
 #else
-	public class ForkMonitor : Object, Gum.InvocationListener {
+	public sealed class ForkMonitor : Object, Gum.InvocationListener {
 		public weak ForkHandler handler {
 			get;
 			construct;

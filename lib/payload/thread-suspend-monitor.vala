@@ -1,6 +1,6 @@
 namespace Frida {
 #if DARWIN
-	public class ThreadSuspendMonitor : Object {
+	public sealed class ThreadSuspendMonitor : Object {
 		public weak ProcessInvader invader {
 			get;
 			construct;
@@ -131,7 +131,7 @@ namespace Frida {
 		}
 	}
 #else
-	public class ThreadSuspendMonitor : Object {
+	public sealed class ThreadSuspendMonitor : Object {
 		public weak ProcessInvader invader {
 			get;
 			construct;

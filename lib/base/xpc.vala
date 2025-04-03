@@ -1,5 +1,5 @@
 namespace Frida {
-	public class XpcClient : Object {
+	public sealed class XpcClient : Object {
 		public signal void message (Darwin.Xpc.Object obj);
 
 		public State state {
@@ -123,7 +123,7 @@ namespace Frida {
 		}
 	}
 
-	public class XpcObjectReader {
+	public sealed class XpcObjectReader {
 		public Darwin.Xpc.Object root_object {
 			get {
 				return scopes.peek_head ().object;

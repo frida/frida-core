@@ -1,5 +1,5 @@
 namespace Frida {
-	public class SpawnMonitor : Object, Gum.InvocationListener {
+	public sealed class SpawnMonitor : Object, Gum.InvocationListener {
 		public weak SpawnHandler handler {
 			get;
 			construct;

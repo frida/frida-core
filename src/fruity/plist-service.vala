@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class PlistServiceClient : Object {
+	public sealed class PlistServiceClient : Object {
 		public signal void closed ();
 
 		public IOStream stream {

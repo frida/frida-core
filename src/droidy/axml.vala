@@ -69,7 +69,7 @@ namespace Frida.AXML {
 		}
 	}
 
-	public class ElementTree : Object {
+	public sealed class ElementTree : Object {
 		public string name {
 			get;
 			set;
@@ -135,7 +135,7 @@ namespace Frida.AXML {
 		}
 	}
 
-	public class ResourceValue : Object {
+	public sealed class ResourceValue : Object {
 		private uint16 size;
 		private uint8 unused;
 		private ResourceType type;
@@ -173,7 +173,7 @@ namespace Frida.AXML {
 		}
 	}
 
-	public class Attribute : Object {
+	public sealed class Attribute : Object {
 		private uint32 namespace;
 		private uint32 name;
 		private uint32 unused;
@@ -238,7 +238,7 @@ namespace Frida.AXML {
 		}
 	}
 
-	private class ResourceMap {
+	private sealed class ResourceMap {
 		private Gee.ArrayList<uint32> resources = new Gee.ArrayList<uint32> ();
 
 		public ResourceMap.with_stream (DataInputStream input, uint32 size) throws IOError {
@@ -247,7 +247,7 @@ namespace Frida.AXML {
 		}
 	}
 
-	private class StringPool {
+	private sealed class StringPool {
 		private uint32 flags;
 		private Gee.ArrayList<string> strings = new Gee.ArrayList<string> ();
 

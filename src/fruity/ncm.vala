@@ -411,7 +411,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	internal class UsbNcmConfig {
+	internal sealed class UsbNcmConfig {
 		public uint8 ctrl_iface;
 		public uint8 data_iface;
 		public int data_altsetting;

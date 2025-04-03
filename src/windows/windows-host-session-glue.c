@@ -270,12 +270,9 @@ _frida_windows_host_session_process_is_alive (guint pid)
 }
 
 void
-frida_child_process_close (FridaChildProcess * self)
+_frida_child_process_do_close (FridaChildProcess * self)
 {
   GSource * watch;
-
-  if (self->closed)
-    return;
 
   watch = frida_child_process_get_watch (self);
   if (watch != NULL)
@@ -283,28 +280,12 @@ frida_child_process_close (FridaChildProcess * self)
 
   CloseHandle (frida_child_process_get_handle (self));
   CloseHandle (frida_child_process_get_main_thread (self));
-
-  self->closed = TRUE;
 }
 
 void
-frida_child_process_resume (FridaChildProcess * self, GError ** error)
+_frida_child_process_do_resume (FridaChildProcess * self)
 {
-  if (self->resumed)
-    goto already_resumed;
-
   ResumeThread (frida_child_process_get_main_thread (self));
-
-  self->resumed = TRUE;
-  return;
-
-already_resumed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_INVALID_OPERATION,
-        "Already resumed");
-  }
 }
 
 static void

@@ -400,7 +400,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		public extern static uint target_function (int level, string message);
 	}
 
-	private class Harness : Frida.Test.AsyncHarness, AgentController, AgentMessageSink {
+	private sealed class Harness : Frida.Test.AsyncHarness, AgentController, AgentMessageSink {
 		private GLib.Module module;
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state);

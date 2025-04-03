@@ -1,5 +1,5 @@
 namespace Frida {
-	public class DroidyHostSessionBackend : Object, HostSessionBackend {
+	public sealed class DroidyHostSessionBackend : Object, HostSessionBackend {
 		private Droidy.DeviceTracker tracker;
 
 		private Gee.HashMap<string, DroidyHostSessionProvider> providers = new Gee.HashMap<string, DroidyHostSessionProvider> ();
@@ -86,7 +86,7 @@ namespace Frida {
 		}
 	}
 
-	public class DroidyHostSessionProvider : Object, HostSessionProvider, HostChannelProvider {
+	public sealed class DroidyHostSessionProvider : Object, HostSessionProvider, HostChannelProvider {
 		public string id {
 			get { return device_details.serial; }
 		}
@@ -212,7 +212,7 @@ namespace Frida {
 		}
 	}
 
-	public class DroidyHostSession : Object, HostSession {
+	public sealed class DroidyHostSession : Object, HostSession {
 		public Droidy.DeviceDetails device_details {
 			get;
 			construct;
@@ -1287,7 +1287,7 @@ namespace Frida {
 			}
 		}
 
-		public class HelperClient : Object, AsyncInitable {
+		public sealed class HelperClient : Object, AsyncInitable {
 			public signal void closed ();
 
 			public string device_serial {

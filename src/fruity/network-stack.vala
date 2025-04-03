@@ -196,7 +196,7 @@ namespace Frida.Fruity {
 			STOPPED
 		}
 
-		public class VirtualNetworkStack (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu) {
+		public VirtualNetworkStack (Bytes? ethernet_address, InetAddress? ipv6_address, uint16 mtu) {
 			Object (
 				ethernet_address: ethernet_address,
 				ipv6_address: ipv6_address,

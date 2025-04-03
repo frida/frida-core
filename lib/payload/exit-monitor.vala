@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ExitMonitor : Object, Gum.InvocationListener {
+	public sealed class ExitMonitor : Object, Gum.InvocationListener {
 		public weak ExitHandler handler {
 			get;
 			construct;

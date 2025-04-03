@@ -44,7 +44,7 @@ namespace Frida {
 		SERVICE
 	}
 
-	private class HelperManager : Object, WindowsRemoteHelper {
+	private sealed class HelperManager : Object, WindowsRemoteHelper {
 		public string parent_address {
 			get;
 			construct;
@@ -302,7 +302,7 @@ namespace Frida {
 		public extern static string derive_svcname_for_suffix (string suffix);
 	}
 
-	private class StandaloneHelperService : HelperService {
+	private sealed class StandaloneHelperService : HelperService {
 		private MainLoop loop;
 
 		public StandaloneHelperService () {
@@ -322,7 +322,7 @@ namespace Frida {
 		}
 	}
 
-	private class ManagedHelperService : HelperService {
+	private sealed class ManagedHelperService : HelperService {
 		public ManagedHelperService () {
 			Object (level: PrivilegeLevel.ELEVATED);
 		}

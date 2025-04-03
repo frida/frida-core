@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public class UnknownMachine : Object, Machine {
+	public sealed class UnknownMachine : Object, Machine {
 		public GDB.Client gdb {
 			get;
 			set;

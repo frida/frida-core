@@ -24,7 +24,7 @@ namespace Frida {
 		}
 	}
 
-	public class DeviceManager : Object {
+	public sealed class DeviceManager : Object {
 		public signal void added (Device device);
 		public signal void removed (Device device);
 		public signal void changed ();
@@ -468,7 +468,7 @@ namespace Frida {
 		}
 	}
 
-	public class DeviceList : Object {
+	public sealed class DeviceList : Object {
 		private Gee.List<Device> items;
 
 		internal DeviceList (Gee.List<Device> items) {
@@ -484,7 +484,7 @@ namespace Frida {
 		}
 	}
 
-	public class Device : Object {
+	public sealed class Device : Object {
 		public signal void spawn_added (Spawn spawn);
 		public signal void spawn_removed (Spawn spawn);
 		public signal void child_added (Child child);
@@ -1545,7 +1545,7 @@ namespace Frida {
 		}
 	}
 
-	public class RemoteDeviceOptions : Object {
+	public sealed class RemoteDeviceOptions : Object {
 		public TlsCertificate? certificate {
 			get;
 			set;
@@ -1568,7 +1568,7 @@ namespace Frida {
 		}
 	}
 
-	public class ApplicationList : Object {
+	public sealed class ApplicationList : Object {
 		private Gee.List<Application> items;
 
 		internal ApplicationList (Gee.List<Application> items) {
@@ -1584,7 +1584,7 @@ namespace Frida {
 		}
 	}
 
-	public class Application : Object {
+	public sealed class Application : Object {
 		public string identifier {
 			get;
 			construct;
@@ -1610,7 +1610,7 @@ namespace Frida {
 		}
 	}
 
-	public class ProcessList : Object {
+	public sealed class ProcessList : Object {
 		private Gee.List<Process> items;
 
 		internal ProcessList (Gee.List<Process> items) {
@@ -1626,7 +1626,7 @@ namespace Frida {
 		}
 	}
 
-	public class Process : Object {
+	public sealed class Process : Object {
 		public uint pid {
 			get;
 			construct;
@@ -1647,7 +1647,7 @@ namespace Frida {
 		}
 	}
 
-	public class ProcessMatchOptions : Object {
+	public sealed class ProcessMatchOptions : Object {
 		public int timeout {
 			get;
 			set;
@@ -1661,7 +1661,7 @@ namespace Frida {
 		}
 	}
 
-	public class SpawnOptions : Object {
+	public sealed class SpawnOptions : Object {
 		public string[]? argv {
 			get;
 			set;
@@ -1695,7 +1695,7 @@ namespace Frida {
 		}
 	}
 
-	public class SpawnList : Object {
+	public sealed class SpawnList : Object {
 		private Gee.List<Spawn> items;
 
 		internal SpawnList (Gee.List<Spawn> items) {
@@ -1711,7 +1711,7 @@ namespace Frida {
 		}
 	}
 
-	public class Spawn : Object {
+	public sealed class Spawn : Object {
 		public uint pid {
 			get;
 			construct;
@@ -1735,7 +1735,7 @@ namespace Frida {
 		}
 	}
 
-	public class ChildList : Object {
+	public sealed class ChildList : Object {
 		private Gee.List<Child> items;
 
 		internal ChildList (Gee.List<Child> items) {
@@ -1751,7 +1751,7 @@ namespace Frida {
 		}
 	}
 
-	public class Child : Object {
+	public sealed class Child : Object {
 		public uint pid {
 			get;
 			construct;
@@ -1815,7 +1815,7 @@ namespace Frida {
 		}
 	}
 
-	public class Crash : Object {
+	public sealed class Crash : Object {
 		public uint pid {
 			get;
 			construct;
@@ -1864,7 +1864,7 @@ namespace Frida {
 		}
 	}
 
-	public class Bus : Object {
+	public sealed class Bus : Object {
 		public signal void detached ();
 		public signal void message (string json, Bytes? data);
 
@@ -2151,7 +2151,7 @@ namespace Frida {
 		}
 	}
 
-	public class Session : Object, AgentMessageSink {
+	public sealed class Session : Object, AgentMessageSink {
 		public signal void detached (SessionDetachReason reason, Crash? crash);
 
 		public uint pid {
@@ -3119,7 +3119,7 @@ namespace Frida {
 		}
 	}
 
-	public class Script : Object {
+	public sealed class Script : Object {
 		public signal void destroyed ();
 		public signal void message (string json, Bytes? data);
 
@@ -3356,7 +3356,7 @@ namespace Frida {
 		}
 	}
 
-	public class PortalMembership : Object {
+	public sealed class PortalMembership : Object {
 		private uint id;
 		private Session session;
 

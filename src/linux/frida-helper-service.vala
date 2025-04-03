@@ -9,7 +9,7 @@ namespace Frida {
 		return service.run ();
 	}
 
-	public class LinuxHelperService : Object, LinuxRemoteHelper {
+	public sealed class LinuxHelperService : Object, LinuxRemoteHelper {
 		public string parent_address {
 			get;
 			construct;

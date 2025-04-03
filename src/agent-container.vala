@@ -1,5 +1,5 @@
 namespace Frida {
-	public class AgentContainer : Object, AgentSessionProvider {
+	public sealed class AgentContainer : Object, AgentSessionProvider {
 		public DBusConnection connection {
 			get;
 			private set;

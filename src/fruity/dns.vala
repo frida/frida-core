@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class DnsPacketReader {
+	public sealed class DnsPacketReader {
 		private BufferReader reader;
 
 		public DnsPacketReader (Bytes packet) {

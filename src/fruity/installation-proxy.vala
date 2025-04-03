@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	public class InstallationProxyClient : Object, AsyncInitable {
+	public sealed class InstallationProxyClient : Object, AsyncInitable {
 		public Device device {
 			get;
 			construct;
@@ -193,7 +193,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class ApplicationDetails : Object {
+	public sealed class ApplicationDetails : Object {
 		public string identifier {
 			get;
 			construct;

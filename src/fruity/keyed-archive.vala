@@ -22,7 +22,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSNumber : NSObject {
+	public sealed class NSNumber : NSObject {
 		public Kind kind {
 			get;
 			private set;
@@ -108,7 +108,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSString : NSObject {
+	public sealed class NSString : NSObject {
 		public string str {
 			get;
 			private set;
@@ -134,7 +134,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSData : NSObject {
+	public sealed class NSData : NSObject {
 		public Bytes bytes {
 			get;
 			private set;
@@ -160,7 +160,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSDictionary : NSObject {
+	public sealed class NSDictionary : NSObject {
 		public int size {
 			get {
 				return storage.size;
@@ -221,7 +221,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSDictionaryRaw : NSObject {
+	public sealed class NSDictionaryRaw : NSObject {
 		public int size {
 			get {
 				return storage.size;
@@ -255,7 +255,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSArray : NSObject {
+	public sealed class NSArray : NSObject {
 		public int length {
 			get {
 				return storage.size;
@@ -279,7 +279,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSDate : NSObject {
+	public sealed class NSDate : NSObject {
 		public double time {
 			get;
 			private set;
@@ -298,7 +298,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class NSError : NSObject {
+	public sealed class NSError : NSObject {
 		public NSString domain {
 			get;
 			private set;
@@ -321,7 +321,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class DTTapMessage : NSObject {
+	public sealed class DTTapMessage : NSObject {
 		public NSDictionary plist {
 			get;
 			private set;
@@ -658,7 +658,7 @@ namespace Frida.Fruity {
 			return new DTTapMessage ((NSDictionary) decode_value (instance.get_uid ("DTTapMessagePlist"), ctx));
 		}
 
-		private class EncodingContext {
+		private sealed class EncodingContext {
 			public PlistArray objects;
 
 			private Gee.HashMap<string, PlistUid> classes = new Gee.HashMap<string, PlistUid> ();
@@ -709,7 +709,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private class DecodingContext {
+		private sealed class DecodingContext {
 			public PlistArray objects;
 
 			public DecodingContext (PlistArray objects) {

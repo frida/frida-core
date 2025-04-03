@@ -1,5 +1,5 @@
 namespace Frida {
-	private class BareboneScript : Object {
+	private sealed class BareboneScript : Object {
 		public signal void message (string json, Bytes? data);
 
 		public AgentScriptId id {

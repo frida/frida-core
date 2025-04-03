@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Fruitjector : Object, Injector {
+	public sealed class Fruitjector : Object, Injector {
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 
 		public DarwinHelper helper {
@@ -117,7 +117,7 @@ namespace Frida {
 		}
 	}
 
-	public class AgentResource : Object {
+	public sealed class AgentResource : Object {
 		public string name {
 			get;
 			construct;

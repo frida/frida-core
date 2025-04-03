@@ -1,5 +1,5 @@
 namespace Frida {
-	public class Compiler : Object {
+	public sealed class Compiler : Object {
 		public signal void starting ();
 		public signal void finished ();
 		public signal void output (string bundle);
@@ -465,10 +465,10 @@ namespace Frida {
 		}
 	}
 
-	public class BuildOptions : CompilerOptions {
+	public sealed class BuildOptions : CompilerOptions {
 	}
 
-	public class WatchOptions : CompilerOptions {
+	public sealed class WatchOptions : CompilerOptions {
 	}
 
 	public enum SourceMaps {

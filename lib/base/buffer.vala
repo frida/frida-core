@@ -1,5 +1,5 @@
 namespace Frida {
-	public class BufferBuilder : Object {
+	public sealed class BufferBuilder : Object {
 		public ByteOrder byte_order {
 			get;
 			construct;
@@ -307,7 +307,7 @@ namespace Frida {
 		NUL
 	}
 
-	public class Buffer : Object {
+	public sealed class Buffer : Object {
 		public Bytes bytes {
 			get;
 			construct;
@@ -466,7 +466,7 @@ namespace Frida {
 		}
 	}
 
-	public class BufferReader {
+	public sealed class BufferReader {
 		public size_t available {
 			get {
 				return buffer.bytes.get_size () - offset;

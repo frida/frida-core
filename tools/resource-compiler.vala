@@ -14,7 +14,7 @@ namespace Frida {
 		MIPS,
 	}
 
-	public class ResourceCompiler {
+	public sealed class ResourceCompiler {
 		private static Toolchain toolchain;
 		private static Machine machine;
 		private static string toolchain_name;
@@ -684,7 +684,7 @@ namespace Frida {
 	}
 
 	namespace MSVC {
-		public class ObjWriter {
+		public sealed class ObjWriter {
 			private const uint16 IMAGE_FILE_MACHINE_I386 = 0x14c;
 			private const uint16 IMAGE_FILE_MACHINE_AMD64 = 0x8664;
 			private const uint16 IMAGE_FILE_MACHINE_ARM = 0x1c0;

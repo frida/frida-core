@@ -151,7 +151,7 @@ namespace Frida {
 		DEBUGGER
 	}
 
-	public class AgentMessageTransmitter : Object {
+	public sealed class AgentMessageTransmitter : Object {
 		public signal void closed ();
 		public signal void new_candidates (string[] candidate_sdps);
 		public signal void candidate_gathering_done ();
@@ -793,7 +793,7 @@ namespace Frida {
 		public abstract async string authenticate (string token, Cancellable? cancellable) throws GLib.Error;
 	}
 
-	public class StaticAuthenticationService : Object, AuthenticationService {
+	public sealed class StaticAuthenticationService : Object, AuthenticationService {
 		public string token_hash {
 			get;
 			construct;
@@ -818,13 +818,13 @@ namespace Frida {
 		}
 	}
 
-	public class NullAuthenticationService : Object, AuthenticationService {
+	public sealed class NullAuthenticationService : Object, AuthenticationService {
 		public async string authenticate (string token, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.INVALID_OPERATION ("Authentication not expected");
 		}
 	}
 
-	public class UnauthorizedHostSession : Object, HostSession {
+	public sealed class UnauthorizedHostSession : Object, HostSession {
 		public async void ping (uint interval_seconds, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
@@ -908,7 +908,7 @@ namespace Frida {
 		}
 	}
 
-	public class UnauthorizedPortalSession : Object, PortalSession {
+	public sealed class UnauthorizedPortalSession : Object, PortalSession {
 		public async void join (HostApplicationInfo app, SpawnStartState current_state,
 				AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options,
 				Cancellable? cancellable, out SpawnStartState next_state) throws Error, IOError {
@@ -916,7 +916,7 @@ namespace Frida {
 		}
 	}
 
-	public class UnauthorizedBusSession : Object, BusSession {
+	public sealed class UnauthorizedBusSession : Object, BusSession {
 		public async void attach (Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
@@ -1114,7 +1114,7 @@ namespace Frida {
 		}
 	}
 
-	public class FrontmostQueryOptions : Object {
+	public sealed class FrontmostQueryOptions : Object {
 		public Scope scope {
 			get;
 			set;
@@ -1144,7 +1144,7 @@ namespace Frida {
 		}
 	}
 
-	public class ApplicationQueryOptions : Object {
+	public sealed class ApplicationQueryOptions : Object {
 		public Scope scope {
 			get;
 			set;
@@ -1202,7 +1202,7 @@ namespace Frida {
 		}
 	}
 
-	public class ProcessQueryOptions : Object {
+	public sealed class ProcessQueryOptions : Object {
 		public Scope scope {
 			get;
 			set;
@@ -1344,7 +1344,7 @@ namespace Frida {
 		}
 	}
 
-	public class SessionOptions : Object {
+	public sealed class SessionOptions : Object {
 		public Realm realm {
 			get;
 			set;
@@ -1589,7 +1589,7 @@ namespace Frida {
 		}
 	}
 
-	public class ScriptOptions : Object {
+	public sealed class ScriptOptions : Object {
 		public string? name {
 			get;
 			set;
@@ -1679,7 +1679,7 @@ namespace Frida {
 		SHARED_MEMORY
 	}
 
-	public class SnapshotOptions : Object {
+	public sealed class SnapshotOptions : Object {
 		public string? warmup_script {
 			get;
 			set;
@@ -1754,7 +1754,7 @@ namespace Frida {
 		}
 	}
 
-	public class PortalOptions : Object {
+	public sealed class PortalOptions : Object {
 		public TlsCertificate? certificate {
 			get;
 			set;
@@ -1817,7 +1817,7 @@ namespace Frida {
 		}
 	}
 
-	public class PeerOptions : Object {
+	public sealed class PeerOptions : Object {
 		public string? stun_server {
 			get;
 			set;
@@ -1878,7 +1878,7 @@ namespace Frida {
 		}
 	}
 
-	public class Relay : Object {
+	public sealed class Relay : Object {
 		public string address {
 			get;
 			construct;

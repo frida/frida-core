@@ -1,18 +1,18 @@
 namespace Frida {
-	public class LinuxHostSessionBackend : LocalHostSessionBackend {
+	public sealed class LinuxHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
 			return new LinuxHostSessionProvider ();
 		}
 	}
 
-	public class LinuxHostSessionProvider : LocalHostSessionProvider {
+	public sealed class LinuxHostSessionProvider : LocalHostSessionProvider {
 		protected override LocalHostSession make_host_session (HostSessionOptions? options) throws Error {
 			var tempdir = new TemporaryDirectory ();
 			return new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
 		}
 	}
 
-	public class LinuxHostSession : LocalHostSession {
+	public sealed class LinuxHostSession : LocalHostSession {
 		public LinuxHelper helper {
 			get;
 			construct;
@@ -442,7 +442,7 @@ namespace Frida {
 	}
 
 #if ANDROID
-	private class RoboLauncher : Object {
+	private sealed class RoboLauncher : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
@@ -742,7 +742,7 @@ namespace Frida {
 		}
 	}
 
-	private class ZygoteAgent : InternalAgent {
+	private sealed class ZygoteAgent : InternalAgent {
 		public uint pid {
 			get;
 			construct;
@@ -795,7 +795,7 @@ namespace Frida {
 		}
 	}
 
-	private class SystemServerAgent : InternalAgent {
+	private sealed class SystemServerAgent : InternalAgent {
 		private delegate void CompletionNotify ();
 
 		public SystemServerAgent (LinuxHostSession host_session) {
@@ -1117,7 +1117,7 @@ namespace Frida {
 		}
 	}
 
-	private class CrashMonitor : Object {
+	private sealed class CrashMonitor : Object {
 		public signal void process_crashed (CrashInfo crash);
 
 		private Object logcat;
@@ -1547,7 +1547,7 @@ namespace Frida {
 		return result.str;
 	}
 
-	private class PackageEntrypoint : Object {
+	private abstract class PackageEntrypoint : Object {
 		public int uid {
 			get;
 			set;
@@ -1607,13 +1607,13 @@ namespace Frida {
 		}
 	}
 
-	private class DefaultActivityEntrypoint : PackageEntrypoint {
+	private sealed class DefaultActivityEntrypoint : PackageEntrypoint {
 		public DefaultActivityEntrypoint () {
 			Object ();
 		}
 	}
 
-	private class ActivityEntrypoint : PackageEntrypoint {
+	private sealed class ActivityEntrypoint : PackageEntrypoint {
 		public string activity {
 			get;
 			construct;
@@ -1624,7 +1624,7 @@ namespace Frida {
 		}
 	}
 
-	private class BroadcastReceiverEntrypoint : PackageEntrypoint {
+	private sealed class BroadcastReceiverEntrypoint : PackageEntrypoint {
 		public string receiver {
 			get;
 			construct;

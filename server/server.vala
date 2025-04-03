@@ -235,7 +235,7 @@ namespace Frida.Server {
 	}
 #endif
 
-	private class Application : Object {
+	private sealed class Application : Object {
 		public signal void ready (bool success);
 
 		public string? device_id {

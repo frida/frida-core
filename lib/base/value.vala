@@ -38,7 +38,7 @@ namespace Frida {
 		public abstract unowned string get_uuid_value () throws Error;
 	}
 
-	public class VariantReader : Object, ObjectReader {
+	public sealed class VariantReader : Object, ObjectReader {
 		public Variant root_object {
 			get {
 				return scopes.peek_head ().val;
@@ -180,7 +180,7 @@ namespace Frida {
 		}
 	}
 
-	public class JsonObjectBuilder : Object, ObjectBuilder {
+	public sealed class JsonObjectBuilder : Object, ObjectBuilder {
 		private Json.Builder builder = new Json.Builder ();
 		private Gee.Map<string, Bytes> raw_values = new Gee.HashMap<string, Bytes> ();
 
@@ -267,7 +267,7 @@ namespace Frida {
 		}
 	}
 
-	public class JsonObjectReader : Object, ObjectReader {
+	public sealed class JsonObjectReader : Object, ObjectReader {
 		private Json.Reader reader;
 
 		public JsonObjectReader (string json) throws Error {

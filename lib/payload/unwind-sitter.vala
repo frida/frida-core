@@ -1,6 +1,6 @@
 namespace Frida {
 #if DARWIN
-	public class UnwindSitter : Object {
+	public sealed class UnwindSitter : Object {
 		public weak ProcessInvader invader {
 			get;
 			construct;
@@ -62,7 +62,7 @@ namespace Frida {
 		public extern static void _unhook_libunwind ();
 	}
 #else
-	public class UnwindSitter : Object {
+	public sealed class UnwindSitter : Object {
 		public weak ProcessInvader invader {
 			get;
 			construct;

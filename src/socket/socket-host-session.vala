@@ -1,5 +1,5 @@
 namespace Frida {
-	public class SocketHostSessionBackend : Object, HostSessionBackend {
+	public sealed class SocketHostSessionBackend : Object, HostSessionBackend {
 		private SocketHostSessionProvider provider;
 
 		public async void start (Cancellable? cancellable) throws IOError {
@@ -14,7 +14,7 @@ namespace Frida {
 		}
 	}
 
-	public class SocketHostSessionProvider : Object, HostSessionProvider {
+	public sealed class SocketHostSessionProvider : Object, HostSessionProvider {
 		public string id {
 			get { return "socket"; }
 		}

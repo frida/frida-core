@@ -3,7 +3,7 @@ namespace Frida.Fruity {
 	using OpenSSL;
 	using OpenSSL.Envelope;
 
-	public class DiscoveryService : Object, AsyncInitable {
+	public sealed class DiscoveryService : Object, AsyncInitable {
 		public IOStream stream {
 			get;
 			construct;
@@ -119,11 +119,11 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class ServiceInfo {
+	public sealed class ServiceInfo {
 		public uint16 port;
 	}
 
-	public class PairingService : Object, AsyncInitable {
+	public sealed class PairingService : Object, AsyncInitable {
 		public const string DNS_SD_NAME = "_remotepairing._tcp.local";
 
 		public PairingTransport transport {
@@ -1248,7 +1248,7 @@ namespace Frida.Fruity {
 		public abstract void post (Bytes message);
 	}
 
-	public class XpcPairingTransport : Object, PairingTransport {
+	public sealed class XpcPairingTransport : Object, PairingTransport {
 		public IOStream stream {
 			get;
 			construct;
@@ -1320,7 +1320,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PlainPairingTransport : Object, PairingTransport {
+	public sealed class PlainPairingTransport : Object, PairingTransport {
 		public IOStream stream {
 			get;
 			construct;
@@ -1458,7 +1458,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PairingStore {
+	public sealed class PairingStore {
 		public PairingIdentity self_identity {
 			get {
 				return _self_identity;
@@ -1664,7 +1664,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PairingIdentity {
+	public sealed class PairingIdentity {
 		public string identifier;
 		public Key key;
 		public Bytes irk;
@@ -1681,7 +1681,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PairingPeer {
+	public sealed class PairingPeer {
 		public string identifier;
 		public Bytes public_key;
 		public Bytes irk;
@@ -1692,7 +1692,7 @@ namespace Frida.Fruity {
 		public Bytes? remote_unlock_host_key;
 	}
 
-	public class PairingServiceMetadata {
+	public sealed class PairingServiceMetadata {
 		public string identifier;
 		public Bytes auth_tag;
 
@@ -1721,7 +1721,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class DeviceOptions {
+	public sealed class DeviceOptions {
 		public bool allows_pair_setup;
 		public bool allows_pinless_pairing;
 		public bool allows_promptless_automation_pairing_upgrade;
@@ -1729,7 +1729,7 @@ namespace Frida.Fruity {
 		public bool allows_incoming_tunnel_connections;
 	}
 
-	public class DeviceInfo {
+	public sealed class DeviceInfo {
 		public string name;
 		public string model;
 		public string udid;
@@ -1737,7 +1737,7 @@ namespace Frida.Fruity {
 		public Plist kvs;
 	}
 
-	private class PairingParamsBuilder {
+	private sealed class PairingParamsBuilder {
 		private BufferBuilder builder = new BufferBuilder (LITTLE_ENDIAN);
 
 		public unowned PairingParamsBuilder add_method (uint8 method) {
@@ -1810,7 +1810,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private class PairingParamsParser {
+	private sealed class PairingParamsParser {
 		private BufferReader reader;
 		private EnumClass param_type_class;
 
@@ -1946,7 +1946,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class TunnelParameters {
+	public sealed class TunnelParameters {
 		public InetAddress address;
 		public uint16 mtu;
 		public InetAddress server_address;
@@ -2877,7 +2877,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class AppService : TrustedService {
+	public sealed class AppService : TrustedService {
 		public static async AppService open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
 			var service = new AppService (stream);
 
@@ -3036,7 +3036,7 @@ namespace Frida.Fruity {
 			return processes;
 		}
 
-		public class ApplicationInfo {
+		public sealed class ApplicationInfo {
 			public string bundle_identifier;
 			public string? bundle_version;
 			public string name;
@@ -3050,7 +3050,7 @@ namespace Frida.Fruity {
 			public bool is_app_clip;
 		}
 
-		public class ProcessInfo {
+		public sealed class ProcessInfo {
 			public uint pid;
 			public string path;
 		}
@@ -3707,11 +3707,11 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class PeerInfo {
+	public sealed class PeerInfo {
 		public Variant? metadata;
 	}
 
-	public class XpcMessageBuilder : Object {
+	public sealed class XpcMessageBuilder : Object {
 		private MessageType message_type;
 		private MessageFlags message_flags = NONE;
 		private uint64 message_id = 0;
@@ -3752,7 +3752,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class XpcMessage {
+	public sealed class XpcMessage {
 		public MessageType type;
 		public MessageFlags flags;
 		public uint64 id;
@@ -3871,7 +3871,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public class XpcBodyBuilder : XpcObjectBuilder {
+	public sealed class XpcBodyBuilder : XpcObjectBuilder {
 		public XpcBodyBuilder () {
 			base ();
 
@@ -4066,7 +4066,7 @@ namespace Frida.Fruity {
 		DICTIONARY	= 0xf000,
 	}
 
-	private class XpcBodyParser {
+	private sealed class XpcBodyParser {
 		public static Variant parse (uint8[] data) throws Error {
 			if (data.length < 12)
 				throw new Error.INVALID_ARGUMENT ("Invalid xpc_object: truncated");
@@ -4086,7 +4086,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	private class XpcObjectParser {
+	private sealed class XpcObjectParser {
 		private Buffer buf;
 		private size_t cursor;
 		private EnumClass object_type_class;

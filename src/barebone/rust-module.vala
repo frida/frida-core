@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	private class RustModule : Object {
+	private sealed class RustModule : Object {
 		public signal void console_output (string message);
 
 		public Gee.List<Export> exports {

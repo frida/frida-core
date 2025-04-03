@@ -1,5 +1,5 @@
 namespace Frida {
-	public class RpcClient : Object {
+	public sealed class RpcClient : Object {
 		public weak RpcPeer peer {
 			get;
 			construct;

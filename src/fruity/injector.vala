@@ -6,7 +6,7 @@ namespace Frida.Fruity.Injector {
 		return yield session.run (cancellable);
 	}
 
-	public class GadgetDetails : Object {
+	public sealed class GadgetDetails : Object {
 		public uint16 port {
 			get;
 			construct;
@@ -21,7 +21,7 @@ namespace Frida.Fruity.Injector {
 		UNSUPPORTED
 	}
 
-	private class Session : Object {
+	private sealed class Session : Object {
 		public Gum.DarwinModule module {
 			get;
 			construct;
