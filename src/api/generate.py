@@ -20,6 +20,8 @@ CORE_TAG_FIELD = f"{{{CORE_NAMESPACE}}}field"
 CORE_TAG_CONSTRUCTOR = f"{{{CORE_NAMESPACE}}}constructor"
 CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
 
+OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed )?(class|interface)\s+(\w+)\b")
+
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
     parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp'], default='bundle')
@@ -418,8 +420,8 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
                         current_enum.vapi_declaration = stripped_line
                     else:
                         ignoring = True
-                elif stripped_line.startswith("public class") or stripped_line.startswith("public interface"):
-                    name = re.match(r"^public (class|interface) (\w+) ", stripped_line).group(2)
+                elif (match := OBJECT_TYPE_PATTERN.match(stripped_line)) is not None:
+                    name = match.group(3)
                     if name not in object_type_by_name:
                         ignoring = True
                     else:
@@ -476,7 +478,7 @@ def function_is_public(name):
             ]
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
-    return [ApiObjectType(m.group(3), m.group(2)) for m in re.finditer(r"^\t+public\s+(sealed )?(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]
+    return [ApiObjectType(m.group(3), m.group(2)) for m in OBJECT_TYPE_PATTERN.finditer(source, re.MULTILINE)]
 
 def parse_vapi_functions(vapi) -> List[ApiFunction]:
     return [ApiFunction(m.group(1), m.group(0)) for m in re.finditer(r"^\tpublic static .+ (\w+) \(.+;", vapi, re.MULTILINE)]
