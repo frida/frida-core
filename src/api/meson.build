@@ -1,3 +1,5 @@
+fs = import('fs')
+
 generate_api = [python, files('generate.py')]
 
 generate_api_args = [
@@ -32,6 +34,8 @@ core_public_h = core_api[0]
 core_public_gir = core_api[1]
 core_public_vapi = [core_api[2], core_api[3]]
 
+gio_gir = fs.copyfile('Gio-2.0.gir')
+
 core_public_vapi_stamp = custom_target('frida-core-vapi-stamp',
   input: core_public_vapi,
   output: f'frida-core-@api_version@.vapi.stamp',
@@ -59,8 +63,6 @@ core_public_lib = custom_target('frida-core-library',
   install_dir: get_option('libdir'),
 )
 
-fs = import('fs')
-
 core_public_extra_headers = []
 if host_os == 'android'
   core_public_extra_headers += fs.copyfile(frida_selinux_h)
@@ -87,7 +89,7 @@ installed_variables = {
 }
 
 core_public_dep = declare_dependency(
-  sources: [core_public_h, core_public_gir, core_public_vapi_stamp, core_public_extra_headers],
+  sources: [core_public_h, core_public_gir, gio_gir, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,
