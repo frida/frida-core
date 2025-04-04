@@ -1549,8 +1549,11 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn (Harness h) {
-			if ((Frida.Test.os () == Frida.Test.OS.ANDROID || Frida.Test.os_arch_suffix () == "-linux-arm") &&
-					!GLib.Test.slow ()) {
+			if (!GLib.Test.slow () && (
+						Frida.Test.os () == Frida.Test.OS.ANDROID ||
+						Frida.Test.os_arch_suffix () == "-linux-arm" ||
+						Frida.Test.os_arch_suffix () == "-linux-arm64be"
+					)) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;

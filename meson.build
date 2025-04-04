@@ -162,6 +162,14 @@ if host_os_family == 'darwin'
   endif
 endif
 
+if host_machine.endian() == 'big'
+  if host_abi in ['arm', 'armhf']
+    host_abi = 'armbe8'
+  elif host_abi == 'arm64'
+    host_abi = 'arm64be'
+  endif
+endif
+
 if host_os_family == 'darwin' and host_arch == 'arm64'
   host_is_modern = host_abi == 'arm64e'
 else
