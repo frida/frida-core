@@ -1,5 +1,5 @@
 namespace Frida {
-	public sealed class Qinjector : Object, Injector {
+	public class Qinjector : Object, Injector {
 		public string temp_directory {
 			owned get {
 				return resource_store.tempdir.path;
