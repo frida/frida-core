@@ -1,5 +1,5 @@
 namespace Frida {
-	public sealed class Binjector : Object, Injector {
+	public class Binjector : Object, Injector {
 		public signal void output (uint pid, int fd, uint8[] data);
 
 		public string temp_directory {
