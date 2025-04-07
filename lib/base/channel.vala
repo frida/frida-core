@@ -106,6 +106,9 @@ namespace Frida {
 				}
 
 				output (buffer[:n]);
+
+				if (n == 0)
+					break;
 			}
 
 			stream.close_async.begin ();
