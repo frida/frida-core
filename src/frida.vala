@@ -31,10 +31,10 @@ namespace Frida {
 
 		public delegate bool Predicate (Device device);
 
-		private Promise<bool> start_request;
-		private Promise<bool> stop_request;
+		private Promise<bool>? start_request;
+		private Promise<bool>? stop_request;
 
-		private HostSessionService service;
+		private HostSessionService? service;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
@@ -425,18 +425,17 @@ namespace Frida {
 					} catch (GLib.Error e) {
 						cancellable.set_error_if_cancelled ();
 					}
-				}
 
-				foreach (var device in devices.to_array ())
-					yield device._do_close (APPLICATION_REQUESTED, true, cancellable);
-				devices.clear ();
+					foreach (var device in devices.to_array ())
+						yield device._do_close (APPLICATION_REQUESTED, true, cancellable);
+					devices.clear ();
 
-				if (service != null) {
 					yield service.stop (cancellable);
 					service.provider_available.disconnect (on_provider_available);
 					service.provider_unavailable.disconnect (on_provider_unavailable);
-					service = null;
 				}
+
+				service = null;
 
 				stop_request.resolve (true);
 			} catch (IOError e) {
