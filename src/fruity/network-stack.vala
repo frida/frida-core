@@ -513,8 +513,10 @@ namespace Frida.Fruity {
 					return OK;
 				});
 
-				state = CLOSED;
-				update_pending_io ();
+				with_state_lock (() => {
+					state = CLOSED;
+					update_pending_io ();
+				});
 			}
 
 			private void detach_from_pcb () {
@@ -525,8 +527,8 @@ namespace Frida.Fruity {
 			private void on_connect () {
 				with_state_lock (() => {
 					tx_space_available = pcb.query_available_send_buffer_space ();
+					update_pending_io ();
 				});
-				update_pending_io ();
 
 				schedule_on_frida_thread (() => {
 					state = OPEN;
@@ -541,10 +543,9 @@ namespace Frida.Fruity {
 			private void on_recv (owned LWIP.PacketBuffer? pbuf, LWIP.ErrorCode err) {
 				if (pbuf == null) {
 					detach_from_pcb ();
-					schedule_on_frida_thread (() => {
+					with_state_lock (() => {
 						state = CLOSED;
 						update_pending_io ();
-						return Source.REMOVE;
 					});
 					return;
 				}
@@ -553,15 +554,15 @@ namespace Frida.Fruity {
 				unowned uint8[] chunk = pbuf.get_contiguous (buffer, pbuf.tot_len);
 				with_state_lock (() => {
 					rx_buf.append (chunk[:pbuf.tot_len]);
+					update_pending_io ();
 				});
-				update_pending_io ();
 			}
 
 			private void on_sent (uint16 len) {
 				with_state_lock (() => {
 					tx_space_available = pcb.query_available_send_buffer_space () - tx_buf.len;
+					update_pending_io ();
 				});
-				update_pending_io ();
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
@@ -570,10 +571,13 @@ namespace Frida.Fruity {
 					pcb = null;
 				else
 					detach_from_pcb ();
-				schedule_on_frida_thread (() => {
+
+				with_state_lock (() => {
 					state = CLOSED;
 					update_pending_io ();
+				});
 
+				schedule_on_frida_thread (() => {
 					if (!established.future.ready)
 						established.reject (parse_error (err));
 
@@ -611,6 +615,7 @@ namespace Frida.Fruity {
 							return;
 						Memory.copy (buffer, rx_buf.data, n);
 						rx_buf.remove_range (0, (uint) n);
+						update_pending_io ();
 					});
 					if (n == 0)
 						return OK;
@@ -633,8 +638,6 @@ namespace Frida.Fruity {
 						return 0;
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
 				}
-
-				update_pending_io ();
 
 				return n;
 			}
@@ -675,6 +678,7 @@ namespace Frida.Fruity {
 					available_space = pcb.query_available_send_buffer_space ();
 					with_state_lock (() => {
 						tx_space_available = available_space - tx_buf.len;
+						update_pending_io ();
 					});
 
 					return OK;
@@ -682,8 +686,6 @@ namespace Frida.Fruity {
 
 				if (n == 0)
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
-
-				update_pending_io ();
 
 				return n;
 			}
