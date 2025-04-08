@@ -124,13 +124,15 @@ namespace Frida {
 		}
 
 		protected virtual void update_pending_io () {
-			_pending_io = query_events ();
+			lock (state) {
+				_pending_io = query_events ();
 
-			foreach (var entry in sources.entries) {
-				unowned Source source = entry.key;
-				IOCondition c = entry.value;
-				if ((_pending_io & c) != 0)
-					source.set_ready_time (0);
+				foreach (var entry in sources.entries) {
+					unowned Source source = entry.key;
+					IOCondition c = entry.value;
+					if ((_pending_io & c) != 0)
+						source.set_ready_time (0);
+				}
 			}
 
 			notify_property ("pending-io");
