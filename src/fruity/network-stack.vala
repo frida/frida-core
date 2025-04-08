@@ -409,8 +409,8 @@ namespace Frida.Fruity {
 
 			private unowned LWIP.TcpPcb? pcb;
 			private ByteArray rx_buf = new ByteArray.sized (64 * 1024);
-			private ByteArray tx_buf = new ByteArray.sized (64 * 1024);
-			private size_t tx_space_available = 0;
+			private bool tx_possible = false;
+			private bool tx_check_pending = false;
 
 			public static async TcpConnection open (VirtualNetworkStack netstack, InetSocketAddress address,
 					Cancellable? cancellable) throws Error, IOError {
@@ -445,7 +445,7 @@ namespace Frida.Fruity {
 				if (rx_buf.len != 0 || state == CLOSED)
 					new_events |= IN;
 
-				if (tx_space_available != 0)
+				if (tx_possible)
 					new_events |= OUT;
 
 				return new_events;
@@ -479,6 +479,12 @@ namespace Frida.Fruity {
 						self->on_sent (len);
 					return OK;
 				});
+				pcb.set_poll_callback ((user_data, pcb) => {
+					TcpConnection * self = user_data;
+					if (self != null)
+						self->on_poll ();
+					return OK;
+				}, 2);
 				pcb.set_error_callback ((user_data, err) => {
 					TcpConnection * self = user_data;
 					if (self != null)
@@ -526,7 +532,7 @@ namespace Frida.Fruity {
 
 			private void on_connect () {
 				with_state_lock (() => {
-					tx_space_available = pcb.query_available_send_buffer_space ();
+					tx_possible = true;
 					update_pending_io ();
 				});
 
@@ -559,10 +565,27 @@ namespace Frida.Fruity {
 			}
 
 			private void on_sent (uint16 len) {
-				with_state_lock (() => {
-					tx_space_available = pcb.query_available_send_buffer_space () - tx_buf.len;
-					update_pending_io ();
-				});
+				maybe_reenable_tx ();
+			}
+
+			private void on_poll () {
+				if (tx_check_pending)
+					maybe_reenable_tx ();
+			}
+
+			private void maybe_reenable_tx () {
+				if (pcb_is_writable ()) {
+					with_state_lock (() => {
+						tx_possible = true;
+						tx_check_pending = false;
+						update_pending_io ();
+					});
+				}
+			}
+
+			private bool pcb_is_writable () {
+				return pcb.query_send_buffer_space () > LWIP.Tcp.SEND_LOW_WATERMARK &&
+					pcb.query_send_queue_length () < LWIP.Tcp.SEND_QUEUE_LOW_WATERMARK;
 			}
 
 			private void on_error (LWIP.ErrorCode err) {
@@ -645,44 +668,57 @@ namespace Frida.Fruity {
 			public override ssize_t write (uint8[] buffer) throws IOError {
 				ssize_t n = 0;
 
-				netstack.perform_on_lwip_thread (() => {
+				check_io (netstack.perform_on_lwip_thread (() => {
 					if (pcb == null)
 						return OK;
 
-					with_state_lock (() => {
-						n = ssize_t.min (buffer.length, (ssize_t) tx_space_available);
-						if (n == 0)
-							return;
-						tx_buf.append (buffer[:n]);
-						tx_space_available -= n;
-					});
-					if (n == 0)
-						return OK;
+					LWIP.TcpPcb.WriteFlags flags = 0;
+					LWIP.ErrorCode write_err = OK;
+					do {
+						flags = COPY;
 
-					size_t available_space = pcb.query_available_send_buffer_space ();
-
-					uint8[]? data = null;
-					with_state_lock (() => {
-						size_t num_bytes_to_write = size_t.min (tx_buf.len, available_space);
-						if (num_bytes_to_write != 0) {
-							data = tx_buf.data[:num_bytes_to_write];
-							tx_buf.remove_range (0, (uint) num_bytes_to_write);
+						size_t len = buffer.length;
+						if (len > uint16.MAX) {
+							len = uint16.MAX;
+							flags |= MORE;
 						}
-					});
-					if (data == null)
-						return OK;
 
-					pcb.write (data, COPY);
-					pcb.output ();
+						size_t available_space = pcb.query_send_buffer_space ();
+						if (available_space < len) {
+							len = available_space;
+							if (len == 0)
+								return OK;
+						}
 
-					available_space = pcb.query_available_send_buffer_space ();
-					with_state_lock (() => {
-						tx_space_available = available_space - tx_buf.len;
-						update_pending_io ();
-					});
+						write_err = pcb.write (buffer[n:n + len], flags);
+						if (write_err == OK)
+							n += (ssize_t) len;
+					} while ((flags & LWIP.TcpPcb.WriteFlags.MORE) != 0 && write_err == OK);
+
+					if (write_err != OK && write_err != MEM)
+						return write_err;
+
+					if (n < buffer.length) {
+						with_state_lock (() => {
+							tx_possible = false;
+							tx_check_pending = true;
+							update_pending_io ();
+						});
+					} else {
+						if (!pcb_is_writable ()) {
+							with_state_lock (() => {
+								tx_possible = false;
+								update_pending_io ();
+							});
+						}
+					}
+
+					var output_err = pcb.output ();
+					if (output_err == RTE)
+						return output_err;
 
 					return OK;
-				});
+				}));
 
 				if (n == 0)
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");

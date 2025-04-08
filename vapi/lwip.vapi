@@ -186,6 +186,8 @@ namespace LWIP {
 		public void set_recv_callback (RecvFunc f);
 		[CCode (cname = "tcp_sent")]
 		public void set_sent_callback (SentFunc f);
+		[CCode (cname = "tcp_poll")]
+		public void set_poll_callback (PollFunc f, uint8 interval);
 		[CCode (cname = "tcp_err")]
 		public void set_error_callback (ErrorFunc f);
 
@@ -206,7 +208,10 @@ namespace LWIP {
 		public void notify_received (uint16 len);
 
 		[CCode (cname = "tcp_sndbuf")]
-		public uint16 query_available_send_buffer_space ();
+		public uint16 query_send_buffer_space ();
+
+		[CCode (cname = "tcp_sndqueuelen")]
+		public uint16 query_send_queue_length ();
 
 		public ErrorCode write (uint8[] data, WriteFlags flags = 0);
 		public ErrorCode output ();
@@ -216,6 +221,9 @@ namespace LWIP {
 
 		[CCode (cname = "tcp_sent_fn", has_target = false)]
 		public delegate ErrorCode SentFunc (void * user_data, TcpPcb pcb, uint16 len);
+
+		[CCode (cname = "tcp_poll_fn", has_target = false)]
+		public delegate ErrorCode PollFunc (void * user_data, TcpPcb pcb);
 
 		[CCode (cname = "tcp_err_fn", has_target = false)]
 		public delegate void ErrorFunc (void * user_data, ErrorCode err);
@@ -247,6 +255,14 @@ namespace LWIP {
 			COPY,
 			MORE,
 		}
+	}
+
+	namespace Tcp {
+		[CCode (cname = "TCP_SNDLOWAT")]
+		public const size_t SEND_LOW_WATERMARK;
+
+		[CCode (cname = "TCP_SNDQUEUELOWAT")]
+		public const size_t SEND_QUEUE_LOW_WATERMARK;
 	}
 
 	[Compact]
