@@ -677,17 +677,12 @@ namespace Frida.Fruity {
 					do {
 						flags = COPY;
 
-						size_t len = buffer.length;
+						size_t len = buffer.length - n;
+						if (len == 0)
+							return OK;
 						if (len > uint16.MAX) {
 							len = uint16.MAX;
 							flags |= MORE;
-						}
-
-						size_t available_space = pcb.query_send_buffer_space ();
-						if (available_space < len) {
-							len = available_space;
-							if (len == 0)
-								return OK;
 						}
 
 						write_err = pcb.write (buffer[n:n + len], flags);
