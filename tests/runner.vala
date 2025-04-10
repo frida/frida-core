@@ -153,11 +153,15 @@ namespace Frida.Test {
 				abi_name = "x86_64";
 				break;
 			case CPU.ARM_32:
+				if (GLib.ByteOrder.HOST == GLib.ByteOrder.BIG_ENDIAN) {
+					abi_name = "armbe8";
+				} else {
 #if ARMHF
-				abi_name = "armhf";
+					abi_name = "armhf";
 #else
-				abi_name = "arm";
+					abi_name = "arm";
 #endif
+				}
 				break;
 			case CPU.ARM_64:
 				abi_name = "arm64";
