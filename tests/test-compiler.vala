@@ -13,7 +13,7 @@ namespace Frida.CompilerTest {
 
 	namespace Performance {
 		private static async void build_simple_agent (Harness h) {
-			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
@@ -70,7 +70,7 @@ namespace Frida.CompilerTest {
 		}
 
 		private static async void watch_simple_agent (Harness h) {
-			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
@@ -136,6 +136,30 @@ namespace Frida.CompilerTest {
 			}
 
 			h.done ();
+		}
+
+		private static bool skip_slow_test () {
+			if (GLib.Test.slow ()) {
+				return false;
+			}
+
+			if (Frida.Test.os () == Frida.Test.OS.IOS) {
+				return true;
+			}
+
+			/*
+			* If we are running on a big-endian ARM system, we are very likely running
+			* in an emulator. So skip the slow tests unless the user explicitly asks
+			* for them at the command line.
+			*/
+			if (Frida.Test.cpu () == Frida.Test.CPU.ARM_32 || Frida.Test.cpu () == Frida.Test.CPU.ARM_64)
+			{
+				if (GLib.ByteOrder.HOST == GLib.ByteOrder.BIG_ENDIAN) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 	}
 
