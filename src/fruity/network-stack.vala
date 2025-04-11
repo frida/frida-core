@@ -584,7 +584,7 @@ namespace Frida.Fruity {
 			}
 
 			private bool pcb_is_writable () {
-				return pcb.query_send_buffer_space () > LWIP.Tcp.SEND_LOW_WATERMARK &&
+				return pcb.query_send_buffer_space () > 0 &&
 					pcb.query_send_queue_length () < LWIP.Tcp.SEND_QUEUE_LOW_WATERMARK;
 			}
 
