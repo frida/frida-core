@@ -677,7 +677,7 @@ namespace Frida.Fruity {
 					do {
 						flags = COPY;
 
-						size_t len = buffer.length;
+						size_t len = buffer.length - n;
 						if (len > uint16.MAX) {
 							len = uint16.MAX;
 							flags |= MORE;
