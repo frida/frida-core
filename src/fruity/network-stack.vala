@@ -687,7 +687,7 @@ namespace Frida.Fruity {
 						if (available_space < len) {
 							len = available_space;
 							if (len == 0)
-								return OK;
+								break;
 						}
 
 						write_err = pcb.write (buffer[n:n + len], flags);
