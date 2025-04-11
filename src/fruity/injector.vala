@@ -825,7 +825,9 @@ namespace Frida.Fruity.Injector {
 
 			yield restore_main_thread_state (cancellable);
 
-			uint64? libdyld_initialize = dyld_symbols["__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE"];
+			uint64? libdyld_initialize = dyld_symbols["__ZN5dyld44APIs19_libdyld_initializeEv"];
+			if (libdyld_initialize == null)
+				libdyld_initialize = dyld_symbols["__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE"];
 			if (libdyld_initialize != null)
 				yield ensure_libsystem_initialized_for_dyld_v4_and_above (libdyld_initialize, dyld_symbols, cancellable);
 			else
@@ -848,9 +850,10 @@ namespace Frida.Fruity.Injector {
 			uint64? notify_objc_init = dyld_symbols["__ZN5dyld412RuntimeState14notifyObjCInitEPKNS_6LoaderE"];
 			uint64 initializer = (notify_objc_init != null) ? notify_objc_init : libdyld_initialize;
 			GDB.Breakpoint init_breakpoint = yield lldb.add_breakpoint (SOFT, initializer, 4, cancellable);
-
 			GDB.Breakpoint? restart_breakpoint = null;
-			uint64? restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv"];
+			uint64? restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN6mach_o6HeaderEPK15DyldSharedCachePv"];
+			if (restart_with_dyld_in_cache == null)
+				restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv"];
 			if (restart_with_dyld_in_cache == null)
 				restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv"];
 			if (restart_with_dyld_in_cache != null)
