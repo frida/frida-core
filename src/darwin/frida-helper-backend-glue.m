@@ -2027,7 +2027,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     }
   }
 
-  modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
+  modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEv");
+  if (modern_entry_address == 0)
+    modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
   instance->dyld_flavor = (modern_entry_address != 0) ? FRIDA_DYLD_V4_PLUS : FRIDA_DYLD_V3_MINUS;
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
@@ -2113,7 +2115,12 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
     GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
-        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv");
+        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN6mach_o6HeaderEPK15DyldSharedCachePv");
+    if (restart_with_dyld_in_cache == 0)
+    {
+      restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
+          "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv");
+    }
     if (restart_with_dyld_in_cache == 0)
     {
       restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
