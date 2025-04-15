@@ -40,8 +40,8 @@ $1-linux-arm: $2
 	mv $$@.tmp $$@
 
 $1-linux-armbe8: $2
-	armeb-linux-gnueabihf-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
-	armeb-linux-gnueabihf-strip --strip-all $$@.tmp
+	armeb-linux-gnueabi-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	armeb-linux-gnueabi-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
 $1-linux-armhf: $2
@@ -107,8 +107,8 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 	mv $@.tmp $@
 
 %-agent-linux-armbe8.so: %-agent.c
-	armeb-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
-	armeb-linux-gnueabihf-strip --strip-all $@.tmp
+	armeb-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	armeb-linux-gnueabi-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-armhf.so: %-agent.c
