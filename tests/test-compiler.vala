@@ -13,7 +13,7 @@ namespace Frida.CompilerTest {
 
 	namespace Performance {
 		private static async void build_simple_agent (Harness h) {
-			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
@@ -70,7 +70,7 @@ namespace Frida.CompilerTest {
 		}
 
 		private static async void watch_simple_agent (Harness h) {
-			if (Frida.Test.os () == Frida.Test.OS.IOS && !GLib.Test.slow ()) {
+			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
@@ -136,6 +136,28 @@ namespace Frida.CompilerTest {
 			}
 
 			h.done ();
+		}
+
+		private static bool skip_slow_test () {
+			if (GLib.Test.slow ())
+				return false;
+
+			if (Frida.Test.os () == Frida.Test.OS.IOS)
+				return true;
+
+			switch (Frida.Test.cpu ()) {
+				case ARM_32:
+				case ARM_64: {
+					bool likely_running_in_an_emulator = ByteOrder.HOST == ByteOrder.BIG_ENDIAN;
+					if (likely_running_in_an_emulator)
+						return true;
+					break;
+				}
+				default:
+					break;
+			}
+
+			return false;
 		}
 	}
 
