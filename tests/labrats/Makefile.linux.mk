@@ -1,54 +1,27 @@
 CC := gcc
 CFLAGS := -Wall -pipe -Os -fPIC -fdata-sections -ffunction-sections
 LDFLAGS := -Wl,--gc-sections
+ARCHS := \
+	linux-x86 \
+	linux-x86_64 \
+	linux-arm \
+	linux-armbe8 \
+	linux-armhf \
+	linux-arm64 \
+	linux-arm64be \
+	linux-arm64beilp32 \
+	linux-mips \
+	linux-mipsel \
+	linux-mips64 \
+	linux-mips64el
 
-all: \
-	sleeper-linux-x86 \
-	sleeper-linux-x86_64 \
-	sleeper-linux-arm \
-	sleeper-linux-armhf \
-	sleeper-linux-arm64 \
-	sleeper-linux-mips \
-	sleeper-linux-mipsel \
-	sleeper-linux-mips64 \
-	sleeper-linux-mips64el \
-	forker-linux-x86 \
-	forker-linux-x86_64 \
-	forker-linux-arm \
-	forker-linux-armhf \
-	forker-linux-arm64 \
-	forker-linux-mips \
-	forker-linux-mipsel \
-	forker-linux-mips64 \
-	forker-linux-mips64el \
-	spawner-linux-x86 \
-	spawner-linux-x86_64 \
-	spawner-linux-arm \
-	spawner-linux-armhf \
-	spawner-linux-arm64 \
-	spawner-linux-mips \
-	spawner-linux-mipsel \
-	spawner-linux-mips64 \
-	spawner-linux-mips64el \
-	simple-agent-linux-x86.so \
-	simple-agent-linux-x86_64.so \
-	simple-agent-linux-arm.so \
-	simple-agent-linux-armhf.so \
-	simple-agent-linux-arm64.so \
-	simple-agent-linux-mips.so \
-	simple-agent-linux-mipsel.so \
-	simple-agent-linux-mips64.so \
-	simple-agent-linux-mips64el.so \
-	resident-agent-linux-x86.so \
-	resident-agent-linux-x86_64.so \
-	resident-agent-linux-arm.so \
-	resident-agent-linux-armhf.so \
-	resident-agent-linux-arm64.so \
-	resident-agent-linux-mips.so \
-	resident-agent-linux-mipsel.so \
-	resident-agent-linux-mips64.so \
-	resident-agent-linux-mips64el.so \
-	$(NULL)
+all: $(ARCHS) $(NULL)
+
+define declare-arch
+$1: resident-agent-$1.so simple-agent-$1.so sleeper-$1 forker-$1 spawner-$1
+endef
+
+$(foreach arch,$(ARCHS),$(eval $(call declare-arch,$(arch))))
 
 define declare-executable
 $1-linux-x86: $2
@@ -66,6 +39,11 @@ $1-linux-arm: $2
 	arm-linux-gnueabi-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
+$1-linux-armbe8: $2
+	armeb-linux-gnueabi-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	armeb-linux-gnueabi-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
 $1-linux-armhf: $2
 	arm-linux-gnueabihf-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
 	arm-linux-gnueabihf-strip --strip-all $$@.tmp
@@ -74,6 +52,16 @@ $1-linux-armhf: $2
 $1-linux-arm64: $2
 	aarch64-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
 	aarch64-linux-gnu-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
+$1-linux-arm64be: $2
+	aarch64_be-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	aarch64_be-linux-gnu-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
+$1-linux-arm64beilp32: $2
+	aarch64_be-linux-gnu_ilp32-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	aarch64_be-linux-gnu_ilp32-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
 $1-linux-mips: $2
@@ -118,6 +106,11 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 	arm-linux-gnueabi-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
+%-agent-linux-armbe8.so: %-agent.c
+	armeb-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	armeb-linux-gnueabi-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
 %-agent-linux-armhf.so: %-agent.c
 	arm-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
@@ -126,6 +119,16 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 %-agent-linux-arm64.so: %-agent.c
 	aarch64-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	aarch64-linux-gnu-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+%-agent-linux-arm64be.so: %-agent.c
+	aarch64_be-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	aarch64_be-linux-gnu-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+%-agent-linux-arm64beilp32.so: %-agent.c
+	aarch64_be-linux-gnu_ilp32-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	aarch64_be-linux-gnu_ilp32-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-mips.so: %-agent.c
