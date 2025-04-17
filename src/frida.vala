@@ -430,7 +430,9 @@ namespace Frida {
 						yield device._do_close (APPLICATION_REQUESTED, true, cancellable);
 					devices.clear ();
 
-					yield service.stop (cancellable);
+					if (service != null)
+						yield service.stop (cancellable);
+
 					service.provider_available.disconnect (on_provider_available);
 					service.provider_unavailable.disconnect (on_provider_unavailable);
 				}
