@@ -139,24 +139,22 @@ namespace Frida.CompilerTest {
 		}
 
 		private static bool skip_slow_test () {
-			if (GLib.Test.slow ()) {
+			if (GLib.Test.slow ())
 				return false;
-			}
 
-			if (Frida.Test.os () == Frida.Test.OS.IOS) {
+			if (Frida.Test.os () == Frida.Test.OS.IOS)
 				return true;
-			}
 
-			/*
-			* If we are running on a big-endian ARM system, we are very likely running
-			* in an emulator. So skip the slow tests unless the user explicitly asks
-			* for them at the command line.
-			*/
-			if (Frida.Test.cpu () == Frida.Test.CPU.ARM_32 || Frida.Test.cpu () == Frida.Test.CPU.ARM_64)
-			{
-				if (GLib.ByteOrder.HOST == GLib.ByteOrder.BIG_ENDIAN) {
-					return true;
+			switch (Frida.Test.cpu ()) {
+				case ARM_32:
+				case ARM_64: {
+					bool likely_running_in_an_emulator = ByteOrder.HOST == ByteOrder.BIG_ENDIAN;
+					if (likely_running_in_an_emulator)
+						return true;
+					break;
 				}
+				default:
+					break;
 			}
 
 			return false;
