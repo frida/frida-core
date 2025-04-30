@@ -34,6 +34,8 @@ core_public_h = core_api[0]
 core_public_gir = core_api[1]
 core_public_vapi = [core_api[2], core_api[3]]
 
+glib_gir = fs.copyfile('GLib-2.0.gir')
+gobject_gir = fs.copyfile('GObject-2.0.gir')
 gio_gir = fs.copyfile('Gio-2.0.gir')
 
 core_public_vapi_stamp = custom_target('frida-core-vapi-stamp',
@@ -89,7 +91,7 @@ installed_variables = {
 }
 
 core_public_dep = declare_dependency(
-  sources: [core_public_h, core_public_gir, gio_gir, core_public_vapi_stamp, core_public_extra_headers],
+  sources: [core_public_h, core_public_gir, glib_gir, gobject_gir, gio_gir, core_public_vapi_stamp, core_public_extra_headers],
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: core_public_lib,
