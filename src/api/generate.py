@@ -217,6 +217,7 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
     result = ET.tostring(merged_root,
                          encoding="unicode",
                          xml_declaration=True)
+    result = result.replace("FridaBase.", "Frida.")
     with OutputFile(output_dir / f"Frida-{api.version}.gir") as output_gir:
         output_gir.write(result)
 
