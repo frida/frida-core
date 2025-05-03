@@ -16,6 +16,7 @@ GIR_NAMESPACES = {
     "glib": GLIB_NAMESPACE,
 }
 
+CORE_TAG_IMPLEMENTS = f"{{{CORE_NAMESPACE}}}implements"
 CORE_TAG_FIELD = f"{{{CORE_NAMESPACE}}}field"
 CORE_TAG_CONSTRUCTOR = f"{{{CORE_NAMESPACE}}}constructor"
 CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
@@ -205,7 +206,9 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
         for elem in core_elements + base_elements:
             if tag_name == "class":
                 for child in list(elem):
-                    if child.tag == CORE_TAG_FIELD or child.get("name").startswith("_"):
+                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") == "FridaBase.AgentMessageSink") \
+                            or child.tag == CORE_TAG_FIELD \
+                            or child.get("name").startswith("_"):
                         elem.remove(child)
             merged_namespace.append(elem)
 
