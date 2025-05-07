@@ -1862,18 +1862,15 @@ namespace Frida {
 		public signal void detached ();
 		public signal void message (string json, Bytes? data);
 
-		public weak Device device {
-			get;
-			construct;
-		}
+		private weak Device device;
 
 		private Promise<BusSession>? attach_request;
-
 		private BusSession? active_session;
+
 		private Cancellable io_cancellable = new Cancellable ();
 
 		internal Bus (Device device) {
-			Object (device: device);
+			this.device = device;
 		}
 
 		public bool is_detached () {
