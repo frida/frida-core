@@ -548,12 +548,17 @@ namespace Frida {
 
 				IOStream soup_stream = connection.get_io_stream ();
 
-				SocketConnection socket_stream;
-				soup_stream.get ("base-iostream", out socket_stream);
+				IOStream base_iostream;
+				soup_stream.get ("base-iostream", out base_iostream);
 
-				SocketAddress remote_address;
+				SocketAddress? remote_address = null;
+				SocketConnection? sc = base_iostream as SocketConnection;
+				if (sc == null) {
+					IOStream tls_stream = base_iostream;
+					tls_stream.get ("base-io-stream", out sc);
+				}
 				try {
-					remote_address = socket_stream.get_remote_address ();
+					remote_address = sc.get_remote_address ();
 				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
