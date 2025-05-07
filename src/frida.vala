@@ -360,12 +360,7 @@ namespace Frida {
 
 				start_request.resolve (true);
 			} catch (IOError e) {
-				service.provider_available.disconnect (on_provider_available);
-				service.provider_unavailable.disconnect (on_provider_unavailable);
-				service = null;
-
 				start_request.reject (e);
-				start_request = null;
 			}
 		}
 
