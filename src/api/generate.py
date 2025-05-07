@@ -387,7 +387,7 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
             if delegate_cname not in seen_cdelegates:
                 seen_cdelegates.add(delegate_cname)
                 object_type.c_delegate_typedefs.append(beautify_cprototype(d.group(0)))
-        if object_type.kind == 'interface' and object_type.name != "Injector":
+        if object_type.kind == 'interface':
             for m in re.finditer("^(struct _" + object_type.c_name + "Iface {[^}]+};)$", all_headers, re.MULTILINE):
                 object_type.c_iface_definition = beautify_cinterface(m.group(1))
 
