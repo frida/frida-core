@@ -34,9 +34,10 @@ core_public_h = core_api[0]
 core_public_gir = core_api[1]
 core_public_vapi = [core_api[2], core_api[3]]
 
-glib_gir = fs.copyfile('GLib-2.0.gir')
-gobject_gir = fs.copyfile('GObject-2.0.gir')
-gio_gir = fs.copyfile('Gio-2.0.gir')
+install_glib_girs = not gi_dep.found() and not fs.exists(girdir / 'GLib-2.0.gir')
+glib_gir = fs.copyfile('GLib-2.0.gir', install: install_glib_girs, install_dir: girdir)
+gobject_gir = fs.copyfile('GObject-2.0.gir', install: install_glib_girs, install_dir: girdir)
+gio_gir = fs.copyfile('Gio-2.0.gir', install: install_glib_girs, install_dir: girdir)
 
 core_public_vapi_stamp = custom_target('frida-core-vapi-stamp',
   input: core_public_vapi,
