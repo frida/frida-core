@@ -301,6 +301,17 @@ namespace Frida.Fruity {
 			_opened_at = get_monotonic_time ();
 
 			var reader = new XpcObjectReader (response);
+			if (reader.has_member ("error")) {
+				string description = reader
+					.read_member ("error")
+					.read_member ("userInfo")
+					.read_member ("NSLocalizedDescription")
+					.get_string_value ();
+				if (description.has_suffix ("."))
+					description = description[:description.length - 1];
+				throw new Error.NOT_SUPPORTED ("%s", description);
+
+			}
 			reader.read_member ("response");
 
 			_assertion_identifier = (Darwin.Xpc.Uuid) reader
