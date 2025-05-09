@@ -129,6 +129,7 @@ namespace Frida.Fruity {
 		private ConnectionType _connection_type;
 		private string _udid;
 		private string _name;
+		private string _auth_state;
 		private Bytes? _remote_unlock_host_key;
 
 		private Promise<Tunnel>? tunnel_request;
@@ -154,6 +155,11 @@ namespace Frida.Fruity {
 			var reader = new XpcObjectReader (device_info);
 			_name = reader.read_member ("name").get_string_value ();
 			reader.end_member ();
+
+			_auth_state = reader.read_member ("authState").read_member ("rawCase").get_string_value ();
+			reader
+				.end_member ()
+				.end_member ();
 
 			if (reader.has_member ("remoteUnlockHostKey")) {
 				_remote_unlock_host_key = new Bytes (reader.read_member ("remoteUnlockHostKey").get_data_value ());
@@ -232,6 +238,8 @@ namespace Frida.Fruity {
 			tunnel_request = new Promise<Tunnel> ();
 
 			try {
+				yield ensure_paired (cancellable);
+
 				var tunnel = new MacOSTunnel (pairing_device, _remote_unlock_host_key);
 				yield tunnel.attach (cancellable);
 
@@ -244,6 +252,17 @@ namespace Frida.Fruity {
 
 				throw_api_error (e);
 			}
+		}
+
+		private async void ensure_paired (Cancellable? cancellable) throws Error, IOError {
+			if (_auth_state == "authenticated")
+				return;
+
+			var r = new PairingdRequest ("RemotePairing.InitiatePairingCommand");
+			r.body.set_bool ("requireNonInteractive", false);
+			var response = yield pairing_device.request (r.message, cancellable);
+			var reader = new XpcObjectReader (response);
+			reader.check_nserror (() => Error.PERMISSION_DENIED);
 		}
 	}
 
