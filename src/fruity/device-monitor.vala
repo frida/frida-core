@@ -184,10 +184,6 @@ namespace Frida.Fruity {
 			default = new Gee.TreeSet<Transport> (compare_transports);
 		}
 
-		private Gee.Queue<UsbmuxLockdownServiceRequest> usbmux_lockdown_service_requests =
-			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
-		private LockdownClient? cached_usbmux_lockdown_client;
-
 		private const string[] LOCKDOWN_SERVICES_WITHOUT_ESCROW_BAG_SUPPORT = {
 			"com.apple.accessibility.axAuditDaemon.remoteserver",
 			"com.apple.afc",
@@ -205,17 +201,15 @@ namespace Frida.Fruity {
 		}
 
 		public UsbmuxDevice? find_usbmux_device () {
-			var transport = transports.first_match (t => t.usbmux_device != null && t.connection_type == USB);
-			if (transport == null)
-				transport = transports.first_match (t => t.usbmux_device != null);
-			return (transport != null) ? transport.usbmux_device : null;
+			var t = transports.first_match (t => t.usbmux_device != null);
+			return (t != null) ? t.usbmux_device : null;
 		}
 
-		public UsbmuxDevice get_usbmux_device () throws Error {
-			var d = find_usbmux_device ();
-			if (d == null)
+		private UsbmuxTransport get_usbmux_transport () throws Error {
+			var t = transports.first_match (t => t is UsbmuxTransport);
+			if (t == null)
 				throw new Error.NOT_SUPPORTED ("USB connection not available");
-			return d;
+			return (UsbmuxTransport) t;
 		}
 
 		public async Tunnel? find_tunnel (Cancellable? cancellable) throws Error, IOError {
@@ -283,19 +277,7 @@ namespace Frida.Fruity {
 				return stream;
 			}
 
-			if (service_name == "") {
-				var client = yield open_usbmux_lockdown_client (cancellable);
-				return client.service.stream;
-			}
-
-			var request = new UsbmuxLockdownServiceRequest (service_name, cancellable);
-			bool first_request = usbmux_lockdown_service_requests.is_empty;
-			usbmux_lockdown_service_requests.offer (request);
-
-			if (first_request)
-				process_usbmux_lockdown_service_requests.begin ();
-
-			return yield request.promise.future.wait_async (cancellable);
+			return yield get_usbmux_transport ().open_lockdown_service (service_name, cancellable);
 		}
 
 		// FIXME: Replace with `element in array`-check once Vala compiler bug has been fixed so generated C code is warning-free.
@@ -305,41 +287,6 @@ namespace Frida.Fruity {
 					return false;
 			}
 			return true;
-		}
-
-		private async void process_usbmux_lockdown_service_requests () {
-			UsbmuxLockdownServiceRequest? req;
-			bool already_invalidated = false;
-			while ((req = usbmux_lockdown_service_requests.peek ()) != null) {
-				try {
-					if (cached_usbmux_lockdown_client == null)
-						cached_usbmux_lockdown_client = yield open_usbmux_lockdown_client (req.cancellable);
-					var stream = yield cached_usbmux_lockdown_client.start_service (req.service_name, req.cancellable);
-					req.promise.resolve (stream);
-				} catch (GLib.Error e) {
-					if (e is LockdownError.CONNECTION_CLOSED && cached_usbmux_lockdown_client != null &&
-							!already_invalidated) {
-						cached_usbmux_lockdown_client = null;
-						already_invalidated = true;
-						continue;
-					}
-					req.promise.reject ((e is LockdownError.INVALID_SERVICE)
-						? (Error) new Error.NOT_SUPPORTED ("%s", e.message)
-						: (Error) new Error.TRANSPORT ("%s", e.message));
-				}
-
-				usbmux_lockdown_service_requests.poll ();
-			}
-		}
-
-		private async LockdownClient open_usbmux_lockdown_client (Cancellable? cancellable) throws Error, IOError {
-			try {
-				var client = yield LockdownClient.open (get_usbmux_device (), cancellable);
-				yield client.start_session (cancellable);
-				return client;
-			} catch (LockdownError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
@@ -451,17 +398,6 @@ namespace Frida.Fruity {
 			if (t.usbmux_device != null)
 				score++;
 			return score;
-		}
-
-		private class UsbmuxLockdownServiceRequest {
-			public string service_name;
-			public Cancellable? cancellable;
-			public Promise<IOStream> promise = new Promise<IOStream> ();
-
-			public UsbmuxLockdownServiceRequest (string service_name, Cancellable? cancellable) {
-				this.service_name = service_name;
-				this.cancellable = cancellable;
-			}
 		}
 	}
 
@@ -768,12 +704,78 @@ namespace Frida.Fruity {
 		internal string _name;
 		internal Variant? _icon;
 
+		private Gee.Queue<UsbmuxLockdownServiceRequest> lockdown_service_requests =
+			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
+		private LockdownClient? cached_lockdown_client;
+
 		public UsbmuxTransport (UsbmuxDevice device) {
 			Object (device: device);
 		}
 
 		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
 			return null;
+		}
+
+		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
+			if (service_name == "") {
+				var client = yield open_usbmux_lockdown_client (cancellable);
+				return client.service.stream;
+			}
+
+			var request = new UsbmuxLockdownServiceRequest (service_name, cancellable);
+			bool first_request = lockdown_service_requests.is_empty;
+			lockdown_service_requests.offer (request);
+
+			if (first_request)
+				process_lockdown_service_requests.begin ();
+
+			return yield request.promise.future.wait_async (cancellable);
+		}
+
+		private async void process_lockdown_service_requests () {
+			UsbmuxLockdownServiceRequest? req;
+			bool already_invalidated = false;
+			while ((req = lockdown_service_requests.peek ()) != null) {
+				try {
+					if (cached_lockdown_client == null)
+						cached_lockdown_client = yield open_usbmux_lockdown_client (req.cancellable);
+					var stream = yield cached_lockdown_client.start_service (req.service_name, req.cancellable);
+					req.promise.resolve (stream);
+				} catch (GLib.Error e) {
+					if (e is LockdownError.CONNECTION_CLOSED && cached_lockdown_client != null &&
+							!already_invalidated) {
+						cached_lockdown_client = null;
+						already_invalidated = true;
+						continue;
+					}
+					req.promise.reject ((e is LockdownError.INVALID_SERVICE)
+						? (Error) new Error.NOT_SUPPORTED ("%s", e.message)
+						: (Error) new Error.TRANSPORT ("%s", e.message));
+				}
+
+				lockdown_service_requests.poll ();
+			}
+		}
+
+		private async LockdownClient open_usbmux_lockdown_client (Cancellable? cancellable) throws Error, IOError {
+			try {
+				var client = yield LockdownClient.open (device, cancellable);
+				yield client.start_session (cancellable);
+				return client;
+			} catch (LockdownError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		private class UsbmuxLockdownServiceRequest {
+			public string service_name;
+			public Cancellable? cancellable;
+			public Promise<IOStream> promise = new Promise<IOStream> ();
+
+			public UsbmuxLockdownServiceRequest (string service_name, Cancellable? cancellable) {
+				this.service_name = service_name;
+				this.cancellable = cancellable;
+			}
 		}
 	}
 
