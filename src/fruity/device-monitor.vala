@@ -1403,7 +1403,8 @@ namespace Frida.Fruity {
 							supported_by_os = ios_major_version >= 17;
 						}
 					} catch (LockdownError e) {
-						throw new Error.PERMISSION_DENIED ("%s", e.message);
+						if (!(e is LockdownError.NOT_PAIRED))
+							throw new Error.PERMISSION_DENIED ("%s", e.message);
 					}
 				}
 
