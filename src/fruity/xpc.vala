@@ -2032,7 +2032,7 @@ namespace Frida.Fruity {
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
-			tls_connection.set_data_full ("tcp-tunnel-keypair", local_keypair, null);
+			tls_connection.set_data ("tcp-tunnel-keypair", local_keypair);
 			tls_connection.set_database (null);
 
 			unowned SSL ssl = get_ssl_handle_from_connection (tls_connection);
