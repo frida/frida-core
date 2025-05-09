@@ -156,12 +156,21 @@ namespace Frida.Fruity {
 			switch (top) {
 				case 0:
 					switch (bottom) {
+						case 1:
+							return true;
+						case 2:
+							return false;
 						case 3:
 							if ((flags & ValueFlags.ALLOW_TERMINATOR) == 0)
 								throw new Error.PROTOCOL ("Unexpected OPACK terminator");
 							return null;
 					}
-					throw new Error.NOT_SUPPORTED ("Unsupported OPACK type 0x%02x", v);
+					if (bottom < 8)
+						throw new Error.NOT_SUPPORTED ("Unsupported OPACK type 0x%02x", v);
+					return (int64) (v - 8);
+				case 1:
+				case 2:
+					return (int64) (v - 8);
 				case 3:
 					switch (bottom) {
 						case 0: return (int64) reader.read_int8 ();
