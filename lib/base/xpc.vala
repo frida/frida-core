@@ -136,6 +136,8 @@ namespace Frida {
 			}
 		}
 
+		public delegate int TranslateErrorFunc (string domain, int code, string description);
+
 		private Gee.Deque<Scope> scopes = new Gee.ArrayQueue<Scope> ();
 
 		public XpcObjectReader (Darwin.Xpc.Object obj) {
@@ -222,6 +224,28 @@ namespace Frida {
 		public unowned string get_error_description () throws Error {
 			var error = peek_scope ().get_object<Darwin.Xpc.Error> (Darwin.Xpc.Error.TYPE);
 			return error.get_string (Darwin.Xpc.Error.KEY_DESCRIPTION);
+		}
+
+		public void check_nserror (TranslateErrorFunc translate_error) throws Error {
+			if (!has_member ("error"))
+				return;
+
+			read_member ("error");
+
+			unowned string domain = read_member ("domain").get_string_value ();
+			end_member ();
+
+			var code = (int) read_member ("code").get_int64_value ();
+			end_member ();
+
+			string description = read_member ("userInfo").read_member ("NSLocalizedDescription").get_string_value ();
+			if (description.has_suffix ("."))
+				description = description[:description.length - 1];
+
+			throw (Error) new GLib.Error.literal (
+				Quark.from_string ("frida-error-quark"),
+				translate_error (domain, code, description),
+				description);
 		}
 
 		public unowned Darwin.Xpc.Object get_object_value (Darwin.Xpc.Type expected_type) throws Error {
