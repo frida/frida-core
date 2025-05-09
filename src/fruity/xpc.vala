@@ -1983,12 +1983,7 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class TcpTunnelConnection : Object, TunnelConnection, AsyncInitable {
-		public InetSocketAddress address {
-			get;
-			construct;
-		}
-
-		public NetworkStack netstack {
+		public IOStream stream {
 			get;
 			construct;
 		}
@@ -1997,16 +1992,6 @@ namespace Frida.Fruity {
 			get {
 				return _tunnel_netstack;
 			}
-		}
-
-		public TunnelKey local_keypair {
-			get;
-			construct;
-		}
-
-		public TunnelKey remote_pubkey {
-			get;
-			construct;
 		}
 
 		public InetAddress remote_address {
@@ -2026,7 +2011,6 @@ namespace Frida.Fruity {
 		private TunnelParameters tunnel_params;
 		private VirtualNetworkStack _tunnel_netstack;
 
-		private TlsClientConnection connection;
 		private BufferedInputStream input;
 		private OutputStream output;
 
@@ -2040,7 +2024,38 @@ namespace Frida.Fruity {
 
 		public static async TcpTunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
 				TunnelKey remote_pubkey, Cancellable? cancellable = null) throws Error, IOError {
-			var connection = new TcpTunnelConnection (address, netstack, local_keypair, remote_pubkey);
+			var stream = yield netstack.open_tcp_connection (address, cancellable);
+
+			TlsClientConnection tls_connection;
+			try {
+				tls_connection = TlsClientConnection.new (stream, null);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			tls_connection.set_data_full ("tcp-tunnel-keypair", local_keypair, null);
+			tls_connection.set_database (null);
+
+			unowned SSL ssl = get_ssl_handle_from_connection (tls_connection);
+			ssl.set_cipher_list ("PSK-AES128-GCM-SHA256:PSK-AES256-GCM-SHA384:PSK-AES256-CBC-SHA384:PSK-AES128-CBC-SHA256");
+			ssl.set_psk_client_callback ((ssl, hint, identity, psk) => {
+				unowned TlsClientConnection conn = (TlsClientConnection) get_connection_from_ssl_handle (ssl);
+				unowned TunnelKey tk = conn.get_data ("tcp-tunnel-keypair");
+
+				Memory.copy (identity, PSK_IDENTITY.data, PSK_IDENTITY.data.length);
+
+				var key = get_raw_private_key (tk.handle).get_data ();
+				Memory.copy (psk, key, key.length);
+
+				return key.length;
+			});
+
+			try {
+				yield tls_connection.handshake_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("%s", e.message);
+			}
+
+			var connection = new TcpTunnelConnection (tls_connection);
 
 			try {
 				yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -2051,46 +2066,29 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
-		private TcpTunnelConnection (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
-				TunnelKey remote_pubkey) {
-			Object (
-				address: address,
-				netstack: netstack,
-				local_keypair: local_keypair,
-				remote_pubkey: remote_pubkey
-			);
+		public static async TcpTunnelConnection open_stream (IOStream stream, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var connection = new TcpTunnelConnection (stream);
+
+			try {
+				yield connection.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return connection;
+		}
+
+		private TcpTunnelConnection (IOStream stream) {
+			Object (stream: stream);
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			var stream = yield netstack.open_tcp_connection (address, cancellable);
-
-			try {
-				connection = TlsClientConnection.new (stream, null);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-			connection.set_data_full ("tcp-tunnel-connection", this, null);
-			connection.set_database (null);
-
-			unowned SSL ssl = get_ssl_handle_from_connection (connection);
-			ssl.set_cipher_list ("PSK-AES128-GCM-SHA256:PSK-AES256-GCM-SHA384:PSK-AES256-CBC-SHA384:PSK-AES128-CBC-SHA256");
-			ssl.set_psk_client_callback ((ssl, hint, identity, psk) => {
-				unowned TlsClientConnection conn = (TlsClientConnection) get_connection_from_ssl_handle (ssl);
-				TcpTunnelConnection self = conn.get_data ("tcp-tunnel-connection");
-				return self.on_psk_request (ssl, hint, identity, psk);
-			});
-
-			try {
-				yield connection.handshake_async (Priority.DEFAULT, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
-
 			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
-				"base-stream", connection.get_input_stream (),
+				"base-stream", stream.get_input_stream (),
 				"close-base-stream", false,
 				"buffer-size", 128 * 1024);
-			output = connection.get_output_stream ();
+			output = stream.get_output_stream ();
 
 			post (make_handshake_request (PREFERRED_MTU));
 
@@ -2132,7 +2130,7 @@ namespace Frida.Fruity {
 			yield;
 
 			try {
-				yield connection.close_async ();
+				yield stream.close_async ();
 			} catch (GLib.Error e) {
 			}
 
@@ -2246,15 +2244,6 @@ namespace Frida.Fruity {
 
 				available += n;
 			}
-		}
-
-		private uint on_psk_request (SSL ssl, string? hint, char[] identity, uint8[] psk) {
-			Memory.copy (identity, PSK_IDENTITY.data, PSK_IDENTITY.data.length);
-
-			var key = get_raw_private_key (local_keypair.handle).get_data ();
-			Memory.copy (psk, key, key.length);
-
-			return key.length;
 		}
 
 		[CCode (cname = "g_tls_connection_openssl_get_ssl")]
