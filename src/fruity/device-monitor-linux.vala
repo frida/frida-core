@@ -200,6 +200,8 @@ namespace Frida.Fruity {
 	namespace Network {
 		public async void wait_until_interfaces_ready (Gee.Collection<string> interface_names, Cancellable? cancellable)
 				throws Error, IOError {
+			var wait_cancellable = new Cancellable ();
+
 			try {
 				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
 
@@ -215,6 +217,22 @@ namespace Frida.Fruity {
 					return;
 				}
 
+				var main_context = MainContext.get_thread_default ();
+
+				var timeout_source = new TimeoutSource.seconds (5);
+				timeout_source.set_callback (() => {
+					wait_cancellable.cancel ();
+					return Source.REMOVE;
+				});
+				timeout_source.attach (main_context);
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (() => {
+					wait_cancellable.cancel ();
+					return Source.REMOVE;
+				});
+				cancel_source.attach (main_context);
+
 				var remaining = interface_names.size + 1;
 
 				NotifyCompleteFunc on_complete = () => {
@@ -225,10 +243,10 @@ namespace Frida.Fruity {
 
 				foreach (var name in interface_names) {
 					if (nm != null) {
-						NetworkManager.wait_until_interface_ready.begin (name, nm, connection, cancellable,
+						NetworkManager.wait_until_interface_ready.begin (name, nm, connection, wait_cancellable,
 							on_complete);
 					} else {
-						Networkd.wait_until_interface_ready.begin (name, netd, connection, cancellable,
+						Networkd.wait_until_interface_ready.begin (name, netd, connection, wait_cancellable,
 							on_complete);
 					}
 				}
@@ -238,11 +256,17 @@ namespace Frida.Fruity {
 					on_complete ();
 					return Source.REMOVE;
 				});
-				source.attach (MainContext.get_thread_default ());
+				source.attach (main_context);
 
 				yield;
+
+				cancel_source.destroy ();
+				timeout_source.destroy ();
 			} catch (GLib.Error e) {
 			}
+
+			if (wait_cancellable.is_cancelled ())
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for interfaces to become ready");
 		}
 
 		private async bool system_has_service (string name, DBusConnection connection, Cancellable? cancellable) throws GLib.Error {
@@ -276,6 +300,10 @@ namespace Frida.Fruity {
 						wait_until_interface_ready.callback ();
 				});
 
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (wait_until_interface_ready.callback);
+				cancel_source.attach (MainContext.get_thread_default ());
+
 				while (!cancellable.is_cancelled ()) {
 					uint32 state, reason;
 					device_proxy.get_cached_property ("StateReason").get ("(uu)", out state, out reason);
@@ -288,6 +316,8 @@ namespace Frida.Fruity {
 					}
 					yield;
 				}
+
+				cancel_source.destroy ();
 
 				device_proxy.disconnect (handler);
 			} catch (GLib.Error e) {
@@ -331,6 +361,10 @@ namespace Frida.Fruity {
 					wait_until_interface_ready.callback ();
 				});
 
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (wait_until_interface_ready.callback);
+				cancel_source.attach (MainContext.get_thread_default ());
+
 				while (!cancellable.is_cancelled ()) {
 					string operational_state;
 					link_proxy.get_cached_property ("OperationalState").get ("s", out operational_state);
@@ -338,6 +372,8 @@ namespace Frida.Fruity {
 						break;
 					yield;
 				}
+
+				cancel_source.destroy ();
 
 				link_proxy.disconnect (handler);
 			} catch (GLib.Error e) {
