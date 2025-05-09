@@ -1565,36 +1565,65 @@ namespace Frida.Fruity {
 			public signal void response_received (Bytes response, InetSocketAddress sender);
 
 			public NetworkStack netstack;
-			public UdpSocket sock;
-			public DatagramBasedSource response_source;
+			private Cancellable? io_cancellable;
+
+			private UdpSocket sock;
+			private DatagramBased sock_datagram;
+
+			private Bytes remoted_mdns_request;
+			private InetSocketAddress mdns_address;
+
+			private TimeoutSource retransmit_source;
+			private DatagramBasedSource response_source;
 
 			public ActiveMulticastDnsProbe (InetSocketAddress ifaddr, MainContext main_context, Cancellable? cancellable)
 					throws Error, IOError {
 				var local_ip = ifaddr.get_address ();
 				netstack = new SystemNetworkStack (local_ip, ifaddr.scope_id);
+				io_cancellable = cancellable;
 
 				sock = netstack.create_udp_socket ();
 				sock.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
 					address: local_ip,
 					scope_id: netstack.scope_id
 				));
-				DatagramBased sock_datagram = sock.datagram_based;
+				sock_datagram = sock.datagram_based;
 
-				var remoted_mdns_request = make_remoted_mdns_request ();
-				var mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+				remoted_mdns_request = make_remoted_mdns_request ();
+
+				mdns_address = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
 					address: new InetAddress.from_string ("ff02::fb"),
 					port: 5353,
 					scope_id: netstack.scope_id
 				);
-				Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, cancellable);
+
+				retransmit_source = new TimeoutSource (250);
+				retransmit_source.set_callback (on_retransmit_tick);
+				retransmit_source.attach (main_context);
 
 				response_source = sock_datagram.create_source (IN, cancellable);
 				response_source.set_callback (on_socket_readable);
 				response_source.attach (main_context);
+
+				transmit_request ();
 			}
 
 			public void cancel () {
 				response_source.destroy ();
+				retransmit_source.destroy ();
+			}
+
+			private void transmit_request () throws Error, IOError {
+				Udp.send_to (remoted_mdns_request.get_data (), mdns_address, sock_datagram, io_cancellable);
+			}
+
+			private bool on_retransmit_tick () {
+				try {
+					transmit_request ();
+				} catch (GLib.Error e) {
+				}
+
+				return Source.CONTINUE;
 			}
 
 			private bool on_socket_readable () {
