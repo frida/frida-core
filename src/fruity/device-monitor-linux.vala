@@ -281,8 +281,11 @@ namespace Frida.Fruity {
 					device_proxy.get_cached_property ("StateReason").get ("(uu)", out state, out reason);
 					if (state == DEVICE_STATE_ACTIVATED)
 						break;
-					if (state == DEVICE_STATE_DISCONNECTED && reason != DEVICE_STATE_REASON_NONE)
+					if (state == DEVICE_STATE_DISCONNECTED &&
+							reason != DEVICE_STATE_REASON_NONE &&
+							reason != DEVICE_STATE_REASON_CARRIER) {
 						break;
+					}
 					yield;
 				}
 
@@ -309,6 +312,7 @@ namespace Frida.Fruity {
 		private const uint32 DEVICE_STATE_ACTIVATED = 100;
 
 		private const uint32 DEVICE_STATE_REASON_NONE = 0;
+		private const uint32 DEVICE_STATE_REASON_CARRIER = 40;
 	}
 
 	namespace Networkd {
