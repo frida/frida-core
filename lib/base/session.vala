@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession16")]
+	[DBus (name = "re.frida.HostSession17")]
 	public interface HostSession : Object {
 		public abstract async void ping (uint interval_seconds, Cancellable? cancellable) throws GLib.Error;
 
@@ -43,7 +43,7 @@ namespace Frida {
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
-	[DBus (name = "re.frida.AgentSessionProvider16")]
+	[DBus (name = "re.frida.AgentSessionProvider17")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id, HashTable<string, Variant> options,
 			Cancellable? cancellable) throws GLib.Error;
@@ -58,7 +58,7 @@ namespace Frida {
 		public signal void child_gating_changed (uint subscriber_count);
 	}
 
-	[DBus (name = "re.frida.AgentSession16")]
+	[DBus (name = "re.frida.AgentSession17")]
 	public interface AgentSession : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 
@@ -100,7 +100,7 @@ namespace Frida {
 		public signal void candidate_gathering_done ();
 	}
 
-	[DBus (name = "re.frida.AgentController16")]
+	[DBus (name = "re.frida.AgentController17")]
 	public interface AgentController : Object {
 #if !WINDOWS
 		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
@@ -121,7 +121,7 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.AgentMessageSink16")]
+	[DBus (name = "re.frida.AgentMessageSink17")]
 	public interface AgentMessageSink : Object {
 		public abstract async void post_messages (AgentMessage[] messages, uint batch_id,
 			Cancellable? cancellable) throws GLib.Error;
@@ -749,14 +749,14 @@ namespace Frida {
 		}
 	}
 
-	[DBus (name = "re.frida.Channel16")]
+	[DBus (name = "re.frida.Channel17")]
 	public interface Channel : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void input (uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public signal void output (uint8[] data);
 	}
 
-	[DBus (name = "re.frida.ServiceSession16")]
+	[DBus (name = "re.frida.ServiceSession17")]
 	public interface ServiceSession : Object {
 		public signal void close ();
 		public signal void message (Variant message);
@@ -766,13 +766,13 @@ namespace Frida {
 		public abstract async Variant request (Variant parameters, Cancellable? cancellable) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.TransportBroker16")]
+	[DBus (name = "re.frida.TransportBroker17")]
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
 			out string token) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.PortalSession16")]
+	[DBus (name = "re.frida.PortalSession17")]
 	public interface PortalSession : Object {
 		public abstract async void join (HostApplicationInfo app, SpawnStartState current_state,
 			AgentSessionId[] interrupted_sessions, HashTable<string, Variant> options, Cancellable? cancellable,
@@ -781,14 +781,14 @@ namespace Frida {
 		public signal void kill ();
 	}
 
-	[DBus (name = "re.frida.BusSession16")]
+	[DBus (name = "re.frida.BusSession17")]
 	public interface BusSession : Object {
 		public abstract async void attach (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post (string json, bool has_data, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public signal void message (string json, bool has_data, uint8[] data);
 	}
 
-	[DBus (name = "re.frida.AuthenticationService16")]
+	[DBus (name = "re.frida.AuthenticationService17")]
 	public interface AuthenticationService : Object {
 		public abstract async string authenticate (string token, Cancellable? cancellable) throws GLib.Error;
 	}
