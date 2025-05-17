@@ -422,7 +422,7 @@ foreach b : [['local', have_local_backend],
   endif
 endforeach
 
-if have_barebone_backend or have_compiler_backend
+if host_os_family == 'darwin' or host_os == 'android' or have_barebone_backend or have_compiler_backend
   node = find_program('node', version: '>=18.0.0', native: true, required: false)
   if not node.found()
     error('Need Node.js >= 18.0.0 to process JavaScript code at build time')
