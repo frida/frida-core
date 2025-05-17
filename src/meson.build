@@ -283,6 +283,8 @@ if have_local_backend
     ]
 
     if host_os == 'android'
+      subdir('linux' / 'agent' / 'system-server')
+
       backend_vala_args_private += frida_selinux_vala_args
       backend_libs += frida_selinux
       backend_deps += frida_selinux_dep
@@ -290,7 +292,7 @@ if have_local_backend
       android_data = custom_target('frida-data-android',
         input: [
           'linux' / 'frida-android.resources',
-          'linux' / 'agent' / 'system-server.js',
+          system_server_js,
         ],
         output: [
           'frida-data-android.vapi',

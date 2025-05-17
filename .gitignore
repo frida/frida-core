@@ -6,6 +6,8 @@
 /src/compiler/node_modules/
 /src/droidy/helper/build/
 /src/fruity/helpers/build/
+/src/linux/agent/system-server/node_modules/
+/src/linux/agent/system-server/system-server.js
 /src/linux/helpers/build/
 /src/linux/helpers/ext/
 /subprojects/*
