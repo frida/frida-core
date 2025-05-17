@@ -7,7 +7,7 @@
     "build": "frida-compile index.js -o reportcrash.js -S -c"
   },
   "devDependencies": {
-    "@types/frida-gum": "^18.8.2",
+    "@types/frida-gum": "^19.0.0",
     "frida-compile": "^16.4.2"
   },
   "dependencies": {

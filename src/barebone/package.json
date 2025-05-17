@@ -7,7 +7,7 @@
     "build": "frida-compile script-runtime/entrypoint.ts -o script-runtime.js -c"
   },
   "devDependencies": {
-    "@types/frida-gum": "^18.3.2",
+    "@types/frida-gum": "^19.0.0",
     "frida-compile": "^16.2.1"
   }
 }
