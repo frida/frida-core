@@ -3,6 +3,7 @@
 /src/barebone/helpers/memory-scanner/target/
 /src/barebone/helpers/target/
 /src/barebone/node_modules/
+/src/barebone/script-runtime.js
 /src/compiler/node_modules/
 /src/darwin/agent/osanalytics/node_modules/
 /src/darwin/agent/osanalytics/osanalytics.js
