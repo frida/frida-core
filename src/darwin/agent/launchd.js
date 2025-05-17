@@ -21,7 +21,7 @@ const substratePidsPending = new Map();
 rpc.exports = {
   dispose() {
     if (suspendedPids.size > 0) {
-      const kill = new NativeFunction(Module.getExportByName(null, 'kill'), 'int', ['int', 'int']);
+      const kill = new NativeFunction(Module.getGlobalExportByName('kill'), 'int', ['int', 'int']);
       for (const pid of suspendedPids) {
         kill(pid, SIGKILL);
       }
@@ -49,7 +49,7 @@ rpc.exports = {
 
 applyJailbreakQuirks();
 
-Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dylib').getExportByName('__posix_spawn'), {
   onEnter(args) {
     const env = parseStringv(args[4]);
     const prewarm = isPrewarmLaunch(env);
@@ -238,7 +238,7 @@ function instrumentInserter(at) {
 }
 
 function findJbdCallImpl() {
-  const impl = Module.findExportByName(null, 'jbd_call');
+  const impl = Module.findGlobalExportByName('jbd_call');
   if (impl !== null)
     return impl;
 

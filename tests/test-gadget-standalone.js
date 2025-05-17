@@ -1,9 +1,6 @@
-const sleep = Module.getExportByName('libSystem.B.dylib',
-    (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep');
-const exit = new NativeFunction(
-    Module.getExportByName('libSystem.B.dylib', 'exit'),
-    'void',
-    ['int']);
+const libsystem = Process.getModuleByName('libSystem.B.dylib');
+const sleep = libsystem.getExportByName((Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep');
+const exit = new NativeFunction(libsystem.getExportByName('exit'), 'void', ['int']);
 
 rpc.exports = {
   init() {

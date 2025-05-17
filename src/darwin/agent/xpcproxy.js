@@ -2,7 +2,7 @@ const POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 applyJailbreakQuirks();
 
-Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dylib').getExportByName('__posix_spawn'), {
   onEnter(args) {
     const attrs = args[2].add(Process.pointerSize).readPointer();
 
@@ -42,7 +42,7 @@ function sabotageJbdCall(jbdCallImpl) {
 }
 
 function instrumentSubstrateBootstrapper(bootstrapper) {
-  Interceptor.attach(Module.getExportByName('/usr/lib/system/libdyld.dylib', 'dlopen'), {
+  Interceptor.attach(Process.getModuleByName('/usr/lib/system/libdyld.dylib').getExportByName('dlopen'), {
     onEnter(args) {
       this.path = args[0].readUtf8String();
     },
@@ -66,7 +66,7 @@ function instrumentSubstrateExec(exec) {
 }
 
 function findJbdCallImpl() {
-  const impl = Module.findExportByName(null, 'jbd_call');
+  const impl = Module.findGlobalExportByName('jbd_call');
   if (impl !== null)
     return impl;
 

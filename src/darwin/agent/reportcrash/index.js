@@ -1,8 +1,5 @@
 import ObjC from 'frida-objc-bridge';
 
-const LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
-const CORESYMBOLICATION_PATH = '/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication';
-const CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';
 const YES = ptr(1);
 
 const CSTypeRef = ['pointer', 'pointer'];
@@ -19,42 +16,45 @@ const complexFuncOptions = {
   scheduling: 'cooperative',
   exceptions: 'propagate'
 };
+const libsystemKernel = Process.getModuleByName('/usr/lib/system/libsystem_kernel.dylib');
 const _pidForTask = new NativeFunction(
-    Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
+    libsystemKernel.getExportByName('pid_for_task'),
     'int',
     ['uint', 'pointer'],
     simpleFuncOptions
 );
 const unlink = new NativeFunction(
-    Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'unlink'),
+    libsystemKernel.getExportByName('unlink'),
     'int',
     ['pointer'],
     simpleFuncOptions
 );
+const coreSymbolication = Process.getModuleByName('/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication');
 const CSSymbolicatorGetSymbolWithAddressAtTime = new NativeFunction(
-    Module.getExportByName(CORESYMBOLICATION_PATH, 'CSSymbolicatorGetSymbolWithAddressAtTime'),
+    coreSymbolication.getExportByName('CSSymbolicatorGetSymbolWithAddressAtTime'),
     CSTypeRef,
     [CSTypeRef, 'uint64', 'uint64'],
     complexFuncOptions
 );
 const CSIsNull = new NativeFunction(
-    Module.getExportByName(CORESYMBOLICATION_PATH, 'CSIsNull'),
+    coreSymbolication.getExportByName('CSIsNull'),
     'int',
     [CSTypeRef],
     simpleFuncOptions
 );
 const mappedMemoryRead = new NativeFunction(
-    Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read'),
+    coreSymbolication.getExportByName('mapped_memory_read'),
     'uint',
     ['pointer', 'uint64', 'uint64', 'pointer'],
     simpleFuncOptions
 );
 const mappedMemoryReadPointer = new NativeFunction(
-    Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read_pointer'),
+    coreSymbolication.getExportByName('mapped_memory_read_pointer'),
     'uint',
     ['pointer', 'uint64', 'pointer'],
     simpleFuncOptions
 );
+const crashReporterSupport = Process.getModuleByName('/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport');
 
 const {
   AppleErrorReport,
@@ -69,7 +69,7 @@ const sessions = new Map();
 let osaHookState = 'pending';
 
 function initialize() {
-  const listener = Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'CRCreateDirectoryStructure'), () => {
+  const listener = Interceptor.attach(crashReporterSupport.getExportByName('CRCreateDirectoryStructure'), () => {
     applyInstrumentation();
     listener.detach();
   });
@@ -146,7 +146,7 @@ function applyInstrumentation() {
     },
   });
 
-  Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit'), {
+  Interceptor.attach(coreSymbolication.getExportByName('task_is_64bit'), {
     onEnter(args) {
       this.pid = pidForTask(args[0].toUInt32());
     },
@@ -218,7 +218,7 @@ function applyInstrumentation() {
       }
     });
   } else {
-    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
+    Interceptor.attach(libsystemKernel.getExportByName('rename'), {
       onEnter(args) {
         const newPath = args[1].readUtf8String();
         const session = getSession(this.threadId, 'rename');
@@ -227,7 +227,7 @@ function applyInstrumentation() {
       },
     });
 
-    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
+    Interceptor.attach(libsystemKernel.getExportByName('open_dprotected_np'), {
       onEnter(args) {
         const path = args[0].readUtf8String();
         this.isCrashLog = /\.ips$/.test(path);
@@ -239,7 +239,7 @@ function applyInstrumentation() {
       },
     });
 
-    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
+    Interceptor.attach(libsystemKernel.getExportByName('write'), {
       onEnter(args) {
         const fd = args[0].toInt32();
         this.buf = args[1];
@@ -268,7 +268,7 @@ function applyInstrumentation() {
     });
   }
 
-  Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
+  Interceptor.attach(crashReporterSupport.getExportByName('OSAPreferencesGetBoolValue'), {
     onEnter(args) {
       this.name = new ObjC.Object(args[0]).toString();
       this.domain = new ObjC.Object(args[1]).toString();

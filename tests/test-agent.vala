@@ -148,7 +148,7 @@ rpc.exports = {
   },
 };
 
-Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dylib').getExportByName('__posix_spawn'), {
   onEnter(args) {
     if (active === 0)
       return;
@@ -343,7 +343,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 				var script_id = yield session.create_script ("""
 console.log('Script runtime is: ' + Script.runtime);
 
-Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () => {
+Interceptor.attach(Process.getModuleByName('libsystem_kernel.dylib').getExportByName('open'), () => {
 });
 """, make_parameters_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);

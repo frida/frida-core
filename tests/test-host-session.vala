@@ -619,7 +619,7 @@ namespace Frida.HostSessionTest {
 
 				try {
 					script = yield session.create_script ("""
-						const puts = new NativeFunction(Module.getExportByName(null, 'puts'), 'int', ['pointer']);
+						const puts = new NativeFunction(Module.getGlobalExportByName('puts'), 'int', ['pointer']);
 						let i = 1;
 						setInterval(() => {
 						  puts(Memory.allocUtf8String('hello' + i++));
@@ -1601,12 +1601,12 @@ namespace Frida.HostSessionTest {
 				});
 
 				var script_id = yield session.create_script ("""
-					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
+					var write = new NativeFunction(Module.getGlobalExportByName('write'), 'int', ['int', 'pointer', 'int']);
 					var message = Memory.allocUtf8String('Hello stdout');
 					write(1, message, 12);
 					for (const m of Process.enumerateModules()) {
 					  if (m.name.startsWith('libc')) {
-					    Interceptor.attach (Module.getExportByName(m.name, 'sleep'), {
+					    Interceptor.attach (m.getExportByName('sleep'), {
 					      onEnter(args) {
 					        send({ seconds: args[0].toInt32() });
 					      }
@@ -1838,18 +1838,19 @@ namespace Frida.HostSessionTest {
 				});
 
 				var script_id = yield session.create_script ("""
-					const write = new NativeFunction(Module.getExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);
+					const libsystem = Process.getModuleByName('libSystem.B.dylib');
+					const write = new NativeFunction(libsystem.getExportByName('write'), 'int', ['int', 'pointer', 'int']);
 					const message = Memory.allocUtf8String('Hello stdout');
-					const cout = Module.getExportByName('libc++.1.dylib', '_ZNSt3__14coutE').readPointer();
+					const cout = Process.getModuleByName('libc++.1.dylib').getExportByName('_ZNSt3__14coutE').readPointer();
 					const properlyInitialized = !cout.isNull();
 					write(1, message, 12);
-					const getMainPtr = Module.findExportByName(null, 'CFRunLoopGetMain');
+					const getMainPtr = Module.findGlobalExportByName('CFRunLoopGetMain');
 					if (getMainPtr !== null) {
 					  const getMain = new NativeFunction(getMainPtr, 'pointer', []);
 					  getMain();
 					}
 					const sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';
-					Interceptor.attach(Module.getExportByName('libSystem.B.dylib', sleepFuncName), {
+					Interceptor.attach(libsystem.getExportByName(sleepFuncName), {
 					  onEnter(args) {
 					    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });
 					  }
@@ -2123,7 +2124,11 @@ namespace Frida.HostSessionTest {
 						  }
 						};
 
-						const abort = new NativeFunction(Module.getExportByName('/usr/lib/system/libsystem_c.dylib', 'abort'), 'void', [], { exceptions: 'propagate' });
+						const abort = new NativeFunction(
+							Process.getModuleByName('/usr/lib/system/libsystem_c.dylib').getExportByName('abort'),
+							'void',
+							[],
+							{ exceptions: 'propagate' });
 						setTimeout(() => { abort(); }, 50);
 						""");
 
@@ -2179,11 +2184,11 @@ namespace Frida.HostSessionTest {
 						meth.implementation = ObjC.implement(meth, function (handle, selector, url) {
 						  return origImpl(handle, selector, NULL);
 						});
-						Interceptor.attach(Module.getExportByName(null, 'abort'), function () {
+						Interceptor.attach(Module.getGlobalExportByName('abort'), function () {
 						  send('abort');
 						  Thread.sleep(1);
 						});
-						Interceptor.attach(Module.getExportByName(null, '__exit'), function (args) {
+						Interceptor.attach(Module.getGlobalExportByName('__exit'), function (args) {
 						  send(`exit(${args[0].toUInt32()})`);
 						  Thread.sleep(1);
 						});
@@ -2248,11 +2253,11 @@ namespace Frida.HostSessionTest {
 						    args[2] = NULL;
 						  }
 						});
-						Interceptor.attach(Module.getExportByName(null, 'abort'), function () {
+						Interceptor.attach(Module.getGlobalExportByName('abort'), function () {
 						  send('abort');
 						  Thread.sleep(1);
 						});
-						Interceptor.attach(Module.getExportByName(null, '__exit'), function (args) {
+						Interceptor.attach(Module.getGlobalExportByName('__exit'), function (args) {
 						  send(`exit(${args[0].toUInt32()})`);
 						  Thread.sleep(1);
 						});
@@ -2474,7 +2479,8 @@ namespace Frida.HostSessionTest {
 
 					printerr ("session.create_script()\n");
 					var script = yield session.create_script ("""
-						Interceptor.attach(Module.getExportByName('UIKit', 'UIApplicationMain'), () => {
+						Interceptor.attach(
+							Process.getModuleByName('UIKit').getExportByName('UIApplicationMain'), () => {
 						  send('UIApplicationMain');
 						});
 						""");
@@ -2594,12 +2600,12 @@ namespace Frida.HostSessionTest {
 				});
 
 				var script_id = yield session.create_script ("""
-					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
+					var write = new NativeFunction(Module.getGlobalExportByName('write'), 'int', ['int', 'pointer', 'int']);
 					var message = Memory.allocUtf8String('Hello stdout');
 					write(1, message, 12);
 					for (const m of Process.enumerateModules()) {
 					  if (m.name.startsWith('libc')) {
-					    Interceptor.attach (Module.getExportByName(m.name, 'sleep'), {
+					    Interceptor.attach (m.getExportByName('sleep'), {
 					      onEnter(args) {
 					        send({ seconds: args[0].toInt32() });
 					      }
@@ -2707,7 +2713,7 @@ namespace Frida.HostSessionTest {
 				});
 				yield parent_session.enable_child_gating ();
 				var parent_script = yield parent_session.create_script ("""
-					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					Interceptor.attach(Module.getGlobalExportByName('puts'), {
 					  onEnter(args) {
 					    send('[PARENT] ' + args[0].readUtf8String());
 					  }
@@ -2751,7 +2757,7 @@ namespace Frida.HostSessionTest {
 						run_fork_scenario.callback ();
 				});
 				var child_script = yield child_session.create_script ("""
-					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					Interceptor.attach(Module.getGlobalExportByName('puts'), {
 					  onEnter(args) {
 					    send('[CHILD] ' + args[0].readUtf8String());
 					  }
@@ -2904,7 +2910,7 @@ namespace Frida.HostSessionTest {
 						run_fork_plus_exec_scenario.callback ();
 				});
 				var script = yield child_session_post_exec.create_script ("""
-					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					Interceptor.attach(Module.getGlobalExportByName('puts'), {
 					  onEnter(args) {
 					    send(args[0].readUtf8String());
 					  }
@@ -3033,7 +3039,7 @@ namespace Frida.HostSessionTest {
 						run_exec_scenario.callback ();
 				});
 				var script = yield post_exec_session.create_script ("""
-					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					Interceptor.attach(Module.getGlobalExportByName('puts'), {
 					  onEnter(args) {
 					    send(args[0].readUtf8String());
 					  }
@@ -3211,7 +3217,7 @@ namespace Frida.HostSessionTest {
 						run_posix_spawn_scenario.callback ();
 				});
 				var script = yield child_session.create_script ("""
-					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					Interceptor.attach(Module.getGlobalExportByName('puts'), {
 					  onEnter(args) {
 					    send(args[0].readUtf8String());
 					  }
@@ -3353,12 +3359,13 @@ namespace Frida.HostSessionTest {
 				var script_id = yield session.create_script ("""
 					const STD_OUTPUT_HANDLE = -11;
 					const winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
-					const GetStdHandle = new NativeFunction(Module.getExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);
-					const WriteFile = new NativeFunction(Module.getExportByName('kernel32.dll', 'WriteFile'), 'int', ['pointer', 'pointer', 'uint', 'pointer', 'pointer'], winAbi);
+					const kernel32 = Process.getModuleByName('kernel32.dll');
+					const GetStdHandle = new NativeFunction(kernel32.getExportByName('GetStdHandle'), 'pointer', ['int'], winAbi);
+					const WriteFile = new NativeFunction(kernel32.getExportByName('WriteFile'), 'int', ['pointer', 'pointer', 'uint', 'pointer', 'pointer'], winAbi);
 					const stdout = GetStdHandle(STD_OUTPUT_HANDLE);
 					const message = Memory.allocUtf8String('Hello stdout');
 					const success = WriteFile(stdout, message, 12, NULL, NULL);
-					Interceptor.attach(Module.getExportByName('user32.dll', 'GetMessageW'), {
+					Interceptor.attach(Process.getModuleByName('user32.dll').getExportByName('GetMessageW'), {
 					  onEnter(args) {
 					    send('GetMessage');
 					  }
@@ -3477,7 +3484,7 @@ namespace Frida.HostSessionTest {
 						create_process.callback ();
 				});
 				var script = yield child_session.create_script ("""
-					Interceptor.attach(Module.getExportByName('kernel32.dll', 'OutputDebugStringW'), {
+					Interceptor.attach(Process.getModuleByName('kernel32.dll').getExportByName('OutputDebugStringW'), {
 					  onEnter(args) {
 					    send(args[0].readUtf16String());
 					  }
@@ -3748,7 +3755,7 @@ namespace Frida.HostSessionTest {
 					printerr ("session.create_script()");
 					timer.reset ();
 					var script = yield session.create_script ("""
-						send(Module.getExportByName(null, 'open'));
+						send(Module.getGlobalExportByName('open'));
 						""");
 					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
