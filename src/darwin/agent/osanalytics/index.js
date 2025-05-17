@@ -1,3 +1,5 @@
+import ObjC from 'frida-objc-bridge';
+
 const YES = ptr(1);
 
 const {

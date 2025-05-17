@@ -4,6 +4,10 @@
 /src/barebone/helpers/target/
 /src/barebone/node_modules/
 /src/compiler/node_modules/
+/src/darwin/agent/osanalytics/node_modules/
+/src/darwin/agent/osanalytics/osanalytics.js
+/src/darwin/agent/reportcrash/node_modules/
+/src/darwin/agent/reportcrash/reportcrash.js
 /src/droidy/helper/build/
 /src/fruity/helpers/build/
 /src/linux/agent/system-server/node_modules/

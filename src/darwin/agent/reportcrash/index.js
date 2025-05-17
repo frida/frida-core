@@ -1,3 +1,5 @@
+import ObjC from 'frida-objc-bridge';
+
 const LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
 const CORESYMBOLICATION_PATH = '/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication';
 const CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';

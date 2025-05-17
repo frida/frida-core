@@ -125,6 +125,9 @@ if have_local_backend
   endif
 
   if host_os_family == 'darwin'
+    subdir('darwin' / 'agent' / 'reportcrash')
+    subdir('darwin' / 'agent' / 'osanalytics')
+
     backend_sources += [
       'darwin' / 'darwin-host-session.vala',
       'darwin' / 'darwin-host-session-glue.m',
@@ -137,8 +140,8 @@ if have_local_backend
         'darwin' / 'frida-darwin.resources',
         'darwin' / 'agent' / 'launchd.js',
         'darwin' / 'agent' / 'xpcproxy.js',
-        'darwin' / 'agent' / 'reportcrash.js',
-        'darwin' / 'agent' / 'osanalytics.js',
+        reportcrash_js,
+        osanalytics_js,
       ],
       output: [
         'frida-data-darwin.vapi',
