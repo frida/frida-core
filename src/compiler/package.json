@@ -13,7 +13,7 @@
     "frida-fs": "6.0.0"
   },
   "devDependencies": {
-    "@frida/rollup-plugin-node-polyfills": "^1.0.3",
+    "@frida/rollup-plugin-node-polyfills": "^3.0.1",
     "@rollup/plugin-node-resolve": "^14.1.0",
     "@rollup/plugin-replace": "^4.0.0",
     "@rollup/plugin-typescript": "^8.3.4",
