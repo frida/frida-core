@@ -8,6 +8,6 @@
   },
   "devDependencies": {
     "@types/frida-gum": "^19.0.0",
-    "frida-compile": "^16.2.1"
+    "frida-compile": "^17.0.0"
   }
 }
