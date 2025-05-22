@@ -2,7 +2,7 @@
 
 tests=$(dirname "$0")
 repo=$(dirname "$tests")
-builddir=../build/tmp_thin-macos-arm64/frida-core
+builddir=build
 flamegraph=/Users/oleavr/src/FlameGraph
 
 set -ex
