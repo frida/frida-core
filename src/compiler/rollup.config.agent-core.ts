@@ -127,7 +127,7 @@ function computeSubstitutionValues() {
     const agentDirectories = new Set<string>();
     const agentFiles = new Map<string, string>();
     for (const assetPath of assets) {
-        let assetRelpath = assetPath.substring(assetParentDir.length);
+        let assetRelpath = "/" + crosspath.relative(assetParentDir, assetPath);
         if (usingLinkedCompiler && assetRelpath.startsWith("/ext/")) {
             assetRelpath = crosspath.join("/", "node_modules", "frida-compile", assetRelpath.substring(1));
         }
