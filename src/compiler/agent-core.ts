@@ -112,7 +112,10 @@ function patchCompilerHost(host: ts.CompilerHost) {
                 return sf;
             }
         } else {
-            const startPos = fileName.indexOf("/node_modules/@types/");
+            let startPos = fileName.indexOf("/node_modules/@types/");
+            if (startPos === -1) {
+                startPos = fileName.indexOf("/node_modules/undici-types");
+            }
             if (startPos !== -1) {
                 const builtinsPath = fileName.substring(startPos);
                 const sf = cachedSourceFiles.get(builtinsPath);

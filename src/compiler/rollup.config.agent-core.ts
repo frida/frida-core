@@ -1,13 +1,15 @@
 import crosspath from "@frida/crosspath";
 import fs from "fs";
 import { sync as glob } from "glob";
+import { dirname } from "path";
 import replace from "@rollup/plugin-replace";
 import resolve from "@rollup/plugin-node-resolve";
+import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 import polyfills from "@frida/rollup-plugin-node-polyfills";
-import { terser } from "rollup-plugin-terser";
 import { defineConfig } from "rollup";
 import type rollup from "rollup";
+import { fileURLToPath } from "url";
 
 export default defineConfig({
     input: "agent-core.ts",
@@ -17,6 +19,7 @@ export default defineConfig({
         name: "FridaCompilerAgentCore",
         generatedCode: {
             preset: "es2015",
+            constBindings: true,
         },
         strict: false,
         interop: "default",
@@ -33,20 +36,14 @@ export default defineConfig({
         stubTsImportPlugin(),
         polyfills(),
         resolve(),
-        /*
         terser({
             ecma: 2020,
             compress: {
-                module: true,
                 global_defs: {
                     "process.env.FRIDA_COMPILE": true
                 },
             },
-            mangle: {
-                module: true,
-            },
         }),
-        */
     ],
 });
 
@@ -66,9 +63,9 @@ function computeSubstitutionValues() {
       throw new Error("missing FRIDA_HOST_CPU_MODE");
     }
 
-    const outputDir = __dirname;
+    const outputDir = dirname(fileURLToPath(import.meta.url));
 
-    const compilerDir = crosspath.join(__dirname, "node_modules", "frida-compile");
+    const compilerDir = crosspath.join(outputDir, "node_modules", "frida-compile");
     let usingLinkedCompiler = false;
     try {
         usingLinkedCompiler = fs.statSync(crosspath.join(compilerDir, "node_modules")).isDirectory();
@@ -108,6 +105,7 @@ function computeSubstitutionValues() {
     const typeDirs = [
         ["@types", "node"],
         ["@types", "frida-gum"],
+        ["undici-types"],
     ];
 
     const assets: string[] = [];
