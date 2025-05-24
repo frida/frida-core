@@ -33,6 +33,7 @@ def compile_js_agent(output_js: Path, inputs: List[Path], priv_dir: Path, npm: P
     try:
         subprocess.run([npm, "install"], **run_kwargs)
         # subprocess.run([npm, "link", "/Users/oleavr/src/frida-compile"], **run_kwargs)
+        subprocess.run([npm, "run", "build"], **run_kwargs)
     except subprocess.CalledProcessError as e:
         print(e, file=sys.stderr)
         print(

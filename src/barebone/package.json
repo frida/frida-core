@@ -4,7 +4,6 @@
   "description": "Script runtime used by Frida's Barebone backend",
   "type": "module",
   "scripts": {
-    "prepare": "npm run build",
     "build": "frida-compile script-runtime/entrypoint.ts -o script-runtime.js -c"
   },
   "devDependencies": {
