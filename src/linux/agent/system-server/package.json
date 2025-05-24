@@ -2,6 +2,7 @@
   "name": "frida-system-server-agent",
   "version": "1.0.0",
   "description": "Agent used by Frida's Linux backend on Android",
+  "type": "module",
   "scripts": {
     "prepare": "npm run build",
     "build": "frida-compile index.js -o system-server.js -S -c"

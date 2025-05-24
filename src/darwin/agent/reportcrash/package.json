@@ -2,6 +2,7 @@
   "name": "frida-reportcrash-agent",
   "version": "1.0.0",
   "description": "Agent used by Frida's Darwin backend on iOS/iPadOS/tvOS",
+  "type": "module",
   "scripts": {
     "prepare": "npm run build",
     "build": "frida-compile index.js -o reportcrash.js -S -c"
