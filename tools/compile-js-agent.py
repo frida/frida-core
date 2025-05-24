@@ -22,14 +22,16 @@ def compile_js_agent(output_js: Path, inputs: List[Path], priv_dir: Path, npm: P
         dest.parent.mkdir(exist_ok=True)
         shutil.copy(f, dest)
 
+    run_kwargs = {
+        "cwd": priv_dir,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "encoding": "utf-8",
+        "check": True,
+    }
+
     try:
-        subprocess.run(
-            [npm, "install"],
-            capture_output=True,
-            cwd=priv_dir,
-            encoding="utf-8",
-            check=True,
-        )
+        subprocess.run([npm, "install"], **run_kwargs)
     except subprocess.CalledProcessError as e:
         print(e, file=sys.stderr)
         print(
