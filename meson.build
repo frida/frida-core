@@ -98,11 +98,6 @@ else
   host_cpu_mode = '32'
 endif
 host_docks_mobile_devices = host_os in ['windows', 'macos', 'linux'] and host_cpu_mode == '64'
-gumjs_archs = {
-  'x86': 'ia32',
-  'x86_64': 'x64',
-}
-host_arch_gumjs = gumjs_archs.get(host_arch, host_arch)
 
 if host_os_family == 'darwin'
   c_languages += ['objc', 'objcpp']
@@ -378,12 +373,6 @@ have_compiler_backend = get_option('compiler_backend') \
     .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
     .disable_auto_if(host_os == 'watchos') \
     .allowed()
-if get_option('compiler_snapshot').auto()
-  # Generating our snapshot with V8's CPU simulator takes a very long time.
-  generate_compiler_snapshot = meson.can_run_host_binaries()
-else
-  generate_compiler_snapshot = get_option('compiler_snapshot').enabled()
-endif
 
 build_gadget = get_option('gadget') \
     .disable_auto_if(meson.is_subproject()) \
@@ -422,6 +411,12 @@ foreach b : [['local', have_local_backend],
   endif
 endforeach
 
+if have_compiler_backend
+  go = find_program('go', native: true, required: false)
+  if not go.found()
+    error('Need go >= 1.24 to build the Compiler backend powered by ESBuild and typescript-go')
+  endif
+endif
 if host_os_family == 'darwin' or host_os == 'android' or have_barebone_backend or have_compiler_backend
   node = find_program('node', version: '>=18.0.0', native: true, required: false)
   if not node.found()
@@ -452,12 +447,6 @@ gumjs_inspector_vala_args = ['--pkg=frida-gumjs-inspector-1.0', gum_vala_args]
 have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
 if have_v8
   vala_flags += ['--define=HAVE_V8']
-  v8_mksnapshot = find_program('v8-mksnapshot-@0@-@1@'.format(host_os, host_abi), required: false)
-  if not v8_mksnapshot.found()
-    v8_mksnapshot = ''
-  endif
-else
-  v8_mksnapshot = ''
 endif
 
 backend_deps_private = []
@@ -760,7 +749,6 @@ summary(
     'assets': get_option('assets'),
     'mapper': have_mapper,
     'connectivity': tls_provider_dep.found(),
-    'compiler_snapshot': generate_compiler_snapshot,
     'gadget': build_gadget,
     'server': build_server,
     'portal': build_portal,

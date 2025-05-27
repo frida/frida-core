@@ -1,27 +1,36 @@
 {
-  "name": "frida-compiler-agent",
+  "name": "frida-compiler-shims",
   "version": "1.0.0",
-  "description": "Agent used by Frida's compiler",
-  "main": "agent.ts",
-  "scripts": {
-    "build:typescript": "rollup --config rollup.config.typescript.ts --configPlugin typescript",
-    "build:agent-core": "rollup --config rollup.config.agent-core.ts --configPlugin typescript"
-  },
+  "description": "Shims used by Frida's compiler",
+  "private": true,
   "dependencies": {
-    "@frida/crosspath": "3.0.2",
-    "frida-compile": "18.0.0",
-    "frida-fs": "7.0.0"
-  },
-  "devDependencies": {
-    "@frida/rollup-plugin-node-polyfills": "^4.0.1",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-replace": "^6.0.2",
-    "@rollup/plugin-terser": "^0.4.4",
-    "@rollup/plugin-typescript": "^12.1.2",
+    "@frida/assert": "^3.0.2",
+    "@frida/base64-js": "^2.0.3",
+    "@frida/buffer": "^7.0.4",
+    "@frida/crypto": "^1.0.1",
+    "@frida/diagnostics_channel": "^1.0.0",
+    "@frida/events": "^4.0.4",
+    "@frida/http": "^4.0.2",
+    "@frida/http-parser-js": "^1.0.0",
+    "@frida/https": "^1.0.0",
+    "@frida/ieee754": "^2.0.2",
+    "@frida/net": "^4.0.2",
+    "@frida/os": "^1.0.2",
+    "@frida/path": "^2.0.3",
+    "@frida/process": "^1.2.1",
+    "@frida/punycode": "^3.0.0",
+    "@frida/querystring": "^1.0.0",
+    "@frida/readable-stream": "^4.1.3",
+    "@frida/reserved-words": "^1.0.0",
+    "@frida/stream": "^1.0.2",
+    "@frida/string_decoder": "^2.0.0",
+    "@frida/timers": "^3.0.0",
+    "@frida/tty": "^1.0.0",
+    "@frida/url": "^1.0.2",
+    "@frida/util": "^1.0.3",
+    "@frida/vm": "^2.0.0",
     "@types/frida-gum": "19.0.0",
-    "@types/glob": "^8.1.0",
     "@types/node": "18.19.103",
-    "glob": "^11.0.2",
-    "rollup": "^4.41.0"
+    "frida-fs": "7.0.0"
   }
 }
