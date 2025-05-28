@@ -26,9 +26,12 @@ namespace Frida.CompilerTest {
 				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
 				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
 				FileUtils.set_contents (agent_ts_path, """
+import { Buffer } from "buffer";
 import { log } from "./logger.js";
 
-log("Hello World");
+const woot = Buffer.from("w00t").toString("base64");
+
+log("Hello World: " + woot);
 log(hexdump(Process.mainModule.base, { ansi: true }));
 """);
 

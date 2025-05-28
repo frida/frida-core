@@ -239,15 +239,17 @@ func (t *typesFS) FileExists(path string) bool {
 }
 
 func (t *typesFS) ReadFile(path string) (contents string, ok bool) {
-	embeddedPath := t.resolveEmbeddedPath(path)
-	if embeddedPath != "" {
-		contents, ok := t.types.ReadFile(embeddedPath)
-		if ok {
-			return contents, ok
-		}
+	contents, ok = t.FS.ReadFile(path)
+	if ok {
+		return contents, ok
 	}
 
-	return t.FS.ReadFile(path)
+	embeddedPath := t.resolveEmbeddedPath(path)
+	if embeddedPath != "" {
+		contents, ok = t.types.ReadFile(embeddedPath)
+	}
+
+	return contents, ok
 }
 
 func (c *typesFS) resolveEmbeddedPath(path string) string {
