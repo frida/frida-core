@@ -257,7 +257,7 @@ function findSubstrateLauncher() {
   if (Process.arch !== 'arm64')
     return null;
 
-  const imp = Module.enumerateImports('/sbin/launchd').filter(imp => imp.name === 'posix_spawn')[0];
+  const imp = Process.mainModule.enumerateImports().filter(imp => imp.name === 'posix_spawn')[0];
   if (imp === undefined)
     return null;
   const impl = imp.slot.readPointer().strip();
