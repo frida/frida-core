@@ -34,7 +34,7 @@ type TSCompiler struct {
 	newLine            string
 }
 
-func NewTSCompiler(entrypoint, tsconfigFileName, projectRoot string) (*TSCompiler, error) {
+func NewTSCompiler(entrypoint, tsconfigFileName, tsconfigText, projectRoot string) (*TSCompiler, error) {
 	captureFs := newCaptureFS(osvfs.FS())
 	fs := newTypesFS(bundled.WrapFS(captureFs), projectRoot)
 	basePath := projectRoot
@@ -46,11 +46,6 @@ func NewTSCompiler(entrypoint, tsconfigFileName, projectRoot string) (*TSCompile
 		defaultLibraryPath: defaultLibraryPath,
 		cwd:                projectRoot,
 		newLine:            "\n",
-	}
-
-	tsconfigText, ok := c.fs.ReadFile(tsconfigFileName)
-	if !ok {
-		tsconfigText = "{ \"compilerOptions\": { \"target\": \"ES2022\" \"module\": \"Node16\", \"skipLibCheck\": true } }"
 	}
 
 	tsconfigSourceFile := tsoptions.NewTsconfigSourceFileFromFilePath(tsconfigFileName, tspath.ToPath(tsconfigFileName, "", c.fs.UseCaseSensitiveFileNames()), tsconfigText)

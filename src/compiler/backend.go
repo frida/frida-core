@@ -6,21 +6,16 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
 )
 
-//go:embed node_modules/@frida/*/package.json
-//go:embed node_modules/@frida/*/*.js
-//go:embed node_modules/@frida/*/*/*.js
-//go:embed node_modules/frida-fs/package.json
-//go:embed node_modules/frida-fs/*/*.js
-var embeddedShims embed.FS
-
 //export frida_compiler_backend_bundle_js
-func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, js_code, error_message **C.char) C.int {
+func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, js_code, error_message **C.char) C.int {
 	*js_code = nil
 	*error_message = nil
 
@@ -36,18 +31,79 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, js_code
 	}
 
 	tsconfigPath := filepath.Join(projectRoot, "tsconfig.json")
+	tsconfigData, err := os.ReadFile(tsconfigPath)
+	var tsconfigText string
+	if err == nil {
+		if !utf8.Valid(tsconfigData) {
+			*error_message = C.CString(fmt.Sprintf("%q is not valid UTF-8", tsconfigPath))
+			return -1
+		}
+		tsconfigText = string(tsconfigData)
+	} else {
+		tsconfigText = "{ \"compilerOptions\": { \"target\": \"ES2022\", \"module\": \"Node16\", \"skipLibCheck\": true } }"
+	}
 
-	tsCompiler, err := NewTSCompiler(entrypoint, tsconfigPath, projectRoot)
+	tsCompiler, err := NewTSCompiler(entrypoint, tsconfigPath, tsconfigText, projectRoot)
 	if err != nil {
 		*error_message = C.CString(fmt.Sprintf("Error initializing TypeScript compiler: %s", err.Error()))
 		return -1
 	}
 
-	customTSPlugin := esbuild.Plugin{
+	sourcemapOption := esbuild.SourceMapNone
+	if source_map != 0 {
+		sourcemapOption = esbuild.SourceMapInline
+	}
+
+	minifyWhitespace := false
+	minifyIdentifiers := false
+	minifySyntax := false
+	if compress != 0 {
+		minifyWhitespace = true
+		minifyIdentifiers = true
+		minifySyntax = true
+	}
+
+	result := esbuild.Build(esbuild.BuildOptions{
+		AbsWorkingDir:     projectRoot,
+		EntryPoints:       []string{entrypoint},
+		Bundle:            true,
+		Write:             false,
+		Platform:          esbuild.PlatformNeutral,
+		Target:            esbuild.ES2022,
+		TsconfigRaw:       tsconfigText,
+		Sourcemap:         sourcemapOption,
+		SourcesContent:    esbuild.SourcesContentExclude,
+		MinifyWhitespace:  minifyWhitespace,
+		MinifyIdentifiers: minifyIdentifiers,
+		MinifySyntax:      minifySyntax,
+		Plugins: []esbuild.Plugin{
+			makeTypeScriptPlugin(tsCompiler),
+			makeFridaShimsPlugin(),
+		},
+	})
+
+	if len(result.Errors) > 0 {
+		var errorMessages []string
+		for _, e := range result.Errors {
+			errorMessages = append(errorMessages, e.Text)
+			if e.Location != nil {
+				errorMessages[len(errorMessages)-1] = fmt.Sprintf("%s (%s:%d:%d)", e.Text, e.Location.File, e.Location.Line, e.Location.Column)
+			}
+		}
+		*error_message = C.CString(strings.Join(errorMessages, "\n"))
+		return -1
+	}
+
+	*js_code = C.CString(string(result.OutputFiles[0].Contents))
+	return 0
+}
+
+func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
+	return esbuild.Plugin{
 		Name: "frida-custom-ts",
 		Setup: func(build esbuild.PluginBuild) {
 			build.OnLoad(esbuild.OnLoadOptions{Filter: "\\.ts$"}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
-				compiledJS, tsDiagnosticStrings, err := tsCompiler.Compile(args.Path)
+				compiledJS, tsDiagnosticStrings, err := compiler.Compile(args.Path)
 
 				var esbuildMessages []esbuild.Message
 				for _, dText := range tsDiagnosticStrings {
@@ -73,8 +129,17 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, js_code
 			})
 		},
 	}
+}
 
-	customShimsPlugin := esbuild.Plugin{
+//go:embed node_modules/@frida/*/package.json
+//go:embed node_modules/@frida/*/*.js
+//go:embed node_modules/@frida/*/*/*.js
+//go:embed node_modules/frida-fs/package.json
+//go:embed node_modules/frida-fs/*/*.js
+var embeddedShims embed.FS
+
+func makeFridaShimsPlugin() esbuild.Plugin {
+	return esbuild.Plugin{
 		Name: "frida-custom-shims",
 		Setup: func(build esbuild.PluginBuild) {
 			build.OnResolve(esbuild.OnResolveOptions{Filter: "^(assert|base64-js|buffer|crypto|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|string_decoder|timers|tty|url|util|vm)$"}, func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
@@ -128,30 +193,6 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, js_code
 			})
 		},
 	}
-
-	result := esbuild.Build(esbuild.BuildOptions{
-		EntryPoints:   []string{entrypoint},
-		Bundle:        true,
-		Write:         false,
-		Platform:      esbuild.PlatformNode,
-		AbsWorkingDir: projectRoot,
-		Plugins:       []esbuild.Plugin{customTSPlugin, customShimsPlugin},
-	})
-
-	if len(result.Errors) > 0 {
-		var errorMessages []string
-		for _, e := range result.Errors {
-			errorMessages = append(errorMessages, e.Text)
-			if e.Location != nil {
-				errorMessages[len(errorMessages)-1] = fmt.Sprintf("%s (%s:%d:%d)", e.Text, e.Location.File, e.Location.Line, e.Location.Column)
-			}
-		}
-		*error_message = C.CString(strings.Join(errorMessages, "\n"))
-		return -1
-	}
-
-	*js_code = C.CString(string(result.OutputFiles[0].Contents))
-	return 0
 }
 
 var shimMap = map[string]string{

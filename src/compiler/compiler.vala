@@ -26,12 +26,21 @@ namespace Frida {
 			if (!absolute_entrypoint.has_prefix (project_root))
 				throw new Error.INVALID_ARGUMENT ("Entrypoint must be inside the project root");
 
-			string? js_code;
-			string? error_message;
-			if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, out js_code, out error_message) != 0)
-				throw new Error.INVALID_ARGUMENT ("%s", error_message);
+			starting ();
+			try {
+				string? js_code;
+				string? error_message;
+				if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
+						opts.compression == TERSER, out js_code, out error_message) != 0) {
+					throw new Error.INVALID_ARGUMENT ("%s", error_message);
+				}
 
-			return js_code;
+				output (js_code);
+
+				return js_code;
+			} finally {
+				finished ();
+			}
 #else
 			throw_not_supported ();
 #endif
@@ -101,8 +110,8 @@ namespace Frida {
 
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
-		private extern static int bundle_js (string project_root, string entrypoint, out string? js_code,
-			out string? error_message);
+		private extern static int bundle_js (string project_root, string entrypoint, bool source_map, bool compress,
+			out string? js_code, out string? error_message);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {
