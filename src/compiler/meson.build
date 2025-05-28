@@ -5,7 +5,10 @@ compiler_sources = files(
 if have_compiler_backend
   compiler_backend = custom_target('frida-compiler-backend',
     input: [
+      'go.mod',
+      'go.sum',
       'backend.go',
+      'tscompiler.go',
       'package.json',
       'package-lock.json',
     ],
@@ -16,6 +19,8 @@ if have_compiler_backend
     command: [
       python,
       files('build-backend.py'),
+      host_os,
+      host_arch,
       meson.current_build_dir(),
       '@PRIVATE_DIR@',
       go,

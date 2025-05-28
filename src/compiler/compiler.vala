@@ -10,9 +10,6 @@ namespace Frida {
 			construct;
 		}
 
-#if HAVE_COMPILER_BACKEND
-#endif
-
 		public Compiler (DeviceManager manager) {
 			Object (manager: manager);
 		}
@@ -20,7 +17,21 @@ namespace Frida {
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 #if HAVE_COMPILER_BACKEND
-			throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			BuildOptions opts = (options != null) ? options : new BuildOptions ();
+			string project_root = compute_project_root (entrypoint, opts);
+
+			string absolute_entrypoint = Path.is_absolute (entrypoint)
+				? entrypoint
+				: Path.build_filename (project_root, entrypoint);
+			if (!absolute_entrypoint.has_prefix (project_root))
+				throw new Error.INVALID_ARGUMENT ("Entrypoint must be inside the project root");
+
+			string? js_code;
+			string? error_message;
+			if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, out js_code, out error_message) != 0)
+				throw new Error.INVALID_ARGUMENT ("%s", error_message);
+
+			return js_code;
 #else
 			throw_not_supported ();
 #endif
@@ -87,6 +98,25 @@ namespace Frida {
 			}
 		}
 	}
+
+#if HAVE_COMPILER_BACKEND
+	namespace CompilerBackend {
+		private extern static int bundle_js (string project_root, string entrypoint, out string? js_code,
+			out string? error_message);
+	}
+
+	private string compute_project_root (string entrypoint, CompilerOptions options) {
+		string? project_root = options.project_root;
+
+		if (project_root != null)
+			return project_root;
+
+		if (Path.is_absolute (entrypoint))
+			return Path.get_dirname (entrypoint);
+
+		return Environment.get_current_dir ();
+	}
+#endif
 
 	public class CompilerOptions : Object {
 		public string? project_root {
