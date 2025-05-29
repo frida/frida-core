@@ -1459,7 +1459,9 @@ namespace Frida {
 					break;
 				}
 			}
-			assert (session_id != null);
+			if (session_id == null)
+				return;
+
 			agent_sessions.unset (session_id);
 
 			if (may_block) {
@@ -1483,6 +1485,8 @@ namespace Frida {
 			Promise<bool> detach_request;
 			if (pending_detach_requests.unset (id, out detach_request))
 				detach_request.resolve (true);
+			else if (session != null)
+				agent_sessions.unset (id);
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {
