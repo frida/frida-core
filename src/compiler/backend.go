@@ -1,14 +1,20 @@
 package main
 
 /*
-typedef void (* FridaDiagnosticsFunc) (char * text, void * user_data);
+typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, unsigned int line, unsigned int character, char * text,
+    void * user_data);
 
 static inline void
-invokeDiagnosticsFunc (FridaDiagnosticsFunc fn,
-                       char * text,
-                       void * user_data)
+invokeDiagnosticFunc (FridaDiagnosticFunc fn,
+                      char * category,
+                      int code,
+                      char * path,
+                      unsigned int line,
+                      unsigned int character,
+                      char * text,
+                      void * user_data)
 {
-  fn (text, user_data);
+  fn (category, code, path, line, character, text, user_data);
 }
 */
 import "C"
@@ -26,9 +32,8 @@ import (
 	esbuild "github.com/evanw/esbuild/pkg/api"
 )
 
-
 //export frida_compiler_backend_bundle_js
-func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, onDiagnostics C.FridaDiagnosticsFunc, onDiagnosticsData unsafe.Pointer, js_code, error_message **C.char) C.int {
+func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, js_code, error_message **C.char) C.int {
 	*js_code = nil
 	*error_message = nil
 
@@ -98,7 +103,10 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			C.invokeDiagnosticsFunc(onDiagnostics, C.CString(e.Text), onDiagnosticsData)
+			emitDiagnostic("error", e, onDiagnostic, onDiagnosticData)
+		}
+		for _, e := range result.Warnings {
+			emitDiagnostic("warning", e, onDiagnostic, onDiagnosticData)
 		}
 		*error_message = C.CString("Compilation failed")
 		return -1
@@ -106,6 +114,24 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 
 	*js_code = C.CString(string(result.OutputFiles[0].Contents))
 	return 0
+}
+
+func emitDiagnostic(category string, message esbuild.Message, onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
+	code := 0
+
+	path := ""
+	line := 0
+	character := 0
+
+	l := message.Location
+	if l != nil {
+		path = l.File
+		line = l.Line
+		character = l.Column
+	}
+
+	C.invokeDiagnosticFunc(onDiagnostic, C.CString(category), C.int(code), C.CString(path), C.uint(line), C.uint(character),
+		C.CString(message.Text), onDiagnosticData)
 }
 
 func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {

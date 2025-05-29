@@ -31,7 +31,7 @@ namespace Frida {
 				string? js_code;
 				string? error_message;
 				if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
-						opts.compression == TERSER, on_diagnostics, out js_code, out error_message) != 0) {
+						opts.compression == TERSER, on_diagnostic, out js_code, out error_message) != 0) {
 					throw new Error.INVALID_ARGUMENT ("%s", error_message);
 				}
 
@@ -46,22 +46,20 @@ namespace Frida {
 #endif
 		}
 
-		private void on_diagnostics (owned string text) {
+		private void on_diagnostic (owned string category, int code, owned string path, uint line, uint character,
+				owned string text) {
 			var builder = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
 
 			builder.open (VariantType.VARDICT);
-			builder.add ("{sv}", "category", new Variant.string ("some-category"));
-			builder.add ("{sv}", "code", new Variant.int64 (1337));
-			/*
-			if (!diag.get_null_element (2)) {
-				var file = diag.get_array_element (2);
+			builder.add ("{sv}", "category", new Variant.string (category));
+			builder.add ("{sv}", "code", new Variant.int64 (code));
+			if (path != "") {
 				var b = new VariantBuilder (VariantType.VARDICT);
-				b.add ("{sv}", "path", new Variant.string (file.get_string_element (0)));
-				b.add ("{sv}", "line", new Variant.int64 (file.get_int_element (1)));
-				b.add ("{sv}", "character", new Variant.int64 (file.get_int_element (2)));
+				b.add ("{sv}", "path", new Variant.string (path));
+				b.add ("{sv}", "line", new Variant.int64 (line));
+				b.add ("{sv}", "character", new Variant.int64 (character));
 				builder.add ("{sv}", "file", b.end ());
 			}
-			*/
 			builder.add ("{sv}", "text", new Variant.string (text));
 			builder.close ();
 
@@ -133,9 +131,10 @@ namespace Frida {
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
 		private extern static int bundle_js (string project_root, string entrypoint, bool source_map, bool compress,
-			DiagnosticsFunc on_diagnostics, out string? js_code, out string? error_message);
+			DiagnosticFunc on_diagnostic, out string? js_code, out string? error_message);
 
-		private delegate void DiagnosticsFunc (owned string text);
+		private delegate void DiagnosticFunc (owned string category, int code, owned string path, uint line, uint character,
+			owned string text);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {
