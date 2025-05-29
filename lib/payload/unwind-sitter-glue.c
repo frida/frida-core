@@ -55,6 +55,7 @@ struct _FridaUnwindHookState
   gpointer set_info_original;
   void (* set_info) (gpointer cursor, gint is_return_address);
   gpointer (* get_reg) (gpointer cursor, gint reg);
+  GumInterceptor * interceptor;
 };
 
 #if __has_feature (ptrauth_calls)
@@ -97,7 +98,6 @@ _frida_unwind_sitter_hook_libunwind (void)
 #if GLIB_SIZEOF_VOID_P == 8
   gpointer * set_info_slot;
   gpointer get_reg_impl;
-  GumInterceptor * interceptor;
 
   if (state != NULL)
     return;
@@ -121,8 +121,9 @@ _frida_unwind_sitter_hook_libunwind (void)
   state->set_info = FRIDA_RESIGN_PTR (state->set_info_original);
   state->get_reg = FRIDA_RESIGN_PTR (get_reg_impl);
 
-  interceptor = gum_interceptor_obtain ();
-  if (gum_interceptor_replace (interceptor, state->set_info_original, frida_unwind_cursor_set_info_replacement, NULL, NULL)
+  state->interceptor = gum_interceptor_obtain ();
+
+  if (gum_interceptor_replace (state->interceptor, state->set_info_original, frida_unwind_cursor_set_info_replacement, NULL, NULL)
       != GUM_REPLACE_OK)
     goto unsupported_version;
 
@@ -137,13 +138,12 @@ unsupported_version:
 void
 _frida_unwind_sitter_unhook_libunwind (void)
 {
-  GumInterceptor * interceptor;
-
   if (state == NULL)
     return;
 
-  interceptor = gum_interceptor_obtain ();
-  gum_interceptor_revert (interceptor, state->set_info_original);
+  gum_interceptor_revert (state->interceptor, state->set_info_original);
+
+  g_object_unref (state->interceptor);
 
   g_slice_free (FridaUnwindHookState, state);
   state = NULL;
