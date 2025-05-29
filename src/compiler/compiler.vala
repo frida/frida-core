@@ -31,7 +31,7 @@ namespace Frida {
 				string? js_code;
 				string? error_message;
 				if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
-						opts.compression == TERSER, out js_code, out error_message) != 0) {
+						opts.compression == TERSER, on_diagnostics, out js_code, out error_message) != 0) {
 					throw new Error.INVALID_ARGUMENT ("%s", error_message);
 				}
 
@@ -44,6 +44,28 @@ namespace Frida {
 #else
 			throw_not_supported ();
 #endif
+		}
+
+		private void on_diagnostics (owned string text) {
+			var builder = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+			builder.open (VariantType.VARDICT);
+			builder.add ("{sv}", "category", new Variant.string ("some-category"));
+			builder.add ("{sv}", "code", new Variant.int64 (1337));
+			/*
+			if (!diag.get_null_element (2)) {
+				var file = diag.get_array_element (2);
+				var b = new VariantBuilder (VariantType.VARDICT);
+				b.add ("{sv}", "path", new Variant.string (file.get_string_element (0)));
+				b.add ("{sv}", "line", new Variant.int64 (file.get_int_element (1)));
+				b.add ("{sv}", "character", new Variant.int64 (file.get_int_element (2)));
+				builder.add ("{sv}", "file", b.end ());
+			}
+			*/
+			builder.add ("{sv}", "text", new Variant.string (text));
+			builder.close ();
+
+			diagnostics (builder.end ());
 		}
 
 		public string build_sync (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
@@ -111,7 +133,9 @@ namespace Frida {
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
 		private extern static int bundle_js (string project_root, string entrypoint, bool source_map, bool compress,
-			out string? js_code, out string? error_message);
+			DiagnosticsFunc on_diagnostics, out string? js_code, out string? error_message);
+
+		private delegate void DiagnosticsFunc (owned string text);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {

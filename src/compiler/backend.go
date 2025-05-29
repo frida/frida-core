@@ -1,5 +1,16 @@
 package main
 
+/*
+typedef void (* FridaDiagnosticsFunc) (char * text, void * user_data);
+
+static inline void
+invokeDiagnosticsFunc (FridaDiagnosticsFunc fn,
+                       char * text,
+                       void * user_data)
+{
+  fn (text, user_data);
+}
+*/
 import "C"
 
 import (
@@ -10,12 +21,14 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
 )
 
+
 //export frida_compiler_backend_bundle_js
-func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, js_code, error_message **C.char) C.int {
+func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, onDiagnostics C.FridaDiagnosticsFunc, onDiagnosticsData unsafe.Pointer, js_code, error_message **C.char) C.int {
 	*js_code = nil
 	*error_message = nil
 
@@ -84,14 +97,10 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 	})
 
 	if len(result.Errors) > 0 {
-		var errorMessages []string
 		for _, e := range result.Errors {
-			errorMessages = append(errorMessages, e.Text)
-			if e.Location != nil {
-				errorMessages[len(errorMessages)-1] = fmt.Sprintf("%s (%s:%d:%d)", e.Text, e.Location.File, e.Location.Line, e.Location.Column)
-			}
+			C.invokeDiagnosticsFunc(onDiagnostics, C.CString(e.Text), onDiagnosticsData)
 		}
-		*error_message = C.CString(strings.Join(errorMessages, "\n"))
+		*error_message = C.CString("Compilation failed")
 		return -1
 	}
 
