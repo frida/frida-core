@@ -76,6 +76,7 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 		MinifyWhitespace:  minifyWhitespace,
 		MinifyIdentifiers: minifyIdentifiers,
 		MinifySyntax:      minifySyntax,
+		Inject:            []string{"frida-builtins:///node-globals.js"},
 		Plugins: []esbuild.Plugin{
 			makeTypeScriptPlugin(tsCompiler),
 			makeFridaShimsPlugin(),
@@ -131,6 +132,11 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 	}
 }
 
+var nodeGlobals = `
+export { Buffer } from 'node:buffer';
+export { default as process } from 'node:process';
+`
+
 //go:embed node_modules/@frida/*/package.json
 //go:embed node_modules/@frida/*/*.js
 //go:embed node_modules/@frida/*/*/*.js
@@ -142,6 +148,21 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 	return esbuild.Plugin{
 		Name: "frida-custom-shims",
 		Setup: func(build esbuild.PluginBuild) {
+			build.OnResolve(esbuild.OnResolveOptions{Filter: "^frida-builtins://(.+)$"}, func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
+				return esbuild.OnResolveResult{Path: strings.TrimPrefix(args.Path, "frida-builtins://"), Namespace: "frida-builtins"}, nil
+			})
+
+			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: "frida-builtins"}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
+				if (args.Path == "/node-globals.js") {
+					return esbuild.OnLoadResult{
+						Contents: &nodeGlobals,
+						Loader: esbuild.LoaderJS,
+					}, nil
+				}
+
+				panic("Unexpected frida-builtins:// path: " + args.Path)
+			})
+
 			build.OnResolve(esbuild.OnResolveOptions{Filter: "^(assert|base64-js|buffer|crypto|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|string_decoder|timers|tty|url|util|vm)$"}, func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
 				path, errs := resolveShim(args.Path)
 				if len(errs) > 0 {
