@@ -15,7 +15,7 @@ crossfile := $(BUILDDIR)/frida-$(host_machine).txt
 
 build: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
-	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
+	$(MESON) setup --cross-file $(crossfile) -Db_lto=false build
 	$(MESON) compile -C build
 	cp build/bootstrapper.bin bootstrapper-$(host_arch).bin
 	cp build/loader.bin loader-$(host_arch).bin
