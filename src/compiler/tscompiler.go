@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/frida/typescript-go/ast"
 	"github.com/frida/typescript-go/bundled"
@@ -85,7 +86,7 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error)
 		return "", nil, fmt.Errorf("TypeScript source file not found in program: %s", filePathToCompile)
 	}
 
-	c.captureFs.Outputs = make(map[string]string)
+	c.captureFs.ClearOutputs()
 
 	res := program.Emit(compiler.EmitOptions{
 		TargetSourceFile: targetSourceFile,
@@ -127,7 +128,7 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error)
 
 	var compiledJS string
 	var foundJSOutput bool
-	for path, content := range c.captureFs.Outputs {
+	for path, content := range c.captureFs.GetOutputs() {
 		ext := filepath.Ext(path)
 		if ext == ".js" {
 			compiledJS = content
@@ -137,9 +138,9 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error)
 	}
 	if !foundJSOutput {
 		if len(diagnosticMessages) == 0 {
-			return "", nil, fmt.Errorf("TypeScript compilation for %s seemed to succeed (emit not skipped, no diagnostics) but no .js output file was captured. Captured outputs: %v", filePathToCompile, c.captureFs.Outputs)
+			return "", nil, fmt.Errorf("TypeScript compilation for %s seemed to succeed (emit not skipped, no diagnostics) but no .js output file was captured. Captured outputs: %v", filePathToCompile, c.captureFs.GetOutputs())
 		}
-		return "", diagnosticMessages, fmt.Errorf("no .js output file was captured for %s. Captured outputs: %v. Diagnostics: %s", filePathToCompile, c.captureFs.Outputs, strings.Join(diagnosticMessages, "; "))
+		return "", diagnosticMessages, fmt.Errorf("no .js output file was captured for %s. Captured outputs: %v. Diagnostics: %s", filePathToCompile, c.captureFs.GetOutputs(), strings.Join(diagnosticMessages, "; "))
 	}
 
 	return compiledJS, diagnosticMessages, nil
@@ -157,7 +158,8 @@ func (c *TSCompiler) GetCurrentDirectory() string {
 
 type captureFS struct {
 	vfs.FS
-	Outputs map[string]string
+	outputs map[string]string
+	mutex   sync.Mutex
 }
 
 var _ vfs.FS = (*captureFS)(nil)
@@ -165,17 +167,38 @@ var _ vfs.FS = (*captureFS)(nil)
 func newCaptureFS(inner vfs.FS) *captureFS {
 	return &captureFS{
 		FS:      inner,
-		Outputs: make(map[string]string),
+		outputs: make(map[string]string),
 	}
 }
 
+func (c *captureFS) ClearOutputs() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.outputs = make(map[string]string)
+}
+
+func (c *captureFS) GetOutputs() map[string]string {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	snap := make(map[string]string, len(c.outputs))
+	for k, v := range c.outputs {
+		snap[k] = v
+	}
+	return snap
+}
+
 func (c *captureFS) WriteFile(path string, data string, writeByteOrderMark bool) error {
-	c.Outputs[path] = data
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.outputs[path] = data
 	return nil
 }
 
 func (c *captureFS) Remove(path string) error {
-	delete(c.Outputs, path)
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	delete(c.outputs, path)
 	return nil
 }
 

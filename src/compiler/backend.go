@@ -153,10 +153,10 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 			})
 
 			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: "frida-builtins"}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
-				if (args.Path == "/node-globals.js") {
+				if args.Path == "/node-globals.js" {
 					return esbuild.OnLoadResult{
 						Contents: &nodeGlobals,
-						Loader: esbuild.LoaderJS,
+						Loader:   esbuild.LoaderJS,
 					}, nil
 				}
 
