@@ -26,14 +26,27 @@ namespace Frida {
 			if (!absolute_entrypoint.has_prefix (project_root))
 				throw new Error.INVALID_ARGUMENT ("Entrypoint must be inside the project root");
 
+			var main_context = MainContext.get_thread_default ();
+
 			starting ();
 			try {
-				string? js_code;
-				string? error_message;
-				if (CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
-						opts.compression == TERSER, on_diagnostic, out js_code, out error_message) != 0) {
+				string? js_code = null;
+				string? error_message = null;
+				CompilerBackend.BundleCompleteFunc on_complete = (js, err) => {
+					js_code = js;
+					error_message = err;
+
+					var source = new IdleSource ();
+					source.set_callback (build.callback);
+					source.attach (main_context);
+				};
+
+				CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
+					opts.compression == TERSER, on_diagnostic, (owned) on_complete);
+				yield;
+
+				if (error_message != null)
 					throw new Error.INVALID_ARGUMENT ("%s", error_message);
-				}
 
 				output (js_code);
 
@@ -46,7 +59,7 @@ namespace Frida {
 #endif
 		}
 
-		private void on_diagnostic (owned string category, int code, owned string path, uint line, uint character,
+		private void on_diagnostic (owned string category, int code, owned string path, int line, int character,
 				owned string text) {
 			var builder = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
 
@@ -131,10 +144,11 @@ namespace Frida {
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
 		private extern static int bundle_js (string project_root, string entrypoint, bool source_map, bool compress,
-			DiagnosticFunc on_diagnostic, out string? js_code, out string? error_message);
+			owned DiagnosticFunc on_diagnostic, owned BundleCompleteFunc on_complete);
 
-		private delegate void DiagnosticFunc (owned string category, int code, owned string path, uint line, uint character,
+		private delegate void DiagnosticFunc (owned string category, int code, owned string path, int line, int character,
 			owned string text);
+		private delegate void BundleCompleteFunc (owned string? js_code, owned string? error_message);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {

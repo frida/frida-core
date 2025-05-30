@@ -1,20 +1,38 @@
 package main
 
 /*
-typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, unsigned int line, unsigned int character, char * text,
+typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, int line, int character, char * text,
     void * user_data);
+typedef void (* FridaBundleCompleteFunc) (char * js_code, char * error_message, void * user_data);
+typedef void (* FridaDestroyFunc) (void * user_data);
 
 static inline void
-invokeDiagnosticFunc (FridaDiagnosticFunc fn,
-                      char * category,
-                      int code,
-                      char * path,
-                      unsigned int line,
-                      unsigned int character,
-                      char * text,
-                      void * user_data)
+invoke_diagnostic_func (FridaDiagnosticFunc fn,
+                        char * category,
+                        int code,
+                        char * path,
+                        int line,
+                        int character,
+                        char * text,
+                        void * user_data)
 {
   fn (category, code, path, line, character, text, user_data);
+}
+
+static inline void
+invoke_bundle_complete_func (FridaBundleCompleteFunc fn,
+                             char * js_code,
+                             char * error_message,
+                             void * user_data)
+{
+  fn (js_code, error_message, user_data);
+}
+
+static inline void
+invoke_destroy_func (FridaDestroyFunc fn,
+                     void * user_data)
+{
+  fn (user_data);
 }
 */
 import "C"
@@ -33,58 +51,93 @@ import (
 	"github.com/frida/typescript-go/scanner"
 )
 
+type Diagnostic struct {
+	category        string
+	code            int
+	path            string
+	line, character int
+	text            string
+}
+
+type DiagnosticHandler func(d Diagnostic)
+
 //export frida_compiler_backend_bundle_js
-func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_map, compress uint, onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, js_code, error_message **C.char) C.int {
-	*js_code = nil
-	*error_message = nil
+func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
+	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc,
+	onComplete C.FridaBundleCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc) {
+	projectRoot := C.GoString(cProjectRoot)
+	entrypoint := C.GoString(cEntrypoint)
 
-	projectRoot, err := filepath.EvalSymlinks(C.GoString(cProjectRoot))
-	if err != nil {
-		*error_message = C.CString(fmt.Sprintf("Failed to resolve project root: %w", err))
-		return -1
+	go func() {
+		var onDiagnostic DiagnosticHandler = func(d Diagnostic) {
+			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), C.CString(d.path), C.int(d.line),
+				C.int(d.character), C.CString(d.text), onDiagnosticData)
+		}
+
+		jsCode, err := bundleJs(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
+
+		var cJsCode, cErrorMessage *C.char
+		if err == nil {
+			cJsCode = C.CString(jsCode)
+		} else {
+			cErrorMessage = C.CString(err.Error())
+		}
+
+		C.invoke_bundle_complete_func(onComplete, cJsCode, cErrorMessage, onCompleteData)
+
+		C.invoke_destroy_func(onDiagnosticDestroy, onDiagnosticData)
+		C.invoke_destroy_func(onCompleteDestroy, onCompleteData)
+	}()
+}
+
+func bundleJs(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (jsCode string, err error) {
+	var e error
+
+	var normalizedProjectRoot, normalizedEntrypoint string
+	if normalizedProjectRoot, e = filepath.EvalSymlinks(projectRoot); e != nil {
+		err = fmt.Errorf("Failed to resolve project root: %w", e)
+		return
 	}
-	entrypoint, err := filepath.EvalSymlinks(C.GoString(cEntrypoint))
-	if err != nil {
-		*error_message = C.CString(fmt.Sprintf("Failed to resolve entrypoint: %w", err))
-		return -1
+	if normalizedEntrypoint, e = filepath.EvalSymlinks(entrypoint); e != nil {
+		err = fmt.Errorf("Failed to resolve entrypoint: %w", e)
+		return
 	}
 
-	tsconfigPath := filepath.Join(projectRoot, "tsconfig.json")
-	tsconfigData, err := os.ReadFile(tsconfigPath)
+	tsconfigPath := filepath.Join(normalizedProjectRoot, "tsconfig.json")
 	var tsconfigText string
-	if err == nil {
+	if tsconfigData, e := os.ReadFile(tsconfigPath); e == nil {
 		if !utf8.Valid(tsconfigData) {
-			*error_message = C.CString(fmt.Sprintf("%q is not valid UTF-8", tsconfigPath))
-			return -1
+			err = fmt.Errorf("%q is not valid UTF-8", tsconfigPath)
+			return
 		}
 		tsconfigText = string(tsconfigData)
 	} else {
 		tsconfigText = "{ \"compilerOptions\": { \"target\": \"ES2022\", \"module\": \"Node16\", \"skipLibCheck\": true } }"
 	}
 
-	tsCompiler, err := NewTSCompiler(entrypoint, tsconfigPath, tsconfigText, projectRoot)
-	if err != nil {
-		*error_message = C.CString(fmt.Sprintf("Error initializing TypeScript compiler: %s", err.Error()))
-		return -1
+	var tsCompiler *TSCompiler
+	if tsCompiler, e = NewTSCompiler(normalizedEntrypoint, tsconfigPath, tsconfigText, normalizedProjectRoot); e != nil {
+		err = fmt.Errorf("Failed to initialize TypeScript compiler: %w", e)
+		return
 	}
 
 	sourcemapOption := esbuild.SourceMapNone
-	if source_map != 0 {
+	if sourceMap {
 		sourcemapOption = esbuild.SourceMapInline
 	}
 
 	minifyWhitespace := false
 	minifyIdentifiers := false
 	minifySyntax := false
-	if compress != 0 {
+	if compress {
 		minifyWhitespace = true
 		minifyIdentifiers = true
 		minifySyntax = true
 	}
 
 	result := esbuild.Build(esbuild.BuildOptions{
-		AbsWorkingDir:     projectRoot,
-		EntryPoints:       []string{entrypoint},
+		AbsWorkingDir:     normalizedProjectRoot,
+		EntryPoints:       []string{normalizedEntrypoint},
 		Bundle:            true,
 		Write:             false,
 		Platform:          esbuild.PlatformNeutral,
@@ -104,39 +157,39 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			emitDiagnostic("error", e, onDiagnostic, onDiagnosticData)
+			emitDiagnostic("error", e, onDiagnostic)
 		}
 		for _, e := range result.Warnings {
-			emitDiagnostic("warning", e, onDiagnostic, onDiagnosticData)
+			emitDiagnostic("warning", e, onDiagnostic)
 		}
-		*error_message = C.CString("Compilation failed")
-		return -1
+		err = fmt.Errorf("Compilation failed")
+		return
 	}
 
-	*js_code = C.CString(string(result.OutputFiles[0].Contents))
-	return 0
+	jsCode = string(result.OutputFiles[0].Contents)
+	return
 }
 
-func emitDiagnostic(category string, message esbuild.Message, onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
-	code := -1
-	if message.PluginName == "frida-custom-ts" {
-		category = message.Notes[0].Text
-		fmt.Sscan(message.Notes[1].Text, &code)
+func emitDiagnostic(category string, message esbuild.Message, onDiagnostic DiagnosticHandler) {
+	d := Diagnostic{
+		category: category,
+		code:     -1,
+		text:     message.Text,
 	}
-
-	path := ""
-	line := 0
-	character := 0
 
 	l := message.Location
 	if l != nil {
-		path = l.File
-		line = l.Line
-		character = l.Column
+		d.path = l.File
+		d.line = l.Line
+		d.character = l.Column
 	}
 
-	C.invokeDiagnosticFunc(onDiagnostic, C.CString(category), C.int(code), C.CString(path), C.uint(line), C.uint(character),
-		C.CString(message.Text), onDiagnosticData)
+	if message.PluginName == "frida-custom-ts" {
+		d.category = message.Notes[0].Text
+		fmt.Sscan(message.Notes[1].Text, &d.code)
+	}
+
+	onDiagnostic(d)
 }
 
 func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
