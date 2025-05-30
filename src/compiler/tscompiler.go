@@ -71,7 +71,7 @@ func NewTSCompiler(entrypoint, tsconfigFileName, tsconfigText, projectRoot strin
 	return c, nil
 }
 
-func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error) {
+func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnostic, error) {
 	program := c.program
 
 	var targetSourceFile *ast.SourceFile
@@ -108,22 +108,12 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error)
 		diagnostics = append(diagnostics, program.GetSemanticDiagnostics(ctx, targetSourceFile)...)
 	}
 
-	var diagnosticMessages []string
-	for _, diag := range diagnostics {
-		msg := ""
-		if diag.File() != nil {
-			msg += fmt.Sprintf("%s(%d): ", diag.File().FileName(), diag.Pos())
-		}
-		msg += diag.Message()
-		diagnosticMessages = append(diagnosticMessages, msg)
-	}
-
 	if res.EmitSkipped {
 		errMsg := "TypeScript compilation failed and was skipped"
-		if len(diagnosticMessages) == 0 {
+		if len(diagnostics) == 0 {
 			errMsg = fmt.Sprintf("TypeScript compilation failed and was skipped for %s, but no diagnostics reported", filePathToCompile)
 		}
-		return "", diagnosticMessages, fmt.Errorf(errMsg)
+		return "", diagnostics, fmt.Errorf(errMsg)
 	}
 
 	var compiledJS string
@@ -137,13 +127,13 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []string, error)
 		}
 	}
 	if !foundJSOutput {
-		if len(diagnosticMessages) == 0 {
+		if len(diagnostics) == 0 {
 			return "", nil, fmt.Errorf("TypeScript compilation for %s seemed to succeed (emit not skipped, no diagnostics) but no .js output file was captured. Captured outputs: %v", filePathToCompile, c.captureFs.GetOutputs())
 		}
-		return "", diagnosticMessages, fmt.Errorf("no .js output file was captured for %s. Captured outputs: %v. Diagnostics: %s", filePathToCompile, c.captureFs.GetOutputs(), strings.Join(diagnosticMessages, "; "))
+		return "", diagnostics, fmt.Errorf("No .js output file was captured for %s. Captured outputs: %v", filePathToCompile, c.captureFs.GetOutputs())
 	}
 
-	return compiledJS, diagnosticMessages, nil
+	return compiledJS, diagnostics, nil
 }
 
 // FS implements ParseConfigHost.

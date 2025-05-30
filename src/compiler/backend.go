@@ -30,6 +30,7 @@ import (
 	"unsafe"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
+	"github.com/frida/typescript-go/scanner"
 )
 
 //export frida_compiler_backend_bundle_js
@@ -117,7 +118,11 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, source_
 }
 
 func emitDiagnostic(category string, message esbuild.Message, onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
-	code := 0
+	code := -1
+	if message.PluginName == "frida-custom-ts" {
+		category = message.Notes[0].Text
+		fmt.Sscan(message.Notes[1].Text, &code)
+	}
 
 	path := ""
 	line := 0
@@ -139,12 +144,29 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 		Name: "frida-custom-ts",
 		Setup: func(build esbuild.PluginBuild) {
 			build.OnLoad(esbuild.OnLoadOptions{Filter: "\\.ts$"}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
-				compiledJS, tsDiagnosticStrings, err := compiler.Compile(args.Path)
+				compiledJS, tsDiagnostics, err := compiler.Compile(args.Path)
 
 				var esbuildMessages []esbuild.Message
-				for _, dText := range tsDiagnosticStrings {
-					// TODO: Parse dText for file, line, col to create richer esbuild.Message.Location
-					esbuildMessages = append(esbuildMessages, esbuild.Message{Text: dText})
+				for _, d := range tsDiagnostics {
+					f := d.File()
+
+					pos := d.Pos()
+					line, column := scanner.GetLineAndCharacterOfPosition(f, pos)
+
+					esbuildMessages = append(esbuildMessages, esbuild.Message{
+						Text: d.Message(),
+						Location: &esbuild.Location{
+							File:     f.FileName(),
+							Line:     line,
+							Column:   column,
+							Length:   d.Len(),
+							LineText: f.Text()[pos:d.End()],
+						},
+						Notes: []esbuild.Note{
+							esbuild.Note{Text: d.Category().Name()},
+							esbuild.Note{Text: fmt.Sprintf("%d", d.Code())},
+						},
+					})
 				}
 
 				if err != nil {
