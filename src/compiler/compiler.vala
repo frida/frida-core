@@ -10,8 +10,16 @@ namespace Frida {
 			construct;
 		}
 
+		private Gee.Queue<Diagnostic> pending_diagnostics = new Gee.ArrayQueue<Diagnostic> ();
+
+		private MainContext main_context;
+
 		public Compiler (DeviceManager manager) {
 			Object (manager: manager);
+		}
+
+		construct {
+			main_context = Frida.get_main_context ();
 		}
 
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
@@ -26,22 +34,17 @@ namespace Frida {
 			if (!absolute_entrypoint.has_prefix (project_root))
 				throw new Error.INVALID_ARGUMENT ("Entrypoint must be inside the project root");
 
-			var main_context = MainContext.get_thread_default ();
-
 			starting ();
 			try {
 				string? js_code = null;
 				string? error_message = null;
-				CompilerBackend.BundleCompleteFunc on_complete = (js, err) => {
+				CompilerBackend.BuildCompleteFunc on_complete = (js, err) => {
 					js_code = js;
 					error_message = err;
-
-					var source = new IdleSource ();
-					source.set_callback (build.callback);
-					source.attach (main_context);
+					schedule_on_frida_thread (build.callback);
 				};
 
-				CompilerBackend.bundle_js (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
+				CompilerBackend.build (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
 					opts.compression == TERSER, on_diagnostic, (owned) on_complete);
 				yield;
 
@@ -57,26 +60,6 @@ namespace Frida {
 #else
 			throw_not_supported ();
 #endif
-		}
-
-		private void on_diagnostic (owned string category, int code, owned string path, int line, int character,
-				owned string text) {
-			var builder = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
-
-			builder.open (VariantType.VARDICT);
-			builder.add ("{sv}", "category", new Variant.string (category));
-			builder.add ("{sv}", "code", new Variant.int64 (code));
-			if (path != "") {
-				var b = new VariantBuilder (VariantType.VARDICT);
-				b.add ("{sv}", "path", new Variant.string (path));
-				b.add ("{sv}", "line", new Variant.int64 (line));
-				b.add ("{sv}", "character", new Variant.int64 (character));
-				builder.add ("{sv}", "file", b.end ());
-			}
-			builder.add ("{sv}", "text", new Variant.string (text));
-			builder.close ();
-
-			diagnostics (builder.end ());
 		}
 
 		public string build_sync (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
@@ -122,7 +105,59 @@ namespace Frida {
 			}
 		}
 
-#if !HAVE_COMPILER_BACKEND
+#if HAVE_COMPILER_BACKEND
+		private void on_diagnostic (owned string category, int code, owned string? path, int line, int character,
+				owned string text) {
+			var diag = new Diagnostic () {
+				category = category,
+				code = code,
+				path = path,
+				line = line,
+				character = character,
+				text = text,
+			};
+
+			bool schedule_emit = false;
+			lock (pending_diagnostics) {
+				schedule_emit = pending_diagnostics.is_empty;
+				pending_diagnostics.add (diag);
+			}
+
+			if (schedule_emit) {
+				schedule_on_frida_thread (() => {
+					emit_pending_diagnostics ();
+					return Source.REMOVE;
+				});
+			}
+		}
+
+		private void emit_pending_diagnostics () {
+			var batch = new Gee.ArrayList<Diagnostic> ();
+			lock (pending_diagnostics) {
+				batch.add_all (pending_diagnostics);
+				pending_diagnostics.clear ();
+			}
+
+			var builder = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+			foreach (var d in batch) {
+				builder.open (VariantType.VARDICT);
+				builder.add ("{sv}", "category", new Variant.string (d.category));
+				builder.add ("{sv}", "code", new Variant.int64 (d.code));
+				if (d.path != null) {
+					var b = new VariantBuilder (VariantType.VARDICT);
+					b.add ("{sv}", "path", new Variant.string (d.path));
+					b.add ("{sv}", "line", new Variant.int64 (d.line));
+					b.add ("{sv}", "character", new Variant.int64 (d.character));
+					builder.add ("{sv}", "file", b.end ());
+				}
+				builder.add ("{sv}", "text", new Variant.string (d.text));
+				builder.close ();
+			}
+
+			diagnostics (builder.end ());
+		}
+#else
 		[NoReturn]
 		private void throw_not_supported () throws Error {
 			throw new Error.NOT_SUPPORTED ("Compiler backend disabled at build-time");
@@ -131,6 +166,21 @@ namespace Frida {
 
 		private T create<T> () {
 			return Object.new (typeof (T), parent: this);
+		}
+
+		protected void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
+		}
+
+		private class Diagnostic {
+			public string category;
+			public int code;
+			public string? path;
+			public int line;
+			public int character;
+			public string text;
 		}
 
 		private abstract class CompilerTask<T> : AsyncTask<T> {
@@ -143,12 +193,12 @@ namespace Frida {
 
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
-		private extern static int bundle_js (string project_root, string entrypoint, bool source_map, bool compress,
-			owned DiagnosticFunc on_diagnostic, owned BundleCompleteFunc on_complete);
+		private extern static int build (string project_root, string entrypoint, bool source_map, bool compress,
+			owned DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete);
 
-		private delegate void DiagnosticFunc (owned string category, int code, owned string path, int line, int character,
+		private delegate void DiagnosticFunc (owned string category, int code, owned string? path, int line, int character,
 			owned string text);
-		private delegate void BundleCompleteFunc (owned string? js_code, owned string? error_message);
+		private delegate void BuildCompleteFunc (owned string? js_code, owned string? error_message);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {

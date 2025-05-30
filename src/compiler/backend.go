@@ -3,7 +3,7 @@ package main
 /*
 typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, int line, int character, char * text,
     void * user_data);
-typedef void (* FridaBundleCompleteFunc) (char * js_code, char * error_message, void * user_data);
+typedef void (* FridaBuildCompleteFunc) (char * js_code, char * error_message, void * user_data);
 typedef void (* FridaDestroyFunc) (void * user_data);
 
 static inline void
@@ -20,10 +20,10 @@ invoke_diagnostic_func (FridaDiagnosticFunc fn,
 }
 
 static inline void
-invoke_bundle_complete_func (FridaBundleCompleteFunc fn,
-                             char * js_code,
-                             char * error_message,
-                             void * user_data)
+invoke_build_complete_func (FridaBuildCompleteFunc fn,
+                            char * js_code,
+                            char * error_message,
+                            void * user_data)
 {
   fn (js_code, error_message, user_data);
 }
@@ -61,20 +61,25 @@ type Diagnostic struct {
 
 type DiagnosticHandler func(d Diagnostic)
 
-//export frida_compiler_backend_bundle_js
-func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
+//export frida_compiler_backend_build
+func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
 	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc,
-	onComplete C.FridaBundleCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc) {
+	onComplete C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc) {
 	projectRoot := C.GoString(cProjectRoot)
 	entrypoint := C.GoString(cEntrypoint)
 
 	go func() {
 		var onDiagnostic DiagnosticHandler = func(d Diagnostic) {
-			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), C.CString(d.path), C.int(d.line),
+			var cPath *C.char
+			if d.path != "" {
+				cPath = C.CString(d.path)
+			}
+
+			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), cPath, C.int(d.line),
 				C.int(d.character), C.CString(d.text), onDiagnosticData)
 		}
 
-		jsCode, err := bundleJs(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
+		jsCode, err := build(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
 
 		var cJsCode, cErrorMessage *C.char
 		if err == nil {
@@ -83,14 +88,14 @@ func frida_compiler_backend_bundle_js(cProjectRoot, cEntrypoint *C.char, sourceM
 			cErrorMessage = C.CString(err.Error())
 		}
 
-		C.invoke_bundle_complete_func(onComplete, cJsCode, cErrorMessage, onCompleteData)
+		C.invoke_build_complete_func(onComplete, cJsCode, cErrorMessage, onCompleteData)
 
 		C.invoke_destroy_func(onDiagnosticDestroy, onDiagnosticData)
 		C.invoke_destroy_func(onCompleteDestroy, onCompleteData)
 	}()
 }
 
-func bundleJs(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (jsCode string, err error) {
+func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (jsCode string, err error) {
 	var e error
 
 	var normalizedProjectRoot, normalizedEntrypoint string
