@@ -1,10 +1,37 @@
 package main
 
 /*
+typedef void (* FridaBuildCompleteFunc) (char * bundle, char * error_message, void * user_data);
+typedef void (* FridaWatchReadyFunc) (char * error_message, void * user_data);
+typedef void (* FridaOutputFunc) (char * bundle, void * user_data);
 typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, int line, int character, char * text,
     void * user_data);
-typedef void (* FridaBuildCompleteFunc) (char * js_code, char * error_message, void * user_data);
 typedef void (* FridaDestroyFunc) (void * user_data);
+
+static inline void
+invoke_build_complete_func (FridaBuildCompleteFunc fn,
+                            char * bundle,
+                            char * error_message,
+                            void * user_data)
+{
+  fn (bundle, error_message, user_data);
+}
+
+static inline void
+invoke_watch_ready_func (FridaWatchReadyFunc fn,
+                         char * error_message,
+                         void * user_data)
+{
+  fn (error_message, user_data);
+}
+
+static inline void
+invoke_output_func (FridaOutputFunc fn,
+                    char * bundle,
+                    void * user_data)
+{
+  fn (bundle, user_data);
+}
 
 static inline void
 invoke_diagnostic_func (FridaDiagnosticFunc fn,
@@ -17,15 +44,6 @@ invoke_diagnostic_func (FridaDiagnosticFunc fn,
                         void * user_data)
 {
   fn (category, code, path, line, character, text, user_data);
-}
-
-static inline void
-invoke_build_complete_func (FridaBuildCompleteFunc fn,
-                            char * js_code,
-                            char * error_message,
-                            void * user_data)
-{
-  fn (js_code, error_message, user_data);
 }
 
 static inline void
@@ -63,8 +81,8 @@ type DiagnosticHandler func(d Diagnostic)
 
 //export frida_compiler_backend_build
 func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
-	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc,
-	onComplete C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc) {
+	onComplete C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc,
+	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc) {
 	projectRoot := C.GoString(cProjectRoot)
 	entrypoint := C.GoString(cEntrypoint)
 
@@ -79,23 +97,75 @@ func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, sourceMap, 
 				C.int(d.character), C.CString(d.text), onDiagnosticData)
 		}
 
-		jsCode, err := build(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
+		bundle, err := build(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
 
-		var cJsCode, cErrorMessage *C.char
+		var cBundle, cErrorMessage *C.char
 		if err == nil {
-			cJsCode = C.CString(jsCode)
+			cBundle = C.CString(bundle)
 		} else {
 			cErrorMessage = C.CString(err.Error())
 		}
-
-		C.invoke_build_complete_func(onComplete, cJsCode, cErrorMessage, onCompleteData)
+		C.invoke_build_complete_func(onComplete, cBundle, cErrorMessage, onCompleteData)
+		C.invoke_destroy_func(onCompleteDestroy, onCompleteData)
 
 		C.invoke_destroy_func(onDiagnosticDestroy, onDiagnosticData)
-		C.invoke_destroy_func(onCompleteDestroy, onCompleteData)
 	}()
 }
 
-func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (jsCode string, err error) {
+//export frida_compiler_backend_watch
+func frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
+	onReady C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDestroy C.FridaDestroyFunc,
+	onOutput C.FridaOutputFunc, onOutputData unsafe.Pointer, onOutputDestroy C.FridaDestroyFunc,
+	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc) {
+	projectRoot := C.GoString(cProjectRoot)
+	entrypoint := C.GoString(cEntrypoint)
+
+	go func() {
+		var onDiagnostic DiagnosticHandler = func(d Diagnostic) {
+			var cPath *C.char
+			if d.path != "" {
+				cPath = C.CString(d.path)
+			}
+
+			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), cPath, C.int(d.line),
+				C.int(d.character), C.CString(d.text), onDiagnosticData)
+		}
+
+		err := watch(projectRoot, entrypoint, sourceMap != 0, compress != 0, onOutput, onDiagnostic)
+
+		var cErrorMessage *C.char
+		if err != nil {
+			cErrorMessage = C.CString(err.Error())
+		}
+		C.invoke_watch_ready_func(onReady, cErrorMessage, onReadyData)
+		C.invoke_destroy_func(onReadyDestroy, onReadyData)
+	}()
+}
+
+func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (bundle string, err error) {
+	ctx, err := makeContext(projectRoot, entrypoint, sourceMap, compress, onDiagnostic)
+	if err != nil {
+		return
+	}
+	defer ctx.Dispose()
+
+	result := ctx.Rebuild()
+
+	if len(result.Errors) == 0 {
+		bundle = string(result.OutputFiles[0].Contents)
+	} else {
+		for _, e := range result.Errors {
+			emitDiagnostic("error", e, onDiagnostic)
+		}
+		for _, e := range result.Warnings {
+			emitDiagnostic("warning", e, onDiagnostic)
+		}
+		err = fmt.Errorf("Compilation failed")
+	}
+	return
+}
+
+func makeContext(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (ctx esbuild.BuildContext, err error) {
 	var e error
 
 	var normalizedProjectRoot, normalizedEntrypoint string
@@ -140,7 +210,7 @@ func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnosti
 		minifySyntax = true
 	}
 
-	result := esbuild.Build(esbuild.BuildOptions{
+	if build_ctx, ctx_error := esbuild.Context(esbuild.BuildOptions{
 		AbsWorkingDir:     normalizedProjectRoot,
 		EntryPoints:       []string{normalizedEntrypoint},
 		Bundle:            true,
@@ -158,20 +228,14 @@ func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnosti
 			makeTypeScriptPlugin(tsCompiler),
 			makeFridaShimsPlugin(),
 		},
-	})
-
-	if len(result.Errors) > 0 {
-		for _, e := range result.Errors {
+	}); ctx_error == nil {
+		ctx = build_ctx
+	} else {
+		for _, e := range ctx_error.Errors {
 			emitDiagnostic("error", e, onDiagnostic)
 		}
-		for _, e := range result.Warnings {
-			emitDiagnostic("warning", e, onDiagnostic)
-		}
-		err = fmt.Errorf("Compilation failed")
-		return
+		err = fmt.Errorf("Failed to create ESBuild context")
 	}
-
-	jsCode = string(result.OutputFiles[0].Contents)
 	return
 }
 

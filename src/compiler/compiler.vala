@@ -36,24 +36,24 @@ namespace Frida {
 
 			starting ();
 			try {
-				string? js_code = null;
+				string? bundle = null;
 				string? error_message = null;
-				CompilerBackend.BuildCompleteFunc on_complete = (js, err) => {
-					js_code = js;
-					error_message = err;
+				CompilerBackend.BuildCompleteFunc on_complete = (b, e) => {
+					bundle = b;
+					error_message = e;
 					schedule_on_frida_thread (build.callback);
 				};
 
 				CompilerBackend.build (project_root, absolute_entrypoint, opts.source_maps == INCLUDED,
-					opts.compression == TERSER, on_diagnostic, (owned) on_complete);
+					opts.compression == TERSER, (owned) on_complete, on_diagnostic);
 				yield;
 
 				if (error_message != null)
 					throw new Error.INVALID_ARGUMENT ("%s", error_message);
 
-				output (js_code);
+				output (bundle);
 
-				return js_code;
+				return bundle;
 			} finally {
 				finished ();
 			}
@@ -193,12 +193,16 @@ namespace Frida {
 
 #if HAVE_COMPILER_BACKEND
 	namespace CompilerBackend {
-		private extern static int build (string project_root, string entrypoint, bool source_map, bool compress,
-			owned DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete);
+		private extern static void build (string project_root, string entrypoint, bool source_map, bool compress,
+			owned BuildCompleteFunc on_complete, owned DiagnosticFunc on_diagnostic);
+		private extern static void watch (string project_root, string entrypoint, bool source_map, bool compress,
+			owned WatchReadyFunc on_ready, owned OutputFunc on_output, owned DiagnosticFunc on_diagnostic);
 
+		private delegate void BuildCompleteFunc (owned string? bundle, owned string? error_message);
+		private delegate void WatchReadyFunc (owned string? error_message);
+		private delegate void OutputFunc (owned string bundle);
 		private delegate void DiagnosticFunc (owned string category, int code, owned string? path, int line, int character,
 			owned string text);
-		private delegate void BuildCompleteFunc (owned string? js_code, owned string? error_message);
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {
