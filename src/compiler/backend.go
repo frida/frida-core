@@ -1,8 +1,10 @@
 package main
 
 /*
+#include <stdint.h>
+
 typedef void (* FridaBuildCompleteFunc) (char * bundle, char * error_message, void * user_data);
-typedef void (* FridaWatchReadyFunc) (char * error_message, void * user_data);
+typedef void (* FridaWatchReadyFunc) (uintptr_t session_handle, char * error_message, void * user_data);
 typedef void (* FridaOutputFunc) (char * bundle, void * user_data);
 typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, int line, int character, char * text,
     void * user_data);
@@ -19,10 +21,11 @@ invoke_build_complete_func (FridaBuildCompleteFunc fn,
 
 static inline void
 invoke_watch_ready_func (FridaWatchReadyFunc fn,
+                         uintptr_t session_handle,
                          char * error_message,
                          void * user_data)
 {
-  fn (error_message, user_data);
+  fn (session_handle, error_message, user_data);
 }
 
 static inline void
@@ -61,6 +64,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/cgo"
 	"strings"
 	"unicode/utf8"
 	"unsafe"
@@ -68,6 +72,15 @@ import (
 	esbuild "github.com/evanw/esbuild/pkg/api"
 	"github.com/frida/typescript-go/scanner"
 )
+
+type BuildOptions struct {
+	projectRoot string
+	entrypoint  string
+	sourceMap   bool
+	compress    bool
+}
+
+type OutputHandler func(bundle string)
 
 type Diagnostic struct {
 	category        string
@@ -83,21 +96,17 @@ type DiagnosticHandler func(d Diagnostic)
 func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, sourceMap, compress uint,
 	onComplete C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDestroy C.FridaDestroyFunc,
 	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc) {
-	projectRoot := C.GoString(cProjectRoot)
-	entrypoint := C.GoString(cEntrypoint)
+	options := BuildOptions{
+		projectRoot: C.GoString(cProjectRoot),
+		entrypoint: C.GoString(cEntrypoint),
+		sourceMap: sourceMap != 0,
+		compress: compress != 0,
+	}
 
 	go func() {
-		var onDiagnostic DiagnosticHandler = func(d Diagnostic) {
-			var cPath *C.char
-			if d.path != "" {
-				cPath = C.CString(d.path)
-			}
+		onDiagnostic := makeCDiagnosticHandler(onDiagnostic, onDiagnosticData)
 
-			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), cPath, C.int(d.line),
-				C.int(d.character), C.CString(d.text), onDiagnosticData)
-		}
-
-		bundle, err := build(projectRoot, entrypoint, sourceMap != 0, compress != 0, onDiagnostic)
+		bundle, err := build(options, onDiagnostic)
 
 		var cBundle, cErrorMessage *C.char
 		if err == nil {
@@ -117,33 +126,44 @@ func frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, sourceMap, 
 	onReady C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDestroy C.FridaDestroyFunc,
 	onOutput C.FridaOutputFunc, onOutputData unsafe.Pointer, onOutputDestroy C.FridaDestroyFunc,
 	onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onDiagnosticDestroy C.FridaDestroyFunc) {
-	projectRoot := C.GoString(cProjectRoot)
-	entrypoint := C.GoString(cEntrypoint)
+	options := BuildOptions{
+		projectRoot: C.GoString(cProjectRoot),
+		entrypoint: C.GoString(cEntrypoint),
+		sourceMap: sourceMap != 0,
+		compress: compress != 0,
+	}
 
 	go func() {
-		var onDiagnostic DiagnosticHandler = func(d Diagnostic) {
-			var cPath *C.char
-			if d.path != "" {
-				cPath = C.CString(d.path)
-			}
+		onDiagnostic := makeCDiagnosticHandler(onDiagnostic, onDiagnosticData)
 
-			C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), cPath, C.int(d.line),
-				C.int(d.character), C.CString(d.text), onDiagnosticData)
-		}
+		session, err := NewWatchSession(options, onOutput, onDiagnostic)
 
-		err := watch(projectRoot, entrypoint, sourceMap != 0, compress != 0, onOutput, onDiagnostic)
-
+		var cSession uintptr
 		var cErrorMessage *C.char
-		if err != nil {
+		if err == nil {
+			cSession = uintptr(cgo.NewHandle(session))
+		} else {
 			cErrorMessage = C.CString(err.Error())
 		}
-		C.invoke_watch_ready_func(onReady, cErrorMessage, onReadyData)
+		C.invoke_watch_ready_func(onReady, cSession, cErrorMessage, onReadyData)
 		C.invoke_destroy_func(onReadyDestroy, onReadyData)
 	}()
 }
 
-func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (bundle string, err error) {
-	ctx, err := makeContext(projectRoot, entrypoint, sourceMap, compress, onDiagnostic)
+func makeCDiagnosticHandler(onDiagnostic C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) DiagnosticHandler {
+	return func(d Diagnostic) {
+		var cPath *C.char
+		if d.path != "" {
+			cPath = C.CString(d.path)
+		}
+
+		C.invoke_diagnostic_func(onDiagnostic, C.CString(d.category), C.int(d.code), cPath, C.int(d.line),
+			C.int(d.character), C.CString(d.text), onDiagnosticData)
+	}
+}
+
+func build(options BuildOptions, onDiagnostic DiagnosticHandler) (bundle string, err error) {
+	ctx, err := makeContext(options, onDiagnostic)
 	if err != nil {
 		return
 	}
@@ -165,7 +185,14 @@ func build(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnosti
 	return
 }
 
-func makeContext(projectRoot, entrypoint string, sourceMap, compress bool, onDiagnostic DiagnosticHandler) (ctx esbuild.BuildContext, err error) {
+type WatchSession struct {
+	ctx esbuild.BuildContext
+}
+
+func NewWatchSession(options BuildOptions, onOutput OutputHandler, onDiagnostic DiagnosticHandler) (*WatchSession, error) {
+}
+
+func makeContext(options BuildOptions, onDiagnostic DiagnosticHandler) (ctx esbuild.BuildContext, err error) {
 	var e error
 
 	var normalizedProjectRoot, normalizedEntrypoint string
