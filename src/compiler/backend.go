@@ -86,11 +86,11 @@ import (
 	"unsafe"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
-	tscore "github.com/frida/typescript-go/core"
-	tsscanner "github.com/frida/typescript-go/scanner"
-	"github.com/frida/typescript-go/tsoptions"
-	"github.com/frida/typescript-go/tspath"
-	tsvfs "github.com/frida/typescript-go/vfs"
+	tscore "github.com/frida/typescript-go/pkg/core"
+	tsscanner "github.com/frida/typescript-go/pkg/scanner"
+	"github.com/frida/typescript-go/pkg/tsoptions"
+	"github.com/frida/typescript-go/pkg/tspath"
+	tsvfs "github.com/frida/typescript-go/pkg/vfs"
 )
 
 type BuildOptions struct {

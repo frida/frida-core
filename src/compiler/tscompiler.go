@@ -10,15 +10,16 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/frida/typescript-go/ast"
-	"github.com/frida/typescript-go/bundled"
-	"github.com/frida/typescript-go/compiler"
-	"github.com/frida/typescript-go/core"
-	"github.com/frida/typescript-go/tsoptions"
-	"github.com/frida/typescript-go/vfs"
-	"github.com/frida/typescript-go/vfs/iovfs"
-	"github.com/frida/typescript-go/vfs/osvfs"
+	"github.com/frida/typescript-go/pkg/ast"
+	"github.com/frida/typescript-go/pkg/bundled"
+	"github.com/frida/typescript-go/pkg/compiler"
+	"github.com/frida/typescript-go/pkg/core"
+	"github.com/frida/typescript-go/pkg/tsoptions"
+	"github.com/frida/typescript-go/pkg/vfs"
+	"github.com/frida/typescript-go/pkg/vfs/iovfs"
+	"github.com/frida/typescript-go/pkg/vfs/osvfs"
 )
 
 //go:embed node_modules/@types/*/package.json
@@ -32,6 +33,8 @@ type TSCompiler struct {
 	loadCompilerOptions LoadCompilerOptionsHandler
 	fs                  vfs.FS
 	captureFs           *captureFS
+	program             *compiler.Program
+	mtimes              map[string]time.Time
 }
 
 type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost, fs vfs.FS) (*core.CompilerOptions, error)
@@ -50,18 +53,17 @@ func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompi
 }
 
 func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnostic, error) {
-	compilerOptions, err := c.loadCompilerOptions(c, c.fs)
-	if err != nil {
-		return "", []*ast.Diagnostic{}, err
+	var program *compiler.Program
+	var err error
+	if c.program != nil {
+		program, err = c.updateProgram(c.program)
+	} else {
+		program, err = c.createProgram()
 	}
-
-	host := compiler.NewCompilerHost(compilerOptions, c.projectRoot, c.fs, bundled.LibPath())
-
-	program := compiler.NewProgram(compiler.ProgramOptions{
-		RootFiles: []string{c.entrypoint},
-		Host:      host,
-		Options:   compilerOptions,
-	})
+	c.program = program
+	if err != nil {
+		return "", nil, err
+	}
 
 	var targetSourceFile *ast.SourceFile
 	sourceFiles := program.GetSourceFiles()
@@ -123,6 +125,95 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnosti
 	}
 
 	return compiledJS, diagnostics, nil
+}
+
+func (c *TSCompiler) createProgram() (*compiler.Program, error) {
+	compilerOptions, err := c.loadCompilerOptions(c, c.fs)
+	if err != nil {
+		fmt.Printf("createProgram() unable to create new program: %w\n", err)
+		return nil, err
+	}
+
+	host := compiler.NewCompilerHost(compilerOptions, c.projectRoot, c.fs, bundled.LibPath())
+
+	fmt.Printf("createProgram() created new program!\n")
+
+	program, err := compiler.NewProgram(compiler.ProgramOptions{
+		RootFiles: []string{c.entrypoint},
+		Host:      host,
+		Options:   compilerOptions,
+	}), nil
+	if err != nil {
+		c.mtimes = nil
+		return nil, err
+	}
+
+	c.updateMtimes(program)
+
+	return program, nil
+}
+
+func (c *TSCompiler) updateProgram(oldProgram *compiler.Program) (*compiler.Program, error) {
+	var newProgram *compiler.Program
+	mtimes := map[string]time.Time{}
+
+	fs := c.fs
+	fmt.Println("===")
+	for _, sourceFile := range oldProgram.SourceFiles() {
+		name := sourceFile.FileName()
+
+		if strings.HasPrefix(name, "bundled://") {
+			fmt.Printf("updateProgram() ignoring: \"%s\"\n", name)
+			continue
+		}
+
+		info := fs.Stat(name)
+		if info == nil {
+			fmt.Printf("updateProgram() name=\"%s\" deleted!\n", name)
+			return c.createProgram()
+		}
+
+		mtime := info.ModTime()
+		mtimes[name] = mtime
+
+		fmt.Printf("updateProgram() name=\"%s\" mtime=%v\n", name, mtime)
+
+		if mtime != c.mtimes[name] {
+			fmt.Printf("\tChanged because old mtime=%v\n", c.mtimes[name])
+			var reused bool
+			newProgram, reused = oldProgram.UpdateProgram(sourceFile.Path())
+			fmt.Printf("\tUpdateProgram() => reused=%v\n", reused)
+			if !reused {
+				c.updateMtimes(newProgram)
+				return newProgram, nil
+			}
+		}
+	}
+	fmt.Println("===")
+
+	c.mtimes = mtimes
+
+	return newProgram, nil
+}
+
+func (c *TSCompiler) updateMtimes(program *compiler.Program) {
+	mtimes := map[string]time.Time{}
+	fs := c.fs
+	for _, sourceFile := range program.SourceFiles() {
+		name := sourceFile.FileName()
+
+		if strings.HasPrefix(name, "bundled://") {
+			continue
+		}
+
+		info := fs.Stat(name)
+		if info == nil {
+			continue
+		}
+
+		mtimes[name] = info.ModTime()
+	}
+	c.mtimes = mtimes
 }
 
 // FS implements ParseConfigHost.
