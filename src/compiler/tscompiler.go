@@ -34,11 +34,16 @@ type TSCompiler struct {
 	loadCompilerOptions LoadCompilerOptionsHandler
 	fs                  vfs.FS
 	captureFs           *captureFS
-	program             *compiler.Program
-	mtimes              map[tspath.Path]time.Time
+
+	mu         sync.Mutex
+	options    *core.CompilerOptions
+	program    *compiler.Program
+	programErr error
+	mtimes     map[tspath.Path]time.Time
+	inputFiles []string
 }
 
-type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost, fs vfs.FS) (*core.CompilerOptions, error)
+type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost) (*core.CompilerOptions, string, error)
 
 func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompilerOptionsHandler) *TSCompiler {
 	captureFs := newCaptureFS(osvfs.FS())
@@ -53,22 +58,76 @@ func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompi
 	}
 }
 
-func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnostic, error) {
-	var program *compiler.Program
-	var err error
-	if c.program != nil {
-		program, err = c.updateProgram(c.program)
-	} else {
-		program, err = c.createProgram()
-	}
-	c.program = program
+func (c *TSCompiler) resetProgramState() {
+	c.options = nil
+	c.program = nil
+	c.programErr = nil
+	c.mtimes = nil
+	c.inputFiles = nil
+}
+
+func (c *TSCompiler) EnsureProgramUpToDate() error {
+	opts, _, err := c.loadCompilerOptions(c)
 	if err != nil {
-		return "", nil, err
+		c.resetProgramState()
+		c.inputFiles = c.computeInputFiles()
+		return err
 	}
 
+	var prog *compiler.Program
+	var progErr error
+
+	if c.program == nil || opts != c.options {
+		prog, progErr = c.createProgram(opts)
+	} else {
+		prog, progErr = c.updateProgram(c.program, opts)
+	}
+
+	c.program = prog
+	c.programErr = progErr
+	c.options = opts
+
+	c.inputFiles = c.computeInputFiles()
+
+	return progErr
+}
+
+func (c *TSCompiler) InputFiles() []string {
+	return c.inputFiles
+}
+
+func (c *TSCompiler) computeInputFiles() []string {
+	var capHint int
+	if c.program != nil {
+		capHint = 1 + len(c.program.GetSourceFiles())
+	} else {
+		capHint = 1
+	}
+
+	result := make([]string, 0, capHint)
+	result = append(result, filepath.Join(c.projectRoot, "tsconfig.json"))
+	if c.program != nil {
+		for _, sf := range c.program.GetSourceFiles() {
+			name := sf.FileName()
+			if !isBundled(name) {
+				result = append(result, name)
+			}
+		}
+	}
+	return result
+}
+
+func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnostic, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.programErr != nil {
+		return "", nil, c.programErr
+	}
+	program := c.program
+
 	var targetSourceFile *ast.SourceFile
-	sourceFiles := program.GetSourceFiles()
-	for _, sf := range sourceFiles {
+	for _, sf := range program.GetSourceFiles() {
 		if sf.FileName() == filePathToCompile {
 			targetSourceFile = sf
 			break
@@ -128,21 +187,15 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnosti
 	return compiledJS, diagnostics, nil
 }
 
-func (c *TSCompiler) createProgram() (*compiler.Program, error) {
-	compilerOptions, err := c.loadCompilerOptions(c, c.fs)
-	if err != nil {
-		fmt.Printf("createProgram() unable to create new program: %w\n", err)
-		return nil, err
-	}
-
-	host := compiler.NewCompilerHost(compilerOptions, c.projectRoot, c.fs, bundled.LibPath())
+func (c *TSCompiler) createProgram(options *core.CompilerOptions) (*compiler.Program, error) {
+	host := compiler.NewCompilerHost(options, c.projectRoot, c.fs, bundled.LibPath())
 
 	fmt.Printf("createProgram() created new program!\n")
 
 	program := compiler.NewProgram(compiler.ProgramOptions{
 		RootFiles: []string{c.entrypoint},
 		Host:      host,
-		Options:   compilerOptions,
+		Options:   options,
 	})
 
 	c.updateMtimes(program)
@@ -150,10 +203,10 @@ func (c *TSCompiler) createProgram() (*compiler.Program, error) {
 	return program, nil
 }
 
-func (c *TSCompiler) updateProgram(old *compiler.Program) (*compiler.Program, error) {
+func (c *TSCompiler) updateProgram(old *compiler.Program, options *core.CompilerOptions) (*compiler.Program, error) {
 	newMtimes, err := c.collectMtimes(old)
 	if err != nil {
-		return c.createProgram()
+		return c.createProgram(options)
 	}
 
 	newProg := old

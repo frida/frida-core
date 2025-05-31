@@ -78,11 +78,12 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
+	"reflect"
 	"runtime/cgo"
 	"strings"
-	"unicode/utf8"
+	"sync"
+	"time"
 	"unsafe"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
@@ -90,7 +91,6 @@ import (
 	tsscanner "github.com/frida/typescript-go/pkg/scanner"
 	"github.com/frida/typescript-go/pkg/tsoptions"
 	"github.com/frida/typescript-go/pkg/tspath"
-	tsvfs "github.com/frida/typescript-go/pkg/vfs"
 )
 
 type BuildOptions struct {
@@ -211,11 +211,6 @@ func frida_compiler_backend_watch_session_dispose(handle uintptr) {
 	cgo.Handle(handle).Delete()
 }
 
-func makeCOutputHandler(onOutput *CDelegate[C.FridaOutputFunc]) OutputHandler {
-	return func(bundle string) {
-	}
-}
-
 func makeCDiagnosticHandler(onDiagnostic *CDelegate[C.FridaDiagnosticFunc]) DiagnosticHandler {
 	return func(d Diagnostic) {
 		var cPath *C.char
@@ -320,34 +315,10 @@ func makeContext(options BuildOptions, handlers BuildEventHandlers) (ctx esbuild
 		return
 	}
 
-	tsconfigPath := filepath.Join(projectRoot, "tsconfig.json")
-	var tsconfigText string
-	if tsconfigData, e := os.ReadFile(tsconfigPath); e == nil {
-		if !utf8.Valid(tsconfigData) {
-			err = fmt.Errorf("%q is not valid UTF-8", tsconfigPath)
-			return
-		}
-		tsconfigText = string(tsconfigData)
-	} else {
-		tsconfigText = "{ \"compilerOptions\": { \"target\": \"ES2022\", \"module\": \"Node16\", \"skipLibCheck\": true } }"
-	}
+	tsconfigCache := NewTsconfigCache(projectRoot)
+	tsCompiler := NewTSCompiler(projectRoot, entrypoint, tsconfigCache.GetCompilerOptions)
 
-	loadCompilerOptions := func(host tsoptions.ParseConfigHost, fs tsvfs.FS) (*tscore.CompilerOptions, error) {
-		tsconfigSourceFile := tsoptions.NewTsconfigSourceFileFromFilePath(tsconfigPath, tspath.ToPath(tsconfigPath, "", fs.UseCaseSensitiveFileNames()), tsconfigText)
-		parsedCommandLine := tsoptions.ParseJsonSourceFileConfigFileContent(tsconfigSourceFile, host, projectRoot, nil, tsconfigPath, nil, nil, nil)
-
-		if len(parsedCommandLine.Errors) > 0 {
-			var errorMessages []string
-			for _, diag := range parsedCommandLine.Errors {
-				errorMessages = append(errorMessages, diag.Message())
-			}
-			return nil, fmt.Errorf("Failed to parse tsconfig.json at %s: %s", tsconfigPath, strings.Join(errorMessages, "; "))
-		}
-
-		return parsedCommandLine.CompilerOptions(), nil
-	}
-
-	tsCompiler := NewTSCompiler(projectRoot, entrypoint, loadCompilerOptions)
+	_, tsconfigText, err := tsconfigCache.GetCompilerOptions(tsCompiler)
 
 	sourcemapOption := esbuild.SourceMapNone
 	if options.SourceMap {
@@ -453,13 +424,21 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 	return esbuild.Plugin{
 		Name: "frida-custom-ts",
 		Setup: func(build esbuild.PluginBuild) {
+			build.OnStart(func() (esbuild.OnStartResult, error) {
+				compiler.EnsureProgramUpToDate()
+				return esbuild.OnStartResult{}, nil
+			})
+
 			build.OnLoad(esbuild.OnLoadOptions{Filter: "\\.ts$"}, func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
 				compiledJS, tsDiagnostics, err := compiler.Compile(args.Path)
+
+				result := esbuild.OnLoadResult{
+					WatchFiles: compiler.InputFiles(),
+				}
 
 				var esbuildMessages []esbuild.Message
 				for _, d := range tsDiagnostics {
 					f := d.File()
-
 					pos := d.Pos()
 					line, column := tsscanner.GetLineAndCharacterOfPosition(f, pos)
 
@@ -473,30 +452,126 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 							LineText: f.Text()[pos:d.End()],
 						},
 						Notes: []esbuild.Note{
-							esbuild.Note{Text: d.Category().Name()},
-							esbuild.Note{Text: fmt.Sprintf("%d", d.Code())},
+							{Text: d.Category().Name()},
+							{Text: fmt.Sprintf("%d", d.Code())},
 						},
 					})
 				}
 
 				if err != nil {
-					mainError := esbuild.Message{Text: err.Error()}
-					esbuildMessages = append([]esbuild.Message{mainError}, esbuildMessages...)
-					return esbuild.OnLoadResult{Errors: esbuildMessages}, nil
+					mainErr := esbuild.Message{Text: err.Error()}
+					result.Errors = append([]esbuild.Message{mainErr}, esbuildMessages...)
+					return result, nil
 				}
 
 				if len(esbuildMessages) > 0 {
-					return esbuild.OnLoadResult{Errors: esbuildMessages}, nil
+					result.Errors = esbuildMessages
+					return result, nil
 				}
 
-				return esbuild.OnLoadResult{
-					Contents: &compiledJS,
-					Loader:   esbuild.LoaderJS,
-					Errors:   esbuildMessages,
-				}, nil
+				result.Contents = &compiledJS
+				result.Loader = esbuild.LoaderJS
+				return result, nil
 			})
 		},
 	}
+}
+
+type TsconfigCache struct {
+	projectRoot  string
+	tsconfigPath string
+
+	mu          sync.Mutex
+	lastModTime time.Time
+	cachedOpts  *tscore.CompilerOptions
+	lastText    string
+}
+
+func NewTsconfigCache(projectRoot string) *TsconfigCache {
+	return &TsconfigCache{
+		projectRoot:  projectRoot,
+		tsconfigPath: filepath.Join(projectRoot, "tsconfig.json"),
+		lastModTime:  time.Time{},
+		cachedOpts:   nil,
+		lastText:     "",
+	}
+}
+
+func (c *TsconfigCache) GetCompilerOptions(host tsoptions.ParseConfigHost) (*tscore.CompilerOptions, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	fs := host.FS()
+
+	info := fs.Stat(c.tsconfigPath)
+	var currentModTime time.Time
+	if info != nil {
+		currentModTime = info.ModTime()
+	} else {
+		currentModTime = time.Time{}
+	}
+
+	if c.cachedOpts != nil && currentModTime.Equal(c.lastModTime) {
+		return c.cachedOpts, c.lastText, nil
+	}
+
+	var tsconfigText string
+	if info != nil {
+		data, ok := fs.ReadFile(c.tsconfigPath)
+		if !ok {
+			return nil, "", fmt.Errorf("Unable to read %q", c.tsconfigPath)
+		}
+		tsconfigText = string(data)
+	} else {
+		tsconfigText = `{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "Node16",
+        "skipLibCheck": true
+    }
+}`
+	}
+
+	parsedSource := tsoptions.NewTsconfigSourceFileFromFilePath(
+		c.tsconfigPath,
+		tspath.ToPath(c.tsconfigPath, "", fs.UseCaseSensitiveFileNames()),
+		tsconfigText,
+	)
+	parsedCommandLine := tsoptions.ParseJsonSourceFileConfigFileContent(
+		parsedSource,
+		host,
+		c.projectRoot,
+		nil,
+		c.tsconfigPath,
+		nil, nil, nil,
+	)
+
+	if len(parsedCommandLine.Errors) > 0 {
+		var msgs []string
+		for _, diag := range parsedCommandLine.Errors {
+			msgs = append(msgs, diag.Message())
+		}
+		return nil, "", fmt.Errorf(
+			"failed to parse %s: %s",
+			c.tsconfigPath,
+			strings.Join(msgs, "; "),
+		)
+	}
+
+	newOpts := parsedCommandLine.CompilerOptions()
+
+	if c.cachedOpts != nil {
+		if reflect.DeepEqual(newOpts, c.cachedOpts) {
+			c.lastModTime = currentModTime
+			c.lastText = tsconfigText
+			return c.cachedOpts, tsconfigText, nil
+		}
+	}
+
+	c.cachedOpts = newOpts
+	c.lastText = tsconfigText
+	c.lastModTime = currentModTime
+	return c.cachedOpts, tsconfigText, nil
 }
 
 var nodeGlobals = `
