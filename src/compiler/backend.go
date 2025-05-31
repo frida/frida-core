@@ -86,7 +86,11 @@ import (
 	"unsafe"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
-	"github.com/frida/typescript-go/scanner"
+	tscore "github.com/frida/typescript-go/core"
+	tsscanner "github.com/frida/typescript-go/scanner"
+	"github.com/frida/typescript-go/tsoptions"
+	"github.com/frida/typescript-go/tspath"
+	tsvfs "github.com/frida/typescript-go/vfs"
 )
 
 type BuildOptions struct {
@@ -328,11 +332,22 @@ func makeContext(options BuildOptions, handlers BuildEventHandlers) (ctx esbuild
 		tsconfigText = "{ \"compilerOptions\": { \"target\": \"ES2022\", \"module\": \"Node16\", \"skipLibCheck\": true } }"
 	}
 
-	var tsCompiler *TSCompiler
-	if tsCompiler, e = NewTSCompiler(entrypoint, tsconfigPath, tsconfigText, projectRoot); e != nil {
-		err = fmt.Errorf("Failed to initialize TypeScript compiler: %w", e)
-		return
+	loadCompilerOptions := func(host tsoptions.ParseConfigHost, fs tsvfs.FS) (*tscore.CompilerOptions, error) {
+		tsconfigSourceFile := tsoptions.NewTsconfigSourceFileFromFilePath(tsconfigPath, tspath.ToPath(tsconfigPath, "", fs.UseCaseSensitiveFileNames()), tsconfigText)
+		parsedCommandLine := tsoptions.ParseJsonSourceFileConfigFileContent(tsconfigSourceFile, host, projectRoot, nil, tsconfigPath, nil, nil, nil)
+
+		if len(parsedCommandLine.Errors) > 0 {
+			var errorMessages []string
+			for _, diag := range parsedCommandLine.Errors {
+				errorMessages = append(errorMessages, diag.Message())
+			}
+			return nil, fmt.Errorf("Failed to parse tsconfig.json at %s: %s", tsconfigPath, strings.Join(errorMessages, "; "))
+		}
+
+		return parsedCommandLine.CompilerOptions(), nil
 	}
+
+	tsCompiler := NewTSCompiler(projectRoot, entrypoint, loadCompilerOptions)
 
 	sourcemapOption := esbuild.SourceMapNone
 	if options.SourceMap {
@@ -446,7 +461,7 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 					f := d.File()
 
 					pos := d.Pos()
-					line, column := scanner.GetLineAndCharacterOfPosition(f, pos)
+					line, column := tsscanner.GetLineAndCharacterOfPosition(f, pos)
 
 					esbuildMessages = append(esbuildMessages, esbuild.Message{
 						Text: d.Message(),

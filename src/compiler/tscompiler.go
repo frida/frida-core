@@ -14,8 +14,8 @@ import (
 	"github.com/frida/typescript-go/ast"
 	"github.com/frida/typescript-go/bundled"
 	"github.com/frida/typescript-go/compiler"
+	"github.com/frida/typescript-go/core"
 	"github.com/frida/typescript-go/tsoptions"
-	"github.com/frida/typescript-go/tspath"
 	"github.com/frida/typescript-go/vfs"
 	"github.com/frida/typescript-go/vfs/iovfs"
 	"github.com/frida/typescript-go/vfs/osvfs"
@@ -27,52 +27,41 @@ import (
 var embeddedTypes embed.FS
 
 type TSCompiler struct {
-	program            *compiler.Program
-	fs                 vfs.FS
-	captureFs          *captureFS
-	defaultLibraryPath string
-	cwd                string
-	newLine            string
+	projectRoot         string
+	entrypoint          string
+	loadCompilerOptions LoadCompilerOptionsHandler
+	fs                  vfs.FS
+	captureFs           *captureFS
 }
 
-func NewTSCompiler(entrypoint, tsconfigFileName, tsconfigText, projectRoot string) (*TSCompiler, error) {
+type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost, fs vfs.FS) (*core.CompilerOptions, error)
+
+func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompilerOptionsHandler) *TSCompiler {
 	captureFs := newCaptureFS(osvfs.FS())
 	fs := newTypesFS(bundled.WrapFS(captureFs), projectRoot)
-	basePath := projectRoot
-	defaultLibraryPath := bundled.LibPath()
 
-	c := &TSCompiler{
-		fs:                 fs,
-		captureFs:          captureFs,
-		defaultLibraryPath: defaultLibraryPath,
-		cwd:                projectRoot,
-		newLine:            "\n",
+	return &TSCompiler{
+		projectRoot:         projectRoot,
+		entrypoint:          entrypoint,
+		loadCompilerOptions: loadCompilerOptions,
+		fs:                  fs,
+		captureFs:           captureFs,
 	}
-
-	tsconfigSourceFile := tsoptions.NewTsconfigSourceFileFromFilePath(tsconfigFileName, tspath.ToPath(tsconfigFileName, "", c.fs.UseCaseSensitiveFileNames()), tsconfigText)
-	parsedCommandLine := tsoptions.ParseJsonSourceFileConfigFileContent(tsconfigSourceFile, c, basePath, nil, tsconfigFileName, nil, nil, nil)
-
-	if len(parsedCommandLine.Errors) > 0 {
-		var errorMessages []string
-		for _, diag := range parsedCommandLine.Errors {
-			errorMessages = append(errorMessages, diag.Message())
-		}
-		return nil, fmt.Errorf("failed to parse tsconfig.json at %s: %s", tsconfigFileName, strings.Join(errorMessages, "; "))
-	}
-
-	compilerHost := compiler.NewCachedFSCompilerHost(parsedCommandLine.CompilerOptions(), projectRoot, c.fs, c.defaultLibraryPath)
-
-	c.program = compiler.NewProgram(compiler.ProgramOptions{
-		RootFiles: []string{entrypoint},
-		Host:      compilerHost,
-		Options:   parsedCommandLine.CompilerOptions(),
-	})
-
-	return c, nil
 }
 
 func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnostic, error) {
-	program := c.program
+	compilerOptions, err := c.loadCompilerOptions(c, c.fs)
+	if err != nil {
+		return "", []*ast.Diagnostic{}, err
+	}
+
+	host := compiler.NewCompilerHost(compilerOptions, c.projectRoot, c.fs, bundled.LibPath())
+
+	program := compiler.NewProgram(compiler.ProgramOptions{
+		RootFiles: []string{c.entrypoint},
+		Host:      host,
+		Options:   compilerOptions,
+	})
 
 	var targetSourceFile *ast.SourceFile
 	sourceFiles := program.GetSourceFiles()
@@ -143,7 +132,7 @@ func (c *TSCompiler) FS() vfs.FS {
 
 // GetCurrentDirectory implements ParseConfigHost.
 func (c *TSCompiler) GetCurrentDirectory() string {
-	return c.cwd
+	return c.projectRoot
 }
 
 type captureFS struct {
