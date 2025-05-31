@@ -17,6 +17,7 @@ import (
 	"github.com/frida/typescript-go/pkg/compiler"
 	"github.com/frida/typescript-go/pkg/core"
 	"github.com/frida/typescript-go/pkg/tsoptions"
+	"github.com/frida/typescript-go/pkg/tspath"
 	"github.com/frida/typescript-go/pkg/vfs"
 	"github.com/frida/typescript-go/pkg/vfs/iovfs"
 	"github.com/frida/typescript-go/pkg/vfs/osvfs"
@@ -34,7 +35,7 @@ type TSCompiler struct {
 	fs                  vfs.FS
 	captureFs           *captureFS
 	program             *compiler.Program
-	mtimes              map[string]time.Time
+	mtimes              map[tspath.Path]time.Time
 }
 
 type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost, fs vfs.FS) (*core.CompilerOptions, error)
@@ -138,82 +139,63 @@ func (c *TSCompiler) createProgram() (*compiler.Program, error) {
 
 	fmt.Printf("createProgram() created new program!\n")
 
-	program, err := compiler.NewProgram(compiler.ProgramOptions{
+	program := compiler.NewProgram(compiler.ProgramOptions{
 		RootFiles: []string{c.entrypoint},
 		Host:      host,
 		Options:   compilerOptions,
-	}), nil
-	if err != nil {
-		c.mtimes = nil
-		return nil, err
-	}
+	})
 
 	c.updateMtimes(program)
 
 	return program, nil
 }
 
-func (c *TSCompiler) updateProgram(oldProgram *compiler.Program) (*compiler.Program, error) {
-	var newProgram *compiler.Program
-	mtimes := map[string]time.Time{}
+func (c *TSCompiler) updateProgram(old *compiler.Program) (*compiler.Program, error) {
+	newMtimes, err := c.collectMtimes(old)
+	if err != nil {
+		return c.createProgram()
+	}
 
-	fs := c.fs
-	fmt.Println("===")
-	for _, sourceFile := range oldProgram.SourceFiles() {
-		name := sourceFile.FileName()
-
-		if strings.HasPrefix(name, "bundled://") {
-			fmt.Printf("updateProgram() ignoring: \"%s\"\n", name)
-			continue
-		}
-
-		info := fs.Stat(name)
-		if info == nil {
-			fmt.Printf("updateProgram() name=\"%s\" deleted!\n", name)
-			return c.createProgram()
-		}
-
-		mtime := info.ModTime()
-		mtimes[name] = mtime
-
-		fmt.Printf("updateProgram() name=\"%s\" mtime=%v\n", name, mtime)
-
-		if mtime != c.mtimes[name] {
-			fmt.Printf("\tChanged because old mtime=%v\n", c.mtimes[name])
+	newProg := old
+	for path, mtime := range newMtimes {
+		if !mtime.Equal(c.mtimes[path]) {
 			var reused bool
-			newProgram, reused = oldProgram.UpdateProgram(sourceFile.Path())
-			fmt.Printf("\tUpdateProgram() => reused=%v\n", reused)
+			newProg, reused = newProg.UpdateProgram(path)
 			if !reused {
-				c.updateMtimes(newProgram)
-				return newProgram, nil
+				c.updateMtimes(newProg)
+				return newProg, nil
 			}
 		}
 	}
-	fmt.Println("===")
-
-	c.mtimes = mtimes
-
-	return newProgram, nil
+	c.mtimes = newMtimes
+	return newProg, nil
 }
 
-func (c *TSCompiler) updateMtimes(program *compiler.Program) {
-	mtimes := map[string]time.Time{}
-	fs := c.fs
-	for _, sourceFile := range program.SourceFiles() {
-		name := sourceFile.FileName()
+func (c *TSCompiler) updateMtimes(p *compiler.Program) {
+	mt, _ := c.collectMtimes(p)
+	c.mtimes = mt
+}
 
-		if strings.HasPrefix(name, "bundled://") {
+func (c *TSCompiler) collectMtimes(p *compiler.Program) (map[tspath.Path]time.Time, error) {
+	mt := make(map[tspath.Path]time.Time, len(p.SourceFiles()))
+
+	for _, sf := range p.SourceFiles() {
+		name := sf.FileName()
+		if isBundled(name) {
 			continue
 		}
-
-		info := fs.Stat(name)
+		info := c.fs.Stat(name)
 		if info == nil {
-			continue
+			return nil, fmt.Errorf("File %q disappeared", name)
 		}
-
-		mtimes[name] = info.ModTime()
+		mt[sf.Path()] = info.ModTime()
 	}
-	c.mtimes = mtimes
+
+	return mt, nil
+}
+
+func isBundled(name string) bool {
+	return strings.HasPrefix(name, "bundled://")
 }
 
 // FS implements ParseConfigHost.
