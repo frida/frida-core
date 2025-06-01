@@ -25,14 +25,31 @@ namespace Frida.CompilerTest {
 
 				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
 				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
-				FileUtils.set_contents (agent_ts_path, "console.log(\"Hello World\");");
+				FileUtils.set_contents (agent_ts_path, """
+import { log } from "./logger.js";
+
+const woot = Buffer.from("w00t").toString("base64");
+
+log("Hello World: " + woot);
+log(hexdump(Process.mainModule.base, { ansi: true }));
+""");
+
+				string logger_ts_path = Path.build_filename (project_dir, "logger.ts");
+				FileUtils.set_contents (logger_ts_path, """
+export function log(...items: any[]) {
+    const message = items.join("\n");
+    console.log(`[LOG] ${message}`);
+}
+""");
 
 				var timer = new Timer ();
-				yield compiler.build (agent_ts_path);
+				var code = yield compiler.build (agent_ts_path);
 				uint elapsed_msec = (uint) (timer.elapsed () * 1000.0);
 
-				if (GLib.Test.verbose ())
+				if (GLib.Test.verbose ()) {
+					print ("Output:\nvvv\n%s^^^\n", code);
 					print ("Built in %u ms\n", elapsed_msec);
+				}
 
 				unowned string? test_log_path = Environment.get_variable ("FRIDA_TEST_LOG");
 				if (test_log_path != null) {

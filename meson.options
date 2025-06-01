@@ -37,13 +37,7 @@ option('barebone_backend',
 option('compiler_backend',
   type: 'feature',
   value: 'auto',
-  description: 'Include frida-compile backend powered by GumJS',
-)
-
-option('compiler_snapshot',
-  type: 'feature',
-  value: 'auto',
-  description: 'Speed up compiler startup by using a snapshot'
+  description: 'Include frida-compile backend powered by ESBuild and typescript-go',
 )
 
 option('assets',

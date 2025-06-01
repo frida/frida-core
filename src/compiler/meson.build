@@ -3,59 +3,32 @@ compiler_sources = files(
 )
 
 if have_compiler_backend
-  compiler_mksnapshot = generate_compiler_snapshot ? v8_mksnapshot : ''
-
-  compiler_agent = custom_target('frida-compiler-agent',
+  compiler_backend = custom_target('frida-compiler-backend',
     input: [
-      'agent-entrypoint.js',
-      'agent-core.ts',
-      'agent-warmup.js',
+      'go.mod',
+      'go.sum',
+      'backend.go',
+      'tscompiler.go',
+      'tsconfig.go',
+      'shims.go',
       'package.json',
       'package-lock.json',
-      'tsconfig.json',
-      'rollup.config.agent-core.ts',
-      'rollup.config.typescript.ts',
     ],
     output: [
-      'agent.js',
-      'snapshot.bin',
+      'frida-compiler-backend.a',
+      'frida-compiler-backend.h',
     ],
     command: [
       python,
-      files('generate-agent.py'),
+      files('build-backend.py'),
+      host_os,
+      host_arch,
       meson.current_build_dir(),
       '@PRIVATE_DIR@',
-      meson.current_source_dir(),
+      go,
       npm,
-      compiler_mksnapshot,
-      host_os_family,
-      host_arch_gumjs,
-      host_cpu_mode,
+      '@INPUT@',
     ],
   )
-  compiler_data = custom_target('frida-data-compiler',
-    input: [
-      'compiler.resources.' + frida_profile,
-      compiler_agent,
-    ],
-    output: [
-      'frida-data-compiler.vapi',
-      'frida-data-compiler.h',
-      'frida-data-compiler.c',
-      'frida-data-compiler-blob' + resource_blob_extension,
-      'frida-data-compiler-agent.js.br',
-      'frida-data-compiler-snapshot.bin.br',
-    ],
-    command: [
-      resource_compiler_cmd_array,
-      '-c', '@INPUT0@',
-      '-o', meson.current_build_dir() / 'frida-data-compiler',
-      '@INPUT1@',
-      '@INPUT2@',
-    ],
-  )
-  compiler_sources += compiler_data
-
-  backend_vala_args_private += '--pkg=libbrotlidec'
-  backend_deps_private += brotlidec_dep
+  backend_libs += compiler_backend[0]
 endif
