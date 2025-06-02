@@ -6,6 +6,8 @@ project('frida-core', 'vala', 'c', 'cpp',
   default_options: ['c_std=gnu99,c99', 'cpp_std=c++17'],
 )
 
+fs = import('fs')
+
 if not meson.get_compiler('vala').version().endswith('-frida')
   error('''Incompatible Vala compiler detected.
 
@@ -20,7 +22,7 @@ cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
 
 releng = meson.global_source_root() / 'releng'
-if not import('fs').exists(releng)
+if not fs.exists(releng)
   releng = meson.project_source_root() / 'releng'
 endif
 
@@ -357,6 +359,42 @@ if host_os == 'android'
   ])
 endif
 
+if host_toolchain == 'microsoft'
+  lib = find_program('lib')
+  ar = ''
+  nm = ''
+  strip = ''
+else
+  lib = ''
+  ar = find_program('ar')
+  nm = find_program('nm')
+  strip = find_program('strip')
+endif
+if host_os_family != 'windows'
+  if host_os_family == 'darwin'
+    readelf = ''
+    otool = find_program('otool')
+    libtool = find_program('libtool')
+  else
+    readelf = find_program('readelf')
+    otool = ''
+    libtool = ''
+  endif
+else
+  readelf = ''
+  otool = ''
+  libtool = ''
+endif
+if host_os_family == 'darwin'
+  install_name_tool = find_program('install_name_tool')
+  lipo = find_program('lipo')
+  codesign = find_program('codesign')
+else
+  install_name_tool = ''
+  lipo = ''
+  codesign = ''
+endif
+
 have_local_backend = get_option('local_backend').allowed()
 have_fruity_backend = get_option('fruity_backend') \
     .disable_auto_if(not host_docks_mobile_devices) \
@@ -369,9 +407,46 @@ have_barebone_backend = get_option('barebone_backend') \
     .disable_if(not quickjs_dep.found()) \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
-have_compiler_backend = get_option('compiler_backend') \
-    .disable_auto_if(host_os == 'watchos') \
-    .allowed()
+compiler_backend_opt = get_option('compiler_backend') \
+    .disable_auto_if(host_os == 'watchos')
+have_compiler_backend = false
+if compiler_backend_opt.allowed()
+  go = find_program('go', native: true, required: false)
+  if go.found()
+    message('Detecting cgo availability')
+    detect_output = run_command(
+      [
+        python,
+        files('tools' / 'cgo' / 'detect.py'),
+        go,
+        host_os,
+        host_abi,
+        cc.get_id(),
+        '>>>', cc.cmd_array(), '<<<',
+        '>>>', ar, '<<<',
+      ],
+      capture: true,
+      check: true
+    ).stdout()
+    lines = detect_output.split('\n')
+    status = lines[0]
+    if status == 'ok'
+      have_compiler_backend = true
+      go_config = lines[1]
+    else
+      error_message = lines[1]
+      if compiler_backend_opt.enabled()
+        error(error_message)
+      else
+        message(f'Building without Compiler backend: @error_message@')
+      endif
+    endif
+  elif compiler_backend_opt.enabled()
+    error('Need Go >= 1.24 to build the Compiler backend powered by ESBuild and typescript-go')
+  else
+    message('Building without Compiler backend: Go >= 1.24 not found')
+  endif
+endif
 
 build_gadget = get_option('gadget') \
     .disable_auto_if(meson.is_subproject()) \
@@ -410,12 +485,6 @@ foreach b : [['local', have_local_backend],
   endif
 endforeach
 
-if have_compiler_backend
-  go = find_program('go', native: true, required: false)
-  if not go.found()
-    error('Need go >= 1.24 to build the Compiler backend powered by ESBuild and typescript-go')
-  endif
-endif
 if host_os_family == 'darwin' or host_os == 'android' or have_barebone_backend or have_compiler_backend
   node = find_program('node', version: '>=18.0.0', native: true, required: false)
   if not node.found()
@@ -565,42 +634,6 @@ if host_os == 'macos'
 endif
 if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
-endif
-
-if host_toolchain == 'microsoft'
-  lib = find_program('lib')
-  ar = ''
-  nm = ''
-  strip = ''
-else
-  lib = ''
-  ar = find_program('ar')
-  nm = find_program('nm')
-  strip = find_program('strip')
-endif
-if host_os_family != 'windows'
-  if host_os_family == 'darwin'
-    readelf = ''
-    otool = find_program('otool')
-    libtool = find_program('libtool')
-  else
-    readelf = find_program('readelf')
-    otool = ''
-    libtool = ''
-  endif
-else
-  readelf = ''
-  otool = ''
-  libtool = ''
-endif
-if host_os_family == 'darwin'
-  install_name_tool = find_program('install_name_tool')
-  lipo = find_program('lipo')
-  codesign = find_program('codesign')
-else
-  install_name_tool = ''
-  lipo = ''
-  codesign = ''
 endif
 
 if get_option('devkits').length() != 0

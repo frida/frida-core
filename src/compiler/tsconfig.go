@@ -26,6 +26,8 @@ type TSConfigCache struct {
 	lastText    string
 }
 
+type ConfigChangeCallback func()
+
 func NewTSConfigCache(
 	projectRoot string,
 	sourceMap bool,
