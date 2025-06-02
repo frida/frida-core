@@ -1,5 +1,6 @@
 compiler_sources = files(
   'compiler.vala',
+  'backend-glue.c',
 )
 
 if have_compiler_backend
@@ -21,8 +22,7 @@ if have_compiler_backend
     command: [
       python,
       files('build-backend.py'),
-      host_os,
-      host_arch,
+      go_config,
       meson.current_build_dir(),
       '@PRIVATE_DIR@',
       go,

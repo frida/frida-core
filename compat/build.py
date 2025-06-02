@@ -435,6 +435,7 @@ def compile(privdir: Path, state: State):
                       environ={**build_env, **group.extra_environ},
                       allowed_prebuilds=state.allowed_prebuilds,
                       extra_meson_options=[
+                          "-Dcompiler_backend=disabled",
                           "-Dhelper_modern=",
                           "-Dhelper_legacy=",
                           "-Dagent_modern=",
@@ -499,6 +500,8 @@ def option_should_be_forwarded(k: "OptionKey",
 
     if k.is_project():
         if is_for_us:
+            if k.name == "compiler_backend":
+                return False
             tokens = k.name.split("_")
             if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
                 return False

@@ -143,7 +143,6 @@ type BuildStartCallback func()
 type BuildEndCallback func()
 type BuildOutputCallback func(bundle string)
 type BuildDiagnosticCallback func(d Diagnostic)
-type ConfigChangeCallback func()
 
 //export frida_compiler_backend_build
 func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,

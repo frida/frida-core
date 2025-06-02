@@ -19,6 +19,10 @@ namespace Frida {
 			Object (manager: manager);
 		}
 
+		static construct {
+			CompilerBackend.init ();
+		}
+
 		construct {
 			main_context = Frida.get_main_context ();
 		}
@@ -226,6 +230,8 @@ namespace Frida {
 	}
 
 	namespace CompilerBackend {
+		private extern void init ();
+
 #if HAVE_COMPILER_BACKEND
 		private extern void build (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
 			bool disable_type_check, bool source_map, bool compress, owned BuildCompleteFunc on_complete,
