@@ -370,7 +370,6 @@ have_barebone_backend = get_option('barebone_backend') \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
 have_compiler_backend = get_option('compiler_backend') \
-    .disable_if(not have_local_backend, error_message: 'compiler backend requires the local backend for script execution') \
     .disable_auto_if(host_os == 'watchos') \
     .allowed()
 
