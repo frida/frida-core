@@ -146,7 +146,7 @@ type BuildDiagnosticCallback func(d Diagnostic)
 
 //export frida_compiler_backend_build
 func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uint,
+	disableTypeCheck, sourceMap, compress uintptr,
 	onCompleteFn C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDataDestroy C.FridaDestroyFunc,
 	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
 	options := BuildOptions{
@@ -181,7 +181,7 @@ func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForma
 
 //export frida_compiler_backend_watch
 func frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uint,
+	disableTypeCheck, sourceMap, compress uintptr,
 	onReadyFn C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc,
 	onStartingFn C.FridaStartingFunc, onStartingData unsafe.Pointer,
 	onFinishedFn C.FridaFinishedFunc, onFinishedData unsafe.Pointer,
