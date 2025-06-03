@@ -47,8 +47,8 @@ namespace Frida {
 				};
 
 				CompilerBackend.build (project_root, entrypoint, opts.output_format, opts.bundle_format,
-					opts.type_check == NONE, opts.source_maps == INCLUDED, opts.compression == TERSER,
-					(owned) on_complete, on_diagnostic);
+					(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
+					(size_t) (opts.compression == TERSER), (owned) on_complete, on_diagnostic);
 				yield;
 
 				if (error_message != null)
@@ -95,8 +95,9 @@ namespace Frida {
 			};
 
 			CompilerBackend.watch (project_root, entrypoint, opts.output_format, opts.bundle_format,
-				opts.type_check == NONE, opts.source_maps == INCLUDED, opts.compression == TERSER,
-				(owned) on_ready, on_starting, on_finished, on_output, on_diagnostic);
+				(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
+				(size_t) (opts.compression == TERSER), (owned) on_ready, on_starting, on_finished,
+				on_output, on_diagnostic);
 			yield;
 
 			if (error_message != null)
@@ -234,11 +235,11 @@ namespace Frida {
 
 #if HAVE_COMPILER_BACKEND
 		private extern void build (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-			bool disable_type_check, bool source_map, bool compress, owned BuildCompleteFunc on_complete,
+			size_t disable_type_check, size_t source_map, size_t compress, owned BuildCompleteFunc on_complete,
 			DiagnosticFunc on_diagnostic);
 		private extern void watch (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-			bool disable_type_check, bool source_map, bool compress, owned WatchReadyFunc on_ready, StartingFunc on_starting,
-			FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic);
+			size_t disable_type_check, size_t source_map, size_t compress, owned WatchReadyFunc on_ready,
+			StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic);
 
 		namespace WatchSession {
 			private extern void dispose (size_t handle);
@@ -247,13 +248,13 @@ namespace Frida {
 		private const string DISABLED_MESSAGE = "Compiler backend disabled at build-time";
 
 		private void build (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-				bool disable_type_check, bool source_map, bool compress, owned BuildCompleteFunc on_complete,
+				size_t disable_type_check, size_t source_map, size_t compress, owned BuildCompleteFunc on_complete,
 				DiagnosticFunc on_diagnostic) {
 			on_complete (null, DISABLED_MESSAGE);
 		}
 
 		private void watch (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-				bool disable_type_check, bool source_map, bool compress, owned WatchReadyFunc on_ready,
+				size_t disable_type_check, size_t source_map, size_t compress, owned WatchReadyFunc on_ready,
 				StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic) {
 			on_ready (0, DISABLED_MESSAGE);
 		}
