@@ -54,7 +54,7 @@ func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompi
 
 	return &TSCompiler{
 		projectRoot:         projectRoot,
-		entrypoint:          entrypoint,
+		entrypoint:          tspath.NormalizePath(entrypoint),
 		loadCompilerOptions: loadCompilerOptions,
 		fs:                  fs,
 		captureFs:           captureFs,
@@ -217,8 +217,9 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnosti
 	program := c.program
 
 	var targetSourceFile *ast.SourceFile
+	normalizedFilePathToCompile := tspath.NormalizePath(filePathToCompile)
 	for _, sf := range program.GetSourceFiles() {
-		if sf.FileName() == filePathToCompile {
+		if sf.FileName() == normalizedFilePathToCompile {
 			targetSourceFile = sf
 			break
 		}
