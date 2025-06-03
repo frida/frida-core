@@ -76,7 +76,7 @@ func (c *TSConfigCache) GetCompilerOptions(
 	}
 
 	parsedSource := tsoptions.NewTsconfigSourceFileFromFilePath(
-		c.tsconfigPath,
+		tspath.NormalizePath(c.tsconfigPath),
 		tspath.ToPath(c.tsconfigPath, "", fs.UseCaseSensitiveFileNames()),
 		tsconfigText,
 	)
