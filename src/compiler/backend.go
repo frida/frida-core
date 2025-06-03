@@ -482,7 +482,7 @@ func emitDiagnostic(category string, message esbuild.Message, onDiagnostic Build
 		d.character = l.Column
 	}
 
-	if message.PluginName == "frida-custom-ts" {
+	if message.PluginName == "frida-custom-ts" && len(message.Notes) == 2 {
 		d.category = message.Notes[0].Text
 		fmt.Sscan(message.Notes[1].Text, &d.code)
 	}
