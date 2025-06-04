@@ -30,6 +30,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'src/compiler/go.mod'
+          cache-dependency-path: 'src/compiler/go.mod'
       - name: Set up Apple certificates
         if: ${{ startsWith(matrix.id, 'macos-') }}
         uses: ./.github/actions/setup-apple-certificates
@@ -91,6 +96,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install ${{ matrix.pkg }}
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'src/compiler/go.mod'
+          cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
         run: |
           ./configure ${{ matrix.opts }} ${{ env.FRIDA_CORE_OPTIONS }}
@@ -114,6 +124,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'src/compiler/go.mod'
+          cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
         run: |
           ./configure --host=$XTOOLS_HOST ${{ env.FRIDA_CORE_OPTIONS }}
@@ -263,6 +278,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'src/compiler/go.mod'
+          cache-dependency-path: 'src/compiler/go.mod'
       - name: Set up Apple certificates
         if: startsWith(matrix.id, 'ios-')
         uses: ./.github/actions/setup-apple-certificates
