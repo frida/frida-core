@@ -59,11 +59,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install gcc-multilib lib32stdc++-13-dev
       - name: Build
-        if: ${{ startsWith(matrix.id, 'windows-') }}
+        if: ${{ startsWith(matrix.id, 'windows-') && matrix.id != 'windows-x86' }}
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
           .\configure ${{ env.FRIDA_CORE_OPTIONS }}
+          .\make
+      - name: Build
+        if: matrix.id == 'windows-x86'
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          .\configure --host=windows-x86 ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
