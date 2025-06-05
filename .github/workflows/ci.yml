@@ -16,13 +16,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - { id: windows-x86_64, runner: '"windows-latest"'                    }
-          - { id: windows-x86,    runner: '"windows-latest"'                    }
-          - { id: macos-x86_64,   runner: '"macos-latest"'                      }
-          - { id: macos-arm64,    runner: '"macos-latest"'                      }
-          - { id: linux-x86_64,   runner: '"ubuntu-latest"'                     }
-          - { id: linux-x86,      runner: '"ubuntu-latest"'                     }
-          - { id: freebsd-arm64,  runner: '["self-hosted", "freebsd", "arm64"]' }
+          - { id: windows-x86_64, runner: '"windows-latest"', sys: MINGW64,    pkg: 'mingw-w64-x86_64-gcc'          }
+          - { id: windows-x86,    runner: '"windows-latest"', sys: MINGW32,    pkg: 'mingw-w64-i686-gcc'            }
+          - { id: macos-x86_64,   runner: '"macos-latest"'                                                          }
+          - { id: macos-arm64,    runner: '"macos-latest"'                                                          }
+          - { id: linux-x86_64,   runner: '"ubuntu-latest"'                                                         }
+          - { id: linux-x86,      runner: '"ubuntu-latest"'                                                         }
+          - { id: freebsd-arm64,  runner: '["self-hosted", "freebsd", "arm64"]'                                     }
       fail-fast: false
     runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
@@ -30,6 +30,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install MinGW toolchain for cgo support
+        if: ${{ startsWith(matrix.id, 'windows-') }}
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.sys }}
+          install: ${{ matrix.pkg }}
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -52,6 +59,8 @@ jobs:
           sudo apt-get install gcc-multilib lib32stdc++-13-dev
       - name: Build
         if: ${{ startsWith(matrix.id, 'windows-') }}
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
           .\configure ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
