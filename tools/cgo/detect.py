@@ -23,8 +23,6 @@ FRIDA_OS_TO_GO_OS = {
 }
 
 FRIDA_ABI_TO_GO_ARCH = {
-    "arm64e": "arm64",
-    "arm64eoabi": "arm64",
     "armbe8": "armbe",
     "armhf": "arm",
     "mips64el": "mips64le",
