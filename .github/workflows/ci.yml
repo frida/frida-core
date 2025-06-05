@@ -62,9 +62,9 @@ jobs:
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          .\configure \
-              --host=${{ matrix.id }} \
-              --enable-compiler-backend \
+          .\configure `
+              --host=${{ matrix.id }} `
+              --enable-compiler-backend `
               ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
