@@ -16,6 +16,7 @@ jobs:
     strategy:
       matrix:
         include:
+          - { id: windows-arm64,  runner: '"windows-11-arm"', sys: CLANGARM64, pkg: 'mingw-w64-clang-aarch64-clang' }
           - { id: windows-x86_64, runner: '"windows-latest"', sys: MINGW64,    pkg: 'mingw-w64-x86_64-gcc'          }
           - { id: windows-x86,    runner: '"windows-latest"', sys: MINGW32,    pkg: 'mingw-w64-i686-gcc'            }
           - { id: macos-x86_64,   runner: '"macos-latest"'                                                          }
@@ -82,6 +83,7 @@ jobs:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
       - name: Test
+        if: matrix.id != 'windows-arm64'
         run: make test
 
   cross:
