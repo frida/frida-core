@@ -438,13 +438,13 @@ if compiler_backend_opt.allowed()
       if compiler_backend_opt.enabled()
         error(error_message)
       else
-        message(f'Building without Compiler backend: @error_message@')
+        warning(f'Building without Compiler backend: @error_message@')
       endif
     endif
   elif compiler_backend_opt.enabled()
     error('Need Go >= 1.24 to build the Compiler backend powered by ESBuild and typescript-go')
   else
-    message('Building without Compiler backend: Go >= 1.24 not found')
+    warning('Building without Compiler backend: Go >= 1.24 not found')
   endif
 endif
 
