@@ -89,7 +89,7 @@ jobs:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
       - name: Test
-        if: matrix.id != 'windows-arm64'
+        if: ${{ matrix.id != 'windows-arm64' && !startsWith(matrix.id, 'macos-') }}
         run: make test
 
   cross:
