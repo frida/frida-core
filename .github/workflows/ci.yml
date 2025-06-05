@@ -62,18 +62,27 @@ jobs:
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          .\configure --host=${{ matrix.id }} --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
+          .\configure \
+              --host=${{ matrix.id }} \
+              --enable-compiler-backend \
+              ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
         run: |
-          ./configure --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure \
+              --enable-compiler-backend \
+              ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Build
         if: matrix.id == 'linux-x86'
         run: |
           CC="gcc -m32" CXX="g++ -m32" STRIP="strip" \
-              ./configure --build=linux-x86 --host=linux-x86 --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
+              ./configure \
+                --build=linux-x86 \
+                --host=linux-x86 \
+                --enable-compiler-backend \
+                ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
@@ -113,7 +122,10 @@ jobs:
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
         run: |
-          ./configure ${{ matrix.opts }} ${{ !contains(matrix.id, 'mips') && '--enable-compiler-backend' }} ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure \
+              ${{ matrix.opts }} \
+              ${{ !contains(matrix.id, 'mips') && '--enable-compiler-backend' || '' }} \
+              ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
@@ -141,7 +153,10 @@ jobs:
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
         run: |
-          ./configure --host=$XTOOLS_HOST ${{ !contains(matrix.id, 'mips') && '--enable-compiler-backend' }} ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure \
+              --host=$XTOOLS_HOST \
+              ${{ !startsWith(matrix.arch, 'mips') && '--enable-compiler-backend' || '' }} \
+              ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         uses: actions/upload-artifact@v4
@@ -310,7 +325,10 @@ jobs:
         run: echo ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} >> $GITHUB_ENV
       - name: Build
         run: |
-          ./configure --host=${{ matrix.id }} --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure \
+              --host=${{ matrix.id }} \
+              --enable-compiler-backend \
+              ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         uses: actions/upload-artifact@v4
