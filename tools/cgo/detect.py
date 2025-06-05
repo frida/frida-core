@@ -90,11 +90,12 @@ def detect_config(
 ) -> dict:
     source_root = Path(os.environ["MESON_SOURCE_ROOT"])
     build_root = Path(os.environ["MESON_BUILD_ROOT"])
+    subdir = Path(os.environ["MESON_SUBDIR"])
 
-    work_dir = build_root / "tools" / "cgo"
+    work_dir = build_root / subdir / "tools" / "cgo"
     work_dir.mkdir(parents=True, exist_ok=True)
     for f in ("go.mod", "main.go"):
-        shutil.copyfile(source_root / "tools" / "cgo" / f, work_dir / f)
+        shutil.copyfile(source_root / subdir / "tools" / "cgo" / f, work_dir / f)
 
     extra_go_args = []
     mingw = None
