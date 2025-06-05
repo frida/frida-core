@@ -62,25 +62,25 @@ jobs:
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          .\configure ${{ env.FRIDA_CORE_OPTIONS }}
+          .\configure --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
         if: matrix.id == 'windows-x86'
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          .\configure --host=windows-x86 ${{ env.FRIDA_CORE_OPTIONS }}
+          .\configure --host=windows-x86 --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
         run: |
-          ./configure ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Build
         if: matrix.id == 'linux-x86'
         run: |
           CC="gcc -m32" CXX="g++ -m32" STRIP="strip" \
-              ./configure --build=linux-x86 --host=linux-x86 ${{ env.FRIDA_CORE_OPTIONS }}
+              ./configure --build=linux-x86 --host=linux-x86 --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
@@ -119,6 +119,12 @@ jobs:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
+        if: ${{ !contains(matrix.id, 'mips') }}
+        run: |
+          ./configure ${{ matrix.opts }} --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Build
+        if: ${{ contains(matrix.id, 'mips') }}
         run: |
           ./configure ${{ matrix.opts }} ${{ env.FRIDA_CORE_OPTIONS }}
           make
@@ -147,6 +153,12 @@ jobs:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
+        if: ${{ !startsWith(matrix.arch, 'mips') }}
+        run: |
+          ./configure --host=$XTOOLS_HOST --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
+          make
+      - name: Build
+        if: ${{ startsWith(matrix.arch, 'mips') }}
         run: |
           ./configure --host=$XTOOLS_HOST ${{ env.FRIDA_CORE_OPTIONS }}
           make
@@ -173,7 +185,7 @@ jobs:
           submodules: recursive
       - name: Build
         run: |
-          ./configure --host=$XTOOLS_HOST --without-prebuilds=sdk:host --enable-tests
+          ./configure --host=$XTOOLS_HOST --without-prebuilds=sdk:host --enable-compiler --enable-tests
           make
       - name: Run custom container
         uses: addnab/docker-run-action@v3
@@ -317,7 +329,7 @@ jobs:
         run: echo ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} >> $GITHUB_ENV
       - name: Build
         run: |
-          ./configure --host=${{ matrix.id }} ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure --host=${{ matrix.id }} --enable-compiler ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         uses: actions/upload-artifact@v4
