@@ -58,18 +58,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install gcc-multilib lib32stdc++-13-dev
       - name: Build
-        if: ${{ startsWith(matrix.id, 'windows-') && matrix.id != 'windows-x86' }}
+        if: ${{ startsWith(matrix.id, 'windows-') }}
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          .\configure --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
-          .\make
-      - name: Build
-        if: matrix.id == 'windows-x86'
-        env:
-          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          .\configure --host=windows-x86 --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
+          .\configure --host=${{ matrix.id }} --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
           .\make
       - name: Build
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
@@ -119,14 +112,8 @@ jobs:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
-        if: ${{ !contains(matrix.id, 'mips') }}
         run: |
-          ./configure ${{ matrix.opts }} --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
-          make
-      - name: Build
-        if: ${{ contains(matrix.id, 'mips') }}
-        run: |
-          ./configure ${{ matrix.opts }} ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure ${{ matrix.opts }} ${{ !contains(matrix.id, 'mips') && '--enable-compiler-backend' }} ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
@@ -153,14 +140,8 @@ jobs:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
       - name: Build
-        if: ${{ !startsWith(matrix.arch, 'mips') }}
         run: |
-          ./configure --host=$XTOOLS_HOST --enable-compiler-backend ${{ env.FRIDA_CORE_OPTIONS }}
-          make
-      - name: Build
-        if: ${{ startsWith(matrix.arch, 'mips') }}
-        run: |
-          ./configure --host=$XTOOLS_HOST ${{ env.FRIDA_CORE_OPTIONS }}
+          ./configure --host=$XTOOLS_HOST ${{ !contains(matrix.id, 'mips') && '--enable-compiler-backend' }} ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
         uses: actions/upload-artifact@v4
