@@ -4,13 +4,14 @@
   "description": "Agent used by Frida's Linux backend on Android",
   "type": "module",
   "scripts": {
-    "build": "frida-compile index.js -o system-server.js -S -c"
+    "build": "node build.js"
   },
   "devDependencies": {
-    "@types/frida-gum": "^19.0.0",
-    "frida-compile": "^18.0.0"
+    "esbuild": "^0.25.5",
+    "esbuild-plugin-alias": "^0.2.1"
   },
   "dependencies": {
+    "@frida/buffer": "^7.0.4",
     "frida-java-bridge": "^7.0.1"
   }
 }
