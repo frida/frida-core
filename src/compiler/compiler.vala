@@ -5,18 +5,14 @@ namespace Frida {
 		public signal void output (string bundle);
 		public signal void diagnostics (Variant diagnostics);
 
-		public DeviceManager manager {
-			get;
-			construct;
-		}
-
 		private size_t watch_session_handle = 0;
 		private Gee.Queue<Diagnostic> pending_diagnostics = new Gee.ArrayQueue<Diagnostic> ();
 
 		private MainContext main_context;
 
-		public Compiler (DeviceManager manager) {
-			Object (manager: manager);
+		// TODO: Remove the DeviceManager parameter.
+		public Compiler (DeviceManager? manager = null) {
+			Object ();
 		}
 
 		static construct {
