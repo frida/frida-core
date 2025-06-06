@@ -465,7 +465,8 @@ namespace Frida {
 
 		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
-			get_script (script_id).load ();
+			var script = get_script (script_id);
+			yield script.load (cancellable);
 		}
 
 		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {

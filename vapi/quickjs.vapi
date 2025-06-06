@@ -163,6 +163,9 @@ namespace QuickJS {
 		[CCode (cname = "JS_NewCFunction2")]
 		public Value make_cfunction2 (CFunction func, string name, int length, CFunctionEnum cproto, int magic);
 
+		[CCode (cname = "JS_NewCFunctionData")]
+		public Value make_cfunction_data (CFunctionData func, int length, int magic, [CCode (array_length_pos = 3.1)] Value[] data);
+
 		[CCode (cname = "JS_NewPromiseCapability")]
 		public Value make_promise ([CCode (array_length = false, array_null_terminated = false)] Value[] resolving_funcs);
 
@@ -200,6 +203,10 @@ namespace QuickJS {
 
 	[CCode (has_target = false)]
 	public delegate Value CFunction (Context ctx, Value this_val, [CCode (array_length_pos = 2.1)] Value[] argv);
+
+	[CCode (has_target = false)]
+	public delegate Value CFunctionData (Context ctx, Value this_val, [CCode (array_length_pos = 2.1)] Value[] argv, int magic,
+		[CCode (array_length = false, array_null_terminated = false)] Value[] data);
 
 	[CCode (cprefix = "JS_CFUNC_", has_type_id = false)]
 	public enum CFunctionEnum {
@@ -313,6 +320,9 @@ namespace QuickJS {
 
 		[CCode (cname = "JS_GetOpaque")]
 		public void * get_opaque (ClassID class_id);
+
+		[CCode (cname = "JS_GetAnyOpaque")]
+		public void * get_any_opaque (out ClassID class_id);
 
 		[CCode (cname = "JS_SetOpaque")]
 		public void set_opaque (void * opaque);

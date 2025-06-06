@@ -72,7 +72,7 @@ namespace Frida {
 		private QuickJS.Value int64_func = QuickJS.Undefined;
 		private QuickJS.Value uint64_func = QuickJS.Undefined;
 
-		private Gee.ArrayList<QuickJS.Value?> entrypoints = new Gee.ArrayList<QuickJS.Value?> ();
+		private Gee.Queue<Entrypoint> entrypoints = new Gee.ArrayQueue<Entrypoint> ();
 		private Gee.Map<string, Asset> assets = new Gee.HashMap<string, Asset> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -328,6 +328,8 @@ namespace Frida {
 			foreach (var val in values)
 				ctx.free_value (val);
 
+			entrypoints.clear ();
+
 			QuickJS.Atom atoms[] = {
 				address_key,
 				base_key,
@@ -376,46 +378,63 @@ namespace Frida {
 			yield;
 		}
 
-		public void load () {
-			foreach (QuickJS.Value? entrypoint in entrypoints) {
-				var result = ctx.eval_function (entrypoint);
-				if (result.is_exception ())
+		public async void load (Cancellable? cancellable) throws IOError {
+			Entrypoint? entrypoint;
+			while ((entrypoint = entrypoints.poll ()) != null) {
+				var result = ctx.eval_function (ctx.dup_value (entrypoint.callable));
+				if (result.is_exception ()) {
 					catch_and_emit ();
-				ctx.free_value (result);
-
-				if (runtime_obj.is_undefined ()) {
-					runtime_obj = global.get_property_str (ctx, "$rt");
-					if (!runtime_obj.is_undefined ()) {
-						dispatch_exception_func = runtime_obj.get_property_str (ctx, "dispatchException");
-						assert (!dispatch_exception_func.is_undefined ());
-
-						dispatch_message_func = runtime_obj.get_property_str (ctx, "dispatchMessage");
-						assert (!dispatch_message_func.is_undefined ());
-
-						var native_pointer_instance = global.get_property_str (ctx, "NULL");
-						assert (!native_pointer_instance.is_undefined ());
-						var native_pointer_proto = native_pointer_instance.get_prototype (ctx);
-
-						var ir_proto = ctx.make_object_proto (native_pointer_proto);
-						add_cfunc (ir_proto, "replace", on_invocation_retval_replace, 1);
-						ctx.set_class_proto (invocation_retval_class, ir_proto);
-
-						ctx.free_value (native_pointer_proto);
-						ctx.free_value (native_pointer_instance);
-
-						ptr_func = global.get_property_str (ctx, "ptr");
-						assert (!ptr_func.is_undefined ());
-
-						int64_func = global.get_property_str (ctx, "int64");
-						assert (!int64_func.is_undefined ());
-
-						uint64_func = global.get_property_str (ctx, "uint64");
-						assert (!uint64_func.is_undefined ());
-					}
+					continue;
 				}
+
+				if (entrypoint.kind == ESM) {
+					var op = new PromiseWaitOperation (this, result);
+					var r = yield op.perform (cancellable);
+					if (!r.error.is_null ())
+						on_unhandled_exception (r.error);
+				} else {
+					ctx.free_value (result);
+				}
+
+				maybe_bind_runtime ();
 			}
 
 			perform_pending_io ();
+		}
+
+		private void maybe_bind_runtime () {
+			if (!runtime_obj.is_undefined ())
+				return;
+
+			runtime_obj = global.get_property_str (ctx, "$rt");
+			if (runtime_obj.is_undefined ())
+				return;
+
+			dispatch_exception_func = runtime_obj.get_property_str (ctx, "dispatchException");
+			assert (!dispatch_exception_func.is_undefined ());
+
+			dispatch_message_func = runtime_obj.get_property_str (ctx, "dispatchMessage");
+			assert (!dispatch_message_func.is_undefined ());
+
+			var native_pointer_instance = global.get_property_str (ctx, "NULL");
+			assert (!native_pointer_instance.is_undefined ());
+			var native_pointer_proto = native_pointer_instance.get_prototype (ctx);
+
+			var ir_proto = ctx.make_object_proto (native_pointer_proto);
+			add_cfunc (ir_proto, "replace", on_invocation_retval_replace, 1);
+			ctx.set_class_proto (invocation_retval_class, ir_proto);
+
+			ctx.free_value (native_pointer_proto);
+			ctx.free_value (native_pointer_instance);
+
+			ptr_func = global.get_property_str (ctx, "ptr");
+			assert (!ptr_func.is_undefined ());
+
+			int64_func = global.get_property_str (ctx, "int64");
+			assert (!int64_func.is_undefined ());
+
+			uint64_func = global.get_property_str (ctx, "uint64");
+			assert (!uint64_func.is_undefined ());
 		}
 
 		public void post (string json, Bytes? data) {
@@ -495,7 +514,7 @@ namespace Frida {
 						throw_malformed_package ();
 
 					var val = compile_module (entrypoint);
-					entrypoints.add (val);
+					entrypoints.offer (new Entrypoint (this, val, ESM));
 
 					string rest = raw_assets[assets_offset:];
 					if (rest.has_prefix (delimiter_marker))
@@ -507,7 +526,7 @@ namespace Frida {
 				}
 			} else {
 				var val = compile_script (source, name);
-				entrypoints.add (val);
+				entrypoints.offer (new Entrypoint (this, val, PLAIN));
 			}
 		}
 
@@ -705,6 +724,111 @@ namespace Frida {
 				promise.resolve (callback);
 			} catch (GLib.Error e) {
 				promise.reject (e);
+			}
+		}
+
+		private class Entrypoint {
+			private weak BareboneScript script;
+			public QuickJS.Value callable;
+			public Kind kind;
+
+			public enum Kind {
+				PLAIN,
+				ESM
+			}
+
+			public Entrypoint (BareboneScript script, QuickJS.Value callable, Kind kind) {
+				this.script = script;
+				this.callable = callable;
+				this.kind = kind;
+			}
+
+			~Entrypoint () {
+				script.ctx.free_value (callable);
+			}
+		}
+
+		private class PromiseWaitOperation {
+			private BareboneScript script;
+			private QuickJS.Value promise;
+
+			private enum Magic {
+				ON_SUCCESS,
+				ON_FAILURE,
+			}
+
+			public PromiseWaitOperation (BareboneScript script, QuickJS.Value promise) {
+				this.script = script;
+				this.promise = promise;
+			}
+
+			~PromiseWaitOperation () {
+				script.ctx.free_value (promise);
+			}
+
+			public async Result perform (Cancellable? cancellable) throws IOError {
+				var res = new Result (script, perform.callback);
+
+				unowned QuickJS.Context ctx = script.ctx;
+
+				var data = ctx.make_object ();
+				data.set_opaque (res);
+
+				var on_success = ctx.make_cfunction_data (on_settled, 1, Magic.ON_SUCCESS, { data });
+				var on_failure = ctx.make_cfunction_data (on_settled, 1, Magic.ON_FAILURE, { data });
+
+				var then_func = promise.get_property_str (ctx, "then");
+				var catch_func = promise.get_property_str (ctx, "catch");
+
+				ctx.free_value (then_func.call (ctx, promise, { on_success }));
+				ctx.free_value (catch_func.call (ctx, promise, { on_failure }));
+
+				ctx.free_value (catch_func);
+				ctx.free_value (then_func);
+
+				ctx.free_value (on_failure);
+				ctx.free_value (on_success);
+
+				script.perform_pending_io ();
+				yield;
+
+				return res;
+			}
+
+			private static QuickJS.Value on_settled (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv, int magic,
+					QuickJS.Value[] data) {
+				QuickJS.ClassID cid;
+				unowned Result res = (Result) data[0].get_any_opaque (out cid);
+
+				if (magic == Magic.ON_SUCCESS)
+					res.val = ctx.dup_value (argv[0]);
+				else
+					res.error = ctx.dup_value (argv[0]);
+
+				var source = new IdleSource ();
+				source.set_callback ((owned) res.on_complete);
+				source.attach (MainContext.get_thread_default ());
+
+				return QuickJS.Undefined;
+			}
+
+			public class Result {
+				public BareboneScript script;
+				public SourceFunc on_complete;
+
+				public QuickJS.Value val = QuickJS.Null;
+				public QuickJS.Value error = QuickJS.Null;
+
+				public Result (BareboneScript script, owned SourceFunc on_complete) {
+					this.script = script;
+					this.on_complete = (owned) on_complete;
+				}
+
+				~Result () {
+					unowned QuickJS.Context ctx = script.ctx;
+					ctx.free_value (val);
+					ctx.free_value (error);
+				}
 			}
 		}
 
