@@ -4,11 +4,10 @@
   "description": "Agent used by Frida's Darwin backend on iOS/iPadOS/tvOS",
   "type": "module",
   "scripts": {
-    "build": "frida-compile index.js -o osanalytics.js -S -c"
+    "build": "esbuild index.js --outfile=osanalytics.js --bundle --platform=neutral --target=es2022 --minify"
   },
   "devDependencies": {
-    "@types/frida-gum": "^19.0.0",
-    "frida-compile": "^18.0.0"
+    "esbuild": "^0.25.5"
   },
   "dependencies": {
     "frida-objc-bridge": "^8.0.4"
