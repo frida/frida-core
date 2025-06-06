@@ -4,7 +4,7 @@
   "description": "Script runtime used by Frida's Barebone backend",
   "type": "module",
   "scripts": {
-    "build": "esbuild script-runtime/entrypoint.ts --outfile=script-runtime.js --bundle --platform=neutral --target=es2022 --minify-whitespace --minify-identifiers --minify-syntax",
+    "build": "esbuild script-runtime/entrypoint.ts --outfile=script-runtime.js --bundle --platform=neutral --target=es2022 --minify",
     "check": "tsc",
     "watch": "tsc -w"
   },
