@@ -210,24 +210,6 @@ Object.defineProperties(globalThis, {
             }
         }
     },
-    ObjC: {
-        enumerable: true,
-        value: {
-            available: false
-        }
-    },
-    Swift: {
-        enumerable: true,
-        value: {
-            available: false
-        }
-    },
-    Java: {
-        enumerable: true,
-        value: {
-            available: false
-        }
-    },
     console: {
         enumerable: true,
         value: new Console()
