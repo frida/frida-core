@@ -4,10 +4,13 @@
   "description": "Script runtime used by Frida's Barebone backend",
   "type": "module",
   "scripts": {
-    "build": "frida-compile script-runtime/entrypoint.ts -o script-runtime.js -c"
+    "build": "esbuild script-runtime/entrypoint.ts --outfile=script-runtime.js --bundle --platform=neutral --target=es2022 --minify-whitespace --minify-identifiers --minify-syntax",
+    "check": "tsc",
+    "watch": "tsc -w"
   },
   "devDependencies": {
     "@types/frida-gum": "^19.0.0",
-    "frida-compile": "^18.0.0"
+    "esbuild": "^0.25.5",
+    "typescript": "^5.8.3"
   }
 }
