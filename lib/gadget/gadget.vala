@@ -1242,7 +1242,13 @@ namespace Frida.Gadget {
 	}
 
 	private sealed class Script : Object, RpcPeer {
-		private const uint8 QUICKJS_BYTECODE_MAGIC = 0x02;
+		private const uint8 QUICKJS_BYTECODE_MAGIC =
+#if BIG_ENDIAN
+			0x42
+#else
+			0x02
+#endif
+			;
 
 		public enum ChangeBehavior {
 			IGNORE,

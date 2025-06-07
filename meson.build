@@ -741,6 +741,7 @@ vala_flags += ['--define=' + host_arch.to_upper()]
 if host_abi != host_arch
   vala_flags += ['--define=' + host_abi.to_upper()]
 endif
+vala_flags += '--define=' + host_machine.endian().to_upper() + '_ENDIAN'
 add_project_arguments(vala_flags, language: 'vala')
 add_project_arguments('-I' + vapidir, language: 'c')
 
