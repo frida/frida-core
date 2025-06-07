@@ -733,13 +733,13 @@ vala_flags += [
   '--pkg', 'config',
 ]
 
-vala_flags += ['--define=' + host_os_family.to_upper()]
+vala_flags += '--define=' + host_os_family.to_upper()
 if host_os != host_os_family
-  vala_flags += ['--define=' + host_os.to_upper()]
+  vala_flags += '--define=' + host_os.to_upper()
 endif
-vala_flags += ['--define=' + host_arch.to_upper()]
+vala_flags += '--define=' + host_arch.to_upper()
 if host_abi != host_arch
-  vala_flags += ['--define=' + host_abi.to_upper()]
+  vala_flags += '--define=' + host_abi.to_upper()
 endif
 vala_flags += '--define=' + host_machine.endian().to_upper() + '_ENDIAN'
 add_project_arguments(vala_flags, language: 'vala')
