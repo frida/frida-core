@@ -26,6 +26,11 @@ OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed )?(class|interface)\s+(\w+
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
     parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp'], default='bundle')
+    parser.add_argument('frida_version', metavar='frida-version', type=str)
+    parser.add_argument('frida_major_version', metavar='frida-major-version', type=str)
+    parser.add_argument('frida_minor_version', metavar='frida-minor-version', type=str)
+    parser.add_argument('frida_micro_version', metavar='frida-micro-version', type=str)
+    parser.add_argument('frida_nano_version', metavar='frida-nano-version', type=str)
     parser.add_argument('api_version', metavar='api-version', type=str)
     parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
     parser.add_argument('core_gir', metavar='/path/to/Frida-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
@@ -38,6 +43,13 @@ def main():
     args = parser.parse_args()
 
     output_type = args.output_type
+    frida_version = args.frida_version
+    frida_version_components = (
+        args.frida_major_version,
+        args.frida_minor_version,
+        args.frida_micro_version,
+        args.frida_nano_version,
+    )
     api_version = args.api_version
     core_header = args.core_header.read()
     core_gir = args.core_gir.read()
@@ -78,7 +90,7 @@ def main():
     elif output_type == 'vapi':
         enable_vapi = True
 
-    api = parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi)
+    api = parse_api(frida_version, frida_version_components, api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi)
 
     if enable_header:
         emit_header(api, output_dir)
@@ -93,7 +105,26 @@ def emit_header(api, output_dir):
     with OutputFile(output_dir / 'frida-core.h') as output_header_file:
         output_header_file.write("#ifndef __FRIDA_CORE_H__\n#define __FRIDA_CORE_H__\n\n")
 
-        output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n#include <json-glib/json-glib.h>\n")
+        output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n#include <json-glib/json-glib.h>\n\n")
+
+        output_header_file.write(f"#define FRIDA_VERSION \"{api.frida_version}\"\n\n")
+
+        for name, value in zip(['MAJOR', 'MINOR', 'MICRO', 'NANO'], api.frida_version_components):
+            output_header_file.write(f"#define FRIDA_{name}_VERSION {value}\n")
+
+        output_header_file.write("""
+#define FRIDA_CHECK_VERSION(maj, min, mic) \\
+    (FRIDA_CURRENT_VERSION >= FRIDA_VERSION_ENCODE ((maj), (min), (mic)))
+
+#define FRIDA_CURRENT_VERSION \\
+    FRIDA_VERSION_ENCODE (    \\
+        FRIDA_MAJOR_VERSION,  \\
+        FRIDA_MINOR_VERSION,  \\
+        FRIDA_MICRO_VERSION)
+
+#define FRIDA_VERSION_ENCODE(maj, min, mic) \\
+    (((maj) * 1000000U) + ((min) * 1000U) + (mic))
+""")
 
         output_header_file.write("\nG_BEGIN_DECLS\n")
 
@@ -271,7 +302,7 @@ def emit_vapi(api, output_dir):
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
 
-def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi):
+def parse_api(frida_version, frida_version_components, api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi):
     all_headers = core_header + "\n" + base_header
 
     all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", toplevel_code + "\n" + base_vapi, re.MULTILINE)]
@@ -464,7 +495,7 @@ def parse_api(api_version, toplevel_code, core_header, core_vapi, base_header, b
         m = re.search(r"^[\w\*]+ frida_{}.+?;".format(f.name), all_headers, re.MULTILINE | re.DOTALL)
         f.c_prototype = beautify_cprototype(m.group(0))
 
-    return ApiSpec(api_version, object_types, functions, enum_types, error_types)
+    return ApiSpec(frida_version, frida_version_components, api_version, object_types, functions, enum_types, error_types)
 
 def function_is_public(name):
     return not name.startswith("_") and \
@@ -489,6 +520,8 @@ def parse_vapi_functions(vapi) -> List[ApiFunction]:
 
 @dataclass
 class ApiSpec:
+    frida_version: str
+    frida_version_components: List[int]
     version: str
     object_types: List[ApiObjectType]
     functions: List[ApiFunction]

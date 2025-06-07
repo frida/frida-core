@@ -3,6 +3,11 @@ fs = import('fs')
 generate_api = [python, files('generate.py')]
 
 generate_api_args = [
+  frida_version,
+  frida_major_version.to_string(),
+  frida_minor_version.to_string(),
+  frida_micro_version.to_string(),
+  frida_nano_version.to_string(),
   api_version,
   core_build_dir / 'frida-core.h',
   core_build_dir / core_gir_name,
