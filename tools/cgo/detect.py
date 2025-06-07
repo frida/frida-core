@@ -56,9 +56,20 @@ def main(argv: List[str]):
     cc_id = args.pop(0)
     cc_cmd_array = pop_cmd_array_arg(args)
     ar_cmd_array = pop_cmd_array_arg(args)
+    nm_cmd_array = pop_cmd_array_arg(args)
+    ranlib_cmd_array = pop_cmd_array_arg(args)
 
     try:
-        config = detect_config(go, host_os, host_abi, cc_id, cc_cmd_array, ar_cmd_array)
+        config = detect_config(
+            go,
+            host_os,
+            host_abi,
+            cc_id,
+            cc_cmd_array,
+            ar_cmd_array,
+            nm_cmd_array,
+            ranlib_cmd_array,
+        )
         print("ok")
         print(base64.b64encode(json.dumps(config).encode("utf-8")).decode("ascii"))
     except Exception as e:
@@ -87,6 +98,8 @@ def detect_config(
     cc_id: str,
     cc_cmd_array: List[str],
     ar_cmd_array: Optional[List[str]],
+    nm_cmd_array: Optional[List[str]],
+    ranlib_cmd_array: Optional[List[str]],
 ) -> dict:
     source_root = Path(os.environ["MESON_SOURCE_ROOT"])
     build_root = Path(os.environ["MESON_BUILD_ROOT"])
@@ -111,18 +124,18 @@ def detect_config(
             "prefix": str(toolchain.prefix),
             "bindir": str(toolchain.bindir),
             "cc": str(toolchain.cc),
-            "ar": str(toolchain.ar),
             "libcc": str(toolchain.libcc),
         }
         env["CC"] = str(toolchain.cc)
         env["PATH"] = str(toolchain.cc.parent) + ";" + env["PATH"]
-        ar = str(toolchain.ar)
+        ar_cmd_array = [str(toolchain.ar)]
+        nm_cmd_array = [str(toolchain.nm)]
+        ranlib_cmd_array = [str(toolchain.ranlib)]
     else:
         env["CC"] = shlex.join(
             [arg for arg in cc_cmd_array if MACHINE_FLAG_PATTERN.fullmatch(arg) is None]
         )
-        ar = ar_cmd_array[0]
-    extra_go_args.append(f"-ldflags=-extar={ar}")
+    extra_go_args.append(f"-ldflags=-extar={ar_cmd_array[0]}")
 
     if host_os == "macos":
         extra_go_args.append("-ldflags=-extldflags=-mmacosx-version-min=11.0")
@@ -162,6 +175,9 @@ def detect_config(
         "abi": host_abi,
         "extra_go_args": extra_go_args,
         "env": env,
+        "ar": ar_cmd_array,
+        "nm": nm_cmd_array,
+        "ranlib": ranlib_cmd_array,
     }
     if mingw is not None:
         config["mingw"] = mingw
@@ -183,6 +199,8 @@ class MinGWToolchain:
     bindir: Path
     cc: Path
     ar: Path
+    nm: Path
+    ranlib: Path
     libcc: Path
 
     @staticmethod
@@ -254,6 +272,8 @@ class MinGWToolchain:
             )
 
         ar_path = cc_path.parent / "ar.exe"
+        nm_path = cc_path.parent / "nm.exe"
+        ranlib_path = cc_path.parent / "ranlib.exe"
 
         try:
             libcc_name = query_cc("-print-libgcc-file-name")
@@ -264,7 +284,14 @@ class MinGWToolchain:
         libcc_path = Path(libcc_name).resolve()
 
         return MinGWToolchain(
-            triplet, mingw_prefix, mingw_bindir, cc_path, ar_path, libcc_path
+            triplet,
+            mingw_prefix,
+            mingw_bindir,
+            cc_path,
+            ar_path,
+            nm_path,
+            ranlib_path,
+            libcc_path,
         )
 
 

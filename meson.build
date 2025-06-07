@@ -363,11 +363,13 @@ if host_toolchain == 'microsoft'
   lib = find_program('lib')
   ar = ''
   nm = ''
+  ranlib = ''
   strip = ''
 else
   lib = ''
   ar = find_program('ar')
   nm = find_program('nm')
+  ranlib = find_program('ranlib')
   strip = find_program('strip')
 endif
 if host_os_family != 'windows'
@@ -424,6 +426,8 @@ if compiler_backend_opt.allowed()
         cc.get_id(),
         '>>>', cc.cmd_array(), '<<<',
         '>>>', ar, '<<<',
+        '>>>', nm, '<<<',
+        '>>>', ranlib, '<<<',
       ],
       capture: true,
       check: true
