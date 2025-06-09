@@ -586,6 +586,12 @@ namespace Frida {
 			return val;
 		}
 
+		public unowned BufferReader skip (size_t n) throws Error {
+			check_available (n);
+			offset += n;
+			return this;
+		}
+
 		private void check_available (size_t n) throws Error {
 			if (available < n)
 				throw new Error.PROTOCOL ("Malformed buffer: truncated");
