@@ -208,7 +208,10 @@ namespace Frida.Barebone {
 			}
 
 			~CompilationAssets () {
-				rmtree (workdir);
+				try {
+					FS.rmtree (workdir);
+				} catch (Error e) {
+				}
 			}
 
 			private static string make_main_rs (string code, Machine machine) {
@@ -427,24 +430,5 @@ namespace Frida.Barebone {
 		File file = parent_dir.resolve_relative_path (filename);
 		yield file.replace_contents_async (content.data, null, false, FileCreateFlags.NONE, cancellable, null);
 		return file;
-	}
-
-	private void rmtree (File dir) {
-		try {
-			var enumerator = dir.enumerate_children (FileAttribute.STANDARD_NAME, NOFOLLOW_SYMLINKS);
-			FileInfo? info;
-			File? child;
-			while (enumerator.iterate (out info, out child) && info != null) {
-				if (info == null)
-					continue;
-				if (info.get_file_type () == DIRECTORY)
-					rmtree (child);
-				else
-					child.delete ();
-			}
-
-			dir.delete ();
-		} catch (GLib.Error e) {
-		}
 	}
 }

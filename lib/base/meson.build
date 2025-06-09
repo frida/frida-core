@@ -9,6 +9,7 @@ base_sources = [
   'p2p-glue.c',
   'dbus.vala',
   'promise.vala',
+  'fs.vala',
   'socket.vala',
   'socket-glue.c',
   'buffer.vala',
