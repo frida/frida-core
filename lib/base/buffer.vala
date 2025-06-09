@@ -446,7 +446,14 @@ namespace Frida {
 
 		public string read_fixed_string (size_t offset, size_t size) throws Error {
 			string * start = (string *) get_pointer (offset, size);
-			string val = start->substring (0, (long) size);
+			size_t max_length = size - offset;
+			string * end = memchr (start, 0, max_length);
+			size_t n;
+			if (end != null)
+				n = end - start;
+			else
+				n = size;
+			string val = start->substring (0, (long) n);
 			if (!val.validate ())
 				throw new Error.PROTOCOL ("Invalid UTF-8 string");
 			return val;
