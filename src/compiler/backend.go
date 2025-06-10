@@ -445,7 +445,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		Bundle:            true,
 		Outdir:            projectRoot,
 		AbsWorkingDir:     projectRoot,
-		Platform:          esbuild.PlatformNeutral,
+		Platform:          esbuild.PlatformNode,
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
 		EntryPoints:       []string{entrypoint},
