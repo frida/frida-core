@@ -790,6 +790,8 @@ namespace Frida {
 			var query = new Fruity.PlistDict ();
 			var ids = new Fruity.PlistArray ();
 			ids.add_string (program);
+			ids.add_string ("");
+			ids.add_string ("");
 			query.set_array ("BundleIDs", ids);
 
 			var matches = yield installation_proxy.lookup (query, cancellable);
