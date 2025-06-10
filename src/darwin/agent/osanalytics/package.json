@@ -4,7 +4,7 @@
   "description": "Agent used by Frida's Darwin backend on iOS/iPadOS/tvOS",
   "type": "module",
   "scripts": {
-    "build": "esbuild index.js --outfile=osanalytics.js --bundle --platform=neutral --target=es2022 --minify"
+    "build": "esbuild index.js --outfile=osanalytics.js --bundle --platform=node --target=es2022 --minify"
   },
   "devDependencies": {
     "esbuild": "^0.25.5"

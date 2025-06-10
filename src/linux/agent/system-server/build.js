@@ -9,7 +9,7 @@ esbuild.build({
   entryPoints: ['index.js'],
   outfile: 'system-server.js',
   bundle: true,
-  platform: 'neutral',
+  platform: 'node',
   target: ['es2022'],
   legalComments: 'none',
   minify: true,
