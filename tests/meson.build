@@ -9,6 +9,10 @@ test_sources = [
   'process-resource-usage.c',
 ]
 
+if host_os_family == 'darwin'
+  test_sources += 'test-host-session-darwin-glue.m'
+endif
+
 test_vala_args = []
 test_depends = []
 
