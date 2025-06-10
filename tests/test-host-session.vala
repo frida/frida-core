@@ -46,6 +46,12 @@ namespace Frida.HostSessionTest {
 			Fruity.Plist.to_xml_yields_complete_document ();
 		});
 
+#if DARWIN
+		GLib.Test.add_func ("/HostSession/Fruity/Plist/output-matches-apple-implementation", () => {
+			Fruity.Plist.output_matches_apple_implementation ();
+		});
+#endif
+
 		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
 			var h = new Harness ((h) => Fruity.backend.begin (h as Harness));
 			h.run ();
@@ -4059,6 +4065,66 @@ namespace Frida.HostSessionTest {
 				assert_true (actual_xml == expected_xml);
 			}
 
+#if DARWIN
+			private static void output_matches_apple_implementation () {
+				var request = new Frida.Fruity.Plist ();
+				request.set_string ("Command", "Lookup");
+
+				var options = new Frida.Fruity.PlistDict ();
+				request.set_dict ("ClientOptions", options);
+
+				var attributes = new Frida.Fruity.PlistArray ();
+				options.set_array ("ReturnAttributes", attributes);
+				attributes.add_string ("ApplicationType");
+				attributes.add_string ("IsAppClip");
+				attributes.add_string ("SBAppTags");
+				attributes.add_string ("CFBundleIdentifier");
+				attributes.add_string ("CFBundleDisplayName");
+				attributes.add_string ("CFBundleShortVersionString");
+				attributes.add_string ("CFBundleVersion");
+				attributes.add_string ("Path");
+				attributes.add_string ("Container");
+				attributes.add_string ("GroupContainers");
+				attributes.add_string ("Entitlements");
+
+				var ids = new Frida.Fruity.PlistArray ();
+				options.set_array ("BundleIDs", ids);
+				ids.add_string ("UUU");
+
+				string? error_message;
+
+				string our_xml = request.to_xml ();
+				uint8[] our_bplist = request.to_binary ();
+
+				uint8[]? apple_bplist = to_binary_using_apple_implementation (our_xml.data, out error_message);
+				if (error_message != null)
+					printerr ("Oops: %s\n", error_message);
+				assert_nonnull (apple_bplist);
+				assert_null (error_message);
+
+				/*
+				try {
+					var home_dir = Environment.get_home_dir ();
+					FileUtils.set_data (Path.build_filename (home_dir, "frida-test-apple.plist"), apple_bplist);
+					FileUtils.set_data (Path.build_filename (home_dir, "frida-test-our.plist"), our_bplist);
+				} catch (FileError e) {
+					assert_not_reached ();
+				}
+				*/
+
+				string? apple_xml = to_xml_using_apple_implementation (our_bplist, out error_message);
+				if (error_message != null)
+					printerr ("Oops: %s\n", error_message);
+				assert_nonnull (apple_xml);
+				assert_null (error_message);
+
+				assert_cmpstr (our_xml, EQ, apple_xml);
+				assert_cmpstr (Base64.encode (our_bplist), EQ, Base64.encode (apple_bplist));
+			}
+
+			private extern uint8[]? to_binary_using_apple_implementation (uint8[] data, out string? error_message);
+			private extern string? to_xml_using_apple_implementation (uint8[] data, out string? error_message);
+#endif
 		}
 
 	}
