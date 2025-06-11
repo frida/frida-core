@@ -84,12 +84,6 @@ build_arch () {
     export CC="gcc -m32" CXX="g++ -m32" STRIP="strip"
   fi
 
-  case "$ARCH" in
-  armbe8 | arm64be | arm64beilp32)
-    EXTRA_FLAGS+=("--without-prebuilds=sdk:host")
-    ;;
-  esac
-
   cd "$FRIDA_CORE_DIR"
 
   rm -rf "$BUILD_DIR"
