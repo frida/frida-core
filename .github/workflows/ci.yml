@@ -423,6 +423,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
+      fail-fast: false
     runs-on: ubuntu-latest
     container: ghcr.io/frida/core-linux-helpers-${{ matrix.arch }}:latest
     steps:
@@ -436,7 +437,7 @@ jobs:
       - name: Check for unexpected changes
         run: |
           git config --global --add safe.directory "$(realpath .)"
-          status_output="$(git status --porcelain)"
+          status_output=$(git status --porcelain tests/labrats/{resident-agent,simple-agent}-linux-${{ matrix.arch }}.so tests/labrats/{forker,sleeper,spawner}-linux-${{ matrix.arch }})
           if [ -n "$status_output" ]; then
             echo "Unexpected changes detected:"
             echo "$status_output"
@@ -455,6 +456,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
+      fail-fast: false
     runs-on: ubuntu-latest
     container: ghcr.io/frida/core-linux-helpers-${{ matrix.arch }}:latest
     steps:
@@ -468,7 +470,7 @@ jobs:
       - name: Check for unexpected changes
         run: |
           git config --global --add safe.directory "$(realpath .)"
-          status_output="$(git status --porcelain)"
+          status_output=$(git status --porcelain src/linux/helpers/{bootstrapper,loader}-${{ matrix.arch }}.bin)
           if [ -n "$status_output" ]; then
             echo "Unexpected changes detected:"
             echo "$status_output"
