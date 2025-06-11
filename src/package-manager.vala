@@ -87,7 +87,7 @@ namespace Frida {
 			Manifest manifest = yield load_manifest (pkg_json_f, lock_f, cancellable);
 
 			var wanted = new Gee.HashMap<string, PackageDependency> ();
-			wanted.set_all (manifest.dependencies);
+			wanted.set_all (manifest.dependencies.all);
 			foreach (string spec in opts.specs) {
 				string name, version;
 				int at = spec.last_index_of ("@");
@@ -100,7 +100,7 @@ namespace Frida {
 				}
 				wanted[name] = new PackageDependency () {
 					name = name,
-					version = version,
+					version = new PackageVersion (version),
 					role = RUNTIME,
 				};
 			}
@@ -111,7 +111,7 @@ namespace Frida {
 			var pending = new Gee.ArrayList<Promise<PackageLockEntry>> ();
 			foreach (PackageDependency dep in wanted.values) {
 				var p = new Promise<PackageLockEntry> ();
-				perform_install.begin (dep, install_root, cancellable, p);
+				perform_install.begin (dep.name, dep.version, dep, install_root, cancellable, p);
 				pending.add (p);
 			}
 
@@ -119,6 +119,14 @@ namespace Frida {
 			foreach (var p in pending) {
 				PackageLockEntry e = yield p.future.wait_async (cancellable);
 				installed.set (e.name, e);
+
+				var dep = wanted[e.name];
+
+				manifest.dependencies.add (new PackageDependency () {
+					name = e.name,
+					version = dep.derive_version (e.version),
+					role = wanted[e.name].role,
+				});
 			}
 
 			yield write_back_manifests (manifest, installed, pkg_json_f, lock_f, cancellable);
@@ -131,7 +139,7 @@ namespace Frida {
 		}
 
 		private class Manifest {
-			public Gee.Map<string, PackageDependency> dependencies = new Gee.HashMap<string, PackageDependency> ();
+			public PackageDependencies dependencies = new PackageDependencies ();
 		}
 
 		private class PackageLockEntry {
@@ -140,13 +148,71 @@ namespace Frida {
 			public string resolved;
 			public string integrity;
 			public string? description;
-			public Gee.Map<string, PackageDependency> dependencies;
+			public string? license;
+			public PackageDependencies dependencies;
+			public PackageDependency toplevel_dep;
+		}
+
+		private class PackageDependencies {
+			public Gee.Map<string, PackageDependency> all = new Gee.HashMap<string, PackageDependency> ();
+
+			public Gee.Map<string, PackageDependency> runtime {
+				get {
+					if (_runtime == null)
+						_runtime = compute_subset_with_role (RUNTIME);
+					return _runtime;
+				}
+			}
+
+			public Gee.Map<string, PackageDependency> development {
+				get {
+					if (_development == null)
+						_development = compute_subset_with_role (DEVELOPMENT);
+					return _development;
+				}
+			}
+
+			private Gee.Map<string, PackageDependency> _runtime;
+			private Gee.Map<string, PackageDependency> _development;
+
+			public void add (PackageDependency d) {
+				all[d.name] = d;
+			}
+
+			private Gee.Map<string, PackageDependency> compute_subset_with_role (PackageRole role) {
+				var result = new Gee.HashMap<string, PackageDependency> ();
+				foreach (PackageDependency d in all.values) {
+					if (d.role == role)
+						result[d.name] = d;
+				}
+				return result;
+			}
 		}
 
 		private class PackageDependency {
 			public string name;
-			public string version;
+			public PackageVersion version;
 			public PackageRole role;
+
+			public PackageVersion derive_version (string installed_version) {
+				if (version.is_pinned)
+					return version;
+				return new PackageVersion ("^" + installed_version);
+			}
+		}
+
+		private class PackageVersion {
+			public string spec;
+
+			public bool is_pinned {
+				get {
+					return spec[0].isdigit ();
+				}
+			}
+
+			public PackageVersion (string spec) {
+				this.spec = spec;
+			}
 		}
 
 		private enum PackageRole {
@@ -166,8 +232,8 @@ namespace Frida {
 			return m;
 		}
 
-		private static Gee.Map<string, PackageDependency> read_dependencies (Json.Reader r) throws Error {
-			var deps = new Gee.HashMap<string, PackageDependency> ();
+		private static PackageDependencies read_dependencies (Json.Reader r) throws Error {
+			var deps = new PackageDependencies ();
 
 			string section_names[2] = {"dependencies", "devDependencies"};
 			for (uint i = 0; i != section_names.length; i++) {
@@ -191,11 +257,11 @@ namespace Frida {
 					if (version == null)
 						throw new Error.PROTOCOL ("Bad type of %s entry for %s", section, name);
 
-					deps[name] = new PackageDependency () {
+					deps.add (new PackageDependency () {
 						name = name,
-						version = version,
+						version = new PackageVersion (version),
 						role = role,
-					};
+					});
 
 					r.end_member ();
 				}
@@ -208,6 +274,7 @@ namespace Frida {
 
 		private async void write_back_manifests (Manifest manifest, Gee.Map<string, PackageLockEntry> installed, File pkg_json_f,
 				File lock_f, Cancellable? cancellable) throws Error, IOError {
+			string? name = null;
 			Json.Node? root = null;
 			string? old_pkg_json = null;
 			uint indent_level = 2;
@@ -222,13 +289,26 @@ namespace Frida {
 				if (root.get_node_type () != OBJECT)
 					throw new Error.PROTOCOL ("%s is invalid, root must be an object", pkg_json_f.get_parse_name ());
 				detect_indent (old_pkg_json, out indent_level, out indent_char);
+
+				var r = new Json.Reader (root);
+				r.read_member ("name");
+				name = r.get_string_value ();
 			} else {
 				root = new Json.Node (OBJECT);
 				root.init_object (new Json.Object ());
 			}
+			if (name == null) {
+				try {
+					var info = yield pkg_json_f.get_parent ().query_info_async (FileAttribute.STANDARD_DISPLAY_NAME,
+						FileQueryInfoFlags.NONE, Priority.DEFAULT, cancellable);
+					name = info.get_display_name ();
+					printerr ("Computed fallback name: \"%s\"\n", name);
+				} catch (GLib.Error e) {
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
+				}
+			}
 
 			Json.Object obj = root.get_object ();
-			printerr ("root object: %p\n", obj);
 			Json.Object deps;
 			Json.Node? deps_node = obj.get_member ("dependencies");
 			if (deps_node != null) {
@@ -241,9 +321,11 @@ namespace Frida {
 				deps = new Json.Object ();
 				obj.set_object_member ("dependencies", deps);
 			}
-			printerr ("deps=%p\n", deps);
-			foreach (PackageLockEntry e in installed.values)
-				deps.set_string_member (e.name, e.version);
+			foreach (PackageLockEntry e in installed.values) {
+				PackageDependency toplevel_dep = e.toplevel_dep;
+				if (e.name == toplevel_dep.name)
+					deps.set_string_member (e.name, toplevel_dep.derive_version (e.version).spec);
+			}
 
 			var gen = new Json.Generator ();
 			gen.set_pretty (true);
@@ -258,8 +340,12 @@ namespace Frida {
 
 			var b = new Json.Builder ();
 			b.begin_object ()
+				.set_member_name ("name")
+				.add_string_value (name)
 				.set_member_name ("lockfileVersion")
 				.add_int_value (3)
+				.set_member_name ("requires")
+				.add_boolean_value (true)
 				.set_member_name ("packages")
 				.begin_object ();
 
@@ -268,10 +354,7 @@ namespace Frida {
 				.begin_object ()
 				.set_member_name ("dependencies")
 				.begin_object ();
-			foreach (PackageDependency dep in manifest.dependencies.values)
-				b
-					.set_member_name (dep.name)
-					.add_string_value (dep.version);
+			add_dependencies (b, manifest.dependencies);
 			b
 				.end_object ()
 				.end_object ();
@@ -285,17 +368,15 @@ namespace Frida {
 					.add_string_value (e.resolved)
 					.set_member_name ("integrity")
 					.add_string_value (e.integrity);
-				if (!e.dependencies.is_empty) {
+				if (e.license != null) {
 					b
-						.set_member_name ("dependencies")
-						.begin_object ();
-					foreach (PackageDependency dep in e.dependencies.values) {
-						b
-							.set_member_name (dep.name)
-							.add_string_value (dep.version);
-					}
+						.set_member_name ("license")
+						.add_string_value (e.license);
+				}
+				if (e.toplevel_dep.role == DEVELOPMENT) {
 					b
-						.end_object ();
+						.set_member_name ("dev")
+						.add_boolean_value (true);
 				}
 				b
 					.end_object ();
@@ -313,17 +394,40 @@ namespace Frida {
 			yield FS.write_all_text (lock_f, lock_json, cancellable);
 		}
 
-		private async void perform_install (PackageDependency dep, File install_root, Cancellable? cancellable,
-				Promise<PackageLockEntry> request) {
+		private static void add_dependencies (Json.Builder b, PackageDependencies deps) {
+			add_dependencies_in_section (b, "dependencies", deps.runtime.values);
+			add_dependencies_in_section (b, "devDependencies", deps.development.values);
+		}
+
+		private static void add_dependencies_in_section (Json.Builder b, string section, Gee.Collection<PackageDependency> deps) {
+			if (deps.is_empty)
+				return;
+			b
+				.set_member_name (section)
+				.begin_object ();
+			foreach (var dep in deps) {
+				b
+					.set_member_name (dep.name)
+					.add_string_value (dep.version.spec);
+			}
+			b
+				.end_object ();
+		}
+
+		private async void perform_install (string name, PackageVersion version, PackageDependency toplevel_dep, File install_root,
+				Cancellable? cancellable, Promise<PackageLockEntry> request) {
 			try {
-				Json.Reader r = yield fetch (
-					"https://registry.npmjs.org/%s/%s".printf (Uri.escape_string (dep.name), Uri.escape_string (dep.version)),
+				Json.Reader r = yield fetch ("https://registry.npmjs.org/%s/%s"
+					.printf (Uri.escape_string (name), Uri.escape_string (version.spec)),
 					session, cancellable);
 				r.read_member ("version");
 				string? effective_version = r.get_string_value ();
 				r.end_member ();
 				r.read_member ("description");
 				string? description = r.get_string_value ();
+				r.end_member ();
+				r.read_member ("license");
+				string? license = r.get_string_value ();
 				r.end_member ();
 				r.read_member ("dist");
 				r.read_member ("tarball");
@@ -339,23 +443,25 @@ namespace Frida {
 				var deps = read_dependencies (r);
 
 				if (tarball_url == null)
-					throw new Error.PROTOCOL ("No tarball URL for %s", dep.name);
+					throw new Error.PROTOCOL ("No tarball URL for %s", name);
 
 				File dest_root = install_root;
-				foreach (string part in dep.name.split ("/"))
+				foreach (string part in name.split ("/"))
 					dest_root = dest_root.get_child (part);
 
-				yield download_and_unpack (dep.name, tarball_url, dest_root, integrity, shasum, cancellable);
+				yield download_and_unpack (name, tarball_url, dest_root, integrity, shasum, cancellable);
 
 				// TODO: handle missing 'integrity'
 
 				request.resolve (new PackageLockEntry () {
-					name = dep.name,
+					name = name,
 					version = effective_version,
 					resolved = tarball_url,
 					integrity = integrity,
 					description = description,
+					license = license,
 					dependencies = deps,
+					toplevel_dep = toplevel_dep,
 				});
 			} catch (GLib.Error e) {
 				request.reject (e);
