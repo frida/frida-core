@@ -108,32 +108,46 @@ namespace Frida {
 			File install_root = project_root.get_child ("node_modules");
 			FS.mkdirp (install_root, cancellable);
 
-			var pending = new Gee.ArrayList<Promise<PackageLockEntry>> ();
-			foreach (PackageDependency dep in wanted.values) {
-				var p = new Promise<PackageLockEntry> ();
-				perform_install.begin (dep.name, dep.version, dep, install_root, cancellable, p);
-				pending.add (p);
+			var all_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
+			foreach (PackageDependency dep in wanted.values)
+				all_installs[dep.name] = new Promise<PackageLockEntry> ();
+
+			var toplevel_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
+			toplevel_installs.set_all (all_installs);
+			foreach (var e in toplevel_installs.entries) {
+				PackageDependency dep = wanted[e.key];
+				perform_install.begin (dep.name, dep.version, dep, install_root, cancellable, e.value, all_installs);
 			}
 
-			var installed = new Gee.HashMap<string, PackageLockEntry> ();
-			foreach (var p in pending) {
-				PackageLockEntry e = yield p.future.wait_async (cancellable);
-				installed.set (e.name, e);
+			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
+			while (finished_installs.size != all_installs.size) {
+				PackageLockEntry? entry = null;
+				foreach (var e in all_installs.entries) {
+					unowned string name = e.key;
+					if (finished_installs.has_key (name))
+						continue;
+					entry = yield e.value.future.wait_async (cancellable);
+					finished_installs[name] = entry;
+					break;
+				}
 
-				var dep = wanted[e.name];
-
-				manifest.dependencies.add (new PackageDependency () {
-					name = e.name,
-					version = dep.derive_version (e.version),
-					role = wanted[e.name].role,
-				});
+				PackageDependency? dep = wanted[entry.name];
+				if (dep != null) {
+					manifest.dependencies.add (new PackageDependency () {
+						name = entry.name,
+						version = dep.derive_version (entry.version),
+						role = dep.role,
+					});
+				}
 			}
 
-			yield write_back_manifests (manifest, installed, pkg_json_f, lock_f, cancellable);
+			yield write_back_manifests (manifest, finished_installs, pkg_json_f, lock_f, cancellable);
 
 			var pkgs = new Gee.ArrayList<Package> ();
-			foreach (var e in installed.values)
-				pkgs.add (new Package (e.name, e.version, e.description));
+			foreach (PackageLockEntry e in finished_installs.values) {
+				if (e.name == e.toplevel_dep.name)
+					pkgs.add (new Package (e.name, e.version, e.description));
+			}
 
 			return new PackageInstallResult (new PackageList (pkgs));
 		}
@@ -415,7 +429,8 @@ namespace Frida {
 		}
 
 		private async void perform_install (string name, PackageVersion version, PackageDependency toplevel_dep, File install_root,
-				Cancellable? cancellable, Promise<PackageLockEntry> request) {
+				Cancellable? cancellable, Promise<PackageLockEntry> request,
+				Gee.Map<string, Promise<PackageLockEntry>> all_installs) {
 			try {
 				Json.Reader r = yield fetch ("https://registry.npmjs.org/%s/%s"
 					.printf (Uri.escape_string (name), Uri.escape_string (version.spec)),
@@ -444,6 +459,18 @@ namespace Frida {
 
 				if (tarball_url == null)
 					throw new Error.PROTOCOL ("No tarball URL for %s", name);
+
+				bool is_toplevel = name != toplevel_dep.name;
+				foreach (PackageDependency d in deps.all.values) {
+					if (d.role == DEVELOPMENT && !is_toplevel)
+						continue;
+					if (all_installs.has_key (d.name))
+						continue;
+					var req = new Promise<PackageLockEntry> ();
+					all_installs[d.name] = req;
+					perform_install.begin (d.name, d.version, toplevel_dep, install_root, cancellable, req,
+						all_installs);
+				}
 
 				File dest_root = install_root;
 				foreach (string part in name.split ("/"))
@@ -785,6 +812,204 @@ namespace Frida {
 			throw new Error.PROTOCOL ("%s", e.message);
 		}
 		return new Json.Reader (p.get_root ());
+	}
+
+	private class SemverVersion {
+		public uint major;
+		public uint minor;
+		public uint patch;
+		public string? prerelease;
+
+		public SemverVersion (uint major, uint minor, uint patch, string? prerelease) {
+			this.major = major;
+			this.minor = minor;
+			this.patch = patch;
+			this.prerelease = prerelease;
+		}
+	}
+
+	namespace Semver {
+		private static SemverVersion parse_version (string v) throws Error {
+			string core;
+			string? pre = null;
+			int dash = v.index_of ('-');
+			if (dash != -1) {
+				core = v[:dash];
+				pre = v[dash + 1:];
+			} else {
+				core = v;
+			}
+
+			string[] nums = core.split ('.', 3);
+			if (nums.length != 3)
+				return null;
+
+			uint major;
+			if (!uint.try_parse (nums[0], out major))
+				throw new Error.PROTOCOL ("Invalid major version: %s", nums[0]);
+
+			uint minor;
+			if (!uint.try_parse (nums[1], out minor))
+				throw new Error.PROTOCOL ("Invalid minor version: %s", nums[1]);
+
+			uint patch;
+			if (!uint.try_parse (nums[2], out patch))
+				throw new Error.PROTOCOL ("Invalid patch version: %s", nums[2]);
+
+			return new SemverVersion (major, minor, patch, pre);
+		}
+
+		private static bool is_precise_spec (string spec) throws Error {
+			if (spec.index_of (' ') != -1)
+				return false;
+
+			if (spec.index_of ('^') != -1 || spec.index_of ('~') != -1 ||
+					spec.index_of ('>') != -1 || spec.index_of ('<') != -1 ||
+					spec.index_of ('|') != -1 || spec.index_of ('*') != -1 ||
+					spec.to_lower ().index_of ('x') != -1) {
+				return false;
+			}
+
+			try {
+				parse_version (spec);
+				return true;
+			} catch (Error e) {
+				return false;
+			}
+		}
+
+		private static string? max_satisfying (Gee.Collection<string> versions, string range) {
+			string? best_str = null;
+			SemverVersion? best_ver = null;
+			foreach (string v in versions) {
+				SemverVersion? parsed = parse_version (v);
+				if (parsed == null)
+					continue;
+				if (!satisfies_range (versions, range))
+					continue;
+				if (best_ver == null || compare_version (parsed, best_ver) > 0) {
+					best_ver = parsed;
+					best_str = v;
+				}
+			}
+			return best_str;
+		}
+
+		private static int compare_version (SemverVersion a, SemverVersion b) {
+			if (a.major != b.major)
+				return a.major > b.major ? 1 : -1;
+			if (a.minor != b.minor)
+				return a.minor > b.minor ? 1 : -1;
+			if (a.patch != b.patch)
+				return a.patch > b.patch ? 1 : -1;
+
+			if (a.prerelease == null && b.prerelease == null)
+				return 0;
+			if (a.prerelease == null)
+				return 1;
+			if (b.prerelease == null)
+				return -1;
+			return a.prerelease.compare (b.prerelease);
+		}
+
+		private static bool satisfies_range (Gee.Collection<string> versions, string range) {
+			string[] ors = range.split ("||");
+			foreach (string orr in ors) {
+				string[] comps = orr.strip ().split (' ');
+				bool ok = true;
+				foreach (string comp in comps) {
+					SemverVersion? cand = parse_version (comp);
+					if (cand == null || !check_comparator (cand, comp)) {
+						ok = false;
+						break;
+					}
+				}
+				if (ok)
+					return true;
+			}
+			return false;
+		}
+
+		private static bool check_comparator (SemverVersion cand, string comp) {
+			comp = comp.strip ();
+			if (comp == "*" || comp == "x" || comp == "X")
+				return true;
+
+			int hy = comp.index_of ('-');
+			int sp = comp.index_of (' ');
+			if (hy != -1 && sp != -1) {
+				string[] parts = comp.split ('-', 2);
+				string lo = parts[0].strip ();
+				string hi = parts[1].strip ();
+				return satisfies_range (cand, ">=" + lo) && satisfies_range (cand, "<=" + hi);
+			}
+
+			string op, ver;
+			if (comp.has_prefix (">=") || comp.has_prefix ("<=")) {
+				op = comp[:2];
+				ver = comp[2:];
+			} else if (comp.has_prefix (">") || comp.has_prefix ("<")) {
+				op = comp[:1];
+				ver = comp[1:];
+			} else {
+				op = string.empty;
+				ver = string.empty;
+			}
+			if (op != string.empty) {
+				SemverVersion? rv = parse_version (ver);
+				if (rv == null) return false;
+				int cmp = compare_version (cand, rv);
+				switch (op) {
+				case ">":  return cmp > 0;
+				case ">=": return cmp >= 0;
+				case "<":  return cmp < 0;
+				case "<=": return cmp <= 0;
+				}
+			}
+
+			if (comp.has_prefix ("~")) {
+				SemverVersion? base_ver = parse_version (comp[1:]);
+				if (base_ver == null)
+					return false;
+				SemverVersion lower = base_ver;
+				SemverVersion upper;
+				if (lower.major != 0)
+					upper = new SemverVersion (lower.major, lower.minor + 1, 0, null);
+				else
+					upper = new SemverVersion (0, lower.minor + 1, 0, null);
+				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
+			}
+
+			if (comp.has_prefix ("^")) {
+				SemverVersion? base_ver = parse_version (comp[1:]);
+				if (base_ver == null)
+					return false;
+				SemverVersion lower = base_ver;
+				SemverVersion upper;
+				if (lower.major != 0)
+					upper = new SemverVersion (lower.major + 1, 0, 0, null);
+				else if (lower.minor != 0)
+					upper = new SemverVersion (0, lower.minor + 1, 0, null);
+				else
+					upper = new SemverVersion (0, 0, lower.patch + 1, null);
+				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
+			}
+
+			if (comp.index_of ('x') != -1 || comp.index_of ('X') != -1 || comp.index_of ('*') != -1) {
+				string norm = comp.replace ("x", "0").replace ("X", "0").replace ("*", "0");
+				SemverVersion? base_ver = parse_version (norm);
+				if (base_ver == null)
+					return false;
+				SemverVersion lower = base_ver;
+				SemverVersion upper = new SemverVersion (lower.major + 1, 0, 0, null);
+				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
+			}
+
+			SemverVersion? ev = parse_version (comp);
+			if (ev == null)
+				return false;
+			return compare_version (cand, ev) == 0;
+		}
 	}
 
 	private class TarStreamReader : Object {
