@@ -1229,21 +1229,24 @@ namespace Frida {
 			if (s.length == 0)
 				throw new Error.PROTOCOL ("Numeric component cannot be empty");
 
-			for (int i = 0; i < s.length; i++) {
-				unichar c = s[i];
-				if (!c.isdigit ()) {
-					throw new Error.PROTOCOL ("Numeric component '%s' contains non-digit character '%s'",
-						s, c.to_string ());
-				}
-			}
-
 			if (s.length > 1 && s[0] == '0')
 				throw new Error.PROTOCOL ("Numeric component '%s' has leading zeros", s);
 
-			uint u;
-			if (!uint.try_parse (s, out u))
-				throw new Error.PROTOCOL ("Invalid uint: '%s'", s);
-			return u;
+			uint result_val;
+			string unparsed_str;
+			if (uint.try_parse (s, out result_val, out unparsed_str)) {
+				if (unparsed_str.length == 0)
+					return result_val;
+				throw new Error.PROTOCOL ("Numeric component '%s' contains trailing non-digit characters: \"%s\"",
+					s, unparsed_str);
+			} else {
+				if (unparsed_str.length == 0) {
+					throw new Error.PROTOCOL ("Numeric component '%s' is too large or invalid", s);
+				} else {
+					throw new Error.PROTOCOL ("Invalid characters in numeric component '%s': problem starts at \"%s\"",
+						s, unparsed_str);
+				}
+			}
 		}
 
 		private static bool is_numeric_identifier (string s) {
