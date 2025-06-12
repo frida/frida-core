@@ -176,7 +176,7 @@ namespace Frida {
 		}
 
 		private static string lockfile_key_for_dependency (string name, File node_modules_root, File project_root) {
-			return install_dir_for_dependency (name, node_modules_root).get_relative_path (project_root);
+			return project_root.get_relative_path (install_dir_for_dependency (name, node_modules_root));
 		}
 
 		private static File install_dir_for_dependency (string name, File node_modules_root) {
