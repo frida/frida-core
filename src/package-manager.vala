@@ -159,7 +159,21 @@ namespace Frida {
 		}
 
 		private class Manifest {
+			public string? name;
+			public string? version;
 			public PackageDependencies dependencies = new PackageDependencies ();
+			public Gee.Map<string, PackageLockPackageInfo> locked_packages = new Gee.HashMap<string, PackageLockPackageInfo> ();
+		}
+
+		private class PackageLockPackageInfo {
+			public string path_key;
+			public string? name;
+			public string? version;
+			public string? resolved;
+			public string? integrity;
+			public PackageDependencies dependencies = new PackageDependencies ();
+			public bool is_dev = false;
+			public bool is_optional = false;
 		}
 
 		private class PackageLockEntry {
@@ -237,17 +251,78 @@ namespace Frida {
 
 		private enum PackageRole {
 			RUNTIME,
-			DEVELOPMENT
+			DEVELOPMENT,
+			OPTIONAL
 		}
 
 		private async Manifest load_manifest (File pkg_json_f, File lock_f, Cancellable? cancellable) throws Error, IOError {
 			var m = new Manifest ();
-			if (!pkg_json_f.query_exists (cancellable))
-				return m;
 
-			Json.Reader r = yield load_json (pkg_json_f, cancellable);
+			if (pkg_json_f.query_exists (cancellable)) {
+				Json.Reader r = yield load_json (pkg_json_f, cancellable);
 
-			m.dependencies = read_dependencies (r);
+				r.read_member ("name");
+				m.name = r.get_string_value ();
+				r.end_member ();
+
+				r.read_member ("version");
+				m.version = r.get_string_value ();
+				r.end_member ();
+
+				m.dependencies = read_dependencies (r);
+			}
+
+			if (lock_f.query_exists (cancellable)) {
+				Json.Reader lock_r = yield load_json (lock_f, cancellable);
+
+				lock_r.read_member ("packages");
+				string[]? pkg_paths = lock_r.list_members ();
+				if (pkg_paths == null)
+					throw new Error.PROTOCOL ("package-lock.json 'packages' member is missing or not an object");
+
+				foreach (unowned string path_key in pkg_paths) {
+					lock_r.read_member (path_key);
+					if (lock_r.get_null_value ()) {
+						lock_r.end_member ();
+						continue;
+					}
+
+					var pli = new PackageLockPackageInfo ();
+					pli.path_key = path_key;
+
+					lock_r.read_member ("name");
+					pli.name = lock_r.get_string_value ();
+					lock_r.end_member ();
+
+					lock_r.read_member ("version");
+					pli.version = lock_r.get_string_value ();
+					lock_r.end_member ();
+
+					lock_r.read_member ("resolved");
+					pli.resolved = lock_r.get_string_value ();
+					lock_r.end_member ();
+
+					lock_r.read_member ("integrity");
+					pli.integrity = lock_r.get_string_value ();
+					lock_r.end_member ();
+
+					pli.dependencies = read_dependencies_from_lock_entry (lock_r, path_key);
+
+					lock_r.read_member ("dev");
+					pli.is_dev = lock_r.get_boolean_value ();
+					lock_r.end_member ();
+
+					lock_r.read_member ("optional");
+					pli.is_optional = lock_r.get_boolean_value ();
+					lock_r.end_member ();
+
+					m.locked_packages[path_key] = pli;
+
+					lock_r.end_member ();
+				}
+
+				lock_r.end_member ();
+			}
 
 			return m;
 		}
@@ -255,32 +330,77 @@ namespace Frida {
 		private static PackageDependencies read_dependencies (Json.Reader r) throws Error {
 			var deps = new PackageDependencies ();
 
-			string section_names[2] = {"dependencies", "devDependencies"};
-			for (uint i = 0; i != section_names.length; i++) {
-				unowned string section = section_names[i];
+			string[] section_keys = {"dependencies", "devDependencies"};
+			for (uint i = 0; i != section_keys.length; i++) {
+				unowned string section_key = section_keys[i];
 
-				if (!r.read_member (section)) {
+				if (!r.read_member (section_key)) {
 					r.end_member ();
 					continue;
 				}
 
 				string[]? names = r.list_members ();
 				if (names == null)
-					throw new Error.PROTOCOL ("Bad shape of %s section", section);
+					throw new Error.PROTOCOL ("Invalid package.json section for '%s'", section_key);
 
 				PackageRole role = (i == 0) ? PackageRole.RUNTIME : PackageRole.DEVELOPMENT;
-
 				foreach (unowned string name in names) {
 					r.read_member (name);
 
 					string? version = r.get_string_value ();
-					if (version == null)
-						throw new Error.PROTOCOL ("Bad type of %s entry for %s", section, name);
+					if (version == null) {
+						throw new Error.PROTOCOL ("Bad type of %s entry for %s, expected string value",
+							section_key, name);
+					}
 
 					deps.add (new PackageDependency () {
 						name = name,
 						version = new PackageVersion (version),
 						role = role,
+					});
+
+					r.end_member ();
+				}
+
+				r.end_member ();
+			}
+
+			return deps;
+		}
+
+		private static PackageDependencies read_dependencies_from_lock_entry (Json.Reader r, string parent_path_key) throws Error {
+			var deps = new PackageDependencies ();
+
+			string[] section_keys = { "dependencies", "optionalDependencies" };
+			for (uint i = 0; i != section_keys.length; i++) {
+				unowned string section_key = section_keys[i];
+
+				if (!r.read_member (section_key)) {
+					r.end_member ();
+					continue;
+				}
+
+				string[]? dep_names = r.list_members ();
+				if (dep_names == null) {
+					throw new Error.PROTOCOL ("Lockfile section for '%s' is invalid for package '%s'",
+						section_key, parent_path_key);
+				}
+
+				PackageRole role = (i == 1) ? PackageRole.OPTIONAL : PackageRole.RUNTIME;
+
+				foreach (unowned string dep_name in dep_names) {
+					r.read_member (dep_name);
+
+					string? version_spec = r.get_string_value ();
+					if (version_spec == null) {
+						throw new Error.PROTOCOL ("Lockfile dependency '%s' in section '%s' for package '%s' " +
+							"must have a string value", dep_name, section_key, parent_path_key);
+					}
+
+					deps.add (new PackageDependency () {
+						name = dep_name,
+						version = new PackageVersion (version_spec),
+						role = role
 					});
 
 					r.end_member ();
@@ -317,12 +437,12 @@ namespace Frida {
 				root = new Json.Node (OBJECT);
 				root.init_object (new Json.Object ());
 			}
+
 			if (name == null) {
 				try {
 					var info = yield pkg_json_f.get_parent ().query_info_async (FileAttribute.STANDARD_DISPLAY_NAME,
 						FileQueryInfoFlags.NONE, Priority.DEFAULT, cancellable);
 					name = info.get_display_name ();
-					printerr ("Computed fallback name: \"%s\"\n", name);
 				} catch (GLib.Error e) {
 					throw new Error.PERMISSION_DENIED ("%s", e.message);
 				}
