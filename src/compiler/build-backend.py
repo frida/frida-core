@@ -41,7 +41,17 @@ def build_backend(
         dest.parent.mkdir(exist_ok=True)
         shutil.copy(f, dest)
 
+    replacer_inputs: List[Path] = [
+            Path(priv_dir / "symbol-replacer" / "main.go"),
+    ]
+
+    symbol_dest = priv_dir / "symbol-replacer"
+    symbol_dest.mkdir(exist_ok=True)
+    shutil.copy(base_dir / "symbol-replacer" / "main.go", symbol_dest)
+    shutil.copy(base_dir / "symbol-replacer" / "go.mod", symbol_dest)
+
     go_sources = [str(f.relative_to(base_dir)) for f in inputs if f.suffix == ".go"]
+    symbol_replacer_sources = [str("symbol-replacer" / f.relative_to(symbol_dest)) for f in replacer_inputs if f.suffix == ".go"]
 
     def run(*args):
         return subprocess.run(
@@ -60,6 +70,8 @@ def build_backend(
     backend_a = priv_dir / "frida-compiler-backend.a"
     backend_h = priv_dir / "frida-compiler-backend.h"
 
+    symbol_replacer = symbol_dest / "frida-symbol-replacer"
+
     run(
         go,
         "build",
@@ -71,8 +83,25 @@ def build_backend(
         *go_sources,
     )
 
-    symbols_to_scramble = detect_conflictful_symbols_in_archive(backend_a, config["nm"])
-    scramble_symbols_in_archive(backend_a, symbols_to_scramble, config["ranlib"])
+    # when we are cross-compiling we want to unset GOOS and GOARCH
+    env_copy = config["env"].copy()
+    env_copy["GOOS"] = ""
+    env_copy["GOARCH"] = ""
+
+    subprocess.run([go,
+        "build",
+        "-o",
+        symbol_replacer.name,
+        *symbol_replacer_sources],
+        cwd=priv_dir,
+        env=env_copy,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        check=True,
+    )
+
+    pr = run(priv_dir / symbol_replacer.name, backend_a.name, *config["nm"], *config["ranlib"])
 
     if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
         "x86",
@@ -98,6 +127,7 @@ def build_backend(
                 "gdtoa",
                 "gmisc",
                 "mingw_fprintf",
+                "mingw_vprintf",
                 "mingw_pformat",
                 "misc",
             ]
@@ -114,50 +144,6 @@ def build_backend(
 
     shutil.copy(priv_dir / backend_a.name, output_dir / backend_a.name)
     shutil.copy(priv_dir / backend_h.name, output_dir / backend_h.name)
-
-
-def detect_conflictful_symbols_in_archive(
-    archive: Path, nm_cmd_array: List[str]
-) -> List[str]:
-    result = []
-    for line in subprocess.run(
-        [*nm_cmd_array, str(archive)], capture_output=True, encoding="utf-8", check=True
-    ).stdout.splitlines():
-        tokens = line.lstrip().split(" ")
-        if len(tokens) >= 3 and tokens[1] in {"S", "T"}:
-            symbol = tokens[2]
-            if all(sub not in symbol for sub in ("/", ".", ":", "frida")):
-                result.append(symbol)
-    return result
-
-
-def scramble_symbols_in_archive(
-    archive: Path, symbols: List[str], ranlib_cmd_array: List[str]
-):
-    data = archive.read_bytes()
-
-    for old_sym in symbols:
-        new_sym = roll_first_alpha(old_sym)
-        data = data.replace(old_sym.encode("ascii"), new_sym.encode("ascii"))
-
-    archive.write_bytes(data)
-
-    subprocess.run([*ranlib_cmd_array, str(archive)], check=True)
-
-
-def roll_first_alpha(s: str) -> str:
-    chars = list(s)
-    for i, c in enumerate(chars):
-        if c.isalpha():
-            if c == "z":
-                chars[i] = "a"
-            elif c == "Z":
-                chars[i] = "A"
-            else:
-                chars[i] = chr(ord(c) + 1)
-            break
-    return "".join(chars)
-
 
 # Work around the Go toolchain's almost-MSVC-compatible object files
 # until our patch is merged upstream:
