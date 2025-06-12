@@ -2,6 +2,12 @@ namespace Frida {
 	public sealed class PackageManager : Object {
 		public signal void progress (string text, double fraction);
 
+		public string registry {
+			get;
+			set;
+			default = "registry.npmjs.org";
+		}
+
 		private Soup.Session session;
 
 		public PackageManager () {
@@ -16,8 +22,8 @@ namespace Frida {
 			var opts = (options != null) ? options : new PackageSearchOptions ();
 
 			var text = string.join (" ", query, "keywords:frida-gum");
-			Json.Reader reader = yield fetch ("https://registry.npmjs.org/-/v1/search?text=%s&from=%u&size=%u"
-				.printf (Uri.escape_string (text), opts.offset, opts.limit), session, cancellable);
+			Json.Reader reader = yield fetch ("https://%s/-/v1/search?text=%s&from=%u&size=%u"
+				.printf (registry, Uri.escape_string (text), opts.offset, opts.limit), session, cancellable);
 
 			var packages = new Gee.ArrayList<Package> ();
 			reader.read_member ("objects");
@@ -432,8 +438,8 @@ namespace Frida {
 				Cancellable? cancellable, Promise<PackageLockEntry> request,
 				Gee.Map<string, Promise<PackageLockEntry>> all_installs) {
 			try {
-				Json.Reader r = yield fetch ("https://registry.npmjs.org/%s/%s"
-					.printf (Uri.escape_string (name), Uri.escape_string (version.spec)),
+				Json.Reader r = yield fetch ("https://%s/%s/%s"
+					.printf (registry, Uri.escape_string (name), Uri.escape_string (version.spec)),
 					session, cancellable);
 				r.read_member ("version");
 				string? effective_version = r.get_string_value ();
@@ -819,54 +825,90 @@ namespace Frida {
 		public uint minor;
 		public uint patch;
 		public string? prerelease;
+		public string? metadata;
 
-		public SemverVersion (uint major, uint minor, uint patch, string? prerelease) {
+		public SemverVersion (uint major, uint minor, uint patch, string? prerelease, string? metadata) {
 			this.major = major;
 			this.minor = minor;
 			this.patch = patch;
 			this.prerelease = prerelease;
+			this.metadata = metadata;
 		}
 	}
 
 	namespace Semver {
-		private static SemverVersion parse_version (string v) throws Error {
+		private static SemverVersion parse_version (string version) throws Error {
+			string v = version;
+			string? meta = null;
+			int plus = version.index_of_char ('+');
+			if (plus != -1) {
+				v = version[:plus];
+				meta = version[plus + 1:];
+			}
+
 			string core;
 			string? pre = null;
-			int dash = v.index_of ('-');
+			int dash = v.index_of_char ('-');
 			if (dash != -1) {
 				core = v[:dash];
-				pre = v[dash + 1:];
+				pre  = v[dash + 1:];
 			} else {
 				core = v;
 			}
 
-			string[] nums = core.split ('.', 3);
-			if (nums.length != 3)
-				return null;
+			string[] nums = core.split (".");
+			if (nums.length == 0 || nums.length > 3)
+				throw new Error.PROTOCOL ("Invalid semver version: %s", v);
 
-			uint major;
-			if (!uint.try_parse (nums[0], out major))
-				throw new Error.PROTOCOL ("Invalid major version: %s", nums[0]);
+			uint major = 0;
+			uint minor = 0;
+			uint patch = 0;
 
-			uint minor;
-			if (!uint.try_parse (nums[1], out minor))
-				throw new Error.PROTOCOL ("Invalid minor version: %s", nums[1]);
+			major = parse_uint (nums[0]);
 
-			uint patch;
-			if (!uint.try_parse (nums[2], out patch))
-				throw new Error.PROTOCOL ("Invalid patch version: %s", nums[2]);
+			if (nums.length > 1)
+				minor = parse_uint (nums[1]);
 
-			return new SemverVersion (major, minor, patch, pre);
+			if (nums.length > 2)
+				patch = parse_uint (nums[2]);
+
+			return new SemverVersion (major, minor, patch, pre, meta);
+		}
+
+		private static int compare_version (SemverVersion a, SemverVersion b) {
+			if (a.major != b.major)
+				return a.major > b.major ? 1 : -1;
+
+			if (a.minor != b.minor)
+				return a.minor > b.minor ? 1 : -1;
+
+			if (a.patch != b.patch)
+				return a.patch > b.patch ? 1 : -1;
+
+			if (a.prerelease == null && b.prerelease == null)
+				return 0;
+
+			if (a.prerelease == null)
+				return 1;
+
+			if (b.prerelease == null)
+				return -1;
+
+			return strcmp (a.prerelease, b.prerelease);
 		}
 
 		private static bool is_precise_spec (string spec) throws Error {
-			if (spec.index_of (' ') != -1)
-				return false;
+			if (spec.strip () == "")
+				throw new Error.PROTOCOL ("Invalid version spec: '%s'", spec);
 
-			if (spec.index_of ('^') != -1 || spec.index_of ('~') != -1 ||
-					spec.index_of ('>') != -1 || spec.index_of ('<') != -1 ||
-					spec.index_of ('|') != -1 || spec.index_of ('*') != -1 ||
-					spec.to_lower ().index_of ('x') != -1) {
+			if (spec.index_of_char (' ') != -1  ||
+					spec.index_of_char ('^') != -1 ||
+					spec.index_of_char ('~') != -1 ||
+					spec.index_of_char ('>') != -1 ||
+					spec.index_of_char ('<') != -1 ||
+					spec.index_of_char ('|') != -1 ||
+					spec.index_of_char ('*') != -1 ||
+					spec.down ().index_of_char ('x') != -1) {
 				return false;
 			}
 
@@ -874,142 +916,227 @@ namespace Frida {
 				parse_version (spec);
 				return true;
 			} catch (Error e) {
-				return false;
 			}
+
+			if (!spec[0].isalpha ())
+				return false;
+
+			foreach (unichar c in spec) {
+				if (!(c == '.' || c == '_' || c == '-' || c.isalnum ()))
+					return false;
+			}
+			return true;
 		}
 
-		private static string? max_satisfying (Gee.Collection<string> versions, string range) {
+		private static string? max_satisfying (Gee.Collection<string> versions, string range) throws Error {
 			string? best_str = null;
 			SemverVersion? best_ver = null;
+
 			foreach (string v in versions) {
-				SemverVersion? parsed = parse_version (v);
-				if (parsed == null)
+				SemverVersion cand = parse_version (v);
+
+				if (!satisfies_range (cand, range))
 					continue;
-				if (!satisfies_range (versions, range))
-					continue;
-				if (best_ver == null || compare_version (parsed, best_ver) > 0) {
-					best_ver = parsed;
+
+				if (best_ver == null || compare_version (cand, best_ver) > 0) {
+					best_ver = cand;
 					best_str = v;
 				}
 			}
+
 			return best_str;
 		}
 
-		private static int compare_version (SemverVersion a, SemverVersion b) {
-			if (a.major != b.major)
-				return a.major > b.major ? 1 : -1;
-			if (a.minor != b.minor)
-				return a.minor > b.minor ? 1 : -1;
-			if (a.patch != b.patch)
-				return a.patch > b.patch ? 1 : -1;
+		private static bool satisfies_range (SemverVersion cand, string range) throws Error {
+			string r = range.strip ();
+			if (r == "")
+				throw new Error.PROTOCOL ("Invalid version range: '%s'", range);
 
-			if (a.prerelease == null && b.prerelease == null)
-				return 0;
-			if (a.prerelease == null)
-				return 1;
-			if (b.prerelease == null)
-				return -1;
-			return a.prerelease.compare (b.prerelease);
-		}
+			string[] ors = r.split ("||");
 
-		private static bool satisfies_range (Gee.Collection<string> versions, string range) {
-			string[] ors = range.split ("||");
-			foreach (string orr in ors) {
-				string[] comps = orr.strip ().split (' ');
+			foreach (string clause in ors) {
+				string part = clause.strip ();
+
+				if (part.index_of (" - ") != -1) {
+					if (check_comparator (cand, part))
+						return true;
+					continue;
+				}
+
+				string[] comps = part.split (" ");
 				bool ok = true;
+
 				foreach (string comp in comps) {
-					SemverVersion? cand = parse_version (comp);
-					if (cand == null || !check_comparator (cand, comp)) {
+					string c = comp.strip ();
+					if (c == "")
+						continue;
+
+					if (!check_comparator (cand, c)) {
 						ok = false;
 						break;
 					}
 				}
+
 				if (ok)
 					return true;
 			}
+
 			return false;
 		}
 
-		private static bool check_comparator (SemverVersion cand, string comp) {
-			comp = comp.strip ();
-			if (comp == "*" || comp == "x" || comp == "X")
-				return true;
+		private static bool check_comparator (SemverVersion cand, string comparator) throws Error {
+			string comp = comparator.strip ();
 
-			int hy = comp.index_of ('-');
-			int sp = comp.index_of (' ');
-			if (hy != -1 && sp != -1) {
-				string[] parts = comp.split ('-', 2);
+			if (comp.index_of (" - ") != -1) {
+				string[] parts = comp.split (" - ", 2);
 				string lo = parts[0].strip ();
 				string hi = parts[1].strip ();
+
 				return satisfies_range (cand, ">=" + lo) && satisfies_range (cand, "<=" + hi);
 			}
 
-			string op, ver;
+			if (comp == "*" || comp == "x" || comp == "X")
+				return true;
+
+			string op = "";
+			string ver = comp;
+
 			if (comp.has_prefix (">=") || comp.has_prefix ("<=")) {
 				op = comp[:2];
 				ver = comp[2:];
 			} else if (comp.has_prefix (">") || comp.has_prefix ("<")) {
 				op = comp[:1];
 				ver = comp[1:];
-			} else {
-				op = string.empty;
-				ver = string.empty;
 			}
-			if (op != string.empty) {
-				SemverVersion? rv = parse_version (ver);
-				if (rv == null) return false;
+
+			if (op != "") {
+				SemverVersion rv = parse_version (ver);
 				int cmp = compare_version (cand, rv);
+
 				switch (op) {
-				case ">":  return cmp > 0;
-				case ">=": return cmp >= 0;
-				case "<":  return cmp < 0;
-				case "<=": return cmp <= 0;
+					case ">":
+						return cmp > 0;
+					case ">=":
+						return cmp >= 0;
+					case "<":
+						return cmp < 0;
+					case "<=":
+						return cmp <= 0;
 				}
 			}
 
 			if (comp.has_prefix ("~")) {
-				SemverVersion? base_ver = parse_version (comp[1:]);
-				if (base_ver == null)
-					return false;
-				SemverVersion lower = base_ver;
+				SemverVersion lower = parse_version (comp[1:]);
 				SemverVersion upper;
-				if (lower.major != 0)
-					upper = new SemverVersion (lower.major, lower.minor + 1, 0, null);
-				else
+
+				if (lower.major == 0 && lower.minor == 0)
+					upper = new SemverVersion (0, 0, lower.patch + 1, null);
+				else if (lower.major == 0)
 					upper = new SemverVersion (0, lower.minor + 1, 0, null);
+				else
+					upper = new SemverVersion (lower.major, lower.minor + 1, 0, null);
+
 				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
 			}
 
 			if (comp.has_prefix ("^")) {
-				SemverVersion? base_ver = parse_version (comp[1:]);
-				if (base_ver == null)
-					return false;
-				SemverVersion lower = base_ver;
+				SemverVersion lower = parse_version (comp[1:]);
 				SemverVersion upper;
-				if (lower.major != 0)
+
+				if (lower.major != 0) {
 					upper = new SemverVersion (lower.major + 1, 0, 0, null);
-				else if (lower.minor != 0)
+				} else if (lower.minor != 0) {
 					upper = new SemverVersion (0, lower.minor + 1, 0, null);
-				else
+				} else {
 					upper = new SemverVersion (0, 0, lower.patch + 1, null);
+				}
+
 				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
 			}
 
-			if (comp.index_of ('x') != -1 || comp.index_of ('X') != -1 || comp.index_of ('*') != -1) {
-				string norm = comp.replace ("x", "0").replace ("X", "0").replace ("*", "0");
-				SemverVersion? base_ver = parse_version (norm);
-				if (base_ver == null)
-					return false;
-				SemverVersion lower = base_ver;
-				SemverVersion upper = new SemverVersion (lower.major + 1, 0, 0, null);
-				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
+			if (comp.index_of_char ('*') != -1 ||
+					comp.index_of_char ('x') != -1 ||
+					comp.index_of_char ('X') != -1 ||
+					count_char (comp, '.') < 2) {
+				return wildcard_match (cand, comp);
 			}
 
-			SemverVersion? ev = parse_version (comp);
-			if (ev == null)
-				return false;
+			SemverVersion ev = parse_version (comp);
 			return compare_version (cand, ev) == 0;
 		}
+
+		private static bool wildcard_match (SemverVersion cand, string pat) throws Error {
+			string norm = pat.replace ("*", "x").replace ("X", "x");
+			string[] parts = norm.split (".");
+
+			bool major_wild = false;
+			bool minor_wild = false;
+			bool patch_wild = false;
+
+			uint major = 0;
+			uint minor = 0;
+			uint patch = 0;
+
+			if (parts.length > 0) {
+				if (parts[0] == "x" || parts[0] == "")
+					major_wild = true;
+				else
+					major = parse_uint (parts[0]);
+			}
+
+			if (parts.length > 1) {
+				if (parts[1] == "x" || parts[1] == "")
+					minor_wild = true;
+				else
+					minor = parse_uint (parts[1]);
+			} else {
+				minor_wild = true;
+			}
+
+			if (parts.length > 2) {
+				if (parts[2] == "x" || parts[2] == "")
+					patch_wild = true;
+				else
+					patch = parse_uint (parts[2]);
+			} else {
+				patch_wild = true;
+			}
+
+			if (major_wild)
+				return true;
+
+			SemverVersion lower = new SemverVersion (major,
+					minor_wild ? 0 : minor,
+					patch_wild ? 0 : patch,
+					null);
+
+			SemverVersion upper;
+
+			if (minor_wild)
+				upper = new SemverVersion (major + 1, 0, 0, null);
+			else if (patch_wild)
+				upper = new SemverVersion (major, minor + 1, 0, null);
+			else
+				return compare_version (cand, lower) == 0;
+
+			return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
+		}
+	}
+
+	private uint parse_uint (string s) throws Error {
+		uint u;
+		if (!uint.try_parse (s, out u))
+			throw new Error.PROTOCOL ("Invalid uint: '%s'", s);
+		return u;
+	}
+
+	private int count_char (string s, char ch) {
+		int n = 0;
+		foreach (unichar c in s) {
+			if (c == ch)
+				n++;
+		}
+		return n;
 	}
 
 	private class TarStreamReader : Object {
