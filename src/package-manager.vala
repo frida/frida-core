@@ -477,22 +477,12 @@ namespace Frida {
 			}
 
 			Json.Object obj = root.get_object ();
-			Json.Object deps;
-			Json.Node? deps_node = obj.get_member ("dependencies");
-			if (deps_node != null) {
-				if (root.get_node_type () != OBJECT) {
-					throw new Error.PROTOCOL ("%s is invalid, 'dependencies' must be an object",
-						pkg_json_f.get_parse_name ());
-				}
-				deps = deps_node.get_object ();
-			} else {
-				deps = new Json.Object ();
-				obj.set_object_member ("dependencies", deps);
-			}
+			var deps_obj = new Json.Object ();
+			obj.set_object_member ("dependencies", deps_obj);
 			foreach (PackageLockEntry e in installed.values) {
 				PackageDependency toplevel_dep = e.toplevel_dep;
 				if (e.name == toplevel_dep.name)
-					deps.set_string_member (e.name, toplevel_dep.derive_version (e.version).spec);
+					deps_obj.set_string_member (e.name, toplevel_dep.derive_version (e.version).spec);
 			}
 
 			var gen = new Json.Generator ();
@@ -517,38 +507,83 @@ namespace Frida {
 				.set_member_name ("packages")
 				.begin_object ();
 
-			b
-				.set_member_name ("")
-				.begin_object ()
-				.set_member_name ("dependencies")
+			b.set_member_name ("")
 				.begin_object ();
-			add_dependencies (b, manifest.dependencies);
+			if (manifest.name != null)
+				b.set_member_name ("name").add_string_value (manifest.name);
+			if (manifest.version != null)
+				b.set_member_name ("version").add_string_value (manifest.version);
+			b.set_member_name ("dependencies").begin_object ();
+			foreach (var entry in installed.entries) {
+				PackageLockEntry resolved_entry = entry.value;
+				if (resolved_entry.name == resolved_entry.toplevel_dep.name) {
+					b
+						.set_member_name (resolved_entry.name)
+						.add_string_value (resolved_entry.version);
+				}
+			}
 			b
 				.end_object ()
 				.end_object ();
-			foreach (PackageLockEntry e in installed.values) {
-				b
-					.set_member_name (e.name)
+
+			foreach (var entry in installed.entries) {
+				string lockfile_key = entry.key;
+				PackageLockEntry e = entry.value;
+
+				b.set_member_name (lockfile_key)
 					.begin_object ()
+					.set_member_name ("name")
+					.add_string_value (e.name)
 					.set_member_name ("version")
 					.add_string_value (e.version)
 					.set_member_name ("resolved")
 					.add_string_value (e.resolved)
 					.set_member_name ("integrity")
 					.add_string_value (e.integrity);
-				if (e.license != null) {
-					b
-						.set_member_name ("license")
-						.add_string_value (e.license);
-				}
-				if (e.toplevel_dep.role == DEVELOPMENT) {
+
+				if (e.license != null)
+					b.set_member_name ("license").add_string_value (e.license);
+
+				if (e.toplevel_dep.role == DEVELOPMENT && e.name == e.toplevel_dep.name) {
 					b
 						.set_member_name ("dev")
 						.add_boolean_value (true);
 				}
-				b
-					.end_object ();
+
+				if (!e.dependencies.runtime.is_empty) {
+					b.set_member_name ("dependencies").begin_object ();
+					foreach (PackageDependency dep_info in e.dependencies.runtime.values) {
+						b
+							.set_member_name (dep_info.name)
+							.add_string_value (dep_info.version.spec);
+					}
+					b.end_object ();
+				}
+
+				if (!e.dependencies.all.is_empty) {
+					bool has_optional = false;
+					foreach (PackageDependency dep_info in e.dependencies.all.values) {
+						if (dep_info.role == OPTIONAL) {
+							has_optional = true;
+							break;
+						}
+					}
+					if (has_optional) {
+						b.set_member_name ("optionalDependencies").begin_object ();
+						foreach (PackageDependency dep_info in e.dependencies.all.values) {
+							if (dep_info.role == OPTIONAL) {
+								b
+									.set_member_name (dep_info.name)
+									.add_string_value (dep_info.version.spec);
+							}
+						}
+						b.end_object ();
+					}
+				}
+
+				b.end_object ();
 			}
+
 			b
 				.end_object ()
 				.end_object ();
