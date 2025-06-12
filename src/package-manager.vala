@@ -642,34 +642,13 @@ namespace Frida {
 					integrity_from_lock_or_registry = locked_info.integrity;
 					deps_to_install = locked_info.dependencies;
 				} else {
-					bool is_precise_version_string = Semver.is_precise_spec (version_spec.spec);
-					bool spec_is_tag_or_range = !is_precise_version_string;
-
 					Json.Reader? meta = null;
+					bool fetch_full_document_then_resolve = true;
 
-					if (spec_is_tag_or_range && version_spec.spec != "latest") {
-						Json.Reader r = yield fetch ("/" + Uri.escape_string (name), cancellable);
+					if (Semver.is_precise_spec (version_spec.spec))
+						fetch_full_document_then_resolve = false;
 
-						r.read_member ("versions");
-						string[]? available_version_strings = r.list_members ();
-						if (available_version_strings == null) {
-							throw new Error.PROTOCOL ("Package '%s' has no versions listed in registry document", name);
-						}
-						r.end_member ();
-
-						string? target_version_str = Semver.max_satisfying (
-							new Gee.ArrayList<string>.wrap (available_version_strings),
-							version_spec.spec);
-						if (target_version_str == null) {
-							throw new Error.PROTOCOL ("No version satisfying '%s' found for package '%s'",
-								version_spec.spec, name);
-						}
-
-						r.read_member ("versions");
-						r.read_member (target_version_str);
-						meta = r;
-						effective_version = target_version_str;
-					} else {
+					if (!fetch_full_document_then_resolve) {
 						meta = yield fetch (
 							"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
 							cancellable);
@@ -680,6 +659,40 @@ namespace Frida {
 							throw new Error.PROTOCOL ("Registry response for '%s@%s' missing 'version' field",
 								name, version_spec.spec);
 						}
+					} else {
+						Json.Reader r = yield fetch ("/" + Uri.escape_string (name), cancellable);
+
+						r.read_member ("dist-tags");
+						r.read_member (version_spec.spec);
+						string? version_from_dist_tag = r.get_string_value ();
+						r.end_member ();
+						r.end_member ();
+
+						if (version_from_dist_tag != null) {
+							effective_version = version_from_dist_tag;
+						} else {
+							r.read_member ("versions");
+							string[]? available_version_strings = r.list_members ();
+							if (available_version_strings == null) {
+								throw new Error.PROTOCOL (
+									"Package '%s' has no versions listed in registry document", name);
+							}
+							r.end_member ();
+
+							string? target_version_str = Semver.max_satisfying (
+								new Gee.ArrayList<string>.wrap (available_version_strings),
+								version_spec.spec);
+							if (target_version_str == null) {
+								throw new Error.PROTOCOL (
+									"No version satisfying '%s' found for package '%s'",
+									version_spec.spec, name);
+							}
+							effective_version = target_version_str;
+						}
+
+						r.read_member ("versions");
+						r.read_member (effective_version);
+						meta = r;
 					}
 
 					meta.read_member ("description");
@@ -1251,34 +1264,38 @@ namespace Frida {
 		}
 
 		private static bool is_precise_spec (string spec) throws Error {
-			if (spec.strip () == "")
+			string stripped_spec = spec.strip ();
+			if (stripped_spec == "")
 				throw new Error.PROTOCOL ("Invalid version spec: '%s'", spec);
 
-			if (spec.index_of_char (' ') != -1  ||
-					spec.index_of_char ('^') != -1 ||
-					spec.index_of_char ('~') != -1 ||
-					spec.index_of_char ('>') != -1 ||
-					spec.index_of_char ('<') != -1 ||
-					spec.index_of_char ('|') != -1 ||
-					spec.index_of_char ('*') != -1 ||
-					spec.down ().index_of_char ('x') != -1) {
+			if (stripped_spec == "latest")
+				return true;
+
+			if (stripped_spec.index_of_char (' ') != -1 ||
+					stripped_spec.index_of_char ('^') != -1 ||
+					stripped_spec.index_of_char ('~') != -1 ||
+					stripped_spec.index_of_char ('>') != -1 ||
+					stripped_spec.index_of_char ('<') != -1 ||
+					stripped_spec.index_of_char ('*') != -1 ||
+					stripped_spec.down ().index_of_char ('x') != -1) {
 				return false;
 			}
 
 			try {
-				parse_version (spec);
-				return true;
+				parse_version (stripped_spec);
+
+				string core_part_of_spec = stripped_spec;
+				int plus_idx = core_part_of_spec.index_of_char ('+');
+				if (plus_idx != -1)
+					core_part_of_spec = core_part_of_spec.substring (0, plus_idx);
+				int dash_idx = core_part_of_spec.index_of_char ('-');
+				if (dash_idx != -1)
+					core_part_of_spec = core_part_of_spec.substring (0, dash_idx);
+
+				return count_char (core_part_of_spec, '.') == 2;
 			} catch (Error e) {
-			}
-
-			if (!spec[0].isalpha ())
 				return false;
-
-			foreach (unichar c in spec) {
-				if (!(c == '.' || c == '_' || c == '-' || c.isalnum ()))
-					return false;
 			}
-			return true;
 		}
 
 		private static string? max_satisfying (Gee.Collection<string> versions, string range) throws Error {
