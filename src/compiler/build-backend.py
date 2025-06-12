@@ -127,7 +127,6 @@ def build_backend(
                 "gdtoa",
                 "gmisc",
                 "mingw_fprintf",
-                "mingw_vprintf",
                 "mingw_pformat",
                 "misc",
             ]
