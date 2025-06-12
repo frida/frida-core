@@ -827,7 +827,7 @@ namespace Frida {
 		public string? prerelease;
 		public string? metadata;
 
-		public SemverVersion (uint major, uint minor, uint patch, string? prerelease, string? metadata) {
+		public SemverVersion (uint major, uint minor = 0, uint patch = 0, string? prerelease = null, string? metadata = null) {
 			this.major = major;
 			this.minor = minor;
 			this.patch = patch;
@@ -857,20 +857,93 @@ namespace Frida {
 			}
 
 			string[] nums = core.split (".");
-			if (nums.length == 0 || nums.length > 3)
-				throw new Error.PROTOCOL ("Invalid semver version: %s", v);
+			if (nums.length == 0 || nums.length > 3) {
+				throw new Error.PROTOCOL ("Invalid semver version '%s': core part must have 1 to 3 segments, found %d",
+					version, nums.length);
+			}
 
 			uint major = 0;
 			uint minor = 0;
 			uint patch = 0;
 
-			major = parse_uint (nums[0]);
+			try {
+				major = parse_uint (nums[0]);
+			} catch (Error e) {
+				throw new Error.PROTOCOL ("Invalid major version in '%s': %s", version, e.message);
+			}
 
-			if (nums.length > 1)
-				minor = parse_uint (nums[1]);
+			if (nums.length > 1) {
+				try {
+					minor = parse_uint (nums[1]);
+				} catch (Error e) {
+					throw new Error.PROTOCOL ("Invalid minor version in '%s': %s", version, e.message);
+				}
+			}
 
-			if (nums.length > 2)
-				patch = parse_uint (nums[2]);
+			if (nums.length > 2) {
+				try {
+					patch = parse_uint (nums[2]);
+				} catch (Error e) {
+					throw new Error.PROTOCOL ("Invalid patch version in '%s': %s", version, e.message);
+				}
+			}
+
+			if (pre != null) {
+				if (pre.length == 0) {
+					throw new Error.PROTOCOL ("Pre-release part of '%s' cannot be empty if specified by a hyphen",
+						version);
+				}
+
+				string[] pre_ids = pre.split (".");
+				foreach (string id in pre_ids) {
+					if (id.length == 0) {
+						throw new Error.PROTOCOL ("Pre-release identifier in '%s' cannot be empty (found in '%s')",
+							version, pre);
+					}
+
+					bool is_potentially_numeric = true;
+					foreach (unichar c in id) {
+						if (!c.isalnum () && c != '-') {
+							throw new Error.PROTOCOL (
+								"Pre-release identifier '%s' in '%s' contains invalid character '%s'",
+								id, version, c.to_string ());
+						}
+						if (!c.isdigit ())
+							is_potentially_numeric = false;
+					}
+
+					if (is_potentially_numeric) {
+						try {
+							parse_uint (id);
+						} catch (Error e) {
+							throw new Error.PROTOCOL ("Invalid numeric pre-release identifier '%s' in '%s': %s",
+								id, version, e.message);
+						}
+					}
+				}
+			}
+
+			if (meta != null) {
+				if (meta.length == 0) {
+					throw new Error.PROTOCOL ("Build metadata part of '%s' cannot be empty if specified by a plus",
+						version);
+				}
+
+				string[] meta_ids = meta.split (".");
+				foreach (string id in meta_ids) {
+					if (id.length == 0) {
+						throw new Error.PROTOCOL (
+							"Build metadata identifier in '%s' cannot be empty (found in '%s')", version, meta);
+					}
+					foreach (unichar c_char in id) {
+						if (!c_char.isalnum () && c_char != '-') {
+							throw new Error.PROTOCOL (
+								"Build metadata identifier '%s' in '%s' contains invalid character '%s'",
+								id, version, c_char.to_string ());
+						}
+					}
+				}
+			}
 
 			return new SemverVersion (major, minor, patch, pre, meta);
 		}
@@ -885,16 +958,47 @@ namespace Frida {
 			if (a.patch != b.patch)
 				return a.patch > b.patch ? 1 : -1;
 
-			if (a.prerelease == null && b.prerelease == null)
+			bool a_has_prerelease = a.prerelease != null;
+			bool b_has_prerelease = b.prerelease != null;
+
+			if (!a_has_prerelease && !b_has_prerelease)
 				return 0;
-
-			if (a.prerelease == null)
+			if (!a_has_prerelease)
 				return 1;
-
-			if (b.prerelease == null)
+			if (!b_has_prerelease)
 				return -1;
 
-			return strcmp (a.prerelease, b.prerelease);
+			string[] a_ids = a.prerelease.split (".");
+			string[] b_ids = b.prerelease.split (".");
+
+			uint min_len = uint.min (a_ids.length, b_ids.length);
+			for (uint i = 0; i != min_len; i++) {
+				string id_a = a_ids[i];
+				string id_b = b_ids[i];
+
+				bool a_is_num = is_numeric_identifier (id_a);
+				bool b_is_num = is_numeric_identifier (id_b);
+
+				if (a_is_num && b_is_num) {
+					var val_a = uint.parse (id_a);
+					var val_b = uint.parse (id_b);
+					if (val_a != val_b)
+						return val_a > val_b ? 1 : -1;
+				} else if (a_is_num) {
+					return -1;
+				} else if (b_is_num) {
+					return 1;
+				} else {
+					int cmp = strcmp (id_a, id_b);
+					if (cmp != 0)
+						return cmp;
+				}
+			}
+
+			if (a_ids.length != b_ids.length)
+				return a_ids.length > b_ids.length ? 1 : -1;
+
+			return 0;
 		}
 
 		private static bool is_precise_spec (string spec) throws Error {
@@ -1030,11 +1134,11 @@ namespace Frida {
 				SemverVersion upper;
 
 				if (lower.major == 0 && lower.minor == 0)
-					upper = new SemverVersion (0, 0, lower.patch + 1, null);
+					upper = new SemverVersion (0, 0, lower.patch + 1);
 				else if (lower.major == 0)
-					upper = new SemverVersion (0, lower.minor + 1, 0, null);
+					upper = new SemverVersion (0, lower.minor + 1);
 				else
-					upper = new SemverVersion (lower.major, lower.minor + 1, 0, null);
+					upper = new SemverVersion (lower.major, lower.minor + 1);
 
 				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
 			}
@@ -1044,11 +1148,11 @@ namespace Frida {
 				SemverVersion upper;
 
 				if (lower.major != 0) {
-					upper = new SemverVersion (lower.major + 1, 0, 0, null);
+					upper = new SemverVersion (lower.major + 1);
 				} else if (lower.minor != 0) {
-					upper = new SemverVersion (0, lower.minor + 1, 0, null);
+					upper = new SemverVersion (0, lower.minor + 1);
 				} else {
-					upper = new SemverVersion (0, 0, lower.patch + 1, null);
+					upper = new SemverVersion (0, 0, lower.patch + 1);
 				}
 
 				return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
@@ -1107,36 +1211,59 @@ namespace Frida {
 
 			SemverVersion lower = new SemverVersion (major,
 					minor_wild ? 0 : minor,
-					patch_wild ? 0 : patch,
-					null);
+					patch_wild ? 0 : patch);
 
 			SemverVersion upper;
 
 			if (minor_wild)
-				upper = new SemverVersion (major + 1, 0, 0, null);
+				upper = new SemverVersion (major + 1);
 			else if (patch_wild)
-				upper = new SemverVersion (major, minor + 1, 0, null);
+				upper = new SemverVersion (major, minor + 1);
 			else
 				return compare_version (cand, lower) == 0;
 
 			return compare_version (cand, lower) >= 0 && compare_version (cand, upper) < 0;
 		}
-	}
 
-	private uint parse_uint (string s) throws Error {
-		uint u;
-		if (!uint.try_parse (s, out u))
-			throw new Error.PROTOCOL ("Invalid uint: '%s'", s);
-		return u;
-	}
+		private uint parse_uint (string s) throws Error {
+			if (s.length == 0)
+				throw new Error.PROTOCOL ("Numeric component cannot be empty");
 
-	private int count_char (string s, char ch) {
-		int n = 0;
-		foreach (unichar c in s) {
-			if (c == ch)
-				n++;
+			for (int i = 0; i < s.length; i++) {
+				unichar c = s[i];
+				if (!c.isdigit ()) {
+					throw new Error.PROTOCOL ("Numeric component '%s' contains non-digit character '%s'",
+						s, c.to_string ());
+				}
+			}
+
+			if (s.length > 1 && s[0] == '0')
+				throw new Error.PROTOCOL ("Numeric component '%s' has leading zeros", s);
+
+			uint u;
+			if (!uint.try_parse (s, out u))
+				throw new Error.PROTOCOL ("Invalid uint: '%s'", s);
+			return u;
 		}
-		return n;
+
+		private static bool is_numeric_identifier (string s) {
+			if (s.length == 0)
+				return false;
+			foreach (unichar c in s) {
+				if (!c.isdigit ())
+					return false;
+			}
+			return true;
+		}
+
+		private int count_char (string s, char ch) {
+			int n = 0;
+			foreach (unichar c in s) {
+				if (c == ch)
+					n++;
+			}
+			return n;
+		}
 	}
 
 	private class TarStreamReader : Object {
