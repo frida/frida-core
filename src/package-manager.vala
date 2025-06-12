@@ -92,57 +92,74 @@ namespace Frida {
 
 			Manifest manifest = yield load_manifest (pkg_json_f, lock_f, cancellable);
 
+			File toplevel_node_modules_root = project_root.get_child ("node_modules");
+			FS.mkdirp (toplevel_node_modules_root, cancellable);
+
 			var wanted = new Gee.HashMap<string, PackageDependency> ();
+			foreach (var e in manifest.dependencies.all.entries) {
+				string lockfile_key = lockfile_key_for_dependency (e.key, toplevel_node_modules_root, project_root);
+				wanted[lockfile_key] = e.value;
+			}
 			wanted.set_all (manifest.dependencies.all);
 			foreach (string spec in opts.specs) {
-				string name, version;
+				string name, version_spec;
 				int at = spec.last_index_of ("@");
 				if (at != -1) {
 					name = spec[:at];
-					version = spec[at + 1:];
+					version_spec = spec[at + 1:];
 				} else {
 					name = spec;
-					version = "latest";
+					version_spec = "latest";
 				}
-				wanted[name] = new PackageDependency () {
+
+				string lockfile_key = lockfile_key_for_dependency (name, toplevel_node_modules_root, project_root);
+
+				wanted[lockfile_key] = new PackageDependency () {
 					name = name,
-					version = new PackageVersion (version),
+					version = new PackageVersion (version_spec),
 					role = RUNTIME,
 				};
 			}
 
-			File install_root = project_root.get_child ("node_modules");
-			FS.mkdirp (install_root, cancellable);
-
 			var all_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
-			foreach (PackageDependency dep in wanted.values)
-				all_installs[dep.name] = new Promise<PackageLockEntry> ();
+			foreach (string lockfile_key in wanted.keys)
+				all_installs[lockfile_key] = new Promise<PackageLockEntry> ();
 
 			var toplevel_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
 			toplevel_installs.set_all (all_installs);
+
 			foreach (var e in toplevel_installs.entries) {
-				PackageDependency dep = wanted[e.key];
-				perform_install.begin (dep.name, dep.version, dep, install_root, cancellable, e.value, all_installs);
+				PackageDependency original_dep = wanted[e.key];
+				perform_install.begin (
+					original_dep.name,
+					original_dep.version,
+					original_dep,
+					toplevel_node_modules_root,
+					project_root,
+					manifest,
+					cancellable,
+					e.value,
+					all_installs
+				);
 			}
 
 			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
 			while (finished_installs.size != all_installs.size) {
 				PackageLockEntry? entry = null;
 				foreach (var e in all_installs.entries) {
-					unowned string name = e.key;
-					if (finished_installs.has_key (name))
+					unowned string key = e.key;
+					if (finished_installs.has_key (key))
 						continue;
 					entry = yield e.value.future.wait_async (cancellable);
-					finished_installs[name] = entry;
+					finished_installs[key] = entry;
 					break;
 				}
 
-				PackageDependency? dep = wanted[entry.name];
-				if (dep != null) {
+				if (entry.name == entry.toplevel_dep.name) {
 					manifest.dependencies.add (new PackageDependency () {
 						name = entry.name,
-						version = dep.derive_version (entry.version),
-						role = dep.role,
+						version = entry.toplevel_dep.derive_version (entry.version),
+						role = entry.toplevel_dep.role,
 					});
 				}
 			}
@@ -156,6 +173,17 @@ namespace Frida {
 			}
 
 			return new PackageInstallResult (new PackageList (pkgs));
+		}
+
+		private static string lockfile_key_for_dependency (string name, File node_modules_root, File project_root) {
+			return install_dir_for_dependency (name, node_modules_root).get_relative_path (project_root);
+		}
+
+		private static File install_dir_for_dependency (string name, File node_modules_root) {
+			File location = node_modules_root;
+			foreach (unowned string part in name.split ("/"))
+				location = location.get_child (part);
+			return location;
 		}
 
 		private class Manifest {
@@ -554,66 +582,117 @@ namespace Frida {
 				.end_object ();
 		}
 
-		private async void perform_install (string name, PackageVersion version, PackageDependency toplevel_dep, File install_root,
-				Cancellable? cancellable, Promise<PackageLockEntry> request,
-				Gee.Map<string, Promise<PackageLockEntry>> all_installs) {
+		private async void perform_install (string name, PackageVersion version_spec, PackageDependency toplevel_dep,
+				File install_root, File project_root, Manifest manifest, Cancellable? cancellable,
+				Promise<PackageLockEntry> request, Gee.Map<string, Promise<PackageLockEntry>> all_installs) {
 			try {
-				Json.Reader r = yield fetch ("https://%s/%s/%s"
-					.printf (registry, Uri.escape_string (name), Uri.escape_string (version.spec)),
-					session, cancellable);
-				r.read_member ("version");
-				string? effective_version = r.get_string_value ();
-				r.end_member ();
-				r.read_member ("description");
-				string? description = r.get_string_value ();
-				r.end_member ();
-				r.read_member ("license");
-				string? license = r.get_string_value ();
-				r.end_member ();
-				r.read_member ("dist");
-				r.read_member ("tarball");
-				string? tarball_url = r.get_string_value ();
-				r.end_member ();
-				r.read_member ("integrity");
-				string? integrity = r.get_string_value ();
-				r.end_member ();
-				r.read_member ("shasum");
-				string? shasum = r.get_string_value ();
-				r.end_member ();
-				r.end_member ();
-				var deps = read_dependencies (r);
+				File dest_dir = install_dir_for_dependency (name, install_root);
+				string lockfile_key = dest_dir.get_relative_path (project_root);
+				PackageLockPackageInfo? locked_info = manifest.locked_packages[lockfile_key];
 
-				if (tarball_url == null)
-					throw new Error.PROTOCOL ("No tarball URL for %s", name);
+				string effective_version;
+				string? description = null;
+				string? license = null;
+				string resolved_url;
+				string? integrity_from_lock_or_registry = null;
+				string? shasum_from_registry = null;
+				PackageDependencies deps_to_install;
 
-				bool is_toplevel = name != toplevel_dep.name;
-				foreach (PackageDependency d in deps.all.values) {
-					if (d.role == DEVELOPMENT && !is_toplevel)
-						continue;
-					if (all_installs.has_key (d.name))
-						continue;
-					var req = new Promise<PackageLockEntry> ();
-					all_installs[d.name] = req;
-					perform_install.begin (d.name, d.version, toplevel_dep, install_root, cancellable, req,
-						all_installs);
+				bool use_lockfile_entry = false;
+				if (locked_info != null) {
+					// If version_spec is "latest", we might want to ignore lockfile or verify.
+					// For now, if "latest" is specified, we bypass strict lockfile version matching.
+					// Otherwise, the locked version must satisfy the requested spec.
+					if (version_spec.spec != "latest" &&
+						Semver.satisfies_range (Semver.parse_version (locked_info.version), version_spec.spec)) {
+						use_lockfile_entry = true;
+					} else if (version_spec.spec == "latest" && locked_info.version != null) {
+						// If @latest is requested, but we have a lockfile entry,
+						// a more advanced system might check if locked_info.version IS the latest.
+						// For now, requesting @latest will mean fetching from registry to ensure latest.
+						// If the spec was *derived* from a package.json that had "latest",
+						// then we should prefer the lockfile if it exists. This distinction is subtle.
+						// Let's assume if version_spec.spec is literally "latest", it's an explicit user request to get latest.
+					}
 				}
 
-				File dest_root = install_root;
-				foreach (string part in name.split ("/"))
-					dest_root = dest_root.get_child (part);
+				if (use_lockfile_entry && locked_info != null) {
+					effective_version = locked_info.version;
+					resolved_url = locked_info.resolved;
+					integrity_from_lock_or_registry = locked_info.integrity;
+					deps_to_install = locked_info.dependencies;
+					if (resolved_url == null) {
+						throw new Error.PROTOCOL ("Lockfile entry for '%s' is missing 'resolved' URL.",
+							lockfile_key);
+					}
+				} else {
+					Json.Reader r = yield fetch ("https://%s/%s/%s"
+						.printf (registry, Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
+						session, cancellable);
 
-				yield download_and_unpack (name, tarball_url, dest_root, integrity, shasum, cancellable);
+					r.read_member ("version");
+					effective_version = r.get_string_value ();
+					r.end_member ();
+					if (effective_version == null) throw new Error.PROTOCOL("Registry response for '%s' missing 'version'", name);
 
-				// TODO: handle missing 'integrity'
+					r.read_member ("description");
+					description = r.get_string_value ();
+					r.end_member ();
+
+					r.read_member ("license");
+					license = r.get_string_value ();
+					r.end_member ();
+
+					r.read_member ("dist");
+					r.read_member ("tarball");
+					resolved_url = r.get_string_value ();
+					r.end_member ();
+					r.read_member ("integrity");
+					integrity_from_lock_or_registry = r.get_string_value ();
+					r.end_member ();
+					r.read_member ("shasum");
+					shasum_from_registry = r.get_string_value ();
+					r.end_member ();
+					r.end_member ();
+
+					deps_to_install = read_dependencies (r);
+
+					if (resolved_url == null) {
+						throw new Error.PROTOCOL ("No tarball URL for %s", name);
+					}
+				}
+
+				foreach (PackageDependency d in deps_to_install.runtime.values) {
+					File sub_install_root = dest_dir.get_child ("node_modules");
+					string sub_lockfile_key = lockfile_key_for_dependency (d.name, sub_install_root, project_root);
+					if (all_installs.has_key (sub_lockfile_key))
+						continue;
+					var sub_req = new Promise<PackageLockEntry> ();
+					all_installs[sub_lockfile_key] = sub_req;
+					perform_install.begin (
+						d.name,
+						d.version,
+						toplevel_dep,
+						sub_install_root,
+						project_root,
+						manifest,
+						cancellable,
+						sub_req,
+						all_installs
+					);
+				}
+
+				yield download_and_unpack (name, resolved_url, dest_dir, integrity_from_lock_or_registry,
+					shasum_from_registry, cancellable);
 
 				request.resolve (new PackageLockEntry () {
 					name = name,
 					version = effective_version,
-					resolved = tarball_url,
-					integrity = integrity,
+					resolved = resolved_url,
+					integrity = integrity_from_lock_or_registry,
 					description = description,
 					license = license,
-					dependencies = deps,
+					dependencies = deps_to_install,
 					toplevel_dep = toplevel_dep,
 				});
 			} catch (GLib.Error e) {
