@@ -864,6 +864,7 @@ namespace Frida {
 
 			Bytes bytes;
 			var msg = new Soup.Message ("GET", url);
+			msg.request_headers.append ("Accept", "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*");
 			try {
 				bytes = yield session.send_and_read_async (msg, Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
