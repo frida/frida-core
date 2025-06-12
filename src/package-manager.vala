@@ -13,7 +13,8 @@ namespace Frida {
 		public PackageManager () {
 			string cache_dir = Path.build_filename (Environment.get_user_cache_dir (), "frida", "package-manager");
 			var cache = new Soup.Cache (cache_dir, Soup.CacheType.SINGLE_USER);
-			session = new Soup.Session ();
+			session = (Soup.Session) Object.new (typeof (Soup.Session),
+				"max-conns-per-host", 15);
 			session.add_feature (cache);
 		}
 
