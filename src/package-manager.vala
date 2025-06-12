@@ -634,20 +634,10 @@ namespace Frida {
 				PackageDependencies deps_to_install;
 
 				bool use_lockfile_entry = false;
-				if (locked_info != null) {
-					// If version_spec is "latest", we might want to ignore lockfile or verify.
-					// For now, if "latest" is specified, we bypass strict lockfile version matching.
-					// Otherwise, the locked version must satisfy the requested spec.
+				if (locked_info != null && locked_info.version != null && locked_info.resolved != null) {
 					if (version_spec.spec != "latest" &&
 						Semver.satisfies_range (Semver.parse_version (locked_info.version), version_spec.spec)) {
 						use_lockfile_entry = true;
-					} else if (version_spec.spec == "latest" && locked_info.version != null) {
-						// If @latest is requested, but we have a lockfile entry,
-						// a more advanced system might check if locked_info.version IS the latest.
-						// For now, requesting @latest will mean fetching from registry to ensure latest.
-						// If the spec was *derived* from a package.json that had "latest",
-						// then we should prefer the lockfile if it exists. This distinction is subtle.
-						// Let's assume if version_spec.spec is literally "latest", it's an explicit user request to get latest.
 					}
 				}
 
@@ -656,50 +646,82 @@ namespace Frida {
 					resolved_url = locked_info.resolved;
 					integrity_from_lock_or_registry = locked_info.integrity;
 					deps_to_install = locked_info.dependencies;
-					if (resolved_url == null) {
-						throw new Error.PROTOCOL ("Lockfile entry for '%s' is missing 'resolved' URL.",
-							lockfile_key);
-					}
 				} else {
-					Json.Reader r = yield fetch ("https://%s/%s/%s"
-						.printf (registry, Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
-						session, cancellable);
+					bool is_precise_version_string = Semver.is_precise_spec (version_spec.spec);
+					bool spec_is_tag_or_range = !is_precise_version_string;
 
-					r.read_member ("version");
-					effective_version = r.get_string_value ();
-					r.end_member ();
-					if (effective_version == null) throw new Error.PROTOCOL("Registry response for '%s' missing 'version'", name);
+					Json.Reader? meta = null;
 
-					r.read_member ("description");
-					description = r.get_string_value ();
-					r.end_member ();
+					if (spec_is_tag_or_range && version_spec.spec != "latest") {
+						Json.Reader full_pkg_reader = yield fetch (
+							"https://%s/%s".printf (registry, Uri.escape_string (name)),
+							session, cancellable);
 
-					r.read_member ("license");
-					license = r.get_string_value ();
-					r.end_member ();
+						full_pkg_reader.read_member ("versions");
+						string[]? available_version_strings = full_pkg_reader.list_members ();
+						if (available_version_strings == null) {
+							throw new Error.PROTOCOL ("Package '%s' has no versions listed in registry document", name);
+						}
+						full_pkg_reader.end_member ();
 
-					r.read_member ("dist");
-					r.read_member ("tarball");
-					resolved_url = r.get_string_value ();
-					r.end_member ();
-					r.read_member ("integrity");
-					integrity_from_lock_or_registry = r.get_string_value ();
-					r.end_member ();
-					r.read_member ("shasum");
-					shasum_from_registry = r.get_string_value ();
-					r.end_member ();
-					r.end_member ();
+						string? target_version_str = Semver.max_satisfying (
+							new Gee.ArrayList<string>.wrap (available_version_strings),
+							version_spec.spec);
+						if (target_version_str == null) {
+							throw new Error.PROTOCOL ("No version satisfying '%s' found for package '%s'",
+								version_spec.spec, name);
+						}
 
-					deps_to_install = read_dependencies (r);
-
-					if (resolved_url == null) {
-						throw new Error.PROTOCOL ("No tarball URL for %s", name);
+						full_pkg_reader
+							.read_member ("versions")
+							.read_member (target_version_str);
+						meta = full_pkg_reader;
+						effective_version = target_version_str;
+					} else {
+						meta = yield fetch (
+							"https://%s/%s/%s".printf (registry, Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
+							session,
+							cancellable
+						);
+						meta.read_member ("version");
+						effective_version = meta.get_string_value ();
+						meta.end_member ();
+						if (effective_version == null) {
+							throw new Error.PROTOCOL ("Registry response for '%s@%s' missing 'version' field",
+								name, version_spec.spec);
+						}
 					}
+
+					meta.read_member ("description");
+					description = meta.get_string_value ();
+					meta.end_member ();
+
+					meta.read_member ("license");
+					license = meta.get_string_value ();
+					meta.end_member ();
+
+					meta.read_member ("dist");
+					meta.read_member ("tarball");
+					resolved_url = meta.get_string_value ();
+					meta.end_member ();
+					meta.read_member ("integrity");
+					integrity_from_lock_or_registry = meta.get_string_value ();
+					meta.end_member ();
+					meta.read_member ("shasum");
+					shasum_from_registry = meta.get_string_value ();
+					meta.end_member ();
+					meta.end_member ();
+
+					deps_to_install = read_dependencies (meta);
+
+					if (resolved_url == null)
+						throw new Error.PROTOCOL ("No tarball URL for %s@%s", name, effective_version);
 				}
 
 				foreach (PackageDependency d in deps_to_install.runtime.values) {
 					File sub_install_root = dest_dir.get_child ("node_modules");
 					string sub_lockfile_key = lockfile_key_for_dependency (d.name, sub_install_root, project_root);
+
 					if (all_installs.has_key (sub_lockfile_key))
 						continue;
 					var sub_req = new Promise<PackageLockEntry> ();
