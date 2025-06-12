@@ -22,8 +22,8 @@ namespace Frida {
 			var opts = (options != null) ? options : new PackageSearchOptions ();
 
 			var text = string.join (" ", query, "keywords:frida-gum");
-			Json.Reader reader = yield fetch ("https://%s/-/v1/search?text=%s&from=%u&size=%u"
-				.printf (registry, Uri.escape_string (text), opts.offset, opts.limit), session, cancellable);
+			Json.Reader reader = yield fetch ("/-/v1/search?text=%s&from=%u&size=%u"
+				.printf (Uri.escape_string (text), opts.offset, opts.limit), cancellable);
 
 			var packages = new Gee.ArrayList<Package> ();
 			reader.read_member ("objects");
@@ -597,11 +597,6 @@ namespace Frida {
 			yield FS.write_all_text (lock_f, lock_json, cancellable);
 		}
 
-		private static void add_dependencies (Json.Builder b, PackageDependencies deps) {
-			add_dependencies_in_section (b, "dependencies", deps.runtime.values);
-			add_dependencies_in_section (b, "devDependencies", deps.development.values);
-		}
-
 		private static void add_dependencies_in_section (Json.Builder b, string section, Gee.Collection<PackageDependency> deps) {
 			if (deps.is_empty)
 				return;
@@ -653,16 +648,14 @@ namespace Frida {
 					Json.Reader? meta = null;
 
 					if (spec_is_tag_or_range && version_spec.spec != "latest") {
-						Json.Reader full_pkg_reader = yield fetch (
-							"https://%s/%s".printf (registry, Uri.escape_string (name)),
-							session, cancellable);
+						Json.Reader r = yield fetch ("/" + Uri.escape_string (name), cancellable);
 
-						full_pkg_reader.read_member ("versions");
-						string[]? available_version_strings = full_pkg_reader.list_members ();
+						r.read_member ("versions");
+						string[]? available_version_strings = r.list_members ();
 						if (available_version_strings == null) {
 							throw new Error.PROTOCOL ("Package '%s' has no versions listed in registry document", name);
 						}
-						full_pkg_reader.end_member ();
+						r.end_member ();
 
 						string? target_version_str = Semver.max_satisfying (
 							new Gee.ArrayList<string>.wrap (available_version_strings),
@@ -672,17 +665,14 @@ namespace Frida {
 								version_spec.spec, name);
 						}
 
-						full_pkg_reader
-							.read_member ("versions")
-							.read_member (target_version_str);
-						meta = full_pkg_reader;
+						r.read_member ("versions");
+						r.read_member (target_version_str);
+						meta = r;
 						effective_version = target_version_str;
 					} else {
 						meta = yield fetch (
-							"https://%s/%s/%s".printf (registry, Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
-							session,
-							cancellable
-						);
+							"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
+							cancellable);
 						meta.read_member ("version");
 						effective_version = meta.get_string_value ();
 						meta.end_member ();
@@ -869,6 +859,31 @@ namespace Frida {
 			}
 		}
 
+		private async Json.Reader fetch (string resource, Cancellable? cancellable) throws Error, IOError {
+			string url = "https://%s%s".printf (registry, resource);
+
+			Bytes bytes;
+			var msg = new Soup.Message ("GET", url);
+			try {
+				bytes = yield session.send_and_read_async (msg, Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to GET %s: %s", url, e.message);
+			}
+			if (msg.status_code != 200)
+				throw new Error.PROTOCOL ("Unable to GET %s: HTTP %u", url, msg.status_code);
+
+			printerr ("Fetched %s: %s\n", url, (string) bytes.get_data ());
+
+			var parser = new Json.Parser ();
+			try {
+				parser.load_from_data ((string) bytes.get_data (), (ssize_t) bytes.get_size ());
+			} catch (GLib.Error e) {
+				throw new Error.PROTOCOL ("Unable to parse response from %s: %s", url, e.message);
+			}
+
+			return new Json.Reader (parser.get_root ());
+		}
+
 		private T create<T> () {
 			return Object.new (typeof (T), parent: this);
 		}
@@ -1036,29 +1051,6 @@ namespace Frida {
 			indent_level = seq.length;
 			indent_char = seq.get_char (0);
 		}
-	}
-
-	private async Json.Reader fetch (string url, Soup.Session session, Cancellable? cancellable) throws Error, IOError {
-		Bytes bytes;
-		var msg = new Soup.Message ("GET", url);
-		try {
-			bytes = yield session.send_and_read_async (msg, Priority.DEFAULT, cancellable);
-		} catch (GLib.Error e) {
-			throw new Error.TRANSPORT ("Unable to GET %s: %s", url, e.message);
-		}
-		if (msg.status_code != 200)
-			throw new Error.PROTOCOL ("Unable to GET %s: HTTP %u", url, msg.status_code);
-
-		printerr ("Fetched %s: %s\n", url, (string) bytes.get_data ());
-
-		var parser = new Json.Parser ();
-		try {
-			parser.load_from_data ((string) bytes.get_data (), (ssize_t) bytes.get_size ());
-		} catch (GLib.Error e) {
-			throw new Error.PROTOCOL ("Unable to parse response from %s: %s", url, e.message);
-		}
-
-		return new Json.Reader (parser.get_root ());
 	}
 
 	private async Json.Reader load_json (File f, Cancellable? cancellable) throws Error, IOError {
