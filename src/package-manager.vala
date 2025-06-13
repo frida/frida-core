@@ -96,81 +96,120 @@ namespace Frida {
 			File toplevel_node_modules_root = project_root.get_child ("node_modules");
 			FS.mkdirp (toplevel_node_modules_root, cancellable);
 
-			var wanted = new Gee.HashMap<string, PackageDependency> ();
-			foreach (var e in manifest.dependencies.all.entries) {
-				string lockfile_key = lockfile_key_for_dependency (e.key, toplevel_node_modules_root, project_root);
-				wanted[lockfile_key] = e.value;
+			var wanted_deps_list = new Gee.ArrayList<PackageDependency> ();
+			foreach (var dep_entry in manifest.dependencies.all.values) {
+				wanted_deps_list.add (dep_entry);
 			}
-			wanted.set_all (manifest.dependencies.all);
-			foreach (string spec in opts.specs) {
-				string name, version_spec;
-				int at = spec.last_index_of ("@");
+			foreach (string spec_str in opts.specs) {
+				string name, version_spec_val;
+				int at = spec_str.last_index_of ("@");
 				if (at != -1) {
-					name = spec[:at];
-					version_spec = spec[at + 1:];
+					name = spec_str.substring (0, at);
+					version_spec_val = spec_str.substring (at + 1);
 				} else {
-					name = spec;
-					version_spec = "latest";
+					name = spec_str;
+					version_spec_val = "latest";
 				}
-
-				string lockfile_key = lockfile_key_for_dependency (name, toplevel_node_modules_root, project_root);
-
-				wanted[lockfile_key] = new PackageDependency () {
+				PackageDependency? existing_wanted = null;
+				foreach (var wd in wanted_deps_list) {
+					if (wd.name == name) {
+						existing_wanted = wd;
+						break;
+					}
+				}
+				if (existing_wanted != null)
+					wanted_deps_list.remove (existing_wanted);
+				wanted_deps_list.add (new PackageDependency () {
 					name = name,
-					version = new PackageVersion (version_spec),
+					version = new PackageVersion (version_spec_val),
 					role = RUNTIME,
-				};
+				});
 			}
 
-			var all_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
-			foreach (string lockfile_key in wanted.keys)
-				all_installs[lockfile_key] = new Promise<PackageLockEntry> ();
+			var all_physical_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
+			var resolution_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
+			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
+			var top_level_placements = new Gee.HashMap<string, string> ();
 
-			var toplevel_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
-			toplevel_installs.set_all (all_installs);
+			var initial_dep_link_promises = new Gee.ArrayList<Future<PackageLockEntry>> ();
 
-			foreach (var e in toplevel_installs.entries) {
-				PackageDependency original_dep = wanted[e.key];
+			foreach (PackageDependency original_dep in wanted_deps_list) {
+				var dep_link_promise = new Promise<PackageLockEntry> ();
+				initial_dep_link_promises.add (dep_link_promise.future);
+
 				perform_install.begin (
 					original_dep.name,
 					original_dep.version,
-					original_dep,
-					toplevel_node_modules_root,
+					original_dep, // This is the toplevel_dep context
+					toplevel_node_modules_root, // Parent node_modules dir for these top-level calls
 					project_root,
-					manifest,
+					manifest, // Pass the manifest for initial lockfile checks
 					cancellable,
-					e.value,
-					all_installs
+					dep_link_promise,	// Promise for this specific dependency link
+					all_physical_installs, // Global map of actual physical installs
+					resolution_cache,
+					packument_cache,
+					top_level_placements
 				);
 			}
 
-			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
-			while (finished_installs.size != all_installs.size) {
-				PackageLockEntry? entry = null;
-				foreach (var e in all_installs.entries) {
-					unowned string key = e.key;
-					if (finished_installs.has_key (key))
-						continue;
-					entry = yield e.value.future.wait_async (cancellable);
-					finished_installs[key] = entry;
-					break;
-				}
+			// Wait for all *initial direct dependencies* to have their links resolved.
+			// Their transitive dependencies will be handled by the recursive perform_install calls,
+			// and all actual physical installs will populate `all_physical_installs`.
+			if (!initial_dep_link_promises.is_empty) {
+				yield Future.all_void (initial_dep_link_promises);
+			}
 
-				if (entry.name == entry.toplevel_dep.name) {
-					manifest.dependencies.add (new PackageDependency () {
-						name = entry.name,
-						version = entry.toplevel_dep.derive_version (entry.version),
-						role = entry.toplevel_dep.role,
+			// Now, ensure all *physical installations* triggered anywhere in the graph are complete.
+			var all_installation_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
+			foreach (var promise in all_physical_installs.values) {
+				all_installation_futures.add (promise.future);
+			}
+			if (!all_installation_futures.is_empty) {
+				yield Future.all_void (all_installation_futures);
+			}
+
+			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
+			foreach (var entry in all_physical_installs.entries) {
+				finished_installs[entry.key] = entry.value.future.get_value ();
+			}
+
+			var new_manifest_dependencies = new PackageDependencies ();
+			// Use the results from initial_dep_link_promises to update manifest.dependencies
+			// as these represent the resolved versions of what was directly requested.
+			foreach (var future_ple in initial_dep_link_promises) {
+				PackageLockEntry ple = future_ple.get_value (); // Should be resolved now
+				// Find the original PackageDependency from wanted_deps_list that matches ple.toplevel_dep
+				PackageDependency? original_wanted_dep = null;
+				foreach (var wd in wanted_deps_list) {
+					if (wd == ple.toplevel_dep) { // Check object identity
+						original_wanted_dep = wd;
+						break;
+					}
+				}
+				if (original_wanted_dep != null) {
+					new_manifest_dependencies.add (new PackageDependency () {
+						name = ple.name, // Use resolved name
+						version = original_wanted_dep.derive_version (ple.version), // Derive spec based on original
+						role = original_wanted_dep.role,
 					});
 				}
 			}
+			manifest.dependencies = new_manifest_dependencies;
 
 			yield write_back_manifests (manifest, finished_installs, pkg_json_f, lock_f, cancellable);
 
 			var pkgs = new Gee.ArrayList<Package> ();
-			foreach (PackageLockEntry e in finished_installs.values) {
-				if (e.name == e.toplevel_dep.name)
+			// Populate 'pkgs' from the results of the initial_dep_link_promises,
+			// as these correspond to the top-level items requested.
+			foreach (var future_ple in initial_dep_link_promises) {
+				PackageLockEntry e = future_ple.get_value ();
+				// Avoid duplicates if multiple specs resolved to the same top-level package instance
+				bool already_added = false;
+				foreach (var p_ in pkgs) { if (p_.name == e.name && p_.version == e.version) { already_added = true; break; } }
+				if (!already_added) {
 					pkgs.add (new Package (e.name, e.version, e.description));
+				}
 			}
 
 			return new PackageInstallResult (new PackageList (pkgs));
@@ -613,151 +652,288 @@ namespace Frida {
 				.end_object ();
 		}
 
-		private async void perform_install (string name, PackageVersion version_spec, PackageDependency toplevel_dep,
-				File install_root, File project_root, Manifest manifest, Cancellable? cancellable,
-				Promise<PackageLockEntry> request, Gee.Map<string, Promise<PackageLockEntry>> all_installs) {
+		private async void perform_install (
+				string name,
+				PackageVersion version_spec,		// Requested version spec (e.g., ^1.0.0, latest)
+				PackageDependency toplevel_dep,	 // The original top-level package that caused this install chain
+				File parent_node_modules_dir,	   // node_modules dir of the package *requesting* this one
+				File project_root,
+				Manifest manifest,				  // Overall project manifest (passed for context)
+				Cancellable? cancellable,
+				Promise<PackageLockEntry> dep_link_promise, // Promise for *this specific dependency link*
+				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs, // K: lockfile_key of actual install path
+				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
+				Gee.Map<string, Promise<Json.Node>> packument_cache,
+				Gee.Map<string, string> top_level_placements) { // K: name, V: effective_version at top level
 			try {
-				File dest_dir = install_dir_for_dependency (name, install_root);
-				string lockfile_key = dest_dir.get_relative_path (project_root);
-				PackageLockPackageInfo? locked_info = manifest.locked_packages[lockfile_key];
+				// 1. Resolve package metadata (name@spec -> name@effective_version, tarball, deps)
+				string resolution_id = name + "@" + version_spec.spec;
+				Promise<ResolvedPackageData>? rpd_promise = resolution_cache[resolution_id];
+				if (rpd_promise == null) {
+					rpd_promise = new Promise<ResolvedPackageData> ();
+					resolution_cache[resolution_id] = rpd_promise;
+					_fetch_and_resolve_package_data_async.begin (name, version_spec, rpd_promise, packument_cache, cancellable);
+				}
+				ResolvedPackageData rpd = yield rpd_promise.future.wait_async (cancellable);
 
-				string effective_version;
-				string? description = null;
-				string? license = null;
-				string resolved_url;
-				string? integrity_from_lock_or_registry = null;
-				string? shasum_from_registry = null;
-				PackageDependencies deps_to_install;
+				// 2. Determine target installation directory (hoisting logic)
+				File target_dir;
+				File toplevel_nm_root = project_root.get_child ("node_modules");
+				File potential_toplevel_dir = install_dir_for_dependency (rpd.name, toplevel_nm_root);
 
-				bool use_lockfile_entry = false;
-				if (locked_info != null && locked_info.version != null && locked_info.resolved != null) {
-					if (version_spec.spec != "latest" &&
-						Semver.satisfies_range (Semver.parse_version (locked_info.version), version_spec.spec)) {
-						use_lockfile_entry = true;
-					}
+				string? placed_toplevel_version = top_level_placements[rpd.name];
+				if (placed_toplevel_version == null) {
+					target_dir = potential_toplevel_dir;
+					top_level_placements[rpd.name] = rpd.effective_version;
+				} else if (placed_toplevel_version == rpd.effective_version) {
+					target_dir = potential_toplevel_dir;
+				} else {
+					target_dir = install_dir_for_dependency (rpd.name, parent_node_modules_dir);
 				}
 
-				if (use_lockfile_entry && locked_info != null) {
-					effective_version = locked_info.version;
-					resolved_url = locked_info.resolved;
-					integrity_from_lock_or_registry = locked_info.integrity;
-					deps_to_install = locked_info.dependencies;
-				} else {
-					Json.Reader? meta = null;
-					bool fetch_full_document_then_resolve = true;
+				string actual_install_lockfile_key = target_dir.get_relative_path (project_root);
+				if (actual_install_lockfile_key == null) {
+					actual_install_lockfile_key = target_dir.get_path (); // Fallback
+				}
 
-					if (Semver.is_precise_spec (version_spec.spec))
-						fetch_full_document_then_resolve = false;
+				// 3. Check if this physical installation is already happening or done (by another concurrent request)
+				Promise<PackageLockEntry>? physical_install_promise = all_physical_installs[actual_install_lockfile_key];
 
-					if (!fetch_full_document_then_resolve) {
-						meta = yield fetch (
-							"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
-							cancellable);
-						meta.read_member ("version");
-						effective_version = meta.get_string_value ();
-						meta.end_member ();
-						if (effective_version == null) {
-							throw new Error.PROTOCOL ("Registry response for '%s@%s' missing 'version' field",
-								name, version_spec.spec);
+				if (physical_install_promise != null) {
+					PackageLockEntry existing_ple = yield physical_install_promise.future.wait_async (cancellable);
+					dep_link_promise.resolve (new PackageLockEntry () {
+						name = existing_ple.name,
+						version = existing_ple.version,
+						resolved = existing_ple.resolved,
+						integrity = existing_ple.integrity,
+						description = existing_ple.description,
+						license = existing_ple.license,
+						dependencies = existing_ple.dependencies,
+						toplevel_dep = toplevel_dep
+					});
+					return;
+				}
+
+				// 4. This is the first request to physically install rpd.name@rpd.effective_version at target_dir.
+				//	The dep_link_promise will drive this physical installation.
+				all_physical_installs[actual_install_lockfile_key] = dep_link_promise;
+
+				// 5. Check if package is already correctly installed at target_dir
+				bool already_correctly_installed = false;
+				if (target_dir.query_exists (cancellable)) {
+					File installed_pkg_json_f = target_dir.get_child ("package.json");
+					if (installed_pkg_json_f.query_exists (cancellable)) {
+						try {
+							Json.Reader installed_pkg_reader = yield load_json (installed_pkg_json_f, cancellable);
+							if (installed_pkg_reader.read_member ("version")) {
+								string? installed_version = installed_pkg_reader.get_string_value ();
+								installed_pkg_reader.end_member ();
+								if (installed_version == rpd.effective_version) {
+									already_correctly_installed = true;
+									// printerr ("Skipping download for %s@%s at %s (already installed)\n", rpd.name, rpd.effective_version, target_dir.get_path());
+								} else {
+									// printerr ("Version mismatch for %s at %s: expected %s, found %s. Re-installing.\n", rpd.name, target_dir.get_path(), rpd.effective_version, installed_version);
+								}
+							}
+						} catch (Error e) {
+							// printerr ("Error reading package.json from %s: %s. Re-installing.\n", target_dir.get_path(), e.message);
 						}
 					} else {
-						Json.Reader r = yield fetch ("/" + Uri.escape_string (name), cancellable);
-
-						r.read_member ("dist-tags");
-						r.read_member (version_spec.spec);
-						string? version_from_dist_tag = r.get_string_value ();
-						r.end_member ();
-						r.end_member ();
-
-						if (version_from_dist_tag != null) {
-							effective_version = version_from_dist_tag;
-						} else {
-							r.read_member ("versions");
-							string[]? available_version_strings = r.list_members ();
-							if (available_version_strings == null) {
-								throw new Error.PROTOCOL (
-									"Package '%s' has no versions listed in registry document", name);
-							}
-							r.end_member ();
-
-							string? target_version_str = Semver.max_satisfying (
-								new Gee.ArrayList<string>.wrap (available_version_strings),
-								version_spec.spec);
-							if (target_version_str == null) {
-								throw new Error.PROTOCOL (
-									"No version satisfying '%s' found for package '%s'",
-									version_spec.spec, name);
-							}
-							effective_version = target_version_str;
-						}
-
-						r.read_member ("versions");
-						r.read_member (effective_version);
-						meta = r;
+						// printerr ("Directory %s exists but missing package.json. Re-installing.\n", target_dir.get_path());
 					}
-
-					meta.read_member ("description");
-					description = meta.get_string_value ();
-					meta.end_member ();
-
-					meta.read_member ("license");
-					license = meta.get_string_value ();
-					meta.end_member ();
-
-					meta.read_member ("dist");
-					meta.read_member ("tarball");
-					resolved_url = meta.get_string_value ();
-					meta.end_member ();
-					meta.read_member ("integrity");
-					integrity_from_lock_or_registry = meta.get_string_value ();
-					meta.end_member ();
-					meta.read_member ("shasum");
-					shasum_from_registry = meta.get_string_value ();
-					meta.end_member ();
-					meta.end_member ();
-
-					deps_to_install = read_dependencies (meta);
-
-					if (resolved_url == null)
-						throw new Error.PROTOCOL ("No tarball URL for %s@%s", name, effective_version);
 				}
 
-				foreach (PackageDependency d in deps_to_install.runtime.values) {
-					File sub_install_root = dest_dir.get_child ("node_modules");
-					string sub_lockfile_key = lockfile_key_for_dependency (d.name, sub_install_root, project_root);
+				// 6. Recursively process dependencies of rpd.name@rpd.effective_version
+				//	This must happen even if already_correctly_installed is true, to ensure sub-dependencies are hoisted/placed.
+				var sub_dep_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
+				File sub_deps_parent_node_modules_dir = target_dir.get_child ("node_modules");
+				PackageDependencies dependencies_to_recurse = rpd.dependencies;
 
-					if (all_installs.has_key (sub_lockfile_key))
+				if (!dependencies_to_recurse.all.is_empty) {
+					FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
+				}
+
+				foreach (PackageDependency d in dependencies_to_recurse.all.values) {
+					bool install_this_sub_dep = false;
+					if (d.role == RUNTIME) {
+						install_this_sub_dep = true;
+					} else if (d.role == DEVELOPMENT) {
+						// Install devDependencies only if the current package (rpd.name) is a direct project dependency
+						bool is_rpd_direct_project_dep = false;
+						if (toplevel_dep.name == rpd.name && parent_node_modules_dir.get_path() == project_root.get_child("node_modules").get_path()) {
+							is_rpd_direct_project_dep = true;
+						}
+						if (is_rpd_direct_project_dep) {
+							install_this_sub_dep = true;
+						}
+					}
+					// TODO: Handle OPTIONAL role based on some policy
+
+					if (!install_this_sub_dep) {
 						continue;
-					var sub_req = new Promise<PackageLockEntry> ();
-					all_installs[sub_lockfile_key] = sub_req;
+					}
+
+					var sub_dep_link_promise = new Promise<PackageLockEntry> ();
+					sub_dep_futures.add (sub_dep_link_promise.future);
 					perform_install.begin (
 						d.name,
 						d.version,
-						toplevel_dep,
-						sub_install_root,
+						toplevel_dep, 
+						sub_deps_parent_node_modules_dir,
 						project_root,
 						manifest,
 						cancellable,
-						sub_req,
-						all_installs
+						sub_dep_link_promise,
+						all_physical_installs,
+						resolution_cache,
+						packument_cache,
+						top_level_placements
 					);
 				}
+				if (!sub_dep_futures.is_empty) {
+					yield Future.all_void (sub_dep_futures);
+				}
 
-				yield download_and_unpack (name, resolved_url, dest_dir, integrity_from_lock_or_registry,
-					shasum_from_registry, cancellable);
+				// 7. Download and unpack the current package if not already correctly installed
+				if (!already_correctly_installed) {
+					// download_and_unpack already handles cleaning dest_root if it exists
+					yield download_and_unpack (rpd.name, rpd.resolved_url, target_dir, rpd.integrity, rpd.shasum, cancellable);
+				}
 
-				request.resolve (new PackageLockEntry () {
+				// 8. Resolve the promise for this dependency link
+				dep_link_promise.resolve (new PackageLockEntry () {
+					name = rpd.name,
+					version = rpd.effective_version,
+					resolved = rpd.resolved_url,
+					integrity = rpd.integrity,
+					description = rpd.description,
+					license = rpd.license,
+					dependencies = rpd.dependencies, // Dependencies declared by *this* package
+					toplevel_dep = toplevel_dep
+				});
+
+			} catch (GLib.Error e) {
+				dep_link_promise.reject (e);
+			}
+		}
+
+		private class ResolvedPackageData {
+			public string name; // Original name requested
+			public string effective_version; // Concrete version resolved
+			public string resolved_url;	  // Tarball URL
+			public string? integrity;
+			public string? shasum;
+			public string? description;
+			public string? license;
+			public PackageDependencies dependencies; // Dependencies from this package's own manifest
+		}
+
+		private async void _fetch_and_resolve_package_data_async (string name, PackageVersion version_spec,
+				Promise<ResolvedPackageData> promise_to_fulfill,
+				Gee.Map<string, Promise<Json.Node>> packument_cache,
+				Cancellable? cancellable) {
+			try {
+				Json.Reader? meta_reader = null; // Reader for the specific version's metadata
+				bool fetch_full_document_then_resolve = true;
+				string effective_version_local;
+
+				if (Semver.is_precise_spec (version_spec.spec)) { // Includes "latest"
+					fetch_full_document_then_resolve = false;
+				}
+
+				if (!fetch_full_document_then_resolve) {
+					// Direct fetch for precise version or "latest"
+					meta_reader = yield fetch (
+						"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
+						cancellable);
+					meta_reader.read_member ("version");
+					effective_version_local = meta_reader.get_string_value ();
+					meta_reader.end_member ();
+					if (effective_version_local == null) {
+						throw new Error.PROTOCOL ("Registry response for '%s@%s' missing 'version' field",
+							name, version_spec.spec);
+					}
+				} else {
+					// Need full packument to resolve range or non-"latest" tag
+					Promise<Json.Node>? packument_promise = packument_cache[name];
+					if (packument_promise == null) {
+						async Promise<Json.Node> fetch_packument_logic () {
+							Json.Reader reader = yield fetch ("/" + Uri.escape_string (name), cancellable);
+							return reader.get_root ();
+						}
+						packument_promise = fetch_packument_logic ();
+						packument_cache[name] = packument_promise;
+					}
+					Json.Node packument_root_node = yield packument_promise.future.wait_async (cancellable);
+					var r = new Json.Reader (packument_root_node);
+
+					string? version_from_dist_tag = null;
+					if (r.read_member ("dist-tags")) {
+						if (r.read_member (version_spec.spec)) {
+							version_from_dist_tag = r.get_string_value ();
+							r.end_member ();
+						}
+						r.end_member ();
+					}
+
+					if (version_from_dist_tag != null) {
+						effective_version_local = version_from_dist_tag;
+					} else {
+						r.read_member ("versions");
+						string[]? available_version_strings = r.list_members ();
+						if (available_version_strings == null) {
+							throw new Error.PROTOCOL ("Package '%s' has no versions listed", name);
+						}
+						r.end_member ();
+						string? target_version_str = Semver.max_satisfying (
+							new Gee.ArrayList<string>.wrap (available_version_strings), version_spec.spec);
+						if (target_version_str == null) {
+							throw new Error.PROTOCOL ("No version satisfying '%s' for '%s'", version_spec.spec, name);
+						}
+						effective_version_local = target_version_str;
+					}
+					r.read_member ("versions");
+					r.read_member (effective_version_local);
+					meta_reader = r;
+				}
+
+				string? description_local = null;
+				if (meta_reader.read_member ("description")) { description_local = meta_reader.get_string_value (); meta_reader.end_member (); }
+
+				string? license_local = null;
+				if (meta_reader.read_member ("license")) {
+					if (meta_reader.get_value_type() == Json.NodeType.STRING) {
+						license_local = meta_reader.get_string_value ();
+					}
+					meta_reader.end_member ();
+				}
+
+				string? resolved_url_local = null;
+				string? integrity_local = null;
+				string? shasum_local = null;
+				if (meta_reader.read_member ("dist")) {
+					if (meta_reader.read_member ("tarball")) { resolved_url_local = meta_reader.get_string_value (); meta_reader.end_member ();}
+					if (meta_reader.read_member ("integrity")) { integrity_local = meta_reader.get_string_value (); meta_reader.end_member ();}
+					if (meta_reader.read_member ("shasum")) { shasum_local = meta_reader.get_string_value (); meta_reader.end_member ();}
+					meta_reader.end_member (); // dist
+				}
+				if (resolved_url_local == null) {
+					throw new Error.PROTOCOL("No tarball URL for %s@%s", name, effective_version_local);
+				}
+				PackageDependencies deps_from_pkg_json = read_dependencies (meta_reader);
+
+				promise_to_fulfill.resolve (new ResolvedPackageData () {
 					name = name,
-					version = effective_version,
-					resolved = resolved_url,
-					integrity = integrity_from_lock_or_registry,
-					description = description,
-					license = license,
-					dependencies = deps_to_install,
-					toplevel_dep = toplevel_dep,
+					effective_version = effective_version_local,
+					resolved_url = resolved_url_local,
+					integrity = integrity_local,
+					shasum = shasum_local,
+					description = description_local,
+					license = license_local,
+					dependencies = deps_from_pkg_json
 				});
 			} catch (GLib.Error e) {
-				request.reject (e);
+				promise_to_fulfill.reject (e);
 			}
 		}
 
@@ -875,6 +1051,7 @@ namespace Frida {
 
 		private async Json.Reader fetch (string resource, Cancellable? cancellable) throws Error, IOError {
 			string url = "https://%s%s".printf (registry, resource);
+			printerr ("Fetching %s\n", url);
 
 			Bytes bytes;
 			var msg = new Soup.Message ("GET", url);
@@ -887,7 +1064,7 @@ namespace Frida {
 			if (msg.status_code != 200)
 				throw new Error.PROTOCOL ("Unable to GET %s: HTTP %u", url, msg.status_code);
 
-			printerr ("Fetched %s: %s\n", url, (string) bytes.get_data ());
+			// printerr ("Fetched %s: %s\n", url, (string) bytes.get_data ());
 
 			var parser = new Json.Parser ();
 			try {
