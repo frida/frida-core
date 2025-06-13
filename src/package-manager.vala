@@ -88,10 +88,10 @@ namespace Frida {
 			var opts = (options != null) ? options : new PackageInstallOptions ();
 
 			File project_root = compute_project_root (opts);
-			File pkg_json_f = project_root.get_child ("package.json");
-			File lock_f = project_root.get_child ("package-lock.json");
+			File pkg_json_file = project_root.get_child ("package.json");
+			File lock_file = project_root.get_child ("package-lock.json");
 
-			Manifest manifest = yield load_manifest (pkg_json_f, lock_f, cancellable);
+			Manifest manifest = yield load_manifest (pkg_json_file, lock_file, cancellable);
 
 			File toplevel_node_modules_root = project_root.get_child ("node_modules");
 			FS.mkdirp (toplevel_node_modules_root, cancellable);
@@ -140,76 +140,67 @@ namespace Frida {
 				perform_install.begin (
 					original_dep.name,
 					original_dep.version,
-					original_dep, // This is the toplevel_dep context
-					toplevel_node_modules_root, // Parent node_modules dir for these top-level calls
+					original_dep,
+					toplevel_node_modules_root,
 					project_root,
-					manifest, // Pass the manifest for initial lockfile checks
+					manifest,
 					cancellable,
-					dep_link_promise,	// Promise for this specific dependency link
-					all_physical_installs, // Global map of actual physical installs
+					dep_link_promise,
+					all_physical_installs,
 					resolution_cache,
 					packument_cache,
 					top_level_placements
 				);
 			}
 
-			// Wait for all *initial direct dependencies* to have their links resolved.
-			// Their transitive dependencies will be handled by the recursive perform_install calls,
-			// and all actual physical installs will populate `all_physical_installs`.
-			if (!initial_dep_link_promises.is_empty) {
+			if (!initial_dep_link_promises.is_empty)
 				yield Future.all_void (initial_dep_link_promises);
-			}
 
-			// Now, ensure all *physical installations* triggered anywhere in the graph are complete.
 			var all_installation_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
 			foreach (var promise in all_physical_installs.values) {
 				all_installation_futures.add (promise.future);
 			}
-			if (!all_installation_futures.is_empty) {
+			if (!all_installation_futures.is_empty)
 				yield Future.all_void (all_installation_futures);
-			}
 
 			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
-			foreach (var entry in all_physical_installs.entries) {
+			foreach (var entry in all_physical_installs.entries)
 				finished_installs[entry.key] = entry.value.future.get_value ();
-			}
 
 			var new_manifest_dependencies = new PackageDependencies ();
-			// Use the results from initial_dep_link_promises to update manifest.dependencies
-			// as these represent the resolved versions of what was directly requested.
 			foreach (var future_ple in initial_dep_link_promises) {
-				PackageLockEntry ple = future_ple.get_value (); // Should be resolved now
-				// Find the original PackageDependency from wanted_deps_list that matches ple.toplevel_dep
+				PackageLockEntry ple = future_ple.get_value ();
 				PackageDependency? original_wanted_dep = null;
 				foreach (var wd in wanted_deps_list) {
-					if (wd == ple.toplevel_dep) { // Check object identity
+					if (wd == ple.toplevel_dep) {
 						original_wanted_dep = wd;
 						break;
 					}
 				}
 				if (original_wanted_dep != null) {
 					new_manifest_dependencies.add (new PackageDependency () {
-						name = ple.name, // Use resolved name
-						version = original_wanted_dep.derive_version (ple.version), // Derive spec based on original
+						name = ple.name,
+						version = original_wanted_dep.derive_version (ple.version),
 						role = original_wanted_dep.role,
 					});
 				}
 			}
 			manifest.dependencies = new_manifest_dependencies;
 
-			yield write_back_manifests (manifest, finished_installs, pkg_json_f, lock_f, cancellable);
+			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
 
 			var pkgs = new Gee.ArrayList<Package> ();
-			// Populate 'pkgs' from the results of the initial_dep_link_promises,
-			// as these correspond to the top-level items requested.
 			foreach (var future_ple in initial_dep_link_promises) {
 				PackageLockEntry e = future_ple.get_value ();
-				// Avoid duplicates if multiple specs resolved to the same top-level package instance
 				bool already_added = false;
-				foreach (var p_ in pkgs) { if (p_.name == e.name && p_.version == e.version) { already_added = true; break; } }
-				if (!already_added) {
-					pkgs.add (new Package (e.name, e.version, e.description));
+				foreach (var p_ in pkgs) {
+					if (p_.name == e.name && p_.version == e.version) {
+						already_added = true;
+						break;
+					}
 				}
+				if (!already_added)
+					pkgs.add (new Package (e.name, e.version, e.description));
 			}
 
 			return new PackageInstallResult (new PackageList (pkgs));
@@ -323,11 +314,11 @@ namespace Frida {
 			OPTIONAL
 		}
 
-		private async Manifest load_manifest (File pkg_json_f, File lock_f, Cancellable? cancellable) throws Error, IOError {
+		private async Manifest load_manifest (File pkg_json_file, File lock_file, Cancellable? cancellable) throws Error, IOError {
 			var m = new Manifest ();
 
-			if (pkg_json_f.query_exists (cancellable)) {
-				Json.Reader r = yield load_json (pkg_json_f, cancellable);
+			if (pkg_json_file.query_exists (cancellable)) {
+				Json.Reader r = yield load_json (pkg_json_file, cancellable);
 
 				r.read_member ("name");
 				m.name = r.get_string_value ();
@@ -340,8 +331,8 @@ namespace Frida {
 				m.dependencies = read_dependencies (r);
 			}
 
-			if (lock_f.query_exists (cancellable)) {
-				Json.Reader lock_r = yield load_json (lock_f, cancellable);
+			if (lock_file.query_exists (cancellable)) {
+				Json.Reader lock_r = yield load_json (lock_file, cancellable);
 
 				lock_r.read_member ("packages");
 				string[]? pkg_paths = lock_r.list_members ();
@@ -480,22 +471,22 @@ namespace Frida {
 			return deps;
 		}
 
-		private async void write_back_manifests (Manifest manifest, Gee.Map<string, PackageLockEntry> installed, File pkg_json_f,
-				File lock_f, Cancellable? cancellable) throws Error, IOError {
+		private async void write_back_manifests (Manifest manifest, Gee.Map<string, PackageLockEntry> installed, File pkg_json_file,
+				File lock_file, Cancellable? cancellable) throws Error, IOError {
 			string? name = null;
 			Json.Node? root = null;
 			string? old_pkg_json = null;
 			uint indent_level = 2;
 			unichar indent_char = ' ';
-			if (pkg_json_f.query_exists (cancellable)) {
-				old_pkg_json = yield FS.read_all_text (pkg_json_f, cancellable);
+			if (pkg_json_file.query_exists (cancellable)) {
+				old_pkg_json = yield FS.read_all_text (pkg_json_file, cancellable);
 				try {
 					root = Json.from_string (old_pkg_json);
 				} catch (GLib.Error e) {
-					throw new Error.PROTOCOL ("%s is invalid: %s", pkg_json_f.get_parse_name (), e.message);
+					throw new Error.PROTOCOL ("%s is invalid: %s", pkg_json_file.get_parse_name (), e.message);
 				}
 				if (root.get_node_type () != OBJECT)
-					throw new Error.PROTOCOL ("%s is invalid, root must be an object", pkg_json_f.get_parse_name ());
+					throw new Error.PROTOCOL ("%s is invalid, root must be an object", pkg_json_file.get_parse_name ());
 				detect_indent (old_pkg_json, out indent_level, out indent_char);
 
 				var r = new Json.Reader (root);
@@ -508,7 +499,7 @@ namespace Frida {
 
 			if (name == null) {
 				try {
-					var info = yield pkg_json_f.get_parent ().query_info_async (FileAttribute.STANDARD_DISPLAY_NAME,
+					var info = yield pkg_json_file.get_parent ().query_info_async (FileAttribute.STANDARD_DISPLAY_NAME,
 						FileQueryInfoFlags.NONE, Priority.DEFAULT, cancellable);
 					name = info.get_display_name ();
 				} catch (GLib.Error e) {
@@ -534,7 +525,7 @@ namespace Frida {
 
 			bool pkg_json_changed = old_pkg_json == null || new_pkg_json != old_pkg_json;
 			if (pkg_json_changed)
-				yield FS.write_all_text (pkg_json_f, new_pkg_json, cancellable);
+				yield FS.write_all_text (pkg_json_file, new_pkg_json, cancellable);
 
 			var b = new Json.Builder ();
 			b.begin_object ()
@@ -634,7 +625,7 @@ namespace Frida {
 			gen.set_indent_char (indent_char);
 			gen.set_root (b.get_root ());
 			string lock_json = gen.to_data (null);
-			yield FS.write_all_text (lock_f, lock_json, cancellable);
+			yield FS.write_all_text (lock_file, lock_json, cancellable);
 		}
 
 		private static void add_dependencies_in_section (Json.Builder b, string section, Gee.Collection<PackageDependency> deps) {
@@ -654,17 +645,17 @@ namespace Frida {
 
 		private async void perform_install (
 				string name,
-				PackageVersion version_spec,		// Requested version spec (e.g., ^1.0.0, latest)
-				PackageDependency toplevel_dep,	 // The original top-level package that caused this install chain
-				File parent_node_modules_dir,	   // node_modules dir of the package *requesting* this one
+				PackageVersion version_spec,
+				PackageDependency toplevel_dep,
+				File parent_node_modules_dir,
 				File project_root,
-				Manifest manifest,				  // Overall project manifest (passed for context)
+				Manifest manifest,
 				Cancellable? cancellable,
-				Promise<PackageLockEntry> dep_link_promise, // Promise for *this specific dependency link*
-				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs, // K: lockfile_key of actual install path
+				Promise<PackageLockEntry> dep_link_promise,
+				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs,
 				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
 				Gee.Map<string, Promise<Json.Node>> packument_cache,
-				Gee.Map<string, string> top_level_placements) { // K: name, V: effective_version at top level
+				Gee.Map<string, string> top_level_placements) {
 			try {
 				// 1. Resolve package metadata (name@spec -> name@effective_version, tarball, deps)
 				string resolution_id = name + "@" + version_spec.spec;
@@ -721,10 +712,10 @@ namespace Frida {
 				// 5. Check if package is already correctly installed at target_dir
 				bool already_correctly_installed = false;
 				if (target_dir.query_exists (cancellable)) {
-					File installed_pkg_json_f = target_dir.get_child ("package.json");
-					if (installed_pkg_json_f.query_exists (cancellable)) {
+					File installed_pkg_json_file = target_dir.get_child ("package.json");
+					if (installed_pkg_json_file.query_exists (cancellable)) {
 						try {
-							Json.Reader installed_pkg_reader = yield load_json (installed_pkg_json_f, cancellable);
+							Json.Reader installed_pkg_reader = yield load_json (installed_pkg_json_file, cancellable);
 							if (installed_pkg_reader.read_member ("version")) {
 								string? installed_version = installed_pkg_reader.get_string_value ();
 								installed_pkg_reader.end_member ();
