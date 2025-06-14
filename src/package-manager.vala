@@ -335,12 +335,13 @@ namespace Frida {
 				Json.Reader lock_r = yield load_json (lock_file, cancellable);
 
 				lock_r.read_member ("packages");
-				string[]? pkg_paths = lock_r.list_members ();
-				if (pkg_paths == null)
-					throw new Error.PROTOCOL ("package-lock.json 'packages' member is missing or not an object");
+				string[]? path_keys = lock_r.list_members ();
+				if (path_keys == null)
+					throw new Error.PROTOCOL ("Lockfile 'packages' member missing or not an object");
 
-				foreach (unowned string path_key in pkg_paths) {
+				foreach (unowned string path_key in path_keys) {
 					lock_r.read_member (path_key);
+
 					if (lock_r.get_null_value ()) {
 						lock_r.end_member ();
 						continue;
@@ -351,18 +352,26 @@ namespace Frida {
 
 					lock_r.read_member ("name");
 					pli.name = lock_r.get_string_value ();
+					if (pli.name == null)
+						throw new Error.PROTOCOL ("Lockfile 'name' for '%s' missing or invalid", path_key);
 					lock_r.end_member ();
 
 					lock_r.read_member ("version");
 					pli.version = lock_r.get_string_value ();
+					if (pli.version == null)
+						throw new Error.PROTOCOL ("Lockfile 'version' for '%s' missing or invalid", path_key);
 					lock_r.end_member ();
 
 					lock_r.read_member ("resolved");
 					pli.resolved = lock_r.get_string_value ();
+					if (pli.resolved == null)
+						throw new Error.PROTOCOL ("Lockfile 'resolved' for '%s' missing or invalid", path_key);
 					lock_r.end_member ();
 
 					lock_r.read_member ("integrity");
 					pli.integrity = lock_r.get_string_value ();
+					if (pli.integrity == null)
+						throw new Error.PROTOCOL ("Lockfile 'integrity' for '%s' missing or invalid", path_key);
 					lock_r.end_member ();
 
 					pli.dependencies = read_dependencies_from_lock_entry (lock_r, path_key);
@@ -809,109 +818,131 @@ namespace Frida {
 		}
 
 		private class ResolvedPackageData {
-			public string name; // Original name requested
-			public string effective_version; // Concrete version resolved
-			public string resolved_url;	  // Tarball URL
+			public string name;
+			public string effective_version;
+			public string resolved_url;
 			public string? integrity;
 			public string? shasum;
 			public string? description;
 			public string? license;
-			public PackageDependencies dependencies; // Dependencies from this package's own manifest
+			public PackageDependencies dependencies;
 		}
 
 		private async void _fetch_and_resolve_package_data_async (string name, PackageVersion version_spec,
-				Promise<ResolvedPackageData> promise_to_fulfill,
-				Gee.Map<string, Promise<Json.Node>> packument_cache,
+				Promise<ResolvedPackageData> promise_to_fulfill, Gee.Map<string, Promise<Json.Node>> packument_cache,
 				Cancellable? cancellable) {
 			try {
-				Json.Reader? meta_reader = null; // Reader for the specific version's metadata
-				bool fetch_full_document_then_resolve = true;
 				string effective_version_local;
+				Json.Reader meta_reader;
+				bool used_packument_reader_for_meta = false;
 
-				if (Semver.is_precise_spec (version_spec.spec)) { // Includes "latest"
-					fetch_full_document_then_resolve = false;
-				}
-
-				if (!fetch_full_document_then_resolve) {
-					// Direct fetch for precise version or "latest"
+				if (Semver.is_precise_spec (version_spec.spec)) {
 					meta_reader = yield fetch (
 						"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
 						cancellable);
+
 					meta_reader.read_member ("version");
-					effective_version_local = meta_reader.get_string_value ();
-					meta_reader.end_member ();
-					if (effective_version_local == null) {
-						throw new Error.PROTOCOL ("Registry response for '%s@%s' missing 'version' field",
+					var ver_val = meta_reader.get_string_value ();
+					if (ver_val == null) {
+						throw new Error.PROTOCOL ("Registry 'version' for '%s@%s' missing or invalid",
 							name, version_spec.spec);
 					}
+					effective_version_local = ver_val;
+					meta_reader.end_member ();
 				} else {
-					// Need full packument to resolve range or non-"latest" tag
 					Promise<Json.Node>? packument_promise = packument_cache[name];
 					if (packument_promise == null) {
-						async Promise<Json.Node> fetch_packument_logic () {
-							Json.Reader reader = yield fetch ("/" + Uri.escape_string (name), cancellable);
-							return reader.get_root ();
-						}
-						packument_promise = fetch_packument_logic ();
+						packument_promise = _fetch_packument_for_cache (this, name, cancellable);
 						packument_cache[name] = packument_promise;
 					}
 					Json.Node packument_root_node = yield packument_promise.future.wait_async (cancellable);
-					var r = new Json.Reader (packument_root_node);
+					var packument_reader = new Json.Reader (packument_root_node);
 
 					string? version_from_dist_tag = null;
-					if (r.read_member ("dist-tags")) {
-						if (r.read_member (version_spec.spec)) {
-							version_from_dist_tag = r.get_string_value ();
-							r.end_member ();
-						}
-						r.end_member ();
-					}
+					packument_reader.read_member ("dist-tags");
+					packument_reader.read_member (version_spec.spec);
+					version_from_dist_tag = packument_reader.get_string_value ();
+					packument_reader.end_member ();
+					packument_reader.end_member ();
 
 					if (version_from_dist_tag != null) {
 						effective_version_local = version_from_dist_tag;
 					} else {
-						r.read_member ("versions");
-						string[]? available_version_strings = r.list_members ();
+						packument_reader.read_member ("versions");
+						string[]? available_version_strings = packument_reader.list_members ();
 						if (available_version_strings == null) {
-							throw new Error.PROTOCOL ("Package '%s' has no versions listed", name);
+							throw new Error.PROTOCOL (
+								"Packument 'versions' missing, not an object, or empty for '%s'", name);
 						}
-						r.end_member ();
+						packument_reader.end_member ();
+
 						string? target_version_str = Semver.max_satisfying (
-							new Gee.ArrayList<string>.wrap (available_version_strings), version_spec.spec);
-						if (target_version_str == null) {
+							new Gee.ArrayList<string>.wrap (available_version_strings),
+							version_spec.spec);
+						if (target_version_str == null)
 							throw new Error.PROTOCOL ("No version satisfying '%s' for '%s'", version_spec.spec, name);
-						}
 						effective_version_local = target_version_str;
 					}
-					r.read_member ("versions");
-					r.read_member (effective_version_local);
-					meta_reader = r;
+
+					if (!Semver.is_precise_spec(version_spec.spec) || version_from_dist_tag != null) {
+						packument_reader.read_member("versions");
+						packument_reader.read_member(effective_version_local);
+						meta_reader = packument_reader;
+						used_packument_reader_for_meta = true;
+					} else {
+						meta_reader = yield fetch (
+							"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (effective_version_local)),
+							cancellable);
+					}
+
+					meta_reader.read_member ("version");
+					string? actual_fetched_version = meta_reader.get_string_value ();
+					meta_reader.end_member ();
+					if (actual_fetched_version != effective_version_local) {
+						throw new Error.PROTOCOL (
+							"Fetched version '%s' differs from expected '%s'",
+							actual_fetched_version,
+							effective_version_local);
+					}
 				}
 
-				string? description_local = null;
-				if (meta_reader.read_member ("description")) { description_local = meta_reader.get_string_value (); meta_reader.end_member (); }
+				meta_reader.read_member ("description");
+				string? description_local = meta_reader.get_string_value ();
+				meta_reader.end_member ();
 
 				string? license_local = null;
-				if (meta_reader.read_member ("license")) {
-					if (meta_reader.get_value_type() == Json.NodeType.STRING) {
-						license_local = meta_reader.get_string_value ();
-					}
+				meta_reader.read_member ("license");
+				if (meta_reader.is_object ()) {
+					meta_reader.read_member ("type");
+					license_local = meta_reader.get_string_value ();
 					meta_reader.end_member ();
+				} else {
+					license_local = meta_reader.get_string_value ();
 				}
+				meta_reader.end_member ();
 
-				string? resolved_url_local = null;
-				string? integrity_local = null;
-				string? shasum_local = null;
-				if (meta_reader.read_member ("dist")) {
-					if (meta_reader.read_member ("tarball")) { resolved_url_local = meta_reader.get_string_value (); meta_reader.end_member ();}
-					if (meta_reader.read_member ("integrity")) { integrity_local = meta_reader.get_string_value (); meta_reader.end_member ();}
-					if (meta_reader.read_member ("shasum")) { shasum_local = meta_reader.get_string_value (); meta_reader.end_member ();}
-					meta_reader.end_member (); // dist
-				}
-				if (resolved_url_local == null) {
-					throw new Error.PROTOCOL("No tarball URL for %s@%s", name, effective_version_local);
-				}
+				meta_reader.read_member ("dist");
+
+				meta_reader.read_member ("tarball");
+				string? resolved_url_local = meta_reader.get_string_value ();
+				if (resolved_url_local == null)
+					throw new Error.PROTOCOL ("'dist.tarball' for '%s@%s' missing or invalid", name, effective_version_local);
+				meta_reader.end_member ();
+
+				meta_reader.read_member ("integrity");
+				string? integrity_local = meta_reader.get_string_value ();
+				meta_reader.end_member ();
+
+				meta_reader.read_member ("shasum");
+				string? shasum_local = meta_reader.get_string_value ();
+				meta_reader.end_member ();
+
+				meta_reader.end_member ();
+
 				PackageDependencies deps_from_pkg_json = read_dependencies (meta_reader);
+
+				if (used_packument_reader_for_meta)
+					meta_reader.end_member ();
 
 				promise_to_fulfill.resolve (new ResolvedPackageData () {
 					name = name,
