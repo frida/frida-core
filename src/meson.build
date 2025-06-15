@@ -1,6 +1,7 @@
 base_sources = [
   'frida.vala',
   'frida-glue.c',
+  'package-manager.vala',
   'control-service.vala',
   'portal-service.vala',
   'host-session-service.vala',
