@@ -999,7 +999,11 @@ namespace Frida {
 				if (n < 0)
 					throw new IOError.FAILED ("Stream read failed");
 
-				yield tar_reader.feed (buffer, (size_t) n, cancellable);
+				try {
+					yield tar_reader.feed (buffer[:n], cancellable);
+				} catch (Error e) {
+					throw new Error.PROTOCOL ("Unable to extract tarball at %s: %s", tarball_url, e.message);
+				}
 				read_total += (size_t) n;
 				report_bucket += (size_t) n;
 
@@ -1736,10 +1740,11 @@ namespace Frida {
 			this.root = root;
 		}
 
-		public async void feed (uint8[] data, size_t len, Cancellable? cancellable) throws Error, IOError {
+		public async void feed (uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			int io_priority = Priority.DEFAULT;
 
 			size_t off = 0;
+			size_t len = data.length;
 			while (off < len) {
 				if (remaining != 0) {
 					size_t chunk_size = size_t.min ((size_t) remaining, len - off);
@@ -1786,6 +1791,7 @@ namespace Frida {
 				}
 
 				var header = new Buffer (header_builder.build ());
+				header_builder = new BufferBuilder ();
 
 				string name = header.read_fixed_string (0, 100);
 				if (name.length == 0) {
@@ -1794,14 +1800,12 @@ namespace Frida {
 				}
 				string safe_entry = sanitize_entry (name, root);
 
-				string size_field = header.read_fixed_string (124, 12);
+				string size_field = header.read_fixed_string (124, 12).split (" ")[0];
 				uint64 file_size = 0;
-				if (!uint64.try_parse (size_field.strip (), out file_size, null, 8))
+				if (!uint64.try_parse (size_field, out file_size, null, 8))
 					throw new Error.PROTOCOL ("Invalid tarball size (file '%s' corrupt)", safe_entry);
 
 				var typeflag = (char) header.read_uint8 (156);
-
-				header_builder = new BufferBuilder ();
 
 				if (typeflag == '0' || typeflag == '\0') {
 					current_file = root.get_child (safe_entry);
