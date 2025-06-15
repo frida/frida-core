@@ -128,14 +128,14 @@ namespace Frida {
 
 			var all_physical_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
 			var resolution_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
-			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
+			var packument_cache = new Gee.HashMap<string, Promise<Json.Reader>> ();
 			var top_level_placements = new Gee.HashMap<string, string> ();
 
-			var initial_dep_link_promises = new Gee.ArrayList<Future<PackageLockEntry>> ();
+			var initial_dep_link_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
 
 			foreach (PackageDependency original_dep in wanted_deps_list) {
 				var dep_link_promise = new Promise<PackageLockEntry> ();
-				initial_dep_link_promises.add (dep_link_promise.future);
+				initial_dep_link_futures.add (dep_link_promise.future);
 
 				perform_install.begin (
 					original_dep.name,
@@ -153,23 +153,19 @@ namespace Frida {
 				);
 			}
 
-			if (!initial_dep_link_promises.is_empty)
-				yield Future.all_void (initial_dep_link_promises);
+			foreach (var f in initial_dep_link_futures)
+				yield f.wait_async (cancellable);
 
-			var all_installation_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
-			foreach (var promise in all_physical_installs.values) {
-				all_installation_futures.add (promise.future);
-			}
-			if (!all_installation_futures.is_empty)
-				yield Future.all_void (all_installation_futures);
+			foreach (var promise in all_physical_installs.values)
+				yield promise.future.wait_async (cancellable);
 
 			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
 			foreach (var entry in all_physical_installs.entries)
-				finished_installs[entry.key] = entry.value.future.get_value ();
+				finished_installs[entry.key] = yield entry.value.future.wait_async (cancellable);
 
 			var new_manifest_dependencies = new PackageDependencies ();
-			foreach (var future_ple in initial_dep_link_promises) {
-				PackageLockEntry ple = future_ple.get_value ();
+			foreach (var future_ple in initial_dep_link_futures) {
+				PackageLockEntry ple = yield future_ple.wait_async (cancellable);
 				PackageDependency? original_wanted_dep = null;
 				foreach (var wd in wanted_deps_list) {
 					if (wd == ple.toplevel_dep) {
@@ -190,8 +186,8 @@ namespace Frida {
 			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
 
 			var pkgs = new Gee.ArrayList<Package> ();
-			foreach (var future_ple in initial_dep_link_promises) {
-				PackageLockEntry e = future_ple.get_value ();
+			foreach (var future_ple in initial_dep_link_futures) {
+				PackageLockEntry e = yield future_ple.wait_async (cancellable);
 				bool already_added = false;
 				foreach (var p_ in pkgs) {
 					if (p_.name == e.name && p_.version == e.version) {
@@ -204,10 +200,6 @@ namespace Frida {
 			}
 
 			return new PackageInstallResult (new PackageList (pkgs));
-		}
-
-		private static string lockfile_key_for_dependency (string name, File node_modules_root, File project_root) {
-			return project_root.get_relative_path (install_dir_for_dependency (name, node_modules_root));
 		}
 
 		private static File install_dir_for_dependency (string name, File node_modules_root) {
@@ -637,21 +629,6 @@ namespace Frida {
 			yield FS.write_all_text (lock_file, lock_json, cancellable);
 		}
 
-		private static void add_dependencies_in_section (Json.Builder b, string section, Gee.Collection<PackageDependency> deps) {
-			if (deps.is_empty)
-				return;
-			b
-				.set_member_name (section)
-				.begin_object ();
-			foreach (var dep in deps) {
-				b
-					.set_member_name (dep.name)
-					.add_string_value (dep.version.spec);
-			}
-			b
-				.end_object ();
-		}
-
 		private async void perform_install (
 				string name,
 				PackageVersion version_spec,
@@ -663,7 +640,7 @@ namespace Frida {
 				Promise<PackageLockEntry> dep_link_promise,
 				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs,
 				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
-				Gee.Map<string, Promise<Json.Node>> packument_cache,
+				Gee.Map<string, Promise<Json.Reader>> packument_cache,
 				Gee.Map<string, string> top_level_placements) {
 			try {
 				// 1. Resolve package metadata (name@spec -> name@effective_version, tarball, deps)
@@ -672,7 +649,8 @@ namespace Frida {
 				if (rpd_promise == null) {
 					rpd_promise = new Promise<ResolvedPackageData> ();
 					resolution_cache[resolution_id] = rpd_promise;
-					_fetch_and_resolve_package_data_async.begin (name, version_spec, rpd_promise, packument_cache, cancellable);
+					_fetch_and_resolve_package_data_async.begin (name, version_spec, rpd_promise, packument_cache,
+						cancellable);
 				}
 				ResolvedPackageData rpd = yield rpd_promise.future.wait_async (cancellable);
 
@@ -778,7 +756,7 @@ namespace Frida {
 					perform_install.begin (
 						d.name,
 						d.version,
-						toplevel_dep, 
+						toplevel_dep,
 						sub_deps_parent_node_modules_dir,
 						project_root,
 						manifest,
@@ -790,9 +768,8 @@ namespace Frida {
 						top_level_placements
 					);
 				}
-				if (!sub_dep_futures.is_empty) {
-					yield Future.all_void (sub_dep_futures);
-				}
+				foreach (var f in sub_dep_futures)
+					yield f.wait_async (cancellable);
 
 				// 7. Download and unpack the current package if not already correctly installed
 				if (!already_correctly_installed) {
@@ -829,7 +806,7 @@ namespace Frida {
 		}
 
 		private async void _fetch_and_resolve_package_data_async (string name, PackageVersion version_spec,
-				Promise<ResolvedPackageData> promise_to_fulfill, Gee.Map<string, Promise<Json.Node>> packument_cache,
+				Promise<ResolvedPackageData> promise_to_fulfill, Gee.Map<string, Promise<Json.Reader>> packument_cache,
 				Cancellable? cancellable) {
 			try {
 				string effective_version_local;
@@ -850,13 +827,13 @@ namespace Frida {
 					effective_version_local = ver_val;
 					meta_reader.end_member ();
 				} else {
-					Promise<Json.Node>? packument_promise = packument_cache[name];
+					Promise<Json.Reader>? packument_promise = packument_cache[name];
 					if (packument_promise == null) {
-						packument_promise = _fetch_packument_for_cache (this, name, cancellable);
+						packument_promise = new Promise<Json.Reader> ();
+						_fetch_packument_for_cache.begin (name, packument_promise, cancellable);
 						packument_cache[name] = packument_promise;
 					}
-					Json.Node packument_root_node = yield packument_promise.future.wait_async (cancellable);
-					var packument_reader = new Json.Reader (packument_root_node);
+					var packument_reader = yield packument_promise.future.wait_async (cancellable);
 
 					string? version_from_dist_tag = null;
 					packument_reader.read_member ("dist-tags");
@@ -956,6 +933,16 @@ namespace Frida {
 				});
 			} catch (GLib.Error e) {
 				promise_to_fulfill.reject (e);
+			}
+		}
+
+		private async void _fetch_packument_for_cache (string name, Promise<Json.Reader> request, Cancellable? cancellable)
+				throws Error, IOError {
+			try {
+				Json.Reader temp_reader = yield fetch ("/" + Uri.escape_string (name), cancellable);
+				request.resolve (temp_reader);
+			} catch (GLib.Error e) {
+				request.reject (e);
 			}
 		}
 
@@ -1256,7 +1243,7 @@ namespace Frida {
 
 	private void detect_indent (string src, out uint indent_level, out unichar indent_char) {
 		indent_level = 2;
-		indent_char  = ' ';
+		indent_char = ' ';
 
 		Regex indents_before_first_key = /^([ \t]+)"/m;
 		MatchInfo? m;
@@ -1313,7 +1300,7 @@ namespace Frida {
 			int dash = v.index_of_char ('-');
 			if (dash != -1) {
 				core = v[:dash];
-				pre  = v[dash + 1:];
+				pre = v[dash + 1:];
 			} else {
 				core = v;
 			}
