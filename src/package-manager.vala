@@ -1777,11 +1777,13 @@ namespace Frida {
 				}
 
 				size_t n_header_bytes_missing = BLOCK_SIZE - header_builder.offset;
-				size_t chunk_size = size_t.min (n_header_bytes_missing, len - off);
-				header_builder.append_data (data[off:off + chunk_size]);
-				off += chunk_size;
-				if (chunk_size != n_header_bytes_missing)
-					return;
+				if (n_header_bytes_missing != 0) {
+					size_t chunk_size = size_t.min (n_header_bytes_missing, len - off);
+					header_builder.append_data (data[off:off + chunk_size]);
+					off += chunk_size;
+					if (chunk_size != n_header_bytes_missing)
+						return;
+				}
 
 				var header = new Buffer (header_builder.build ());
 
