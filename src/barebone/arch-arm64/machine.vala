@@ -25,6 +25,11 @@ namespace Frida.Barebone {
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
 
+		private const uint64 UXN_BIT = 1UL << 54;
+		private const uint64 PXN_BIT = 1UL << 53;
+		private const uint64 AP1_BIT = 1UL << 7;
+		private const uint64 AP0_BIT = 1UL << 6;
+
 		public Arm64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
 		}
@@ -55,7 +60,7 @@ namespace Frida.Barebone {
 
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
-				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p.granule, result, cancellable);
+				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p, result, cancellable);
 			} finally {
 				set_addressing_mode.begin (gdb, VIRTUAL, null);
 			}
@@ -63,30 +68,30 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, Granule granule,
+		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, MMUParameters p,
 				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
-			uint max_entries = compute_max_entries (level, granule);
+			uint max_entries = compute_max_entries (level, p.granule);
 			Buffer entries = yield gdb.read_buffer (table_address, max_entries * Descriptor.SIZE, cancellable);
-			uint shift = address_shift_at_level (level, granule);
+			uint shift = address_shift_at_level (level, p.granule);
 			for (uint i = 0; i != max_entries; i++) {
 				uint64 raw_descriptor = entries.read_uint64 (i * Descriptor.SIZE);
 
-				Descriptor desc = Descriptor.parse (raw_descriptor, level, granule);
+				Descriptor desc = Descriptor.parse (raw_descriptor, level, p.granule);
 				if (desc.kind == INVALID)
 					continue;
 
 				uint64 address = upper_bits | ((uint64) i << shift);
 
 				if (desc.kind == BLOCK) {
-					size_t size = 1 << num_block_bits_at_level (level, granule);
-					Gum.PageProtection prot = protection_from_flags (desc.flags);
+					size_t size = 1 << num_block_bits_at_level (level, p.granule);
+					Gum.PageProtection prot = protection_from_flags (desc.flags, p);
 
 					ranges.add (new RangeDetails (address, desc.target_address, size, prot, MappingType.UNKNOWN));
 
 					continue;
 				}
 
-				yield collect_ranges_in_table (desc.target_address, level + 1, address, granule, ranges, cancellable);
+				yield collect_ranges_in_table (desc.target_address, level + 1, address, p, ranges, cancellable);
 			}
 		}
 
@@ -152,9 +157,41 @@ namespace Frida.Barebone {
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
 				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address, num_pages, p.tt1,
-					p.first_level, p.upper_bits, p.granule, cancellable);
+					p.first_level, p.upper_bits, p, cancellable);
 				if (allocation == null)
 					throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
+
+				//yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+
+				//uint64 reset_vector_va = 0xfffffff008120400ULL;
+
+				//printerr (">>> running TLB FLUSH!\n\n");
+				//yield execute (0xfffffff008120494ULL, 0xfffffff0081204a0ULL, cancellable);
+				//printerr ("<<< ran TLB FLUSH\n\n");
+
+				/*
+				uint32 flush_sequence[6] = {
+					0xd5033b9fU, // DSB ISH       — Data-sync barrier, inner-shareable
+					0xd508871fU, // TLBI VMALLE1  — Invalidate all EL1 TLB entries
+					0xd5033b9fU, // DSB ISH       — Barrier so the TLB invalidation completes
+					0xd5033fdfU, // ISB SY        — Instruction-sync barrier
+					0xd5033bbfU, // IC IALLU      — Invalidate *all* I-cache to PoU
+					0xd5033fdfU, // ISB SY        — Final sync before you branch into new code
+				};
+				size_t flush_sequence_size = flush_sequence.length * sizeof (uint32);
+
+				var vector_backup = yield gdb.read_byte_array (reset_vector_va, flush_sequence_size, cancellable);
+				yield gdb.write_byte_array (reset_vector_va, new Bytes ((uint8[]) flush_sequence), cancellable);
+
+				printerr (">>> running FLUSH!\n\n");
+				yield execute (reset_vector_va, reset_vector_va + flush_sequence_size, cancellable);
+				printerr ("<<< ran FLUSH\n\n");
+
+				yield gdb.write_byte_array (reset_vector_va, vector_backup, cancellable);
+
+				printerr ("YOLO\n\n");
+				*/
+
 				return allocation;
 			} finally {
 				set_addressing_mode.begin (gdb, VIRTUAL, null);
@@ -162,10 +199,10 @@ namespace Frida.Barebone {
 		}
 
 		private async Allocation? maybe_insert_descriptor_in_table (uint64 physical_address, uint num_pages,
-				uint64 table_address, uint level, uint64 upper_bits, Granule granule, Cancellable? cancellable)
+				uint64 table_address, uint level, uint64 upper_bits, MMUParameters p, Cancellable? cancellable)
 				throws Error, IOError {
-			uint max_entries = compute_max_entries (level, granule);
-			uint shift = address_shift_at_level (level, granule);
+			uint max_entries = compute_max_entries (level, p.granule);
+			uint shift = address_shift_at_level (level, p.granule);
 
 			uint64 first_available_va = 0;
 			uint64 first_available_slot = 0;
@@ -184,13 +221,15 @@ namespace Frida.Barebone {
 					uint table_index = chunk_offset + i;
 					uint64 address = upper_bits | ((uint64) table_index << shift);
 
-					Descriptor desc = Descriptor.parse (raw_descriptor, level, granule);
+					Descriptor desc = Descriptor.parse (raw_descriptor, level, p.granule);
 
 					if (level < 3) {
 						if (desc.kind != TABLE)
 							continue;
+						if ((desc.flags & (DescriptorFlags.UXNTABLE | DescriptorFlags.PXNTABLE)) != 0)
+							continue;
 						Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address,
-							num_pages, desc.target_address, level + 1, address, granule, cancellable);
+							num_pages, desc.target_address, level + 1, address, p, cancellable);
 						if (allocation != null)
 							return allocation;
 						continue;
@@ -215,10 +254,35 @@ namespace Frida.Barebone {
 			if (num_available_slots != num_pages)
 				return null;
 
+			int sprr_execute_index = -1;
+			if (p.sprr_enabled) {
+				for (uint i = 0; i != 16; i++) {
+					uint perm = (uint) ((p.sprr_perm >> (i * 4)) & 0x3);
+					if (perm == 1) {
+						sprr_execute_index = (int) i;
+						break;
+					}
+				}
+				if (sprr_execute_index == -1)
+					throw new Error.PROTOCOL ("Unable to find an executable SPRR perm slot");
+			}
+
 			var builder = gdb.make_buffer_builder ();
 			for (uint i = 0; i != num_available_slots; i++) {
-				uint64 cur_physical_address = physical_address + (i * granule);
-				uint64 new_descriptor = cur_physical_address | 0x40000000000403ULL;
+				uint64 cur_physical_address = physical_address + (i * p.granule);
+				uint64 new_descriptor = cur_physical_address | 0x403ULL;
+				if (sprr_execute_index != -1) {
+					if ((sprr_execute_index & 0x8) != 0)
+						new_descriptor |= AP1_BIT;
+					if ((sprr_execute_index & 0x4) != 0)
+						new_descriptor |= AP0_BIT;
+					if ((sprr_execute_index & 0x2) != 0)
+						new_descriptor |= UXN_BIT;
+					if ((sprr_execute_index & 0x1) != 0)
+						new_descriptor |= PXN_BIT;
+				} else {
+					new_descriptor |= UXN_BIT;
+				}
 				builder.append_uint64 (new_descriptor);
 			}
 			Bytes new_descriptors = builder.build ();
@@ -392,6 +456,9 @@ namespace Frida.Barebone {
 			GDB.Exception ex = null;
 			do {
 				ex = yield gdb.continue_until_exception (cancellable);
+				printerr ("Got ex.breakpoint=%p vs. bp=%p\n", ex.breakpoint, bp);
+				printerr ("Matches ours: %s\n", (ex.breakpoint == bp) ? "true" : "false");
+				printerr ("Matches thread ID: %s\n\n", (ex.thread.id == thread.id) ? "true" : "false");
 			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
 			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
 			yield bp.remove (cancellable);
@@ -404,6 +471,35 @@ namespace Frida.Barebone {
 				yield gdb.continue (cancellable);
 
 			return retval;
+		}
+
+		public async void execute (uint64 start, uint64 end, Cancellable? cancellable) throws Error, IOError {
+			bool was_running = gdb.state != STOPPED;
+			if (was_running)
+				yield gdb.stop (cancellable);
+
+			GDB.Thread thread = gdb.exception.thread;
+			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
+
+			var regs = new Gee.HashMap<string, Variant> ();
+			regs.set_all (saved_regs);
+
+			regs["pc"] = start;
+
+			yield thread.write_registers (regs, cancellable);
+
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, end, 4, cancellable);
+			GDB.Exception ex = null;
+			do {
+				ex = yield gdb.continue_until_exception (cancellable);
+			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
+			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
+			yield bp.remove (cancellable);
+
+			yield thread.write_registers (saved_regs, cancellable);
+
+			if (was_running)
+				yield gdb.continue (cancellable);
 		}
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
@@ -685,10 +781,15 @@ namespace Frida.Barebone {
 		}
 
 		private class MMUParameters {
+			public uint64 cpsr;
+
 			public Granule granule;
 			public uint first_level;
 			public uint64 upper_bits;
 			public uint64 tt1;
+
+			public bool sprr_enabled;
+			public uint64 sprr_perm;
 
 			public static async MMUParameters load (GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
 				GDB.Exception? exception = gdb.exception;
@@ -699,6 +800,8 @@ namespace Frida.Barebone {
 				MMURegisters regs = yield MMURegisters.read (thread, cancellable);
 
 				var parameters = new MMUParameters ();
+
+				parameters.cpsr = yield thread.read_register ("cpsr", cancellable);
 
 				uint tg1 = (uint) ((regs.tcr >> 30) & INT2_MASK);
 				parameters.granule = granule_from_tg1 (tg1);
@@ -717,6 +820,9 @@ namespace Frida.Barebone {
 
 				parameters.tt1 = regs.ttbr1 & INT48_MASK;
 
+				parameters.sprr_enabled = (regs.sprr_config & 1) != 0;
+				parameters.sprr_perm = regs.sprr_perm;
+
 				return parameters;
 			}
 		}
@@ -724,6 +830,8 @@ namespace Frida.Barebone {
 		private class MMURegisters {
 			public uint64 tcr;
 			public uint64 ttbr1;
+			public uint64 sprr_config;
+			public uint64 sprr_perm;
 
 			public static async MMURegisters read (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
 				var regs = new MMURegisters ();
@@ -741,10 +849,19 @@ namespace Frida.Barebone {
 							regs.tcr = val;
 						else if (name == "ttbr1_el1")
 							regs.ttbr1 = val;
+						else if (name == "sprr_config_el1")
+							regs.sprr_config = val;
+						else if (name == "sprr_el1br1_el1")
+							regs.sprr_perm = val;
 					}
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
 					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);
+					try {
+						regs.sprr_config = yield thread.read_register ("sprr_config_el1", cancellable);
+						regs.sprr_perm = yield thread.read_register ("sprr_el1br1_el1", cancellable);
+					} catch (Error e) {
+					}
 				}
 
 				return regs;
@@ -872,7 +989,9 @@ namespace Frida.Barebone {
 				old_descriptors = null;
 				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 				try {
+					printerr ("Reverting!\n\n");
 					yield gdb.write_byte_array (first_slot, d, cancellable);
+					printerr ("Reverted!\n\n");
 				} finally {
 					set_addressing_mode.begin (gdb, VIRTUAL, null);
 				}
@@ -949,7 +1068,45 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private static Gum.PageProtection protection_from_flags (DescriptorFlags flags) {
+		private static Gum.PageProtection protection_from_flags (DescriptorFlags flags, MMUParameters p) {
+			if (p.sprr_enabled) {
+				uint idx = 0;
+				if ((flags & DescriptorFlags.AP_READ_ONLY) != 0)
+					idx |= 1 << 3;
+				if ((flags & DescriptorFlags.AP_ALLOW_APPLICATION) != 0)
+					idx |= 1 << 2;
+				if ((flags & DescriptorFlags.UXN) != 0)
+					idx |= 1 << 1;
+				if ((flags & DescriptorFlags.PXN) != 0)
+					idx |= 1 << 0;
+
+				uint perm = (uint) ((p.sprr_perm >> (idx * 4)) & 0xf);
+
+				Gum.PageProtection prot;
+				switch (perm & 3) {
+					case 0:
+						prot = 0;
+						break;
+					case 1:
+						prot = READ | EXECUTE;
+						if ((perm >> 2) == 2)
+							prot = EXECUTE;
+						break;
+					case 2:
+						prot = READ;
+						break;
+					case 3:
+						prot = READ | WRITE;
+						if ((perm >> 2) == 1)
+							prot = 0;
+						break;
+					default:
+						assert_not_reached ();
+				}
+
+				return prot;
+			}
+
 			Gum.PageProtection prot = READ;
 			if ((flags & DescriptorFlags.PXN) == 0)
 				prot |= EXECUTE;
