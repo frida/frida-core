@@ -25,6 +25,11 @@ namespace Frida.Barebone {
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
 
+		private const uint64 UXN_BIT = 1UL << 54;
+		private const uint64 PXN_BIT = 1UL << 53;
+		private const uint64 AP1_BIT = 1UL << 7;
+		private const uint64 AP0_BIT = 1UL << 6;
+
 		public Arm64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
 		}
@@ -55,7 +60,7 @@ namespace Frida.Barebone {
 
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
-				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p.granule, result, cancellable);
+				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p, result, cancellable);
 			} finally {
 				set_addressing_mode.begin (gdb, VIRTUAL, null);
 			}
@@ -63,30 +68,30 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, Granule granule,
+		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, MMUParameters p,
 				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
-			uint max_entries = compute_max_entries (level, granule);
+			uint max_entries = compute_max_entries (level, p);
 			Buffer entries = yield gdb.read_buffer (table_address, max_entries * Descriptor.SIZE, cancellable);
-			uint shift = address_shift_at_level (level, granule);
+			uint shift = address_shift_at_level (level, p.granule);
 			for (uint i = 0; i != max_entries; i++) {
 				uint64 raw_descriptor = entries.read_uint64 (i * Descriptor.SIZE);
 
-				Descriptor desc = Descriptor.parse (raw_descriptor, level, granule);
+				Descriptor desc = Descriptor.parse (raw_descriptor, level, p.granule);
 				if (desc.kind == INVALID)
 					continue;
 
 				uint64 address = upper_bits | ((uint64) i << shift);
 
 				if (desc.kind == BLOCK) {
-					size_t size = 1 << num_block_bits_at_level (level, granule);
-					Gum.PageProtection prot = protection_from_flags (desc.flags);
+					size_t size = 1 << num_block_bits_at_level (level, p.granule);
+					Gum.PageProtection prot = protection_from_flags (desc.flags, p);
 
 					ranges.add (new RangeDetails (address, desc.target_address, size, prot, MappingType.UNKNOWN));
 
 					continue;
 				}
 
-				yield collect_ranges_in_table (desc.target_address, level + 1, address, granule, ranges, cancellable);
+				yield collect_ranges_in_table (desc.target_address, level + 1, address, p, ranges, cancellable);
 			}
 		}
 
@@ -152,9 +157,10 @@ namespace Frida.Barebone {
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
 				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address, num_pages, p.tt1,
-					p.first_level, p.upper_bits, p.granule, cancellable);
+					p.first_level, p.upper_bits, p, cancellable);
 				if (allocation == null)
 					throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
+
 				return allocation;
 			} finally {
 				set_addressing_mode.begin (gdb, VIRTUAL, null);
@@ -162,10 +168,10 @@ namespace Frida.Barebone {
 		}
 
 		private async Allocation? maybe_insert_descriptor_in_table (uint64 physical_address, uint num_pages,
-				uint64 table_address, uint level, uint64 upper_bits, Granule granule, Cancellable? cancellable)
+				uint64 table_address, uint level, uint64 upper_bits, MMUParameters p, Cancellable? cancellable)
 				throws Error, IOError {
-			uint max_entries = compute_max_entries (level, granule);
-			uint shift = address_shift_at_level (level, granule);
+			uint max_entries = compute_max_entries (level, p);
+			uint shift = address_shift_at_level (level, p.granule);
 
 			uint64 first_available_va = 0;
 			uint64 first_available_slot = 0;
@@ -184,7 +190,7 @@ namespace Frida.Barebone {
 					uint table_index = chunk_offset + i;
 					uint64 address = upper_bits | ((uint64) table_index << shift);
 
-					Descriptor desc = Descriptor.parse (raw_descriptor, level, granule);
+					Descriptor desc = Descriptor.parse (raw_descriptor, level, p.granule);
 
 					if (level < 3) {
 						if (desc.kind != TABLE)
@@ -192,7 +198,7 @@ namespace Frida.Barebone {
 						if ((desc.flags & DescriptorFlags.PXNTABLE) != 0)
 							continue;
 						Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address,
-							num_pages, desc.target_address, level + 1, address, granule, cancellable);
+							num_pages, desc.target_address, level + 1, address, p, cancellable);
 						if (allocation != null)
 							return allocation;
 						continue;
@@ -217,10 +223,17 @@ namespace Frida.Barebone {
 			if (num_available_slots != num_pages)
 				return null;
 
+			Gum.PageProtection page_prot = Gum.PageProtection.READ | Gum.PageProtection.WRITE;
+			if (!p.sprr_enabled)
+				page_prot |= Gum.PageProtection.EXECUTE;
+
 			var builder = gdb.make_buffer_builder ();
 			for (uint i = 0; i != num_available_slots; i++) {
-				uint64 cur_physical_address = physical_address + (i * granule);
-				uint64 new_descriptor = cur_physical_address | 0x40000000000403ULL;
+				uint64 cur_physical_address = physical_address + (i * p.granule);
+				uint64 base_descriptor = cur_physical_address | 0x403ULL;
+
+				uint64 new_descriptor = apply_protection_bits (base_descriptor, page_prot, p);
+
 				builder.append_uint64 (new_descriptor);
 			}
 			Bytes new_descriptors = builder.build ();
@@ -691,6 +704,10 @@ namespace Frida.Barebone {
 			public uint first_level;
 			public uint64 upper_bits;
 			public uint64 tt1;
+			public uint t1sz;
+
+			public bool sprr_enabled;
+			public uint64 sprr_perm;
 
 			public static async MMUParameters load (GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
 				GDB.Exception? exception = gdb.exception;
@@ -718,6 +735,10 @@ namespace Frida.Barebone {
 					parameters.upper_bits |= 1ULL << (63 - i);
 
 				parameters.tt1 = regs.ttbr1 & INT48_MASK;
+				parameters.t1sz = t1sz;
+
+				parameters.sprr_enabled = (regs.sprr_config & 1) != 0;
+				parameters.sprr_perm = regs.sprr_perm;
 
 				return parameters;
 			}
@@ -726,6 +747,8 @@ namespace Frida.Barebone {
 		private class MMURegisters {
 			public uint64 tcr;
 			public uint64 ttbr1;
+			public uint64 sprr_config;
+			public uint64 sprr_perm;
 
 			public static async MMURegisters read (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
 				var regs = new MMURegisters ();
@@ -743,10 +766,19 @@ namespace Frida.Barebone {
 							regs.tcr = val;
 						else if (name == "ttbr1_el1")
 							regs.ttbr1 = val;
+						else if (name == "sprr_config_el1")
+							regs.sprr_config = val;
+						else if (name == "sprr_el1br1_el1")
+							regs.sprr_perm = val;
 					}
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
 					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);
+					try {
+						regs.sprr_config = yield thread.read_register ("sprr_config_el1", cancellable);
+						regs.sprr_perm = yield thread.read_register ("sprr_el1br1_el1", cancellable);
+					} catch (Error e) {
+					}
 				}
 
 				return regs;
@@ -910,11 +942,23 @@ namespace Frida.Barebone {
 			assert_not_reached ();
 		}
 
-		private static uint compute_max_entries (uint level, Granule granule) {
-			return 1 << num_address_bits_at_level (level, granule);
+		private static uint compute_max_entries (uint level, MMUParameters p) {
+			return 1 << num_address_bits_at_level (level, p);
 		}
 
-		private static uint num_address_bits_at_level (uint level, Granule granule) {
+		private static uint num_address_bits_at_level (uint level, MMUParameters p) {
+			if (level == p.first_level) {
+				uint available_address_bits = 64 - p.t1sz - inpage_bits_for_granule (p.granule);
+				uint consumed_by_lower_levels = 0;
+				for (uint l = level + 1; l <= 3; l++)
+					consumed_by_lower_levels += unclipped_address_bits_at_level (l, p.granule);
+				return available_address_bits - consumed_by_lower_levels;
+			} else {
+				return unclipped_address_bits_at_level (level, p.granule);
+			}
+		}
+
+		private static uint unclipped_address_bits_at_level (uint level, Granule granule) {
 			switch (granule) {
 				case 4K:
 					return 9;
@@ -934,7 +978,7 @@ namespace Frida.Barebone {
 		private static uint address_shift_at_level (uint level, Granule granule) {
 			uint shift = inpage_bits_for_granule (granule);
 			for (int l = 2; l != (int) level - 1; l--)
-				shift += num_address_bits_at_level (l, granule);
+				shift += unclipped_address_bits_at_level (l, granule);
 			return shift;
 		}
 
@@ -951,13 +995,138 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private static Gum.PageProtection protection_from_flags (DescriptorFlags flags) {
+		private static Gum.PageProtection protection_from_flags (DescriptorFlags flags, MMUParameters p) {
+			if (p.sprr_enabled) {
+				uint idx = 0;
+				if ((flags & DescriptorFlags.AP_READ_ONLY) != 0)
+					idx |= 1 << 3;
+				if ((flags & DescriptorFlags.AP_ALLOW_APPLICATION) != 0)
+					idx |= 1 << 2;
+				if ((flags & DescriptorFlags.UXN) != 0)
+					idx |= 1 << 1;
+				if ((flags & DescriptorFlags.PXN) != 0)
+					idx |= 1 << 0;
+
+				uint perm = (uint) ((p.sprr_perm >> (idx * 4)) & 0xf);
+
+				Gum.PageProtection prot;
+				switch (perm & 3) {
+					case 0:
+						prot = 0;
+						break;
+					case 1:
+						prot = READ | EXECUTE;
+						if ((perm >> 2) == 2)
+							prot = EXECUTE;
+						break;
+					case 2:
+						prot = READ;
+						break;
+					case 3:
+						prot = READ | WRITE;
+						if ((perm >> 2) == 1)
+							prot = 0;
+						break;
+					default:
+						assert_not_reached ();
+				}
+
+				return prot;
+			}
+
 			Gum.PageProtection prot = READ;
 			if ((flags & DescriptorFlags.PXN) == 0)
 				prot |= EXECUTE;
 			if ((flags & DescriptorFlags.AP_READ_ONLY) == 0)
 				prot |= WRITE;
 			return prot;
+		}
+
+		private static uint64 apply_protection_bits (uint64 descriptor, Gum.PageProtection prot, MMUParameters p) throws Error {
+			uint64 result = descriptor;
+
+			if (p.sprr_enabled) {
+				uint target_sprr_index = find_sprr_index_for_permissions (prot, p);
+				result = apply_sprr_index_to_descriptor (result, target_sprr_index);
+			} else {
+				result = apply_non_sprr_protection_bits (result, prot);
+			}
+
+			return result;
+		}
+
+		private static uint64 apply_non_sprr_protection_bits (uint64 descriptor, Gum.PageProtection prot) {
+			uint64 result = descriptor;
+
+			bool want_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
+			bool want_write = (prot & Gum.PageProtection.WRITE) != 0;
+
+			if (want_exec)
+				result &= ~(UXN_BIT | PXN_BIT);
+			else
+				result |= (UXN_BIT | PXN_BIT);
+
+			if (want_write) {
+				result &= ~(AP1_BIT | AP0_BIT);
+			} else {
+				result |= AP1_BIT;
+				result &= ~AP0_BIT;
+			}
+
+			return result;
+		}
+
+		private static uint find_sprr_index_for_permissions (Gum.PageProtection prot, MMUParameters p) throws Error {
+			bool want_read = (prot & Gum.PageProtection.READ) != 0;
+			bool want_write = (prot & Gum.PageProtection.WRITE) != 0;
+			bool want_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
+
+			for (uint i = 0; i != 16; i++) {
+				uint perm = (uint) ((p.sprr_perm >> (i * 4)) & 0xf);
+
+				bool slot_allows_read = false;
+				bool slot_allows_write = false;
+				bool slot_allows_exec = false;
+
+				switch (perm & 3) {
+					case 0:
+						break;
+					case 1:
+						slot_allows_exec = true;
+						if ((perm >> 2) != 2)
+							slot_allows_read = true;
+						break;
+					case 2:
+						slot_allows_read = true;
+						break;
+					case 3:
+						slot_allows_read = true;
+						slot_allows_write = ((perm >> 2) != 1);
+						break;
+				}
+
+				if (slot_allows_read == want_read && slot_allows_write == want_write && slot_allows_exec == want_exec)
+					return i;
+			}
+
+			throw new Error.INVALID_ARGUMENT ("No suitable SPRR slot found for protection 0x%x", prot);
+		}
+
+		private static uint64 apply_sprr_index_to_descriptor (uint64 descriptor, uint sprr_index) {
+			uint64 result = descriptor;
+
+			result &= ~(AP1_BIT | AP0_BIT | UXN_BIT | PXN_BIT);
+
+			if ((sprr_index & 0x8) != 0)
+				result |= AP1_BIT;
+			if ((sprr_index & 0x4) != 0)
+				result |= AP0_BIT;
+			if ((sprr_index & 0x2) != 0)
+				result |= UXN_BIT;
+			if ((sprr_index & 0x1) != 0)
+				result |= PXN_BIT;
+
+			return result;
 		}
 
 		private static Gum.PageProtection protection_from_corellium_pt_details (string details) {
