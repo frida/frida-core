@@ -65,6 +65,7 @@ def main():
 
     toplevel_names = [
         "frida.vala",
+        "package-manager.vala",
         "control-service.vala",
         "portal-service.vala",
         "file-monitor.vala",
