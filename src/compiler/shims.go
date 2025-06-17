@@ -18,6 +18,7 @@ export { default as process } from 'node:process';
 //go:embed node_modules/@frida/*/package.json
 //go:embed node_modules/@frida/*/*.js
 //go:embed node_modules/@frida/*/*/*.js
+//go:embed node_modules/@frida/*/*/*/*.js
 //go:embed node_modules/frida-fs/package.json
 //go:embed node_modules/frida-fs/*/*.js
 var embeddedShims embed.FS
