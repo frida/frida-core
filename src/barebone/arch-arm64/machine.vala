@@ -292,6 +292,10 @@ namespace Frida.Barebone {
 			return new DescriptorAllocation (first_available_va, first_available_slot, old_descriptors, gdb);
 		}
 
+		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
+		}
+
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
 				Cancellable? cancellable) throws Error, IOError {
 			unowned uint8[] scanner_blob = Data.Barebone.get_memory_scanner_arm64_elf_blob ().data;
@@ -456,9 +460,6 @@ namespace Frida.Barebone {
 			GDB.Exception ex = null;
 			do {
 				ex = yield gdb.continue_until_exception (cancellable);
-				printerr ("Got ex.breakpoint=%p vs. bp=%p\n", ex.breakpoint, bp);
-				printerr ("Matches ours: %s\n", (ex.breakpoint == bp) ? "true" : "false");
-				printerr ("Matches thread ID: %s\n\n", (ex.thread.id == thread.id) ? "true" : "false");
 			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
 			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
 			yield bp.remove (cancellable);
@@ -989,9 +990,7 @@ namespace Frida.Barebone {
 				old_descriptors = null;
 				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 				try {
-					printerr ("Reverting!\n\n");
 					yield gdb.write_byte_array (first_slot, d, cancellable);
-					printerr ("Reverted!\n\n");
 				} finally {
 					set_addressing_mode.begin (gdb, VIRTUAL, null);
 				}

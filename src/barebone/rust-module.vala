@@ -97,9 +97,7 @@ namespace Frida.Barebone {
 			uint64 base_va = allocation.virtual_address;
 
 			Bytes relocated_image = machine.relocate (elf, base_va);
-			printerr ("Writing ELF to base_va=0x%" + uint64.FORMAT_MODIFIER + "x\n\n", base_va);
 			yield gdb.write_byte_array (base_va, relocated_image, cancellable);
-			printerr ("Wrote ELF to base_va=0x%" + uint64.FORMAT_MODIFIER + "x\n\n", base_va);
 
 			uint64 console_log_trap = 0;
 			elf.enumerate_dynamic_symbols (e => {

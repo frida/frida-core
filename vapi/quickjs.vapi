@@ -118,6 +118,9 @@ namespace QuickJS {
 		[CCode (cname = "JS_NewAtom")]
 		public Atom make_atom (string str);
 
+		[CCode (cname = "JS_NewBool")]
+		public Value make_bool (bool v);
+
 		[CCode (cname = "JS_NewInt32")]
 		public Value make_int32 (int32 v);
 
