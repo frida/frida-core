@@ -294,6 +294,73 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
 				Cancellable? cancellable) throws Error, IOError {
+		{
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			try {
+				uint64 page_mask = p.granule - 1;
+				uint64 aligned_va = virtual_address & ~page_mask;
+				uint64 aligned_end = (virtual_address + size + page_mask) & ~page_mask;
+				uint num_pages = (uint) ((aligned_end - aligned_va) / p.granule);
+
+				bool want_exec  = (prot & Gum.PageProtection.EXECUTE) != 0;
+				bool want_write = (prot & Gum.PageProtection.WRITE)   != 0;
+
+				for (uint i = 0; i != num_pages; i++)
+				{
+					uint64 cur_va = aligned_va + (uint64) i * p.granule;
+
+					uint64 slot_pa = yield find_descriptor_slot (cur_va, p.tt1, p.first_level, p, cancellable);
+
+					Buffer buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+					uint64 raw_desc = buf.read_uint64 (0);
+					uint64 new_desc = raw_desc;
+
+					if (want_exec)
+						new_desc &= ~(UXN_BIT | PXN_BIT);
+					else
+						new_desc |=  (UXN_BIT | PXN_BIT);
+
+					if (want_write) {
+						new_desc &= ~(AP1_BIT | AP0_BIT);
+					} else {
+						new_desc |=  AP1_BIT;
+						new_desc &= ~AP0_BIT;
+					}
+
+					if (new_desc != raw_desc) {
+						var bb = gdb.make_buffer_builder ();
+						bb.append_uint64 (new_desc);
+						yield gdb.write_byte_array (slot_pa, bb.build (), cancellable);
+					}
+				}
+			} finally {
+				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			}
+		}
+
+		private async uint64 find_descriptor_slot (uint64 va, uint64 table_pa, uint level, MMUParameters p,
+				Cancellable? cancellable) throws Error, IOError {
+			while (true) {
+				uint shift = address_shift_at_level (level, p.granule);
+				uint entries = compute_max_entries (level, p.granule);
+				uint index = (uint) ((va >> shift) & (entries - 1));
+				uint64 slot_pa = table_pa + ((uint64) index * Descriptor.SIZE);
+
+				Buffer d_buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				uint64 raw = d_buf.read_uint64 (0);
+				Descriptor desc = Descriptor.parse (raw, level, p.granule);
+
+				if (level == 3)
+					return slot_pa;
+
+				if (desc.kind != TABLE)
+					throw new Error.NOT_SUPPORTED ("Walk failed at level %u".printf (level));
+
+				table_pa = desc.target_address;
+				level++;
+			}
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
