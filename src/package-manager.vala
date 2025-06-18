@@ -48,11 +48,17 @@ namespace Frida {
 				string? description = reader.get_string_value ();
 				reader.end_member ();
 
+				reader.read_member ("links");
+				reader.read_member ("npm");
+				string? url = reader.get_string_value ();
+				reader.end_member ();
 				reader.end_member ();
 
-				if (name == null || version == null)
+				reader.end_member ();
+
+				if (name == null || version == null || url == null)
 					throw new Error.PROTOCOL ("Unexpected JSON format: missing package details");
-				packages.add (new Package (name, version, description));
+				packages.add (new Package (name, version, description, url));
 
 				reader.end_element ();
 			}
@@ -1223,12 +1229,26 @@ namespace Frida {
 			construct;
 		}
 
-		internal Package (string name, string version, string? description) {
+		public string? url {
+			get;
+			construct;
+		}
+
+		internal Package (string name, string version, string? description, string? url = null) {
 			Object (
 				name: name,
 				version: version,
-				description: description
+				description: description,
+				url: prettify_url (url)
 			);
+		}
+
+		private static string? prettify_url (string? url) {
+			if (url == null)
+				return null;
+			if (url.has_prefix ("https://www.npmjs.com/package/"))
+				return "https://npm.im/" + url[30:];
+			return url;
 		}
 	}
 
