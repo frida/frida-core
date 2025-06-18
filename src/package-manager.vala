@@ -1071,7 +1071,7 @@ namespace Frida {
 			size_t read_total = 0;
 			size_t report_bucket = 0;
 			int64 content_len = tar_msg.get_response_headers ().get_content_length ();
-			string progress_details = "%s@%s".printf(name, version);
+			string progress_details = "%s@%s".printf (name, version);
 
 			install_progress (DOWNLOADING_PACKAGE, 0.0, progress_details);
 
