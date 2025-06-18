@@ -224,7 +224,7 @@ namespace Frida {
 			double finalizing_manifests_start_fraction = physical_completion_start_fraction + physical_completion_span;
 			install_progress (FINALIZING_MANIFESTS, finalizing_manifests_start_fraction);
 			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
-			install_progress (FINALIZING_MANIFESTS, 0.95, "Manifests written");
+			install_progress (FINALIZING_MANIFESTS, 0.95);
 
 			var pkgs = new Gee.ArrayList<Package> ();
 			foreach (var future_ple in initial_dep_link_futures) {
