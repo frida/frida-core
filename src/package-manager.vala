@@ -108,7 +108,7 @@ namespace Frida {
 			foreach (string spec_str in opts.specs) {
 				string name, version_spec_val;
 				int at = spec_str.last_index_of ("@");
-				if (at != -1) {
+				if (at > 0) {
 					name = spec_str[:at];
 					version_spec_val = spec_str[at + 1:];
 				} else {
