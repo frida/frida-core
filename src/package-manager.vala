@@ -389,6 +389,11 @@ namespace Frida {
 						lock_r.read_member ("name");
 						pli.name = lock_r.get_string_value ();
 						lock_r.end_member ();
+					} else {
+						int last_start = path_key.last_index_of ("/node_modules/");
+						pli.name = (last_start != -1)
+							? path_key[last_start + 14:]
+							: path_key[13:];
 					}
 
 					lock_r.read_member ("version");
