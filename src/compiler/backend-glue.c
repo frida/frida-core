@@ -13,7 +13,7 @@
 extern void FRIDA_CGO_INIT_FUNC ();
 
 void
-frida_compiler_backend_init (void)
+_frida_compiler_backend_init_go_runtime (void)
 {
   FRIDA_CGO_INIT_FUNC ();
 }
@@ -21,7 +21,7 @@ frida_compiler_backend_init (void)
 #else
 
 void
-frida_compiler_backend_init (void)
+_frida_compiler_backend_init_go_runtime (void)
 {
 }
 

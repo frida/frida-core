@@ -29,6 +29,8 @@ namespace Frida {
 
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
+			CompilerBackend.check_available ();
+
 			BuildOptions opts = (options != null) ? options : new BuildOptions ();
 			string project_root = compute_project_root (entrypoint, opts);
 
@@ -77,6 +79,8 @@ namespace Frida {
 
 		public async void watch (string entrypoint, WatchOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
+			CompilerBackend.check_available ();
+
 			WatchOptions opts = (options != null) ? options : new WatchOptions ();
 			string project_root = compute_project_root (entrypoint, opts);
 
@@ -227,40 +231,82 @@ namespace Frida {
 	}
 
 	namespace CompilerBackend {
-		private extern void init ();
-
+		private void init () {
 #if HAVE_COMPILER_BACKEND
-		private extern void build (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-			size_t disable_type_check, size_t source_map, size_t compress, owned BuildCompleteFunc on_complete,
-			DiagnosticFunc on_diagnostic);
-		private extern void watch (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-			size_t disable_type_check, size_t source_map, size_t compress, owned WatchReadyFunc on_ready,
-			StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic);
-
-		namespace WatchSession {
-			private extern void dispose (size_t handle);
-		}
+#if COMPILER_BACKEND_STATIC_COMPILATION
+			_init_go_runtime ();
+			build = (BuildFunc) _build;
+			watch = (WatchFunc) _watch;
+			WatchSession.dispose = (WatchSession.DisposeFunc) WatchSession._dispose;
 #else
-		private const string DISABLED_MESSAGE = "Compiler backend disabled at build-time";
+			unowned uint8[] backend_so = Frida.Data.Compiler.get_frida_compiler_backend_so_blob ().data;
 
-		private void build (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-				size_t disable_type_check, size_t source_map, size_t compress, owned BuildCompleteFunc on_complete,
-				DiagnosticFunc on_diagnostic) {
-			on_complete (null, DISABLED_MESSAGE);
-		}
+			FileDescriptor fd;
+			if (MemoryFileDescriptor.is_supported ()) {
+				fd = MemoryFileDescriptor.from_bytes ("frida-compiler-backend.so", new Bytes.static (backend_so));
+			} else {
+				string name_used;
+				try {
+					fd = new FileDescriptor (FileUtils.open_tmp ("frida-compiler-backend-XXXXXX.so", out name_used));
+					FileUtils.unlink (name_used);
 
-		private void watch (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
-				size_t disable_type_check, size_t source_map, size_t compress, owned WatchReadyFunc on_ready,
-				StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic) {
-			on_ready (0, DISABLED_MESSAGE);
-		}
+					var output = new UnixOutputStream (fd.handle, false);
+					output.write_all (backend_so, null);
 
-		namespace WatchSession {
-			private void dispose (size_t handle) {
+					Posix.lseek (fd.handle, 0, Posix.SEEK_SET);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+			}
+
+			Module backend;
+			try {
+				backend = new Module ("/proc/self/fd/%d".printf (fd.handle), LOCAL);
+			} catch (ModuleError e) {
 				assert_not_reached ();
 			}
-		}
+			build = resolve_symbol (backend, "_frida_compiler_backend_build");
+			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
+			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
 #endif
+#endif
+		}
+
+		private void check_available () throws Error {
+			if (build == null)
+				throw new Error.NOT_SUPPORTED ("Compiler backend disabled at build-time");
+		}
+
+		private BuildFunc? build;
+		private WatchFunc? watch;
+
+		[CCode (has_target = false)]
+		private delegate void BuildFunc (string project_root, string entrypoint, OutputFormat output_format,
+			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
+			owned BuildCompleteFunc on_complete, DiagnosticFunc on_diagnostic);
+
+		[CCode (has_target = false)]
+		private delegate void WatchFunc (string project_root, string entrypoint, OutputFormat output_format,
+			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
+			owned WatchReadyFunc on_ready, StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output,
+			DiagnosticFunc on_diagnostic);
+
+#if COMPILER_BACKEND_STATIC_COMPILATION
+		private extern void _init_go_runtime ();
+		private extern void _build ();
+		private extern void _watch ();
+#endif
+
+		namespace WatchSession {
+			[CCode (has_target = false)]
+			private delegate void DisposeFunc (size_t handle);
+
+			private DisposeFunc? dispose;
+
+#if COMPILER_BACKEND_STATIC_COMPILATION
+			private extern void _dispose ();
+#endif
+		}
 
 		private delegate void BuildCompleteFunc (owned string? bundle, owned string? error_message);
 		private delegate void WatchReadyFunc (size_t session_handle, owned string? error_message);
@@ -269,6 +315,15 @@ namespace Frida {
 		private delegate void OutputFunc (owned string bundle);
 		private delegate void DiagnosticFunc (owned string category, int code, owned string? path, int line, int character,
 			owned string text);
+
+#if HAVE_COMPILER_BACKEND && !COMPILER_BACKEND_STATIC_COMPILATION
+		private static T resolve_symbol<T> (Module m, string name) {
+			void * address;
+			if (!m.symbol (name, out address))
+				assert_not_reached ();
+			return (T) address;
+		}
+#endif
 	}
 
 	private string compute_project_root (string entrypoint, CompilerOptions options) {

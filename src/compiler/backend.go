@@ -144,8 +144,8 @@ type BuildEndCallback func()
 type BuildOutputCallback func(bundle string)
 type BuildDiagnosticCallback func(d Diagnostic)
 
-//export frida_compiler_backend_build
-func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
+//export _frida_compiler_backend_build
+func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
 	disableTypeCheck, sourceMap, compress uintptr,
 	onCompleteFn C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDataDestroy C.FridaDestroyFunc,
 	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
@@ -179,8 +179,8 @@ func frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForma
 	}()
 }
 
-//export frida_compiler_backend_watch
-func frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
+//export _frida_compiler_backend_watch
+func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
 	disableTypeCheck, sourceMap, compress uintptr,
 	onReadyFn C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc,
 	onStartingFn C.FridaStartingFunc, onStartingData unsafe.Pointer,
@@ -238,8 +238,8 @@ func frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForma
 	}()
 }
 
-//export frida_compiler_backend_watch_session_dispose
-func frida_compiler_backend_watch_session_dispose(h uintptr) {
+//export _frida_compiler_backend_watch_session_dispose
+func _frida_compiler_backend_watch_session_dispose(h uintptr) {
 	handle := cgo.Handle(h)
 	session := handle.Value().(*WatchSession)
 	session.Dispose()

@@ -18,7 +18,6 @@ if platform.system() == "Windows":
 
 
 FRIDA_OS_TO_GO_OS = {
-    "android": "linux",  # XXX: Work around lack of support for -buildmode=c-archive
     "macos": "darwin",
 }
 
@@ -53,6 +52,7 @@ def main(argv: List[str]):
     go = Path(args.pop(0))
     host_os = args.pop(0)
     host_abi = args.pop(0)
+    shlib_suffix = args.pop(0)
     cc_id = args.pop(0)
     cc_cmd_array = pop_cmd_array_arg(args)
     ar_cmd_array = pop_cmd_array_arg(args)
@@ -64,6 +64,7 @@ def main(argv: List[str]):
             go,
             host_os,
             host_abi,
+            shlib_suffix,
             cc_id,
             cc_cmd_array,
             ar_cmd_array,
@@ -71,7 +72,7 @@ def main(argv: List[str]):
             ranlib_cmd_array,
         )
         print("ok")
-        print(base64.b64encode(json.dumps(config).encode("utf-8")).decode("ascii"))
+        print(config["mode"], base64.b64encode(json.dumps(config).encode("utf-8")).decode("ascii"))
     except Exception as e:
         print("error")
         print(str(e).replace("\n", "\\n"))
@@ -95,6 +96,7 @@ def detect_config(
     go: Path,
     host_os: str,
     host_abi: str,
+    shlib_suffix: str,
     cc_id: str,
     cc_cmd_array: List[str],
     ar_cmd_array: Optional[List[str]],
@@ -141,10 +143,6 @@ def detect_config(
         extra_go_args.append("-ldflags=-extldflags=-mmacosx-version-min=11.0")
         env["MACOSX_DEPLOYMENT_TARGET"] = "11.0"
 
-    if host_os == "android":
-        # XXX: Avoid socklen_t compatibility issue caused by us using GOOS=linux for Android
-        extra_go_args += ["-tags", "netgo"]
-
     def run(*args):
         return subprocess.run(
             args,
@@ -165,14 +163,18 @@ def detect_config(
     env["GOOS"] = goos
     env["GOARCH"] = goarch
 
+    mode = "c-shared" if host_os == "android" else "c-archive"
+
     try:
-        run(go, "build", "-buildmode=c-archive", "-o", "cgotest.a", "-buildvcs=false")
+        run(go, "build", f"-buildmode={mode}", "-o", "cgotest.a", "-buildvcs=false")
     except subprocess.CalledProcessError as e:
         raise BuildError(e.output.strip())
 
     config = {
+        "mode": mode,
         "os": host_os,
         "abi": host_abi,
+        "shlib_suffix": shlib_suffix,
         "extra_go_args": extra_go_args,
         "env": env,
         "ar": ar_cmd_array,

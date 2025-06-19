@@ -423,6 +423,7 @@ if compiler_backend_opt.allowed()
         go,
         host_os,
         host_abi,
+        shlib_suffix,
         cc.get_id(),
         '>>>', cc.cmd_array(), '<<<',
         '>>>', ar, '<<<',
@@ -436,7 +437,13 @@ if compiler_backend_opt.allowed()
     status = lines[0]
     if status == 'ok'
       have_compiler_backend = true
-      go_config = lines[1]
+      tokens = lines[1].split(' ')
+      go_mode = tokens[0]
+      go_config = tokens[1]
+      compiler_backend_static_compilation = go_mode == 'c-archive'
+      if compiler_backend_static_compilation
+        vala_flags += '--define=COMPILER_BACKEND_STATIC_COMPILATION'
+      endif
     else
       error_message = lines[1]
       if compiler_backend_opt.enabled()

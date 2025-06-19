@@ -57,62 +57,79 @@ def build_backend(
     run(npm, "install")
     # run(npm, "link", "/home/oleavr/src/frida-fs")
 
-    backend_a = priv_dir / "frida-compiler-backend.a"
-    backend_h = priv_dir / "frida-compiler-backend.h"
+    mode = config["mode"]
+
+    backend_stem = "frida-compiler-backend"
+    if mode == "c-shared":
+        backend_stem += "-raw"
+
+    backend_a = priv_dir / f"{backend_stem}.a"
+    backend_shlib = priv_dir / (f"{backend_stem}" + config["shlib_suffix"])
+    backend_h = priv_dir / f"{backend_stem}.h"
+
+    extra_go_args = config["extra_go_args"].copy()
+
+    if mode == "c-shared":
+        version_script = priv_dir / "backend.version"
+        extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,--version-script={version_script}")
 
     run(
         go,
         "build",
-        "-buildmode=c-archive",
+        f"-buildmode={mode}",
         "-o",
-        backend_a.name,
+        backend_a.name if mode == "c-archive" else backend_shlib.name,
         "-buildvcs=false",
-        *config["extra_go_args"],
+        *extra_go_args,
         *go_sources,
     )
 
-    symbols_to_scramble = detect_conflictful_symbols_in_archive(backend_a, config["nm"])
-    scramble_symbols_in_archive(backend_a, symbols_to_scramble, config["ranlib"])
+    if mode == "c-archive":
+        symbols_to_scramble = detect_conflictful_symbols_in_archive(backend_a, config["nm"])
+        scramble_symbols_in_archive(backend_a, symbols_to_scramble, config["ranlib"])
 
-    if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
-        "x86",
-        "x86_64",
-    }:
-        prefix = Path(mingw["prefix"])
-        ar = config["ar"]
+        if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
+            "x86",
+            "x86_64",
+        }:
+            prefix = Path(mingw["prefix"])
+            ar = config["ar"]
 
-        libmingwex_a = prefix / "lib" / "libmingwex.a"
-        if not libmingwex_a.exists():
-            libmingwex_a = prefix / mingw["triplet"] / "lib" / "libmingwex.a"
+            libmingwex_a = prefix / "lib" / "libmingwex.a"
+            if not libmingwex_a.exists():
+                libmingwex_a = prefix / mingw["triplet"] / "lib" / "libmingwex.a"
 
-        libgcc_objects = [
-            "_chkstk_ms.o",
-        ]
-        run(*ar, "x", mingw["libcc"], *libgcc_objects)
-
-        gwex_objflavor = "64" if abi == "x86_64" else "32"
-        gwex_objects = [
-            f"lib{gwex_objflavor}_libmingwex_a-{name}.o"
-            for name in [
-                "dmisc",
-                "gdtoa",
-                "gmisc",
-                "mingw_fprintf",
-                "mingw_pformat",
-                "misc",
+            libgcc_objects = [
+                "_chkstk_ms.o",
             ]
-        ]
-        run(*ar, "x", libmingwex_a, *gwex_objects)
+            run(*ar, "x", mingw["libcc"], *libgcc_objects)
 
-        extra_objects = []
-        if abi == "x86_64":
-            run(*ar, "x", backend_a.name, "go.o")
-            sort_pdata_in_object(Path(priv_dir) / "go.o")
-            extra_objects.append("go.o")
+            gwex_objflavor = "64" if abi == "x86_64" else "32"
+            gwex_objects = [
+                f"lib{gwex_objflavor}_libmingwex_a-{name}.o"
+                for name in [
+                    "dmisc",
+                    "gdtoa",
+                    "gmisc",
+                    "mingw_fprintf",
+                    "mingw_pformat",
+                    "misc",
+                ]
+            ]
+            run(*ar, "x", libmingwex_a, *gwex_objects)
 
-        run(*ar, "rs", backend_a.name, *libgcc_objects, *gwex_objects, *extra_objects)
+            extra_objects = []
+            if abi == "x86_64":
+                run(*ar, "x", backend_a.name, "go.o")
+                sort_pdata_in_object(Path(priv_dir) / "go.o")
+                extra_objects.append("go.o")
 
-    shutil.copy(priv_dir / backend_a.name, output_dir / backend_a.name)
+            run(*ar, "rs", backend_a.name, *libgcc_objects, *gwex_objects, *extra_objects)
+
+        shutil.copy(priv_dir / backend_a.name, output_dir / backend_a.name)
+    else:
+        shutil.copy(priv_dir / backend_shlib.name, output_dir / backend_shlib.name)
+
     shutil.copy(priv_dir / backend_h.name, output_dir / backend_h.name)
 
 
