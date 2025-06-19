@@ -109,8 +109,8 @@ namespace Frida {
 				string name, version_spec_val;
 				int at = spec_str.last_index_of ("@");
 				if (at != -1) {
-					name = spec_str.substring (0, at);
-					version_spec_val = spec_str.substring (at + 1);
+					name = spec_str[:at];
+					version_spec_val = spec_str[at + 1:];
 				} else {
 					name = spec_str;
 					version_spec_val = "latest";
@@ -1617,10 +1617,10 @@ namespace Frida {
 				string core_part_of_spec = stripped_spec;
 				int plus_idx = core_part_of_spec.index_of_char ('+');
 				if (plus_idx != -1)
-					core_part_of_spec = core_part_of_spec.substring (0, plus_idx);
+					core_part_of_spec = core_part_of_spec[:plus_idx];
 				int dash_idx = core_part_of_spec.index_of_char ('-');
 				if (dash_idx != -1)
-					core_part_of_spec = core_part_of_spec.substring (0, dash_idx);
+					core_part_of_spec = core_part_of_spec[:dash_idx];
 
 				return count_char (core_part_of_spec, '.') == 2;
 			} catch (Error e) {
