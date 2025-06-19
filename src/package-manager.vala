@@ -1941,11 +1941,11 @@ namespace Frida {
 				string size_field = header.read_fixed_string (124, 12).split (" ")[0];
 				uint64 file_size = 0;
 				if (!uint64.try_parse (size_field, out file_size, null, 8))
-					throw new Error.PROTOCOL ("Invalid tarball size (file '%s' corrupt)", safe_entry);
+					throw new Error.PROTOCOL ("Invalid tarball size (file '%s' corrupt)", name);
 
 				var typeflag = (char) header.read_uint8 (156);
 
-				if (typeflag == '0' || typeflag == '\0') {
+				if ((typeflag == '0' || typeflag == '\0') && safe_entry != "") {
 					current_file = root.get_child (safe_entry);
 					FS.mkdirp (current_file.get_parent (), cancellable);
 					try {
@@ -1971,9 +1971,9 @@ namespace Frida {
 
 		private static string sanitize_entry (string name, File root) throws Error {
 			int slash = name.index_of ("/");
-			string entry = (slash == -1) ? name : name[slash + 1:];
-			if (entry.length == 0)
-				throw new Error.PROTOCOL ("Empty tar entry name: %s", name);
+			string entry = (slash == -1) ? "" : name[slash + 1:];
+			if (entry == "")
+				return entry;
 
 			entry = entry.replace ("/", Path.DIR_SEPARATOR_S);
 
