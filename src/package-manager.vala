@@ -120,9 +120,8 @@ namespace Frida {
 
 			install_progress (PREPARING_DEPENDENCIES, 0.05);
 			var wanted_deps_list = new Gee.ArrayList<PackageDependency> ();
-			foreach (var dep_entry in manifest.dependencies.all.values) {
+			foreach (var dep_entry in manifest.dependencies.all.values)
 				wanted_deps_list.add (dep_entry);
-			}
 			foreach (var e in specs.entries) {
 				string name = e.key;
 				string version_spec_val = e.value;
@@ -645,7 +644,8 @@ namespace Frida {
 										rpd_promise.resolve (rpd);
 									break;
 								}
-							} catch (Error e) { }
+							} catch (Error e) {
+							}
 						}
 					}
 				}
