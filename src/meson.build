@@ -365,16 +365,14 @@ if have_local_backend
     helper_backend_vala_args = [
       base_vala_args,
       gum_vala_args,
-      '--pkg=gio-unix-2.0',
       '--pkg=posix',
     ]
     helper_backend = static_library('frida-helper-backend', helper_backend_sources,
       c_args: frida_component_cflags,
       vala_args: [
         helper_backend_vala_args,
-        '--vapidir=' + meson.current_source_dir() / 'linux',
-        '--pkg=frida-sysapi',
         '--pkg=linux',
+        '--pkg=linux-system',
         '--pkg=frida-gum-linux-1.0',
       ],
       dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,

@@ -510,7 +510,8 @@ def function_is_public(name):
                 "parse_control_address",
                 "parse_cluster_address",
                 "parse_socket_address",
-                "negotiate_connection"
+                "negotiate_connection",
+                "check_kernel_version",
             ]
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
