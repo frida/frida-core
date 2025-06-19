@@ -712,9 +712,8 @@ namespace Frida {
 				File sub_deps_parent_node_modules_dir = target_dir.get_child ("node_modules");
 				PackageDependencies dependencies_to_recurse = rpd.dependencies;
 
-				if (!dependencies_to_recurse.all.is_empty) {
+				if (!dependencies_to_recurse.all.is_empty)
 					FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
-				}
 
 				foreach (PackageDependency d in dependencies_to_recurse.all.values) {
 					bool install_this_sub_dep = d.role == RUNTIME || d.role == OPTIONAL;
