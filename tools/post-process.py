@@ -23,6 +23,7 @@ def main(argv):
         input_entitlements_path = args.pop(0) if args else None
     else:
         input_entitlements_path = None
+    flags = set(args.pop(0).split("|") if args else [])
 
     is_apple_os = host_os in {"macos", "ios", "watchos", "tvos"}
 
@@ -62,7 +63,7 @@ def main(argv):
                     codesign_args += ["--entitlements", input_entitlements_path]
             subprocess.run(codesign + codesign_args + [intermediate_path], **run_kwargs)
 
-        if host_os == "android":
+        if host_os == "android" and "elf-cleaner:off" not in flags:
             api_level = 19 if host_abi in {"x86", "arm"} else 21
             subprocess.run(termux_elf_cleaner + ["--api-level", str(api_level), "--quiet", intermediate_path],
                            **run_kwargs)
