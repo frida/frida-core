@@ -191,55 +191,36 @@ namespace Frida {
 
 			double physical_completion_start_fraction = dep_processing_start_fraction + dep_processing_span;
 			double physical_completion_span = 0.05;
-			install_progress (AWAITING_COMPLETION, physical_completion_start_fraction);
-			foreach (var promise in all_physical_installs.values)
-				yield promise.future.wait_async (cancellable);
-			install_progress (DEPENDENCIES_PROCESSED, physical_completion_start_fraction + physical_completion_span);
 
 			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
+			install_progress (AWAITING_COMPLETION, physical_completion_start_fraction);
 			foreach (var entry in all_physical_installs.entries)
 				finished_installs[entry.key] = yield entry.value.future.wait_async (cancellable);
+			install_progress (DEPENDENCIES_PROCESSED, physical_completion_start_fraction + physical_completion_span);
 
+			var pkgs = new Gee.ArrayList<Package> ();
 			var new_manifest_dependencies = new PackageDependencies ();
 			foreach (var future_ple in initial_dep_link_futures) {
 				PackageLockEntry ple = yield future_ple.wait_async (cancellable);
-				PackageDependency? original_wanted_dep = null;
-				foreach (var wd in wanted_deps_list) {
-					if (wd == ple.toplevel_dep) {
-						original_wanted_dep = wd;
-						break;
-					}
-				}
-				if (original_wanted_dep != null) {
-					new_manifest_dependencies.add (new PackageDependency () {
-						name = ple.name,
-						version = original_wanted_dep.derive_version (ple.version),
-						role = original_wanted_dep.role,
-					});
-				}
+
+				if (ple.newly_installed)
+					pkgs.add (new Package (ple.name, ple.version, ple.description));
+
+				var original_dep = ple.toplevel_dep;
+				new_manifest_dependencies.add (new PackageDependency () {
+					name = ple.name,
+					version = original_dep.derive_version (ple.version),
+					role = original_dep.role,
+				});
 			}
 			manifest.dependencies = new_manifest_dependencies;
 
 			double finalizing_manifests_start_fraction = physical_completion_start_fraction + physical_completion_span;
 			install_progress (FINALIZING_MANIFESTS, finalizing_manifests_start_fraction);
 			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
-			install_progress (FINALIZING_MANIFESTS, 0.95);
-
-			var pkgs = new Gee.ArrayList<Package> ();
-			foreach (var future_ple in initial_dep_link_futures) {
-				PackageLockEntry e = yield future_ple.wait_async (cancellable);
-				bool already_added = false;
-				foreach (var p in pkgs) {
-					if (p.name == e.name && p.version == e.version) {
-						already_added = true;
-						break;
-					}
-				}
-				if (!already_added)
-					pkgs.add (new Package (e.name, e.version, e.description));
-			}
 
 			install_progress (COMPLETE, 1.0);
+
 			return new PackageInstallResult (new PackageList (pkgs));
 		}
 
@@ -345,6 +326,7 @@ namespace Frida {
 			public string? license;
 			public PackageDependencies dependencies;
 			public PackageDependency toplevel_dep;
+			public bool newly_installed;
 		}
 
 		private async Manifest load_manifest (File pkg_json_file, File lock_file, Cancellable? cancellable) throws Error, IOError {
@@ -698,7 +680,8 @@ namespace Frida {
 						description = existing_ple.description,
 						license = existing_ple.license,
 						dependencies = existing_ple.dependencies,
-						toplevel_dep = toplevel_dep
+						toplevel_dep = toplevel_dep,
+						newly_installed = existing_ple.newly_installed
 					});
 					return;
 				}
@@ -778,7 +761,8 @@ namespace Frida {
 					description = rpd.description,
 					license = rpd.license,
 					dependencies = rpd.dependencies,
-					toplevel_dep = toplevel_dep
+					toplevel_dep = toplevel_dep,
+					newly_installed = !already_correctly_installed
 				});
 
 			} catch (GLib.Error e) {
