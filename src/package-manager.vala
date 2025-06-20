@@ -193,7 +193,7 @@ namespace Frida {
 					pkgs.add (new Package (ple.name, ple.version, ple.description));
 
 				var original_dep = ple.toplevel_dep;
-				var version = ple.newly_installed
+				var version = specs.has_key (ple.name)
 					? original_dep.derive_version (ple.version)
 					: original_dep.version;
 				new_manifest_dependencies.add (new PackageDependency () {
