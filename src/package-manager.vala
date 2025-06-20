@@ -143,6 +143,7 @@ namespace Frida {
 				});
 			}
 
+			var tracker = new InstallProgressTracker ();
 			var all_physical_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
 			var resolution_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
 			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
@@ -166,6 +167,7 @@ namespace Frida {
 					prefer_lockfile_for_this_dep,
 					cancellable,
 					dep_link_promise,
+					tracker,
 					all_physical_installs,
 					resolution_cache,
 					packument_cache,
@@ -173,36 +175,19 @@ namespace Frida {
 				);
 			}
 
-			double dep_processing_start_fraction = 0.1;
-			double dep_processing_span = 0.7;
-			int completed_top_level_deps = 0;
-			int num_wanted_deps = wanted_deps_list.size;
-			if (num_wanted_deps == 0) {
-				install_progress (RESOLVING_AND_INSTALLING_ALL, dep_processing_start_fraction + dep_processing_span, null);
-			} else {
-				foreach (var f in initial_dep_link_futures) {
-					PackageLockEntry ple = yield f.wait_async (cancellable);
-					completed_top_level_deps++;
-					double current_fraction = dep_processing_start_fraction +
-						((double) completed_top_level_deps / num_wanted_deps) * dep_processing_span;
-					install_progress (RESOLVING_AND_INSTALLING_ALL, current_fraction, ple.toplevel_dep.name);
-				}
-			}
+			var initial_dep_results = new Gee.ArrayList<PackageLockEntry> ();
+			foreach (var f in initial_dep_link_futures)
+				initial_dep_results.add (yield f.wait_async (cancellable));
 
-			double physical_completion_start_fraction = dep_processing_start_fraction + dep_processing_span;
-			double physical_completion_span = 0.05;
+			install_progress (DEPENDENCIES_PROCESSED, 0.98);
 
 			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
-			install_progress (AWAITING_COMPLETION, physical_completion_start_fraction);
 			foreach (var entry in all_physical_installs.entries)
 				finished_installs[entry.key] = yield entry.value.future.wait_async (cancellable);
-			install_progress (DEPENDENCIES_PROCESSED, physical_completion_start_fraction + physical_completion_span);
 
 			var pkgs = new Gee.ArrayList<Package> ();
 			var new_manifest_dependencies = new PackageDependencies ();
-			foreach (var future_ple in initial_dep_link_futures) {
-				PackageLockEntry ple = yield future_ple.wait_async (cancellable);
-
+			foreach (var ple in initial_dep_results) {
 				if (ple.newly_installed)
 					pkgs.add (new Package (ple.name, ple.version, ple.description));
 
@@ -215,8 +200,7 @@ namespace Frida {
 			}
 			manifest.dependencies = new_manifest_dependencies;
 
-			double finalizing_manifests_start_fraction = physical_completion_start_fraction + physical_completion_span;
-			install_progress (FINALIZING_MANIFESTS, finalizing_manifests_start_fraction);
+			install_progress (FINALIZING_MANIFESTS, 0.99);
 			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
 
 			install_progress (COMPLETE, 1.0);
@@ -580,6 +564,7 @@ namespace Frida {
 				bool prefer_lockfile_for_this_dep,
 				Cancellable? cancellable,
 				Promise<PackageLockEntry> dep_link_promise,
+				InstallProgressTracker tracker,
 				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs,
 				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
 				Gee.Map<string, Promise<Json.Node>> packument_cache,
@@ -682,6 +667,18 @@ namespace Frida {
 				var physical_install_completion = new Promise<PackageLockEntry> ();
 				all_physical_installs[actual_install_lockfile_key] = physical_install_completion;
 
+				tracker.total_physical++;
+				physical_install_completion.future.then (future => {
+					tracker.completed_physical++;
+
+					double dep_processing_start_fraction = 0.1;
+					double dep_processing_span = 0.88;
+					double current_fraction = dep_processing_start_fraction
+						+ ((double) tracker.completed_physical / tracker.total_physical) * dep_processing_span;
+
+					install_progress (RESOLVING_AND_INSTALLING_ALL, current_fraction);
+				});
+
 				try {
 					bool already_correctly_installed = false;
 					if (target_dir.query_exists (cancellable)) {
@@ -755,6 +752,7 @@ namespace Frida {
 							true,
 							cancellable,
 							sub_dep_link_promise,
+							tracker,
 							all_physical_installs,
 							resolution_cache,
 							packument_cache,
@@ -774,6 +772,10 @@ namespace Frida {
 			}
 		}
 
+		private class InstallProgressTracker {
+			public int total_physical = 0;
+			public int completed_physical = 0;
+		}
 
 		private static File install_dir_for_dependency (string name, File node_modules_root) {
 			File location = node_modules_root;
@@ -1208,7 +1210,6 @@ namespace Frida {
 		DOWNLOADING_PACKAGE,
 		PACKAGE_INSTALLED,
 		RESOLVING_AND_INSTALLING_ALL,
-		AWAITING_COMPLETION,
 		DEPENDENCIES_PROCESSED,
 		FINALIZING_MANIFESTS,
 		COMPLETE,
