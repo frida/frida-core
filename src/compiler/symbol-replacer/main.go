@@ -10,7 +10,7 @@ import (
 
 var (
 	excludeSymbols = [][]byte{
-		[]byte("frida"),
+		[]byte("fprintf"),
 		[]byte("pthread"),
 		[]byte("st0_"),
 		[]byte("rt0_"),
@@ -65,9 +65,6 @@ func main() {
 		}
 	}
 
-	// rename mingw vgprintf symbol
-	modifiedData = bytes.ReplaceAll(modifiedData, []byte("mingw_vgprintf"), []byte("mingw_vfprintf"))
-
 	f.Truncate(0)
 	f.Seek(0, 0)
 	f.Write(modifiedData)
@@ -100,10 +97,19 @@ func flipAlpha(s []byte) []byte {
 }
 
 func symbolIsOkay(symbol []byte) bool {
-	for _, s := range excludeSymbols {
-		if bytes.Contains(symbol, s) {
-			return false
+	switch {
+	case bytes.Contains(symbol, []byte("frida")):
+		return false
+	case bytes.Contains(symbol, []byte("cgo")):
+		return true
+	case bytes.ContainsAny(symbol, "./"):
+		return true
+	default:
+		for _, s := range excludeSymbols {
+			if bytes.Contains(symbol, s) {
+				return false
+			}
 		}
+		return true
 	}
-	return true
 }
