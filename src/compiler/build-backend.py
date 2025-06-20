@@ -85,40 +85,42 @@ def build_backend(
     )
 
     if mode == "c-archive":
-        replacer_inputs: List[Path] = [
-            Path(priv_dir / "symbol-replacer" / "main.go"),
-            Path(priv_dir / "symbol-replacer" / "trie.go"),
-        ]
+        if config.get("mingw") is None:
+            replacer_inputs: List[Path] = [
+                Path(priv_dir / "symbol-replacer" / "main.go"),
+                Path(priv_dir / "symbol-replacer" / "trie.go"),
+            ]
 
-        symbol_dest = priv_dir / "symbol-replacer"
-        symbol_dest.mkdir(exist_ok=True)
-        shutil.copy(base_dir / "symbol-replacer" / "main.go", symbol_dest)
-        shutil.copy(base_dir / "symbol-replacer" / "trie.go", symbol_dest)
-        shutil.copy(base_dir / "symbol-replacer" / "go.mod", symbol_dest)
+            symbol_dest = priv_dir / "symbol-replacer"
+            symbol_dest.mkdir(exist_ok=True)
+            shutil.copy(base_dir / "symbol-replacer" / "main.go", symbol_dest)
+            shutil.copy(base_dir / "symbol-replacer" / "trie.go", symbol_dest)
+            shutil.copy(base_dir / "symbol-replacer" / "go.mod", symbol_dest)
 
-        symbol_replacer_sources = [str("symbol-replacer" / f.relative_to(symbol_dest)) for f in replacer_inputs if f.suffix == ".go"]
+            symbol_replacer_sources = [str("symbol-replacer" / f.relative_to(symbol_dest)) for f in replacer_inputs if f.suffix == ".go"]
 
-        # when we are cross-compiling we want to unset GOOS and GOARCH
-        env_copy = config["env"].copy()
-        env_copy["GOOS"] = ""
-        env_copy["GOARCH"] = ""
+            # when we are cross-compiling we want to unset GOOS and GOARCH
+            env_copy = config["env"].copy()
+            env_copy["GOOS"] = ""
+            env_copy["GOARCH"] = ""
 
-        symbol_replacer = symbol_dest / "frida-symbol-replacer"
+            symbol_replacer = symbol_dest / "frida-symbol-replacer"
 
-        subprocess.run([go,
-            "build",
-            "-o",
-            symbol_replacer.name,
-            *symbol_replacer_sources],
-            cwd=priv_dir,
-            env=env_copy,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            encoding="utf-8",
-            check=True,
-        )
-        
-        run(priv_dir / symbol_replacer.name, backend_a.name, *config["nm"], *config["ranlib"])
+            subprocess.run([go,
+                "build",
+                "-o",
+                symbol_replacer.name,
+                *symbol_replacer_sources],
+                cwd=priv_dir,
+                env=env_copy,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+                check=True,
+            )
+
+            pr = run(priv_dir / symbol_replacer.name, backend_a.name, *config["nm"], *config["ranlib"])
+            print("out", pr.stdout)
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",
