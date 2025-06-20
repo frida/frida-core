@@ -161,6 +161,7 @@ namespace Frida {
 					original_dep.name,
 					original_dep.version,
 					original_dep,
+					original_dep.role,
 					toplevel_node_modules_root,
 					project_root,
 					manifest,
@@ -181,7 +182,7 @@ namespace Frida {
 
 			install_progress (DEPENDENCIES_PROCESSED, 0.98);
 
-			var finished_installs = new Gee.HashMap<string, PackageLockEntry> ();
+			var finished_installs = new Gee.TreeMap<string, PackageLockEntry> ();
 			foreach (var entry in all_physical_installs.entries)
 				finished_installs[entry.key] = yield entry.value.future.wait_async (cancellable);
 
@@ -192,9 +193,12 @@ namespace Frida {
 					pkgs.add (new Package (ple.name, ple.version, ple.description));
 
 				var original_dep = ple.toplevel_dep;
+				var version = ple.newly_installed
+					? original_dep.derive_version (ple.version)
+					: original_dep.version;
 				new_manifest_dependencies.add (new PackageDependency () {
 					name = ple.name,
-					version = original_dep.derive_version (ple.version),
+					version = version,
 					role = original_dep.role,
 				});
 			}
@@ -211,6 +215,9 @@ namespace Frida {
 		private class Manifest {
 			public string? name;
 			public string? version;
+			public string? license;
+			public Gee.List<FundingSource>? funding;
+			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies = new PackageDependencies ();
 			public Gee.Map<string, PackageLockPackageInfo> locked_packages = new Gee.HashMap<string, PackageLockPackageInfo> ();
 		}
@@ -232,11 +239,12 @@ namespace Frida {
 		private enum PackageRole {
 			RUNTIME,
 			DEVELOPMENT,
-			OPTIONAL
+			OPTIONAL,
+			PEER
 		}
 
 		private class PackageDependencies {
-			public Gee.Map<string, PackageDependency> all = new Gee.HashMap<string, PackageDependency> ();
+			public Gee.Map<string, PackageDependency> all = new Gee.TreeMap<string, PackageDependency> ();
 
 			public Gee.Map<string, PackageDependency> runtime {
 				get {
@@ -254,15 +262,33 @@ namespace Frida {
 				}
 			}
 
+			public Gee.Map<string, PackageDependency> optional {
+				get {
+					if (_optional == null)
+						_optional = compute_subset_with_role (OPTIONAL);
+					return _optional;
+				}
+			}
+
+			public Gee.Map<string, PackageDependency> peer {
+				get {
+					if (_peer == null)
+						_peer = compute_subset_with_role (PEER);
+					return _peer;
+				}
+			}
+
 			private Gee.Map<string, PackageDependency> _runtime;
 			private Gee.Map<string, PackageDependency> _development;
+			private Gee.Map<string, PackageDependency> _optional;
+			private Gee.Map<string, PackageDependency> _peer;
 
 			public void add (PackageDependency d) {
 				all[d.name] = d;
 			}
 
 			private Gee.Map<string, PackageDependency> compute_subset_with_role (PackageRole role) {
-				var result = new Gee.HashMap<string, PackageDependency> ();
+				var result = new Gee.TreeMap<string, PackageDependency> ();
 				foreach (PackageDependency d in all.values) {
 					if (d.role == role)
 						result[d.name] = d;
@@ -283,12 +309,21 @@ namespace Frida {
 			}
 		}
 
+		private class FundingSource {
+			public string? as_string;
+			public string? type;
+			public string? url;
+		}
+
 		private class PackageLockPackageInfo {
 			public string path_key;
 			public string? name;
 			public string? version;
 			public string? resolved;
 			public string? integrity;
+			public string? license;
+			public Gee.List<FundingSource>? funding;
+			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies = new PackageDependencies ();
 			public bool is_dev = false;
 			public bool is_optional = false;
@@ -301,9 +336,12 @@ namespace Frida {
 			public string integrity;
 			public string? description;
 			public string? license;
+			public Gee.List<FundingSource>? funding;
+			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies;
 			public PackageDependency toplevel_dep;
 			public bool newly_installed;
+			public Gee.Set<PackageRole> roles = new Gee.HashSet<PackageRole> ();
 		}
 
 		private async Manifest load_manifest (File pkg_json_file, File lock_file, Cancellable? cancellable) throws Error, IOError {
@@ -320,6 +358,9 @@ namespace Frida {
 				m.version = r.get_string_value ();
 				r.end_member ();
 
+				m.license = read_license (r);
+				m.funding = read_funding (r);
+				m.engines = read_engines (r);
 				m.dependencies = read_dependencies (r);
 			}
 
@@ -379,6 +420,9 @@ namespace Frida {
 						lock_r.end_member ();
 					}
 
+					pli.license = read_license (lock_r);
+					pli.funding = read_funding (lock_r);
+					pli.engines = read_engines (lock_r);
 					pli.dependencies = read_dependencies_from_lock_entry (lock_r, path_key);
 
 					lock_r.read_member ("dev");
@@ -437,13 +481,16 @@ namespace Frida {
 			}
 
 			Json.Object obj = root.get_object ();
+
 			var deps_obj = new Json.Object ();
 			obj.set_object_member ("dependencies", deps_obj);
-			foreach (PackageLockEntry e in installed.values) {
-				PackageDependency toplevel_dep = e.toplevel_dep;
-				if (e.name == toplevel_dep.name)
-					deps_obj.set_string_member (e.name, toplevel_dep.derive_version (e.version).spec);
-			}
+			foreach (PackageDependency dep in manifest.dependencies.runtime.values)
+				deps_obj.set_string_member (dep.name, dep.version.spec);
+
+			var dev_deps_obj = new Json.Object ();
+			obj.set_object_member ("devDependencies", dev_deps_obj);
+			foreach (PackageDependency dep in manifest.dependencies.development.values)
+				dev_deps_obj.set_string_member (dep.name, dep.version.spec);
 
 			string new_pkg_json = generate_npm_style_json (root, indent_level, indent_char);
 			bool pkg_json_changed = old_pkg_json == null || new_pkg_json != old_pkg_json;
@@ -451,9 +498,10 @@ namespace Frida {
 				yield FS.write_all_text (pkg_json_file, new_pkg_json, cancellable);
 
 			var b = new Json.Builder ();
-			b.begin_object ()
-				.set_member_name ("name")
-				.add_string_value (name)
+			b.begin_object ();
+			write_name (name, b);
+			write_version (manifest.version, b);
+			b
 				.set_member_name ("lockfileVersion")
 				.add_int_value (3)
 				.set_member_name ("requires")
@@ -461,24 +509,15 @@ namespace Frida {
 				.set_member_name ("packages")
 				.begin_object ();
 
-			b.set_member_name ("")
-				.begin_object ();
-			if (manifest.name != null)
-				b.set_member_name ("name").add_string_value (manifest.name);
-			if (manifest.version != null)
-				b.set_member_name ("version").add_string_value (manifest.version);
-			b.set_member_name ("dependencies").begin_object ();
-			foreach (PackageLockEntry e in installed.values) {
-				PackageDependency toplevel_dep = e.toplevel_dep;
-				if (e.name == toplevel_dep.name) {
-					b
-						.set_member_name (e.name)
-						.add_string_value (toplevel_dep.derive_version (e.version).spec);
-				}
-			}
-			b
-				.end_object ()
-				.end_object ();
+			b.set_member_name ("").begin_object ();
+			write_name (manifest.name, b);
+			write_version (manifest.version, b);
+			write_license (manifest.license, b);
+			write_funding (manifest.funding, b);
+			write_dependencies_section ("dependencies", manifest.dependencies.runtime, b);
+			write_dependencies_section ("devDependencies", manifest.dependencies.development, b);
+			write_engines (manifest.engines, b);
+			b.end_object ();
 
 			foreach (var entry in installed.entries) {
 				string lockfile_key = entry.key;
@@ -489,59 +528,26 @@ namespace Frida {
 					.set_member_name (lockfile_key)
 					.begin_object ();
 
-				if (is_root_package) {
-					b
-						.set_member_name ("name")
-						.add_string_value (e.name);
-				}
+				if (is_root_package)
+					write_name (e.name, b);
+
+				write_version (e.version, b);
 
 				b
-					.set_member_name ("version")
-					.add_string_value (e.version)
 					.set_member_name ("resolved")
 					.add_string_value (e.resolved)
 					.set_member_name ("integrity")
 					.add_string_value (e.integrity);
 
-				if (e.license != null)
-					b.set_member_name ("license").add_string_value (e.license);
+				if (!e.roles.contains (RUNTIME))
+					b.set_member_name ("dev").add_boolean_value (true);
 
-				if (e.toplevel_dep.role == DEVELOPMENT && e.name == e.toplevel_dep.name) {
-					b
-						.set_member_name ("dev")
-						.add_boolean_value (true);
-				}
-
-				if (!e.dependencies.runtime.is_empty) {
-					b.set_member_name ("dependencies").begin_object ();
-					foreach (PackageDependency dep_info in e.dependencies.runtime.values) {
-						b
-							.set_member_name (dep_info.name)
-							.add_string_value (dep_info.version.spec);
-					}
-					b.end_object ();
-				}
-
-				if (!e.dependencies.all.is_empty) {
-					bool has_optional = false;
-					foreach (PackageDependency dep_info in e.dependencies.all.values) {
-						if (dep_info.role == OPTIONAL) {
-							has_optional = true;
-							break;
-						}
-					}
-					if (has_optional) {
-						b.set_member_name ("optionalDependencies").begin_object ();
-						foreach (PackageDependency dep_info in e.dependencies.all.values) {
-							if (dep_info.role == OPTIONAL) {
-								b
-									.set_member_name (dep_info.name)
-									.add_string_value (dep_info.version.spec);
-							}
-						}
-						b.end_object ();
-					}
-				}
+				write_license (e.license, b);
+				write_dependencies_section ("dependencies", e.dependencies.runtime, b);
+				write_engines (e.engines, b);
+				write_dependencies_section ("optionalDependencies", e.dependencies.optional, b);
+				write_funding (e.funding, b);
+				write_dependencies_section ("peerDependencies", e.dependencies.peer, b);
 
 				b.end_object ();
 			}
@@ -558,6 +564,7 @@ namespace Frida {
 				string name,
 				PackageVersion version_spec,
 				PackageDependency toplevel_dep,
+				PackageRole role,
 				File parent_node_modules_dir,
 				File project_root,
 				Manifest manifest,
@@ -593,7 +600,9 @@ namespace Frida {
 										integrity = li.integrity,
 										shasum = null,
 										description = null,
-										license = null,
+										license = li.license,
+										funding = li.funding,
+										engines = li.engines,
 										dependencies = li.dependencies
 									};
 									rpd_came_from_lockfile = true;
@@ -650,6 +659,9 @@ namespace Frida {
 				Promise<PackageLockEntry>? physical_install_promise = all_physical_installs[actual_install_lockfile_key];
 				if (physical_install_promise != null) {
 					PackageLockEntry existing_ple = yield physical_install_promise.future.wait_async (cancellable);
+
+					existing_ple.roles.add (role);
+
 					dep_link_promise.resolve (new PackageLockEntry () {
 						name = existing_ple.name,
 						version = existing_ple.version,
@@ -657,9 +669,12 @@ namespace Frida {
 						integrity = existing_ple.integrity,
 						description = existing_ple.description,
 						license = existing_ple.license,
+						funding = existing_ple.funding,
+						engines = existing_ple.engines,
 						dependencies = existing_ple.dependencies,
 						toplevel_dep = toplevel_dep,
-						newly_installed = existing_ple.newly_installed
+						newly_installed = existing_ple.newly_installed,
+						roles = existing_ple.roles,
 					});
 					return;
 				}
@@ -709,9 +724,9 @@ namespace Frida {
 							"%s@%s".printf (rpd.name, rpd.effective_version));
 					}
 
-					if (rpd.description == null || rpd.license == null) {
+					if (rpd.description == null) {
 						Json.Reader reader = yield load_json (target_dir.get_child ("package.json"), cancellable);
-						update_rpd_description_license_from_reader (reader, rpd);
+						rpd.description = read_description (reader);
 					}
 
 					var ple = new PackageLockEntry () {
@@ -721,10 +736,13 @@ namespace Frida {
 						integrity = rpd.integrity,
 						description = rpd.description,
 						license = rpd.license,
+						funding = rpd.funding,
+						engines = rpd.engines,
 						dependencies = rpd.dependencies,
 						toplevel_dep = toplevel_dep,
-						newly_installed = !already_correctly_installed
+						newly_installed = !already_correctly_installed,
 					};
+					ple.roles.add (role);
 
 					physical_install_completion.resolve (ple);
 
@@ -736,16 +754,18 @@ namespace Frida {
 						FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
 
 					foreach (PackageDependency d in dependencies_to_recurse.all.values) {
-						bool install_this_sub_dep = d.role == RUNTIME || d.role == OPTIONAL;
+						bool install_this_sub_dep = d.role == RUNTIME;
 						if (!install_this_sub_dep)
 							continue;
 
 						var sub_dep_link_promise = new Promise<PackageLockEntry> ();
 						sub_dep_futures.add (sub_dep_link_promise.future);
+
 						perform_install.begin (
 							d.name,
 							d.version,
 							toplevel_dep,
+							d.role,
 							sub_deps_parent_node_modules_dir,
 							project_root,
 							manifest,
@@ -879,6 +899,8 @@ namespace Frida {
 			public string? shasum;
 			public string? description;
 			public string? license;
+			public Gee.List<FundingSource>? funding;
+			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies;
 		}
 
@@ -895,6 +917,8 @@ namespace Frida {
 		private static void read_package_version_metadata (Json.Reader reader, ResolvedPackageData rpd) throws Error {
 			rpd.description = read_description (reader);
 			rpd.license = read_license (reader);
+			rpd.funding = read_funding (reader);
+			rpd.engines = read_engines (reader);
 
 			reader.read_member ("dist");
 
@@ -916,15 +940,20 @@ namespace Frida {
 
 			reader.end_member ();
 
+			rpd.license = read_license (reader);
+			rpd.funding = read_funding (reader);
+			rpd.engines = read_engines (reader);
 			rpd.dependencies = read_dependencies (reader);
 		}
 
-		private static void update_rpd_description_license_from_reader (Json.Reader reader, ResolvedPackageData rpd) {
-			if (rpd.description == null)
-				rpd.description = read_description (reader);
+		private static void write_name (string? name, Json.Builder b) {
+			if (name != null)
+				b.set_member_name ("name").add_string_value (name);
+		}
 
-			if (rpd.license == null)
-				rpd.license = read_license (reader);
+		private static void write_version (string? version, Json.Builder b) {
+			if (version != null)
+				b.set_member_name ("version").add_string_value (version);
 		}
 
 		private static string? read_description (Json.Reader reader) {
@@ -950,10 +979,118 @@ namespace Frida {
 			return license;
 		}
 
+		private static void write_license (string? license, Json.Builder b) {
+			if (license != null)
+				b.set_member_name ("license").add_string_value (license);
+		}
+
+		private static Gee.List<FundingSource>? read_funding (Json.Reader reader) throws Error {
+			if (!reader.read_member ("funding")) {
+				reader.end_member ();
+				return null;
+			}
+
+			var result = new Gee.ArrayList<FundingSource> ();
+
+			if (reader.is_array ()) {
+				int n = reader.count_elements ();
+				for (int i = 0; i < n; i++) {
+					reader.read_element (i);
+					read_funding_source (reader, result);
+					reader.end_element ();
+				}
+			} else {
+				read_funding_source (reader, result);
+			}
+
+			reader.end_member ();
+
+			return result.is_empty ? null : result;
+		}
+
+		private static void write_funding (Gee.List<FundingSource>? funding, Json.Builder b) {
+			if (funding == null)
+				return;
+			b.set_member_name ("funding");
+			if (funding.size == 1) {
+				write_funding_source (funding.get (0), b);
+			} else {
+				b.begin_array ();
+				foreach (var s in funding)
+					write_funding_source (s, b);
+				b.end_array ();
+			}
+		}
+
+		private static void read_funding_source (Json.Reader r, Gee.List<FundingSource> list) throws Error {
+			if (r.is_object ()) {
+				var source = new FundingSource ();
+				r.read_member ("type");
+				source.type = r.get_string_value ();
+				r.end_member ();
+				r.read_member ("url");
+				source.url = r.get_string_value ();
+				r.end_member ();
+				list.add (source);
+			} else {
+				var val = r.get_string_value ();
+				if (val == null)
+					throw new Error.PROTOCOL ("Invalid 'funding' field");
+				list.add (new FundingSource () { as_string = val });
+			}
+		}
+
+		private static void write_funding_source (FundingSource s, Json.Builder b) {
+			if (s.as_string != null) {
+				b.add_string_value (s.as_string);
+			} else {
+				b.begin_object ();
+				if (s.type != null)
+					b.set_member_name ("type").add_string_value (s.type);
+				if (s.url != null)
+					b.set_member_name ("url").add_string_value (s.url);
+				b.end_object ();
+			}
+		}
+
+		private static Gee.Map<string, string>? read_engines (Json.Reader reader) throws Error {
+			if (!reader.read_member ("engines")) {
+				reader.end_member ();
+				return null;
+			}
+
+			var result = new Gee.TreeMap<string, string> ();
+			string[]? members = reader.list_members ();
+			if (members == null)
+				throw new Error.PROTOCOL ("Invalid 'engines' field");
+			foreach (unowned string name in members) {
+				reader.read_member (name);
+				string? val = reader.get_string_value ();
+				if (val == null)
+					throw new Error.PROTOCOL ("Invalid 'engines' value");
+				result[name] = val;
+				reader.end_member ();
+			}
+
+			reader.end_member ();
+
+			return result;
+		}
+
+		private static void write_engines (Gee.Map<string, string>? engines, Json.Builder b) {
+			if (engines == null)
+				return;
+			b.set_member_name ("engines").begin_object ();
+			foreach (var e in engines.entries)
+				b.set_member_name (e.key).add_string_value (e.value);
+			b.end_object ();
+		}
+
 		private static PackageDependencies read_dependencies (Json.Reader r) throws Error {
 			var deps = new PackageDependencies ();
 
-			string[] section_keys = {"dependencies", "devDependencies"};
+			string[] section_keys = { "dependencies", "devDependencies", "optionalDependencies", "peerDependencies" };
+			PackageRole[] section_roles = { RUNTIME, DEVELOPMENT, OPTIONAL, PEER };
 			for (uint i = 0; i != section_keys.length; i++) {
 				unowned string section_key = section_keys[i];
 
@@ -966,7 +1103,7 @@ namespace Frida {
 				if (names == null)
 					throw new Error.PROTOCOL ("Invalid package.json section for '%s'", section_key);
 
-				PackageRole role = (i == 0) ? PackageRole.RUNTIME : PackageRole.DEVELOPMENT;
+				PackageRole role = section_roles[i];
 				foreach (unowned string name in names) {
 					r.read_member (name);
 
@@ -994,7 +1131,8 @@ namespace Frida {
 		private static PackageDependencies read_dependencies_from_lock_entry (Json.Reader r, string parent_path_key) throws Error {
 			var deps = new PackageDependencies ();
 
-			string[] section_keys = { "dependencies", "optionalDependencies" };
+			string[] section_keys = { "dependencies", "optionalDependencies", "peerDependencies" };
+			PackageRole[] section_roles = { RUNTIME, OPTIONAL, PEER };
 			for (uint i = 0; i != section_keys.length; i++) {
 				unowned string section_key = section_keys[i];
 
@@ -1009,7 +1147,7 @@ namespace Frida {
 						section_key, parent_path_key);
 				}
 
-				PackageRole role = (i == 1) ? PackageRole.OPTIONAL : PackageRole.RUNTIME;
+				PackageRole role = section_roles[i];
 
 				foreach (unowned string dep_name in dep_names) {
 					r.read_member (dep_name);
@@ -1033,6 +1171,15 @@ namespace Frida {
 			}
 
 			return deps;
+		}
+
+		private static void write_dependencies_section (string section, Gee.Map<string, PackageDependency> deps, Json.Builder b) {
+			if (deps.is_empty)
+				return;
+			b.set_member_name (section).begin_object ();
+			foreach (PackageDependency dep in deps.values)
+				b.set_member_name (dep.name).add_string_value (dep.version.spec);
+			b.end_object ();
 		}
 
 		private async void download_and_unpack (string name, string version, string tarball_url, File dest_root, string? integrity,
