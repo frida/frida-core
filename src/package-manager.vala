@@ -224,13 +224,6 @@ namespace Frida {
 			return new PackageInstallResult (new PackageList (pkgs));
 		}
 
-		private static File install_dir_for_dependency (string name, File node_modules_root) {
-			File location = node_modules_root;
-			foreach (unowned string part in name.split ("/"))
-				location = location.get_child (part);
-			return location;
-		}
-
 		private class Manifest {
 			public string? name;
 			public string? version;
@@ -781,15 +774,12 @@ namespace Frida {
 			}
 		}
 
-		private class ResolvedPackageData {
-			public string name;
-			public string effective_version;
-			public string resolved_url;
-			public string? integrity;
-			public string? shasum;
-			public string? description;
-			public string? license;
-			public PackageDependencies dependencies;
+
+		private static File install_dir_for_dependency (string name, File node_modules_root) {
+			File location = node_modules_root;
+			foreach (unowned string part in name.split ("/"))
+				location = location.get_child (part);
+			return location;
 		}
 
 		private async void fetch_and_resolve_package_data (string name, PackageVersion version_spec,
@@ -877,6 +867,17 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				promise_to_fulfill.reject (e);
 			}
+		}
+
+		private class ResolvedPackageData {
+			public string name;
+			public string effective_version;
+			public string resolved_url;
+			public string? integrity;
+			public string? shasum;
+			public string? description;
+			public string? license;
+			public PackageDependencies dependencies;
 		}
 
 		private async void fetch_packument_for_cache (string name, Promise<Json.Node> request, Cancellable? cancellable)
