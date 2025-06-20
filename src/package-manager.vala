@@ -686,84 +686,96 @@ namespace Frida {
 					return;
 				}
 
-				all_physical_installs[actual_install_lockfile_key] = dep_link_promise;
+				var physical_install_completion = new Promise<PackageLockEntry> ();
+				all_physical_installs[actual_install_lockfile_key] = physical_install_completion;
 
-				bool already_correctly_installed = false;
-				if (target_dir.query_exists (cancellable)) {
-					File installed_pkg_json_file = target_dir.get_child ("package.json");
-					if (installed_pkg_json_file.query_exists (cancellable)) {
-						try {
-							Json.Reader installed_pkg_reader =
-								yield load_json (installed_pkg_json_file, cancellable);
-							if (installed_pkg_reader.read_member ("version")) {
-								string? installed_version = installed_pkg_reader.get_string_value ();
-								installed_pkg_reader.end_member ();
-								if (installed_version == rpd.effective_version) {
-									already_correctly_installed = true;
-									install_progress (PACKAGE_ALREADY_INSTALLED, -1.0,
-										"%s@%s".printf (rpd.name, rpd.effective_version));
+				try {
+					bool already_correctly_installed = false;
+					if (target_dir.query_exists (cancellable)) {
+						File installed_pkg_json_file = target_dir.get_child ("package.json");
+						if (installed_pkg_json_file.query_exists (cancellable)) {
+							try {
+								Json.Reader installed_pkg_reader =
+									yield load_json (installed_pkg_json_file, cancellable);
+								if (installed_pkg_reader.read_member ("version")) {
+									string? installed_version =
+										installed_pkg_reader.get_string_value ();
+									installed_pkg_reader.end_member ();
+									if (installed_version == rpd.effective_version) {
+										already_correctly_installed = true;
+										install_progress (PACKAGE_ALREADY_INSTALLED, -1.0,
+											"%s@%s".printf (rpd.name, rpd.effective_version));
+									}
 								}
+							} catch (Error e) {
 							}
-						} catch (Error e) { }
+						}
 					}
+
+					if (!already_correctly_installed) {
+						yield download_and_unpack (rpd.name, rpd.effective_version, rpd.resolved_url, target_dir,
+							rpd.integrity, rpd.shasum, cancellable);
+						install_progress (PACKAGE_INSTALLED, -1.0,
+							"%s@%s".printf (rpd.name, rpd.effective_version));
+					}
+
+					if (rpd.description == null || rpd.license == null) {
+						Json.Reader reader = yield load_json (target_dir.get_child ("package.json"), cancellable);
+						update_rpd_description_license_from_reader (reader, rpd);
+					}
+
+					var ple = new PackageLockEntry () {
+						name = rpd.name,
+						version = rpd.effective_version,
+						resolved = rpd.resolved_url,
+						integrity = rpd.integrity,
+						description = rpd.description,
+						license = rpd.license,
+						dependencies = rpd.dependencies,
+						toplevel_dep = toplevel_dep,
+						newly_installed = !already_correctly_installed
+					};
+
+					physical_install_completion.resolve (ple);
+
+					var sub_dep_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
+					File sub_deps_parent_node_modules_dir = target_dir.get_child ("node_modules");
+					PackageDependencies dependencies_to_recurse = rpd.dependencies;
+
+					if (!dependencies_to_recurse.all.is_empty)
+						FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
+
+					foreach (PackageDependency d in dependencies_to_recurse.all.values) {
+						bool install_this_sub_dep = d.role == RUNTIME || d.role == OPTIONAL;
+						if (!install_this_sub_dep)
+							continue;
+
+						var sub_dep_link_promise = new Promise<PackageLockEntry> ();
+						sub_dep_futures.add (sub_dep_link_promise.future);
+						perform_install.begin (
+							d.name,
+							d.version,
+							toplevel_dep,
+							sub_deps_parent_node_modules_dir,
+							project_root,
+							manifest,
+							true,
+							cancellable,
+							sub_dep_link_promise,
+							all_physical_installs,
+							resolution_cache,
+							packument_cache,
+							top_level_placements
+						);
+					}
+					foreach (var f in sub_dep_futures)
+						yield f.wait_async (cancellable);
+
+					dep_link_promise.resolve (ple);
+				} catch (GLib.Error e) {
+					physical_install_completion.reject (e);
+					throw e;
 				}
-
-				var sub_dep_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
-				File sub_deps_parent_node_modules_dir = target_dir.get_child ("node_modules");
-				PackageDependencies dependencies_to_recurse = rpd.dependencies;
-
-				if (!dependencies_to_recurse.all.is_empty)
-					FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
-
-				foreach (PackageDependency d in dependencies_to_recurse.all.values) {
-					bool install_this_sub_dep = d.role == RUNTIME || d.role == OPTIONAL;
-					if (!install_this_sub_dep)
-						continue;
-
-					var sub_dep_link_promise = new Promise<PackageLockEntry> ();
-					sub_dep_futures.add (sub_dep_link_promise.future);
-					perform_install.begin (
-						d.name,
-						d.version,
-						toplevel_dep,
-						sub_deps_parent_node_modules_dir,
-						project_root,
-						manifest,
-						true,
-						cancellable,
-						sub_dep_link_promise,
-						all_physical_installs,
-						resolution_cache,
-						packument_cache,
-						top_level_placements
-					);
-				}
-				foreach (var f in sub_dep_futures)
-					yield f.wait_async (cancellable);
-
-				if (!already_correctly_installed) {
-					yield download_and_unpack (rpd.name, rpd.effective_version, rpd.resolved_url, target_dir,
-						rpd.integrity, rpd.shasum, cancellable);
-					install_progress (PACKAGE_INSTALLED, -1.0, "%s@%s".printf (rpd.name, rpd.effective_version));
-				}
-
-				if (rpd.description == null || rpd.license == null) {
-					Json.Reader reader = yield load_json (target_dir.get_child ("package.json"), cancellable);
-					update_rpd_description_license_from_reader (reader, rpd);
-				}
-
-				dep_link_promise.resolve (new PackageLockEntry () {
-					name = rpd.name,
-					version = rpd.effective_version,
-					resolved = rpd.resolved_url,
-					integrity = rpd.integrity,
-					description = rpd.description,
-					license = rpd.license,
-					dependencies = rpd.dependencies,
-					toplevel_dep = toplevel_dep,
-					newly_installed = !already_correctly_installed
-				});
-
 			} catch (GLib.Error e) {
 				dep_link_promise.reject (e);
 			}
