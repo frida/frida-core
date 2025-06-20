@@ -46,7 +46,8 @@ namespace Frida {
 			}
 			private GLib.Error? _error;
 
-			private Gee.ArrayQueue<CompletionFuncEntry> on_complete;
+			private Gee.ArrayQueue<CompletionFuncEntry>? on_complete;
+			private Gee.ArrayQueue<ThenHandlerEntry<T>>? on_then;
 
 			public async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError {
 				if (_ready)
@@ -74,7 +75,21 @@ namespace Frida {
 				return get_result ();
 			}
 
-			private T get_result () throws Frida.Error, IOError {
+			public void then (owned FutureCompletionHandler<T> handler) {
+				if (_ready) {
+					schedule (() => {
+						handler (this);
+						return Source.REMOVE;
+					});
+					return;
+				}
+
+				if (on_then == null)
+					on_then = new Gee.ArrayQueue<ThenHandlerEntry<T>> ();
+				on_then.offer (new ThenHandlerEntry<T> ((owned) handler));
+			}
+
+			public T get_result () throws Frida.Error, IOError {
 				if (error != null) {
 					if (error is Frida.Error)
 						throw (Frida.Error) error;
@@ -111,18 +126,31 @@ namespace Frida {
 			internal void transition_to_ready () {
 				_ready = true;
 
-				if (on_complete != null && !on_complete.is_empty) {
-					var source = new IdleSource ();
-					source.set_priority (Priority.HIGH);
-					source.set_callback (() => {
-						CompletionFuncEntry? entry;
-						while ((entry = on_complete.poll ()) != null)
-							entry.func ();
-						on_complete = null;
-						return false;
+				if (on_complete != null || on_then != null) {
+					schedule (() => {
+						if (on_complete != null) {
+							CompletionFuncEntry? entry;
+							while ((entry = on_complete.poll ()) != null)
+								entry.func ();
+							on_complete = null;
+						}
+
+						if (on_then != null) {
+							ThenHandlerEntry? entry;
+							while ((entry = on_then.poll ()) != null)
+								entry.handler (this);
+							on_then = null;
+						}
+
+						return Source.REMOVE;
 					});
-					source.attach (MainContext.get_thread_default ());
 				}
+			}
+
+			private static void schedule (owned SourceFunc function) {
+				var source = new IdleSource ();
+				source.set_callback ((owned) function);
+				source.attach (MainContext.get_thread_default ());
 			}
 		}
 
@@ -133,6 +161,14 @@ namespace Frida {
 				this.func = (owned) func;
 			}
 		}
+
+		private class ThenHandlerEntry<T> {
+			public FutureCompletionHandler<T> handler;
+
+			public ThenHandlerEntry (owned FutureCompletionHandler<T> handler) {
+				this.handler = (owned) handler;
+			}
+		}
 	}
 
 	public interface Future<T> : Object {
@@ -140,5 +176,9 @@ namespace Frida {
 		public abstract T? value { get; }
 		public abstract GLib.Error? error { get; }
 		public abstract async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError;
+		public abstract void then (owned FutureCompletionHandler<T> handler);
+		public abstract T get_result () throws Frida.Error, IOError;
 	}
+
+	public delegate void FutureCompletionHandler<T> (Future<T> future);
 }
