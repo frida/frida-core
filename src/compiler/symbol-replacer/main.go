@@ -14,6 +14,7 @@ var (
 		[]byte("pthread"),
 		[]byte("st0_"),
 		[]byte("rt0_"),
+		[]byte("cas"),
 	}
 )
 
