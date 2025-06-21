@@ -161,18 +161,17 @@ namespace Frida {
 					original_dep.name,
 					original_dep.version,
 					original_dep,
-					original_dep.role,
 					toplevel_node_modules_root,
 					project_root,
 					manifest,
 					prefer_lockfile_for_this_dep,
-					cancellable,
-					dep_link_promise,
 					tracker,
 					all_physical_installs,
 					resolution_cache,
 					packument_cache,
-					top_level_placements
+					top_level_placements,
+					dep_link_promise,
+					cancellable
 				);
 			}
 
@@ -205,7 +204,8 @@ namespace Frida {
 			manifest.dependencies = new_manifest_dependencies;
 
 			install_progress (FINALIZING_MANIFESTS, 0.99);
-			yield write_back_manifests (manifest, finished_installs, pkg_json_file, lock_file, cancellable);
+			yield write_back_manifests (manifest, initial_dep_results, finished_installs, pkg_json_file, lock_file,
+				cancellable);
 
 			install_progress (COMPLETE, 1.0);
 
@@ -330,6 +330,7 @@ namespace Frida {
 		}
 
 		private class PackageLockEntry {
+			public string id;
 			public string name;
 			public string version;
 			public string resolved;
@@ -341,7 +342,7 @@ namespace Frida {
 			public PackageDependencies dependencies;
 			public PackageDependency toplevel_dep;
 			public bool newly_installed;
-			public Gee.Set<PackageRole> roles = new Gee.HashSet<PackageRole> ();
+			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
 		private async Manifest load_manifest (File pkg_json_file, File lock_file, Cancellable? cancellable) throws Error, IOError {
@@ -444,8 +445,9 @@ namespace Frida {
 			return m;
 		}
 
-		private async void write_back_manifests (Manifest manifest, Gee.Map<string, PackageLockEntry> installed, File pkg_json_file,
-				File lock_file, Cancellable? cancellable) throws Error, IOError {
+		private async void write_back_manifests (Manifest manifest, Gee.List<PackageLockEntry> toplevel_installed,
+				Gee.Map<string, PackageLockEntry> all_installed, File pkg_json_file, File lock_file,
+				Cancellable? cancellable) throws Error, IOError {
 			string? name = null;
 			Json.Node? root = null;
 			string? old_pkg_json = null;
@@ -519,7 +521,9 @@ namespace Frida {
 			write_engines (manifest.engines, b);
 			b.end_object ();
 
-			foreach (var entry in installed.entries) {
+			var runtime_reach = compute_runtime_reach (toplevel_installed, all_installed);
+
+			foreach (var entry in all_installed.entries) {
 				string lockfile_key = entry.key;
 				PackageLockEntry e = entry.value;
 				bool is_root_package = lockfile_key == "";
@@ -539,7 +543,7 @@ namespace Frida {
 					.set_member_name ("integrity")
 					.add_string_value (e.integrity);
 
-				if (!e.roles.contains (RUNTIME))
+				if (!runtime_reach.contains (lockfile_key))
 					b.set_member_name ("dev").add_boolean_value (true);
 
 				write_license (e.license, b);
@@ -560,22 +564,43 @@ namespace Frida {
 			yield FS.write_all_text (lock_file, lock_json, cancellable);
 		}
 
+		private static Gee.Set<string> compute_runtime_reach (Gee.List<PackageLockEntry> toplevel_installed,
+				Gee.Map<string, PackageLockEntry> all_installed) {
+			Gee.Set<string> runtime_reach = new Gee.HashSet<string> ();
+
+			Gee.Queue<string> q = new Gee.LinkedList<string> ();
+			foreach (var ple in toplevel_installed)
+				if (ple.toplevel_dep.role != DEVELOPMENT)
+					q.offer (ple.id);
+
+			while (!q.is_empty) {
+				string k = q.poll ();
+				if (!runtime_reach.add (k))
+					continue;
+
+				PackageLockEntry ple = all_installed[k];
+				foreach (var sub in ple.children)
+					q.offer (sub.id);
+			}
+
+			return runtime_reach;
+		}
+
 		private async void perform_install (
 				string name,
 				PackageVersion version_spec,
 				PackageDependency toplevel_dep,
-				PackageRole role,
 				File parent_node_modules_dir,
 				File project_root,
 				Manifest manifest,
 				bool prefer_lockfile_for_this_dep,
-				Cancellable? cancellable,
-				Promise<PackageLockEntry> dep_link_promise,
 				InstallProgressTracker tracker,
 				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs,
 				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
 				Gee.Map<string, Promise<Json.Node>> packument_cache,
-				Gee.Map<string, string> top_level_placements) {
+				Gee.Map<string, string> top_level_placements,
+				Promise<PackageLockEntry> dep_link_promise,
+				Cancellable? cancellable) {
 			try {
 				install_progress (RESOLVING_PACKAGE, -1.0, "%s@%s".printf (name, version_spec.spec));
 				string resolution_id = name + "@" + version_spec.spec;
@@ -660,9 +685,8 @@ namespace Frida {
 				if (physical_install_promise != null) {
 					PackageLockEntry existing_ple = yield physical_install_promise.future.wait_async (cancellable);
 
-					existing_ple.roles.add (role);
-
 					dep_link_promise.resolve (new PackageLockEntry () {
+						id = actual_install_lockfile_key,
 						name = existing_ple.name,
 						version = existing_ple.version,
 						resolved = existing_ple.resolved,
@@ -674,7 +698,6 @@ namespace Frida {
 						dependencies = existing_ple.dependencies,
 						toplevel_dep = toplevel_dep,
 						newly_installed = existing_ple.newly_installed,
-						roles = existing_ple.roles,
 					});
 					return;
 				}
@@ -730,6 +753,7 @@ namespace Frida {
 					}
 
 					var ple = new PackageLockEntry () {
+						id = actual_install_lockfile_key,
 						name = rpd.name,
 						version = rpd.effective_version,
 						resolved = rpd.resolved_url,
@@ -742,7 +766,6 @@ namespace Frida {
 						toplevel_dep = toplevel_dep,
 						newly_installed = !already_correctly_installed,
 					};
-					ple.roles.add (role);
 
 					physical_install_completion.resolve (ple);
 
@@ -765,22 +788,21 @@ namespace Frida {
 							d.name,
 							d.version,
 							toplevel_dep,
-							d.role,
 							sub_deps_parent_node_modules_dir,
 							project_root,
 							manifest,
 							true,
-							cancellable,
-							sub_dep_link_promise,
 							tracker,
 							all_physical_installs,
 							resolution_cache,
 							packument_cache,
-							top_level_placements
+							top_level_placements,
+							sub_dep_link_promise,
+							cancellable
 						);
 					}
 					foreach (var f in sub_dep_futures)
-						yield f.wait_async (cancellable);
+						ple.children.add (yield f.wait_async (cancellable));
 
 					dep_link_promise.resolve (ple);
 				} catch (GLib.Error e) {
