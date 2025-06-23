@@ -91,125 +91,350 @@ namespace Frida {
 
 		public async PackageInstallResult install (PackageInstallOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			install_progress (INITIALIZING, 0.0);
-
 			var opts = (options != null) ? options : new PackageInstallOptions ();
 
 			File project_root = compute_project_root (opts);
 			File pkg_json_file = project_root.get_child ("package.json");
 			File lock_file = project_root.get_child ("package-lock.json");
 
-			Manifest manifest = yield load_manifest (pkg_json_file, lock_file, cancellable);
+			var specs = parse_mutation_specs (ADD, opts.specs, RUNTIME);
+			var manifest = yield load_manifest (pkg_json_file, cancellable);
+			bool dirty = apply_specs_to_manifest (specs, manifest);
 
-			File toplevel_node_modules_root = project_root.get_child ("node_modules");
-			FS.mkdirp (toplevel_node_modules_root, cancellable);
+			Gee.Map<string, PackageLockPackageInfo>? locked = yield load_lockfile (lock_file, cancellable);
 
-			var specs = new Gee.HashMap<string, string> ();
-			foreach (string spec_str in opts.specs) {
-				string name, version_spec_val;
-				int at = spec_str.last_index_of ("@");
-				if (at > 0) {
-					name = spec_str[:at];
-					version_spec_val = spec_str[at + 1:];
+			bool lock_clean = !dirty && locked != null && deps_match (manifest, locked[""].dependencies);
+
+			if (lock_clean && locked != null) {
+				var root = lock_to_graph (locked);
+				// TODO: validate_peers (root);
+				yield reify_graph (root, project_root, cancellable);
+			} else {
+				throw new Error.NOT_SUPPORTED ("TODO");
+				/*
+				PackageNode? base_graph = null;
+				if (locked != null)
+					base_graph = lock_to_graph (locked);
+
+				var root = yield resolve_with_selective_unlock (manifest, base_graph, c);
+
+				// TODO: validate_peers (root);
+				yield reify_graph (root, project_root, cancellable);
+
+				manifest.save ("package.json");
+				write_lockfile (root);
+				*/
+			}
+
+			return new PackageInstallResult (new PackageList (new Gee.ArrayList<Package> ()));
+		}
+
+		/*
+		private async PackageNode resolve_with_selective_unlock (Manifest man, PackageNode? base_node, Cancellable? cancellable)
+				throws Error, IOError {
+			if (base_node == null)
+				return yield build_full_tree (man, cancellable);
+
+			// 1. Mark nodes that violate new top‑level ranges
+			Queue<PackageNode> to_uninstall = new Queue<PackageNode> ();
+			foreach (var kvp in man.dependencies) {
+				var name  = kvp.key;
+				var range = kvp.value;
+				var node  = base_node.lookup (name);
+				if (node == null || !semver_satisfies (node.version, range))
+					to_uninstall.push (node ?? base_node);   // base_node acts as dummy root for missing dep
+			}
+
+			// 2. BFS to yank dependents (they might be peer/child deps that change)
+			while (!to_uninstall.is_empty) {
+				var n = to_uninstall.pop ();
+				if (n.parent != null) {
+					n.parent.children.remove (n.name);
+				}
+				foreach (var child in n.children.values)
+					to_uninstall.push (child);
+			}
+
+			// 3. Build ideal graph on the *holes* only
+			var holes = base_node.find_holes ();				// returns list<PackageNode> missing children
+			foreach (var anchor in holes) {
+				var needed = anchor.find_missing_ranges (man); // HashMap<string,string>
+				foreach (var kv in needed) {
+					var sub = yield build_ideal_subtree (kv.key, kv.value, cancellable);
+					anchor.children[kv.key] = sub;
+					sub.parent = anchor;
+				}
+			}
+
+			hoist_graph (base_node);
+			return base_node;
+		}
+
+		private async PackageNode build_full_tree (Manifest m, Cancellable? c) throws Error {
+			var root = yield build_ideal_graph (m, c);
+			hoist_graph (root);
+			return root;
+		}
+		*/
+
+		private static Gee.List<MutationSpec> parse_mutation_specs (MutationKind kind, Gee.List<string> raw_specs,
+				PackageRole role) {
+			var specs = new Gee.ArrayList<MutationSpec> ();
+			foreach (string raw_spec in raw_specs) {
+				string name, range;
+				if (raw_spec.contains ("@")) {
+					var parts = raw_spec.split ("@", 2);
+					name  = parts[0];
+					range = parts[1];
 				} else {
-					name = spec_str;
-					version_spec_val = "latest";
+					name  = raw_spec;
+					range = "";
 				}
-				specs[name] = version_spec_val;
-			}
-
-			install_progress (PREPARING_DEPENDENCIES, 0.05);
-			var wanted_deps_list = new Gee.ArrayList<PackageDependency> ();
-			foreach (var dep_entry in manifest.dependencies.all.values)
-				wanted_deps_list.add (dep_entry);
-			foreach (var e in specs.entries) {
-				string name = e.key;
-				string version_spec_val = e.value;
-
-				PackageDependency? existing_wanted = null;
-				foreach (var wd in wanted_deps_list) {
-					if (wd.name == name) {
-						existing_wanted = wd;
-						break;
-					}
-				}
-				if (existing_wanted != null)
-					wanted_deps_list.remove (existing_wanted);
-
-				wanted_deps_list.add (new PackageDependency () {
+				specs.add (new MutationSpec () {
+					kind = kind,
 					name = name,
-					version = new PackageVersion (version_spec_val),
-					role = RUNTIME,
+					range = range,
+					role = role,
 				});
 			}
+			return specs;
+		}
 
-			var tracker = new InstallProgressTracker ();
-			var all_physical_installs = new Gee.HashMap<string, Promise<PackageLockEntry>> ();
-			var resolution_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
-			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
-			var top_level_placements = new Gee.HashMap<string, string> ();
+		private static bool apply_specs_to_manifest (Gee.List<MutationSpec> specs, Manifest m) {
+			bool dirty = false;
+			foreach (var s in specs) {
+				switch (s.kind) {
+					case ADD:
+					case UPGRADE:
+						string new_range = s.range == "" ? "*" : s.range;
+						PackageDependency? dep = m.dependencies.all[s.name];
+						if (dep == null || new_range != dep.version.spec) {
+							m.dependencies.all[s.name] = new PackageDependency () {
+								name = s.name,
+								version = new PackageVersion (new_range),
+								role = s.role,
+							};
+							dirty = true;
+						}
+						break;
+					case REMOVE:
+						dirty |= m.dependencies.all.unset (s.name);
+						break;
+				}
+			}
+			return dirty;
+		}
 
-			var initial_dep_link_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
+		private static async Manifest load_manifest (File pkg_json_file, Cancellable? cancellable) throws Error, IOError {
+			var m = new Manifest ();
 
-			foreach (PackageDependency original_dep in wanted_deps_list) {
-				var dep_link_promise = new Promise<PackageLockEntry> ();
-				initial_dep_link_futures.add (dep_link_promise.future);
+			if (pkg_json_file.query_exists (cancellable)) {
+				Json.Reader r = yield load_json (pkg_json_file, cancellable);
 
-				bool prefer_lockfile_for_this_dep = !specs.has_key (original_dep.name);
+				r.read_member ("name");
+				m.name = r.get_string_value ();
+				r.end_member ();
 
-				perform_install.begin (
-					original_dep.name,
-					original_dep.version,
-					original_dep,
-					toplevel_node_modules_root,
-					project_root,
-					manifest,
-					prefer_lockfile_for_this_dep,
-					tracker,
-					all_physical_installs,
-					resolution_cache,
-					packument_cache,
-					top_level_placements,
-					dep_link_promise,
-					cancellable
-				);
+				r.read_member ("version");
+				m.version = r.get_string_value ();
+				r.end_member ();
+
+				m.license = read_license (r);
+				m.funding = read_funding (r);
+				m.engines = read_engines (r);
+				m.dependencies = read_dependencies (r);
 			}
 
-			var initial_dep_results = new Gee.ArrayList<PackageLockEntry> ();
-			foreach (var f in initial_dep_link_futures)
-				initial_dep_results.add (yield f.wait_async (cancellable));
+			return m;
+		}
 
-			install_progress (DEPENDENCIES_PROCESSED, 0.98);
+		private static async Gee.Map<string, PackageLockPackageInfo>? load_lockfile (File lock_file, Cancellable? cancellable)
+				throws Error, IOError {
+			if (!lock_file.query_exists (cancellable))
+				return null;
 
-			var finished_installs = new Gee.TreeMap<string, PackageLockEntry> ();
-			foreach (var entry in all_physical_installs.entries)
-				finished_installs[entry.key] = yield entry.value.future.wait_async (cancellable);
+			var packages = new Gee.HashMap<string, PackageLockPackageInfo> ();
 
-			var pkgs = new Gee.ArrayList<Package> ();
-			var new_manifest_dependencies = new PackageDependencies ();
-			foreach (var ple in initial_dep_results) {
-				if (ple.newly_installed)
-					pkgs.add (new Package (ple.name, ple.version, ple.description));
+			Json.Reader lock_r = yield load_json (lock_file, cancellable);
 
-				var original_dep = ple.toplevel_dep;
-				var version = specs.has_key (ple.name)
-					? original_dep.derive_version (ple.version)
-					: original_dep.version;
-				new_manifest_dependencies.add (new PackageDependency () {
-					name = ple.name,
-					version = version,
-					role = original_dep.role,
-				});
+			lock_r.read_member ("packages");
+			string[]? path_keys = lock_r.list_members ();
+			if (path_keys == null)
+				throw new Error.PROTOCOL ("Lockfile 'packages' member missing or not an object");
+
+			foreach (unowned string path_key in path_keys) {
+				bool is_root_package = path_key == "";
+
+				lock_r.read_member (path_key);
+
+				if (lock_r.get_null_value ()) {
+					lock_r.end_member ();
+					continue;
+				}
+
+				var pli = new PackageLockPackageInfo ();
+				pli.path_key = path_key;
+
+				if (is_root_package) {
+					lock_r.read_member ("name");
+					pli.name = lock_r.get_string_value ();
+					lock_r.end_member ();
+				} else {
+					int last_start = path_key.last_index_of ("/node_modules/");
+					pli.name = (last_start != -1)
+						? path_key[last_start + 14:]
+						: path_key[13:];
+				}
+
+				lock_r.read_member ("version");
+				pli.version = lock_r.get_string_value ();
+				if (!is_root_package && pli.version == null)
+					throw new Error.PROTOCOL ("Lockfile 'version' for '%s' missing or invalid", path_key);
+				lock_r.end_member ();
+
+				if (!is_root_package) {
+					lock_r.read_member ("resolved");
+					pli.resolved = lock_r.get_string_value ();
+					if (pli.resolved == null) {
+						throw new Error.PROTOCOL ("Lockfile 'resolved' for '%s' missing or invalid",
+							path_key);
+					}
+					lock_r.end_member ();
+
+					lock_r.read_member ("integrity");
+					pli.integrity = lock_r.get_string_value ();
+					if (pli.integrity == null) {
+						throw new Error.PROTOCOL ("Lockfile 'integrity' for '%s' missing or invalid",
+							path_key);
+					}
+					lock_r.end_member ();
+				}
+
+				pli.license = read_license (lock_r);
+				pli.funding = read_funding (lock_r);
+				pli.engines = read_engines (lock_r);
+				pli.dependencies = read_dependencies_from_lock_entry (lock_r, path_key);
+
+				lock_r.read_member ("dev");
+				pli.is_dev = lock_r.get_boolean_value ();
+				lock_r.end_member ();
+
+				lock_r.read_member ("optional");
+				pli.is_optional = lock_r.get_boolean_value ();
+				lock_r.end_member ();
+
+				packages[path_key] = pli;
+
+				lock_r.end_member ();
 			}
-			manifest.dependencies = new_manifest_dependencies;
 
-			install_progress (FINALIZING_MANIFESTS, 0.99);
-			yield write_back_manifests (manifest, initial_dep_results, finished_installs, pkg_json_file, lock_file,
-				cancellable);
+			lock_r.end_member ();
 
-			install_progress (COMPLETE, 1.0);
+			return packages;
+		}
 
-			return new PackageInstallResult (new PackageList (pkgs));
+		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) {
+			var root = new PackageNode ();
+
+			foreach (var e in packages.entries) {
+				string key = e.key;
+				PackageLockPackageInfo pkg = e.value;
+
+				if (key == "")
+					continue;
+
+				string[] parts = key.split ("/");
+				PackageNode cur = root;
+				for (int i = 0; i != parts.length; ) {
+					if (parts[i] == "node_modules") {
+						string name = parts[++i];
+						PackageNode? next = cur.children[name];
+						if (next == null) {
+							next = new PackageNode (name);
+							cur.children[name] = next;
+						}
+						cur = next;
+					}
+					i++;
+				}
+
+				cur.version = pkg.version;
+				cur.resolved = pkg.resolved;
+				cur.integrity = pkg.integrity;
+
+				// TODO: peer_ranges
+			}
+
+			return root;
+		}
+
+		private async void reify_graph (PackageNode node, File target, Cancellable? cancellable) throws Error, IOError {
+			var requests = new Gee.ArrayList<Future<bool>> ();
+			reify_subgraph (node, target, requests, cancellable);
+			foreach (var future in requests)
+				yield future.wait_async (cancellable);
+		}
+
+		private void reify_subgraph (PackageNode node, File target, Gee.List<Future<bool>> requests, Cancellable? cancellable)
+				throws Error, IOError {
+			if (!node.is_root) {
+				var dir = install_dir_for_dependency (node.name, target);
+				var request = new Promise<bool> ();
+				requests.add (request.future);
+				perform_download_and_unpack.begin (node, dir, request, cancellable);
+			}
+			foreach (var child in node.children.values)
+				reify_subgraph (child, target, requests, cancellable);
+		}
+
+		private async void perform_download_and_unpack (PackageNode node, File dir, Promise<bool> request,
+				Cancellable? cancellable) {
+			try {
+				yield download_and_unpack (node.name, node.version, node.resolved, dir, node.integrity, null /* FIXME */,
+					cancellable);
+				request.resolve (true);
+			} catch (GLib.Error e) {
+				request.reject (e);
+			}
+		}
+
+		private static bool deps_match (Manifest manifest, PackageDependencies deps) {
+			// TODO
+			return true;
+		}
+
+		private class MutationSpec {
+			public MutationKind kind;
+			public string name;
+			public string range;
+			public PackageRole role = RUNTIME;
+		}
+
+		private enum MutationKind {
+			ADD,
+			UPGRADE,
+			REMOVE,
+		}
+
+		private class PackageNode {
+			public string? name;
+			public string? version;
+			public string? resolved;
+			public string? integrity;
+			public weak PackageNode parent;
+			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
+			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
+
+			public bool is_root {
+				get {
+					return name == null;
+				}
+			}
+
+			public PackageNode (string? name = null, string? version = null) {
+				this.name = name;
+				this.version = version;
+			}
 		}
 
 		private class Manifest {
@@ -219,7 +444,6 @@ namespace Frida {
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies = new PackageDependencies ();
-			public Gee.Map<string, PackageLockPackageInfo> locked_packages = new Gee.HashMap<string, PackageLockPackageInfo> ();
 		}
 
 		private class PackageVersion {
@@ -343,106 +567,6 @@ namespace Frida {
 			public PackageDependency toplevel_dep;
 			public bool newly_installed;
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
-		}
-
-		private async Manifest load_manifest (File pkg_json_file, File lock_file, Cancellable? cancellable) throws Error, IOError {
-			var m = new Manifest ();
-
-			if (pkg_json_file.query_exists (cancellable)) {
-				Json.Reader r = yield load_json (pkg_json_file, cancellable);
-
-				r.read_member ("name");
-				m.name = r.get_string_value ();
-				r.end_member ();
-
-				r.read_member ("version");
-				m.version = r.get_string_value ();
-				r.end_member ();
-
-				m.license = read_license (r);
-				m.funding = read_funding (r);
-				m.engines = read_engines (r);
-				m.dependencies = read_dependencies (r);
-			}
-
-			if (lock_file.query_exists (cancellable)) {
-				Json.Reader lock_r = yield load_json (lock_file, cancellable);
-
-				lock_r.read_member ("packages");
-				string[]? path_keys = lock_r.list_members ();
-				if (path_keys == null)
-					throw new Error.PROTOCOL ("Lockfile 'packages' member missing or not an object");
-
-				foreach (unowned string path_key in path_keys) {
-					bool is_root_package = path_key == "";
-
-					lock_r.read_member (path_key);
-
-					if (lock_r.get_null_value ()) {
-						lock_r.end_member ();
-						continue;
-					}
-
-					var pli = new PackageLockPackageInfo ();
-					pli.path_key = path_key;
-
-					if (is_root_package) {
-						lock_r.read_member ("name");
-						pli.name = lock_r.get_string_value ();
-						lock_r.end_member ();
-					} else {
-						int last_start = path_key.last_index_of ("/node_modules/");
-						pli.name = (last_start != -1)
-							? path_key[last_start + 14:]
-							: path_key[13:];
-					}
-
-					lock_r.read_member ("version");
-					pli.version = lock_r.get_string_value ();
-					if (!is_root_package && pli.version == null)
-						throw new Error.PROTOCOL ("Lockfile 'version' for '%s' missing or invalid", path_key);
-					lock_r.end_member ();
-
-					if (!is_root_package) {
-						lock_r.read_member ("resolved");
-						pli.resolved = lock_r.get_string_value ();
-						if (pli.resolved == null) {
-							throw new Error.PROTOCOL ("Lockfile 'resolved' for '%s' missing or invalid",
-								path_key);
-						}
-						lock_r.end_member ();
-
-						lock_r.read_member ("integrity");
-						pli.integrity = lock_r.get_string_value ();
-						if (pli.integrity == null) {
-							throw new Error.PROTOCOL ("Lockfile 'integrity' for '%s' missing or invalid",
-								path_key);
-						}
-						lock_r.end_member ();
-					}
-
-					pli.license = read_license (lock_r);
-					pli.funding = read_funding (lock_r);
-					pli.engines = read_engines (lock_r);
-					pli.dependencies = read_dependencies_from_lock_entry (lock_r, path_key);
-
-					lock_r.read_member ("dev");
-					pli.is_dev = lock_r.get_boolean_value ();
-					lock_r.end_member ();
-
-					lock_r.read_member ("optional");
-					pli.is_optional = lock_r.get_boolean_value ();
-					lock_r.end_member ();
-
-					m.locked_packages[path_key] = pli;
-
-					lock_r.end_member ();
-				}
-
-				lock_r.end_member ();
-			}
-
-			return m;
 		}
 
 		private async void write_back_manifests (Manifest manifest, Gee.List<PackageLockEntry> toplevel_installed,
@@ -586,241 +710,13 @@ namespace Frida {
 			return runtime_reach;
 		}
 
-		private async void perform_install (
-				string name,
-				PackageVersion version_spec,
-				PackageDependency toplevel_dep,
-				File parent_node_modules_dir,
-				File project_root,
-				Manifest manifest,
-				bool prefer_lockfile_for_this_dep,
-				InstallProgressTracker tracker,
-				Gee.Map<string, Promise<PackageLockEntry>> all_physical_installs,
-				Gee.Map<string, Promise<ResolvedPackageData>> resolution_cache,
-				Gee.Map<string, Promise<Json.Node>> packument_cache,
-				Gee.Map<string, string> top_level_placements,
-				Promise<PackageLockEntry> dep_link_promise,
-				Cancellable? cancellable) {
-			try {
-				install_progress (RESOLVING_PACKAGE, -1.0, "%s@%s".printf (name, version_spec.spec));
-				string resolution_id = name + "@" + version_spec.spec;
-				ResolvedPackageData? rpd = null;
-				bool rpd_came_from_lockfile = false;
-
-				Promise<ResolvedPackageData>? rpd_promise = resolution_cache[resolution_id];
-
-				if (rpd_promise != null && rpd_promise.future.ready) {
-					rpd = yield rpd_promise.future.wait_async (cancellable);
-				} else if (prefer_lockfile_for_this_dep) {
-					foreach (var lp_entry in manifest.locked_packages.entries) {
-						PackageLockPackageInfo li = lp_entry.value;
-						if (li.name == name) {
-							try {
-								if (Semver.satisfies_range (Semver.parse_version (li.version),
-										version_spec.spec)) {
-									rpd = new ResolvedPackageData () {
-										name = li.name,
-										effective_version = li.version,
-										resolved_url = li.resolved,
-										integrity = li.integrity,
-										shasum = null,
-										description = null,
-										license = li.license,
-										funding = li.funding,
-										engines = li.engines,
-										dependencies = li.dependencies
-									};
-									rpd_came_from_lockfile = true;
-									install_progress (USING_LOCKFILE_DATA, -1.0,
-										"%s@%s (%s)".printf (rpd.name, rpd.effective_version,
-											lp_entry.key));
-
-									if (rpd_promise == null) {
-										rpd_promise = new Promise<ResolvedPackageData> ();
-										resolution_cache[resolution_id] = rpd_promise;
-									}
-									if (!rpd_promise.future.ready)
-										rpd_promise.resolve (rpd);
-									break;
-								}
-							} catch (Error e) {
-							}
-						}
-					}
-				}
-
-				if (rpd == null) {
-					bool was_new_promise = false;
-					if (rpd_promise == null) {
-						rpd_promise = new Promise<ResolvedPackageData> ();
-						resolution_cache[resolution_id] = rpd_promise;
-						fetch_and_resolve_package_data.begin (name, version_spec, rpd_promise, packument_cache,
-							cancellable);
-						was_new_promise = true;
-					}
-					rpd = yield rpd_promise.future.wait_async (cancellable);
-					if (was_new_promise) {
-						install_progress (METADATA_FETCHED, -1.0, "%s@%s".printf (rpd.name, rpd.effective_version));
-					}
-					rpd_came_from_lockfile = false;
-				}
-
-				File target_dir;
-				File toplevel_nm_root = project_root.get_child ("node_modules");
-				File potential_toplevel_dir = install_dir_for_dependency (rpd.name, toplevel_nm_root);
-
-				string? placed_toplevel_version = top_level_placements[rpd.name];
-				if (placed_toplevel_version == null) {
-					target_dir = potential_toplevel_dir;
-					top_level_placements[rpd.name] = rpd.effective_version;
-				} else if (placed_toplevel_version == rpd.effective_version) {
-					target_dir = potential_toplevel_dir;
-				} else {
-					target_dir = install_dir_for_dependency (rpd.name, parent_node_modules_dir);
-				}
-
-				string actual_install_lockfile_key = project_root.get_relative_path (target_dir);
-
-				Promise<PackageLockEntry>? physical_install_promise = all_physical_installs[actual_install_lockfile_key];
-				if (physical_install_promise != null) {
-					PackageLockEntry existing_ple = yield physical_install_promise.future.wait_async (cancellable);
-
-					dep_link_promise.resolve (new PackageLockEntry () {
-						id = actual_install_lockfile_key,
-						name = existing_ple.name,
-						version = existing_ple.version,
-						resolved = existing_ple.resolved,
-						integrity = existing_ple.integrity,
-						description = existing_ple.description,
-						license = existing_ple.license,
-						funding = existing_ple.funding,
-						engines = existing_ple.engines,
-						dependencies = existing_ple.dependencies,
-						toplevel_dep = toplevel_dep,
-						newly_installed = existing_ple.newly_installed,
-					});
-					return;
-				}
-
-				var physical_install_completion = new Promise<PackageLockEntry> ();
-				all_physical_installs[actual_install_lockfile_key] = physical_install_completion;
-
-				tracker.total_physical++;
-				physical_install_completion.future.then (future => {
-					tracker.completed_physical++;
-
-					double dep_processing_start_fraction = 0.1;
-					double dep_processing_span = 0.88;
-					double current_fraction = dep_processing_start_fraction
-						+ ((double) tracker.completed_physical / tracker.total_physical) * dep_processing_span;
-
-					install_progress (RESOLVING_AND_INSTALLING_ALL, current_fraction);
-				});
-
-				try {
-					bool already_correctly_installed = false;
-					if (target_dir.query_exists (cancellable)) {
-						File installed_pkg_json_file = target_dir.get_child ("package.json");
-						if (installed_pkg_json_file.query_exists (cancellable)) {
-							try {
-								Json.Reader installed_pkg_reader =
-									yield load_json (installed_pkg_json_file, cancellable);
-								if (installed_pkg_reader.read_member ("version")) {
-									string? installed_version =
-										installed_pkg_reader.get_string_value ();
-									installed_pkg_reader.end_member ();
-									if (installed_version == rpd.effective_version) {
-										already_correctly_installed = true;
-										install_progress (PACKAGE_ALREADY_INSTALLED, -1.0,
-											"%s@%s".printf (rpd.name, rpd.effective_version));
-									}
-								}
-							} catch (Error e) {
-							}
-						}
-					}
-
-					if (!already_correctly_installed) {
-						yield download_and_unpack (rpd.name, rpd.effective_version, rpd.resolved_url, target_dir,
-							rpd.integrity, rpd.shasum, cancellable);
-						install_progress (PACKAGE_INSTALLED, -1.0,
-							"%s@%s".printf (rpd.name, rpd.effective_version));
-					}
-
-					if (rpd.description == null) {
-						Json.Reader reader = yield load_json (target_dir.get_child ("package.json"), cancellable);
-						rpd.description = read_description (reader);
-					}
-
-					var ple = new PackageLockEntry () {
-						id = actual_install_lockfile_key,
-						name = rpd.name,
-						version = rpd.effective_version,
-						resolved = rpd.resolved_url,
-						integrity = rpd.integrity,
-						description = rpd.description,
-						license = rpd.license,
-						funding = rpd.funding,
-						engines = rpd.engines,
-						dependencies = rpd.dependencies,
-						toplevel_dep = toplevel_dep,
-						newly_installed = !already_correctly_installed,
-					};
-
-					physical_install_completion.resolve (ple);
-
-					var sub_dep_futures = new Gee.ArrayList<Future<PackageLockEntry>> ();
-					File sub_deps_parent_node_modules_dir = target_dir.get_child ("node_modules");
-					PackageDependencies dependencies_to_recurse = rpd.dependencies;
-
-					if (!dependencies_to_recurse.all.is_empty)
-						FS.mkdirp (sub_deps_parent_node_modules_dir, cancellable);
-
-					foreach (PackageDependency d in dependencies_to_recurse.all.values) {
-						bool install_this_sub_dep = d.role == RUNTIME;
-						if (!install_this_sub_dep)
-							continue;
-
-						var sub_dep_link_promise = new Promise<PackageLockEntry> ();
-						sub_dep_futures.add (sub_dep_link_promise.future);
-
-						perform_install.begin (
-							d.name,
-							d.version,
-							toplevel_dep,
-							sub_deps_parent_node_modules_dir,
-							project_root,
-							manifest,
-							true,
-							tracker,
-							all_physical_installs,
-							resolution_cache,
-							packument_cache,
-							top_level_placements,
-							sub_dep_link_promise,
-							cancellable
-						);
-					}
-					foreach (var f in sub_dep_futures)
-						ple.children.add (yield f.wait_async (cancellable));
-
-					dep_link_promise.resolve (ple);
-				} catch (GLib.Error e) {
-					physical_install_completion.reject (e);
-					throw e;
-				}
-			} catch (GLib.Error e) {
-				dep_link_promise.reject (e);
-			}
-		}
-
 		private class InstallProgressTracker {
 			public int total_physical = 0;
 			public int completed_physical = 0;
 		}
 
-		private static File install_dir_for_dependency (string name, File node_modules_root) {
-			File location = node_modules_root;
+		private static File install_dir_for_dependency (string name, File package_root) {
+			File location = package_root.get_child ("node_modules");
 			foreach (unowned string part in name.split ("/"))
 				location = location.get_child (part);
 			return location;
