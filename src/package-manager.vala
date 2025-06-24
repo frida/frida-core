@@ -126,7 +126,7 @@ namespace Frida {
 				yield reify_graph (root, project_root, cancellable);
 
 				// TODO: manifest.save ("package.json");
-				yield write_lockfile (root, manifest, lock_file, indent_level, indent_char, cancellable);
+				yield write_lockfile (root, manifest, lock_file, cancellable);
 			}
 
 			install_progress (DEPENDENCIES_PROCESSED, 0.98);
@@ -386,7 +386,10 @@ namespace Frida {
 			var m = new Manifest ();
 
 			if (pkg_json_file.query_exists (cancellable)) {
-				Json.Reader r = yield load_json (pkg_json_file, cancellable);
+				var pkg_json = yield FS.read_all_text (pkg_json_file, cancellable);
+				detect_indent (pkg_json, out m.indent_level, out m.indent_char);
+
+				Json.Reader r = parse_json (new Bytes.static (pkg_json.data));
 
 				r.read_member ("name");
 				m.name = r.get_string_value ();
@@ -491,8 +494,8 @@ namespace Frida {
 			return packages;
 		}
 
-		private async void write_lockfile (PackageNode root, Manifest manifest, File lock_file, int indent_level, char indent_char,
-				Cancellable? cancellable) throws Error, IOError {
+		private async void write_lockfile (PackageNode root, Manifest manifest, File lock_file, Cancellable? cancellable)
+				throws Error, IOError {
 			var path_map = new Gee.HashMap<string, PackageNode> ();
 
 			var node_stack = new Gee.LinkedList<PackageNode> ();
@@ -559,8 +562,22 @@ namespace Frida {
 				.end_object ()
 				.end_object ();
 
-			string txt = generate_npm_style_json (b.get_root (), indent_level, indent_char);
+			string txt = generate_npm_style_json (b.get_root (), manifest.indent_level, manifest.indent_char);
 			yield FS.write_all_text (lock_file, txt, cancellable);
+		}
+
+		private Gee.Map<string, PackageDependency> collect_direct_deps (PackageNode node) {
+			var m = new Gee.TreeMap<string, PackageDependency> ();
+
+			foreach (PackageNode ch in node.children.values.to_array ()) {
+				var d = new PackageDependency ();
+				d.name = ch.name;
+				d.version = new PackageVersion (ch.version.str);
+				d.role = PackageRole.RUNTIME;
+				m[d.name] = d;
+			}
+
+			return m;
 		}
 
 		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) throws Error {
@@ -788,6 +805,9 @@ namespace Frida {
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies = new PackageDependencies ();
+
+			public uint indent_level = 2;
+			public unichar indent_char = ' ';
 		}
 
 		private class PackageVersion {
