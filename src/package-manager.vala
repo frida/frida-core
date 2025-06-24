@@ -105,7 +105,7 @@ namespace Frida {
 
 			install_progress (PREPARING_DEPENDENCIES, 0.05);
 
-			Gee.Map<string, PackageLockPackageInfo>? locked = yield load_lockfile (lock_file, cancellable);
+			Gee.Map<string, PackageLockPackageInfo>? locked = yield read_lockfile (lock_file, cancellable);
 
 			bool lock_clean = !dirty && locked != null && deps_match (manifest, locked[""].dependencies);
 
@@ -126,7 +126,7 @@ namespace Frida {
 				yield reify_graph (root, project_root, cancellable);
 
 				// TODO: manifest.save ("package.json");
-				// TODO: write_lockfile (root);
+				yield write_lockfile (root, manifest, lock_file, indent_level, indent_char, cancellable);
 			}
 
 			install_progress (DEPENDENCIES_PROCESSED, 0.98);
@@ -136,23 +136,23 @@ namespace Frida {
 			return new PackageInstallResult (new PackageList (new Gee.ArrayList<Package> ()));
 		}
 
-		private static async PackageNode resolve_with_selective_unlock (Manifest man, PackageNode? base_node,
+		private static async PackageNode resolve_with_selective_unlock (Manifest manifest, PackageNode? base_node,
 				PackageDataCache cache, Cancellable? cancellable) throws Error, IOError {
 			if (base_node == null)
-				return yield build_full_tree (man, cache, cancellable);
+				return yield build_full_tree (manifest, cache, cancellable);
 
-			var to_uninstall = collect_outdated_nodes (man, base_node);
+			var to_uninstall = collect_outdated_nodes (manifest, base_node);
 			var anchors = yank_nodes_and_collect_parents (to_uninstall);
-			yield patch_holes (anchors, man, cache, cancellable);
+			yield patch_holes (anchors, manifest, cache, cancellable);
 
 			hoist_graph (base_node);
 
 			return base_node;
 		}
 
-		private static Gee.Queue<PackageNode> collect_outdated_nodes (Manifest man, PackageNode base_node) throws Error {
+		private static Gee.Queue<PackageNode> collect_outdated_nodes (Manifest manifest, PackageNode base_node) throws Error {
 			var queue = new Gee.ArrayQueue<PackageNode> ();
-			foreach (PackageDependency dep in man.dependencies.all.values) {
+			foreach (PackageDependency dep in manifest.dependencies.all.values) {
 				var node = base_node.lookup (dep.name);
 				bool ok = node != null && Semver.satisfies_range (node.version, dep.version.range);
 				if (!ok)
@@ -176,10 +176,10 @@ namespace Frida {
 			return anchors;
 		}
 
-		private static async void patch_holes (Gee.List<PackageNode> anchors, Manifest man, PackageDataCache cache,
+		private static async void patch_holes (Gee.List<PackageNode> anchors, Manifest manifest, PackageDataCache cache,
 				Cancellable? cancellable) throws Error, IOError {
 			foreach (PackageNode anchor in anchors) {
-				var needed = anchor.find_missing_ranges (man);
+				var needed = anchor.find_missing_ranges (manifest);
 				foreach (var kv in needed) {
 					var sub = yield build_ideal_subtree (kv.key, kv.value, cache, cancellable);
 					anchor.children[kv.key] = sub;
@@ -405,7 +405,7 @@ namespace Frida {
 			return m;
 		}
 
-		private static async Gee.Map<string, PackageLockPackageInfo>? load_lockfile (File lock_file, Cancellable? cancellable)
+		private static async Gee.Map<string, PackageLockPackageInfo>? read_lockfile (File lock_file, Cancellable? cancellable)
 				throws Error, IOError {
 			if (!lock_file.query_exists (cancellable))
 				return null;
@@ -489,6 +489,78 @@ namespace Frida {
 			lock_r.end_member ();
 
 			return packages;
+		}
+
+		private async void write_lockfile (PackageNode root, Manifest manifest, File lock_file, int indent_level, char indent_char,
+				Cancellable? cancellable) throws Error, IOError {
+			var path_map = new Gee.HashMap<string, PackageNode> ();
+
+			var node_stack = new Gee.LinkedList<PackageNode> ();
+			var key_stack = new Gee.LinkedList<string> ();
+
+			node_stack.offer_head (root);
+			key_stack.offer_head ("");
+
+			while (!node_stack.is_empty) {
+				var node = node_stack.poll_head ();
+				string key = key_stack.poll_head ();
+				path_map[key] = node;
+
+				foreach (PackageNode ch in node.children.values) {
+					string child_key = (key == "") ? "" : key + "/";
+					child_key += "node_modules/" + ch.name;
+					node_stack.offer_head (ch);
+					key_stack.offer_head (child_key);
+				}
+			}
+
+			var b = new Json.Builder ();
+			b.begin_object ();
+			write_name (manifest.name, b);
+			write_version (manifest.version, b);
+			b.set_member_name ("lockfileVersion").add_int_value (3);
+			b.set_member_name ("requires").add_boolean_value (true);
+			b.set_member_name ("packages").begin_object ();
+
+			b.set_member_name ("").begin_object ();
+			write_name (manifest.name, b);
+			write_version (manifest.version, b);
+			write_license (manifest.license, b);
+			write_funding (manifest.funding, b);
+			write_dependencies_section ("dependencies", manifest.dependencies.runtime, b);
+			write_dependencies_section ("devDependencies", manifest.dependencies.development, b);
+			write_engines (manifest.engines, b);
+			b.end_object ();
+
+			var runtime_reach = compute_runtime_reach (manifest.dependencies.runtime.values, path_map);
+
+			foreach (string k in path_map.keys) {
+				if (k == "")
+					continue;
+
+				PackageNode pn = path_map[k];
+				b.set_member_name (k).begin_object ();
+				write_version (pn.version.str, b);
+				b
+					.set_member_name ("resolved")
+					.add_string_value (pn.resolved)
+					.set_member_name ("integrity")
+					.add_string_value (pn.integrity);
+
+				if (!runtime_reach.contains (k))
+					b.set_member_name ("dev").add_boolean_value (true);
+
+				write_dependencies_section ("dependencies", collect_direct_deps (pn), b);
+
+				b.end_object ();
+			}
+
+			b
+				.end_object ()
+				.end_object ();
+
+			string txt = generate_npm_style_json (b.get_root (), indent_level, indent_char);
+			yield FS.write_all_text (lock_file, txt, cancellable);
 		}
 
 		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) throws Error {
@@ -699,9 +771,9 @@ namespace Frida {
 				return null;
 			}
 
-			public Gee.Map<string, string> find_missing_ranges (Manifest man) {
+			public Gee.Map<string, string> find_missing_ranges (Manifest manifest) {
 				var missing = new Gee.HashMap<string, string> ();
-				foreach (var dep in man.dependencies.all.values) {
+				foreach (var dep in manifest.dependencies.all.values) {
 					if (!children.has_key (dep.name))
 						missing[dep.name] = dep.version.range;
 				}
@@ -841,145 +913,31 @@ namespace Frida {
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
-		private async void write_back_manifests (Manifest manifest, Gee.List<PackageLockEntry> toplevel_installed,
-				Gee.Map<string, PackageLockEntry> all_installed, File pkg_json_file, File lock_file,
-				Cancellable? cancellable) throws Error, IOError {
-			string? name = null;
-			Json.Node? root = null;
-			string? old_pkg_json = null;
-			uint indent_level = 2;
-			unichar indent_char = ' ';
-			if (pkg_json_file.query_exists (cancellable)) {
-				old_pkg_json = yield FS.read_all_text (pkg_json_file, cancellable);
-				try {
-					root = Json.from_string (old_pkg_json);
-				} catch (GLib.Error e) {
-					throw new Error.PROTOCOL ("%s is invalid: %s", pkg_json_file.get_parse_name (), e.message);
-				}
-				if (root.get_node_type () != OBJECT)
-					throw new Error.PROTOCOL ("%s is invalid, root must be an object", pkg_json_file.get_parse_name ());
-				detect_indent (old_pkg_json, out indent_level, out indent_char);
+		private static Gee.Set<string> compute_runtime_reach (Gee.Collection<PackageDependency> runtime_deps,
+				Gee.Map<string, PackageNode> path_map) {
+			var reach = new Gee.HashSet<string> ();
 
-				var r = new Json.Reader (root);
-				r.read_member ("name");
-				name = r.get_string_value ();
-			} else {
-				root = new Json.Node (OBJECT);
-				root.init_object (new Json.Object ());
+			var stack = new Gee.LinkedList<string> ();
+
+			foreach (PackageDependency dep in runtime_deps) {
+				string key = "node_modules/" + dep.name;   // handles @scope/pkg too
+				stack.offer_head (key);
 			}
-
-			if (name == null) {
-				try {
-					var info = yield pkg_json_file.get_parent ().query_info_async (FileAttribute.STANDARD_DISPLAY_NAME,
-						FileQueryInfoFlags.NONE, Priority.DEFAULT, cancellable);
-					name = info.get_display_name ();
-				} catch (GLib.Error e) {
-					throw new Error.PERMISSION_DENIED ("%s", e.message);
-				}
-			}
-
-			Json.Object obj = root.get_object ();
-
-			var deps_obj = new Json.Object ();
-			obj.set_object_member ("dependencies", deps_obj);
-			foreach (PackageDependency dep in manifest.dependencies.runtime.values)
-				deps_obj.set_string_member (dep.name, dep.version.range);
-
-			var dev_deps_obj = new Json.Object ();
-			obj.set_object_member ("devDependencies", dev_deps_obj);
-			foreach (PackageDependency dep in manifest.dependencies.development.values)
-				dev_deps_obj.set_string_member (dep.name, dep.version.range);
-
-			string new_pkg_json = generate_npm_style_json (root, indent_level, indent_char);
-			bool pkg_json_changed = old_pkg_json == null || new_pkg_json != old_pkg_json;
-			if (pkg_json_changed)
-				yield FS.write_all_text (pkg_json_file, new_pkg_json, cancellable);
-
-			var b = new Json.Builder ();
-			b.begin_object ();
-			write_name (name, b);
-			write_version (manifest.version, b);
-			b
-				.set_member_name ("lockfileVersion")
-				.add_int_value (3)
-				.set_member_name ("requires")
-				.add_boolean_value (true)
-				.set_member_name ("packages")
-				.begin_object ();
-
-			b.set_member_name ("").begin_object ();
-			write_name (manifest.name, b);
-			write_version (manifest.version, b);
-			write_license (manifest.license, b);
-			write_funding (manifest.funding, b);
-			write_dependencies_section ("dependencies", manifest.dependencies.runtime, b);
-			write_dependencies_section ("devDependencies", manifest.dependencies.development, b);
-			write_engines (manifest.engines, b);
-			b.end_object ();
-
-			var runtime_reach = compute_runtime_reach (toplevel_installed, all_installed);
-
-			foreach (var entry in all_installed.entries) {
-				string lockfile_key = entry.key;
-				PackageLockEntry e = entry.value;
-				bool is_root_package = lockfile_key == "";
-
-				b
-					.set_member_name (lockfile_key)
-					.begin_object ();
-
-				if (is_root_package)
-					write_name (e.name, b);
-
-				write_version (e.version, b);
-
-				b
-					.set_member_name ("resolved")
-					.add_string_value (e.resolved)
-					.set_member_name ("integrity")
-					.add_string_value (e.integrity);
-
-				if (!runtime_reach.contains (lockfile_key))
-					b.set_member_name ("dev").add_boolean_value (true);
-
-				write_license (e.license, b);
-				write_dependencies_section ("dependencies", e.dependencies.runtime, b);
-				write_engines (e.engines, b);
-				write_dependencies_section ("optionalDependencies", e.dependencies.optional, b);
-				write_funding (e.funding, b);
-				write_dependencies_section ("peerDependencies", e.dependencies.peer, b);
-
-				b.end_object ();
-			}
-
-			b
-				.end_object ()
-				.end_object ();
-
-			string lock_json = generate_npm_style_json (b.get_root (), indent_level, indent_char);
-			yield FS.write_all_text (lock_file, lock_json, cancellable);
-		}
-
-		private static Gee.Set<string> compute_runtime_reach (Gee.List<PackageLockEntry> toplevel_installed,
-				Gee.Map<string, PackageLockEntry> all_installed) {
-			Gee.Set<string> runtime_reach = new Gee.HashSet<string> ();
-
-			Gee.Queue<string> q = new Gee.ArrayQueue<string> ();
-			foreach (var ple in toplevel_installed)
-				if (ple.toplevel_dep.role != DEVELOPMENT)
-					q.offer (ple.id);
 
 			string? k;
-			while ((k = q.poll ()) != null) {
-				if (!runtime_reach.add (k))
+			while ((k = stack.poll_head ()) != null) {
+				if (!reach.add (k))
 					continue;
 
-				PackageLockEntry ple = all_installed[k];
-				foreach (var sub in ple.children)
-					q.offer (sub.id);
+				PackageNode node = path_map[k];
+				foreach (PackageNode ch in node.children.values.to_array ()) {
+					string child_key = (k == "") ? "" : k + "/";
+					child_key += "node_modules/" + ch.name;
+					stack.offer_head (child_key);
+				}
 			}
 
-			return runtime_reach;
+			return reach;
 		}
 
 		private class InstallProgressTracker {
