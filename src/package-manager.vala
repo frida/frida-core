@@ -91,6 +91,8 @@ namespace Frida {
 
 		public async PackageInstallResult install (PackageInstallOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
+			install_progress (INITIALIZING, 0.0);
+
 			var opts = (options != null) ? options : new PackageInstallOptions ();
 
 			File project_root = compute_project_root (opts);
@@ -100,6 +102,8 @@ namespace Frida {
 			var specs = parse_mutation_specs (ADD, opts.specs, RUNTIME);
 			var manifest = yield load_manifest (pkg_json_file, cancellable);
 			bool dirty = apply_specs_to_manifest (specs, manifest);
+
+			install_progress (PREPARING_DEPENDENCIES, 0.05);
 
 			Gee.Map<string, PackageLockPackageInfo>? locked = yield load_lockfile (lock_file, cancellable);
 
@@ -125,6 +129,10 @@ namespace Frida {
 				write_lockfile (root);
 				*/
 			}
+
+			install_progress (DEPENDENCIES_PROCESSED, 0.98);
+			install_progress (FINALIZING_MANIFESTS, 0.99);
+			install_progress (COMPLETE, 1.0);
 
 			return new PackageInstallResult (new PackageList (new Gee.ArrayList<Package> ()));
 		}
@@ -333,7 +341,7 @@ namespace Frida {
 			return packages;
 		}
 
-		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) {
+		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) throws Error {
 			var root = new PackageNode ();
 
 			foreach (var e in packages.entries) {
@@ -343,19 +351,32 @@ namespace Frida {
 				if (key == "")
 					continue;
 
-				string[] parts = key.split ("/");
+				string[] segs = key.split ("/");
 				PackageNode cur = root;
-				for (int i = 0; i != parts.length; ) {
-					if (parts[i] == "node_modules") {
-						string name = parts[++i];
-						PackageNode? next = cur.children[name];
-						if (next == null) {
-							next = new PackageNode (name);
-							cur.children[name] = next;
-						}
-						cur = next;
-					}
+				for (int i = 0; i != segs.length; ) {
+					if (segs[i] != "node_modules")
+						throw new Error.PROTOCOL ("Invalid lockfile");
 					i++;
+					if (i >= segs.length)
+						throw new Error.PROTOCOL ("Invalid lockfile");
+
+					string name;
+					if (segs[i].has_prefix ("@")) {
+						if (i + 1 == segs.length)
+							throw new Error.PROTOCOL ("Invalid lockfile");
+						name = segs[i] + "/" + segs[i + 1];
+						i += 2;
+					} else {
+						name = segs[i];
+						i += 1;
+					}
+
+					PackageNode? next = cur.children[name];
+					if (next == null) {
+						next = new PackageNode (name);
+						cur.children[name] = next;
+					}
+					cur = next;
 				}
 
 				cur.version = pkg.version;
@@ -368,33 +389,108 @@ namespace Frida {
 			return root;
 		}
 
-		private async void reify_graph (PackageNode node, File target, Cancellable? cancellable) throws Error, IOError {
-			var requests = new Gee.ArrayList<Future<bool>> ();
-			reify_subgraph (node, target, requests, cancellable);
-			foreach (var future in requests)
-				yield future.wait_async (cancellable);
-		}
+		private async void reify_graph (PackageNode root, File target, Cancellable? cancellable) throws Error, IOError {
+			var inner = new Cancellable ();
 
-		private void reify_subgraph (PackageNode node, File target, Gee.List<Future<bool>> requests, Cancellable? cancellable)
-				throws Error, IOError {
-			if (!node.is_root) {
-				var dir = install_dir_for_dependency (node.name, target);
-				var request = new Promise<bool> ();
-				requests.add (request.future);
-				perform_download_and_unpack.begin (node, dir, request, cancellable);
+			var source = new CancellableSource (cancellable);
+			source.set_callback (() => {
+				inner.cancel ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+
+			var futures = new Gee.ArrayList<Future<bool>> ();
+			uint completed = 0;
+			Error? first_error = null;
+
+			perform_reify_graph (root, target, null, futures, inner);
+
+			foreach (var f in futures) {
+				f.then (fut => {
+					try {
+						fut.get_result ();
+					} catch (GLib.Error e) {
+						if (!(e is IOError.CANCELLED) && first_error == null)
+							first_error = (Error) e;
+						inner.cancel ();
+					}
+
+					completed++;
+
+					double dep_processing_start_fraction = 0.1;
+					double dep_processing_span = 0.88;
+					double current_fraction = dep_processing_start_fraction
+						+ ((double) completed / futures.size) * dep_processing_span;
+
+					install_progress (RESOLVING_AND_INSTALLING_ALL, current_fraction);
+
+					if (completed == futures.size)
+						reify_graph.callback ();
+				});
 			}
-			foreach (var child in node.children.values)
-				reify_subgraph (child, target, requests, cancellable);
+			yield;
+			if (first_error != null)
+				throw first_error;
 		}
 
-		private async void perform_download_and_unpack (PackageNode node, File dir, Promise<bool> request,
-				Cancellable? cancellable) {
+		private void perform_reify_graph (PackageNode node, File base_dir, Promise<bool>? prereq, Gee.List<Future<bool>> futures,
+				Cancellable inner) {
+			Promise<bool>? my_job = prereq;
+
+			if (!node.is_root) {
+				my_job = new Promise<bool> ();
+				futures.add (my_job.future);
+
+				var dir = install_dir_for_dependency (node.name, base_dir);
+
+				perform_download_and_unpack.begin (node, dir, my_job, prereq, inner);
+
+				base_dir = dir;
+			}
+
+			foreach (var child in node.children.values)
+				perform_reify_graph (child, base_dir, my_job, futures, inner);
+		}
+
+		private async void perform_download_and_unpack (PackageNode node, File dir, Promise<bool> job, Promise<bool>? prereq,
+				Cancellable inner) {
 			try {
-				yield download_and_unpack (node.name, node.version, node.resolved, dir, node.integrity, null /* FIXME */,
-					cancellable);
-				request.resolve (true);
+				if (prereq != null)
+					yield prereq.future.wait_async (inner);
+
+				string progress_details = "%s@%s".printf (node.name, node.version);
+
+				if (yield package_is_already_installed (node, dir, inner)) {
+					install_progress (PackageInstallPhase.PACKAGE_ALREADY_INSTALLED, 1.0, progress_details);
+					job.resolve (true);
+					return;
+				}
+
+				yield download_and_unpack (node.name, node.version, node.resolved, dir, node.integrity, node.shasum, inner);
+
+				install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
+				job.resolve (true);
 			} catch (GLib.Error e) {
-				request.reject (e);
+				job.reject (e);
+			}
+		}
+
+		private static async bool package_is_already_installed (PackageNode node, File dir, Cancellable? cancellable)
+				throws IOError {
+			try {
+				Json.Reader r = yield load_json (dir.get_child ("package.json"), cancellable);
+
+				r.read_member ("name");
+				string? name = r.get_string_value ();
+				r.end_member ();
+
+				r.read_member ("version");
+				string? version = r.get_string_value ();
+				r.end_member ();
+
+				return name != null && version != null && name == node.name && version == node.version;
+			} catch (Error e) {
+				return false;
 			}
 		}
 
@@ -421,6 +517,7 @@ namespace Frida {
 			public string? version;
 			public string? resolved;
 			public string? integrity;
+			public string? shasum;
 			public weak PackageNode parent;
 			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
@@ -1102,6 +1199,9 @@ namespace Frida {
 
 		private async void download_and_unpack (string name, string version, string tarball_url, File dest_root, string? integrity,
 				string? shasum, Cancellable? cancellable) throws Error, IOError {
+			string progress_details = "%s@%s".printf (name, version);
+			install_progress (DOWNLOADING_PACKAGE, 0.0, progress_details);
+
 			int io_priority = Priority.DEFAULT;
 
 			var tar_msg = new Soup.Message ("GET", tarball_url);
@@ -1145,9 +1245,6 @@ namespace Frida {
 			size_t read_total = 0;
 			size_t report_bucket = 0;
 			int64 content_len = tar_msg.get_response_headers ().get_content_length ();
-			string progress_details = "%s@%s".printf (name, version);
-
-			install_progress (DOWNLOADING_PACKAGE, 0.0, progress_details);
 
 			while (true) {
 				ssize_t n = yield gunzip_input.read_async (buffer, io_priority, cancellable);
