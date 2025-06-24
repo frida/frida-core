@@ -114,8 +114,6 @@ namespace Frida {
 				// TODO: validate_peers (root);
 				yield reify_graph (root, project_root, cancellable);
 			} else {
-				throw new Error.NOT_SUPPORTED ("TODO");
-				/*
 				PackageNode? base_graph = null;
 				if (locked != null)
 					base_graph = lock_to_graph (locked);
@@ -125,9 +123,8 @@ namespace Frida {
 				// TODO: validate_peers (root);
 				yield reify_graph (root, project_root, cancellable);
 
-				manifest.save ("package.json");
-				write_lockfile (root);
-				*/
+				// TODO: manifest.save ("package.json");
+				// TODO: write_lockfile (root);
 			}
 
 			install_progress (DEPENDENCIES_PROCESSED, 0.98);
@@ -137,7 +134,6 @@ namespace Frida {
 			return new PackageInstallResult (new PackageList (new Gee.ArrayList<Package> ()));
 		}
 
-		/*
 		private async PackageNode resolve_with_selective_unlock (Manifest man, PackageNode? base_node, Cancellable? cancellable)
 				throws Error, IOError {
 			if (base_node == null)
@@ -145,20 +141,18 @@ namespace Frida {
 
 			// 1. Mark nodes that violate new top‑level ranges
 			Queue<PackageNode> to_uninstall = new Queue<PackageNode> ();
-			foreach (var kvp in man.dependencies) {
-				var name  = kvp.key;
+			foreach (PackageDependency dep in man.dependencies.all.values) {
 				var range = kvp.value;
-				var node  = base_node.lookup (name);
-				if (node == null || !semver_satisfies (node.version, range))
-					to_uninstall.push (node ?? base_node);   // base_node acts as dummy root for missing dep
+				var node = base_node.lookup (dep.name);
+				if (node == null || !Semver.satisfies_range (node.version, dep.version.spec))
+					to_uninstall.push ((node != null) ? node : base_node);
 			}
 
 			// 2. BFS to yank dependents (they might be peer/child deps that change)
 			while (!to_uninstall.is_empty) {
 				var n = to_uninstall.pop ();
-				if (n.parent != null) {
+				if (n.parent != null)
 					n.parent.children.remove (n.name);
-				}
 				foreach (var child in n.children.values)
 					to_uninstall.push (child);
 			}
@@ -183,7 +177,57 @@ namespace Frida {
 			hoist_graph (root);
 			return root;
 		}
-		*/
+
+		private async PackageNode build_ideal_graph (Manifest manifest, Cancellable? cancellable) throws Error, IOError {
+			var root = new PackageNode ();
+
+			Gee.Queue<DepQueueItem> q = new Gee.LinkedList<DepQueueItem> ();
+			foreach (PackageDependency d in manifest.dependencies.all.values)
+				q.offer (new DepQueueItem (root, d));
+
+			Gee.Map<string, Promise<ResolvedPackageData>> data_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
+			Gee.Map<string, Promise<Json.Node>> packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
+
+			while (!q.is_empty) {
+				DepQueueItem item = q.poll ();
+				PackageNode host = item.host;
+				PackageDependency dep = item.dep;
+
+				string key = dep.name + "@" + dep.version.spec;
+				Promise<ResolvedPackageData> p = data_cache[key];
+				if (p == null) {
+					p = new Promise<ResolvedPackageData> ();
+					data_cache[key] = p;
+					fetch_and_resolve_package_data.begin (dep.name, dep.version, p, packument_cache, cancellable);
+				}
+
+				ResolvedPackageData data = yield p.future.wait_async (cancellable);
+
+				PackageNode node = new PackageNode (data.name, data.effective_version);
+				node.resolved = data.resolved_url;
+				node.integrity = data.integrity;
+				if (dep.role == PackageRole.PEER)
+					node.peer_ranges = new Gee.HashMap<string, string> ();
+
+				host.children[dep.name] = node;
+				node.parent = host;
+
+				foreach (PackageDependency cd in data.dependencies.all.values)
+					q.offer (new DepQueueItem (node, cd));
+			}
+
+			return root;
+		}
+
+		private class DepQueueItem {
+			public PackageNode host;
+			public PackageDependency dep;
+
+			public DepQueueItem (PackageNode host, PackageDependency dep) {
+				this.host = host;
+				this.dep = dep;
+			}
+		}
 
 		private static Gee.List<MutationSpec> parse_mutation_specs (MutationKind kind, Gee.List<string> raw_specs,
 				PackageRole role) {
@@ -192,10 +236,10 @@ namespace Frida {
 				string name, range;
 				if (raw_spec.contains ("@")) {
 					var parts = raw_spec.split ("@", 2);
-					name  = parts[0];
+					name = parts[0];
 					range = parts[1];
 				} else {
-					name  = raw_spec;
+					name = raw_spec;
 					range = "";
 				}
 				specs.add (new MutationSpec () {
@@ -216,7 +260,7 @@ namespace Frida {
 					case UPGRADE:
 						string new_range = s.range == "" ? "*" : s.range;
 						PackageDependency? dep = m.dependencies.all[s.name];
-						if (dep == null || new_range != dep.version.spec) {
+						if (dep == null || new_range != dep.version.range) {
 							m.dependencies.all[s.name] = new PackageDependency () {
 								name = s.name,
 								version = new PackageVersion (new_range),
@@ -295,9 +339,10 @@ namespace Frida {
 				}
 
 				lock_r.read_member ("version");
-				pli.version = lock_r.get_string_value ();
-				if (!is_root_package && pli.version == null)
+				string? raw_version = lock_r.get_string_value ();
+				if (!is_root_package && raw_version == null)
 					throw new Error.PROTOCOL ("Lockfile 'version' for '%s' missing or invalid", path_key);
+				pli.version = (raw_version != null) ? Semver.parse_version (raw_version) : null;
 				lock_r.end_member ();
 
 				if (!is_root_package) {
@@ -458,7 +503,7 @@ namespace Frida {
 				if (prereq != null)
 					yield prereq.future.wait_async (inner);
 
-				string progress_details = "%s@%s".printf (node.name, node.version);
+				string progress_details = "%s@%s".printf (node.name, node.version.raw);
 
 				if (yield package_is_already_installed (node, dir, inner)) {
 					install_progress (PackageInstallPhase.PACKAGE_ALREADY_INSTALLED, 1.0, progress_details);
@@ -514,7 +559,7 @@ namespace Frida {
 
 		private class PackageNode {
 			public string? name;
-			public string? version;
+			public SemverVersion? version;
 			public string? resolved;
 			public string? integrity;
 			public string? shasum;
@@ -528,7 +573,7 @@ namespace Frida {
 				}
 			}
 
-			public PackageNode (string? name = null, string? version = null) {
+			public PackageNode (string? name = null, SemverVersion? version = null) {
 				this.name = name;
 				this.version = version;
 			}
@@ -544,16 +589,16 @@ namespace Frida {
 		}
 
 		private class PackageVersion {
-			public string spec;
+			public string range;
 
 			public bool is_pinned {
 				get {
-					return spec[0].isdigit ();
+					return range[0].isdigit ();
 				}
 			}
 
-			public PackageVersion (string spec) {
-				this.spec = spec;
+			public PackageVersion (string range) {
+				this.range = range;
 			}
 		}
 
@@ -639,7 +684,7 @@ namespace Frida {
 		private class PackageLockPackageInfo {
 			public string path_key;
 			public string? name;
-			public string? version;
+			public SemverVersion? version;
 			public string? resolved;
 			public string? integrity;
 			public string? license;
@@ -819,23 +864,23 @@ namespace Frida {
 			return location;
 		}
 
-		private async void fetch_and_resolve_package_data (string name, PackageVersion version_spec,
+		private async void fetch_and_resolve_package_data (string name, PackageVersion version,
 				Promise<ResolvedPackageData> promise_to_fulfill, Gee.Map<string, Promise<Json.Node>> packument_cache,
 				Cancellable? cancellable) {
 			try {
 				string effective_version_local;
 				Json.Reader meta_reader;
 
-				if (Semver.is_precise_spec (version_spec.spec)) {
+				if (Semver.is_precise_spec (version.range)) {
 					meta_reader = yield fetch (
-						"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version_spec.spec)),
+						"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version.range)),
 						cancellable);
 
 					meta_reader.read_member ("version");
 					var ver_val = meta_reader.get_string_value ();
 					if (ver_val == null) {
 						throw new Error.PROTOCOL ("Registry 'version' for '%s@%s' missing or invalid",
-							name, version_spec.spec);
+							name, version.range);
 					}
 					effective_version_local = ver_val;
 					meta_reader.end_member ();
@@ -851,7 +896,7 @@ namespace Frida {
 
 					string? version_from_dist_tag = null;
 					packument_reader.read_member ("dist-tags");
-					packument_reader.read_member (version_spec.spec);
+					packument_reader.read_member (version.range);
 					version_from_dist_tag = packument_reader.get_string_value ();
 					packument_reader.end_member ();
 					packument_reader.end_member ();
@@ -869,10 +914,10 @@ namespace Frida {
 
 						string? target_version_str = Semver.max_satisfying (
 							new Gee.ArrayList<string>.wrap (available_version_strings),
-							version_spec.spec);
+							version.range);
 						if (target_version_str == null) {
 							throw new Error.PROTOCOL ("No version satisfying '%s' for '%s'",
-								version_spec.spec, name);
+								version.range, name);
 						}
 						effective_version_local = target_version_str;
 					}
@@ -895,7 +940,7 @@ namespace Frida {
 
 				var rpd = new ResolvedPackageData () {
 					name = name,
-					effective_version = effective_version_local
+					effective_version = Semver.parse_version (effective_version_local)
 				};
 
 				read_package_version_metadata (meta_reader, rpd);
@@ -908,7 +953,7 @@ namespace Frida {
 
 		private class ResolvedPackageData {
 			public string name;
-			public string effective_version;
+			public SemverVersion effective_version;
 			public string resolved_url;
 			public string? integrity;
 			public string? shasum;
@@ -941,7 +986,7 @@ namespace Frida {
 			rpd.resolved_url = reader.get_string_value ();
 			if (rpd.resolved_url == null) {
 				throw new Error.PROTOCOL ("'dist.tarball' for '%s@%s' missing or invalid, or 'dist' not an object",
-					rpd.name, rpd.effective_version);
+					rpd.name, rpd.effective_version.raw);
 			}
 			reader.end_member ();
 
@@ -1122,15 +1167,15 @@ namespace Frida {
 				foreach (unowned string name in names) {
 					r.read_member (name);
 
-					string? version = r.get_string_value ();
-					if (version == null) {
+					string? range = r.get_string_value ();
+					if (range == null) {
 						throw new Error.PROTOCOL ("Bad type of %s entry for %s, expected string value",
 							section_key, name);
 					}
 
 					deps.add (new PackageDependency () {
 						name = name,
-						version = new PackageVersion (version),
+						version = new PackageVersion (range),
 						role = role,
 					});
 
@@ -1167,15 +1212,15 @@ namespace Frida {
 				foreach (unowned string dep_name in dep_names) {
 					r.read_member (dep_name);
 
-					string? version_spec = r.get_string_value ();
-					if (version_spec == null) {
+					string? range = r.get_string_value ();
+					if (range == null) {
 						throw new Error.PROTOCOL ("Lockfile dependency '%s' in section '%s' for package '%s' " +
 							"must have a string value", dep_name, section_key, parent_path_key);
 					}
 
 					deps.add (new PackageDependency () {
 						name = dep_name,
-						version = new PackageVersion (version_spec),
+						version = new PackageVersion (range),
 						role = role
 					});
 
@@ -1588,13 +1633,16 @@ namespace Frida {
 	}
 
 	private class SemverVersion {
+		public string raw;
 		public uint major;
 		public uint minor;
 		public uint patch;
 		public string? prerelease;
 		public string? metadata;
 
-		public SemverVersion (uint major, uint minor = 0, uint patch = 0, string? prerelease = null, string? metadata = null) {
+		public SemverVersion (string raw, uint major, uint minor = 0, uint patch = 0, string? prerelease = null,
+				string? metadata = null) {
+			this.raw = raw;
 			this.major = major;
 			this.minor = minor;
 			this.patch = patch;
@@ -1712,7 +1760,7 @@ namespace Frida {
 				}
 			}
 
-			return new SemverVersion (major, minor, patch, pre, meta);
+			return new SemverVersion (version, major, minor, patch, pre, meta);
 		}
 
 		private static int compare_version (SemverVersion a, SemverVersion b) {
