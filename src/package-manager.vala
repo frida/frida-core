@@ -217,7 +217,9 @@ namespace Frida {
 
 				string key = pdata.name + "@" + pdata.effective_version.str;
 				if (expanded.add (key)) {
-					foreach (PackageDependency cd in pdata.dependencies.runtime.values) {
+					foreach (PackageDependency cd in pdata.dependencies.all.values) {
+						if (cd.role == DEVELOPMENT)
+							continue;
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -253,7 +255,9 @@ namespace Frida {
 
 				string key = pdata.name + "@" + ddata.effective_version.str;
 				if (expanded.add (key)) {
-					foreach (PackageDependency cd in ddata.dependencies.runtime.values) {
+					foreach (PackageDependency cd in ddata.dependencies.all.values) {
+						if (cd.role == DEVELOPMENT)
+							continue;
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
