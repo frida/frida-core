@@ -216,11 +216,7 @@ namespace Frida {
 				var node = ensure_child_node (host, dep, pdata);
 
 				string key = pdata.name + "@" + pdata.effective_version.str;
-				if (expanded.contains (key))
-					continue;
-				expanded.add (key);
-
-				if (node.children.is_empty) {
+				if (expanded.add (key)) {
 					foreach (PackageDependency cd in pdata.dependencies.runtime.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
@@ -255,12 +251,8 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, pdata);
 
-				string key = pdata.name + "@" + pdata.effective_version.str;
-				if (expanded.contains (key))
-					continue;
-				expanded.add (key);
-
-				if (node.children.is_empty) {
+				string key = pdata.name + "@" + ddata.effective_version.str;
+				if (expanded.add (key)) {
 					foreach (PackageDependency cd in ddata.dependencies.runtime.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
@@ -271,7 +263,8 @@ namespace Frida {
 			return root;
 		}
 
-		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data) {
+		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
+				throws Error {
 			PackageNode? reuse = find_ancestor (host, dep);
 			if (reuse != null)
 				return reuse;
@@ -307,14 +300,15 @@ namespace Frida {
 		}
 
 		private static void hoist_graph (PackageNode root) {
-			Gee.Queue<PackageNode> bfs = new Gee.ArrayQueue<PackageNode> ();
+			var bfs = new Gee.ArrayQueue<PackageNode> ();
 			bfs.offer (root);
 
 			PackageNode? n;
 			while ((n = bfs.poll ()) != null) {
-				foreach (var child in n.children.values.to_array ()) {
+				foreach (PackageNode child in n.children.values.to_array ()) {
 					try_hoist (child);
-					bfs.offer (child);
+					if (child.parent != null)
+						bfs.offer (child);
 				}
 			}
 		}
@@ -327,9 +321,22 @@ namespace Frida {
 					return;
 
 				PackageNode? pkg_above = parent.parent.children[node.name];
-				bool versions_collide = pkg_above != null && pkg_above.version != node.version;
-				if (versions_collide)
+				if (pkg_above != null) {
+					bool versions_collide = pkg_above.version.str != node.version.str;
+					if (versions_collide)
+						return;
+
+					foreach (PackageNode gc in node.children.values) {
+						if (!pkg_above.children.has_key (gc.name)) {
+							pkg_above.children[gc.name] = gc;
+							gc.parent = pkg_above;
+						}
+					}
+
+					parent.children.unset (node.name);
+					node.parent = null;
 					return;
+				}
 
 				foreach (var peer in node.peer_ranges.keys) {
 					bool peer_missing_in_parent = !parent.peer_ranges.has_key (peer) && !parent.children.has_key (peer);
