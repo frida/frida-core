@@ -213,7 +213,7 @@ namespace Frida {
 				var dep = item.dep;
 				var pdata = yield item.data_future.wait_async (cancellable);
 
-				var node = ensure_child_node (host, pdata, dep.role);
+				var node = ensure_child_node (host, dep, pdata);
 
 				string key = pdata.name + "@" + pdata.effective_version.str;
 				if (expanded.contains (key))
@@ -253,7 +253,7 @@ namespace Frida {
 				var dep = item.dep;
 				var ddata = yield item.data_future.wait_async (cancellable);
 
-				var node = ensure_child_node (host, ddata, dep.role);
+				var node = ensure_child_node (host, dep, pdata);
 
 				string key = pdata.name + "@" + pdata.effective_version.str;
 				if (expanded.contains (key))
@@ -271,18 +271,27 @@ namespace Frida {
 			return root;
 		}
 
-		private static PackageNode ensure_child_node (PackageNode host, ResolvedPackageData data, PackageRole role) {
-			PackageNode n = host.children[data.name];
-			if (n != null)
-				return n;
+		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data) {
+			PackageNode? reuse = find_ancestor (host, dep);
+			if (reuse != null)
+				return reuse;
 
-			n = new PackageNode (data.name, data.effective_version);
+			var n = new PackageNode (data.name, data.effective_version);
 			n.resolved = data.resolved_url;
 			n.integrity = data.integrity;
 
 			host.children[data.name] = n;
 			n.parent = host;
 			return n;
+		}
+
+		private static PackageNode? find_ancestor (PackageNode start, PackageDependency dep) throws Error {
+			for (PackageNode? n = start; n != null; n = n.parent) {
+				var maybe = n.children[dep.name];
+				if (maybe != null && Semver.satisfies_range (maybe.version, dep.version.range))
+					return maybe;
+			}
+			return null;
 		}
 
 		private class DepQueueItem {
@@ -940,7 +949,7 @@ namespace Frida {
 			var stack = new Gee.LinkedList<string> ();
 
 			foreach (PackageDependency dep in runtime_deps) {
-				string key = "node_modules/" + dep.name;   // handles @scope/pkg too
+				string key = "node_modules/" + dep.name;
 				stack.offer_head (key);
 			}
 
