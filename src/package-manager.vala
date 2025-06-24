@@ -118,7 +118,7 @@ namespace Frida {
 				if (locked != null)
 					base_graph = lock_to_graph (locked);
 
-				var root = yield resolve_with_selective_unlock (manifest, base_graph, c);
+				var root = yield resolve_with_selective_unlock (manifest, base_graph, cancellable);
 
 				// TODO: validate_peers (root);
 				yield reify_graph (root, project_root, cancellable);
@@ -139,40 +139,54 @@ namespace Frida {
 			if (base_node == null)
 				return yield build_full_tree (man, cancellable);
 
-			// 1. Mark nodes that violate new top‑level ranges
-			Queue<PackageNode> to_uninstall = new Queue<PackageNode> ();
+			var to_uninstall = collect_outdated_nodes (man, base_node);
+			var anchors = yank_nodes_and_collect_parents (to_uninstall);
+			yield patch_holes (anchors, man, cancellable);
+
+			hoist_graph (base_node);
+
+			return base_node;
+		}
+
+		private Gee.Queue<PackageNode> collect_outdated_nodes (Manifest man, PackageNode base_node) throws Error {
+			var queue = new Gee.ArrayQueue<PackageNode> ();
 			foreach (PackageDependency dep in man.dependencies.all.values) {
-				var range = kvp.value;
 				var node = base_node.lookup (dep.name);
-				if (node == null || !Semver.satisfies_range (node.version, dep.version.spec))
-					to_uninstall.push ((node != null) ? node : base_node);
+				bool ok = node != null && Semver.satisfies_range (node.version, dep.version.range);
+				if (!ok)
+					queue.offer ((node != null) ? node : base_node);
 			}
+			return queue;
+		}
 
-			// 2. BFS to yank dependents (they might be peer/child deps that change)
-			while (!to_uninstall.is_empty) {
-				var n = to_uninstall.pop ();
-				if (n.parent != null)
-					n.parent.children.remove (n.name);
-				foreach (var child in n.children.values)
-					to_uninstall.push (child);
+		private Gee.List<PackageNode> yank_nodes_and_collect_parents (Gee.Queue<PackageNode> queue) {
+			var anchors = new Gee.ArrayList<PackageNode> ();
+			PackageNode? n;
+			while ((n = queue.poll ()) != null) {
+				if (n.parent != null) {
+					var p = n.parent;
+					p.children.unset (n.name);
+					anchors.add (p);
+				}
+				foreach (PackageNode ch in n.children.values)
+					queue.offer (ch);
 			}
+			return anchors;
+		}
 
-			// 3. Build ideal graph on the *holes* only
-			var holes = base_node.find_holes ();				// returns list<PackageNode> missing children
-			foreach (var anchor in holes) {
-				var needed = anchor.find_missing_ranges (man); // HashMap<string,string>
+		private async Task patch_holes (Gee.List<PackageNode> anchors, Manifest man, Cancellable? cancellable)
+				throws Error, IOError {
+			foreach (PackageNode anchor in anchors) {
+				var needed = anchor.find_missing_ranges (man);
 				foreach (var kv in needed) {
 					var sub = yield build_ideal_subtree (kv.key, kv.value, cancellable);
 					anchor.children[kv.key] = sub;
 					sub.parent = anchor;
 				}
 			}
-
-			hoist_graph (base_node);
-			return base_node;
 		}
 
-		private async PackageNode build_full_tree (Manifest m, Cancellable? c) throws Error {
+		private async PackageNode build_full_tree (Manifest m, Cancellable? c) throws Error, IOError {
 			var root = yield build_ideal_graph (m, c);
 			hoist_graph (root);
 			return root;
@@ -181,19 +195,19 @@ namespace Frida {
 		private async PackageNode build_ideal_graph (Manifest manifest, Cancellable? cancellable) throws Error, IOError {
 			var root = new PackageNode ();
 
-			Gee.Queue<DepQueueItem> q = new Gee.LinkedList<DepQueueItem> ();
+			Gee.Queue<DepQueueItem> q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in manifest.dependencies.all.values)
 				q.offer (new DepQueueItem (root, d));
 
-			Gee.Map<string, Promise<ResolvedPackageData>> data_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
-			Gee.Map<string, Promise<Json.Node>> packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
+			var data_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
+			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
 
 			while (!q.is_empty) {
 				DepQueueItem item = q.poll ();
 				PackageNode host = item.host;
 				PackageDependency dep = item.dep;
 
-				string key = dep.name + "@" + dep.version.spec;
+				string key = dep.name + "@" + dep.version.range;
 				Promise<ResolvedPackageData> p = data_cache[key];
 				if (p == null) {
 					p = new Promise<ResolvedPackageData> ();
@@ -219,6 +233,48 @@ namespace Frida {
 			return root;
 		}
 
+		private async PackageNode build_ideal_subtree (string name, string range_spec, Cancellable? cancellable)
+				throws Error, IOError {
+			static Gee.Map<string, Promise<ResolvedPackageData>> data_cache =
+				new Gee.HashMap<string, Promise<ResolvedPackageData>> (str_hash, str_equal);
+			static Gee.Map<string, Promise<Json.Node>> packument_cache =
+				new Gee.HashMap<string, Promise<Json.Node>> (str_hash, str_equal);
+
+			string cache_key = name + "@" + range_spec;
+			if (!data_cache.has_key (cache_key)) {
+				var p = new Promise<ResolvedPackageData> ();
+				data_cache[cache_key] = p;
+				fetch_and_resolve_package_data.begin (name, new PackageVersion (range_spec), p, packument_cache,
+					cancellable);
+			}
+
+			ResolvedPackageData data = yield data_cache[cache_key].future.wait_async (cancellable);
+
+			PackageNode root = new PackageNode (data.name, data.effective_version);
+			root.resolved = data.resolved_url;
+			root.integrity = data.integrity;
+
+			var q = new Gee.LinkedList<DepQueueItem> ();
+			foreach (PackageDependency d in data.dependencies.all.values)
+				q.offer (new DepQueueItem (root, d));
+
+			while (!q.is_empty) {
+				DepQueueItem cur = q.poll ();
+				PackageNode host = cur.host;
+				PackageDependency dep = cur.dep;
+
+				PackageNode? existing = host.children[dep.name];
+				if (existing != null && Semver.satisfies_range (existing.version, dep.version.spec))
+					continue;
+
+				PackageNode child = yield build_ideal_subtree (dep.name, dep.version.spec, cancellable);
+				host.children[dep.name] = child;
+				child.parent = host;
+			}
+
+			return root;
+		}
+
 		private class DepQueueItem {
 			public PackageNode host;
 			public PackageDependency dep;
@@ -226,6 +282,45 @@ namespace Frida {
 			public DepQueueItem (PackageNode host, PackageDependency dep) {
 				this.host = host;
 				this.dep = dep;
+			}
+		}
+
+		private static void hoist_graph (PackageNode root) {
+			Gee.Queue<PackageNode> bfs = new Gee.ArrayQueue<PackageNode> ();
+			bfs.offer (root);
+
+			while (!bfs.is_empty) {
+				var n = bfs.poll ();
+
+				foreach (var kvp in n.children) {
+					var child = kvp.value;
+					try_hoist (child);
+					bfs.offer (child);
+				}
+			}
+		}
+
+		private static void try_hoist (PackageNode node) {
+			while (true) {
+				var parent = node.parent;
+				bool already_at_top = parent == null || parent.parent == null;
+				if (already_at_top)
+					return;
+
+				PackageNode? pkg_above = parent.parent.children[node.name];
+				bool versions_collide = pkg_above != null && pkg_above.version != node.version;
+				if (versions_collide)
+					return;
+
+				foreach (var peer in node.peer_ranges.keys) {
+					bool peer_missing_in_parent = !parent.peer_ranges.has_key (peer) && !parent.children.has_key (peer);
+					if (peer_missing_in_parent)
+						return;
+				}
+
+				parent.children.unset (node.name);
+				parent.parent.children[node.name] = node;
+				node.parent = parent.parent;
 			}
 		}
 
@@ -503,7 +598,7 @@ namespace Frida {
 				if (prereq != null)
 					yield prereq.future.wait_async (inner);
 
-				string progress_details = "%s@%s".printf (node.name, node.version.raw);
+				string progress_details = "%s@%s".printf (node.name, node.version.str);
 
 				if (yield package_is_already_installed (node, dir, inner)) {
 					install_progress (PackageInstallPhase.PACKAGE_ALREADY_INSTALLED, 1.0, progress_details);
@@ -511,7 +606,7 @@ namespace Frida {
 					return;
 				}
 
-				yield download_and_unpack (node.name, node.version, node.resolved, dir, node.integrity, node.shasum, inner);
+				yield download_and_unpack (node.name, node.version.str, node.resolved, dir, node.integrity, node.shasum, inner);
 
 				install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
 				job.resolve (true);
@@ -533,7 +628,7 @@ namespace Frida {
 				string? version = r.get_string_value ();
 				r.end_member ();
 
-				return name != null && version != null && name == node.name && version == node.version;
+				return name != null && version != null && name == node.name && version == node.version.str;
 			} catch (Error e) {
 				return false;
 			}
@@ -576,6 +671,26 @@ namespace Frida {
 			public PackageNode (string? name = null, SemverVersion? version = null) {
 				this.name = name;
 				this.version = version;
+			}
+
+			public PackageNode? lookup (string pkg_name) {
+				if (name == pkg_name)
+					return this;
+				foreach (var child in children.values) {
+					PackageNode? found = child.lookup (pkg_name);
+					if (found != null)
+						return found;
+				}
+				return null;
+			}
+
+			public Gee.Map<string, string> find_missing_ranges (Manifest man) {
+				var missing = new Gee.HashMap<string, string> ();
+				foreach (var dep in man.dependencies.all.values) {
+					if (!children.has_key (dep.name))
+						missing[dep.name] = dep.version.range;
+				}
+				return missing;
 			}
 		}
 
@@ -753,12 +868,12 @@ namespace Frida {
 			var deps_obj = new Json.Object ();
 			obj.set_object_member ("dependencies", deps_obj);
 			foreach (PackageDependency dep in manifest.dependencies.runtime.values)
-				deps_obj.set_string_member (dep.name, dep.version.spec);
+				deps_obj.set_string_member (dep.name, dep.version.range);
 
 			var dev_deps_obj = new Json.Object ();
 			obj.set_object_member ("devDependencies", dev_deps_obj);
 			foreach (PackageDependency dep in manifest.dependencies.development.values)
-				dev_deps_obj.set_string_member (dep.name, dep.version.spec);
+				dev_deps_obj.set_string_member (dep.name, dep.version.range);
 
 			string new_pkg_json = generate_npm_style_json (root, indent_level, indent_char);
 			bool pkg_json_changed = old_pkg_json == null || new_pkg_json != old_pkg_json;
@@ -834,7 +949,7 @@ namespace Frida {
 				Gee.Map<string, PackageLockEntry> all_installed) {
 			Gee.Set<string> runtime_reach = new Gee.HashSet<string> ();
 
-			Gee.Queue<string> q = new Gee.LinkedList<string> ();
+			Gee.Queue<string> q = new Gee.ArrayQueue<string> ();
 			foreach (var ple in toplevel_installed)
 				if (ple.toplevel_dep.role != DEVELOPMENT)
 					q.offer (ple.id);
@@ -862,6 +977,24 @@ namespace Frida {
 			foreach (unowned string part in name.split ("/"))
 				location = location.get_child (part);
 			return location;
+		}
+
+		private class PackageDataCache {
+			public Gee.Map<string, Promise<ResolvedPackageData>> data =
+				new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
+			public Gee.Map<string, Promise<Json.Node>> packument =
+				new Gee.HashMap<string, Promise<Json.Node>> ();
+
+			public Promise<ResolvedPackageData> fetch (string name, PackageVersion ver, Cancellable? cancellable) {
+				string key = name + "@" + ver.spec;
+				Promise<ResolvedPackageData> p = data[key];
+				if (p == null) {
+					p = new Promise<ResolvedPackageData> ();
+					data[key] = p;
+					fetch_and_resolve_package_data.begin (name, ver, p, packument, cancellable);
+				}
+				return p;
+			}
 		}
 
 		private async void fetch_and_resolve_package_data (string name, PackageVersion version,
@@ -986,7 +1119,7 @@ namespace Frida {
 			rpd.resolved_url = reader.get_string_value ();
 			if (rpd.resolved_url == null) {
 				throw new Error.PROTOCOL ("'dist.tarball' for '%s@%s' missing or invalid, or 'dist' not an object",
-					rpd.name, rpd.effective_version.raw);
+					rpd.name, rpd.effective_version.str);
 			}
 			reader.end_member ();
 
@@ -1238,7 +1371,7 @@ namespace Frida {
 				return;
 			b.set_member_name (section).begin_object ();
 			foreach (PackageDependency dep in deps.values)
-				b.set_member_name (dep.name).add_string_value (dep.version.spec);
+				b.set_member_name (dep.name).add_string_value (dep.version.range);
 			b.end_object ();
 		}
 
@@ -1633,16 +1766,30 @@ namespace Frida {
 	}
 
 	private class SemverVersion {
-		public string raw;
 		public uint major;
 		public uint minor;
 		public uint patch;
 		public string? prerelease;
 		public string? metadata;
 
-		public SemverVersion (string raw, uint major, uint minor = 0, uint patch = 0, string? prerelease = null,
-				string? metadata = null) {
-			this.raw = raw;
+		public string str {
+			get {
+				if (_str == null) {
+					var s = new StringBuilder.sized (8);
+					s.append_printf ("%u.%u.%u", major, minor, patch);
+					if (prerelease != null)
+						s.append_c ('-').append (prerelease);
+					if (metadata != null)
+						s.append_c ('+').append (metadata);
+					_str = s.str;
+				}
+				return _str;
+			}
+		}
+
+		private string? _str;
+
+		public SemverVersion (uint major, uint minor = 0, uint patch = 0, string? prerelease = null, string? metadata = null) {
 			this.major = major;
 			this.minor = minor;
 			this.patch = patch;
@@ -1760,7 +1907,7 @@ namespace Frida {
 				}
 			}
 
-			return new SemverVersion (version, major, minor, patch, pre, meta);
+			return new SemverVersion (major, minor, patch, pre, meta);
 		}
 
 		private static int compare_version (SemverVersion a, SemverVersion b) {
