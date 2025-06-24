@@ -198,22 +198,33 @@ namespace Frida {
 		private static async PackageNode build_ideal_graph (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
 				throws Error, IOError {
 			var root = new PackageNode ();
-			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in manifest.dependencies.all.values)
-				q.offer (new DepQueueItem (root, d));
 
-			while (!q.is_empty) {
-				DepQueueItem item = q.poll ();
+			var q = new Gee.ArrayQueue<DepQueueItem> ();
+			foreach (PackageDependency d in manifest.dependencies.all.values) {
+				var future = cache.fetch (d.name, d.version);
+				q.offer (new DepQueueItem (root, d, future));
+			}
+
+			var expanded = new Gee.HashSet<string> ();
+
+			DepQueueItem? item;
+			while ((item = q.poll ()) != null) {
 				var host = item.host;
 				var dep = item.dep;
-
-				ResolvedPackageData pdata = yield cache.fetch (dep.name, dep.version).future.wait_async (cancellable);
+				var pdata = yield item.data_future.wait_async (cancellable);
 
 				var node = ensure_child_node (host, pdata, dep.role);
 
+				string key = pdata.name + "@" + pdata.effective_version.str;
+				if (expanded.contains (key))
+					continue;
+				expanded.add (key);
+
 				if (node.children.is_empty) {
-					foreach (PackageDependency cd in pdata.dependencies.all.values)
-						q.offer (new DepQueueItem (node, cd));
+					foreach (PackageDependency cd in pdata.dependencies.runtime.values) {
+						var future = cache.fetch (cd.name, cd.version);
+						q.offer (new DepQueueItem (node, cd, future));
+					}
 				}
 			}
 
@@ -222,28 +233,38 @@ namespace Frida {
 
 		private static async PackageNode build_ideal_subtree (string name, string spec, PackageDataCache cache,
 				Cancellable? cancellable) throws Error, IOError {
-			ResolvedPackageData root_data = yield cache.fetch (name, new PackageVersion (spec)).future.wait_async (cancellable);
+			ResolvedPackageData pdata = yield cache.fetch (name, new PackageVersion (spec)).wait_async (cancellable);
 
-			var root = new PackageNode (root_data.name, root_data.effective_version);
-			root.resolved = root_data.resolved_url;
-			root.integrity = root_data.integrity;
+			var root = new PackageNode (pdata.name, pdata.effective_version);
+			root.resolved = pdata.resolved_url;
+			root.integrity = pdata.integrity;
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in root_data.dependencies.all.values)
-				q.offer (new DepQueueItem (root, d));
+			foreach (PackageDependency d in pdata.dependencies.runtime.values) {
+				var future = cache.fetch (d.name, d.version);
+				q.offer (new DepQueueItem (root, d, future));
+			}
 
-			while (!q.is_empty) {
-				DepQueueItem item = q.poll ();
+			var expanded = new Gee.HashSet<string> ();
+
+			DepQueueItem? item;
+			while ((item = q.poll ()) != null) {
 				var host = item.host;
 				var dep = item.dep;
+				var ddata = yield item.data_future.wait_async (cancellable);
 
-				ResolvedPackageData pdata = yield cache.fetch (dep.name, dep.version).future.wait_async (cancellable);
+				var node = ensure_child_node (host, ddata, dep.role);
 
-				var node = ensure_child_node (host, pdata, dep.role);
+				string key = pdata.name + "@" + pdata.effective_version.str;
+				if (expanded.contains (key))
+					continue;
+				expanded.add (key);
 
 				if (node.children.is_empty) {
-					foreach (PackageDependency cd in pdata.dependencies.all.values)
-						q.offer (new DepQueueItem (node, cd));
+					foreach (PackageDependency cd in ddata.dependencies.runtime.values) {
+						var future = cache.fetch (cd.name, cd.version);
+						q.offer (new DepQueueItem (node, cd, future));
+					}
 				}
 			}
 
@@ -267,10 +288,12 @@ namespace Frida {
 		private class DepQueueItem {
 			public PackageNode host;
 			public PackageDependency dep;
+			public Future<ResolvedPackageData> data_future;
 
-			public DepQueueItem (PackageNode host, PackageDependency dep) {
+			public DepQueueItem (PackageNode host, PackageDependency dep, Future<ResolvedPackageData> data_future) {
 				this.host = host;
 				this.dep = dep;
+				this.data_future = data_future;
 			}
 		}
 
@@ -278,11 +301,9 @@ namespace Frida {
 			Gee.Queue<PackageNode> bfs = new Gee.ArrayQueue<PackageNode> ();
 			bfs.offer (root);
 
-			while (!bfs.is_empty) {
-				var n = bfs.poll ();
-
-				foreach (var kvp in n.children) {
-					var child = kvp.value;
+			PackageNode? n;
+			while ((n = bfs.poll ()) != null) {
+				foreach (var child in n.children.values.to_array ()) {
 					try_hoist (child);
 					bfs.offer (child);
 				}
@@ -647,7 +668,7 @@ namespace Frida {
 			public string? resolved;
 			public string? integrity;
 			public string? shasum;
-			public weak PackageNode parent;
+			public weak PackageNode? parent;
 			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
@@ -660,6 +681,11 @@ namespace Frida {
 			public PackageNode (string? name = null, SemverVersion? version = null) {
 				this.name = name;
 				this.version = version;
+			}
+
+			~PackageNode () {
+				foreach (var child in children.values)
+					child.parent = null;
 			}
 
 			public PackageNode? lookup (string pkg_name) {
@@ -943,8 +969,8 @@ namespace Frida {
 				if (ple.toplevel_dep.role != DEVELOPMENT)
 					q.offer (ple.id);
 
-			while (!q.is_empty) {
-				string k = q.poll ();
+			string? k;
+			while ((k = q.poll ()) != null) {
 				if (!runtime_reach.add (k))
 					continue;
 
@@ -982,7 +1008,7 @@ namespace Frida {
 				this.cancellable = cancellable;
 			}
 
-			public Promise<ResolvedPackageData> fetch (string name, PackageVersion ver) {
+			public Future<ResolvedPackageData> fetch (string name, PackageVersion ver) {
 				string key = name + "@" + ver.range;
 				Promise<ResolvedPackageData> p = data[key];
 				if (p == null) {
@@ -990,7 +1016,7 @@ namespace Frida {
 					data[key] = p;
 					manager.fetch_and_resolve_package_data.begin (name, ver, p, packument, cancellable);
 				}
-				return p;
+				return p.future;
 			}
 		}
 
