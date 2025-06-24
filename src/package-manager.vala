@@ -114,11 +114,13 @@ namespace Frida {
 				// TODO: validate_peers (root);
 				yield reify_graph (root, project_root, cancellable);
 			} else {
+				var cache = new PackageDataCache (this, cancellable);
+
 				PackageNode? base_graph = null;
 				if (locked != null)
 					base_graph = lock_to_graph (locked);
 
-				var root = yield resolve_with_selective_unlock (manifest, base_graph, cancellable);
+				var root = yield resolve_with_selective_unlock (manifest, base_graph, cache, cancellable);
 
 				// TODO: validate_peers (root);
 				yield reify_graph (root, project_root, cancellable);
@@ -134,21 +136,21 @@ namespace Frida {
 			return new PackageInstallResult (new PackageList (new Gee.ArrayList<Package> ()));
 		}
 
-		private async PackageNode resolve_with_selective_unlock (Manifest man, PackageNode? base_node, Cancellable? cancellable)
-				throws Error, IOError {
+		private static async PackageNode resolve_with_selective_unlock (Manifest man, PackageNode? base_node,
+				PackageDataCache cache, Cancellable? cancellable) throws Error, IOError {
 			if (base_node == null)
-				return yield build_full_tree (man, cancellable);
+				return yield build_full_tree (man, cache, cancellable);
 
 			var to_uninstall = collect_outdated_nodes (man, base_node);
 			var anchors = yank_nodes_and_collect_parents (to_uninstall);
-			yield patch_holes (anchors, man, cancellable);
+			yield patch_holes (anchors, man, cache, cancellable);
 
 			hoist_graph (base_node);
 
 			return base_node;
 		}
 
-		private Gee.Queue<PackageNode> collect_outdated_nodes (Manifest man, PackageNode base_node) throws Error {
+		private static Gee.Queue<PackageNode> collect_outdated_nodes (Manifest man, PackageNode base_node) throws Error {
 			var queue = new Gee.ArrayQueue<PackageNode> ();
 			foreach (PackageDependency dep in man.dependencies.all.values) {
 				var node = base_node.lookup (dep.name);
@@ -159,7 +161,7 @@ namespace Frida {
 			return queue;
 		}
 
-		private Gee.List<PackageNode> yank_nodes_and_collect_parents (Gee.Queue<PackageNode> queue) {
+		private static Gee.List<PackageNode> yank_nodes_and_collect_parents (Gee.Queue<PackageNode> queue) {
 			var anchors = new Gee.ArrayList<PackageNode> ();
 			PackageNode? n;
 			while ((n = queue.poll ()) != null) {
@@ -174,105 +176,92 @@ namespace Frida {
 			return anchors;
 		}
 
-		private async Task patch_holes (Gee.List<PackageNode> anchors, Manifest man, Cancellable? cancellable)
-				throws Error, IOError {
+		private static async void patch_holes (Gee.List<PackageNode> anchors, Manifest man, PackageDataCache cache,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (PackageNode anchor in anchors) {
 				var needed = anchor.find_missing_ranges (man);
 				foreach (var kv in needed) {
-					var sub = yield build_ideal_subtree (kv.key, kv.value, cancellable);
+					var sub = yield build_ideal_subtree (kv.key, kv.value, cache, cancellable);
 					anchor.children[kv.key] = sub;
 					sub.parent = anchor;
 				}
 			}
 		}
 
-		private async PackageNode build_full_tree (Manifest m, Cancellable? c) throws Error, IOError {
-			var root = yield build_ideal_graph (m, c);
+		private static async PackageNode build_full_tree (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
+				throws Error, IOError {
+			var root = yield build_ideal_graph (manifest, cache, cancellable);
 			hoist_graph (root);
 			return root;
 		}
 
-		private async PackageNode build_ideal_graph (Manifest manifest, Cancellable? cancellable) throws Error, IOError {
+		private static async PackageNode build_ideal_graph (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
+				throws Error, IOError {
 			var root = new PackageNode ();
-
-			Gee.Queue<DepQueueItem> q = new Gee.ArrayQueue<DepQueueItem> ();
+			var q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in manifest.dependencies.all.values)
 				q.offer (new DepQueueItem (root, d));
 
-			var data_cache = new Gee.HashMap<string, Promise<ResolvedPackageData>> ();
-			var packument_cache = new Gee.HashMap<string, Promise<Json.Node>> ();
-
 			while (!q.is_empty) {
 				DepQueueItem item = q.poll ();
-				PackageNode host = item.host;
-				PackageDependency dep = item.dep;
+				var host = item.host;
+				var dep = item.dep;
 
-				string key = dep.name + "@" + dep.version.range;
-				Promise<ResolvedPackageData> p = data_cache[key];
-				if (p == null) {
-					p = new Promise<ResolvedPackageData> ();
-					data_cache[key] = p;
-					fetch_and_resolve_package_data.begin (dep.name, dep.version, p, packument_cache, cancellable);
+				ResolvedPackageData pdata = yield cache.fetch (dep.name, dep.version).future.wait_async (cancellable);
+
+				var node = ensure_child_node (host, pdata, dep.role);
+
+				if (node.children.is_empty) {
+					foreach (PackageDependency cd in pdata.dependencies.all.values)
+						q.offer (new DepQueueItem (node, cd));
 				}
-
-				ResolvedPackageData data = yield p.future.wait_async (cancellable);
-
-				PackageNode node = new PackageNode (data.name, data.effective_version);
-				node.resolved = data.resolved_url;
-				node.integrity = data.integrity;
-				if (dep.role == PackageRole.PEER)
-					node.peer_ranges = new Gee.HashMap<string, string> ();
-
-				host.children[dep.name] = node;
-				node.parent = host;
-
-				foreach (PackageDependency cd in data.dependencies.all.values)
-					q.offer (new DepQueueItem (node, cd));
 			}
 
 			return root;
 		}
 
-		private async PackageNode build_ideal_subtree (string name, string range_spec, Cancellable? cancellable)
-				throws Error, IOError {
-			static Gee.Map<string, Promise<ResolvedPackageData>> data_cache =
-				new Gee.HashMap<string, Promise<ResolvedPackageData>> (str_hash, str_equal);
-			static Gee.Map<string, Promise<Json.Node>> packument_cache =
-				new Gee.HashMap<string, Promise<Json.Node>> (str_hash, str_equal);
+		private static async PackageNode build_ideal_subtree (string name, string spec, PackageDataCache cache,
+				Cancellable? cancellable) throws Error, IOError {
+			ResolvedPackageData root_data = yield cache.fetch (name, new PackageVersion (spec)).future.wait_async (cancellable);
 
-			string cache_key = name + "@" + range_spec;
-			if (!data_cache.has_key (cache_key)) {
-				var p = new Promise<ResolvedPackageData> ();
-				data_cache[cache_key] = p;
-				fetch_and_resolve_package_data.begin (name, new PackageVersion (range_spec), p, packument_cache,
-					cancellable);
-			}
+			var root = new PackageNode (root_data.name, root_data.effective_version);
+			root.resolved = root_data.resolved_url;
+			root.integrity = root_data.integrity;
 
-			ResolvedPackageData data = yield data_cache[cache_key].future.wait_async (cancellable);
-
-			PackageNode root = new PackageNode (data.name, data.effective_version);
-			root.resolved = data.resolved_url;
-			root.integrity = data.integrity;
-
-			var q = new Gee.LinkedList<DepQueueItem> ();
-			foreach (PackageDependency d in data.dependencies.all.values)
+			var q = new Gee.ArrayQueue<DepQueueItem> ();
+			foreach (PackageDependency d in root_data.dependencies.all.values)
 				q.offer (new DepQueueItem (root, d));
 
 			while (!q.is_empty) {
-				DepQueueItem cur = q.poll ();
-				PackageNode host = cur.host;
-				PackageDependency dep = cur.dep;
+				DepQueueItem item = q.poll ();
+				var host = item.host;
+				var dep = item.dep;
 
-				PackageNode? existing = host.children[dep.name];
-				if (existing != null && Semver.satisfies_range (existing.version, dep.version.spec))
-					continue;
+				ResolvedPackageData pdata = yield cache.fetch (dep.name, dep.version).future.wait_async (cancellable);
 
-				PackageNode child = yield build_ideal_subtree (dep.name, dep.version.spec, cancellable);
-				host.children[dep.name] = child;
-				child.parent = host;
+				var node = ensure_child_node (host, pdata, dep.role);
+
+				if (node.children.is_empty) {
+					foreach (PackageDependency cd in pdata.dependencies.all.values)
+						q.offer (new DepQueueItem (node, cd));
+				}
 			}
 
 			return root;
+		}
+
+		private static PackageNode ensure_child_node (PackageNode host, ResolvedPackageData data, PackageRole role) {
+			PackageNode n = host.children[data.name];
+			if (n != null)
+				return n;
+
+			n = new PackageNode (data.name, data.effective_version);
+			n.resolved = data.resolved_url;
+			n.integrity = data.integrity;
+
+			host.children[data.name] = n;
+			n.parent = host;
+			return n;
 		}
 
 		private class DepQueueItem {
@@ -985,13 +974,21 @@ namespace Frida {
 			public Gee.Map<string, Promise<Json.Node>> packument =
 				new Gee.HashMap<string, Promise<Json.Node>> ();
 
-			public Promise<ResolvedPackageData> fetch (string name, PackageVersion ver, Cancellable? cancellable) {
-				string key = name + "@" + ver.spec;
+			private PackageManager manager;
+			private Cancellable? cancellable;
+
+			public PackageDataCache (PackageManager manager, Cancellable? cancellable) {
+				this.manager = manager;
+				this.cancellable = cancellable;
+			}
+
+			public Promise<ResolvedPackageData> fetch (string name, PackageVersion ver) {
+				string key = name + "@" + ver.range;
 				Promise<ResolvedPackageData> p = data[key];
 				if (p == null) {
 					p = new Promise<ResolvedPackageData> ();
 					data[key] = p;
-					fetch_and_resolve_package_data.begin (name, ver, p, packument, cancellable);
+					manager.fetch_and_resolve_package_data.begin (name, ver, p, packument, cancellable);
 				}
 				return p;
 			}
