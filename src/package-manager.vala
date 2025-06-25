@@ -238,6 +238,8 @@ namespace Frida {
 			root.engines = pdata.engines;
 			root.resolved = pdata.resolved_url;
 			root.integrity = pdata.integrity;
+			foreach (PackageDependency pd in pdata.dependencies.peer.values)
+				root.peer_ranges[pd.name] = pd.version.range;
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in pdata.dependencies.runtime.values) {
@@ -286,6 +288,8 @@ namespace Frida {
 			n.engines = data.engines;
 			n.resolved = data.resolved_url;
 			n.integrity = data.integrity;
+			foreach (PackageDependency pd in data.dependencies.peer.values)
+				n.peer_ranges[pd.name] = pd.version.range;
 
 			host.children[data.name] = n;
 			host.child_roles[n] = dep.role;
@@ -360,8 +364,17 @@ namespace Frida {
 					return true;
 				}
 
-				foreach (var peer in node.peer_ranges.keys) {
-					if (!parent.peer_ranges.has_key (peer) && !parent.children.has_key (peer))
+				foreach (string peer in node.peer_ranges.keys) {
+					PackageNode? a = parent;
+					bool ok = false;
+					while (a != null) {
+						if (a.children.has_key (peer) || a.peer_ranges.has_key (peer)) {
+							ok = true;
+							break;
+						}
+						a = a.parent;
+					}
+					if (!ok)
 						return false;
 				}
 
