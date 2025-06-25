@@ -215,7 +215,7 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, pdata);
 
-				string key = pdata.name + "@" + pdata.effective_version.str;
+				string key = node.name + "@" + node.version.str;
 				if (expanded.add (key)) {
 					foreach (PackageDependency cd in pdata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
@@ -234,6 +234,9 @@ namespace Frida {
 			ResolvedPackageData pdata = yield cache.fetch (name, new PackageVersion (spec)).wait_async (cancellable);
 
 			var root = new PackageNode (pdata.name, pdata.effective_version);
+			root.license = pdata.license;
+			root.funding = pdata.funding;
+			root.engines = pdata.engines;
 			root.resolved = pdata.resolved_url;
 			root.integrity = pdata.integrity;
 
@@ -251,9 +254,9 @@ namespace Frida {
 				var dep = item.dep;
 				var ddata = yield item.data_future.wait_async (cancellable);
 
-				var node = ensure_child_node (host, dep, pdata);
+				var node = ensure_child_node (host, dep, ddata);
 
-				string key = pdata.name + "@" + ddata.effective_version.str;
+				string key = node.name + "@" + node.version.str;
 				if (expanded.add (key)) {
 					foreach (PackageDependency cd in ddata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
@@ -270,14 +273,24 @@ namespace Frida {
 		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
 				throws Error {
 			PackageNode? reuse = find_ancestor (host, dep);
-			if (reuse != null)
+			if (reuse != null) {
+				//if (!host.children.has_key (dep.name)) {
+				//	var n = reuse.clone (host);
+				//	host.children[dep.name] = n;
+				//	host.child_roles[n] = dep.role;
+				//}
 				return reuse;
+			}
 
 			var n = new PackageNode (data.name, data.effective_version);
+			n.license = data.license;
+			n.funding = data.funding;
+			n.engines = data.engines;
 			n.resolved = data.resolved_url;
 			n.integrity = data.integrity;
 
 			host.children[data.name] = n;
+			host.child_roles[n] = dep.role;
 			n.parent = host;
 			return n;
 		}
@@ -516,7 +529,7 @@ namespace Frida {
 
 		private async void write_lockfile (PackageNode root, Manifest manifest, File lock_file, Cancellable? cancellable)
 				throws Error, IOError {
-			var path_map = new Gee.HashMap<string, PackageNode> ();
+			var path_map = new Gee.TreeMap<string, PackageNode> ();
 
 			var node_stack = new Gee.LinkedList<PackageNode> ();
 			var key_stack = new Gee.LinkedList<string> ();
@@ -573,7 +586,12 @@ namespace Frida {
 				if (!runtime_reach.contains (k))
 					b.set_member_name ("dev").add_boolean_value (true);
 
-				write_dependencies_section ("dependencies", collect_direct_deps (pn), b);
+				write_license (pn.license, b);
+				write_dependencies_section ("dependencies", collect_direct_deps (pn, RUNTIME), b);
+				write_engines (pn.engines, b);
+				write_dependencies_section ("optionalDependencies", collect_direct_deps (pn, OPTIONAL), b);
+				write_funding (pn.funding, b);
+				write_dependencies_section ("peerDependencies", collect_direct_deps (pn, PEER), b);
 
 				b.end_object ();
 			}
@@ -586,14 +604,14 @@ namespace Frida {
 			yield FS.write_all_text (lock_file, txt, cancellable);
 		}
 
-		private Gee.Map<string, PackageDependency> collect_direct_deps (PackageNode node) {
+		private Gee.Map<string, PackageDependency> collect_direct_deps (PackageNode node, PackageRole role) {
 			var m = new Gee.TreeMap<string, PackageDependency> ();
 
 			foreach (PackageNode ch in node.children.values.to_array ()) {
 				var d = new PackageDependency ();
 				d.name = ch.name;
 				d.version = new PackageVersion (ch.version.str);
-				d.role = PackageRole.RUNTIME;
+				d.role = node.child_roles[ch];
 				m[d.name] = d;
 			}
 
@@ -639,6 +657,9 @@ namespace Frida {
 				}
 
 				cur.version = pkg.version;
+				cur.license = pkg.license;
+				cur.funding = pkg.funding;
+				cur.engines = pkg.engines;
 				cur.resolved = pkg.resolved;
 				cur.integrity = pkg.integrity;
 
@@ -774,11 +795,15 @@ namespace Frida {
 		private class PackageNode {
 			public string? name;
 			public SemverVersion? version;
+			public string? license;
+			public Gee.List<FundingSource>? funding;
+			public Gee.Map<string, string>? engines;
 			public string? resolved;
 			public string? integrity;
 			public string? shasum;
 			public weak PackageNode? parent;
 			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
+			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
 			public bool is_root {
@@ -795,6 +820,20 @@ namespace Frida {
 			~PackageNode () {
 				foreach (var child in children.values)
 					child.parent = null;
+			}
+
+			public PackageNode clone (PackageNode? new_parent) {
+				var n = new PackageNode (name, version);
+				n.license = license;
+				n.funding = funding;
+				n.engines = engines;
+				n.resolved = resolved;
+				n.integrity = integrity;
+				n.shasum = shasum;
+				n.parent = new_parent;
+				n.children.set_all (children);
+				n.peer_ranges.set_all (peer_ranges);
+				return n;
 			}
 
 			public PackageNode? lookup (string pkg_name) {
@@ -1025,7 +1064,7 @@ namespace Frida {
 				string effective_version_local;
 				Json.Reader meta_reader;
 
-				if (Semver.is_precise_spec (version.range)) {
+				if (Semver.is_precise_range (version.range)) {
 					meta_reader = yield fetch (
 						"/%s/%s".printf (Uri.escape_string (name), Uri.escape_string (version.range)),
 						cancellable);
@@ -1069,6 +1108,9 @@ namespace Frida {
 						string? target_version_str = Semver.max_satisfying (
 							new Gee.ArrayList<string>.wrap (available_version_strings),
 							version.range);
+						if (name == "typescript") {
+							printerr ("looking to satisfy %s, we picked %s\n\n\n", version.range, target_version_str);
+						}
 						if (target_version_str == null) {
 							throw new Error.PROTOCOL ("No version satisfying '%s' for '%s'",
 								version.range, name);
@@ -1820,7 +1862,7 @@ namespace Frida {
 	}
 
 	namespace Semver {
-		private static SemverVersion parse_version (string version) throws Error {
+		private SemverVersion parse_version (string version) throws Error {
 			string v = version;
 			string? meta = null;
 			int plus = version.index_of_char ('+');
@@ -1931,7 +1973,21 @@ namespace Frida {
 			return new SemverVersion (major, minor, patch, pre, meta);
 		}
 
-		private static int compare_version (SemverVersion a, SemverVersion b) {
+		private string extract_core_part (string version) {
+			string core_part = version;
+
+			int dash_idx = core_part.index_of_char ('-');
+			if (dash_idx != -1)
+				core_part = core_part[:dash_idx];
+
+			int plus_idx = core_part.index_of_char ('+');
+			if (plus_idx != -1)
+				core_part = core_part[:plus_idx];
+
+			return core_part;
+		}
+
+		private int compare_version (SemverVersion a, SemverVersion b) {
 			if (a.major != b.major)
 				return a.major > b.major ? 1 : -1;
 
@@ -1984,42 +2040,29 @@ namespace Frida {
 			return 0;
 		}
 
-		private static bool is_precise_spec (string spec) throws Error {
-			string stripped_spec = spec.strip ();
-			if (stripped_spec == "")
-				throw new Error.PROTOCOL ("Invalid version spec: '%s'", spec);
-
-			if (stripped_spec == "latest")
+		private bool is_precise_range (string range) throws Error {
+			if (range == "latest")
 				return true;
 
-			if (stripped_spec.index_of_char (' ') != -1 ||
-					stripped_spec.index_of_char ('^') != -1 ||
-					stripped_spec.index_of_char ('~') != -1 ||
-					stripped_spec.index_of_char ('>') != -1 ||
-					stripped_spec.index_of_char ('<') != -1 ||
-					stripped_spec.index_of_char ('*') != -1 ||
-					stripped_spec.down ().index_of_char ('x') != -1) {
+			if (range.index_of_char (' ') != -1 ||
+					range.index_of_char ('^') != -1 ||
+					range.index_of_char ('~') != -1 ||
+					range.index_of_char ('>') != -1 ||
+					range.index_of_char ('<') != -1 ||
+					range.index_of_char ('*') != -1) {
 				return false;
 			}
 
 			try {
-				parse_version (stripped_spec);
+				parse_version (range);
 
-				string core_part_of_spec = stripped_spec;
-				int plus_idx = core_part_of_spec.index_of_char ('+');
-				if (plus_idx != -1)
-					core_part_of_spec = core_part_of_spec[:plus_idx];
-				int dash_idx = core_part_of_spec.index_of_char ('-');
-				if (dash_idx != -1)
-					core_part_of_spec = core_part_of_spec[:dash_idx];
-
-				return count_char (core_part_of_spec, '.') == 2;
+				return count_char (extract_core_part (range), '.') == 2;
 			} catch (Error e) {
 				return false;
 			}
 		}
 
-		private static string? max_satisfying (Gee.Collection<string> versions, string range) throws Error {
+		private string? max_satisfying (Gee.Collection<string> versions, string range) throws Error {
 			string? best_str = null;
 			SemverVersion? best_ver = null;
 
@@ -2038,7 +2081,7 @@ namespace Frida {
 			return best_str;
 		}
 
-		private static bool satisfies_range (SemverVersion cand, string range) throws Error {
+		private bool satisfies_range (SemverVersion cand, string range) throws Error {
 			string r = range.strip ();
 			if (r == "")
 				throw new Error.PROTOCOL ("Invalid version range: '%s'", range);
@@ -2068,14 +2111,53 @@ namespace Frida {
 					}
 				}
 
-				if (ok)
-					return true;
+				if (!ok)
+					continue;
+
+				if (cand.prerelease != null && !range_allows_prerelease (cand, clause))
+					continue;
+
+				return true;
 			}
 
 			return false;
 		}
 
-		private static bool check_comparator (SemverVersion cand, string comparator) throws Error {
+		private bool range_allows_prerelease (SemverVersion cand, string range) throws Error {
+			foreach (string clause in range.split ("||")) {
+				foreach (string raw_comp in clause.strip ().split (" ")) {
+					string comp = raw_comp.strip ();
+					if (comp == "")
+						continue;
+
+					string[] pieces = comp.split (" - ", 2);
+					foreach (string p in pieces) {
+						string vstr = p.strip ();
+
+						if (vstr.has_prefix (">=") || vstr.has_prefix ("<="))
+							vstr = vstr.substring (2);
+						else if (vstr[0] == '^' || vstr[0] == '~' || vstr[0] == '>' || vstr[0] == '<')
+							vstr = vstr.substring (1);
+
+						string core_part = extract_core_part (vstr);
+						if (core_part.index_of_char ('*') != -1 || core_part.down ().index_of_char ('x') != -1)
+							continue;
+
+						SemverVersion v = parse_version (vstr);
+
+						if (v.prerelease != null &&
+								v.major == cand.major &&
+								v.minor == cand.minor &&
+								v.patch == cand.patch) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		}
+
+		private bool check_comparator (SemverVersion cand, string comparator) throws Error {
 			string comp = comparator.strip ();
 
 			if (comp.index_of (" - ") != -1) {
@@ -2095,7 +2177,7 @@ namespace Frida {
 			if (comp.has_prefix (">=") || comp.has_prefix ("<=")) {
 				op = comp[:2];
 				ver = comp[2:];
-			} else if (comp.has_prefix (">") || comp.has_prefix ("<")) {
+			} else if (comp[0] == '>' || comp[0] == '<') {
 				op = comp[:1];
 				ver = comp[1:];
 			}
@@ -2156,7 +2238,7 @@ namespace Frida {
 			return compare_version (cand, ev) == 0;
 		}
 
-		private static bool wildcard_match (SemverVersion cand, string pat) throws Error {
+		private bool wildcard_match (SemverVersion cand, string pat) throws Error {
 			string norm = pat.replace ("*", "x").replace ("X", "x");
 			string[] parts = norm.split (".");
 
@@ -2236,7 +2318,7 @@ namespace Frida {
 			}
 		}
 
-		private static bool is_numeric_identifier (string s) {
+		private bool is_numeric_identifier (string s) {
 			if (s.length == 0)
 				return false;
 			foreach (unichar c in s) {
