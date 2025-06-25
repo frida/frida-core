@@ -205,7 +205,7 @@ namespace Frida {
 				q.offer (new DepQueueItem (root, d, future));
 			}
 
-			var expanded = new Gee.HashSet<string> ();
+			var expanded = new Gee.HashSet<PackageNode> ();
 
 			DepQueueItem? item;
 			while ((item = q.poll ()) != null) {
@@ -215,8 +215,7 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, pdata);
 
-				string key = node.name + "@" + node.version.str;
-				if (expanded.add (key)) {
+				if (expanded.add (node)) {
 					foreach (PackageDependency cd in pdata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
 							continue;
@@ -246,7 +245,7 @@ namespace Frida {
 				q.offer (new DepQueueItem (root, d, future));
 			}
 
-			var expanded = new Gee.HashSet<string> ();
+			var expanded = new Gee.HashSet<PackageNode> ();
 
 			DepQueueItem? item;
 			while ((item = q.poll ()) != null) {
@@ -256,8 +255,7 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, ddata);
 
-				string key = node.name + "@" + node.version.str;
-				if (expanded.add (key)) {
+				if (expanded.add (node)) {
 					foreach (PackageDependency cd in ddata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
 							continue;
