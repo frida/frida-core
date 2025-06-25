@@ -315,53 +315,60 @@ namespace Frida {
 		}
 
 		private static void hoist_graph (PackageNode root) {
-			var bfs = new Gee.ArrayQueue<PackageNode> ();
-			bfs.offer (root);
+			bool changed = false;
+			do {
+				changed = false;
 
-			PackageNode? n;
-			while ((n = bfs.poll ()) != null) {
-				foreach (PackageNode child in n.children.values.to_array ()) {
-					try_hoist (child);
-					if (child.parent != null)
-						bfs.offer (child);
+				var bfs = new Gee.ArrayQueue<PackageNode> ();
+				bfs.offer (root);
+
+				PackageNode? n;
+				while ((n = bfs.poll ()) != null) {
+					foreach (var child in n.children.values.to_array ()) {
+						if (try_hoist (child))
+							changed = true;
+						if (child.parent != null)
+							bfs.offer (child);
+					}
 				}
-			}
+			} while (changed);
 		}
 
-		private static void try_hoist (PackageNode node) {
+		private static bool try_hoist (PackageNode node) {
 			while (true) {
 				var parent = node.parent;
-				bool already_at_top = parent == null || parent.parent == null;
-				if (already_at_top)
-					return;
+				if (parent == null || parent.parent == null)
+					return false;
 
-				PackageNode? pkg_above = parent.parent.children[node.name];
-				if (pkg_above != null) {
-					bool versions_collide = pkg_above.version.str != node.version.str;
-					if (versions_collide)
-						return;
+				for (var anc = parent.parent; anc != null; anc = anc.parent) {
+					var dupe = anc.children[node.name];
+					if (dupe == null)
+						continue;
 
-					foreach (PackageNode gc in node.children.values) {
-						if (!pkg_above.children.has_key (gc.name)) {
-							pkg_above.children[gc.name] = gc;
-							gc.parent = pkg_above;
+					if (dupe.version.str != node.version.str)
+						return false;
+
+					foreach (var gc in node.children.values.to_array ()) {
+						if (!dupe.children.has_key (gc.name)) {
+							dupe.children[gc.name] = gc;
+							gc.parent = dupe;
 						}
 					}
 
 					parent.children.unset (node.name);
 					node.parent = null;
-					return;
+					return true;
 				}
 
 				foreach (var peer in node.peer_ranges.keys) {
-					bool peer_missing_in_parent = !parent.peer_ranges.has_key (peer) && !parent.children.has_key (peer);
-					if (peer_missing_in_parent)
-						return;
+					if (!parent.peer_ranges.has_key (peer) && !parent.children.has_key (peer))
+						return false;
 				}
 
 				parent.children.unset (node.name);
 				parent.parent.children[node.name] = node;
 				node.parent = parent.parent;
+				return true;
 			}
 		}
 
