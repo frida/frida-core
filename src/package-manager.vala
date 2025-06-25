@@ -740,22 +740,26 @@ namespace Frida {
 
 				string progress_details = "%s@%s".printf (node.name, node.version.str);
 
-				if (yield package_is_already_installed (node, dir, inner)) {
+				Json.Reader? pkg = yield try_open_already_installed_manifest (node, dir, inner);
+				if (pkg != null) {
 					install_progress (PackageInstallPhase.PACKAGE_ALREADY_INSTALLED, 1.0, progress_details);
-					job.resolve (true);
-					return;
+				} else {
+					yield download_and_unpack (node.name, node.version.str, node.resolved, dir, node.integrity,
+						node.shasum, inner);
+					pkg = yield load_json (dir.get_child ("package.json"), inner);
+					install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
 				}
 
-				yield download_and_unpack (node.name, node.version.str, node.resolved, dir, node.integrity, node.shasum, inner);
+				node.license = read_license (pkg);
+				node.funding = read_funding (pkg);
 
-				install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
 				job.resolve (true);
 			} catch (GLib.Error e) {
 				job.reject (e);
 			}
 		}
 
-		private static async bool package_is_already_installed (PackageNode node, File dir, Cancellable? cancellable)
+		private static async Json.Reader? try_open_already_installed_manifest (PackageNode node, File dir, Cancellable? cancellable)
 				throws IOError {
 			try {
 				Json.Reader r = yield load_json (dir.get_child ("package.json"), cancellable);
@@ -768,9 +772,12 @@ namespace Frida {
 				string? version = r.get_string_value ();
 				r.end_member ();
 
-				return name != null && version != null && name == node.name && version == node.version.str;
+				if (name == null || version == null || name != node.name || version != node.version.str)
+					return null;
+
+				return r;
 			} catch (Error e) {
-				return false;
+				return null;
 			}
 		}
 
@@ -1108,9 +1115,6 @@ namespace Frida {
 						string? target_version_str = Semver.max_satisfying (
 							new Gee.ArrayList<string>.wrap (available_version_strings),
 							version.range);
-						if (name == "typescript") {
-							printerr ("looking to satisfy %s, we picked %s\n\n\n", version.range, target_version_str);
-						}
 						if (target_version_str == null) {
 							throw new Error.PROTOCOL ("No version satisfying '%s' for '%s'",
 								version.range, name);
@@ -1171,11 +1175,6 @@ namespace Frida {
 		}
 
 		private static void read_package_version_metadata (Json.Reader reader, ResolvedPackageData rpd) throws Error {
-			rpd.description = read_description (reader);
-			rpd.license = read_license (reader);
-			rpd.funding = read_funding (reader);
-			rpd.engines = read_engines (reader);
-
 			reader.read_member ("dist");
 
 			reader.read_member ("tarball");
@@ -1196,8 +1195,6 @@ namespace Frida {
 
 			reader.end_member ();
 
-			rpd.license = read_license (reader);
-			rpd.funding = read_funding (reader);
 			rpd.engines = read_engines (reader);
 			rpd.dependencies = read_dependencies (reader);
 		}
