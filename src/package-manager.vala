@@ -357,7 +357,6 @@ namespace Frida {
 					anc.children[node.name] = node;
 					node.parent = anc;
 					node.depth = anc.depth + 1;
-					node.edges_in += dupe.edges_in;
 
 					return true;
 				}
