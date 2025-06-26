@@ -205,7 +205,7 @@ namespace Frida {
 				q.offer (new DepQueueItem (root, d, future));
 			}
 
-			var expanded = new Gee.HashSet<PackageNode> ();
+			var expanded = new Gee.HashSet<string> ();
 
 			DepQueueItem? item;
 			while ((item = q.poll ()) != null) {
@@ -215,7 +215,7 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, pdata);
 
-				if (expanded.add (node)) {
+				if (expanded.add (pdata.resolved_url)) {
 					foreach (PackageDependency cd in pdata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
 							continue;
@@ -247,7 +247,7 @@ namespace Frida {
 				q.offer (new DepQueueItem (root, d, future));
 			}
 
-			var expanded = new Gee.HashSet<PackageNode> ();
+			var expanded = new Gee.HashSet<string> ();
 
 			DepQueueItem? item;
 			while ((item = q.poll ()) != null) {
@@ -257,7 +257,7 @@ namespace Frida {
 
 				var node = ensure_child_node (host, dep, ddata);
 
-				if (expanded.add (node)) {
+				if (expanded.add (ddata.resolved_url)) {
 					foreach (PackageDependency cd in ddata.dependencies.all.values) {
 						if (cd.role == DEVELOPMENT)
 							continue;
@@ -272,17 +272,12 @@ namespace Frida {
 
 		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
 				throws Error {
-			PackageNode? reuse = find_ancestor (host, dep);
-			if (reuse != null) {
-				//if (!host.children.has_key (dep.name)) {
-				//	var n = reuse.clone (host);
-				//	host.children[dep.name] = n;
-				//	host.child_roles[n] = dep.role;
-				//}
-				return reuse;
-			}
+			assert (data.name != null);
+			PackageNode? existing = host.children[data.name];
+			if (existing != null)
+				return existing;
 
-			var n = new PackageNode (data.name, data.effective_version);
+			var n = new PackageNode (data.name, data.effective_version, data.dependencies);
 			n.license = data.license;
 			n.funding = data.funding;
 			n.engines = data.engines;
@@ -295,15 +290,6 @@ namespace Frida {
 			host.child_roles[n] = dep.role;
 			n.parent = host;
 			return n;
-		}
-
-		private static PackageNode? find_ancestor (PackageNode start, PackageDependency dep) throws Error {
-			for (PackageNode? n = start; n != null; n = n.parent) {
-				var maybe = n.children[dep.name];
-				if (maybe != null && Semver.satisfies_range (maybe.version, dep.version.range))
-					return maybe;
-			}
-			return null;
 		}
 
 		private class DepQueueItem {
@@ -605,11 +591,11 @@ namespace Frida {
 					b.set_member_name ("dev").add_boolean_value (true);
 
 				write_license (pn.license, b);
-				write_dependencies_section ("dependencies", collect_direct_deps (pn, RUNTIME), b);
+				write_dependencies_section ("dependencies", pn.dependencies.runtime, b);
 				write_engines (pn.engines, b);
-				write_dependencies_section ("optionalDependencies", collect_direct_deps (pn, OPTIONAL), b);
+				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
 				write_funding (pn.funding, b);
-				write_dependencies_section ("peerDependencies", collect_direct_deps (pn, PEER), b);
+				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
 				b.end_object ();
 			}
@@ -620,20 +606,6 @@ namespace Frida {
 
 			string txt = generate_npm_style_json (b.get_root (), manifest.indent_level, manifest.indent_char);
 			yield FS.write_all_text (lock_file, txt, cancellable);
-		}
-
-		private Gee.Map<string, PackageDependency> collect_direct_deps (PackageNode node, PackageRole role) {
-			var m = new Gee.TreeMap<string, PackageDependency> ();
-
-			foreach (PackageNode ch in node.children.values.to_array ()) {
-				var d = new PackageDependency ();
-				d.name = ch.name;
-				d.version = new PackageVersion (ch.version.str);
-				d.role = node.child_roles[ch];
-				m[d.name] = d;
-			}
-
-			return m;
 		}
 
 		private static PackageNode lock_to_graph (Gee.Map<string, PackageLockPackageInfo> packages) throws Error {
@@ -826,6 +798,8 @@ namespace Frida {
 			public string? resolved;
 			public string? integrity;
 			public string? shasum;
+			public PackageDependencies dependencies;
+
 			public weak PackageNode? parent;
 			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
 			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
@@ -837,9 +811,10 @@ namespace Frida {
 				}
 			}
 
-			public PackageNode (string? name = null, SemverVersion? version = null) {
+			public PackageNode (string? name = null, SemverVersion? version = null, PackageDependencies? dependencies = null) {
 				this.name = name;
 				this.version = version;
+				this.dependencies = (dependencies != null) ? dependencies : new PackageDependencies ();
 			}
 
 			~PackageNode () {
