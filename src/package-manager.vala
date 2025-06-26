@@ -213,7 +213,7 @@ namespace Frida {
 				var dep = item.dep;
 				var pdata = yield item.data_future.wait_async (cancellable);
 
-				var node = ensure_child_node (host, dep, pdata);
+				var node = add_child_node (host, dep, pdata);
 
 				if (expanded.add (pdata.resolved_url)) {
 					foreach (PackageDependency cd in pdata.dependencies.all.values) {
@@ -255,7 +255,7 @@ namespace Frida {
 				var dep = item.dep;
 				var ddata = yield item.data_future.wait_async (cancellable);
 
-				var node = ensure_child_node (host, dep, ddata);
+				var node = add_child_node (host, dep, ddata);
 
 				if (expanded.add (ddata.resolved_url)) {
 					foreach (PackageDependency cd in ddata.dependencies.all.values) {
@@ -270,13 +270,8 @@ namespace Frida {
 			return root;
 		}
 
-		private static PackageNode ensure_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
+		private static PackageNode add_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
 				throws Error {
-			assert (data.name != null);
-			PackageNode? existing = host.children[data.name];
-			if (existing != null)
-				return existing;
-
 			var n = new PackageNode (data.name, data.effective_version, data.dependencies);
 			n.license = data.license;
 			n.funding = data.funding;
@@ -310,14 +305,18 @@ namespace Frida {
 				changed = false;
 
 				var bfs = new Gee.ArrayQueue<PackageNode> ();
+				var seen = new Gee.HashSet<PackageNode> ();
+
 				bfs.offer (root);
+				seen.add (root);
 
 				PackageNode? n;
 				while ((n = bfs.poll ()) != null) {
 					foreach (var child in n.children.values.to_array ()) {
 						while (try_hoist (child))
 							changed = true;
-						if (child.parent != null)
+
+						if (child.parent != null && seen.add (child))
 							bfs.offer (child);
 					}
 				}
@@ -335,18 +334,28 @@ namespace Frida {
 					if (dupe == null)
 						continue;
 
-					if (dupe.version.str != node.version.str)
-						return false;
-
-					foreach (var gc in node.children.values.to_array ()) {
-						if (!dupe.children.has_key (gc.name)) {
-							dupe.children[gc.name] = gc;
-							gc.parent = dupe;
-						}
+					if (dupe.version.str == node.version.str) {
+						dupe.edges_in += node.edges_in;
+						merge_children (dupe, node);
+						parent.children.unset (node.name);
+						node.parent = null;
+						return true;
 					}
 
-					parent.children.unset (node.name);
-					node.parent = null;
+					bool node_wins =
+						(node.edges_in > dupe.edges_in) ||
+						((node.edges_in == dupe.edges_in) && (node.depth < dupe.depth));
+					if (!node_wins)
+						return false;
+
+					parent.children[node.name] = dupe;
+					dupe.parent = parent;
+					dupe.depth = parent.depth + 1;
+
+					anc.children[node.name] = node;
+					node.parent = anc;
+					node.depth = anc.depth + 1;
+
 					return true;
 				}
 
@@ -365,7 +374,18 @@ namespace Frida {
 				parent.children.unset (node.name);
 				parent.parent.children[node.name] = node;
 				node.parent = parent.parent;
+				node.depth = parent.parent.depth + 1;
 				return true;
+			}
+		}
+
+		private static void merge_children (PackageNode target, PackageNode donor) {
+			foreach (var gc in donor.children.values) {
+				if (!target.children.has_key (gc.name)) {
+					target.children[gc.name] = gc;
+					gc.parent = target;
+					gc.depth = target.depth + 1;
+				}
 			}
 		}
 
@@ -803,6 +823,9 @@ namespace Frida {
 			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
+			public int edges_in = 0;
+			public int depth = 0;
+
 			public bool is_root {
 				get {
 					return name == null;
@@ -818,20 +841,6 @@ namespace Frida {
 			~PackageNode () {
 				foreach (var child in children.values)
 					child.parent = null;
-			}
-
-			public PackageNode clone (PackageNode? new_parent) {
-				var n = new PackageNode (name, version);
-				n.license = license;
-				n.funding = funding;
-				n.engines = engines;
-				n.resolved = resolved;
-				n.integrity = integrity;
-				n.shasum = shasum;
-				n.parent = new_parent;
-				n.children.set_all (children);
-				n.peer_ranges.set_all (peer_ranges);
-				return n;
 			}
 
 			public PackageNode? lookup (string pkg_name) {
