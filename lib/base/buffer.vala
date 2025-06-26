@@ -446,7 +446,7 @@ namespace Frida {
 
 		public string read_fixed_string (size_t offset, size_t size) throws Error {
 			string * start = (string *) get_pointer (offset, size);
-			size_t max_length = size - offset;
+			size_t max_length = size_t.min (size, this.size - offset);
 			string * end = memchr (start, 0, max_length);
 			size_t n;
 			if (end != null)
