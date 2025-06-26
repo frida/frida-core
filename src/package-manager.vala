@@ -304,7 +304,7 @@ namespace Frida {
 			}
 		}
 
-		private static void hoist_graph (PackageNode root) {
+		private static void hoist_graph (PackageNode root) throws Error {
 			bool changed = false;
 			do {
 				changed = false;
@@ -315,7 +315,7 @@ namespace Frida {
 				PackageNode? n;
 				while ((n = bfs.poll ()) != null) {
 					foreach (var child in n.children.values.to_array ()) {
-						if (try_hoist (child))
+						while (try_hoist (child))
 							changed = true;
 						if (child.parent != null)
 							bfs.offer (child);
@@ -324,7 +324,7 @@ namespace Frida {
 			} while (changed);
 		}
 
-		private static bool try_hoist (PackageNode node) {
+		private static bool try_hoist (PackageNode node) throws Error {
 			while (true) {
 				var parent = node.parent;
 				if (parent == null || parent.parent == null)
@@ -350,17 +350,15 @@ namespace Frida {
 					return true;
 				}
 
-				foreach (string peer in node.peer_ranges.keys) {
-					PackageNode? a = parent;
-					bool ok = false;
-					while (a != null) {
-						if (a.children.has_key (peer) || a.peer_ranges.has_key (peer)) {
-							ok = true;
-							break;
-						}
-						a = a.parent;
-					}
-					if (!ok)
+				foreach (var pr in node.peer_ranges.entries) {
+					string peer_name = pr.key;
+					string wanted_range = pr.value;
+
+					var provider = parent.parent.find_provider (peer_name);
+					if (provider == null)
+						return false;
+
+					if (!Semver.satisfies_range (provider.version, wanted_range))
 						return false;
 				}
 
@@ -572,7 +570,7 @@ namespace Frida {
 			write_engines (manifest.engines, b);
 			b.end_object ();
 
-			var runtime_reach = compute_runtime_reach (manifest.dependencies.runtime.values, path_map);
+			var runtime_reach = compute_runtime_reach (manifest.dependencies, path_map);
 
 			foreach (string k in path_map.keys) {
 				if (k == "")
@@ -847,6 +845,15 @@ namespace Frida {
 				return null;
 			}
 
+			public PackageNode? find_provider (string name) {
+				for (var anc = this; anc != null; anc = anc.parent) {
+					var cand = anc.children[name];
+					if (cand != null)
+						return cand;
+				}
+				return null;
+			}
+
 			public Gee.Map<string, string> find_missing_ranges (Manifest manifest) {
 				var missing = new Gee.HashMap<string, string> ();
 				foreach (var dep in manifest.dependencies.all.values) {
@@ -992,31 +999,37 @@ namespace Frida {
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
-		private static Gee.Set<string> compute_runtime_reach (Gee.Collection<PackageDependency> runtime_deps,
-				Gee.Map<string, PackageNode> path_map) {
-			var reach = new Gee.HashSet<string> ();
+		private Gee.Set<string> compute_runtime_reach (PackageDependencies deps, Gee.Map<string, PackageNode> path_map) {
+			var node_to_path = new Gee.HashMap<PackageNode, string> ();
+			foreach (var e in path_map.entries)
+				node_to_path[e.value] = e.key;
 
-			var stack = new Gee.LinkedList<string> ();
+			var reachable = new Gee.HashSet<string> ();
 
-			foreach (PackageDependency dep in runtime_deps) {
-				string key = "node_modules/" + dep.name;
-				stack.offer_head (key);
+			var q = new Gee.LinkedList<PackageNode> ();
+			var visited = new Gee.HashSet<PackageNode> ();
+
+			foreach (PackageDependency d in deps.all.values) {
+				if (d.role == DEVELOPMENT)
+					continue;
+				q.offer (path_map["node_modules/" + d.name]);
 			}
 
-			string? k;
-			while ((k = stack.poll_head ()) != null) {
-				if (!reach.add (k))
+			while (!q.is_empty) {
+				var node = q.poll ();
+
+				if (!visited.add (node))
 					continue;
 
-				PackageNode node = path_map[k];
-				foreach (PackageNode ch in node.children.values.to_array ()) {
-					string child_key = (k == "") ? "" : k + "/";
-					child_key += "node_modules/" + ch.name;
-					stack.offer_head (child_key);
+				reachable.add (node_to_path[node]);
+
+				foreach (var child in node.children.values) {
+					if (node.child_roles[child] != PackageRole.DEVELOPMENT)
+						q.offer (child);
 				}
 			}
 
-			return reach;
+			return reachable;
 		}
 
 		private class InstallProgressTracker {
