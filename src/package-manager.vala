@@ -197,10 +197,10 @@ namespace Frida {
 
 		private static async PackageNode build_ideal_graph (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
 				throws Error, IOError {
-			var root = new PackageNode ();
+			var root = new PackageNode (manifest.name, manifest.version, manifest.dependencies);
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in manifest.dependencies.all.values) {
+			foreach (PackageDependency d in root.active_deps.values) {
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -216,9 +216,7 @@ namespace Frida {
 				var node = add_child_node (host, dep, pdata);
 
 				if (expanded.add (pdata.resolved_url)) {
-					foreach (PackageDependency cd in pdata.dependencies.all.values) {
-						if (cd.role == DEVELOPMENT)
-							continue;
+					foreach (PackageDependency cd in node.active_deps.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -242,7 +240,7 @@ namespace Frida {
 				root.peer_ranges[pd.name] = pd.version.range;
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in pdata.dependencies.runtime.values) {
+			foreach (PackageDependency d in root.active_deps.values) {
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -258,9 +256,7 @@ namespace Frida {
 				var node = add_child_node (host, dep, ddata);
 
 				if (expanded.add (ddata.resolved_url)) {
-					foreach (PackageDependency cd in ddata.dependencies.all.values) {
-						if (cd.role == DEVELOPMENT)
-							continue;
+					foreach (PackageDependency cd in node.active_deps.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -350,11 +346,11 @@ namespace Frida {
 					if (!node_wins)
 						return false;
 
-					PackageDependency? need_at_anc = anc.dependencies.all[node.name];
+					PackageDependency? need_at_anc = anc.active_deps[node.name];
 					if (need_at_anc != null && !Semver.satisfies_range (node.version, need_at_anc.version.range))
 						return false;
 
-					PackageDependency? need_at_parent = parent.dependencies.all[node.name];
+					PackageDependency? need_at_parent = parent.active_deps[node.name];
 					if (need_at_parent != null && !Semver.satisfies_range (dupe.version, need_at_parent.version.range))
 						return false;
 
@@ -413,12 +409,9 @@ namespace Frida {
 				if (sib.children.has_key (node.name))
 					continue;
 
-				PackageDependency? need = sib.dependencies.all[node.name];
-				if (need != null) {
-					printerr ("need.version.range=\"%s\" node.version.str=%s\n\n", need.version.range, node.version.str);
-					if (!Semver.satisfies_range (node.version, need.version.range))
-						return false;
-				}
+				PackageDependency? need = sib.active_deps[node.name];
+				if (need != null && !Semver.satisfies_range (node.version, need.version.range))
+					return false;
 			}
 			return true;
 		}
@@ -485,7 +478,8 @@ namespace Frida {
 				r.end_member ();
 
 				r.read_member ("version");
-				m.version = r.get_string_value ();
+				string? raw_version = r.get_string_value ();
+				m.version = (raw_version != null) ? Semver.parse_version (raw_version) : null;
 				r.end_member ();
 
 				m.license = read_license (r);
@@ -624,7 +618,7 @@ namespace Frida {
 			write_engines (manifest.engines, b);
 			b.end_object ();
 
-			var runtime_reach = compute_runtime_reach (manifest.dependencies, path_map);
+			var runtime_reach = compute_runtime_reach (path_map);
 
 			foreach (string k in path_map.keys) {
 				if (k == "")
@@ -632,7 +626,7 @@ namespace Frida {
 
 				PackageNode pn = path_map[k];
 				b.set_member_name (k).begin_object ();
-				write_version (pn.version.str, b);
+				write_version (pn.version, b);
 				b
 					.set_member_name ("resolved")
 					.add_string_value (pn.resolved)
@@ -866,6 +860,25 @@ namespace Frida {
 				}
 			}
 
+			public Gee.Map<string, PackageDependency> active_deps {
+				get {
+					if (_active_deps == null) {
+						if (parent == null) {
+							_active_deps = dependencies.all;
+						} else {
+							_active_deps = new Gee.TreeMap<string, PackageDependency> ();
+							foreach (var d in dependencies.all.values) {
+								if (d.role != DEVELOPMENT)
+									_active_deps[d.name] = d;
+							}
+						}
+					}
+					return _active_deps;
+				}
+			}
+
+			private Gee.Map<string, PackageDependency> _active_deps;
+
 			public PackageNode (string? name = null, SemverVersion? version = null, PackageDependencies? dependencies = null) {
 				this.name = name;
 				this.version = version;
@@ -909,7 +922,7 @@ namespace Frida {
 
 		private class Manifest {
 			public string? name;
-			public string? version;
+			public SemverVersion? version;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
@@ -1042,7 +1055,7 @@ namespace Frida {
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
-		private Gee.Set<string> compute_runtime_reach (PackageDependencies deps, Gee.Map<string, PackageNode> path_map) {
+		private Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) {
 			var node_to_path = new Gee.HashMap<PackageNode, string> ();
 			foreach (var e in path_map.entries)
 				node_to_path[e.value] = e.key;
@@ -1052,11 +1065,9 @@ namespace Frida {
 			var q = new Gee.LinkedList<PackageNode> ();
 			var visited = new Gee.HashSet<PackageNode> ();
 
-			foreach (PackageDependency d in deps.all.values) {
-				if (d.role == DEVELOPMENT)
-					continue;
+			PackageNode root = path_map[""];
+			foreach (PackageDependency d in root.active_deps.values)
 				q.offer (path_map["node_modules/" + d.name]);
-			}
 
 			while (!q.is_empty) {
 				var node = q.poll ();
@@ -1253,9 +1264,9 @@ namespace Frida {
 				b.set_member_name ("name").add_string_value (name);
 		}
 
-		private static void write_version (string? version, Json.Builder b) {
+		private static void write_version (SemverVersion? version, Json.Builder b) {
 			if (version != null)
-				b.set_member_name ("version").add_string_value (version);
+				b.set_member_name ("version").add_string_value (version.str);
 		}
 
 		private static string? read_description (Json.Reader reader) {
