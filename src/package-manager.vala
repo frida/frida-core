@@ -346,8 +346,8 @@ namespace Frida {
 					int vcmp = Semver.compare_version (node.version, dupe.version);
 					bool node_wins =
 						(node.edges_in > dupe.edges_in) ||
-						((node.edges_in == dupe.edges_in) && (vcmp > 0)) ||
-						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth <  dupe.depth));
+						((node.edges_in == dupe.edges_in) && (vcmp < 0)) ||
+						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth < dupe.depth));
 					if (!node_wins)
 						return false;
 
