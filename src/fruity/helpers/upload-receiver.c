@@ -307,15 +307,39 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
         {
           uint64_t address;
           uint32_t size;
+          mach_port_t task;
+          vm_address_t writable_address;
+          vm_prot_t cur_prot, max_prot;
           size_t n;
 
           FRIDA_READ_VALUE (address);
           FRIDA_READ_VALUE (size);
 
-          success = frida_read_chunk (client_fd, (void *) address, size, &n, api);
+          cur_prot = max_prot = VM_PROT_READ | VM_PROT_WRITE;
+
+          task = api->_mach_task_self ();
+          success = api->vm_remap (
+              task, (vm_address_t *) &writable_address, size,
+              0, VM_FLAGS_ANYWHERE,
+              task, address,
+              false,
+              &cur_prot, &max_prot,
+              VM_INHERIT_NONE) == 0;
+          if (!success)
+              break;
+
+          success = api->mprotect ((void *) writable_address, size, VM_PROT_READ | VM_PROT_WRITE) == 0;
+          if (!success)
+            goto unmap_writable;
+
+          success = frida_read_chunk (client_fd, (void *) writable_address, size, &n, api);
+          if (!success)
+            goto unmap_writable;
 
           api->sys_icache_invalidate ((void *) address, n);
           api->sys_dcache_flush ((void *) address, n);
+unmap_writable:
+          api->munmap ((void *) writable_address, size);
 
           break;
         }
