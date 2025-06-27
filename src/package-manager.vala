@@ -363,6 +363,7 @@ namespace Frida {
 						return false;
 
 					parent.children[node.name] = dupe;
+					parent.child_order.remove (node);
 					parent.child_order.add (dupe);
 					dupe.parent = parent;
 					dupe.depth = parent.depth + 1;
@@ -438,10 +439,8 @@ namespace Frida {
 		}
 
 		private static bool satisfies_all_siblings (PackageNode anc, PackageNode node) throws Error {
-			foreach (var sib in anc.children.values) {
-				if (sib == node)
-					continue;
-				if (sib.children.has_key (node.name))
+			foreach (var sib in anc.child_order) {
+				if (sib == node || sib.children.has_key (node.name))
 					continue;
 
 				PackageDependency? need = sib.active_deps[node.name];
