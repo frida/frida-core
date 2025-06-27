@@ -402,27 +402,26 @@ namespace Frida {
 			}
 		}
 
-		private static void recount_edges_in (PackageNode root) {
+		private static void recount_edges_in (PackageNode root) throws Error {
 			var stack = new Gee.LinkedList<PackageNode> ();
+
+			PackageNode? n;
 			stack.offer_head (root);
-			while (!stack.is_empty) {
-				var n = stack.poll_head ();
+			while ((n = stack.poll_head ()) != null) {
 				n.edges_in = 0;
 				foreach (var ch in n.children.values)
 					stack.offer_head (ch);
 			}
 
 			stack.offer_head (root);
-			while (!stack.is_empty) {
-				var host = stack.poll_head ();
-
-				foreach (PackageDependency dep in host.active_deps.values) {
-					var provider = host.find_provider (dep.name);
-					if (provider != null)
-						provider.edges_in += 1;
+			while ((n = stack.poll_head ()) != null) {
+				foreach (PackageDependency dep in n.active_deps.values) {
+					var provider = n.find_provider (dep.name);
+					if (provider != null && Semver.satisfies_range (provider.version, dep.version.range))
+						provider.edges_in++;
 				}
 
-				foreach (var ch in host.children.values)
+				foreach (var ch in n.children.values)
 					stack.offer_head (ch);
 			}
 		}
@@ -1107,9 +1106,8 @@ namespace Frida {
 			foreach (PackageDependency d in root.active_deps.values)
 				q.offer (path_map["node_modules/" + d.name]);
 
-			while (!q.is_empty) {
-				var node = q.poll ();
-
+			PackageNode? node;
+			while ((node = q.poll ()) != null) {
 				if (!visited.add (node))
 					continue;
 
