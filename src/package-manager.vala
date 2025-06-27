@@ -358,6 +358,9 @@ namespace Frida {
 					if (need_at_parent != null && !Semver.satisfies_range (dupe.version, need_at_parent.version.range))
 						return false;
 
+					if (!satisfies_all_siblings (anc, node))
+						return false;
+
 					parent.children[node.name] = dupe;
 					dupe.parent = parent;
 					dupe.depth = parent.depth + 1;
@@ -365,6 +368,10 @@ namespace Frida {
 					anc.children[node.name] = node;
 					node.parent = anc;
 					node.depth = anc.depth + 1;
+
+					uint tmp = node.edges_in;
+					node.edges_in = dupe.edges_in;
+					dupe.edges_in = tmp;
 
 					return true;
 				}
@@ -397,6 +404,23 @@ namespace Frida {
 					gc.depth = target.depth + 1;
 				}
 			}
+		}
+
+		private static bool satisfies_all_siblings (PackageNode anc, PackageNode node) throws Error {
+			foreach (var sib in anc.children.values) {
+				if (sib == node)
+					continue;
+				if (sib.children.has_key (node.name))
+					continue;
+
+				PackageDependency? need = sib.dependencies.all[node.name];
+				if (need != null) {
+					printerr ("need.version.range=\"%s\" node.version.str=%s\n\n", need.version.range, node.version.str);
+					if (!Semver.satisfies_range (node.version, need.version.range))
+						return false;
+				}
+			}
+			return true;
 		}
 
 		private static Gee.List<MutationSpec> parse_mutation_specs (MutationKind kind, Gee.List<string> raw_specs,
@@ -833,8 +857,8 @@ namespace Frida {
 			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
-			public int edges_in = 0;
-			public int depth = 0;
+			public uint edges_in = 0;
+			public uint depth = 0;
 
 			public bool is_root {
 				get {
