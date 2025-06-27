@@ -283,6 +283,7 @@ namespace Frida {
 			host.child_order.add (n);
 			host.child_roles[n] = dep.role;
 			n.parent = host;
+
 			return n;
 		}
 
@@ -322,6 +323,8 @@ namespace Frida {
 					}
 				}
 			} while (changed);
+
+			collapse_identical (root);
 		}
 
 		private static bool try_hoist (PackageNode node) throws Error {
@@ -336,9 +339,21 @@ namespace Frida {
 						continue;
 
 					if (dupe.version.str == node.version.str) {
+						if (shadowed_between (parent, anc, node.name))
+							continue;
+
 						merge_children (dupe, node);
 						parent.children.unset (node.name);
 						parent.child_order.remove (node);
+
+						if (!satisfies_all_siblings (anc, dupe)) {
+							parent.children[node.name] = node;
+							parent.child_order.add (node);
+							node.parent = parent;
+							node.depth  = parent.depth + 1;
+							return false;
+						}
+
 						node.parent = null;
 						return true;
 					}
@@ -361,6 +376,9 @@ namespace Frida {
 
 					if (!satisfies_all_siblings (anc, node))
 						return false;
+
+					log_move ("SWAP-OUT", dupe, parent);
+					log_move ("SWAP-IN",  node, anc);
 
 					parent.children[node.name] = dupe;
 					parent.child_order.remove (node);
@@ -393,6 +411,11 @@ namespace Frida {
 				if (need_here != null && !Semver.satisfies_range (node.version, need_here.version.range))
 					return false;
 
+				if (!satisfies_all_siblings (anc, node))
+					return false;
+
+				log_move ("HOIST", node, anc);
+
 				parent.children.unset (node.name);
 				parent.child_order.remove (node);
 				anc.children[node.name] = node;
@@ -400,6 +423,55 @@ namespace Frida {
 				node.parent = anc;
 				node.depth = anc.depth + 1;
 				return true;
+			}
+		}
+
+		private static bool shadowed_between (PackageNode from, PackageNode to, string pkg) {
+			for (var anc = from; anc != null && anc != to; anc = anc.parent) {
+				if (anc.children.has_key (pkg))
+					return true;
+			}
+			return false;
+		}
+
+		private static void collapse_identical (PackageNode root) {
+			var stack = new Gee.LinkedList<PackageNode> ();
+			stack.offer_head (root);
+			PackageNode? p;
+			while ((p = stack.poll_head ()) != null) {
+				foreach (var child in p.child_order.to_array ()) {
+					var dup = find_ancestor_with_same_version (child);
+					if (dup != null) {
+						merge_children (dup, child);
+						p.children.unset (child.name);
+						p.child_order.remove (child);
+					}
+					foreach (var gc in child.children.values)
+						stack.offer_head (gc);
+				}
+			}
+		}
+
+		private static PackageNode? find_ancestor_with_same_version (PackageNode node) {
+			var anc = node.parent;
+			while (anc != null) {
+				var dupe = anc.children[node.name];
+				if (dupe != null && dupe != node) {
+					if (dupe.version.str == node.version.str)
+						return dupe;
+					return null;
+				}
+				anc = anc.parent;
+			}
+			return null;
+		}
+
+		private static void log_move (string tag, PackageNode nd, PackageNode? target) {
+			if (nd.name == "eslint-visitor-keys") {
+				printerr ("%s  %s@%s  →  %s\n",
+						tag,
+						nd.name, nd.version.str,
+						(target != null ? target.get_path () : "(DELETED)"));
 			}
 		}
 
@@ -438,13 +510,19 @@ namespace Frida {
 			}
 		}
 
-		private static bool satisfies_all_siblings (PackageNode anc, PackageNode node) throws Error {
+		private static bool satisfies_all_siblings (PackageNode anc, PackageNode candidate) throws Error {
 			foreach (var sib in anc.child_order) {
-				if (sib == node || sib.children.has_key (node.name))
+				if (sib == candidate)
 					continue;
 
-				PackageDependency? need = sib.active_deps[node.name];
-				if (need != null && !Semver.satisfies_range (node.version, need.version.range))
+				PackageNode? provider = sib.children.has_key (candidate.name)
+					? sib.children[candidate.name]
+					: sib.find_provider (candidate.name);
+				if (provider == null)
+					continue;
+
+				PackageDependency? edge = sib.active_deps[candidate.name];
+				if (edge != null && !Semver.satisfies_range (provider.version, edge.version.range))
 					return false;
 			}
 			return true;
@@ -924,6 +1002,13 @@ namespace Frida {
 			~PackageNode () {
 				foreach (var child in children.values)
 					child.parent = null;
+			}
+
+			public string get_path () {
+				var stack = new Gee.LinkedList<string> ();
+				for (var anc = this; anc != null; anc = anc.parent)
+					stack.offer_head ((anc.name != null) ? anc.name : "");
+				return string.joinv ("/", stack.to_array ());
 			}
 
 			public PackageNode? lookup (string pkg_name) {
