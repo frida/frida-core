@@ -37,6 +37,9 @@ struct _FridaUploadApi
   int (* close) (int fd);
 
   int * (* get_errno_storage) (void);
+  kern_return_t (* vm_remap) (vm_map_t target_task, vm_address_t *target_address, vm_size_t size, vm_address_t mask, int flags, vm_map_t src_task, vm_address_t src_address, boolean_t copy, vm_prot_t *cur_protection, vm_prot_t *max_protection, vm_inherit_t inheritance);
+  int (* munmap)(void *addr, size_t len);
+  int (* getpagesize) (void);
 };
 
 #define FRIDA_UPLOAD_API_INIT { \
@@ -57,7 +60,10 @@ struct _FridaUploadApi
       dlsym, \
       mprotect, \
       close, \
-      __error \
+      __error, \
+      vm_remap, \
+      munmap, \
+      getpagesize \
     }
 
 #define FRIDA_RX_BUFFER_SIZE (1024 * 1024)
