@@ -350,8 +350,12 @@ namespace Frida {
 					if (!node_wins)
 						return false;
 
-					PackageDependency? dep_edge = anc.dependencies.all[node.name];
-					if (dep_edge != null && !Semver.satisfies_range (node.version, dep_edge.version.range))
+					PackageDependency? need_at_anc = anc.dependencies.all[node.name];
+					if (need_at_anc != null && !Semver.satisfies_range (node.version, need_at_anc.version.range))
+						return false;
+
+					PackageDependency? need_at_parent = parent.dependencies.all[node.name];
+					if (need_at_parent != null && !Semver.satisfies_range (dupe.version, need_at_parent.version.range))
 						return false;
 
 					parent.children[node.name] = dupe;
