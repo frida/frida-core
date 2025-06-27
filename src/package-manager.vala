@@ -168,6 +168,7 @@ namespace Frida {
 				if (n.parent != null) {
 					var p = n.parent;
 					p.children.unset (n.name);
+					p.child_order.remove (n);
 					anchors.add (p);
 				}
 				foreach (PackageNode ch in n.children.values)
@@ -183,6 +184,7 @@ namespace Frida {
 				foreach (var kv in needed) {
 					var sub = yield build_ideal_subtree (kv.key, kv.value, cache, cancellable);
 					anchor.children[kv.key] = sub;
+					anchor.child_order.add (sub);
 					sub.parent = anchor;
 				}
 			}
@@ -278,6 +280,7 @@ namespace Frida {
 				n.peer_ranges[pd.name] = pd.version.range;
 
 			host.children[data.name] = n;
+			host.child_order.add (n);
 			host.child_roles[n] = dep.role;
 			n.parent = host;
 			return n;
@@ -300,6 +303,8 @@ namespace Frida {
 			do {
 				changed = false;
 
+				recount_edges_in (root);
+
 				var bfs = new Gee.ArrayQueue<PackageNode> ();
 				var seen = new Gee.HashSet<PackageNode> ();
 
@@ -308,7 +313,7 @@ namespace Frida {
 
 				PackageNode? n;
 				while ((n = bfs.poll ()) != null) {
-					foreach (var child in n.children.values.to_array ()) {
+					foreach (var child in n.child_order.to_array ()) {
 						while (try_hoist (child))
 							changed = true;
 
@@ -331,9 +336,9 @@ namespace Frida {
 						continue;
 
 					if (dupe.version.str == node.version.str) {
-						dupe.edges_in += node.edges_in;
 						merge_children (dupe, node);
 						parent.children.unset (node.name);
+						parent.child_order.remove (node);
 						node.parent = null;
 						return true;
 					}
@@ -358,16 +363,14 @@ namespace Frida {
 						return false;
 
 					parent.children[node.name] = dupe;
+					parent.child_order.add (dupe);
 					dupe.parent = parent;
 					dupe.depth = parent.depth + 1;
 
 					anc.children[node.name] = node;
+					anc.child_order[anc.child_order.index_of (dupe)] = node;
 					node.parent = anc;
 					node.depth = anc.depth + 1;
-
-					uint tmp = node.edges_in;
-					node.edges_in = dupe.edges_in;
-					dupe.edges_in = tmp;
 
 					return true;
 				}
@@ -384,11 +387,43 @@ namespace Frida {
 						return false;
 				}
 
+				var anc = parent.parent;
+				var need_here = anc.active_deps[node.name];
+				if (need_here != null && !Semver.satisfies_range (node.version, need_here.version.range))
+					return false;
+
 				parent.children.unset (node.name);
-				parent.parent.children[node.name] = node;
-				node.parent = parent.parent;
-				node.depth = parent.parent.depth + 1;
+				parent.child_order.remove (node);
+				anc.children[node.name] = node;
+				anc.child_order.add (node);
+				node.parent = anc;
+				node.depth = anc.depth + 1;
 				return true;
+			}
+		}
+
+		private static void recount_edges_in (PackageNode root) {
+			var stack = new Gee.LinkedList<PackageNode> ();
+			stack.offer_head (root);
+			while (!stack.is_empty) {
+				var n = stack.poll_head ();
+				n.edges_in = 0;
+				foreach (var ch in n.children.values)
+					stack.offer_head (ch);
+			}
+
+			stack.offer_head (root);
+			while (!stack.is_empty) {
+				var host = stack.poll_head ();
+
+				foreach (PackageDependency dep in host.active_deps.values) {
+					var provider = host.find_provider (dep.name);
+					if (provider != null)
+						provider.edges_in += 1;
+				}
+
+				foreach (var ch in host.children.values)
+					stack.offer_head (ch);
 			}
 		}
 
@@ -396,6 +431,7 @@ namespace Frida {
 			foreach (var gc in donor.children.values) {
 				if (!target.children.has_key (gc.name)) {
 					target.children[gc.name] = gc;
+					target.child_order.add (gc);
 					gc.parent = target;
 					gc.depth = target.depth + 1;
 				}
@@ -688,6 +724,7 @@ namespace Frida {
 					if (next == null) {
 						next = new PackageNode (name);
 						cur.children[name] = next;
+						cur.child_order.add (next);
 					}
 					cur = next;
 				}
@@ -848,6 +885,7 @@ namespace Frida {
 
 			public weak PackageNode? parent;
 			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
+			public Gee.List<PackageNode> child_order = new Gee.ArrayList<PackageNode> ();
 			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
@@ -856,7 +894,7 @@ namespace Frida {
 
 			public bool is_root {
 				get {
-					return name == null;
+					return parent == null;
 				}
 			}
 
@@ -893,7 +931,7 @@ namespace Frida {
 			public PackageNode? lookup (string pkg_name) {
 				if (name == pkg_name)
 					return this;
-				foreach (var child in children.values) {
+				foreach (var child in child_order) {
 					PackageNode? found = child.lookup (pkg_name);
 					if (found != null)
 						return found;
