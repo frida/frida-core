@@ -350,6 +350,10 @@ namespace Frida {
 					if (!node_wins)
 						return false;
 
+					PackageDependency? dep_edge = anc.dependencies.all[node.name];
+					if (dep_edge != null && !Semver.satisfies_range (node.version, dep_edge.version.range))
+						return false;
+
 					parent.children[node.name] = dupe;
 					dupe.parent = parent;
 					dupe.depth = parent.depth + 1;
@@ -2149,9 +2153,9 @@ namespace Frida {
 						string vstr = p.strip ();
 
 						if (vstr.has_prefix (">=") || vstr.has_prefix ("<="))
-							vstr = vstr.substring (2);
+							vstr = vstr[2:];
 						else if (vstr[0] == '^' || vstr[0] == '~' || vstr[0] == '>' || vstr[0] == '<')
-							vstr = vstr.substring (1);
+							vstr = vstr[1:];
 
 						string core_part = extract_core_part (vstr);
 						if (core_part.index_of_char ('*') != -1 || core_part.down ().index_of_char ('x') != -1)
