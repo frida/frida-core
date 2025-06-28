@@ -197,7 +197,7 @@ namespace Frida {
 
 		private static async PackageNode build_ideal_graph (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
 				throws Error, IOError {
-			var root = new PackageNode ();
+			var root = new PackageNode (manifest.name, manifest.version, manifest.dependencies);
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in manifest.dependencies.all.values) {
@@ -335,8 +335,30 @@ namespace Frida {
 						continue;
 
 					if (dupe.version.str == node.version.str) {
-						dupe.edges_in += node.edges_in;
+						if (shadowed_between (parent, anc, node.name, node.version))
+							continue;
+
 						merge_children (dupe, node);
+
+						bool ok = true;
+						foreach (var sib in anc.children.values) {
+							if (sib == node) continue;
+							var edge = sib.active_deps[node.name];
+							if (edge == null) continue;
+
+							SemverVersion v = sib.children.has_key (node.name)
+								? sib.children[node.name].version
+								: dupe.version;
+
+							if (!Semver.satisfies_range (v, edge.version.range)) {
+								ok = false; break;
+							}
+						}
+						if (!ok) {
+							parent.children[node.name] = node;
+							return false;
+						}
+
 						parent.children.unset (node.name);
 						node.parent = null;
 						return true;
@@ -345,18 +367,31 @@ namespace Frida {
 					int vcmp = Semver.compare_version (node.version, dupe.version);
 					bool node_wins =
 						(node.edges_in > dupe.edges_in) ||
-						((node.edges_in == dupe.edges_in) && (vcmp > 0)) ||
-						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth <  dupe.depth));
+						((node.edges_in == dupe.edges_in) && (vcmp < 0)) ||
+						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth < dupe.depth));
+
 					if (!node_wins)
 						return false;
 
-					PackageDependency? need_at_anc = anc.dependencies.all[node.name];
-					if (need_at_anc != null && !Semver.satisfies_range (node.version, need_at_anc.version.range))
+					PackageDependency? need_anc = anc.active_deps[node.name];
+					if (need_anc != null && !Semver.satisfies_range (node.version, need_anc.version.range))
 						return false;
 
-					PackageDependency? need_at_parent = parent.dependencies.all[node.name];
-					if (need_at_parent != null && !Semver.satisfies_range (dupe.version, need_at_parent.version.range))
+					PackageDependency? need_par = parent.active_deps[node.name];
+					if (need_par != null && !Semver.satisfies_range (dupe.version, need_par.version.range))
 						return false;
+
+					foreach (var sib in anc.children.values) {
+						if (sib == node) continue;
+						var edge = sib.active_deps[node.name];
+						if (edge == null) continue;
+
+						SemverVersion v = sib.children.has_key (node.name)
+										 ? sib.children[node.name].version
+										 : node.version;
+						if (!Semver.satisfies_range (v, edge.version.range))
+							return false;
+					}
 
 					parent.children[node.name] = dupe;
 					dupe.parent = parent;
@@ -369,24 +404,36 @@ namespace Frida {
 					return true;
 				}
 
+				var anc = parent.parent;
+
+				PackageDependency? need_here = anc.active_deps[node.name];
+				if (need_here != null &&
+					!Semver.satisfies_range (node.version, need_here.version.range))
+					return false;
+
 				foreach (var pr in node.peer_ranges.entries) {
-					string peer_name = pr.key;
-					string wanted_range = pr.value;
-
-					var provider = parent.parent.find_provider (peer_name);
-					if (provider == null)
-						return false;
-
-					if (!Semver.satisfies_range (provider.version, wanted_range))
+					var provider = anc.find_provider (pr.key);
+					if (provider == null || !Semver.satisfies_range (provider.version, pr.value))
 						return false;
 				}
 
 				parent.children.unset (node.name);
-				parent.parent.children[node.name] = node;
-				node.parent = parent.parent;
-				node.depth = parent.parent.depth + 1;
+
+				anc.children[node.name] = node;
+				node.parent = anc;
+				node.depth = anc.depth + 1;
+
 				return true;
 			}
+		}
+
+		private static bool shadowed_between (PackageNode from, PackageNode to, string pkg, SemverVersion node_ver) {
+			for (var anc = from.parent; anc != null && anc != to; anc = anc.parent) {
+				var child = anc.children[pkg];
+				if (child != null && child.version.str != node_ver.str)
+					return true;
+			}
+			return false;
 		}
 
 		private static void merge_children (PackageNode target, PackageNode donor) {
@@ -461,7 +508,8 @@ namespace Frida {
 				r.end_member ();
 
 				r.read_member ("version");
-				m.version = r.get_string_value ();
+				string? raw_version = r.get_string_value ();
+				m.version = (raw_version != null) ? Semver.parse_version (raw_version) : null;
 				r.end_member ();
 
 				m.license = read_license (r);
@@ -600,7 +648,7 @@ namespace Frida {
 			write_engines (manifest.engines, b);
 			b.end_object ();
 
-			var runtime_reach = compute_runtime_reach (manifest.dependencies, path_map);
+			var runtime_reach = compute_runtime_reach (path_map);
 
 			foreach (string k in path_map.keys) {
 				if (k == "")
@@ -608,7 +656,7 @@ namespace Frida {
 
 				PackageNode pn = path_map[k];
 				b.set_member_name (k).begin_object ();
-				write_version (pn.version.str, b);
+				write_version (pn.version, b);
 				b
 					.set_member_name ("resolved")
 					.add_string_value (pn.resolved)
@@ -829,7 +877,7 @@ namespace Frida {
 			public PackageDependencies dependencies;
 
 			public weak PackageNode? parent;
-			public Gee.Map<string, PackageNode> children = new Gee.HashMap<string, PackageNode> ();
+			public Gee.Map<string, PackageNode> children = new Gee.TreeMap<string, PackageNode> ();
 			public Gee.Map<PackageNode, PackageRole> child_roles = new Gee.HashMap<PackageNode, PackageRole> ();
 			public Gee.Map<string, string> peer_ranges = new Gee.HashMap<string, string> ();
 
@@ -838,9 +886,28 @@ namespace Frida {
 
 			public bool is_root {
 				get {
-					return name == null;
+					return parent == null;
 				}
 			}
+
+			public Gee.Map<string, PackageDependency> active_deps {
+				get {
+					if (_active_deps == null) {
+						if (parent == null) {
+							_active_deps = dependencies.all;
+						} else {
+							_active_deps = new Gee.TreeMap<string, PackageDependency> ();
+							foreach (var d in dependencies.all.values) {
+								if (d.role != DEVELOPMENT)
+									_active_deps[d.name] = d;
+							}
+						}
+					}
+					return _active_deps;
+				}
+			}
+
+			private Gee.Map<string, PackageDependency> _active_deps;
 
 			public PackageNode (string? name = null, SemverVersion? version = null, PackageDependencies? dependencies = null) {
 				this.name = name;
@@ -885,7 +952,7 @@ namespace Frida {
 
 		private class Manifest {
 			public string? name;
-			public string? version;
+			public SemverVersion? version;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
@@ -1018,7 +1085,7 @@ namespace Frida {
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
-		private Gee.Set<string> compute_runtime_reach (PackageDependencies deps, Gee.Map<string, PackageNode> path_map) {
+		private Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) {
 			var node_to_path = new Gee.HashMap<PackageNode, string> ();
 			foreach (var e in path_map.entries)
 				node_to_path[e.value] = e.key;
@@ -1028,23 +1095,25 @@ namespace Frida {
 			var q = new Gee.LinkedList<PackageNode> ();
 			var visited = new Gee.HashSet<PackageNode> ();
 
-			foreach (PackageDependency d in deps.all.values) {
-				if (d.role == DEVELOPMENT)
-					continue;
-				q.offer (path_map["node_modules/" + d.name]);
+			PackageNode root = path_map[""];
+			foreach (PackageDependency d in root.active_deps.values) {
+				if (d.role != DEVELOPMENT)
+					q.offer (path_map["node_modules/" + d.name]);
 			}
 
-			while (!q.is_empty) {
-				var node = q.poll ();
-
+			PackageNode? node;
+			while ((node = q.poll ()) != null) {
 				if (!visited.add (node))
 					continue;
 
 				reachable.add (node_to_path[node]);
 
-				foreach (var child in node.children.values) {
-					if (node.child_roles[child] != PackageRole.DEVELOPMENT)
+				foreach (PackageDependency d in node.active_deps.values) {
+					if (d.role != DEVELOPMENT) {
+						var child = node.find_provider (d.name);
+						assert (child != null);
 						q.offer (child);
+					}
 				}
 			}
 
@@ -1229,9 +1298,9 @@ namespace Frida {
 				b.set_member_name ("name").add_string_value (name);
 		}
 
-		private static void write_version (string? version, Json.Builder b) {
+		private static void write_version (SemverVersion? version, Json.Builder b) {
 			if (version != null)
-				b.set_member_name ("version").add_string_value (version);
+				b.set_member_name ("version").add_string_value (version.str);
 		}
 
 		private static string? read_description (Json.Reader reader) {
