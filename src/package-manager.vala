@@ -1050,9 +1050,8 @@ namespace Frida {
 		}
 
 		private class FundingSource {
-			public string? as_string;
 			public string? type;
-			public string? url;
+			public string url;
 		}
 
 		private class PackageLockPackageInfo {
@@ -1372,32 +1371,35 @@ namespace Frida {
 		private static void read_funding_source (Json.Reader r, Gee.List<FundingSource> list) throws Error {
 			if (r.is_object ()) {
 				var source = new FundingSource ();
+
 				r.read_member ("type");
 				source.type = r.get_string_value ();
 				r.end_member ();
+
 				r.read_member ("url");
 				source.url = r.get_string_value ();
+				if (source.url == null)
+					throw new Error.PROTOCOL ("Invalid 'funding' field");
 				r.end_member ();
+
 				list.add (source);
 			} else {
 				var val = r.get_string_value ();
 				if (val == null)
 					throw new Error.PROTOCOL ("Invalid 'funding' field");
-				list.add (new FundingSource () { as_string = val });
+				list.add (new FundingSource () { url = val });
 			}
 		}
 
 		private static void write_funding_source (FundingSource s, Json.Builder b) {
-			if (s.as_string != null) {
-				b.add_string_value (s.as_string);
-			} else {
-				b.begin_object ();
-				if (s.type != null)
-					b.set_member_name ("type").add_string_value (s.type);
-				if (s.url != null)
-					b.set_member_name ("url").add_string_value (s.url);
-				b.end_object ();
-			}
+			b.begin_object ();
+
+			if (s.type != null)
+				b.set_member_name ("type").add_string_value (s.type);
+
+			b.set_member_name ("url").add_string_value (s.url);
+
+			b.end_object ();
 		}
 
 		private static Gee.Map<string, string>? read_engines (Json.Reader reader) throws Error {
