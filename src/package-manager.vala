@@ -666,11 +666,14 @@ namespace Frida {
 				if (!runtime_reach.contains (k))
 					b.set_member_name ("dev").add_boolean_value (true);
 
-				write_license (pn.license, b);
+				if (pn.license_origin == API)
+					write_license (pn.license, b);
 				write_dependencies_section ("dependencies", pn.dependencies.runtime, b);
 				write_engines (pn.engines, b);
 				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
 				write_funding (pn.funding, b);
+				if (pn.license_origin == PACKAGE)
+					write_license (pn.license, b);
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
 				b.end_object ();
@@ -816,7 +819,11 @@ namespace Frida {
 					install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
 				}
 
-				node.license = read_license (pkg);
+				if (node.license == null) {
+					node.license = read_license (pkg);
+					if (node.license != null)
+						node.license_origin = PACKAGE;
+				}
 				node.funding = read_funding (pkg);
 
 				job.resolve (true);
@@ -869,6 +876,7 @@ namespace Frida {
 			public string? name;
 			public SemverVersion? version;
 			public string? license;
+			public LicenseOrigin license_origin = API;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
 			public string? resolved;
@@ -948,6 +956,11 @@ namespace Frida {
 				}
 				return missing;
 			}
+		}
+
+		private enum LicenseOrigin {
+			API,
+			PACKAGE,
 		}
 
 		private class Manifest {
@@ -1288,6 +1301,7 @@ namespace Frida {
 
 			reader.end_member ();
 
+			rpd.license = read_license (reader);
 			rpd.engines = read_engines (reader);
 			rpd.dependencies = read_dependencies (reader);
 		}
