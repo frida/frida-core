@@ -374,6 +374,12 @@ namespace Frida {
 					return false;
 
 				for (var anc = parent.parent; anc != null; anc = anc.parent) {
+					if (sibling_branch_conflict (anc, parent)) {
+						if (enable_logging)
+							dbg ("  NO – version conflict with other branch below %s", path_of (anc));
+						return false;
+					}
+
 					var dupe = anc.children[node.name];
 					if (dupe == null)
 						continue;
@@ -498,6 +504,25 @@ namespace Frida {
 					return false;
 			}
 			return true;
+		}
+
+		private static bool sibling_branch_conflict (PackageNode anc, PackageNode node) {
+			var q = new Gee.ArrayQueue<PackageNode> ();
+			q.offer (anc);
+
+			PackageNode? cur;
+			while ((cur = q.poll ()) != null) {
+				if (cur == node)
+					continue;
+
+				foreach (var ch in cur.children.values) {
+					if (ch.name == node.name && ch.version.str != node.version.str)
+						return true;
+					q.offer (ch);
+				}
+			}
+
+			return false;
 		}
 
 		private static void merge_children (PackageNode target, PackageNode donor) {
