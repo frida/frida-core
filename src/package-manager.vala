@@ -455,6 +455,12 @@ namespace Frida {
 					}
 				}
 
+				if (has_conflicting_descendant (anc, node, parent)) {
+					if (enable_logging)
+						dbg ("  NO – version conflict with descendant copy deeper in %s", path_of (anc));
+					return false;
+				}
+
 				parent.children.unset (node.name);
 
 				anc.children[node.name] = node;
@@ -498,6 +504,23 @@ namespace Frida {
 					return false;
 			}
 			return true;
+		}
+
+		private static bool has_conflicting_descendant (PackageNode anc, PackageNode node, PackageNode skip_subtree) {
+			var q = new Gee.LinkedList<PackageNode> ();
+			foreach (var ch in anc.children.values) {
+				if (ch != skip_subtree)
+					q.offer (ch);
+			}
+
+			PackageNode? cur;
+			while ((cur = q.poll ()) != null) {
+				if (cur.name == node.name && cur.version.str != node.version.str)
+					return true;
+				foreach (var ch in cur.children.values)
+					q.offer (ch);
+			}
+			return false;
 		}
 
 		private static void merge_children (PackageNode target, PackageNode donor) {
