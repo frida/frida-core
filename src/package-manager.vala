@@ -1229,11 +1229,14 @@ namespace Frida {
 					if (d.role != DEVELOPMENT) {
 						var child = node.find_provider (d.name);
 						if (child == null) {
+							printerr ("WARNING: Package '%s' needs dependency '%s', but it is missing", node.name, d.name);
+							/*
 							if (!node.optional_peers.contains (d.name)) {
 								throw new Error.PROTOCOL (
 									"Package '%s' needs dependency '%s', but it is missing",
 										node.name, d.name);
 							}
+							*/
 							continue;
 						}
 						q.offer (child);
