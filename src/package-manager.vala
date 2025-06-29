@@ -1380,9 +1380,11 @@ namespace Frida {
 		}
 
 		private static bool read_has_install_script (Json.Reader r) {
-			r.read_member ("scripts");
-			bool has_install_script = r.read_member ("install");
-			r.end_member ();
+			bool has_install_script = false;
+			if (r.read_member ("scripts")) {
+				has_install_script = r.read_member ("install");
+				r.end_member ();
+			}
 			r.end_member ();
 			return has_install_script;
 		}
