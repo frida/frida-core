@@ -374,6 +374,12 @@ namespace Frida {
 					return false;
 
 				for (var anc = parent.parent; anc != null; anc = anc.parent) {
+					if (enable_logging) {
+						dbg ("HOIST?  %s@%s  from=%s  parent=%s  anc=%s",
+							node.name, node.version.str,
+							path_of (node), path_of (parent), path_of (anc));
+					}
+
 					if (sibling_branch_conflict (anc, parent, node)) {
 						if (enable_logging)
 							dbg ("  NO – version conflict with sibling branch below %s", path_of (anc));
@@ -383,12 +389,6 @@ namespace Frida {
 					var dupe = anc.children[node.name];
 					if (dupe == null)
 						continue;
-
-					if (enable_logging) {
-						dbg ("HOIST?  %s@%s  from=%s  parent=%s  anc=%s",
-							node.name, node.version.str,
-							path_of (node), path_of (parent), path_of (anc));
-					}
 
 					if (dupe.version.str == node.version.str) {
 						for (var a = anc; a != null; a = a.parent) {
