@@ -586,6 +586,7 @@ namespace Frida {
 				}
 
 				pli.deprecated = read_deprecated (lock_r);
+				pli.bin = read_bin (lock_r);
 				pli.license = read_license (lock_r);
 				pli.funding = read_funding (lock_r);
 				pli.engines = read_engines (lock_r);
@@ -659,7 +660,6 @@ namespace Frida {
 				PackageNode pn = path_map[k];
 				b.set_member_name (k).begin_object ();
 				write_version (pn.version, b);
-				write_deprecated (pn.deprecated, b);
 				b
 					.set_member_name ("resolved")
 					.add_string_value (pn.resolved)
@@ -669,10 +669,12 @@ namespace Frida {
 				if (!runtime_reach.contains (k))
 					b.set_member_name ("dev").add_boolean_value (true);
 
+				write_deprecated (pn.deprecated, b);
 				write_license (pn.license, b);
 				write_dependencies_section ("dependencies", pn.dependencies.runtime, b);
 				write_engines (pn.engines, b);
 				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
+				write_bin (pn.bin, b);
 				write_funding (pn.funding, b);
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
@@ -819,6 +821,10 @@ namespace Frida {
 					install_progress (PackageInstallPhase.PACKAGE_INSTALLED, 1.0, progress_details);
 				}
 
+				if (node.deprecated == null)
+					node.deprecated = read_deprecated (pkg);
+				if (node.bin == null)
+					node.bin = read_bin (pkg, node.name);
 				if (node.license == null)
 					node.license = read_license (pkg);
 				if (node.funding == null)
@@ -1068,6 +1074,7 @@ namespace Frida {
 			public string? name;
 			public SemverVersion? version;
 			public string? deprecated;
+			public Gee.Map<string, string>? bin;
 			public string? resolved;
 			public string? integrity;
 			public string? license;
@@ -1258,6 +1265,7 @@ namespace Frida {
 			public string name;
 			public SemverVersion effective_version;
 			public string? deprecated;
+			public Gee.Map<string, string>? bin;
 			public string? description;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
@@ -1279,32 +1287,33 @@ namespace Frida {
 			}
 		}
 
-		private static void read_package_version_metadata (Json.Reader reader, ResolvedPackageData rpd) throws Error {
-			reader.read_member ("dist");
+		private static void read_package_version_metadata (Json.Reader r, ResolvedPackageData rpd) throws Error {
+			r.read_member ("dist");
 
-			reader.read_member ("tarball");
-			rpd.resolved_url = reader.get_string_value ();
+			r.read_member ("tarball");
+			rpd.resolved_url = r.get_string_value ();
 			if (rpd.resolved_url == null) {
 				throw new Error.PROTOCOL ("'dist.tarball' for '%s@%s' missing or invalid, or 'dist' not an object",
 					rpd.name, rpd.effective_version.str);
 			}
-			reader.end_member ();
+			r.end_member ();
 
-			reader.read_member ("integrity");
-			rpd.integrity = reader.get_string_value ();
-			reader.end_member ();
+			r.read_member ("integrity");
+			rpd.integrity = r.get_string_value ();
+			r.end_member ();
 
-			reader.read_member ("shasum");
-			rpd.shasum = reader.get_string_value ();
-			reader.end_member ();
+			r.read_member ("shasum");
+			rpd.shasum = r.get_string_value ();
+			r.end_member ();
 
-			reader.end_member ();
+			r.end_member ();
 
-			rpd.deprecated = read_deprecated (reader);
-			rpd.license = read_license (reader);
-			rpd.funding = read_funding (reader);
-			rpd.engines = read_engines (reader);
-			rpd.dependencies = read_dependencies (reader);
+			rpd.deprecated = read_deprecated (r);
+			rpd.bin = read_bin (r, rpd.name);
+			rpd.license = read_license (r);
+			rpd.funding = read_funding (r);
+			rpd.engines = read_engines (r);
+			rpd.dependencies = read_dependencies (r);
 		}
 
 		private static void write_name (string? name, Json.Builder b) {
@@ -1317,10 +1326,10 @@ namespace Frida {
 				b.set_member_name ("version").add_string_value (version.str);
 		}
 
-		private static string? read_deprecated (Json.Reader reader) {
-			reader.read_member ("deprecated");
-			string? str = reader.get_string_value ();
-			reader.end_member ();
+		private static string? read_deprecated (Json.Reader r) {
+			r.read_member ("deprecated");
+			string? str = r.get_string_value ();
+			r.end_member ();
 			return str;
 		}
 
@@ -1329,25 +1338,60 @@ namespace Frida {
 				b.set_member_name ("deprecated").add_string_value (msg);
 		}
 
-		private static string? read_description (Json.Reader reader) {
-			reader.read_member ("description");
-			string? description = reader.get_string_value ();
-			reader.end_member ();
+		private static Gee.Map<string, string>? read_bin (Json.Reader r, string? package_name = null) throws Error {
+			if (!r.read_member ("bin")) {
+				r.end_member ();
+				return null;
+			}
+
+			if (r.is_object ()) {
+				r.end_member ();
+				var bin = read_map_str_str (r, "bin");
+				foreach (var k in bin.keys.to_array ())
+					bin[k] = normalize_bin_path (bin[k]);
+				return bin;
+			}
+
+			if (package_name == null)
+				throw new Error.PROTOCOL ("Invalid 'bin' field");
+			var result = new Gee.HashMap<string, string> ();
+			string? path = r.get_string_value ();
+			if (path == null)
+				throw new Error.PROTOCOL ("Invalid 'bin' field");
+			result[package_name] = normalize_bin_path (path);
+			r.end_member ();
+			return result;
+		}
+
+		private static string normalize_bin_path (string path) {
+			return path.has_prefix ("./")
+				? path[2:]
+				: path;
+		}
+
+		private static void write_bin (Gee.Map<string, string>? bin, Json.Builder b) {
+			write_map_str_str (bin, "bin", b);
+		}
+
+		private static string? read_description (Json.Reader r) {
+			r.read_member ("description");
+			string? description = r.get_string_value ();
+			r.end_member ();
 			return description;
 		}
 
-		private static string? read_license (Json.Reader reader) {
+		private static string? read_license (Json.Reader r) {
 			string? license;
 
-			reader.read_member ("license");
-			if (reader.is_object ()) {
-				reader.read_member ("type");
-				license = reader.get_string_value ();
-				reader.end_member ();
+			r.read_member ("license");
+			if (r.is_object ()) {
+				r.read_member ("type");
+				license = r.get_string_value ();
+				r.end_member ();
 			} else {
-				license = reader.get_string_value ();
+				license = r.get_string_value ();
 			}
-			reader.end_member ();
+			r.end_member ();
 
 			return license;
 		}
@@ -1357,26 +1401,26 @@ namespace Frida {
 				b.set_member_name ("license").add_string_value (license);
 		}
 
-		private static Gee.List<FundingSource>? read_funding (Json.Reader reader) throws Error {
-			if (!reader.read_member ("funding")) {
-				reader.end_member ();
+		private static Gee.List<FundingSource>? read_funding (Json.Reader r) throws Error {
+			if (!r.read_member ("funding")) {
+				r.end_member ();
 				return null;
 			}
 
 			var result = new Gee.ArrayList<FundingSource> ();
 
-			if (reader.is_array ()) {
-				int n = reader.count_elements ();
+			if (r.is_array ()) {
+				int n = r.count_elements ();
 				for (int i = 0; i < n; i++) {
-					reader.read_element (i);
-					read_funding_source (reader, result);
-					reader.end_element ();
+					r.read_element (i);
+					read_funding_source (r, result);
+					r.end_element ();
 				}
 			} else {
-				read_funding_source (reader, result);
+				read_funding_source (r, result);
 			}
 
-			reader.end_member ();
+			r.end_member ();
 
 			return result.is_empty ? null : result;
 		}
@@ -1429,37 +1473,12 @@ namespace Frida {
 			b.end_object ();
 		}
 
-		private static Gee.Map<string, string>? read_engines (Json.Reader reader) throws Error {
-			if (!reader.read_member ("engines")) {
-				reader.end_member ();
-				return null;
-			}
-
-			var result = new Gee.TreeMap<string, string> ();
-			string[]? members = reader.list_members ();
-			if (members == null)
-				throw new Error.PROTOCOL ("Invalid 'engines' field");
-			foreach (unowned string name in members) {
-				reader.read_member (name);
-				string? val = reader.get_string_value ();
-				if (val == null)
-					throw new Error.PROTOCOL ("Invalid 'engines' value");
-				result[name] = val;
-				reader.end_member ();
-			}
-
-			reader.end_member ();
-
-			return result;
+		private static Gee.Map<string, string>? read_engines (Json.Reader r) throws Error {
+			return read_map_str_str (r, "engines");
 		}
 
 		private static void write_engines (Gee.Map<string, string>? engines, Json.Builder b) {
-			if (engines == null)
-				return;
-			b.set_member_name ("engines").begin_object ();
-			foreach (var e in engines.entries)
-				b.set_member_name (e.key).add_string_value (e.value);
-			b.end_object ();
+			write_map_str_str (engines, "engines", b);
 		}
 
 		private static PackageDependencies read_dependencies (Json.Reader r) throws Error {
@@ -1555,6 +1574,39 @@ namespace Frida {
 			b.set_member_name (section).begin_object ();
 			foreach (PackageDependency dep in deps.values)
 				b.set_member_name (dep.name).add_string_value (dep.version.range);
+			b.end_object ();
+		}
+
+		private static Gee.Map<string, string>? read_map_str_str (Json.Reader r, string name) throws Error {
+			if (!r.read_member (name)) {
+				r.end_member ();
+				return null;
+			}
+
+			var result = new Gee.TreeMap<string, string> ();
+			string[]? members = r.list_members ();
+			if (members == null)
+				throw new Error.PROTOCOL ("Invalid '%s' field", name);
+			foreach (unowned string key in members) {
+				r.read_member (key);
+				string? val = r.get_string_value ();
+				if (val == null)
+					throw new Error.PROTOCOL ("Invalid '%s' value", name);
+				result[key] = val;
+				r.end_member ();
+			}
+
+			r.end_member ();
+
+			return result;
+		}
+
+		private static void write_map_str_str (Gee.Map<string, string>? map, string name, Json.Builder b) {
+			if (map == null)
+				return;
+			b.set_member_name (name).begin_object ();
+			foreach (var e in map.entries)
+				b.set_member_name (e.key).add_string_value (e.value);
 			b.end_object ();
 		}
 
