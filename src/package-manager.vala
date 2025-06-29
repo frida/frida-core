@@ -388,6 +388,9 @@ namespace Frida {
 			while ((cur = bfs.poll ()) != null) {
 				foreach (var child in cur.children.values) {
 					bool enable_logging = child.name in interesting_packages;
+					if (enable_logging)
+						dbg ("scan() HOIST?  %s@%s  from=%s", child.name, child.version.str, path_of (child));
+
 					if (may_hoist (child, enable_logging))
 						hoistables.add (child);
 
