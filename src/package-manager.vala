@@ -1695,8 +1695,8 @@ namespace Frida {
 		private static PackageDependencies read_dependencies (Json.Reader r) throws Error {
 			var deps = new PackageDependencies ();
 
-			string[] section_keys = { "dependencies", "devDependencies", "optionalDependencies", "peerDependencies" };
-			PackageRole[] section_roles = { RUNTIME, DEVELOPMENT, OPTIONAL, PEER };
+			string[] section_keys = { "devDependencies", "optionalDependencies", "peerDependencies", "dependencies" };
+			PackageRole[] section_roles = { DEVELOPMENT, OPTIONAL, PEER, RUNTIME };
 			for (uint i = 0; i != section_keys.length; i++) {
 				unowned string section_key = section_keys[i];
 
