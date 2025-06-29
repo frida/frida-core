@@ -154,6 +154,8 @@ namespace Frida {
 			var queue = new Gee.ArrayQueue<PackageNode> ();
 			foreach (PackageDependency dep in manifest.dependencies.all.values) {
 				var node = base_node.lookup (dep.name);
+				dbg ("OUTDATED want %-35s need %s vs had %s",
+					 dep.name, dep.version.range, (node != null) ? node.version.str : "∅");
 				bool ok = node != null && Semver.satisfies_range (node.version, dep.version.range);
 				if (!ok)
 					queue.offer ((node != null) ? node : base_node);
@@ -184,6 +186,7 @@ namespace Frida {
 					var sub = yield build_ideal_subtree (kv.key, kv.value, cache, cancellable);
 					anchor.children[kv.key] = sub;
 					sub.parent = anchor;
+					dbg ("PATCH   anchor=%s  installing %s@%s", path_of (anchor), kv.key, kv.value);
 				}
 			}
 		}
@@ -212,6 +215,12 @@ namespace Frida {
 				var host = item.host;
 				var dep = item.dep;
 				var pdata = yield item.data_future.wait_async (cancellable);
+
+				dbg ("RESOLVE  %-40s requested=%s  picked=%s  host=%s",
+					dep.name,
+					dep.version.range,
+					pdata.effective_version.str,
+					host.name);
 
 				var node = add_child_node (host, dep, pdata);
 
@@ -254,6 +263,12 @@ namespace Frida {
 				var host = item.host;
 				var dep = item.dep;
 				var ddata = yield item.data_future.wait_async (cancellable);
+
+				dbg ("RESOLVE  %-40s requested=%s  picked=%s  host=%s",
+					dep.name,
+					dep.version.range,
+					ddata.effective_version.str,
+					host.name);
 
 				var node = add_child_node (host, dep, ddata);
 
@@ -326,7 +341,40 @@ namespace Frida {
 			} while (changed);
 		}
 
+		private static string[] interesting_packages = {
+			"@eslint/eslintrc",
+			"@eslint/js",
+			"brace-expansion",
+			"builtin-modules",
+			"debug",
+			"doctrine",
+			"eslint-compat-utils",
+			"eslint-config-standard",
+			"eslint-import-resolver-node",
+			"eslint-module-utils",
+			"eslint-plugin-es-x",
+			"eslint-plugin-n",
+			"eslint-scope",
+			"eslint-visitor-keys",
+			"eslint",
+			"espree",
+			"file-entry-cache",
+			"flat-cache",
+			"get-tsconfig",
+			"globals",
+			"is-builtin-module",
+			"jiti",
+			"locate-path",
+			"p-limit",
+			"p-locate",
+			"path-exists",
+			"resolve-pkg-maps",
+			"type-fest",
+		};
+
 		private static bool try_hoist (PackageNode node) throws Error {
+			bool enable_logging = node.name in interesting_packages;
+
 			while (true) {
 				var parent = node.parent;
 				if (parent == null || parent.parent == null)
@@ -337,9 +385,18 @@ namespace Frida {
 					if (dupe == null)
 						continue;
 
+					if (enable_logging) {
+						dbg ("HOIST?  %s@%s  from=%s  parent=%s  anc=%s",
+							node.name, node.version.str,
+							path_of (node), path_of (parent), path_of (anc));
+					}
+
 					if (dupe.version.str == node.version.str) {
-						if (shadowed_between (parent, anc, node.name, node.version))
+						if (shadowed_between (parent, anc, node.name, node.version)) {
+							if (enable_logging)
+								dbg ("  NO – shadowed between parent and anc");
 							continue;
+						}
 
 						merge_children (dupe, node);
 
@@ -361,10 +418,14 @@ namespace Frida {
 							}
 						}
 						if (!ok) {
+							if (enable_logging)
+								dbg ("  NO – version conflict");
 							parent.children[node.name] = node;
 							return false;
 						}
 
+						if (enable_logging)
+							dbg ("  YES – same version, moved to %s", path_of (anc));
 						parent.children.unset (node.name);
 						node.parent = null;
 						return true;
@@ -376,27 +437,55 @@ namespace Frida {
 						((node.edges_in == dupe.edges_in) && (vcmp < 0)) ||
 						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth < dupe.depth));
 
-					if (!node_wins)
+					if (!node_wins) {
+						if (enable_logging) {
+							dbg ("  NO – node{version=%s edges_in=%u depth=%u} dupe{version=%s edges_in=%u depth=%u} vcmp=%d",
+								node.version.str, node.edges_in, node.depth,
+								dupe.version.str, dupe.edges_in, dupe.depth,
+								vcmp);
+						}
 						return false;
+					}
 
 					PackageDependency? need_anc = anc.active_deps[node.name];
-					if (need_anc != null && !Semver.satisfies_range (node.version, need_anc.version.range))
+					if (need_anc != null && !Semver.satisfies_range (node.version, need_anc.version.range)) {
+						if (enable_logging) {
+							dbg ("  NO – not satisfying ancestor version requirements: node.version=%s need_anc.version.range=%s",
+								node.version.str,
+								need_anc.version.range);
+						}
 						return false;
+					}
 
 					PackageDependency? need_par = parent.active_deps[node.name];
-					if (need_par != null && !Semver.satisfies_range (dupe.version, need_par.version.range))
+					if (need_par != null && !Semver.satisfies_range (dupe.version, need_par.version.range)) {
+						if (enable_logging) {
+							dbg ("  NO – not satisfying parent version requirements: node.version=%s need_par.version.range=%s",
+								node.version.str,
+								need_par.version.range);
+						}
 						return false;
+					}
 
 					foreach (var sib in anc.children.values) {
-						if (sib == node) continue;
+						if (sib == node)
+							continue;
+
 						var edge = sib.active_deps[node.name];
-						if (edge == null) continue;
+						if (edge == null)
+							continue;
 
 						SemverVersion v = sib.children.has_key (node.name)
 										 ? sib.children[node.name].version
 										 : node.version;
-						if (!Semver.satisfies_range (v, edge.version.range))
+						if (!Semver.satisfies_range (v, edge.version.range)) {
+							if (enable_logging) {
+								dbg ("  NO – not satisfying sibling version requirements: v=%s edge.version.range=%s",
+									v.str,
+									edge.version.range);
+							}
 							return false;
+						}
 					}
 
 					parent.children[node.name] = dupe;
@@ -407,20 +496,44 @@ namespace Frida {
 					node.parent = anc;
 					node.depth = anc.depth + 1;
 
+					if (enable_logging)
+						dbg ("  YES – swapped with existing, moved to %s", path_of (anc));
 					return true;
 				}
 
 				var anc = parent.parent;
 
+				if (enable_logging) {
+					dbg ("HOIST?  %s@%s  from=%s  parent=%s  anc=%s",
+						node.name, node.version.str,
+						path_of (node), path_of (parent), path_of (anc));
+				}
+
 				PackageDependency? need_here = anc.active_deps[node.name];
-				if (need_here != null &&
-					!Semver.satisfies_range (node.version, need_here.version.range))
+				if (need_here != null && !Semver.satisfies_range (node.version, need_here.version.range)) {
+					if (enable_logging) {
+						dbg ("  NO – not satisfying parent.parent requirements: node.version=%s need_here.version.range=%s",
+							node.version.str,
+							need_here.version.range);
+					}
 					return false;
+				}
 
 				foreach (var pr in node.peer_ranges.entries) {
 					var provider = anc.find_provider (pr.key);
-					if (provider == null || !Semver.satisfies_range (provider.version, pr.value))
+					if (provider == null || !Semver.satisfies_range (provider.version, pr.value)) {
+						if (enable_logging) {
+							if (provider != null) {
+								dbg ("  NO – not satisfying peer requirements: provider.version=%s peer.range=%s",
+									provider.version.str,
+									pr.value);
+							} else {
+								dbg ("  NO – not satisfying peer requirements: no provider of peer.range=%s",
+									pr.value);
+							}
+						}
 						return false;
+					}
 				}
 
 				parent.children.unset (node.name);
@@ -429,6 +542,8 @@ namespace Frida {
 				node.parent = anc;
 				node.depth = anc.depth + 1;
 
+				if (enable_logging)
+					dbg ("  YES – moved to %s", path_of (anc));
 				return true;
 			}
 		}
@@ -712,6 +827,12 @@ namespace Frida {
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
 				b.end_object ();
+
+				dbg ("LOCKOUT %s  v=%s  dev=%s  resolved=%s",
+					k,
+					pn.version.str,
+					runtime_reach.contains (k) ? "no" : "yes",
+					pn.resolved);
 			}
 
 			b
@@ -1170,6 +1291,8 @@ namespace Frida {
 					}
 				}
 			}
+
+			dbg ("REACH   runtime reachable paths: %s", string.joinv (", ", reachable.to_array ()));
 
 			return reachable;
 		}
@@ -1858,6 +1981,22 @@ namespace Frida {
 			}
 
 			return parser.get_root ();
+		}
+
+		private static void dbg (string format, ...) {
+			var args = va_list ();
+			stderr.vprintf (format + "\n", args);
+		}
+
+		private static string path_of (PackageNode n) {
+			var segs = new Gee.LinkedList<string> ();
+			for (var cur = n; cur != null; cur = cur.parent) {
+				if (cur.parent != null)
+					segs.offer_head ("node_modules/" + cur.name);
+				else
+					segs.offer_head ("node_modules");
+			}
+			return string.joinv ("/", segs.to_array ());
 		}
 
 		private T create<T> () {
