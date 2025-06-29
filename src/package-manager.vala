@@ -155,7 +155,7 @@ namespace Frida {
 			foreach (PackageDependency dep in manifest.dependencies.all.values) {
 				var node = base_node.lookup (dep.name);
 				dbg ("OUTDATED want %-35s need %s vs had %s",
-					 dep.name, dep.version.range, (node != null) ? node.version.str : "∅");
+					dep.name, dep.version.range, (node != null) ? node.version.str : "∅");
 				bool ok = node != null && Semver.satisfies_range (node.version, dep.version.range);
 				if (!ok)
 					queue.offer ((node != null) ? node : base_node);
@@ -203,7 +203,7 @@ namespace Frida {
 			var root = new PackageNode (manifest.name, manifest.version, manifest.dependencies);
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in manifest.dependencies.all.values) {
+			foreach (PackageDependency d in root.active_deps.values) {
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -225,9 +225,7 @@ namespace Frida {
 				var node = add_child_node (host, dep, pdata);
 
 				if (expanded.add (pdata.resolved_url)) {
-					foreach (PackageDependency cd in pdata.dependencies.all.values) {
-						if (cd.role == DEVELOPMENT)
-							continue;
+					foreach (PackageDependency cd in node.active_deps.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -251,7 +249,7 @@ namespace Frida {
 				root.peer_ranges[pd.name] = pd.version.range;
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
-			foreach (PackageDependency d in pdata.dependencies.runtime.values) {
+			foreach (PackageDependency d in root.active_deps.values) {
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -273,9 +271,7 @@ namespace Frida {
 				var node = add_child_node (host, dep, ddata);
 
 				if (expanded.add (ddata.resolved_url)) {
-					foreach (PackageDependency cd in ddata.dependencies.all.values) {
-						if (cd.role == DEVELOPMENT)
-							continue;
+					foreach (PackageDependency cd in node.active_deps.values) {
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -1044,14 +1040,10 @@ namespace Frida {
 			public Gee.Map<string, PackageDependency> active_deps {
 				get {
 					if (_active_deps == null) {
-						if (parent == null) {
-							_active_deps = dependencies.all;
-						} else {
-							_active_deps = new Gee.TreeMap<string, PackageDependency> ();
-							foreach (var d in dependencies.all.values) {
-								if (d.role != DEVELOPMENT)
-									_active_deps[d.name] = d;
-							}
+						_active_deps = new Gee.TreeMap<string, PackageDependency> ();
+						foreach (var d in dependencies.all.values) {
+							if ((d.role != DEVELOPMENT || parent == null) && d.role != PEER)
+								_active_deps[d.name] = d;
 						}
 					}
 					return _active_deps;
