@@ -587,6 +587,7 @@ namespace Frida {
 
 				pli.deprecated = read_deprecated (lock_r);
 				pli.bin = read_bin (lock_r);
+				pli.has_install_script = read_has_install_script (lock_r);
 				pli.license = read_license (lock_r);
 				pli.funding = read_funding (lock_r);
 				pli.engines = read_engines (lock_r);
@@ -675,6 +676,7 @@ namespace Frida {
 				write_engines (pn.engines, b);
 				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
 				write_bin (pn.bin, b);
+				write_has_install_script (pn.has_install_script, b);
 				write_funding (pn.funding, b);
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
@@ -825,6 +827,7 @@ namespace Frida {
 					node.deprecated = read_deprecated (pkg);
 				if (node.bin == null)
 					node.bin = read_bin (pkg, node.name);
+				node.has_install_script = read_has_install_script (pkg);
 				if (node.license == null)
 					node.license = read_license (pkg);
 				if (node.funding == null)
@@ -1075,6 +1078,7 @@ namespace Frida {
 			public SemverVersion? version;
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
+			public bool has_install_script;
 			public string? resolved;
 			public string? integrity;
 			public string? license;
@@ -1266,6 +1270,7 @@ namespace Frida {
 			public SemverVersion effective_version;
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
+			public bool has_install_script;
 			public string? description;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
@@ -1310,6 +1315,7 @@ namespace Frida {
 
 			rpd.deprecated = read_deprecated (r);
 			rpd.bin = read_bin (r, rpd.name);
+			rpd.has_install_script = read_has_install_script (r);
 			rpd.license = read_license (r);
 			rpd.funding = read_funding (r);
 			rpd.engines = read_engines (r);
@@ -1371,6 +1377,19 @@ namespace Frida {
 
 		private static void write_bin (Gee.Map<string, string>? bin, Json.Builder b) {
 			write_map_str_str (bin, "bin", b);
+		}
+
+		private static bool read_has_install_script (Json.Reader r) {
+			r.read_member ("scripts");
+			bool has_install_script = r.read_member ("install");
+			r.end_member ();
+			r.end_member ();
+			return has_install_script;
+		}
+
+		private static void write_has_install_script (bool has_install_script, Json.Builder b) {
+			if (has_install_script)
+				b.set_member_name ("hasInstallScript").add_boolean_value (has_install_script);
 		}
 
 		private static string? read_description (Json.Reader r) {
