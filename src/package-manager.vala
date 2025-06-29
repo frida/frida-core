@@ -419,8 +419,13 @@ namespace Frida {
 							continue;
 
 						var edge = sib.active_deps[node.name];
-						if (edge != null &&
-								!Semver.satisfies_range (dupe.version, edge.version.range) &&
+						if (edge == null)
+							continue;
+
+						SemverVersion provider_ver = sib.children.has_key (node.name)
+							? sib.children[node.name].version
+							: dupe.version;
+						if (!Semver.satisfies_range (provider_ver, edge.version.range) &&
 								Semver.satisfies_range (node.version, edge.version.range)) {
 							dupe_breaks_req = true;
 							break;
