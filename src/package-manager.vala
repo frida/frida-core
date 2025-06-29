@@ -588,6 +588,7 @@ namespace Frida {
 				pli.deprecated = read_deprecated (lock_r);
 				pli.bin = read_bin (lock_r);
 				pli.has_install_script = read_has_install_script (lock_r);
+				pli.optional_peers = read_optional_peers (lock_r);
 				pli.license = read_license (lock_r);
 				pli.funding = read_funding (lock_r);
 				pli.engines = read_engines (lock_r);
@@ -677,6 +678,7 @@ namespace Frida {
 				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
 				write_bin (pn.bin, b);
 				write_has_install_script (pn.has_install_script, b);
+				write_optional_peers (pn.optional_peers, b);
 				write_funding (pn.funding, b);
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
 
@@ -828,6 +830,8 @@ namespace Frida {
 				if (node.bin == null)
 					node.bin = read_bin (pkg, node.name);
 				node.has_install_script = read_has_install_script (pkg);
+				if (node.optional_peers == null)
+					node.optional_peers = read_optional_peers (pkg);
 				if (node.license == null)
 					node.license = read_license (pkg);
 				if (node.funding == null)
@@ -885,7 +889,7 @@ namespace Frida {
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
 			public bool has_install_script = false;
-			public Gee.Map<string, Gee.Map<string, bool>>? peer_dep_meta;
+			public Gee.Set<string> optional_peers;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
@@ -1079,6 +1083,7 @@ namespace Frida {
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
 			public bool has_install_script;
+			public Gee.Set<string> optional_peers;
 			public string? resolved;
 			public string? integrity;
 			public string? license;
@@ -1271,6 +1276,7 @@ namespace Frida {
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
 			public bool has_install_script;
+			public Gee.Set<string> optional_peers;
 			public string? description;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
@@ -1316,6 +1322,7 @@ namespace Frida {
 			rpd.deprecated = read_deprecated (r);
 			rpd.bin = read_bin (r, rpd.name);
 			rpd.has_install_script = read_has_install_script (r);
+			rpd.optional_peers = read_optional_peers (r);
 			rpd.license = read_license (r);
 			rpd.funding = read_funding (r);
 			rpd.engines = read_engines (r);
@@ -1392,6 +1399,47 @@ namespace Frida {
 		private static void write_has_install_script (bool has_install_script, Json.Builder b) {
 			if (has_install_script)
 				b.set_member_name ("hasInstallScript").add_boolean_value (has_install_script);
+		}
+
+		private static Gee.Set<string> read_optional_peers (Json.Reader r) throws Error {
+			var result = new Gee.HashSet<string> ();
+			if (!r.read_member ("peerDependenciesMeta")) {
+				r.end_member ();
+				return result;
+			}
+
+			string[]? members = r.list_members ();
+			if (members == null)
+				throw new Error.PROTOCOL ("Invalid 'peerDependenciesMeta' field");
+			foreach (unowned string dep_name in members) {
+				r.read_member (dep_name);
+				r.read_member ("optional");
+				if (r.get_boolean_value ())
+					result.add (dep_name);
+				r.end_member ();
+				r.end_member ();
+			}
+
+			r.end_member ();
+
+			return result;
+		}
+
+		private static void write_optional_peers (Gee.Set<string> optional_peers, Json.Builder b) {
+			if (optional_peers.is_empty)
+				return;
+			b
+				.set_member_name ("peerDependenciesMeta")
+				.begin_object ();
+			foreach (string dep_name in optional_peers) {
+				b
+					.set_member_name (dep_name)
+					.begin_object ()
+					.set_member_name ("optional")
+					.add_boolean_value (true)
+					.end_object ();
+			}
+			b.end_object ();
 		}
 
 		private static string? read_description (Json.Reader r) {
