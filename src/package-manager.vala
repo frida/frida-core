@@ -394,34 +394,29 @@ namespace Frida {
 					}
 
 					if (dupe.version.str == node.version.str) {
-						merge_children (dupe, node);
+						for (var a = anc; a != null; a = a.parent) {
+							foreach (var sib in a.children.values) {
+								if (sib == node)
+									continue;
+								var edge = sib.active_deps[node.name];
+								if (edge == null)
+									continue;
 
-						bool ok = true;
-						foreach (var sib in anc.children.values) {
-							if (sib == node)
-								continue;
-							var edge = sib.active_deps[node.name];
-							if (edge == null)
-								continue;
+								SemverVersion v = sib.children.has_key (node.name)
+									? sib.children[node.name].version
+									: dupe.version;
 
-							SemverVersion v = sib.children.has_key (node.name)
-								? sib.children[node.name].version
-								: dupe.version;
-
-							if (!Semver.satisfies_range (v, edge.version.range)) {
-								ok = false;
-								break;
+								if (!Semver.satisfies_range (v, edge.version.range)) {
+									if (enable_logging)
+										dbg ("  NO – version conflict");
+									return false;
+								}
 							}
-						}
-						if (!ok) {
-							if (enable_logging)
-								dbg ("  NO – version conflict");
-							parent.children[node.name] = node;
-							return false;
 						}
 
 						if (enable_logging)
 							dbg ("  YES – same version, moved to %s", path_of (anc));
+						merge_children (dupe, node);
 						parent.children.unset (node.name);
 						node.parent = null;
 						return true;
