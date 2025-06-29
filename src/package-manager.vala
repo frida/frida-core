@@ -305,6 +305,8 @@ namespace Frida {
 			do {
 				changed = false;
 
+				recount_edges_in (root);
+
 				var bfs = new Gee.ArrayQueue<PackageNode> ();
 				var seen = new Gee.HashSet<PackageNode> ();
 
@@ -343,16 +345,19 @@ namespace Frida {
 
 						bool ok = true;
 						foreach (var sib in anc.children.values) {
-							if (sib == node) continue;
+							if (sib == node)
+								continue;
 							var edge = sib.active_deps[node.name];
-							if (edge == null) continue;
+							if (edge == null)
+								continue;
 
 							SemverVersion v = sib.children.has_key (node.name)
 								? sib.children[node.name].version
 								: dupe.version;
 
 							if (!Semver.satisfies_range (v, edge.version.range)) {
-								ok = false; break;
+								ok = false;
+								break;
 							}
 						}
 						if (!ok) {
@@ -425,6 +430,30 @@ namespace Frida {
 				node.depth = anc.depth + 1;
 
 				return true;
+			}
+		}
+
+		private static void recount_edges_in (PackageNode root) throws Error {
+			var stack = new Gee.LinkedList<PackageNode> ();
+
+			PackageNode? n;
+			stack.offer_head (root);
+			while ((n = stack.poll_head ()) != null) {
+				n.edges_in = 0;
+				foreach (var ch in n.children.values)
+					stack.offer_head (ch);
+			}
+
+			stack.offer_head (root);
+			while ((n = stack.poll_head ()) != null) {
+				foreach (PackageDependency dep in n.active_deps.values) {
+					var provider = n.find_provider (dep.name);
+					if (provider != null && Semver.satisfies_range (provider.version, dep.version.range))
+						provider.edges_in++;
+				}
+
+				foreach (var ch in n.children.values)
+					stack.offer_head (ch);
 			}
 		}
 
