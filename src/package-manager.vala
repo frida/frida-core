@@ -415,6 +415,9 @@ namespace Frida {
 
 					bool dupe_breaks_req = false;
 					foreach (var sib in anc.children.values) {
+						if (sib == parent)
+							continue;
+
 						var edge = sib.active_deps[node.name];
 						if (edge != null &&
 								!Semver.satisfies_range (dupe.version, edge.version.range) &&
