@@ -413,70 +413,11 @@ namespace Frida {
 						return true;
 					}
 
-					bool dupe_breaks_req = false;
-					foreach (var sib in anc.children.values) {
-						if (sib == parent)
-							continue;
-
-						var edge = sib.active_deps[node.name];
-						if (edge == null)
-							continue;
-
-						SemverVersion provider_ver = sib.children.has_key (node.name)
-							? sib.children[node.name].version
-							: dupe.version;
-						if (!Semver.satisfies_range (provider_ver, edge.version.range) &&
-								Semver.satisfies_range (node.version, edge.version.range)) {
-							dupe_breaks_req = true;
-							break;
-						}
+					if (enable_logging) {
+						dbg ("  NO – version conflict with existing %s at %s",
+							 dupe.version.str, path_of (anc));
 					}
-					if (!dupe_breaks_req) {
-						if (enable_logging)
-							dbg ("  NO – existing copy already satisfies every range");
-						return false;
-					}
-
-					if (!satisfies_all_ancestors (node, anc)) {
-						if (enable_logging)
-							dbg ("  NO – not satisfying ancestor version requirements");
-						return false;
-					}
-
-					for (var a = anc; a != null; a = a.parent) {
-						foreach (var sib in a.children.values) {
-							if (sib == node)
-								continue;
-
-							var edge = sib.active_deps[node.name];
-							if (edge == null)
-								continue;
-
-							SemverVersion v = sib.children.has_key (node.name)
-											? sib.children[node.name].version
-											: node.version;
-							if (!Semver.satisfies_range (v, edge.version.range)) {
-								if (enable_logging) {
-									dbg ("  NO – not satisfying sibling version requirements: v=%s edge.version.range=%s",
-										v.str,
-										edge.version.range);
-								}
-								return false;
-							}
-						}
-					}
-
-					parent.children[node.name] = dupe;
-					dupe.parent = parent;
-					dupe.depth = parent.depth + 1;
-
-					anc.children[node.name] = node;
-					node.parent = anc;
-					node.depth = anc.depth + 1;
-
-					if (enable_logging)
-						dbg ("  YES – swapped with existing, moved to %s", path_of (anc));
-					return true;
+					return false;
 				}
 
 				var anc = parent.parent;
