@@ -374,9 +374,9 @@ namespace Frida {
 					return false;
 
 				for (var anc = parent.parent; anc != null; anc = anc.parent) {
-					if (sibling_branch_conflict (anc, parent)) {
+					if (sibling_branch_conflict (anc, parent, node)) {
 						if (enable_logging)
-							dbg ("  NO – version conflict with other branch below %s", path_of (anc));
+							dbg ("  NO – version conflict with sibling branch below %s", path_of (anc));
 						return false;
 					}
 
@@ -506,22 +506,27 @@ namespace Frida {
 			return true;
 		}
 
-		private static bool sibling_branch_conflict (PackageNode anc, PackageNode node) {
-			var q = new Gee.ArrayQueue<PackageNode> ();
-			q.offer (anc);
-
-			PackageNode? cur;
-			while ((cur = q.poll ()) != null) {
-				if (cur == node)
+		private static bool sibling_branch_conflict (PackageNode anc, PackageNode parent, PackageNode node) {
+			foreach (var branch in anc.children.values) {
+				if (branch == parent)
 					continue;
-
-				foreach (var ch in cur.children.values) {
-					if (ch.name == node.name && ch.version.str != node.version.str)
-						return true;
-					q.offer (ch);
-				}
+				if (contains_other_version (branch, node.name, node.version.str))
+					return true;
 			}
+			return false;
+		}
 
+		private static bool contains_other_version (PackageNode root, string pkgName, string wanted) {
+			var q = new Gee.ArrayQueue<PackageNode> ();
+			q.offer (root);
+
+			PackageNode? n;
+			while ((n = q.poll ()) != null) {
+				if (n.name == pkgName && n.version.str != wanted)
+					return true;
+				foreach (var ch in n.children.values)
+					q.offer (ch);
+			}
 			return false;
 		}
 
