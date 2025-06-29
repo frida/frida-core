@@ -387,7 +387,8 @@ namespace Frida {
 			PackageNode? cur;
 			while ((cur = bfs.poll ()) != null) {
 				foreach (var child in cur.children.values) {
-					if (may_hoist (child))
+					bool enable_logging = child.name in interesting_packages;
+					if (may_hoist (child, enable_logging))
 						hoistables.add (child);
 
 					bfs.offer (child);
@@ -401,7 +402,6 @@ namespace Frida {
 		 * between scan and move – but we only touch that single branch.
 		 */
 		private static bool hoist_pass (PackageNode node) throws Error {
-			/* unchanged logging toggle */
 			bool enable_logging = node.name in interesting_packages;
 
 			var parent = node.parent;
@@ -417,7 +417,7 @@ namespace Frida {
 			}
 
 			/* Re-run conflict guards (same tests used in scan()) */
-			if (sibling_branch_conflict (anc, parent, node) ||
+			if (sibling_branch_conflict (anc, parent, node, enable_logging) ||
 				!anc_accepts (anc, node)						  ||
 				!peer_requirements_ok (anc, node))
 			{
@@ -459,22 +459,39 @@ namespace Frida {
 		/* ------------------------------------------------------------------------ */
 		/* ----------  tiny helpers used by both phases  -------------------------- */
 
-		/* ------------------------------------------------------------------------ */
-		/* 1️⃣  check if ancestor’s other sub-trees contain incompatible versions  */
-		private static bool sibling_branch_conflict (PackageNode anc, PackageNode parent, PackageNode node) throws Error {
+		/* ------------------------------------------------------------------ */
+		/*  Detect whether some *other* branch under the same ancestor `anc`  */
+		/*  already contains an *incompatible* copy of `node`.                */
+		/*                                                                    */
+		/*  – If we find a sibling-branch copy with a *different* version      */
+		/*    we must refuse the hoist, because that sibling would resolve    */
+		/*    to the wrong package after we move `node` higher.                */
+		/*                                                                    */
+		/*  – If every copy we find is the *same* version we’re good.          */
+		/*                                                                    */
+		/*  The routine never mutates the graph – it is used purely as a      */
+		/*  guard.                                                             */
+		/* ------------------------------------------------------------------ */
+		private static bool sibling_branch_conflict (PackageNode anc, PackageNode parent, PackageNode node, bool enable_logging)
+				throws Error {
 			foreach (var sib in anc.children.values) {
 				if (sib == parent)
-					continue;					  // same branch we’re hoisting from
+					continue;					   // same branch we’re hoisting from
 
-				/* `lookup()` is your recursive search helper */
+				/* Use your existing recursive lookup. */
 				PackageNode? other = sib.lookup (node.name);
 				if (other == null)
 					continue;
 
-				/* any different version down that sibling branch is a blocker */
-				if (other.version.str != node.version.str)
+				/* Version mismatch?  That’s a blocker. */
+				if (other.version.str != node.version.str) {
+					if (enable_logging)
+						dbg ("  NO – version conflict with sibling branch below %s", path_of (anc));
 					return true;
+				}
 			}
+
+			/* No conflicting sibling found → safe to proceed. */
 			return false;
 		}
 
@@ -497,14 +514,14 @@ namespace Frida {
 		}
 
 		/* 4️⃣  may_hoist() – wrapper used during scan() */
-		private static bool may_hoist (PackageNode node) throws Error {
+		private static bool may_hoist (PackageNode node, bool enable_logging) throws Error {
 		    var parent = node.parent;
 		    if (parent == null || parent.parent == null)
 			return false;
 
 		    var anc = parent.parent;
 
-		    return !sibling_branch_conflict (anc, parent, node) &&
+		    return !sibling_branch_conflict (anc, parent, node, enable_logging) &&
 			   anc_accepts (anc, node)                       &&
 			   peer_requirements_ok (anc, node);
 		}
