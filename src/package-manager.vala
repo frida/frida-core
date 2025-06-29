@@ -353,111 +353,149 @@ namespace Frida {
 		 *  possible – exactly like before, but with far fewer rescans.
 		 ****************************************************************/
 
-		private static void hoist_graph (PackageNode root) throws Error {
-			bool changed = false;
-			do {
-				changed = false;
-				recount_edges_in (root);
+/* --------------------------------------------------------------- *
+ *  Hoist driver                                                   *
+ * --------------------------------------------------------------- */
 
-				/* ----------------  Phase A – collect hoistable nodes  ---------------- */
-				Gee.ArrayList<PackageNode> to_hoist = new Gee.ArrayList<PackageNode>();
+private static void hoist_graph (PackageNode root) throws Error
+{
+    bool changed = false;
+    do
+    {
+        /* Always keep dependency edges up-to-date before each pass. */
+        recount_edges_in (root);
 
-				scan (root, to_hoist);
+        /* 1️⃣  Build <pkg-name → global consumer count>. */
+        var usage = new Gee.HashMap<string,int>();
+        build_global_usage (root, usage);
 
-				/* ----------------  Phase B – apply the moves  ---------------- */
-				foreach (var node in to_hoist) {
-					if (hoist_pass (node)) {
-						changed = true;
-					}
-				}
-			} while (changed);
-		}
+        /* 2️⃣  One pass of hoisting that may move several nodes. */
+        changed = hoist_pass (root, usage);
+    }
+    while (changed);
+}
 
-		/* ------------------------------------------------------------------------ */
-		/* Phase-A helper: breadth-first scan.  A node is *recorded* (not moved yet)
-		 * when the package can live at parent.parent without breaking:
-		 *   • its own range requirements						 (active_deps+peers)
-		 *   • every sibling branch below parent				  (sibling conflict)
-		 *   • every direct request on ancestor (parent.parent)   (need_here)
-		 */
-		private static void scan (PackageNode root, Gee.ArrayList<PackageNode> hoistables) throws Error {
-			var bfs = new Gee.ArrayQueue<PackageNode>();
-			bfs.offer (root);
+/* --------------------------------------------------------------- *
+ *  Build global usage map                                         *
+ * --------------------------------------------------------------- */
 
-			PackageNode? cur;
-			while ((cur = bfs.poll ()) != null) {
-				foreach (var child in cur.children.values) {
-					bool enable_logging = child.name in interesting_packages;
-					if (enable_logging)
-						dbg ("scan() HOIST?  %s@%s  from=%s", child.name, child.version.str, path_of (child));
+private static void build_global_usage (PackageNode            node,
+                                        Gee.HashMap<string,int> usage)
+{
+    /* Count every edge once (peer deps are already in active_deps). */
+    foreach (PackageDependency dep in node.active_deps.values)
+    {
+        int n = 0;
+        int? cur = usage.get (dep.name);        // returns null if missing
+        if (cur != null)
+            n = cur;
+        usage.set (dep.name, n + 1);
+    }
 
-					if (may_hoist (child, enable_logging))
-						hoistables.add (child);
+    foreach (var child in node.children.values)
+        build_global_usage (child, usage);
+}
 
-					bfs.offer (child);
-				}
-			}
-		}
+/* --------------------------------------------------------------- *
+ *  scan(): collect nodes that are safe to hoist                   *
+ * --------------------------------------------------------------- */
 
-		/* ------------------------------------------------------------------------ */
-		/* Phase-B helper: *actually* move one node that scan() deemed hoistable.
-		 * This re-checks the same conditions because the graph may have changed
-		 * between scan and move – but we only touch that single branch.
-		 */
-		private static bool hoist_pass (PackageNode node) throws Error {
-			bool enable_logging = node.name in interesting_packages;
+private static void scan (PackageNode              parent,
+                          Gee.HashMap<string,int>  usage,
+                          Gee.ArrayList<PackageNode> candidates,
+                          Gee.HashSet<PackageNode> visited)
+{
+    foreach (var child in parent.children.values)
+    {
+        if (!visited.add (child))
+            continue;                            // already seen elsewhere
 
-			var parent = node.parent;
-			if (parent == null || parent.parent == null)
-				return false;
+        int? cnt = usage.get (child.name);
+        if (cnt == 1)                            // only its own parent uses it
+            candidates.add (child);
 
-			var anc = parent.parent;
+        scan (child, usage, candidates, visited);
+    }
+}
 
-			if (enable_logging) {
-				dbg ("HOIST?  %s@%s  from=%s  parent=%s  anc=%s",
-					 node.name, node.version.str,
-					 path_of (node), path_of (parent), path_of (anc));
-			}
+/* --------------------------------------------------------------- *
+ *  One complete hoist pass                                        *
+ * --------------------------------------------------------------- */
 
-			/* Re-run conflict guards (same tests used in scan()) */
-			if (sibling_branch_conflict (anc, parent, node, enable_logging) ||
-				!anc_accepts (anc, node)						  ||
-				!peer_requirements_ok (anc, node))
-			{
-				if (enable_logging)
-					dbg ("  NO – guard failed during apply-phase");
-				return false;
-			}
+private static bool hoist_pass (PackageNode             root,
+                                Gee.HashMap<string,int> usage)
+                                throws Error
+{
+    var candidates = new Gee.ArrayList<PackageNode>();
+    var visited    = new Gee.HashSet<PackageNode>();
 
-			/* If ancestor already has a *same-version* copy, merge. */
-			PackageNode? dupe = anc.children[node.name];
-			if (dupe != null) {
-				if (dupe.version.str != node.version.str) {
-					if (enable_logging)
-						dbg ("  NO – version conflict with existing %s at %s",
-							 dupe.version.str, path_of (anc));
-					return false;
-				}
+    scan (root, usage, candidates, visited);
 
-				merge_children (dupe, node);
-				parent.children.unset (node.name);
-				node.parent = null;
-				if (enable_logging)
-					dbg ("  YES – same version, merged into %s", path_of (anc));
-				return true;
-			}
+    bool changed = false;
+    foreach (var node in candidates)
+    {
+        if (try_hoist (node))                    // uses your existing helper
+            changed = true;
+    }
+    return changed;
+}
 
-			/* Normal hoist: detach and re-attach */
-			parent.children.unset (node.name);
-			anc.children[node.name] = node;
-			node.parent = anc;
-			node.depth  = anc.depth + 1;
+/**
+ * Final “apply” step: move `node` one level up (to its grand-parent)
+ * - or merge with the copy that is already there - once scan() has
+ * verified that doing so is safe.
+ *
+ * Returns **true** if something was actually changed.
+ */
+private static bool try_hoist (PackageNode node) throws Error
+{
+    // Keep your existing selective debug tracing
+    bool enable_logging = node.name in interesting_packages;
 
-			if (enable_logging)
-				dbg ("  YES – moved to %s", path_of (anc));
+    // We only ever hoist one level (parent → grand-parent)
+    var parent = node.parent;
+    if (parent == null || parent.parent == null)
+        return false;
 
-			return true;
-		}
+    var target = parent.parent;          // “ancestor” in the old code
+
+    /*-----------------------------------------------------------*
+     * Case 1: a package with the same name already exists under
+     *         the target.  We only merge if the versions match.
+     *-----------------------------------------------------------*/
+    var existing = target.children.get (node.name);
+    if (existing != null)
+    {
+        if (existing.version.str != node.version.str)
+        {
+            if (enable_logging)
+                dbg ("  NO – version conflict with existing %s at %s",
+                     existing.version.str, path_of (target));
+            return false;
+        }
+
+        if (enable_logging)
+            dbg ("  YES – same version, merged into %s", path_of (target));
+
+        merge_children (existing, node);          // reuse your util
+        parent.children.unset (node.name);
+        node.parent = null;                       // let GC collect it
+        return true;
+    }
+
+    /*-----------------------------------------------------------*
+     * Case 2: no duplicate – we can simply re-attach the node.
+     *-----------------------------------------------------------*/
+    if (enable_logging)
+        dbg ("  YES – moved to %s", path_of (target));
+
+    parent.children.unset (node.name);
+    target.children.set (node.name, node);
+    node.parent = target;
+    node.depth  = target.depth + 1;
+
+    return true;
+}
 
 		/* ------------------------------------------------------------------------ */
 		/* ----------  tiny helpers used by both phases  -------------------------- */
@@ -475,59 +513,6 @@ namespace Frida {
 		/*  The routine never mutates the graph – it is used purely as a      */
 		/*  guard.                                                             */
 		/* ------------------------------------------------------------------ */
-		private static bool sibling_branch_conflict (PackageNode anc, PackageNode parent, PackageNode node, bool enable_logging)
-				throws Error {
-			foreach (var sib in anc.children.values) {
-				if (sib == parent)
-					continue;					   // same branch we’re hoisting from
-
-				/* Use your existing recursive lookup. */
-				PackageNode? other = sib.lookup (node.name);
-				if (other == null)
-					continue;
-
-				/* Version mismatch?  That’s a blocker. */
-				if (other.version.str != node.version.str) {
-					if (enable_logging)
-						dbg ("  NO – version conflict with sibling branch below %s", path_of (anc));
-					return true;
-				}
-			}
-
-			/* No conflicting sibling found → safe to proceed. */
-			return false;
-		}
-
-		/* 2️⃣  does ancestor itself request this package, and is version OK? */
-		private static bool anc_accepts (PackageNode anc, PackageNode node) throws Error
-		{
-			PackageDependency? need = anc.active_deps[node.name];
-			return (need == null) || Semver.satisfies_range (node.version, need.version.range);
-		}
-
-		/* 3️⃣  all peer deps provided? */
-		private static bool peer_requirements_ok (PackageNode anc, PackageNode node) throws Error {
-			foreach (var pr in node.peer_ranges.entries) {
-				var prov = anc.find_provider (pr.key);
-				if (prov == null ||
-					!Semver.satisfies_range (prov.version, pr.value))
-					return false;
-			}
-			return true;
-		}
-
-		/* 4️⃣  may_hoist() – wrapper used during scan() */
-		private static bool may_hoist (PackageNode node, bool enable_logging) throws Error {
-		    var parent = node.parent;
-		    if (parent == null || parent.parent == null)
-			return false;
-
-		    var anc = parent.parent;
-
-		    return !sibling_branch_conflict (anc, parent, node, enable_logging) &&
-			   anc_accepts (anc, node)                       &&
-			   peer_requirements_ok (anc, node);
-		}
 
 		private static void recount_edges_in (PackageNode root) throws Error {
 			var stack = new Gee.LinkedList<PackageNode> ();
