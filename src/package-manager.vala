@@ -273,6 +273,7 @@ namespace Frida {
 		private static PackageNode add_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
 				throws Error {
 			var n = new PackageNode (data.name, data.effective_version, data.dependencies);
+			n.deprecated = data.deprecated;
 			n.license = data.license;
 			n.funding = data.funding;
 			n.engines = data.engines;
@@ -584,6 +585,7 @@ namespace Frida {
 					lock_r.end_member ();
 				}
 
+				pli.deprecated = read_deprecated (lock_r);
 				pli.license = read_license (lock_r);
 				pli.funding = read_funding (lock_r);
 				pli.engines = read_engines (lock_r);
@@ -657,6 +659,7 @@ namespace Frida {
 				PackageNode pn = path_map[k];
 				b.set_member_name (k).begin_object ();
 				write_version (pn.version, b);
+				write_deprecated (pn.deprecated, b);
 				b
 					.set_member_name ("resolved")
 					.add_string_value (pn.resolved)
@@ -870,6 +873,10 @@ namespace Frida {
 		private class PackageNode {
 			public string? name;
 			public SemverVersion? version;
+			public string? deprecated;
+			public Gee.Map<string, string>? bin;
+			public bool has_install_script = false;
+			public Gee.Map<string, Gee.Map<string, bool>>? peer_dep_meta;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
@@ -1060,6 +1067,7 @@ namespace Frida {
 			public string path_key;
 			public string? name;
 			public SemverVersion? version;
+			public string? deprecated;
 			public string? resolved;
 			public string? integrity;
 			public string? license;
@@ -1249,14 +1257,16 @@ namespace Frida {
 		private class ResolvedPackageData {
 			public string name;
 			public SemverVersion effective_version;
-			public string resolved_url;
-			public string? integrity;
-			public string? shasum;
+			public string? deprecated;
 			public string? description;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
 			public PackageDependencies dependencies;
+
+			public string resolved_url;
+			public string? integrity;
+			public string? shasum;
 		}
 
 		private async void fetch_packument_for_cache (string name, Promise<Json.Node> request, Cancellable? cancellable)
@@ -1290,6 +1300,7 @@ namespace Frida {
 
 			reader.end_member ();
 
+			rpd.deprecated = read_deprecated (reader);
 			rpd.license = read_license (reader);
 			rpd.funding = read_funding (reader);
 			rpd.engines = read_engines (reader);
@@ -1304,6 +1315,18 @@ namespace Frida {
 		private static void write_version (SemverVersion? version, Json.Builder b) {
 			if (version != null)
 				b.set_member_name ("version").add_string_value (version.str);
+		}
+
+		private static string? read_deprecated (Json.Reader reader) {
+			reader.read_member ("deprecated");
+			string? str = reader.get_string_value ();
+			reader.end_member ();
+			return str;
+		}
+
+		private static void write_deprecated (string? msg, Json.Builder b) {
+			if (msg != null)
+				b.set_member_name ("deprecated").add_string_value (msg);
 		}
 
 		private static string? read_description (Json.Reader reader) {
