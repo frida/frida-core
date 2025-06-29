@@ -331,8 +331,10 @@ namespace Frida {
 				PackageNode? n;
 				while ((n = bfs.poll ()) != null) {
 					foreach (var child in n.children.values.to_array ()) {
-						while (try_hoist (child))
+						while (try_hoist (child)) {
+							recount_edges_in (root);
 							changed = true;
+						}
 
 						if (child.parent != null && seen.add (child))
 							bfs.offer (child);
@@ -392,12 +394,6 @@ namespace Frida {
 					}
 
 					if (dupe.version.str == node.version.str) {
-						if (shadowed_between (parent, anc, node.name, node.version)) {
-							if (enable_logging)
-								dbg ("  NO – shadowed between parent and anc");
-							continue;
-						}
-
 						merge_children (dupe, node);
 
 						bool ok = true;
@@ -447,44 +443,32 @@ namespace Frida {
 						return false;
 					}
 
-					PackageDependency? need_anc = anc.active_deps[node.name];
-					if (need_anc != null && !Semver.satisfies_range (node.version, need_anc.version.range)) {
-						if (enable_logging) {
-							dbg ("  NO – not satisfying ancestor version requirements: node.version=%s need_anc.version.range=%s",
-								node.version.str,
-								need_anc.version.range);
-						}
+					if (!satisfies_all_ancestors (node, anc)) {
+						if (enable_logging)
+							dbg ("  NO – not satisfying ancestor version requirements");
 						return false;
 					}
 
-					PackageDependency? need_par = parent.active_deps[node.name];
-					if (need_par != null && !Semver.satisfies_range (dupe.version, need_par.version.range)) {
-						if (enable_logging) {
-							dbg ("  NO – not satisfying parent version requirements: node.version=%s need_par.version.range=%s",
-								node.version.str,
-								need_par.version.range);
-						}
-						return false;
-					}
+					for (var a = anc; a != null; a = a.parent) {
+						foreach (var sib in a.children.values) {
+							if (sib == node)
+								continue;
 
-					foreach (var sib in anc.children.values) {
-						if (sib == node)
-							continue;
+							var edge = sib.active_deps[node.name];
+							if (edge == null)
+								continue;
 
-						var edge = sib.active_deps[node.name];
-						if (edge == null)
-							continue;
-
-						SemverVersion v = sib.children.has_key (node.name)
-										 ? sib.children[node.name].version
-										 : node.version;
-						if (!Semver.satisfies_range (v, edge.version.range)) {
-							if (enable_logging) {
-								dbg ("  NO – not satisfying sibling version requirements: v=%s edge.version.range=%s",
-									v.str,
-									edge.version.range);
+							SemverVersion v = sib.children.has_key (node.name)
+											? sib.children[node.name].version
+											: node.version;
+							if (!Semver.satisfies_range (v, edge.version.range)) {
+								if (enable_logging) {
+									dbg ("  NO – not satisfying sibling version requirements: v=%s edge.version.range=%s",
+										v.str,
+										edge.version.range);
+								}
+								return false;
 							}
-							return false;
 						}
 					}
 
@@ -572,13 +556,13 @@ namespace Frida {
 			}
 		}
 
-		private static bool shadowed_between (PackageNode from, PackageNode to, string pkg, SemverVersion node_ver) {
-			for (var anc = from.parent; anc != null && anc != to; anc = anc.parent) {
-				var child = anc.children[pkg];
-				if (child != null && child.version.str != node_ver.str)
-					return true;
+		private static bool satisfies_all_ancestors (PackageNode node, PackageNode anc_or_higher) {
+			for (var a = anc_or_higher; a != null; a = a.parent) {
+				var need = a.active_deps[node.name];
+				if (need != null && !Semver.satisfies_range (node.version, need.version.range))
+					return false;
 			}
-			return false;
+			return true;
 		}
 
 		private static void merge_children (PackageNode target, PackageNode donor) {
