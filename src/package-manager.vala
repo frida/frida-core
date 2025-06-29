@@ -413,19 +413,19 @@ namespace Frida {
 						return true;
 					}
 
-					int vcmp = Semver.compare_version (node.version, dupe.version);
-					bool node_wins =
-						(node.edges_in > dupe.edges_in) ||
-						((node.edges_in == dupe.edges_in) && (vcmp > 0)) ||
-						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth < dupe.depth));
-
-					if (!node_wins) {
-						if (enable_logging) {
-							dbg ("  NO – node{version=%s edges_in=%u depth=%u} dupe{version=%s edges_in=%u depth=%u} vcmp=%d",
-								node.version.str, node.edges_in, node.depth,
-								dupe.version.str, dupe.edges_in, dupe.depth,
-								vcmp);
+					bool dupe_breaks_req = false;
+					foreach (var sib in anc.children.values) {
+						var edge = sib.active_deps[node.name];
+						if (edge != null &&
+								!Semver.satisfies_range (dupe.version, edge.version.range) &&
+								Semver.satisfies_range (node.version, edge.version.range)) {
+							dupe_breaks_req = true;
+							break;
 						}
+					}
+					if (!dupe_breaks_req) {
+						if (enable_logging)
+							dbg ("  NO – existing copy already satisfies every range");
 						return false;
 					}
 
