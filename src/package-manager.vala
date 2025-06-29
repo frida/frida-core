@@ -1236,7 +1236,7 @@ namespace Frida {
 					if (d.role != DEVELOPMENT) {
 						var child = node.find_provider (d.name);
 						if (child == null) {
-							printerr ("WARNING: Package '%s' needs dependency '%s', but it is missing", node.name, d.name);
+							printerr ("WARNING: Package '%s' needs dependency '%s', but it is missing\n", node.name, d.name);
 							/*
 							if (!node.optional_peers.contains (d.name)) {
 								throw new Error.PROTOCOL (
