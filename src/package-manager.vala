@@ -337,182 +337,285 @@ namespace Frida {
 			"type-fest",
 		};
 
-		/****************************************************************/
-		/* 2-PHASE HOIST ALGORITHM — keeps all your dbg() instrumentation
-		 * and honours interesting_packages for selective logging.
-		 *
-		 *  ──  Phase A  ──   scan() walks the graph **once** and records
-		 *					every node that *could* safely move higher.
-		 *
-		 *  ──  Phase B  ──   hoist_pass() applies the moves in breadth-
-		 *					first order (top-down) so that we never
-		 *					re-traverse sub-trees that were already
-		 *					scanned.
-		 *
-		 *  The outer while-loop keeps running until no further moves are
-		 *  possible – exactly like before, but with far fewer rescans.
-		 ****************************************************************/
+		private struct HoistInfo {
+			public Gee.Map<string, PackageInfo> entries = new Gee.HashMap<string, PackageInfo>();
 
-/* --------------------------------------------------------------- *
- *  Hoist driver                                                   *
- * --------------------------------------------------------------- */
+			public void add_range (string pkg, string range) {
+				var info = entries.get (pkg) ?? (() => { var x = new PackageInfo(); entries[pkg] = x; return x; }) ();
+				info.ranges.add (range);
+			}
 
-private static void hoist_graph (PackageNode root) throws Error
-{
-    bool changed = false;
-    do
-    {
-        /* Always keep dependency edges up-to-date before each pass. */
-        recount_edges_in (root);
+			public void add_version (string pkg, SemverVersion v, PackageNode node) {
+				var info = entries.get (pkg) ?? (() => { var x = new PackageInfo();
+									 entries[pkg] = x; return x; }) ();
+				info.versions.add (v);
 
-        /* 1️⃣  Build <pkg-name → global consumer count>. */
-        var usage = new Gee.HashMap<string,int>();
-        build_global_usage (root, usage);
+				var set = info.providers.get (v);
+				if (set == null) {
+					set = new Gee.HashSet<PackageNode>();
+					info.providers[v] = set;
+				}
+				set.add (node);
+			}
 
-        /* 2️⃣  One pass of hoisting that may move several nodes. */
-        changed = hoist_pass (root, usage);
-    }
-    while (changed);
+			public void merge (HoistInfo other) {
+				foreach (var kv in other.entries) {
+					var dst = entries.get (kv.key);
+					if (dst == null) {
+						dst = new PackageInfo ();
+						entries[kv.key] = dst;
+					}
+					dst.versions.add_all   (kv.value.versions);
+					dst.ranges.add_all	 (kv.value.ranges);
+
+					foreach (var pv in kv.value.providers) {
+						var set = dst.providers.get (pv.key);
+						if (set == null) {
+							set = new Gee.HashSet<PackageNode>();
+							dst.providers[pv.key] = set;
+						}
+						set.add_all (pv.value);
+					}
+				}
+			}
+		}
+
+		/*  A small bag used while we recurse.  For every package name we collect
+		 *  - all concrete versions that exist below the current node
+		 *  - all semver ranges required below the current node
+		 *  - a reverse map  version → {all PackageNodes that provide that version}
+		 */
+		private class PackageInfo : Object {
+			public Gee.Set<SemverVersion> versions = new Gee.HashSet<SemverVersion> ();
+			public Gee.Set<string> ranges = new Gee.HashSet<string> ();
+			public Gee.Map<SemverVersion, Gee.Set<PackageNode>> providers = new Gee.HashMap<SemverVersion, Gee.HashSet<PackageNode>> ();
+		}
+
+		/*  Convenience: return the provider-set for (pkg,ver) or an empty set
+		 *  to avoid null checks outside.										*/
+		private static Gee.HashSet<PackageNode> nodes_for_version (HoistInfo info, string pkg, SemverVersion v) {
+			var pi = info.entries.get (pkg);
+			if (pi == null)
+				return new Gee.HashSet<PackageNode> ();
+			return pi.providers.get (v) ?? new Gee.HashSet<PackageNode> ();
+		}
+
+		/* --------------------------------------------------------------------- *
+		 *  Tiny helper that re-attaches a child under a new parent (one level)  *
+		 * --------------------------------------------------------------------- */
+		private static void move_child (PackageNode child, PackageNode new_parent) {
+			var old_parent = child.parent;
+			if (old_parent == null || old_parent == new_parent)
+				return;
+
+			/*  If the destination already has the same package/version,
+			 *  just merge their children so we do not create duplicates.		*/
+			var dup = new_parent.children.get (child.name);
+			if (dup != null) {
+				/* versions already guaranteed equal by caller */
+				merge_children (dup, child);
+				old_parent.children.unset (child.name);
+				return;
+			}
+
+			old_parent.children.unset (child.name);
+			new_parent.children.set (child.name, child);
+
+			child.parent = new_parent;
+			child.depth  = new_parent.depth + 1;
+		}
+
+		/* node → { pkg-name → Choice }  */
+		private static Gee.HashMap<PackageNode, Gee.HashMap<string, Choice>> decisions = new Gee.HashMap<PackageNode, Gee.HashMap<string, Choice>> ();
+
+		private struct Choice {
+			SemverVersion? chosen;		// null = no version works for all
+			Gee.HashSet<PackageNode> providers; // all nodes that have `chosen`
+		}
+
+/* ===================================================================== *
+ *  Phase 0: public entry                                                *
+ * ===================================================================== */
+
+private static void hoist_graph (PackageNode root) {
+    /* Decisions has to be fresh each run. */
+    decisions.clear ();
+
+    /* 1️⃣ collect */
+    scan (root);
+
+    /* 2️⃣ apply   (may need several iterations if you want full fix-point;
+     *              for now one deterministic top-down pass is enough)     */
+    hoist_pass (root);
 }
 
-/* --------------------------------------------------------------- *
- *  Build global usage map                                         *
- * --------------------------------------------------------------- */
+/* ===================================================================== *
+ *  Phase 1: recurse + decide per node                                   *
+ * ===================================================================== */
 
-private static void build_global_usage (PackageNode            node,
-                                        Gee.HashMap<string,int> usage)
-{
-    /* Count every edge once (peer deps are already in active_deps). */
-    foreach (PackageDependency dep in node.active_deps.values)
-    {
-        int n = 0;
-        int? cur = usage.get (dep.name);        // returns null if missing
-        if (cur != null)
-            n = cur;
-        usage.set (dep.name, n + 1);
-    }
+private static HoistInfo scan (PackageNode n) {
+    HoistInfo here;
 
-    foreach (var child in node.children.values)
-        build_global_usage (child, usage);
-}
+    /* 1.  This node’s *own* requirements … */
+    foreach (var dep in n.active_deps.values)
+        here.add_range (dep.name, dep.version.range);
+    foreach (var peer in n.peer_ranges)
+        here.add_range (peer.key, peer.value);
 
-/* --------------------------------------------------------------- *
- *  scan(): collect nodes that are safe to hoist                   *
- * --------------------------------------------------------------- */
+    /* 2.  … plus everything coming from children. */
+    foreach (var child in n.children.values)
+        here.merge (scan (child));
 
-private static void scan (PackageNode              parent,
-                          Gee.HashMap<string,int>  usage,
-                          Gee.ArrayList<PackageNode> candidates,
-                          Gee.HashSet<PackageNode> visited)
-{
-    foreach (var child in parent.children.values)
-    {
-        if (!visited.add (child))
-            continue;                            // already seen elsewhere
+    /* 3.  Remember that *this node* concretely provides its own package. */
+    here.add_version (n.name, n.version, n);
 
-        int? cnt = usage.get (child.name);
-        if (cnt == 1)                            // only its own parent uses it
-            candidates.add (child);
+    /* 4.  Write final Choice table for this node. */
+    var node_tbl = new Gee.HashMap<string,Choice>();
+    decisions[n] = node_tbl;
 
-        scan (child, usage, candidates, visited);
-    }
-}
+    foreach (var e in here.entries) {
+        string pkg          = e.key;
+        var    info         = e.value;
 
-/* --------------------------------------------------------------- *
- *  One complete hoist pass                                        *
- * --------------------------------------------------------------- */
-
-private static bool hoist_pass (PackageNode             root,
-                                Gee.HashMap<string,int> usage)
-                                throws Error
-{
-    var candidates = new Gee.ArrayList<PackageNode>();
-    var visited    = new Gee.HashSet<PackageNode>();
-
-    scan (root, usage, candidates, visited);
-
-    bool changed = false;
-    foreach (var node in candidates)
-    {
-        if (try_hoist (node))                    // uses your existing helper
-            changed = true;
-    }
-    return changed;
-}
-
-/**
- * Final “apply” step: move `node` one level up (to its grand-parent)
- * - or merge with the copy that is already there - once scan() has
- * verified that doing so is safe.
- *
- * Returns **true** if something was actually changed.
- */
-private static bool try_hoist (PackageNode node) throws Error
-{
-    // Keep your existing selective debug tracing
-    bool enable_logging = node.name in interesting_packages;
-
-    // We only ever hoist one level (parent → grand-parent)
-    var parent = node.parent;
-    if (parent == null || parent.parent == null)
-        return false;
-
-    var target = parent.parent;          // “ancestor” in the old code
-
-    /*-----------------------------------------------------------*
-     * Case 1: a package with the same name already exists under
-     *         the target.  We only merge if the versions match.
-     *-----------------------------------------------------------*/
-    var existing = target.children.get (node.name);
-    if (existing != null)
-    {
-        if (existing.version.str != node.version.str)
-        {
-            if (enable_logging)
-                dbg ("  NO – version conflict with existing %s at %s",
-                     existing.version.str, path_of (target));
-            return false;
+        SemverVersion? best = null;
+        foreach (var v in info.versions) {
+            bool ok = true;
+            foreach (var r in info.ranges) {
+                if (!Semver.satisfies_range (v, r)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok && (best == null || Semver.compare (v, best) > 0))
+                best = v;
         }
 
-        if (enable_logging)
-            dbg ("  YES – same version, merged into %s", path_of (target));
+        Choice c;
+        c.chosen    = best;
+        c.providers = (best == null)
+                          ? new Gee.HashSet<PackageNode>()
+                          : nodes_for_version (here, pkg, best);
 
-        merge_children (existing, node);          // reuse your util
-        parent.children.unset (node.name);
-        node.parent = null;                       // let GC collect it
-        return true;
+        node_tbl[pkg] = c;
     }
-
-    /*-----------------------------------------------------------*
-     * Case 2: no duplicate – we can simply re-attach the node.
-     *-----------------------------------------------------------*/
-    if (enable_logging)
-        dbg ("  YES – moved to %s", path_of (target));
-
-    parent.children.unset (node.name);
-    target.children.set (node.name, node);
-    node.parent = target;
-    node.depth  = target.depth + 1;
-
-    return true;
+    return here;
 }
 
-		/* ------------------------------------------------------------------------ */
-		/* ----------  tiny helpers used by both phases  -------------------------- */
+/* ===================================================================== *
+ *  Phase 2: apply / move nodes                                          *
+ * ===================================================================== */
 
-		/* ------------------------------------------------------------------ */
-		/*  Detect whether some *other* branch under the same ancestor `anc`  */
-		/*  already contains an *incompatible* copy of `node`.                */
-		/*                                                                    */
-		/*  – If we find a sibling-branch copy with a *different* version      */
-		/*    we must refuse the hoist, because that sibling would resolve    */
-		/*    to the wrong package after we move `node` higher.                */
-		/*                                                                    */
-		/*  – If every copy we find is the *same* version we’re good.          */
-		/*                                                                    */
-		/*  The routine never mutates the graph – it is used purely as a      */
-		/*  guard.                                                             */
-		/* ------------------------------------------------------------------ */
+private static void hoist_pass (PackageNode n) {
+    /* First recurse so deepest nodes try to move first. */
+    foreach (var child in n.children.values)
+        hoist_pass (child);
+
+    /* Work on a *copy* of the child map – we will mutate it. */
+    foreach (var child in n.children.copy.values) {
+
+        /* Walk ancestors one level at a time, stopping at root. */
+        for (var anc = n.parent;
+             anc != null && anc.parent != null;
+             anc = anc.parent)
+        {
+            var tbl    = decisions.get (anc);
+            var choice = (tbl != null) ? tbl.get (child.name) : null;
+
+            if (choice == null || choice.chosen == null)
+                break;                      // impossible to place higher
+
+            if (child.version != choice.chosen)
+                break;                      // this instance is not the winner
+
+            /* All good – hoist *one* level up and re-iterate from the new
+             * position (so outer loop keeps going if we can move further). */
+            move_child (child, anc);
+        }
+    }
+}
+
+
+
+
+
+		private static void hoist_graph (PackageNode root) {
+			// 1. phase-1 collect
+			var decisions = new Gee.HashMap<PackageNode*, Gee.HashMap<string, Choice>> ();
+			scan (root);
+
+			// 2. phase-2 apply
+			hoist_pass (root);
+		}
+
+		// returns map: pkg-name → { all versions under this node, all semver ranges required under this node }
+		private static HoistInfo scan (PackageNode n) {
+			HoistInfo here;
+
+			// 1. start with own deps / peerDeps
+			foreach (var dep in n.active_deps.values)
+				here.add_range (dep.name, dep.version.range);
+			foreach (var peer in n.peer_ranges.entries)
+				here.add_range (peer.key, peer.value);
+
+			// 2. merge info from children
+			foreach (var child in n.children.values) {
+				var sub = scan (child);
+				here.merge (sub);
+			}
+
+			// 3. also record concrete version *if this node IS that package*
+			here.add_version (n.name, n.version, n);
+
+			// 4. for every package, if *all* concrete versions satisfy *all*
+			//	collected ranges, choose the **max** version (Semver.compare)
+			//	and store it in `decisions[n][pkg].chosen`
+			foreach (var entry in here.entries) {
+				string pkg = entry.key;
+				var info = entry.value;   // {versions, ranges}
+
+				SemverVersion? best = null;
+				foreach (var v in info.versions) {
+					bool ok = true;
+					foreach (var r in info.ranges) {
+						if (!Semver.satisfies_range (v, r)) {
+							ok = false;
+							break;
+						}
+					}
+					if (ok && (best == null || Semver.compare (v, best) > 0))
+						best = v;
+				}
+				decisions[n].set (pkg, {
+								chosen = best,
+								providers = (best == null) ? {} : info.nodes_for (best)
+				});
+			}
+
+			return here;
+		}
+
+		private static void hoist_pass (PackageNode n) {
+			// recurse first so we try to move deepest nodes upward
+			foreach (var child in n.children.values)
+				hoist_pass (child);
+
+			foreach (var child in n.children.copy.values) {
+				// ancestor *above* `n` that we might lift to
+				var target_anc = n.parent;
+				for (; target_anc != null && target_anc.parent != null; target_anc = target_anc.parent) {
+					var choice = decisions[target_anc].lookup (child.name);
+					if (choice == null || choice.chosen == null)
+						break;						  // impossible to hoist
+
+					// only allowed to hoist *if* this node provides the chosen ver
+					if (child.version != choice.chosen)
+						break;
+
+					// OK – move one level up
+					move_child (child, target_anc);
+				}
+			}
+		}
 
 		private static void recount_edges_in (PackageNode root) throws Error {
 			var stack = new Gee.LinkedList<PackageNode> ();
