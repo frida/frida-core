@@ -204,6 +204,8 @@ namespace Frida {
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in root.active_deps.values) {
+				if (d.role == PEER)
+					continue;
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -226,6 +228,8 @@ namespace Frida {
 
 				if (expanded.add (pdata.resolved_url)) {
 					foreach (PackageDependency cd in node.active_deps.values) {
+						if (cd.role == PEER)
+							continue;
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -250,6 +254,8 @@ namespace Frida {
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
 			foreach (PackageDependency d in root.active_deps.values) {
+				if (d.role == PEER)
+					continue;
 				var future = cache.fetch (d.name, d.version);
 				q.offer (new DepQueueItem (root, d, future));
 			}
@@ -272,6 +278,8 @@ namespace Frida {
 
 				if (expanded.add (ddata.resolved_url)) {
 					foreach (PackageDependency cd in node.active_deps.values) {
+						if (cd.role == PEER)
+							continue;
 						var future = cache.fetch (cd.name, cd.version);
 						q.offer (new DepQueueItem (node, cd, future));
 					}
@@ -547,7 +555,7 @@ namespace Frida {
 			}
 		}
 
-		private static bool satisfies_all_ancestors (PackageNode node, PackageNode anc_or_higher) {
+		private static bool satisfies_all_ancestors (PackageNode node, PackageNode anc_or_higher) throws Error {
 			for (var a = anc_or_higher; a != null; a = a.parent) {
 				var need = a.active_deps[node.name];
 				if (need != null && !Semver.satisfies_range (node.version, need.version.range))
@@ -1040,10 +1048,14 @@ namespace Frida {
 			public Gee.Map<string, PackageDependency> active_deps {
 				get {
 					if (_active_deps == null) {
-						_active_deps = new Gee.TreeMap<string, PackageDependency> ();
-						foreach (var d in dependencies.all.values) {
-							if ((d.role != DEVELOPMENT || parent == null) && d.role != PEER)
-								_active_deps[d.name] = d;
+						if (parent == null) {
+								_active_deps = dependencies.all;
+						} else {
+								_active_deps = new Gee.TreeMap<string, PackageDependency> ();
+								foreach (var d in dependencies.all.values) {
+										if (d.role != DEVELOPMENT)
+											_active_deps[d.name] = d;
+								}
 						}
 					}
 					return _active_deps;
@@ -1231,7 +1243,7 @@ namespace Frida {
 			public Gee.List<PackageLockEntry> children = new Gee.ArrayList<PackageLockEntry> ();
 		}
 
-		private Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) {
+		private Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) throws Error {
 			var node_to_path = new Gee.HashMap<PackageNode, string> ();
 			foreach (var e in path_map.entries)
 				node_to_path[e.value] = e.key;
@@ -1257,7 +1269,14 @@ namespace Frida {
 				foreach (PackageDependency d in node.active_deps.values) {
 					if (d.role != DEVELOPMENT) {
 						var child = node.find_provider (d.name);
-						assert (child != null);
+						if (child == null) {
+							if (!node.optional_peers.contains (d.name)) {
+								throw new Error.PROTOCOL (
+									"Package '%s' needs peer dependency '%s', but it is missing",
+										node.name, d.name);
+							}
+							continue;
+						}
 						q.offer (child);
 					}
 				}
