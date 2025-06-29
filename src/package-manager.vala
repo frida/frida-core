@@ -429,7 +429,7 @@ namespace Frida {
 					int vcmp = Semver.compare_version (node.version, dupe.version);
 					bool node_wins =
 						(node.edges_in > dupe.edges_in) ||
-						((node.edges_in == dupe.edges_in) && (vcmp < 0)) ||
+						((node.edges_in == dupe.edges_in) && (vcmp > 0)) ||
 						((node.edges_in == dupe.edges_in) && (vcmp == 0) && (node.depth < dupe.depth));
 
 					if (!node_wins) {
@@ -1272,7 +1272,7 @@ namespace Frida {
 						if (child == null) {
 							if (!node.optional_peers.contains (d.name)) {
 								throw new Error.PROTOCOL (
-									"Package '%s' needs peer dependency '%s', but it is missing",
+									"Package '%s' needs dependency '%s', but it is missing",
 										node.name, d.name);
 							}
 							continue;
