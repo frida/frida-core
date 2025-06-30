@@ -775,21 +775,20 @@ namespace Frida.Gadget {
 
 	private Location detect_location (Gum.MemoryRange? mapped_range) {
 		string? executable_name = null;
-		string? executable_path = null;
-		Gum.MemoryRange? executable_range = null;
 		string? our_path = null;
 		Gum.MemoryRange? our_range = mapped_range;
 
 		Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_location));
 
+#if DARWIN
+		Environment.detect_darwin_location_fields (our_address, ref executable_name, ref our_path, ref our_range);
+#else
 		var index = 0;
 		Gum.Process.enumerate_modules ((details) => {
 			var range = details.range;
 
 			if (index == 0) {
 				executable_name = details.name;
-				executable_path = details.path;
-				executable_range = details.range;
 			}
 
 			if (mapped_range != null)
@@ -805,6 +804,7 @@ namespace Frida.Gadget {
 
 			return true;
 		});
+#endif
 
 		assert (our_range != null);
 
@@ -2176,6 +2176,10 @@ namespace Frida.Gadget {
 		private extern bool has_objc_class (string name);
 
 		private extern void set_thread_name (string name);
+#if DARWIN
+		private extern void detect_darwin_location_fields (Gum.Address our_address, ref string? executable_name,
+			ref string? our_path, ref Gum.MemoryRange? our_range);
+#endif
 	}
 
 	private extern void log_info (string message);
