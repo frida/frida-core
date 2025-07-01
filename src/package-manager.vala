@@ -101,7 +101,7 @@ namespace Frida {
 
 			var cache = new PackageDataCache (this, cancellable);
 
-			var specs = parse_mutation_specs (ADD, opts.specs, RUNTIME);
+			var specs = parse_mutation_specs (ADD, opts.specs, opts.role);
 			var manifest = yield read_manifest (pkg_json_file, cancellable);
 			bool dirty = yield apply_specs_to_manifest (specs, manifest, cache, cancellable);
 
@@ -774,6 +774,8 @@ namespace Frida {
 		private static async bool apply_specs_to_manifest (Gee.List<MutationSpec> specs, Manifest manifest, PackageDataCache cache,
 				Cancellable? cancellable) throws Error, IOError {
 			bool dirty = false;
+			PackageDependencies deps = manifest.dependencies;
+
 			foreach (var s in specs) {
 				switch (s.kind) {
 					case ADD:
@@ -786,22 +788,24 @@ namespace Frida {
 							new_range = s.range;
 						}
 
-						PackageDependency? dep = manifest.dependencies.all[s.name];
-						if (dep == null || new_range != dep.version.range) {
-							manifest.dependencies.all[s.name] = new PackageDependency () {
+						PackageDependency? dep = deps.all[s.name];
+						if (dep == null || new_range != dep.version.range || s.role != dep.role) {
+							deps.remove (s.name);
+							deps.add (new PackageDependency () {
 								name = s.name,
 								version = new PackageVersion (new_range),
 								role = s.role,
-							};
+							});
 							dirty = true;
 						}
 
 						break;
 					case REMOVE:
-						dirty |= manifest.dependencies.all.unset (s.name);
+						dirty |= deps.all.unset (s.name);
 						break;
 				}
 			}
+
 			return dirty;
 		}
 
@@ -1426,6 +1430,19 @@ namespace Frida {
 
 			public void add (PackageDependency d) {
 				all[d.name] = d;
+				clear_caches ();
+			}
+
+			public void remove (string name) {
+				if (all.unset (name))
+					clear_caches ();
+			}
+
+			private void clear_caches () {
+				_runtime = null;
+				_development = null;
+				_optional = null;
+				_peer = null;
 			}
 
 			private Gee.Map<string, PackageDependency> compute_subset_with_role (PackageRole role) {
@@ -2346,6 +2363,12 @@ namespace Frida {
 		public string? project_root {
 			get;
 			set;
+		}
+
+		public PackageRole role {
+			get;
+			set;
+			default = RUNTIME;
 		}
 
 		public void clear_specs () {
