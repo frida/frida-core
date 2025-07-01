@@ -216,8 +216,6 @@ namespace Frida {
 				}
 
 				var node = add_child_node (host, dep, pdata);
-				if (node == null)
-					continue;
 
 				if (expanded.add (pdata.resolved_url)) {
 					foreach (PackageDependency cd in node.active_deps.values) {
@@ -240,6 +238,9 @@ namespace Frida {
 			root.license = pdata.license;
 			root.funding = pdata.funding;
 			root.engines = pdata.engines;
+			root.os = pdata.os;
+			root.cpu = pdata.cpu;
+			root.libc = pdata.libc;
 			root.resolved = pdata.resolved_url;
 			root.integrity = pdata.integrity;
 
@@ -260,8 +261,6 @@ namespace Frida {
 				var ddata = yield item.data_future.wait_async (cancellable);
 
 				var node = add_child_node (host, dep, ddata);
-				if (node == null)
-					continue;
 
 				if (expanded.add (ddata.resolved_url)) {
 					foreach (PackageDependency cd in node.active_deps.values) {
@@ -276,83 +275,26 @@ namespace Frida {
 			return root;
 		}
 
-		private static PackageNode? add_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
+		private static PackageNode add_child_node (PackageNode host, PackageDependency dep, ResolvedPackageData data)
 				throws Error {
-			bool is_optional = (dep.role == OPTIONAL) || data.optional_peers.contains (dep.name);
-			if (!is_package_compatible (data, is_optional))
-				return null;
-
 			var n = new PackageNode (data.name, data.effective_version, data.dependencies);
+			n.optional_peers = data.optional_peers;
+
+			n.is_optional = (dep.role == OPTIONAL) || data.optional_peers.contains (dep.name);
 			n.deprecated = data.deprecated;
 			n.license = data.license;
 			n.funding = data.funding;
 			n.engines = data.engines;
+			n.os = data.os;
+			n.cpu = data.cpu;
+			n.libc = data.libc;
+
 			n.resolved = data.resolved_url;
 			n.integrity = data.integrity;
 
 			host.children[data.name] = n;
 			n.parent = host;
 			return n;
-		}
-
-		private static bool is_package_compatible (ResolvedPackageData pdata, bool is_optional) throws Error {
-			unowned string current_os = get_current_os ();
-			Gee.List<string>? os_constraints = pdata.os;
-			if (os_constraints != null && !check_compatibility (current_os, os_constraints)) {
-				if (is_optional)
-					return false;
-				throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current OS. Requires: %s, Current: %s",
-					pdata.name, pdata.effective_version.str,
-					string.joinv ("/", os_constraints.to_array ()),
-					current_os);
-			}
-
-			unowned string current_cpu = get_current_cpu ();
-			Gee.List<string>? cpu_constraints = pdata.cpu;
-			if (cpu_constraints != null && !check_compatibility (current_cpu, cpu_constraints)) {
-				if (is_optional)
-					return false;
-				throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current CPU. Requires: %s, Current: %s",
-					pdata.name, pdata.effective_version.str,
-					string.joinv ("/", cpu_constraints.to_array ()),
-					current_cpu);
-			}
-
-			unowned string current_libc = get_current_libc ();
-			Gee.List<string>? libc_constraints = pdata.libc;
-			if (libc_constraints != null && !check_compatibility (current_libc, libc_constraints)) {
-				if (is_optional)
-					return false;
-				throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current libc. Requires: %s, Current: %s",
-					pdata.name, pdata.effective_version.str,
-					string.joinv ("/", libc_constraints.to_array ()),
-					current_libc);
-			}
-
-			return true;
-		}
-
-		private static bool check_compatibility (string current, Gee.List<string> constraints) {
-			foreach (string entry in constraints) {
-				if (entry.has_prefix ("!")) {
-					string forbidden = entry[1:];
-					if (current == forbidden)
-						return false;
-				} else {
-					if (current == entry)
-						return true;
-				}
-			}
-
-			bool only_negated = true;
-			foreach (string entry in constraints) {
-				if (!entry.has_prefix ("!")) {
-					only_negated = false;
-					break;
-				}
-			}
-
-			return only_negated;
 		}
 
 		private static Gee.Set<PackageNode> collect_packages_needing_unlock (Manifest manifest, PackageNode base_node)
@@ -937,6 +879,27 @@ namespace Frida {
 				pli.version = (raw_version != null) ? Semver.parse_version (raw_version) : null;
 				lock_r.end_member ();
 
+				pli.dependencies = read_dependencies (lock_r);
+
+				lock_r.read_member ("dev");
+				pli.is_dev = lock_r.get_boolean_value ();
+				lock_r.end_member ();
+
+				lock_r.read_member ("optional");
+				pli.is_optional = lock_r.get_boolean_value ();
+				lock_r.end_member ();
+
+				pli.deprecated = read_deprecated (lock_r);
+				pli.optional_peers = read_optional_peers (lock_r);
+				pli.bin = read_bin (lock_r);
+				pli.has_install_script = read_has_install_script (lock_r);
+				pli.license = read_license (lock_r);
+				pli.funding = read_funding (lock_r);
+				pli.engines = read_engines (lock_r);
+				pli.os = read_array_str (lock_r, "os");
+				pli.cpu = read_array_str (lock_r, "cpu");
+				pli.libc = read_array_str (lock_r, "libc");
+
 				if (!is_root_package) {
 					lock_r.read_member ("resolved");
 					pli.resolved = lock_r.get_string_value ();
@@ -954,23 +917,6 @@ namespace Frida {
 					}
 					lock_r.end_member ();
 				}
-
-				pli.dependencies = read_dependencies (lock_r);
-				pli.optional_peers = read_optional_peers (lock_r);
-				pli.deprecated = read_deprecated (lock_r);
-				pli.bin = read_bin (lock_r);
-				pli.has_install_script = read_has_install_script (lock_r);
-				pli.license = read_license (lock_r);
-				pli.funding = read_funding (lock_r);
-				pli.engines = read_engines (lock_r);
-
-				lock_r.read_member ("dev");
-				pli.is_dev = lock_r.get_boolean_value ();
-				lock_r.end_member ();
-
-				lock_r.read_member ("optional");
-				pli.is_optional = lock_r.get_boolean_value ();
-				lock_r.end_member ();
 
 				packages[path_key] = pli;
 
@@ -1013,8 +959,8 @@ namespace Frida {
 			b.end_object ();
 
 			var path_map = build_path_map (root);
-			var runtime_reach = compute_runtime_reach (path_map);
-			var optional_reach = compute_optional_reach (path_map);
+			var dev_only_packages = compute_dev_only_packages (root);
+			var optional_only_packages = compute_optional_only_packages (root);
 
 			foreach (var e in path_map.entries) {
 				string k = e.key;
@@ -1030,13 +976,19 @@ namespace Frida {
 					.set_member_name ("integrity")
 					.add_string_value (pn.integrity);
 
-				if (!runtime_reach.contains (k) && !optional_reach.contains (k))
+				write_array_str ("cpu", pn.cpu, b);
+
+				write_license (pn.license, b);
+
+				if (dev_only_packages.contains (k))
 					b.set_member_name ("dev").add_boolean_value (true);
-				if (!runtime_reach.contains (k) && optional_reach.contains (k))
+				else if (optional_only_packages.contains (k))
 					b.set_member_name ("optional").add_boolean_value (true);
 
+				write_array_str ("os", pn.os, b);
+				write_array_str ("libc", pn.libc, b);
+
 				write_deprecated (pn.deprecated, b);
-				write_license (pn.license, b);
 				write_bin (pn.bin, b);
 				write_dependencies_section ("dependencies", pn.dependencies.runtime, b);
 				write_engines (pn.engines, b);
@@ -1098,16 +1050,22 @@ namespace Frida {
 				}
 
 				cur.version = pkg.version;
-				cur.resolved = pkg.resolved;
-				cur.integrity = pkg.integrity;
 				cur.dependencies = pkg.dependencies;
 				cur.optional_peers = pkg.optional_peers;
+
+				cur.is_optional = pkg.is_optional;
 				cur.deprecated = pkg.deprecated;
 				cur.bin = pkg.bin;
 				cur.has_install_script = pkg.has_install_script;
 				cur.license = pkg.license;
 				cur.funding = pkg.funding;
 				cur.engines = pkg.engines;
+				cur.os = pkg.os;
+				cur.cpu = pkg.cpu;
+				cur.libc = pkg.libc;
+
+				cur.resolved = pkg.resolved;
+				cur.integrity = pkg.integrity;
 			}
 
 			return root;
@@ -1173,6 +1131,12 @@ namespace Frida {
 
 			if (!omits.contains (DEVELOPMENT))
 				to_install.add_all (compute_development_reach (path_map));
+
+			foreach (string path in to_install.to_array ()) {
+				PackageNode node = path_map[path];
+				if (!node.check_compatible ())
+					to_install.remove (path);
+			}
 
 			return to_install;
 		}
@@ -1278,14 +1242,19 @@ namespace Frida {
 			public string? name;
 			public SemverVersion? version;
 			public PackageDependencies dependencies;
+			public Gee.Set<string> optional_peers;
 
+			public bool is_optional = false;
 			public string? deprecated;
 			public Gee.Map<string, string>? bin;
 			public bool has_install_script = false;
-			public Gee.Set<string> optional_peers;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
+			public Gee.List<string>? os;
+			public Gee.List<string>? cpu;
+			public Gee.List<string>? libc;
+
 			public string? resolved;
 			public string? integrity;
 			public string? shasum;
@@ -1357,6 +1326,63 @@ namespace Frida {
 						missing[dep.name] = dep.version.range;
 				}
 				return missing;
+			}
+
+			public bool check_compatible () throws Error {
+				unowned string current_os = get_current_os ();
+				if (os != null && !check_compatibility (current_os, os)) {
+					if (is_optional)
+						return false;
+					throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current OS. Requires: %s, Current: %s",
+						name, version.str,
+						string.joinv ("/", os.to_array ()),
+						current_os);
+				}
+
+				unowned string current_cpu = get_current_cpu ();
+				if (cpu != null && !check_compatibility (current_cpu, cpu)) {
+					if (is_optional)
+						return false;
+					throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current CPU. Requires: %s, Current: %s",
+						name, version.str,
+						string.joinv ("/", cpu.to_array ()),
+						current_cpu);
+				}
+
+				unowned string current_libc = get_current_libc ();
+				if (libc != null && !check_compatibility (current_libc, libc)) {
+					if (is_optional)
+						return false;
+					throw new Error.NOT_SUPPORTED ("Package %s@%s is incompatible with current libc. Requires: %s, Current: %s",
+						name, version.str,
+						string.joinv ("/", libc.to_array ()),
+						current_libc);
+				}
+
+				return true;
+			}
+
+			private static bool check_compatibility (string current, Gee.List<string> constraints) {
+				foreach (string entry in constraints) {
+					if (entry.has_prefix ("!")) {
+						string forbidden = entry[1:];
+						if (current == forbidden)
+							return false;
+					} else {
+						if (current == entry)
+							return true;
+					}
+				}
+
+				bool only_negated = true;
+				foreach (string entry in constraints) {
+					if (!entry.has_prefix ("!")) {
+						only_negated = false;
+						break;
+					}
+				}
+
+				return only_negated;
 			}
 		}
 
@@ -1469,18 +1495,23 @@ namespace Frida {
 		private class PackageLockPackageInfo {
 			public string? name;
 			public SemverVersion? version;
-			public string? resolved;
-			public string? integrity;
 			public PackageDependencies dependencies = new PackageDependencies ();
-			public Gee.Set<string> optional_peers;
+
+			public bool is_dev = false;
+			public bool is_optional = false;
 			public string? deprecated;
+			public Gee.Set<string> optional_peers;
 			public Gee.Map<string, string>? bin;
 			public bool has_install_script;
 			public string? license;
 			public Gee.List<FundingSource>? funding;
 			public Gee.Map<string, string>? engines;
-			public bool is_dev = false;
-			public bool is_optional = false;
+			public Gee.List<string>? os;
+			public Gee.List<string>? cpu;
+			public Gee.List<string>? libc;
+
+			public string? resolved;
+			public string? integrity;
 		}
 
 		private static Gee.Map<string, PackageNode> build_path_map (PackageNode root) {
@@ -1570,6 +1601,91 @@ namespace Frida {
 			}
 
 			return reachable;
+		}
+
+		private static Gee.Set<string> compute_dev_only_packages (PackageNode root) {
+			var dev_only = new Gee.HashSet<string> ();
+			var all_packages = new Gee.HashSet<string> ();
+			var non_dev_reachable = new Gee.HashSet<string> ();
+
+			collect_all_package_paths (root, all_packages);
+
+			mark_reachable_through_non_dev_deps (root, non_dev_reachable);
+
+			foreach (string path in all_packages) {
+				if (!non_dev_reachable.contains (path))
+					dev_only.add (path);
+			}
+
+			return dev_only;
+		}
+
+		private static Gee.Set<string> compute_optional_only_packages (PackageNode root) {
+			var optional_only = new Gee.HashSet<string> ();
+			var all_packages = new Gee.HashSet<string> ();
+			var required_packages = new Gee.HashSet<string> ();
+
+			collect_all_package_paths (root, all_packages);
+
+			mark_required_packages (root, required_packages);
+
+			foreach (string path in all_packages) {
+				if (!required_packages.contains (path))
+					optional_only.add (path);
+			}
+
+			return optional_only;
+		}
+
+		private static void collect_all_package_paths (PackageNode node, Gee.Set<string> paths) {
+			if (!node.is_root)
+				paths.add (node.compute_path ());
+
+			foreach (var child in node.children.values)
+				collect_all_package_paths (child, paths);
+		}
+
+		private static void mark_required_packages (PackageNode node, Gee.Set<string> required) {
+			foreach (var child in node.children.values) {
+				string child_path = child.compute_path ();
+
+				var dep = node.active_deps[child.name];
+				if (dep != null && dep.role != OPTIONAL)
+					required.add (child_path);
+
+				mark_required_packages (child, required);
+			}
+		}
+
+		private static void mark_reachable_through_non_dev_deps (PackageNode node, Gee.Set<string> reachable) {
+			var visited = new Gee.HashSet<PackageNode> ();
+			var queue = new Gee.LinkedList<PackageNode> ();
+
+			foreach (var dep in node.active_deps.values) {
+				if (dep.role != DEVELOPMENT) {
+					var provider = node.find_provider (dep.name);
+					if (provider != null)
+						queue.offer (provider);
+				}
+			}
+
+			PackageNode? current;
+			while ((current = queue.poll ()) != null) {
+				if (!visited.add (current))
+					continue;
+
+				string path = current.compute_path ();
+				if (path != "")
+					reachable.add (path);
+
+				foreach (var dep in current.active_deps.values) {
+					if (dep.role != DEVELOPMENT) {
+						var provider = current.find_provider (dep.name);
+						if (provider != null)
+							queue.offer (provider);
+					}
+				}
+			}
 		}
 
 		private static File install_dir_for_dependency (string path, File project_root) {
@@ -2086,6 +2202,15 @@ namespace Frida {
 			r.end_member ();
 
 			return result;
+		}
+
+		private static void write_array_str (string name, Gee.List<string>? array, Json.Builder b) {
+			if (array == null)
+				return;
+			b.set_member_name (name).begin_array ();
+			foreach (string s in array)
+				b.add_string_value (s);
+			b.end_array ();
 		}
 
 		private async void download_and_unpack (string name, string version, string tarball_url, File dest_root, string? integrity,
