@@ -3111,13 +3111,12 @@ namespace Frida {
 						if (out_stream != null) {
 							try {
 								yield out_stream.close_async (io_priority, cancellable);
-
 							} catch (GLib.Error e) {
 								throw new Error.TRANSPORT ("%s", e.message);
 							}
 
-							try {
 #if !WINDOWS
+							try {
 								var info = new FileInfo ();
 								info.set_attribute_uint32 (FileAttribute.UNIX_MODE,
 									current_file_mode & 0777);
@@ -3126,6 +3125,7 @@ namespace Frida {
 							} catch (GLib.Error e) {
 							}
 #endif
+
 							current_file = null;
 							out_stream = null;
 						}
