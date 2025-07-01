@@ -2932,6 +2932,7 @@ namespace Frida {
 		private File root;
 		private BufferBuilder header_builder = new BufferBuilder ();
 		private File? current_file = null;
+		private uint32 current_file_mode = 0;
 		private OutputStream? out_stream = null;
 		private uint64 remaining = 0;
 		private size_t pad = 0;
@@ -2963,9 +2964,21 @@ namespace Frida {
 						if (out_stream != null) {
 							try {
 								yield out_stream.close_async (io_priority, cancellable);
+
 							} catch (GLib.Error e) {
 								throw new Error.TRANSPORT ("%s", e.message);
 							}
+
+							try {
+#if !WINDOWS
+								var info = new FileInfo ();
+								info.set_attribute_uint32 (FileAttribute.UNIX_MODE,
+									current_file_mode & 0777);
+								yield current_file.set_attributes_async (info, FileQueryInfoFlags.NONE,
+									Priority.DEFAULT, cancellable, out info);
+							} catch (GLib.Error e) {
+							}
+#endif
 							current_file = null;
 							out_stream = null;
 						}
@@ -3000,6 +3013,11 @@ namespace Frida {
 				}
 				string safe_entry = sanitize_entry (name, root);
 
+				string mode_field = header.read_fixed_string (100, 8).split (" ")[0];
+				uint32 file_mode = 0;
+				if (!uint.try_parse (mode_field, out file_mode, null, 8))
+					throw new Error.PROTOCOL ("Invalid tarball mode (file '%s' corrupt)", name);
+
 				string size_field = header.read_fixed_string (124, 12).split (" ")[0];
 				uint64 file_size = 0;
 				if (!uint64.try_parse (size_field, out file_size, null, 8))
@@ -3009,6 +3027,7 @@ namespace Frida {
 
 				if ((typeflag == '0' || typeflag == '\0') && safe_entry != "") {
 					current_file = root.get_child (safe_entry);
+					current_file_mode = file_mode;
 					FS.mkdirp (current_file.get_parent (), cancellable);
 					try {
 						out_stream = yield current_file.replace_async (null, false, FileCreateFlags.NONE,
@@ -3018,6 +3037,7 @@ namespace Frida {
 					}
 				} else {
 					current_file = null;
+					current_file_mode = 0;
 					out_stream = null;
 				}
 				remaining = file_size;
