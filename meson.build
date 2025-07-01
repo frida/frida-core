@@ -12,9 +12,11 @@ if not meson.get_compiler('vala').version().endswith('-frida')
   error('''Incompatible Vala compiler detected.
 
 Frida currently relies on features not yet upstream. Grab the Frida-optimized
-Vala compiler from:
+Vala sources from:
 
-    https://github.com/frida/vala''')
+    https://github.com/frida/vala
+
+and compile them with Meson.''')
 endif
 
 c_languages = ['c', 'cpp']
