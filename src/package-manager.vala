@@ -977,7 +977,7 @@ namespace Frida {
 					.add_string_value (pn.integrity);
 
 				write_array_str ("cpu", pn.cpu, b);
-
+				write_has_install_script (pn.has_install_script, b);
 				write_license (pn.license, b);
 
 				if (dev_only_packages.contains (k))
@@ -993,7 +993,6 @@ namespace Frida {
 				write_dependencies_section ("dependencies", pn.dependencies.runtime, b);
 				write_engines (pn.engines, b);
 				write_dependencies_section ("optionalDependencies", pn.dependencies.optional, b);
-				write_has_install_script (pn.has_install_script, b);
 				write_optional_peers (pn.optional_peers, b);
 				write_funding (pn.funding, b);
 				write_dependencies_section ("peerDependencies", pn.dependencies.peer, b);
@@ -1933,8 +1932,13 @@ namespace Frida {
 		private static bool read_has_install_script (Json.Reader r) {
 			bool has_install_script = false;
 			if (r.read_member ("scripts")) {
-				has_install_script = r.read_member ("install");
-				r.end_member ();
+				string[] install_script_names = { "preinstall", "install", "postinstall" };
+				foreach (string name in install_script_names) {
+					has_install_script = r.read_member (name);
+					r.end_member ();
+					if (has_install_script)
+						break;
+				}
 			}
 			r.end_member ();
 			return has_install_script;
