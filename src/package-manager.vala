@@ -1121,15 +1121,17 @@ namespace Frida {
 		private static Gee.Set<string> compute_packages_to_install (Gee.Map<string, PackageNode> path_map,
 				Gee.Set<PackageRole> omits) throws Error {
 			var to_install = new Gee.HashSet<string> ();
+			collect_all_package_paths (path_map[""], to_install);
 
-			if (!omits.contains (RUNTIME))
-				to_install.add_all (compute_runtime_reach (path_map));
+			if (omits.contains (DEVELOPMENT)) {
+				var dev_only_packages = compute_dev_only_packages (path_map[""]);
+				to_install.remove_all (dev_only_packages);
+			}
 
-			if (!omits.contains (OPTIONAL))
-				to_install.add_all (compute_optional_reach (path_map));
-
-			if (!omits.contains (DEVELOPMENT))
-				to_install.add_all (compute_development_reach (path_map));
+			if (omits.contains (OPTIONAL)) {
+				var optional_only_packages = compute_optional_only_packages (path_map[""]);
+				to_install.remove_all (optional_only_packages);
+			}
 
 			foreach (string path in to_install.to_array ()) {
 				PackageNode node = path_map[path];
@@ -1536,70 +1538,6 @@ namespace Frida {
 			}
 
 			return path_map;
-		}
-
-		private static Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) throws Error {
-			return compute_reach_by_roles (path_map, new PackageRole[] { RUNTIME });
-		}
-
-		private static Gee.Set<string> compute_development_reach (Gee.Map<string, PackageNode> path_map) throws Error {
-			return compute_reach_by_roles (path_map, new PackageRole[] { DEVELOPMENT });
-		}
-
-		private static Gee.Set<string> compute_optional_reach (Gee.Map<string, PackageNode> path_map) throws Error {
-			return compute_reach_by_roles (path_map, new PackageRole[] { OPTIONAL });
-		}
-
-		private static Gee.Set<string> compute_reach_by_roles (Gee.Map<string, PackageNode> path_map, PackageRole[] allowed_roles)
-				throws Error {
-			var allowed_set = new Gee.HashSet<PackageRole> ();
-			foreach (var role in allowed_roles)
-				allowed_set.add (role);
-
-			var node_to_path = new Gee.HashMap<PackageNode, string> ();
-			foreach (var e in path_map.entries)
-				node_to_path[e.value] = e.key;
-
-			var reachable = new Gee.HashSet<string> ();
-
-			var q = new Gee.LinkedList<PackageNode> ();
-			var visited = new Gee.HashSet<PackageNode> ();
-
-			PackageNode root = path_map[""];
-			foreach (PackageDependency d in root.active_deps.values) {
-				if (allowed_set.contains (d.role)) {
-					var child = root.find_provider (d.name);
-					if (child != null)
-						q.offer (child);
-				}
-			}
-
-			PackageNode? node;
-			while ((node = q.poll ()) != null) {
-				if (!visited.add (node))
-					continue;
-
-				string path = node_to_path[node];
-				if (path != "")
-					reachable.add (path);
-
-				foreach (PackageDependency d in node.active_deps.values) {
-					if (d.role != DEVELOPMENT) {
-						var child = node.find_provider (d.name);
-						if (child == null) {
-							if (d.role != OPTIONAL && !node.optional_peers.contains (d.name)) {
-								throw new Error.PROTOCOL (
-									"Package '%s' needs dependency '%s', but it is missing",
-										node.name, d.name);
-							}
-							continue;
-						}
-						q.offer (child);
-					}
-				}
-			}
-
-			return reachable;
 		}
 
 		private static Gee.Set<string> compute_dev_only_packages (PackageNode root) {
