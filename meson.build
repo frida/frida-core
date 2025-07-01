@@ -269,12 +269,14 @@ if host_os == 'linux'
 #endif
 '''
   if cc.compiles(glibc_src, name: 'compiling for glibc')
-    cdata.set('HAVE_GLIBC', 1)
+    libc = 'glibc'
   elif cc.compiles(uclibc_src, name: 'compiling for uClibc')
-    cdata.set('HAVE_UCLIBC', 1)
+    libc = 'uclibc'
   else
-    cdata.set('HAVE_MUSL', 1)
+    libc = 'musl'
   endif
+  cdata.set('HAVE_' + libc.to_upper(), 1)
+  vala_flags += '--define=' + libc.to_upper()
 endif
 
 if get_option('b_sanitize') == 'address'
