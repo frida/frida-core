@@ -16,7 +16,7 @@ Vala sources from:
 
     https://github.com/frida/vala
 
-and compile them with meson.''')
+and compile them with Meson.''')
 endif
 
 c_languages = ['c', 'cpp']
