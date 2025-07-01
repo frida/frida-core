@@ -115,7 +115,7 @@ namespace Frida {
 
 			if (lock_clean) {
 				var root = lock_to_graph (manifest, locked);
-				yield reify_graph (root, project_root, installed_packages, 0.05, 0.98, cancellable);
+				yield reify_graph (root, project_root, opts.omits, installed_packages, 0.05, 0.98, cancellable);
 			} else {
 				PackageNode? base_graph = null;
 				if (locked != null)
@@ -126,7 +126,7 @@ namespace Frida {
 				foreach (var orphan in tree.orphans)
 					yield FS.rmtree_async (install_dir_for_dependency (orphan, project_root), cancellable);
 
-				yield reify_graph (tree.root, project_root, installed_packages, 0.85, 0.98, cancellable);
+				yield reify_graph (tree.root, project_root, opts.omits, installed_packages, 0.85, 0.98, cancellable);
 
 				yield write_manifest (manifest, pkg_json_file, cancellable);
 				yield write_lockfile (manifest, tree.root, lock_file, cancellable);
@@ -980,27 +980,6 @@ namespace Frida {
 
 		private async void write_lockfile (Manifest manifest, PackageNode root, File lock_file, Cancellable? cancellable)
 				throws Error, IOError {
-			var path_map = new Gee.TreeMap<string, PackageNode> ();
-
-			var node_stack = new Gee.LinkedList<PackageNode> ();
-			var key_stack = new Gee.LinkedList<string> ();
-
-			node_stack.offer_head (root);
-			key_stack.offer_head ("");
-
-			while (!node_stack.is_empty) {
-				var node = node_stack.poll_head ();
-				string key = key_stack.poll_head ();
-				path_map[key] = node;
-
-				foreach (PackageNode ch in node.children.values) {
-					string child_key = (key == "") ? "" : key + "/";
-					child_key += "node_modules/" + ch.name;
-					node_stack.offer_head (ch);
-					key_stack.offer_head (child_key);
-				}
-			}
-
 			var b = new Json.Builder ();
 			b.begin_object ();
 			string? name = manifest.name;
@@ -1029,13 +1008,16 @@ namespace Frida {
 			write_engines (manifest.engines, b);
 			b.end_object ();
 
+			var path_map = build_path_map (root);
 			var runtime_reach = compute_runtime_reach (path_map);
+			var optional_reach = compute_optional_reach (path_map);
 
-			foreach (string k in path_map.keys) {
+			foreach (var e in path_map.entries) {
+				string k = e.key;
 				if (k == "")
 					continue;
+				PackageNode pn = e.value;
 
-				PackageNode pn = path_map[k];
 				b.set_member_name (k).begin_object ();
 				write_version (pn.version, b);
 				b
@@ -1044,8 +1026,10 @@ namespace Frida {
 					.set_member_name ("integrity")
 					.add_string_value (pn.integrity);
 
-				if (!runtime_reach.contains (k))
+				if (!runtime_reach.contains (k) && !optional_reach.contains (k))
 					b.set_member_name ("dev").add_boolean_value (true);
+				if (!runtime_reach.contains (k) && optional_reach.contains (k))
+					b.set_member_name ("optional").add_boolean_value (true);
 
 				write_deprecated (pn.deprecated, b);
 				write_license (pn.license, b);
@@ -1125,8 +1109,9 @@ namespace Frida {
 			return root;
 		}
 
-		private async void reify_graph (PackageNode root, File target, Gee.List<Package> installed_packages, double start_fraction,
-				double end_fraction, Cancellable? cancellable) throws Error, IOError {
+		private async void reify_graph (PackageNode root, File project_root, Gee.Set<PackageRole> omits,
+				Gee.List<Package> installed_packages, double start_fraction, double end_fraction, Cancellable? cancellable)
+				throws Error, IOError {
 			var inner = new Cancellable ();
 
 			var source = new CancellableSource (cancellable);
@@ -1136,12 +1121,14 @@ namespace Frida {
 			});
 			source.attach (MainContext.get_thread_default ());
 
+			var path_map = build_path_map (root);
+			var packages_to_install = compute_packages_to_install (path_map, omits);
 			var futures = new Gee.ArrayList<Future<bool>> ();
 			uint completed = 0;
 			double fraction_span = end_fraction - start_fraction;
 			Error? first_error = null;
 
-			perform_reify_graph (root, target, null, futures, installed_packages, inner);
+			perform_reify_graph (root, project_root, packages_to_install, null, futures, installed_packages, inner);
 
 			if (futures.is_empty)
 				return;
@@ -1170,23 +1157,39 @@ namespace Frida {
 				throw first_error;
 		}
 
-		private void perform_reify_graph (PackageNode node, File base_dir, Promise<bool>? prereq, Gee.List<Future<bool>> futures,
-				Gee.List<Package> installed_packages, Cancellable inner) {
+		private static Gee.Set<string> compute_packages_to_install (Gee.Map<string, PackageNode> path_map,
+				Gee.Set<PackageRole> omits) throws Error {
+			var to_install = new Gee.HashSet<string> ();
+
+			if (!omits.contains (RUNTIME))
+				to_install.add_all (compute_runtime_reach (path_map));
+
+			if (!omits.contains (OPTIONAL))
+				to_install.add_all (compute_optional_reach (path_map));
+
+			if (!omits.contains (DEVELOPMENT))
+				to_install.add_all (compute_development_reach (path_map));
+
+			return to_install;
+		}
+
+		private void perform_reify_graph (PackageNode node, File project_root, Gee.Set<string> packages_to_install,
+				Promise<bool>? prereq, Gee.List<Future<bool>> futures, Gee.List<Package> installed_packages,
+				Cancellable inner) {
 			Promise<bool>? my_job = prereq;
 
-			if (!node.is_root) {
+			string path = node.compute_path ();
+			if (packages_to_install.contains (path)) {
 				my_job = new Promise<bool> ();
 				futures.add (my_job.future);
 
-				var dir = install_dir_for_dependency (node.name, base_dir);
+				var dir = install_dir_for_dependency (path, project_root);
 
 				perform_download_and_unpack.begin (node, dir, my_job, prereq, installed_packages, inner);
-
-				base_dir = dir;
 			}
 
 			foreach (var child in node.children.values)
-				perform_reify_graph (child, base_dir, my_job, futures, installed_packages, inner);
+				perform_reify_graph (child, project_root, packages_to_install, my_job, futures, installed_packages, inner);
 		}
 
 		private async void perform_download_and_unpack (PackageNode node, File dir, Promise<bool> job, Promise<bool>? prereq,
@@ -1329,9 +1332,7 @@ namespace Frida {
 			public string compute_path () {
 				var stack = new Gee.LinkedList<string> ();
 				for (var cur = this; cur.parent != null; cur = cur.parent) {
-					stack.offer_head (cur.name);
-					if (cur.parent.parent != null)
-						stack.offer_head ("node_modules");
+					stack.offer_head ("node_modules/" + cur.name);
 				}
 				return string.joinv ("/", stack.to_array ());
 			}
@@ -1381,13 +1382,6 @@ namespace Frida {
 			public PackageVersion (string range) {
 				this.range = range;
 			}
-		}
-
-		private enum PackageRole {
-			RUNTIME,
-			DEVELOPMENT,
-			OPTIONAL,
-			PEER
 		}
 
 		private class PackageDependencies {
@@ -1472,7 +1466,49 @@ namespace Frida {
 			public bool is_optional = false;
 		}
 
-		private Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) throws Error {
+		private static Gee.Map<string, PackageNode> build_path_map (PackageNode root) {
+			var path_map = new Gee.TreeMap<string, PackageNode> ();
+
+			var node_stack = new Gee.LinkedList<PackageNode> ();
+			var key_stack = new Gee.LinkedList<string> ();
+
+			node_stack.offer_head (root);
+			key_stack.offer_head ("");
+
+			while (!node_stack.is_empty) {
+				var node = node_stack.poll_head ();
+				string key = key_stack.poll_head ();
+				path_map[key] = node;
+
+				foreach (PackageNode ch in node.children.values) {
+					string child_key = (key == "") ? "" : key + "/";
+					child_key += "node_modules/" + ch.name;
+					node_stack.offer_head (ch);
+					key_stack.offer_head (child_key);
+				}
+			}
+
+			return path_map;
+		}
+
+		private static Gee.Set<string> compute_runtime_reach (Gee.Map<string, PackageNode> path_map) throws Error {
+			return compute_reach_by_roles (path_map, new PackageRole[] { RUNTIME });
+		}
+
+		private static Gee.Set<string> compute_development_reach (Gee.Map<string, PackageNode> path_map) throws Error {
+			return compute_reach_by_roles (path_map, new PackageRole[] { DEVELOPMENT });
+		}
+
+		private static Gee.Set<string> compute_optional_reach (Gee.Map<string, PackageNode> path_map) throws Error {
+			return compute_reach_by_roles (path_map, new PackageRole[] { OPTIONAL });
+		}
+
+		private static Gee.Set<string> compute_reach_by_roles (Gee.Map<string, PackageNode> path_map, PackageRole[] allowed_roles)
+				throws Error {
+			var allowed_set = new Gee.HashSet<PackageRole> ();
+			foreach (var role in allowed_roles)
+				allowed_set.add (role);
+
 			var node_to_path = new Gee.HashMap<PackageNode, string> ();
 			foreach (var e in path_map.entries)
 				node_to_path[e.value] = e.key;
@@ -1484,8 +1520,11 @@ namespace Frida {
 
 			PackageNode root = path_map[""];
 			foreach (PackageDependency d in root.active_deps.values) {
-				if (d.role != DEVELOPMENT)
-					q.offer (path_map["node_modules/" + d.name]);
+				if (allowed_set.contains (d.role)) {
+					var child = root.find_provider (d.name);
+					if (child != null)
+						q.offer (child);
+				}
 			}
 
 			PackageNode? node;
@@ -1493,7 +1532,9 @@ namespace Frida {
 				if (!visited.add (node))
 					continue;
 
-				reachable.add (node_to_path[node]);
+				string path = node_to_path[node];
+				if (path != "")
+					reachable.add (path);
 
 				foreach (PackageDependency d in node.active_deps.values) {
 					if (d.role != DEVELOPMENT) {
@@ -1514,9 +1555,9 @@ namespace Frida {
 			return reachable;
 		}
 
-		private static File install_dir_for_dependency (string name, File package_root) {
-			File location = package_root.get_child ("node_modules");
-			foreach (unowned string part in name.split ("/"))
+		private static File install_dir_for_dependency (string path, File project_root) {
+			File location = project_root;
+			foreach (unowned string part in path.split ("/"))
 				location = location.get_child (part);
 			return location;
 		}
@@ -2245,6 +2286,13 @@ namespace Frida {
 		}
 	}
 
+	public enum PackageRole {
+		RUNTIME,
+		DEVELOPMENT,
+		OPTIONAL,
+		PEER
+	}
+
 	public sealed class PackageList : Object {
 		private Gee.List<Package> items;
 
@@ -2293,6 +2341,7 @@ namespace Frida {
 
 	public class PackageInstallOptions : Object {
 		internal Gee.List<string> specs = new Gee.ArrayList<string> ();
+		internal Gee.Set<PackageRole> omits = new Gee.HashSet<PackageRole> ();
 
 		public string? project_root {
 			get;
@@ -2305,6 +2354,14 @@ namespace Frida {
 
 		public void add_spec (string spec) {
 			specs.add (spec);
+		}
+
+		public void clear_omits () {
+			omits.clear ();
+		}
+
+		public void add_omit (PackageRole role) {
+			omits.add (role);
 		}
 	}
 
