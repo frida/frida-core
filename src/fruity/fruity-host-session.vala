@@ -808,7 +808,10 @@ namespace Frida {
 			var lldb = yield start_lldb_service (cancellable);
 			var process = yield lldb.launch (argv, launch_options, cancellable);
 			if (process.observed_state == ALREADY_RUNNING) {
-				yield lldb.kill (cancellable);
+				try {
+					yield lldb.kill (cancellable);
+				} catch (Error e) {
+				}
 				yield lldb.close (cancellable);
 
 				lldb = yield start_lldb_service (cancellable);
