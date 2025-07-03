@@ -187,6 +187,8 @@ namespace Frida.Fruity.Injector {
 			module_size = compute_virtual_size (module);
 			module.base_address = yield lldb.allocate (module_size, "rx", cancellable);
 
+			yield lldb.spray_pages (module.base_address, (size_t) module.segments.index (0).vm_size, page_size, cancellable);
+
 			unowned Gum.DarwinModuleImage image = module.image;
 			unowned uint8[] image_data = ((uint8[]) image.data)[0:image.size];
 			var buffer = lldb.make_buffer (new Bytes.static (image_data));
