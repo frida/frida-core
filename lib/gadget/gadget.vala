@@ -405,6 +405,12 @@ namespace Frida.Gadget {
 
 		interceptor = Gum.Interceptor.obtain ();
 		interceptor.begin_transaction ();
+
+#if DARWIN
+		if (mapped_range != null)
+			Environment.ensure_debugger_breakpoints_only ();
+#endif
+
 		exceptor = Gum.Exceptor.obtain ();
 
 		try {
@@ -624,6 +630,11 @@ namespace Frida.Gadget {
 					controller = null;
 
 					exceptor = null;
+
+#if DARWIN
+					Environment.allow_stolen_breakpoints ();
+#endif
+
 					interceptor = null;
 				}
 			}
@@ -1672,7 +1683,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession {
+		private class ControlChannel : Object, Peer, HostSession, GadgetSession {
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1702,6 +1713,9 @@ namespace Frida.Gadget {
 				try {
 					HostSession host_session = this;
 					registrations.add (connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session));
+
+					GadgetSession gadget_session = this;
+					registrations.add (connection.register_object (Frida.ObjectPath.GADGET_SESSION, gadget_session));
 
 					AuthenticationService null_auth = new NullAuthenticationService ();
 					registrations.add (connection.register_object (Frida.ObjectPath.AUTHENTICATION_SERVICE, null_auth));
@@ -1863,6 +1877,14 @@ namespace Frida.Gadget {
 
 			public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
+			}
+
+			public async void break_and_resume (Cancellable? cancellable) throws Error, IOError {
+				Environment.break_and_resume ();
+			}
+
+			public async void break_and_detach (Cancellable? cancellable) throws Error, IOError {
+				Environment.break_and_detach ();
 			}
 
 			private void validate_pid (uint pid) throws Error {
@@ -2103,6 +2125,10 @@ namespace Frida.Gadget {
 #if DARWIN
 		private extern void detect_darwin_location_fields (Gum.Address our_address, ref string? executable_name,
 			ref string? our_path, ref Gum.MemoryRange? our_range);
+		private extern void ensure_debugger_breakpoints_only ();
+		private extern void allow_stolen_breakpoints ();
+		private extern void break_and_resume ();
+		private extern void break_and_detach ();
 #endif
 	}
 

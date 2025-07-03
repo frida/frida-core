@@ -3762,6 +3762,11 @@ namespace Frida.HostSessionTest {
 					timer.reset ();
 					var script = yield session.create_script ("""
 						send(Module.getGlobalExportByName('open'));
+						try {
+							ptr(0x69).writeU32(1337);
+						} catch (e) {
+							send('I cannot believe Exceptor works!');
+						}
 						""");
 					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
 

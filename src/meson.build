@@ -511,6 +511,7 @@ if have_fruity_backend
     'fruity' / 'springboard-services.vala',
     'fruity' / 'lldb.vala',
     'fruity' / 'injector.vala',
+    'fruity' / 'debugger-mappings.vala',
     'fruity' / 'usbmux.vala',
     'fruity' / 'dns.vala',
     'fruity' / 'keyed-archive.vala',

@@ -749,6 +749,19 @@ namespace Frida {
 		}
 	}
 
+	[DBus (name = "re.frida.GadgetSession17")]
+	public interface GadgetSession : Object {
+		public abstract async void break_and_resume (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void break_and_detach (Cancellable? cancellable) throws GLib.Error;
+	}
+
+	public enum GadgetBreakpointAction {
+		INVOKE_RETURN,
+		RESUME,
+		DETACH,
+		PAGE_PLAN,
+	}
+
 	[DBus (name = "re.frida.Channel17")]
 	public interface Channel : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
@@ -2119,6 +2132,7 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
+		public const string GADGET_SESSION = "/re/frida/GadgetSession";
 		public const string CHANNEL = "/re/frida/Channel";
 		public const string SERVICE = "/re/frida/Service";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";

@@ -1,10 +1,16 @@
 #include "frida-gadget.h"
 
+#include "frida-base.h"
+
 #import <Foundation/Foundation.h>
 #include <gum/gumdarwin.h>
 #include <mach-o/loader.h>
 #include <objc/runtime.h>
 #include <pthread.h>
+
+static void frida_on_breakpoints_steal_attempt (GumInvocationContext * ic, gpointer user_data);
+
+static GumInvocationListener * frida_dont_steal_my_breakpoints;
 
 gchar *
 frida_gadget_environment_detect_bundle_id (void)
@@ -102,4 +108,95 @@ frida_gadget_environment_detect_darwin_location_fields (GumAddress our_address, 
   g_ptr_array_unref (modules);
 
   g_object_unref (resolver);
+}
+
+void
+frida_gadget_environment_ensure_debugger_breakpoints_only (void)
+{
+  task_set_exception_ports (
+      mach_task_self (),
+      EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT,
+      MACH_PORT_NULL,
+      EXCEPTION_DEFAULT,
+      THREAD_STATE_NONE
+  );
+
+  if (gum_process_get_code_signing_policy () == GUM_CODE_SIGNING_OPTIONAL &&
+      frida_dont_steal_my_breakpoints == NULL &&
+      gum_darwin_is_debugger_mapping_enforced ())
+  {
+    gpointer exceptions_set, exceptions_swap;
+    GumInterceptor * interceptor;
+
+    exceptions_set = &task_set_exception_ports;
+    exceptions_swap = &task_swap_exception_ports;
+
+    frida_dont_steal_my_breakpoints = gum_make_call_listener (frida_on_breakpoints_steal_attempt,
+      NULL, NULL, NULL);
+
+    interceptor = gum_interceptor_obtain ();
+
+    gum_interceptor_attach (interceptor, exceptions_set, frida_dont_steal_my_breakpoints,
+        NULL, GUM_ATTACH_FLAGS_NONE);
+    gum_interceptor_attach (interceptor, exceptions_swap, frida_dont_steal_my_breakpoints,
+        NULL, GUM_ATTACH_FLAGS_NONE);
+
+    g_object_unref (interceptor);
+  }
+}
+
+void
+frida_gadget_environment_allow_stolen_breakpoints (void)
+{
+  GumInterceptor * interceptor;
+
+  if (frida_dont_steal_my_breakpoints == NULL)
+    return;
+
+  interceptor = gum_interceptor_obtain ();
+
+  gum_interceptor_detach (interceptor, frida_dont_steal_my_breakpoints);
+
+  g_object_unref (frida_dont_steal_my_breakpoints);
+  frida_dont_steal_my_breakpoints = NULL;
+
+  g_object_unref (interceptor);
+}
+
+static void
+frida_on_breakpoints_steal_attempt (GumInvocationContext * ic, gpointer user_data)
+{
+  exception_mask_t exception_mask;
+
+  exception_mask = GPOINTER_TO_SIZE (gum_invocation_context_get_nth_argument (ic, 1));
+  exception_mask &= ~EXC_MASK_BREAKPOINT;
+  gum_invocation_context_replace_nth_argument (ic, 1, GSIZE_TO_POINTER (exception_mask));
+}
+
+void
+frida_gadget_environment_break_and_resume (void)
+{
+  asm volatile (
+      "mov x1, #1337\n\t"
+      "mov x2, #1337\n\t"
+      "mov x3, %0\n\t"
+      "brk #1337\n\t"
+      :
+      : "r" ((gsize) FRIDA_GADGET_BREAKPOINT_ACTION_RESUME)
+      : "x1", "x2", "x3"
+  );
+}
+
+void
+frida_gadget_environment_break_and_detach (void)
+{
+  asm volatile (
+      "mov x1, #1337\n\t"
+      "mov x2, #1337\n\t"
+      "mov x3, %0\n\t"
+      "brk #1337\n\t"
+      :
+      : "r" ((gsize) FRIDA_GADGET_BREAKPOINT_ACTION_DETACH)
+      : "x1", "x2", "x3"
+  );
 }

@@ -508,41 +508,6 @@ namespace Frida.GDB {
 			yield write_byte_array (address, new Bytes ({ val ? 1 : 0 }), cancellable);
 		}
 
-		public async void spray_pages (uint64 address, size_t size, size_t page_size, Cancellable? cancellable = null)
-				throws Error, IOError {
-			int n_pages = (int) (size / page_size);
-			if (n_pages == 0)
-				throw new Error.INVALID_ARGUMENT ("Expected one or more pages");
-
-			var builder = make_packet_builder_sized (64);
-			Future<bool>? last_write = null;
-
-			for (int i = 0; i < n_pages; i += 2) {
-				bool is_last = (i + 2 >= n_pages);
-
-				uint64 last_byte_addr = address + ((uint64) i * page_size) + page_size - 1;
-				size_t write_count = is_last ? 1 : 2;
-
-				builder
-					.append_c ('M')
-					.append_address (last_byte_addr)
-					.append_c (',')
-					.append_size (write_count)
-					.append_c (':')
-					.append_escaped ((write_count == 2) ? "0000" : "00");
-
-				var request = new Promise<bool> ();
-				perform_execute.begin (builder.build (), cancellable, request);
-
-				builder.reset ();
-
-				if (is_last)
-					last_write = request.future;
-			}
-
-			yield last_write.wait_async (cancellable);
-		}
-
 		public BufferBuilder make_buffer_builder () {
 			return new BufferBuilder (byte_order, pointer_size);
 		}
@@ -764,8 +729,7 @@ namespace Frida.GDB {
 			check_execute_response (response);
 		}
 
-		private async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request)
-				throws Error, IOError {
+		public async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request) throws Error, IOError {
 			try {
 				yield execute (command, cancellable);
 				request.resolve (true);
