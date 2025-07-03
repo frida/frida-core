@@ -99,6 +99,8 @@ namespace Frida.Barebone {
 			Bytes relocated_image = machine.relocate (elf, base_va);
 			yield gdb.write_byte_array (base_va, relocated_image, cancellable);
 
+			yield machine.protect_pages (base_va, vm_size, READ | EXECUTE, cancellable);
+
 			uint64 console_log_trap = 0;
 			elf.enumerate_symbols (e => {
 				if (e.name == "")
