@@ -243,6 +243,145 @@ namespace Frida.Barebone {
 			return new DescriptorAllocation (first_available_va, first_available_slot, old_descriptors, gdb);
 		}
 
+		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
+				throws Error, IOError {
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			try {
+				uint64 page_mask = p.granule - 1;
+				uint64 aligned_va = virtual_address & ~page_mask;
+				uint64 aligned_end = (virtual_address + size + page_mask) & ~page_mask;
+				uint num_pages = (uint) ((aligned_end - aligned_va) / p.granule);
+
+				yield perform_protect_pages (aligned_va, num_pages, prot, p, cancellable);
+			} finally {
+				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			}
+		}
+
+		private async void perform_protect_pages (uint64 start_va, uint num_pages, Gum.PageProtection prot, MMUParameters p,
+				Cancellable? cancellable) throws Error, IOError {
+			var table_cache = new TableWalkCache ();
+			uint pages_processed = 0;
+
+			while (pages_processed != num_pages) {
+				uint64 current_va = start_va + (uint64) pages_processed * p.granule;
+
+				uint64 table_pa = yield find_level3_table (current_va, p, table_cache, cancellable);
+
+				uint level3_shift = address_shift_at_level (3, p.granule);
+				uint64 level3_mask = (1ULL << level3_shift) - 1;
+				uint64 table_base_va = current_va & ~level3_mask;
+				uint64 table_end_va = table_base_va + (1ULL << level3_shift);
+				uint64 remaining_va = start_va + num_pages * p.granule;
+				uint64 batch_end_va = uint64.min (remaining_va, table_end_va);
+				uint batch_size = (uint) ((batch_end_va - current_va) / p.granule);
+
+				yield protect_pages_in_table (current_va, batch_size, prot, table_pa, p, cancellable);
+
+				pages_processed += batch_size;
+			}
+		}
+
+		private async void protect_pages_in_table (uint64 current_va, uint batch_size, Gum.PageProtection prot,
+				uint64 table_pa, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+			uint index_bits = num_address_bits_at_level (3, p);
+			uint index_shift = inpage_bits_for_granule (p.granule);
+			uint index_mask = (1U << index_bits) - 1;
+
+			uint64 first_index = (current_va >> index_shift) & index_mask;
+			uint64 first_slot_pa = table_pa + (first_index * Descriptor.SIZE);
+
+			Buffer descriptors = yield gdb.read_buffer (first_slot_pa, batch_size * Descriptor.SIZE, cancellable);
+
+			bool any_changed = false;
+			for (uint i = 0; i != batch_size; i++) {
+				uint64 raw_desc = descriptors.read_uint64 (i * Descriptor.SIZE);
+				uint64 new_desc = apply_protection_bits (raw_desc, prot, p);
+
+				if (new_desc != raw_desc) {
+					descriptors.write_uint64 (i * Descriptor.SIZE, new_desc);
+					any_changed = true;
+				}
+			}
+
+			if (any_changed)
+				yield gdb.write_byte_array (first_slot_pa, descriptors.bytes, cancellable);
+		}
+
+		private async uint64 find_level3_table (uint64 va, MMUParameters p, TableWalkCache cache, Cancellable? cancellable)
+				throws Error, IOError {
+			TableWalkResult? cached = cache.lookup (va, p);
+			if (cached != null)
+				return yield walk_to_level3 (va, cached.table_pa, cached.level, p, cache, cancellable);
+
+			return yield walk_to_level3 (va, p.tt1, p.first_level, p, cache, cancellable);
+		}
+
+		private async uint64 walk_to_level3 (uint64 va, uint64 start_table_pa, uint start_level, MMUParameters p,
+				TableWalkCache cache, Cancellable? cancellable) throws Error, IOError {
+			uint64 table_pa = start_table_pa;
+			uint level = start_level;
+
+			while (level != 3) {
+				cache.store (va, level, table_pa, p);
+
+				uint shift = address_shift_at_level (level, p.granule);
+				uint entries = compute_max_entries (level, p);
+				uint index = (uint) ((va >> shift) & (entries - 1));
+				uint64 slot_pa = table_pa + ((uint64) index * Descriptor.SIZE);
+
+				Buffer d_buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				uint64 raw = d_buf.read_uint64 (0);
+				Descriptor desc = Descriptor.parse (raw, level, p.granule);
+
+				if (desc.kind != TABLE)
+					throw new Error.NOT_SUPPORTED ("Walk failed at level %u", level);
+
+				table_pa = desc.target_address;
+				level++;
+			}
+
+			return table_pa;
+		}
+
+		private class TableWalkCache {
+			private Gee.Map<uint64?, TableWalkResult> cache =
+				new Gee.HashMap<uint64?, TableWalkResult> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+			public TableWalkResult? lookup (uint64 va, MMUParameters p) {
+				for (int level = 2; level >= (int) p.first_level; level--) {
+					uint64 cache_key = compute_cache_key (va, (uint) level, p);
+					TableWalkResult? result = cache[cache_key];
+					if (result != null)
+						return result;
+				}
+				return null;
+			}
+
+			public void store (uint64 va, uint level, uint64 table_pa, MMUParameters p) {
+				if (level >= 3)
+					return;
+
+				uint64 cache_key = compute_cache_key (va, level, p);
+				cache[cache_key] = new TableWalkResult () {
+					table_pa = table_pa,
+					level = level
+				};
+			}
+
+			private uint64 compute_cache_key (uint64 va, uint level, MMUParameters p) {
+				uint shift = address_shift_at_level (level + 1, p.granule);
+				return (va >> shift) << shift;
+			}
+		}
+
+		private class TableWalkResult {
+			public uint64 table_pa;
+			public uint level;
+		}
+
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
 				Cancellable? cancellable) throws Error, IOError {
 			unowned uint8[] scanner_blob = Data.Barebone.get_memory_scanner_arm64_elf_blob ().data;

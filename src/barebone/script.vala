@@ -155,6 +155,7 @@ namespace Frida {
 
 			var memory_obj = ctx.make_object ();
 			add_cfunc (memory_obj, "alloc", on_memory_alloc, 1);
+			add_cfunc (memory_obj, "protect", on_memory_protect, 3);
 			add_cfunc (memory_obj, "scan", on_memory_scan, 4);
 			add_cfunc (memory_obj, "scanSync", on_memory_scan_sync, 3);
 			global.set_property_str (ctx, "Memory", memory_obj);
@@ -1121,6 +1122,41 @@ namespace Frida {
 				promise.resolve (allocation);
 			} catch (GLib.Error e) {
 				promise.reject (e);
+			}
+		}
+
+		private static QuickJS.Value on_memory_protect (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
+			BareboneScript * script = ctx.get_opaque ();
+
+			uint64 address;
+			if (!script->unparse_native_pointer (argv[0], out address))
+				return QuickJS.Exception;
+
+			uint size;
+			if (!script->unparse_uint (argv[1], out size))
+				return QuickJS.Exception;
+
+			Gum.PageProtection prot;
+			if (!script->unparse_page_protection (argv[2], out prot))
+				return QuickJS.Exception;
+
+			var promise = new Promise<bool?> ();
+			script->do_memory_protect.begin (address, size, prot, promise);
+
+			bool? result = script->process_events_until_ready (promise);
+			if (result == null)
+				return QuickJS.Exception;
+
+			return ctx.make_bool (result);
+		}
+
+		private async void do_memory_protect (uint64 address, size_t size, Gum.PageProtection prot, Promise<bool?> promise) {
+			try {
+				yield services.machine.protect_pages (address, size, prot, io_cancellable);
+
+				promise.resolve (true);
+			} catch (GLib.Error e) {
+				promise.resolve (false);
 			}
 		}
 
