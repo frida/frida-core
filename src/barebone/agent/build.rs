@@ -55,6 +55,7 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", newlib_lib.to_str().unwrap());
     println!("cargo:rustc-link-lib=static=c");
+    println!("cargo:rustc-link-lib=static=m");
     println!("cargo:rustc-link-arg=--gc-sections");
     println!("cargo:rustc-link-arg=--script=agent.lds");
     println!("cargo:rerun-if-changed=build.rs");
