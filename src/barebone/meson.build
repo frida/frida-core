@@ -6,6 +6,7 @@ backend_sources += files(
   'callback.vala',
   'memory-scanner.vala',
   'interceptor.vala',
+  'c-module.vala',
   'rust-module.vala',
   'console.vala',
   'elf.vala',

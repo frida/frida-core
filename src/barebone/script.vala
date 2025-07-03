@@ -56,6 +56,9 @@ namespace Frida {
 		private static QuickJS.ClassExoticMethods invocation_args_exotic_methods;
 		private static QuickJS.ClassID invocation_retval_class;
 
+		private static QuickJS.ClassID c_module_class;
+		private Gee.Set<Barebone.CModule> c_modules = new Gee.HashSet<Barebone.CModule> ();
+
 		private static QuickJS.ClassID rust_module_class;
 		private Gee.Set<Barebone.RustModule> rust_modules = new Gee.HashSet<Barebone.RustModule> ();
 
@@ -206,6 +209,17 @@ namespace Frida {
 			QuickJS.ClassDef ir;
 			ir.class_name = "InvocationReturnValue";
 			rt.make_class (QuickJS.make_class_id (ref invocation_retval_class), ir);
+
+			QuickJS.ClassDef cm;
+			cm.class_name = "CModule";
+			cm.finalizer = on_c_module_finalize;
+			rt.make_class (QuickJS.make_class_id (ref c_module_class), cm);
+			var cm_proto = ctx.make_object ();
+			add_cfunc (cm_proto, "dispose", on_c_module_dispose, 0);
+			ctx.set_class_proto (c_module_class, cm_proto);
+			var cm_ctor = ctx.make_cfunction2 (on_c_module_construct, cm.class_name, 1, constructor, 0);
+			cm_ctor.set_constructor (ctx, cm_proto);
+			global.set_property_str (ctx, "CModule", cm_ctor);
 
 			QuickJS.ClassDef rm;
 			rm.class_name = "RustModule";
@@ -1827,6 +1841,67 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
+		private static QuickJS.Value on_c_module_construct (QuickJS.Context ctx, QuickJS.Value new_target,
+				QuickJS.Value[] argv) {
+			BareboneScript * script = ctx.get_opaque ();
+
+			Bytes blob;
+			if (!script->unparse_bytes (argv[0], out blob))
+				return QuickJS.Exception;
+
+			var promise = new Promise<Barebone.CModule> ();
+			script->load_c_module.begin (blob, promise);
+
+			Barebone.CModule? mod = script->process_events_until_ready (promise);
+			if (mod == null)
+				return QuickJS.Exception;
+
+			var proto = new_target.get_property (ctx, script->prototype_key);
+			var wrapper = ctx.make_object_with_proto_and_class (proto, c_module_class);
+			ctx.free_value (proto);
+
+			wrapper.set_opaque (mod);
+			script->c_modules.add (mod);
+
+			foreach (var e in mod.exports)
+				wrapper.set_property_str (ctx, e.name, script->make_native_pointer (e.address));
+
+			mod.console_output.connect (script->on_console_output);
+
+			return wrapper;
+		}
+
+		private async void load_c_module (Bytes blob, Promise<Barebone.CModule> promise) {
+			try {
+				var mod = yield new Barebone.CModule.from_blob (blob, services.machine, services.allocator, io_cancellable);
+
+				promise.resolve (mod);
+			} catch (GLib.Error e) {
+				promise.reject (e);
+			}
+		}
+
+		private static void on_c_module_finalize (QuickJS.Runtime rt, QuickJS.Value val) {
+			Barebone.CModule * mod = val.get_opaque (c_module_class);
+			if (mod == null)
+				return;
+
+			BareboneScript * script = rt.get_opaque ();
+			script->c_modules.remove (mod);
+		}
+
+		private static QuickJS.Value on_c_module_dispose (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
+			Barebone.CModule * mod = this_val.get_opaque (c_module_class);
+
+			if (mod != null) {
+				this_val.set_opaque (null);
+				BareboneScript * script = ctx.get_opaque ();
+				script->c_modules.remove (mod);
+			}
+
+			return QuickJS.Undefined;
+		}
+
 		private static QuickJS.Value on_rust_module_construct (QuickJS.Context ctx, QuickJS.Value new_target,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
@@ -1896,7 +1971,7 @@ namespace Frida {
 			foreach (var e in mod.exports)
 				wrapper.set_property_str (ctx, e.name, script->make_native_pointer (e.address));
 
-			mod.console_output.connect (script->on_rust_module_console_output);
+			mod.console_output.connect (script->on_console_output);
 
 			return wrapper;
 		}
@@ -1934,7 +2009,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private void on_rust_module_console_output (string message) {
+		private void on_console_output (string message) {
 			var builder = new Json.Builder ();
 			builder
 				.begin_object ()
