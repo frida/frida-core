@@ -436,6 +436,11 @@ namespace Frida.LLDB {
 
 			exception = new Exception (signum, metype, medata, breakpoint, thread, context);
 		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			yield stop (cancellable);
+			yield continue (cancellable);
+		}
 	}
 
 	public sealed class LaunchOptions : Object {

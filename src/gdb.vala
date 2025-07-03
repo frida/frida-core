@@ -280,6 +280,21 @@ namespace Frida.GDB {
 			write_bytes (command.build ());
 		}
 
+		public async void continue_with_signal (Thread thread, uint8 signum, Cancellable? cancellable = null)
+				throws Error, IOError {
+			check_stopped ();
+
+			change_state (RUNNING);
+
+			var command = make_packet_builder_sized (1)
+				.append ("vCont")
+				.append (";C ")
+				.append_hexbyte (signum)
+				.append (":")
+				.append (thread.id);
+			write_bytes (command.build ());
+		}
+
 		public async Exception continue_until_exception (Cancellable? cancellable = null) throws Error, IOError {
 			check_stopped ();
 
