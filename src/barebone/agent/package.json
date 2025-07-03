@@ -1,0 +1,19 @@
+{
+  "name": "frida-barebone-agent",
+  "version": "1.0.0",
+  "description": "xPack configuration for frida-barebone-agent",
+  "xpack": {
+    "minimumXpmRequired": "0.20.8",
+    "dependencies": {},
+    "devDependencies": {
+      "@xpack-dev-tools/aarch64-none-elf-gcc": {
+        "specifier": "14.2.1-1.1.1",
+        "local": "link",
+        "platforms": "all"
+      }
+    },
+    "properties": {},
+    "actions": {},
+    "buildConfigurations": {}
+  }
+}
