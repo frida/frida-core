@@ -192,7 +192,7 @@ namespace Frida {
 		}
 
 		private void on_server_connection (IOStream connection, SocketAddress remote_address, DynamicInterface? dynamic_iface) {
-#if IOS || TVOS
+#if HAVE_LOCAL_BACKEND && (IOS || TVOS)
 			/*
 			 * We defer the launchd injection until the first connection is established in order
 			 * to avoid bootloops on unsupported jailbreaks.
