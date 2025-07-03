@@ -421,6 +421,35 @@ namespace Frida.Barebone {
 			return retval;
 		}
 
+		public async void execute (uint64 start, uint64 end, Cancellable? cancellable) throws Error, IOError {
+			bool was_running = gdb.state != STOPPED;
+			if (was_running)
+				yield gdb.stop (cancellable);
+
+			GDB.Thread thread = gdb.exception.thread;
+			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
+
+			var regs = new Gee.HashMap<string, Variant> ();
+			regs.set_all (saved_regs);
+
+			regs["pc"] = start;
+
+			yield thread.write_registers (regs, cancellable);
+
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, end, 4, cancellable);
+			GDB.Exception ex = null;
+			do {
+				ex = yield gdb.continue_until_exception (cancellable);
+			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
+			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
+			yield bp.remove (cancellable);
+
+			yield thread.write_registers (saved_regs, cancellable);
+
+			if (was_running)
+				yield gdb.continue (cancellable);
+		}
+
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
