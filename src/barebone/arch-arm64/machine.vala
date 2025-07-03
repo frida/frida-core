@@ -189,6 +189,8 @@ namespace Frida.Barebone {
 					if (level < 3) {
 						if (desc.kind != TABLE)
 							continue;
+						if ((desc.flags & DescriptorFlags.PXNTABLE) != 0)
+							continue;
 						Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address,
 							num_pages, desc.target_address, level + 1, address, granule, cancellable);
 						if (allocation != null)
