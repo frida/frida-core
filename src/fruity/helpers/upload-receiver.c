@@ -469,6 +469,19 @@ next_client:
 beach:
   api->close (listener_fd);
 
+#ifndef BUILDING_TEST_PROGRAM
+  asm volatile (
+      "mov x0, %0\n\t"
+      "mov x1, #1337\n\t"
+      "mov x2, #1337\n\t"
+      "mov x3, #0\n\t"
+      "brk #1337\n\t"
+      :
+      : "r" ((uint64_t) result)
+      : "x0", "x1", "x2", "x3"
+  );
+#endif
+
   return result;
 }
 
