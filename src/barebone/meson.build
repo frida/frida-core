@@ -7,6 +7,8 @@ backend_sources += files(
   'memory-scanner.vala',
   'interceptor.vala',
   'rust-module.vala',
+  'console.vala',
+  'elf.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',
