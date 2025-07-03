@@ -1,0 +1,19 @@
+[package]
+name = "frida-barebone-agent"
+version = "1.0.0"
+edition = "2024"
+build = "build.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+overflow-checks = false
+lto = true
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
+
+[build-dependencies]
+cc = "1.2"
+bindgen = "0.72.0"

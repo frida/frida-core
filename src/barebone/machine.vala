@@ -16,10 +16,33 @@ namespace Frida.Barebone {
 
 		public abstract async size_t query_page_size (Cancellable? cancellable) throws Error, IOError;
 
+		public abstract async uint query_exception_level (Cancellable? cancellable) throws Error, IOError;
+
+		public async void enter_exception_level (uint level, uint timeout, Cancellable? cancellable) throws Error, IOError {
+			var timer = new Timer ();
+
+			do {
+				var el = yield query_exception_level (cancellable);
+				if (el == level)
+					return;
+
+				yield gdb.continue (cancellable);
+
+				var source = new TimeoutSource (10);
+				source.set_callback (enter_exception_level.callback);
+				source.attach (MainContext.get_thread_default ());
+				yield;
+
+				yield gdb.stop (cancellable);
+			} while ((uint) (timer.elapsed () * 1000.0) < timeout);
+
+			throw new Error.TIMED_OUT ("Timed out while trying to get target to exception level %u", level);
+		}
+
 		public abstract async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 			throws Error, IOError;
 
-		public abstract async Allocation allocate_pages (uint64 physical_address, uint num_pages, Cancellable? cancellable)
+		public abstract async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 			throws Error, IOError;
 
 		public abstract async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
@@ -28,10 +51,10 @@ namespace Frida.Barebone {
 		public abstract async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern,
 			uint max_matches, Cancellable? cancellable) throws Error, IOError;
 
-		public Bytes relocate (Gum.ElfModule module, uint64 base_va) throws Error {
+		public Bytes relocate (Gum.ElfModule elf, Bytes raw_elf, uint64 base_va) throws Error {
 			uint64 file_start = uint64.MAX;
 			uint64 file_end = 0;
-			module.enumerate_segments (s => {
+			elf.enumerate_segments (s => {
 				if (s.file_size != 0) {
 					file_start = uint64.min (s.file_offset, file_start);
 					file_end = uint64.max (s.file_offset + s.file_size, file_end);
@@ -39,9 +62,9 @@ namespace Frida.Barebone {
 				return true;
 			});
 
-			var relocated_buf = gdb.make_buffer (new Bytes (module.get_file_data ()[file_start:file_end]));
+			var relocated_buf = gdb.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
 			Error? pending_error = null;
-			module.enumerate_relocations (r => {
+			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
 				if (parent_section == ".rela.text" || parent_section.has_prefix (".rela.debug_"))
 					return true;
@@ -61,7 +84,7 @@ namespace Frida.Barebone {
 			Bytes relocated_bytes = relocated_buf.bytes;
 			Bytes relocated_image = gdb.make_buffer_builder ()
 				.append_bytes (relocated_bytes)
-				.skip ((size_t) (module.mapped_size - relocated_bytes.get_size ()))
+				.skip ((size_t) (elf.mapped_size - relocated_bytes.get_size ()))
 				.build ();
 			return relocated_image;
 		}

@@ -344,6 +344,7 @@ quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), de
   'atomics=disabled',
   'stack_check=disabled',
 ])
+lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'))
 
 native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true, default_options: glib_options)
 native_gio_dep = dependency('gio-2.0', native: true)
@@ -410,7 +411,7 @@ have_droidy_backend = get_option('droidy_backend') \
     .allowed()
 have_socket_backend = get_option('socket_backend').allowed()
 have_barebone_backend = get_option('barebone_backend') \
-    .disable_if(not quickjs_dep.found()) \
+    .disable_if(not (quickjs_dep.found() and lzfse_dep.found())) \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
 compiler_backend_opt = get_option('compiler_backend') \
