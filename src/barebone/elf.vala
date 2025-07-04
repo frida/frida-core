@@ -9,6 +9,19 @@ namespace Frida.Barebone {
 		if (vm_size % page_size != 0)
 			num_pages++;
 
+		uint64 text_base = 0;
+		size_t text_size = 0;
+		elf.enumerate_segments (s => {
+			if ((s.protection & Gum.PageProtection.EXECUTE) != 0) {
+				text_base = s.vm_address;
+				text_size = (size_t) s.vm_size;
+				return false;
+			}
+			return true;
+		});
+		if (text_size == 0)
+			throw new Error.NOT_SUPPORTED ("Unable to detect text segment");
+
 		var allocation = yield allocator.allocate (num_pages * page_size, page_size, cancellable);
 		try {
 			uint64 base_va = allocation.virtual_address;
@@ -16,7 +29,7 @@ namespace Frida.Barebone {
 			Bytes relocated_image = machine.relocate (elf, base_va);
 			yield machine.gdb.write_byte_array (base_va, relocated_image, cancellable);
 
-			yield machine.protect_pages (base_va, vm_size, READ | EXECUTE, cancellable);
+			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);
 		} catch (GLib.Error e) {
 			yield allocation.deallocate (cancellable);
 			throw_api_error (e);
