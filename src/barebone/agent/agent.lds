@@ -26,6 +26,7 @@ VERSION {
   {
     global:
       _start;
+
     local:
       *;
   };
