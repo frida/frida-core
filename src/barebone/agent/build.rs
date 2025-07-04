@@ -8,7 +8,12 @@ fn main() {
     let quickjs_dir = out_dir.join("quickjs");
     if !quickjs_dir.exists() {
         let status = Command::new("git")
-            .args(["clone", "--depth=1", "https://github.com/frida/quickjs", quickjs_dir.to_str().unwrap()])
+            .args([
+                "clone",
+                "--depth=1",
+                "https://github.com/frida/quickjs",
+                quickjs_dir.to_str().unwrap(),
+            ])
             .status()
             .expect("Failed to clone QuickJS");
         assert!(status.success());
@@ -36,10 +41,47 @@ fn main() {
         .flag("-Wno-unused-parameter")
         .compile("quickjs");
 
-    // FIXME
-    let newlib_prefix = PathBuf::from("/Users/oleavr/Library/xPacks/@xpack-dev-tools/aarch64-none-elf-gcc/14.2.1-1.1.1/.content/aarch64-none-elf");
+    let target_cc = env::var("CC_aarch64_unknown_none")
+        .or_else(|_| env::var("CC"))
+        .unwrap_or_else(|_| "cc".to_string());
+
+    let sysroot_output = Command::new(&target_cc)
+        .arg("-print-sysroot")
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to get sysroot from {} - make sure it's in PATH: {}",
+                target_cc, e
+            )
+        });
+
+    if !sysroot_output.status.success() {
+        panic!(
+            "{} -print-sysroot failed: {}",
+            target_cc,
+            String::from_utf8_lossy(&sysroot_output.stderr)
+        );
+    }
+    let sysroot_str = String::from_utf8(sysroot_output.stdout)
+        .expect("Invalid UTF-8 in sysroot output")
+        .trim()
+        .to_string();
+
+    let newlib_prefix = PathBuf::from(sysroot_str);
     let newlib_include = newlib_prefix.join("include");
     let newlib_lib = newlib_prefix.join("lib");
+    if !newlib_include.exists() {
+        panic!(
+            "newlib include directory not found at: {}",
+            newlib_include.display()
+        );
+    }
+    if !newlib_lib.exists() {
+        panic!(
+            "newlib lib directory not found at: {}",
+            newlib_lib.display()
+        );
+    }
 
     let bindings = bindgen::Builder::default()
         .use_core()
@@ -59,7 +101,10 @@ fn main() {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings");
 
-    println!("cargo:rustc-link-search=native={}", newlib_lib.to_str().unwrap());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        newlib_lib.to_str().unwrap()
+    );
     println!("cargo:rustc-link-lib=static=c");
     println!("cargo:rustc-link-lib=static=m");
     println!("cargo:rustc-link-arg=--export-dynamic");
@@ -69,6 +114,12 @@ fn main() {
     println!("cargo:rustc-link-arg=--script=agent.lds");
     println!("cargo:rustc-link-arg=--gc-sections");
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed={}", src_dir.join("quickjs-glue.c").to_str().unwrap());
-    println!("cargo:rerun-if-changed={}", src_dir.join("quickjs-glue.h").to_str().unwrap());
+    println!(
+        "cargo:rerun-if-changed={}",
+        src_dir.join("quickjs-glue.c").to_str().unwrap()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        src_dir.join("quickjs-glue.h").to_str().unwrap()
+    );
 }
