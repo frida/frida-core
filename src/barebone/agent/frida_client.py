@@ -14,9 +14,13 @@ def main(args: List[str]):
         if not client.connect():
             print("Failed to connect to QEMU monitor")
             return
+
         #client.ping()
         #client.execute_javascript("function add(a, b) { return a + b; }")
-        client.execute_javascript(args[0])
+
+        result = client.execute_javascript(args[0])
+        print(result)
+
         #client.shutdown()
     except KeyboardInterrupt:
         print("\nInterrupted by user")
@@ -125,79 +129,30 @@ class FridaBareboneClient:
         return False
 
     def ping(self) -> bool:
-        print("Sending PING...")
-
-        self._write_buffer_field(5, self.CMD_PING, 1, '<B')
-
-        if not self._wait_for_completion():
-            print("✗ PING timeout")
-            return False
-
-        status = self._get_buffer_status()
-        if status['result_code'] == 0:
-            result_size = status['result_size']
-            if result_size > 0:
-                result_data = self._read_memory(self.buffer_offset + 20, result_size)
-                result = result_data.decode('utf-8')
-                print(f"✓ PING response: {result}")
-            else:
-                print("✓ PING response: (empty)")
-            return True
-        else:
-            print(f"✗ PING failed with code {status['result_code']}")
-            return False
+        result = self._execute_command(self.CMD_PING, "PING")
+        return result is not None
 
     def execute_javascript(self, code: str) -> Union[int, str, None]:
-        print(f"Executing JavaScript: {code}")
-
         code_bytes = code.encode('utf-8')
-        if len(code_bytes) > 4096:
-            print("✗ JavaScript code too long (max 4096 bytes)")
-            return None
-
-        self._write_memory(self.buffer_offset + 20, code_bytes)
-        self._write_buffer_field(8, len(code_bytes), 4, '<I')
-        self._write_buffer_field(5, self.CMD_EXEC_JS, 1, '<B')
-
-        if not self._wait_for_completion():
-            print("✗ JavaScript execution timeout")
-            return None
-
-        status = self._get_buffer_status()
-        if status['result_code'] == 0:
-            result_size = status['result_size']
-            if result_size > 0:
-                result_data = self._read_memory(self.buffer_offset + 20, result_size)
-
-                if result_size == 4:
-                    result = struct.unpack('<i', result_data)[0]
-                    print(f"✓ JavaScript result: {result}")
-                    return result
-                else:
-                    result = result_data.decode('utf-8', errors='replace')
-                    print(f"✓ JavaScript result: {result}")
-                    return result
-            else:
-                print("✓ JavaScript result: (empty)")
-                return ""
-        else:
-            error_size = status['result_size']
-            if error_size > 0:
-                error_data = self._read_memory(self.buffer_offset + 20, error_size)
-                error_msg = error_data.decode('utf-8', errors='replace')
-                print(f"✗ JavaScript execution failed: {error_msg}")
-            else:
-                print(f"✗ JavaScript execution failed with code {status['result_code']}")
-            return None
+        return self._execute_command(self.CMD_EXEC_JS, "JavaScript execution", code_bytes)
 
     def shutdown(self) -> bool:
-        print("Sending SHUTDOWN...")
+        result = self._execute_command(self.CMD_SHUTDOWN, "SHUTDOWN")
+        return result is not None
 
-        self._write_buffer_field(5, self.CMD_SHUTDOWN, 1, '<B')
+    def _execute_command(self, command: int, command_name: str, data: bytes = b'') -> Union[int, str, None]:
+        if data:
+            if len(data) > 4096:
+                print(f"✗ {command_name} data too long (max 4096 bytes)")
+                return None
+            self._write_memory(self.buffer_offset + 20, data)
+        self._write_buffer_field(8, len(data), 4, '<I')
+
+        self._write_buffer_field(5, command, 1, '<B')
 
         if not self._wait_for_completion():
-            print("✗ SHUTDOWN timeout")
-            return False
+            print(f"✗ {command_name} timeout")
+            return None
 
         status = self._get_buffer_status()
         if status['result_code'] == 0:
@@ -205,16 +160,18 @@ class FridaBareboneClient:
             if result_size > 0:
                 result_data = self._read_memory(self.buffer_offset + 20, result_size)
                 result = result_data.decode('utf-8', errors='replace')
-                print(f"✓ SHUTDOWN response: {result}")
+                return result
             else:
-                print("✓ SHUTDOWN response: (empty)")
-            return True
+                return ""
         else:
-            print(f"✗ SHUTDOWN failed with code {status['result_code']}")
-            return False
-
-    def get_status(self) -> Dict[str, Any]:
-        return self._get_buffer_status()
+            error_size = status['result_size']
+            if error_size > 0:
+                error_data = self._read_memory(self.buffer_offset + 20, error_size)
+                error_msg = error_data.decode('utf-8', errors='replace')
+                print(f"✗ {command_name} failed: {error_msg}")
+            else:
+                print(f"✗ {command_name} failed with code {status['result_code']}")
+            return None
 
 
 if __name__ == "__main__":
