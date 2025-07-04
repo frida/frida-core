@@ -149,7 +149,6 @@ unsafe fn write_string_result_to_buffer(buffer: *mut SharedBuffer, text: &str) {
     unsafe {
         let text_bytes = text.as_bytes();
         let copy_size = core::cmp::min(text_bytes.len(), 4096);
-
         core::ptr::copy_nonoverlapping(
             text_bytes.as_ptr(),
             (*buffer).data.as_mut_ptr(),
@@ -165,7 +164,6 @@ unsafe fn write_error_to_buffer(buffer: *mut SharedBuffer, error_code: u32, erro
     unsafe {
         let error_bytes = error_msg.as_bytes();
         let copy_size = core::cmp::min(error_bytes.len(), 4096);
-
         core::ptr::copy_nonoverlapping(
             error_bytes.as_ptr(),
             (*buffer).data.as_mut_ptr(),

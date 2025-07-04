@@ -1,35 +1,23 @@
 #!/usr/bin/env python3
 
-import struct
-import time
 import mmap
-from typing import Union, Dict, Any
+import struct
+import sys
+import time
+from typing import List, Union, Dict, Any
 
 
-def main():
+def main(args: List[str]):
     client = FridaBareboneClient()
 
     try:
         if not client.connect():
             print("Failed to connect to QEMU monitor")
             return
-
-        print("\n=== Frida Barebone Agent Client ===")
-        print(f"Shared buffer at 0x{client.buffer_offset:x}")
-
-        try:
-            print(f"\nInitial status: {client.get_status()}")
-        except Exception as e:
-            print(f"Failed to get status: {e}")
-            return
-
         #client.ping()
-
-        client.execute_javascript("function add(a, b) { return a + b; }")
-        client.execute_javascript("add(3, 4)")
-
-        print(f"\nFinal status: {client.get_status()}")
-
+        #client.execute_javascript("function add(a, b) { return a + b; }")
+        client.execute_javascript(args[0])
+        #client.shutdown()
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     except Exception as e:
@@ -38,7 +26,6 @@ def main():
         traceback.print_exc()
     finally:
         client.disconnect()
-        print("Disconnected from QEMU monitor")
 
 
 class FridaBareboneClient:
@@ -58,7 +45,7 @@ class FridaBareboneClient:
 
     MAGIC_NUMBER = 0x46524944  # "FRID"
 
-    def __init__(self, buffer_addr = 0x8eca44c0c, dram_base = 0x800000000):
+    def __init__(self, buffer_addr = 0x8eca44fcc, dram_base = 0x800000000):
         self.buffer_offset = buffer_addr - dram_base
         self.buffer_size = 4096
         self.memory_map = None
@@ -68,12 +55,11 @@ class FridaBareboneClient:
         try:
             self._open_shared_memory()
 
-            if self._verify_buffer():
-                print(f"✓ Shared buffer verified at DRAM offset 0x{self.buffer_offset:x}")
-                return True
-            else:
+            if not self._verify_buffer():
                 print("✗ Shared buffer verification failed")
                 return False
+
+            return True
         except Exception as e:
             print(f"Failed to connect: {e}")
             return False
@@ -90,7 +76,6 @@ class FridaBareboneClient:
         path = "/Volumes/RAM Disk/ios-dram"
         self.memory_fd = open(path, 'r+b')
         self.memory_map = mmap.mmap(self.memory_fd.fileno(), 0)
-        print(f"✓ Shared memory opened: {path} ({len(self.memory_map)} bytes)")
 
     def _read_memory(self, offset: int, size: int) -> bytes:
         return bytes(self.memory_map[offset:offset + size])
@@ -233,4 +218,4 @@ class FridaBareboneClient:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
