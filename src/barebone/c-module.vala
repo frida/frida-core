@@ -38,9 +38,8 @@ namespace Frida.Barebone {
 				if (e.name == "")
 					return true;
 
-				if (e.name[0] == '_') {
-					if (e.name == "_console_log")
-						console_log_trap = base_va + e.address;
+				if (e.name == "_console_log") {
+					console_log_trap = base_va + e.address;
 					return true;
 				}
 
