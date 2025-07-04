@@ -1,5 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
+	private uint EXTRA_PAGES_FOR_HEAP = 20;
+
 	public async Allocation inject_elf (Gum.ElfModule elf, Machine machine, Allocator allocator, Cancellable? cancellable)
 			throws Error, IOError {
 		size_t vm_size = (size_t) elf.mapped_size;
@@ -8,6 +10,7 @@ namespace Frida.Barebone {
 		uint num_pages = (uint) (vm_size / page_size);
 		if (vm_size % page_size != 0)
 			num_pages++;
+		num_pages += EXTRA_PAGES_FOR_HEAP;
 
 		uint64 text_base = 0;
 		size_t text_size = 0;
