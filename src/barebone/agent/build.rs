@@ -1,6 +1,8 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let src_dir = manifest_dir.join("src");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let quickjs_dir = out_dir.join("quickjs");
@@ -19,6 +21,7 @@ fn main() {
             quickjs_dir.join("libunicode.c"),
             quickjs_dir.join("cutils.c"),
             quickjs_dir.join("libbf.c"),
+            src_dir.join("quickjs-glue.c"),
         ])
         .define("CONFIG_VERSION", Some("\"2024-01-13-frida\""))
         .include(&quickjs_dir)
@@ -40,12 +43,15 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .use_core()
-        .header(quickjs_dir.join("quickjs.h").to_str().unwrap())
+        .header(src_dir.join("quickjs-glue.h").to_str().unwrap())
         .allowlist_var("JS_EVAL_FLAG_.*")
         .allowlist_var("JS_EVAL_TYPE_.*")
+        .allowlist_var("JS_TAG_.*")
         .allowlist_function("JS_.*")
+        .allowlist_function("JSGlue_.*")
         .clang_arg(format!("-I{}", quickjs_dir.to_str().unwrap()))
         .clang_arg(format!("-I{}", newlib_include.to_str().unwrap()))
+        .merge_extern_blocks(true)
         .generate()
         .expect("Unable to generate bindings");
 
@@ -63,4 +69,6 @@ fn main() {
     println!("cargo:rustc-link-arg=--script=agent.lds");
     println!("cargo:rustc-link-arg=--gc-sections");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={}", src_dir.join("quickjs-glue.c").to_str().unwrap());
+    println!("cargo:rerun-if-changed={}", src_dir.join("quickjs-glue.h").to_str().unwrap());
 }
