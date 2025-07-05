@@ -7,7 +7,7 @@ use alloc::format;
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     //needs alloc
-    let mut s = format!("{}", info.message());
+    let mut s = format!("{}", info);
     s.push('\0');
     xnu::panic(s.as_str());
     loop {}
