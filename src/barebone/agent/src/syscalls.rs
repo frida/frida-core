@@ -2,6 +2,10 @@ use core::ptr;
 use core::ptr::addr_of_mut;
 
 #[unsafe(no_mangle)]
+pub extern "C" fn _fini() {
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn _exit(_status: i32) -> ! {
     loop {}
 }

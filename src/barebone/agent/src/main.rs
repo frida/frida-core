@@ -1,11 +1,17 @@
 #![no_main]
 #![no_std]
 
-mod quickjs;
+mod bindings {
+    #![allow(dead_code,improper_ctypes,non_camel_case_types,non_snake_case,non_upper_case_globals,unused_imports)]
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+
 mod syscalls;
 
-use core::{arch::asm, ffi::CStr, mem::transmute};
+use core::{arch::asm, mem::transmute, ptr};
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+
+use crate::bindings::GCancellable;
 
 #[repr(C)]
 pub struct SharedBuffer {
@@ -75,11 +81,26 @@ pub unsafe extern "C" fn _start() -> usize {
 }
 
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
-    let rt = quickjs::JSRuntime::new();
-    let ctx = rt.create_context();
-
     loop {
         unsafe {
+            bindings::gum_init_embedded();
+
+            let backend = bindings::gum_script_backend_obtain_qjs();
+
+            let cancellable: *mut GCancellable = ptr::null_mut();
+            let mut error: *mut bindings::GError = ptr::null_mut();
+
+            let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("explore.js".as_bytes());
+            let c_source = core::ffi::CStr::from_bytes_with_nul_unchecked("console.log('Hello from Frida!');".as_bytes());
+
+            let _script = bindings::gum_script_backend_create_sync(
+                backend,
+                c_name.as_ptr(),
+                c_source.as_ptr(),
+                ptr::null_mut(),
+                cancellable,
+                &mut error);
+
             let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
 
             let cmd = (*buffer).command.load(Ordering::Acquire);
@@ -92,7 +113,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
                         (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
                     }
                     CMD_EXEC_JS => {
-                        on_exec_js(buffer, &ctx);
+                        write_string_result_to_buffer(buffer, "TODO");
                         (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
                     }
                     CMD_SHUTDOWN => {
@@ -112,35 +133,6 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         for _ in 0..1000 {
             core::hint::spin_loop();
-        }
-    }
-}
-
-unsafe fn on_exec_js(buffer: *mut SharedBuffer, ctx: &quickjs::JSContext) {
-    unsafe {
-        let data_size = (*buffer).data_size.load(Ordering::Acquire) as usize;
-        if data_size == 0 || data_size > 4096 {
-            panic!("Protocol error");
-        }
-
-        let mut code_bytes = [0u8; 4097];
-        let code_size = core::cmp::min(data_size, 4096);
-        core::ptr::copy_nonoverlapping(
-            (*buffer).data.as_ptr(),
-            code_bytes.as_mut_ptr(),
-            code_size
-        );
-        code_bytes[code_size] = 0;
-
-        let code = CStr::from_bytes_with_nul_unchecked(&code_bytes[..code_size + 1]).to_str().unwrap();
-
-        let result_val = ctx.eval("worker.js", code);
-        if result_val.is_exception() {
-            let exception = ctx.steal_exception().unwrap();
-            let exception_str = exception.to_cstring();
-            write_error_to_buffer(buffer, 1, exception_str.as_str_unchecked());
-        } else {
-            write_string_result_to_buffer(buffer, result_val.to_cstring().as_str_unchecked());
         }
     }
 }

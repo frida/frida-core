@@ -1,45 +1,8 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let src_dir = manifest_dir.join("src");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    let quickjs_dir = out_dir.join("quickjs");
-    if !quickjs_dir.exists() {
-        let status = Command::new("git")
-            .args([
-                "clone",
-                "--depth=1",
-                "https://github.com/frida/quickjs",
-                quickjs_dir.to_str().unwrap(),
-            ])
-            .status()
-            .expect("Failed to clone QuickJS");
-        assert!(status.success());
-    }
-
-    cc::Build::new()
-        .files([
-            quickjs_dir.join("quickjs.c"),
-            quickjs_dir.join("libregexp.c"),
-            quickjs_dir.join("libunicode.c"),
-            quickjs_dir.join("cutils.c"),
-            quickjs_dir.join("libbf.c"),
-            src_dir.join("quickjs-glue.c"),
-        ])
-        .define("CONFIG_VERSION", Some("\"2024-01-13-frida\""))
-        .include(&quickjs_dir)
-        .flag("-Oz")
-        .flag("-ffunction-sections")
-        .flag("-fdata-sections")
-        .flag("-Wno-cast-function-type")
-        .flag("-Wno-enum-conversion")
-        .flag("-Wno-implicit-fallthrough")
-        .flag("-Wno-sign-compare")
-        .flag("-Wno-unused-function")
-        .flag("-Wno-unused-parameter")
-        .compile("quickjs");
+    let devkit_dir = PathBuf::from(env::var("GUMJS_DEVKIT_DIR").unwrap());
 
     let target_cc = env::var("CC_aarch64_unknown_none")
         .or_else(|_| env::var("CC"))
@@ -85,13 +48,8 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .use_core()
-        .header(src_dir.join("quickjs-glue.h").to_str().unwrap())
-        .allowlist_var("JS_EVAL_FLAG_.*")
-        .allowlist_var("JS_EVAL_TYPE_.*")
-        .allowlist_var("JS_TAG_.*")
-        .allowlist_function("JS_.*")
-        .allowlist_function("JSGlue_.*")
-        .clang_arg(format!("-I{}", quickjs_dir.to_str().unwrap()))
+        .header(devkit_dir.join("frida-gumjs.h").to_str().unwrap())
+        .clang_arg(format!("-I{}", devkit_dir.to_str().unwrap()))
         .clang_arg(format!("-I{}", newlib_include.to_str().unwrap()))
         .merge_extern_blocks(true)
         .generate()
@@ -101,6 +59,11 @@ fn main() {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings");
 
+    println!(
+        "cargo:rustc-link-search=native={}",
+        devkit_dir.to_str().unwrap()
+    );
+    println!("cargo:rustc-link-lib=static=frida-gumjs");
     println!(
         "cargo:rustc-link-search=native={}",
         newlib_lib.to_str().unwrap()
@@ -114,12 +77,4 @@ fn main() {
     println!("cargo:rustc-link-arg=--script=agent.lds");
     println!("cargo:rustc-link-arg=--gc-sections");
     println!("cargo:rerun-if-changed=build.rs");
-    println!(
-        "cargo:rerun-if-changed={}",
-        src_dir.join("quickjs-glue.c").to_str().unwrap()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        src_dir.join("quickjs-glue.h").to_str().unwrap()
-    );
 }
