@@ -508,6 +508,14 @@ namespace Frida.Barebone {
 				case ABS64:
 					relocated.write_uint64 ((size_t) r.address, base_va + r.symbol.address + r.addend);
 					break;
+				  case PREL32: {
+					int64 s = (int64) (base_va + r.symbol.address);
+					int64 diff = (s + (int64) r.addend) - (int64) (base_va + r.address);
+					if (diff < -0x80000000L || diff > 0x7FFFFFFFL)
+						throw new Error.NOT_SUPPORTED ("R_AARCH64_PREL32 overflow (%llx)", diff);
+					relocated.write_uint32 ((size_t) r.address, (uint32) diff);
+					break;
+				}
 				default:
 					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
 						Marshal.enum_to_nick<Gum.ElfArm64Relocation> (type));
