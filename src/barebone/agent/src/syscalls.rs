@@ -53,6 +53,11 @@ pub extern "C" fn _isatty(_fd: i32) -> i32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn _open(_path: *const u8, _flags: i32, _mode: i32) -> i32 {
+    -1
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn _close(_fd: i32) -> i32 {
     0
 }
@@ -75,4 +80,28 @@ pub extern "C" fn _lseek(_fd: i32, _offset: isize, _whence: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn _fstat(_fd: i32, _st: *mut core::ffi::c_void) -> i32 {
     0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn _link(_old: *const u8, _new: *const u8) -> i32 {
+    -1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn _unlink(_path: *const u8) -> i32 {
+    -1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
+    // On AArch64, we need to flush the instruction cache
+    // This is a simplified implementation for the kernel environment
+    unsafe {
+        core::arch::asm!(
+            "ic iallu",     // Invalidate all instruction caches
+            "dsb sy",       // Data synchronization barrier
+            "isb",          // Instruction synchronization barrier
+            options(nomem, nostack),
+        );
+    }
 }
