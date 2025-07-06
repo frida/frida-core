@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use crate::bindings::GCancellable;
 
 mod gthread;
+mod gum;
 mod pac;
 mod syscalls;
 mod xnu;
@@ -72,8 +73,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         unsafe {
             kprintln!("Frida agent worker thread started");
 
-            bindings::g_thread_set_panic_handler(Some(frida_thread_panic_handler), ptr::null_mut());
-            bindings::g_test_log_set_fatal_handler(Some(frida_fatal_log_handler), ptr::null_mut());
+            bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
 
             bindings::gum_init_embedded();
             kprintln!("Gum initialized in worker thread");
@@ -86,13 +86,14 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
             let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("explore.js".as_bytes());
             let c_source = core::ffi::CStr::from_bytes_with_nul_unchecked("console.log('Hello from Frida!');".as_bytes());
 
-            let _script = bindings::gum_script_backend_create_sync(
+            let script = bindings::gum_script_backend_create_sync(
                 backend,
                 c_name.as_ptr(),
                 c_source.as_ptr(),
                 ptr::null_mut(),
                 cancellable,
                 &mut error);
+            kprintln!("Script created in worker thread: {:?}", script);
 
             let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
 
@@ -182,24 +183,10 @@ unsafe fn virt_to_phys(virt_addr: usize) -> usize {
     }
 }
 
-unsafe extern "C" fn frida_thread_panic_handler(
+unsafe extern "C" fn frida_panic_handler(
     message: *const u8,
     _user_data: *mut core::ffi::c_void,
 ) {
-    let msg = unsafe {
-        core::ffi::CStr::from_ptr(message)
-            .to_str()
-            .unwrap_or("<invalid utf8>")
-    };
-    panic!("[Frida] {}", msg);
-}
-
-unsafe extern "C" fn frida_fatal_log_handler(
-    _log_domain: *const u8,
-    _log_level: i32,
-    message: *const u8,
-    _user_data: *mut core::ffi::c_void,
-) -> i32 {
     let msg = unsafe {
         core::ffi::CStr::from_ptr(message)
             .to_str()
