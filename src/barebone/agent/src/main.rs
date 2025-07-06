@@ -227,6 +227,6 @@ macro_rules! kprintln {
         write!(&mut buf, $($arg)*).unwrap();
         buf.push('\n');
         buf.push('\0');
-        xnu::io_log(&buf)
+        crate::xnu::io_log(&buf)
     }};
 }
