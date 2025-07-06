@@ -24,12 +24,6 @@ namespace Frida.Gadget {
 			default = Gum.CodeSigningPolicy.OPTIONAL;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (Config).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "interaction" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var interaction_node = property_node.get_object ();
@@ -77,20 +71,6 @@ namespace Frida.Gadget {
 			value = Value (pspec.value_type);
 			return false;
 		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
-		}
 	}
 
 	private sealed class ScriptInteraction : Object, Json.Serializable {
@@ -112,12 +92,6 @@ namespace Frida.Gadget {
 			default = Script.ChangeBehavior.IGNORE;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ScriptInteraction).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -128,20 +102,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -183,12 +143,6 @@ namespace Frida.Gadget {
 			default = Script.ChangeBehavior.IGNORE;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ScriptConfig).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -199,20 +153,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -299,8 +239,6 @@ namespace Frida.Gadget {
 			default = make_empty_json_object ();
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ConnectInteraction).class_ref ();
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -311,20 +249,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
