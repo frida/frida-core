@@ -759,7 +759,7 @@ namespace Frida.Gadget {
 		}
 
 		try {
-			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+			return (Config) Json.gobject_from_data (typeof (Config), config_data);
 		} catch (GLib.Error e) {
 			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 		}
@@ -767,7 +767,7 @@ namespace Frida.Gadget {
 
 	private Config parse_config (string config_data) throws Error {
 		try {
-			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+			return (Config) Json.gobject_from_data (typeof (Config), config_data);
 		} catch (GLib.Error e) {
 			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 		}
@@ -1234,7 +1234,7 @@ namespace Frida.Gadget {
 			}
 
 			try {
-				return Json.gobject_from_data (typeof (ScriptConfig), data) as ScriptConfig;
+				return (ScriptConfig) Json.gobject_from_data (typeof (ScriptConfig), data);
 			} catch (GLib.Error e) {
 				throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 			}
