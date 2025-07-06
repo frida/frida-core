@@ -66,8 +66,11 @@ pub fn free(ptr: *mut u8, size: usize) {
 
 //kernel_thread_start
 const KERNEL_THREAD_START_ADDR: usize = 0xfffffff0_07a7_4674;
-type PenisFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
-pub fn kernel_thread_start(continuation: PenisFn) -> isize {
+type ContinuationFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
+pub fn kernel_thread_start(
+    continuation: ContinuationFn,
+    thread_parameter: *mut core::ffi::c_void,
+) -> isize {
     type KernelThreadStartFn = unsafe extern "C" fn(
         continuation: *const (),
         parameter: *mut core::ffi::c_void,
@@ -75,7 +78,6 @@ pub fn kernel_thread_start(continuation: PenisFn) -> isize {
     ) -> isize;
 
     let mut new_thread: *mut core::ffi::c_void = core::ptr::null_mut();
-    let thread_parameter = 12345usize as *mut core::ffi::c_void;
     return unsafe {
         let func: KernelThreadStartFn = core::mem::transmute(KERNEL_THREAD_START_ADDR as *const ());
         let ptr = pac::ptrauth_sign(continuation as *const u8, 0xd507);
