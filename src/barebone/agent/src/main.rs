@@ -1,17 +1,22 @@
 #![no_main]
 #![no_std]
 
+use alloc::format;
+use core::alloc::{GlobalAlloc, Layout};
+use core::{arch::asm, ptr};
+use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+
+use crate::bindings::GCancellable;
+
+mod gthread;
+mod pac;
+mod syscalls;
+mod xnu;
+
 mod bindings {
     #![allow(dead_code,improper_ctypes,non_camel_case_types,non_snake_case,non_upper_case_globals,unused_imports)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
-
-mod syscalls;
-
-use core::{arch::asm, mem::transmute, ptr};
-use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
-
-use crate::bindings::GCancellable;
 
 #[repr(C)]
 pub struct SharedBuffer {
@@ -45,19 +50,8 @@ pub const STATUS_BUSY: u8 = 1;
 pub const STATUS_DATA_READY: u8 = 2;
 pub const STATUS_ERROR: u8 = 3;
 
-type KernelThreadStartFn = unsafe extern "C" fn(
-    continuation: *const (),
-    parameter: *mut core::ffi::c_void,
-    new_thread: *mut *mut core::ffi::c_void
-) -> i32;
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> usize {
-    const KERNEL_THREAD_START_ADDR: usize = 0xfffffff007a74674;
-    let kernel_thread_start: KernelThreadStartFn = unsafe {
-        core::mem::transmute(KERNEL_THREAD_START_ADDR as *const ())
-    };
-
     unsafe {
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
         (*buffer).magic.store(0x46524944, Ordering::Release); // "FRID"
@@ -67,14 +61,7 @@ pub unsafe extern "C" fn _start() -> usize {
         (*buffer).result_code.store(0, Ordering::Release);
         (*buffer).result_size.store(0, Ordering::Release);
 
-        let mut new_thread: *mut core::ffi::c_void = core::ptr::null_mut();
-        let thread_parameter = 12345usize as *mut core::ffi::c_void;
-
-        let _result = kernel_thread_start(
-            transmute(ptrauth_sign(frida_agent_worker as *const u8, 0xd507)),
-            thread_parameter,
-            &mut new_thread as *mut *mut core::ffi::c_void
-        );
+        xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
 
         virt_to_phys(buffer as usize)
     }
@@ -83,7 +70,13 @@ pub unsafe extern "C" fn _start() -> usize {
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
     loop {
         unsafe {
+            kprintln!("Frida agent worker thread started");
+
+            bindings::_frida_g_thread_set_panic_handler(Some(frida_thread_panic_handler), ptr::null_mut());
+            bindings::_frida_g_test_log_set_fatal_handler(Some(frida_fatal_log_handler), ptr::null_mut());
+
             bindings::gum_init_embedded();
+            kprintln!("Gum initialized in worker thread");
 
             let backend = bindings::gum_script_backend_obtain_qjs();
 
@@ -189,21 +182,64 @@ unsafe fn virt_to_phys(virt_addr: usize) -> usize {
     }
 }
 
-unsafe fn ptrauth_sign(ptr: *const u8, discriminator: usize) -> *const u8 {
-    let signed: usize;
-    unsafe {
-        asm!(
-            ".inst 0xdac10020",       // pacia x0, x1
-            in("x0") ptr as usize,
-            in("x1") discriminator,
-            lateout("x0") signed,
-            options(nomem, nostack),
-        );
-    }
-    signed as *const u8
+unsafe extern "C" fn frida_thread_panic_handler(
+    message: *const u8,
+    _user_data: *mut core::ffi::c_void,
+) {
+    let msg = unsafe {
+        core::ffi::CStr::from_ptr(message)
+            .to_str()
+            .unwrap_or("<invalid utf8>")
+    };
+    panic!("[Frida] {}", msg);
+}
+
+unsafe extern "C" fn frida_fatal_log_handler(
+    _log_domain: *const u8,
+    _log_level: i32,
+    message: *const u8,
+    _user_data: *mut core::ffi::c_void,
+) -> i32 {
+    let msg = unsafe {
+        core::ffi::CStr::from_ptr(message)
+            .to_str()
+            .unwrap_or("<invalid utf8>")
+    };
+    panic!("[Frida] {}", msg);
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    let mut s = format!("{}", info);
+    s.push('\0');
+    xnu::panic(s.as_str());
     loop {}
+}
+
+pub struct XnuAllocator;
+
+unsafe impl GlobalAlloc for XnuAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        xnu::kalloc(layout.size())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        xnu::free(ptr, layout.size());
+    }
+}
+
+#[global_allocator]
+static GLOBAL: XnuAllocator = XnuAllocator;
+extern crate alloc;
+
+#[macro_export]
+macro_rules! kprintln {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        let mut buf = alloc::string::String::new();
+        write!(&mut buf, $($arg)*).unwrap();
+        buf.push('\n');
+        buf.push('\0');
+        xnu::io_log(&buf)
+    }};
 }
