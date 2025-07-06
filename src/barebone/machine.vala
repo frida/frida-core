@@ -68,8 +68,7 @@ namespace Frida.Barebone {
 
 		public abstract void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error;
 
-		public abstract async uint64 invoke (uint64 impl, uint64[] args, uint64 landing_zone, Cancellable? cancellable)
-			throws Error, IOError;
+		public abstract async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError;
 
 		public abstract async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable)
 			throws Error, IOError;

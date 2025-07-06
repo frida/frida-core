@@ -42,8 +42,6 @@ namespace Frida {
 
 		private Gee.Queue<QuickJS.Value?> tick_callbacks = new Gee.ArrayQueue<QuickJS.Value?> ();
 
-		private Barebone.Allocation? cached_landing_zone; // TODO: Deallocate on teardown.
-
 		private Gee.Set<Barebone.Callback> native_callbacks = new Gee.HashSet<Barebone.Callback> ();
 
 		private static QuickJS.ClassID cpu_context_class;
@@ -687,11 +685,7 @@ namespace Frida {
 
 		private async void do_invoke (uint64 impl, uint64[] args, Promise<uint64?> promise) {
 			try {
-				if (cached_landing_zone == null)
-					cached_landing_zone = yield services.allocator.allocate (4, 1, io_cancellable);
-
-				uint64 retval = yield services.machine.invoke (impl, args, cached_landing_zone.virtual_address,
-					io_cancellable);
+				uint64 retval = yield services.machine.invoke (impl, args, io_cancellable);
 
 				promise.resolve (retval);
 			} catch (GLib.Error e) {

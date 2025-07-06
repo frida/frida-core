@@ -46,8 +46,7 @@ namespace Frida.Barebone {
 			throw_not_supported ();
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, uint64 landing_zone, Cancellable? cancellable)
-				throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}
 

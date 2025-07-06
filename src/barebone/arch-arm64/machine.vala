@@ -514,8 +514,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, uint64 landing_zone, Cancellable? cancellable)
-				throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
 			if (args.length > 8)
 				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
@@ -531,6 +530,7 @@ namespace Frida.Barebone {
 
 			regs["pc"] = impl;
 
+			uint64 landing_zone = saved_regs["pc"].get_uint64 ();
 			regs["x30"] = landing_zone;
 
 			uint64 sp = saved_regs["sp"].get_uint64 ();
