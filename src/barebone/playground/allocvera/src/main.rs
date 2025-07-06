@@ -53,6 +53,6 @@ unsafe extern "C" fn worker(_parameter: *mut core::ffi::c_void, _wait_result: i3
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> usize {
-    xnu::kernel_thread_start(worker);
+    xnu::kernel_thread_start(worker, 12345usize as *mut core::ffi::c_void);
     0
 }
