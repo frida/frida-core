@@ -1,5 +1,6 @@
 backend_sources += files(
   'barebone-host-session.vala',
+  'config.vala',
   'script.vala',
   'machine.vala',
   'allocator.vala',

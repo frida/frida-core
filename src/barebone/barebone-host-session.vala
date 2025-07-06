@@ -2,26 +2,8 @@ namespace Frida {
 	public sealed class BareboneHostSessionBackend : Object, HostSessionBackend {
 		private BareboneHostSessionProvider? provider;
 
-		private const uint16 DEFAULT_PORT = 3333;
-
 		public async void start (Cancellable? cancellable) throws IOError {
-			SocketConnectable? connectable = null;
-			unowned string? address = Environment.get_variable ("FRIDA_BAREBONE_ADDRESS");
-			if (address != null) {
-				try {
-					connectable = NetworkAddress.parse (address, DEFAULT_PORT);
-				} catch (GLib.Error e) {
-				}
-			}
-			if (connectable == null)
-				connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), DEFAULT_PORT);
-
-			uint64 heap_base_pa = 0;
-			unowned string? heap_base_preference = Environment.get_variable ("FRIDA_BAREBONE_HEAP_BASE");
-			if (heap_base_preference != null)
-				heap_base_pa = uint64.parse (heap_base_preference, 16);
-
-			provider = new BareboneHostSessionProvider (connectable, heap_base_pa);
+			provider = new BareboneHostSessionProvider ();
 			provider_available (provider);
 		}
 
@@ -49,21 +31,7 @@ namespace Frida {
 			}
 		}
 
-		public SocketConnectable connectable {
-			get;
-			construct;
-		}
-
-		public uint64 heap_base_pa {
-			get;
-			construct;
-		}
-
 		private BareboneHostSession? host_session;
-
-		public BareboneHostSessionProvider (SocketConnectable connectable, uint64 heap_base_pa) {
-			Object (connectable: connectable, heap_base_pa: heap_base_pa);
-		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
 			if (host_session != null) {
@@ -75,6 +43,27 @@ namespace Frida {
 		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
+
+			Barebone.Config config;
+			unowned string? config_path = Environment.get_variable ("FRIDA_BAREBONE_CONFIG");
+			if (config_path != null) {
+				try {
+					var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
+					config = (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), config_data);
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
+				}
+			} else {
+				config = new Barebone.Config ();
+			}
+
+			SocketConnectable connectable;
+			try {
+				Barebone.ConnectionConfig c = config.connection;
+				connectable = NetworkAddress.parse (c.host, c.port);
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
+			}
 
 			IOStream stream;
 			try {
@@ -111,8 +100,19 @@ namespace Frida {
 
 			var page_size = yield machine.query_page_size (cancellable);
 
-			// TODO: Locate and use kernel's allocator when possible.
-			Barebone.Allocator allocator = new Barebone.SimpleAllocator (machine, page_size, heap_base_pa);
+			Barebone.Allocator allocator;
+			Barebone.AllocatorConfig ac = config.allocator;
+			if (ac is Barebone.NoAllocatorConfig) {
+				allocator = new Barebone.NullAllocator (page_size);
+			} else if (ac is Barebone.PhysicalAllocatorConfig) {
+				allocator = new Barebone.PhysicalAllocator (machine, page_size,
+					(Barebone.PhysicalAllocatorConfig) ac);
+			} else if (ac is Barebone.TargetFunctionsAllocatorConfig) {
+				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size,
+					(Barebone.TargetFunctionsAllocatorConfig) ac);
+			} else {
+				assert_not_reached ();
+			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);
 

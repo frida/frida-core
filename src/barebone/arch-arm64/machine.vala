@@ -240,7 +240,8 @@ namespace Frida.Barebone {
 			Bytes old_descriptors = yield gdb.read_byte_array (first_available_slot, new_descriptors.get_size (), cancellable);
 			yield gdb.write_byte_array (first_available_slot, new_descriptors, cancellable);
 
-			return new DescriptorAllocation (first_available_va, first_available_slot, old_descriptors, gdb);
+			size_t size = num_pages * p.granule;
+			return new DescriptorAllocation (first_available_va, size, first_available_slot, old_descriptors, gdb);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
@@ -1052,16 +1053,27 @@ namespace Frida.Barebone {
 
 		private class DescriptorAllocation : Object, Allocation {
 			public uint64 virtual_address {
-				get { return base_va; }
+				get {
+					return base_va;
+				}
+			}
+
+			public size_t size {
+				get {
+					return _size;
+				}
 			}
 
 			private uint64 base_va;
+			private size_t _size;
 			private uint64 first_slot;
 			private Bytes? old_descriptors;
 			private GDB.Client gdb;
 
-			public DescriptorAllocation (uint64 base_va, uint64 first_slot, Bytes old_descriptors, GDB.Client gdb) {
+			public DescriptorAllocation (uint64 base_va, size_t size, uint64 first_slot, Bytes old_descriptors,
+					GDB.Client gdb) {
 				this.base_va = base_va;
+				this._size = size;
 				this.first_slot = first_slot;
 				this.old_descriptors = old_descriptors;
 				this.gdb = gdb;
