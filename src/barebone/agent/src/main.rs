@@ -72,8 +72,8 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         unsafe {
             kprintln!("Frida agent worker thread started");
 
-            bindings::_frida_g_thread_set_panic_handler(Some(frida_thread_panic_handler), ptr::null_mut());
-            bindings::_frida_g_test_log_set_fatal_handler(Some(frida_fatal_log_handler), ptr::null_mut());
+            bindings::g_thread_set_panic_handler(Some(frida_thread_panic_handler), ptr::null_mut());
+            bindings::g_test_log_set_fatal_handler(Some(frida_fatal_log_handler), ptr::null_mut());
 
             bindings::gum_init_embedded();
             kprintln!("Gum initialized in worker thread");
