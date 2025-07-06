@@ -1,3 +1,2 @@
-export FRIDA_BAREBONE_ADDRESS=127.0.0.1:9000
-export FRIDA_BAREBONE_HEAP_BASE=0x8ec9b4000
+export FRIDA_BAREBONE_CONFIG=$PWD/../agent/etc/xnu.config
 export PYTHONPATH=$HOME/src/frida-python
