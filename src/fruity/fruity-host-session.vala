@@ -1408,7 +1408,6 @@ namespace Frida {
 
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
 			private ulong? exception_handler;
-			private bool? resumed;
 
 			public LLDBSession (LLDB.Client lldb, LLDB.Process process, string? gadget_path,
 					HostChannelProvider channel_provider) {
@@ -1440,22 +1439,13 @@ namespace Frida {
 			}
 
 			public async void resume (Cancellable? cancellable) throws Error, IOError {
-				resumed = false;
-				if (exception_handler != null)
-					lldb.disconnect (exception_handler);
-
-				exception_handler = lldb.notify["exception"].connect ((obj, pspec) => {
-					if (lldb.exception != null && resumed) {
-						handle_exception.begin ();
-					}
-				});
-				yield lldb.resume (cancellable);
-				resumed = true;
+				yield lldb.stop (cancellable);
+				yield lldb.continue (cancellable);
 			}
 
-			private async void handle_exception () {
-				var exception = lldb.exception as Frida.LLDB.Exception;
-				print ("CHECKING EXCEPTION %u %u\n%s\n\n", exception.signum, exception.metype, exception.to_string ());
+			private async void handle_exception (GDB.Exception exception) {
+				var e = (Frida.LLDB.Exception) exception;
+				print ("CHECKING EXCEPTION:\n%s\n\n", e.to_string ());
 
 				//lldb.continue_with_signal.begin (exception.thread, (uint8) exception.signum, null);
 				lldb.close.begin (null);
@@ -1505,13 +1495,25 @@ namespace Frida {
 						: Gum.PtrauthSupport.UNSUPPORTED;
 					var module = new Gum.DarwinModule.from_file (path, Gum.CpuType.ARM64, ptrauth_support);
 
-					var details = yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
+					Fruity.Injector.Transaction transaction =
+						yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
+					Fruity.Injector.GadgetDetails gadget = transaction.gadget;
 
-					gadget_request.resolve (details);
+					exception_handler = lldb.notify["exception"].connect ((obj, pspec) => {
+						var exception = lldb.exception;
+						if (exception != null)
+							handle_exception.begin (exception);
+					});
 
-					return details;
+					yield transaction.commit (cancellable);
+
+					gadget_request.resolve (gadget);
+
+					return gadget;
 				} catch (GLib.Error e) {
-					var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+					var api_error = (e is Error)
+						? (Error) e
+						: new Error.NOT_SUPPORTED ("%s", e.message);
 
 					gadget_request.reject (api_error);
 					gadget_request = null;

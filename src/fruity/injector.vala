@@ -1,9 +1,42 @@
 [CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
-	public static async GadgetDetails inject (owned Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider,
+	public static async Transaction inject (owned Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider,
 			Cancellable? cancellable) throws Error, IOError {
 		var session = new Session (module, lldb, channel_provider);
 		return yield session.run (cancellable);
+	}
+
+	public sealed class Transaction : Object {
+		public GadgetDetails gadget {
+			get;
+			construct;
+		}
+
+		private bool is_early_instrumentation;
+		private string main_thread_id;
+		private LLDB.Client lldb;
+
+		internal Transaction (GadgetDetails gadget, bool is_early_instrumentation, string main_thread_id, LLDB.Client lldb) {
+			Object (gadget: gadget);
+
+			this.is_early_instrumentation = is_early_instrumentation;
+			this.main_thread_id = main_thread_id;
+			this.lldb = lldb;
+		}
+
+		public async void commit (Cancellable? cancellable) throws Error, IOError {
+			if (is_early_instrumentation) {
+				var gadget_threads = new Gee.ArrayList<LLDB.Thread> ();
+				yield lldb.enumerate_threads (thread => {
+					if (thread.id != main_thread_id)
+						gadget_threads.add (thread);
+					return true;
+				}, cancellable);
+				yield lldb.continue_specific_threads (gadget_threads, cancellable);
+			} else {
+				yield lldb.continue (cancellable);
+			}
+		}
 	}
 
 	public sealed class GadgetDetails : Object {
@@ -15,10 +48,6 @@ namespace Frida.Fruity.Injector {
 		public GadgetDetails (uint16 port) {
 			Object (port: port);
 		}
-	}
-
-	public errordomain Error {
-		UNSUPPORTED
 	}
 
 	private sealed class Session : Object {
@@ -77,36 +106,26 @@ namespace Frida.Fruity.Injector {
 			);
 		}
 
-		public async GadgetDetails run (Cancellable? cancellable) throws Error, IOError {
+		public async Transaction run (Cancellable? cancellable) throws Error, IOError {
 			try {
+				bool is_early_instrumentation;
+
 				var existing_gadget = yield setup (cancellable);
 				if (existing_gadget != null) {
-					yield lldb.detach (cancellable);
-					return existing_gadget;
+					is_early_instrumentation = false;
+					return new Transaction (existing_gadget, is_early_instrumentation, main_thread.id, lldb);
 				}
 
-				bool is_early_instrumentation = !libsystem_initialized;
+				is_early_instrumentation = !libsystem_initialized;
 
 				yield ensure_libsystem_initialized (cancellable);
-				var result = yield inject_module (cancellable);
+				var gadget = yield inject_module (cancellable);
 
 				yield teardown (cancellable);
 
-				if (is_early_instrumentation) {
-					var gadget_threads = new Gee.ArrayList<LLDB.Thread> ();
-					yield lldb.enumerate_threads (thread => {
-						if (thread.id != main_thread.id)
-							gadget_threads.add (thread);
-						return true;
-					}, cancellable);
-					yield lldb.continue_specific_threads (gadget_threads, cancellable);
-				} else {
-					yield lldb.detach (cancellable);
-				}
-
-				return result;
+				return new Transaction (gadget, is_early_instrumentation, main_thread.id, lldb);
 			} catch (GLib.Error e) {
-				throw new Error.UNSUPPORTED ("%s", e.message);
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
@@ -223,7 +242,7 @@ namespace Frida.Fruity.Injector {
 					case TEXT_ABSOLUTE32:
 						break;
 					default:
-						pending_error = new Error.UNSUPPORTED ("Unsupported rebase type: %u", rebase.type);
+						pending_error = new Error.NOT_SUPPORTED ("Unsupported rebase type: %u", rebase.type);
 						return false;
 				}
 
@@ -252,7 +271,7 @@ namespace Frida.Fruity.Injector {
 							case MAIN_EXECUTABLE:
 							case FLAT_LOOKUP:
 							case WEAK_LOOKUP:
-								pending_error = new Error.UNSUPPORTED ("Unsupported bind ordinal: %d",
+								pending_error = new Error.NOT_SUPPORTED ("Unsupported bind ordinal: %d",
 									bind.library_ordinal);
 								return false;
 							default:
@@ -275,7 +294,7 @@ namespace Frida.Fruity.Injector {
 						threaded_items.add_region (bind.segment.vm_address + slide + bind.offset);
 						break;
 					default:
-						pending_error = new Error.UNSUPPORTED ("Unsupported bind type: %u", bind.type);
+						pending_error = new Error.NOT_SUPPORTED ("Unsupported bind type: %u", bind.type);
 						return false;
 				}
 
@@ -310,7 +329,7 @@ namespace Frida.Fruity.Injector {
 					bool is_weak = (bind.symbol_flags & Gum.DarwinBindSymbolFlags.WEAK_IMPORT) != 0;
 					if (is_weak || is_dyld_stub_binder (module_name, symbol_name))
 						return true;
-					pending_error = new Error.UNSUPPORTED ("Unable to resolve symbol: %s", bind.symbol_name);
+					pending_error = new Error.NOT_SUPPORTED ("Unable to resolve symbol: %s", bind.symbol_name);
 					return false;
 				}
 
@@ -415,7 +434,7 @@ namespace Frida.Fruity.Injector {
 			uint16 listener_port             = (uint16)  (listen_result        & 0xffff);
 
 			if (error_code != 0)
-				throw new Error.UNSUPPORTED ("Unable to listen on TCP (error_code=%u)", error_code);
+				throw new Error.NOT_SUPPORTED ("Unable to listen on TCP (error_code=%u)", error_code);
 
 			if (debugger_mapping_enforced) {
 				string overwrite_config_param = "frida_gadget_config=" + Base64.encode (raw_config.replace ("optional", "required", 1).data);
@@ -440,7 +459,7 @@ namespace Frida.Fruity.Injector {
 					upload_api
 				}, null, cancellable);
 			if (receive_result <= 0)
-				throw new Error.UNSUPPORTED ("Unable to start gadget: %" + int64.FORMAT_MODIFIER + "d", receive_result);
+				throw new Error.NOT_SUPPORTED ("Unable to start gadget: %" + int64.FORMAT_MODIFIER + "d", receive_result);
 
 			return (uint16) receive_result;
 		}
@@ -853,7 +872,7 @@ namespace Frida.Fruity.Injector {
 		private static uint64 resolve_dyld_symbol (string name, string nick, Gee.Map<string, uint64?> dyld_symbols) throws Error {
 			uint64? val = dyld_symbols[name];
 			if (val == null)
-				throw new Error.UNSUPPORTED ("Unsupported iOS version (%s not found)", nick);
+				throw new Error.NOT_SUPPORTED ("Unsupported iOS version (%s not found)", nick);
 			return val;
 		}
 
@@ -903,7 +922,7 @@ namespace Frida.Fruity.Injector {
 
 			GDB.Breakpoint? hit_breakpoint = exception.breakpoint;
 			if (hit_breakpoint == null)
-				throw new Error.UNSUPPORTED ("Unexpected exception");
+				throw new Error.NOT_SUPPORTED ("Unexpected exception");
 
 			if (restart_breakpoint != null)
 				yield restart_breakpoint.remove (cancellable);
@@ -911,7 +930,7 @@ namespace Frida.Fruity.Injector {
 
 			if (hit_breakpoint == restart_breakpoint) {
 				if (process_info_ptr == null)
-					throw new Error.UNSUPPORTED ("Missing gProcessInfo");
+					throw new Error.NOT_SUPPORTED ("Missing gProcessInfo");
 				uint64 process_info = yield lldb.read_pointer (process_info_ptr, cancellable);
 				uint64 dyld_image_load_address = yield lldb.read_pointer (process_info + 0x20, cancellable);
 
@@ -932,7 +951,7 @@ namespace Frida.Fruity.Injector {
 
 				hit_breakpoint = exception.breakpoint;
 				if (hit_breakpoint == null)
-					throw new Error.UNSUPPORTED ("Unexpected exception");
+					throw new Error.NOT_SUPPORTED ("Unexpected exception");
 
 				dyld_fields = yield lldb.get_apple_dyld_fields (BYPASS_CACHE, cancellable);
 			}
@@ -964,7 +983,7 @@ namespace Frida.Fruity.Injector {
 
 			hit_breakpoint = exception.breakpoint;
 			if (hit_breakpoint == null)
-				throw new Error.UNSUPPORTED ("Unexpected exception");
+				throw new Error.NOT_SUPPORTED ("Unexpected exception");
 
 			assert (hit_breakpoint == caller_breakpoint);
 			yield caller_breakpoint.remove (cancellable);
@@ -999,7 +1018,7 @@ namespace Frida.Fruity.Injector {
 
 			GDB.Breakpoint? hit_breakpoint = exception.breakpoint;
 			if (hit_breakpoint == null)
-				throw new Error.UNSUPPORTED ("Unexpected exception");
+				throw new Error.NOT_SUPPORTED ("Unexpected exception");
 
 			yield legacy_breakpoint.remove (cancellable);
 
@@ -1045,7 +1064,7 @@ namespace Frida.Fruity.Injector {
 				}
 			}
 
-			throw new Error.UNSUPPORTED ("Unable to probe dyld v3 internals; please file a bug");
+			throw new Error.NOT_SUPPORTED ("Unable to probe dyld v3 internals; please file a bug");
 		}
 
 		private async void initialize_libsystem_from_legacy_codepath (Gee.Map<string, uint64?> dyld_symbols,
@@ -1218,14 +1237,14 @@ namespace Frida.Fruity.Injector {
 				}, null, cancellable);
 			size_t size = length + 1;
 			if (size > page_size)
-				throw new Error.UNSUPPORTED ("Buffer too small; please file a bug");
+				throw new Error.NOT_SUPPORTED ("Buffer too small; please file a bug");
 
 			Bytes output_bytes = yield lldb.read_byte_array (output, size, cancellable);
 			unowned string output_str = (string) output_bytes.get_data ();
 			foreach (var line in output_str.split ("\n")) {
 				var tokens = line.split ("\t", 2);
 				if (tokens.length != 2)
-					throw new Error.UNSUPPORTED ("Unable to fetch dyld symbols; please file a bug");
+					throw new Error.NOT_SUPPORTED ("Unable to fetch dyld symbols; please file a bug");
 
 				unowned string raw_address = tokens[0];
 				unowned string name = tokens[1];
@@ -1509,7 +1528,7 @@ namespace Frida.Fruity.Injector {
 			public uint64 get (string module_name, string symbol_name) throws Error {
 				uint64 address;
 				if (!lookup (module_name, symbol_name, out address))
-					throw new Error.UNSUPPORTED ("Symbol not found: %s", symbol_name);
+					throw new Error.NOT_SUPPORTED ("Symbol not found: %s", symbol_name);
 				return address;
 			}
 
@@ -1700,7 +1719,7 @@ namespace Frida.Fruity.Injector {
 						continue;
 				}
 
-				throw new Error.UNSUPPORTED ("Invocation of 0x%" + uint64.FORMAT_MODIFIER + "x crashed at %s",
+				throw new Error.NOT_SUPPORTED ("Invocation of 0x%" + uint64.FORMAT_MODIFIER + "x crashed at %s",
 					impl, yield summarize_exception (exception, cancellable));
 			}
 
