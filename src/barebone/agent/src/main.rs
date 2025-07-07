@@ -10,6 +10,7 @@ use crate::bindings::GCancellable;
 
 mod gthread;
 mod gum;
+mod gpoll;
 mod pac;
 mod syscalls;
 mod xnu;
