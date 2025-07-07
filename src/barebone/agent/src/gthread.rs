@@ -600,7 +600,7 @@ unsafe fn lock_notify_all() {
     }
 }
 
-unsafe fn get_current_thread_id() -> u64 {
+pub unsafe fn get_current_thread_id() -> u64 {
     let thread_ptr: u64;
     unsafe {
         asm!("mrs {}, tpidr_el1", out(reg) thread_ptr, options(nomem, nostack));

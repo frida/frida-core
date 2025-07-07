@@ -10,7 +10,7 @@ use crate::bindings::GCancellable;
 
 mod gthread;
 mod gum;
-mod gpoll;
+mod gwait;
 mod pac;
 mod syscalls;
 mod xnu;
@@ -70,32 +70,34 @@ pub unsafe extern "C" fn _start() -> usize {
 }
 
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
+    unsafe {
+        kprintln!("Frida agent worker thread started tid: {:?}", gthread::get_current_thread_id());
+
+        bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
+
+        bindings::gum_init_embedded();
+        kprintln!("Gum initialized in worker thread");
+
+        let backend = bindings::gum_script_backend_obtain_qjs();
+
+        let cancellable: *mut GCancellable = ptr::null_mut();
+        let mut error: *mut bindings::GError = ptr::null_mut();
+
+        let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("explore.js".as_bytes());
+        let c_source = core::ffi::CStr::from_bytes_with_nul_unchecked("console.log('Hello from Frida!');".as_bytes());
+
+        let script = bindings::gum_script_backend_create_sync(
+            backend,
+            c_name.as_ptr(),
+            c_source.as_ptr(),
+            ptr::null_mut(),
+            cancellable,
+            &mut error);
+        kprintln!("Script created in worker thread: {:?}", script);
+    }
+
     loop {
         unsafe {
-            kprintln!("Frida agent worker thread started");
-
-            bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
-
-            bindings::gum_init_embedded();
-            kprintln!("Gum initialized in worker thread");
-
-            let backend = bindings::gum_script_backend_obtain_qjs();
-
-            let cancellable: *mut GCancellable = ptr::null_mut();
-            let mut error: *mut bindings::GError = ptr::null_mut();
-
-            let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("explore.js".as_bytes());
-            let c_source = core::ffi::CStr::from_bytes_with_nul_unchecked("console.log('Hello from Frida!');".as_bytes());
-
-            let script = bindings::gum_script_backend_create_sync(
-                backend,
-                c_name.as_ptr(),
-                c_source.as_ptr(),
-                ptr::null_mut(),
-                cancellable,
-                &mut error);
-            kprintln!("Script created in worker thread: {:?}", script);
-
             let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
 
             let cmd = (*buffer).command.load(Ordering::Acquire);
