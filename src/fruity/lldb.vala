@@ -896,6 +896,22 @@ namespace Frida.LLDB {
 		}
 	}
 
+	public enum MachSoftwareExceptionType {
+		SIGNAL = 0x10003;
+
+		public static MachSoftwareExceptionType from_nick (string nick) throws Frida.Error {
+			return Marshal.enum_from_nick<MachSoftwareExceptionType> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<MachSoftwareExceptionType> (this);
+		}
+
+		public string to_name () {
+			return to_nick ().ascii_up ().replace ("-", "_");
+		}
+	}
+
 	public sealed class AppleDyldFields : Object {
 		public uint64 all_image_info {
 			get;

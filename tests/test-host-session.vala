@@ -3674,8 +3674,8 @@ namespace Frida.HostSessionTest {
 
 		namespace Manual {
 
-			private const string DEVICE_ID = "<device-id>";
-			private const string APP_ID = "<app-id>";
+			private const string DEVICE_ID = "00008130-000C1D800843401C";
+			private const string APP_ID = "no.oleavr.HelloIOS";
 
 			private static async void lockdown (Harness h) {
 				if (!GLib.Test.slow ()) {
@@ -3712,6 +3712,7 @@ namespace Frida.HostSessionTest {
 
 					var timer = new Timer ();
 
+					/*
 					printerr ("device.query_system_parameters()");
 					timer.reset ();
 					var p = yield device.query_system_parameters ();
@@ -3735,6 +3736,7 @@ namespace Frida.HostSessionTest {
 							printerr ("\t%s\n", app.identifier);
 						}
 					}
+					*/
 
 					if (target_name != null) {
 						timer.reset ();
@@ -3762,6 +3764,11 @@ namespace Frida.HostSessionTest {
 					timer.reset ();
 					var script = yield session.create_script ("""
 						send(Module.getGlobalExportByName('open'));
+						try {
+							ptr(0x69).writeU32(1337);
+						} catch (e) {
+							send('I cannot believe Exceptor works!');
+						}
 						""");
 					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
 

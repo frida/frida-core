@@ -1409,6 +1409,8 @@ namespace Frida {
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
 			private ulong? exception_handler;
 
+			private Cancellable io_cancellable = new Cancellable ();
+
 			public LLDBSession (LLDB.Client lldb, LLDB.Process process, string? gadget_path,
 					HostChannelProvider channel_provider) {
 				Object (
@@ -1432,20 +1434,39 @@ namespace Frida {
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
+				io_cancellable.cancel ();
+
 				if (exception_handler != null)
 					lldb.disconnect (exception_handler);
 				exception_handler = null;
+
 				yield lldb.close (cancellable);
 			}
 
 			public async void resume (Cancellable? cancellable) throws Error, IOError {
+				printerr ("resume (A)\n\n");
 				yield lldb.stop (cancellable);
+				printerr ("resume (B)\n\n");
 				yield lldb.continue (cancellable);
+				printerr ("resume (C)\n\n");
 			}
 
 			private async void handle_exception (GDB.Exception exception) {
 				var e = (Frida.LLDB.Exception) exception;
 				print ("CHECKING EXCEPTION:\n%s\n\n", e.to_string ());
+
+				var sig = (LLDB.Signal) e.signum;
+				var medata = e.medata;
+				if (sig == SIGSTOP && e.metype == EXC_SOFTWARE && medata.size == 2) {
+					var swex = (LLDB.MachSoftwareExceptionType) medata[0];
+					if (swex == SIGNAL) {
+						var sub_sig = (LLDB.Signal) medata[1];
+						if (sub_sig == SIGSTOP) {
+							printerr ("Just letting it go\n");
+							return;
+						}
+					}
+				}
 
 				//lldb.continue_with_signal.begin (exception.thread, (uint8) exception.signum, null);
 				lldb.close.begin (null);
