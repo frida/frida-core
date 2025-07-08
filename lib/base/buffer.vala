@@ -381,19 +381,19 @@ namespace Frida {
 				: int32.from_little_endian (val);
 		}
 
-		public uint32 read_uint32 (size_t offset) {
-			uint32 val = *((uint32 *) get_pointer (offset, sizeof (uint32)));
-			return (byte_order == BIG_ENDIAN)
-				? uint32.from_big_endian (val)
-				: uint32.from_little_endian (val);
-		}
-
 		public unowned Buffer write_int32 (size_t offset, int32 val) {
 			int32 target_val = (byte_order == BIG_ENDIAN)
 				? val.to_big_endian ()
 				: val.to_little_endian ();
 			*((int32 *) get_pointer (offset, sizeof (int32))) = target_val;
 			return this;
+		}
+
+		public uint32 read_uint32 (size_t offset) {
+			uint32 val = *((uint32 *) get_pointer (offset, sizeof (uint32)));
+			return (byte_order == BIG_ENDIAN)
+				? uint32.from_big_endian (val)
+				: uint32.from_little_endian (val);
 		}
 
 		public unowned Buffer write_uint32 (size_t offset, uint32 val) {
