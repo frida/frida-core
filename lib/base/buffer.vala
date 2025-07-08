@@ -513,6 +513,12 @@ namespace Frida {
 			return new Bytes.take ((owned) data);
 		}
 
+		public unowned Buffer write_bytes (size_t offset, Bytes bytes) {
+			size_t size = bytes.get_size ();
+			Memory.copy (get_pointer (offset, size), bytes.get_data (), size);
+			return this;
+		}
+
 		private uint8 * get_pointer (size_t offset, size_t n) {
 			size_t minimum_size = offset + n;
 			assert (size >= minimum_size);
