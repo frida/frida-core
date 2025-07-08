@@ -9,6 +9,8 @@ namespace Frida.Barebone {
 
 		private Allocation allocation;
 
+		private const size_t BUFFER_SIZE = 8192;
+
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
@@ -58,8 +60,20 @@ namespace Frida.Barebone {
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
-			uint64 buffer_physical_address = yield machine.invoke (start_address, {}, cancellable);
-			printerr ("Using buffer_physical_address=0x%llx\n\n", buffer_physical_address);
+			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
+			uint64 buffer_end_pa = buffer_start_pa + BUFFER_SIZE;
+			printerr ("Using buffer_start_pa=0x%llx\n\n", buffer_start_pa);
+
+			uint64 base_pa = tc.base_address;
+			size_t ram_size = ram.get_length ();
+			if (buffer_start_pa < base_pa || (buffer_end_pa - base_pa) > ram_size)
+				throw new Error.INVALID_ARGUMENT ("Invalid transport config: base_address is incorrect");
+
+			var gdb = machine.gdb;
+			var buf = new Buffer (ram.get_bytes (), gdb.byte_order, gdb.pointer_size);
+
+			uint32 magic = buf.read_uint32 ((size_t) (buffer_start_pa - base_pa));
+			printerr ("Got magic=0x%08x\n\n", magic);
 
 			throw new Error.NOT_SUPPORTED ("TODO");
 		}
