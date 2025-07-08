@@ -42,6 +42,17 @@ namespace Frida.Barebone {
 			return p.granule;
 		}
 
+		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+			GDB.Exception? exception = gdb.exception;
+			if (exception == null)
+				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+			GDB.Thread thread = exception.thread;
+
+			var cpsr = yield thread.read_register ("cpsr", cancellable);
+
+			return (uint) ((cpsr >> 2) & 3);
+		}
+
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 				throws Error, IOError {
 			Gee.List<RangeDetails> ranges = ("corellium" in gdb.features)

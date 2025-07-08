@@ -6,7 +6,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use core::{arch::asm, ptr};
 
-use crate::bindings::{g_main_loop_run, gboolean, gchar, gpointer, gum_script_load_sync, gum_script_set_message_handler, GBytes, GCancellable};
+use crate::bindings::{g_main_loop_run, gboolean, gchar, gpointer, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, GBytes, GCancellable};
 
 mod glib;
 mod gthread;
@@ -94,8 +94,15 @@ console.log('Hello from Frida!');
 
 let i = 0;
 setInterval(() => {
-    console.log(`Interval running... i=${i++}`);
+  console.log(`Interval running... i=${i++}`);
 }, 1000);
+
+function onMessage(message) {
+  console.log('Received message:', JSON.stringify(message));
+  send({ type: 'response', text: 'Hello from Frida!' });
+  recv(onMessage);
+}
+recv(onMessage);
 
 \0".as_bytes(),
         );
@@ -118,6 +125,11 @@ setInterval(() => {
         }
         gum_script_set_message_handler(script, Some(frida_message_handler), ptr::null_mut(), None);
         gum_script_load_sync(script, cancellable);
+        gum_script_post(
+            script,
+            b"{\"type\":\"hello\",\"text\":\"How do you do?\"}\0".as_ptr() as *const u8,
+            ptr::null_mut(),
+        );
 
         bindings::g_timeout_add(1000, Some(tick_handler), ptr::null_mut());
 

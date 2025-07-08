@@ -41,6 +41,13 @@ namespace Frida.Barebone {
 	 *      "free_function": "0xfffffff007a3c338"
 	 *    }
 	 *  }
+	 *
+	 * 4. Injecting a remote agent:
+	 *  {
+	 *    "agent": {
+	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent"
+	 *    }
+	 *  }
 	 */
 	public sealed class Config : Object, Json.Serializable {
 		public ConnectionConfig connection {
@@ -53,6 +60,11 @@ namespace Frida.Barebone {
 			get;
 			set;
 			default = new NoAllocatorConfig ();
+		}
+
+		public AgentConfig? agent {
+			get;
+			set;
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
@@ -162,6 +174,38 @@ namespace Frida.Barebone {
 				return true;
 
 			if (try_deserialize_address ("free_function", property_node, out value))
+				return true;
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+	}
+
+	public sealed class AgentConfig : Object {
+		public string path {
+			get;
+			set;
+		}
+
+		public AgentTransportConfig transport {
+			get;
+			set;
+		}
+	}
+
+	public sealed class AgentTransportConfig : Object, Json.Serializable {
+		public string path {
+			get;
+			set;
+		}
+
+		public uint64 base_address {
+			get;
+			set;
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (try_deserialize_address ("base_address", property_node, out value))
 				return true;
 
 			value = Value (pspec.value_type);

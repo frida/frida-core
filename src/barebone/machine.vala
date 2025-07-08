@@ -16,6 +16,29 @@ namespace Frida.Barebone {
 
 		public abstract async size_t query_page_size (Cancellable? cancellable) throws Error, IOError;
 
+		public abstract async uint query_exception_level (Cancellable? cancellable) throws Error, IOError;
+
+		public async void enter_exception_level (uint level, uint timeout, Cancellable? cancellable) throws Error, IOError {
+			var timer = new Timer ();
+
+			do {
+				var el = yield query_exception_level (cancellable);
+				if (el == level)
+					return;
+
+				yield gdb.continue (cancellable);
+
+				var source = new TimeoutSource (10);
+				source.set_callback (enter_exception_level.callback);
+				source.attach (MainContext.get_thread_default ());
+				yield;
+
+				yield gdb.stop (cancellable);
+			} while ((uint) (timer.elapsed () * 1000.0) < timeout);
+
+			throw new Error.TIMED_OUT ("Timed out while trying to get target to exception level %u", level);
+		}
+
 		public abstract async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 			throws Error, IOError;
 
