@@ -92,16 +92,13 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
-			printerr ("buffer_start_pa=0x%llx\n\n", buffer_start_pa);
 			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
-			printerr ("buffer_end_pa=0x%llx\n\n", buffer_end_pa);
 
 			var gdb = machine.gdb;
 			yield gdb.continue (cancellable);
 
 			uint64 base_pa = tc.base_address;
 			size_t ram_size = ram.get_size ();
-			printerr ("ram_size=%zu\n\n", ram_size);
 			if (buffer_start_pa < base_pa || (buffer_end_pa - base_pa) > ram_size)
 				throw new Error.INVALID_ARGUMENT ("Invalid transport config: base_address is incorrect");
 			var buffer_offset = (size_t) (buffer_start_pa - base_pa);
@@ -134,8 +131,7 @@ namespace Frida.Barebone {
 
 			var main_context = MainContext.get_thread_default ();
 			while (shared_buffer.fetch_command () != IDLE) {
-				printerr ("Still waiting...\n");
-				var source = new TimeoutSource (1000);
+				var source = new TimeoutSource (10);
 				source.set_callback (execute_command.callback);
 				source.attach (main_context);
 				yield;
@@ -143,12 +139,10 @@ namespace Frida.Barebone {
 				cancellable.set_error_if_cancelled ();
 			}
 
-			var status = shared_buffer.fetch_status ();
-			printerr ("status=%s\n", status.to_string ());
-			switch (status) {
+			switch (shared_buffer.fetch_status ()) {
 				case DATA_READY: {
-					ResultCode code = shared_buffer.fetch_result_code ();
-					if (code != SUCCESS)
+					uint8 code = shared_buffer.fetch_result_code ();
+					if (code != 0)
 						throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
 					return new BufferReader (shared_buffer.fetch_result_buffer ());
 				}
@@ -177,15 +171,15 @@ namespace Frida.Barebone {
 			}
 
 			public Status fetch_status () {
-				return buf.read_uint8 (4);
-			}
-
-			public Command fetch_command () {
 				return buf.read_uint8 (5);
 			}
 
+			public Command fetch_command () {
+				return buf.read_uint8 (4);
+			}
+
 			public unowned SharedBuffer put_command (Command command) {
-				buf.write_uint8 (5, command);
+				buf.write_uint8 (4, command);
 				flush ();
 				return this;
 			}
@@ -197,7 +191,7 @@ namespace Frida.Barebone {
 				return this;
 			}
 
-			public ResultCode fetch_result_code () {
+			public uint8 fetch_result_code () {
 				return buf.read_uint8 (12);
 			}
 
@@ -235,10 +229,18 @@ namespace Frida.Barebone {
 				size_t start_page = first_address & align_mask;
 				size_t end_page = (last_address & align_mask) + page_size;
 
-				int res = Posix.msync ((void *) start_page, end_page - start_page, Posix.MS_SYNC);
-				printerr ("msync(0x%zx->0x%zx) => %d\n\n", start_page, end_page, res);
+				Posix.msync ((void *) start_page, end_page - start_page, Posix.MS_SYNC);
 #endif
 			}
+		}
+
+		private enum Command {
+			IDLE,
+			CREATE_SCRIPT,
+			LOAD_SCRIPT,
+			DESTROY_SCRIPT,
+			POST_SCRIPT_MESSAGE,
+			FETCH_SCRIPT_MESSAGE,
 		}
 
 		private enum Status {
@@ -246,18 +248,6 @@ namespace Frida.Barebone {
 			BUSY,
 			DATA_READY,
 			ERROR
-		}
-
-		private enum Command {
-			IDLE,
-			CREATE_SCRIPT,
-			EXEC_JS,
-			SHUTDOWN,
-		}
-
-		private enum ResultCode {
-			SUCCESS,
-			INVALID_ARGUMENT,
 		}
 	}
 
@@ -272,8 +262,7 @@ namespace Frida.Barebone {
 		}
 
 		~MappedMemoryRegion () {
-			int res = Posix.munmap (mem, size);
-			printerr ("Posix.munmap() => %d\n\n", res);
+			Posix.munmap (mem, size);
 		}
 	}
 #endif
