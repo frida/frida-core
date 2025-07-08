@@ -3,9 +3,12 @@ const IOLOG_ADDR: usize = 0xfffffff0_07ff_1b68;
 const KALLOC_ADDR: usize = 0xfffffff0_07a3_c278;
 const KFREE_ADDR: usize = 0xfffffff0_07a3_c338;
 const KERNEL_THREAD_START_ADDR: usize = 0xfffffff0_07a7_4674;
+const ASSERT_WAIT_ADDR: usize = 0xfffffff0_07a5_1294;
 const ASSERT_WAIT_TIMEOUT_ADDR: usize = 0xfffffff0_07a5_1430;
 const THREAD_BLOCK_ADDR: usize = 0xfffffff0_07a5_5728;
 const THREAD_WAKEUP_ADDR: usize = 0xfffffff0_07a5_8ea0;
+const MACH_ABSOLUTE_TIME_ADDR: usize = 0xfffffff0_07b6_0cc0;
+const ABSOLUTETIME_TO_NANOSECONDS_ADDR: usize = 0xfffffff0_07b6_11e4;
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -61,14 +64,31 @@ pub fn kernel_thread_start(
     };
 }
 
+type ContinuationFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
+
 pub const THREAD_UNINT: u32 = 0;
+pub const THREAD_WAITING: i32 = -1;
 
-pub const THREAD_AWAKENED: i32 = 0;
-pub const THREAD_TIMED_OUT: i32 = 1;
-pub const THREAD_INTERRUPTED: i32 = 2;
+pub fn assert_wait(event: *const u8, interruptible: u32) -> i32 {
+    type AssertWaitFn = unsafe extern "C" fn(event: *const u8, interruptible: u32) -> i32;
+    unsafe {
+        let func: AssertWaitFn = core::mem::transmute(ASSERT_WAIT_ADDR);
+        func(event, interruptible)
+    }
+}
 
-pub fn assert_wait_timeout(event: *const u8, interruptible: u32, interval: u32, scale_factor: u32) -> i32 {
-    type AssertWaitTimeoutFn = unsafe extern "C" fn(event: *const u8, interruptible: u32, interval: u32, scale_factor: u32) -> i32;
+pub fn assert_wait_timeout(
+    event: *const u8,
+    interruptible: u32,
+    interval: u32,
+    scale_factor: u32,
+) -> i32 {
+    type AssertWaitTimeoutFn = unsafe extern "C" fn(
+        event: *const u8,
+        interruptible: u32,
+        interval: u32,
+        scale_factor: u32,
+    ) -> i32;
     unsafe {
         let func: AssertWaitTimeoutFn = core::mem::transmute(ASSERT_WAIT_TIMEOUT_ADDR);
         func(event, interruptible, interval, scale_factor)
@@ -91,4 +111,20 @@ pub fn thread_wakeup(event: *const u8) -> i32 {
     }
 }
 
-type ContinuationFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
+pub fn mach_absolute_time() -> u64 {
+    type MachAbsoluteTimeFn = unsafe extern "C" fn() -> u64;
+    unsafe {
+        let func: MachAbsoluteTimeFn = core::mem::transmute(MACH_ABSOLUTE_TIME_ADDR);
+        func()
+    }
+}
+
+pub fn absolutetime_to_nanoseconds(abstime: u64) -> u64 {
+    type AbsoluteTimeToNanoFn = unsafe extern "C" fn(abstime: u64, nanoseconds: *mut u64);
+    let mut nanoseconds: u64 = 0;
+    unsafe {
+        let func: AbsoluteTimeToNanoFn = core::mem::transmute(ABSOLUTETIME_TO_NANOSECONDS_ADDR);
+        func(abstime, &mut nanoseconds);
+    }
+    nanoseconds
+}
