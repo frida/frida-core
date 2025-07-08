@@ -101,4 +101,7 @@ namespace Darwin.XNU {
 		IPV6,
 		V4MAPPEDV6,
 	}
+
+	[CCode (cheader_filename = "fcntl.h")]
+	public const int F_FULLFSYNC;
 }
