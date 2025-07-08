@@ -41,6 +41,7 @@ pub extern "C" fn _getpid() -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _gettimeofday(tp: *mut core::ffi::c_void, _tzp: *mut core::ffi::c_void) -> i32 {
+    // TODO: Use clock_get_system_microtime or clock_get_system_nanotime.
     if !tp.is_null() {
         unsafe { ptr::write_bytes(tp, 0, core::mem::size_of::<core::ffi::c_void>()) };
     }
