@@ -40,7 +40,7 @@ pub struct SharedBuffer {
 
 #[unsafe(no_mangle)]
 pub static mut FRIDA_SHARED_BUFFER: SharedBuffer = SharedBuffer {
-    magic: AtomicU32::new(0x46524944), // "FRID" in hex
+    magic: AtomicU32::new(0x44495246),
     status: AtomicU8::new(0),
     command: AtomicU8::new(0),
     data_size: AtomicU32::new(0),
@@ -63,7 +63,7 @@ pub const STATUS_ERROR: u8 = 3;
 pub unsafe extern "C" fn _start() -> usize {
     unsafe {
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
-        (*buffer).magic.store(0x46524944, Ordering::Release); // "FRID"
+        (*buffer).magic.store(0x44495246, Ordering::Release);
         (*buffer).status.store(STATUS_IDLE, Ordering::Release);
         (*buffer).command.store(CMD_IDLE, Ordering::Release);
         (*buffer).data_size.store(0, Ordering::Release);
