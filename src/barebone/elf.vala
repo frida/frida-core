@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	private uint EXTRA_PAGES_FOR_HEAP = 20;
+	private uint EXTRA_PAGES_FOR_HEAP = 500;
 
 	public async Allocation inject_elf (Gum.ElfModule elf, Machine machine, Allocator allocator, Cancellable? cancellable)
 			throws Error, IOError {
