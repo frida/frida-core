@@ -377,6 +377,14 @@ namespace Frida {
 				: int16.from_little_endian (val);
 		}
 
+		public unowned Buffer write_int16 (size_t offset, int16 val) {
+			int16 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int16 *) get_pointer (offset, sizeof (int16))) = target_val;
+			return this;
+		}
+
 		public uint16 read_uint16 (size_t offset) {
 			uint16 val = *((uint16 *) get_pointer (offset, sizeof (uint16)));
 			return (byte_order == BIG_ENDIAN)
