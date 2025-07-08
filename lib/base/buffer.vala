@@ -356,6 +356,11 @@ namespace Frida {
 			return *((int8 *) get_pointer (offset, sizeof (int8)));
 		}
 
+		public unowned Buffer write_int8 (size_t offset, int8 val) {
+			*((int8 *) get_pointer (offset, sizeof (int8))) = val;
+			return this;
+		}
+
 		public uint8 read_uint8 (size_t offset) {
 			return *get_pointer (offset, sizeof (uint8));
 		}
