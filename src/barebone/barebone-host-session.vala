@@ -119,11 +119,18 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
+			Barebone.AgentConnection? agent_connection = null;
+			Barebone.AgentConfig? agent_config = config.agent;
+			if (agent_config != null) {
+				agent_connection = yield Barebone.AgentConnection.open (agent_config, machine, allocator, cancellable);
+			}
+			printerr ("Using agent_connection=%p\n\n", agent_connection);
+
 			var interceptor = new Barebone.Interceptor (machine, allocator);
 
 			var services = new Barebone.Services (machine, allocator, interceptor);
 
-			host_session = new BareboneHostSession (services);
+			host_session = new BareboneHostSession (agent_config, services);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -175,6 +182,11 @@ namespace Frida {
 	}
 
 	public sealed class BareboneHostSession : Object, HostSession {
+		public Barebone.AgentConfig? agent_config {
+			get;
+			construct;
+		}
+
 		public Barebone.Services services {
 			get;
 			construct;
@@ -183,8 +195,8 @@ namespace Frida {
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-		public BareboneHostSession (Barebone.Services services) {
-			Object (services: services);
+		public BareboneHostSession (Barebone.AgentConfig? config, Barebone.Services services) {
+			Object (agent_config: config, services: services);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

@@ -22,6 +22,10 @@ namespace Frida.Barebone {
 			return 4096;
 		}
 
+		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+			throw_not_supported ();
+		}
+
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 				throws Error, IOError {
 		}
