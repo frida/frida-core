@@ -1,14 +1,17 @@
 #![no_main]
 #![no_std]
 
-use alloc::format;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
-use core::ffi::CStr;
+use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use core::{arch::asm, ptr};
 
-use crate::bindings::{g_main_loop_run, gboolean, gchar, gpointer, gum_script_set_message_handler, gum_script_load_sync, GBytes, GCancellable};
+use crate::bindings::{
+    GBytes, GCancellable, g_main_loop_run, g_object_unref, gboolean, gchar, gpointer,
+    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+};
 
 mod glib;
 mod gthread;
@@ -31,50 +34,75 @@ mod bindings {
 
 #[repr(C)]
 pub struct SharedBuffer {
-    pub magic: AtomicU32,
-    pub status: AtomicU8,
+    pub magic: u32,
     pub command: AtomicU8,
-    pub data_size: AtomicU32,
-    pub result_code: AtomicU32,
-    pub result_size: AtomicU32,
+    pub status: AtomicU8,
+    pub data_size: u32,
+    pub result_code: u32,
+    pub result_size: u32,
     pub data: [u8; 4096],
 }
 
 #[unsafe(no_mangle)]
 pub static mut FRIDA_SHARED_BUFFER: SharedBuffer = SharedBuffer {
-    magic: AtomicU32::new(0x44495246),
-    status: AtomicU8::new(0),
-    command: AtomicU8::new(0),
-    data_size: AtomicU32::new(0),
-    result_code: AtomicU32::new(0),
-    result_size: AtomicU32::new(0),
+    magic: 0x44495246,
+    command: AtomicU8::new(FridaCommand::Idle as u8),
+    status: AtomicU8::new(FridaStatus::Idle as u8),
+    data_size: 0,
+    result_code: 0,
+    result_size: 0,
     data: [0u8; 4096],
 };
 
-// Script storage
 static mut SCRIPTS: BTreeMap<u32, *mut bindings::GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 
-pub const CMD_IDLE: u8 = 0;
-pub const CMD_CREATE_SCRIPT: u8 = 1;
-pub const CMD_EXEC_JS: u8 = 2;
-pub const CMD_SHUTDOWN: u8 = 3;
+#[repr(u8)]
+#[derive(PartialEq, Eq)]
+pub enum FridaCommand {
+    Idle = 0,
+    CreateScript = 1,
+    LoadScript = 2,
+    DestroyScript = 3,
+    PostScriptMessage = 4,
+    FetchScriptMessage = 5,
+}
 
-pub const STATUS_IDLE: u8 = 0;
-pub const STATUS_BUSY: u8 = 1;
-pub const STATUS_DATA_READY: u8 = 2;
-pub const STATUS_ERROR: u8 = 3;
+impl core::fmt::Display for FridaCommand {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            FridaCommand::Idle => write!(f, "Idle"),
+            FridaCommand::CreateScript => write!(f, "CreateScript"),
+            FridaCommand::LoadScript => write!(f, "LoadScript"),
+            FridaCommand::DestroyScript => write!(f, "DestroyScript"),
+            FridaCommand::PostScriptMessage => write!(f, "PostScriptMessage"),
+            FridaCommand::FetchScriptMessage => write!(f, "FetchScriptMessage"),
+        }
+    }
+}
+
+#[repr(u8)]
+pub enum FridaStatus {
+    Idle = 0,
+    Busy = 1,
+    DataReady = 2,
+    Error = 3,
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> usize {
     unsafe {
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
-        (*buffer).magic.store(0x44495246, Ordering::Release);
-        (*buffer).status.store(STATUS_IDLE, Ordering::Release);
-        (*buffer).command.store(CMD_IDLE, Ordering::Release);
-        (*buffer).data_size.store(0, Ordering::Release);
-        (*buffer).result_code.store(0, Ordering::Release);
-        (*buffer).result_size.store(0, Ordering::Release);
+        (*buffer).magic = 0x44495246;
+        (*buffer)
+            .command
+            .store(FridaCommand::Idle as u8, Ordering::Release);
+        (*buffer)
+            .status
+            .store(FridaStatus::Idle as u8, Ordering::Release);
+        (*buffer).data_size = 0;
+        (*buffer).result_code = 0;
+        (*buffer).result_size = 0;
 
         xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
 
@@ -88,7 +116,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        bindings::g_timeout_add(1000, Some(process_shared_buffer), ptr::null_mut());
+        bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
 
         let main_loop = bindings::g_main_loop_new(ptr::null_mut(), 0);
         g_main_loop_run(main_loop);
@@ -99,36 +127,48 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     unsafe {
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
 
-        let cmd = (*buffer).command.load(Ordering::Acquire);
-        if cmd != CMD_IDLE {
+        let cmd =
+            core::mem::transmute::<u8, FridaCommand>((*buffer).command.load(Ordering::Acquire));
+        if cmd != FridaCommand::Idle {
             kprintln!("[Frida] Processing command: {}", cmd);
 
-            (*buffer).status.store(STATUS_BUSY, Ordering::Release);
+            (*buffer)
+                .status
+                .store(FridaStatus::Busy as u8, Ordering::Release);
 
-            match cmd {
-                CMD_CREATE_SCRIPT => {
+            let new_status = match cmd {
+                FridaCommand::CreateScript => {
                     handle_create_script_request(buffer);
-                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                    FridaStatus::DataReady
                 }
-                CMD_EXEC_JS => {
-                    write_string_result_to_buffer(buffer, "TODO");
-                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                FridaCommand::LoadScript => {
+                    handle_load_script_request(buffer);
+                    FridaStatus::DataReady
                 }
-                CMD_SHUTDOWN => {
-                    write_string_result_to_buffer(buffer, "Worker shutting down");
-                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                FridaCommand::DestroyScript => {
+                    handle_destroy_script_request(buffer);
+                    FridaStatus::DataReady
+                }
+                FridaCommand::PostScriptMessage => {
+                    handle_post_script_message_request(buffer);
+                    FridaStatus::DataReady
+                }
+                FridaCommand::FetchScriptMessage => {
+                    handle_fetch_script_message_request(buffer);
+                    FridaStatus::DataReady
                 }
                 _ => {
                     write_error_to_buffer(buffer, 1, "Unknown command");
-                    (*buffer).status.store(STATUS_ERROR, Ordering::Release);
+                    FridaStatus::Error
                 }
-            }
+            };
+            (*buffer).status.store(new_status as u8, Ordering::Release);
 
             kprintln!("[Frida] Processed command: {}", cmd);
 
-            (*buffer).command.store(CMD_IDLE, Ordering::Release);
-        } else {
-            kprintln!("[Frida] Nothing to do!");
+            (*buffer)
+                .command
+                .store(FridaCommand::Idle as u8, Ordering::Release);
         }
     }
 
@@ -137,7 +177,7 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
 
 unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
     unsafe {
-        let data_size = (*buffer).data_size.load(Ordering::Acquire) as usize;
+        let data_size = (*buffer).data_size as usize;
         if data_size == 0 || data_size > 4096 {
             panic!("Protocol error");
         }
@@ -170,18 +210,108 @@ unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
         }
         gum_script_set_message_handler(script, Some(frida_message_handler), ptr::null_mut(), None);
         gum_script_load_sync(script, cancellable);
-        /*
-        gum_script_post(
-            script,
-            b"{\"type\":\"hello\",\"text\":\"How do you do?\"}\0".as_ptr() as *const u8,
-            ptr::null_mut(),
-        );
-        */
 
         let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
-        core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap().insert(script_id, script);
+        core::ptr::addr_of_mut!(SCRIPTS)
+            .as_mut()
+            .unwrap()
+            .insert(script_id, script);
 
         write_uint32_result_to_buffer(buffer, script_id);
+    }
+}
+
+unsafe fn handle_load_script_request(buffer: *mut SharedBuffer) {
+    unsafe {
+        let script_id = match parse_script_id_from_buffer(buffer) {
+            Ok(id) => id,
+            Err(msg) => {
+                write_error_to_buffer(buffer, 1, msg);
+                return;
+            }
+        };
+
+        if let Some(script) = get_script_by_id(script_id) {
+            bindings::gum_script_load_sync(script, ptr::null_mut());
+
+            write_string_result_to_buffer(buffer, "Script loaded successfully");
+        } else {
+            write_error_to_buffer(buffer, 3, "Script not found");
+        }
+    }
+}
+
+unsafe fn handle_destroy_script_request(buffer: *mut SharedBuffer) {
+    unsafe {
+        let script_id = match parse_script_id_from_buffer(buffer) {
+            Ok(id) => id,
+            Err(msg) => {
+                write_error_to_buffer(buffer, 1, msg);
+                return;
+            }
+        };
+
+        let scripts = core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap();
+        if let Some(script) = scripts.remove(&script_id) {
+            gum_script_unload_sync(script, ptr::null_mut());
+            g_object_unref(script as *mut c_void);
+
+            write_string_result_to_buffer(buffer, "Script destroyed successfully");
+        } else {
+            write_error_to_buffer(buffer, 3, "Script not found");
+        }
+    }
+}
+
+unsafe fn handle_post_script_message_request(buffer: *mut SharedBuffer) {
+    unsafe {
+        let script_id = match parse_script_id_from_buffer(buffer) {
+            Ok(id) => id,
+            Err(msg) => {
+                write_error_to_buffer(buffer, 1, msg);
+                return;
+            }
+        };
+
+        let _message_size = (*buffer).data_size as usize - 4;
+        let message_ptr = (*buffer).data.as_ptr().add(4);
+
+        if let Some(script) = get_script_by_id(script_id) {
+            gum_script_post(script, message_ptr, ptr::null_mut());
+            write_string_result_to_buffer(buffer, "Message posted successfully");
+        } else {
+            write_error_to_buffer(buffer, 3, "Script not found");
+        }
+    }
+}
+
+unsafe fn handle_fetch_script_message_request(buffer: *mut SharedBuffer) {
+    unsafe {
+        write_string_result_to_buffer(buffer, "TODO");
+    }
+}
+
+unsafe fn parse_script_id_from_buffer(buffer: *mut SharedBuffer) -> Result<u32, &'static str> {
+    unsafe {
+        if (*buffer).data_size < 4 {
+            return Err("Expected at least 4 bytes for script ID");
+        }
+
+        let script_id = u32::from_le_bytes([
+            (*buffer).data[0],
+            (*buffer).data[1],
+            (*buffer).data[2],
+            (*buffer).data[3],
+        ]);
+
+        Ok(script_id)
+    }
+}
+
+unsafe fn get_script_by_id(script_id: u32) -> Option<*mut bindings::GumScript> {
+    unsafe {
+        let scripts = core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap();
+        scripts.get(&script_id).copied()
     }
 }
 
@@ -191,10 +321,8 @@ unsafe fn write_string_result_to_buffer(buffer: *mut SharedBuffer, text: &str) {
         let copy_size = core::cmp::min(text_bytes.len(), 4096);
         core::ptr::copy_nonoverlapping(text_bytes.as_ptr(), (*buffer).data.as_mut_ptr(), copy_size);
 
-        (*buffer).result_code.store(0, Ordering::Release);
-        (*buffer)
-            .result_size
-            .store(copy_size as u32, Ordering::Release);
+        (*buffer).result_code = 0;
+        (*buffer).result_size = copy_size as u32;
     }
 }
 
@@ -203,8 +331,8 @@ unsafe fn write_uint32_result_to_buffer(buffer: *mut SharedBuffer, value: u32) {
         let value_bytes = value.to_le_bytes();
         core::ptr::copy_nonoverlapping(value_bytes.as_ptr(), (*buffer).data.as_mut_ptr(), 4);
 
-        (*buffer).result_code.store(0, Ordering::Release);
-        (*buffer).result_size.store(4, Ordering::Release);
+        (*buffer).result_code = 0;
+        (*buffer).result_size = 4;
     }
 }
 
@@ -218,10 +346,8 @@ unsafe fn write_error_to_buffer(buffer: *mut SharedBuffer, error_code: u32, erro
             copy_size,
         );
 
-        (*buffer).result_code.store(error_code, Ordering::Release);
-        (*buffer)
-            .result_size
-            .store(copy_size as u32, Ordering::Release);
+        (*buffer).result_code = error_code;
+        (*buffer).result_size = copy_size as u32;
     }
 }
 
@@ -262,8 +388,14 @@ unsafe extern "C" fn frida_log_handler(
     kprintln!("[Frida] {}", msg);
 }
 
-unsafe extern "C" fn frida_message_handler(message: *const gchar, _data: *mut GBytes, _user_data: gpointer) {
-    kprintln!("[Frida] Message from script: {}", unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() });
+unsafe extern "C" fn frida_message_handler(
+    message: *const gchar,
+    _data: *mut GBytes,
+    _user_data: gpointer,
+) {
+    kprintln!("[Frida] Message from script: {}", unsafe {
+        core::ffi::CStr::from_ptr(message).to_str().unwrap()
+    });
 }
 
 #[panic_handler]
