@@ -12,9 +12,6 @@ SECTIONS {
   .got : {
     *(.got*)
   }
-  .panic_info : ALIGN(1024) {
-    *(.bss.panic_info)
-  }
   .bss : {
     *(.bss*)
   }

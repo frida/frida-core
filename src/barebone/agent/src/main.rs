@@ -2,11 +2,13 @@
 #![no_std]
 
 use alloc::format;
+use alloc::collections::BTreeMap;
 use core::alloc::{GlobalAlloc, Layout};
+use core::ffi::CStr;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use core::{arch::asm, ptr};
 
-use crate::bindings::{g_main_loop_run, gboolean, gchar, gpointer, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, GBytes, GCancellable};
+use crate::bindings::{g_main_loop_run, gboolean, gchar, gpointer, gum_script_set_message_handler, gum_script_load_sync, GBytes, GCancellable};
 
 mod glib;
 mod gthread;
@@ -49,8 +51,12 @@ pub static mut FRIDA_SHARED_BUFFER: SharedBuffer = SharedBuffer {
     data: [0u8; 4096],
 };
 
+// Script storage
+static mut SCRIPTS: BTreeMap<u32, *mut bindings::GumScript> = BTreeMap::new();
+static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
+
 pub const CMD_IDLE: u8 = 0;
-pub const CMD_PING: u8 = 1;
+pub const CMD_CREATE_SCRIPT: u8 = 1;
 pub const CMD_EXEC_JS: u8 = 2;
 pub const CMD_SHUTDOWN: u8 = 3;
 
@@ -82,35 +88,74 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        let backend = bindings::gum_script_backend_obtain_qjs();
+        bindings::g_timeout_add(1000, Some(process_shared_buffer), ptr::null_mut());
 
+        let main_loop = bindings::g_main_loop_new(ptr::null_mut(), 0);
+        g_main_loop_run(main_loop);
+    }
+}
+
+unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
+    unsafe {
+        let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
+
+        let cmd = (*buffer).command.load(Ordering::Acquire);
+        if cmd != CMD_IDLE {
+            kprintln!("[Frida] Processing command: {}", cmd);
+
+            (*buffer).status.store(STATUS_BUSY, Ordering::Release);
+
+            match cmd {
+                CMD_CREATE_SCRIPT => {
+                    handle_create_script_request(buffer);
+                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                }
+                CMD_EXEC_JS => {
+                    write_string_result_to_buffer(buffer, "TODO");
+                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                }
+                CMD_SHUTDOWN => {
+                    write_string_result_to_buffer(buffer, "Worker shutting down");
+                    (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
+                }
+                _ => {
+                    write_error_to_buffer(buffer, 1, "Unknown command");
+                    (*buffer).status.store(STATUS_ERROR, Ordering::Release);
+                }
+            }
+
+            kprintln!("[Frida] Processed command: {}", cmd);
+
+            (*buffer).command.store(CMD_IDLE, Ordering::Release);
+        } else {
+            kprintln!("[Frida] Nothing to do!");
+        }
+    }
+
+    1
+}
+
+unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
+    unsafe {
+        let data_size = (*buffer).data_size.load(Ordering::Acquire) as usize;
+        if data_size == 0 || data_size > 4096 {
+            panic!("Protocol error");
+        }
+
+        let backend = bindings::gum_script_backend_obtain_qjs();
         let cancellable: *mut GCancellable = ptr::null_mut();
         let mut error: *mut bindings::GError = ptr::null_mut();
 
-        let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("explore.js\0".as_bytes());
-        let c_source = core::ffi::CStr::from_bytes_with_nul_unchecked(
-            "
-console.log('Hello from Frida!');
+        let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("agent.js\0".as_bytes());
 
-let i = 0;
-setInterval(() => {
-  console.log(`Interval running... i=${i++}`);
-}, 1000);
-
-function onMessage(message) {
-  console.log('Received message:', JSON.stringify(message));
-  send({ type: 'response', text: 'Hello from Frida!' });
-  recv(onMessage);
-}
-recv(onMessage);
-
-\0".as_bytes(),
-        );
+        let data_ptr = (*buffer).data.as_ptr();
+        let data_slice = core::slice::from_raw_parts(data_ptr, data_size);
+        let source = CStr::from_bytes_with_nul(data_slice).unwrap();
 
         let script = bindings::gum_script_backend_create_sync(
             backend,
             c_name.as_ptr(),
-            c_source.as_ptr(),
+            source.as_ptr(),
             ptr::null_mut(),
             cancellable,
             &mut error,
@@ -119,59 +164,24 @@ recv(onMessage);
             let error_msg = core::ffi::CStr::from_ptr((*error).message)
                 .to_str()
                 .unwrap();
-            kprintln!("Error creating script: {}", error_msg);
+            write_error_to_buffer(buffer, 1, error_msg);
             bindings::g_error_free(error);
             return;
         }
         gum_script_set_message_handler(script, Some(frida_message_handler), ptr::null_mut(), None);
         gum_script_load_sync(script, cancellable);
+        /*
         gum_script_post(
             script,
             b"{\"type\":\"hello\",\"text\":\"How do you do?\"}\0".as_ptr() as *const u8,
             ptr::null_mut(),
         );
+        */
 
-        bindings::g_timeout_add(1000, Some(tick_handler), ptr::null_mut());
+        let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
+        core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap().insert(script_id, script);
 
-        let main_loop = bindings::g_main_loop_new(ptr::null_mut(), 0);
-        g_main_loop_run(main_loop);
-    }
-
-    loop {
-        unsafe {
-            let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
-
-            let cmd = (*buffer).command.load(Ordering::Acquire);
-            if cmd != CMD_IDLE {
-                (*buffer).status.store(STATUS_BUSY, Ordering::Release);
-
-                match cmd {
-                    CMD_PING => {
-                        write_string_result_to_buffer(buffer, "PONG from worker thread!");
-                        (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
-                    }
-                    CMD_EXEC_JS => {
-                        write_string_result_to_buffer(buffer, "TODO");
-                        (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
-                    }
-                    CMD_SHUTDOWN => {
-                        write_string_result_to_buffer(buffer, "Worker shutting down");
-                        (*buffer).status.store(STATUS_DATA_READY, Ordering::Release);
-                        break;
-                    }
-                    _ => {
-                        write_error_to_buffer(buffer, 1, "Unknown command");
-                        (*buffer).status.store(STATUS_ERROR, Ordering::Release);
-                    }
-                }
-
-                (*buffer).command.store(CMD_IDLE, Ordering::Release);
-            }
-        }
-
-        for _ in 0..1000 {
-            core::hint::spin_loop();
-        }
+        write_uint32_result_to_buffer(buffer, script_id);
     }
 }
 
@@ -185,6 +195,16 @@ unsafe fn write_string_result_to_buffer(buffer: *mut SharedBuffer, text: &str) {
         (*buffer)
             .result_size
             .store(copy_size as u32, Ordering::Release);
+    }
+}
+
+unsafe fn write_uint32_result_to_buffer(buffer: *mut SharedBuffer, value: u32) {
+    unsafe {
+        let value_bytes = value.to_le_bytes();
+        core::ptr::copy_nonoverlapping(value_bytes.as_ptr(), (*buffer).data.as_mut_ptr(), 4);
+
+        (*buffer).result_code.store(0, Ordering::Release);
+        (*buffer).result_size.store(4, Ordering::Release);
     }
 }
 
@@ -240,11 +260,6 @@ unsafe extern "C" fn frida_log_handler(
 ) {
     let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
     kprintln!("[Frida] {}", msg);
-}
-
-unsafe extern "C" fn tick_handler(_user_data: gpointer) -> gboolean {
-    kprintln!("[Frida] Tick handler called");
-    1
 }
 
 unsafe extern "C" fn frida_message_handler(message: *const gchar, _data: *mut GBytes, _user_data: gpointer) {
