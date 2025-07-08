@@ -13,6 +13,7 @@ base_sources = [
   'socket.vala',
   'socket-glue.c',
   'buffer.vala',
+  'buffer-glue.c',
   'value.vala',
 ]
 

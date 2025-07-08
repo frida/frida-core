@@ -651,4 +651,6 @@ namespace Frida {
 				throw new Error.PROTOCOL ("Malformed buffer: truncated");
 		}
 	}
+
+	public extern Bytes make_bytes_with_owner<T> (void * data, size_t size, owned T? owner = null);
 }
