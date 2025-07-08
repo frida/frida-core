@@ -15,10 +15,7 @@ def main(args: List[str]):
             print("Failed to connect to QEMU monitor")
             return
 
-        # client.ping()
-        # client.execute_javascript("function add(a, b) { return a + b; }")
-
-        result = client.execute_javascript(args[0])
+        result = client.create_script("console.log('hey');")
         print(result)
 
         # client.shutdown()
@@ -35,7 +32,7 @@ def main(args: List[str]):
 
 class FridaBareboneClient:
     CMD_IDLE = 0
-    CMD_PING = 1
+    CMD_CREATE_SCRIPT = 1
     CMD_EXEC_JS = 2
     CMD_SHUTDOWN = 3
 
@@ -44,9 +41,9 @@ class FridaBareboneClient:
     STATUS_DATA_READY = 2
     STATUS_ERROR = 3
 
-    MAGIC_NUMBER = 0x46524944
+    MAGIC_NUMBER = 0x44495246
 
-    def __init__(self, buffer_addr=0x8ECA44FCC, dram_base=0x800000000):
+    def __init__(self, buffer_addr=0x8ed30ca60, dram_base=0x800000000):
         self.buffer_offset = buffer_addr - dram_base
         self.buffer_size = 4096
         self.memory_map = None
@@ -87,8 +84,10 @@ class FridaBareboneClient:
 
     def _verify_buffer(self) -> bool:
         try:
+            print("Using buffer_offset:", hex(self.buffer_offset))
             magic_bytes = self._read_memory(self.buffer_offset, 4)
             magic = struct.unpack("<I", magic_bytes)[0]
+            print("Got magic:", hex(magic))
             return magic == self.MAGIC_NUMBER
         except Exception as e:
             print(f"Buffer verification failed: {e}")
@@ -117,10 +116,8 @@ class FridaBareboneClient:
 
         while time.time() - start_time < timeout:
             status = self._get_buffer_status()
-            if status["status"] == self.STATUS_DATA_READY:
+            if status["command"] == self.CMD_IDLE:
                 return True
-            elif status["status"] == self.STATUS_ERROR:
-                return False
             time.sleep(0.01)
 
         return False
@@ -129,11 +126,8 @@ class FridaBareboneClient:
         result = self._execute_command(self.CMD_PING, "PING")
         return result is not None
 
-    def execute_javascript(self, code: str) -> Union[int, str, None]:
-        code_bytes = code.encode("utf-8")
-        return self._execute_command(
-            self.CMD_EXEC_JS, "JavaScript execution", code_bytes
-        )
+    def create_script(self, code: str) -> Union[int, str, None]:
+        return self._execute_command(self.CMD_CREATE_SCRIPT, "CREATE_SCRIPT", code.encode("utf-8") + b"\x00")
 
     def shutdown(self) -> bool:
         result = self._execute_command(self.CMD_SHUTDOWN, "SHUTDOWN")
