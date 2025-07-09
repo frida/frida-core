@@ -93,6 +93,7 @@ namespace Frida.Barebone {
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
 			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
+			printerr ("Got buffer_start_pa=0x%" + uint64.FORMAT_MODIFIER + "x\n", buffer_start_pa);
 
 			var gdb = machine.gdb;
 			yield gdb.continue (cancellable);
@@ -108,8 +109,29 @@ namespace Frida.Barebone {
 			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, gdb.byte_order, gdb.pointer_size));
 			shared_buffer.check ();
 
-			var id = yield create_script ("send('Hello hsorbo');", cancellable);
+			var id = yield create_script ("""
+					recv('ping', onPing);
+					function onPing() {
+						send({ type: 'pong', platform: Process.platform });
+						recv('ping', onPing);
+					}
+				""", cancellable);
 			printerr ("Created script with ID: %u\n\n", id.handle);
+
+			yield load_script (id, cancellable);
+			printerr ("Script loaded\n\n");
+
+			yield post_script_message (id, "{\"type\":\"ping\"}", cancellable);
+			printerr ("Message posted\n\n");
+
+			AgentMessage? message = yield fetch_script_message (cancellable);
+			if (message != null)
+				printerr ("Fetched script message with script_id=%u text=%s\n\n", message.script_id.handle, message.text);
+			else
+				printerr ("No pending script messages yet\n\n");
+
+			yield destroy_script (id, cancellable);
+			printerr ("Script destroyed\n\n");
 
 			throw new Error.NOT_SUPPORTED ("Ready to rock");
 		}
@@ -122,6 +144,45 @@ namespace Frida.Barebone {
 			var payload = new Bytes.static (source.data[:source.data.length + 1]);
 			var response = yield execute_command (CREATE_SCRIPT, payload, cancellable);
 			return AgentScriptId (response.read_uint32 ());
+		}
+
+		public async void load_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
+			var payload = make_payload_builder ()
+				.append_uint32 (id.handle)
+				.build ();
+			var response = yield execute_command (LOAD_SCRIPT, payload, cancellable);
+			printerr ("Got response: %s\n\n", response.read_string ());
+		}
+
+		public async void destroy_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
+			var payload = make_payload_builder ()
+				.append_uint32 (id.handle)
+				.build ();
+			var response = yield execute_command (DESTROY_SCRIPT, payload, cancellable);
+			printerr ("Got response: %s\n\n", response.read_string ());
+		}
+
+		public async void post_script_message (AgentScriptId id, string message, Cancellable? cancellable) throws Error, IOError {
+			var payload = make_payload_builder ()
+				.append_uint32 (id.handle)
+				.append_string (message)
+				.build ();
+			var response = yield execute_command (POST_SCRIPT_MESSAGE, payload, cancellable);
+			printerr ("Got response: %s\n\n", response.read_string ());
+		}
+
+		public async AgentMessage? fetch_script_message (Cancellable? cancellable) throws Error, IOError {
+			var response = yield execute_command (FETCH_SCRIPT_MESSAGE, new Bytes ({}), cancellable);
+			if (response.available == 0)
+				return null;
+			var script_id = AgentScriptId (response.read_uint32 ());
+			var text = response.read_string ();
+			return AgentMessage (SCRIPT, script_id, text, false, {});
+		}
+
+		private BufferBuilder make_payload_builder () {
+			var b = shared_buffer.buf;
+			return new BufferBuilder (b.byte_order, b.pointer_size);
 		}
 
 		private async BufferReader execute_command (Command command, Bytes payload, Cancellable? cancellable) throws Error, IOError {
@@ -158,7 +219,7 @@ namespace Frida.Barebone {
 			private const uint32 MAGIC = 0x44495246;
 			private const uint32 DATA_CAPACITY = 4096;
 
-			private Buffer buf;
+			public Buffer buf;
 
 			public SharedBuffer (Buffer b) {
 				buf = b;
