@@ -1492,7 +1492,10 @@ namespace Frida {
 				if (exception_handler != null)
 					lldb.disconnect (exception_handler);
 				exception_handler = null;
-				yield lldb.kill (cancellable);
+				if (gadget_path == null)
+					yield lldb.kill (cancellable);
+				else
+					yield lldb.close (cancellable);
 			}
 
 			public async Fruity.Injector.GadgetDetails query_gadget_details (Cancellable? cancellable) throws Error, IOError {
