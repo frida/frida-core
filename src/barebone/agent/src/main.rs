@@ -1,8 +1,11 @@
 #![no_main]
 #![no_std]
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::collections::VecDeque;
 use alloc::format;
+use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
@@ -55,6 +58,7 @@ pub static mut FRIDA_SHARED_BUFFER: SharedBuffer = SharedBuffer {
 };
 
 static mut SCRIPTS: BTreeMap<u32, *mut bindings::GumScript> = BTreeMap::new();
+static mut MESSAGE_QUEUE: VecDeque<(u32, String)> = VecDeque::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[repr(u8)]
@@ -208,10 +212,18 @@ unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
             bindings::g_error_free(error);
             return;
         }
-        gum_script_set_message_handler(script, Some(frida_message_handler), ptr::null_mut(), None);
+        let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
+
+        // Pass script ID as user data to message handler
+        let script_id_ptr = Box::into_raw(Box::new(script_id));
+        gum_script_set_message_handler(
+            script,
+            Some(frida_message_handler),
+            script_id_ptr as *mut c_void,
+            None,
+        );
         gum_script_load_sync(script, cancellable);
 
-        let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
         core::ptr::addr_of_mut!(SCRIPTS)
             .as_mut()
             .unwrap()
@@ -287,7 +299,31 @@ unsafe fn handle_post_script_message_request(buffer: *mut SharedBuffer) {
 
 unsafe fn handle_fetch_script_message_request(buffer: *mut SharedBuffer) {
     unsafe {
-        write_string_result_to_buffer(buffer, "TODO");
+        let message_queue = core::ptr::addr_of_mut!(MESSAGE_QUEUE).as_mut().unwrap();
+
+        if let Some((script_id, message)) = message_queue.pop_front() {
+            let script_id_bytes = script_id.to_le_bytes();
+            core::ptr::copy_nonoverlapping(
+                script_id_bytes.as_ptr(),
+                (*buffer).data.as_mut_ptr(),
+                4,
+            );
+
+            let message_bytes = message.as_bytes();
+            let message_copy_size = core::cmp::min(message_bytes.len(), 4096 - 4 - 1);
+            core::ptr::copy_nonoverlapping(
+                message_bytes.as_ptr(),
+                (*buffer).data.as_mut_ptr().add(4),
+                message_copy_size,
+            );
+            *(*buffer).data.as_mut_ptr().add(4 + message_copy_size) = 0;
+
+            (*buffer).result_code = 0;
+            (*buffer).result_size = 4 + message_copy_size as u32 + 1;
+        } else {
+            (*buffer).result_code = 0;
+            (*buffer).result_size = 0;
+        }
     }
 }
 
@@ -391,11 +427,19 @@ unsafe extern "C" fn frida_log_handler(
 unsafe extern "C" fn frida_message_handler(
     message: *const gchar,
     _data: *mut GBytes,
-    _user_data: gpointer,
+    user_data: gpointer,
 ) {
-    kprintln!("[Frida] Message from script: {}", unsafe {
-        core::ffi::CStr::from_ptr(message).to_str().unwrap()
-    });
+    let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
+    kprintln!("[Frida] Message from script: {}", msg);
+
+    // Get script ID from user data
+    if !user_data.is_null() {
+        let script_id = unsafe { *(user_data as *const u32) };
+
+        // Enqueue the message with script ID
+        let message_queue = unsafe { core::ptr::addr_of_mut!(MESSAGE_QUEUE).as_mut().unwrap() };
+        message_queue.push_back((script_id, String::from(msg)));
+    }
 }
 
 #[panic_handler]
