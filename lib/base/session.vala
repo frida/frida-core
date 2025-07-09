@@ -127,6 +127,11 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
+	[DBus (name = "re.frida.GadgetSession17")]
+	public interface GadgetSession : Object {
+		public abstract async void stop_with_breakpoint (Cancellable? cancellable) throws GLib.Error;
+	}
+
 	public struct AgentMessage {
 		public AgentMessageKind kind;
 
@@ -2119,6 +2124,7 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
+		public const string GADGET_SESSION = "/re/frida/GadgetSession";
 		public const string CHANNEL = "/re/frida/Channel";
 		public const string SERVICE = "/re/frida/Service";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";

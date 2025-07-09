@@ -103,3 +103,28 @@ frida_gadget_environment_detect_darwin_location_fields (GumAddress our_address, 
 
   g_object_unref (resolver);
 }
+
+void
+frida_gadget_environment_disable_debugger_exceptions (void)
+{
+  task_set_exception_ports (
+      mach_task_self (),
+      EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT,
+      MACH_PORT_NULL,
+      EXCEPTION_DEFAULT,
+      THREAD_STATE_NONE
+  );
+}
+
+void
+frida_gadget_environment_trigger_resume_breakpoint (void)
+{
+  asm volatile (
+      "mov x1, #1337\n\t"
+      "mov x2, #1337\n\t"
+      "brk #1337\n\t"
+      :
+      :
+      : "x1", "x2"
+  );
+}

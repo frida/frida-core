@@ -403,6 +403,11 @@ namespace Frida.Gadget {
 
 		Gum.Cloak.add_range (location.range);
 
+#if DARWIN
+		if (mapped_range != null)
+			Environment.disable_debugger_exceptions ();
+#endif
+
 		interceptor = Gum.Interceptor.obtain ();
 		interceptor.begin_transaction ();
 		exceptor = Gum.Exceptor.obtain ();
@@ -1672,7 +1677,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession {
+		private class ControlChannel : Object, Peer, HostSession, GadgetSession {
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1702,6 +1707,9 @@ namespace Frida.Gadget {
 				try {
 					HostSession host_session = this;
 					registrations.add (connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session));
+
+					GadgetSession gadget_session = this;
+					registrations.add (connection.register_object (Frida.ObjectPath.GADGET_SESSION, gadget_session));
 
 					AuthenticationService null_auth = new NullAuthenticationService ();
 					registrations.add (connection.register_object (Frida.ObjectPath.AUTHENTICATION_SERVICE, null_auth));
@@ -1863,6 +1871,10 @@ namespace Frida.Gadget {
 
 			public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
+			}
+
+			public async void stop_with_breakpoint (Cancellable? cancellable) throws Error, IOError {
+				Environment.trigger_resume_breakpoint ();
 			}
 
 			private void validate_pid (uint pid) throws Error {
@@ -2103,6 +2115,8 @@ namespace Frida.Gadget {
 #if DARWIN
 		private extern void detect_darwin_location_fields (Gum.Address our_address, ref string? executable_name,
 			ref string? our_path, ref Gum.MemoryRange? our_range);
+		private extern void disable_debugger_exceptions ();
+		private extern void trigger_resume_breakpoint ();
 #endif
 	}
 

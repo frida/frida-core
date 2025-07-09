@@ -836,8 +836,13 @@ namespace Frida {
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var session = lldb_sessions[pid];
 			if (session != null) {
-				yield session.resume (cancellable);
-				return;
+				foreach (var entry in gadget_entries.values) {
+					if (entry.pid == pid) {
+						yield entry.resume (cancellable);
+						return;
+					}
+				}
+				assert_not_reached ();
 			}
 
 			var server = yield get_remote_server (cancellable);
@@ -1443,17 +1448,8 @@ namespace Frida {
 				yield lldb.close (cancellable);
 			}
 
-			public async void resume (Cancellable? cancellable) throws Error, IOError {
-				printerr ("resume (A)\n\n");
-				yield lldb.stop (cancellable);
-				printerr ("resume (B)\n\n");
-				yield lldb.continue (cancellable);
-				printerr ("resume (C)\n\n");
-			}
-
-			private async void handle_exception (GDB.Exception exception) {
+			private async void handle_exception (GDB.Exception exception) throws Error, IOError {
 				var e = (Frida.LLDB.Exception) exception;
-				print ("CHECKING EXCEPTION:\n%s\n\n", e.to_string ());
 
 				var sig = (LLDB.Signal) e.signum;
 				var medata = e.medata;
@@ -1467,9 +1463,22 @@ namespace Frida {
 						}
 					}
 				}
+				if (sig == SIGTRAP && e.metype == EXC_BREAKPOINT && medata.size == 2) {
+					uint64 x1 = e.context["x1"];
+					uint64 x2 = e.context["x2"];
+					if (x1 == x2 == 1337) {
+						uint64 pc = e.context["pc"];
+						var thread = e.thread;
+						yield thread.write_register ("pc", pc + 4, io_cancellable);
+						yield lldb.continue (io_cancellable);
+						return;
+					}
+				}
 
-				//lldb.continue_with_signal.begin (exception.thread, (uint8) exception.signum, null);
-				lldb.close.begin (null);
+				lldb.disconnect (exception_handler);
+				exception_handler = null;
+
+				yield lldb.close (io_cancellable);
 			}
 
 			public async void detach (Cancellable? cancellable) throws Error, IOError {
@@ -1621,6 +1630,17 @@ namespace Frida {
 				}
 
 				close_request.resolve (true);
+			}
+
+			public async void resume (Cancellable? cancellable) throws Error, IOError {
+				try {
+					GadgetSession session = yield connection.get_proxy (null, ObjectPath.GADGET_SESSION,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+					
+					yield session.stop_with_breakpoint (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
 			}
 
 			private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
