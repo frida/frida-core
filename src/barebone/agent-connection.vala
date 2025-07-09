@@ -59,7 +59,7 @@ namespace Frida.Barebone {
 					throw new Error.INVALID_ARGUMENT ("Memory file at %s is empty", tc.path);
 
 				void * mem = Posix.mmap (null, size, Posix.PROT_READ | Posix.PROT_WRITE, Posix.MAP_SHARED, fd, 0);
-				if (res != 0)
+				if (mem == Posix.MAP_FAILED)
 					throw new Error.INVALID_ARGUMENT ("Unable to map %s: %s", tc.path, strerror (errno));
 
 				ram = make_bytes_with_owner (mem, size, new MappedMemoryRegion (mem, size));
