@@ -856,7 +856,6 @@ namespace Frida {
 		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var lldb_session = lldb_sessions[pid];
 			if (lldb_session != null) {
-				print ("NOOO KILL\n");
 				yield lldb_session.kill (cancellable);
 				return;
 			}
