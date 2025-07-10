@@ -1157,9 +1157,8 @@ namespace Frida {
 			var lldb_session = lldb_sessions[entry.pid];
 			if (lldb_session != null) {
 				remove_lldb_session (lldb_session);
+				yield entry.detach_lldb (lldb_session, io_cancellable);
 			}
-
-			yield entry.detach (lldb_session, io_cancellable);
 
 			gadget_entries.unset (id);
 			agent_sessions.unset (id);
@@ -1664,7 +1663,7 @@ namespace Frida {
 				}
 			}
 
-			public async void detach (LLDBSession? lldb_session, Cancellable? cancellable) throws Error, IOError {
+			public async void detach_lldb (LLDBSession lldb_session, Cancellable? cancellable) throws Error, IOError {
 				while (detach_request != null) {
 					try {
 						yield detach_request.future.wait_async (cancellable);
@@ -1681,21 +1680,16 @@ namespace Frida {
 					GadgetSession session = yield connection.get_proxy (null, ObjectPath.GADGET_SESSION,
 						DO_NOT_LOAD_PROPERTIES, cancellable);
 
-					if (lldb_session != null)
-						lldb_session.detached.connect (on_lldb_session_detached);
+					lldb_session.detached.connect (on_lldb_session_detached);
 					
 					yield session.stop_with_breakpoint (GadgetBreakpointAction.DETACH, cancellable);
-
-					if (lldb_session == null)
-						detach_request.resolve (true);
 
 					yield detach_request.future.wait_async (cancellable);
 				} catch (GLib.Error e) {
 					detach_request.reject (e);
 					throw_dbus_error (e);
 				} finally {
-					if (lldb_session != null)
-						lldb_session.detached.disconnect (on_lldb_session_detached);
+					lldb_session.detached.disconnect (on_lldb_session_detached);
 					detach_request = null;
 				}
 			}
