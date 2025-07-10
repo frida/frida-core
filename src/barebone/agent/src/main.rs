@@ -134,8 +134,6 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
         let cmd =
             core::mem::transmute::<u8, FridaCommand>((*buffer).command.load(Ordering::Acquire));
         if cmd != FridaCommand::Idle {
-            kprintln!("[Frida] Processing command: {}", cmd);
-
             (*buffer)
                 .status
                 .store(FridaStatus::Busy as u8, Ordering::Release);
@@ -167,8 +165,6 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
                 }
             };
             (*buffer).status.store(new_status as u8, Ordering::Release);
-
-            kprintln!("[Frida] Processed command: {}", cmd);
 
             (*buffer)
                 .command
@@ -430,7 +426,6 @@ unsafe extern "C" fn frida_message_handler(
     user_data: gpointer,
 ) {
     let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
-    kprintln!("[Frida] Message from script: {}", msg);
 
     // Get script ID from user data
     if !user_data.is_null() {
