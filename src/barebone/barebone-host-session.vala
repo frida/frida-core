@@ -415,6 +415,10 @@ namespace Frida {
 			transmitter.notify_rx_batch_id (batch_id);
 		}
 
+		private void on_message_from_script (BareboneScript script, string json, Bytes? data) {
+			transmitter.post_message_from_script (script.id, json, data);
+		}
+
 		private BareboneScript get_script (AgentScriptId script_id) throws Error {
 			var script = scripts[script_id];
 			if (script == null)
@@ -438,6 +442,10 @@ namespace Frida {
 				frida_context: MainContext.ref_thread_default (),
 				dbus_context: dbus_context
 			);
+		}
+
+		construct {
+			connection.script_message.connect (on_message_from_script);
 		}
 
 		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
@@ -467,16 +475,20 @@ namespace Frida {
 
 			foreach (var m in messages) {
 				switch (m.kind) {
-					case SCRIPT: {
-						yield connection.post_script_message (m.script_id, m.text, cancellable);
+					case SCRIPT:
+						yield connection.post_script_message (m.script_id, m.text,
+							m.has_data ? new Bytes (m.data) : null, cancellable);
 						break;
-					}
 					case DEBUGGER:
 						break;
 				}
 			}
 
 			transmitter.notify_rx_batch_id (batch_id);
+		}
+
+		private void on_message_from_script (AgentScriptId id, string json, Bytes? data) {
+			transmitter.post_message_from_script (id, json, data);
 		}
 	}
 
@@ -629,10 +641,6 @@ namespace Frida {
 		protected void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Session is closing");
-		}
-
-		protected void on_message_from_script (BareboneScript script, string json, Bytes? data) {
-			transmitter.post_message_from_script (script.id, json, data);
 		}
 
 		private void on_transmitter_closed () {
