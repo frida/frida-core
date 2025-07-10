@@ -11,6 +11,7 @@ namespace Frida.Barebone {
 
 		private Allocation allocation;
 		private SharedBuffer shared_buffer;
+		private AsyncLock request_lock;
 
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
@@ -167,31 +168,36 @@ namespace Frida.Barebone {
 
 		private async BufferReader execute_command (Command command, Bytes payload, Cancellable? cancellable)
 				throws Error, IOError {
-			shared_buffer
-				.put_data (payload)
-				.put_command (command);
+			yield request_lock.acquire (cancellable);
+			try {
+				shared_buffer
+					.put_data (payload)
+					.put_command (command);
 
-			var main_context = MainContext.get_thread_default ();
-			while (shared_buffer.fetch_command () != IDLE) {
-				var source = new TimeoutSource (10);
-				source.set_callback (execute_command.callback);
-				source.attach (main_context);
-				yield;
+				var main_context = MainContext.get_thread_default ();
+				while (shared_buffer.fetch_command () != IDLE) {
+					var source = new TimeoutSource (10);
+					source.set_callback (execute_command.callback);
+					source.attach (main_context);
+					yield;
 
-				cancellable.set_error_if_cancelled ();
-			}
-
-			switch (shared_buffer.fetch_status ()) {
-				case DATA_READY: {
-					uint8 code = shared_buffer.fetch_result_code ();
-					if (code != 0)
-						throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
-					return new BufferReader (shared_buffer.fetch_result_buffer ());
+					cancellable.set_error_if_cancelled ();
 				}
-				case ERROR:
-					throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
-				default:
-					throw new Error.PROTOCOL ("Unexpected status");
+
+				switch (shared_buffer.fetch_status ()) {
+					case DATA_READY: {
+						uint8 code = shared_buffer.fetch_result_code ();
+						if (code != 0)
+							throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
+						return new BufferReader (shared_buffer.fetch_result_buffer ());
+					}
+					case ERROR:
+						throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
+					default:
+						throw new Error.PROTOCOL ("Unexpected status");
+				}
+			} finally {
+				request_lock.release ();
 			}
 		}
 
@@ -290,6 +296,56 @@ namespace Frida.Barebone {
 			BUSY,
 			DATA_READY,
 			ERROR
+		}
+	}
+
+	private class AsyncLock {
+		private bool held = false;
+		private Gee.Queue<Waiter> waiters = new Gee.LinkedList<Waiter> ();
+
+		public async void acquire (Cancellable? cancellable) throws IOError {
+			if (!held) {
+				held = true;
+				return;
+			}
+
+			var completion_source = new IdleSource ();
+			completion_source.set_callback (acquire.callback);
+
+			var cancellable_source = new CancellableSource (cancellable);
+			cancellable_source.set_callback (acquire.callback);
+			cancellable_source.attach (MainContext.get_thread_default ());
+
+			var w = new Waiter () {
+				completion_source = completion_source,
+				cancellable_source = cancellable_source
+			};
+			waiters.offer (w);
+
+			yield;
+
+			if (!w.holds_lock) {
+				waiters.remove (w);
+				cancellable.set_error_if_cancelled ();
+			}
+		}
+
+		public void release () {
+			Waiter? next = waiters.poll ();
+			if (next != null) {
+				next.holds_lock = true;
+				next.cancellable_source.destroy ();
+				next.completion_source.attach (MainContext.get_thread_default ());
+			} else {
+				held = false;
+			}
+		}
+
+		private class Waiter {
+			public IdleSource completion_source;
+			public CancellableSource cancellable_source;
+
+			public bool holds_lock = false;
 		}
 	}
 
