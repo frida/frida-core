@@ -264,6 +264,8 @@ namespace Frida.Barebone {
 				uint32 size = buf.read_uint32 (16);
 				if (size > DATA_CAPACITY)
 					throw new Error.PROTOCOL ("Invalid result size: %u", size);
+				if (size == 0)
+					return new Bytes ({});
 				return buf.read_bytes (20, size);
 			}
 
