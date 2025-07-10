@@ -11,7 +11,7 @@ namespace Frida.Barebone {
 
 		private Allocation allocation;
 		private SharedBuffer shared_buffer;
-		private AsyncLock request_lock;
+		private AsyncLock request_lock = new AsyncLock ();
 
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
@@ -49,8 +49,7 @@ namespace Frida.Barebone {
 # if DARWIN
 				// See https://bugs.python.org/issue11277 for details.
 				// TODO: Move this quirk to GLib.
-				int res = Posix.fcntl (fd, Darwin.XNU.F_FULLFSYNC);
-				printerr ("fcntl(F_FULLFSYNC) => %d\n\n", res);
+				Posix.fcntl (fd, Darwin.XNU.F_FULLFSYNC);
 # endif
 
 				var sb = Posix.Stat ();
@@ -96,7 +95,6 @@ namespace Frida.Barebone {
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
 			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
-			printerr ("Got buffer_start_pa=0x%" + uint64.FORMAT_MODIFIER + "x\n", buffer_start_pa);
 
 			var gdb = machine.gdb;
 			yield gdb.continue (cancellable);
@@ -106,7 +104,6 @@ namespace Frida.Barebone {
 			if (buffer_start_pa < base_pa || (buffer_end_pa - base_pa) > ram_size)
 				throw new Error.INVALID_ARGUMENT ("Invalid transport config: base_address is incorrect");
 			var buffer_offset = (size_t) (buffer_start_pa - base_pa);
-			printerr ("Using buffer_offset=0x%zx\n\n", buffer_offset);
 
 			Bytes shared_bytes = ram.slice (buffer_offset, buffer_offset + SharedBuffer.SIZE);
 			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, gdb.byte_order, gdb.pointer_size));
@@ -131,16 +128,14 @@ namespace Frida.Barebone {
 			var payload = make_payload_builder ()
 				.append_uint32 (id.handle)
 				.build ();
-			var response = yield execute_command (LOAD_SCRIPT, payload, cancellable);
-			printerr ("Got response: %s\n\n", response.read_string ());
+			yield execute_command (LOAD_SCRIPT, payload, cancellable);
 		}
 
 		public async void destroy_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
 			var payload = make_payload_builder ()
 				.append_uint32 (id.handle)
 				.build ();
-			var response = yield execute_command (DESTROY_SCRIPT, payload, cancellable);
-			printerr ("Got response: %s\n\n", response.read_string ());
+			yield execute_command (DESTROY_SCRIPT, payload, cancellable);
 		}
 
 		public async void post_script_message (AgentScriptId id, string message, Bytes? data, Cancellable? cancellable)
@@ -150,8 +145,7 @@ namespace Frida.Barebone {
 				.append_uint32 (id.handle)
 				.append_string (message)
 				.build ();
-			var response = yield execute_command (POST_SCRIPT_MESSAGE, payload, cancellable);
-			printerr ("Got response: %s\n\n", response.read_string ());
+			yield execute_command (POST_SCRIPT_MESSAGE, payload, cancellable);
 		}
 
 		private async void process_incoming_messages () {
