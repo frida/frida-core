@@ -127,11 +127,6 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.GadgetSession17")]
-	public interface GadgetSession : Object {
-		public abstract async void stop_with_breakpoint (Cancellable? cancellable) throws GLib.Error;
-	}
-
 	public struct AgentMessage {
 		public AgentMessageKind kind;
 
@@ -1677,6 +1672,16 @@ namespace Frida {
 
 			return options;
 		}
+	}
+
+	[DBus (name = "re.frida.GadgetSession17")]
+	public interface GadgetSession : Object {
+		public abstract async void stop_with_breakpoint (GadgetBreakpointAction action, Cancellable? cancellable) throws GLib.Error;
+	}
+
+	public enum GadgetBreakpointAction {
+		RESUME = 1,
+		DETACH
 	}
 
 	public enum SnapshotTransport {

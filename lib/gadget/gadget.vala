@@ -1873,8 +1873,8 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
 			}
 
-			public async void stop_with_breakpoint (Cancellable? cancellable) throws Error, IOError {
-				Environment.trigger_resume_breakpoint ();
+			public async void stop_with_breakpoint (GadgetBreakpointAction action, Cancellable? cancellable) throws Error, IOError {
+				Environment.trigger_resume_breakpoint (action);
 			}
 
 			private void validate_pid (uint pid) throws Error {
@@ -2116,7 +2116,7 @@ namespace Frida.Gadget {
 		private extern void detect_darwin_location_fields (Gum.Address our_address, ref string? executable_name,
 			ref string? our_path, ref Gum.MemoryRange? our_range);
 		private extern void disable_debugger_exceptions ();
-		private extern void trigger_resume_breakpoint ();
+		private extern void trigger_resume_breakpoint (uint action);
 #endif
 	}
 

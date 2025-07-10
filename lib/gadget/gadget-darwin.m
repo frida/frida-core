@@ -117,14 +117,15 @@ frida_gadget_environment_disable_debugger_exceptions (void)
 }
 
 void
-frida_gadget_environment_trigger_resume_breakpoint (void)
+frida_gadget_environment_trigger_resume_breakpoint (guint action)
 {
   asm volatile (
       "mov x1, #1337\n\t"
       "mov x2, #1337\n\t"
+      "mov x3, %0\n\t"
       "brk #1337\n\t"
       :
-      :
-      : "x1", "x2"
+      : "r" ((gsize) action)
+      : "x1", "x2", "x3"
   );
 }
