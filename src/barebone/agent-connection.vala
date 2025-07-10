@@ -185,7 +185,8 @@ namespace Frida.Barebone {
 			return new BufferBuilder (b.byte_order, b.pointer_size);
 		}
 
-		private async BufferReader execute_command (Command command, Bytes payload, Cancellable? cancellable) throws Error, IOError {
+		private async BufferReader execute_command (Command command, Bytes payload, Cancellable? cancellable)
+				throws Error, IOError {
 			shared_buffer
 				.put_data (payload)
 				.put_command (command);

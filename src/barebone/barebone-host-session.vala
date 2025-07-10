@@ -124,13 +124,12 @@ namespace Frida {
 			if (agent_config != null) {
 				agent_connection = yield Barebone.AgentConnection.open (agent_config, machine, allocator, cancellable);
 			}
-			printerr ("Using agent_connection=%p\n\n", agent_connection);
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);
 
 			var services = new Barebone.Services (machine, allocator, interceptor);
 
-			host_session = new BareboneHostSession (agent_config, services);
+			host_session = new BareboneHostSession (agent_connection, services);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -182,7 +181,7 @@ namespace Frida {
 	}
 
 	public sealed class BareboneHostSession : Object, HostSession {
-		public Barebone.AgentConfig? agent_config {
+		public Barebone.AgentConnection? connection {
 			get;
 			construct;
 		}
@@ -195,8 +194,8 @@ namespace Frida {
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-		public BareboneHostSession (Barebone.AgentConfig? config, Barebone.Services services) {
-			Object (agent_config: config, services: services);
+		public BareboneHostSession (Barebone.AgentConnection? connection, Barebone.Services services) {
+			Object (connection: connection, services: services);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -272,13 +271,17 @@ namespace Frida {
 
 			var opts = SessionOptions._deserialize (options);
 			if (opts.realm == EMULATED)
-				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on barebone targets");
+				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on Barebone targets");
 
 			var session_id = AgentSessionId.generate ();
 
 			MainContext dbus_context = yield get_dbus_context ();
 
-			var session = new BareboneAgentSession (session_id, opts.persist_timeout, dbus_context, services);
+			BareboneAgentSession session;
+			if (connection != null)
+				session = new RemoteBareboneAgentSession (connection, session_id, opts.persist_timeout, dbus_context);
+			else
+				session = new LocalBareboneAgentSession (services, session_id, opts.persist_timeout, dbus_context);
 			agent_sessions[session_id] = session;
 			session.closed.connect (on_agent_session_closed);
 
@@ -338,7 +341,146 @@ namespace Frida {
 		}
 	}
 
-	private sealed class BareboneAgentSession : Object, AgentSession {
+	private sealed class LocalBareboneAgentSession : BareboneAgentSession {
+		public Barebone.Services services {
+			get;
+			construct;
+		}
+
+		private Gee.Map<AgentScriptId?, BareboneScript> scripts =
+			new Gee.HashMap<AgentScriptId?, BareboneScript> (AgentScriptId.hash, AgentScriptId.equal);
+		private uint next_script_id = 1;
+
+		public LocalBareboneAgentSession (Barebone.Services services, AgentSessionId id, uint persist_timeout,
+				MainContext dbus_context) {
+			Object (
+				services: services,
+				id: id,
+				persist_timeout: persist_timeout,
+				frida_context: MainContext.ref_thread_default (),
+				dbus_context: dbus_context
+			);
+		}
+
+		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+
+			var opts = ScriptOptions._deserialize (options);
+			if (opts.runtime == V8)
+				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
+
+			var id = AgentScriptId (next_script_id++);
+
+			var script = BareboneScript.create (id, source, services);
+			scripts[id] = script;
+			script.message.connect (on_message_from_script);
+
+			return id;
+		}
+
+		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+
+			BareboneScript script = get_script (script_id);
+			yield script.destroy (cancellable);
+			script.message.disconnect (on_message_from_script);
+
+			scripts.unset (script_id);
+		}
+
+		public override async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+			var script = get_script (script_id);
+			yield script.load (cancellable);
+		}
+
+		public override async void post_messages (AgentMessage[] messages, uint batch_id, Cancellable? cancellable)
+				throws Error, IOError {
+			transmitter.check_okay_to_receive ();
+
+			foreach (var m in messages) {
+				switch (m.kind) {
+					case SCRIPT: {
+						BareboneScript? script = scripts[m.script_id];
+						if (script != null)
+							script.post (m.text, m.has_data ? new Bytes (m.data) : null);
+						break;
+					}
+					case DEBUGGER:
+						break;
+				}
+			}
+
+			transmitter.notify_rx_batch_id (batch_id);
+		}
+
+		private BareboneScript get_script (AgentScriptId script_id) throws Error {
+			var script = scripts[script_id];
+			if (script == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			return script;
+		}
+	}
+
+	private sealed class RemoteBareboneAgentSession : BareboneAgentSession {
+		public Barebone.AgentConnection connection {
+			get;
+			construct;
+		}
+
+		public RemoteBareboneAgentSession (Barebone.AgentConnection connection, AgentSessionId id, uint persist_timeout,
+				MainContext dbus_context) {
+			Object (
+				connection: connection,
+				id: id,
+				persist_timeout: persist_timeout,
+				frida_context: MainContext.ref_thread_default (),
+				dbus_context: dbus_context
+			);
+		}
+
+		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+
+			var opts = ScriptOptions._deserialize (options);
+			if (opts.runtime == V8)
+				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
+
+			return yield connection.create_script (source, cancellable);
+		}
+
+		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+			yield connection.destroy_script (script_id, cancellable);
+		}
+
+		public override async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+			yield connection.load_script (script_id, cancellable);
+		}
+
+		public override async void post_messages (AgentMessage[] messages, uint batch_id, Cancellable? cancellable)
+				throws Error, IOError {
+			transmitter.check_okay_to_receive ();
+
+			foreach (var m in messages) {
+				switch (m.kind) {
+					case SCRIPT: {
+						yield connection.post_script_message (m.script_id, m.text, cancellable);
+						break;
+					}
+					case DEBUGGER:
+						break;
+				}
+			}
+
+			transmitter.notify_rx_batch_id (batch_id);
+		}
+	}
+
+	private abstract class BareboneAgentSession : Object, AgentSession {
 		public signal void closed ();
 
 		public AgentSessionId id {
@@ -352,8 +494,12 @@ namespace Frida {
 		}
 
 		public AgentMessageSink? message_sink {
-			get { return transmitter.message_sink; }
-			set { transmitter.message_sink = value; }
+			get {
+				return transmitter.message_sink;
+			}
+			set {
+				transmitter.message_sink = value;
+			}
 		}
 
 		public MainContext frida_context {
@@ -366,34 +512,9 @@ namespace Frida {
 			construct;
 		}
 
-		public Barebone.Services services {
-			get;
-			construct;
-		}
-
-		public Barebone.Allocator allocator {
-			get;
-			construct;
-		}
-
 		private Promise<bool>? close_request;
 
-		private Gee.Map<AgentScriptId?, BareboneScript> scripts =
-			new Gee.HashMap<AgentScriptId?, BareboneScript> (AgentScriptId.hash, AgentScriptId.equal);
-		private uint next_script_id = 1;
-
-		private AgentMessageTransmitter transmitter;
-
-		public BareboneAgentSession (AgentSessionId id, uint persist_timeout, MainContext dbus_context,
-				Barebone.Services services) {
-			Object (
-				id: id,
-				persist_timeout: persist_timeout,
-				frida_context: MainContext.ref_thread_default (),
-				dbus_context: dbus_context,
-				services: services
-			);
-		}
+		protected AgentMessageTransmitter transmitter;
 
 		construct {
 			assert (frida_context != null);
@@ -438,22 +559,8 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async AgentScriptId create_script (string source, HashTable<string, Variant> options,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var opts = ScriptOptions._deserialize (options);
-			if (opts.runtime == V8)
-				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the barebone backend");
-
-			var id = AgentScriptId (next_script_id++);
-
-			var script = BareboneScript.create (id, source, services);
-			scripts[id] = script;
-			script.message.connect (on_message_from_script);
-
-			return id;
-		}
+		public abstract async AgentScriptId create_script (string source, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError;
 
 		public async AgentScriptId create_script_from_bytes (uint8[] bytes, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
@@ -470,31 +577,12 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError;
 
-			BareboneScript script = get_script (script_id);
-			yield script.destroy (cancellable);
-			script.message.disconnect (on_message_from_script);
-
-			scripts.unset (script_id);
-		}
-
-		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-			var script = get_script (script_id);
-			yield script.load (cancellable);
-		}
+		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError;
 
 		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
-		}
-
-		private BareboneScript get_script (AgentScriptId script_id) throws Error {
-			var script = scripts[script_id];
-			if (script == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			return script;
 		}
 
 		public async void enable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
@@ -505,25 +593,8 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async void post_messages (AgentMessage[] messages, uint batch_id,
-				Cancellable? cancellable) throws Error, IOError {
-			transmitter.check_okay_to_receive ();
-
-			foreach (var m in messages) {
-				switch (m.kind) {
-					case SCRIPT: {
-						BareboneScript? script = scripts[m.script_id];
-						if (script != null)
-							script.post (m.text, m.has_data ? new Bytes (m.data) : null);
-						break;
-					}
-					case DEBUGGER:
-						break;
-				}
-			}
-
-			transmitter.notify_rx_batch_id (batch_id);
-		}
+		public abstract async void post_messages (AgentMessage[] messages, uint batch_id, Cancellable? cancellable)
+			throws Error, IOError;
 
 		public async PortalMembershipId join_portal (string address, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
@@ -555,12 +626,12 @@ namespace Frida {
 			transmitter.commit_migration ();
 		}
 
-		private void check_open () throws Error {
+		protected void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Session is closing");
 		}
 
-		private void on_message_from_script (BareboneScript script, string json, Bytes? data) {
+		protected void on_message_from_script (BareboneScript script, string json, Bytes? data) {
 			transmitter.post_message_from_script (script.id, json, data);
 		}
 
