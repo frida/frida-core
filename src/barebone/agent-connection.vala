@@ -1,6 +1,8 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class AgentConnection : Object, AsyncInitable {
+		public signal void script_message (AgentScriptId id, string json, Bytes? data);
+
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private AgentConfig config;
@@ -109,31 +111,7 @@ namespace Frida.Barebone {
 			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, gdb.byte_order, gdb.pointer_size));
 			shared_buffer.check ();
 
-			var id = yield create_script ("""
-					recv('ping', onPing);
-					function onPing() {
-						send({ type: 'pong', platform: Process.platform });
-						recv('ping', onPing);
-					}
-				""", cancellable);
-			printerr ("Created script with ID: %u\n\n", id.handle);
-
-			yield load_script (id, cancellable);
-			printerr ("Script loaded\n\n");
-
-			yield post_script_message (id, "{\"type\":\"ping\"}", cancellable);
-			printerr ("Message posted\n\n");
-
-			AgentMessage? message = yield fetch_script_message (cancellable);
-			if (message != null)
-				printerr ("Fetched script message with script_id=%u text=%s\n\n", message.script_id.handle, message.text);
-			else
-				printerr ("No pending script messages yet\n\n");
-
-			yield destroy_script (id, cancellable);
-			printerr ("Script destroyed\n\n");
-
-			throw new Error.NOT_SUPPORTED ("Ready to rock");
+			return true;
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -162,7 +140,9 @@ namespace Frida.Barebone {
 			printerr ("Got response: %s\n\n", response.read_string ());
 		}
 
-		public async void post_script_message (AgentScriptId id, string message, Cancellable? cancellable) throws Error, IOError {
+		public async void post_script_message (AgentScriptId id, string message, Bytes? data, Cancellable? cancellable)
+				throws Error, IOError {
+			// TODO: Include data.
 			var payload = make_payload_builder ()
 				.append_uint32 (id.handle)
 				.append_string (message)
