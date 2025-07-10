@@ -112,6 +112,8 @@ namespace Frida.Barebone {
 			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, gdb.byte_order, gdb.pointer_size));
 			shared_buffer.check ();
 
+			process_incoming_messages.begin ();
+
 			return true;
 		}
 
@@ -150,6 +152,23 @@ namespace Frida.Barebone {
 				.build ();
 			var response = yield execute_command (POST_SCRIPT_MESSAGE, payload, cancellable);
 			printerr ("Got response: %s\n\n", response.read_string ());
+		}
+
+		private async void process_incoming_messages () {
+			var main_context = MainContext.get_thread_default ();
+			try {
+				while (true) {
+					var source = new TimeoutSource (10);
+					source.set_callback (process_incoming_messages.callback);
+					source.attach (main_context);
+					yield;
+
+					AgentMessage? msg = yield fetch_script_message (io_cancellable);
+					if (msg != null)
+						script_message (msg.script_id, msg.text, msg.has_data ? new Bytes (msg.data) : null);
+				}
+			} catch (GLib.Error e) {
+			}
 		}
 
 		public async AgentMessage? fetch_script_message (Cancellable? cancellable) throws Error, IOError {
