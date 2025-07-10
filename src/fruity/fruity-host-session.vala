@@ -1157,7 +1157,10 @@ namespace Frida {
 			var lldb_session = lldb_sessions[entry.pid];
 			if (lldb_session != null) {
 				remove_lldb_session (lldb_session);
-				yield entry.detach_lldb (lldb_session, io_cancellable);
+				if (reason == SessionDetachReason.APPLICATION_REQUESTED)
+					yield entry.detach_lldb (lldb_session, io_cancellable);
+				else
+					yield lldb_session.close (io_cancellable);
 			}
 
 			gadget_entries.unset (id);
