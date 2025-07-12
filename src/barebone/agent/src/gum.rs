@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use crate::{bindings::{gboolean, gpointer, gsize, guint, GPrivate, GumPageProtection, GumThreadId, GumTlsKey}, gthread};
+use crate::{bindings::{gboolean, gpointer, gsize, guint, GPrivate, GumPageProtection, GumThreadId, GumTlsKey}, gthread, libc};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
@@ -52,6 +52,15 @@ pub extern "C" fn gum_memory_allocate(
 pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
     crate::xnu::free(address as *mut u8, size as usize);
     1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_clear_cache(address: gpointer, size: gsize) {
+    unsafe {
+        let start = address as *const u8;
+        let end = start.add(size as usize);
+        libc::__clear_cache(start, end);
+    }
 }
 
 #[unsafe(no_mangle)]
