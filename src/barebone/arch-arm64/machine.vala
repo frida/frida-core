@@ -25,10 +25,10 @@ namespace Frida.Barebone {
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
 
-		private const uint64 UXN_BIT = 1UL << 54;
-		private const uint64 PXN_BIT = 1UL << 53;
-		private const uint64 AP1_BIT = 1UL << 7;
-		private const uint64 AP0_BIT = 1UL << 6;
+		private const uint64 UXN_BIT = 1ULL << 54;
+		private const uint64 PXN_BIT = 1ULL << 53;
+		private const uint64 AP1_BIT = 1ULL << 7;
+		private const uint64 AP0_BIT = 1ULL << 6;
 
 		public Arm64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
