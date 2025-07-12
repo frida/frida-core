@@ -25,6 +25,8 @@ namespace Frida.Barebone {
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
 
+		private const uint64 TABLE_PXN_BIT = 1ULL << 59;
+
 		private const uint64 UXN_BIT = 1ULL << 54;
 		private const uint64 PXN_BIT = 1ULL << 53;
 		private const uint64 AP1_BIT = 1ULL << 7;
@@ -266,10 +268,18 @@ namespace Frida.Barebone {
 			var table_cache = new TableWalkCache ();
 			uint pages_processed = 0;
 
+			var processed_tables = new Gee.HashSet<uint64?> (Numeric.uint64_hash, Numeric.uint64_equal);
+			bool need_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
+
 			while (pages_processed != num_pages) {
 				uint64 current_va = start_va + (uint64) pages_processed * p.granule;
 
 				uint64 table_pa = yield find_level3_table (current_va, p, table_cache, cancellable);
+
+				if (need_exec && !processed_tables.contains (table_pa)) {
+					yield clear_pxn_table_bits_for_va (current_va, p, table_cache, cancellable);
+					processed_tables.add (table_pa);
+				}
 
 				uint level3_shift = address_shift_at_level (3, p.granule);
 				uint64 level3_mask = (1ULL << level3_shift) - 1;
@@ -345,6 +355,31 @@ namespace Frida.Barebone {
 			}
 
 			return table_pa;
+		}
+
+		private async void clear_pxn_table_bits_for_va (uint64 va, MMUParameters p, TableWalkCache cache, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 table_pa = p.tt1;
+			for (uint level = p.first_level; level != 3; level++) {
+				uint entries = compute_max_entries (level, p);
+				uint shift = address_shift_at_level (level, p.granule);
+				uint index = (uint) ((va >> shift) & (entries - 1));
+				uint64 slot_pa = table_pa + (index * Descriptor.SIZE);
+
+				Buffer d_buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				uint64 raw_desc = d_buf.read_uint64 (0);
+				Descriptor desc = Descriptor.parse (raw_desc, level, p.granule);
+				if (desc.kind != TABLE)
+					break;
+
+				if ((raw_desc & TABLE_PXN_BIT) != 0) {
+					uint64 new_desc = raw_desc & ~TABLE_PXN_BIT;
+					d_buf.write_uint64 (0, new_desc);
+					yield gdb.write_byte_array (slot_pa, d_buf.bytes, cancellable);
+				}
+
+				table_pa = desc.target_address;
+			}
 		}
 
 		private class TableWalkCache {
