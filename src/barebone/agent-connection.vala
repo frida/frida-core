@@ -12,6 +12,7 @@ namespace Frida.Barebone {
 		private Allocation allocation;
 		private SharedBuffer shared_buffer;
 		private AsyncLock request_lock = new AsyncLock ();
+		private Callback mprotect_callback;
 
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
@@ -82,21 +83,29 @@ namespace Frida.Barebone {
 			allocation = yield inject_elf (elf, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
+			uint64 mprotect_address = 0;
 			uint64 base_va = allocation.virtual_address;
 			elf.enumerate_symbols (e => {
-				if (e.name == "_start") {
+				if (e.name == "_start")
 					start_address = base_va + e.address;
-					return false;
-				}
-				return true;
+				else if (e.name == "gum_try_mprotect")
+					mprotect_address = base_va + e.address;
+				else
+					return true;
+				return start_address == 0 || mprotect_address == 0;
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
+			if (mprotect_address == 0)
+				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
+
+			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
 			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
 
 			var gdb = machine.gdb;
+
 			yield gdb.continue (cancellable);
 
 			uint64 base_pa = tc.base_address;
@@ -294,6 +303,33 @@ namespace Frida.Barebone {
 
 				Posix.msync ((void *) start_page, end_page - start_page, Posix.MS_SYNC);
 #endif
+			}
+		}
+
+		private class MemoryProtectHandler : Object, CallbackHandler {
+			public signal void output (string message);
+
+			public uint arity {
+				get { return 3; }
+			}
+
+			private Machine machine;
+
+			public MemoryProtectHandler (Machine machine) {
+				this.machine = machine;
+			}
+
+			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
+					throws Error, IOError {
+				var address = args[0];
+				var size = (size_t) args[1];
+				var prot = (Gum.PageProtection) args[2];
+				try {
+					yield machine.protect_pages (address, size, prot, cancellable);
+					return 1;
+				} catch (GLib.Error e) {
+					return 0;
+				}
 			}
 		}
 
