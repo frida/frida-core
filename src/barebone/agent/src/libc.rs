@@ -1,5 +1,6 @@
 use core::ptr;
-use core::ptr::addr_of_mut;
+use crate::bindings::GMutex;
+use crate::gthread;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _fini() {
@@ -17,20 +18,38 @@ pub extern "C" fn _kill(_pid: i32, _sig: i32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _sbrk(incr: isize) -> *mut u8 {
-    unsafe extern "C" {
-        static mut _heap_start: u8;
-    }
+    const HEAP_SIZE: usize = 32 * 1024 * 1024; // 32 MB
 
-    static mut HEAP_END: *mut u8 = ptr::null_mut();
+    static mut HEAP_START: *mut u8 = ptr::null_mut();
+    static mut HEAP_CURRENT: *mut u8 = ptr::null_mut();
+    static mut HEAP_MUTEX: GMutex = unsafe { core::mem::zeroed() };
 
     unsafe {
-        if HEAP_END.is_null() {
-            HEAP_END = addr_of_mut!(_heap_start);
+        gthread::g_mutex_lock(ptr::addr_of_mut!(HEAP_MUTEX));
+
+        if HEAP_START.is_null() {
+            HEAP_START = crate::xnu::kalloc(HEAP_SIZE);
+            if HEAP_START.is_null() {
+                gthread::g_mutex_unlock(ptr::addr_of_mut!(HEAP_MUTEX));
+                panic!("Failed to allocate 32 MB heap");
+            }
+            HEAP_CURRENT = HEAP_START;
         }
 
-        let prev_heap_end = HEAP_END;
-        HEAP_END = HEAP_END.add(incr as usize);
-        prev_heap_end
+        let prev_heap_current = HEAP_CURRENT;
+        let new_heap_current = HEAP_CURRENT.add(incr as usize);
+
+        if new_heap_current > HEAP_START.add(HEAP_SIZE) {
+            gthread::g_mutex_unlock(ptr::addr_of_mut!(HEAP_MUTEX));
+            panic!("Heap exhausted: requested {} bytes, {} bytes remaining",
+                   incr,
+                   HEAP_START.add(HEAP_SIZE).offset_from(HEAP_CURRENT));
+        }
+
+        HEAP_CURRENT = new_heap_current;
+
+        gthread::g_mutex_unlock(ptr::addr_of_mut!(HEAP_MUTEX));
+        prev_heap_current
     }
 }
 

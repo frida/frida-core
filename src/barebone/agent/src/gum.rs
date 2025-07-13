@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use crate::{bindings::{gboolean, gpointer, gsize, guint, GPrivate, GumPageProtection, GumThreadId, GumTlsKey}, gthread, libc};
+use core::arch::asm;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
@@ -20,6 +21,32 @@ pub extern "C" fn gum_barebone_query_page_size() -> guint {
             0b10 => 16384,
             _ => 4096,
         }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_virtual_to_physical(virt_addr: gpointer) -> gpointer {
+    let virt_addr = virt_addr as usize;
+    let phys_addr: usize;
+    unsafe {
+        asm!(
+            "at s1e1r, {virt}",
+            "mrs {phys}, par_el1",
+            virt = in(reg) virt_addr,
+            phys = out(reg) phys_addr,
+            options(nomem, nostack),
+        );
+    }
+
+    if (phys_addr & 1) == 0 {
+        let page_size = gum_barebone_query_page_size() as usize;
+        let offset_mask = page_size - 1;
+
+        let pa_bits = (phys_addr >> 12) & ((1usize << (48 - 12)) - 1);
+        let offset = virt_addr & offset_mask;
+        ((pa_bits << 12) | offset) as gpointer
+    } else {
+        virt_addr as gpointer
     }
 }
 
