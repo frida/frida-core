@@ -9,7 +9,7 @@ use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
-use core::{arch::asm, ptr};
+use core::ptr;
 
 use crate::bindings::{
     GBytes, GCancellable, g_main_loop_run, g_object_unref, gboolean, gchar, gpointer,
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn _start() -> usize {
 
         xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
 
-        virt_to_phys(buffer as usize)
+        gum::gum_barebone_virtual_to_physical(buffer as gpointer) as usize
     }
 }
 
@@ -380,28 +380,6 @@ unsafe fn write_error_to_buffer(buffer: *mut SharedBuffer, error_code: u32, erro
 
         (*buffer).result_code = error_code;
         (*buffer).result_size = copy_size as u32;
-    }
-}
-
-unsafe fn virt_to_phys(virt_addr: usize) -> usize {
-    let phys_addr: usize;
-    unsafe {
-        asm!(
-            "at s1e1r, {virt}",
-            "mrs {phys}, par_el1",
-            virt = in(reg) virt_addr,
-            phys = out(reg) phys_addr,
-            options(nomem, nostack),
-        );
-    }
-
-    if (phys_addr & 1) == 0 {
-        // Extract physical address from PAR_EL1 [47:12] and combine with offset [11:0]
-        let pa_bits = (phys_addr >> 12) & 0xFFFFFFFFF; // Extract PA[47:12]
-        let offset = virt_addr & 0xFFF; // Extract offset [11:0]
-        (pa_bits << 12) | offset
-    } else {
-        virt_addr
     }
 }
 
