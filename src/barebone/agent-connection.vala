@@ -13,6 +13,7 @@ namespace Frida.Barebone {
 		private SharedBuffer shared_buffer;
 		private AsyncLock request_lock = new AsyncLock ();
 		private Callback mprotect_callback;
+		private Callback get_writable_mappings_callback;
 
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
@@ -84,22 +85,30 @@ namespace Frida.Barebone {
 
 			uint64 start_address = 0;
 			uint64 mprotect_address = 0;
+			uint64 get_writable_mappings_address = 0;
 			uint64 base_va = allocation.virtual_address;
+			printerr ("ELF injected at base address 0x%lx\n\n", (ulong) base_va);
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
 					start_address = base_va + e.address;
 				else if (e.name == "gum_try_mprotect")
 					mprotect_address = base_va + e.address;
+				else if (e.name == "gum_barebone_get_writable_mappings")
+					get_writable_mappings_address = base_va + e.address;
 				else
 					return true;
-				return start_address == 0 || mprotect_address == 0;
+				return start_address == 0 || mprotect_address == 0 || get_writable_mappings_address == 0;
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 			if (mprotect_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
+			if (get_writable_mappings_address == 0)
+				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_get_writable_mappings symbol found");
 
 			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
+			get_writable_mappings_callback = yield new Callback (get_writable_mappings_address,
+				new GetWritableMappingsHandler (machine), machine, cancellable);
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
 			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
@@ -330,6 +339,51 @@ namespace Frida.Barebone {
 				} catch (GLib.Error e) {
 					return 0;
 				}
+			}
+		}
+
+		private class GetWritableMappingsHandler : Object, CallbackHandler {
+			public signal void output (string message);
+
+			public uint arity {
+				get { return 2; }
+			}
+
+			private Machine machine;
+
+			private Gee.Map<uint64?, Allocation> mappings =
+				new Gee.HashMap<uint64?, Allocation> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+			public GetWritableMappingsHandler (Machine machine) {
+				this.machine = machine;
+			}
+
+			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
+					throws Error, IOError {
+				var pages = args[0];
+				var num_pages = (uint) args[1];
+
+				var gdb = machine.gdb;
+				var reader = new BufferReader (yield gdb.read_buffer (pages, num_pages * gdb.pointer_size, cancellable));
+				var result = gdb.make_buffer_builder ();
+				for (uint i = 0; i != num_pages; i++) {
+					uint64 physical_address = reader.read_pointer ();
+					Allocation? allocation = mappings[physical_address];
+					if (allocation == null) {
+						allocation = yield machine.allocate_pages (physical_address, 1, cancellable);
+						mappings[physical_address] = allocation;
+					}
+					result.append_pointer (allocation.virtual_address);
+					printerr ("pages[%u]: 0x%lx -> 0x%lx\n",
+						i,
+						(ulong) allocation.virtual_address,
+						(ulong) physical_address);
+				}
+
+				yield gdb.write_byte_array (pages, result.build (), cancellable);
+				printerr ("Wrote num_pages=%u\n\n", num_pages);
+
+				return 0;
 			}
 		}
 
