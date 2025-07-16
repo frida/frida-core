@@ -61,6 +61,7 @@ pub fn kernel_thread_start(
             thread_parameter,
             &mut new_thread as *mut *mut core::ffi::c_void,
         )
+        // TODO: Call thread_deallocate()
     };
 }
 
