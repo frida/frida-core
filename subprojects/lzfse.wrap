@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/frida/lzfse.git
+revision = 8382eeef4fc15f5f88ce7bdfaf2a49d7f0ef26a4
+depth = 1
+
+[provide]
+dependency_names = lzfse
+
