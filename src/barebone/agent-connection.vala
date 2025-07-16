@@ -45,7 +45,7 @@ namespace Frida.Barebone {
 
 				Gum.DarwinModule mod;
 				try {
-					mod = new Gum.DarwinModule.from_file (symbol_source, ARM64, Gum.PtrauthSupport.SUPPORTED);
+					mod = new Gum.DarwinModule.from_blob (payload.data, ARM64, Gum.PtrauthSupport.SUPPORTED);
 				} catch (Gum.Error e) {
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}
