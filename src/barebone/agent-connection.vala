@@ -33,6 +33,28 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			string? symbol_source = config.symbol_source;
+			if (symbol_source != null) {
+				var payload = yield Img4.parse_file (File.new_for_path (symbol_source), cancellable);
+				printerr ("Got payload! kind=%s description=%s data.size=%zu\n",
+					payload.kind,
+					payload.description,
+					payload.data.get_size ());
+				hexdump (payload.data.get_data ()[:256]);
+				printerr ("\n\n");
+
+				Gum.DarwinModule mod;
+				try {
+					mod = new Gum.DarwinModule.from_file (symbol_source, ARM64, Gum.PtrauthSupport.SUPPORTED);
+				} catch (Gum.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+				mod.enumerate_symbols (s => {
+					printerr ("Found symbol: %s\n", s.name);
+					return true;
+				});
+			}
+
 			Gum.ElfModule elf;
 			try {
 				elf = new Gum.ElfModule.from_file (config.path);
@@ -469,4 +491,31 @@ namespace Frida.Barebone {
 		}
 	}
 #endif
+
+	// https://gist.github.com/phako/96b36b5070beaf7eee27
+	private void hexdump (uint8[] data) {
+		var builder = new StringBuilder.sized (16);
+		var i = 0;
+
+		foreach (var c in data) {
+			if (i % 16 == 0)
+				printerr ("%08x | ", i);
+
+			printerr ("%02x ", c);
+
+			if (((char) c).isprint ())
+				builder.append_c ((char) c);
+			else
+				builder.append (".");
+
+			i++;
+			if (i % 16 == 0) {
+				printerr ("| %s\n", builder.str);
+				builder.erase ();
+			}
+		}
+
+		if (i % 16 != 0)
+			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
+	}
 }

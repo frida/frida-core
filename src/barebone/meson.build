@@ -12,6 +12,8 @@ backend_sources += files(
   'rust-module.vala',
   'console.vala',
   'elf.vala',
+  'img4.vala',
+  'lzfse.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',

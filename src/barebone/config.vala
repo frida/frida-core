@@ -191,6 +191,11 @@ namespace Frida.Barebone {
 			get;
 			set;
 		}
+
+		public string? symbol_source {
+			get;
+			set;
+		}
 	}
 
 	public sealed class AgentTransportConfig : Object, Json.Serializable {
