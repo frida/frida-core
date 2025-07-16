@@ -1628,6 +1628,8 @@ frida_run_to_entrypoint (pid_t pid, GError ** error)
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rip = entrypoint;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_eip = entrypoint;
 #elif defined (HAVE_ARM64)
   regs.elr = entrypoint;
 #else
@@ -1879,6 +1881,62 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     if (!frida_remote_write (pid, regs.r_rsp, &dummy_return_address, sizeof (dummy_return_address), error))
       goto propagate_error;
   }
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_esp -= FRIDA_RED_ZONE_SIZE;
+  regs.r_esp -= (regs.r_esp - (MAX (args_length - 6, 0) * 4)) % FRIDA_STACK_ALIGNMENT;
+
+  regs.r_eip = func;
+
+  for (i = 0; i != args_length && i < 6; i++)
+  {
+    switch (i)
+    {
+      case 0:
+        regs.r_ebx = args[i];
+        break;
+      case 1:
+        regs.r_ecx = args[i];
+        break;
+      case 2:
+        regs.r_edx = args[i];
+        break;
+      case 3:
+        regs.r_esi = args[i];
+        break;
+      case 4:
+        regs.r_edi = args[i];
+        break;
+      case 5:
+        regs.r_ebp = args[i];
+        break;
+      default:
+        g_assert_not_reached ();
+    }
+  }
+
+  {
+    gint num_stack_args = args_length - 6;
+    if (num_stack_args > 0)
+    {
+      guintptr * stack_args;
+
+      stack_args = g_newa (guintptr, num_stack_args);
+      for (i = 0; i != num_stack_args; i++)
+        stack_args[i] = args[6 + i];
+
+      regs.r_esp -= num_stack_args * sizeof (guintptr);
+      if (!frida_remote_write (pid, regs.r_esp, stack_args, num_stack_args * sizeof (guintptr), error))
+        goto propagate_error;
+    }
+  }
+
+  {
+    guintptr dummy_return_address = FRIDA_DUMMY_RETURN_ADDRESS;
+
+    regs.r_esp -= 4;
+    if (!frida_remote_write (pid, regs.r_esp, &dummy_return_address, sizeof (dummy_return_address), error))
+      goto propagate_error;
+  }
 #elif defined (HAVE_ARM64)
   regs.sp -= regs.sp % FRIDA_STACK_ALIGNMENT;
 
@@ -1907,6 +1965,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   *retval = regs.r_rax;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  *retval = regs.r_eax;
 #elif defined (HAVE_ARM64)
   *retval = regs.x[0];
 #else
@@ -1929,6 +1989,11 @@ propagate_error:
   {
     return FALSE;
   }
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+propagate_error:
+  {
+    return FALSE;
+  }
 #endif
 }
 
@@ -1946,6 +2011,9 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rip = remote_address;
   regs.r_rsp = remote_stack;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_eip = remote_address;
+  regs.r_esp = remote_stack;
 #elif defined (HAVE_ARM64)
   regs.elr = remote_address;
   regs.sp = remote_stack;
@@ -1969,6 +2037,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
     *result = regs.r_rax;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+    *result = regs.r_eax;
 #elif defined (HAVE_ARM64)
     *result = regs.x[0];
 #else
