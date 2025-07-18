@@ -1680,8 +1680,10 @@ namespace Frida {
 	}
 
 	public enum GadgetBreakpointAction {
-		RESUME = 1,
-		DETACH
+		INVOKE_RETURN,
+		RESUME,
+		DETACH,
+		PAGE_PLAN
 	}
 
 	public enum SnapshotTransport {

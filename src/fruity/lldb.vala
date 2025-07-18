@@ -436,6 +436,61 @@ namespace Frida.LLDB {
 
 			exception = new Exception (signum, metype, medata, breakpoint, thread, context);
 		}
+
+		public async void handle_page_plan (uint64 address, size_t size, size_t page_size, Cancellable? cancellable = null)
+				throws Error, IOError {
+
+			var plan = yield read_buffer (address, size, cancellable);
+			var n_blocks = plan.read_uint32 (0);
+			if (n_blocks == 0)
+				return;
+
+			var builder = make_packet_builder_sized (64);
+			Future<bool>? last_write = null;
+
+			print ("PLAN WRITING %u PAGES\n", n_blocks);
+			size_t cursor = 4;
+			for (uint32 i = 0; i < n_blocks; i++) {
+				uint64 start = plan.read_pointer (cursor);
+				cursor += 8;
+				uint32 count = plan.read_uint32 (cursor);
+				cursor += 4;
+				print ("PLAN WRITING %u BYTES AT 0x%llx\n", count, start);
+				cursor += count - 1;
+				for (uint j = 0; j < count; j += 2) {
+					bool is_last = (j + 2 >= count);
+
+					uint64 last_byte_addr = start + ((uint64) j * page_size) + page_size - 1;
+					size_t write_count = is_last ? 1 : 2;
+
+					print ("PLAN WRITE 0x%llx - 0x%x\n", last_byte_addr, plan.read_uint8 (cursor));
+					if (write_count == 2)
+						print ("PLAN WRITE 0x%llx - 0x%x\n", last_byte_addr + 1, plan.read_uint8 (cursor - 1));
+
+					builder
+						.append_c ('M')
+						.append_address (last_byte_addr)
+						.append_c (',')
+						.append_size (write_count)
+						.append_c (':')
+						.append_hexbyte (plan.read_uint8 (cursor--));
+
+					if (write_count == 2)
+						builder.append_hexbyte (plan.read_uint8 (cursor--));
+
+					var request = new Promise<bool> ();
+					perform_execute.begin (builder.build (), cancellable, request);
+
+					builder.reset ();
+
+					if (is_last)
+						last_write = request.future;
+				}
+				cursor += count + 1;
+			}
+
+			yield last_write.wait_async (cancellable);
+		}
 	}
 
 	public sealed class LaunchOptions : Object {

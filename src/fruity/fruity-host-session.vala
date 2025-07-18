@@ -1426,6 +1426,8 @@ namespace Frida {
 
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
 			private ulong? exception_handler;
+			private string? main_thread_id;
+			private bool resumed;
 
 			private Cancellable io_cancellable = new Cancellable ();
 
@@ -1443,6 +1445,7 @@ namespace Frida {
 			construct {
 				lldb.closed.connect (on_lldb_closed);
 				lldb.console_output.connect (on_lldb_console_output);
+				resumed = false;
 			}
 
 			~LLDBSession () {
@@ -1488,12 +1491,25 @@ namespace Frida {
 						yield thread.write_register ("pc", pc + 4, io_cancellable);
 						switch (action) {
 							case RESUME:
+								resumed = true;
 								yield lldb.continue (io_cancellable);
 								return;
 							case DETACH:
 								yield lldb.detach (io_cancellable);
 								detached ();
 								break;
+							case PAGE_PLAN: {
+								print ("PAGE PLAN BREAKPOINT:\n%s\n", exception.to_string ());
+								var plan_size = (size_t) e.context["x4"];
+								var plan_address = e.context["x5"];
+								yield lldb.handle_page_plan (plan_address, plan_size, 0x4000, io_cancellable);
+								yield thread.write_register ("x0", 0x1337, io_cancellable);
+								if (resumed)
+									yield lldb.continue (io_cancellable);
+								else
+									yield continue_gadget_threads (io_cancellable);
+								return;
+							}
 							default:
 								printerr ("Unsupported breakpoint action: %d", action);
 								break;
@@ -1505,6 +1521,16 @@ namespace Frida {
 				exception_handler = null;
 
 				yield lldb.close (io_cancellable);
+			}
+
+			private async void continue_gadget_threads (Cancellable? cancellable) throws Error, IOError {
+				var gadget_threads = new Gee.ArrayList<LLDB.Thread> ();
+				yield lldb.enumerate_threads (thread => {
+					if (thread.id != main_thread_id)
+						gadget_threads.add (thread);
+					return true;
+				}, cancellable);
+				yield lldb.continue_specific_threads (gadget_threads, cancellable);
 			}
 
 			public async void kill (Cancellable? cancellable) throws Error, IOError {
@@ -1550,6 +1576,7 @@ namespace Frida {
 					Fruity.Injector.Transaction transaction =
 						yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
 					Fruity.Injector.GadgetDetails gadget = transaction.gadget;
+					main_thread_id = transaction.main_thread_id;
 
 					exception_handler = lldb.notify["exception"].connect ((obj, pspec) => {
 						var exception = lldb.exception;

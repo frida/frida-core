@@ -779,7 +779,7 @@ namespace Frida.GDB {
 			check_execute_response (response);
 		}
 
-		private async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request)
+		protected async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request)
 				throws Error, IOError {
 			try {
 				yield execute (command, cancellable);
