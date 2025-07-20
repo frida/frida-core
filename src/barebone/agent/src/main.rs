@@ -134,9 +134,13 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
 
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
     unsafe {
+        kprintln!("Frida agent worker initializing");
+
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
+
+        kprintln!("Frida agent worker parsing config");
 
         if *core::ptr::addr_of!(CONFIG_SIZE) > 0 {
             parse_symbol_config(*core::ptr::addr_of!(CONFIG_DATA), *core::ptr::addr_of!(CONFIG_SIZE));
