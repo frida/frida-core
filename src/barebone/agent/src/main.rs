@@ -6,6 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
@@ -34,6 +35,20 @@ mod bindings {
     )]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
+
+#[derive(Debug, Clone)]
+pub struct DarwinSymbolDetails {
+    pub name: String,
+    pub address: u64,
+    pub symbol_type: u8,
+    pub section: u8,
+    pub description: u16,
+}
+
+static mut SYMBOL_TABLE: Vec<DarwinSymbolDetails> = Vec::new();
+static mut SYMBOL_NAME_INDEX: BTreeMap<String, usize> = BTreeMap::new();
+static mut CONFIG_DATA: *const u8 = core::ptr::null();
+static mut CONFIG_SIZE: usize = 0;
 
 #[repr(C)]
 pub struct SharedBuffer {
@@ -94,8 +109,11 @@ pub enum FridaStatus {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start() -> usize {
+pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> usize {
     unsafe {
+        CONFIG_DATA = config_data;
+        CONFIG_SIZE = config_size;
+
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
         (*buffer).magic = 0x44495246;
         (*buffer)
@@ -120,10 +138,94 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
+        if *core::ptr::addr_of!(CONFIG_SIZE) > 0 {
+            parse_symbol_config(*core::ptr::addr_of!(CONFIG_DATA), *core::ptr::addr_of!(CONFIG_SIZE));
+        }
+
+        let symbol_count = core::ptr::addr_of!(SYMBOL_TABLE).as_ref().unwrap().len();
+        kprintln!("Frida agent starting with symbols count: {}", symbol_count);
+
         bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
 
         let main_loop = bindings::g_main_loop_new(ptr::null_mut(), 0);
         g_main_loop_run(main_loop);
+    }
+}
+
+unsafe fn parse_symbol_config(config_data: *const u8, config_size: usize) {
+    use crate::bindings::{
+        g_variant_new_from_data, g_variant_iter_new, g_variant_iter_next_value,
+        g_variant_iter_free, g_variant_get_string, g_variant_get_uint32, g_variant_get_byte,
+        g_variant_get_uint16, g_variant_get_child_value, g_variant_unref, gsize, g_variant_type_new,
+    };
+
+    unsafe {
+        let type_string = b"a(suyyq)\0".as_ptr() as *const gchar;
+        let variant_type = g_variant_type_new(type_string);
+
+        let variant = g_variant_new_from_data(
+            variant_type,
+            config_data as *const core::ffi::c_void,
+            config_size as gsize,
+            1,
+            None,
+            ptr::null_mut(),
+        );
+
+        let iter = g_variant_iter_new(variant);
+
+        let mut symbols = Vec::new();
+        let mut name_index: BTreeMap<String, usize> = BTreeMap::new();
+        let kernel_base = crate::xnu::get_kernel_base();
+
+        loop {
+            let child = g_variant_iter_next_value(iter);
+            if child.is_null() {
+                break;
+            }
+
+            let name_variant = g_variant_get_child_value(child, 0);
+            let offset_variant = g_variant_get_child_value(child, 1);
+            let type_variant = g_variant_get_child_value(child, 2);
+            let section_variant = g_variant_get_child_value(child, 3);
+            let desc_variant = g_variant_get_child_value(child, 4);
+
+            let mut name_len = 0 as gsize;
+            let name_ptr = g_variant_get_string(name_variant, &mut name_len);
+            let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
+
+            let offset = g_variant_get_uint32(offset_variant);
+            let symbol_type = g_variant_get_byte(type_variant);
+            let section = g_variant_get_byte(section_variant);
+            let description = g_variant_get_uint16(desc_variant);
+
+            let address = kernel_base + (offset as u64);
+
+            let symbol_index = symbols.len();
+            name_index.insert(name.clone(), symbol_index);
+
+            symbols.push(DarwinSymbolDetails {
+                name,
+                address,
+                symbol_type,
+                section,
+                description,
+            });
+
+            g_variant_unref(name_variant);
+            g_variant_unref(offset_variant);
+            g_variant_unref(type_variant);
+            g_variant_unref(section_variant);
+            g_variant_unref(desc_variant);
+
+            g_variant_unref(child);
+        }
+
+        SYMBOL_TABLE = symbols;
+        SYMBOL_NAME_INDEX = name_index;
+
+        g_variant_iter_free(iter);
+        g_variant_unref(variant);
     }
 }
 

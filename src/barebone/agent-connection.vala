@@ -9,7 +9,8 @@ namespace Frida.Barebone {
 		private Machine machine;
 		private Allocator allocator;
 
-		private Allocation allocation;
+		private Allocation elf_allocation;
+		private Allocation config_allocation;
 		private SharedBuffer shared_buffer;
 		private AsyncLock request_lock = new AsyncLock ();
 		private Callback mprotect_callback;
@@ -33,24 +34,32 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var gdb = machine.gdb;
+			ByteOrder byte_order = gdb.byte_order;
+			uint pointer_size = gdb.pointer_size;
+
+			var config_builder = new VariantBuilder (new VariantType ("a(styyq)"));
+
 			string? symbol_source = config.symbol_source;
 			if (symbol_source != null) {
 				var payload = yield Img4.parse_file (File.new_for_path (symbol_source), cancellable);
-				printerr ("Got payload! kind=%s description=%s data.size=%zu\n",
-					payload.kind,
-					payload.description,
-					payload.data.get_size ());
-				hexdump (payload.data.get_data ()[:256]);
-				printerr ("\n\n");
+
+				Bytes kerncache = payload.data;
 
 				Gum.DarwinModule mod;
 				try {
-					mod = new Gum.DarwinModule.from_blob (payload.data, ARM64, Gum.PtrauthSupport.SUPPORTED);
+					mod = new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
 				} catch (Gum.Error e) {
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}
+
 				mod.enumerate_symbols (s => {
-					printerr ("Found symbol: %s\n", s.name);
+					config_builder.add ("(suyyq)",
+						(s.name[0] == '_') ? s.name[1:] : s.name,
+						(uint32) s.address,
+						s.type,
+						s.section,
+						s.description);
 					return true;
 				});
 			}
@@ -70,12 +79,6 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("Unable to open %s: %s", tc.path, strerror (errno));
 
 			try {
-# if DARWIN
-				// See https://bugs.python.org/issue11277 for details.
-				// TODO: Move this quirk to GLib.
-				Posix.fcntl (fd, Darwin.XNU.F_FULLFSYNC);
-# endif
-
 				var sb = Posix.Stat ();
 				if (Posix.fstat (fd, out sb) == -1)
 					throw new Error.INVALID_ARGUMENT ("Unable to stat %s: %s", tc.path, strerror (errno));
@@ -103,12 +106,12 @@ namespace Frida.Barebone {
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
-			allocation = yield inject_elf (elf, machine, allocator, cancellable);
+			elf_allocation = yield inject_elf (elf, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
 			uint64 mprotect_address = 0;
 			uint64 get_writable_mappings_address = 0;
-			uint64 base_va = allocation.virtual_address;
+			uint64 base_va = elf_allocation.virtual_address;
 			printerr ("ELF injected at base address 0x%lx\n\n", (ulong) base_va);
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
@@ -132,10 +135,17 @@ namespace Frida.Barebone {
 			get_writable_mappings_callback = yield new Callback (get_writable_mappings_address,
 				new GetWritableMappingsHandler (machine), machine, cancellable);
 
-			uint64 buffer_start_pa = yield machine.invoke (start_address, {}, cancellable);
-			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
+			var config_blob = config_builder.end ().get_data_as_bytes ();
+			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
 
-			var gdb = machine.gdb;
+			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
+
+			uint64 buffer_start_pa = yield machine.invoke (start_address, {
+					config_allocation.virtual_address,
+					config_allocation.size
+				},
+				cancellable);
+			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
 
 			yield gdb.continue (cancellable);
 
@@ -146,7 +156,7 @@ namespace Frida.Barebone {
 			var buffer_offset = (size_t) (buffer_start_pa - base_pa);
 
 			Bytes shared_bytes = ram.slice (buffer_offset, buffer_offset + SharedBuffer.SIZE);
-			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, gdb.byte_order, gdb.pointer_size));
+			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, byte_order, pointer_size));
 			shared_buffer.check ();
 
 			process_incoming_messages.begin ();
@@ -491,31 +501,4 @@ namespace Frida.Barebone {
 		}
 	}
 #endif
-
-	// https://gist.github.com/phako/96b36b5070beaf7eee27
-	private void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
-	}
 }
