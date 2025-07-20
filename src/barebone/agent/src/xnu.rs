@@ -1,3 +1,9 @@
+const KERNEL_BASE: u64 = 0xfffffff007004000;
+
+pub fn get_kernel_base() -> u64 {
+    KERNEL_BASE
+}
+
 const PANIC_ADDR: usize = 0xfffffff0_097d_b944;
 const IOLOG_ADDR: usize = 0xfffffff0_07ff_1b68;
 const KALLOC_ADDR: usize = 0xfffffff0_07a3_c278;
