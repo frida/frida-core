@@ -38,7 +38,7 @@ namespace Frida.Barebone {
 			ByteOrder byte_order = gdb.byte_order;
 			uint pointer_size = gdb.pointer_size;
 
-			var config_builder = new VariantBuilder (new VariantType ("a(styyq)"));
+			var config_builder = new VariantBuilder (new VariantType ("a(suyyq)"));
 
 			string? symbol_source = config.symbol_source;
 			if (symbol_source != null) {
@@ -105,6 +105,14 @@ namespace Frida.Barebone {
 #endif
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
+
+			var bp = yield gdb.add_breakpoint (SOFT, 0xfffffff007a55728, 4, cancellable);
+			GDB.Breakpoint? hit_breakpoint = null;
+			do {
+				var exception = yield gdb.continue_until_exception (cancellable);
+				hit_breakpoint = exception.breakpoint;
+			} while (hit_breakpoint != bp);
+			yield bp.remove (cancellable);
 
 			elf_allocation = yield inject_elf (elf, machine, allocator, cancellable);
 
