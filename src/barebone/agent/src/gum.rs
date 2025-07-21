@@ -148,24 +148,8 @@ pub extern "C" fn gum_symbol_details_from_address(
 pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar {
     unsafe {
         let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
-        if let Some(symbol) = table.find_symbol_by_address(address as u64) {
-            let name_bytes = symbol.name.as_bytes();
-            let name_ptr = crate::xnu::kalloc(name_bytes.len() + 1);
-            if !name_ptr.is_null() {
-                core::ptr::copy_nonoverlapping(
-                    name_bytes.as_ptr(),
-                    name_ptr as *mut u8,
-                    name_bytes.len(),
-                );
-                *((name_ptr as *mut u8).add(name_bytes.len())) = 0;
-
-                let result = g_strdup(name_ptr as *const gchar);
-                crate::xnu::free(name_ptr as *mut u8, name_bytes.len() + 1);
-                return result;
-            }
-        }
-
-        core::ptr::null_mut()
+        let name_ptr = table.find_symbol_name_ptr_by_address(address as u64);
+        g_strdup(name_ptr as *const gchar)
     }
 }
 
@@ -191,7 +175,8 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
         let target_name = CStr::from_ptr(name).to_string_lossy();
         let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
 
-        if let Some(symbol) = table.find_symbol_by_name(&target_name) {
+        let symbols = table.find_symbols_by_name(&target_name);
+        for symbol in symbols {
             let addr = symbol.address as gpointer;
             g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
         }
@@ -201,9 +186,19 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_find_functions_matching(_pattern: *const gchar) -> *mut GArray {
+pub extern "C" fn gum_find_functions_matching(pattern: *const gchar) -> *mut GArray {
     unsafe {
         let array = g_array_new(0, 0, core::mem::size_of::<gpointer>() as guint);
+
+        let glob_pattern = CStr::from_ptr(pattern).to_string_lossy();
+        let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
+
+        let symbols = table.find_symbols_matching_glob(&glob_pattern);
+        for symbol in symbols {
+            let addr = symbol.address as gpointer;
+            g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
+        }
+
         array
     }
 }

@@ -560,7 +560,7 @@ namespace Frida.Barebone {
 				symbol_offsets[i] = (uint32) builder.offset;
 
 				builder.append_uint16 ((uint16) symbol.name.length);
-				builder.append_string (symbol.name, StringTerminator.NONE);
+				builder.append_string (symbol.name, StringTerminator.NUL);
 				builder.append_uint32 (symbol.offset);
 				builder.append_uint8 (symbol.symbol_type);
 				builder.append_uint8 (symbol.section);
