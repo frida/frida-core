@@ -38,8 +38,13 @@ namespace Frida.Barebone {
 			ByteOrder byte_order = gdb.byte_order;
 			uint pointer_size = gdb.pointer_size;
 
-			var config_builder = new VariantBuilder (new VariantType ("a(suyyq)"));
+			var config_builder = new VariantBuilder (new VariantType ("(tay)"));
 
+			uint64 kernel_base = 0xfffffff007004000ULL; // TODO: Read from config.
+			config_builder.add ("t", kernel_base);
+
+			var timer = new Timer ();
+			var hash_builder = new SymbolHashBuilder ();
 			string? symbol_source = config.symbol_source;
 			if (symbol_source != null) {
 				var payload = yield Img4.parse_file (File.new_for_path (symbol_source), cancellable);
@@ -54,15 +59,19 @@ namespace Frida.Barebone {
 				}
 
 				mod.enumerate_symbols (s => {
-					config_builder.add ("(suyyq)",
-						(s.name[0] == '_') ? s.name[1:] : s.name,
-						(uint32) s.address,
-						s.type,
-						s.section,
-						s.description);
+					hash_builder.add_symbol (new SymbolInfo () {
+						name = (s.name[0] == '_') ? s.name[1:] : s.name,
+						offset = (uint32) s.address,
+						symbol_type = s.type,
+						section = s.section,
+						description = s.description
+					});
 					return true;
 				});
 			}
+			Bytes symbol_data = hash_builder.build (byte_order);
+			printerr ("Built symbol hash table (%zu bytes) in %u ms\n\n", symbol_data.get_size (), (uint) (timer.elapsed () * 1000.0));
+			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true, symbol_data));
 
 			Gum.ElfModule elf;
 			try {
@@ -146,7 +155,11 @@ namespace Frida.Barebone {
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
 
+			timer.reset ();
 			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
+			printerr ("Uploaded %zu bytes of config in %u ms\n\n",
+				config_blob.get_size (),
+				(uint) (timer.elapsed () * 1000.0));
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
@@ -509,4 +522,64 @@ namespace Frida.Barebone {
 		}
 	}
 #endif
+
+	private class SymbolHashBuilder : Object {
+		private Gee.Map<string, Gee.List<SymbolInfo>> symbol_table = new Gee.TreeMap<string, Gee.List<SymbolInfo>> ();
+
+		public void add_symbol (SymbolInfo symbol) {
+			var symbol_list = symbol_table[symbol.name];
+			if (symbol_list == null) {
+				symbol_list = new Gee.ArrayList<SymbolInfo> ();
+				symbol_table[symbol.name] = symbol_list;
+			}
+			symbol_list.add (symbol);
+		}
+
+		public Bytes build (ByteOrder byte_order) {
+			var builder = new BufferBuilder (byte_order);
+
+			uint total_symbols = 0;
+			foreach (var entry in symbol_table.entries)
+				total_symbols += entry.value.size;
+
+			builder.append_uint32 (total_symbols);
+
+			var index_table_offset = builder.offset;
+			builder.skip (total_symbols * 4);
+
+			var symbol_offsets = new uint32[total_symbols];
+			uint symbol_index = 0;
+
+			foreach (var entry in symbol_table.entries) {
+				string name = entry.key;
+				var symbol_list = entry.value;
+
+				foreach (var symbol in symbol_list) {
+					symbol_offsets[symbol_index] = (uint32) builder.offset;
+
+					builder.append_uint16 ((uint16) name.length);
+					builder.append_string (name, StringTerminator.NONE);
+					builder.append_uint32 (symbol.offset);
+					builder.append_uint8 (symbol.symbol_type);
+					builder.append_uint8 (symbol.section);
+					builder.append_uint16 (symbol.description);
+
+					symbol_index++;
+				}
+			}
+
+			for (int i = 0; i != total_symbols; i++)
+				builder.write_uint32 (index_table_offset + (i * 4), symbol_offsets[i]);
+
+			return builder.build ();
+		}
+	}
+
+	private class SymbolInfo {
+		public string name;
+		public uint32 offset;
+		public uint8 symbol_type;
+		public uint8 section;
+		public uint16 description;
+	}
 }
