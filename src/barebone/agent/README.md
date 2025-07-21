@@ -23,4 +23,5 @@
 
 ## Development loop
 
-    cargo build --release && make -C ~/src/frida-python && killall -9 qemu-system-aarch64 && sleep 10 && frida -D barebone -p 0
+    export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.config
+    cargo build --release && make -C ~/src/frida-python && killall -9 qemu-system-aarch64 && sleep 2 && frida -D barebone -p 0
