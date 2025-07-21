@@ -27,7 +27,11 @@ namespace Frida.Barebone {
 			uint64 base_va = allocation.virtual_address;
 
 			Bytes relocated_image = machine.relocate (elf, base_va);
+			var timer = new Timer ();
 			yield machine.gdb.write_byte_array (base_va, relocated_image, cancellable);
+			printerr ("Uploaded %zu bytes ELF in %u ms\n\n",
+				relocated_image.get_size (),
+				(uint) (timer.elapsed () * 1000.0));
 
 			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);
 		} catch (GLib.Error e) {

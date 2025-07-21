@@ -119,7 +119,7 @@ pub extern "C" fn gum_symbol_details_from_address(
     details: *mut GumDebugSymbolDetails,
 ) -> gboolean {
     unsafe {
-        if let Some(symbol) = find_symbol_by_address(address as u64) {
+        if let Some(symbol) = crate::find_symbol_by_address(address as u64) {
             let name_bytes = symbol.name.as_bytes();
             let copy_len = core::cmp::min(name_bytes.len(), 2048);
             core::ptr::copy_nonoverlapping(
@@ -146,7 +146,7 @@ pub extern "C" fn gum_symbol_details_from_address(
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar {
     unsafe {
-        if let Some(symbol) = find_symbol_by_address(address as u64) {
+        if let Some(symbol) = crate::find_symbol_by_address(address as u64) {
             let name_bytes = symbol.name.as_bytes();
             let name_ptr = crate::xnu::kalloc(name_bytes.len() + 1);
             if !name_ptr.is_null() {
@@ -167,38 +167,13 @@ pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar 
     }
 }
 
-unsafe fn find_symbol_by_address(address: u64) -> Option<&'static crate::DarwinSymbolDetails> {
-    unsafe {
-        let symbols = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
-        let mut best_match: Option<&crate::DarwinSymbolDetails> = None;
-        let mut best_distance = u64::MAX;
-
-        for symbol in symbols.iter() {
-            if symbol.address <= address {
-                let distance = address - symbol.address;
-                if distance < best_distance {
-                    best_distance = distance;
-                    best_match = Some(symbol);
-                }
-            }
-        }
-
-        best_match
-    }
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_find_function(name: *const gchar) -> gpointer {
     unsafe {
         let target_name = CStr::from_ptr(name).to_string_lossy();
 
-        let symbols = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
-        let name_index = &*core::ptr::addr_of!(crate::SYMBOL_NAME_INDEX);
-
-        if let Some(&index) = name_index.get(&*target_name) {
-            if let Some(symbol) = symbols.get(index) {
-                return symbol.address as gpointer;
-            }
+        if let Some(symbol) = crate::search_symbol_by_name(&target_name) {
+            return symbol.address as gpointer;
         }
 
         core::ptr::null_mut()
@@ -212,14 +187,10 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
 
         let target_name = CStr::from_ptr(name).to_string_lossy();
 
-        let symbols = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
-        let name_index = &*core::ptr::addr_of!(crate::SYMBOL_NAME_INDEX);
-
-        if let Some(&index) = name_index.get(&*target_name) {
-            if let Some(symbol) = symbols.get(index) {
-                let addr = symbol.address as gpointer;
-                g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
-            }
+        let symbols = crate::search_symbols_by_name(&target_name);
+        for symbol in symbols {
+            let addr = symbol.address as gpointer;
+            g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
         }
 
         array
@@ -227,20 +198,9 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_find_functions_matching(pattern: *const gchar) -> *mut GArray {
+pub extern "C" fn gum_find_functions_matching(_pattern: *const gchar) -> *mut GArray {
     unsafe {
         let array = g_array_new(0, 0, core::mem::size_of::<gpointer>() as guint);
-
-        let pattern_str = CStr::from_ptr(pattern).to_string_lossy();
-
-        let symbols = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
-        for symbol in symbols.iter() {
-            if symbol.name.contains(&*pattern_str) {
-                let addr = symbol.address as gpointer;
-                g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
-            }
-        }
-
         array
     }
 }
