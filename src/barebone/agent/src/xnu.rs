@@ -1,7 +1,13 @@
-const KERNEL_BASE: u64 = 0xfffffff007004000;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+static KERNEL_BASE: AtomicU64 = AtomicU64::new(0xfffffff007004000);
 
 pub fn get_kernel_base() -> u64 {
-    KERNEL_BASE
+    KERNEL_BASE.load(Ordering::Relaxed)
+}
+
+pub fn set_kernel_base(base: u64) {
+    KERNEL_BASE.store(base, Ordering::Relaxed);
 }
 
 const PANIC_ADDR: usize = 0xfffffff0_097d_b944;

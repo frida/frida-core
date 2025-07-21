@@ -6,12 +6,14 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use core::ptr;
 
+use crate::bindings::g_variant_get_uint64;
 use crate::bindings::{
     GBytes, GCancellable, g_main_loop_run, g_object_unref, gboolean, gchar, gpointer,
     gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
@@ -45,10 +47,10 @@ pub struct DarwinSymbolDetails {
     pub description: u16,
 }
 
-static mut SYMBOL_TABLE: Vec<DarwinSymbolDetails> = Vec::new();
-static mut SYMBOL_NAME_INDEX: BTreeMap<String, usize> = BTreeMap::new();
 static mut CONFIG_DATA: *const u8 = core::ptr::null();
 static mut CONFIG_SIZE: usize = 0;
+static mut SYMBOL_DATA: *const u8 = core::ptr::null();
+static mut SYMBOL_DATA_SIZE: usize = 0;
 
 #[repr(C)]
 pub struct SharedBuffer {
@@ -146,7 +148,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
             parse_symbol_config(*core::ptr::addr_of!(CONFIG_DATA), *core::ptr::addr_of!(CONFIG_SIZE));
         }
 
-        let symbol_count = core::ptr::addr_of!(SYMBOL_TABLE).as_ref().unwrap().len();
+        let symbol_count = get_symbol_count();
         kprintln!("Frida agent starting with symbols count: {}", symbol_count);
 
         bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
@@ -158,16 +160,15 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
 unsafe fn parse_symbol_config(config_data: *const u8, config_size: usize) {
     use crate::bindings::{
-        g_variant_new_from_data, g_variant_iter_new, g_variant_iter_next_value,
-        g_variant_iter_free, g_variant_get_string, g_variant_get_uint32, g_variant_get_byte,
-        g_variant_get_uint16, g_variant_get_child_value, g_variant_unref, gsize, g_variant_type_new,
+        g_variant_new_from_data, g_variant_get_child_value, g_variant_unref,
+        g_variant_get_data, g_variant_get_size, gsize, g_variant_type_new,
     };
 
     unsafe {
-        let type_string = b"a(suyyq)\0".as_ptr() as *const gchar;
+        let type_string = b"(tay)\0".as_ptr() as *const gchar;
         let variant_type = g_variant_type_new(type_string);
 
-        let variant = g_variant_new_from_data(
+        let root_variant = g_variant_new_from_data(
             variant_type,
             config_data as *const core::ffi::c_void,
             config_size as gsize,
@@ -176,60 +177,26 @@ unsafe fn parse_symbol_config(config_data: *const u8, config_size: usize) {
             ptr::null_mut(),
         );
 
-        let iter = g_variant_iter_new(variant);
+        let kernel_base_variant = g_variant_get_child_value(root_variant, 0);
 
-        let mut symbols = Vec::new();
-        let mut name_index: BTreeMap<String, usize> = BTreeMap::new();
-        let kernel_base = crate::xnu::get_kernel_base();
+        let kernel_base = g_variant_get_uint64(kernel_base_variant);
+        xnu::set_kernel_base(kernel_base);
+        kprintln!("Set kernel base to 0x{:x}", kernel_base);
 
-        loop {
-            let child = g_variant_iter_next_value(iter);
-            if child.is_null() {
-                break;
-            }
+        let symbol_array_variant = g_variant_get_child_value(root_variant, 1);
 
-            let name_variant = g_variant_get_child_value(child, 0);
-            let offset_variant = g_variant_get_child_value(child, 1);
-            let type_variant = g_variant_get_child_value(child, 2);
-            let section_variant = g_variant_get_child_value(child, 3);
-            let desc_variant = g_variant_get_child_value(child, 4);
+        SYMBOL_DATA = g_variant_get_data(symbol_array_variant) as *const u8;
+        SYMBOL_DATA_SIZE = g_variant_get_size(symbol_array_variant) as usize;
 
-            let mut name_len = 0 as gsize;
-            let name_ptr = g_variant_get_string(name_variant, &mut name_len);
-            let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
+        let symbol_data_size = core::ptr::addr_of!(SYMBOL_DATA_SIZE);
+        kprintln!("Loaded symbol data with {} bytes", *symbol_data_size);
 
-            let offset = g_variant_get_uint32(offset_variant);
-            let symbol_type = g_variant_get_byte(type_variant);
-            let section = g_variant_get_byte(section_variant);
-            let description = g_variant_get_uint16(desc_variant);
+        let symbol_count = get_symbol_count();
+        kprintln!("Loaded {} symbols in raw format", symbol_count);
 
-            let address = kernel_base + (offset as u64);
-
-            let symbol_index = symbols.len();
-            name_index.insert(name.clone(), symbol_index);
-
-            symbols.push(DarwinSymbolDetails {
-                name,
-                address,
-                symbol_type,
-                section,
-                description,
-            });
-
-            g_variant_unref(name_variant);
-            g_variant_unref(offset_variant);
-            g_variant_unref(type_variant);
-            g_variant_unref(section_variant);
-            g_variant_unref(desc_variant);
-
-            g_variant_unref(child);
-        }
-
-        SYMBOL_TABLE = symbols;
-        SYMBOL_NAME_INDEX = name_index;
-
-        g_variant_iter_free(iter);
-        g_variant_unref(variant);
+        g_variant_unref(symbol_array_variant);
+        g_variant_unref(kernel_base_variant);
+        g_variant_unref(root_variant);
     }
 }
 
@@ -316,7 +283,6 @@ unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
         }
         let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
 
-        // Pass script ID as user data to message handler
         let script_id_ptr = Box::into_raw(Box::new(script_id));
         gum_script_set_message_handler(
             script,
@@ -511,11 +477,9 @@ unsafe extern "C" fn frida_message_handler(
 ) {
     let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
 
-    // Get script ID from user data
     if !user_data.is_null() {
         let script_id = unsafe { *(user_data as *const u32) };
 
-        // Enqueue the message with script ID
         let message_queue = unsafe { core::ptr::addr_of_mut!(MESSAGE_QUEUE).as_mut().unwrap() };
         message_queue.push_back((script_id, String::from(msg)));
     }
@@ -555,4 +519,113 @@ macro_rules! kprintln {
         buf.push('\0');
         crate::xnu::io_log(&buf)
     }};
+}
+
+fn get_symbol_count() -> u32 {
+    unsafe {
+        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
+        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+    }
+}
+
+fn parse_symbol_at_offset(data: &[u8], offset: usize) -> (String, u32, u8, u8, u16) {
+    let name_len = u16::from_le_bytes([data[offset], data[offset+1]]) as usize;
+
+    let name = unsafe {
+        core::str::from_utf8_unchecked(&data[offset+2..offset+2+name_len]).to_string()
+    };
+
+    let meta_start = offset + 2 + name_len;
+    let symbol_offset = u32::from_le_bytes([
+        data[meta_start], data[meta_start+1], data[meta_start+2], data[meta_start+3]
+    ]);
+    let symbol_type = data[meta_start + 4];
+    let section = data[meta_start + 5];
+    let description = u16::from_le_bytes([data[meta_start+6], data[meta_start+7]]);
+
+    (name, symbol_offset, symbol_type, section, description)
+}
+
+fn search_symbol_by_name(name: &str) -> Option<DarwinSymbolDetails> {
+    unsafe {
+        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
+        let symbol_count = get_symbol_count() as usize;
+        let kernel_base = crate::xnu::get_kernel_base();
+
+        let mut left = 0;
+        let mut right = symbol_count;
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+
+            let index_offset = 4 + mid * 4;
+            let symbol_offset = u32::from_le_bytes([
+                data[index_offset], data[index_offset+1],
+                data[index_offset+2], data[index_offset+3]
+            ]) as usize;
+
+            let (symbol_name, symbol_addr_offset, symbol_type, section, description) =
+                parse_symbol_at_offset(data, symbol_offset);
+
+            match symbol_name.as_str().cmp(name) {
+                core::cmp::Ordering::Equal => {
+                    return Some(DarwinSymbolDetails {
+                        name: symbol_name,
+                        address: kernel_base + symbol_addr_offset as u64,
+                        symbol_type,
+                        section,
+                        description,
+                    });
+                }
+                core::cmp::Ordering::Less => {
+                    left = mid + 1;
+                }
+                core::cmp::Ordering::Greater => {
+                    right = mid;
+                }
+            }
+        }
+
+        None
+    }
+}
+
+fn search_symbols_by_name(name: &str) -> Vec<DarwinSymbolDetails> {
+    if let Some(symbol) = search_symbol_by_name(name) {
+        alloc::vec![symbol]
+    } else {
+        Vec::new()
+    }
+}
+
+pub unsafe fn find_symbol_by_address(address: u64) -> Option<DarwinSymbolDetails> {
+    unsafe {
+        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
+        let symbol_count = get_symbol_count() as usize;
+        let kernel_base = crate::xnu::get_kernel_base();
+        let target_offset = (address - kernel_base) as u32;
+
+        for i in 0..symbol_count {
+            let index_offset = 4 + i * 4;
+            let symbol_offset = u32::from_le_bytes([
+                data[index_offset], data[index_offset+1],
+                data[index_offset+2], data[index_offset+3]
+            ]) as usize;
+
+            let (symbol_name, symbol_addr_offset, symbol_type, section, description) =
+                parse_symbol_at_offset(data, symbol_offset);
+
+            if symbol_addr_offset == target_offset {
+                return Some(DarwinSymbolDetails {
+                    name: symbol_name,
+                    address: address,
+                    symbol_type,
+                    section,
+                    description,
+                });
+            }
+        }
+
+        None
+    }
 }
