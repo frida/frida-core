@@ -6,8 +6,6 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
-use alloc::string::ToString;
-use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
@@ -18,12 +16,14 @@ use crate::bindings::{
     GBytes, GCancellable, g_main_loop_run, g_object_unref, gboolean, gchar, gpointer,
     gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
 };
+use crate::symbols::SymbolTable;
 
 mod glib;
 mod gthread;
 mod gum;
 mod libc;
 mod pac;
+mod symbols;
 mod xnu;
 
 mod bindings {
@@ -38,19 +38,8 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-#[derive(Debug, Clone)]
-pub struct DarwinSymbolDetails {
-    pub name: String,
-    pub address: u64,
-    pub symbol_type: u8,
-    pub section: u8,
-    pub description: u16,
-}
-
-static mut CONFIG_DATA: *const u8 = core::ptr::null();
-static mut CONFIG_SIZE: usize = 0;
-static mut SYMBOL_DATA: *const u8 = core::ptr::null();
-static mut SYMBOL_DATA_SIZE: usize = 0;
+static mut CONFIG_DATA: &'static [u8] = &[];
+pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
 #[repr(C)]
 pub struct SharedBuffer {
@@ -113,8 +102,7 @@ pub enum FridaStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> usize {
     unsafe {
-        CONFIG_DATA = config_data;
-        CONFIG_SIZE = config_size;
+        CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
         let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
         (*buffer).magic = 0x44495246;
@@ -144,11 +132,16 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         kprintln!("Frida agent worker parsing config");
 
-        if *core::ptr::addr_of!(CONFIG_SIZE) > 0 {
-            parse_symbol_config(*core::ptr::addr_of!(CONFIG_DATA), *core::ptr::addr_of!(CONFIG_SIZE));
+        let config_data_ref = core::ptr::addr_of!(CONFIG_DATA).read();
+
+        if !config_data_ref.is_empty() {
+            parse_symbol_config(config_data_ref.as_ptr(), config_data_ref.len());
         }
 
-        let symbol_count = get_symbol_count();
+        let symbol_count = {
+            let table = core::ptr::addr_of!(SYMBOL_TABLE).read();
+            table.symbol_count()
+        };
         kprintln!("Frida agent starting with symbols count: {}", symbol_count);
 
         bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
@@ -183,15 +176,18 @@ unsafe fn parse_symbol_config(config_data: *const u8, config_size: usize) {
         xnu::set_kernel_base(kernel_base);
         kprintln!("Set kernel base to 0x{:x}", kernel_base);
 
-        let symbol_array_variant = g_variant_get_child_value(root_variant, 1);
+        let symbol_array_variant = g_variant_get_child_value(root_variant, 1);        let symbol_data_ptr = g_variant_get_data(symbol_array_variant) as *const u8;
+        let symbol_data_size = g_variant_get_size(symbol_array_variant) as usize;
 
-        SYMBOL_DATA = g_variant_get_data(symbol_array_variant) as *const u8;
-        SYMBOL_DATA_SIZE = g_variant_get_size(symbol_array_variant) as usize;
+        let symbol_data_slice = core::slice::from_raw_parts(symbol_data_ptr, symbol_data_size);
+        SYMBOL_TABLE = SymbolTable::new(symbol_data_slice);
 
-        let symbol_data_size = core::ptr::addr_of!(SYMBOL_DATA_SIZE);
-        kprintln!("Loaded symbol data with {} bytes", *symbol_data_size);
+        kprintln!("Loaded symbol data with {} bytes", symbol_data_size);
 
-        let symbol_count = get_symbol_count();
+        let symbol_count = {
+            let table = core::ptr::addr_of!(SYMBOL_TABLE).read();
+            table.symbol_count()
+        };
         kprintln!("Loaded {} symbols in raw format", symbol_count);
 
         g_variant_unref(symbol_array_variant);
@@ -519,113 +515,4 @@ macro_rules! kprintln {
         buf.push('\0');
         crate::xnu::io_log(&buf)
     }};
-}
-
-fn get_symbol_count() -> u32 {
-    unsafe {
-        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
-        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
-    }
-}
-
-fn parse_symbol_at_offset(data: &[u8], offset: usize) -> (String, u32, u8, u8, u16) {
-    let name_len = u16::from_le_bytes([data[offset], data[offset+1]]) as usize;
-
-    let name = unsafe {
-        core::str::from_utf8_unchecked(&data[offset+2..offset+2+name_len]).to_string()
-    };
-
-    let meta_start = offset + 2 + name_len;
-    let symbol_offset = u32::from_le_bytes([
-        data[meta_start], data[meta_start+1], data[meta_start+2], data[meta_start+3]
-    ]);
-    let symbol_type = data[meta_start + 4];
-    let section = data[meta_start + 5];
-    let description = u16::from_le_bytes([data[meta_start+6], data[meta_start+7]]);
-
-    (name, symbol_offset, symbol_type, section, description)
-}
-
-fn search_symbol_by_name(name: &str) -> Option<DarwinSymbolDetails> {
-    unsafe {
-        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
-        let symbol_count = get_symbol_count() as usize;
-        let kernel_base = crate::xnu::get_kernel_base();
-
-        let mut left = 0;
-        let mut right = symbol_count;
-
-        while left < right {
-            let mid = left + (right - left) / 2;
-
-            let index_offset = 4 + mid * 4;
-            let symbol_offset = u32::from_le_bytes([
-                data[index_offset], data[index_offset+1],
-                data[index_offset+2], data[index_offset+3]
-            ]) as usize;
-
-            let (symbol_name, symbol_addr_offset, symbol_type, section, description) =
-                parse_symbol_at_offset(data, symbol_offset);
-
-            match symbol_name.as_str().cmp(name) {
-                core::cmp::Ordering::Equal => {
-                    return Some(DarwinSymbolDetails {
-                        name: symbol_name,
-                        address: kernel_base + symbol_addr_offset as u64,
-                        symbol_type,
-                        section,
-                        description,
-                    });
-                }
-                core::cmp::Ordering::Less => {
-                    left = mid + 1;
-                }
-                core::cmp::Ordering::Greater => {
-                    right = mid;
-                }
-            }
-        }
-
-        None
-    }
-}
-
-fn search_symbols_by_name(name: &str) -> Vec<DarwinSymbolDetails> {
-    if let Some(symbol) = search_symbol_by_name(name) {
-        alloc::vec![symbol]
-    } else {
-        Vec::new()
-    }
-}
-
-pub unsafe fn find_symbol_by_address(address: u64) -> Option<DarwinSymbolDetails> {
-    unsafe {
-        let data = core::slice::from_raw_parts(SYMBOL_DATA, SYMBOL_DATA_SIZE);
-        let symbol_count = get_symbol_count() as usize;
-        let kernel_base = crate::xnu::get_kernel_base();
-        let target_offset = (address - kernel_base) as u32;
-
-        for i in 0..symbol_count {
-            let index_offset = 4 + i * 4;
-            let symbol_offset = u32::from_le_bytes([
-                data[index_offset], data[index_offset+1],
-                data[index_offset+2], data[index_offset+3]
-            ]) as usize;
-
-            let (symbol_name, symbol_addr_offset, symbol_type, section, description) =
-                parse_symbol_at_offset(data, symbol_offset);
-
-            if symbol_addr_offset == target_offset {
-                return Some(DarwinSymbolDetails {
-                    name: symbol_name,
-                    address: address,
-                    symbol_type,
-                    section,
-                    description,
-                });
-            }
-        }
-
-        None
-    }
 }

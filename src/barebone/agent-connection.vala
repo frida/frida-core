@@ -538,38 +538,56 @@ namespace Frida.Barebone {
 		public Bytes build (ByteOrder byte_order) {
 			var builder = new BufferBuilder (byte_order);
 
-			uint total_symbols = 0;
-			foreach (var entry in symbol_table.entries)
-				total_symbols += entry.value.size;
-
-			builder.append_uint32 (total_symbols);
-
-			var index_table_offset = builder.offset;
-			builder.skip (total_symbols * 4);
-
-			var symbol_offsets = new uint32[total_symbols];
-			uint symbol_index = 0;
-
+			var all_symbols = new Gee.ArrayList<SymbolInfo> ();
 			foreach (var entry in symbol_table.entries) {
-				string name = entry.key;
-				var symbol_list = entry.value;
-
-				foreach (var symbol in symbol_list) {
-					symbol_offsets[symbol_index] = (uint32) builder.offset;
-
-					builder.append_uint16 ((uint16) name.length);
-					builder.append_string (name, StringTerminator.NONE);
-					builder.append_uint32 (symbol.offset);
-					builder.append_uint8 (symbol.symbol_type);
-					builder.append_uint8 (symbol.section);
-					builder.append_uint16 (symbol.description);
-
-					symbol_index++;
+				foreach (var symbol in entry.value) {
+					all_symbols.add (symbol);
 				}
 			}
 
-			for (int i = 0; i != total_symbols; i++)
-				builder.write_uint32 (index_table_offset + (i * 4), symbol_offsets[i]);
+			uint total_symbols = all_symbols.size;
+			builder.append_uint32 (total_symbols);
+
+			var name_index_offset = builder.offset;
+			builder.skip (total_symbols * 4);
+
+			var addr_index_offset = builder.offset;
+			builder.skip (total_symbols * 4);
+
+			var symbol_offsets = new uint32[total_symbols];
+			for (uint i = 0; i != total_symbols; i++) {
+				var symbol = all_symbols[(int) i];
+				symbol_offsets[i] = (uint32) builder.offset;
+
+				builder.append_uint16 ((uint16) symbol.name.length);
+				builder.append_string (symbol.name, StringTerminator.NONE);
+				builder.append_uint32 (symbol.offset);
+				builder.append_uint8 (symbol.symbol_type);
+				builder.append_uint8 (symbol.section);
+				builder.append_uint16 (symbol.description);
+			}
+
+			for (uint i = 0; i != total_symbols; i++)
+				builder.write_uint32 (name_index_offset + (i * 4), symbol_offsets[i]);
+
+			var addr_sorted_symbols = new Gee.ArrayList<int> ();
+			for (uint i = 0; i != total_symbols; i++)
+				addr_sorted_symbols.add ((int) i);
+			addr_sorted_symbols.sort ((a, b) => {
+				var symbol_a = all_symbols[a];
+				var symbol_b = all_symbols[b];
+				if (symbol_a.offset < symbol_b.offset)
+					return -1;
+				if (symbol_a.offset > symbol_b.offset)
+					return 1;
+				return 0;
+			});
+
+			for (uint i = 0; i != total_symbols; i++) {
+				int original_index = addr_sorted_symbols[(int) i];
+				uint symbol_data_offset = symbol_offsets[original_index];
+				builder.write_uint32 (addr_index_offset + (i * 4), symbol_data_offset);
+			}
 
 			return builder.build ();
 		}

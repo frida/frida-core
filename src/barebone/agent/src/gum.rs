@@ -119,7 +119,8 @@ pub extern "C" fn gum_symbol_details_from_address(
     details: *mut GumDebugSymbolDetails,
 ) -> gboolean {
     unsafe {
-        if let Some(symbol) = crate::find_symbol_by_address(address as u64) {
+        let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
+        if let Some(symbol) = table.find_symbol_by_address(address as u64) {
             let name_bytes = symbol.name.as_bytes();
             let copy_len = core::cmp::min(name_bytes.len(), 2048);
             core::ptr::copy_nonoverlapping(
@@ -146,7 +147,8 @@ pub extern "C" fn gum_symbol_details_from_address(
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar {
     unsafe {
-        if let Some(symbol) = crate::find_symbol_by_address(address as u64) {
+        let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
+        if let Some(symbol) = table.find_symbol_by_address(address as u64) {
             let name_bytes = symbol.name.as_bytes();
             let name_ptr = crate::xnu::kalloc(name_bytes.len() + 1);
             if !name_ptr.is_null() {
@@ -171,8 +173,9 @@ pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar 
 pub extern "C" fn gum_find_function(name: *const gchar) -> gpointer {
     unsafe {
         let target_name = CStr::from_ptr(name).to_string_lossy();
+        let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
 
-        if let Some(symbol) = crate::search_symbol_by_name(&target_name) {
+        if let Some(symbol) = table.find_symbol_by_name(&target_name) {
             return symbol.address as gpointer;
         }
 
@@ -186,9 +189,9 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
         let array = g_array_new(0, 0, core::mem::size_of::<gpointer>() as guint);
 
         let target_name = CStr::from_ptr(name).to_string_lossy();
+        let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
 
-        let symbols = crate::search_symbols_by_name(&target_name);
-        for symbol in symbols {
+        if let Some(symbol) = table.find_symbol_by_name(&target_name) {
             let addr = symbol.address as gpointer;
             g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
         }
