@@ -1,13 +1,15 @@
-use alloc::string::String;
+use crate::bindings::{
+    GPatternSpec, g_pattern_spec_free, g_pattern_spec_match_string, g_pattern_spec_new,
+};
+use crate::xnu::get_kernel_base;
 use alloc::borrow::ToOwned;
-use alloc::vec::Vec;
 use alloc::ffi::CString;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 use core::ffi::{CStr, c_char};
 use core::mem::size_of;
-use core::cmp::Ordering;
 use core::ptr;
-use crate::bindings::{g_pattern_spec_new, g_pattern_spec_free, g_pattern_spec_match_string, GPatternSpec};
-use crate::xnu::get_kernel_base;
 
 #[derive(Debug, Clone)]
 pub struct DarwinSymbolDetails {
@@ -35,9 +37,7 @@ impl SymbolTable {
         if data.len() < 4 {
             return Self::empty();
         }
-        let symbol_count = unsafe {
-            *(data.as_ptr() as *const u32) as usize
-        };
+        let symbol_count = unsafe { *(data.as_ptr() as *const u32) as usize };
         Self { data, symbol_count }
     }
 
@@ -134,7 +134,11 @@ impl SymbolTable {
             let data_start = self.data.as_ptr();
             let entry_offset = unsafe { entry_ptr.offset_from(data_start) as usize };
             unsafe {
-                (self.data.as_ptr().add(entry_offset + core::mem::size_of::<SymbolEntry>())) as *const core::ffi::c_char
+                (self
+                    .data
+                    .as_ptr()
+                    .add(entry_offset + core::mem::size_of::<SymbolEntry>()))
+                    as *const core::ffi::c_char
             }
         } else {
             ptr::null()
@@ -192,28 +196,25 @@ impl SymbolTable {
     fn symbol_matches_pattern(&self, offset: usize, pspec: *mut GPatternSpec) -> bool {
         let name_start = offset + core::mem::size_of::<SymbolEntry>();
         unsafe {
-            g_pattern_spec_match_string(pspec, self.data[name_start..].as_ptr() as *const core::ffi::c_char) != 0
+            g_pattern_spec_match_string(
+                pspec,
+                self.data[name_start..].as_ptr() as *const core::ffi::c_char,
+            ) != 0
         }
     }
 
     fn get_symbol_offset_by_name_index(&self, index: usize) -> usize {
         let offset = self.name_index_start() + index * 4;
-        unsafe {
-            *(self.data.as_ptr().add(offset) as *const u32) as usize
-        }
+        unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize }
     }
 
     fn get_symbol_offset_by_address_index(&self, index: usize) -> usize {
         let offset = self.address_index_start() + index * 4;
-        unsafe {
-            *(self.data.as_ptr().add(offset) as *const u32) as usize
-        }
+        unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize }
     }
 
     fn parse_symbol_entry(&self, offset: usize) -> &SymbolEntry {
-        unsafe {
-            &*(self.data.as_ptr().add(offset) as *const SymbolEntry)
-        }
+        unsafe { &*(self.data.as_ptr().add(offset) as *const SymbolEntry) }
     }
 
     fn name_index_start(&self) -> usize {
@@ -228,7 +229,7 @@ impl SymbolTable {
         self.binary_search(
             |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_name_index(mid)),
             |entry| entry.name(self).cmp(name),
-            false
+            false,
         )
     }
 
@@ -236,19 +237,27 @@ impl SymbolTable {
         self.binary_search(
             |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_address_index(mid)),
             |entry| entry.address_offset.cmp(&target_offset),
-            false
+            false,
         )
     }
 
-    fn binary_search_closest_by_address(&self, target_offset: u32) -> Option<(usize, &SymbolEntry)> {
+    fn binary_search_closest_by_address(
+        &self,
+        target_offset: u32,
+    ) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
             |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_address_index(mid)),
             |entry| entry.address_offset.cmp(&target_offset),
-            true
+            true,
         )
     }
 
-    fn binary_search<F, C>(&self, get_entry_fn: F, compare_fn: C, find_closest: bool) -> Option<(usize, &SymbolEntry)>
+    fn binary_search<F, C>(
+        &self,
+        get_entry_fn: F,
+        compare_fn: C,
+        find_closest: bool,
+    ) -> Option<(usize, &SymbolEntry)>
     where
         F: Fn(&Self, usize) -> &SymbolEntry,
         C: Fn(&SymbolEntry) -> Ordering,
