@@ -557,14 +557,15 @@ namespace Frida.Barebone {
 			var symbol_offsets = new uint32[total_symbols];
 			for (uint i = 0; i != total_symbols; i++) {
 				var symbol = all_symbols[(int) i];
+
+				builder.align (4);
 				symbol_offsets[i] = (uint32) builder.offset;
 
-				builder.append_uint16 ((uint16) symbol.name.length);
-				builder.append_string (symbol.name, StringTerminator.NUL);
 				builder.append_uint32 (symbol.offset);
 				builder.append_uint8 (symbol.symbol_type);
 				builder.append_uint8 (symbol.section);
 				builder.append_uint16 (symbol.description);
+				builder.append_string (symbol.name, StringTerminator.NUL);
 			}
 
 			for (uint i = 0; i != total_symbols; i++)
