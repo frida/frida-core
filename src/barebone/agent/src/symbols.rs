@@ -74,8 +74,7 @@ impl SymbolTable {
         let mut end = found_index;
 
         while start > 0 {
-            let symbol_offset = self.get_symbol_offset_by_name_index(start - 1);
-            let entry = self.parse_symbol_entry(symbol_offset);
+            let entry = self.get_symbol_entry_by_name_index(start - 1);
             let symbol_name = entry.name(self);
             if symbol_name == name {
                 start -= 1;
@@ -85,8 +84,7 @@ impl SymbolTable {
         }
 
         while end + 1 < self.symbol_count {
-            let symbol_offset = self.get_symbol_offset_by_name_index(end + 1);
-            let entry = self.parse_symbol_entry(symbol_offset);
+            let entry = self.get_symbol_entry_by_name_index(end + 1);
             let symbol_name = entry.name(self);
             if symbol_name == name {
                 end += 1;
@@ -98,8 +96,7 @@ impl SymbolTable {
         let kernel_base = get_kernel_base();
 
         for i in start..=end {
-            let symbol_offset = self.get_symbol_offset_by_name_index(i);
-            let entry = self.parse_symbol_entry(symbol_offset);
+            let entry = self.get_symbol_entry_by_name_index(i);
             let symbol_name = entry.name(self);
             results.push(DarwinSymbolDetails {
                 name: symbol_name.to_owned(),
@@ -127,19 +124,10 @@ impl SymbolTable {
         })
     }
 
-    pub fn find_symbol_name_ptr_by_address(&self, address: u64) -> *const core::ffi::c_char {
+    pub fn find_symbol_name_ptr_by_address(&self, address: u64) -> *const c_char {
         let target_offset = (address - get_kernel_base()) as u32;
         if let Some((_, entry)) = self.binary_search_by_address(target_offset) {
-            let entry_ptr = entry as *const SymbolEntry as *const u8;
-            let data_start = self.data.as_ptr();
-            let entry_offset = unsafe { entry_ptr.offset_from(data_start) as usize };
-            unsafe {
-                (self
-                    .data
-                    .as_ptr()
-                    .add(entry_offset + core::mem::size_of::<SymbolEntry>()))
-                    as *const core::ffi::c_char
-            }
+            entry.name_ptr(self)
         } else {
             ptr::null()
         }
@@ -173,10 +161,9 @@ impl SymbolTable {
         let kernel_base = get_kernel_base();
 
         for i in 0..self.symbol_count {
-            let symbol_offset = self.get_symbol_offset_by_name_index(i);
+            let entry = self.get_symbol_entry_by_name_index(i);
 
-            if self.symbol_matches_pattern(symbol_offset, pspec) {
-                let entry = self.parse_symbol_entry(symbol_offset);
+            if self.symbol_matches_pattern(entry, pspec) {
                 let symbol_name = entry.name(self);
                 results.push(DarwinSymbolDetails {
                     name: symbol_name.to_owned(),
@@ -193,27 +180,23 @@ impl SymbolTable {
         results
     }
 
-    fn symbol_matches_pattern(&self, offset: usize, pspec: *mut GPatternSpec) -> bool {
-        let name_start = offset + core::mem::size_of::<SymbolEntry>();
-        unsafe {
-            g_pattern_spec_match_string(
-                pspec,
-                self.data[name_start..].as_ptr() as *const core::ffi::c_char,
-            ) != 0
-        }
+    fn symbol_matches_pattern(&self, entry: &SymbolEntry, pspec: *mut GPatternSpec) -> bool {
+        unsafe { g_pattern_spec_match_string(pspec, entry.name_ptr(self)) != 0 }
     }
 
-    fn get_symbol_offset_by_name_index(&self, index: usize) -> usize {
+    fn get_symbol_entry_by_name_index(&self, index: usize) -> &SymbolEntry {
         let offset = self.name_index_start() + index * 4;
-        unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize }
+        let symbol_offset = unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize };
+        self.symbol_entry_at(symbol_offset)
     }
 
-    fn get_symbol_offset_by_address_index(&self, index: usize) -> usize {
+    fn get_symbol_entry_by_address_index(&self, index: usize) -> &SymbolEntry {
         let offset = self.address_index_start() + index * 4;
-        unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize }
+        let symbol_offset = unsafe { *(self.data.as_ptr().add(offset) as *const u32) as usize };
+        self.symbol_entry_at(symbol_offset)
     }
 
-    fn parse_symbol_entry(&self, offset: usize) -> &SymbolEntry {
+    fn symbol_entry_at(&self, offset: usize) -> &SymbolEntry {
         unsafe { &*(self.data.as_ptr().add(offset) as *const SymbolEntry) }
     }
 
@@ -227,7 +210,7 @@ impl SymbolTable {
 
     fn binary_search_by_name(&self, name: &str) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
-            |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_name_index(mid)),
+            |table, mid| table.get_symbol_entry_by_name_index(mid),
             |entry| entry.name(self).cmp(name),
             false,
         )
@@ -235,7 +218,7 @@ impl SymbolTable {
 
     fn binary_search_by_address(&self, target_offset: u32) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
-            |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_address_index(mid)),
+            |table, mid| table.get_symbol_entry_by_address_index(mid),
             |entry| entry.address_offset.cmp(&target_offset),
             false,
         )
@@ -246,7 +229,7 @@ impl SymbolTable {
         target_offset: u32,
     ) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
-            |table, mid| table.parse_symbol_entry(table.get_symbol_offset_by_address_index(mid)),
+            |table, mid| table.get_symbol_entry_by_address_index(mid),
             |entry| entry.address_offset.cmp(&target_offset),
             true,
         )
@@ -300,14 +283,19 @@ struct SymbolEntry {
 
 impl SymbolEntry {
     fn name<'a>(&self, symbol_table: &'a SymbolTable) -> &'a str {
+        unsafe {
+            CStr::from_ptr(self.name_ptr(symbol_table))
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    fn name_ptr(&self, symbol_table: &SymbolTable) -> *const c_char {
         let entry_ptr = self as *const SymbolEntry as *const u8;
         let data_start = symbol_table.data.as_ptr();
         let entry_offset = unsafe { entry_ptr.offset_from(data_start) as usize };
         let name_start = entry_offset + size_of::<SymbolEntry>();
 
-        unsafe {
-            let name_ptr = symbol_table.data.as_ptr().add(name_start) as *const c_char;
-            CStr::from_ptr(name_ptr).to_str().unwrap()
-        }
+        unsafe { symbol_table.data.as_ptr().add(name_start) as *const c_char }
     }
 }
