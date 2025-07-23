@@ -1471,16 +1471,6 @@ namespace Frida {
 
 				var sig = (LLDB.Signal) e.signum;
 				var medata = e.medata;
-				if (sig == SIGSTOP && e.metype == EXC_SOFTWARE && medata.size == 2) {
-					var swex = (LLDB.MachSoftwareExceptionType) medata[0];
-					if (swex == SIGNAL) {
-						var sub_sig = (LLDB.Signal) medata[1];
-						if (sub_sig == SIGSTOP) {
-							printerr ("Just letting it go\n");
-							return;
-						}
-					}
-				}
 				if (sig == SIGTRAP && e.metype == EXC_BREAKPOINT && medata.size == 2) {
 					uint64 x1 = e.context["x1"];
 					uint64 x2 = e.context["x2"];
@@ -1490,16 +1480,19 @@ namespace Frida {
 						var thread = e.thread;
 						yield thread.write_register ("pc", pc + 4, io_cancellable);
 						switch (action) {
-							case RESUME:
+							case RESUME: {
 								resumed = true;
 								yield lldb.continue (io_cancellable);
+
 								return;
-							case DETACH:
+							}
+							case DETACH: {
 								yield lldb.detach (io_cancellable);
 								detached ();
+
 								break;
+							}
 							case PAGE_PLAN: {
-								print ("PAGE PLAN BREAKPOINT:\n%s\n", exception.to_string ());
 								var plan_size = (size_t) e.context["x4"];
 								var plan_address = e.context["x5"];
 								yield lldb.handle_page_plan (plan_address, plan_size, 0x4000, io_cancellable);
@@ -1508,11 +1501,14 @@ namespace Frida {
 									yield lldb.continue (io_cancellable);
 								else
 									yield continue_gadget_threads (io_cancellable);
+
 								return;
 							}
-							default:
+							default: {
 								printerr ("Unsupported breakpoint action: %d", action);
+
 								break;
+							}
 						}
 					}
 				}

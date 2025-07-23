@@ -448,24 +448,18 @@ namespace Frida.LLDB {
 			var builder = make_packet_builder_sized (64);
 			Future<bool>? last_write = null;
 
-			print ("PLAN WRITING %u PAGES\n", n_blocks);
 			size_t cursor = 4;
 			for (uint32 i = 0; i < n_blocks; i++) {
 				uint64 start = plan.read_pointer (cursor);
 				cursor += 8;
 				uint32 count = plan.read_uint32 (cursor);
 				cursor += 4;
-				print ("PLAN WRITING %u BYTES AT 0x%llx\n", count, start);
 				cursor += count - 1;
 				for (uint j = 0; j < count; j += 2) {
 					bool is_last = (j + 2 >= count);
 
 					uint64 last_byte_addr = start + ((uint64) j * page_size) + page_size - 1;
 					size_t write_count = is_last ? 1 : 2;
-
-					print ("PLAN WRITE 0x%llx - 0x%x\n", last_byte_addr, plan.read_uint8 (cursor));
-					if (write_count == 2)
-						print ("PLAN WRITE 0x%llx - 0x%x\n", last_byte_addr + 1, plan.read_uint8 (cursor - 1));
 
 					builder
 						.append_c ('M')
