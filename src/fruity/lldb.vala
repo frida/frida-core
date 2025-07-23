@@ -454,6 +454,8 @@ namespace Frida.LLDB {
 				cursor += 8;
 				uint32 count = plan.read_uint32 (cursor);
 				cursor += 4;
+
+				size_t end_of_bytes = cursor + count;
 				cursor += count - 1;
 				for (uint j = 0; j < count; j += 2) {
 					bool is_last = (j + 2 >= count);
@@ -480,7 +482,7 @@ namespace Frida.LLDB {
 					if (is_last)
 						last_write = request.future;
 				}
-				cursor += count + 1;
+				cursor = end_of_bytes;
 			}
 
 			yield last_write.wait_async (cancellable);
