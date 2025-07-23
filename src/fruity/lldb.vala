@@ -454,14 +454,13 @@ namespace Frida.LLDB {
 				cursor += 8;
 				uint32 count = plan.read_uint32 (cursor);
 				cursor += 4;
-
 				size_t end_of_bytes = cursor + count;
 				cursor += count - 1;
-				for (uint j = 0; j < count; j += 2) {
+				for (size_t j = 0; j < count; j += 2) {
 					bool is_last = (j + 2 >= count);
 
 					uint64 last_byte_addr = start + ((uint64) j * page_size) + page_size - 1;
-					size_t write_count = is_last ? 1 : 2;
+					size_t write_count = size_t.min (2, count - j);
 
 					builder
 						.append_c ('M')
