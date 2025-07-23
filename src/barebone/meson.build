@@ -11,6 +11,7 @@ backend_sources += files(
   'c-module.vala',
   'rust-module.vala',
   'console.vala',
+  'layout.vala',
   'elf.vala',
   'img4.vala',
   'lzfse.vala',
