@@ -6,15 +6,20 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
-use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use core::ptr;
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
-use crate::bindings::g_variant_get_uint64;
+use crate::bindings::gsize;
 use crate::bindings::{
-    GBytes, GCancellable, g_main_loop_run, g_object_unref, gboolean, gchar, gpointer,
-    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+    GBytes, GCancellable, GVariantIter, g_free, g_main_loop_run, g_object_unref,
+    g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_uint64,
+    g_variant_iter_init, g_variant_iter_next, g_variant_new_from_data, g_variant_type_new,
+    g_variant_unref, gboolean, gchar, gpointer, gum_script_load_sync, gum_script_post,
+    gum_script_set_message_handler, gum_script_unload_sync,
 };
 use crate::symbols::SymbolTable;
 
@@ -39,6 +44,7 @@ mod bindings {
 }
 
 static mut CONFIG_DATA: &'static [u8] = &[];
+pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
 pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
 #[repr(C)]
@@ -99,6 +105,16 @@ pub enum FridaStatus {
     Error = 3,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModuleInfo {
+    pub name: String,
+    pub version: String,
+    pub offset: u32,
+    pub size: u32,
+    pub start_func_offset: u32,
+    pub stop_func_offset: u32,
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> usize {
     unsafe {
@@ -124,25 +140,11 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
 
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
     unsafe {
-        kprintln!("Frida agent worker initializing");
-
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        kprintln!("Frida agent worker parsing config");
-
-        let config_data_ref = core::ptr::addr_of!(CONFIG_DATA).read();
-
-        if !config_data_ref.is_empty() {
-            parse_symbol_config(config_data_ref.as_ptr(), config_data_ref.len());
-        }
-
-        let symbol_count = {
-            let table = core::ptr::addr_of!(SYMBOL_TABLE).read();
-            table.symbol_count()
-        };
-        kprintln!("Frida agent starting with symbols count: {}", symbol_count);
+        parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
 
         bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
 
@@ -151,46 +153,72 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
     }
 }
 
-unsafe fn parse_symbol_config(config_data: *const u8, config_size: usize) {
-    use crate::bindings::{
-        g_variant_new_from_data, g_variant_get_child_value, g_variant_unref,
-        g_variant_get_data, g_variant_get_size, gsize, g_variant_type_new,
-    };
-
+unsafe fn parse_config(config: &[u8]) {
     unsafe {
-        let type_string = b"(tay)\0".as_ptr() as *const gchar;
+        let type_string = c"(ta(ssuuuu)ay)".as_ptr() as *const gchar;
         let variant_type = g_variant_type_new(type_string);
 
         let root_variant = g_variant_new_from_data(
             variant_type,
-            config_data as *const core::ffi::c_void,
-            config_size as gsize,
+            config.as_ptr() as *const core::ffi::c_void,
+            config.len() as gsize,
             1,
             None,
             ptr::null_mut(),
         );
 
         let kernel_base_variant = g_variant_get_child_value(root_variant, 0);
-
         let kernel_base = g_variant_get_uint64(kernel_base_variant);
         xnu::set_kernel_base(kernel_base);
-        kprintln!("Set kernel base to 0x{:x}", kernel_base);
 
-        let symbol_array_variant = g_variant_get_child_value(root_variant, 1);        let symbol_data_ptr = g_variant_get_data(symbol_array_variant) as *const u8;
+        let module_info_variant = g_variant_get_child_value(root_variant, 1);
+        let mut iter: GVariantIter = core::mem::zeroed();
+        g_variant_iter_init(&mut iter as *mut GVariantIter, module_info_variant);
+
+        let module_infos = core::ptr::addr_of_mut!(MODULE_INFOS);
+        let raw_name: *mut gchar = null_mut();
+        let raw_version: *mut gchar = null_mut();
+        let offset: u32 = 0;
+        let size: u32 = 0;
+        let start_func_offset: u32 = 0;
+        let stop_func_offset: u32 = 0;
+        while g_variant_iter_next(
+            &mut iter as *mut GVariantIter,
+            c"(ssuuuu)".as_ptr(),
+            &raw_name,
+            &raw_version,
+            &offset,
+            &size,
+            &start_func_offset,
+            &stop_func_offset,
+        ) != 0
+        {
+            let name = CStr::from_ptr(raw_name).to_str().unwrap();
+            let version = CStr::from_ptr(raw_version).to_str().unwrap();
+
+            (*module_infos).push(ModuleInfo {
+                name: String::from(name),
+                version: String::from(version),
+                offset,
+                size,
+                start_func_offset,
+                stop_func_offset,
+            });
+
+            g_free(raw_name as *mut c_void);
+            g_free(raw_version as *mut c_void);
+        }
+
+        let symbol_array_variant = g_variant_get_child_value(root_variant, 2);
+        let symbol_data_ptr = g_variant_get_data(symbol_array_variant) as *const u8;
         let symbol_data_size = g_variant_get_size(symbol_array_variant) as usize;
-
-        let symbol_data_slice = core::slice::from_raw_parts(symbol_data_ptr, symbol_data_size);
-        SYMBOL_TABLE = SymbolTable::new(symbol_data_slice);
-
-        kprintln!("Loaded symbol data with {} bytes", symbol_data_size);
-
-        let symbol_count = {
-            let table = core::ptr::addr_of!(SYMBOL_TABLE).read();
-            table.symbol_count()
-        };
-        kprintln!("Loaded {} symbols in raw format", symbol_count);
+        SYMBOL_TABLE = SymbolTable::new(core::slice::from_raw_parts(
+            symbol_data_ptr,
+            symbol_data_size,
+        ));
 
         g_variant_unref(symbol_array_variant);
+        g_variant_unref(module_info_variant);
         g_variant_unref(kernel_base_variant);
         g_variant_unref(root_variant);
     }
@@ -255,15 +283,13 @@ unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
         let cancellable: *mut GCancellable = ptr::null_mut();
         let mut error: *mut bindings::GError = ptr::null_mut();
 
-        let c_name = core::ffi::CStr::from_bytes_with_nul_unchecked("agent.js\0".as_bytes());
-
         let data_ptr = (*buffer).data.as_ptr();
         let data_slice = core::slice::from_raw_parts(data_ptr, data_size);
         let source = CStr::from_bytes_with_nul(data_slice).unwrap();
 
         let script = bindings::gum_script_backend_create_sync(
             backend,
-            c_name.as_ptr(),
+            c"agent.js".as_ptr(),
             source.as_ptr(),
             ptr::null_mut(),
             cancellable,

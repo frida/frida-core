@@ -1,22 +1,21 @@
-use alloc::boxed::Box;
-use alloc::ffi::CString;
-use alloc::string::String;
-use core::ffi::CStr;
-use core::ptr;
 use crate::{
     bindings::{
-        gboolean, gpointer, gsize, guint, GPrivate, GumPageProtection, GumThreadId, GumTlsKey,
-        GumDebugSymbolDetails, GArray, g_array_new, g_array_append_vals, gchar, gconstpointer,
-        g_strdup, GObject, GObjectClass, GType, GumModule,
-        GumModuleInterface, GumMemoryRange, GumModuleRegistry, gum_barebone_register_module,
-        g_object_new, g_free, _GTypeInfo, _GInterfaceInfo,
-        g_once_init_enter, g_once_init_leave,
-        g_type_register_static, g_object_get_type, g_type_add_interface_static,
-        gum_module_get_type, g_type_class_peek_parent
+        _GInterfaceInfo, _GTypeInfo, GArray, GObject, GObjectClass, GPrivate, GType,
+        GumDebugSymbolDetails, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
+        GumPageProtection, GumThreadId, GumTlsKey, g_array_append_vals, g_array_new, g_free,
+        g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave,
+        g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static,
+        gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module,
+        gum_module_get_type,
     },
-    gthread, libc
+    gthread, libc,
 };
+use alloc::boxed::Box;
+use alloc::ffi::CString;
+use alloc::format;
 use core::arch::asm;
+use core::ffi::CStr;
+use core::ptr;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
@@ -130,86 +129,43 @@ pub extern "C" fn gum_tls_key_set_value(key: GumTlsKey, value: gpointer) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
-    register_kernel_extensions(registry);
-}
-
-fn register_kernel_extensions(registry: *mut GumModuleRegistry) {
-    let table = unsafe { core::ptr::addr_of!(crate::SYMBOL_TABLE).read() };
-
-    if table.is_empty() {
-        return;
-    }
-
     let kernel_base = crate::xnu::get_kernel_base();
-    let kernel_range = GumMemoryRange {
-        base_address: kernel_base,
-        size: 0x1000000,
-    };
-    let kernel_module = gum_native_module_new(
-        "/System/Library/Kernels/kernel",
-        &kernel_range,
-    );
 
     unsafe {
-        gum_barebone_register_module(registry, kernel_module);
-    }
+        let module_infos = core::ptr::addr_of!(crate::MODULE_INFOS);
+        let module_infos = &*module_infos;
 
-    register_modules_from_symbols(registry, &table);
-}
+        let mut i = 0;
+        for module_info in module_infos.iter() {
+            let module_base = kernel_base + module_info.offset as u64;
 
-fn register_modules_from_symbols(registry: *mut GumModuleRegistry, table: &crate::symbols::SymbolTable) {
-    let mut seen_kexts = alloc::collections::BTreeSet::new();
+            let module_path = if i == 0 {
+                "/System/Library/Kernels/kernel"
+            } else {
+                &format!(
+                    "/System/Library/Extensions/{}.kext/{}",
+                    module_info.name, module_info.name
+                )
+            };
+            let module_range = GumMemoryRange {
+                base_address: module_base,
+                size: module_info.size as u64,
+            };
 
-    let kext_patterns = [
-        "_com_apple_*",
-        "*IOKit*",
-    ];
+            let module = gum_native_module_new(&module_path, &module_info.version, &module_range);
+            gum_barebone_register_module(registry, module);
+            g_object_unref(module as gpointer);
 
-    for pattern in &kext_patterns {
-        let symbols = table.find_symbols_matching_glob(pattern);
-        for symbol in symbols {
-            if let Some(kext_name) = extract_kext_name(&symbol.name) {
-                if !seen_kexts.contains(kext_name) {
-                    seen_kexts.insert(String::from(kext_name));
-
-                    let module_path = alloc::format!("/System/Library/Extensions/{}.kext", kext_name);
-                    let kext_range = GumMemoryRange {
-                        base_address: symbol.address,
-                        size: 0x100000,
-                    };
-
-                    let kext_module = gum_native_module_new(
-                        &module_path,
-                        &kext_range,
-                    );
-
-                    unsafe {
-                        gum_barebone_register_module(registry, kext_module);
-                    }
-                }
-            }
+            i += 1;
         }
     }
-}
-
-fn extract_kext_name(symbol_name: &str) -> Option<&str> {
-    if symbol_name.starts_with("_com_apple_") {
-        if let Some(end) = symbol_name[11..].find('_') {
-            return Some(&symbol_name[1..11 + end]);
-        }
-    }
-
-    if symbol_name.contains("IOKit") || symbol_name.contains("Driver") {
-        return Some("IOKit");
-    }
-
-    None
 }
 
 #[repr(C)]
 pub struct GumNativeModule {
     parent: GObject,
     name: *mut gchar,
+    version: *mut gchar,
     path: *mut gchar,
     range: GumMemoryRange,
 }
@@ -225,8 +181,11 @@ static mut GUM_NATIVE_MODULE_PARENT_CLASS: *mut GObjectClass = core::ptr::null_m
 
 fn gum_native_module_get_type() -> GType {
     unsafe {
-        if g_once_init_enter(core::ptr::addr_of_mut!(GUM_NATIVE_MODULE_TYPE) as *mut ::core::ffi::c_void) != 0 {
-            let type_name = b"GumNativeModule\0".as_ptr() as *const gchar;
+        if g_once_init_enter(
+            core::ptr::addr_of_mut!(GUM_NATIVE_MODULE_TYPE) as *mut ::core::ffi::c_void
+        ) != 0
+        {
+            let type_name = c"GumNativeModule".as_ptr() as *const gchar;
 
             let type_info = _GTypeInfo {
                 class_size: core::mem::size_of::<GObjectClass>() as u16,
@@ -241,12 +200,7 @@ fn gum_native_module_get_type() -> GType {
                 value_table: core::ptr::null(),
             };
 
-            let new_type = g_type_register_static(
-                g_object_get_type(),
-                type_name,
-                &type_info,
-                0,
-            );
+            let new_type = g_type_register_static(g_object_get_type(), type_name, &type_info, 0);
 
             let interface_info = _GInterfaceInfo {
                 interface_init: Some(gum_native_module_iface_init),
@@ -254,11 +208,7 @@ fn gum_native_module_get_type() -> GType {
                 interface_data: core::ptr::null_mut(),
             };
 
-            g_type_add_interface_static(
-                new_type,
-                gum_module_get_type(),
-                &interface_info,
-            );
+            g_type_add_interface_static(new_type, gum_module_get_type(), &interface_info);
 
             g_once_init_leave(
                 core::ptr::addr_of_mut!(GUM_NATIVE_MODULE_TYPE) as *mut ::core::ffi::c_void,
@@ -284,6 +234,7 @@ extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpoin
     unsafe {
         let iface = g_iface as *mut GumModuleInterface;
         (*iface).get_name = Some(gum_native_module_get_name);
+        (*iface).get_version = Some(gum_native_module_get_version);
         (*iface).get_path = Some(gum_native_module_get_path);
         (*iface).get_range = Some(gum_native_module_get_range);
     }
@@ -299,21 +250,16 @@ unsafe extern "C" fn gum_native_module_finalize(object: *mut GObject) {
     }
 }
 
-fn gum_native_module_new(path: &str, range: &GumMemoryRange) -> *mut GumModule {
+fn gum_native_module_new(path: &str, version: &str, range: &GumMemoryRange) -> *mut GumModule {
     unsafe {
         let path_cstr = CString::new(path).unwrap();
+        let version_cstr = CString::new(version).unwrap();
 
-        let module = g_object_new(gum_native_module_get_type(), ptr::null()) as *mut GumNativeModule;
-
+        let module =
+            g_object_new(gum_native_module_get_type(), ptr::null()) as *mut GumNativeModule;
         (*module).path = g_strdup(path_cstr.as_ptr());
-
-        let path_str = (*module).path;
-        if let Some(sep_pos) = path.rfind('/').or_else(|| path.rfind('\\')) {
-            (*module).name = path_str.add(sep_pos + 1);
-        } else {
-            (*module).name = path_str;
-        }
-
+        (*module).name = (*module).path.add(path.rfind('/').unwrap() + 1);
+        (*module).version = g_strdup(version_cstr.as_ptr());
         (*module).range = *range;
 
         module as *mut GumModule
@@ -324,6 +270,13 @@ extern "C" fn gum_native_module_get_name(module: *mut GumModule) -> *const gchar
     unsafe {
         let native_module = module as *mut GumNativeModule;
         (*native_module).name as *const gchar
+    }
+}
+
+extern "C" fn gum_native_module_get_version(module: *mut GumModule) -> *const gchar {
+    unsafe {
+        let native_module = module as *mut GumNativeModule;
+        (*native_module).version as *const gchar
     }
 }
 

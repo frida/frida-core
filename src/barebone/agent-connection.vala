@@ -38,22 +38,37 @@ namespace Frida.Barebone {
 			ByteOrder byte_order = gdb.byte_order;
 			uint pointer_size = gdb.pointer_size;
 
-			var config_builder = new VariantBuilder (new VariantType ("(tay)"));
+			var config_builder = new VariantBuilder (new VariantType ("(ta(ssuuuu)ay)"));
 
 			uint64 kernel_base = 0xfffffff007004000ULL; // TODO: Read from config.
 			config_builder.add ("t", kernel_base);
 
-			var timer = new Timer ();
-			var hash_builder = new SymbolHashBuilder ();
+			Layout layout;
 			string? symbol_source = config.symbol_source;
 			if (symbol_source != null) {
-				var layout = yield Layout.load_from_symbol_source (File.new_for_path (symbol_source), kernel_base,
-					byte_order, pointer_size, cancellable);
-				foreach (var s in layout.symbols)
-					hash_builder.add_symbol (s);
+				layout = yield Layout.load_from_symbol_source (File.new_for_path (symbol_source), kernel_base, byte_order,
+					pointer_size, cancellable);
+			} else {
+				layout = new Layout.empty ();
 			}
+
+			config_builder.open (new VariantType ("a(ssuuuu)"));
+			foreach (var m in layout.modules) {
+				config_builder.add ("(ssuuuu)",
+					m.name,
+					m.version,
+					m.offset,
+					m.size,
+					m.start_func_offset,
+					m.stop_func_offset
+				);
+			}
+			config_builder.close ();
+
+			var hash_builder = new SymbolHashBuilder ();
+			foreach (var s in layout.symbols)
+				hash_builder.add_symbol (s);
 			Bytes symbol_data = hash_builder.build (byte_order);
-			printerr ("Built symbol hash table (%zu bytes) in %u ms\n\n", symbol_data.get_size (), (uint) (timer.elapsed () * 1000.0));
 			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true, symbol_data));
 
 			Gum.ElfModule elf;
@@ -138,11 +153,7 @@ namespace Frida.Barebone {
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
 
-			timer.reset ();
 			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
-			printerr ("Uploaded %zu bytes of config in %u ms\n\n",
-				config_blob.get_size (),
-				(uint) (timer.elapsed () * 1000.0));
 
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {
 					config_allocation.virtual_address,

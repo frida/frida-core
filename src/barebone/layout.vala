@@ -17,6 +17,10 @@ namespace Frida.Barebone {
 			Object (modules: modules, symbols: symbols);
 		}
 
+		public Layout.empty () {
+			Object (modules: new Gee.ArrayList<ModuleInfo> (), symbols: new Gee.ArrayList<SymbolInfo> ());
+		}
+
 		public static async Layout load_from_symbol_source (File symbol_source, uint64 kernel_base, ByteOrder byte_order,
 				uint pointer_size, Cancellable? cancellable) throws Error, IOError {
 			var payload = yield Img4.parse_file (symbol_source, cancellable);
@@ -39,13 +43,10 @@ namespace Frida.Barebone {
 		}
 
 		private static Gee.List<ModuleInfo> compute_module_list (Gum.DarwinModule mod, Blob blob, uint64 kernel_base) throws Error {
-			printerr ("Kernel source version: %s\n\n", mod.source_version);
 			Buffer? kmod_info = null;
 			Buffer? kmod_start = null;
 			Error? pending_error = null;
 			mod.enumerate_sections (s => {
-				printerr ("> Found %s %s\n", s.segment_name, s.section_name);
-
 				if (s.segment_name == "__PRELINK_INFO") {
 					try {
 						if (s.section_name == "__kmod_info")
@@ -57,12 +58,6 @@ namespace Frida.Barebone {
 						return false;
 					}
 				}
-
-				if (s.segment_name == "__PRELINK_DATA" && s.section_name == "__data")
-					printerr ("__PRELINK_DATA.__data vm_address=0x%lx file_offset=0x%x\n\n", (ulong) s.vm_address, s.file_offset);
-				else if (s.segment_name == "__PLK_LINKEDIT" && s.section_name == "__data")
-					printerr ("__PLK_LINKEDIT.__data vm_address=0x%lx file_offset=0x%x\n\n", (ulong) s.vm_address, s.file_offset);
-
 				return true;
 			});
 			if (pending_error != null)
@@ -75,7 +70,7 @@ namespace Frida.Barebone {
 			var kexts = new Gee.ArrayList<ModuleInfo> ();
 			var info_pointers = new BufferReader (kmod_info);
 			while (info_pointers.available != 0) {
-				var kmodinfo_start = chained_pointer_to_file_offset (info_pointers.read_pointer (), kernel_base);
+				var kmodinfo_start = chained_pointer_to_vm_offset (info_pointers.read_pointer (), kernel_base);
 				var kmodinfo = new BufferReader (blob.slice (kmodinfo_start, 196, "__kmod_info entry"));
 
 				kmodinfo.skip (blob.pointer_size + 4 + 4);
@@ -85,8 +80,8 @@ namespace Frida.Barebone {
 
 				kmodinfo.skip (4 + (2 * blob.pointer_size) + 8 + 8);
 
-				size_t start = chained_pointer_to_file_offset (kmodinfo.read_pointer (), kernel_base);
-				size_t stop = chained_pointer_to_file_offset (kmodinfo.read_pointer (), kernel_base);
+				size_t start = chained_pointer_to_vm_offset (kmodinfo.read_pointer (), kernel_base);
+				size_t stop = chained_pointer_to_vm_offset (kmodinfo.read_pointer (), kernel_base);
 
 				kexts.add (new ModuleInfo () {
 					name = name,
@@ -99,7 +94,7 @@ namespace Frida.Barebone {
 			var start_offsets = new Gee.ArrayList<uint> ();
 			var start_pointers = new BufferReader (kmod_start);
 			while (start_pointers.available != 0)
-				start_offsets.add ((uint) chained_pointer_to_file_offset (start_pointers.read_pointer (), kernel_base));
+				start_offsets.add ((uint) chained_pointer_to_vm_offset (start_pointers.read_pointer (), kernel_base));
 			if (start_offsets.size != kexts.size + 1)
 				throw new Error.PROTOCOL ("Unexpected __kmod_start length");
 
@@ -110,10 +105,20 @@ namespace Frida.Barebone {
 				kext.size = start_offsets[i + 1] - kext.offset;
 			}
 
-			return new Gee.ArrayList<ModuleInfo> ();
+			var result = new Gee.ArrayList<ModuleInfo> ();
+
+			result.add (new ModuleInfo () {
+				name = "mach_kernel",
+				version = mod.source_version,
+				offset = 0,
+				size = kexts[0].offset,
+			});
+			result.add_all (kexts);
+
+			return result;
 		}
 
-		private static size_t chained_pointer_to_file_offset (uint64 val, uint64 kernel_base) {
+		private static size_t chained_pointer_to_vm_offset (uint64 val, uint64 kernel_base) {
 			var target = (size_t) (val & CHAINED_PTR_TARGET_MASK);
 
 			bool is_auth = (val >> 63) != 0;

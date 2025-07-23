@@ -12,8 +12,8 @@ fn main() {
             .or_else(|_| env::var("CC"))
             .unwrap_or_else(|_| "cc".to_string());
     let cc = Path::new(&cc_str);
-    let cc_include_paths = detect_gcc_include_paths(&cc);
-    let cc_library_paths = detect_gcc_library_paths(&cc);
+    let cc_include_paths = detect_gcc_include_paths(cc);
+    let cc_library_paths = detect_gcc_library_paths(cc);
 
     let cc_clang_args: Vec<String> = cc_include_paths
         .iter()
