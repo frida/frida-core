@@ -1,7 +1,8 @@
 use crate::{
     bindings::{
         _GInterfaceInfo, _GTypeInfo, GArray, GObject, GObjectClass, GPrivate, GType,
-        GumDebugSymbolDetails, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
+        GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION,
+        GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
         GumPageProtection, GumThreadId, GumTlsKey, g_array_append_vals, g_array_new, g_free,
         g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave,
         g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static,
@@ -237,6 +238,7 @@ extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpoin
         (*iface).get_version = Some(gum_native_module_get_version);
         (*iface).get_path = Some(gum_native_module_get_path);
         (*iface).get_range = Some(gum_native_module_get_range);
+        (*iface).enumerate_exports = Some(gum_native_module_enumerate_exports);
     }
 }
 
@@ -291,6 +293,54 @@ extern "C" fn gum_native_module_get_range(module: *mut GumModule) -> *const GumM
     unsafe {
         let native_module = module as *mut GumNativeModule;
         &(*native_module).range as *const GumMemoryRange
+    }
+}
+
+unsafe extern "C" fn gum_native_module_enumerate_exports(
+    self_: *mut GumModule,
+    func: GumFoundExportFunc,
+    user_data: gpointer,
+) {
+    unsafe {
+        let module = self_ as *mut GumNativeModule;
+        let module_range = &(*module).range;
+
+        let symbol_table = core::ptr::addr_of!(crate::SYMBOL_TABLE);
+        let symbol_table = &*symbol_table;
+
+        const N_EXT: u8 = 0x01; // External symbol flag
+        const N_TYPE: u8 = 0x0e; // Type mask
+        const N_SECT: u8 = 0x0e; // Defined in section
+
+        for symbol_info in symbol_table.iter_symbols() {
+            if symbol_info.address < module_range.base_address
+                || symbol_info.address >= module_range.base_address + module_range.size
+            {
+                continue;
+            }
+
+            let is_external = (symbol_info.symbol_type & N_EXT) != 0;
+            let is_defined = (symbol_info.symbol_type & N_TYPE) == N_SECT;
+            if !is_external || !is_defined {
+                continue;
+            }
+
+            let export_type = GumExportType_GUM_EXPORT_FUNCTION;
+
+            let export_details = GumExportDetails {
+                type_: export_type,
+                name: symbol_info.name.as_ptr(),
+                address: symbol_info.address,
+            };
+
+            if let Some(callback) = func {
+                let should_continue =
+                    callback(&export_details as *const GumExportDetails, user_data);
+                if should_continue == 0 {
+                    break;
+                }
+            }
+        }
     }
 }
 

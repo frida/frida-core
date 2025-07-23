@@ -271,6 +271,13 @@ impl SymbolTable {
 
         best_match
     }
+
+    pub fn iter_symbols(&self) -> SymbolIterator {
+        SymbolIterator {
+            symbol_table: self,
+            index: 0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -297,5 +304,35 @@ impl SymbolEntry {
         let name_start = entry_offset + size_of::<SymbolEntry>();
 
         unsafe { symbol_table.data.as_ptr().add(name_start) as *const c_char }
+    }
+}
+
+pub struct SymbolIterator<'a> {
+    symbol_table: &'a SymbolTable,
+    index: usize,
+}
+
+impl<'a> Iterator for SymbolIterator<'a> {
+    type Item = DarwinSymbolDetails;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.symbol_table.symbol_count {
+            return None;
+        }
+
+        let entry = self.symbol_table.get_symbol_entry_by_name_index(self.index);
+        let symbol_name = entry.name(self.symbol_table);
+        let kernel_base = get_kernel_base();
+        let details = DarwinSymbolDetails {
+            name: symbol_name.to_owned(),
+            address: kernel_base + entry.address_offset as u64,
+            symbol_type: entry.symbol_type,
+            section: entry.section,
+            description: entry.description,
+        };
+
+        self.index += 1;
+
+        Some(details)
     }
 }
