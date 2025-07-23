@@ -47,91 +47,10 @@ namespace Frida.Barebone {
 			var hash_builder = new SymbolHashBuilder ();
 			string? symbol_source = config.symbol_source;
 			if (symbol_source != null) {
-				var payload = yield Img4.parse_file (File.new_for_path (symbol_source), cancellable);
-
-				Bytes kerncache = payload.data;
-				size_t kerncache_size = kerncache.get_size ();
-
-				Gum.DarwinModule mod;
-				try {
-					mod = new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
-				} catch (Gum.Error e) {
-					throw new Error.NOT_SUPPORTED ("%s", e.message);
-				}
-
-				bool info_found = false;
-				uint info_start = 0;
-				uint info_end = 0;
-				mod.enumerate_sections (s => {
-					printerr ("> Found %s %s\n", s.segment_name, s.section_name);
-
-					if (s.segment_name == "__PRELINK_DATA" && s.section_name == "__data") {
-						printerr ("__PRELINK_DATA.__data vm_address=0x%lx file_offset=0x%x\n\n", (ulong) s.vm_address, s.file_offset);
-					}
-
-					if (s.segment_name == "__PRELINK_INFO" && s.section_name == "__kmod_info") {
-						printerr ("TODO, parse: vm_address=0x%lx file_offset=0x%x\n\n", (ulong) s.vm_address, s.file_offset);
-						info_found = true;
-						info_start = s.file_offset;
-						info_end = (uint) (info_start + s.size);
-					}
-
-					if (s.segment_name == "__PLK_LINKEDIT" && s.section_name == "__data") {
-						printerr ("__PLK_LINKEDIT.__data vm_address=0x%lx file_offset=0x%x\n\n", (ulong) s.vm_address, s.file_offset);
-					}
-
-					return true;
-				});
-				if (!info_found)
-					throw new Error.NOT_SUPPORTED ("Unable to find prelink info");
-				if (info_start >= kerncache_size || info_end > kerncache_size)
-					throw new Error.PROTOCOL ("Kernel cache __kmod_info section out of bounds");
-
-				var info_pointers = new BufferReader (new Buffer (kerncache[info_start:info_end], byte_order, pointer_size));
-				uint i = 0;
-				uint64 chained_ptr_target_mask = (1 << 30) - 1;
-				uint64 naked_kernel_base = kernel_base & chained_ptr_target_mask;
-				while (info_pointers.available != 0) {
-					uint64 chained_info_ptr = info_pointers.read_pointer ();
-					// dyld_chained_ptr_64_kernel_cache_rebase, assuming isAuth == 0 and cacheLevel == 0
-					uint kmodinfo_start = (uint) ((chained_info_ptr & chained_ptr_target_mask) - naked_kernel_base);
-					uint kmodinfo_end = kmodinfo_start + 196;
-					if (kmodinfo_start >= kerncache_size || kmodinfo_end > kerncache_size)
-						throw new Error.PROTOCOL ("Kernel cache __kmod_info entry out of bounds");
-
-					var kmodinfo = new BufferReader (new Buffer (kerncache[kmodinfo_start:kmodinfo_end], byte_order, pointer_size));
-
-					kmodinfo.skip (pointer_size + 4 + 4);
-
-					string name = kmodinfo.read_fixed_string (64);
-					string version = kmodinfo.read_fixed_string (64);
-
-					kmodinfo.skip (4 + pointer_size);
-
-					uint64 address = kmodinfo.read_pointer ();
-					uint64 size = kmodinfo.read_uint64 ();
-					uint64 hdr_size = kmodinfo.read_uint64 ();
-
-					uint64 start = kernel_base + (kmodinfo.read_pointer () & chained_ptr_target_mask);
-					uint64 stop = kernel_base + (kmodinfo.read_pointer () & chained_ptr_target_mask);
-
-					printerr ("kmod_info[%u]: name=\"%s\" version=\"%s\" address=0x%lx size=0x%lx hdr_size=0x%lx start=0x%lx stop=0x%lx\n",
-						i, name, version, (ulong) address, (ulong) size, (ulong) hdr_size, (ulong) start, (ulong) stop);
-
-					i++;
-				}
-				printerr ("\n");
-
-				mod.enumerate_symbols (s => {
-					hash_builder.add_symbol (new SymbolInfo () {
-						name = (s.name[0] == '_') ? s.name[1:] : s.name,
-						offset = (uint32) s.address,
-						symbol_type = s.type,
-						section = s.section,
-						description = s.description
-					});
-					return true;
-				});
+				var layout = yield Layout.load_from_symbol_source (File.new_for_path (symbol_source), kernel_base,
+					byte_order, pointer_size, cancellable);
+				foreach (var s in layout.symbols)
+					hash_builder.add_symbol (s);
 			}
 			Bytes symbol_data = hash_builder.build (byte_order);
 			printerr ("Built symbol hash table (%zu bytes) in %u ms\n\n", symbol_data.get_size (), (uint) (timer.elapsed () * 1000.0));
@@ -658,11 +577,4 @@ namespace Frida.Barebone {
 		}
 	}
 
-	private class SymbolInfo {
-		public string name;
-		public uint32 offset;
-		public uint8 symbol_type;
-		public uint8 section;
-		public uint16 description;
-	}
 }
