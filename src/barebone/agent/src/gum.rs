@@ -312,15 +312,12 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
         const N_TYPE: u8 = 0x0e; // Type mask
         const N_SECT: u8 = 0x0e; // Defined in section
 
-        for symbol_info in symbol_table.iter_symbols() {
-            if symbol_info.address < module_range.base_address
-                || symbol_info.address >= module_range.base_address + module_range.size
-            {
-                continue;
-            }
+        let start_address = module_range.base_address;
+        let end_address = module_range.base_address + module_range.size;
 
-            let is_external = (symbol_info.symbol_type & N_EXT) != 0;
-            let is_defined = (symbol_info.symbol_type & N_TYPE) == N_SECT;
+        for symbol_ref in symbol_table.iter_symbols_in_range(start_address, end_address) {
+            let is_external = (symbol_ref.symbol_type() & N_EXT) != 0;
+            let is_defined = (symbol_ref.symbol_type() & N_TYPE) == N_SECT;
             if !is_external || !is_defined {
                 continue;
             }
@@ -329,16 +326,14 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
 
             let export_details = GumExportDetails {
                 type_: export_type,
-                name: symbol_info.name.as_ptr(),
-                address: symbol_info.address,
+                name: g_strdup(symbol_ref.name_ptr()),
+                address: symbol_ref.address(),
             };
 
-            if let Some(callback) = func {
-                let should_continue =
-                    callback(&export_details as *const GumExportDetails, user_data);
-                if should_continue == 0 {
-                    break;
-                }
+            let should_continue =
+                func.unwrap()(&export_details as *const GumExportDetails, user_data);
+            if should_continue == 0 {
+                break;
             }
         }
     }
@@ -352,7 +347,7 @@ pub extern "C" fn gum_symbol_details_from_address(
     unsafe {
         let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
         if let Some(symbol) = table.find_symbol_by_address(address as u64) {
-            let name_bytes = symbol.name.as_bytes();
+            let name_bytes = symbol.name().as_bytes();
             let copy_len = core::cmp::min(name_bytes.len(), 2048);
             core::ptr::copy_nonoverlapping(
                 name_bytes.as_ptr(),
@@ -361,7 +356,7 @@ pub extern "C" fn gum_symbol_details_from_address(
             );
             (*details).symbol_name[copy_len] = 0;
 
-            (*details).address = symbol.address;
+            (*details).address = symbol.address();
 
             (*details).module_name[0] = 0;
             (*details).file_name[0] = 0;
@@ -391,7 +386,7 @@ pub extern "C" fn gum_find_function(name: *const gchar) -> gpointer {
         let table = core::ptr::addr_of!(crate::SYMBOL_TABLE).read();
 
         if let Some(symbol) = table.find_symbol_by_name(&target_name) {
-            return symbol.address as gpointer;
+            return symbol.address() as gpointer;
         }
 
         core::ptr::null_mut()
@@ -408,7 +403,7 @@ pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
 
         let symbols = table.find_symbols_by_name(&target_name);
         for symbol in symbols {
-            let addr = symbol.address as gpointer;
+            let addr = symbol.address() as gpointer;
             g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
         }
 
@@ -426,7 +421,7 @@ pub extern "C" fn gum_find_functions_matching(pattern: *const gchar) -> *mut GAr
 
         let symbols = table.find_symbols_matching_glob(&glob_pattern);
         for symbol in symbols {
-            let addr = symbol.address as gpointer;
+            let addr = symbol.address() as gpointer;
             g_array_append_vals(array, &addr as *const gpointer as gconstpointer, 1);
         }
 
