@@ -2,23 +2,11 @@ use crate::bindings::{
     GPatternSpec, g_pattern_spec_free, g_pattern_spec_match_string, g_pattern_spec_new,
 };
 use crate::xnu::get_kernel_base;
-use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use alloc::string::String;
-use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::ffi::{CStr, c_char};
 use core::mem::size_of;
 use core::ptr;
-
-#[derive(Debug, Clone)]
-pub struct DarwinSymbolDetails {
-    pub name: String,
-    pub address: u64,
-    pub symbol_type: u8,
-    pub section: u8,
-    pub description: u16,
-}
 
 pub struct SymbolTable {
     data: &'static [u8],
@@ -49,25 +37,19 @@ impl SymbolTable {
         self.symbol_count
     }
 
-    pub fn find_symbol_by_name(&self, name: &str) -> Option<DarwinSymbolDetails> {
+    pub fn find_symbol_by_name(&self, name: &str) -> Option<SymbolRef> {
         let (_, entry) = self.binary_search_by_name(name)?;
-        let symbol_name = entry.name(self);
-
-        Some(DarwinSymbolDetails {
-            name: symbol_name.to_owned(),
-            address: get_kernel_base() + entry.address_offset as u64,
-            symbol_type: entry.symbol_type,
-            section: entry.section,
-            description: entry.description,
+        Some(SymbolRef {
+            symbol_table: self,
+            entry,
+            kernel_base: get_kernel_base(),
         })
     }
 
-    pub fn find_symbols_by_name(&self, name: &str) -> Vec<DarwinSymbolDetails> {
-        let mut results = Vec::new();
-
+    pub fn find_symbols_by_name(&self, name: &str) -> SymbolsByNameIterator {
         let (found_index, _) = match self.binary_search_by_name(name) {
             Some(result) => result,
-            None => return results,
+            None => return SymbolsByNameIterator::empty(self),
         };
 
         let mut start = found_index;
@@ -93,34 +75,38 @@ impl SymbolTable {
             }
         }
 
-        let kernel_base = get_kernel_base();
-
-        for i in start..=end {
-            let entry = self.get_symbol_entry_by_name_index(i);
-            let symbol_name = entry.name(self);
-            results.push(DarwinSymbolDetails {
-                name: symbol_name.to_owned(),
-                address: kernel_base + entry.address_offset as u64,
-                symbol_type: entry.symbol_type,
-                section: entry.section,
-                description: entry.description,
-            });
+        SymbolsByNameIterator {
+            symbol_table: self,
+            current_index: start,
+            end_index: end + 1,
+            kernel_base: get_kernel_base(),
         }
-
-        results
     }
 
-    pub fn find_symbol_by_address(&self, address: u64) -> Option<DarwinSymbolDetails> {
+    pub fn find_symbols_matching_glob(&self, pattern: &str) -> SymbolsMatchingIterator {
+        if self.is_empty() {
+            return SymbolsMatchingIterator::empty(self);
+        }
+
+        let pattern_cstr = CString::new(pattern).unwrap();
+        let pspec = unsafe { g_pattern_spec_new(pattern_cstr.as_ptr()) };
+
+        SymbolsMatchingIterator {
+            symbol_table: self,
+            current_index: 0,
+            end_index: self.symbol_count,
+            pspec,
+            kernel_base: get_kernel_base(),
+        }
+    }
+
+    pub fn find_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
         let target_offset = (address - get_kernel_base()) as u32;
         let (_, entry) = self.binary_search_by_address(target_offset)?;
-        let symbol_name = entry.name(self);
-
-        Some(DarwinSymbolDetails {
-            name: symbol_name.to_owned(),
-            address,
-            symbol_type: entry.symbol_type,
-            section: entry.section,
-            description: entry.description,
+        Some(SymbolRef {
+            symbol_table: self,
+            entry,
+            kernel_base: get_kernel_base(),
         })
     }
 
@@ -133,55 +119,62 @@ impl SymbolTable {
         }
     }
 
-    pub fn find_closest_symbol_by_address(&self, address: u64) -> Option<DarwinSymbolDetails> {
+    pub fn find_closest_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
         let kernel_base = get_kernel_base();
         let target_offset = (address - kernel_base) as u32;
         let (_, entry) = self.binary_search_closest_by_address(target_offset)?;
-        let symbol_name = entry.name(self);
-
-        Some(DarwinSymbolDetails {
-            name: symbol_name.to_owned(),
-            address: kernel_base + entry.address_offset as u64,
-            symbol_type: entry.symbol_type,
-            section: entry.section,
-            description: entry.description,
+        Some(SymbolRef {
+            symbol_table: self,
+            entry,
+            kernel_base,
         })
     }
 
-    pub fn find_symbols_matching_glob(&self, pattern: &str) -> Vec<DarwinSymbolDetails> {
-        let mut results = Vec::new();
-
+    pub fn iter_symbols_in_range(&self, start_address: u64, end_address: u64) -> SymbolsInRangeIterator {
         if self.is_empty() {
-            return results;
+            return SymbolsInRangeIterator {
+                symbol_table: self,
+                current_index: 0,
+                end_index: 0,
+                end_offset: 0,
+                kernel_base: get_kernel_base(),
+            };
         }
 
-        let pattern_cstr = CString::new(pattern).unwrap();
-        let pspec = unsafe { g_pattern_spec_new(pattern_cstr.as_ptr()) };
-
         let kernel_base = get_kernel_base();
+        let start_offset = (start_address - kernel_base) as u32;
+        let end_offset = (end_address - kernel_base) as u32;
 
-        for i in 0..self.symbol_count {
-            let entry = self.get_symbol_entry_by_name_index(i);
+        let mut left = 0;
+        let mut right = self.symbol_count;
 
-            if self.symbol_matches_pattern(entry, pspec) {
-                let symbol_name = entry.name(self);
-                results.push(DarwinSymbolDetails {
-                    name: symbol_name.to_owned(),
-                    address: kernel_base + entry.address_offset as u64,
-                    symbol_type: entry.symbol_type,
-                    section: entry.section,
-                    description: entry.description,
-                });
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let entry = self.get_symbol_entry_by_address_index(mid);
+
+            if entry.address_offset < start_offset {
+                left = mid + 1;
+            } else {
+                right = mid;
             }
         }
 
-        unsafe { g_pattern_spec_free(pspec) };
+        while left > 0 {
+            let prev_entry = self.get_symbol_entry_by_address_index(left - 1);
+            if prev_entry.address_offset >= start_offset {
+                left -= 1;
+            } else {
+                break;
+            }
+        }
 
-        results
-    }
-
-    fn symbol_matches_pattern(&self, entry: &SymbolEntry, pspec: *mut GPatternSpec) -> bool {
-        unsafe { g_pattern_spec_match_string(pspec, entry.name_ptr(self)) != 0 }
+        SymbolsInRangeIterator {
+            symbol_table: self,
+            current_index: left,
+            end_index: self.symbol_count,
+            end_offset,
+            kernel_base,
+        }
     }
 
     fn get_symbol_entry_by_name_index(&self, index: usize) -> &SymbolEntry {
@@ -271,13 +264,6 @@ impl SymbolTable {
 
         best_match
     }
-
-    pub fn iter_symbols(&self) -> SymbolIterator {
-        SymbolIterator {
-            symbol_table: self,
-            index: 0,
-        }
-    }
 }
 
 #[repr(C)]
@@ -307,32 +293,151 @@ impl SymbolEntry {
     }
 }
 
-pub struct SymbolIterator<'a> {
+pub struct SymbolRef<'a> {
     symbol_table: &'a SymbolTable,
-    index: usize,
+    entry: &'a SymbolEntry,
+    kernel_base: u64,
 }
 
-impl<'a> Iterator for SymbolIterator<'a> {
-    type Item = DarwinSymbolDetails;
+impl<'a> SymbolRef<'a> {
+    pub fn name(&self) -> &'a str {
+        self.entry.name(self.symbol_table)
+    }
+
+    pub fn name_ptr(&self) -> *const c_char {
+        self.entry.name_ptr(self.symbol_table)
+    }
+
+    pub fn address(&self) -> u64 {
+        self.kernel_base + self.entry.address_offset as u64
+    }
+
+    pub fn symbol_type(&self) -> u8 {
+        self.entry.symbol_type
+    }
+
+    pub fn section(&self) -> u8 {
+        self.entry.section
+    }
+
+    pub fn description(&self) -> u16 {
+        self.entry.description
+    }
+}
+
+pub struct SymbolsByNameIterator<'a> {
+    symbol_table: &'a SymbolTable,
+    current_index: usize,
+    end_index: usize,
+    kernel_base: u64,
+}
+
+impl<'a> SymbolsByNameIterator<'a> {
+    fn empty(symbol_table: &'a SymbolTable) -> Self {
+        Self {
+            symbol_table,
+            current_index: 0,
+            end_index: 0,
+            kernel_base: get_kernel_base(),
+        }
+    }
+}
+
+impl<'a> Iterator for SymbolsByNameIterator<'a> {
+    type Item = SymbolRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.symbol_table.symbol_count {
+        if self.current_index == self.end_index {
             return None;
         }
 
-        let entry = self.symbol_table.get_symbol_entry_by_name_index(self.index);
-        let symbol_name = entry.name(self.symbol_table);
-        let kernel_base = get_kernel_base();
-        let details = DarwinSymbolDetails {
-            name: symbol_name.to_owned(),
-            address: kernel_base + entry.address_offset as u64,
-            symbol_type: entry.symbol_type,
-            section: entry.section,
-            description: entry.description,
-        };
+        let entry = self.symbol_table.get_symbol_entry_by_name_index(self.current_index);
+        self.current_index += 1;
 
-        self.index += 1;
+        Some(SymbolRef {
+            symbol_table: self.symbol_table,
+            entry,
+            kernel_base: self.kernel_base,
+        })
+    }
+}
 
-        Some(details)
+pub struct SymbolsMatchingIterator<'a> {
+    symbol_table: &'a SymbolTable,
+    current_index: usize,
+    end_index: usize,
+    pspec: *mut GPatternSpec,
+    kernel_base: u64,
+}
+
+impl<'a> SymbolsMatchingIterator<'a> {
+    fn empty(symbol_table: &'a SymbolTable) -> Self {
+        Self {
+            symbol_table,
+            current_index: 0,
+            end_index: 0,
+            pspec: ptr::null_mut(),
+            kernel_base: get_kernel_base(),
+        }
+    }
+}
+
+impl<'a> Iterator for SymbolsMatchingIterator<'a> {
+    type Item = SymbolRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_index != self.end_index {
+            let entry = self.symbol_table.get_symbol_entry_by_name_index(self.current_index);
+            self.current_index += 1;
+
+            if unsafe { g_pattern_spec_match_string(self.pspec, entry.name_ptr(self.symbol_table)) } != 0 {
+                return Some(SymbolRef {
+                    symbol_table: self.symbol_table,
+                    entry,
+                    kernel_base: self.kernel_base,
+                });
+            }
+        }
+
+        None
+    }
+}
+
+impl<'a> Drop for SymbolsMatchingIterator<'a> {
+    fn drop(&mut self) {
+        if !self.pspec.is_null() {
+            unsafe { g_pattern_spec_free(self.pspec) };
+        }
+    }
+}
+
+pub struct SymbolsInRangeIterator<'a> {
+    symbol_table: &'a SymbolTable,
+    current_index: usize,
+    end_index: usize,
+    end_offset: u32,
+    kernel_base: u64,
+}
+
+impl<'a> Iterator for SymbolsInRangeIterator<'a> {
+    type Item = SymbolRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_index != self.end_index {
+            let entry = self.symbol_table.get_symbol_entry_by_address_index(self.current_index);
+            self.current_index += 1;
+
+            if entry.address_offset >= self.end_offset {
+                break;
+            }
+
+            return Some(SymbolRef {
+                symbol_table: self.symbol_table,
+                entry,
+                kernel_base: self.kernel_base,
+            });
+        }
+
+        None
     }
 }
