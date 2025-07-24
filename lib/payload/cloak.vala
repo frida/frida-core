@@ -86,6 +86,8 @@ namespace Frida {
 			if (read_slot != null) {
 				update_slot ((void **) read_slot, (void *) old_read_impl);
 			}
+
+			base.dispose ();
 		}
 
 		private static void * update_slot (void ** orig, void * new_impl) {
