@@ -21,6 +21,7 @@ const THREAD_BLOCK_ADDR: usize = 0xfffffff0_07a5_5728;
 const THREAD_WAKEUP_ADDR: usize = 0xfffffff0_07a5_8ea0;
 const MACH_ABSOLUTE_TIME_ADDR: usize = 0xfffffff0_07b6_0cc0;
 const ABSOLUTETIME_TO_NANOSECONDS_ADDR: usize = 0xfffffff0_07b6_11e4;
+const CLOCK_GET_CALENDAR_MICROTIME_ADDR: usize = 0xfffffff0_07a2_332c;
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -140,4 +141,15 @@ pub fn absolutetime_to_nanoseconds(abstime: u64) -> u64 {
         func(abstime, &mut nanoseconds);
     }
     nanoseconds
+}
+
+pub fn clock_get_calendar_microtime() -> (u32, u32) {
+    type ClockGetCalendarMicrotimeFn = unsafe extern "C" fn(secs: *mut u32, microsecs: *mut u32);
+    let mut secs: u32 = 0;
+    let mut microsecs: u32 = 0;
+    unsafe {
+        let func: ClockGetCalendarMicrotimeFn = core::mem::transmute(CLOCK_GET_CALENDAR_MICROTIME_ADDR);
+        func(&mut secs, &mut microsecs);
+    }
+    (secs, microsecs)
 }
