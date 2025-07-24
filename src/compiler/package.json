@@ -29,7 +29,7 @@
     "@frida/url": "^1.0.2",
     "@frida/util": "^1.0.3",
     "@frida/vm": "^2.0.0",
-    "@types/frida-gum": "19.0.0",
+    "@types/frida-gum": "19.0.1",
     "@types/node": "18.19.103",
     "frida-fs": "7.0.0"
   }
