@@ -58,11 +58,25 @@ pub extern "C" fn _getpid() -> i32 {
     0
 }
 
+#[repr(C)]
+struct Timeval {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _gettimeofday(tp: *mut core::ffi::c_void, _tzp: *mut core::ffi::c_void) -> i32 {
-    // TODO: Use clock_get_system_microtime or clock_get_system_nanotime.
-    if !tp.is_null() {
-        unsafe { ptr::write_bytes(tp, 0, core::mem::size_of::<core::ffi::c_void>()) };
+    let (secs, microsecs) = crate::xnu::clock_get_calendar_microtime();
+    let timeval = Timeval {
+        tv_sec: secs as i64,
+        tv_usec: microsecs as i64,
+    };
+    unsafe {
+        ptr::copy_nonoverlapping(
+            &timeval as *const Timeval as *const u8,
+            tp as *mut u8,
+            core::mem::size_of::<Timeval>(),
+        );
     }
     0
 }
