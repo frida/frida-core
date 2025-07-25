@@ -167,7 +167,7 @@ if have_local_backend
       'darwin' / 'policy-softener.vala',
       'darwin' / 'policy-softener-glue.c',
     ]
-    if host_os in ['macos', 'ios', 'tvos']
+    if host_os in ['macos', 'ios', 'tvos', 'xros']
       helper_backend_sources += [
         'darwin' / 'frida-helper-backend.vala',
         'darwin' / 'frida-helper-backend-glue.m',
@@ -179,7 +179,7 @@ if have_local_backend
         'darwin' / 'frida-helper-null-backend.vala',
       ]
     endif
-    if host_os in ['ios', 'tvos']
+    if host_os in ['ios', 'tvos', 'xros']
       helper_backend_sources += [
         'darwin' / 'springboard.m',
         'darwin' / 'substituted-client.c',
