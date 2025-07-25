@@ -70,7 +70,7 @@ impl SharedTransport {
         }
     }
 
-    pub unsafe fn as_view(&mut self, role: TransportRole) -> TransportView {
+    pub fn as_view(&mut self, role: TransportRole) -> TransportView {
         let header_size = core::mem::size_of::<SharedTransport>();
         let available_data = self.buffer_size as usize - header_size;
         let buffer_size = available_data / 2;
@@ -84,11 +84,11 @@ impl SharedTransport {
         }
     }
 
-    unsafe fn channel_a_buffer(&self) -> *mut u8 {
+    fn channel_a_buffer(&self) -> *mut u8 {
         self.data.as_ptr() as *mut u8
     }
 
-    unsafe fn channel_b_buffer(&self) -> *mut u8 {
+    fn channel_b_buffer(&self) -> *mut u8 {
         let header_size = core::mem::size_of::<SharedTransport>();
         let available_data = self.buffer_size as usize - header_size;
         let buffer_size = available_data / 2;
@@ -110,43 +110,37 @@ impl SharedTransport {
         }
     }
 
-    unsafe fn write_buffer(&self, role: TransportRole) -> *mut u8 {
+    fn write_buffer(&self, role: TransportRole) -> *mut u8 {
         match role {
-            TransportRole::Primary => unsafe { self.channel_a_buffer() },
-            TransportRole::Secondary => unsafe { self.channel_b_buffer() },
+            TransportRole::Primary => self.channel_a_buffer(),
+            TransportRole::Secondary => self.channel_b_buffer(),
         }
     }
 
-    unsafe fn read_buffer(&self, role: TransportRole) -> *mut u8 {
+    fn read_buffer(&self, role: TransportRole) -> *mut u8 {
         match role {
-            TransportRole::Primary => unsafe { self.channel_b_buffer() },
-            TransportRole::Secondary => unsafe { self.channel_a_buffer() },
+            TransportRole::Primary => self.channel_b_buffer(),
+            TransportRole::Secondary => self.channel_a_buffer(),
         }
     }
 }
 
 impl<'a> TransportView<'a> {
-    pub unsafe fn write_message(&mut self, data: &[u8]) {
-        unsafe { self.flush_pending() };
+    pub fn write_message(&mut self, data: &[u8]) {
+        self.flush_pending();
 
         let pending = PendingMessage {
             remaining_data: data.to_vec(),
             offset: 0,
         };
-
         self.write_pending_queue.push_back(pending);
 
-        unsafe { self.flush_pending() };
+        self.flush_pending();
     }
 
-    pub unsafe fn try_read_message(&mut self) -> Option<Vec<u8>> {
+    pub fn try_read_message(&mut self) -> Option<Vec<u8>> {
         let header_size = core::mem::size_of::<MessageHeader>();
-
-        if unsafe { self.available_read_data() } < header_size {
-            return None;
-        }
-
-        let header_data = unsafe { self.peek_bytes(header_size)? };
+        let header_data = self.peek_bytes(header_size)?;
         let header = unsafe { core::ptr::read(header_data.as_ptr() as *const MessageHeader) };
         if header.size == 0 || header.size as usize > self.buffer_size {
             panic!(
@@ -156,11 +150,7 @@ impl<'a> TransportView<'a> {
         }
 
         let total_size = header_size + header.size as usize;
-        if unsafe { self.available_read_data() } < total_size {
-            return None;
-        }
-
-        let message_data = unsafe { self.read_bytes(total_size)? };
+        let message_data = self.read_bytes(total_size)?;
         let payload = &message_data[header_size..];
 
         if header.flags & MSG_FLAG_COMPLETE != 0 {
@@ -178,21 +168,19 @@ impl<'a> TransportView<'a> {
         }
     }
 
-    pub unsafe fn flush_pending(&mut self) {
-        let header_size = core::mem::size_of::<MessageHeader>();
-        let max_payload = self.buffer_size.saturating_sub(header_size + 1);
-
+    pub fn flush_pending(&mut self) {
         if self.write_pending_queue.is_empty() {
             return;
         }
 
+        let header_size = core::mem::size_of::<MessageHeader>();
+        let max_payload = self.buffer_size.saturating_sub(header_size + 1);
         let pending = self.write_pending_queue.front().cloned().unwrap();
 
         let remaining = pending.remaining_data.len() - pending.offset;
         let chunk_size = remaining.min(max_payload);
         let total_needed = header_size + chunk_size;
-
-        if unsafe { self.available_write_space() } < total_needed {
+        if self.available_write_space() < total_needed {
             return;
         }
 
@@ -213,18 +201,18 @@ impl<'a> TransportView<'a> {
         combined_data.extend_from_slice(header_bytes);
         combined_data.extend_from_slice(chunk);
 
-        unsafe { self.write_bytes(&combined_data) };
+        self.write_bytes(&combined_data);
 
-        if !is_last {
+        if is_last {
+            self.write_pending_queue.pop_front();
+        } else {
             if let Some(front_msg) = self.write_pending_queue.front_mut() {
                 front_msg.offset += chunk_size;
             }
-        } else {
-            self.write_pending_queue.pop_front();
         }
     }
 
-    pub unsafe fn available_write_space(&self) -> usize {
+    pub fn available_write_space(&self) -> usize {
         let (head, tail) = self.transport.write_channel(self.role).pointers();
         let head_val = head.load(Ordering::Acquire);
         let tail_val = tail.load(Ordering::Acquire);
@@ -236,18 +224,18 @@ impl<'a> TransportView<'a> {
         }
     }
 
-    unsafe fn write_bytes(&mut self, data: &[u8]) {
-        if unsafe { self.available_write_space() } < data.len() {
+    fn write_bytes(&mut self, data: &[u8]) {
+        if self.available_write_space() < data.len() {
             panic!(
                 "Insufficient space: need {} bytes, have {} bytes",
                 data.len(),
-                unsafe { self.available_write_space() }
+                self.available_write_space()
             );
         }
 
         let (head, _tail) = self.transport.write_channel(self.role).pointers();
         let head_val = head.load(Ordering::Acquire);
-        let buffer = unsafe { self.transport.write_buffer(self.role) };
+        let buffer = self.transport.write_buffer(self.role);
         let pos = head_val as usize % self.buffer_size;
 
         if pos + data.len() <= self.buffer_size {
@@ -266,7 +254,7 @@ impl<'a> TransportView<'a> {
         head.store(head_val + data.len() as u32, Ordering::Release);
     }
 
-    unsafe fn available_read_data(&self) -> usize {
+    fn available_read_data(&self) -> usize {
         let (head, tail) = self.transport.read_channel(self.role).pointers();
         let head_val = head.load(Ordering::Acquire);
         let tail_val = tail.load(Ordering::Acquire);
@@ -278,22 +266,22 @@ impl<'a> TransportView<'a> {
         }
     }
 
-    unsafe fn read_bytes(&mut self, size: usize) -> Option<Vec<u8>> {
-        unsafe { self.read_bytes_common(size, true) }
+    fn read_bytes(&mut self, size: usize) -> Option<Vec<u8>> {
+        self.read_bytes_common(size, true)
     }
 
-    unsafe fn peek_bytes(&self, size: usize) -> Option<Vec<u8>> {
-        unsafe { self.read_bytes_common(size, false) }
+    fn peek_bytes(&self, size: usize) -> Option<Vec<u8>> {
+        self.read_bytes_common(size, false)
     }
 
-    unsafe fn read_bytes_common(&self, size: usize, advance_tail: bool) -> Option<Vec<u8>> {
-        if unsafe { self.available_read_data() } < size {
+    fn read_bytes_common(&self, size: usize, advance_tail: bool) -> Option<Vec<u8>> {
+        if self.available_read_data() < size {
             return None;
         }
 
         let (_head, tail) = self.transport.read_channel(self.role).pointers();
         let tail_val = tail.load(Ordering::Acquire);
-        let buffer = unsafe { self.transport.read_buffer(self.role) };
+        let buffer = self.transport.read_buffer(self.role);
         let pos = tail_val as usize % self.buffer_size;
 
         let mut data = alloc::vec![0u8; size];
