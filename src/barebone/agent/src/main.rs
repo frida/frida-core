@@ -230,15 +230,13 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     unsafe {
         let transport = FRIDA_SHARED_TRANSPORT;
         let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
-        transport_view.process_pending_fragments();
+        transport_view.flush_pending();
 
-        while let Some((message_ptr, message_size)) = transport_view.try_read_message() {
-            let message_data = core::slice::from_raw_parts(message_ptr, message_size);
-            if let Some(variant) = deserialize_gvariant_message(message_data) {
+        while let Some(message_data) = transport_view.try_read_message() {
+            if let Some(variant) = deserialize_message(&message_data) {
                 process_incoming_message(variant);
                 g_variant_unref(variant);
             }
-            crate::xnu::free(message_ptr, message_size);
         }
     }
 
@@ -261,7 +259,7 @@ unsafe fn serialize_gvariant_message(variant: *mut GVariant) -> Option<Vec<u8>> 
     }
 }
 
-unsafe fn deserialize_gvariant_message(data: &[u8]) -> Option<*mut GVariant> {
+unsafe fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
     unsafe {
         if data.is_empty() {
             return None;
