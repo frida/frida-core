@@ -30,7 +30,9 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
-			allocation = yield inject_elf (elf, machine, allocator, cancellable);
+			size_t page_size = yield machine.query_page_size (cancellable);
+
+			allocation = yield inject_elf (elf, page_size, machine, allocator, cancellable);
 
 			uint64 base_va = allocation.virtual_address;
 			uint64 console_log_trap = 0;
