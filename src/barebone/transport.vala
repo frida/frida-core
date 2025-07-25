@@ -226,11 +226,10 @@ namespace Frida.Barebone {
 			uint32 head_val = AtomicUint.@get (ref channel->head);
 			uint32 tail_val = AtomicUint.@get (ref channel->tail);
 
-			if (head_val >= tail_val) {
+			if (head_val >= tail_val)
 				return head_val - tail_val;
-			} else {
+			else
 				return buffer_size - (tail_val - head_val);
-			}
 		}
 
 		private Bytes? read_bytes (size_t size) {
