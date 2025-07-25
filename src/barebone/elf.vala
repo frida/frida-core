@@ -1,10 +1,9 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public async Allocation inject_elf (Gum.ElfModule elf, Machine machine, Allocator allocator, Cancellable? cancellable)
-			throws Error, IOError {
+	public async Allocation inject_elf (Gum.ElfModule elf, size_t page_size, Machine machine, Allocator allocator,
+			Cancellable? cancellable) throws Error, IOError {
 		size_t vm_size = (size_t) elf.mapped_size;
 
-		size_t page_size = yield machine.query_page_size (cancellable);
 		uint num_pages = (uint) (vm_size / page_size);
 		if (vm_size % page_size != 0)
 			num_pages++;
