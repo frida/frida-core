@@ -110,6 +110,7 @@ pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
 #[unsafe(no_mangle)]
 pub static mut FRIDA_SHARED_TRANSPORT: *mut transport::SharedTransport = ptr::null_mut();
+static mut TRANSPORT_VIEW: Option<transport::TransportView<'static>> = None;
 
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
@@ -131,8 +132,11 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
 
         let page_size = gum::gum_barebone_query_page_size() as usize;
 
-        let (transport_ptr, physical_addr) = transport::allocate_shared_transport(page_size);
-        FRIDA_SHARED_TRANSPORT = transport_ptr;
+        FRIDA_SHARED_TRANSPORT = xnu::kalloc(page_size) as *mut transport::SharedTransport;
+        core::ptr::write(FRIDA_SHARED_TRANSPORT, transport::SharedTransport::new(page_size));
+        let physical_addr = gum::gum_barebone_virtual_to_physical(FRIDA_SHARED_TRANSPORT as bindings::gpointer) as usize;
+
+        TRANSPORT_VIEW = Some((*FRIDA_SHARED_TRANSPORT).as_view(transport::TransportRole::Primary));
 
         xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
 
@@ -228,8 +232,8 @@ unsafe fn parse_config(config: &[u8]) {
 
 unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     unsafe {
-        let transport = FRIDA_SHARED_TRANSPORT;
-        let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
+        let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
+
         transport_view.flush_pending();
 
         while let Some(message_data) = transport_view.try_read_message() {
@@ -314,8 +318,6 @@ unsafe fn process_incoming_message(variant: *mut GVariant) {
 
 unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
     unsafe {
-        let transport = FRIDA_SHARED_TRANSPORT;
-
         let payload_variant = g_variant_new_variant(response.variant);
 
         let message_variant = g_variant_new(
@@ -326,8 +328,8 @@ unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
-            let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
-            transport_view.try_write_message(&serialized);
+            let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
+            transport_view.write_message(&serialized);
         }
 
         g_variant_unref(message_variant);
@@ -399,8 +401,6 @@ unsafe extern "C" fn frida_message_handler(
 
 unsafe fn send_script_message(script_id: u32, message: String) {
     unsafe {
-        let transport = FRIDA_SHARED_TRANSPORT;
-
         let payload_variant = g_variant_new(
             c"(us)".as_ptr(),
             script_id,
@@ -415,8 +415,8 @@ unsafe fn send_script_message(script_id: u32, message: String) {
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
-            let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
-            transport_view.try_write_message(&serialized);
+            let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
+            transport_view.write_message(&serialized);
         }
 
         g_variant_unref(payload_variant);
