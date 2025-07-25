@@ -11,10 +11,15 @@ namespace Frida.Barebone {
 
 		private Allocation elf_allocation;
 		private Allocation config_allocation;
-		private SharedBuffer shared_buffer;
-		private AsyncLock request_lock = new AsyncLock ();
+		private Bytes shared_bytes;
+		private TransportView transport;
 		private Callback mprotect_callback;
 		private Callback get_writable_mappings_callback;
+
+		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
+		private uint16 next_request_id = 1;
+
+		private const int COMMAND_TIMEOUT_MS = 25000;
 
 		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
 				Cancellable? cancellable) throws Error, IOError {
@@ -121,7 +126,9 @@ namespace Frida.Barebone {
 			} while (hit_breakpoint != bp);
 			yield bp.remove (cancellable);
 
-			elf_allocation = yield inject_elf (elf, machine, allocator, cancellable);
+			size_t page_size = yield machine.query_page_size (cancellable);
+
+			elf_allocation = yield inject_elf (elf, page_size, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
 			uint64 mprotect_address = 0;
@@ -155,12 +162,13 @@ namespace Frida.Barebone {
 
 			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
 
+			size_t buffer_size = page_size;
 			uint64 buffer_start_pa = yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size
 				},
 				cancellable);
-			uint64 buffer_end_pa = buffer_start_pa + SharedBuffer.SIZE;
+			uint64 buffer_end_pa = buffer_start_pa + buffer_size;
 
 			yield gdb.continue (cancellable);
 
@@ -170,9 +178,8 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("Invalid transport config: base_address is incorrect");
 			var buffer_offset = (size_t) (buffer_start_pa - base_pa);
 
-			Bytes shared_bytes = ram.slice (buffer_offset, buffer_offset + SharedBuffer.SIZE);
-			shared_buffer = new SharedBuffer (new Buffer (shared_bytes, byte_order, pointer_size));
-			shared_buffer.check ();
+			shared_bytes = ram.slice (buffer_offset, buffer_offset + buffer_size);
+			transport = SharedTransport.from_memory (shared_bytes.get_data (), shared_bytes.get_size ()).as_view (SECONDARY);
 
 			process_incoming_messages.begin ();
 
@@ -184,181 +191,106 @@ namespace Frida.Barebone {
 		}
 
 		public async AgentScriptId create_script (string source, Cancellable? cancellable) throws Error, IOError {
-			var payload = new Bytes.static (source.data[:source.data.length + 1]);
-			var response = yield execute_command (CREATE_SCRIPT, payload, cancellable);
-			return AgentScriptId (response.read_uint32 ());
+			var payload = new Variant ("(s)", source);
+			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable);
+			if (!response.check_format_string ("u", false))
+				throw new Error.PROTOCOL ("Invalid create_script response format");
+			uint32 script_handle;
+			response.get ("u", out script_handle);
+			return AgentScriptId (script_handle);
 		}
 
-		public async void load_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
-			var payload = make_payload_builder ()
-				.append_uint32 (id.handle)
-				.build ();
-			yield execute_command (LOAD_SCRIPT, payload, cancellable);
+		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			var payload = new Variant ("u", script_id.handle);
+			yield execute_command (Command.LOAD_SCRIPT, payload, cancellable);
 		}
 
-		public async void destroy_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
-			var payload = make_payload_builder ()
-				.append_uint32 (id.handle)
-				.build ();
-			yield execute_command (DESTROY_SCRIPT, payload, cancellable);
+		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			var payload = new Variant ("u", script_id.handle);
+			yield execute_command (Command.DESTROY_SCRIPT, payload, cancellable);
 		}
 
-		public async void post_script_message (AgentScriptId id, string message, Bytes? data, Cancellable? cancellable)
+		public async void post_script_message (AgentScriptId script_id, string message, Bytes? data, Cancellable? cancellable)
 				throws Error, IOError {
+			var payload = new Variant ("(us)", script_id.handle, message);
 			// TODO: Include data.
-			var payload = make_payload_builder ()
-				.append_uint32 (id.handle)
-				.append_string (message)
-				.build ();
-			yield execute_command (POST_SCRIPT_MESSAGE, payload, cancellable);
+			yield execute_command (Command.POST_SCRIPT_MESSAGE, payload, cancellable);
+		}
+
+		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable) throws Error, IOError {
+			uint16 request_id = next_request_id++;
+			var command_message = new Variant ("(yqv)", (uint8) command, request_id, payload);
+
+			if (machine.gdb.byte_order != ByteOrder.HOST)
+				command_message = command_message.byteswap ();
+
+			var command_bytes = command_message.get_data_as_bytes ();
+
+			var promise = new Promise<Variant> ();
+			pending_requests[request_id] = promise;
+
+			transport.write_message (command_bytes);
+
+			var timeout_source = new TimeoutSource (COMMAND_TIMEOUT_MS);
+			timeout_source.set_callback (() => {
+				Promise<Variant>? removed_promise;
+				if (pending_requests.unset (request_id, out removed_promise))
+					removed_promise.reject (new Error.TIMED_OUT ("Command timed out"));
+				return Source.REMOVE;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+
+			try {
+				return yield promise.future.wait_async (cancellable);
+			} finally {
+				timeout_source.destroy ();
+			}
 		}
 
 		private async void process_incoming_messages () {
 			var main_context = MainContext.get_thread_default ();
+			var byte_order = machine.gdb.byte_order;
 			try {
 				while (true) {
+					io_cancellable.set_error_if_cancelled ();
+
 					var source = new TimeoutSource (10);
 					source.set_callback (process_incoming_messages.callback);
 					source.attach (main_context);
 					yield;
 
-					AgentMessage? msg = yield fetch_script_message (io_cancellable);
-					if (msg != null)
-						script_message (msg.script_id, msg.text, msg.has_data ? new Bytes (msg.data) : null);
+					Bytes? message_bytes = transport.try_read_message ();
+					if (message_bytes == null)
+						continue;
+
+					var message = Variant.new_from_data (new VariantType ("(yqv)"), message_bytes.get_data (), false,
+						message_bytes);
+					if (byte_order != ByteOrder.HOST)
+						message = message.byteswap ();
+					if (!message.check_format_string ("(yqv)", false))
+						throw new Error.PROTOCOL ("Invalid message format");
+
+					uint8 command_code;
+					uint16 request_id;
+					Variant payload;
+					message.get ("(yqv)", out command_code, out request_id, out payload);
+
+					if (command_code == Command.SCRIPT_MESSAGE) {
+						if (!payload.check_format_string ("(us)", false))
+							throw new Error.PROTOCOL ("Invalid script message payload format");
+
+						uint32 script_handle;
+						unowned string json;
+						payload.get ("(u&s)", out script_handle, out json);
+
+						script_message (AgentScriptId (script_handle), json, null);
+					} else if (command_code == Command.REPLY) {
+						Promise<Variant>? promise;
+						if (pending_requests.unset (request_id, out promise))
+							promise.resolve (payload);
+					}
 				}
 			} catch (GLib.Error e) {
-			}
-		}
-
-		public async AgentMessage? fetch_script_message (Cancellable? cancellable) throws Error, IOError {
-			var response = yield execute_command (FETCH_SCRIPT_MESSAGE, new Bytes ({}), cancellable);
-			if (response.available == 0)
-				return null;
-			var script_id = AgentScriptId (response.read_uint32 ());
-			var text = response.read_string ();
-			return AgentMessage (SCRIPT, script_id, text, false, {});
-		}
-
-		private BufferBuilder make_payload_builder () {
-			var b = shared_buffer.buf;
-			return new BufferBuilder (b.byte_order, b.pointer_size);
-		}
-
-		private async BufferReader execute_command (Command command, Bytes payload, Cancellable? cancellable)
-				throws Error, IOError {
-			yield request_lock.acquire (cancellable);
-			try {
-				shared_buffer
-					.put_data (payload)
-					.put_command (command);
-
-				var main_context = MainContext.get_thread_default ();
-				while (shared_buffer.fetch_command () != IDLE) {
-					var source = new TimeoutSource (10);
-					source.set_callback (execute_command.callback);
-					source.attach (main_context);
-					yield;
-
-					cancellable.set_error_if_cancelled ();
-				}
-
-				switch (shared_buffer.fetch_status ()) {
-					case DATA_READY: {
-						uint8 code = shared_buffer.fetch_result_code ();
-						if (code != 0)
-							throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
-						return new BufferReader (shared_buffer.fetch_result_buffer ());
-					}
-					case ERROR:
-						throw new Error.INVALID_ARGUMENT ("%s", shared_buffer.fetch_result_string ());
-					default:
-						throw new Error.PROTOCOL ("Unexpected status");
-				}
-			} finally {
-				request_lock.release ();
-			}
-		}
-
-		private class SharedBuffer {
-			public const size_t SIZE = 8192;
-			private const uint32 MAGIC = 0x44495246;
-			private const uint32 DATA_CAPACITY = 4096;
-
-			public Buffer buf;
-
-			public SharedBuffer (Buffer b) {
-				buf = b;
-			}
-
-			public void check () throws Error {
-				uint32 magic = buf.read_uint32 (0);
-				if (magic != MAGIC)
-					throw new Error.INVALID_ARGUMENT ("Invalid transport config, incorrect magic: 0x%08x", magic);
-			}
-
-			public Status fetch_status () {
-				return buf.read_uint8 (5);
-			}
-
-			public Command fetch_command () {
-				return buf.read_uint8 (4);
-			}
-
-			public unowned SharedBuffer put_command (Command command) {
-				buf.write_uint8 (4, command);
-				flush ();
-				return this;
-			}
-
-			public unowned SharedBuffer put_data (Bytes data) {
-				buf.write_uint32 (8, (uint32) data.get_size ());
-				buf.write_bytes (20, data);
-				flush ();
-				return this;
-			}
-
-			public uint8 fetch_result_code () {
-				return buf.read_uint8 (12);
-			}
-
-			public Buffer fetch_result_buffer () throws Error {
-				return new Buffer (fetch_result_bytes (), buf.byte_order, buf.pointer_size);
-			}
-
-			public Bytes fetch_result_bytes () throws Error {
-				uint32 size = buf.read_uint32 (16);
-				if (size > DATA_CAPACITY)
-					throw new Error.PROTOCOL ("Invalid result size: %u", size);
-				if (size == 0)
-					return new Bytes ({});
-				return buf.read_bytes (20, size);
-			}
-
-			public string fetch_result_string () throws Error {
-				Bytes r = fetch_result_bytes ();
-				string s = (string) r.get_data ();
-				if (!s.validate ())
-					throw new Error.PROTOCOL ("Result is not valid UTF-8");
-				return s;
-			}
-
-			private void flush () {
-#if !WINDOWS
-				size_t page_size = Posix.getpagesize ();
-
-				size_t align_mask = ~(page_size - 1);
-
-				Bytes b = buf.bytes;
-				size_t size = b.get_size ();
-
-				size_t first_address = (size_t) b.get_data ();
-				size_t last_address = first_address + size - 1;
-
-				size_t start_page = first_address & align_mask;
-				size_t end_page = (last_address & align_mask) + page_size;
-
-				Posix.msync ((void *) start_page, end_page - start_page, Posix.MS_SYNC);
-#endif
 			}
 		}
 
@@ -435,12 +367,12 @@ namespace Frida.Barebone {
 		}
 
 		private enum Command {
-			IDLE,
-			CREATE_SCRIPT,
-			LOAD_SCRIPT,
-			DESTROY_SCRIPT,
-			POST_SCRIPT_MESSAGE,
-			FETCH_SCRIPT_MESSAGE,
+			CREATE_SCRIPT = 1,
+			LOAD_SCRIPT = 2,
+			DESTROY_SCRIPT = 3,
+			POST_SCRIPT_MESSAGE = 4,
+			REPLY = 128,
+			SCRIPT_MESSAGE = 129
 		}
 
 		private enum Status {
@@ -448,56 +380,6 @@ namespace Frida.Barebone {
 			BUSY,
 			DATA_READY,
 			ERROR
-		}
-	}
-
-	private class AsyncLock {
-		private bool held = false;
-		private Gee.Queue<Waiter> waiters = new Gee.LinkedList<Waiter> ();
-
-		public async void acquire (Cancellable? cancellable) throws IOError {
-			if (!held) {
-				held = true;
-				return;
-			}
-
-			var completion_source = new IdleSource ();
-			completion_source.set_callback (acquire.callback);
-
-			var cancellable_source = new CancellableSource (cancellable);
-			cancellable_source.set_callback (acquire.callback);
-			cancellable_source.attach (MainContext.get_thread_default ());
-
-			var w = new Waiter () {
-				completion_source = completion_source,
-				cancellable_source = cancellable_source
-			};
-			waiters.offer (w);
-
-			yield;
-
-			if (!w.holds_lock) {
-				waiters.remove (w);
-				cancellable.set_error_if_cancelled ();
-			}
-		}
-
-		public void release () {
-			Waiter? next = waiters.poll ();
-			if (next != null) {
-				next.holds_lock = true;
-				next.cancellable_source.destroy ();
-				next.completion_source.attach (MainContext.get_thread_default ());
-			} else {
-				held = false;
-			}
-		}
-
-		private class Waiter {
-			public IdleSource completion_source;
-			public CancellableSource cancellable_source;
-
-			public bool holds_lock = false;
 		}
 	}
 
