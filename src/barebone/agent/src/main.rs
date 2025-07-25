@@ -3,7 +3,6 @@
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -11,15 +10,16 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::ptr::null_mut;
-use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::bindings::gsize;
 use crate::bindings::{
-    GBytes, GCancellable, GVariantIter, g_free, g_main_loop_run, g_object_unref,
-    g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_uint64,
-    g_variant_iter_init, g_variant_iter_next, g_variant_new_from_data, g_variant_type_new,
-    g_variant_unref, gboolean, gchar, gpointer, gum_script_load_sync, gum_script_post,
-    gum_script_set_message_handler, gum_script_unload_sync,
+    GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
+    g_main_loop_new, g_main_loop_run, g_object_unref, g_timeout_add, g_variant_check_format_string,
+    g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size,
+    g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new,
+    g_variant_new_from_data, g_variant_new_variant, g_variant_type_new, g_variant_unref, gboolean,
+    gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
+    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
 };
 use crate::symbols::SymbolTable;
 
@@ -29,6 +29,7 @@ mod gum;
 mod libc;
 mod pac;
 mod symbols;
+mod transport;
 mod xnu;
 
 mod bindings {
@@ -43,67 +44,76 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-static mut CONFIG_DATA: &'static [u8] = &[];
-pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
-pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
-
-#[repr(C)]
-pub struct SharedBuffer {
-    pub magic: u32,
-    pub command: AtomicU8,
-    pub status: AtomicU8,
-    pub data_size: u32,
-    pub result_code: u32,
-    pub result_size: u32,
-    pub data: [u8; 4096],
-}
-
-#[unsafe(no_mangle)]
-pub static mut FRIDA_SHARED_BUFFER: SharedBuffer = SharedBuffer {
-    magic: 0x44495246,
-    command: AtomicU8::new(FridaCommand::Idle as u8),
-    status: AtomicU8::new(FridaStatus::Idle as u8),
-    data_size: 0,
-    result_code: 0,
-    result_size: 0,
-    data: [0u8; 4096],
-};
-
-static mut SCRIPTS: BTreeMap<u32, *mut bindings::GumScript> = BTreeMap::new();
-static mut MESSAGE_QUEUE: VecDeque<(u32, String)> = VecDeque::new();
-static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
-
 #[repr(u8)]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum FridaCommand {
-    Idle = 0,
     CreateScript = 1,
     LoadScript = 2,
     DestroyScript = 3,
     PostScriptMessage = 4,
-    FetchScriptMessage = 5,
+
+    Reply = 128,
+    ScriptMessage = 129,
 }
 
 impl core::fmt::Display for FridaCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            FridaCommand::Idle => write!(f, "Idle"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
             FridaCommand::DestroyScript => write!(f, "DestroyScript"),
             FridaCommand::PostScriptMessage => write!(f, "PostScriptMessage"),
-            FridaCommand::FetchScriptMessage => write!(f, "FetchScriptMessage"),
+            FridaCommand::Reply => write!(f, "Reply"),
+            FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
     }
 }
 
-#[repr(u8)]
-pub enum FridaStatus {
-    Idle = 0,
-    Busy = 1,
-    DataReady = 2,
-    Error = 3,
+#[derive(Debug)]
+struct HandlerResponse {
+    variant: *mut GVariant,
 }
+
+impl HandlerResponse {
+    fn success(variant: *mut GVariant) -> Self {
+        Self { variant }
+    }
+
+    fn success_empty() -> Self {
+        // Return empty tuple variant "()"
+        let variant = unsafe { g_variant_new(c"()".as_ptr()) };
+        Self { variant }
+    }
+
+    fn error(message: &str) -> Self {
+        let error_variant =
+            unsafe { g_variant_new(c"s".as_ptr(), message.as_ptr() as *const gchar) };
+
+        Self {
+            variant: error_variant,
+        }
+    }
+}
+
+impl Drop for HandlerResponse {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.variant.is_null() {
+                g_variant_unref(self.variant);
+            }
+        }
+    }
+}
+
+static mut CONFIG_DATA: &'static [u8] = &[];
+pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
+pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
+
+#[unsafe(no_mangle)]
+pub static mut FRIDA_SHARED_TRANSPORT: *mut transport::SharedTransport = ptr::null_mut();
+
+static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
+static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
@@ -120,21 +130,14 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
     unsafe {
         CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
-        let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
-        (*buffer).magic = 0x44495246;
-        (*buffer)
-            .command
-            .store(FridaCommand::Idle as u8, Ordering::Release);
-        (*buffer)
-            .status
-            .store(FridaStatus::Idle as u8, Ordering::Release);
-        (*buffer).data_size = 0;
-        (*buffer).result_code = 0;
-        (*buffer).result_size = 0;
+        let page_size = gum::gum_barebone_query_page_size() as usize;
+
+        let (transport_ptr, physical_addr) = transport::allocate_shared_transport(page_size);
+        FRIDA_SHARED_TRANSPORT = transport_ptr;
 
         xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
 
-        gum::gum_barebone_virtual_to_physical(buffer as gpointer) as usize
+        physical_addr
     }
 }
 
@@ -146,9 +149,9 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
 
-        bindings::g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
+        g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
 
-        let main_loop = bindings::g_main_loop_new(ptr::null_mut(), 0);
+        let main_loop = g_main_loop_new(ptr::null_mut(), 0);
         g_main_loop_run(main_loop);
     }
 }
@@ -226,83 +229,140 @@ unsafe fn parse_config(config: &[u8]) {
 
 unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     unsafe {
-        let buffer = core::ptr::addr_of_mut!(FRIDA_SHARED_BUFFER);
+        let transport = FRIDA_SHARED_TRANSPORT;
+        (*transport).process_pending_fragments();
 
-        let cmd =
-            core::mem::transmute::<u8, FridaCommand>((*buffer).command.load(Ordering::Acquire));
-        if cmd != FridaCommand::Idle {
-            (*buffer)
-                .status
-                .store(FridaStatus::Busy as u8, Ordering::Release);
-
-            let new_status = match cmd {
-                FridaCommand::CreateScript => {
-                    handle_create_script_request(buffer);
-                    FridaStatus::DataReady
-                }
-                FridaCommand::LoadScript => {
-                    handle_load_script_request(buffer);
-                    FridaStatus::DataReady
-                }
-                FridaCommand::DestroyScript => {
-                    handle_destroy_script_request(buffer);
-                    FridaStatus::DataReady
-                }
-                FridaCommand::PostScriptMessage => {
-                    handle_post_script_message_request(buffer);
-                    FridaStatus::DataReady
-                }
-                FridaCommand::FetchScriptMessage => {
-                    handle_fetch_script_message_request(buffer);
-                    FridaStatus::DataReady
-                }
-                _ => {
-                    write_error_to_buffer(buffer, 1, "Unknown command");
-                    FridaStatus::Error
-                }
-            };
-            (*buffer).status.store(new_status as u8, Ordering::Release);
-
-            (*buffer)
-                .command
-                .store(FridaCommand::Idle as u8, Ordering::Release);
+        while let Some(message_data) = (*transport).try_read_message_h2g() {
+            if let Some(variant) = deserialize_gvariant_message(&message_data) {
+                process_incoming_message(variant);
+                g_variant_unref(variant);
+            }
         }
     }
 
     1
 }
 
-unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
+unsafe fn serialize_gvariant_message(variant: *mut GVariant) -> Option<Vec<u8>> {
     unsafe {
-        let data_size = (*buffer).data_size as usize;
-        if data_size == 0 || data_size > 4096 {
-            panic!("Protocol error");
+        let size = g_variant_get_size(variant) as usize;
+        if size == 0 {
+            return None;
         }
 
-        let backend = bindings::gum_script_backend_obtain_qjs();
+        let data_ptr = g_variant_get_data(variant) as *const u8;
+        let mut result = Vec::with_capacity(size);
+        result.resize(size, 0);
+
+        core::ptr::copy_nonoverlapping(data_ptr, result.as_mut_ptr(), size);
+        Some(result)
+    }
+}
+
+unsafe fn deserialize_gvariant_message(data: &[u8]) -> Option<*mut GVariant> {
+    unsafe {
+        if data.is_empty() {
+            return None;
+        }
+
+        let variant_type = g_variant_type_new(c"(yqv)".as_ptr());
+        let variant = g_variant_new_from_data(
+            variant_type,
+            data.as_ptr() as *const core::ffi::c_void,
+            data.len() as gsize,
+            0,
+            None,
+            ptr::null_mut(),
+        );
+
+        if variant.is_null() {
+            None
+        } else {
+            Some(variant)
+        }
+    }
+}
+
+unsafe fn process_incoming_message(variant: *mut GVariant) {
+    unsafe {
+        let mut cmd_value: u8 = 0;
+        let mut request_id: u16 = 0;
+        let mut payload_variant: *mut GVariant = ptr::null_mut();
+        g_variant_get(
+            variant,
+            c"(yqv)".as_ptr(),
+            &mut cmd_value,
+            &mut request_id,
+            &mut payload_variant,
+        );
+
+        let cmd = core::mem::transmute::<u8, FridaCommand>(cmd_value);
+
+        let response = match cmd {
+            FridaCommand::CreateScript => handle_create_script(payload_variant),
+            FridaCommand::LoadScript => handle_load_script(payload_variant),
+            FridaCommand::DestroyScript => handle_destroy_script(payload_variant),
+            FridaCommand::PostScriptMessage => handle_post_script_message(payload_variant),
+            _ => HandlerResponse::error("Unknown command"),
+        };
+
+        send_command_reply(request_id, response);
+
+        g_variant_unref(payload_variant);
+    }
+}
+
+unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
+    unsafe {
+        let transport = FRIDA_SHARED_TRANSPORT;
+
+        let payload_variant = g_variant_new_variant(response.variant);
+
+        let message_variant = g_variant_new(
+            c"(yqv)".as_ptr(),
+            FridaCommand::Reply as u8 as u32,
+            request_id as u32,
+            payload_variant,
+        );
+
+        if let Some(serialized) = serialize_gvariant_message(message_variant) {
+            (*transport).try_write_message_g2h(&serialized);
+        }
+
+        g_variant_unref(message_variant);
+        g_variant_unref(payload_variant);
+    }
+}
+
+unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerResponse {
+    unsafe {
+        if g_variant_check_format_string(payload_variant, c"s".as_ptr(), 0) == 0 {
+            return HandlerResponse::error("Invalid payload format: expected string");
+        }
+
+        let mut source_ptr: *const gchar = ptr::null();
+        g_variant_get(payload_variant, c"&s".as_ptr(), &mut source_ptr);
+
+        let backend = gum_script_backend_obtain_qjs();
         let cancellable: *mut GCancellable = ptr::null_mut();
-        let mut error: *mut bindings::GError = ptr::null_mut();
+        let mut error: *mut GError = ptr::null_mut();
 
-        let data_ptr = (*buffer).data.as_ptr();
-        let data_slice = core::slice::from_raw_parts(data_ptr, data_size);
-        let source = CStr::from_bytes_with_nul(data_slice).unwrap();
-
-        let script = bindings::gum_script_backend_create_sync(
+        let script = gum_script_backend_create_sync(
             backend,
             c"agent.js".as_ptr(),
-            source.as_ptr(),
+            source_ptr,
             ptr::null_mut(),
             cancellable,
             &mut error,
         );
-        if error != ptr::null_mut() {
-            let error_msg = core::ffi::CStr::from_ptr((*error).message)
-                .to_str()
-                .unwrap();
-            write_error_to_buffer(buffer, 1, error_msg);
-            bindings::g_error_free(error);
-            return;
+
+        if !error.is_null() {
+            let error_msg = CStr::from_ptr((*error).message).to_str().unwrap();
+            let error_string = String::from(error_msg);
+            g_error_free(error);
+            return HandlerResponse::error(&error_string);
         }
+
         let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
 
         let script_id_ptr = Box::into_raw(Box::new(script_id));
@@ -312,168 +372,125 @@ unsafe fn handle_create_script_request(buffer: *mut SharedBuffer) {
             script_id_ptr as *mut c_void,
             None,
         );
-        gum_script_load_sync(script, cancellable);
 
         core::ptr::addr_of_mut!(SCRIPTS)
             .as_mut()
             .unwrap()
             .insert(script_id, script);
 
-        write_uint32_result_to_buffer(buffer, script_id);
+        HandlerResponse::success(g_variant_new(c"u".as_ptr(), script_id))
     }
 }
 
-unsafe fn handle_load_script_request(buffer: *mut SharedBuffer) {
+unsafe extern "C" fn frida_message_handler(
+    message: *const gchar,
+    _data: *mut GBytes,
+    user_data: gpointer,
+) {
     unsafe {
-        let script_id = match parse_script_id_from_buffer(buffer) {
-            Ok(id) => id,
-            Err(msg) => {
-                write_error_to_buffer(buffer, 1, msg);
-                return;
-            }
-        };
+        let msg = core::ffi::CStr::from_ptr(message).to_str().unwrap();
 
-        if let Some(script) = get_script_by_id(script_id) {
-            bindings::gum_script_load_sync(script, ptr::null_mut());
+        let script_id = *(user_data as *const u32);
 
-            write_string_result_to_buffer(buffer, "Script loaded successfully");
-        } else {
-            write_error_to_buffer(buffer, 3, "Script not found");
+        send_script_message(script_id, String::from(msg));
+    }
+}
+
+unsafe fn send_script_message(script_id: u32, message: String) {
+    unsafe {
+        let transport = FRIDA_SHARED_TRANSPORT;
+
+        let payload_variant = g_variant_new(
+            c"(us)".as_ptr(),
+            script_id,
+            message.as_ptr() as *const gchar,
+        );
+
+        let message_variant = g_variant_new(
+            c"(yqv)".as_ptr(),
+            FridaCommand::ScriptMessage as u8 as u32,
+            0u32,
+            payload_variant,
+        );
+
+        if let Some(serialized) = serialize_gvariant_message(message_variant) {
+            (*transport).try_write_message_g2h(&serialized);
         }
+
+        g_variant_unref(payload_variant);
+        g_variant_unref(message_variant);
     }
 }
 
-unsafe fn handle_destroy_script_request(buffer: *mut SharedBuffer) {
+unsafe fn handle_load_script(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let script_id = match parse_script_id_from_buffer(buffer) {
-            Ok(id) => id,
-            Err(msg) => {
-                write_error_to_buffer(buffer, 1, msg);
-                return;
-            }
+        if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
+            return HandlerResponse::error("Invalid payload format: expected uint32");
+        }
+
+        let mut script_id: u32 = 0;
+        g_variant_get(payload_variant, c"u".as_ptr(), &mut script_id);
+
+        let Some(script) = get_script_by_id(script_id) else {
+            return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
         };
+
+        gum_script_load_sync(script, ptr::null_mut());
+
+        HandlerResponse::success_empty()
+    }
+}
+
+unsafe fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerResponse {
+    unsafe {
+        if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
+            return HandlerResponse::error("Invalid payload format: expected uint32");
+        }
+
+        let mut script_id: u32 = 0;
+        g_variant_get(payload_variant, c"u".as_ptr(), &mut script_id);
 
         let scripts = core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap();
-        if let Some(script) = scripts.remove(&script_id) {
-            gum_script_unload_sync(script, ptr::null_mut());
-            g_object_unref(script as *mut c_void);
-
-            write_string_result_to_buffer(buffer, "Script destroyed successfully");
-        } else {
-            write_error_to_buffer(buffer, 3, "Script not found");
-        }
-    }
-}
-
-unsafe fn handle_post_script_message_request(buffer: *mut SharedBuffer) {
-    unsafe {
-        let script_id = match parse_script_id_from_buffer(buffer) {
-            Ok(id) => id,
-            Err(msg) => {
-                write_error_to_buffer(buffer, 1, msg);
-                return;
-            }
+        let Some(script) = scripts.remove(&script_id) else {
+            return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
         };
 
-        let _message_size = (*buffer).data_size as usize - 4;
-        let message_ptr = (*buffer).data.as_ptr().add(4);
+        gum_script_unload_sync(script, ptr::null_mut());
+        g_object_unref(script as *mut c_void);
 
-        if let Some(script) = get_script_by_id(script_id) {
-            gum_script_post(script, message_ptr, ptr::null_mut());
-            write_string_result_to_buffer(buffer, "Message posted successfully");
-        } else {
-            write_error_to_buffer(buffer, 3, "Script not found");
-        }
+        HandlerResponse::success_empty()
     }
 }
 
-unsafe fn handle_fetch_script_message_request(buffer: *mut SharedBuffer) {
+unsafe fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let message_queue = core::ptr::addr_of_mut!(MESSAGE_QUEUE).as_mut().unwrap();
-
-        if let Some((script_id, message)) = message_queue.pop_front() {
-            let script_id_bytes = script_id.to_le_bytes();
-            core::ptr::copy_nonoverlapping(
-                script_id_bytes.as_ptr(),
-                (*buffer).data.as_mut_ptr(),
-                4,
-            );
-
-            let message_bytes = message.as_bytes();
-            let message_copy_size = core::cmp::min(message_bytes.len(), 4096 - 4 - 1);
-            core::ptr::copy_nonoverlapping(
-                message_bytes.as_ptr(),
-                (*buffer).data.as_mut_ptr().add(4),
-                message_copy_size,
-            );
-            *(*buffer).data.as_mut_ptr().add(4 + message_copy_size) = 0;
-
-            (*buffer).result_code = 0;
-            (*buffer).result_size = 4 + message_copy_size as u32 + 1;
-        } else {
-            (*buffer).result_code = 0;
-            (*buffer).result_size = 0;
+        if g_variant_check_format_string(payload_variant, c"(u&s)".as_ptr(), 0) == 0 {
+            return HandlerResponse::error("Invalid payload format: expected (uint32, string)");
         }
+
+        let mut script_id: u32 = 0;
+        let mut message_ptr: *const gchar = ptr::null();
+        g_variant_get(
+            payload_variant,
+            c"(u&s)".as_ptr(),
+            &mut script_id,
+            &mut message_ptr,
+        );
+
+        let Some(script) = get_script_by_id(script_id) else {
+            return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
+        };
+
+        gum_script_post(script, message_ptr, ptr::null_mut());
+
+        HandlerResponse::success_empty()
     }
 }
 
-unsafe fn parse_script_id_from_buffer(buffer: *mut SharedBuffer) -> Result<u32, &'static str> {
-    unsafe {
-        if (*buffer).data_size < 4 {
-            return Err("Expected at least 4 bytes for script ID");
-        }
-
-        let script_id = u32::from_le_bytes([
-            (*buffer).data[0],
-            (*buffer).data[1],
-            (*buffer).data[2],
-            (*buffer).data[3],
-        ]);
-
-        Ok(script_id)
-    }
-}
-
-unsafe fn get_script_by_id(script_id: u32) -> Option<*mut bindings::GumScript> {
+unsafe fn get_script_by_id(script_id: u32) -> Option<*mut GumScript> {
     unsafe {
         let scripts = core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap();
         scripts.get(&script_id).copied()
-    }
-}
-
-unsafe fn write_string_result_to_buffer(buffer: *mut SharedBuffer, text: &str) {
-    unsafe {
-        let text_bytes = text.as_bytes();
-        let copy_size = core::cmp::min(text_bytes.len(), 4096);
-        core::ptr::copy_nonoverlapping(text_bytes.as_ptr(), (*buffer).data.as_mut_ptr(), copy_size);
-
-        (*buffer).result_code = 0;
-        (*buffer).result_size = copy_size as u32;
-    }
-}
-
-unsafe fn write_uint32_result_to_buffer(buffer: *mut SharedBuffer, value: u32) {
-    unsafe {
-        let value_bytes = value.to_le_bytes();
-        core::ptr::copy_nonoverlapping(value_bytes.as_ptr(), (*buffer).data.as_mut_ptr(), 4);
-
-        (*buffer).result_code = 0;
-        (*buffer).result_size = 4;
-    }
-}
-
-unsafe fn write_error_to_buffer(buffer: *mut SharedBuffer, error_code: u32, error_msg: &str) {
-    unsafe {
-        let error_bytes = error_msg.as_bytes();
-        let copy_size = core::cmp::min(error_bytes.len(), 4096);
-        core::ptr::copy_nonoverlapping(
-            error_bytes.as_ptr(),
-            (*buffer).data.as_mut_ptr(),
-            copy_size,
-        );
-
-        (*buffer).result_code = error_code;
-        (*buffer).result_size = copy_size as u32;
     }
 }
 
@@ -490,21 +507,6 @@ unsafe extern "C" fn frida_log_handler(
 ) {
     let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
     kprintln!("[Frida] {}", msg);
-}
-
-unsafe extern "C" fn frida_message_handler(
-    message: *const gchar,
-    _data: *mut GBytes,
-    user_data: gpointer,
-) {
-    let msg = unsafe { core::ffi::CStr::from_ptr(message).to_str().unwrap() };
-
-    if !user_data.is_null() {
-        let script_id = unsafe { *(user_data as *const u32) };
-
-        let message_queue = unsafe { core::ptr::addr_of_mut!(MESSAGE_QUEUE).as_mut().unwrap() };
-        message_queue.push_back((script_id, String::from(msg)));
-    }
 }
 
 #[panic_handler]
