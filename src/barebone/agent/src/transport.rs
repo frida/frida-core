@@ -170,17 +170,18 @@ impl<'a> TransportView<'a> {
     pub unsafe fn try_write_message(&mut self, data: &[u8]) -> bool {
         unsafe {
             let sizes = self.transport.get_buffer_sizes();
+
+            if data.len() > sizes.max_message_size * (u16::MAX as usize) {
+                return false;
+            }
+
             let fragment_id = self.transport.next_fragment_id.fetch_add(1, Ordering::Relaxed) as u16;
 
             let total_fragments = if data.len() <= sizes.max_message_size {
                 1
             } else {
                 let chunk_size = sizes.max_message_size;
-                let fragments = (data.len() + chunk_size - 1) / chunk_size;
-                if fragments > u16::MAX as usize {
-                    return false;
-                }
-                fragments
+                (data.len() + chunk_size - 1) / chunk_size
             };
 
             let pending = PendingFragment {
@@ -190,7 +191,18 @@ impl<'a> TransportView<'a> {
                 total_fragments,
             };
 
-            self.try_send_pending_fragment(pending)
+            if self.try_send_pending_fragment(pending.clone()) {
+                return true;
+            }
+
+            let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
+
+            if pending_queue.len() >= 64 {
+                return false;
+            }
+
+            pending_queue.push_back(pending);
+            true
         }
     }
 
@@ -210,9 +222,7 @@ impl<'a> TransportView<'a> {
                 let total_size = core::mem::size_of::<MessageHeader>() + pending.data.len();
 
                 if !self.has_space_tx(total_size) {
-                    let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
-                    pending_queue.push_back(pending);
-                    return true;
+                    return false;
                 }
 
                 self.write_bytes_tx(
@@ -224,15 +234,22 @@ impl<'a> TransportView<'a> {
             }
 
             let chunk_size = sizes.max_message_size;
-            let remaining_data = &pending.data;
             let mut fragments_sent = 0;
 
-            for (_local_index, chunk) in remaining_data.chunks(chunk_size).enumerate() {
+            for (chunk_index, chunk) in pending.data.chunks(chunk_size).enumerate() {
+                let global_fragment_index = pending.next_fragment_index + chunk_index;
+                let is_last_fragment = global_fragment_index == pending.total_fragments - 1;
+
+                let mut flags = MSG_FLAG_FRAGMENT;
+                if is_last_fragment {
+                    flags |= MSG_FLAG_COMPLETE;
+                }
+
                 let header = MessageHeader {
                     size: chunk.len() as u16,
                     fragment_id: pending.fragment_id,
                     fragment_count: pending.total_fragments as u16,
-                    flags: MSG_FLAG_FRAGMENT,
+                    flags,
                     _reserved: [0; 9],
                 };
 
@@ -241,12 +258,10 @@ impl<'a> TransportView<'a> {
                 if !self.has_space_tx(total_size) {
                     if fragments_sent > 0 {
                         let remaining_offset = fragments_sent * chunk_size;
-                        pending.data = remaining_data[remaining_offset..].to_vec();
+                        pending.data = pending.data[remaining_offset..].to_vec();
                         pending.next_fragment_index += fragments_sent;
                     }
-                    let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
-                    pending_queue.push_back(pending);
-                    return true;
+                    return false;
                 }
 
                 self.write_bytes_tx(
@@ -264,11 +279,19 @@ impl<'a> TransportView<'a> {
     pub unsafe fn process_pending_fragments(&mut self) {
         unsafe {
             let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
+            let mut retry_queue = VecDeque::new();
 
             while let Some(pending) = pending_queue.pop_front() {
-                if !self.try_send_pending_fragment(pending) {
+                if self.try_send_pending_fragment(pending.clone()) {
+                    continue;
+                } else {
+                    retry_queue.push_back(pending);
                     break;
                 }
+            }
+
+            while let Some(pending) = retry_queue.pop_back() {
+                pending_queue.push_front(pending);
             }
         }
     }
@@ -327,8 +350,7 @@ impl<'a> TransportView<'a> {
                     entry.extend_from_slice(payload_slice);
                     crate::xnu::free(payload_ptr, payload_size);
 
-                    let expected_total_size = (header.fragment_count as usize) * payload_size;
-                    if entry.len() >= expected_total_size {
+                    if header.flags & MSG_FLAG_COMPLETE != 0 {
                         let complete_data = fragment_cache.remove(&header.fragment_id).unwrap();
                         let final_ptr = crate::xnu::kalloc(complete_data.len());
                         if !final_ptr.is_null() {
