@@ -43,7 +43,7 @@ frida_gadget_environment_detect_bundle_name (void)
 gchar *
 frida_gadget_environment_detect_documents_dir (void)
 {
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
   @autoreleasepool
   {
     NSArray<NSString *> * paths = NSSearchPathForDirectoriesInDomains (NSDocumentDirectory, NSUserDomainMask, YES);

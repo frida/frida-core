@@ -58,7 +58,7 @@ def main(argv):
             for asset in {embedded_agent, embedded_dbghelp, embedded_symsrv}:
                 asset.write_bytes(b"")
                 embedded_assets += [asset]
-    elif host_os in {"macos", "ios", "watchos", "tvos"}:
+    elif host_os in {"macos", "ios", "watchos", "tvos", "xros"}:
         embedded_agent = priv_dir / "frida-agent.dylib"
         if agent_modern is not None and agent_legacy is not None:
             subprocess.run(lipo + [agent_modern, agent_legacy, "-create", "-output", embedded_agent],
