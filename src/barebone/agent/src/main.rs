@@ -80,7 +80,6 @@ impl HandlerResponse {
     }
 
     fn success_empty() -> Self {
-        // Return empty tuple variant "()"
         let variant = unsafe { g_variant_new(c"()".as_ptr()) };
         Self { variant }
     }
@@ -230,13 +229,16 @@ unsafe fn parse_config(config: &[u8]) {
 unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     unsafe {
         let transport = FRIDA_SHARED_TRANSPORT;
-        (*transport).process_pending_fragments();
+        let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
+        transport_view.process_pending_fragments();
 
-        while let Some(message_data) = (*transport).try_read_message_h2g() {
-            if let Some(variant) = deserialize_gvariant_message(&message_data) {
+        while let Some((message_ptr, message_size)) = transport_view.try_read_message() {
+            let message_data = core::slice::from_raw_parts(message_ptr, message_size);
+            if let Some(variant) = deserialize_gvariant_message(message_data) {
                 process_incoming_message(variant);
                 g_variant_unref(variant);
             }
+            crate::xnu::free(message_ptr, message_size);
         }
     }
 
@@ -326,7 +328,8 @@ unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
-            (*transport).try_write_message_g2h(&serialized);
+            let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
+            transport_view.try_write_message(&serialized);
         }
 
         g_variant_unref(message_variant);
@@ -414,7 +417,8 @@ unsafe fn send_script_message(script_id: u32, message: String) {
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
-            (*transport).try_write_message_g2h(&serialized);
+            let mut transport_view = (*transport).as_view(transport::TransportRole::Primary);
+            transport_view.try_write_message(&serialized);
         }
 
         g_variant_unref(payload_variant);
