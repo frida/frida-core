@@ -36,7 +36,7 @@ def main(argv):
             embedded_helper = priv_dir / f"frida-helper-{missing_arch}.exe"
             embedded_helper.write_bytes(b"")
             embedded_assets += [embedded_helper]
-    elif host_os in {"macos", "ios", "watchos", "tvos"}:
+    elif host_os in {"macos", "ios", "watchos", "tvos", "xros"}:
         embedded_helper = priv_dir / "frida-helper"
 
         if helper_modern is not None and helper_legacy is not None:
