@@ -1,16 +1,24 @@
-use alloc::collections::BTreeMap;
-use alloc::collections::VecDeque;
 use alloc::vec::Vec;
+use alloc::collections::VecDeque;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bindings::gpointer;
 use crate::gum;
 use crate::xnu;
 
-pub unsafe fn allocate_shared_transport(page_size: usize) -> (*mut SharedTransport, usize) {
-    unsafe {
-        let transport_ptr = xnu::kalloc(page_size) as *mut SharedTransport;
+#[derive(Debug, Clone)]
+struct PendingMessage {
+    remaining_data: Vec<u8>,
+    offset: usize,
+}
 
+static mut PENDING_QUEUE: VecDeque<PendingMessage> = VecDeque::new();
+static mut FRAGMENT_BUFFER: Vec<u8> = Vec::new();
+
+pub unsafe fn allocate_shared_transport(page_size: usize) -> (*mut SharedTransport, usize) {
+    let transport_ptr = xnu::kalloc(page_size) as *mut SharedTransport;
+
+    unsafe {
         core::ptr::write(
             transport_ptr,
             SharedTransport {
@@ -20,33 +28,23 @@ pub unsafe fn allocate_shared_transport(page_size: usize) -> (*mut SharedTranspo
                 channel_a_tail: AtomicU32::new(0),
                 channel_b_head: AtomicU32::new(0),
                 channel_b_tail: AtomicU32::new(0),
-                next_fragment_id: AtomicU32::new(1),
-                reserved: [0; 3],
                 data: [],
             },
         );
-
-        let physical_addr =
-            gum::gum_barebone_virtual_to_physical(transport_ptr as gpointer) as usize;
-        (transport_ptr, physical_addr)
     }
+
+    let physical_addr = gum::gum_barebone_virtual_to_physical(transport_ptr as gpointer) as usize;
+    (transport_ptr, physical_addr)
 }
 
 #[repr(C)]
 pub struct SharedTransport {
     pub magic: u32,
     pub page_size: u32,
-
     pub channel_a_head: AtomicU32,
     pub channel_a_tail: AtomicU32,
-
     pub channel_b_head: AtomicU32,
     pub channel_b_tail: AtomicU32,
-
-    pub next_fragment_id: AtomicU32,
-
-    pub reserved: [u32; 3],
-
     pub data: [u8; 0],
 }
 
@@ -59,98 +57,251 @@ pub enum TransportRole {
 pub struct TransportView<'a> {
     transport: &'a mut SharedTransport,
     role: TransportRole,
+    buffer_size: usize,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageHeader {
     pub size: u16,
-    pub fragment_id: u16,
-    pub fragment_count: u16,
     pub flags: u8,
-    pub _reserved: [u8; 9],
 }
 
 const MSG_FLAG_COMPLETE: u8 = 0x01;
-const MSG_FLAG_FRAGMENT: u8 = 0x02;
-
-#[derive(Debug, Clone)]
-struct PendingFragment {
-    data: Vec<u8>,
-    next_fragment_index: usize,
-    fragment_id: u16,
-    total_fragments: usize,
-}
-
-static mut PENDING_FRAGMENTS: VecDeque<PendingFragment> = VecDeque::new();
-static mut FRAGMENT_CACHE: BTreeMap<u16, Vec<u8>> = BTreeMap::new();
-
-pub struct TransportBuffers {
-    pub page_size: usize,
-    pub header_size: usize,
-    pub buffer_size: usize,
-    pub max_message_size: usize,
-}
-
-impl TransportBuffers {
-    pub fn new(page_size: usize) -> Self {
-        let header_size = core::mem::size_of::<SharedTransport>();
-        let available_data = page_size - header_size;
-        let buffer_size = available_data / 2;
-        let max_message_size = buffer_size - core::mem::size_of::<MessageHeader>() - 16;
-
-        Self {
-            page_size,
-            header_size,
-            buffer_size,
-            max_message_size,
-        }
-    }
-}
 
 impl SharedTransport {
     pub unsafe fn as_view(&mut self, role: TransportRole) -> TransportView {
+        let header_size = core::mem::size_of::<SharedTransport>();
+        let available_data = self.page_size as usize - header_size;
+        let buffer_size = available_data / 2;
+
         TransportView {
             transport: self,
             role,
+            buffer_size,
         }
-    }
-
-    unsafe fn get_buffer_sizes(&self) -> TransportBuffers {
-        TransportBuffers::new(self.page_size as usize)
     }
 
     unsafe fn channel_a_buffer(&self) -> *mut u8 {
-        let base = self.data.as_ptr() as *mut u8;
-        base
+        self.data.as_ptr() as *mut u8
     }
 
     unsafe fn channel_b_buffer(&self) -> *mut u8 {
-        unsafe {
-            let sizes = self.get_buffer_sizes();
-            let base = self.data.as_ptr() as *mut u8;
-            base.add(sizes.buffer_size)
-        }
+        let header_size = core::mem::size_of::<SharedTransport>();
+        let available_data = self.page_size as usize - header_size;
+        let buffer_size = available_data / 2;
+        let base = self.data.as_ptr() as *mut u8;
+        unsafe { base.add(buffer_size) }
     }
 }
 
 impl<'a> TransportView<'a> {
-    unsafe fn tx_buffer(&self) -> *mut u8 {
+    pub unsafe fn write_message(&mut self, data: &[u8]) {
+        unsafe { self.flush_pending() };
+
+        let pending = PendingMessage {
+            remaining_data: data.to_vec(),
+            offset: 0,
+        };
+
+        let queue_ptr = core::ptr::addr_of_mut!(PENDING_QUEUE);
         unsafe {
-            match self.role {
-                TransportRole::Primary => self.transport.channel_a_buffer(),
-                TransportRole::Secondary => self.transport.channel_b_buffer(),
+            (*queue_ptr).push_back(pending);
+        }
+
+        unsafe { self.flush_pending() };
+    }
+
+    pub unsafe fn try_read_message(&mut self) -> Option<Vec<u8>> {
+        let header_size = core::mem::size_of::<MessageHeader>();
+
+        if unsafe { self.available_rx_data() } < header_size {
+            return None;
+        }
+
+        let header_data = unsafe { self.peek_bytes(header_size)? };
+        let header = unsafe { core::ptr::read(header_data.as_ptr() as *const MessageHeader) };
+        if header.size == 0 || header.size as usize > self.buffer_size {
+            panic!("Protocol violation: invalid header size {}, buffer_size {}", header.size, self.buffer_size);
+        }
+
+        let total_size = header_size + header.size as usize;
+        if unsafe { self.available_rx_data() } < total_size {
+            return None;
+        }
+
+        let message_data = unsafe { self.read_bytes(total_size)? };
+        let payload = &message_data[header_size..];
+
+        let fragment_ptr = core::ptr::addr_of_mut!(FRAGMENT_BUFFER);
+
+        if header.flags & MSG_FLAG_COMPLETE != 0 {
+            unsafe {
+                if !(*fragment_ptr).is_empty() {
+                    (*fragment_ptr).extend_from_slice(payload);
+                    let complete_message = (*fragment_ptr).clone();
+                    (*fragment_ptr).clear();
+                    return Some(complete_message);
+                } else {
+                    return Some(payload.to_vec());
+                }
+            }
+        } else {
+            unsafe {
+                (*fragment_ptr).extend_from_slice(payload);
+            }
+            None
+        }
+    }
+
+    pub unsafe fn flush_pending(&mut self) {
+        let header_size = core::mem::size_of::<MessageHeader>();
+        let max_payload = self.buffer_size.saturating_sub(header_size + 1);
+
+        let queue_ptr = core::ptr::addr_of_mut!(PENDING_QUEUE);
+
+        if unsafe {
+            (*queue_ptr).is_empty()
+        } {
+            return;
+        }
+
+        let pending = unsafe {
+            (*queue_ptr).front().cloned().unwrap()
+        };
+
+        let remaining = pending.remaining_data.len() - pending.offset;
+        let chunk_size = remaining.min(max_payload);
+        let total_needed = header_size + chunk_size;
+
+        if unsafe { self.available_tx_space() } < total_needed {
+            return;
+        }
+
+        let chunk = &pending.remaining_data[pending.offset..pending.offset + chunk_size];
+        let is_last = pending.offset + chunk_size >= pending.remaining_data.len();
+
+        let flags = if is_last { MSG_FLAG_COMPLETE } else { 0 };
+
+        let header = MessageHeader {
+            size: chunk_size as u16,
+            flags,
+        };
+
+        let header_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &header as *const _ as *const u8,
+                header_size
+            )
+        };
+
+        let mut combined_data = Vec::with_capacity(header_size + chunk.len());
+        combined_data.extend_from_slice(header_bytes);
+        combined_data.extend_from_slice(chunk);
+
+        unsafe { self.write_bytes(&combined_data) };
+
+        if !is_last {
+            unsafe {
+                if let Some(front_msg) = (*queue_ptr).front_mut() {
+                    front_msg.offset += chunk_size;
+                }
+            }
+        } else {
+            unsafe {
+                (*queue_ptr).pop_front();
             }
         }
     }
 
-    unsafe fn rx_buffer(&self) -> *mut u8 {
-        unsafe {
-            match self.role {
-                TransportRole::Primary => self.transport.channel_b_buffer(),
-                TransportRole::Secondary => self.transport.channel_a_buffer(),
+    pub unsafe fn available_tx_space(&self) -> usize {
+        let (head, tail) = unsafe { self.tx_pointers() };
+        let head_val = head.load(Ordering::Acquire);
+        let tail_val = tail.load(Ordering::Acquire);
+
+        if head_val >= tail_val {
+            self.buffer_size - (head_val - tail_val) as usize - 1
+        } else {
+            (tail_val - head_val) as usize - 1
+        }
+    }
+
+    unsafe fn write_bytes(&mut self, data: &[u8]) {
+        if unsafe { self.available_tx_space() } < data.len() {
+            panic!("Insufficient space: need {} bytes, have {} bytes", data.len(), unsafe { self.available_tx_space() });
+        }
+
+        let (head, _tail) = unsafe { self.tx_pointers() };
+        let head_val = head.load(Ordering::Acquire);
+        let buffer = unsafe { self.tx_buffer() };
+        let pos = head_val as usize % self.buffer_size;
+
+        if pos + data.len() <= self.buffer_size {
+            unsafe {
+                core::ptr::copy_nonoverlapping(data.as_ptr(), buffer.add(pos), data.len());
+            }
+        } else {
+            let first = self.buffer_size - pos;
+            let second = data.len() - first;
+            unsafe {
+                core::ptr::copy_nonoverlapping(data.as_ptr(), buffer.add(pos), first);
+                core::ptr::copy_nonoverlapping(data.as_ptr().add(first), buffer, second);
             }
         }
+
+        head.store(head_val + data.len() as u32, Ordering::Release);
+    }
+
+    unsafe fn available_rx_data(&self) -> usize {
+        let (head, tail) = unsafe { self.rx_pointers() };
+        let head_val = head.load(Ordering::Acquire);
+        let tail_val = tail.load(Ordering::Acquire);
+
+        if head_val >= tail_val {
+            (head_val - tail_val) as usize
+        } else {
+            self.buffer_size - (tail_val - head_val) as usize
+        }
+    }
+
+    unsafe fn read_bytes(&mut self, size: usize) -> Option<Vec<u8>> {
+        unsafe { self.read_bytes_common(size, true) }
+    }
+
+    unsafe fn peek_bytes(&self, size: usize) -> Option<Vec<u8>> {
+        unsafe { self.read_bytes_common(size, false) }
+    }
+
+    unsafe fn read_bytes_common(&self, size: usize, advance_tail: bool) -> Option<Vec<u8>> {
+        if unsafe { self.available_rx_data() } < size {
+            return None;
+        }
+
+        let (_head, tail) = unsafe { self.rx_pointers() };
+        let tail_val = tail.load(Ordering::Acquire);
+        let buffer = unsafe { self.rx_buffer() };
+        let pos = tail_val as usize % self.buffer_size;
+
+        let mut data = alloc::vec![0u8; size];
+
+        if pos + size <= self.buffer_size {
+            unsafe {
+                core::ptr::copy_nonoverlapping(buffer.add(pos), data.as_mut_ptr(), size);
+            }
+        } else {
+            let first = self.buffer_size - pos;
+            let second = size - first;
+            unsafe {
+                core::ptr::copy_nonoverlapping(buffer.add(pos), data.as_mut_ptr(), first);
+                core::ptr::copy_nonoverlapping(buffer, data.as_mut_ptr().add(first), second);
+            }
+        }
+
+        if advance_tail {
+            tail.store(tail_val + size as u32, Ordering::Release);
+        }
+
+        Some(data)
     }
 
     unsafe fn tx_pointers(&self) -> (&AtomicU32, &AtomicU32) {
@@ -167,328 +318,17 @@ impl<'a> TransportView<'a> {
         }
     }
 
-    pub unsafe fn try_write_message(&mut self, data: &[u8]) -> bool {
-        unsafe {
-            let sizes = self.transport.get_buffer_sizes();
-
-            if data.len() > sizes.max_message_size * (u16::MAX as usize) {
-                return false;
-            }
-
-            let fragment_id = self.transport.next_fragment_id.fetch_add(1, Ordering::Relaxed) as u16;
-
-            let total_fragments = if data.len() <= sizes.max_message_size {
-                1
-            } else {
-                let chunk_size = sizes.max_message_size;
-                (data.len() + chunk_size - 1) / chunk_size
-            };
-
-            let pending = PendingFragment {
-                data: data.to_vec(),
-                next_fragment_index: 0,
-                fragment_id,
-                total_fragments,
-            };
-
-            if self.try_send_pending_fragment(pending.clone()) {
-                return true;
-            }
-
-            let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
-
-            if pending_queue.len() >= 64 {
-                return false;
-            }
-
-            pending_queue.push_back(pending);
-            true
+    unsafe fn tx_buffer(&self) -> *mut u8 {
+        match self.role {
+            TransportRole::Primary => unsafe { self.transport.channel_a_buffer() },
+            TransportRole::Secondary => unsafe { self.transport.channel_b_buffer() },
         }
     }
 
-    unsafe fn try_send_pending_fragment(&mut self, mut pending: PendingFragment) -> bool {
-        unsafe {
-            let sizes = self.transport.get_buffer_sizes();
-
-            if pending.total_fragments == 1 {
-                let header = MessageHeader {
-                    size: pending.data.len() as u16,
-                    fragment_id: 0,
-                    fragment_count: 0,
-                    flags: MSG_FLAG_COMPLETE,
-                    _reserved: [0; 9],
-                };
-
-                let total_size = core::mem::size_of::<MessageHeader>() + pending.data.len();
-
-                if !self.has_space_tx(total_size) {
-                    return false;
-                }
-
-                self.write_bytes_tx(
-                    &header as *const MessageHeader as *const u8,
-                    core::mem::size_of::<MessageHeader>(),
-                );
-                self.write_bytes_tx(pending.data.as_ptr(), pending.data.len());
-                return true;
-            }
-
-            let chunk_size = sizes.max_message_size;
-            let mut fragments_sent = 0;
-
-            for (chunk_index, chunk) in pending.data.chunks(chunk_size).enumerate() {
-                let global_fragment_index = pending.next_fragment_index + chunk_index;
-                let is_last_fragment = global_fragment_index == pending.total_fragments - 1;
-
-                let mut flags = MSG_FLAG_FRAGMENT;
-                if is_last_fragment {
-                    flags |= MSG_FLAG_COMPLETE;
-                }
-
-                let header = MessageHeader {
-                    size: chunk.len() as u16,
-                    fragment_id: pending.fragment_id,
-                    fragment_count: pending.total_fragments as u16,
-                    flags,
-                    _reserved: [0; 9],
-                };
-
-                let total_size = core::mem::size_of::<MessageHeader>() + chunk.len();
-
-                if !self.has_space_tx(total_size) {
-                    if fragments_sent > 0 {
-                        let remaining_offset = fragments_sent * chunk_size;
-                        pending.data = pending.data[remaining_offset..].to_vec();
-                        pending.next_fragment_index += fragments_sent;
-                    }
-                    return false;
-                }
-
-                self.write_bytes_tx(
-                    &header as *const MessageHeader as *const u8,
-                    core::mem::size_of::<MessageHeader>(),
-                );
-                self.write_bytes_tx(chunk.as_ptr(), chunk.len());
-                fragments_sent += 1;
-            }
-
-            true
-        }
-    }
-
-    pub unsafe fn process_pending_fragments(&mut self) {
-        unsafe {
-            let pending_queue = core::ptr::addr_of_mut!(PENDING_FRAGMENTS).as_mut().unwrap();
-            let mut retry_queue = VecDeque::new();
-
-            while let Some(pending) = pending_queue.pop_front() {
-                if self.try_send_pending_fragment(pending.clone()) {
-                    continue;
-                } else {
-                    retry_queue.push_back(pending);
-                    break;
-                }
-            }
-
-            while let Some(pending) = retry_queue.pop_back() {
-                pending_queue.push_front(pending);
-            }
-        }
-    }
-
-    pub unsafe fn try_read_message(&mut self) -> Option<(*mut u8, usize)> {
-        unsafe {
-            if let Some(header) = self.peek_header_rx() {
-                if header.flags & MSG_FLAG_COMPLETE != 0 {
-                    self.advance_tail_rx(core::mem::size_of::<MessageHeader>());
-
-                    let message_size = header.size as usize;
-                    if self.available_bytes_rx() >= message_size {
-                        let message_ptr = crate::xnu::kalloc(message_size);
-                        if !message_ptr.is_null() {
-                            if self.read_bytes_rx(message_ptr, message_size) {
-                                return Some((message_ptr, message_size));
-                            }
-                            crate::xnu::free(message_ptr, message_size);
-                        }
-                    }
-                } else if header.flags & MSG_FLAG_FRAGMENT != 0 {
-                    return self.handle_fragment_rx();
-                }
-            }
-            None
-        }
-    }
-
-    unsafe fn handle_fragment_rx(&mut self) -> Option<(*mut u8, usize)> {
-        unsafe {
-            if let Some(header) = self.peek_header_rx() {
-                let available = self.available_bytes_rx();
-                let header_size = core::mem::size_of::<MessageHeader>();
-                let total_message_size = header_size + header.size as usize;
-
-                if available >= total_message_size {
-                    self.advance_tail_rx(header_size);
-
-                    let payload_size = header.size as usize;
-                    let payload_ptr = crate::xnu::kalloc(payload_size);
-                    if payload_ptr.is_null() {
-                        return None;
-                    }
-
-                    if !self.read_bytes_rx(payload_ptr, payload_size) {
-                        crate::xnu::free(payload_ptr, payload_size);
-                        return None;
-                    }
-
-                    let fragment_cache = core::ptr::addr_of_mut!(FRAGMENT_CACHE).as_mut().unwrap();
-                    let entry = fragment_cache
-                        .entry(header.fragment_id)
-                        .or_insert_with(Vec::new);
-
-                    let payload_slice = core::slice::from_raw_parts(payload_ptr, payload_size);
-                    entry.extend_from_slice(payload_slice);
-                    crate::xnu::free(payload_ptr, payload_size);
-
-                    if header.flags & MSG_FLAG_COMPLETE != 0 {
-                        let complete_data = fragment_cache.remove(&header.fragment_id).unwrap();
-                        let final_ptr = crate::xnu::kalloc(complete_data.len());
-                        if !final_ptr.is_null() {
-                            core::ptr::copy_nonoverlapping(complete_data.as_ptr(), final_ptr, complete_data.len());
-                            return Some((final_ptr, complete_data.len()));
-                        }
-                    }
-                }
-            }
-            None
-        }
-    }
-
-    unsafe fn has_space_tx(&self, size: usize) -> bool {
-        unsafe {
-            let sizes = self.transport.get_buffer_sizes();
-            let (head, tail) = self.tx_pointers();
-            let head_val = head.load(Ordering::Acquire);
-            let tail_val = tail.load(Ordering::Acquire);
-            let available = if head_val >= tail_val {
-                sizes.buffer_size - (head_val - tail_val) as usize - 1
-            } else {
-                (tail_val - head_val) as usize - 1
-            };
-            available >= size
-        }
-    }
-
-    unsafe fn write_bytes_tx(&mut self, data: *const u8, size: usize) {
-        unsafe {
-            let sizes = self.transport.get_buffer_sizes();
-            let (head, _tail) = self.tx_pointers();
-            let head_val = head.load(Ordering::Acquire);
-            let buffer = self.tx_buffer();
-            let head_pos = head_val as usize % sizes.buffer_size;
-
-            if head_pos + size <= sizes.buffer_size {
-                core::ptr::copy_nonoverlapping(data, buffer.add(head_pos), size);
-            } else {
-                let first_chunk = sizes.buffer_size - head_pos;
-                let second_chunk = size - first_chunk;
-
-                core::ptr::copy_nonoverlapping(data, buffer.add(head_pos), first_chunk);
-                core::ptr::copy_nonoverlapping(data.add(first_chunk), buffer, second_chunk);
-            }
-
-            head.store(
-                (head_val + size as u32) % sizes.buffer_size as u32,
-                Ordering::Release,
-            );
-        }
-    }
-
-    unsafe fn peek_header_rx(&self) -> Option<MessageHeader> {
-        unsafe {
-            let available = self.available_bytes_rx();
-            if available < core::mem::size_of::<MessageHeader>() {
-                return None;
-            }
-
-            let sizes = self.transport.get_buffer_sizes();
-            let (_head, tail) = self.rx_pointers();
-            let tail_val = tail.load(Ordering::Acquire);
-            let buffer = self.rx_buffer();
-            let tail_pos = tail_val as usize % sizes.buffer_size;
-            let header_size = core::mem::size_of::<MessageHeader>();
-
-            let mut header: MessageHeader = core::mem::zeroed();
-            let header_ptr = &mut header as *mut MessageHeader as *mut u8;
-
-            if tail_pos + header_size <= sizes.buffer_size {
-                core::ptr::copy_nonoverlapping(buffer.add(tail_pos), header_ptr, header_size);
-            } else {
-                let first_chunk = sizes.buffer_size - tail_pos;
-                let second_chunk = header_size - first_chunk;
-
-                core::ptr::copy_nonoverlapping(buffer.add(tail_pos), header_ptr, first_chunk);
-                core::ptr::copy_nonoverlapping(buffer, header_ptr.add(first_chunk), second_chunk);
-            }
-
-            Some(header)
-        }
-    }
-
-    unsafe fn advance_tail_rx(&mut self, size: usize) {
-        unsafe {
-            let sizes = self.transport.get_buffer_sizes();
-            let (_head, tail) = self.rx_pointers();
-            let tail_val = tail.load(Ordering::Acquire);
-            tail.store(
-                (tail_val + size as u32) % sizes.buffer_size as u32,
-                Ordering::Release,
-            );
-        }
-    }
-
-    unsafe fn read_bytes_rx(&mut self, dest: *mut u8, size: usize) -> bool {
-        unsafe {
-            if self.available_bytes_rx() < size {
-                return false;
-            }
-
-            let sizes = self.transport.get_buffer_sizes();
-            let (_head, tail) = self.rx_pointers();
-            let tail_val = tail.load(Ordering::Acquire);
-            let buffer = self.rx_buffer();
-            let tail_pos = tail_val as usize % sizes.buffer_size;
-
-            if tail_pos + size <= sizes.buffer_size {
-                core::ptr::copy_nonoverlapping(buffer.add(tail_pos), dest, size);
-            } else {
-                let first_chunk = sizes.buffer_size - tail_pos;
-                let second_chunk = size - first_chunk;
-
-                core::ptr::copy_nonoverlapping(buffer.add(tail_pos), dest, first_chunk);
-                core::ptr::copy_nonoverlapping(buffer, dest.add(first_chunk), second_chunk);
-            }
-
-            tail.store(
-                (tail_val + size as u32) % sizes.buffer_size as u32,
-                Ordering::Release,
-            );
-            true
-        }
-    }
-
-    unsafe fn available_bytes_rx(&self) -> usize {
-        unsafe {
-            let (head, tail) = self.rx_pointers();
-            let head_val = head.load(Ordering::Acquire);
-            let tail_val = tail.load(Ordering::Acquire);
-            let sizes = self.transport.get_buffer_sizes();
-
-            if head_val >= tail_val {
-                (head_val - tail_val) as usize
-            } else {
-                sizes.buffer_size - (tail_val - head_val) as usize
-            }
+    unsafe fn rx_buffer(&self) -> *mut u8 {
+        match self.role {
+            TransportRole::Primary => unsafe { self.transport.channel_b_buffer() },
+            TransportRole::Secondary => unsafe { self.transport.channel_a_buffer() },
         }
     }
 }
