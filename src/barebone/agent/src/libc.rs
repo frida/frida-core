@@ -1,6 +1,18 @@
 use core::ptr;
-use crate::bindings::GMutex;
+use crate::bindings::{GMutex, GRecMutex};
 use crate::gthread;
+
+static mut MALLOC_LOCK: GRecMutex = unsafe { core::mem::zeroed() };
+
+#[unsafe(no_mangle)]
+pub extern "C" fn __malloc_lock(_reent: *mut core::ffi::c_void) {
+    gthread::g_rec_mutex_lock(ptr::addr_of_mut!(MALLOC_LOCK));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn __malloc_unlock(_reent: *mut core::ffi::c_void) {
+    gthread::g_rec_mutex_unlock(ptr::addr_of_mut!(MALLOC_LOCK));
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _fini() {
