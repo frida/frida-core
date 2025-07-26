@@ -189,11 +189,10 @@ namespace Frida.Barebone {
 			uint32 head_val = AtomicUint.@get (ref channel->head);
 			uint32 tail_val = AtomicUint.@get (ref channel->tail);
 
-			if (head_val >= tail_val) {
+			if (head_val >= tail_val)
 				return buffer_size - (head_val - tail_val) - 1;
-			} else {
+			else
 				return (tail_val - head_val) - 1;
-			}
 		}
 
 		private void write_bytes (Bytes data) throws Error {
@@ -252,12 +251,12 @@ namespace Frida.Barebone {
 			var data = new uint8[size];
 
 			if (pos + size <= buffer_size) {
-				Memory.copy (buffer + pos, data, size);
+				Memory.copy (data, buffer + pos, size);
 			} else {
 				size_t first = buffer_size - pos;
 				size_t second = size - first;
-				Memory.copy (buffer + pos, data, first);
-				Memory.copy (buffer, (uint8 *) data + first, second);
+				Memory.copy (data, buffer + pos, first);
+				Memory.copy ((uint8 *) data + first, buffer, second);
 			}
 
 			if (advance_tail) {
