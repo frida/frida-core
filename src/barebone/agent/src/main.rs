@@ -79,7 +79,9 @@ impl HandlerResponse {
     }
 
     fn error(message: &str) -> Self {
-        let error_variant = unsafe { g_variant_new_string(message.as_ptr()) };
+        let mut c_message = String::from(message);
+        c_message.push('\0');
+        let error_variant = unsafe { g_variant_new_string(c_message.as_ptr()) };
 
         Self {
             variant: error_variant,
@@ -230,7 +232,7 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
     1
 }
 
-unsafe fn serialize_gvariant_message(variant: *mut GVariant) -> Option<Vec<u8>> {
+unsafe fn serialize_message(variant: *mut GVariant) -> Option<Vec<u8>> {
     unsafe {
         let size = g_variant_get_size(variant) as usize;
         if size == 0 {
@@ -240,7 +242,6 @@ unsafe fn serialize_gvariant_message(variant: *mut GVariant) -> Option<Vec<u8>> 
         let data_ptr = g_variant_get_data(variant) as *const u8;
         let mut result = Vec::with_capacity(size);
         result.resize(size, 0);
-
         core::ptr::copy_nonoverlapping(data_ptr, result.as_mut_ptr(), size);
 
         Some(result)
@@ -311,7 +312,7 @@ unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
             response.variant,
         );
 
-        if let Some(serialized) = serialize_gvariant_message(message) {
+        if let Some(serialized) = serialize_message(message) {
             let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
             transport_view.write_message(&serialized);
         }
@@ -325,7 +326,6 @@ unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerRespons
         if g_variant_check_format_string(payload_variant, c"s".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected string");
         }
-
         let source = g_variant_get_string(payload_variant, core::ptr::null_mut());
 
         let backend = gum_script_backend_obtain_qjs();
@@ -382,7 +382,7 @@ unsafe extern "C" fn frida_message_handler(
             g_variant_new(c"(us)".as_ptr(), script_id, message),
         );
 
-        if let Some(serialized) = serialize_gvariant_message(message_variant) {
+        if let Some(serialized) = serialize_message(message_variant) {
             let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
             transport_view.write_message(&serialized);
         }
