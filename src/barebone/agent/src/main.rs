@@ -14,13 +14,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bindings::{
     GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
-    g_main_loop_new, g_main_loop_run, g_object_unref, g_timeout_add, g_variant_check_format_string,
-    g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size,
-    g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new,
-    g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32,
-    g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean, gchar, gpointer, gsize,
-    gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync,
-    gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+    g_main_loop_new, g_main_loop_run, g_memdup2, g_object_unref, g_timeout_add,
+    g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data,
+    g_variant_get_size, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next,
+    g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple,
+    g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean,
+    gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
+    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
 };
 use crate::symbols::SymbolTable;
 
@@ -86,7 +86,7 @@ impl HandlerResponse {
     }
 
     fn error(message: &str) -> Self {
-        let error_variant = unsafe { g_variant_new_string(message.as_ptr() as *const gchar) };
+        let error_variant = unsafe { g_variant_new_string(message.as_ptr()) };
 
         Self {
             variant: error_variant,
@@ -263,13 +263,14 @@ unsafe fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
         }
 
         let variant_type = g_variant_type_new(c"(yqv)".as_ptr());
+        let data_copy = g_memdup2(data.as_ptr() as *const c_void, data.len() as u64);
         let variant = g_variant_new_from_data(
             variant_type,
-            data.as_ptr() as *const core::ffi::c_void,
-            data.len() as gsize,
+            data_copy,
+            data.len() as u64,
             0,
-            None,
-            ptr::null_mut(),
+            Some(g_free),
+            data_copy,
         );
         g_variant_type_free(variant_type);
 
@@ -447,19 +448,19 @@ unsafe fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerR
         }
 
         let mut script_id: u32 = 0;
-        let mut message_ptr: *const gchar = ptr::null();
+        let mut message: *const gchar = ptr::null();
         g_variant_get(
             payload_variant,
             c"(u&s)".as_ptr(),
             &mut script_id,
-            &mut message_ptr,
+            &mut message,
         );
 
         let Some(script) = get_script_by_id(script_id) else {
             return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
         };
 
-        gum_script_post(script, message_ptr, ptr::null_mut());
+        gum_script_post(script, message, ptr::null_mut());
 
         HandlerResponse::success_empty()
     }
