@@ -17,9 +17,10 @@ use crate::bindings::{
     g_main_loop_new, g_main_loop_run, g_object_unref, g_timeout_add, g_variant_check_format_string,
     g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size,
     g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new,
-    g_variant_new_from_data, g_variant_new_variant, g_variant_type_new, g_variant_unref, gboolean,
-    gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
-    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+    g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32,
+    g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean, gchar, gpointer, gsize,
+    gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync,
+    gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
 };
 use crate::symbols::SymbolTable;
 
@@ -80,26 +81,15 @@ impl HandlerResponse {
     }
 
     fn success_empty() -> Self {
-        let variant = unsafe { g_variant_new(c"()".as_ptr()) };
+        let variant = unsafe { g_variant_new_tuple(ptr::null(), 0) };
         Self { variant }
     }
 
     fn error(message: &str) -> Self {
-        let error_variant =
-            unsafe { g_variant_new(c"s".as_ptr(), message.as_ptr() as *const gchar) };
+        let error_variant = unsafe { g_variant_new_string(message.as_ptr() as *const gchar) };
 
         Self {
             variant: error_variant,
-        }
-    }
-}
-
-impl Drop for HandlerResponse {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.variant.is_null() {
-                g_variant_unref(self.variant);
-            }
         }
     }
 }
@@ -133,8 +123,13 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
         let page_size = gum::gum_barebone_query_page_size() as usize;
 
         FRIDA_SHARED_TRANSPORT = xnu::kalloc(page_size) as *mut transport::SharedTransport;
-        core::ptr::write(FRIDA_SHARED_TRANSPORT, transport::SharedTransport::new(page_size));
-        let physical_addr = gum::gum_barebone_virtual_to_physical(FRIDA_SHARED_TRANSPORT as bindings::gpointer) as usize;
+        core::ptr::write(
+            FRIDA_SHARED_TRANSPORT,
+            transport::SharedTransport::new(page_size),
+        );
+        let physical_addr =
+            gum::gum_barebone_virtual_to_physical(FRIDA_SHARED_TRANSPORT as bindings::gpointer)
+                as usize;
 
         TRANSPORT_VIEW = Some((*FRIDA_SHARED_TRANSPORT).as_view(transport::TransportRole::Primary));
 
@@ -227,6 +222,7 @@ unsafe fn parse_config(config: &[u8]) {
         g_variant_unref(module_info_variant);
         g_variant_unref(kernel_base_variant);
         g_variant_unref(root_variant);
+        g_variant_type_free(variant_type);
     }
 }
 
@@ -278,6 +274,7 @@ unsafe fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
             None,
             ptr::null_mut(),
         );
+        g_variant_type_free(variant_type);
 
         if variant.is_null() {
             None
@@ -318,13 +315,11 @@ unsafe fn process_incoming_message(variant: *mut GVariant) {
 
 unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
     unsafe {
-        let payload_variant = g_variant_new_variant(response.variant);
-
         let message_variant = g_variant_new(
             c"(yqv)".as_ptr(),
             FridaCommand::Reply as u8 as u32,
             request_id as u32,
-            payload_variant,
+            response.variant,
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
@@ -333,7 +328,6 @@ unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
         }
 
         g_variant_unref(message_variant);
-        g_variant_unref(payload_variant);
     }
 }
 
@@ -381,7 +375,7 @@ unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerRespons
             .unwrap()
             .insert(script_id, script);
 
-        HandlerResponse::success(g_variant_new(c"u".as_ptr(), script_id))
+        HandlerResponse::success(g_variant_new_uint32(script_id))
     }
 }
 
@@ -391,27 +385,13 @@ unsafe extern "C" fn frida_message_handler(
     user_data: gpointer,
 ) {
     unsafe {
-        let msg = core::ffi::CStr::from_ptr(message).to_str().unwrap();
-
         let script_id = *(user_data as *const u32);
-
-        send_script_message(script_id, String::from(msg));
-    }
-}
-
-unsafe fn send_script_message(script_id: u32, message: String) {
-    unsafe {
-        let payload_variant = g_variant_new(
-            c"(us)".as_ptr(),
-            script_id,
-            message.as_ptr() as *const gchar,
-        );
 
         let message_variant = g_variant_new(
             c"(yqv)".as_ptr(),
             FridaCommand::ScriptMessage as u8 as u32,
             0u32,
-            payload_variant,
+            g_variant_new(c"(us)".as_ptr(), script_id, message),
         );
 
         if let Some(serialized) = serialize_gvariant_message(message_variant) {
@@ -419,7 +399,6 @@ unsafe fn send_script_message(script_id: u32, message: String) {
             transport_view.write_message(&serialized);
         }
 
-        g_variant_unref(payload_variant);
         g_variant_unref(message_variant);
     }
 }

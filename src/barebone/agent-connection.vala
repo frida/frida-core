@@ -191,7 +191,7 @@ namespace Frida.Barebone {
 		}
 
 		public async AgentScriptId create_script (string source, Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(s)", source);
+			var payload = new Variant ("s", source);
 			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable);
 			if (!response.check_format_string ("u", false))
 				throw new Error.PROTOCOL ("Invalid create_script response format");
