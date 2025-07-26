@@ -233,9 +233,9 @@ namespace Frida.Barebone {
 
 			var timeout_source = new TimeoutSource (COMMAND_TIMEOUT_MS);
 			timeout_source.set_callback (() => {
-				Promise<Variant>? removed_promise;
-				if (pending_requests.unset (request_id, out removed_promise))
-					removed_promise.reject (new Error.TIMED_OUT ("Command timed out"));
+				Promise<Variant>? p;
+				if (pending_requests.unset (request_id, out p))
+					p.reject (new Error.TIMED_OUT ("Command timed out"));
 				return Source.REMOVE;
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
@@ -258,6 +258,8 @@ namespace Frida.Barebone {
 					source.set_callback (process_incoming_messages.callback);
 					source.attach (main_context);
 					yield;
+
+					transport.flush_pending ();
 
 					Bytes? message_bytes = transport.try_read_message ();
 					if (message_bytes == null)
