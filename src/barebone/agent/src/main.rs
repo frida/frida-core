@@ -13,14 +13,7 @@ use core::ptr::null_mut;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bindings::{
-    GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
-    g_main_loop_new, g_main_loop_run, g_memdup2, g_object_unref, g_timeout_add,
-    g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data,
-    g_variant_get_size, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next,
-    g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple,
-    g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean,
-    gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
-    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+    g_error_free, g_free, g_main_loop_new, g_main_loop_run, g_memdup2, g_object_unref, g_timeout_add, g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean, gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync, GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript
 };
 use crate::symbols::SymbolTable;
 
@@ -194,12 +187,9 @@ unsafe fn parse_config(config: &[u8]) {
             &stop_func_offset,
         ) != 0
         {
-            let name = CStr::from_ptr(raw_name).to_str().unwrap();
-            let version = CStr::from_ptr(raw_version).to_str().unwrap();
-
             (*module_infos).push(ModuleInfo {
-                name: String::from(name),
-                version: String::from(version),
+                name: String::from(CStr::from_ptr(raw_name).to_str().unwrap()),
+                version: String::from(CStr::from_ptr(raw_version).to_str().unwrap()),
                 offset,
                 size,
                 start_func_offset,
@@ -252,6 +242,7 @@ unsafe fn serialize_gvariant_message(variant: *mut GVariant) -> Option<Vec<u8>> 
         result.resize(size, 0);
 
         core::ptr::copy_nonoverlapping(data_ptr, result.as_mut_ptr(), size);
+
         Some(result)
     }
 }
@@ -313,19 +304,19 @@ unsafe fn process_incoming_message(variant: *mut GVariant) {
 
 unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
     unsafe {
-        let message_variant = g_variant_new(
+        let message = g_variant_new(
             c"(yqv)".as_ptr(),
             FridaCommand::Reply as u8 as u32,
             request_id as u32,
             response.variant,
         );
 
-        if let Some(serialized) = serialize_gvariant_message(message_variant) {
+        if let Some(serialized) = serialize_gvariant_message(message) {
             let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
             transport_view.write_message(&serialized);
         }
 
-        g_variant_unref(message_variant);
+        g_variant_unref(message);
     }
 }
 
@@ -335,8 +326,7 @@ unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerRespons
             return HandlerResponse::error("Invalid payload format: expected string");
         }
 
-        let mut source_ptr: *const gchar = ptr::null();
-        g_variant_get(payload_variant, c"&s".as_ptr(), &mut source_ptr);
+        let source = g_variant_get_string(payload_variant, core::ptr::null_mut());
 
         let backend = gum_script_backend_obtain_qjs();
         let cancellable: *mut GCancellable = ptr::null_mut();
@@ -345,7 +335,7 @@ unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerRespons
         let script = gum_script_backend_create_sync(
             backend,
             c"agent.js".as_ptr(),
-            source_ptr,
+            source,
             ptr::null_mut(),
             cancellable,
             &mut error,
@@ -406,9 +396,7 @@ unsafe fn handle_load_script(payload_variant: *mut GVariant) -> HandlerResponse 
         if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected uint32");
         }
-
-        let mut script_id: u32 = 0;
-        g_variant_get(payload_variant, c"u".as_ptr(), &mut script_id);
+        let script_id = g_variant_get_uint32(payload_variant);
 
         let Some(script) = get_script_by_id(script_id) else {
             return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
@@ -425,9 +413,7 @@ unsafe fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerRespon
         if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected uint32");
         }
-
-        let mut script_id: u32 = 0;
-        g_variant_get(payload_variant, c"u".as_ptr(), &mut script_id);
+        let script_id = g_variant_get_uint32(payload_variant);
 
         let scripts = core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap();
         let Some(script) = scripts.remove(&script_id) else {
@@ -446,7 +432,6 @@ unsafe fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerR
         if g_variant_check_format_string(payload_variant, c"(us)".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected (uint32, string)");
         }
-
         let mut script_id: u32 = 0;
         let mut message: *const gchar = ptr::null();
         g_variant_get(
