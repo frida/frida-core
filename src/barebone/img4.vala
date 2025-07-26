@@ -15,7 +15,6 @@ namespace Frida.Barebone.Img4 {
 
 		string first_magic = Der.read_string (r);
 
-		bool standalone_im4p = false;
 		if (first_magic == "IMG4") {
 			if (r.read_uint8 () != Der.SEQUENCE)
 				throw new Error.PROTOCOL ("Expected SEQUENCE for IM4P");
@@ -23,9 +22,7 @@ namespace Frida.Barebone.Img4 {
 			seq_end = r.offset + im4p_len;
 			if (Der.read_string (r) != "IM4P")
 				throw new Error.PROTOCOL ("Missing IM4P magic");
-		} else if (first_magic == "IM4P") {
-			standalone_im4p = true;
-		} else {
+		} else if (first_magic != "IM4P") {
 			throw new Error.PROTOCOL ("Not an IMG4/IM4P container (magic='%s')", first_magic);
 		}
 

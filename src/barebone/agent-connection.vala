@@ -416,9 +416,8 @@ namespace Frida.Barebone {
 
 			var all_symbols = new Gee.ArrayList<SymbolInfo> ();
 			foreach (var entry in symbol_table.entries) {
-				foreach (var symbol in entry.value) {
+				foreach (var symbol in entry.value)
 					all_symbols.add (symbol);
-				}
 			}
 
 			uint total_symbols = all_symbols.size;
@@ -438,6 +437,7 @@ namespace Frida.Barebone {
 				symbol_offsets[i] = (uint32) builder.offset;
 
 				builder.append_uint32 (symbol.offset);
+				// TODO: Only include details we need.
 				builder.append_uint8 (symbol.symbol_type);
 				builder.append_uint8 (symbol.section);
 				builder.append_uint16 (symbol.description);
