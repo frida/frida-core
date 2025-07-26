@@ -185,7 +185,7 @@ unsafe fn parse_config(config: &[u8]) {
         let stop_func_offset: u32 = 0;
         while g_variant_iter_next(
             &mut iter as *mut GVariantIter,
-            c"(ssuuuu)".as_ptr(),
+            c"(&s&suuuu)".as_ptr(),
             &raw_name,
             &raw_version,
             &offset,
@@ -205,9 +205,6 @@ unsafe fn parse_config(config: &[u8]) {
                 start_func_offset,
                 stop_func_offset,
             });
-
-            g_free(raw_name as *mut c_void);
-            g_free(raw_version as *mut c_void);
         }
 
         let symbol_array_variant = g_variant_get_child_value(root_variant, 2);
@@ -445,7 +442,7 @@ unsafe fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerRespon
 
 unsafe fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
-        if g_variant_check_format_string(payload_variant, c"(u&s)".as_ptr(), 0) == 0 {
+        if g_variant_check_format_string(payload_variant, c"(us)".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected (uint32, string)");
         }
 
