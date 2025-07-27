@@ -22,6 +22,7 @@ const THREAD_WAKEUP_ADDR: usize = 0xfffffff0_07a5_8ea0;
 const MACH_ABSOLUTE_TIME_ADDR: usize = 0xfffffff0_07b6_0cc0;
 const ABSOLUTETIME_TO_NANOSECONDS_ADDR: usize = 0xfffffff0_07b6_11e4;
 const CLOCK_GET_CALENDAR_MICROTIME_ADDR: usize = 0xfffffff0_07a2_332c;
+const ML_IO_MAP_ADDR: usize = 0xfffffff0_07b5_ba04;
 const ML_VTOPHYS_ADDR: usize = 0xfffffff0_07b5_c4a0;
 const ML_INSTALL_INTERRUPT_HANDLER_ADDR: usize = 0xfffffff0_07b5_aac4;
 
@@ -154,6 +155,14 @@ pub fn clock_get_calendar_microtime() -> (u32, u32) {
         func(&mut secs, &mut microsecs);
     }
     (secs, microsecs)
+}
+
+pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut core::ffi::c_void {
+    type MlIoMapFn = unsafe extern "C" fn(phys_addr: u64, size: u64) -> *mut core::ffi::c_void;
+    unsafe {
+        let func: MlIoMapFn = core::mem::transmute(ML_IO_MAP_ADDR);
+        func(phys_addr, size)
+    }
 }
 
 pub fn ml_vtophys(vaddr: u64) -> u64 {

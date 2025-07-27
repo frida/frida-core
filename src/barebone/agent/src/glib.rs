@@ -59,7 +59,7 @@ pub const DOORBELL_IRQ: i32 = 32;
 pub fn init_host_doorbell() {
     unsafe {
         let pa = xnu::ml_vtophys(ptr::addr_of!(HOST_EVENT) as u64);
-        asm!("mov x0, {0}", "hvc #0xab", in(reg) pa);
+        asm!("mov x0, {0}", "smc #0xab", in(reg) pa);
 
         xnu::ml_install_interrupt_handler(
             core::ptr::null_mut(),
