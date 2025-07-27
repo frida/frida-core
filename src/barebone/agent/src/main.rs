@@ -13,7 +13,15 @@ use core::ptr::null_mut;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bindings::{
-    g_error_free, g_free, g_main_loop_new, g_main_loop_run, g_memdup2, g_object_unref, g_timeout_add, g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gboolean, gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync, GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript
+    GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
+    g_main_context_default, g_main_context_iteration, g_memdup2, g_object_unref,
+    g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data,
+    g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64,
+    g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data,
+    g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free,
+    g_variant_type_new, g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create_sync,
+    gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post,
+    gum_script_set_message_handler, gum_script_unload_sync,
 };
 use crate::symbols::SymbolTable;
 
@@ -141,10 +149,12 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
 
-        g_timeout_add(10, Some(process_shared_buffer), ptr::null_mut());
-
-        let main_loop = g_main_loop_new(ptr::null_mut(), 0);
-        g_main_loop_run(main_loop);
+        let main_context = g_main_context_default();
+        loop {
+            process_shared_buffer();
+            g_main_context_iteration(main_context, 1);
+            kprintln!("[FRIDA] One main loop iteration completed!");
+        }
     }
 }
 
@@ -214,7 +224,7 @@ unsafe fn parse_config(config: &[u8]) {
     }
 }
 
-unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
+fn process_shared_buffer() {
     unsafe {
         let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
 
@@ -227,8 +237,6 @@ unsafe extern "C" fn process_shared_buffer(_user_data: gpointer) -> gboolean {
             }
         }
     }
-
-    1
 }
 
 unsafe fn serialize_message(variant: *mut GVariant) -> Option<Vec<u8>> {

@@ -95,7 +95,7 @@ def symbolicate_address(elf_path: str, address: int, base_address: int):
         offset = address - base_address
 
         result = subprocess.run([
-            "addr2line", "-e", elf_path, "-f", "-C", f"0x{offset:x}"
+            "aarch64-none-elf-addr2line", "-e", elf_path, "-f", "-C", f"0x{offset:x}"
         ], capture_output=True, text=True, check=True)
 
         lines = result.stdout.strip().split("\n")
