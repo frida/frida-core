@@ -1,3 +1,4 @@
+use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 static KERNEL_BASE: AtomicU64 = AtomicU64::new(0xfffffff007004000);
@@ -58,30 +59,27 @@ pub fn free(ptr: *mut u8, size: usize) {
     };
 }
 
-pub fn kernel_thread_start(
-    continuation: ContinuationFn,
-    thread_parameter: *mut core::ffi::c_void,
-) -> isize {
+pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut c_void) -> isize {
     type KernelThreadStartFn = unsafe extern "C" fn(
         continuation: *const (),
-        parameter: *mut core::ffi::c_void,
-        new_thread: *mut *mut core::ffi::c_void,
+        parameter: *mut c_void,
+        new_thread: *mut *mut c_void,
     ) -> isize;
 
-    let mut new_thread: *mut core::ffi::c_void = core::ptr::null_mut();
+    let mut new_thread: *mut c_void = core::ptr::null_mut();
     return unsafe {
         let func: KernelThreadStartFn = core::mem::transmute(KERNEL_THREAD_START_ADDR as *const ());
         let ptr = crate::pac::ptrauth_sign(continuation as *const u8, 0xd507);
         func(
             core::mem::transmute(ptr),
             thread_parameter,
-            &mut new_thread as *mut *mut core::ffi::c_void,
+            &mut new_thread as *mut *mut c_void,
         )
         // TODO: Call thread_deallocate()
     };
 }
 
-type ContinuationFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
+type ContinuationFn = unsafe extern "C" fn(_parameter: *mut c_void, _wait_result: i32);
 
 pub const THREAD_INTERRUPTIBLE: u32 = 1;
 pub const THREAD_WAITING: i32 = -1;
@@ -151,14 +149,15 @@ pub fn clock_get_calendar_microtime() -> (u32, u32) {
     let mut secs: u32 = 0;
     let mut microsecs: u32 = 0;
     unsafe {
-        let func: ClockGetCalendarMicrotimeFn = core::mem::transmute(CLOCK_GET_CALENDAR_MICROTIME_ADDR);
+        let func: ClockGetCalendarMicrotimeFn =
+            core::mem::transmute(CLOCK_GET_CALENDAR_MICROTIME_ADDR);
         func(&mut secs, &mut microsecs);
     }
     (secs, microsecs)
 }
 
-pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut core::ffi::c_void {
-    type MlIoMapFn = unsafe extern "C" fn(phys_addr: u64, size: u64) -> *mut core::ffi::c_void;
+pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut c_void {
+    type MlIoMapFn = unsafe extern "C" fn(phys_addr: u64, size: u64) -> *mut c_void;
     unsafe {
         let func: MlIoMapFn = core::mem::transmute(ML_IO_MAP_ADDR);
         func(phys_addr, size)
@@ -174,25 +173,33 @@ pub fn ml_vtophys(vaddr: u64) -> u64 {
 }
 
 type MlInstallInterruptHandlerFn = unsafe extern "C" fn(
-    nub: *mut core::ffi::c_void,
-    irq: i32,
-    refcon: *mut core::ffi::c_void,
+    nub: *mut c_void,
+    source: i32,
+    target: *mut c_void,
     handler: IOInterruptHandler,
-    target: *mut core::ffi::c_void,
+    refcon: *mut c_void,
 );
 
 pub type IOInterruptHandler =
-    unsafe extern "C" fn(refcon: *mut core::ffi::c_void, nub: *mut core::ffi::c_void, source: i32);
+    unsafe extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
 pub fn ml_install_interrupt_handler(
-    nub: *mut core::ffi::c_void,
-    irq: i32,
-    refcon: *mut core::ffi::c_void,
+    nub: *mut c_void,
+    source: i32,
+    target: *mut c_void,
     handler: IOInterruptHandler,
-    target: *mut core::ffi::c_void,
+    refcon: *mut c_void,
 ) {
     unsafe {
-        let func: MlInstallInterruptHandlerFn = core::mem::transmute(ML_INSTALL_INTERRUPT_HANDLER_ADDR);
-        func(nub, irq, refcon, handler, target);
+        let func: MlInstallInterruptHandlerFn =
+            core::mem::transmute(ML_INSTALL_INTERRUPT_HANDLER_ADDR);
+        let signed_handler = crate::pac::ptrauth_sign(handler as *const u8, 0xd36);
+        func(
+            nub,
+            source,
+            target,
+            core::mem::transmute(signed_handler),
+            refcon,
+        );
     }
 }
