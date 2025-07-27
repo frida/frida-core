@@ -111,7 +111,7 @@ pub struct ModuleInfo {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> usize {
+pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u64 {
     unsafe {
         CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
@@ -122,9 +122,7 @@ pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u
             FRIDA_SHARED_TRANSPORT,
             transport::SharedTransport::new(page_size),
         );
-        let physical_addr =
-            gum::gum_barebone_virtual_to_physical(FRIDA_SHARED_TRANSPORT as bindings::gpointer)
-                as usize;
+        let physical_addr = xnu::ml_vtophys(FRIDA_SHARED_TRANSPORT as u64);
 
         TRANSPORT_VIEW = Some((*FRIDA_SHARED_TRANSPORT).as_view(transport::TransportRole::Primary));
 
@@ -139,6 +137,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
+        glib::init_host_doorbell();
 
         parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
 

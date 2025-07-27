@@ -22,6 +22,8 @@ const THREAD_WAKEUP_ADDR: usize = 0xfffffff0_07a5_8ea0;
 const MACH_ABSOLUTE_TIME_ADDR: usize = 0xfffffff0_07b6_0cc0;
 const ABSOLUTETIME_TO_NANOSECONDS_ADDR: usize = 0xfffffff0_07b6_11e4;
 const CLOCK_GET_CALENDAR_MICROTIME_ADDR: usize = 0xfffffff0_07a2_332c;
+const ML_VTOPHYS_ADDR: usize = 0xfffffff0_07b5_c4a0;
+const ML_INSTALL_INTERRUPT_HANDLER_ADDR: usize = 0xfffffff0_07b5_aac4;
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -80,7 +82,7 @@ pub fn kernel_thread_start(
 
 type ContinuationFn = unsafe extern "C" fn(_parameter: *mut core::ffi::c_void, _wait_result: i32);
 
-pub const THREAD_UNINT: u32 = 0;
+pub const THREAD_INTERRUPTIBLE: u32 = 1;
 pub const THREAD_WAITING: i32 = -1;
 
 pub fn assert_wait(event: *const u8, interruptible: u32) -> i32 {
@@ -152,4 +154,36 @@ pub fn clock_get_calendar_microtime() -> (u32, u32) {
         func(&mut secs, &mut microsecs);
     }
     (secs, microsecs)
+}
+
+pub fn ml_vtophys(vaddr: u64) -> u64 {
+    type MlVtophysFn = unsafe extern "C" fn(vaddr: u64) -> u64;
+    unsafe {
+        let func: MlVtophysFn = core::mem::transmute(ML_VTOPHYS_ADDR);
+        func(vaddr)
+    }
+}
+
+type MlInstallInterruptHandlerFn = unsafe extern "C" fn(
+    nub: *mut core::ffi::c_void,
+    irq: i32,
+    refcon: *mut core::ffi::c_void,
+    handler: IOInterruptHandler,
+    target: *mut core::ffi::c_void,
+);
+
+pub type IOInterruptHandler =
+    unsafe extern "C" fn(refcon: *mut core::ffi::c_void, nub: *mut core::ffi::c_void, source: i32);
+
+pub fn ml_install_interrupt_handler(
+    nub: *mut core::ffi::c_void,
+    irq: i32,
+    refcon: *mut core::ffi::c_void,
+    handler: IOInterruptHandler,
+    target: *mut core::ffi::c_void,
+) {
+    unsafe {
+        let func: MlInstallInterruptHandlerFn = core::mem::transmute(ML_INSTALL_INTERRUPT_HANDLER_ADDR);
+        func(nub, irq, refcon, handler, target);
+    }
 }
