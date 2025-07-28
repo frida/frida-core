@@ -13,3 +13,16 @@ pub unsafe fn ptrauth_sign(ptr: *const u8, discriminator: usize) -> *const u8 {
     }
     signed as *const u8
 }
+
+pub unsafe fn ptrauth_strip_data(ptr: *const u8) -> *const u8 {
+    let stripped: usize;
+    unsafe {
+        asm!(
+            ".inst 0xdac143e0",       // xpaci x0
+            in("x0") ptr as usize,
+            lateout("x0") stripped,
+            options(nomem, nostack),
+        );
+    }
+    stripped as *const u8
+}
