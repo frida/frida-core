@@ -179,7 +179,6 @@ pub type IOInterruptHandler =
     extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
 pub fn install_interrupt_handler(
-    nub: *mut c_void,
     source: i32,
     target: *mut c_void,
     handler: IOInterruptHandler,
@@ -189,11 +188,27 @@ pub fn install_interrupt_handler(
     let ossym_cstr: OSSymWithCStrFn =
         unsafe { core::mem::transmute(OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR) };
 
+    /*
+    let nub = kalloc(0x88);
+    unsafe {
+        core::ptr::write_bytes(nub, 0, 0x88);
+    }
+    const IOSERVICE_CONSTRUCTOR_ADDR: usize = 0xfffffff00801c318;
+    type IOServiceConstructorFn = unsafe extern "C" fn(*mut c_void);
+    let ioservice_ctor: IOServiceConstructorFn =
+        unsafe { core::mem::transmute(IOSERVICE_CONSTRUCTOR_ADDR) };
+    unsafe { ioservice_ctor(nub as *mut c_void) };
+    kprintln!("[FRIDA] Created IOService nub at {:#x}", nub as u64);
+    */
+
     let pe = get_platform();
     kprintln!("[FRIDA] IOPlatformExpert={:#x}", pe as u64);
 
     let name = ossym_cstr(c"IOInterruptController0000001A".as_ptr());
-    kprintln!("[FRIDA] Resolved IOInterruptController0000001A to {:?}", name);
+    kprintln!(
+        "[FRIDA] Resolved IOInterruptController0000001A to {:?}",
+        name
+    );
 
     let lookup: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
         vf(pe as _, VT_LOOKUP_IC);
@@ -201,13 +216,12 @@ pub fn install_interrupt_handler(
     let ic = lookup(pe, name);
     kprintln!("[FRIDA] After lookup");
 
-    kprintln!(
-        "[FRIDA] IOInterruptController={:#x}",
-        ic as u64
-    );
+    kprintln!("[FRIDA] IOInterruptController={:#x}", ic as u64);
     if ic.is_null() {
         panic!("Failed to lookup IOInterruptController");
     }
+
+    let nub = ic;
 
     let reg: extern "C" fn(
         *mut _,
@@ -223,18 +237,30 @@ pub fn install_interrupt_handler(
         core::mem::transmute::<*const u8, IOInterruptHandler>(handler_ptr)
     };
 
-    let kr = reg(ic, nub, source, target, signed_handler, refcon);
+    let kr = reg(
+        ic,
+        nub as *mut c_void,
+        source,
+        target,
+        signed_handler,
+        refcon,
+    );
     kprintln!(
         "[FRIDA] Registering interrupt handler for source {} returned {:#x}",
-        source, kr
+        source,
+        kr
     );
     if kr != 0 {
         return kr;
     }
 
     let en: extern "C" fn(*mut _, *mut c_void, i32) -> i32 = vf(ic as _, VT_ENABLE_INT);
-    let enable_result = en(ic, nub, source);
-    kprintln!("Enabling interrupt for source {} returned {}", source, enable_result);
+    let enable_result = en(ic, nub as *mut c_void, source);
+    kprintln!(
+        "Enabling interrupt for source {} returned {}",
+        source,
+        enable_result
+    );
 
     enable_result
 }

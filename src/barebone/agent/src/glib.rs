@@ -74,7 +74,6 @@ pub fn init_host_doorbell() {
         kprintln!("[FRIDA] Host doorbell irq={}", irq);
 
         xnu::install_interrupt_handler(
-            core::ptr::null_mut(),
             irq,
             ptr::addr_of_mut!(PENDING_EVENT) as *mut c_void,
             on_doorbell_interrupt,
