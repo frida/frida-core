@@ -345,6 +345,17 @@ const marshalers: { [type: string]: Marshaler } = {
             return BigInt(v);
         }
     },
+    uint: {
+        fromNative(v) {
+            return Number(v);
+        },
+        toNative(v) {
+            if (typeof v !== "number") {
+                throw new Error("expected an integer");
+            }
+            return BigInt(v);
+        }
+    },
     size_t: {
         fromNative(v) {
             return new BUInt64(v);
