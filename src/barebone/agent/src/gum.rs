@@ -1,15 +1,8 @@
 use crate::{
     bindings::{
-        _GInterfaceInfo, _GTypeInfo, GArray, GObject, GObjectClass, GPrivate, GType,
-        GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION,
-        GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
-        GumPageProtection, GumThreadId, GumTlsKey, g_array_append_vals, g_array_new, g_free,
-        g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave,
-        g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static,
-        gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module,
-        gum_module_get_type,
+        GArray, GObject, GObjectClass, GPrivate, GType, GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION, GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry, GumPageProtection, GumThreadId, GumTlsKey, _GInterfaceInfo, _GTypeInfo, g_array_append_vals, g_array_new, g_free, g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave, g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static, gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module, gum_module_get_type
     },
-    gthread, libc,
+    gthread, libc, xnu,
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
@@ -37,6 +30,11 @@ pub extern "C" fn gum_barebone_query_page_size() -> guint {
             _ => 4096,
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_virtual_to_physical(virt_addr: gpointer) -> gpointer {
+    xnu::ml_vtophys(virt_addr as u64) as gpointer
 }
 
 #[unsafe(no_mangle)]

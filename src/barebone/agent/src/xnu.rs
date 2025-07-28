@@ -1,6 +1,8 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crate::kprintln;
+
 static KERNEL_BASE: AtomicU64 = AtomicU64::new(0xfffffff007004000);
 
 pub fn get_kernel_base() -> u64 {
@@ -25,7 +27,8 @@ const ABSOLUTETIME_TO_NANOSECONDS_ADDR: usize = 0xfffffff0_07b6_11e4;
 const CLOCK_GET_CALENDAR_MICROTIME_ADDR: usize = 0xfffffff0_07a2_332c;
 const ML_IO_MAP_ADDR: usize = 0xfffffff0_07b5_ba04;
 const ML_VTOPHYS_ADDR: usize = 0xfffffff0_07b5_c4a0;
-const ML_INSTALL_INTERRUPT_HANDLER_ADDR: usize = 0xfffffff0_07b5_aac4;
+const IO_SERVICE_GET_PLATFORM_ADDR: usize = 0xfffffff0_0801_ed48;
+const OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR: usize = 0xfffffff0_07fc_45dc;
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -172,34 +175,117 @@ pub fn ml_vtophys(vaddr: u64) -> u64 {
     }
 }
 
-type MlInstallInterruptHandlerFn = unsafe extern "C" fn(
-    nub: *mut c_void,
-    source: i32,
-    target: *mut c_void,
-    handler: IOInterruptHandler,
-    refcon: *mut c_void,
-);
-
 pub type IOInterruptHandler =
-    unsafe extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
+    extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
-pub fn ml_install_interrupt_handler(
+pub fn install_interrupt_handler(
     nub: *mut c_void,
     source: i32,
     target: *mut c_void,
     handler: IOInterruptHandler,
     refcon: *mut c_void,
-) {
-    unsafe {
-        let func: MlInstallInterruptHandlerFn =
-            core::mem::transmute(ML_INSTALL_INTERRUPT_HANDLER_ADDR);
-        let signed_handler = crate::pac::ptrauth_sign(handler as *const u8, 0xd36);
-        func(
-            nub,
-            source,
-            target,
-            core::mem::transmute(signed_handler),
-            refcon,
-        );
+) -> i32 {
+    let get_platform: GetPlatformFn = unsafe { core::mem::transmute(IO_SERVICE_GET_PLATFORM_ADDR) };
+    let ossym_cstr: OSSymWithCStrFn =
+        unsafe { core::mem::transmute(OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR) };
+
+    let pe = get_platform();
+    kprintln!("[FRIDA] IOPlatformExpert={:#x}", pe as u64);
+
+    let name = ossym_cstr(c"IOInterruptController0000001A".as_ptr());
+    kprintln!("[FRIDA] Resolved IOInterruptController0000001A to {:?}", name);
+
+    let lookup: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
+        vf(pe as _, VT_LOOKUP_IC);
+    kprintln!("[FRIDA] Before lookup");
+    let ic = lookup(pe, name);
+    kprintln!("[FRIDA] After lookup");
+
+    kprintln!(
+        "[FRIDA] IOInterruptController={:#x}",
+        ic as u64
+    );
+    if ic.is_null() {
+        panic!("Failed to lookup IOInterruptController");
     }
+
+    let reg: extern "C" fn(
+        *mut _,
+        *mut c_void,
+        i32,
+        *mut c_void,
+        IOInterruptHandler,
+        *mut c_void,
+    ) -> i32 = vf(ic as _, VT_REGISTER_INT);
+
+    let signed_handler = unsafe {
+        let handler_ptr = crate::pac::ptrauth_sign(handler as *const u8, 0xd36);
+        core::mem::transmute::<*const u8, IOInterruptHandler>(handler_ptr)
+    };
+
+    let kr = reg(ic, nub, source, target, signed_handler, refcon);
+    kprintln!(
+        "[FRIDA] Registering interrupt handler for source {} returned {:#x}",
+        source, kr
+    );
+    if kr != 0 {
+        return kr;
+    }
+
+    let en: extern "C" fn(*mut _, *mut c_void, i32) -> i32 = vf(ic as _, VT_ENABLE_INT);
+    let enable_result = en(ic, nub, source);
+    kprintln!("Enabling interrupt for source {} returned {}", source, enable_result);
+
+    enable_result
 }
+
+#[repr(C)]
+struct IOPlatformExpert {
+    _p: [u8; 0],
+}
+
+#[repr(C)]
+struct IOInterruptController {
+    _p: [u8; 0],
+}
+
+#[repr(C)]
+struct OSSymbol {
+    _p: [u8; 0],
+}
+
+type GetPlatformFn = extern "C" fn() -> *mut IOPlatformExpert;
+type OSSymWithCStrFn = extern "C" fn(*const u8) -> *mut OSSymbol;
+
+#[inline(always)]
+fn vf<T>(obj: *mut c_void, slot: isize) -> T
+where
+    T: Copy,
+{
+    let vtable_ptr = unsafe { *(obj as *const *const usize) };
+    kprintln!(
+        "[FRIDA] VTable for object at {:#x} is at {:#x}",
+        obj as u64,
+        vtable_ptr as u64
+    );
+    let vtable = unsafe { crate::pac::ptrauth_strip_data(vtable_ptr as *const u8) as *const usize };
+    kprintln!("[FRIDA] VTable stripped pointer is at {:#x}", vtable as u64);
+    let entry = unsafe { *vtable.offset(slot) };
+    kprintln!(
+        "[FRIDA] VTable entry at offset {} is at {:#x}",
+        slot,
+        entry as u64
+    );
+    let entry_ptr = unsafe { crate::pac::ptrauth_strip_data(entry as *const u8) };
+    kprintln!(
+        "[FRIDA] VTable entry stripped pointer is at {:#x}",
+        entry_ptr as u64
+    );
+    unsafe { core::mem::transmute_copy::<*const u8, T>(&entry_ptr) }
+}
+
+const IO_SERVICE_VTABLE_LENGTH: isize = 168;
+
+const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
+const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
+const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController

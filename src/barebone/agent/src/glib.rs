@@ -73,23 +73,21 @@ pub fn init_host_doorbell() {
         let irq: i32 = ptr::read_volatile((doorbell_va as u64 + REG_IRQ as u64) as *const i32);
         kprintln!("[FRIDA] Host doorbell irq={}", irq);
 
-        /*
-        xnu::ml_install_interrupt_handler(
+        xnu::install_interrupt_handler(
             core::ptr::null_mut(),
             irq,
-            ptr::addr_of!(PENDING_EVENT) as *mut c_void,
-            host_doorbell_isr,
+            ptr::addr_of_mut!(PENDING_EVENT) as *mut c_void,
+            on_doorbell_interrupt,
             core::ptr::null_mut(),
         );
-        */
     }
 }
 
-unsafe extern "C" fn host_doorbell_isr(
+extern "C" fn on_doorbell_interrupt(
     target: *mut c_void,
     _refcon: *mut c_void,
     _nub: *mut c_void,
-    source: i32,
+    _source: i32,
 ) {
     xnu::thread_wakeup(target as *const u8);
 }
