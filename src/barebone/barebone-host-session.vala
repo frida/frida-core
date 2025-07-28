@@ -98,7 +98,12 @@ namespace Frida {
 					break;
 			}
 
-			var page_size = yield machine.query_page_size (cancellable);
+			size_t page_size;
+			try {
+				page_size = yield machine.query_page_size (cancellable);
+			} catch (Error e) {
+				page_size = 0;
+			}
 
 			Barebone.Allocator allocator;
 			Barebone.AllocatorConfig ac = config.allocator;
