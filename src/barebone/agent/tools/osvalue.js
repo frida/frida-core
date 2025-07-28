@@ -1,6 +1,6 @@
 const osSerialize_withCapacity = new NativeFunction(ptr('0xfffffff007fbf074'), 'pointer', ['uint']);
-const UNPAC_MASK = ptr('0xfffffff000000000');
 
+const UNPAC_MASK = ptr('0xfffffff000000000');
 
 const serializer = osSerialize_withCapacity(4096);
 

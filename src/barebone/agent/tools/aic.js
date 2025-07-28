@@ -1,14 +1,23 @@
-const listener = Interceptor.attach(ptr('0xfffffff0091cb4cc'), function (args) {
-  const aic = args[0];
-  const service = args[1];
-  const arg3 = args[2];
-  console.log('AIC is at:', aic);
-  console.log('Service is at:', service);
-  console.log('arg3:', arg3);
-  Object.assign(globalThis, { aic, service });
-  listener.detach();
+// fffffff0080863e8    int64_t IOInterruptController::registerInterrupt
+Interceptor.breakpointKind = 'hard';
+const listener = Interceptor.attach(ptr('0xfffffff0080863e8'), function (args) {
+  const handler = unpac(args[4]);
+  console.log(`IOInterruptController::registerInterrupt() called with handler=${handler} from ${this.returnAddress}`);
+  //listener.detach();
 });
 $gdb.continue();
+
+//const listener = Interceptor.attach(ptr('0xfffffff0091cb4cc'), function (args) {
+//  const aic = args[0];
+//  const service = args[1];
+//  const arg3 = args[2];
+//  console.log('AIC is at:', aic);
+//  console.log('Service is at:', service);
+//  console.log('arg3:', arg3);
+//  Object.assign(globalThis, { aic, service });
+//  listener.detach();
+//});
+//$gdb.continue();
 
 //Interceptor.attach(ptr('0xfffffff007a55728'), function () {
 //  console.log('Stopped on thread about to call thread_block()');
