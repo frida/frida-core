@@ -6,9 +6,8 @@ use crate::{kprintln, xnu};
 
 const G_WAIT_INFINITE: gint64 = -1;
 
-#[unsafe(no_mangle)]
-#[unsafe(link_section = ".data")]
 static mut PENDING_EVENT: u64 = 0;
+static mut DOORBELL_INTERRUPT_COUNT: u64 = 0;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_get_monotonic_time() -> gint64 {
@@ -40,19 +39,22 @@ pub extern "C" fn g_wait_sleep(token: gpointer, timeout_us: gint64) {
         return;
     }
 
+    kprintln!("[FRIDA] g_wait_sleep: waiting for event to wake up...");
     xnu::thread_block(None);
+    let interrupt_count = unsafe { DOORBELL_INTERRUPT_COUNT };
+    kprintln!("[FRIDA] g_wait_sleep: woke up from event! (interrupt count: {})", interrupt_count);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_wait_wake(_token: gpointer) {
+    kprintln!("[FRIDA] g_wait_wake: waking up the event!");
     xnu::thread_wakeup(ptr::addr_of_mut!(PENDING_EVENT) as *const u8);
 }
 
 const DOORBELL_PADDR: u64 = 0x200100000;
 const DOORBELL_SIZE: u64 = 0x4000;
 
-const REG_TOKEN: usize = 0x0; // W 64‑bit
-const REG_IRQ: usize = 0x8; // R 32‑bit
+const REG_IRQ: usize = 0x0; // R 32‑bit
 
 pub fn init_host_doorbell() {
     unsafe {
@@ -64,13 +66,7 @@ pub fn init_host_doorbell() {
             doorbell_va as u64
         );
 
-        let token_pa = xnu::ml_vtophys(PENDING_EVENT);
-        ptr::write_volatile(
-            (doorbell_va as u64 + REG_TOKEN as u64) as *mut u64,
-            token_pa,
-        );
-
-        let irq: i32 = ptr::read_volatile((doorbell_va as u64 + REG_IRQ as u64) as *const i32);
+        let irq = ptr::read_volatile((doorbell_va as u64 + REG_IRQ as u64) as *const u64) as i32;
         kprintln!("[FRIDA] Host doorbell irq={}", irq);
 
         xnu::install_interrupt_handler(
@@ -88,5 +84,8 @@ extern "C" fn on_doorbell_interrupt(
     _nub: *mut c_void,
     _source: i32,
 ) {
+    unsafe {
+        DOORBELL_INTERRUPT_COUNT += 1;
+    }
     xnu::thread_wakeup(target as *const u8);
 }

@@ -189,17 +189,6 @@ pub fn install_interrupt_handler(
     let ossym_cstr: OSSymWithCStrFn =
         unsafe { core::mem::transmute(OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR) };
 
-    let nub = kalloc(0x88);
-    unsafe {
-        core::ptr::write_bytes(nub, 0, 0x88);
-    }
-    const IOSERVICE_CONSTRUCTOR_ADDR: usize = 0xfffffff00801c318;
-    type IOServiceConstructorFn = unsafe extern "C" fn(*mut c_void);
-    let ioservice_ctor: IOServiceConstructorFn =
-        unsafe { core::mem::transmute(IOSERVICE_CONSTRUCTOR_ADDR) };
-    unsafe { ioservice_ctor(nub as *mut c_void) };
-    kprintln!("[FRIDA] Created IOService nub at {:#x}", nub as u64);
-
     let pe = get_platform();
     kprintln!("[FRIDA] IOPlatformExpert={:#x}", pe as u64);
 
@@ -219,6 +208,23 @@ pub fn install_interrupt_handler(
     if ic.is_null() {
         panic!("Failed to lookup IOInterruptController");
     }
+
+    let nub = kalloc(0x88);
+    unsafe {
+        core::ptr::write_bytes(nub, 0, 0x88);
+    }
+    const IOSERVICE_CONSTRUCTOR_ADDR: usize = 0xfffffff00801c318;
+    type IOServiceConstructorFn = unsafe extern "C" fn(*mut c_void);
+    let ioservice_ctor: IOServiceConstructorFn =
+        unsafe { core::mem::transmute(IOSERVICE_CONSTRUCTOR_ADDR) };
+    unsafe { ioservice_ctor(nub as *mut c_void) };
+
+    type IOServiceInitFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
+    let init_fn: IOServiceInitFn = vf(nub as *mut c_void, 21);
+    let init_result = unsafe { init_fn(nub as *mut c_void, core::ptr::null_mut()) };
+
+    kprintln!("[FRIDA] Created IOService nub at {:#x}, init() returned {}",
+              nub as u64, init_result);
 
     let interrupt_sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
 
