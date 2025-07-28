@@ -29,6 +29,7 @@ const ML_IO_MAP_ADDR: usize = 0xfffffff0_07b5_ba04;
 const ML_VTOPHYS_ADDR: usize = 0xfffffff0_07b5_c4a0;
 const IO_SERVICE_GET_PLATFORM_ADDR: usize = 0xfffffff0_0801_ed48;
 const OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR: usize = 0xfffffff0_07fc_45dc;
+const OSDATA_WITH_BYTES_ADDR: usize = 0xfffffff0_07f8_c588;
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -188,7 +189,6 @@ pub fn install_interrupt_handler(
     let ossym_cstr: OSSymWithCStrFn =
         unsafe { core::mem::transmute(OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR) };
 
-    /*
     let nub = kalloc(0x88);
     unsafe {
         core::ptr::write_bytes(nub, 0, 0x88);
@@ -199,7 +199,6 @@ pub fn install_interrupt_handler(
         unsafe { core::mem::transmute(IOSERVICE_CONSTRUCTOR_ADDR) };
     unsafe { ioservice_ctor(nub as *mut c_void) };
     kprintln!("[FRIDA] Created IOService nub at {:#x}", nub as u64);
-    */
 
     let pe = get_platform();
     kprintln!("[FRIDA] IOPlatformExpert={:#x}", pe as u64);
@@ -221,7 +220,23 @@ pub fn install_interrupt_handler(
         panic!("Failed to lookup IOInterruptController");
     }
 
-    let nub = ic;
+    let interrupt_sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
+
+    let osdata_with_bytes: OSDataWithBytesFn = unsafe { core::mem::transmute(OSDATA_WITH_BYTES_ADDR) };
+    let source_bytes = (source as u32).to_ne_bytes(); // Convert source to native-endian uint32
+    let vector_data = osdata_with_bytes(source_bytes.as_ptr() as *const c_void, 4);
+
+    unsafe {
+        (*interrupt_sources).interrupt_controller = ic;
+        (*interrupt_sources).vector_data = vector_data;
+    }
+
+    unsafe {
+        let interrupt_sources_ptr = (nub as *mut u8).offset(0x80) as *mut *mut IOInterruptSource;
+        *interrupt_sources_ptr = interrupt_sources;
+    }
+
+    kprintln!("[FRIDA] Allocated _interruptSources at {:#x}", interrupt_sources as u64);
 
     let reg: extern "C" fn(
         *mut _,
@@ -240,7 +255,7 @@ pub fn install_interrupt_handler(
     let kr = reg(
         ic,
         nub as *mut c_void,
-        source,
+        0,
         target,
         signed_handler,
         refcon,
@@ -255,7 +270,7 @@ pub fn install_interrupt_handler(
     }
 
     let en: extern "C" fn(*mut _, *mut c_void, i32) -> i32 = vf(ic as _, VT_ENABLE_INT);
-    let enable_result = en(ic, nub as *mut c_void, source);
+    let enable_result = en(ic, nub as *mut c_void, 0);
     kprintln!(
         "Enabling interrupt for source {} returned {}",
         source,
@@ -280,8 +295,20 @@ struct OSSymbol {
     _p: [u8; 0],
 }
 
+#[repr(C)]
+struct OSData {
+    _p: [u8; 0],
+}
+
+#[repr(C)]
+struct IOInterruptSource {
+    interrupt_controller: *mut IOInterruptController,
+    vector_data: *mut OSData,
+}
+
 type GetPlatformFn = extern "C" fn() -> *mut IOPlatformExpert;
 type OSSymWithCStrFn = extern "C" fn(*const u8) -> *mut OSSymbol;
+type OSDataWithBytesFn = extern "C" fn(*const c_void, u32) -> *mut OSData;
 
 #[inline(always)]
 fn vf<T>(obj: *mut c_void, slot: isize) -> T
