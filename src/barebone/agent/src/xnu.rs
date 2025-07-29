@@ -1,8 +1,6 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::kprintln;
-
 static KERNEL_BASE: AtomicU64 = AtomicU64::new(0xfffffff007004000);
 
 pub fn get_kernel_base() -> u64 {
@@ -190,21 +188,12 @@ pub fn install_interrupt_handler(
         unsafe { core::mem::transmute(OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR) };
 
     let pe = get_platform();
-    kprintln!("[FRIDA] IOPlatformExpert={:#x}", pe as u64);
 
     let name = ossym_cstr(c"IOInterruptController0000001A".as_ptr());
-    kprintln!(
-        "[FRIDA] Resolved IOInterruptController0000001A to {:?}",
-        name
-    );
 
     let lookup: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
         vf(pe as _, VT_LOOKUP_IC);
-    kprintln!("[FRIDA] Before lookup");
     let ic = lookup(pe, name);
-    kprintln!("[FRIDA] After lookup");
-
-    kprintln!("[FRIDA] IOInterruptController={:#x}", ic as u64);
     if ic.is_null() {
         panic!("Failed to lookup IOInterruptController");
     }
@@ -221,15 +210,12 @@ pub fn install_interrupt_handler(
 
     type IOServiceInitFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
     let init_fn: IOServiceInitFn = vf(nub as *mut c_void, 21);
-    let init_result = unsafe { init_fn(nub as *mut c_void, core::ptr::null_mut()) };
-
-    kprintln!("[FRIDA] Created IOService nub at {:#x}, init() returned {}",
-              nub as u64, init_result);
+    unsafe { init_fn(nub as *mut c_void, core::ptr::null_mut()) };
 
     let interrupt_sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
 
     let osdata_with_bytes: OSDataWithBytesFn = unsafe { core::mem::transmute(OSDATA_WITH_BYTES_ADDR) };
-    let source_bytes = (source as u32).to_ne_bytes(); // Convert source to native-endian uint32
+    let source_bytes = (source as u32).to_ne_bytes();
     let vector_data = osdata_with_bytes(source_bytes.as_ptr() as *const c_void, 4);
 
     unsafe {
@@ -241,8 +227,6 @@ pub fn install_interrupt_handler(
         let interrupt_sources_ptr = (nub as *mut u8).offset(0x80) as *mut *mut IOInterruptSource;
         *interrupt_sources_ptr = interrupt_sources;
     }
-
-    kprintln!("[FRIDA] Allocated _interruptSources at {:#x}", interrupt_sources as u64);
 
     let reg: extern "C" fn(
         *mut _,
@@ -266,24 +250,12 @@ pub fn install_interrupt_handler(
         signed_handler,
         refcon,
     );
-    kprintln!(
-        "[FRIDA] Registering interrupt handler for source {} returned {:#x}",
-        source,
-        kr
-    );
     if kr != 0 {
         return kr;
     }
 
     let en: extern "C" fn(*mut _, *mut c_void, i32) -> i32 = vf(ic as _, VT_ENABLE_INT);
-    let enable_result = en(ic, nub as *mut c_void, 0);
-    kprintln!(
-        "Enabling interrupt for source {} returned {}",
-        source,
-        enable_result
-    );
-
-    enable_result
+    en(ic, nub as *mut c_void, 0)
 }
 
 #[repr(C)]
@@ -322,24 +294,9 @@ where
     T: Copy,
 {
     let vtable_ptr = unsafe { *(obj as *const *const usize) };
-    kprintln!(
-        "[FRIDA] VTable for object at {:#x} is at {:#x}",
-        obj as u64,
-        vtable_ptr as u64
-    );
     let vtable = unsafe { crate::pac::ptrauth_strip_data(vtable_ptr as *const u8) as *const usize };
-    kprintln!("[FRIDA] VTable stripped pointer is at {:#x}", vtable as u64);
     let entry = unsafe { *vtable.offset(slot) };
-    kprintln!(
-        "[FRIDA] VTable entry at offset {} is at {:#x}",
-        slot,
-        entry as u64
-    );
     let entry_ptr = unsafe { crate::pac::ptrauth_strip_data(entry as *const u8) };
-    kprintln!(
-        "[FRIDA] VTable entry stripped pointer is at {:#x}",
-        entry_ptr as u64
-    );
     unsafe { core::mem::transmute_copy::<*const u8, T>(&entry_ptr) }
 }
 

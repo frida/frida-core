@@ -19,8 +19,9 @@ namespace Frida.Barebone {
 
 		private bool is_connected = false;
 		private Promise<bool> close_request = new Promise<bool> ();
-		private uint next_request_id = 1;
+
 		private Gee.Map<uint, Promise<Json.Node>> pending_requests = new Gee.HashMap<uint, Promise<Json.Node>> ();
+		private uint next_request_id = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -73,12 +74,6 @@ namespace Frida.Barebone {
 				string? greeting_line = yield input.read_line_async (Priority.DEFAULT, cancellable);
 				if (greeting_line == null)
 					throw new Error.TRANSPORT ("Connection closed during QMP greeting");
-
-				printerr ("greeting_line: %s\n\n", greeting_line);
-
-				//var greeting = parse_json_line (greeting_line);
-				//if (!greeting.has_member ("QMP"))
-				//	throw new Error.PROTOCOL ("Invalid QMP greeting: missing QMP object");
 
 				process_incoming_messages.begin ();
 				started_message_processing = true;
