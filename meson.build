@@ -320,7 +320,7 @@ gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8', default_options: gee_options)
-json_glib_dep = dependency('json-glib-1.0', default_options: [
+json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
   'introspection=disabled',
   'gtk_doc=disabled',
   'tests=false',
