@@ -39,6 +39,10 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var qmp = yield QmpClient.open ("unix:/home/oleavr/src/ios/qmp.sock", 0, cancellable);
+			var info = yield qmp.execute_command ("query-doorbell", null, cancellable);
+			printerr ("Got doorbell info: %p\n\n", info);
+
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
 			uint pointer_size = gdb.pointer_size;
