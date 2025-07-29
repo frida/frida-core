@@ -16,6 +16,7 @@ backend_sources += files(
   'elf.vala',
   'img4.vala',
   'lzfse.vala',
+  'qmp-client.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',
