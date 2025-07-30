@@ -7,23 +7,26 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
+use core::cell::UnsafeCell;
 use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::bindings::{
+use bindings::{
     g_error_free, g_free, g_main_context_default, g_main_context_iteration, g_memdup2, g_object_unref, g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync, GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript
 };
-use crate::symbols::SymbolTable;
+use hostlink_virtio::Hostlink;
+use symbols::SymbolTable;
 
 mod glib;
 mod gthread;
 mod gum;
+mod hostlink_virtio;
+
 mod libc;
 mod pac;
 mod symbols;
-mod transport;
 mod xnu;
 
 mod bindings {
@@ -93,9 +96,24 @@ static mut CONFIG_DATA: &'static [u8] = &[];
 pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
 pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
-#[unsafe(no_mangle)]
-pub static mut FRIDA_SHARED_TRANSPORT: *mut transport::SharedTransport = ptr::null_mut();
-static mut TRANSPORT_VIEW: Option<transport::TransportView<'static>> = None;
+#[repr(transparent)]
+struct Global<T>(UnsafeCell<T>);
+unsafe impl<T> Sync for Global<T> {}
+
+static TRANSPORT_DRIVER: Global<Option<Hostlink>> = Global(UnsafeCell::new(None));
+
+#[inline(always)]
+fn transport_set(driver: Hostlink) {
+    unsafe { *TRANSPORT_DRIVER.0.get() = Some(driver); }
+}
+
+#[inline(always)]
+fn transport_get_unchecked() -> &'static Hostlink {
+    unsafe {
+        debug_assert!((*TRANSPORT_DRIVER.0.get()).is_some());
+        (*TRANSPORT_DRIVER.0.get()).as_ref().unwrap_unchecked()
+    }
+}
 
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
@@ -111,24 +129,11 @@ pub struct ModuleInfo {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) -> u64 {
+pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) {
     unsafe {
         CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
-        let page_size = gum::gum_barebone_query_page_size() as usize;
-
-        FRIDA_SHARED_TRANSPORT = xnu::kalloc(page_size) as *mut transport::SharedTransport;
-        core::ptr::write(
-            FRIDA_SHARED_TRANSPORT,
-            transport::SharedTransport::new(page_size),
-        );
-        let physical_addr = xnu::ml_vtophys(FRIDA_SHARED_TRANSPORT as u64);
-
-        TRANSPORT_VIEW = Some((*FRIDA_SHARED_TRANSPORT).as_view(transport::TransportRole::Primary));
-
         xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
-
-        physical_addr
     }
 }
 
@@ -137,17 +142,25 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
-        glib::init_host_doorbell();
 
         parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
+
+        transport_set(Hostlink::init(Some(on_frame_from_host_safe), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
 
         let main_context = g_main_context_default();
 
         loop {
-            process_shared_buffer();
+            transport_get_unchecked().process();
             g_main_context_iteration(main_context, 1);
             kprintln!("[FRIDA] g_main_context_iteration() completed");
         }
+    }
+}
+
+fn on_frame_from_host_safe(frame: &[u8]) {
+    if let Some(variant) = deserialize_message(&frame) {
+        process_incoming_message(variant);
+        unsafe { g_variant_unref(variant); }
     }
 }
 
@@ -217,21 +230,6 @@ unsafe fn parse_config(config: &[u8]) {
     }
 }
 
-fn process_shared_buffer() {
-    unsafe {
-        let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
-
-        transport_view.flush_pending();
-
-        while let Some(message_data) = transport_view.try_read_message() {
-            if let Some(variant) = deserialize_message(&message_data) {
-                process_incoming_message(variant);
-                g_variant_unref(variant);
-            }
-        }
-    }
-}
-
 unsafe fn serialize_message(variant: *mut GVariant) -> Option<Vec<u8>> {
     unsafe {
         let size = g_variant_get_size(variant) as usize;
@@ -248,7 +246,7 @@ unsafe fn serialize_message(variant: *mut GVariant) -> Option<Vec<u8>> {
     }
 }
 
-unsafe fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
+fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
     unsafe {
         if data.is_empty() {
             return None;
@@ -274,20 +272,23 @@ unsafe fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
     }
 }
 
-unsafe fn process_incoming_message(variant: *mut GVariant) {
-    unsafe {
+fn process_incoming_message(variant: *mut GVariant) {
+    {
         let mut cmd_value: u8 = 0;
         let mut request_id: u16 = 0;
         let mut payload_variant: *mut GVariant = ptr::null_mut();
-        g_variant_get(
-            variant,
-            c"(yqv)".as_ptr(),
-            &mut cmd_value,
-            &mut request_id,
-            &mut payload_variant,
-        );
 
-        let cmd = core::mem::transmute::<u8, FridaCommand>(cmd_value);
+        let cmd = unsafe {
+            g_variant_get(
+                variant,
+                c"(yqv)".as_ptr(),
+                &mut cmd_value,
+                &mut request_id,
+                &mut payload_variant,
+            );
+
+            core::mem::transmute::<u8, FridaCommand>(cmd_value)
+        };
 
         let response = match cmd {
             FridaCommand::CreateScript => handle_create_script(payload_variant),
@@ -299,11 +300,11 @@ unsafe fn process_incoming_message(variant: *mut GVariant) {
 
         send_command_reply(request_id, response);
 
-        g_variant_unref(payload_variant);
+        unsafe { g_variant_unref(payload_variant) };
     }
 }
 
-unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
+fn send_command_reply(request_id: u16, response: HandlerResponse) {
     unsafe {
         let message = g_variant_new(
             c"(yqv)".as_ptr(),
@@ -313,15 +314,14 @@ unsafe fn send_command_reply(request_id: u16, response: HandlerResponse) {
         );
 
         if let Some(serialized) = serialize_message(message) {
-            let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
-            transport_view.write_message(&serialized);
+            transport_get_unchecked().send(&serialized);
         }
 
         g_variant_unref(message);
     }
 }
 
-unsafe fn handle_create_script(payload_variant: *mut GVariant) -> HandlerResponse {
+fn handle_create_script(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
         if g_variant_check_format_string(payload_variant, c"s".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected string");
@@ -383,15 +383,14 @@ unsafe extern "C" fn frida_message_handler(
         );
 
         if let Some(serialized) = serialize_message(message_variant) {
-            let transport_view = (*core::ptr::addr_of_mut!(TRANSPORT_VIEW)).as_mut().unwrap();
-            transport_view.write_message(&serialized);
+            transport_get_unchecked().send(&serialized);
         }
 
         g_variant_unref(message_variant);
     }
 }
 
-unsafe fn handle_load_script(payload_variant: *mut GVariant) -> HandlerResponse {
+fn handle_load_script(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
         if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected uint32");
@@ -408,7 +407,7 @@ unsafe fn handle_load_script(payload_variant: *mut GVariant) -> HandlerResponse 
     }
 }
 
-unsafe fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerResponse {
+fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
         if g_variant_check_format_string(payload_variant, c"u".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected uint32");
@@ -427,7 +426,7 @@ unsafe fn handle_destroy_script(payload_variant: *mut GVariant) -> HandlerRespon
     }
 }
 
-unsafe fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerResponse {
+fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
         if g_variant_check_format_string(payload_variant, c"(us)".as_ptr(), 0) == 0 {
             return HandlerResponse::error("Invalid payload format: expected (uint32, string)");
