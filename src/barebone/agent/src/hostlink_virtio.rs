@@ -12,9 +12,9 @@ use crate::xnu;
 
 /* ---------- Config (hard-coded for now) ---------- */
 
-const MMIO_BASE: usize = 0x2F100000; // TODO: set to your virtio-mmio base
-const MMIO_SIZE: usize = 0x1000;
-const IRQ_LINE: i32 = 220; // TODO: set to your IRQ line
+const MMIO_BASE: usize = 0x200100000; // TODO: pass in from config
+const MMIO_SIZE: usize = 0x4000; // TODO: pass in from config
+const IRQ_LINE: i32 = 32; // TODO: pass in from config
 
 /* Filled at init from gum_barebone_query_page_size() */
 static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);

@@ -132,7 +132,7 @@ namespace Frida.Barebone {
 			string chardev = "vserial0";
 			yield add_chardev_from_fd (chardev, fd_name, cancellable);
 
-			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", 0, cancellable);
+			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", "hostlink.port", cancellable);
 
 			return local_sock;
 #endif
@@ -205,7 +205,7 @@ namespace Frida.Barebone {
 			yield execute_command ("chardev-add", args.get_root (), cancellable);
 		}
 
-		private async void add_serial_port (string chardev, string bus, string name, uint id, Cancellable? cancellable)
+		private async void add_serial_port (string chardev, string bus, string name, string id, Cancellable? cancellable)
 				throws Error, IOError {
 			var args = new Json.Builder ();
 			args
@@ -219,7 +219,7 @@ namespace Frida.Barebone {
 					.set_member_name ("name")
 					.add_string_value (name)
 					.set_member_name ("id")
-					.add_int_value ((int64) id)
+					.add_string_value (id)
 				.end_object ();
 			yield execute_command ("device_add", args.get_root (), cancellable);
 		}
@@ -271,7 +271,6 @@ namespace Frida.Barebone {
 			ssize_t n;
 			try {
 				n = s.send_message (null, vectors, scms, 0, cancellable);
-				printerr ("send_message() => %zd\n\n", n);
 			} catch (GLib.Error e) {
 				cancel_request (request);
 				throw new Error.TRANSPORT ("%s", e.message);
@@ -297,7 +296,6 @@ namespace Frida.Barebone {
 			pending_requests[id] = promise;
 
 			string json = build_request (command, id, arguments);
-			printerr (">>> %s\n\n", json);
 
 			return new Request () {
 				promise = promise,
@@ -366,13 +364,10 @@ namespace Frida.Barebone {
 					string? line = yield input.read_line_async (Priority.DEFAULT, io_cancellable);
 					if (line == null)
 						break;
-					printerr ("<<< %s\n\n", line);
 
 					handle_message (Json.from_string (line));
 				}
 			} catch (GLib.Error e) {
-				if (!(e is IOError.CANCELLED))
-					printerr ("QMP: Error reading messages: %s\n\n", e.message);
 			} finally {
 				is_connected = false;
 
