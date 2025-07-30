@@ -105,6 +105,15 @@ namespace Frida.Barebone {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
 #else
+			uint64 mmio_base = (uint64) yield get_qom_property_int ("/machine", "hostlink-mmio-base", cancellable);
+			uint32 mmio_size = (uint32) yield get_qom_property_int ("/machine", "hostlink-mmio-size", cancellable);
+			uint irq = (uint) yield get_qom_property_int ("/machine", "hostlink-irq", cancellable);
+			string serial_bus = yield get_qom_property_string ("/machine", "hostlink-serial-bus", cancellable);
+			printerr ("hostlink-mmio-base: 0x%" + uint64.FORMAT_MODIFIER + "x\n", mmio_base);
+			printerr ("hostlink-mmio-size: 0x%x\n", mmio_size);
+			printerr ("hostlink-irq: %u\n", irq);
+			printerr ("hostlink-serial-bus: \"%s\"\n\n", serial_bus);
+
 			int fds[2];
 			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
 				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
@@ -118,15 +127,45 @@ namespace Frida.Barebone {
 			}
 
 			string fd_name = "appfd";
-			yield qmp.getfd (fd_name, fds[1], cancellable);
+			yield getfd (fd_name, fds[1], cancellable);
 
-			yield qmp.add_chardev_from_fd ("vserial0", fd_name, cancellable);
+			string chardev = "vserial0";
+			yield add_chardev_from_fd (chardev, fd_name, cancellable);
 
+			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", 0, cancellable);
 
+			return local_sock;
 #endif
 		}
 
-		private async void getfd (string name, int fd, Cancellable? cancellable = null) throws Error, IOError {
+		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Error, IOError {
+			var val = yield get_qom_property (path, property, cancellable);
+			if (val.get_value_type () != typeof (int64))
+				throw new Error.PROTOCOL ("Expected '%s' property on %s to be an integer", property, path);
+			return val.get_int ();
+		}
+
+		private async string get_qom_property_string (string path, string property, Cancellable? cancellable)
+				throws Error, IOError {
+			var val = yield get_qom_property (path, property, cancellable);
+			if (val.get_value_type () != typeof (string))
+				throw new Error.PROTOCOL ("Expected '%s' property on %s to be a string", property, path);
+			return val.get_string ();
+		}
+
+		private async Json.Node get_qom_property (string path, string property, Cancellable? cancellable) throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("path")
+					.add_string_value (path)
+					.set_member_name ("property")
+					.add_string_value (property)
+				.end_object ();
+			return yield execute_command ("qom-get", args.get_root (), cancellable);
+		}
+
+		private async void getfd (string name, int fd, Cancellable? cancellable) throws Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -136,7 +175,7 @@ namespace Frida.Barebone {
 			yield execute_command_with_file_descriptor ("getfd", args.get_root (), fd, cancellable);
 		}
 
-		private async void add_chardev_from_fd (string id, string fd_name, Cancellable? cancellable = null) throws Error, IOError {
+		private async void add_chardev_from_fd (string id, string fd_name, Cancellable? cancellable) throws Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -166,7 +205,7 @@ namespace Frida.Barebone {
 			yield execute_command ("chardev-add", args.get_root (), cancellable);
 		}
 
-		private async void add_serial_port (string chardev, string name, string id, Cancellable? cancellable = null)
+		private async void add_serial_port (string chardev, string bus, string name, uint id, Cancellable? cancellable)
 				throws Error, IOError {
 			var args = new Json.Builder ();
 			args
@@ -175,10 +214,12 @@ namespace Frida.Barebone {
 					.add_string_value ("virtserialport")
 					.set_member_name ("chardev")
 					.add_string_value (chardev)
+					.set_member_name ("bus")
+					.add_string_value (bus)
 					.set_member_name ("name")
 					.add_string_value (name)
 					.set_member_name ("id")
-					.add_string_value (id)
+					.add_int_value ((int64) id)
 				.end_object ();
 			yield execute_command ("device_add", args.get_root (), cancellable);
 		}
@@ -392,8 +433,6 @@ namespace Frida.Barebone {
 			r.end_member ();
 
 			r.read_member ("return");
-			if (!r.is_object ())
-				throw new Error.PROTOCOL ("Malformed event message: 'return' must be an object");
 			promise.resolve (r.get_current_node ());
 		}
 
