@@ -86,39 +86,6 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
-			Bytes ram = null;
-			AgentTransportConfig tc = config.transport;
-#if !WINDOWS
-			var fd = Posix.open (tc.path, Posix.O_RDWR);
-			if (fd == -1)
-				throw new Error.INVALID_ARGUMENT ("Unable to open %s: %s", tc.path, strerror (errno));
-
-			try {
-				var sb = Posix.Stat ();
-				if (Posix.fstat (fd, out sb) == -1)
-					throw new Error.INVALID_ARGUMENT ("Unable to stat %s: %s", tc.path, strerror (errno));
-
-				size_t size = sb.st_size;
-				if (size == 0)
-					throw new Error.INVALID_ARGUMENT ("Memory file at %s is empty", tc.path);
-
-				void * mem = Posix.mmap (null, size, Posix.PROT_READ | Posix.PROT_WRITE, Posix.MAP_SHARED, fd, 0);
-				if (mem == Posix.MAP_FAILED)
-					throw new Error.INVALID_ARGUMENT ("Unable to map %s: %s", tc.path, strerror (errno));
-
-				ram = make_bytes_with_owner (mem, size, new MappedMemoryRegion (mem, size));
-			} finally {
-				Posix.close (fd);
-			}
-#else
-			try {
-				var file = new MappedFile (tc.path, true);
-				ram = file.get_bytes ();
-			} catch (FileError e) {
-				throw new Error.INVALID_ARGUMENT ("%s", e.message);
-			}
-#endif
-
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
 			var bp = yield gdb.add_breakpoint (SOFT, 0xfffffff007a55728, 4, cancellable);
@@ -165,26 +132,15 @@ namespace Frida.Barebone {
 
 			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
 
-			size_t buffer_size = page_size;
-			uint64 buffer_start_pa = yield machine.invoke (start_address, {
+			yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size
 				},
 				cancellable);
-			uint64 buffer_end_pa = buffer_start_pa + buffer_size;
 
 			yield gdb.continue (cancellable);
 
-			uint64 base_pa = tc.base_address;
-			size_t ram_size = ram.get_size ();
-			if (buffer_start_pa < base_pa || (buffer_end_pa - base_pa) > ram_size)
-				throw new Error.INVALID_ARGUMENT ("Invalid transport config: base_address is incorrect");
-			var buffer_offset = (size_t) (buffer_start_pa - base_pa);
-
-			shared_bytes = ram.slice (buffer_offset, buffer_offset + buffer_size);
-			transport = SharedTransport.from_memory (shared_bytes.get_data (), shared_bytes.get_size ()).as_view (SECONDARY);
-
-			process_incoming_messages.begin ();
+			//process_incoming_messages.begin ();
 
 			return true;
 		}
@@ -250,6 +206,7 @@ namespace Frida.Barebone {
 			}
 		}
 
+		/*
 		private async void process_incoming_messages () {
 			var main_context = MainContext.get_thread_default ();
 			var byte_order = machine.gdb.byte_order;
@@ -298,6 +255,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 			}
 		}
+		*/
 
 		private class MemoryProtectHandler : Object, CallbackHandler {
 			public signal void output (string message);
@@ -388,22 +346,6 @@ namespace Frida.Barebone {
 		}
 	}
 
-#if !WINDOWS
-	private class MappedMemoryRegion {
-		private void * mem;
-		private size_t size;
-
-		public MappedMemoryRegion (void * mem, size_t size) {
-			this.mem = mem;
-			this.size = size;
-		}
-
-		~MappedMemoryRegion () {
-			Posix.munmap (mem, size);
-		}
-	}
-#endif
-
 	private class SymbolHashBuilder : Object {
 		private Gee.Map<string, Gee.List<SymbolInfo>> symbol_table = new Gee.TreeMap<string, Gee.List<SymbolInfo>> ();
 
@@ -474,5 +416,4 @@ namespace Frida.Barebone {
 			return builder.build ();
 		}
 	}
-
 }
