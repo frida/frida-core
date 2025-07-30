@@ -13,7 +13,7 @@ namespace Frida.Barebone {
 			construct;
 		}
 
-		private IOStream stream;
+		private SocketConnection connection;
 		private DataInputStream input;
 		private OutputStream output;
 
@@ -25,7 +25,7 @@ namespace Frida.Barebone {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		private const int COMMAND_TIMEOUT_MS = 30000;
+		private const int REQUEST_TIMEOUT_MS = 30000;
 
 		public QmpClient (string? address = null, uint16 port = 0) {
 			Object (
@@ -50,7 +50,6 @@ namespace Frida.Barebone {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var connectable = parse_socket_address (address, port, "localhost", 4444);
 
-			SocketConnection connection;
 			try {
 				var client = new SocketClient ();
 				connection = yield client.connect_async (connectable, cancellable);
@@ -62,10 +61,9 @@ namespace Frida.Barebone {
 			if (socket.get_family () != UNIX)
 				Tcp.enable_nodelay (socket);
 
-			stream = connection;
-			input = new DataInputStream (stream.get_input_stream ());
+			input = new DataInputStream (connection.get_input_stream ());
 			input.set_newline_type (DataStreamNewlineType.LF);
-			output = stream.get_output_stream ();
+			output = connection.get_output_stream ();
 
 			bool started_message_processing = false;
 			try {
@@ -103,11 +101,171 @@ namespace Frida.Barebone {
 			}
 		}
 
+		public async Socket open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
+#if WINDOWS
+			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
+#else
+			int fds[2];
+			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
+				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
+
+			Socket local_sock, remote_sock;
+			try {
+				local_sock = new Socket.from_fd (fds[0]);
+				remote_sock = new Socket.from_fd (fds[1]);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			string fd_name = "appfd";
+			yield qmp.getfd (fd_name, fds[1], cancellable);
+
+			yield qmp.add_chardev_from_fd ("vserial0", fd_name, cancellable);
+
+
+#endif
+		}
+
+		private async void getfd (string name, int fd, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("fdname")
+					.add_string_value (name)
+				.end_object ();
+			yield execute_command_with_file_descriptor ("getfd", args.get_root (), fd, cancellable);
+		}
+
+		private async void add_chardev_from_fd (string id, string fd_name, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("id")
+					.add_string_value (id)
+					.set_member_name ("backend")
+					.begin_object ()
+						.set_member_name ("type")
+						.add_string_value ("socket")
+						.set_member_name ("data")
+						.begin_object ()
+							.set_member_name ("server")
+							.add_boolean_value (false)
+							.set_member_name ("addr")
+							.begin_object ()
+								.set_member_name ("type")
+								.add_string_value ("fd")
+								.set_member_name ("data")
+								.begin_object ()
+									.set_member_name ("str")
+									.add_string_value (fd_name)
+								.end_object ()
+							.end_object ()
+						.end_object ()
+					.end_object ()
+				.end_object ();
+			yield execute_command ("chardev-add", args.get_root (), cancellable);
+		}
+
+		private async void add_serial_port (string chardev, string name, string id, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("driver")
+					.add_string_value ("virtserialport")
+					.set_member_name ("chardev")
+					.add_string_value (chardev)
+					.set_member_name ("name")
+					.add_string_value (name)
+					.set_member_name ("id")
+					.add_string_value (id)
+				.end_object ();
+			yield execute_command ("device_add", args.get_root (), cancellable);
+		}
+
 		public async Json.Node execute_command (string command, Json.Node? arguments = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			if (!is_connected)
-				throw new Error.INVALID_OPERATION ("QMP client is not connected");
+			check_connected ();
 
+			Request request = begin_request (command, arguments);
+
+			try {
+				yield output.write_all_async (request.json.data, Priority.DEFAULT, cancellable, null);
+			} catch (GLib.Error e) {
+				cancel_request (request);
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			return yield join_request (request, cancellable);
+		}
+
+		public async Json.Node execute_command_with_file_descriptor (string command, Json.Node? arguments = null, int fd,
+				Cancellable? cancellable = null) throws Error, IOError {
+			check_connected ();
+
+#if WINDOWS
+			throw new Error.NOT_SUPPORTED ("Executing command with SocketControlMessage is not supported on Windows");
+#else
+			Request request = begin_request (command, arguments);
+
+			var scm = new UnixFDMessage ();
+			try {
+				scm.append_fd (fd);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			Socket s = connection.get_socket ();
+
+			unowned uint8[] raw_command = request.json.data;
+
+			OutputVector vectors[1] = {
+				OutputVector () {
+					buffer = raw_command,
+					size = raw_command.length,
+				},
+			};
+			SocketControlMessage scms[1] = { scm };
+
+			ssize_t n;
+			try {
+				n = s.send_message (null, vectors, scms, 0, cancellable);
+				printerr ("send_message() => %zd\n\n", n);
+			} catch (GLib.Error e) {
+				cancel_request (request);
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			if (n != raw_command.length) {
+				try {
+					yield output.write_all_async (raw_command[n:], Priority.DEFAULT, cancellable, null);
+				} catch (GLib.Error e) {
+					cancel_request (request);
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			return yield join_request (request, cancellable);
+#endif
+		}
+
+		private Request begin_request (string command, Json.Node? arguments) {
+			uint id = next_request_id++;
+
+			var promise = new Promise<Json.Node> ();
+			pending_requests[id] = promise;
+
+			string json = build_request (command, id, arguments);
+			printerr (">>> %s\n\n", json);
+
+			return new Request () {
+				promise = promise,
+				json = json,
+				id = id,
+			};
+		}
+
+		private static string build_request (string command, uint id, Json.Node? arguments) {
 			var b = new Json.Builder ();
 			b
 				.begin_object ()
@@ -120,45 +278,45 @@ namespace Frida.Barebone {
 					.add_value (arguments);
 			}
 
-			uint request_id = next_request_id++;
 			b
 				.set_member_name ("id")
-				.add_int_value ((int64) request_id);
+				.add_int_value ((int64) id);
 
-			Json.Node message = b
-				.end_object ()
-				.get_root ();
+			Json.Node message = b.end_object ().get_root ();
 
-			var promise = new Promise<Json.Node> ();
-			pending_requests[request_id] = promise;
+			return Json.to_string (message, false) + "\n";
+		}
+
+		private async Json.Node join_request (Request request, Cancellable? cancellable) throws Error, IOError {
+			var timeout_source = new TimeoutSource (REQUEST_TIMEOUT_MS);
+			timeout_source.set_callback (() => {
+				Promise<Json.Node>? p;
+				if (pending_requests.unset (request.id, out p))
+					p.reject (new Error.TIMED_OUT ("QMP command timed out"));
+				return Source.REMOVE;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
 
 			try {
-				string line = Json.to_string (message, false) + "\n";
-				printerr (">>> %s\n\n", line);
-				try {
-					yield output.write_all_async (line.data, Priority.DEFAULT, cancellable, null);
-				} catch (GLib.Error e) {
-					throw new Error.TRANSPORT ("%s", e.message);
-				}
-
-				var timeout_source = new TimeoutSource (COMMAND_TIMEOUT_MS);
-				timeout_source.set_callback (() => {
-					Promise<Json.Node>? p;
-					if (pending_requests.unset (request_id, out p))
-						p.reject (new Error.TIMED_OUT ("QMP command timed out"));
-					return Source.REMOVE;
-				});
-				timeout_source.attach (MainContext.get_thread_default ());
-
-				try {
-					return yield promise.future.wait_async (cancellable);
-				} finally {
-					timeout_source.destroy ();
-				}
-			} catch (GLib.Error e) {
-				pending_requests.unset (request_id);
-				throw_api_error (e);
+				return yield request.promise.future.wait_async (cancellable);
+			} finally {
+				timeout_source.destroy ();
 			}
+		}
+
+		private void cancel_request (Request r) {
+			pending_requests.unset (r.id);
+		}
+
+		private class Request {
+			public Promise<Json.Node> promise;
+			public string json;
+			public uint id;
+		}
+
+		private void check_connected () throws Error {
+			if (!is_connected)
+				throw new Error.INVALID_OPERATION ("QMP client is not connected");
 		}
 
 		private async void process_incoming_messages () {
@@ -190,7 +348,7 @@ namespace Frida.Barebone {
 			yield;
 
 			try {
-				yield stream.close_async ();
+				yield connection.close_async ();
 			} catch (GLib.Error e) {
 			}
 
