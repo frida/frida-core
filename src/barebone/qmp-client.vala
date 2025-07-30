@@ -101,7 +101,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public async Socket open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
+		public async SocketConnection open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
 #else
@@ -134,7 +134,7 @@ namespace Frida.Barebone {
 
 			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", "hostlink.port", cancellable);
 
-			return local_sock;
+			return SocketConnection.factory_create_connection (local_sock);
 #endif
 		}
 

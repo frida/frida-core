@@ -5,14 +5,13 @@ namespace Frida.Barebone {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
+		private SocketConnection hostlink;
 		private AgentConfig config;
 		private Machine machine;
 		private Allocator allocator;
 
 		private Allocation elf_allocation;
 		private Allocation config_allocation;
-		private Bytes shared_bytes;
-		private TransportView transport;
 		private Callback mprotect_callback;
 		private Callback get_writable_mappings_callback;
 
@@ -40,7 +39,7 @@ namespace Frida.Barebone {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var qmp = yield QmpClient.open ("unix:/home/oleavr/src/ios/qmp.sock", 0, cancellable);
-			var sock = yield qmp.open_hostlink (cancellable);
+			hostlink = yield qmp.open_hostlink (cancellable);
 
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
@@ -188,7 +187,13 @@ namespace Frida.Barebone {
 			var promise = new Promise<Variant> ();
 			pending_requests[request_id] = promise;
 
-			transport.write_message (command_bytes);
+			try {
+				yield hostlink.get_output_stream ().write_all_async (command_bytes.get_data (), Priority.DEFAULT,
+					cancellable, null);
+			} catch (GLib.Error e) {
+				pending_requests.unset (request_id);
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
 
 			var timeout_source = new TimeoutSource (COMMAND_TIMEOUT_MS);
 			timeout_source.set_callback (() => {
