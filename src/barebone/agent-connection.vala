@@ -40,8 +40,22 @@ namespace Frida.Barebone {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var qmp = yield QmpClient.open ("unix:/home/oleavr/src/ios/qmp.sock", 0, cancellable);
-			var info = yield qmp.execute_command ("query-doorbell", null, cancellable);
-			printerr ("Got doorbell info: %p\n\n", info);
+
+			int fds[2];
+			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
+				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
+
+			Socket local_sock, remote_sock;
+			try {
+				local_sock = new Socket.from_fd (fds[0]);
+				remote_sock = new Socket.from_fd (fds[1]);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			string fd_name = "appfd";
+			yield qmp.getfd (fd_name, fds[1], cancellable);
+			yield qmp.add_chardev_from_fd ("vserial0", fd_name, cancellable);
 
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
