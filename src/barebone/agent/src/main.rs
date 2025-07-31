@@ -7,7 +7,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
-use core::cell::UnsafeCell;
 use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::ptr::null_mut;
@@ -96,22 +95,21 @@ static mut CONFIG_DATA: &'static [u8] = &[];
 pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
 pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
-#[repr(transparent)]
-struct Global<T>(UnsafeCell<T>);
-unsafe impl<T> Sync for Global<T> {}
-
-static TRANSPORT_DRIVER: Global<Option<Hostlink>> = Global(UnsafeCell::new(None));
+static mut TRANSPORT_DRIVER: *mut Hostlink = core::ptr::null_mut();
 
 #[inline(always)]
 fn transport_set(driver: Hostlink) {
-    unsafe { *TRANSPORT_DRIVER.0.get() = Some(driver); }
+    unsafe {
+        let boxed = Box::into_raw(Box::new(driver));
+        TRANSPORT_DRIVER = boxed;
+    }
 }
 
 #[inline(always)]
 fn transport_get_unchecked() -> &'static Hostlink {
     unsafe {
-        debug_assert!((*TRANSPORT_DRIVER.0.get()).is_some());
-        (*TRANSPORT_DRIVER.0.get()).as_ref().unwrap_unchecked()
+        debug_assert!(!TRANSPORT_DRIVER.is_null());
+        &*TRANSPORT_DRIVER
     }
 }
 
@@ -145,19 +143,26 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
 
-        transport_set(Hostlink::init(Some(on_frame_from_host_safe), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
+        transport_set(Hostlink::init(Some(on_frame_from_host), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
+
+        transport_get_unchecked().send(&serialize_message(
+            g_variant_new_string(c"Frida agent started successfully".as_ptr())
+        ).unwrap());
 
         let main_context = g_main_context_default();
 
         loop {
+            kprintln!("[FRIDA] g_main_context_iteration() before process()");
             transport_get_unchecked().process();
+            kprintln!("[FRIDA] g_main_context_iteration() after process()");
             g_main_context_iteration(main_context, 1);
             kprintln!("[FRIDA] g_main_context_iteration() completed");
         }
     }
 }
 
-fn on_frame_from_host_safe(frame: &[u8]) {
+fn on_frame_from_host(frame: &[u8]) {
+    kprintln!("[FRIDA] on_frame_from_host!");
     if let Some(variant) = deserialize_message(&frame) {
         process_incoming_message(variant);
         unsafe { g_variant_unref(variant); }

@@ -132,7 +132,7 @@ namespace Frida.Barebone {
 			string chardev = "vserial0";
 			yield add_chardev_from_fd (chardev, fd_name, cancellable);
 
-			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", "hostlink.port", cancellable);
+			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", "hostlink.port", 1, cancellable);
 
 			return SocketConnection.factory_create_connection (local_sock);
 #endif
@@ -205,7 +205,7 @@ namespace Frida.Barebone {
 			yield execute_command ("chardev-add", args.get_root (), cancellable);
 		}
 
-		private async void add_serial_port (string chardev, string bus, string name, string id, Cancellable? cancellable)
+		private async void add_serial_port (string chardev, string bus, string name, string id, uint nr, Cancellable? cancellable)
 				throws Error, IOError {
 			var args = new Json.Builder ();
 			args
@@ -220,6 +220,8 @@ namespace Frida.Barebone {
 					.add_string_value (name)
 					.set_member_name ("id")
 					.add_string_value (id)
+					.set_member_name ("nr")
+					.add_int_value ((int64) nr)
 				.end_object ();
 			yield execute_command ("device_add", args.get_root (), cancellable);
 		}
@@ -296,6 +298,7 @@ namespace Frida.Barebone {
 			pending_requests[id] = promise;
 
 			string json = build_request (command, id, arguments);
+			printerr (">>> %s\n\n", json);
 
 			return new Request () {
 				promise = promise,
@@ -364,6 +367,8 @@ namespace Frida.Barebone {
 					string? line = yield input.read_line_async (Priority.DEFAULT, io_cancellable);
 					if (line == null)
 						break;
+
+					printerr ("<<< %s\n\n", line);
 
 					handle_message (Json.from_string (line));
 				}

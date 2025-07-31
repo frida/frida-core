@@ -9,7 +9,7 @@ use crate::{
         gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module,
         gum_module_get_type,
     },
-    gthread, kprintln, libc, xnu,
+    gthread, libc, xnu,
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
@@ -60,7 +60,6 @@ pub extern "C" fn gum_memory_allocate(
     _alignment: gsize,
     _prot: GumPageProtection,
 ) -> gpointer {
-    kprintln!("[FRIDA] gum_memory_allocate: Allocating {} bytes", size);
     let ptr = crate::xnu::kalloc(size as usize);
     if !ptr.is_null() {
         unsafe {
