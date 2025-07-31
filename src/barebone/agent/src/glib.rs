@@ -1,12 +1,11 @@
 use core::ptr;
 
 use crate::bindings::{g_wait_is_set, gint64, gpointer};
-use crate::{kprintln, xnu};
+use crate::xnu;
 
 const G_WAIT_INFINITE: gint64 = -1;
 
 pub static mut WAKEUP_TOKEN: u64 = 0;
-static mut DOORBELL_INTERRUPT_COUNT: u64 = 0;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_get_monotonic_time() -> gint64 {
@@ -38,14 +37,10 @@ pub extern "C" fn g_wait_sleep(token: gpointer, timeout_us: gint64) {
         return;
     }
 
-    kprintln!("[FRIDA] g_wait_sleep: waiting for event to wake up...");
     xnu::thread_block(None);
-    let interrupt_count = unsafe { DOORBELL_INTERRUPT_COUNT };
-    kprintln!("[FRIDA] g_wait_sleep: woke up from event! (interrupt count: {})", interrupt_count);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_wait_wake(_token: gpointer) {
-    kprintln!("[FRIDA] g_wait_wake: waking up the event!");
     xnu::thread_wakeup(ptr::addr_of_mut!(WAKEUP_TOKEN) as *const u8);
 }

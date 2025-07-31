@@ -298,7 +298,6 @@ namespace Frida.Barebone {
 			pending_requests[id] = promise;
 
 			string json = build_request (command, id, arguments);
-			printerr (">>> %s\n\n", json);
 
 			return new Request () {
 				promise = promise,
@@ -367,8 +366,6 @@ namespace Frida.Barebone {
 					string? line = yield input.read_line_async (Priority.DEFAULT, io_cancellable);
 					if (line == null)
 						break;
-
-					printerr ("<<< %s\n\n", line);
 
 					handle_message (Json.from_string (line));
 				}
