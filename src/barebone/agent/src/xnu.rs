@@ -1,6 +1,8 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crate::kprintln;
+
 static KERNEL_BASE: AtomicU64 = AtomicU64::new(0xfffffff007004000);
 
 pub fn get_kernel_base() -> u64 {
@@ -162,7 +164,10 @@ pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut c_void {
     type MlIoMapFn = unsafe extern "C" fn(phys_addr: u64, size: u64) -> *mut c_void;
     unsafe {
         let func: MlIoMapFn = core::mem::transmute(ML_IO_MAP_ADDR);
-        func(phys_addr, size)
+        kprintln!("ml_io_map(phys_addr={:x}, size={:x})", phys_addr, size);
+        let vaddr = func(phys_addr, size);
+        kprintln!("\t=> vaddr={:x}", vaddr as u64);
+        vaddr
     }
 }
 

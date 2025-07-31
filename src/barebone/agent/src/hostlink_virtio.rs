@@ -8,16 +8,19 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::gum::gum_barebone_query_page_size;
-use crate::xnu;
+use crate::{kprintln, xnu};
 
 /* ---------- Config (hard-coded for now) ---------- */
 
 const MMIO_BASE: usize = 0x200100000; // TODO: pass in from config
-const MMIO_SIZE: usize = 0x4000; // TODO: pass in from config
+const MMIO_SIZE: usize = 0x200; // TODO: pass in from config
 const IRQ_LINE: i32 = 32; // TODO: pass in from config
 
 /* Filled at init from gum_barebone_query_page_size() */
 static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+/* ISR wake counter for debugging */
+static ISR_WAKE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /* Queue depth chosen so desc/avail/used each fit in a single page. */
 const QSZ: u16 = 64;
@@ -37,6 +40,7 @@ const DRVFEAT_SEL: usize = 0x024;
 const QSEL: usize = 0x030;
 const QNUM_MAX: usize = 0x034;
 const QNUM: usize = 0x038;
+const QALIGN: usize = 0x03C;
 const QREADY: usize = 0x044;
 
 const QDESC_LO: usize = 0x080;
@@ -154,43 +158,45 @@ struct Vq {
 }
 impl Vq {
     fn new(mmio: *mut u8, sel: u16, size: u16) -> Self {
-        // program queue selection and size
         w32(mmio, QSEL, sel as u32);
         let max = r32(mmio, QNUM_MAX) as u16;
         debug_assert!(max >= size && max != 0);
         w32(mmio, QNUM, size as u32);
 
-        // allocate and publish ring areas
         let d = dma_page_alloc();
         let a = dma_page_alloc();
         let u = dma_page_alloc();
+
+        // **NEW**: zero the rings so idx/flags/ids start at 0
+        let ps = PAGE_SIZE.load(core::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            core::ptr::write_bytes(d.va, 0, ps);
+            core::ptr::write_bytes(a.va, 0, ps);
+            core::ptr::write_bytes(u.va, 0, ps);
+        }
+
         w64(mmio, QDESC_LO, QDESC_HI, d.pa);
         w64(mmio, QAVAIL_LO, QAVAIL_HI, a.pa);
-        w64(mmio, QUSED_LO, QUSED_HI, u.pa);
-        w32(mmio, QREADY, 1);
+        w64(mmio, QUSED_LO,  QUSED_HI,  u.pa);
 
-        // build a free-list in the descriptor ring
+        // build free list
         let dp = d.va as *mut Desc;
         for i in 0..size {
             unsafe {
-                (*dp.add(i as usize)).next = if i + 1 < size { i + 1 } else { 0xFFFF };
+                (*dp.add(i as usize)).flags = 0;
+                (*dp.add(i as usize)).next  = if i + 1 < size { i + 1 } else { 0xFFFF };
             }
         }
 
+        w32(mmio, QREADY, 1);
+
         Self {
-            sel,
-            size,
-            desc_va: d.va,
-            avail_va: a.va,
-            used_va: u.va,
-            avail_idx: 0,
-            used_idx: 0,
-            free_head: 0,
-            free_cnt: size,
+            sel, size,
+            desc_va: d.va, avail_va: a.va, used_va: u.va,
+            avail_idx: 0, used_idx: 0, free_head: 0, free_cnt: size,
         }
     }
 
-    #[inline]
     fn alloc(&mut self) -> u16 {
         debug_assert!(self.free_cnt > 0);
         let h = self.free_head;
@@ -202,7 +208,6 @@ impl Vq {
         h
     }
 
-    #[inline]
     fn free_chain(&mut self, mut idx: u16) {
         let dp = self.desc_va as *mut Desc;
         loop {
@@ -222,7 +227,6 @@ impl Vq {
         self.free_head = idx;
     }
 
-    #[inline]
     fn push_avail(&mut self, head: u16) {
         let ap = self.avail_va as *mut Avail;
         let ring = unsafe { (ap as *mut u8).add(size_of::<Avail>()) as *mut u16 };
@@ -230,13 +234,13 @@ impl Vq {
         unsafe {
             *ring.add(slot) = head;
         }
+        wmb();
         self.avail_idx = self.avail_idx.wrapping_add(1);
         unsafe {
             (*ap).idx = self.avail_idx;
         }
     }
 
-    #[inline]
     fn pop_used(&mut self) -> Option<UsedElem> {
         let up = self.used_va as *mut Used;
         if unsafe { (*up).idx } == self.used_idx {
@@ -302,7 +306,8 @@ unsafe impl Send for Hostlink {}
 impl Hostlink {
     /// Initialize driver; ISR only wakes `wake_token`. Call once at boot.
     pub fn init(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
-        PAGE_SIZE.store(gum_barebone_query_page_size() as usize, Ordering::Relaxed);
+        let page_size = gum_barebone_query_page_size();
+        PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
 
         let mmio = xnu::ml_io_map(MMIO_BASE as u64, MMIO_SIZE as u64) as *mut u8;
         if mmio.is_null() {
@@ -315,12 +320,18 @@ impl Hostlink {
 
         /* Sanity */
         let magic_ok = r32(mmio, MAGIC) == 0x7472_6976;
-        let version_ok = r32(mmio, VERSION) == 2;
+        let version = r32(mmio, VERSION);
+        kprintln!("[FRIDA] virtio-mmio: version={}", version);
+        let version_ok = version == 1 || version == 2;
         let device_ok = r32(mmio, DEVICE) == DEV_ID_CONSOLE;
         if !(magic_ok && version_ok && device_ok) {
             w32(mmio, STATUS, ST_FAILED);
             return Err(());
         }
+
+        //if version == 1 {
+        //    w32(mmio, QALIGN, page_size);
+        //}
 
         /* Feature negotiation: VERSION_1 + MULTIPORT if offered */
         let dev_lo = feat_get(mmio, 0) as u64;
@@ -434,10 +445,15 @@ impl Hostlink {
     pub fn process(&self) {
         let s = unsafe { &mut *self.state.get() };
 
-        /* Ack transport interrupt if present */
+        let wake_count = ISR_WAKE_COUNT.load(Ordering::Relaxed);
+        kprintln!("process() called, ISR wake count: {}", wake_count);
+
+        ///* Ack transport interrupt if present */
         if (r32(s.mmio, ISR) & INT_VRING) != 0 {
             w32(s.mmio, ISR_ACK, INT_VRING);
         }
+        ///* Poll & ack: read clears on legacy virtio-mmio */
+        //let _ = r32(s.mmio, ISR);
 
         /* Control path */
         self.ctrl_complete();
@@ -781,9 +797,10 @@ impl Hostlink {
         }
     }
 
-    #[inline]
     fn kick(&self, sel: u16) {
         let s = unsafe { &*self.state.get() };
+        kprintln!("kick() sel={} writing to mmio={:?}", sel, s.mmio);
+        wmb();
         w32(s.mmio, QSEL, sel as u32);
         w32(s.mmio, QNOTIFY, sel as u32);
     }
@@ -792,31 +809,35 @@ impl Hostlink {
 /* ---------- ISR: just wake the token ---------- */
 
 extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_void, _src: i32) {
+    ISR_WAKE_COUNT.fetch_add(1, Ordering::Relaxed);
     xnu::thread_wakeup(token as *const u8);
 }
 
 /* ---------- MMIO helpers (safe wrappers with inner unsafe) ---------- */
 
-#[inline(always)]
 fn r32(mmio: *mut u8, off: usize) -> u32 {
     unsafe { read_volatile(mmio.add(off) as *const u32) }
 }
-#[inline(always)]
+
 fn w32(mmio: *mut u8, off: usize, val: u32) {
     unsafe { write_volatile(mmio.add(off) as *mut u32, val) }
 }
-#[inline(always)]
+
 fn w64(mmio: *mut u8, lo: usize, hi: usize, v: u64) {
     w32(mmio, lo, (v & 0xffff_ffff) as u32);
     w32(mmio, hi, (v >> 32) as u32);
 }
-#[inline(always)]
+
 fn feat_get(mmio: *mut u8, sel: u32) -> u32 {
     w32(mmio, DEVFEAT_SEL, sel);
     r32(mmio, DEVFEAT)
 }
-#[inline(always)]
+
 fn feat_set(mmio: *mut u8, sel: u32, v: u32) {
     w32(mmio, DRVFEAT_SEL, sel);
     w32(mmio, DRVFEAT, v)
+}
+
+fn wmb() {
+    unsafe { core::arch::asm!("dmb ishst", options(nostack, preserves_flags)) }
 }

@@ -139,7 +139,14 @@ namespace Frida.Barebone {
 
 			yield gdb.continue (cancellable);
 
-			//process_incoming_messages.begin ();
+			process_incoming_messages.begin ();
+
+			var source = new TimeoutSource.seconds (2);
+			source.set_callback (init_async.callback);
+			source.attach (MainContext.get_thread_default ());
+			printerr (">>> before two second sleep\n\n");
+			yield;
+			printerr ("<<< after two second sleep\n\n");
 
 			return true;
 		}
@@ -190,6 +197,7 @@ namespace Frida.Barebone {
 			try {
 				yield hostlink.get_output_stream ().write_all_async (command_bytes.get_data (), Priority.DEFAULT,
 					cancellable, null);
+				printerr ("Wrote %zu bytes to hostlink\n\n", command_bytes.get_size ());
 			} catch (GLib.Error e) {
 				pending_requests.unset (request_id);
 				throw new Error.TRANSPORT ("%s", e.message);
@@ -211,9 +219,22 @@ namespace Frida.Barebone {
 			}
 		}
 
-		/*
 		private async void process_incoming_messages () {
 			var main_context = MainContext.get_thread_default ();
+
+			var buf = new uint8[4096];
+			try {
+				while (true) {
+					printerr (">>> read_async()\n\n");
+					var n = yield hostlink.get_input_stream ().read_async (buf, Priority.DEFAULT, io_cancellable);
+					printerr ("<<< read_async() => %zd\n\n", n);
+					hexdump (buf[:n]);
+				}
+			} catch (GLib.Error e) {
+				printerr ("[process_incoming_messages] Oops: %s\n\n", e.message);
+			}
+
+			/*
 			var byte_order = machine.gdb.byte_order;
 			try {
 				while (true) {
@@ -259,8 +280,8 @@ namespace Frida.Barebone {
 				}
 			} catch (GLib.Error e) {
 			}
+			*/
 		}
-		*/
 
 		private class MemoryProtectHandler : Object, CallbackHandler {
 			public signal void output (string message);
@@ -420,5 +441,31 @@ namespace Frida.Barebone {
 
 			return builder.build ();
 		}
+	}
+
+	private void hexdump (uint8[] data) {
+		var builder = new StringBuilder.sized (16);
+		var i = 0;
+
+		foreach (var c in data) {
+			if (i % 16 == 0)
+				printerr ("%08x | ", i);
+
+			printerr ("%02x ", c);
+
+			if (((char) c).isprint ())
+				builder.append_c ((char) c);
+			else
+				builder.append (".");
+
+			i++;
+			if (i % 16 == 0) {
+				printerr ("| %s\n", builder.str);
+				builder.erase ();
+			}
+		}
+
+		if (i % 16 != 0)
+			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 }
