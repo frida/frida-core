@@ -151,7 +151,9 @@ namespace Frida.Fruity.Injector {
 				dyld_base = yield lldb.read_pointer (dyld_fields.dyld_load_address, cancellable);
 			} else {
 				yield lldb.enumerate_modules (m => {
-					if (m.pathname == "/usr/lib/dyld" || m.pathname == "/binpack/lib/dyld") {
+					if (m.pathname == "/usr/lib/dyld" ||
+							m.pathname == "/binpack/lib/dyld" ||
+							m.pathname == "/cores/usr/lib/dyld") {
 						dyld_base = m.load_address;
 						return false;
 					}
