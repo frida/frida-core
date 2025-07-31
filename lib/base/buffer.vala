@@ -547,7 +547,7 @@ namespace Frida {
 			buffer = buf;
 		}
 
-		public uint64 read_pointer (size_t offset) throws Error {
+		public uint64 read_pointer () throws Error {
 			var pointer_size = buffer.pointer_size;
 			check_available (pointer_size);
 			var ptr = buffer.read_pointer (_offset);
