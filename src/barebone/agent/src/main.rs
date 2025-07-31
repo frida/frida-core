@@ -145,24 +145,16 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 
         transport_set(Hostlink::init(Some(on_frame_from_host), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
 
-        transport_get_unchecked().send(&serialize_message(
-            g_variant_new_string(c"Frida agent started successfully".as_ptr())
-        ).unwrap());
-
         let main_context = g_main_context_default();
 
         loop {
-            kprintln!("[FRIDA] g_main_context_iteration() before process()");
             transport_get_unchecked().process();
-            kprintln!("[FRIDA] g_main_context_iteration() after process()");
             g_main_context_iteration(main_context, 1);
-            kprintln!("[FRIDA] g_main_context_iteration() completed");
         }
     }
 }
 
 fn on_frame_from_host(frame: &[u8]) {
-    kprintln!("[FRIDA] on_frame_from_host!");
     if let Some(variant) = deserialize_message(&frame) {
         process_incoming_message(variant);
         unsafe { g_variant_unref(variant); }

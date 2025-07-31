@@ -6,6 +6,9 @@ namespace Frida.Barebone {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private SocketConnection hostlink;
+		private BufferedInputStream input;
+		private OutputStream output;
+
 		private AgentConfig config;
 		private Machine machine;
 		private Allocator allocator;
@@ -40,6 +43,11 @@ namespace Frida.Barebone {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var qmp = yield QmpClient.open ("unix:/home/oleavr/src/ios/qmp.sock", 0, cancellable);
 			hostlink = yield qmp.open_hostlink (cancellable);
+			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+				"base-stream", hostlink.get_input_stream (),
+				"close-base-stream", false,
+				"buffer-size", 128 * 1024);
+			output = hostlink.get_output_stream ();
 
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
@@ -141,13 +149,6 @@ namespace Frida.Barebone {
 
 			process_incoming_messages.begin ();
 
-			var source = new TimeoutSource.seconds (2);
-			source.set_callback (init_async.callback);
-			source.attach (MainContext.get_thread_default ());
-			printerr (">>> before two second sleep\n\n");
-			yield;
-			printerr ("<<< after two second sleep\n\n");
-
 			return true;
 		}
 
@@ -184,20 +185,23 @@ namespace Frida.Barebone {
 
 		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable) throws Error, IOError {
 			uint16 request_id = next_request_id++;
-			var command_message = new Variant ("(yqv)", (uint8) command, request_id, payload);
 
+			var command_message = new Variant ("(yqv)", (uint8) command, request_id, payload);
 			if (machine.gdb.byte_order != ByteOrder.HOST)
 				command_message = command_message.byteswap ();
-
 			var command_bytes = command_message.get_data_as_bytes ();
+
+			var builder = machine.gdb.make_buffer_builder ();
+			Bytes frame = builder
+				.append_uint32 ((uint32) command_bytes.get_size ())
+				.append_bytes (command_bytes)
+				.build ();
 
 			var promise = new Promise<Variant> ();
 			pending_requests[request_id] = promise;
 
 			try {
-				yield hostlink.get_output_stream ().write_all_async (command_bytes.get_data (), Priority.DEFAULT,
-					cancellable, null);
-				printerr ("Wrote %zu bytes to hostlink\n\n", command_bytes.get_size ());
+				yield output.write_all_async (frame.get_data (), Priority.DEFAULT, cancellable, null);
 			} catch (GLib.Error e) {
 				pending_requests.unset (request_id);
 				throw new Error.TRANSPORT ("%s", e.message);
@@ -220,39 +224,32 @@ namespace Frida.Barebone {
 		}
 
 		private async void process_incoming_messages () {
-			var main_context = MainContext.get_thread_default ();
-
-			var buf = new uint8[4096];
-			try {
-				while (true) {
-					printerr (">>> read_async()\n\n");
-					var n = yield hostlink.get_input_stream ().read_async (buf, Priority.DEFAULT, io_cancellable);
-					printerr ("<<< read_async() => %zd\n\n", n);
-					hexdump (buf[:n]);
-				}
-			} catch (GLib.Error e) {
-				printerr ("[process_incoming_messages] Oops: %s\n\n", e.message);
-			}
-
-			/*
 			var byte_order = machine.gdb.byte_order;
+
 			try {
 				while (true) {
-					io_cancellable.set_error_if_cancelled ();
+					size_t header_size = 4;
+					if (input.get_available () < header_size)
+						yield fill_until_n_bytes_available (header_size);
 
-					var source = new TimeoutSource (10);
-					source.set_callback (process_incoming_messages.callback);
-					source.attach (main_context);
-					yield;
+					uint32 body_size = 0;
+					unowned uint8[] size_buf = ((uint8[]) &body_size)[:4];
+					input.peek (size_buf);
+					body_size = uint32.from_little_endian (body_size);
 
-					transport.flush_pending ();
+					size_t full_size = header_size + body_size;
+					if (input.get_available () < full_size)
+						yield fill_until_n_bytes_available (full_size);
 
-					Bytes? message_bytes = transport.try_read_message ();
-					if (message_bytes == null)
-						continue;
+					var body = new uint8[body_size];
+					input.peek (body, header_size);
 
-					var message = Variant.new_from_data (new VariantType ("(yqv)"), message_bytes.get_data (), false,
-						message_bytes);
+					input.skip (full_size, io_cancellable);
+
+					var raw_message = new Bytes.take ((owned) body);
+
+					var message = Variant.new_from_data (new VariantType ("(yqv)"), raw_message.get_data (), false,
+						raw_message);
 					if (byte_order != ByteOrder.HOST)
 						message = message.byteswap ();
 					if (!message.check_format_string ("(yqv)", false))
@@ -279,8 +276,29 @@ namespace Frida.Barebone {
 					}
 				}
 			} catch (GLib.Error e) {
+				printerr ("[process_incoming_messages] Oops: %s\n\n", e.message);
 			}
-			*/
+		}
+
+		private async void fill_until_n_bytes_available (size_t minimum) throws Error, IOError {
+			size_t available = input.get_available ();
+			while (available < minimum) {
+				if (input.get_buffer_size () < minimum)
+					input.set_buffer_size (minimum);
+
+				ssize_t n;
+				try {
+					n = yield input.fill_async ((ssize_t) (input.get_buffer_size () - available), Priority.DEFAULT,
+						io_cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Connection closed");
+				}
+
+				if (n == 0)
+					throw new Error.TRANSPORT ("Connection closed");
+
+				available += n;
+			}
 		}
 
 		private class MemoryProtectHandler : Object, CallbackHandler {
@@ -441,31 +459,5 @@ namespace Frida.Barebone {
 
 			return builder.build ();
 		}
-	}
-
-	private void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 }

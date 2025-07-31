@@ -1,6 +1,3 @@
-// hostlink_virtio.rs — virtio-mmio + virtio-serial (event-driven, single-threaded)
-// Rust edition = 2024. No warnings suppressed. Uses only crate::xnu and crate::gum APIs.
-
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::mem::size_of;
@@ -8,28 +5,19 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::gum::gum_barebone_query_page_size;
-use crate::{kprintln, xnu};
-
-/* ---------- Config (hard-coded for now) ---------- */
+use crate::xnu;
 
 const MMIO_BASE: usize = 0x200100000; // TODO: pass in from config
 const MMIO_SIZE: usize = 0x200; // TODO: pass in from config
 const IRQ_LINE: i32 = 32; // TODO: pass in from config
 
-/* Filled at init from gum_barebone_query_page_size() */
 static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
-/* ISR wake counter for debugging */
-static ISR_WAKE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/* Queue depth chosen so desc/avail/used each fit in a single page. */
 const QSZ: u16 = 64;
 
-/* ---------- virtio-mmio regs (v1.x) ---------- */
-
-const MAGIC: usize = 0x000; // 0x74726976
-const VERSION: usize = 0x004; // 2
-const DEVICE: usize = 0x008; // 3 (console/serial)
+const MAGIC: usize = 0x000;
+const VERSION: usize = 0x004;
+const DEVICE: usize = 0x008;
 const STATUS: usize = 0x070;
 
 const DEVFEAT: usize = 0x010;
@@ -40,7 +28,6 @@ const DRVFEAT_SEL: usize = 0x024;
 const QSEL: usize = 0x030;
 const QNUM_MAX: usize = 0x034;
 const QNUM: usize = 0x038;
-const QALIGN: usize = 0x03C;
 const QREADY: usize = 0x044;
 
 const QDESC_LO: usize = 0x080;
@@ -54,30 +41,23 @@ const QNOTIFY: usize = 0x050;
 const ISR: usize = 0x060;
 const ISR_ACK: usize = 0x064;
 
-/* STATUS bits */
 const ST_ACK: u32 = 1;
 const ST_DRV: u32 = 2;
 const ST_DRV_OK: u32 = 4;
 const ST_FEAT_OK: u32 = 8;
 const ST_FAILED: u32 = 0x80;
 
-/* Device/feature bits */
 const DEV_ID_CONSOLE: u32 = 3;
 const F_VERSION_1: u64 = 1u64 << 32;
 const F_MULTIPORT: u64 = 1u64 << 1;
 
-/* InterruptStatus bit */
 const INT_VRING: u32 = 1;
 
-/* ---------- virtio-console specifics ---------- */
-
-/* Queues: port0 rx/tx + control rx/tx (v1.1 §5.3.2) */
 const Q_RX0: u16 = 0;
 const Q_TX0: u16 = 1;
 const Q_CTRL_RX: u16 = 2;
 const Q_CTRL_TX: u16 = 3;
 
-/* Control events (v1.1 §5.3.6.2) */
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct VConsCtrl {
@@ -90,8 +70,6 @@ const EV_DEVICE_ADD: u16 = 1;
 const EV_PORT_READY: u16 = 3;
 const EV_PORT_OPEN: u16 = 6;
 const EV_CONSOLE_PORT: u16 = 4;
-
-/* ---------- Split ring structs ---------- */
 
 #[repr(C)]
 struct Desc {
@@ -107,7 +85,7 @@ const D_WRITE: u16 = 2;
 #[derive(Copy, Clone)]
 struct Avail {
     flags: u16,
-    idx: u16, /* ring[u16] follows */
+    idx: u16,
 }
 
 #[repr(C)]
@@ -120,10 +98,8 @@ struct UsedElem {
 #[derive(Copy, Clone)]
 struct Used {
     flags: u16,
-    idx: u16, /* ring[UsedElem] follows */
+    idx: u16,
 }
-
-/* ---------- Tiny page-DMA helpers ---------- */
 
 #[derive(Copy, Clone)]
 struct DmaPage {
@@ -133,17 +109,15 @@ struct DmaPage {
 
 fn dma_page_alloc() -> DmaPage {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    // SAFETY: kalloc/phys mapping provided by xnu module.
     let va = xnu::kalloc(len);
     let pa = xnu::ml_vtophys(va as u64);
     DmaPage { va, pa }
 }
+
 fn dma_page_free(p: DmaPage) {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
     xnu::free(p.va, len);
 }
-
-/* ---------- Virtqueue (each area = one page) ---------- */
 
 struct Vq {
     sel: u16,
@@ -167,7 +141,6 @@ impl Vq {
         let a = dma_page_alloc();
         let u = dma_page_alloc();
 
-        // **NEW**: zero the rings so idx/flags/ids start at 0
         let ps = PAGE_SIZE.load(core::sync::atomic::Ordering::Relaxed);
         unsafe {
             core::ptr::write_bytes(d.va, 0, ps);
@@ -177,23 +150,28 @@ impl Vq {
 
         w64(mmio, QDESC_LO, QDESC_HI, d.pa);
         w64(mmio, QAVAIL_LO, QAVAIL_HI, a.pa);
-        w64(mmio, QUSED_LO,  QUSED_HI,  u.pa);
+        w64(mmio, QUSED_LO, QUSED_HI, u.pa);
 
-        // build free list
         let dp = d.va as *mut Desc;
         for i in 0..size {
             unsafe {
                 (*dp.add(i as usize)).flags = 0;
-                (*dp.add(i as usize)).next  = if i + 1 < size { i + 1 } else { 0xFFFF };
+                (*dp.add(i as usize)).next = if i + 1 < size { i + 1 } else { 0xFFFF };
             }
         }
 
         w32(mmio, QREADY, 1);
 
         Self {
-            sel, size,
-            desc_va: d.va, avail_va: a.va, used_va: u.va,
-            avail_idx: 0, used_idx: 0, free_head: 0, free_cnt: size,
+            sel,
+            size,
+            desc_va: d.va,
+            avail_va: a.va,
+            used_va: u.va,
+            avail_idx: 0,
+            used_idx: 0,
+            free_head: 0,
+            free_cnt: size,
         }
     }
 
@@ -253,40 +231,31 @@ impl Vq {
     }
 }
 
-/* ---------- Driver state with interior mutability ---------- */
-
 struct Inner {
     mmio: *mut u8,
 
-    /* control queues */
     ctrl_rx: Vq,
     ctrl_tx: Vq,
 
-    /* data port (set on first DEVICE_ADD / CONSOLE_PORT) */
     port_id: Option<u32>,
     rx: Option<Vq>,
     tx: Option<Vq>,
 
-    /* RX frame reassembly (LE u32 length) */
     rx_need: usize,
     rx_have: usize,
     rx_lenbuf: [u8; 4],
     rx_lenhave: usize,
     rx_buf: Option<&'static mut [u8]>,
 
-    /* software TX backlog (singly-linked list of owned frames) */
     tx_head: *mut TxNode,
     tx_tail: *mut TxNode,
 
-    /* posted pages bookkeeping */
     ctrl_rx_pages: [Option<DmaPage>; QSZ as usize],
     data_rx_pages: [Option<DmaPage>; QSZ as usize],
     tx_pages: [Option<DmaPage>; QSZ as usize],
 
-    /* wake token (same one your GMain loop sleeps on) */
     wake_token: *const u8,
 
-    /* inbound frame callback */
     on_rx: Option<fn(&[u8])>,
 }
 
@@ -300,11 +269,9 @@ pub struct Hostlink {
     state: UnsafeCell<Inner>,
 }
 
-// Not Sync (UnsafeCell); Send is fine in single-threaded XNU kext world if you move between contexts.
 unsafe impl Send for Hostlink {}
 
 impl Hostlink {
-    /// Initialize driver; ISR only wakes `wake_token`. Call once at boot.
     pub fn init(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let page_size = gum_barebone_query_page_size();
         PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
@@ -314,26 +281,17 @@ impl Hostlink {
             return Err(());
         }
 
-        /* Reset + ack/driver */
         w32(mmio, STATUS, 0);
         w32(mmio, STATUS, ST_ACK | ST_DRV);
 
-        /* Sanity */
         let magic_ok = r32(mmio, MAGIC) == 0x7472_6976;
-        let version = r32(mmio, VERSION);
-        kprintln!("[FRIDA] virtio-mmio: version={}", version);
-        let version_ok = version == 1 || version == 2;
+        let version_ok = r32(mmio, VERSION) == 2;
         let device_ok = r32(mmio, DEVICE) == DEV_ID_CONSOLE;
         if !(magic_ok && version_ok && device_ok) {
             w32(mmio, STATUS, ST_FAILED);
             return Err(());
         }
 
-        //if version == 1 {
-        //    w32(mmio, QALIGN, page_size);
-        //}
-
-        /* Feature negotiation: VERSION_1 + MULTIPORT if offered */
         let dev_lo = feat_get(mmio, 0) as u64;
         let dev_hi = (feat_get(mmio, 1) as u64) << 32;
         let mut drv: u64 = 0;
@@ -352,14 +310,11 @@ impl Hostlink {
             return Err(());
         }
 
-        /* Control queues */
         let ctrl_rx = Vq::new(mmio, Q_CTRL_RX, QSZ);
         let ctrl_tx = Vq::new(mmio, Q_CTRL_TX, QSZ);
 
-        /* DRIVER_OK */
         w32(mmio, STATUS, r32(mmio, STATUS) | ST_DRV_OK);
 
-        /* Install ISR that just wakes the token */
         xnu::install_interrupt_handler(
             IRQ_LINE,
             wake_token as *mut c_void,
@@ -367,7 +322,6 @@ impl Hostlink {
             core::ptr::null_mut(),
         );
 
-        /* Object */
         let inner = Inner {
             mmio,
             ctrl_rx,
@@ -393,7 +347,6 @@ impl Hostlink {
             state: UnsafeCell::new(inner),
         };
 
-        /* Prime a handful of control RX buffers and announce DEVICE_READY */
         hl.ctrl_prime_rx(8);
         hl.ctrl_send(VConsCtrl {
             id: 0,
@@ -404,11 +357,9 @@ impl Hostlink {
         Ok(hl)
     }
 
-    /// Fire-and-forget: queue a frame. Always succeeds (assumes `kalloc()` succeeds).
     pub fn send(&self, payload: &[u8]) {
         let s = unsafe { &mut *self.state.get() };
 
-        /* Build `[len(LE)][payload]` into one owned buffer */
         let total = 4 + payload.len();
         let buf = xnu::kalloc(total);
         unsafe {
@@ -421,7 +372,6 @@ impl Hostlink {
         }
         let frame: &'static [u8] = unsafe { core::slice::from_raw_parts(buf, total) };
 
-        /* Push onto software tail (singly-linked) */
         let node = xnu::kalloc(size_of::<TxNode>()) as *mut TxNode;
         unsafe {
             (*node).next = core::ptr::null_mut();
@@ -441,32 +391,21 @@ impl Hostlink {
         xnu::thread_wakeup(s.wake_token);
     }
 
-    /// Call this whenever your GMain loop wakes from `g_wait_sleep()`.
     pub fn process(&self) {
         let s = unsafe { &mut *self.state.get() };
 
-        let wake_count = ISR_WAKE_COUNT.load(Ordering::Relaxed);
-        kprintln!("process() called, ISR wake count: {}", wake_count);
-
-        ///* Ack transport interrupt if present */
         if (r32(s.mmio, ISR) & INT_VRING) != 0 {
             w32(s.mmio, ISR_ACK, INT_VRING);
         }
-        ///* Poll & ack: read clears on legacy virtio-mmio */
-        //let _ = r32(s.mmio, ISR);
 
-        /* Control path */
         self.ctrl_complete();
         self.ctrl_prime_rx(QSZ as usize);
 
-        /* Data path (once port is up) */
         self.data_rx_complete();
         self.data_tx_complete();
         self.data_tx_push();
         self.data_rx_refill();
     }
-
-    /* ---------- private helpers operate on &self via UnsafeCell ---------- */
 
     fn ctrl_prime_rx(&self, count: usize) {
         let s = unsafe { &mut *self.state.get() };
@@ -514,7 +453,6 @@ impl Hostlink {
 
     fn ctrl_complete(&self) {
         let s = unsafe { &mut *self.state.get() };
-        /* RX events */
         while let Some(u) = s.ctrl_rx.pop_used() {
             let h = u.id as u16;
             if let Some(pg) = s.ctrl_rx_pages[h as usize].take() {
@@ -540,7 +478,6 @@ impl Hostlink {
                     _ => {}
                 }
 
-                /* re-post page on same slot */
                 let pg2 = dma_page_alloc();
                 let d = s.ctrl_rx.desc_va as *mut Desc;
                 unsafe {
@@ -556,7 +493,6 @@ impl Hostlink {
         let sel = s.ctrl_rx.sel;
         self.kick(sel);
 
-        /* TX completions: free sent control pages */
         while let Some(u) = s.ctrl_tx.pop_used() {
             let head = u.id as u16;
             if let Some(pg) = s.tx_pages[head as usize].take() {
@@ -623,7 +559,6 @@ impl Hostlink {
                 }
                 dma_page_free(pg);
 
-                /* repost same slot */
                 let pg2 = dma_page_alloc();
                 let d = rxq.desc_va as *mut Desc;
                 unsafe {
@@ -640,7 +575,6 @@ impl Hostlink {
         self.kick(sel);
     }
 
-    /* stream -> frames (LE u32 length) */
     fn feed_rx_stream(&self, mut chunk: &[u8]) {
         let s = unsafe { &mut *self.state.get() };
         while !chunk.is_empty() {
@@ -687,7 +621,6 @@ impl Hostlink {
                 if let (Some(cb), Some(buf)) = (s.on_rx, &s.rx_buf) {
                     cb(&buf[..]);
                 }
-                /* Reset for next frame */
                 s.rx_buf = None;
                 s.rx_need = 0;
                 s.rx_have = 0;
@@ -702,7 +635,6 @@ impl Hostlink {
             return;
         };
         while let Some(u) = txq.pop_used() {
-            /* free page fragments */
             let mut i = u.id as u16;
             loop {
                 if let Some(pg) = s.tx_pages[i as usize].take() {
@@ -728,7 +660,6 @@ impl Hostlink {
             return;
         };
         loop {
-            /* pop one software node */
             let node = if s.tx_head.is_null() {
                 core::ptr::null_mut()
             } else {
@@ -744,7 +675,6 @@ impl Hostlink {
             }
             let frame = unsafe { (*node).frame };
 
-            /* chain page-sized descriptors */
             let mut off = 0usize;
             let mut head: Option<u16> = None;
             let mut prev = 0u16;
@@ -784,14 +714,12 @@ impl Hostlink {
                 off += chunk;
             }
 
-            /* kick */
             if let Some(h) = head {
                 let sel = txq.sel;
                 txq.push_avail(h);
                 self.kick(sel);
             }
 
-            /* free software node + its frame (we copied into DMA pages) */
             xnu::free(frame.as_ptr() as *mut u8, frame.len());
             xnu::free(node as *mut u8, core::mem::size_of::<TxNode>());
         }
@@ -799,21 +727,15 @@ impl Hostlink {
 
     fn kick(&self, sel: u16) {
         let s = unsafe { &*self.state.get() };
-        kprintln!("kick() sel={} writing to mmio={:?}", sel, s.mmio);
         wmb();
         w32(s.mmio, QSEL, sel as u32);
         w32(s.mmio, QNOTIFY, sel as u32);
     }
 }
 
-/* ---------- ISR: just wake the token ---------- */
-
 extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_void, _src: i32) {
-    ISR_WAKE_COUNT.fetch_add(1, Ordering::Relaxed);
     xnu::thread_wakeup(token as *const u8);
 }
-
-/* ---------- MMIO helpers (safe wrappers with inner unsafe) ---------- */
 
 fn r32(mmio: *mut u8, off: usize) -> u32 {
     unsafe { read_volatile(mmio.add(off) as *const u32) }
