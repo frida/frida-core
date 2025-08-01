@@ -92,7 +92,7 @@ impl HandlerResponse {
 }
 
 static mut CONFIG_DATA: &'static [u8] = &[];
-pub static mut MODULE_INFOS: Vec<ModuleInfo> = Vec::new();
+pub static mut MODULE_INFO: Vec<ModuleInfo> = Vec::new();
 pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
 static mut TRANSPORT_DRIVER: *mut Hostlink = core::ptr::null_mut();
@@ -141,9 +141,13 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
+        let (mmio, irq, kernel_base, module_info, symbol_table) = parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
+        kprintln!("Using mmio=0x{:x} irq={} kernel_base=0x{:x}", mmio, irq, kernel_base);
+        xnu::set_kernel_base(kernel_base);
+        MODULE_INFO = module_info;
+        SYMBOL_TABLE = symbol_table;
 
-        transport_set(Hostlink::init(Some(on_frame_from_host), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
+        transport_set(Hostlink::init(mmio, irq, Some(on_frame_from_host), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
 
         let main_context = g_main_context_default();
 
@@ -161,9 +165,9 @@ fn on_frame_from_host(frame: &[u8]) {
     }
 }
 
-unsafe fn parse_config(config: &[u8]) {
+unsafe fn parse_config(config: &[u8]) -> (u64, u32, u64, Vec<ModuleInfo>, SymbolTable) {
     unsafe {
-        let type_string = c"(ta(ssuuuu)ay)".as_ptr() as *const gchar;
+        let type_string = c"(tuta(ssuuuu)ay)".as_ptr() as *const gchar;
         let variant_type = g_variant_type_new(type_string);
 
         let root_variant = g_variant_new_from_data(
@@ -175,15 +179,21 @@ unsafe fn parse_config(config: &[u8]) {
             ptr::null_mut(),
         );
 
-        let kernel_base_variant = g_variant_get_child_value(root_variant, 0);
+        let hostlink_mmio_variant = g_variant_get_child_value(root_variant, 0);
+        let hostlink_mmio = g_variant_get_uint64(hostlink_mmio_variant);
+
+        let hostlink_irq_variant = g_variant_get_child_value(root_variant, 1);
+        let hostlink_irq = g_variant_get_uint32(hostlink_irq_variant);
+
+        let kernel_base_variant = g_variant_get_child_value(root_variant, 2);
         let kernel_base = g_variant_get_uint64(kernel_base_variant);
         xnu::set_kernel_base(kernel_base);
 
-        let module_info_variant = g_variant_get_child_value(root_variant, 1);
+        let module_info_variant = g_variant_get_child_value(root_variant, 3);
         let mut iter: GVariantIter = core::mem::zeroed();
         g_variant_iter_init(&mut iter as *mut GVariantIter, module_info_variant);
 
-        let module_infos = core::ptr::addr_of_mut!(MODULE_INFOS);
+        let mut module_info: Vec<ModuleInfo> = Vec::new();
         let mut raw_name: *mut gchar = null_mut();
         let mut raw_version: *mut gchar = null_mut();
         let mut offset: u32 = 0;
@@ -201,7 +211,7 @@ unsafe fn parse_config(config: &[u8]) {
             &mut stop_func_offset,
         ) != 0
         {
-            (*module_infos).push(ModuleInfo {
+            module_info.push(ModuleInfo {
                 name: String::from(CStr::from_ptr(raw_name).to_str().unwrap()),
                 version: String::from(CStr::from_ptr(raw_version).to_str().unwrap()),
                 offset,
@@ -211,10 +221,10 @@ unsafe fn parse_config(config: &[u8]) {
             });
         }
 
-        let symbol_array_variant = g_variant_get_child_value(root_variant, 2);
+        let symbol_array_variant = g_variant_get_child_value(root_variant, 4);
         let symbol_data_ptr = g_variant_get_data(symbol_array_variant) as *const u8;
         let symbol_data_size = g_variant_get_size(symbol_array_variant) as usize;
-        SYMBOL_TABLE = SymbolTable::new(core::slice::from_raw_parts(
+        let symbol_table = SymbolTable::new(core::slice::from_raw_parts(
             symbol_data_ptr,
             symbol_data_size,
         ));
@@ -222,8 +232,12 @@ unsafe fn parse_config(config: &[u8]) {
         g_variant_unref(symbol_array_variant);
         g_variant_unref(module_info_variant);
         g_variant_unref(kernel_base_variant);
+        g_variant_unref(hostlink_irq_variant);
+        g_variant_unref(hostlink_mmio_variant);
         g_variant_unref(root_variant);
         g_variant_type_free(variant_type);
+
+        (hostlink_mmio, hostlink_irq, kernel_base, module_info, symbol_table)
     }
 }
 

@@ -7,9 +7,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::gum::gum_barebone_query_page_size;
 use crate::xnu;
 
-const MMIO_BASE: usize = 0x200100000; // TODO: pass in from config
-const MMIO_SIZE: usize = 0x200; // TODO: pass in from config
-const IRQ_LINE: i32 = 32; // TODO: pass in from config
+const MMIO_SIZE: usize = 0x200;
 
 static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
@@ -272,11 +270,11 @@ pub struct Hostlink {
 unsafe impl Send for Hostlink {}
 
 impl Hostlink {
-    pub fn init(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
+    pub fn init(mmio: u64, irq: u32, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let page_size = gum_barebone_query_page_size();
         PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
 
-        let mmio = xnu::ml_io_map(MMIO_BASE as u64, MMIO_SIZE as u64) as *mut u8;
+        let mmio = xnu::ml_io_map(mmio, MMIO_SIZE as u64) as *mut u8;
         if mmio.is_null() {
             return Err(());
         }
@@ -316,7 +314,7 @@ impl Hostlink {
         w32(mmio, STATUS, r32(mmio, STATUS) | ST_DRV_OK);
 
         xnu::install_interrupt_handler(
-            IRQ_LINE,
+            irq,
             wake_token as *mut c_void,
             isr_wake,
             core::ptr::null_mut(),

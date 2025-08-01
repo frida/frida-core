@@ -111,7 +111,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     let kernel_base = crate::xnu::get_kernel_base();
 
     unsafe {
-        let module_infos = core::ptr::addr_of!(crate::MODULE_INFOS);
+        let module_infos = core::ptr::addr_of!(crate::MODULE_INFO);
         let module_infos = &*module_infos;
 
         let mut i = 0;

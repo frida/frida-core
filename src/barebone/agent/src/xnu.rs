@@ -183,7 +183,7 @@ pub type IOInterruptHandler =
     extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
 pub fn install_interrupt_handler(
-    source: i32,
+    irq: u32,
     target: *mut c_void,
     handler: IOInterruptHandler,
     refcon: *mut c_void,
@@ -220,7 +220,7 @@ pub fn install_interrupt_handler(
     let interrupt_sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
 
     let osdata_with_bytes: OSDataWithBytesFn = unsafe { core::mem::transmute(OSDATA_WITH_BYTES_ADDR) };
-    let source_bytes = (source as u32).to_ne_bytes();
+    let source_bytes = irq.to_ne_bytes();
     let vector_data = osdata_with_bytes(source_bytes.as_ptr() as *const c_void, 4);
 
     unsafe {

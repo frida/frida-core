@@ -101,18 +101,13 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public async SocketConnection open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
+		public async Hostlink open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
 #else
-			uint64 mmio_base = (uint64) yield get_qom_property_int ("/machine", "hostlink-mmio-base", cancellable);
-			uint32 mmio_size = (uint32) yield get_qom_property_int ("/machine", "hostlink-mmio-size", cancellable);
+			uint64 mmio = (uint64) yield get_qom_property_int ("/machine", "hostlink-mmio", cancellable);
 			uint irq = (uint) yield get_qom_property_int ("/machine", "hostlink-irq", cancellable);
-			string serial_bus = yield get_qom_property_string ("/machine", "hostlink-serial-bus", cancellable);
-			printerr ("hostlink-mmio-base: 0x%" + uint64.FORMAT_MODIFIER + "x\n", mmio_base);
-			printerr ("hostlink-mmio-size: 0x%x\n", mmio_size);
-			printerr ("hostlink-irq: %u\n", irq);
-			printerr ("hostlink-serial-bus: \"%s\"\n\n", serial_bus);
+			string bus = yield get_qom_property_string ("/machine", "hostlink-bus", cancellable);
 
 			int fds[2];
 			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
@@ -132,10 +127,20 @@ namespace Frida.Barebone {
 			string chardev = "vserial0";
 			yield add_chardev_from_fd (chardev, fd_name, cancellable);
 
-			yield add_serial_port (chardev, serial_bus, "re.frida.hostlink", "hostlink.port", 1, cancellable);
+			yield add_serial_port (chardev, bus, "re.frida.hostlink", "hostlink.port", 1, cancellable);
 
-			return SocketConnection.factory_create_connection (local_sock);
+			return new Hostlink () {
+				connection = SocketConnection.factory_create_connection (local_sock),
+				mmio = mmio,
+				irq = irq,
+			};
 #endif
+		}
+
+		public class Hostlink {
+			public SocketConnection connection;
+			public uint64 mmio;
+			public uint irq;
 		}
 
 		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Error, IOError {

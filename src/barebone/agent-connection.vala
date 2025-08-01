@@ -46,10 +46,10 @@ namespace Frida.Barebone {
 			HostlinkTransportConfig? transport_config = agent_config.transport as HostlinkTransportConfig;
 			if (transport_config == null)
 				throw new Error.NOT_SUPPORTED ("Unsupported transport config: only hostlink is supported for now");
-			printerr ("qmp: %s\n\n", transport_config.qmp);
 
 			var qmp = yield QmpClient.open (transport_config.qmp, 0, cancellable);
-			hostlink = yield qmp.open_hostlink (cancellable);
+			var link = yield qmp.open_hostlink (cancellable);
+			hostlink = link.connection;
 			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
 				"base-stream", hostlink.get_input_stream (),
 				"close-base-stream", false,
@@ -70,9 +70,15 @@ namespace Frida.Barebone {
 				kernel_base = 0;
 				layout = new Layout.empty ();
 			}
+			if (kernel_base == 0)
+				throw new Error.NOT_SUPPORTED ("Missing kernel_base");
+			SymbolInfo? thread_block = layout.symbols.first_match (s => s.name == "thread_block");
+			if (thread_block == null)
+				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
 
-			var config_builder = new VariantBuilder (new VariantType ("(ta(ssuuuu)ay)"));
-
+			var config_builder = new VariantBuilder (new VariantType ("(tuta(ssuuuu)ay)"));
+			config_builder.add ("t", link.mmio);
+			config_builder.add ("u", link.irq);
 			config_builder.add ("t", kernel_base);
 
 			config_builder.open (new VariantType ("a(ssuuuu)"));
@@ -104,7 +110,7 @@ namespace Frida.Barebone {
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
-			var bp = yield gdb.add_breakpoint (SOFT, 0xfffffff007a55728, 4, cancellable);
+			var bp = yield gdb.add_breakpoint (SOFT, kernel_base + thread_block.offset, 4, cancellable);
 			GDB.Breakpoint? hit_breakpoint = null;
 			do {
 				var exception = yield gdb.continue_until_exception (cancellable);
@@ -285,7 +291,6 @@ namespace Frida.Barebone {
 					}
 				}
 			} catch (GLib.Error e) {
-				printerr ("[process_incoming_messages] Oops: %s\n\n", e.message);
 			}
 		}
 
