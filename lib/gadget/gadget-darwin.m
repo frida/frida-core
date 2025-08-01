@@ -1,3 +1,11 @@
+#if defined (HAVE_TVOS) || defined (HAVE_WATCHOS)
+# include <Availability.h>
+# undef __TVOS_PROHIBITED
+# define __TVOS_PROHIBITED
+# undef __WATCHOS_PROHIBITED
+# define __WATCHOS_PROHIBITED
+#endif
+
 #include "frida-gadget.h"
 
 #include "frida-base.h"
