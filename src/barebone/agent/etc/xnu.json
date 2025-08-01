@@ -1,0 +1,22 @@
+{
+  "connection": {
+    "host": "127.0.0.1",
+    "port": 9000
+  },
+  "allocator": {
+    "mode": "target-functions",
+    "alloc_function": "0xfffffff007a3c278",
+    "free_function": "0xfffffff007a3c338"
+  },
+  "agent": {
+    "path": "/home/oleavr/src/frida-core/src/barebone/agent/target/aarch64-unknown-none/release/frida-barebone-agent",
+    "transport": {
+      "type": "hostlink",
+      "qmp": "unix:/home/oleavr/src/qmp.sock"
+    }
+  },
+  "image": {
+    "file": "/home/oleavr/src/ios/iPhone11_8_iPhone12_1_14.0_18A5351d_Restore/kernelcache.research.iphone12b",
+    "base": "0xfffffff007004000"
+  }
+}
