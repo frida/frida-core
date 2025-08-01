@@ -49,7 +49,9 @@ namespace Frida {
 			if (config_path != null) {
 				try {
 					var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
-					config = (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), config_data);
+					var cfg = (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), config_data);
+					cfg.check ();
+					config = cfg;
 				} catch (GLib.Error e) {
 					throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
 				}
@@ -106,8 +108,8 @@ namespace Frida {
 			}
 
 			Barebone.Allocator allocator;
-			Barebone.AllocatorConfig ac = config.allocator;
-			if (ac is Barebone.NoAllocatorConfig) {
+			Barebone.AllocatorConfig? ac = config.allocator;
+			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
 			} else if (ac is Barebone.PhysicalAllocatorConfig) {
 				allocator = new Barebone.PhysicalAllocator (machine, page_size,
@@ -122,7 +124,8 @@ namespace Frida {
 			Barebone.AgentConnection? agent_connection = null;
 			Barebone.AgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
-				agent_connection = yield Barebone.AgentConnection.open (agent_config, machine, allocator, cancellable);
+				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, machine, allocator,
+					cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);
