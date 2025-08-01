@@ -11,9 +11,6 @@ namespace Frida.Barebone {
 	 *   "connection": {
 	 *     "host": "127.0.0.1",
 	 *     "port": 3333
-	 *   },
-	 *   "allocator": {
-	 *     "mode": "none"
 	 *   }
 	 * }
 	 *
@@ -45,7 +42,15 @@ namespace Frida.Barebone {
 	 * 4. Injecting a remote agent:
 	 *  {
 	 *    "agent": {
-	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent"
+	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent",
+	 *      "transport": {
+	 *        "type": "hostlink",
+	 *        "qmp": "unix:/path/to/qmp.sock"
+	 *      }
+	 *    },
+	 *    "image": {
+	 *      "file": "/path/to/kernelcache.research.iphone12b",
+	 *      "base": "0xfffffff007004000"
 	 *    }
 	 *  }
 	 */
@@ -56,10 +61,9 @@ namespace Frida.Barebone {
 			default = new ConnectionConfig ();
 		}
 
-		public AllocatorConfig allocator {
+		public AllocatorConfig? allocator {
 			get;
 			set;
-			default = new NoAllocatorConfig ();
 		}
 
 		public AgentConfig? agent {
@@ -67,35 +71,44 @@ namespace Frida.Barebone {
 			set;
 		}
 
+		public ImageConfig? image {
+			get;
+			set;
+		}
+
+		public void check () throws Error {
+			if (allocator != null)
+				allocator.check ();
+			if (agent != null)
+				agent.check ();
+			if (image != null)
+				image.check ();
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
-			if (property_name == "allocator" && property_node.get_node_type () == Json.NodeType.OBJECT) {
-				var obj_node = property_node.get_object ();
-				string? mode = obj_node.get_string_member ("mode");
-
-				Type t = 0;
-				switch (mode) {
-				case "none":
-					t = typeof (NoAllocatorConfig);
-					break;
-				case "physical":
-					t = typeof (PhysicalAllocatorConfig);
-					break;
-				case "target-functions":
-					t = typeof (TargetFunctionsAllocatorConfig);
-					break;
-				default:
-					break;
-				}
-
-				if (t != 0) {
-					var obj = (AllocatorConfig) Json.gobject_deserialize (t, property_node);
-					if (obj != null && obj.is_valid) {
-						var v = Value (t);
-						v.set_object (obj);
-						value = v;
-						return true;
+			if (property_name == "allocator") {
+				AllocatorConfig? allocator = null;
+				Type t = typeof (InvalidAllocatorConfig);
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					switch (property_node.get_object ().get_string_member_with_default ("mode", "invalid")) {
+					case "physical":
+						t = typeof (PhysicalAllocatorConfig);
+						break;
+					case "target-functions":
+						t = typeof (TargetFunctionsAllocatorConfig);
+						break;
+					default:
+						break;
 					}
+					allocator = (AllocatorConfig) Json.gobject_deserialize (t, property_node);
+				} else {
+					allocator = new InvalidAllocatorConfig ();
 				}
+
+				var v = Value (t);
+				v.set_object (allocator);
+				value = v;
+				return true;
 			}
 
 			value = Value (pspec.value_type);
@@ -118,34 +131,32 @@ namespace Frida.Barebone {
 	}
 
 	public abstract class AllocatorConfig : Object {
-		public abstract bool is_valid {
-			get;
-		}
+		public abstract void check () throws Error;
 	}
 
-	public sealed class NoAllocatorConfig : AllocatorConfig {
-		public override bool is_valid {
-			get {
-				return true;
-			}
+	public sealed class InvalidAllocatorConfig : AllocatorConfig {
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for 'allocator' is invalid");
 		}
 	}
 
 	public sealed class PhysicalAllocatorConfig : AllocatorConfig, Json.Serializable {
-		public override bool is_valid {
-			get {
-				return true;
-			}
-		}
-
-		public uint64 physical_base {
+		public MemoryAddress physical_base {
 			get;
 			set;
 		}
 
+		public override void check () throws Error {
+			if (physical_base == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.physical_base' is missing");
+			physical_base.check ();
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
-			if (try_deserialize_address ("physical_base", property_node, out value))
+			if (property_name == "physical_base") {
+				value = deserialize_address ("allocator.physical_base", property_node);
 				return true;
+			}
 
 			value = Value (pspec.value_type);
 			return false;
@@ -153,35 +164,43 @@ namespace Frida.Barebone {
 	}
 
 	public sealed class TargetFunctionsAllocatorConfig : AllocatorConfig, Json.Serializable {
-		public override bool is_valid {
-			get {
-				return alloc_function != 0 && free_function != 0;
-			}
-		}
-
-		public uint64 alloc_function {
+		public MemoryAddress alloc_function {
 			get;
 			set;
 		}
 
-		public uint64 free_function {
+		public MemoryAddress free_function {
 			get;
 			set;
+		}
+
+		public override void check () throws Error {
+			if (alloc_function == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.alloc_function' is missing");
+			alloc_function.check ();
+
+			if (free_function == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.free_function' is missing");
+			free_function.check ();
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
-			if (try_deserialize_address ("alloc_function", property_node, out value))
+			if (property_name == "alloc-function") {
+				value = deserialize_address ("allocator.alloc_function", property_node);
 				return true;
+			}
 
-			if (try_deserialize_address ("free_function", property_node, out value))
+			if (property_name == "free-function") {
+				value = deserialize_address ("allocator.free_function", property_node);
 				return true;
+			}
 
 			value = Value (pspec.value_type);
 			return false;
 		}
 	}
 
-	public sealed class AgentConfig : Object {
+	public sealed class AgentConfig : Object, Json.Serializable {
 		public string path {
 			get;
 			set;
@@ -192,19 +211,64 @@ namespace Frida.Barebone {
 			set;
 		}
 
-		public string? symbol_source {
-			get;
-			set;
+		public void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
+
+			if (transport == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
+			transport.check ();
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "transport") {
+				TransportConfig transport;
+				Type t = typeof (InvalidTransportConfig);
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					switch (property_node.get_object ().get_string_member_with_default ("type", "invalid")) {
+					case "hostlink":
+						t = typeof (HostlinkTransportConfig);
+						break;
+					default:
+						break;
+					}
+					transport = (TransportConfig) Json.gobject_deserialize (t, property_node);
+				} else {
+					transport = new InvalidTransportConfig ();
+				}
+
+				var v = Value (t);
+				v.set_object (transport);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
 		}
 	}
 
 	public abstract class TransportConfig : Object {
+		public abstract void check () throws Error;
+	}
+
+	public sealed class InvalidTransportConfig : TransportConfig {
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is invalid");
+		}
 	}
 
 	public sealed class HostlinkTransportConfig : TransportConfig {
 		public string qmp {
 			get;
 			set;
+		}
+
+		public override void check () throws Error {
+			if (qmp == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
+			if (!qmp.has_prefix ("unix:"))
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
 		}
 	}
 
@@ -214,31 +278,77 @@ namespace Frida.Barebone {
 			set;
 		}
 
-		public uint64 base {
+		public MemoryAddress base {
 			get;
 			set;
 		}
 
+		public void check () throws Error {
+			if (file == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.file' is missing");
+
+			if (@base == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.base' is missing");
+			@base.check ();
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
-			if (try_deserialize_address ("base", property_node, out value))
+			if (property_name == "base") {
+				value = deserialize_address ("image.base", property_node);
 				return true;
+			}
 
 			value = Value (pspec.value_type);
 			return false;
 		}
 	}
 
-	private bool try_deserialize_address (string name, Json.Node node, out Value val) {
-		val = Value (typeof (uint64));
+	public abstract class MemoryAddress : Object {
+		public string label {
+			get;
+			construct;
+		}
 
-		if (node.get_value_type () != typeof (string))
-			return false;
+		public uint64 address {
+			get;
+			construct;
+		}
 
-		uint64 v;
-		if (!uint64.try_parse (node.get_string (), out v, null, 16))
-			return false;
+		public abstract void check () throws Error;
+	}
 
-		val = v;
-		return true;
+	public sealed class InvalidMemoryAddress : MemoryAddress {
+		public InvalidMemoryAddress (string label) {
+			Object (label: label);
+		}
+
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for '%s' is invalid", label);
+		}
+	}
+
+	public sealed class NonNullMemoryAddress : MemoryAddress {
+		public NonNullMemoryAddress (string label, uint64 address) {
+			Object (label: label, address: address);
+		}
+
+		public override void check () throws Error {
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Config for '%s' cannot be NULL", label);
+		}
+	}
+
+	private MemoryAddress deserialize_address (string label, Json.Node node) {
+		Type t = node.get_value_type ();
+		if (t == typeof (string)) {
+			uint64 address;
+			if (!uint64.try_parse (node.get_string (), out address, null, 16))
+				return new InvalidMemoryAddress (label);
+			return new NonNullMemoryAddress (label, address);
+		} else if (t == typeof (int64)) {
+			return new NonNullMemoryAddress (label, node.get_int ());
+		} else {
+			return new InvalidMemoryAddress (label);
+		}
 	}
 }

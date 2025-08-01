@@ -12,7 +12,7 @@
     "path": "/home/oleavr/src/frida-core/src/barebone/agent/target/aarch64-unknown-none/release/frida-barebone-agent",
     "transport": {
       "type": "hostlink",
-      "qmp": "unix:/home/oleavr/src/qmp.sock"
+      "qmp": "unix:/home/oleavr/src/ios/qmp.sock"
     }
   },
   "image": {

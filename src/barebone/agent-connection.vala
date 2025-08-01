@@ -9,7 +9,8 @@ namespace Frida.Barebone {
 		private BufferedInputStream input;
 		private OutputStream output;
 
-		private AgentConfig config;
+		private AgentConfig agent_config;
+		private ImageConfig? image_config;
 		private Machine machine;
 		private Allocator allocator;
 
@@ -23,10 +24,11 @@ namespace Frida.Barebone {
 
 		private const int COMMAND_TIMEOUT_MS = 25000;
 
-		public static async AgentConnection open (AgentConfig config, Machine machine, Allocator allocator,
-				Cancellable? cancellable) throws Error, IOError {
+		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config, Machine machine,
+				Allocator allocator, Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
-				config = config,
+				agent_config = agent_config,
+				image_config = image_config,
 				machine = machine,
 				allocator = allocator,
 			};
@@ -41,7 +43,12 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			var qmp = yield QmpClient.open ("unix:/home/oleavr/src/ios/qmp.sock", 0, cancellable);
+			HostlinkTransportConfig? transport_config = agent_config.transport as HostlinkTransportConfig;
+			if (transport_config == null)
+				throw new Error.NOT_SUPPORTED ("Unsupported transport config: only hostlink is supported for now");
+			printerr ("qmp: %s\n\n", transport_config.qmp);
+
+			var qmp = yield QmpClient.open (transport_config.qmp, 0, cancellable);
 			hostlink = yield qmp.open_hostlink (cancellable);
 			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
 				"base-stream", hostlink.get_input_stream (),
@@ -53,19 +60,20 @@ namespace Frida.Barebone {
 			ByteOrder byte_order = gdb.byte_order;
 			uint pointer_size = gdb.pointer_size;
 
-			var config_builder = new VariantBuilder (new VariantType ("(ta(ssuuuu)ay)"));
-
-			uint64 kernel_base = 0xfffffff007004000ULL; // TODO: Read from config.
-			config_builder.add ("t", kernel_base);
-
+			uint64 kernel_base;
 			Layout layout;
-			string? symbol_source = config.symbol_source;
-			if (symbol_source != null) {
-				layout = yield Layout.load_from_symbol_source (File.new_for_path (symbol_source), kernel_base, byte_order,
-					pointer_size, cancellable);
+			if (image_config != null) {
+				kernel_base = image_config.base.address;
+				layout = yield Layout.load_from_symbol_source (File.new_for_path (image_config.file), kernel_base,
+					byte_order, pointer_size, cancellable);
 			} else {
+				kernel_base = 0;
 				layout = new Layout.empty ();
 			}
+
+			var config_builder = new VariantBuilder (new VariantType ("(ta(ssuuuu)ay)"));
+
+			config_builder.add ("t", kernel_base);
 
 			config_builder.open (new VariantType ("a(ssuuuu)"));
 			foreach (var m in layout.modules) {
@@ -84,11 +92,12 @@ namespace Frida.Barebone {
 			foreach (var s in layout.symbols)
 				hash_builder.add_symbol (s);
 			Bytes symbol_data = hash_builder.build (byte_order);
-			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true, symbol_data));
+			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
+				symbol_data));
 
 			Gum.ElfModule elf;
 			try {
-				elf = new Gum.ElfModule.from_file (config.path);
+				elf = new Gum.ElfModule.from_file (agent_config.path);
 			} catch (Gum.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}

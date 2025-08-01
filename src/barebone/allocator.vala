@@ -54,7 +54,7 @@ namespace Frida.Barebone {
 		public PhysicalAllocator (Machine machine, size_t page_size, PhysicalAllocatorConfig config) {
 			this.machine = machine;
 			this._page_size = page_size;
-			this.cursor = config.physical_base;
+			this.cursor = config.physical_base.address;
 		}
 
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
@@ -114,7 +114,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			uint64 address = yield machine.invoke (config.alloc_function, { size }, cancellable);
+			uint64 address = yield machine.invoke (config.alloc_function.address, { size }, cancellable);
 
 			// TODO: Handle alignment.
 
@@ -147,7 +147,7 @@ namespace Frida.Barebone {
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
-				yield machine.invoke (config.free_function, { _virtual_address, size }, cancellable);
+				yield machine.invoke (config.free_function.address, { _virtual_address, size }, cancellable);
 			}
 		}
 	}
