@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "@frida/buffer": "^7.0.4",
-    "frida-java-bridge": "^7.0.7"
+    "frida-java-bridge": "^7.0.8"
   }
 }
