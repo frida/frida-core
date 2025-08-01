@@ -176,6 +176,7 @@ frida_on_breakpoints_steal_attempt (GumInvocationContext * ic, gpointer user_dat
 void
 frida_gadget_environment_break_and_resume (void)
 {
+#ifdef HAVE_ARM64
   asm volatile (
       "mov x1, #1337\n\t"
       "mov x2, #1337\n\t"
@@ -185,11 +186,15 @@ frida_gadget_environment_break_and_resume (void)
       : "r" ((gsize) FRIDA_GADGET_BREAKPOINT_ACTION_RESUME)
       : "x1", "x2", "x3"
   );
+#else
+  g_assert_not_reached ();
+#endif
 }
 
 void
 frida_gadget_environment_break_and_detach (void)
 {
+#ifdef HAVE_ARM64
   asm volatile (
       "mov x1, #1337\n\t"
       "mov x2, #1337\n\t"
@@ -199,4 +204,7 @@ frida_gadget_environment_break_and_detach (void)
       : "r" ((gsize) FRIDA_GADGET_BREAKPOINT_ACTION_DETACH)
       : "x1", "x2", "x3"
   );
+#else
+  g_assert_not_reached ();
+#endif
 }
