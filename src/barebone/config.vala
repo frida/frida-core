@@ -187,7 +187,7 @@ namespace Frida.Barebone {
 			set;
 		}
 
-		public AgentTransportConfig transport {
+		public TransportConfig transport {
 			get;
 			set;
 		}
@@ -198,19 +198,29 @@ namespace Frida.Barebone {
 		}
 	}
 
-	public sealed class AgentTransportConfig : Object, Json.Serializable {
-		public string path {
+	public abstract class TransportConfig : Object {
+	}
+
+	public sealed class HostlinkTransportConfig : TransportConfig {
+		public string qmp {
+			get;
+			set;
+		}
+	}
+
+	public sealed class ImageConfig : Object, Json.Serializable {
+		public string file {
 			get;
 			set;
 		}
 
-		public uint64 base_address {
+		public uint64 base {
 			get;
 			set;
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
-			if (try_deserialize_address ("base_address", property_node, out value))
+			if (try_deserialize_address ("base", property_node, out value))
 				return true;
 
 			value = Value (pspec.value_type);

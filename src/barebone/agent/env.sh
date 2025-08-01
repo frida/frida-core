@@ -1,4 +1,4 @@
-export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.config
+export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.json
 export PYTHONPATH=$HOME/src/frida-python
 
 export PATH=$PWD/xpacks/.bin:$PATH
