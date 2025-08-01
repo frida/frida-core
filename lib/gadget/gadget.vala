@@ -1880,11 +1880,19 @@ namespace Frida.Gadget {
 			}
 
 			public async void break_and_resume (Cancellable? cancellable) throws Error, IOError {
+#if DARWIN
 				Environment.break_and_resume ();
+#else
+				throw new Error.NOT_SUPPORTED ("This API is only applicable on Darwin");
+#endif
 			}
 
 			public async void break_and_detach (Cancellable? cancellable) throws Error, IOError {
+#if DARWIN
 				Environment.break_and_detach ();
+#else
+				throw new Error.NOT_SUPPORTED ("This API is only applicable on Darwin");
+#endif
 			}
 
 			private void validate_pid (uint pid) throws Error {
