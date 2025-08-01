@@ -184,21 +184,21 @@ unsafe fn parse_config(config: &[u8]) {
         g_variant_iter_init(&mut iter as *mut GVariantIter, module_info_variant);
 
         let module_infos = core::ptr::addr_of_mut!(MODULE_INFOS);
-        let raw_name: *mut gchar = null_mut();
-        let raw_version: *mut gchar = null_mut();
-        let offset: u32 = 0;
-        let size: u32 = 0;
-        let start_func_offset: u32 = 0;
-        let stop_func_offset: u32 = 0;
+        let mut raw_name: *mut gchar = null_mut();
+        let mut raw_version: *mut gchar = null_mut();
+        let mut offset: u32 = 0;
+        let mut size: u32 = 0;
+        let mut start_func_offset: u32 = 0;
+        let mut stop_func_offset: u32 = 0;
         while g_variant_iter_next(
             &mut iter as *mut GVariantIter,
             c"(&s&suuuu)".as_ptr(),
-            &raw_name,
-            &raw_version,
-            &offset,
-            &size,
-            &start_func_offset,
-            &stop_func_offset,
+            &mut raw_name,
+            &mut raw_version,
+            &mut offset,
+            &mut size,
+            &mut start_func_offset,
+            &mut stop_func_offset,
         ) != 0
         {
             (*module_infos).push(ModuleInfo {
