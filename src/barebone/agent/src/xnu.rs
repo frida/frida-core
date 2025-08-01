@@ -28,8 +28,15 @@ const CLOCK_GET_CALENDAR_MICROTIME_ADDR: usize = 0xfffffff0_07a2_332c;
 const ML_IO_MAP_ADDR: usize = 0xfffffff0_07b5_ba04;
 const ML_VTOPHYS_ADDR: usize = 0xfffffff0_07b5_c4a0;
 const IO_SERVICE_GET_PLATFORM_ADDR: usize = 0xfffffff0_0801_ed48;
+const IO_SERVICE_CONSTRUCTOR_ADDR: usize = 0xfffffff00801c318;
 const OS_SYMBOL_WITH_CSTRING_NO_COPY_ADDR: usize = 0xfffffff0_07fc_45dc;
 const OSDATA_WITH_BYTES_ADDR: usize = 0xfffffff0_07f8_c588;
+
+const IO_SERVICE_VTABLE_LENGTH: isize = 168;
+
+const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
+const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
+const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
 
 pub fn panic(msg: &str) {
     type PanicFn = unsafe extern "C" fn(msg: *const u8);
@@ -207,10 +214,9 @@ pub fn install_interrupt_handler(
     unsafe {
         core::ptr::write_bytes(nub, 0, 0x88);
     }
-    const IOSERVICE_CONSTRUCTOR_ADDR: usize = 0xfffffff00801c318;
     type IOServiceConstructorFn = unsafe extern "C" fn(*mut c_void);
     let ioservice_ctor: IOServiceConstructorFn =
-        unsafe { core::mem::transmute(IOSERVICE_CONSTRUCTOR_ADDR) };
+        unsafe { core::mem::transmute(IO_SERVICE_CONSTRUCTOR_ADDR) };
     unsafe { ioservice_ctor(nub as *mut c_void) };
 
     type IOServiceInitFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
@@ -304,9 +310,3 @@ where
     let entry_ptr = unsafe { crate::pac::ptrauth_strip_data(entry as *const u8) };
     unsafe { core::mem::transmute_copy::<*const u8, T>(&entry_ptr) }
 }
-
-const IO_SERVICE_VTABLE_LENGTH: isize = 168;
-
-const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
-const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
-const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
