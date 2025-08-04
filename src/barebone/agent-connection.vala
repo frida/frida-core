@@ -108,6 +108,16 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
+			printerr (">>>\n");
+			elf.enumerate_symbols (s => {
+				unowned Gum.ElfSectionDetails? sect = s.section;
+				if (sect != null && sect.name == ".kernel_addrs") {
+					printerr ("TODO: Need to fill in name=\"%s\"\n", s.name[1:]);
+				}
+				return true;
+			});
+			printerr ("<<<\n\n");
+
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
 			var bp = yield gdb.add_breakpoint (SOFT, kernel_base + thread_block.offset, 4, cancellable);

@@ -25,3 +25,19 @@
 
     export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.json
     cargo build --release && make -C ~/src/frida-python && killall -9 qemu-system-aarch64 && sleep 2 && frida -D barebone -p 0
+
+## Speeding up loop
+
+    ./configure \
+        -- \
+        -Dfrida-core:compat=disabled \
+        -Dfrida-core:local_backend=disabled \
+        -Dfrida-core:fruity_backend=disabled \
+        -Dfrida-core:droidy_backend=disabled \
+        -Dfrida-core:socket_backend=disabled \
+        -Dfrida-core:compiler_backend=disabled \
+        -Dfrida-core:gadget=disabled \
+        -Dfrida-core:server=disabled \
+        -Dfrida-core:portal=disabled \
+        -Dfrida-core:inject=disabled \
+        -Dfrida-core:tests=enabled
