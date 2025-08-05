@@ -1,20 +1,13 @@
 use crate::{
     bindings::{
-        _GInterfaceInfo, _GTypeInfo, GArray, GObject, GObjectClass, GPrivate, GType,
-        GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION,
-        GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
-        GumPageProtection, GumThreadId, GumTlsKey, g_array_append_vals, g_array_new, g_free,
-        g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave,
-        g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static,
-        gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module,
-        gum_module_get_type,
+        GArray, GObject, GObjectClass, GPrivate, GType, GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION, GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry, GumPageProtection, GumRwxSupport, GumThreadId, GumTlsKey, _GInterfaceInfo, _GTypeInfo, _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_NONE, g_array_append_vals, g_array_new, g_free, g_object_get_type, g_object_new, g_object_unref, g_once_init_enter, g_once_init_leave, g_strdup, g_type_add_interface_static, g_type_class_peek_parent, g_type_register_static, gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_barebone_register_module, gum_barebone_try_remap_writable_pages as _gum_barebone_try_remap_writable_pages, gum_module_get_type, gum_query_page_size
     },
-    gthread, libc, xnu,
+    gthread, kprintln, libc, xnu,
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
 use alloc::format;
-use core::ffi::CStr;
+use core::{ffi::CStr, ptr::read_volatile};
 use core::ptr;
 
 #[unsafe(no_mangle)]
@@ -40,8 +33,60 @@ pub extern "C" fn gum_barebone_query_page_size() -> guint {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_barebone_virtual_to_physical(virt_addr: gpointer) -> gpointer {
-    xnu::ml_vtophys(virt_addr as u64) as gpointer
+pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
+    _GumRwxSupport_GUM_RWX_NONE
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_can_remap_writable() -> gboolean {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_try_remap_writable_pages(
+    first_page: gpointer,
+    n_pages: guint,
+) -> gpointer {
+    unsafe {
+        let page_size = gum_query_page_size() as usize;
+        let mut physical_addrs = alloc::vec::Vec::with_capacity(n_pages as usize);
+
+        let mut current_page = first_page as u64;
+        for i in 0..n_pages {
+            let phys_addr = xnu::ml_vtophys(current_page);
+            kprintln!(
+                "gum_memory_try_remap_writable_pages: i={} current_page=0x{:x} phys_addr=0x{:x}",
+                i,
+                current_page,
+                phys_addr
+            );
+            physical_addrs.push(phys_addr as gpointer);
+            current_page += page_size as u64;
+        }
+
+        let result = _gum_barebone_try_remap_writable_pages(
+            physical_addrs.as_ptr() as *mut gpointer,
+            physical_addrs.len() as guint,
+        );
+        kprintln!(
+            "gum_memory_try_remap_writable_pages: result=0x{:x}",
+            result as u64
+        );
+        result
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_try_remap_writable_pages(
+    addrs: *const gpointer,
+    n_addrs: guint,
+) -> gpointer {
+    kprintln!(
+        "gum_barebone_remap_writable_pages: physical_addrs=0x{:x} n_pages={} (SHOULD NOT GET HERE)",
+        addrs as u64,
+        n_addrs
+    );
+    unsafe { read_volatile(addrs) }
 }
 
 #[unsafe(no_mangle)]
@@ -58,14 +103,21 @@ pub extern "C" fn gum_memory_allocate(
     _address: gpointer,
     size: gsize,
     _alignment: gsize,
-    _prot: GumPageProtection,
+    prot: GumPageProtection,
 ) -> gpointer {
     let ptr = crate::xnu::kalloc(size as usize);
-    if !ptr.is_null() {
-        unsafe {
-            core::ptr::write_bytes(ptr, 0, size as usize);
+    unsafe {
+        core::ptr::write_bytes(ptr, 0, size as usize);
+        if (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0 {
+            gum_try_mprotect(ptr as gpointer, size, prot);
         }
     }
+    kprintln!(
+        "gum_memory_allocate: size={} prot=0x{:x} => 0x{:x}",
+        size,
+        prot,
+        ptr as u64
+    );
     ptr as gpointer
 }
 

@@ -42,7 +42,7 @@ namespace Frida.Barebone {
 		public abstract async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 			throws Error, IOError;
 
-		public abstract async Allocation allocate_pages (uint64 physical_address, uint num_pages, Cancellable? cancellable)
+		public abstract async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 			throws Error, IOError;
 
 		public abstract async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,

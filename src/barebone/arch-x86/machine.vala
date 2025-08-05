@@ -31,7 +31,7 @@ namespace Frida.Barebone {
 			throw_not_supported ();
 		}
 
-		public async Allocation allocate_pages (uint64 physical_address, uint num_pages, Cancellable? cancellable)
+		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
 			throw_not_supported ();
 		}

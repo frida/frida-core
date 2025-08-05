@@ -65,7 +65,11 @@ namespace Frida.Barebone {
 
 			uint num_pages = (uint) (vm_size / _page_size);
 
-			Allocation page_allocation = yield machine.allocate_pages (address_pa, num_pages, cancellable);
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			for (uint i = 0; i != num_pages; i++)
+				physical_addresses.add (address_pa + (i * _page_size));
+
+			Allocation page_allocation = yield machine.allocate_pages (physical_addresses, cancellable);
 
 			return new PhysicalAllocation (page_allocation);
 		}

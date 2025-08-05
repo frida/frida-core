@@ -163,14 +163,14 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		public async Allocation allocate_pages (uint64 physical_address, uint num_pages, Cancellable? cancellable)
+		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
 			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
 
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
-				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address, num_pages, p.tt1,
-					p.first_level, p.upper_bits, p, cancellable);
+				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_addresses, p.tt1, p.first_level,
+					p.upper_bits, p, cancellable);
 				if (allocation == null)
 					throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
 
@@ -180,7 +180,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Allocation? maybe_insert_descriptor_in_table (uint64 physical_address, uint num_pages,
+		private async Allocation? maybe_insert_descriptor_in_table (Gee.List<uint64?> physical_addresses,
 				uint64 table_address, uint level, uint64 upper_bits, MMUParameters p, Cancellable? cancellable)
 				throws Error, IOError {
 			uint max_entries = compute_max_entries (level, p);
@@ -191,6 +191,7 @@ namespace Frida.Barebone {
 			uint num_available_slots = 0;
 			uint chunk_max_size = (level < 3) ? 4 : 64;
 			uint chunk_offset = 0;
+			uint num_pages = physical_addresses.size;
 			while (chunk_offset != max_entries && num_available_slots != num_pages) {
 				uint64 chunk_base_address = table_address + (chunk_offset * Descriptor.SIZE);
 				uint chunk_size = uint.min (chunk_max_size, max_entries - chunk_offset);
@@ -210,8 +211,8 @@ namespace Frida.Barebone {
 							continue;
 						if ((desc.flags & DescriptorFlags.PXNTABLE) != 0)
 							continue;
-						Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_address,
-							num_pages, desc.target_address, level + 1, address, p, cancellable);
+						Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_addresses,
+							desc.target_address, level + 1, address, p, cancellable);
 						if (allocation != null)
 							return allocation;
 						continue;
@@ -242,11 +243,8 @@ namespace Frida.Barebone {
 
 			var builder = gdb.make_buffer_builder ();
 			for (uint i = 0; i != num_available_slots; i++) {
-				uint64 cur_physical_address = physical_address + (i * p.granule);
-				uint64 base_descriptor = cur_physical_address | 0x403ULL;
-
+				uint64 base_descriptor = physical_addresses[(int) i] | 0x403ULL;
 				uint64 new_descriptor = apply_protection_bits (base_descriptor, page_prot, p);
-
 				builder.append_uint64 (new_descriptor);
 			}
 			Bytes new_descriptors = builder.build ();
@@ -496,7 +494,11 @@ namespace Frida.Barebone {
 
 			uint64 module_page_pa = page_start (module_pa, page_size);
 
-			Allocation module_allocation = yield allocate_pages (module_page_pa, num_pages, cancellable);
+			var module_pas = new Gee.ArrayList<uint64?> ();
+			for (uint i = 0; i != num_pages; i++)
+				module_pas.add (module_page_pa + (i * page_size)); // FIXME: This assumes a contiguous range.
+
+			Allocation module_allocation = yield allocate_pages (module_pas, cancellable);
 
 			size_t page_offset = (size_t) (module_pa - module_page_pa);
 			uint64 module_va = module_allocation.virtual_address + page_offset;

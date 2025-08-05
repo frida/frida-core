@@ -17,7 +17,7 @@ namespace Frida.Barebone {
 		private Allocation elf_allocation;
 		private Allocation config_allocation;
 		private Callback mprotect_callback;
-		private Callback get_writable_mappings_callback;
+		private Callback remap_writable_pages_callback;
 
 		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
 		private uint16 next_request_id = 1;
@@ -147,31 +147,31 @@ namespace Frida.Barebone {
 			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
+			uint64 remap_writable_pages_address = 0;
 			uint64 mprotect_address = 0;
-			uint64 get_writable_mappings_address = 0;
 			uint64 base_va = elf_allocation.virtual_address;
 			printerr ("ELF injected at base address 0x%lx\n\n", (ulong) base_va);
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
 					start_address = base_va + e.address;
+				else if (e.name == "gum_barebone_try_remap_writable_pages")
+					remap_writable_pages_address = base_va + e.address;
 				else if (e.name == "gum_try_mprotect")
 					mprotect_address = base_va + e.address;
-				else if (e.name == "gum_barebone_get_writable_mappings")
-					get_writable_mappings_address = base_va + e.address;
 				else
 					return true;
-				return start_address == 0 || mprotect_address == 0 || get_writable_mappings_address == 0;
+				return start_address == 0 || mprotect_address == 0 || remap_writable_pages_address == 0;
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
+			if (remap_writable_pages_address == 0)
+				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_remap_writable_pages symbol found");
 			if (mprotect_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
-			if (get_writable_mappings_address == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_get_writable_mappings symbol found");
 
 			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
-			get_writable_mappings_callback = yield new Callback (get_writable_mappings_address,
-				new GetWritableMappingsHandler (machine), machine, cancellable);
+			remap_writable_pages_callback = yield new Callback (remap_writable_pages_address,
+				new RemapWritablePagesHandler (machine), machine, cancellable);
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
@@ -366,7 +366,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private class GetWritableMappingsHandler : Object, CallbackHandler {
+		private class RemapWritablePagesHandler : Object, CallbackHandler {
 			public signal void output (string message);
 
 			public uint arity {
@@ -375,10 +375,7 @@ namespace Frida.Barebone {
 
 			private Machine machine;
 
-			private Gee.Map<uint64?, Allocation> mappings =
-				new Gee.HashMap<uint64?, Allocation> (Numeric.uint64_hash, Numeric.uint64_equal);
-
-			public GetWritableMappingsHandler (Machine machine) {
+			public RemapWritablePagesHandler (Machine machine) {
 				this.machine = machine;
 			}
 
@@ -387,27 +384,18 @@ namespace Frida.Barebone {
 				var pages = args[0];
 				var num_pages = (uint) args[1];
 
+				var physical_addresses = new Gee.ArrayList<uint64?> ();
 				var gdb = machine.gdb;
 				var reader = new BufferReader (yield gdb.read_buffer (pages, num_pages * gdb.pointer_size, cancellable));
-				var result = gdb.make_buffer_builder ();
 				for (uint i = 0; i != num_pages; i++) {
-					uint64 physical_address = reader.read_pointer ();
-					Allocation? allocation = mappings[physical_address];
-					if (allocation == null) {
-						allocation = yield machine.allocate_pages (physical_address, 1, cancellable);
-						mappings[physical_address] = allocation;
-					}
-					result.append_pointer (allocation.virtual_address);
-					printerr ("pages[%u]: 0x%lx -> 0x%lx\n",
-						i,
-						(ulong) allocation.virtual_address,
-						(ulong) physical_address);
+					physical_addresses.add (reader.read_pointer ());
+					printerr ("RemapWritablePagesHandler physical_addresses[%u]=0x%lx\n\n", i, (ulong) physical_addresses[(int) i]);
 				}
 
-				yield gdb.write_byte_array (pages, result.build (), cancellable);
-				printerr ("Wrote num_pages=%u\n\n", num_pages);
+				Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
+				printerr ("RemapWritablePagesHandler returning 0x%lx\n\n", (ulong) allocation.virtual_address);
 
-				return 0;
+				return allocation.virtual_address;
 			}
 		}
 
