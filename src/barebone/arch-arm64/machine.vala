@@ -433,9 +433,11 @@ namespace Frida.Barebone {
 				Cancellable? cancellable) throws Error, IOError {
 			unowned uint8[] scanner_blob = Data.Barebone.get_memory_scanner_arm64_elf_blob ().data;
 
+			var raw_scanner = new Bytes.static (scanner_blob);
+
 			Gum.ElfModule scanner;
 			try {
-				scanner = new Gum.ElfModule.from_blob (new Bytes.static (scanner_blob));
+				scanner = new Gum.ElfModule.from_blob (raw_scanner);
 			} catch (Gum.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
@@ -500,7 +502,7 @@ namespace Frida.Barebone {
 			uint64 module_va = module_allocation.virtual_address + page_offset;
 			uint64 data_va = module_va + data_offset;
 
-			Bytes scanner_module = relocate (scanner, module_va);
+			Bytes scanner_module = relocate (scanner, raw_scanner, module_va);
 			Bytes original_memory = yield gdb.read_byte_array (module_va, vm_size, cancellable);
 			yield gdb.write_byte_array (module_va, scanner_module, cancellable);
 

@@ -12,7 +12,7 @@ SECTIONS {
     _IOLog = .; . += 8;
     _kalloc = .; . += 8;
     _kfree = .; . += 8;
-    _thread_start = .; . += 8;
+    _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;
     _assert_wait_timeout = .; . += 8;
     _thread_block = .; . += 8;

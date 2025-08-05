@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public async Allocation inject_elf (Gum.ElfModule elf, size_t page_size, Machine machine, Allocator allocator,
+	public async Allocation inject_elf (Gum.ElfModule elf, Bytes raw_elf, size_t page_size, Machine machine, Allocator allocator,
 			Cancellable? cancellable) throws Error, IOError {
 		size_t vm_size = (size_t) elf.mapped_size;
 
@@ -25,7 +25,7 @@ namespace Frida.Barebone {
 		try {
 			uint64 base_va = allocation.virtual_address;
 
-			Bytes relocated_image = machine.relocate (elf, base_va);
+			Bytes relocated_image = machine.relocate (elf, raw_elf, base_va);
 			yield machine.gdb.write_byte_array (base_va, relocated_image, cancellable);
 
 			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);

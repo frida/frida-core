@@ -20,7 +20,7 @@ unsafe extern "C" {
     static _IOLog: unsafe extern "C" fn(*const u8, ...);
     static _kalloc: unsafe extern "C" fn(usize) -> *mut u8;
     static _kfree: unsafe extern "C" fn(*mut u8, usize) -> *mut u8;
-    static _thread_start: unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
+    static _kernel_thread_start: unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
     static _assert_wait: unsafe extern "C" fn(*const u8, u32) -> i32;
     static _assert_wait_timeout: unsafe extern "C" fn(*const u8, u32, u32, u32) -> i32;
     static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
@@ -70,7 +70,7 @@ pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut 
     let mut new_thread: *mut c_void = core::ptr::null_mut();
     return unsafe {
         let ptr = crate::pac::ptrauth_sign(continuation as *const u8, 0xd507);
-        _thread_start(
+        _kernel_thread_start(
             core::mem::transmute(ptr),
             thread_parameter,
             &mut new_thread as *mut *mut c_void,

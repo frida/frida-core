@@ -94,9 +94,12 @@ namespace Frida.Barebone {
 			}
 			config_builder.close ();
 
+			var symbols = new Gee.HashMap<string, SymbolInfo> ();
 			var hash_builder = new SymbolHashBuilder ();
-			foreach (var s in layout.symbols)
+			foreach (var s in layout.symbols) {
+				symbols[s.name] = s;
 				hash_builder.add_symbol (s);
+			}
 			Bytes symbol_data = hash_builder.build (byte_order);
 			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
 				symbol_data));
@@ -108,15 +111,26 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
-			printerr (">>>\n");
+			var raw_elf = gdb.make_buffer (new Bytes (elf.get_file_data ()));
+			var missing_symbols = new Gee.ArrayList<string> ();
 			elf.enumerate_symbols (s => {
 				unowned Gum.ElfSectionDetails? sect = s.section;
 				if (sect != null && sect.name == ".kernel_addrs") {
-					printerr ("TODO: Need to fill in name=\"%s\"\n", s.name[1:]);
+					string name = s.name[1:];
+					SymbolInfo? info = symbols[name];
+					if (info != null) {
+						size_t file_offset = (size_t) (sect.offset + (s.address - sect.address));
+						raw_elf.write_pointer (file_offset, kernel_base + info.offset);
+					} else {
+						missing_symbols.add (name);
+					}
 				}
 				return true;
 			});
-			printerr ("<<<\n\n");
+			if (!missing_symbols.is_empty) {
+				throw new Error.INVALID_ARGUMENT ("Missing symbols for: %s",
+					string.joinv (", ", missing_symbols.to_array ()));
+			}
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
@@ -130,7 +144,7 @@ namespace Frida.Barebone {
 
 			size_t page_size = yield machine.query_page_size (cancellable);
 
-			elf_allocation = yield inject_elf (elf, page_size, machine, allocator, cancellable);
+			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
 			uint64 mprotect_address = 0;

@@ -51,10 +51,10 @@ namespace Frida.Barebone {
 		public abstract async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern,
 			uint max_matches, Cancellable? cancellable) throws Error, IOError;
 
-		public Bytes relocate (Gum.ElfModule module, uint64 base_va) throws Error {
+		public Bytes relocate (Gum.ElfModule elf, Bytes raw_elf, uint64 base_va) throws Error {
 			uint64 file_start = uint64.MAX;
 			uint64 file_end = 0;
-			module.enumerate_segments (s => {
+			elf.enumerate_segments (s => {
 				if (s.file_size != 0) {
 					file_start = uint64.min (s.file_offset, file_start);
 					file_end = uint64.max (s.file_offset + s.file_size, file_end);
@@ -62,9 +62,9 @@ namespace Frida.Barebone {
 				return true;
 			});
 
-			var relocated_buf = gdb.make_buffer (new Bytes (module.get_file_data ()[file_start:file_end]));
+			var relocated_buf = gdb.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
 			Error? pending_error = null;
-			module.enumerate_relocations (r => {
+			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
 				if (parent_section == ".rela.text" || parent_section.has_prefix (".rela.debug_"))
 					return true;
@@ -84,7 +84,7 @@ namespace Frida.Barebone {
 			Bytes relocated_bytes = relocated_buf.bytes;
 			Bytes relocated_image = gdb.make_buffer_builder ()
 				.append_bytes (relocated_bytes)
-				.skip ((size_t) (module.mapped_size - relocated_bytes.get_size ()))
+				.skip ((size_t) (elf.mapped_size - relocated_bytes.get_size ()))
 				.build ();
 			return relocated_image;
 		}
