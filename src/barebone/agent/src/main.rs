@@ -13,7 +13,15 @@ use core::ptr::null_mut;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use bindings::{
-    g_error_free, g_free, g_main_context_default, g_main_context_iteration, g_memdup2, g_object_unref, g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data, g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64, g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync, GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript
+    GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
+    g_main_context_default, g_main_context_iteration, g_memdup2, g_object_unref,
+    g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data,
+    g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64,
+    g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data,
+    g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free,
+    g_variant_type_new, g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create_sync,
+    gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post,
+    gum_script_set_message_handler, gum_script_unload_sync,
 };
 use hostlink_virtio::Hostlink;
 use symbols::SymbolTable;
@@ -141,13 +149,21 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        let (mmio, irq, kernel_base, module_info, symbol_table) = parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
-        kprintln!("Using mmio=0x{:x} irq={} kernel_base=0x{:x}", mmio, irq, kernel_base);
+        let (mmio, irq, kernel_base, module_info, symbol_table) =
+            parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
         xnu::set_kernel_base(kernel_base);
         MODULE_INFO = module_info;
         SYMBOL_TABLE = symbol_table;
 
-        transport_set(Hostlink::init(mmio, irq, Some(on_frame_from_host), ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8).unwrap());
+        transport_set(
+            Hostlink::init(
+                mmio,
+                irq,
+                Some(on_frame_from_host),
+                ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8,
+            )
+            .unwrap(),
+        );
 
         let main_context = g_main_context_default();
 
@@ -161,7 +177,9 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
 fn on_frame_from_host(frame: &[u8]) {
     if let Some(variant) = deserialize_message(&frame) {
         process_incoming_message(variant);
-        unsafe { g_variant_unref(variant); }
+        unsafe {
+            g_variant_unref(variant);
+        }
     }
 }
 
@@ -237,7 +255,13 @@ unsafe fn parse_config(config: &[u8]) -> (u64, u32, u64, Vec<ModuleInfo>, Symbol
         g_variant_unref(root_variant);
         g_variant_type_free(variant_type);
 
-        (hostlink_mmio, hostlink_irq, kernel_base, module_info, symbol_table)
+        (
+            hostlink_mmio,
+            hostlink_irq,
+            kernel_base,
+            module_info,
+            symbol_table,
+        )
     }
 }
 

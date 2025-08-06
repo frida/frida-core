@@ -1,8 +1,6 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::kprintln;
-
 static KERNEL_BASE: AtomicU64 = AtomicU64::new(0);
 
 pub fn get_kernel_base() -> u64 {
@@ -20,7 +18,8 @@ unsafe extern "C" {
     static _IOLog: unsafe extern "C" fn(*const u8, ...);
     static _kalloc: unsafe extern "C" fn(usize) -> *mut u8;
     static _kfree: unsafe extern "C" fn(*mut u8, usize) -> *mut u8;
-    static _kernel_thread_start: unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
+    static _kernel_thread_start:
+        unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
     static _assert_wait: unsafe extern "C" fn(*const u8, u32) -> i32;
     static _assert_wait_timeout: unsafe extern "C" fn(*const u8, u32, u32, u32) -> i32;
     static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
@@ -32,8 +31,10 @@ unsafe extern "C" {
     static _ml_vtophys: unsafe extern "C" fn(u64) -> u64;
     static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
     static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
-    static __ZN8OSSymbol17withCStringNoCopyEPKc: unsafe extern "C" fn(*const core::ffi::c_char) -> *const OSSymbol;
-    static __ZN6OSData9withBytesEPKvj: unsafe extern "C" fn(*const core::ffi::c_void, u32) -> *mut OSData;
+    static __ZN8OSSymbol17withCStringNoCopyEPKc:
+        unsafe extern "C" fn(*const core::ffi::c_char) -> *const OSSymbol;
+    static __ZN6OSData9withBytesEPKvj:
+        unsafe extern "C" fn(*const core::ffi::c_void, u32) -> *mut OSData;
 }
 
 const IO_SERVICE_VTABLE_LENGTH: isize = 168;
@@ -43,9 +44,7 @@ const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptContr
 const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
 
 pub fn panic(msg: &str) {
-    unsafe {
-        _panic(msg.as_ptr())
-    };
+    unsafe { _panic(msg.as_ptr()) };
 }
 
 pub fn io_log(msg: &str) {
@@ -55,9 +54,7 @@ pub fn io_log(msg: &str) {
 }
 
 pub fn kalloc(size: usize) -> *mut u8 {
-    unsafe {
-        _kalloc(size)
-    }
+    unsafe { _kalloc(size) }
 }
 
 pub fn free(ptr: *mut u8, size: usize) {
@@ -83,9 +80,7 @@ pub const THREAD_INTERRUPTIBLE: u32 = 1;
 pub const THREAD_WAITING: i32 = -1;
 
 pub fn assert_wait(event: *const u8, interruptible: u32) -> i32 {
-    unsafe {
-        _assert_wait(event, interruptible)
-    }
+    unsafe { _assert_wait(event, interruptible) }
 }
 
 pub fn assert_wait_timeout(
@@ -94,27 +89,19 @@ pub fn assert_wait_timeout(
     interval: u32,
     scale_factor: u32,
 ) -> i32 {
-    unsafe {
-        _assert_wait_timeout(event, interruptible, interval, scale_factor)
-    }
+    unsafe { _assert_wait_timeout(event, interruptible, interval, scale_factor) }
 }
 
 pub fn thread_block(continuation: Option<ContinuationFn>) -> i32 {
-    unsafe {
-        _thread_block(continuation)
-    }
+    unsafe { _thread_block(continuation) }
 }
 
 pub fn thread_wakeup(event: *const u8) -> i32 {
-    unsafe {
-        _thread_wakeup(event)
-    }
+    unsafe { _thread_wakeup(event) }
 }
 
 pub fn mach_absolute_time() -> u64 {
-    unsafe {
-        _mach_absolute_time()
-    }
+    unsafe { _mach_absolute_time() }
 }
 
 pub fn absolutetime_to_nanoseconds(abstime: u64) -> u64 {
@@ -135,18 +122,11 @@ pub fn clock_get_calendar_microtime() -> (u32, u32) {
 }
 
 pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe {
-        kprintln!("ml_io_map(phys_addr={:x}, size={:x})", phys_addr, size);
-        let vaddr = _ml_io_map(phys_addr, size);
-        kprintln!("	=> vaddr={:x}", vaddr as u64);
-        vaddr
-    }
+    unsafe { _ml_io_map(phys_addr, size) }
 }
 
 pub fn ml_vtophys(vaddr: u64) -> u64 {
-    unsafe {
-        _ml_vtophys(vaddr)
-    }
+    unsafe { _ml_vtophys(vaddr) }
 }
 
 pub type IOInterruptHandler =
@@ -158,13 +138,10 @@ pub fn install_interrupt_handler(
     handler: IOInterruptHandler,
     refcon: *mut c_void,
 ) -> i32 {
-    let pe = unsafe {
-        __ZN9IOService11getPlatformEv()
-    };
+    let pe = unsafe { __ZN9IOService11getPlatformEv() };
 
-    let name = unsafe {
-        __ZN8OSSymbol17withCStringNoCopyEPKc(c"IOInterruptController0000001A".as_ptr())
-    };
+    let name =
+        unsafe { __ZN8OSSymbol17withCStringNoCopyEPKc(c"IOInterruptController0000001A".as_ptr()) };
 
     let lookup: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
         vf(pe as _, VT_LOOKUP_IC);
@@ -183,12 +160,12 @@ pub fn install_interrupt_handler(
     let init_fn: IOServiceInitFn = vf(nub as *mut c_void, 21);
     unsafe { init_fn(nub as *mut c_void, core::ptr::null_mut()) };
 
-    let interrupt_sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
+    let interrupt_sources =
+        kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
 
     let source_bytes = irq.to_ne_bytes();
-    let vector_data = unsafe {
-        __ZN6OSData9withBytesEPKvj(source_bytes.as_ptr() as *const core::ffi::c_void, 4)
-    };
+    let vector_data =
+        unsafe { __ZN6OSData9withBytesEPKvj(source_bytes.as_ptr() as *const core::ffi::c_void, 4) };
 
     unsafe {
         (*interrupt_sources).interrupt_controller = ic;
@@ -214,14 +191,7 @@ pub fn install_interrupt_handler(
         core::mem::transmute::<*const u8, IOInterruptHandler>(handler_ptr)
     };
 
-    let kr = reg(
-        ic,
-        nub as *mut c_void,
-        0,
-        target,
-        signed_handler,
-        refcon,
-    );
+    let kr = reg(ic, nub as *mut c_void, 0, target, signed_handler, refcon);
     if kr != 0 {
         return kr;
     }

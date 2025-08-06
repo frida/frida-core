@@ -165,13 +165,13 @@ namespace Frida.Barebone {
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 			if (remap_writable_pages_address == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_remap_writable_pages symbol found");
+				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_try_remap_writable_pages symbol found");
 			if (mprotect_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
 
-			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
 			remap_writable_pages_callback = yield new Callback (remap_writable_pages_address,
 				new RemapWritablePagesHandler (machine), machine, cancellable);
+			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
@@ -339,6 +339,37 @@ namespace Frida.Barebone {
 			}
 		}
 
+		private class RemapWritablePagesHandler : Object, CallbackHandler {
+			public signal void output (string message);
+
+			public uint arity {
+				get { return 2; }
+			}
+
+			private Machine machine;
+
+			public RemapWritablePagesHandler (Machine machine) {
+				this.machine = machine;
+			}
+
+			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
+					throws Error, IOError {
+				var pages = args[0];
+				var num_pages = (uint) args[1];
+
+				var physical_addresses = new Gee.ArrayList<uint64?> ();
+				var gdb = machine.gdb;
+				var reader = new BufferReader (yield gdb.read_buffer (pages, num_pages * gdb.pointer_size, cancellable));
+				for (uint i = 0; i != num_pages; i++)
+					physical_addresses.add (reader.read_pointer ());
+
+				Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
+				// TODO: Handle cleanup.
+
+				return allocation.virtual_address;
+			}
+		}
+
 		private class MemoryProtectHandler : Object, CallbackHandler {
 			public signal void output (string message);
 
@@ -363,39 +394,6 @@ namespace Frida.Barebone {
 				} catch (GLib.Error e) {
 					return 0;
 				}
-			}
-		}
-
-		private class RemapWritablePagesHandler : Object, CallbackHandler {
-			public signal void output (string message);
-
-			public uint arity {
-				get { return 2; }
-			}
-
-			private Machine machine;
-
-			public RemapWritablePagesHandler (Machine machine) {
-				this.machine = machine;
-			}
-
-			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-					throws Error, IOError {
-				var pages = args[0];
-				var num_pages = (uint) args[1];
-
-				var physical_addresses = new Gee.ArrayList<uint64?> ();
-				var gdb = machine.gdb;
-				var reader = new BufferReader (yield gdb.read_buffer (pages, num_pages * gdb.pointer_size, cancellable));
-				for (uint i = 0; i != num_pages; i++) {
-					physical_addresses.add (reader.read_pointer ());
-					printerr ("RemapWritablePagesHandler physical_addresses[%u]=0x%lx\n\n", i, (ulong) physical_addresses[(int) i]);
-				}
-
-				Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
-				printerr ("RemapWritablePagesHandler returning 0x%lx\n\n", (ulong) allocation.virtual_address);
-
-				return allocation.virtual_address;
 			}
 		}
 
