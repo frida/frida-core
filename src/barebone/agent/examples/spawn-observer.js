@@ -1,4 +1,7 @@
-const _copyinstr = new NativeFunction(DebugSymbol.getFunctionByName('copyinstr'), 'int', ['pointer', 'pointer', 'size_t', 'pointer']);
+const _copyinstr = new NativeFunction(
+    DebugSymbol.getFunctionByName('copyinstr'),
+  'int',
+  ['pointer', 'pointer', 'size_t', 'pointer']);
 const { pointerSize } = Process;
 
 Interceptor.attach(DebugSymbol.getFunctionByName('__mac_execve'), {
