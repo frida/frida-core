@@ -1425,7 +1425,7 @@ namespace Frida {
 			}
 
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
-			private ulong? exception_handler;
+			private ulong exception_handler = 0;
 			private string? main_thread_id;
 			private bool resumed = false;
 
@@ -1528,6 +1528,8 @@ namespace Frida {
 			}
 
 			public async void kill (Cancellable? cancellable) throws Error, IOError {
+				io_cancellable.cancel ();
+
 				detach_exception_handler ();
 
 				if (exception_handling_status == FULL)
@@ -1595,9 +1597,10 @@ namespace Frida {
 			}
 
 			private void detach_exception_handler () {
-				if (exception_handler != null) {
-					lldb.disconnect (exception_handler);
-					exception_handler = null;
+				if (exception_handler != 0) {
+					if (lldb.state != CLOSED)
+						lldb.disconnect (exception_handler);
+					exception_handler = 0;
 				}
 			}
 
