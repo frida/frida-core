@@ -126,6 +126,8 @@ namespace Frida.Fruity {
 	public sealed class PairingService : Object, AsyncInitable {
 		public const string DNS_SD_NAME = "_remotepairing._tcp.local";
 
+		private signal void events_received (ObjectReader events);
+
 		public PairingTransport transport {
 			get;
 			construct;
@@ -737,11 +739,30 @@ namespace Frida.Fruity {
 				.end_dictionary ()
 				.build ();
 
-			ObjectReader response = yield request_plain (wrapper, cancellable);
+			var promise = new Promise<ObjectReader> ();
+			var pairing_handler = events_received.connect (reader => {
+				try {
+					reader
+						.read_member ("plain")
+						.read_member ("_0")
+						.read_member ("event")
+						.read_member ("_0");
 
-			response
-				.read_member ("event")
-				.read_member ("_0");
+					if (reader.has_member ("pairingData") || reader.has_member ("pairingRejectedWithError"))
+						promise.resolve (reader);
+				} catch (Error e) {
+					promise.reject (e);
+					return;
+				}
+			});
+
+			ObjectReader response = null;
+			try {
+				yield post_plain (wrapper, cancellable);
+				response = yield promise.future.wait_async (cancellable);
+			} finally {
+				disconnect (pairing_handler);
+			}
 
 			if (response.has_member ("pairingRejectedWithError")) {
 				string description = response
@@ -869,9 +890,24 @@ namespace Frida.Fruity {
 
 				reader.read_member ("message");
 
-				var request = requests.poll ();
-				if (request != null)
-					request.resolve (reader);
+				bool is_event = false;
+				if (reader.has_member ("plain")) {
+					is_event = reader
+						.read_member ("plain")
+						.read_member ("_0")
+						.has_member ("event");
+					reader
+						.end_member ()
+						.end_member ();
+				}
+
+				if (is_event) {
+					events_received (reader);
+				} else {
+					var request = requests.poll ();
+					if (request != null)
+						request.resolve (reader);
+				}
 			} catch (Error e) {
 			}
 		}
