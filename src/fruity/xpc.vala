@@ -151,8 +151,7 @@ namespace Frida.Fruity {
 			private set;
 		}
 
-		private Gee.Map<uint64?, Promise<ObjectReader>> requests =
-			new Gee.HashMap<uint64?, Promise<ObjectReader>> (Numeric.uint64_hash, Numeric.uint64_equal);
+		private Gee.Queue<Promise<ObjectReader>> requests = new Gee.ArrayQueue<Promise<ObjectReader>> ();
 		private uint64 next_control_sequence_number = 0;
 		private uint64 next_encrypted_sequence_number = 0;
 
@@ -766,12 +765,12 @@ namespace Frida.Fruity {
 		private async ObjectReader request_plain (Bytes payload, Cancellable? cancellable) throws Error, IOError {
 			uint64 seqno = next_control_sequence_number++;
 			var promise = new Promise<ObjectReader> ();
-			requests[seqno] = promise;
+			requests.offer (promise);
 
 			try {
 				yield post_plain_with_sequence_number (seqno, payload, cancellable);
 			} catch (GLib.Error e) {
-				if (requests.unset (seqno))
+				if (requests.remove (promise))
 					promise.reject (e);
 			}
 
@@ -810,7 +809,7 @@ namespace Frida.Fruity {
 		private async string request_encrypted (string json, Cancellable? cancellable) throws Error, IOError {
 			uint64 seqno = next_control_sequence_number++;
 			var promise = new Promise<ObjectReader> ();
-			requests[seqno] = promise;
+			requests.offer (promise);
 
 			Bytes iv = new BufferBuilder (LITTLE_ENDIAN)
 				.append_uint64 (next_encrypted_sequence_number++)
@@ -856,7 +855,7 @@ namespace Frida.Fruity {
 			var e = (error != null)
 				? error
 				: new Error.TRANSPORT ("Connection closed while waiting for response");
-			foreach (Promise<ObjectReader> promise in requests.values)
+			foreach (Promise<ObjectReader> promise in requests)
 				promise.reject (e);
 			requests.clear ();
 		}
@@ -868,16 +867,11 @@ namespace Frida.Fruity {
 					return;
 				reader.end_member ();
 
-				uint64 seqno = reader.read_member ("sequenceNumber").get_uint64_value ();
-				reader.end_member ();
-
 				reader.read_member ("message");
 
-				Promise<ObjectReader> promise;
-				if (!requests.unset (seqno, out promise))
-					return;
-
-				promise.resolve (reader);
+				var request = requests.poll ();
+				if (request != null)
+					request.resolve (reader);
 			} catch (Error e) {
 			}
 		}
