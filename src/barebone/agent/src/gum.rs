@@ -69,7 +69,7 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
         }
 
         _gum_barebone_try_remap_writable_pages(
-            physical_addrs.as_ptr() as *mut gpointer,
+            physical_addrs.as_ptr() as *mut *const core::ffi::c_void,
             physical_addrs.len() as guint,
         )
     }

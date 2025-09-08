@@ -283,6 +283,12 @@ namespace Frida.Barebone {
 			set;
 		}
 
+		public Gee.Map<string, uint64?> symbols {
+			get;
+			set;
+			default = new Gee.HashMap<string, uint64?> ();
+		}
+
 		public void check () throws Error {
 			if (file == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'image.file' is missing");
@@ -290,11 +296,38 @@ namespace Frida.Barebone {
 			if (@base == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'image.base' is missing");
 			@base.check ();
+
+			if (symbols == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.symbols' is invalid");
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "base") {
 				value = deserialize_address ("image.base", property_node);
+				return true;
+			}
+
+			if (property_name == "symbols") {
+				Gee.Map<string, uint64?> syms = null;
+
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					syms = new Gee.HashMap<string, uint64?> ();
+
+					property_node.get_object ().foreach_member ((obj, name, node) => {
+						if (syms == null)
+							return;
+
+						uint64 addr;
+						if (!try_deserialize_address (node, out addr)) {
+							syms = null;
+							return;
+						}
+
+						syms[name] = addr;
+					});
+				}
+
+				value = syms;
 				return true;
 			}
 
@@ -339,16 +372,24 @@ namespace Frida.Barebone {
 	}
 
 	private MemoryAddress deserialize_address (string label, Json.Node node) {
-		Type t = node.get_value_type ();
-		if (t == typeof (string)) {
-			uint64 address;
-			if (!uint64.try_parse (node.get_string (), out address, null, 16))
-				return new InvalidMemoryAddress (label);
-			return new NonNullMemoryAddress (label, address);
-		} else if (t == typeof (int64)) {
-			return new NonNullMemoryAddress (label, node.get_int ());
-		} else {
+		uint64 addr;
+		if (!try_deserialize_address (node, out addr))
 			return new InvalidMemoryAddress (label);
+		return new NonNullMemoryAddress (label, addr);
+	}
+
+	private bool try_deserialize_address (Json.Node node, out uint64 address) {
+		Type t = node.get_value_type ();
+
+		if (t == typeof (string))
+			return uint64.try_parse (node.get_string (), out address, null, 16);
+
+		if (t == typeof (int64)) {
+			address = node.get_int ();
+			return true;
 		}
+
+		address = 0;
+		return false;
 	}
 }

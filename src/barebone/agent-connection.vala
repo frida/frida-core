@@ -72,7 +72,30 @@ namespace Frida.Barebone {
 			}
 			if (kernel_base == 0)
 				throw new Error.NOT_SUPPORTED ("Missing kernel_base");
-			SymbolInfo? thread_block = layout.symbols.first_match (s => s.name == "thread_block");
+
+			var symbols = new Gee.HashMap<string, SymbolInfo> ();
+			var hash_builder = new SymbolHashBuilder ();
+			foreach (var s in layout.symbols) {
+				symbols[s.name] = s;
+				hash_builder.add_symbol (s);
+			}
+			if (image_config != null) {
+				foreach (var e in image_config.symbols.entries) {
+					unowned string name = e.key;
+					if (!symbols.has_key (name)) {
+						var s = new SymbolInfo () {
+							name = name,
+							offset = (uint32) e.value,
+							symbol_type = 0xf,
+							section = 0x10, // FIXME
+						};
+						symbols[name] = s;
+						hash_builder.add_symbol (s);
+					}
+				}
+			}
+
+			SymbolInfo? thread_block = symbols["thread_block"];
 			if (thread_block == null)
 				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
 
@@ -94,12 +117,6 @@ namespace Frida.Barebone {
 			}
 			config_builder.close ();
 
-			var symbols = new Gee.HashMap<string, SymbolInfo> ();
-			var hash_builder = new SymbolHashBuilder ();
-			foreach (var s in layout.symbols) {
-				symbols[s.name] = s;
-				hash_builder.add_symbol (s);
-			}
 			Bytes symbol_data = hash_builder.build (byte_order);
 			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
 				symbol_data));
@@ -150,7 +167,6 @@ namespace Frida.Barebone {
 			uint64 remap_writable_pages_address = 0;
 			uint64 mprotect_address = 0;
 			uint64 base_va = elf_allocation.virtual_address;
-			printerr ("ELF injected at base address 0x%lx\n\n", (ulong) base_va);
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
 					start_address = base_va + e.address;
