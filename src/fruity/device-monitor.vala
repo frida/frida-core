@@ -340,7 +340,7 @@ namespace Frida.Fruity {
 					var stream = yield tunnel.open_tcp_connection (port, cancellable);
 					return new TcpChannel () { stream = stream, kind = TUNNEL };
 				} catch (Error e) {
-					if (e is Error.SERVER_NOT_RUNNING)
+					if (e is Error.SERVER_NOT_RUNNING || e is Error.TRANSPORT)
 						pending_error = e;
 					else
 						throw e;
