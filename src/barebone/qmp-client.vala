@@ -143,6 +143,7 @@ namespace Frida.Barebone {
 			public uint irq;
 		}
 
+#if !WINDOWS
 		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Error, IOError {
 			var val = yield get_qom_property (path, property, cancellable);
 			if (val.get_value_type () != typeof (int64))
@@ -230,6 +231,7 @@ namespace Frida.Barebone {
 				.end_object ();
 			yield execute_command ("device_add", args.get_root (), cancellable);
 		}
+#endif
 
 		public async Json.Node execute_command (string command, Json.Node? arguments = null, Cancellable? cancellable = null)
 				throws Error, IOError {
