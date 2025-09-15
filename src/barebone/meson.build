@@ -68,4 +68,3 @@ backend_sources += custom_target('frida-data-barebone',
 
 backend_vala_args += gum_vala_args
 backend_vala_args_private += '--pkg=quickjs'
-backend_deps += [quickjs_dep, lzfse_dep]

@@ -579,6 +579,11 @@ if quickjs_dep.found()
   backend_reqs_private += 'quickjs'
 endif
 
+if lzfse_dep.found()
+  backend_deps_private += lzfse_dep
+  backend_reqs_private += 'lzfse'
+endif
+
 if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>')
   vala_flags += '--define=HAVE_OPENPTY'
 endif
