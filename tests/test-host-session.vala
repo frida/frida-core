@@ -67,6 +67,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/speedtest", () => {
+			var h = new Harness ((h) => Fruity.Manual.speedtest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Fruity/Manual/Xpc/list", () => {
 			var h = new Harness ((h) => Fruity.Manual.Xpc.list.begin (h as Harness));
 			h.run ();
@@ -3800,6 +3805,77 @@ namespace Frida.HostSessionTest {
 					}
 
 					yield h.prompt_for_key ("Hit a key to exit: ");
+				} catch (GLib.Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+				}
+
+				try {
+					yield device_manager.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+
+				h.done ();
+			}
+
+			private static async void speedtest (Harness h) {
+				/*
+				 * Configured like this:
+				 *
+				 * ./configure \
+				 *   --disable-local-backend \
+				 *   --disable-droidy-backend \
+				 *   --disable-socket-backend \
+				 *   --disable-barebone-backend \
+				 *   --disable-compiler-backend \
+				 *   --with-compat=disabled \
+				 *   --disable-gadget \
+				 *   --disable-server \
+				 *   --disable-portal \
+				 *   --disable-inject \
+				 *   -- \
+				 *   --force-fallback-for=lwip
+				 */
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout ();
+
+				var device_manager = new DeviceManager ();
+
+				try {
+					var device = yield device_manager.get_device_by_id (DEVICE_ID);
+
+					{
+						var stream = yield device.open_channel ("tcp:5050");
+
+						var jumbo_message = new uint8[64 * 1024 * 1024];
+						yield stream.get_output_stream ().write_all_async (jumbo_message, Priority.DEFAULT, null,
+							null);
+
+						yield stream.close_async ();
+					}
+
+					{
+						var stream = yield device.open_channel ("tcp:5051");
+
+						var buf = new uint8[4 * 1024 * 1024];
+						while (true) {
+							var n = yield stream.get_input_stream ().read_async (buf);
+							if (n == 0)
+								break;
+						}
+
+						yield stream.close_async ();
+					}
+
+					var source = new TimeoutSource (500);
+					source.set_callback (speedtest.callback);
+					source.attach (MainContext.get_thread_default ());
+					yield;
 				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 				}

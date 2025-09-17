@@ -32,6 +32,8 @@ namespace Frida.Fruity {
 		private size_t max_in_transfers;
 		private size_t max_out_transfers;
 		private VirtualNetworkStack? _netstack;
+		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
+		private bool input_flush_scheduled = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private bool writing = false;
 		private uint16 next_outgoing_sequence = 1;
@@ -147,7 +149,7 @@ namespace Frida.Fruity {
 				"Failed to set USB interface alt setting");
 
 			_netstack = new VirtualNetworkStack (new Bytes (mac_address), null, 1500);
-			_netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
+			_netstack.outgoing_datagrams.connect (on_netif_outgoing_datagrams);
 
 			process_incoming_datagrams.begin ();
 
@@ -234,24 +236,44 @@ namespace Frida.Fruity {
 							notify_property ("remote-ipv6-address");
 					}
 
-					_netstack.handle_incoming_datagram (datagram);
+					on_incoming_datagram (datagram);
 				}
 
 				ndp_index = next_ndp_index;
 			} while (ndp_index != 0);
 		}
 
-		private void on_netif_outgoing_datagram (Bytes datagram) {
-			pending_output.offer (datagram);
+		private void on_incoming_datagram (Bytes datagram) {
+			pending_input.offer (datagram);
+
+			if (!input_flush_scheduled) {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					input_flush_scheduled = false;
+					flush_pending_input ();
+					return Source.REMOVE;
+				});
+				source.attach (MainContext.get_thread_default ());
+				input_flush_scheduled = true;
+			}
+		}
+
+		private void flush_pending_input () {
+			var datagrams = pending_input;
+			pending_input = new Gee.ArrayQueue<Bytes> ();
+			try {
+				_netstack.handle_incoming_datagrams (datagrams);
+			} catch (Error e) {
+			}
+		}
+
+		private void on_netif_outgoing_datagrams (Gee.Collection<Bytes> datagrams) {
+			foreach (var d in datagrams)
+				pending_output.offer (d);
 
 			if (!writing) {
 				writing = true;
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					process_pending_output.begin ();
-					return false;
-				});
-				source.attach (MainContext.get_thread_default ());
+				process_pending_output.begin ();
 			}
 		}
 
