@@ -561,9 +561,6 @@ if have_fruity_backend
     'dns=disabled',
     'arp=disabled',
     'ethernet=enabled',
-    'tcp_mss=4036',
-    'tcp_snd_buf=65535',
-    'tcp_wnd=65535',
   ]
   if optimize_for_prod
     lwip_options += 'lwip_debug=disabled'
