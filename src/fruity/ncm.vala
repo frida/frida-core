@@ -31,11 +31,16 @@ namespace Frida.Fruity {
 		private uint16 ntb_out_max_datagrams;
 		private size_t max_in_transfers;
 		private size_t max_out_transfers;
+		private size_t max_out_bytes_in_flight;
+
 		private VirtualNetworkStack? _netstack;
 		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
 		private bool input_flush_scheduled = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
-		private bool writing = false;
+		private size_t out_in_flight_count = 0;
+		private size_t out_in_flight_bytes = 0;
+		private Gee.Map<Future<uint>, uint16> out_in_flight_sizes = new Gee.HashMap<Future<uint>, uint16> ();
+		private bool out_topup_scheduled = false;
 		private uint16 next_outgoing_sequence = 1;
 
 		private InetAddress? _remote_ipv6_address;
@@ -139,11 +144,15 @@ namespace Frida.Fruity {
 				max_out_transfers = (5 * MAX_TRANSFER_MEMORY) / ntb_out_max_size;
 			} else if (speed == LibUSB.Speed.HIGH) {
 				max_in_transfers = MAX_TRANSFER_MEMORY / ntb_in_max_size;
-				max_out_transfers = MAX_TRANSFER_MEMORY / ntb_out_max_size;
+				max_out_transfers = (3 * MAX_TRANSFER_MEMORY) / ntb_out_max_size;
+				max_out_transfers = size_t.max (max_out_transfers, 6);
+				max_out_transfers = size_t.min (max_out_transfers, 16);
 			} else {
 				max_in_transfers = 4;
 				max_out_transfers = 4;
 			}
+
+			max_out_bytes_in_flight = 4 * MAX_TRANSFER_MEMORY;
 
 			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
@@ -271,48 +280,68 @@ namespace Frida.Fruity {
 			foreach (var d in datagrams)
 				pending_output.offer (d);
 
-			if (!writing) {
-				writing = true;
-				process_pending_output.begin ();
-			}
+			schedule_top_up ();
 		}
 
-		private async void process_pending_output () {
-			try {
-				while (!pending_output.is_empty) {
-					var pending = new Gee.ArrayList<Promise<uint>> ();
+		private void schedule_top_up () {
+			if (out_topup_scheduled)
+				return;
+			out_topup_scheduled = true;
 
-					do {
-						var request = transfer_next_output_batch ();
-						pending.add (request);
-					} while (pending.size < max_out_transfers && !pending_output.is_empty);
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				out_topup_scheduled = false;
+				top_up_output_window ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+		}
 
-					foreach (var request in pending)
-						yield request.future.wait_async (io_cancellable);
+		private void top_up_output_window () {
+			while (!pending_output.is_empty && out_in_flight_count < max_out_transfers) {
+				size_t num_datagrams = ntb_out_max_datagrams;
+				TransferLayout layout;
+				while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment, ndp_out_divisor,
+						ndp_out_payload_remainder)).size > ntb_out_max_size) {
+					num_datagrams--;
+					if (num_datagrams == 0)
+						break;
 				}
-			} catch (GLib.Error e) {
-			} finally {
-				writing = false;
+				if (num_datagrams == 0)
+					break;
+				if ((out_in_flight_bytes + layout.size) > max_out_bytes_in_flight)
+					break;
+
+				var batch = new Gee.ArrayList<Bytes> ();
+				for (var i = 0; i != layout.offsets.size; i++)
+					batch.add (pending_output.poll ());
+				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+
+				var request = new Promise<uint> ();
+				do_transfer_output_batch.begin (transfer, request);
+
+				out_in_flight_count++;
+				out_in_flight_bytes += layout.size;
+
+				out_in_flight_sizes.set (request.future, layout.size);
+
+				request.future.then (fut => {
+					on_output_completed (fut);
+				});
 			}
 		}
 
-		private Promise<uint> transfer_next_output_batch () {
-			size_t num_datagrams = ntb_out_max_datagrams;
-			TransferLayout layout;
-			while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment,
-					ndp_out_divisor, ndp_out_payload_remainder)).size > ntb_out_max_size) {
-				num_datagrams--;
-			}
+		private void on_output_completed (Future<uint> fut) {
+			uint16 size;
+			out_in_flight_sizes.unset (fut, out size);
 
-			var batch = new Gee.ArrayList<Bytes> ();
-			for (var i = 0; i != layout.offsets.size; i++)
-				batch.add (pending_output.poll ());
+			out_in_flight_count--;
+			out_in_flight_bytes -= size;
 
-			var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+			if (fut.error != null)
+				return;
 
-			var request = new Promise<uint> ();
-			do_transfer_output_batch.begin (transfer, request);
-			return request;
+			top_up_output_window ();
 		}
 
 		private async void do_transfer_output_batch (Bytes transfer, Promise<uint> request) {
