@@ -32,6 +32,8 @@ namespace Frida.Fruity {
 		private size_t max_in_transfers;
 		private size_t max_out_transfers;
 		private size_t max_out_bytes_in_flight;
+		private uint16 ndp_reserved_slots;
+		private uint16 ndp_fixed_header_size;
 
 		private VirtualNetworkStack? _netstack;
 		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
@@ -122,7 +124,7 @@ namespace Frida.Fruity {
 			ndp_out_divisor = ntb_params.read_uint16 (20);
 			ndp_out_payload_remainder = ntb_params.read_uint16 (22);
 			ndp_out_alignment = ntb_params.read_uint16 (24);
-			ntb_out_max_datagrams = uint16.min (ntb_params.read_uint16 (26), 16);
+			ntb_out_max_datagrams = ntb_params.read_uint16 (26);
 
 			if (ntb_in_max_size != device_ntb_in_max_size) {
 				var ntb_size_buf = new BufferBuilder (LITTLE_ENDIAN)
@@ -153,6 +155,9 @@ namespace Frida.Fruity {
 			}
 
 			max_out_bytes_in_flight = 4 * MAX_TRANSFER_MEMORY;
+
+			ndp_reserved_slots = (uint16) uint16.min (21, ntb_out_max_datagrams);
+			ndp_fixed_header_size = (uint16) align (8 + (ndp_reserved_slots * 4) + 4, ndp_out_alignment);
 
 			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
@@ -299,21 +304,14 @@ namespace Frida.Fruity {
 
 		private void top_up_output_window () {
 			while (!pending_output.is_empty && out_in_flight_count < max_out_transfers) {
-				size_t num_datagrams = ntb_out_max_datagrams;
-				TransferLayout layout;
-				while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment, ndp_out_divisor,
-						ndp_out_payload_remainder)).size > ntb_out_max_size) {
-					num_datagrams--;
-					if (num_datagrams == 0)
-						break;
-				}
-				if (num_datagrams == 0)
-					break;
+				size_t max_datagrams = size_t.min (pending_output.size, (size_t) ndp_reserved_slots);
+				var layout = TransferLayout.compute (pending_output, max_datagrams, ntb_out_max_size, ndp_fixed_header_size,
+					ndp_out_alignment, ndp_out_divisor, ndp_out_payload_remainder);
 				if ((out_in_flight_bytes + layout.size) > max_out_bytes_in_flight)
 					break;
 
 				var batch = new Gee.ArrayList<Bytes> ();
-				for (var i = 0; i != layout.offsets.size; i++)
+				for (var i = 0; i != layout.offsets.length; i++)
 					batch.add (pending_output.poll ());
 				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
 
@@ -357,52 +355,44 @@ namespace Frida.Fruity {
 			public uint16 size;
 			public uint16 ndp_header_offset;
 			public uint16 ndp_header_size;
-			public Gee.List<uint16> offsets;
+			public uint16[] offsets;
 
-			public static TransferLayout compute (Gee.Collection<Bytes> datagrams, size_t max_datagrams, size_t ndp_alignment,
+			public static TransferLayout compute (Gee.Collection<Bytes> datagrams, size_t max_datagrams,
+					uint32 max_transfer_size, uint16 ndp_fixed_header_size, size_t ndp_alignment,
 					size_t datagram_modulus, size_t datagram_remainder) {
-				size_t ndp_header_base_size = 4 + 2 + 2;
-				size_t ndp_entry_size = 2 + 2;
 				size_t ethernet_header_size = 14;
 
 				size_t ndp_header_offset = align (TRANSFER_HEADER_SIZE, ndp_alignment, 0);
-				size_t num_datagram_slots = size_t.min (datagrams.size, max_datagrams);
-				size_t ndp_header_size = ndp_header_base_size + ((num_datagram_slots + 1) * ndp_entry_size);
 
-				size_t current_transfer_size = ndp_header_offset + ndp_header_size;
-				var offsets = new Gee.ArrayList<uint16> ();
+				size_t current_transfer_size = ndp_header_offset + ndp_fixed_header_size;
+				var offsets = new uint16[max_datagrams];
 
-				uint i = 0;
+				int i = 0;
 				foreach (var datagram in datagrams) {
 					var size = (uint16) datagram.get_size ();
 
 					size_t start_offset =
 						align (current_transfer_size + ethernet_header_size, datagram_modulus, datagram_remainder);
 					size_t end_offset = start_offset + size;
-					if (end_offset > uint16.MAX)
+					if (end_offset > uint16.MAX || end_offset > max_transfer_size)
 						break;
 
 					current_transfer_size = end_offset;
-					offsets.add ((uint16) start_offset);
+					offsets[i] = (uint16) start_offset;
 
 					i++;
 					if (i == max_datagrams)
 						break;
 				}
 
+				offsets.resize (i);
+
 				return new TransferLayout () {
 					size = (uint16) current_transfer_size,
 					ndp_header_offset = (uint16) ndp_header_offset,
-					ndp_header_size = (uint16) ndp_header_size,
-					offsets = offsets,
+					ndp_header_size = ndp_fixed_header_size,
+					offsets = (owned) offsets,
 				};
-			}
-
-			private static size_t align (size_t val, size_t modulus, size_t remainder) {
-				var delta = val % modulus;
-				if (delta != remainder)
-					return val + modulus - delta + remainder;
-				return val;
 			}
 		}
 
@@ -459,6 +449,13 @@ namespace Frida.Fruity {
 				return null;
 
 			return new InetAddress.from_bytes (datagram[22:22 + 16].get_data (), IPV6);
+		}
+
+		private static size_t align (size_t val, size_t modulus, size_t remainder = 0) {
+			var delta = val % modulus;
+			if (delta != remainder)
+				return val + modulus - delta + remainder;
+			return val;
 		}
 	}
 
