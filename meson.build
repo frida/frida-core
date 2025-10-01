@@ -403,6 +403,10 @@ else
 endif
 
 have_local_backend = get_option('local_backend').allowed()
+have_simmy_backend = get_option('simmy_backend') \
+    .disable_auto_if(host_os != 'macos') \
+    .require(host_os == 'macos', error_message: 'Simmy backend is only available on macOS') \
+    .allowed()
 have_fruity_backend = get_option('fruity_backend') \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
@@ -491,6 +495,7 @@ build_tests = get_option('tests') \
     .allowed()
 
 foreach b : [['local', have_local_backend],
+             ['simmy', have_simmy_backend],
              ['fruity', have_fruity_backend],
              ['droidy', have_droidy_backend],
              ['socket', have_socket_backend],
@@ -786,6 +791,7 @@ endif
 summary(
   {
     'local': have_local_backend,
+    'simmy': have_simmy_backend,
     'fruity': have_fruity_backend,
     'droidy': have_droidy_backend,
     'socket': have_socket_backend,
