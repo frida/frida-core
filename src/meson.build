@@ -500,6 +500,13 @@ if have_local_backend
   endif
 endif
 
+if have_simmy_backend
+  backend_sources += [
+    'simmy' / 'simmy-host-session.vala',
+    'simmy' / 'text-plist.vala',
+  ]
+endif
+
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
