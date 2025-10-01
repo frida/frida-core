@@ -439,8 +439,11 @@ namespace Frida {
 
 		private bool is_booting (uint task) throws Error {
 			Gum.Darwin.AllImageInfos infos;
-			if (!Gum.Darwin.query_all_image_infos (task, out infos))
-				throw new Error.PROCESS_NOT_FOUND ("Target process died unexpectedly");
+			try {
+				Gum.Darwin.query_all_image_infos (task, out infos);
+			} catch (Gum.Error e) {
+				throw new Error.PROCESS_NOT_FOUND ("%s", e.message);
+			}
 
 			return !infos.libsystem_initialized;
 		}
