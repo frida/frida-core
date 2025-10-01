@@ -47,6 +47,9 @@ namespace Frida {
 		}
 
 		private void add_nonlocal_backends () {
+#if HAVE_SIMMY_BACKEND
+			add_backend (new SimmyHostSessionBackend ());
+#endif
 #if !IOS && !ANDROID && !TVOS
 #if HAVE_FRUITY_BACKEND
 			add_backend (new FruityHostSessionBackend ());

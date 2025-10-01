@@ -10,6 +10,12 @@ option('local_backend',
   description: 'Include backend for the local system',
 )
 
+option('simmy_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the iDevice Simulator backend',
+)
+
 option('fruity_backend',
   type: 'feature',
   value: 'auto',
