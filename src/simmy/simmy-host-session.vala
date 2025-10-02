@@ -106,11 +106,14 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			host_session = new SimmyHostSession (device);
+			HostSessionEntry local_system = yield hub.resolve_host_session ("local", cancellable);
+
+			host_session = new SimmyHostSession (device, local_system);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -131,15 +134,14 @@ namespace Frida {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-			//return yield this.host_session.link_agent_session (id, sink, cancellable);
-			throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
 		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
 			if (host_session != this.host_session)
 				return;
 
-			//this.host_session.unlink_agent_session (id);
+			this.host_session.unlink_agent_session (id);
 		}
 
 		public async IOStream link_channel (HostSession host_session, ChannelId id, Cancellable? cancellable)
@@ -169,10 +171,15 @@ namespace Frida {
 			construct;
 		}
 
+		public HostSessionEntry local_system {
+			get;
+			construct;
+		}
+
 		private Cancellable io_cancellable = new Cancellable ();
 
-		public SimmyHostSession (Simmy.Device device) {
-			Object (device: device);
+		public SimmyHostSession (Simmy.Device device, HostSessionEntry local_system) {
+			Object (device: device, local_system: local_system);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -286,6 +293,7 @@ namespace Frida {
 		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			string result = yield simctl ({
 				"launch",
+				//"--wait-for-debugger",
 				"--terminate-running-process",
 				device.udid,
 				program,
@@ -302,16 +310,16 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			//Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
 		}
 
-		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+		public async void kill (uint pid, Cancellable? cancellable) throws GLib.Error {
+			yield local_system.session.kill (pid, cancellable);
 		}
 
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws GLib.Error {
+			return yield local_system.session.attach (pid, options, cancellable);
 		}
 
 		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
@@ -320,21 +328,21 @@ namespace Frida {
 
 		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			return yield local_system.provider.link_agent_session (local_system.session, id, sink, cancellable);
 		}
 
 		public void unlink_agent_session (AgentSessionId id) {
-			assert_not_reached ();
+			local_system.provider.unlink_agent_session (local_system.session, id);
 		}
 
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws GLib.Error {
+			return yield local_system.session.inject_library_file (pid, path, entrypoint, data, cancellable);
 		}
 
 		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws GLib.Error {
+			return yield local_system.session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
 		}
 
 		public async ChannelId open_channel (string address, Cancellable? cancellable) throws Error, IOError {
