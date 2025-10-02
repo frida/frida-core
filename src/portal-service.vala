@@ -957,7 +957,8 @@ namespace Frida {
 				_icon = builder.end ();
 			}
 
-			public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+			public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+					throws Error, IOError {
 				if (channel != null)
 					throw new Error.INVALID_OPERATION ("Already created");
 

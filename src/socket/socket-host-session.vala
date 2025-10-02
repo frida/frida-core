@@ -61,7 +61,8 @@ namespace Frida {
 			io_cancellable.cancel ();
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			string? raw_address = null;
 			TlsCertificate? certificate = null;
 			string? origin = null;

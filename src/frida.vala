@@ -24,7 +24,7 @@ namespace Frida {
 		}
 	}
 
-	public sealed class DeviceManager : Object {
+	public sealed class DeviceManager : Object, HostSessionHub {
 		public signal void added (Device device);
 		public signal void removed (Device device);
 		public signal void changed ();
@@ -392,6 +392,12 @@ namespace Frida {
 
 			if (started)
 				changed ();
+		}
+
+		private async HostSessionEntry resolve_host_session (string id, Cancellable? cancellable) throws Error, IOError {
+			var device = yield get_device_by_id (id, 0, cancellable);
+			var session = yield device.get_host_session (cancellable);
+			return new HostSessionEntry (device.provider, session);
 		}
 
 		private void check_open () throws Error {
@@ -1326,7 +1332,7 @@ namespace Frida {
 			host_session_request = new Promise<HostSession> ();
 
 			try {
-				var session = yield provider.create (host_session_options, cancellable);
+				var session = yield provider.create (manager, host_session_options, cancellable);
 				attach_host_session (session);
 
 				current_host_session = session;
