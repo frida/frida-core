@@ -130,7 +130,8 @@ namespace Frida {
 		public async void close (Cancellable? cancellable) throws IOError {
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Already created");
 
