@@ -164,7 +164,7 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (HostSessionOptions? options = null,
+		public abstract async HostSession create (HostSessionHub hub, HostSessionOptions? options = null,
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_detached (HostSession session);
@@ -181,6 +181,32 @@ namespace Frida {
 		public abstract async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id,
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract void unlink_service_session (HostSession host_session, ServiceSessionId id);
+	}
+
+	public interface HostSessionHub : Object {
+		public abstract async HostSessionEntry resolve_host_session (string id, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public class NullHostSessionHub : Object, HostSessionHub {
+		public async HostSessionEntry resolve_host_session (string id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Host session lookup not supported");
+		}
+	}
+
+	public class HostSessionEntry : Object {
+		public HostSessionProvider provider {
+			get;
+			construct;
+		}
+
+		public HostSession session {
+			get;
+			construct;
+		}
+
+		public HostSessionEntry (HostSessionProvider provider, HostSession session) {
+			Object (provider: provider, session: session);
+		}
 	}
 
 	public enum HostSessionProviderKind {
@@ -280,7 +306,8 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 

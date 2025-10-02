@@ -80,7 +80,8 @@ namespace Frida {
 			yield Fruity.DTXConnection.close_all (device, cancellable);
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
