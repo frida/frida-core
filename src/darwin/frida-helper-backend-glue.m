@@ -181,6 +181,7 @@ struct _FridaSpawnInstance
   mach_vm_address_t dyld_data;
 
   GumAddress modern_entry_address;
+  GumAddress sim_notify_address;
 
   /* V4+ */
   GumAddress notify_objc_init;
@@ -1881,7 +1882,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  GumAddress modern_entry_address, legacy_entry_address;
+  GumAddress modern_entry_address, legacy_entry_address, sim_notify_address;
   const gchar * launch_with_closure_names[] = {
     "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_R11DiagnosticsPmSG_PbSH_",
     "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
@@ -2101,6 +2102,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
       instance->ret_gadget |= 1;
   }
 
+  sim_notify_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld4L29sim_notifyMonitorOfMainCalledEv");
+  instance->sim_notify_address = sim_notify_address;
+
   instance->ret_state = FRIDA_RET_FROM_HELPER;
 
   kr = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
@@ -2112,6 +2116,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     frida_spawn_instance_set_nth_breakpoint (instance, i++, legacy_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (modern_entry_address != 0)
     frida_spawn_instance_set_nth_breakpoint (instance, i++, modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+  if (sim_notify_address != 0)
+    frida_spawn_instance_set_nth_breakpoint (instance, i++, sim_notify_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
     GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
@@ -3104,7 +3110,11 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
 
   if (self->breakpoint_phase == FRIDA_BREAKPOINT_DETECT_FLAVOR)
   {
-    if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
+    if (pc == self->sim_notify_address)
+    {
+      self->breakpoint_phase = FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED;
+    }
+    else if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
     {
       if (pc == self->modern_entry_address)
       {
