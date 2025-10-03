@@ -182,6 +182,13 @@ namespace Frida {
 			Object (device: device, local_system: local_system);
 		}
 
+		construct {
+			var s = local_system.session;
+			s.process_crashed.connect (on_process_crashed);
+			s.agent_session_detached.connect (on_agent_session_detached);
+			s.uninjected.connect (on_uninjected);
+		}
+
 		public async void close (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
 		}
@@ -293,7 +300,7 @@ namespace Frida {
 		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			string result = yield simctl ({
 				"launch",
-				//"--wait-for-debugger",
+				"--wait-for-debugger",
 				"--terminate-running-process",
 				device.udid,
 				program,
@@ -309,8 +316,8 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			//Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
+		public async void resume (uint pid, Cancellable? cancellable) throws GLib.Error {
+			yield local_system.session.resume (pid, cancellable);
 		}
 
 		public async void kill (uint pid, Cancellable? cancellable) throws GLib.Error {
@@ -367,6 +374,18 @@ namespace Frida {
 
 		public void unlink_service_session (ServiceSessionId id) {
 			assert_not_reached ();
+		}
+
+		private void on_process_crashed (CrashInfo crash) {
+			process_crashed (crash);
+		}
+
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
+		}
+
+		private void on_uninjected (InjectorPayloadId id) {
+			uninjected (id);
 		}
 
 		[NoReturn]
