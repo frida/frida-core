@@ -503,6 +503,7 @@ endif
 if have_simmy_backend
   backend_sources += [
     'simmy' / 'simmy-host-session.vala',
+    'simmy' / 'simmy-host-session-glue.m',
     'simmy' / 'text-plist.vala',
   ]
 endif
