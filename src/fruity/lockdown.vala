@@ -88,8 +88,12 @@ namespace Frida.Fruity {
 				request.set_string ("SystemBUID", system_buid);
 
 				var response = yield service.query (request, cancellable);
-				if (response.has ("Error"))
-					throw new LockdownError.PROTOCOL ("Unexpected response: %s", response.get_string ("Error"));
+				if (response.has ("Error")) {
+					var error = response.get_string ("Error");
+					if (error == "InvalidHostID")
+						yield unpair (cancellable);
+					throw new LockdownError.PROTOCOL ("Unexpected response: %s", error);
+				}
 
 				if (response.get_boolean ("EnableSessionSSL"))
 					service.stream = yield start_tls (service.stream, cancellable);
