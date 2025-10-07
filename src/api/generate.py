@@ -512,6 +512,8 @@ def function_is_public(name):
                 "parse_socket_address",
                 "negotiate_connection",
                 "check_kernel_version",
+                "make_stdio_pipes",
+                "make_stdio_pipe",
             ]
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
