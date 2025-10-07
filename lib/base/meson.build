@@ -19,6 +19,13 @@ base_sources = [
 
 extra_vala_args = []
 
+if host_os == 'windows'
+  base_sources += 'windows.vala'
+else
+  base_sources += 'posix.vala'
+  extra_vala_args += '--pkg=posix'
+endif
+
 if host_os == 'macos'
   base_sources += [
     'xpc.vala',
@@ -28,6 +35,7 @@ endif
 
 if host_os_family == 'darwin'
   base_sources += 'corefoundation.vala'
+  extra_vala_args += '--pkg=darwin-xnu'
 endif
 
 if host_os_family == 'linux'
@@ -35,7 +43,6 @@ if host_os_family == 'linux'
   extra_vala_args += [
     '--pkg=linux',
     '--pkg=linux-system',
-    '--pkg=posix',
   ]
 endif
 

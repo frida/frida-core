@@ -696,41 +696,4 @@ namespace Frida {
 	protected enum ProgressMessageType {
 		HELLO = 0xff
 	}
-
-	protected class StdioPipes : Object {
-		public int input {
-			get;
-			construct;
-		}
-
-		public int output {
-			get;
-			construct;
-		}
-
-		public int error {
-			get;
-			construct;
-		}
-
-		public StdioPipes (int input, int output, int error) {
-			Object (input: input, output: output, error: error);
-		}
-
-		construct {
-			try {
-				Unix.set_fd_nonblocking (input, true);
-				Unix.set_fd_nonblocking (output, true);
-				Unix.set_fd_nonblocking (error, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
-
-		~StdioPipes () {
-			Posix.close (input);
-			Posix.close (output);
-			Posix.close (error);
-		}
-	}
 }

@@ -36,21 +36,8 @@ namespace Frida {
 			string[] argv = options.compute_argv (path);
 			string[] envp = options.compute_envp ();
 
-			StdioPipes? pipes = null;
-			FileDescriptor? stdin_read = null, stdin_write = null;
-			FileDescriptor? stdout_read = null, stdout_write = null;
-			FileDescriptor? stderr_read = null, stderr_write = null;
-			switch (options.stdio) {
-				case INHERIT:
-					break;
-				case PIPE: {
-					make_pty (out stdin_read, out stdin_write);
-					make_pty (out stdout_read, out stdout_write);
-					make_pty (out stderr_read, out stderr_write);
-					pipes = new StdioPipes (stdin_write, stdout_read, stderr_read);
-					break;
-				}
-			}
+			FileDescriptor? in_fd, out_fd, err_fd;
+			StdioPipes? pipes = make_stdio_pipes (options.stdio, true, out in_fd, null, out out_fd, null, out err_fd, null);
 
 			string? old_cwd = null;
 			if (options.cwd.length > 0) {
@@ -68,10 +55,10 @@ namespace Frida {
 				if (pid == 0) {
 					Posix.setsid ();
 
-					if (options.stdio == PIPE) {
-						Posix.dup2 (stdin_read.handle, 0);
-						Posix.dup2 (stdout_write.handle, 1);
-						Posix.dup2 (stderr_write.handle, 2);
+					if (pipes != null) {
+						Posix.dup2 (in_fd.handle, 0);
+						Posix.dup2 (out_fd.handle, 1);
+						Posix.dup2 (err_fd.handle, 2);
 					}
 
 					if (_ptrace (TRACEME) == -1) {
@@ -637,9 +624,9 @@ namespace Frida {
 			monitor ();
 
 			if (pipes != null) {
-				stdin_stream = new UnixOutputStream (pipes.input.handle, false);
-				process_next_output_from.begin (new UnixInputStream (pipes.output.handle, false), 1);
-				process_next_output_from.begin (new UnixInputStream (pipes.error.handle, false), 2);
+				stdin_stream = pipes.input;
+				process_next_output_from.begin (pipes.output, 1);
+				process_next_output_from.begin (pipes.error, 2);
 			}
 		}
 
@@ -699,37 +686,6 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				if (!(e is IOError.CANCELLED))
 					output (fd, {});
-			}
-		}
-	}
-
-	private sealed class StdioPipes : Object {
-		public FileDescriptor input {
-			get;
-			construct;
-		}
-
-		public FileDescriptor output {
-			get;
-			construct;
-		}
-
-		public FileDescriptor error {
-			get;
-			construct;
-		}
-
-		public StdioPipes (FileDescriptor input, FileDescriptor output, FileDescriptor error) {
-			Object (input: input, output: output, error: error);
-		}
-
-		construct {
-			try {
-				Unix.set_fd_nonblocking (input.handle, true);
-				Unix.set_fd_nonblocking (output.handle, true);
-				Unix.set_fd_nonblocking (error.handle, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
 			}
 		}
 	}
@@ -3167,52 +3123,7 @@ namespace Frida {
 		return Linux.syscall (SysCall.tgkill, tgid, tid, sig);
 	}
 
-
 	public extern bool _syscall_satisfies (int syscall_id, LinuxSyscall mask);
-
-	private void make_pty (out FileDescriptor read, out FileDescriptor write) throws Error {
-#if HAVE_OPENPTY
-		int rfd = -1, wfd = -1;
-		char name[Posix.Limits.PATH_MAX];
-		if (Linux.openpty (out rfd, out wfd, name, null, null) == -1)
-			throw new Error.NOT_SUPPORTED ("Unable to open PTY: %s", strerror (errno));
-
-		enable_close_on_exec (rfd);
-		enable_close_on_exec (wfd);
-
-		configure_terminal_attributes (rfd);
-
-		read = new FileDescriptor (rfd);
-		write = new FileDescriptor (wfd);
-#else
-		try {
-			int fds[2];
-			Unix.open_pipe (fds, Posix.FD_CLOEXEC);
-
-			read = new FileDescriptor (fds[0]);
-			write = new FileDescriptor (fds[1]);
-		} catch (GLib.Error e) {
-			throw new Error.NOT_SUPPORTED ("Unable to open pipe: %s", e.message);
-		}
-#endif
-	}
-
-#if HAVE_OPENPTY
-	private void enable_close_on_exec (int fd) {
-		Posix.fcntl (fd, Posix.F_SETFD, Posix.fcntl (fd, Posix.F_GETFD) | Posix.FD_CLOEXEC);
-	}
-
-	private void configure_terminal_attributes (int fd) {
-		var tios = Posix.termios ();
-		Posix.tcgetattr (fd, out tios);
-
-		tios.c_oflag &= ~Posix.ONLCR;
-		tios.c_cflag = (tios.c_cflag & Posix.CLOCAL) | Posix.CS8 | Posix.CREAD | Posix.HUPCL;
-		tios.c_lflag &= ~Posix.ECHO;
-
-		Posix.tcsetattr (fd, 0, tios);
-	}
-#endif
 
 	private sealed class ProcMapsSoEntry {
 		public uint64 base_address;

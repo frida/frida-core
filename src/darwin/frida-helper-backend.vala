@@ -136,9 +136,9 @@ namespace Frida {
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
 			if (pipes != null) {
-				stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
-				process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
-				process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+				stdin_streams[child_pid] = pipes.input;
+				process_next_output_from.begin (pipes.output, child_pid, 1, pipes);
+				process_next_output_from.begin (pipes.error, child_pid, 2, pipes);
 			}
 
 			return child_pid;
@@ -180,10 +180,8 @@ namespace Frida {
 
 			var pipes = pending.pipes;
 			if (pipes != null) {
-				pipes.clear_retained ();
-
-				process_next_output_from.begin (new UnixInputStream (pipes.output, false), pid, 1, pipes);
-				process_next_output_from.begin (new UnixInputStream (pipes.error, false), pid, 2, pipes);
+				process_next_output_from.begin (pipes.output, pid, 1, pipes);
+				process_next_output_from.begin (pipes.error, pid, 2, pipes);
 			}
 		}
 
@@ -889,59 +887,6 @@ namespace Frida {
 			complete ();
 
 			return false;
-		}
-	}
-
-	public sealed class StdioPipes : Object {
-		public int input {
-			get;
-			construct;
-		}
-
-		public int output {
-			get;
-			construct;
-		}
-
-		public int error {
-			get;
-			construct;
-		}
-
-		private int[] retained = {};
-
-		public StdioPipes (int input, int output, int error) {
-			Object (input: input, output: output, error: error);
-		}
-
-		construct {
-			try {
-				if (input != -1)
-					Unix.set_fd_nonblocking (input, true);
-				Unix.set_fd_nonblocking (output, true);
-				Unix.set_fd_nonblocking (error, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
-
-		~StdioPipes () {
-			clear_retained ();
-
-			if (input != -1)
-				Posix.close (input);
-			Posix.close (output);
-			Posix.close (error);
-		}
-
-		public void clear_retained () {
-			foreach (var fd in retained)
-				Posix.close (fd);
-			retained = {};
-		}
-
-		public void retain (int fd) {
-			retained += fd;
 		}
 	}
 }
