@@ -801,10 +801,10 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   short flags;
-  GError * stdio_error = NULL;
   FridaFileDescriptor * in_fd = NULL;
   FridaFileDescriptor * out_fd = NULL;
   FridaFileDescriptor * err_fd = NULL;
+  GError * stdio_error = NULL;
   FridaAslr aslr = FRIDA_ASLR_AUTO;
   GVariant * aslr_value;
   gchar * old_cwd = NULL;
