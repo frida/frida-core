@@ -68,9 +68,9 @@ namespace Frida {
 			monitor_child (child_pid);
 
 			if (pipes != null) {
-				stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
-				process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
-				process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+				stdin_streams[child_pid] = pipes.input;
+				process_next_output_from.begin (pipes.output, child_pid, 1, pipes);
+				process_next_output_from.begin (pipes.error, child_pid, 2, pipes);
 			}
 
 			return child_pid;
