@@ -91,10 +91,12 @@ namespace Frida {
 		int rfd = -1, wfd = -1;
 		char buf[Posix.Limits.PATH_MAX];
 		var res =
-#if LINUX
-			Linux.openpty (out rfd, out wfd, buf, null, null)
-#else
+#if DARWIN
 			Darwin.XNU.openpty (out rfd, out wfd, buf, null, null)
+#elif LINUX
+			Linux.openpty (out rfd, out wfd, buf, null, null)
+#elif FREEBSD
+			FreeBSD.openpty (out rfd, out wfd, buf, null, null)
 #endif
 			;
 		if (res == -1)

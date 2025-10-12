@@ -586,7 +586,7 @@ if lzfse_dep.found()
   backend_reqs_private += 'lzfse'
 endif
 
-if host_os_family == 'darwin' or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
+if host_os_family in ['darwin', 'freebsd'] or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
   vala_flags += '--define=HAVE_OPENPTY'
 endif
 
@@ -657,6 +657,9 @@ if host_os == 'macos'
 endif
 if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
+endif
+if host_os_family == 'freebsd'
+  backend_libs_private += ['-lutil']
 endif
 
 if get_option('devkits').length() != 0

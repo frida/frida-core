@@ -46,6 +46,10 @@ if host_os_family == 'linux'
   ]
 endif
 
+if host_os_family == 'freebsd'
+  extra_vala_args += '--pkg=freebsd'
+endif
+
 extra_deps = []
 if host_os_family != 'windows'
   extra_vala_args += '--pkg=gio-unix-2.0'
