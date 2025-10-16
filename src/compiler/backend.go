@@ -106,6 +106,7 @@ type BuildOptions struct {
 	DisableTypeCheck bool
 	SourceMap        bool
 	Compress         bool
+	Platform         esbuild.Platform
 }
 
 type OutputFormat C.FridaOutputFormat
@@ -434,6 +435,11 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 
 	plugins = append(plugins, makeFridaShimsPlugin())
 
+	platform := options.Platform
+	if platform == "" {
+		platform = esbuild.PlatformNode
+	}
+
 	buildOpts := esbuild.BuildOptions{
 		Sourcemap:         sourcemapOption,
 		SourcesContent:    esbuild.SourcesContentExclude,
@@ -445,7 +451,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		Bundle:            true,
 		Outdir:            projectRoot,
 		AbsWorkingDir:     projectRoot,
-		Platform:          esbuild.PlatformNode,
+		Platform:          platform,
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
 		EntryPoints:       []string{entrypoint},
