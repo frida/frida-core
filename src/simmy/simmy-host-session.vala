@@ -240,8 +240,19 @@ namespace Frida {
 
 		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
+			var opts = ApplicationQueryOptions._deserialize (options);
+			var scope = opts.scope;
+
 			Future<Gee.List<Simmy.Application>> list_apps_request = device.list_applications ();
 			Future<Gee.List<LaunchdJob>> list_jobs_request = list_launchd_jobs (cancellable);
+
+			Gee.Map<string, Bytes>? icons = null;
+			if (scope == FULL) {
+				var app_ids = new Gee.ArrayList<string> ();
+				foreach (Simmy.Application app in yield list_apps_request.wait_async (cancellable))
+					app_ids.add (app.identifier);
+				icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
+			}
 
 			var pids = new Gee.HashMap<string, uint> ();
 			foreach (var job in yield list_jobs_request.wait_async (cancellable)) {
@@ -261,6 +272,8 @@ namespace Frida {
 				unowned string identifier = app.identifier;
 
 				var info = HostApplicationInfo (identifier, app.display_name, pids[identifier], make_parameters_dict ());
+				if (scope == FULL)
+					add_app_icons (info.parameters, icons[identifier]);
 				result += info;
 			}
 			return result;
@@ -543,17 +556,41 @@ namespace Frida {
 			var scope = options.scope;
 			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
 
-			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, null,
-				cancellable);
+			Json.Node response = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, null, cancellable);
 
-			if (result.get_node_type () == NULL)
+			if (response.get_node_type () == NULL)
 				return HostApplicationInfo.empty ();
 
-			var item = result.get_array ();
+			var item = response.get_array ();
 			var identifier = item.get_string_element (0);
 			var name = item.get_string_element (1);
 			var pid = (uint) item.get_int_element (2);
-			return HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+			if (scope == FULL)
+				add_app_icons (info.parameters, new Bytes.take (Base64.decode (item.get_string_element (3))));
+			return info;
+		}
+
+		public async Gee.Map<string, Bytes> fetch_application_icons (Gee.List<string> app_ids, Cancellable? cancellable)
+				throws Error, IOError {
+			var app_id_values = new Json.Array ();
+			foreach (var id in app_ids)
+				app_id_values.add_string_element (id);
+
+			var args = new Json.Node[] { new Json.Node.alloc ().init_array (app_id_values) };
+
+			Json.Node response = yield call ("fetchApplicationIcons", args, null, cancellable);
+
+			var icons = new Gee.HashMap<string, Bytes> ();
+			var reader = new Json.Reader (response);
+			int n = reader.count_elements ();
+			for (int i = 0; i != n; i++) {
+				reader.read_element (i);
+				if (!reader.get_null_value ())
+					icons[app_ids[i]] = new Bytes (Base64.decode (reader.get_string_value ()));
+				reader.end_element ();
+			}
+			return icons;
 		}
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
@@ -570,6 +607,17 @@ namespace Frida {
 		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
 			return (string) Frida.Data.Simmy.get_springboard_js_blob ().data;
 		}
+	}
+
+	private void add_app_icons (HashTable<string, Variant> parameters, Bytes png) {
+		var icons = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
+
+		icons.open (VariantType.VARDICT);
+		icons.add ("{sv}", "format", new Variant.string ("png"));
+		icons.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), png.get_data (), true, png));
+		icons.close ();
+
+		parameters["icons"] = icons.end ();
 	}
 
 	[CCode (gir_namespace = "FridaSimmy", gir_version = "1.0")]

@@ -4,6 +4,7 @@ const SBS = bind({
   functions: {
     copyFrontmostApplicationDisplayIdentifier:        ['pointer', [                    ]],
     copyLocalizedApplicationNameForDisplayIdentifier: ['pointer', ['pointer'           ]],
+    copyIconImagePNGDataForDisplayIdentifier:         ['pointer', ['pointer'           ]],
     processIDForDisplayIdentifier:                    ['bool',    ['pointer', 'pointer']],
   }
 });
@@ -12,18 +13,23 @@ const CF = bind({
   module: '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation',
   cprefix: 'CF',
   functions: {
+    retain:                           ['pointer', ['pointer'                           ]],
     release:                          ['void',    ['pointer'                           ]],
+    stringCreateWithCString:          ['pointer', ['pointer', 'pointer', 'uint'        ]],
     stringGetCStringPtr:              ['pointer', ['pointer', 'uint'                   ]],
     stringGetLength:                  ['long',    ['pointer'                           ]],
     stringGetMaximumSizeForEncoding:  ['long',    ['long', 'uint'                      ]],
     stringGetCString:                 ['bool',    ['pointer', 'pointer', 'long', 'uint']],
+    dataGetLength:                    ['long',    ['pointer'                           ]],
+    dataGetBytePtr:                   ['pointer', ['pointer'                           ]],
   }
 });
 
+const kCFBooleanTrue = Module.getGlobalExportByName('kCFBooleanTrue').readPointer();
 const kCFStringEncodingUTF8 = 0x08000100;
 
 rpc.exports = {
-  getFrontmostApplication() {
+  getFrontmostApplication(scope) {
     const idObj = SBS.copyFrontmostApplicationDisplayIdentifier();
     if (idObj.isNull())
       return null;
@@ -47,9 +53,33 @@ rpc.exports = {
       id,
       name,
       pid,
+      (scope === 'full') ? fetchApplicationIcon(id) : null
     ];
-  }
+  },
+  fetchApplicationIcons(appIds) {
+    return appIds.map(fetchApplicationIcon);
+  },
 };
+
+function fetchApplicationIcon(appId) {
+  const idObj = CF.stringCreateWithCString(NULL, Memory.allocUtf8String(appId), kCFStringEncodingUTF8);
+  const pngObj = SBS.copyIconImagePNGDataForDisplayIdentifier(idObj);
+  CF.release(idObj);
+
+  const png = CF.dataGetBytePtr(pngObj).readByteArray(CF.dataGetLength(pngObj));
+  CF.release(pngObj);
+  return base64FromBytes(png);
+}
+
+Interceptor.attach(Module.getGlobalExportByName('SecTaskCopyValueForEntitlement'), {
+  onEnter(args) {
+    this.entitlement = cfStringToUtf8(args[1]);
+  },
+  onLeave(retval) {
+    if (this.entitlement === 'com.apple.springboard.iconState' && retval.isNull())
+      retval.replace(CF.retain(kCFBooleanTrue));
+  }
+});
 
 function bind({ module, cprefix, functions }) {
   const mod = Process.getModuleByName(module);
@@ -70,4 +100,32 @@ function cfStringToUtf8(cfstr) {
   const buf = Memory.alloc(maxBytes);
   CF.stringGetCString(cfstr, buf, maxBytes, kCFStringEncodingUTF8);
   return buf.readUtf8String();
+}
+
+function base64FromBytes(buf) {
+  const bytes = new Uint8Array(buf);
+
+  const enc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let i = 0;
+  const len = bytes.length;
+
+  let out = '';
+  while (i < len) {
+    const c1 = bytes[i++];
+    const c2 = (i !== len) ? bytes[i++] : 0;
+    const c3 = (i !== len) ? bytes[i++] : 0;
+
+    const o1 = c1 >> 2;
+    const o2 = ((c1 & 0x03) << 4) | (c2 >> 4);
+    const o3 = ((c2 & 0x0f) << 2) | (c3 >> 6);
+    const o4 = c3 & 0x3f;
+
+    if (i - 1 > len)
+      out += enc[o1] + enc[o2] + '==';
+    else if (i > len)
+      out += enc[o1] + enc[o2] + enc[o3] + '=';
+    else
+      out += enc[o1] + enc[o2] + enc[o3] + enc[o4];
+  }
+  return out;
 }
