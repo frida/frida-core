@@ -107,7 +107,7 @@ type BuildOptions struct {
 	SourceMap        bool
 	Compress         bool
 	Externals        []string
-	Platform         esbuild.Platform
+	Platform         Platform
 }
 
 type OutputFormat C.FridaOutputFormat
@@ -123,6 +123,13 @@ type BundleFormat C.FridaBundleFormat
 const (
 	BundleFormatESM  BundleFormat = BundleFormat(C.FRIDA_BUNDLE_ESM)
 	BundleFormatIIFE BundleFormat = BundleFormat(C.FRIDA_BUNDLE_IIFE)
+)
+
+type Platform string
+
+const (
+	PlatformNode    Platform = "node"
+	PlatformBrowser Platform = "browser"
 )
 
 type Diagnostic struct {
@@ -162,7 +169,7 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 		Externals:        parseCExternals(cExternals),
 	}
 	if cPlatform != nil {
-		options.Platform = esbuild.Platform(C.GoString(cPlatform))
+		options.Platform = Platform(C.GoString(cPlatform))
 	}
 	onComplete := NewCDelegate(onCompleteFn, onCompleteData, onCompleteDataDestroy)
 	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
@@ -204,7 +211,7 @@ func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForm
 		Externals:        parseCExternals(cExternals),
 	}
 	if cPlatform != nil {
-		options.Platform = esbuild.Platform(C.GoString(cPlatform))
+		options.Platform = Platform(C.GoString(cPlatform))
 	}
 	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
 	onStarting := NewCDelegate(onStartingFn, onStartingData, nil)
@@ -463,7 +470,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 
 	platform := options.Platform
 	if string(platform) == "" {
-		platform = esbuild.PlatformNode
+		platform = PlatformNode
 	}
 
 	buildOpts := esbuild.BuildOptions{
@@ -477,7 +484,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		Bundle:            true,
 		Outdir:            projectRoot,
 		AbsWorkingDir:     projectRoot,
-		Platform:          platform,
+		Platform:          esbuild.Platform(platform),
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
 		EntryPoints:       []string{entrypoint},
