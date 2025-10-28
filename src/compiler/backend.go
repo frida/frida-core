@@ -160,7 +160,9 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
 		Externals:        parseCExternals(cExternals),
-		Platform:         esbuild.Platform(C.GoString(cPlatform)),
+	}
+	if cPlatform != nil {
+		options.Platform = esbuild.Platform(C.GoString(cPlatform))
 	}
 	onComplete := NewCDelegate(onCompleteFn, onCompleteData, onCompleteDataDestroy)
 	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
@@ -200,7 +202,9 @@ func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForm
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
 		Externals:        parseCExternals(cExternals),
-		Platform:         esbuild.Platform(C.GoString(cPlatform)),
+	}
+	if cPlatform != nil {
+		options.Platform = esbuild.Platform(C.GoString(cPlatform))
 	}
 	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
 	onStarting := NewCDelegate(onStartingFn, onStartingData, nil)
@@ -458,7 +462,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 	plugins = append(plugins, makeFridaShimsPlugin())
 
 	platform := options.Platform
-	if platform == "" {
+	if string(platform) == "" {
 		platform = esbuild.PlatformNode
 	}
 
