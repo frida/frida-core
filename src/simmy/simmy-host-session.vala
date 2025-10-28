@@ -206,7 +206,7 @@ namespace Frida {
 			parameters["arch"] = "arm64";
 
 			var hardware = new HashTable<string, Variant> (str_hash, str_equal);
-			hardware["product"] = device.name;
+			hardware["product"] = device.model_identifier;
 			parameters["hardware"] = hardware;
 
 			parameters["access"] = "full";
@@ -528,6 +528,11 @@ namespace Frida {
 				construct;
 			}
 
+			public string model_identifier {
+				get;
+				construct;
+			}
+
 			public Runtime runtime {
 				get;
 				construct;
@@ -538,11 +543,13 @@ namespace Frida {
 				construct;
 			}
 
-			public Device (void * handle, string udid, string name, Runtime runtime, void * simmy_context) {
+			public Device (void * handle, string udid, string name, string model_identifier, Runtime runtime,
+					void * simmy_context) {
 				Object (
 					handle: handle,
 					udid: udid,
 					name: name,
+					model_identifier: model_identifier,
 					runtime: runtime,
 					simmy_context: simmy_context
 				);

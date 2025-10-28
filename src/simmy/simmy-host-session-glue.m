@@ -42,6 +42,8 @@ static void frida_simmy_context_emit_devices (FridaSimmyContext * self);
 @property (nonatomic, readonly, strong) NSString * name;
 @property (nonatomic, readonly, strong) SimRuntime * runtime;
 @property (nonatomic, readonly, strong) NSString * stateString;
+- (NSString *)getenv:(NSString *)name
+               error:(NSError * _Nullable * _Nullable)error;
 - (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)installedAppsWithError:(NSError * _Nullable * _Nullable)error;
 - (void)launchApplicationAsyncWithID:(NSString *)identifier
                              options:(NSDictionary<NSString *, id> * _Nullable)options
@@ -180,7 +182,8 @@ frida_simmy_context_emit_devices (FridaSimmyContext * self)
 
     runtime = frida_simmy_runtime_new (device.runtime);
 
-    d = frida_simmy_device_new ([device retain], device.UDID.UUIDString.UTF8String, device.name.UTF8String, runtime, self);
+    d = frida_simmy_device_new ([device retain], device.UDID.UUIDString.UTF8String, device.name.UTF8String,
+        [device getenv:@"SIMULATOR_MODEL_IDENTIFIER" error:nil].UTF8String, runtime, self);
     self->on_device_added (d, self->on_device_added_target);
     g_object_unref (d);
 
