@@ -845,8 +845,8 @@ namespace Frida {
 			construct;
 		}
 
-		public LaunchdAgent (DarwinHostSession host_session, Cancellable io_cancellable) {
-			Object (host_session: host_session, io_cancellable: io_cancellable);
+		public LaunchdAgent (HostSessionConnection connection, Cancellable io_cancellable) {
+			Object (connection: connection, io_cancellable: io_cancellable);
 		}
 
 		construct {
@@ -905,7 +905,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
+					var agent = new XpcProxyAgent (connection, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
@@ -921,7 +921,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
+					var agent = new XpcProxyAgent (connection, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
@@ -937,7 +937,8 @@ namespace Frida {
 
 		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
 			string * raw_source = Frida.Data.Darwin.get_launchd_js_blob ().data;
-			return raw_source->replace ("@REPORT_CRASHES@", ((DarwinHostSession) host_session).report_crashes.to_string ());
+			return raw_source->replace ("@REPORT_CRASHES@",
+				((DarwinHostSession) connection.host_session).report_crashes.to_string ());
 		}
 	}
 
@@ -952,8 +953,8 @@ namespace Frida {
 			construct;
 		}
 
-		public XpcProxyAgent (DarwinHostSession host_session, string identifier, uint pid) {
-			Object (host_session: host_session, identifier: identifier, pid: pid);
+		public XpcProxyAgent (HostSessionConnection connection, string identifier, uint pid) {
+			Object (connection: connection, identifier: identifier, pid: pid);
 		}
 
 		construct {
@@ -965,7 +966,7 @@ namespace Frida {
 		public async void run_until_exec (Cancellable? cancellable) throws Error, IOError {
 			yield ensure_loaded (cancellable);
 
-			var helper = ((DarwinHostSession) host_session).helper;
+			var helper = ((DarwinHostSession) connection.host_session).helper;
 			yield helper.resume (pid, cancellable);
 
 			yield wait_for_unload (cancellable);
@@ -1002,10 +1003,10 @@ namespace Frida {
 			construct;
 		}
 
-		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container,
+		public ReportCrashAgent (HostSessionConnection connection, uint pid, MappedAgentContainer mapped_agent_container,
 				Cancellable io_cancellable) {
 			Object (
-				host_session: host_session,
+				connection: connection,
 				pid: pid,
 				mapped_agent_container: mapped_agent_container,
 				io_cancellable: io_cancellable
@@ -1226,9 +1227,9 @@ namespace Frida {
 			construct;
 		}
 
-		public OSAnalyticsAgent (DarwinHostSession host_session, uint pid, Cancellable io_cancellable) {
+		public OSAnalyticsAgent (HostSessionConnection connection, uint pid, Cancellable io_cancellable) {
 			Object (
-				host_session: host_session,
+				connection: connection,
 				pid: pid,
 				io_cancellable: io_cancellable
 			);

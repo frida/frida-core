@@ -758,9 +758,9 @@ namespace Frida {
 			set;
 		}
 
-		public ZygoteAgent (LinuxHostSession host_session, uint pid, string name) {
+		public ZygoteAgent (HostSessionConnection connection, uint pid, string name) {
 			Object (
-				host_session: host_session,
+				connection: connection,
 				pid: pid,
 				name: name
 			);
@@ -768,7 +768,7 @@ namespace Frida {
 
 		public async void load (Cancellable? cancellable) throws Error, IOError {
 #if ARM || ARM64
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			LinuxHelper helper = ((LinuxHostSession) connection.host_session).helper;
 			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
 #endif
@@ -798,9 +798,9 @@ namespace Frida {
 	private sealed class SystemServerAgent : InternalAgent {
 		private delegate void CompletionNotify ();
 
-		public SystemServerAgent (LinuxHostSession host_session) {
+		public SystemServerAgent (HostSessionConnection connection) {
 			Object (
-				host_session: host_session,
+				connection: connection,
 #if HAVE_V8
 				script_runtime: ScriptRuntime.V8
 #else
@@ -996,7 +996,7 @@ namespace Frida {
 				}
 			};
 
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			LinuxHelper helper = ((LinuxHostSession) connection.host_session).helper;
 			foreach (var tid in thread_ids) {
 				bool safe_to_suspend = false;
 				string thread_name;
@@ -1050,7 +1050,7 @@ namespace Frida {
 		}
 
 		private void resume_threads (Gee.List<uint> thread_ids) {
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			LinuxHelper helper = ((LinuxHostSession) connection.host_session).helper;
 			foreach (var tid in thread_ids)
 				helper.resume_syscall.begin (tid, null);
 		}
