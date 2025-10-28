@@ -106,6 +106,7 @@ type BuildOptions struct {
 	DisableTypeCheck bool
 	SourceMap        bool
 	Compress         bool
+	Externals        []string
 	Platform         esbuild.Platform
 }
 
@@ -147,7 +148,7 @@ type BuildDiagnosticCallback func(d Diagnostic)
 
 //export _frida_compiler_backend_build
 func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uintptr,
+	disableTypeCheck, sourceMap, compress uintptr, cExternals *C.char, cPlatform *C.char,
 	onCompleteFn C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDataDestroy C.FridaDestroyFunc,
 	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
 	options := BuildOptions{
@@ -158,6 +159,8 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 		DisableTypeCheck: disableTypeCheck != 0,
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
+		Externals:        parseCExternals(cExternals),
+		Platform:         esbuild.Platform(C.GoString(cPlatform)),
 	}
 	onComplete := NewCDelegate(onCompleteFn, onCompleteData, onCompleteDataDestroy)
 	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
@@ -182,7 +185,7 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 
 //export _frida_compiler_backend_watch
 func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uintptr,
+	disableTypeCheck, sourceMap, compress uintptr, cExternals *C.char, cPlatform *C.char,
 	onReadyFn C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc,
 	onStartingFn C.FridaStartingFunc, onStartingData unsafe.Pointer,
 	onFinishedFn C.FridaFinishedFunc, onFinishedData unsafe.Pointer,
@@ -196,6 +199,8 @@ func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForm
 		DisableTypeCheck: disableTypeCheck != 0,
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
+		Externals:        parseCExternals(cExternals),
+		Platform:         esbuild.Platform(C.GoString(cPlatform)),
 	}
 	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
 	onStarting := NewCDelegate(onStartingFn, onStartingData, nil)
@@ -245,6 +250,23 @@ func _frida_compiler_backend_watch_session_dispose(h uintptr) {
 	session := handle.Value().(*WatchSession)
 	session.Dispose()
 	handle.Delete()
+}
+
+func parseCExternals(cExternals *C.char) []string {
+	if cExternals == nil {
+		return nil
+	}
+	s := strings.TrimSpace(C.GoString(cExternals))
+	if s == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(s, func(r rune) bool { return r == ',' })
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	return parts
 }
 
 func makeCBuildDiagnosticCallback(onDiagnostic *CDelegate[C.FridaDiagnosticFunc]) BuildDiagnosticCallback {
@@ -457,6 +479,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		EntryPoints:       []string{entrypoint},
 		Write:             false,
 		Plugins:           plugins,
+		External: 		   options.Externals,
 	}
 
 	if isTS {

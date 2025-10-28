@@ -46,7 +46,7 @@ namespace Frida {
 
 				CompilerBackend.build (project_root, entrypoint, opts.output_format, opts.bundle_format,
 					(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-					(size_t) (opts.compression == TERSER), (owned) on_complete, on_diagnostic);
+					(size_t) (opts.compression == TERSER), opts.externals, opts.platform, (owned) on_complete, on_diagnostic);
 				yield;
 
 				if (error_message != null)
@@ -96,8 +96,8 @@ namespace Frida {
 
 			CompilerBackend.watch (project_root, entrypoint, opts.output_format, opts.bundle_format,
 				(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-				(size_t) (opts.compression == TERSER), (owned) on_ready, on_starting, on_finished,
-				on_output, on_diagnostic);
+				(size_t) (opts.compression == TERSER), opts.externals, opts.platform,
+				(owned) on_ready, on_starting, on_finished, on_output, on_diagnostic);
 			yield;
 
 			if (error_message != null)
@@ -283,11 +283,13 @@ namespace Frida {
 		[CCode (has_target = false)]
 		private delegate void BuildFunc (string project_root, string entrypoint, OutputFormat output_format,
 			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
+			string? externals, string? platform,
 			owned BuildCompleteFunc on_complete, DiagnosticFunc on_diagnostic);
 
 		[CCode (has_target = false)]
 		private delegate void WatchFunc (string project_root, string entrypoint, OutputFormat output_format,
 			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
+			string? externals, string? platform,
 			owned WatchReadyFunc on_ready, StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output,
 			DiagnosticFunc on_diagnostic);
 
@@ -372,6 +374,18 @@ namespace Frida {
 			get;
 			set;
 			default = NONE;
+		}
+
+		public string? externals {
+			get;
+			set;
+			default = null;
+		}
+
+		public string? platform {
+			get;
+			set;
+			default = "node";
 		}
 	}
 
