@@ -107,7 +107,7 @@ type BuildOptions struct {
 	SourceMap        bool
 	Compress         bool
 	Externals        []string
-	Platform         Platform
+	Platform         esbuild.Platform
 }
 
 type OutputFormat C.FridaOutputFormat
@@ -125,12 +125,18 @@ const (
 	BundleFormatIIFE BundleFormat = BundleFormat(C.FRIDA_BUNDLE_IIFE)
 )
 
-type Platform string
-
-const (
-	PlatformNode    Platform = "node"
-	PlatformBrowser Platform = "browser"
-)
+func platformFromString(s string) esbuild.Platform {
+	switch s {
+	case "browser":
+		return esbuild.PlatformBrowser
+	case "node":
+		return esbuild.PlatformNode
+	case "neutral":
+		return esbuild.PlatformNeutral
+	default:
+		return esbuild.PlatformNode
+	}
+}
 
 type Diagnostic struct {
 	category        string
@@ -166,10 +172,8 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 		DisableTypeCheck: disableTypeCheck != 0,
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
+		Platform:         platformFromString(C.GoString(cPlatform)),
 		Externals:        parseCExternals(cExternals),
-	}
-	if cPlatform != nil {
-		options.Platform = Platform(C.GoString(cPlatform))
 	}
 	onComplete := NewCDelegate(onCompleteFn, onCompleteData, onCompleteDataDestroy)
 	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
@@ -208,10 +212,8 @@ func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForm
 		DisableTypeCheck: disableTypeCheck != 0,
 		SourceMap:        sourceMap != 0,
 		Compress:         compress != 0,
+		Platform:         platformFromString(C.GoString(cPlatform)),
 		Externals:        parseCExternals(cExternals),
-	}
-	if cPlatform != nil {
-		options.Platform = Platform(C.GoString(cPlatform))
 	}
 	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
 	onStarting := NewCDelegate(onStartingFn, onStartingData, nil)
@@ -468,11 +470,6 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 
 	plugins = append(plugins, makeFridaShimsPlugin())
 
-	platform := options.Platform
-	if string(platform) == "" {
-		platform = PlatformNode
-	}
-
 	buildOpts := esbuild.BuildOptions{
 		Sourcemap:         sourcemapOption,
 		SourcesContent:    esbuild.SourcesContentExclude,
@@ -484,13 +481,13 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		Bundle:            true,
 		Outdir:            projectRoot,
 		AbsWorkingDir:     projectRoot,
-		Platform:          esbuild.Platform(platform),
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
 		EntryPoints:       []string{entrypoint},
 		Write:             false,
 		Plugins:           plugins,
 		External: 		   options.Externals,
+		Platform:          options.Platform,
 	}
 
 	if isTS {
