@@ -155,7 +155,7 @@ namespace Frida {
 		}
 	}
 
-	public sealed class SimmyHostSession : Object, HostSession {
+	public sealed class SimmyHostSession : Object, HostSession, HostSessionConnection {
 		public Simmy.Device device {
 			get;
 			construct;
@@ -166,7 +166,15 @@ namespace Frida {
 			construct;
 		}
 
+		public HostSession host_session {
+			get {
+				return this;
+			}
+		}
+
 		private Gee.Map<uint, Simmy.SpawnedProcess> spawned_processes = new Gee.HashMap<uint, Simmy.SpawnedProcess> ();
+
+		private SpringboardAgent springboard_agent;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -179,9 +187,15 @@ namespace Frida {
 			s.process_crashed.connect (on_process_crashed);
 			s.agent_session_detached.connect (on_agent_session_detached);
 			s.uninjected.connect (on_uninjected);
+
+			springboard_agent = new SpringboardAgent (this);
+			springboard_agent.unloaded.connect (on_springboard_agent_unloaded);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			springboard_agent.unloaded.disconnect (on_springboard_agent_unloaded);
+			yield springboard_agent.close (cancellable);
+
 			io_cancellable.cancel ();
 		}
 
@@ -219,7 +233,9 @@ namespace Frida {
 
 		public async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			var opts = FrontmostQueryOptions._deserialize (options);
+
+			return yield springboard_agent.get_frontmost_application (opts, cancellable);
 		}
 
 		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
@@ -392,7 +408,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private Future<Gee.List<LaunchdJob>> list_launchd_jobs (Cancellable? cancellable) {
+		internal Future<Gee.List<LaunchdJob>> list_launchd_jobs (Cancellable? cancellable) {
 			var promise = new Promise<Gee.List<LaunchdJob>> ();
 			perform_list_launchd_jobs.begin (cancellable, promise);
 			return promise.future;
@@ -429,7 +445,7 @@ namespace Frida {
 			}
 		}
 
-		private class LaunchdJob {
+		internal class LaunchdJob {
 			public uint pid;
 			public string label;
 		}
@@ -504,9 +520,55 @@ namespace Frida {
 			}
 		}
 
+		private void on_springboard_agent_unloaded (InternalAgent dead_agent) {
+			dead_agent.unloaded.disconnect (on_springboard_agent_unloaded);
+
+			springboard_agent = new SpringboardAgent (this);
+			springboard_agent.unloaded.connect (on_springboard_agent_unloaded);
+		}
+
 		[NoReturn]
 		private static void throw_not_supported () throws Error {
 			throw new Error.NOT_SUPPORTED ("Not yet supported by the Simmy backend");
+		}
+	}
+
+	private sealed class SpringboardAgent : InternalAgent {
+		public SpringboardAgent (HostSessionConnection connection) {
+			Object (connection: connection);
+		}
+
+		public async HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options,
+				Cancellable? cancellable) throws Error, IOError {
+			var scope = options.scope;
+			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
+
+			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, null,
+				cancellable);
+
+			if (result.get_node_type () == NULL)
+				return HostApplicationInfo.empty ();
+
+			var item = result.get_array ();
+			var identifier = item.get_string_element (0);
+			var name = item.get_string_element (1);
+			var pid = (uint) item.get_int_element (2);
+			return HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
+		}
+
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
+			var host_session = (SimmyHostSession) connection.host_session;
+
+			foreach (var job in yield host_session.list_launchd_jobs (cancellable).wait_async (cancellable)) {
+				if (job.label == "com.apple.SpringBoard")
+					return job.pid;
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unable to locate SpringBoard process");
+		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) Frida.Data.Simmy.get_springboard_js_blob ().data;
 		}
 	}
 

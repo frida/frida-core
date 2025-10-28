@@ -506,6 +506,26 @@ if have_simmy_backend
     'simmy' / 'simmy-host-session-glue.m',
     'simmy' / 'text-plist.vala',
   ]
+
+  simmy_data = custom_target('frida-data-simmy',
+    input: [
+      'simmy' / 'frida-simmy.resources',
+      'simmy' / 'agent' / 'springboard.js',
+    ],
+    output: [
+      'frida-data-simmy.vapi',
+      'frida-data-simmy.h',
+      'frida-data-simmy.c',
+      'frida-data-simmy-blob' + resource_blob_extension,
+    ],
+    command: [
+      resource_compiler_cmd_array,
+      '-c', '@INPUT0@',
+      '-o', meson.current_build_dir() / 'frida-data-simmy',
+      '@INPUT1@',
+    ],
+  )
+  backend_sources += [simmy_data]
 endif
 
 if have_fruity_backend
