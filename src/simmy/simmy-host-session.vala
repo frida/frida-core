@@ -246,10 +246,23 @@ namespace Frida {
 			Future<Gee.List<Simmy.Application>> list_apps_request = device.list_applications ();
 			Future<Gee.List<LaunchdJob>> list_jobs_request = list_launchd_jobs (cancellable);
 
+			var selected_ids = new Gee.HashSet<string> ();
+			opts.enumerate_selected_identifiers (identifier => {
+				selected_ids.add (identifier);
+			});
+			bool include_all_apps = selected_ids.is_empty;
+
+			var apps = new Gee.ArrayList<Simmy.Application> ();
+			foreach (Simmy.Application app in yield list_apps_request.wait_async (cancellable)) {
+				unowned string id = app.identifier;
+				if (include_all_apps || id in selected_ids)
+					apps.add (app);
+			}
+
 			Gee.Map<string, Bytes>? icons = null;
 			if (scope == FULL) {
 				var app_ids = new Gee.ArrayList<string> ();
-				foreach (Simmy.Application app in yield list_apps_request.wait_async (cancellable))
+				foreach (var app in apps)
 					app_ids.add (app.identifier);
 				icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
 			}
@@ -268,7 +281,7 @@ namespace Frida {
 			}
 
 			var result = new HostApplicationInfo[0];
-			foreach (Simmy.Application app in yield list_apps_request.wait_async (cancellable)) {
+			foreach (var app in apps) {
 				unowned string identifier = app.identifier;
 
 				var info = HostApplicationInfo (identifier, app.display_name, pids[identifier], make_parameters_dict ());
