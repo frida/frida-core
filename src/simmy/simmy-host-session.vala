@@ -235,7 +235,13 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			var opts = FrontmostQueryOptions._deserialize (options);
 
-			return yield springboard_agent.get_frontmost_application (opts, cancellable);
+			try {
+				return yield springboard_agent.get_frontmost_application (opts, cancellable);
+			} catch (Error e) {
+				if (e is Error.PERMISSION_DENIED)
+					throw new Error.NOT_SUPPORTED ("Frontmost query is only supported with SIP disabled (for now)");
+				throw e;
+			}
 		}
 
 		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
@@ -264,7 +270,10 @@ namespace Frida {
 				var app_ids = new Gee.ArrayList<string> ();
 				foreach (var app in apps)
 					app_ids.add (app.identifier);
-				icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
+				try {
+					icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
+				} catch (Error e) {
+				}
 			}
 
 			var pids = new Gee.HashMap<string, uint> ();
@@ -285,7 +294,7 @@ namespace Frida {
 				unowned string identifier = app.identifier;
 
 				var info = HostApplicationInfo (identifier, app.display_name, pids[identifier], make_parameters_dict ());
-				if (scope == FULL)
+				if (scope == FULL && icons != null)
 					add_app_icons (info.parameters, icons[identifier]);
 				result += info;
 			}
