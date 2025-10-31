@@ -46,7 +46,8 @@ namespace Frida {
 
 				CompilerBackend.build (project_root, entrypoint, opts.output_format, opts.bundle_format,
 					(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-					(size_t) (opts.compression == TERSER), opts.externals, opts.platform, (owned) on_complete, on_diagnostic);
+					(size_t) (opts.compression == TERSER), opts.externals != null ? string.join (",", opts.externals) : null,
+					opts.platform, (owned) on_complete, on_diagnostic);
 				yield;
 
 				if (error_message != null)
@@ -96,7 +97,8 @@ namespace Frida {
 
 			CompilerBackend.watch (project_root, entrypoint, opts.output_format, opts.bundle_format,
 				(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-				(size_t) (opts.compression == TERSER), opts.externals, opts.platform,
+				(size_t) (opts.compression == TERSER), opts.externals != null ? string.join (",", opts.externals) : null,
+				opts.platform,
 				(owned) on_ready, on_starting, on_finished, on_output, on_diagnostic);
 			yield;
 
@@ -376,16 +378,25 @@ namespace Frida {
 			default = NONE;
 		}
 
-		public string? externals {
-			get;
-			set;
-			default = null;
-		}
-
 		public string? platform {
 			get;
 			set;
 			default = "node";
+		}
+
+		private Gee.List<string> externals = new Gee.ArrayList<string> ();
+
+		public void clear_externals () {
+			externals.clear ();
+		}
+
+		public void add_external (string external) {
+			externals.add (external);
+		}
+
+		public void enumerate_externals (Func<string> func) {
+			foreach (var external in externals)
+				func (external);
 		}
 	}
 
