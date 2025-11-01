@@ -270,17 +270,12 @@ func parseCExternals(cExternals *C.char) []string {
 		return nil
 	}
 
-	s := strings.TrimSpace(C.GoString(cExternals))
+	s := C.GoString(cExternals)
 	if s == "" {
 		return nil
 	}
 
-	parts := strings.FieldsFunc(s, func(r rune) bool { return r == ',' })
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-	}
-
-	return parts
+	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' })
 }
 
 func makeCBuildDiagnosticCallback(onDiagnostic *CDelegate[C.FridaDiagnosticFunc]) BuildDiagnosticCallback {
