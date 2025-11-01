@@ -106,8 +106,8 @@ type BuildOptions struct {
 	DisableTypeCheck bool
 	SourceMap        bool
 	Compress         bool
-	Externals        []string
 	Platform         esbuild.Platform
+	Externals        []string
 }
 
 type OutputFormat C.FridaOutputFormat
@@ -161,7 +161,7 @@ type BuildDiagnosticCallback func(d Diagnostic)
 
 //export _frida_compiler_backend_build
 func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uintptr, cExternals *C.char, cPlatform *C.char,
+	disableTypeCheck, sourceMap, compress uintptr, cPlatform *C.char, cExternals *C.char,
 	onCompleteFn C.FridaBuildCompleteFunc, onCompleteData unsafe.Pointer, onCompleteDataDestroy C.FridaDestroyFunc,
 	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer) {
 	options := BuildOptions{
@@ -198,7 +198,7 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 
 //export _frida_compiler_backend_watch
 func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
-	disableTypeCheck, sourceMap, compress uintptr, cExternals *C.char, cPlatform *C.char,
+	disableTypeCheck, sourceMap, compress uintptr, cPlatform *C.char, cExternals *C.char,
 	onReadyFn C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc,
 	onStartingFn C.FridaStartingFunc, onStartingData unsafe.Pointer,
 	onFinishedFn C.FridaFinishedFunc, onFinishedData unsafe.Pointer,
