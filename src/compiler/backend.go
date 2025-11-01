@@ -477,13 +477,13 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		Bundle:            true,
 		Outdir:            projectRoot,
 		AbsWorkingDir:     projectRoot,
+		Platform:          options.Platform,
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
+		External: 		   options.Externals,
 		EntryPoints:       []string{entrypoint},
 		Write:             false,
 		Plugins:           plugins,
-		External: 		   options.Externals,
-		Platform:          options.Platform,
 	}
 
 	if isTS {
