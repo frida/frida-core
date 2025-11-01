@@ -269,6 +269,7 @@ func parseCExternals(cExternals *C.char) []string {
 	if cExternals == nil {
 		return nil
 	}
+
 	s := strings.TrimSpace(C.GoString(cExternals))
 	if s == "" {
 		return nil
