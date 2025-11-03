@@ -12,12 +12,15 @@ struct _FridaSimmyContext
 
   void * core_simulator;
 
+  NSString * SimDeviceLaunchApplicationKeyArguments;
+  NSString * SimDeviceLaunchApplicationKeyEnvironment;
   NSString * SimDeviceLaunchApplicationKeyStandardErrPath;
   NSString * SimDeviceLaunchApplicationKeyStandardOutPath;
   NSString * SimDeviceLaunchApplicationKeyTerminateRunningProcess;
   NSString * SimDeviceLaunchApplicationKeyWaitForDebugger;
 
   NSString * SimDeviceSpawnKeyArguments;
+  NSString * SimDeviceSpawnKeyEnvironment;
   NSString * SimDeviceSpawnKeyStderr;
   NSString * SimDeviceSpawnKeyStdin;
   NSString * SimDeviceSpawnKeyStdout;
@@ -29,6 +32,9 @@ struct _FridaSimmyContext
 
 static void frida_simmy_context_destroy (FridaSimmyContext * self);
 static void frida_simmy_context_emit_devices (FridaSimmyContext * self);
+
+static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length, gint start_index);
+static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
 
 @interface SimRuntime : NSObject
 @property (nonatomic, readonly, strong) NSString * identifier;
@@ -153,12 +159,15 @@ frida_simmy_context_emit_devices (FridaSimmyContext * self)
     g_assert (str != NULL); \
     self->N = *str
 
+  FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyArguments);
+  FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyEnvironment);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyStandardErrPath);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyStandardOutPath);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyTerminateRunningProcess);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceLaunchApplicationKeyWaitForDebugger);
 
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceSpawnKeyArguments);
+  FRIDA_ASSIGN_CS_CONSTANT (SimDeviceSpawnKeyEnvironment);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceSpawnKeyStderr);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceSpawnKeyStdin);
   FRIDA_ASSIGN_CS_CONSTANT (SimDeviceSpawnKeyStdout);
@@ -234,7 +243,7 @@ _frida_simmy_device_list_applications (FridaSimmyDevice * self, FridaSimmyDevice
 }
 
 void
-_frida_simmy_device_launch_application (FridaSimmyDevice * self, const gchar * identifier, FridaHostSpawnOptions * options,
+_frida_simmy_device_launch_application (FridaSimmyDevice * self, const gchar * identifier, FridaHostSpawnOptions * opts,
     FridaSimmyDeviceLaunchApplicationCompleteFunc on_complete, gpointer on_complete_target,
     GDestroyNotify on_complete_target_destroy_notify)
 {
@@ -249,20 +258,12 @@ _frida_simmy_device_launch_application (FridaSimmyDevice * self, const gchar * i
   device = frida_simmy_device_get_handle (self);
   ctx = frida_simmy_device_get_simmy_context (self);
 
-  pipes = frida_make_stdio_pipes (options->stdio, FALSE, NULL, NULL, &out_fd, &out_name, &err_fd, &err_name, &error);
+  if (opts->has_envp)
+    goto envp_not_supported;
+
+  pipes = frida_make_stdio_pipes (opts->stdio, FALSE, NULL, NULL, &out_fd, &out_name, &err_fd, &err_name, &error);
   if (error != NULL)
-  {
-    dispatch_async (ctx->dispatch_queue, ^
-    {
-      on_complete (error->message, NULL, on_complete_target);
-
-      g_error_free (error);
-
-      if (on_complete_target_destroy_notify != NULL)
-        on_complete_target_destroy_notify (on_complete_target);
-    });
-    return;
-  }
+    goto propagate_error;
 
   main_context = g_main_context_ref_thread_default ();
 
@@ -275,7 +276,13 @@ _frida_simmy_device_launch_application (FridaSimmyDevice * self, const gchar * i
       ctx->SimDeviceLaunchApplicationKeyTerminateRunningProcess: @YES,
     } mutableCopy];
 
-    if (options->stdio == FRIDA_STDIO_PIPE)
+    if (opts->has_argv)
+      launch_opts[ctx->SimDeviceLaunchApplicationKeyArguments] = frida_argv_to_arguments_array (opts->argv, opts->argv_length1, 1);
+
+    if (opts->has_env)
+      launch_opts[ctx->SimDeviceLaunchApplicationKeyEnvironment] = frida_envp_to_environment_dictionary (opts->env, opts->env_length1);
+
+    if (opts->stdio == FRIDA_STDIO_PIPE)
     {
       launch_opts[ctx->SimDeviceLaunchApplicationKeyStandardOutPath] = @(out_name);
       launch_opts[ctx->SimDeviceLaunchApplicationKeyStandardErrPath] = @(err_name);
@@ -310,26 +317,18 @@ _frida_simmy_device_launch_application (FridaSimmyDevice * self, const gchar * i
 
   g_free (out_name);
   g_free (err_name);
-}
 
-void
-_frida_simmy_device_spawn_program (FridaSimmyDevice * self, const gchar * program, FridaHostSpawnOptions * options,
-    FridaSimmyDeviceSpawnProgramCompleteFunc on_complete, gpointer on_complete_target,
-    GDestroyNotify on_complete_target_destroy_notify)
-{
-  const FridaStdio stdio = options->stdio;
-  SimDevice * device;
-  FridaSimmyContext * ctx;
-  __block FridaStdioPipes * pipes;
-  __block FridaFileDescriptor * in_fd, * out_fd, * err_fd;
-  GError * error = NULL;
-  __block GMainContext * main_context;
+  return;
 
-  device = frida_simmy_device_get_handle (self);
-  ctx = frida_simmy_device_get_simmy_context (self);
-
-  pipes = frida_make_stdio_pipes (options->stdio, TRUE, &in_fd, NULL, &out_fd, NULL, &err_fd, NULL, &error);
-  if (error != NULL)
+envp_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'envp' option is not supported when spawning Simmy apps, use the 'env' option instead");
+    goto propagate_error;
+  }
+propagate_error:
   {
     dispatch_async (ctx->dispatch_queue, ^
     {
@@ -340,8 +339,34 @@ _frida_simmy_device_spawn_program (FridaSimmyDevice * self, const gchar * progra
       if (on_complete_target_destroy_notify != NULL)
         on_complete_target_destroy_notify (on_complete_target);
     });
+
     return;
   }
+}
+
+void
+_frida_simmy_device_spawn_program (FridaSimmyDevice * self, const gchar * program, FridaHostSpawnOptions * opts,
+    FridaSimmyDeviceSpawnProgramCompleteFunc on_complete, gpointer on_complete_target,
+    GDestroyNotify on_complete_target_destroy_notify)
+{
+  const FridaStdio stdio = opts->stdio;
+  SimDevice * device;
+  FridaSimmyContext * ctx;
+  __block FridaStdioPipes * pipes;
+  __block FridaFileDescriptor * in_fd, * out_fd, * err_fd;
+  GError * error = NULL;
+  __block GMainContext * main_context;
+
+  device = frida_simmy_device_get_handle (self);
+  ctx = frida_simmy_device_get_simmy_context (self);
+
+  if (opts->has_envp)
+    goto envp_not_supported;
+
+  pipes = frida_make_stdio_pipes (opts->stdio, TRUE, &in_fd, NULL, &out_fd, NULL, &err_fd, NULL, &error);
+  if (error != NULL)
+    goto propagate_error;
+
   main_context = g_main_context_ref_thread_default ();
 
   @autoreleasepool
@@ -353,17 +378,11 @@ _frida_simmy_device_spawn_program (FridaSimmyDevice * self, const gchar * progra
       ctx->SimDeviceSpawnKeyWaitForDebugger: @YES,
     } mutableCopy];
 
-    if (options->has_argv)
-    {
-      NSMutableArray<NSString *> * args;
-      int i;
+    if (opts->has_argv)
+      spawn_opts[ctx->SimDeviceSpawnKeyArguments] = frida_argv_to_arguments_array (opts->argv, opts->argv_length1, 0);
 
-      args = [NSMutableArray arrayWithCapacity:options->argv_length1];
-      for (i = 0; i != options->argv_length1; i++)
-        [args addObject:[NSString stringWithUTF8String:options->argv[i]]];
-
-      spawn_opts[ctx->SimDeviceSpawnKeyArguments] = args;
-    }
+    if (opts->has_env)
+      spawn_opts[ctx->SimDeviceSpawnKeyEnvironment] = frida_envp_to_environment_dictionary (opts->env, opts->env_length1);
 
     if (stdio == FRIDA_STDIO_PIPE)
     {
@@ -404,6 +423,30 @@ _frida_simmy_device_spawn_program (FridaSimmyDevice * self, const gchar * progra
           on_complete_target_destroy_notify (on_complete_target);
       }];
   }
+
+  return;
+
+envp_not_supported:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'envp' option is not supported when spawning Simmy programs, use the 'env' option instead");
+    goto propagate_error;
+  }
+propagate_error:
+  {
+    dispatch_async (ctx->dispatch_queue, ^
+    {
+      on_complete (error->message, NULL, on_complete_target);
+
+      g_error_free (error);
+
+      if (on_complete_target_destroy_notify != NULL)
+        on_complete_target_destroy_notify (on_complete_target);
+    });
+    return;
+  }
 }
 
 const gchar *
@@ -428,4 +471,58 @@ const gchar *
 _frida_simmy_runtime_get_root (FridaSimmyRuntime * self)
 {
   return ((SimRuntime *) frida_simmy_runtime_get_handle (self)).root.UTF8String;
+}
+
+static NSArray *
+frida_argv_to_arguments_array (gchar * const * argv, gint argv_length, gint start_index)
+{
+  NSMutableArray * result;
+  gint i;
+
+  result = [NSMutableArray arrayWithCapacity:argv_length];
+  for (i = start_index; i < argv_length; i++)
+    [result addObject:[NSString stringWithUTF8String:argv[i]]];
+
+  return result;
+}
+
+static NSDictionary *
+frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
+{
+  NSMutableDictionary * result;
+  gint i;
+
+  result = [NSMutableDictionary dictionaryWithCapacity:envp_length];
+  for (i = 0; i != envp_length; i++)
+  {
+    const gchar * pair, * equals_sign, * name_start, * value_start;
+    NSUInteger name_size, value_size;
+    NSString * name, * value;
+
+    pair = envp[i];
+
+    equals_sign = strchr (pair, '=');
+    if (equals_sign == NULL)
+      continue;
+
+    name_start = pair;
+    name_size = equals_sign - name_start;
+
+    value_start = equals_sign + 1;
+    value_size = pair + strlen (pair) - value_start;
+
+    name = [[NSString alloc] initWithBytes:name_start
+                                    length:name_size
+                                  encoding:NSUTF8StringEncoding];
+    value = [[NSString alloc] initWithBytes:value_start
+                                     length:value_size
+                                   encoding:NSUTF8StringEncoding];
+
+    [result setObject:value forKey:name];
+
+    [value release];
+    [name release];
+  }
+
+  return result;
 }

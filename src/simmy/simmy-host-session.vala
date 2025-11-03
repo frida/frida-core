@@ -697,10 +697,10 @@ namespace Frida {
 				return promise.future;
 			}
 
-			public Future<SpawnedProcess> launch_application (string identifier, HostSpawnOptions options) {
+			public Future<SpawnedProcess> launch_application (string identifier, HostSpawnOptions opts) {
 				var promise = new Promise<SpawnedProcess> ();
 
-				_launch_application (identifier, options, (error_message, process) => {
+				_launch_application (identifier, opts, (error_message, process) => {
 					if (error_message != null)
 						promise.reject (new Error.NOT_SUPPORTED ("%s", error_message));
 					else
@@ -710,10 +710,10 @@ namespace Frida {
 				return promise.future;
 			}
 
-			public Future<SpawnedProcess> spawn_program (string program, HostSpawnOptions options) {
+			public Future<SpawnedProcess> spawn_program (string program, HostSpawnOptions opts) {
 				var promise = new Promise<SpawnedProcess> ();
 
-				_spawn_program (program, options, (error_message, process) => {
+				_spawn_program (program, opts, (error_message, process) => {
 					if (error_message != null)
 						promise.reject (new Error.NOT_SUPPORTED ("%s", error_message));
 					else
