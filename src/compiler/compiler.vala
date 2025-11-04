@@ -46,7 +46,8 @@ namespace Frida {
 
 				CompilerBackend.build (project_root, entrypoint, opts.output_format, opts.bundle_format,
 					(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-					(size_t) (opts.compression == TERSER), (owned) on_complete, on_diagnostic);
+					(size_t) (opts.compression == TERSER), opts.platform.to_nick (),
+					opts.externals.to_array (), (owned) on_complete, on_diagnostic);
 				yield;
 
 				if (error_message != null)
@@ -96,7 +97,8 @@ namespace Frida {
 
 			CompilerBackend.watch (project_root, entrypoint, opts.output_format, opts.bundle_format,
 				(size_t) (opts.type_check == NONE), (size_t) (opts.source_maps == INCLUDED),
-				(size_t) (opts.compression == TERSER), (owned) on_ready, on_starting, on_finished,
+				(size_t) (opts.compression == TERSER), opts.platform.to_nick (),
+				opts.externals.to_array (), (owned) on_ready, on_starting, on_finished,
 				on_output, on_diagnostic);
 			yield;
 
@@ -283,13 +285,14 @@ namespace Frida {
 		[CCode (has_target = false)]
 		private delegate void BuildFunc (string project_root, string entrypoint, OutputFormat output_format,
 			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
-			owned BuildCompleteFunc on_complete, DiagnosticFunc on_diagnostic);
+			string platform, string[] externals, owned BuildCompleteFunc on_complete,
+			DiagnosticFunc on_diagnostic);
 
 		[CCode (has_target = false)]
 		private delegate void WatchFunc (string project_root, string entrypoint, OutputFormat output_format,
 			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
-			owned WatchReadyFunc on_ready, StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output,
-			DiagnosticFunc on_diagnostic);
+			string platform, string[] externals, owned WatchReadyFunc on_ready, StartingFunc on_starting,
+			FinishedFunc on_finished, OutputFunc on_output, DiagnosticFunc on_diagnostic);
 
 #if COMPILER_BACKEND_STATIC_COMPILATION
 		private extern void _init_go_runtime ();
@@ -373,6 +376,27 @@ namespace Frida {
 			set;
 			default = NONE;
 		}
+
+		public JsPlatform platform {
+			get;
+			set;
+			default = GUM;
+		}
+
+		internal Gee.List<string> externals = new Gee.ArrayList<string> ();
+
+		public void clear_externals () {
+			externals.clear ();
+		}
+
+		public void add_external (string external) {
+			externals.add (external);
+		}
+
+		public void enumerate_externals (Func<string> func) {
+			foreach (var external in externals)
+				func (external);
+		}
 	}
 
 	public sealed class BuildOptions : CompilerOptions {
@@ -444,6 +468,20 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<JsCompression> (this);
+		}
+	}
+
+	public enum JsPlatform {
+		GUM,
+		BROWSER,
+		NEUTRAL;
+
+		public static JsPlatform from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<JsPlatform> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<JsPlatform> (this);
 		}
 	}
 }
