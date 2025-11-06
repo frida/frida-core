@@ -151,13 +151,16 @@ namespace Frida.GDB {
 					ack_mode = SKIP_ACKS;
 				}
 
+				if ("qXfer:features:read+" in supported_features) {
+					yield load_target_properties (cancellable);
+				}
+
 				yield detect_vendor_features (cancellable);
 
 				yield enable_extensions (cancellable);
 
 				string attached_response = yield query_property ("Attached", cancellable);
 				if (attached_response == "1") {
-					yield load_target_properties (cancellable);
 					if (_exception == null) {
 						request_stop_info ();
 						yield wait_until_stopped (cancellable);
