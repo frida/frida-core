@@ -550,7 +550,7 @@ namespace Frida.GDB {
 			var output = new Gee.ArrayList<Packet> ();
 			Packet response = yield query_with_predicate (builder.build (), packet => {
 				unowned string payload = packet.payload;
-				if (payload.has_prefix ("OK") || payload[0] == 'E')
+				if (payload.has_prefix ("OK") || payload[0] == 'E' || payload == "")
 					return COMPLETE;
 				if (payload[0] == NOTIFICATION_TYPE_OUTPUT) {
 					output.add (packet);
