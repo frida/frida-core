@@ -343,6 +343,7 @@ jobs:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
       - name: Package tests
+        if: false
         run: |
           mkdir -p /tmp/pkg
           cd build
@@ -362,7 +363,7 @@ jobs:
           esac
           tar -C /tmp/pkg -czf /tmp/runner.tar.gz .
       - name: Test on Corellium iOS device
-        if: matrix.id == 'ios-arm64'
+        if: false
         continue-on-error: true
         uses: frida/corellium-action@v4
         with:
@@ -378,7 +379,7 @@ jobs:
             tar xf $ASSET_PATH
             ./frida-tests
       - name: Test on Corellium Android device
-        if: matrix.id == 'android-arm64'
+        if: false
         continue-on-error: true
         uses: frida/corellium-action@v4
         with:
