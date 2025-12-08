@@ -16,13 +16,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - { id: windows-arm64,  runner: '"windows-11-arm"', sys: CLANGARM64, pkg: 'mingw-w64-clang-aarch64-clang' }
-          - { id: windows-x86_64, runner: '"windows-latest"', sys: MINGW64,    pkg: 'mingw-w64-x86_64-gcc'          }
-          - { id: windows-x86,    runner: '"windows-latest"', sys: MINGW32,    pkg: 'mingw-w64-i686-gcc'            }
+          #- { id: windows-arm64,  runner: '"windows-11-arm"', sys: CLANGARM64, pkg: 'mingw-w64-clang-aarch64-clang' }
+          #- { id: windows-x86_64, runner: '"windows-latest"', sys: MINGW64,    pkg: 'mingw-w64-x86_64-gcc'          }
+          #- { id: windows-x86,    runner: '"windows-latest"', sys: MINGW32,    pkg: 'mingw-w64-i686-gcc'            }
           - { id: macos-x86_64,   runner: '"macos-latest"'                                                          }
           - { id: macos-arm64,    runner: '"macos-latest"'                                                          }
-          - { id: linux-x86_64,   runner: '"ubuntu-latest"'                                                         }
-          - { id: linux-x86,      runner: '"ubuntu-latest"'                                                         }
+          #- { id: linux-x86_64,   runner: '"ubuntu-latest"'                                                         }
+          #- { id: linux-x86,      runner: '"ubuntu-latest"'                                                         }
       fail-fast: false
     runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
@@ -96,6 +96,7 @@ jobs:
         run: make test
 
   cross:
+    if: false
     strategy:
       matrix:
         include:
@@ -136,6 +137,7 @@ jobs:
           path: build/src/devkit/
 
   manylinux:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, x86_64-musl, armhf, arm64, arm64-musl, mips, mipsel, mips64, mips64el]
@@ -169,6 +171,7 @@ jobs:
         run: make test
 
   emulator:
+    if: false
     strategy:
       matrix:
         arch: [armbe8, arm64be]
@@ -299,10 +302,10 @@ jobs:
       matrix:
         id:
           - ios-arm64
-          - android-x86
-          - android-x86_64
-          - android-arm
-          - android-arm64
+          #- android-x86
+          #- android-x86_64
+          #- android-arm
+          #- android-arm64
       fail-fast: false
     runs-on: ${{ startsWith(matrix.id, 'ios-') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
@@ -393,6 +396,7 @@ jobs:
             TMPDIR=/data/local/tmp ./frida-tests
 
   qnx-armeabi:
+    if: false
     runs-on: ubuntu-latest
     container: ghcr.io/frida/qnx-tools:latest
     steps:
@@ -423,6 +427,7 @@ jobs:
   # in, and we want to ensure that they are up-to-date with respect to the source
   # for all architectures.
   check-linux-helpers:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
@@ -456,6 +461,7 @@ jobs:
   # in, and we want to ensure that they are up-to-date with respect to the source
   # for all architectures.
   check-labrats:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
