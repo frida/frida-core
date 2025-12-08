@@ -525,18 +525,18 @@ jobs:
 
           mkdir -p devkits/macos-universal
           lipo -create \
-            devkits/macos-x86_64/libfrida-core.a \
-            devkits/macos-arm64/libfrida-core.a \
-            -output devkits/macos-universal/libfrida-core.a
+              devkits/macos-x86_64/libfrida-core.a \
+              devkits/macos-arm64/libfrida-core.a \
+              -output devkits/macos-universal/libfrida-core.a
 
           mkdir -p xcframework_headers/macos-universal
           mkdir -p xcframework_headers/ios-arm64
           mkdir -p xcframework_headers/ios-arm64-simulator
 
           cp devkits/macos-x86_64/frida-core.h \
-             xcframework_headers/macos-universal/frida-core-x86_64.h
+              xcframework_headers/macos-universal/frida-core-x86_64.h
           cp devkits/macos-arm64/frida-core.h \
-             xcframework_headers/macos-universal/frida-core-arm64.h
+              xcframework_headers/macos-universal/frida-core-arm64.h
 
           cat > xcframework_headers/macos-universal/frida-core.h <<'EOF'
           #if defined (__x86_64__)
@@ -549,18 +549,18 @@ jobs:
           EOF
 
           cp devkits/ios-arm64/frida-core.h \
-             xcframework_headers/ios-arm64/frida-core.h
+              xcframework_headers/ios-arm64/frida-core.h
           cp devkits/ios-arm64-simulator/frida-core.h \
-             xcframework_headers/ios-arm64-simulator/frida-core.h
+              xcframework_headers/ios-arm64-simulator/frida-core.h
 
           xcodebuild -create-xcframework \
-            -library devkits/macos-universal/libfrida-core.a \
-            -headers xcframework_headers/macos-universal \
-            -library devkits/ios-arm64/libfrida-core.a \
-            -headers xcframework_headers/ios-arm64 \
-            -library devkits/ios-arm64-simulator/libfrida-core.a \
-            -headers xcframework_headers/ios-arm64-simulator \
-            -output FridaCore.xcframework
+              -library devkits/macos-universal/libfrida-core.a \
+              -headers xcframework_headers/macos-universal \
+              -library devkits/ios-arm64/libfrida-core.a \
+              -headers xcframework_headers/ios-arm64 \
+              -library devkits/ios-arm64-simulator/libfrida-core.a \
+              -headers xcframework_headers/ios-arm64-simulator \
+              -output FridaCore.xcframework
       - name: Upload FridaCore.xcframework
         uses: actions/upload-artifact@v4
         with:
