@@ -206,7 +206,7 @@ jobs:
             /sbin/entropy
             cat /etc/motd
             export PS1='\u@frida:\w\$ '
-            /root/frida-tests
+            /root/tests/frida-tests
             status=\$?
             echo "exit status: \$status"
             if [ \$status -eq 0 ]; then
@@ -282,7 +282,8 @@ jobs:
             COPY initscript /tmp/initramfs/init
             RUN chmod +x /tmp/initramfs/init
 
-            COPY build/tests /tmp/initramfs/root/
+            COPY build/tests /tmp/initramfs/root/tests/
+            COPY build/lib/agent/frida-agent.so /tmp/initramfs/root/lib/agent/
             RUN find . | cpio -o --format=newc -R root:root > /root/initramfs.img
 
             COPY launch.sh /root/launch.sh
