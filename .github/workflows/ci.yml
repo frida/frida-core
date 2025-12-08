@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -568,3 +566,50 @@ jobs:
         with:
           name: FridaCore.xcframework
           path: FridaCore.xcframework
+
+  publish-xcframework:
+    if: github.ref_type == 'tag'
+    runs-on: macos-latest
+    needs:
+      - xcframework
+    steps:
+      - name: Download FridaCore.xcframework artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FridaCore.xcframework
+          path: dist
+      - name: Inspect dist (debug)
+        run: |
+          echo "=== dist contents ==="
+          ls -R dist
+      - name: Rewrap into FridaCore.xcframework directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          mkdir -p FridaCore.xcframework
+
+          shopt -s dotglob
+          for f in *; do
+            if [[ "$f" != "FridaCore.xcframework" ]]; then
+              mv "$f" FridaCore.xcframework/
+            fi
+          done
+      - name: Zip FridaCore.xcframework
+        run: |
+          cd dist
+          zip -r FridaCore.xcframework.zip FridaCore.xcframework
+      - name: Compute SwiftPM checksum
+        run: |
+          cd dist
+          swift package compute-checksum FridaCore.xcframework.zip > FridaCore.xcframework.checksum.txt
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/FridaCore.xcframework.zip
+            dist/FridaCore.xcframework.checksum.txt
+          prerelease: ${{ contains(github.ref_name, 'snapshot') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
