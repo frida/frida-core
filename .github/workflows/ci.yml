@@ -529,9 +529,15 @@ jobs:
               devkits/macos-arm64/libfrida-core.a \
               -output devkits/macos-universal/libfrida-core.a
 
-          mkdir -p xcframework_headers/macos-universal
-          mkdir -p xcframework_headers/ios-arm64
-          mkdir -p xcframework_headers/ios-arm64-simulator
+          platforms=(
+            "macos-universal"
+            "ios-arm64"
+            "ios-arm64-simulator"
+          )
+
+          for platform in "${platforms[@]}"; do
+            mkdir -p "xcframework_headers/${platform}"
+          done
 
           cp devkits/macos-x86_64/frida-core.h \
               xcframework_headers/macos-universal/frida-core-x86_64.h
@@ -552,6 +558,15 @@ jobs:
               xcframework_headers/ios-arm64/frida-core.h
           cp devkits/ios-arm64-simulator/frida-core.h \
               xcframework_headers/ios-arm64-simulator/frida-core.h
+
+          for platform in "${platforms[@]}"; do
+            cat > "xcframework_headers/${platform}/module.modulemap" <<'EOF'
+          module FridaCore [extern_c] {
+            header "frida-core.h"
+            export *
+          }
+          EOF
+          done
 
           xcodebuild -create-xcframework \
               -library devkits/macos-universal/libfrida-core.a \
