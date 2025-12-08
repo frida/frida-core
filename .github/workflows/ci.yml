@@ -71,6 +71,7 @@ jobs:
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
         run: |
           ./configure \
+              --host=${{ matrix.id }} \
               --enable-compiler-backend \
               ${{ env.FRIDA_CORE_OPTIONS }}
           make
