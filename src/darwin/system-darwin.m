@@ -489,7 +489,7 @@ static void
 frida_add_app_icons (GHashTable * parameters, NSImage * image)
 {
   GVariantBuilder builder;
-  const guint sizes[] = { 16, 32 };
+  const guint sizes[] = { 128 };
   guint i;
 
   g_variant_builder_init (&builder, G_VARIANT_TYPE ("aa{sv}"));
