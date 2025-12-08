@@ -5,6 +5,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build/test"
+        required: false
+        type: string
 
 env:
   FRIDA_CORE_OPTIONS: '--with-devkits=core --enable-tests'
