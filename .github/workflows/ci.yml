@@ -299,6 +299,7 @@ jobs:
       matrix:
         id:
           - ios-arm64
+          - ios-arm64-simulator
           - android-x86
           - android-x86_64
           - android-arm
