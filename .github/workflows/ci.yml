@@ -536,7 +536,7 @@ jobs:
           )
 
           for platform in "${platforms[@]}"; do
-            mkdir -p "xcframework_headers/${platform}"
+            mkdir -p "xcframework_headers/${platform}/FridaCore"
           done
 
           cp devkits/macos-x86_64/frida-core.h \
@@ -560,9 +560,9 @@ jobs:
               xcframework_headers/ios-arm64-simulator/frida-core.h
 
           for platform in "${platforms[@]}"; do
-            cat > "xcframework_headers/${platform}/module.modulemap" <<'EOF'
+            cat > "xcframework_headers/${platform}/FridaCore/module.modulemap" <<'EOF'
           module FridaCore [extern_c] {
-            header "frida-core.h"
+            header "../frida-core.h"
             export *
           }
           EOF
