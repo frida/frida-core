@@ -52,13 +52,17 @@ endif
 
 extra_deps = []
 if host_os_family != 'windows'
-  extra_vala_args += '--pkg=gio-unix-2.0'
   extra_deps += gio_unix_dep
 endif
 
 base_vala_args = [gum_vala_args, '--pkg=gio-2.0', '--pkg=json-glib-1.0']
 if nice_dep.found()
   base_vala_args += '--pkg=nice'
+endif
+if host_os_family != 'windows'
+  base_vala_args += [
+    '--pkg=gio-unix-2.0',
+  ]
 endif
 if host_os_family == 'darwin'
   base_vala_args += [
