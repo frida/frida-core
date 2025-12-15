@@ -308,6 +308,7 @@ gum_dep = dependency('frida-gum-1.0', default_options: [
 gumjs_dep = dependency('frida-gumjs-1.0')
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 
+glib_version_req = '>=2.74'
 glib_options = [
   'cocoa=disabled',
   'selinux=disabled',
@@ -331,7 +332,7 @@ if optimize_for_prod
   gee_options += 'disable-internal-asserts=true'
 endif
 
-glib_dep = dependency('glib-2.0', version: '>=2.72', default_options: glib_options)
+glib_dep = dependency('glib-2.0', version: glib_version_req, default_options: glib_options)
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
@@ -362,7 +363,7 @@ quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), de
 ])
 lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'))
 
-native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true, default_options: glib_options)
+native_glib_dep = dependency('glib-2.0', version: glib_version_req, native: true, default_options: glib_options)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true, default_options: gee_options)
 native_brotlienc_dep = dependency('libbrotlienc', native: true)
