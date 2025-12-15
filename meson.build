@@ -32,18 +32,36 @@ frida_version = get_option('frida_version')
 if frida_version == ''
   frida_version = run_command(releng / 'frida_version.py', meson.project_source_root(), check: true).stdout().strip()
 endif
-tokens = frida_version.split('.')
-frida_major_version = tokens[0].to_int()
-frida_minor_version = tokens[1].to_int()
-if tokens.length() == 4
-  frida_micro_version = tokens[2].split('-')[0].to_int() - 1
-  frida_nano_version = tokens[3].to_int() + 1
+
+is_dev = frida_version.contains('-dev.')
+if is_dev
+  dev_parts = frida_version.split('-dev.')
+  assert(dev_parts.length() == 2)
+  prefix = dev_parts[0]
+  frida_nano_version = dev_parts[1].to_int() + 1
 else
-  assert(tokens.length() == 3)
-  frida_micro_version = tokens[2].to_int()
+  prefix = frida_version
   frida_nano_version = 0
 endif
-frida_profile = (frida_version != '0.0.0' and frida_nano_version == 0) ? 'prod' : 'dev'
+
+parts = prefix.split('-')
+core = parts[0]
+has_suffix = parts.length() > 1
+
+core_tokens = core.split('.')
+assert(core_tokens.length() == 3)
+
+frida_major_version = core_tokens[0].to_int()
+frida_minor_version = core_tokens[1].to_int()
+micro_encoded = core_tokens[2].to_int()
+
+if is_dev and not has_suffix
+  frida_micro_version = micro_encoded - 1
+else
+  frida_micro_version = micro_encoded
+endif
+
+frida_profile = (frida_version != '0.0.0' and frida_nano_version == 0 and not has_suffix) ? 'prod' : 'dev'
 
 api_version = '1.0'
 
