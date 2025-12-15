@@ -61,8 +61,6 @@ else
   frida_micro_version = micro_encoded
 endif
 
-frida_profile = (frida_version != '0.0.0' and frida_nano_version == 0 and not has_suffix) ? 'prod' : 'dev'
-
 api_version = '1.0'
 
 header_install_dir = get_option('includedir') / f'frida-@api_version@'
