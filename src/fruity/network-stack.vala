@@ -760,8 +760,11 @@ namespace Frida.Fruity {
 					return OK;
 				}));
 
-				if (n == 0)
+				if (n == 0) {
+					if (state == CLOSED)
+						throw new IOError.CLOSED ("Connection is closed");
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+				}
 
 				return n;
 			}
