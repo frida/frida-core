@@ -451,6 +451,12 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #  else
 #   error Unexpected MIPS ABI
 #  endif
+# elif defined (HAVE_RISCV)
+#  if GLIB_SIZEOF_VOID_P == 8
+#   define __NR_dup3 24
+#  else
+#   error RISC-V 32-bit not yet supported
+#  endif
 # endif
 #endif
 

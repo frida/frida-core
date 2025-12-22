@@ -108,6 +108,12 @@ frida_test_cpu (void)
 # else
   return FRIDA_TEST_CPU_MIPS;
 # endif
+#elif defined (HAVE_RISCV)
+# if GLIB_SIZEOF_VOID_P == 8
+  return FRIDA_TEST_CPU_RISCV64;
+# else
+  return FRIDA_TEST_CPU_RISCV32;
+# endif
 #endif
 }
 

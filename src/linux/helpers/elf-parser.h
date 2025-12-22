@@ -9,7 +9,7 @@
 #endif
 
 #ifndef __ELF_NATIVE_CLASS
-# if defined (__x86_64__) || (defined (__aarch64__) && !defined (__ILP32__)) || defined (__mips64)
+# if defined (__x86_64__) || (defined (__aarch64__) && !defined (__ILP32__)) || defined (__mips64) || (defined (__riscv) && __riscv_xlen == 64)
 #  define __ELF_NATIVE_CLASS 64
 # else
 #  define __ELF_NATIVE_CLASS 32

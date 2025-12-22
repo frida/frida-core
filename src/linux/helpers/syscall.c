@@ -138,6 +138,26 @@ frida_syscall_4 (size_t n, size_t a, size_t b, size_t c, size_t d)
 
     result = (status == 0) ? retval : -retval;
   }
+#elif defined (__riscv)
+  {
+    register ssize_t a7 asm ("a7") = n;
+    register  size_t a0 asm ("a0") = a;
+    register  size_t a1 asm ("a1") = b;
+    register  size_t a2 asm ("a2") = c;
+    register  size_t a3 asm ("a3") = d;
+
+    asm volatile (
+        "ecall\n\t"
+        : "+r" (a0)
+        : "r" (a1),
+          "r" (a2),
+          "r" (a3),
+          "r" (a7)
+        : "memory"
+    );
+
+    result = a0;
+  }
 #endif
 
   return result;
