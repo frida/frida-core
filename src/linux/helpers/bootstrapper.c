@@ -865,6 +865,15 @@ frida_try_load_libc_and_raise (FridaBootstrapContext * ctx)
           "r" (entrypoint)
         : "memory"
     );
+#elif defined (__riscv)
+    asm volatile (
+        "mv sp, %0\n\t"
+        "jr %1\n\t"
+        :
+        : "r" (&params),
+          "r" (entrypoint)
+        : "memory"
+    );
 #endif
   }
 }
