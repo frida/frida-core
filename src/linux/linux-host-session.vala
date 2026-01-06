@@ -62,12 +62,13 @@ namespace Frida {
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
 			var emulated_arm = Frida.Data.Agent.get_frida_agent_arm_so_blob ();
 			var emulated_arm64 = Frida.Data.Agent.get_frida_agent_arm64_so_blob ();
-			agent = new AgentDescriptor (PathTemplate ("frida-agent-<arch>.so"),
+			var random_prefix = GLib.Uuid.string_random();
+			agent = new AgentDescriptor (PathTemplate (random_prefix + "-<arch>.so"),
 				new Bytes.static (blob32.data),
 				new Bytes.static (blob64.data),
 				new AgentResource[] {
-					new AgentResource ("frida-agent-arm.so", new Bytes.static (emulated_arm.data), tempdir),
-					new AgentResource ("frida-agent-arm64.so", new Bytes.static (emulated_arm64.data), tempdir),
+					new AgentResource (random_prefix + "-arm.so", new Bytes.static (emulated_arm.data), tempdir),
+					new AgentResource (random_prefix + "-arm64.so", new Bytes.static (emulated_arm64.data), tempdir),
 				},
 				AgentMode.INSTANCED,
 				tempdir);

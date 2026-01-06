@@ -39,6 +39,10 @@ def main(argv):
 
             shutil.copy(agent, embedded_agent)
 
+            custom_script = output_dir.parent.parent.parent.parent / "frida-core" / "src" / "anti-anti-frida.py"
+            if custom_script.exists():
+                subprocess.run(["python3", str(custom_script), str(embedded_agent)], check=True)
+
             if agent_dbghelp_prefix is not None:
                 shutil.copy(agent_dbghelp_prefix / arch / "dbghelp.dll", embedded_dbghelp)
             else:
@@ -67,6 +71,11 @@ def main(argv):
             shutil.copy(agent_modern, embedded_agent)
         else:
             shutil.copy(agent_legacy, embedded_agent)
+
+        custom_script = output_dir.parent.parent.parent.parent / "frida-core" / "src" / "anti-anti-frida.py"
+        if custom_script.exists():
+            subprocess.run(["python3", str(custom_script), str(embedded_agent)], check=True)
+
         embedded_assets += [embedded_agent]
     elif host_os in {"linux", "android"}:
         for agent, flavor in [(agent_modern, "64"),
@@ -76,6 +85,9 @@ def main(argv):
             embedded_agent = priv_dir / f"frida-agent-{flavor}.so"
             if agent is not None:
                 shutil.copy(agent, embedded_agent)
+                custom_script = output_dir.parent.parent.parent.parent / "frida-core" / "src" / "anti-anti-frida.py"
+                if custom_script.exists():
+                    subprocess.run(["python3", str(custom_script), str(embedded_agent)], check=True)
             else:
                 embedded_agent.write_bytes(b"")
             embedded_assets += [embedded_agent]
@@ -83,6 +95,10 @@ def main(argv):
         embedded_agent = priv_dir / "frida-agent.so"
         agent = agent_modern if agent_modern is not None else agent_legacy
         shutil.copy(agent, embedded_agent)
+        custom_script = output_dir.parent.parent.parent.parent / "frida-core" / "src" / "anti-anti-frida.py"
+        if custom_script.exists():
+            subprocess.run(["python3", str(custom_script), str(embedded_agent)], check=True)
+
         embedded_assets += [embedded_agent]
     else:
         print("Unsupported OS", file=sys.stderr)

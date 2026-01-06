@@ -787,7 +787,8 @@ frida_inject_instance_init_fifo (FridaInjectInstance * self)
 {
   const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
 
-  self->fifo_path = g_strdup_printf ("%s/binjector-%u", self->temp_path, self->id);
+  // self->fifo_path = g_strdup_printf ("%s/binjector-%u", self->temp_path, self->id);
+  self->fifo_path = g_strdup_printf ("%s/%p%u", self->temp_path, self ,self->id);
 
   mkfifo (self->fifo_path, mode);
   chmod (self->fifo_path, mode);
