@@ -3035,27 +3035,44 @@ namespace Frida {
 
 	namespace ChildProcess {
 		private async void wait_for_early_signal (uint pid, Posix.Signal sig, Cancellable? cancellable) throws Error, IOError {
-			while (true) {
-				Posix.Signal next_signal = yield wait_for_next_signal (pid, cancellable);
-				if (next_signal == sig)
-					return;
-
-				ptrace (CONT, pid);
-			}
+			yield wait_for_signals_common (pid, { sig }, suppress_unmatched, cancellable);
 		}
 
 		private async void wait_for_signal (uint pid, Posix.Signal sig, Cancellable? cancellable) throws Error, IOError {
 			yield wait_for_signals (pid, { sig }, cancellable);
 		}
 
-		private async Posix.Signal wait_for_signals (uint pid, Posix.Signal[] sigs, Cancellable? cancellable) throws Error, IOError {
-			while (true) {
-				Posix.Signal next_signal = yield wait_for_next_signal (pid, cancellable);
-				if (next_signal in sigs)
-					return next_signal;
+		private async Posix.Signal wait_for_signals (uint pid, Posix.Signal[] sigs, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield wait_for_signals_common (pid, sigs, pass_through_unmatched, cancellable);
+		}
 
-				ptrace (CONT, pid, null, (void *) next_signal);
+		private async Posix.Signal wait_for_signals_common (uint pid, Posix.Signal[] sigs, UnmatchedStopHandler on_unmatched,
+				Cancellable? cancellable) throws Error, IOError {
+			while (true) {
+				var wr = yield wait_for_next_stop (pid, cancellable);
+				wr.check_stopped ();
+
+				if (wr.stop_signal in sigs)
+					return wr.stop_signal;
+
+				if (!wr.should_deliver_to_tracee) {
+					ptrace (CONT, pid);
+					continue;
+				}
+
+				on_unmatched (pid, wr);
 			}
+		}
+
+		private delegate void UnmatchedStopHandler (uint pid, WaitResult wr) throws Error;
+
+		private static void pass_through_unmatched (uint pid, WaitResult wr) throws Error {
+			ptrace (CONT, pid, null, (void *) wr.stop_signal);
+		}
+
+		private static void suppress_unmatched (uint pid, WaitResult wr) throws Error {
+			ptrace (CONT, pid);
 		}
 
 		private async Posix.Signal wait_for_next_signal (uint pid, Cancellable? cancellable) throws Error, IOError {
