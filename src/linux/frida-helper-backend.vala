@@ -741,25 +741,38 @@ namespace Frida {
 		public async void wait_for_syscall (LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
 			bool on_syscall_entry = true;
 			int pending_signal = 0;
-			do {
+			while (state != SATISFIED) {
 				ptrace (SYSCALL, tid, null, (void *) pending_signal);
 				pending_signal = 0;
 
-				Posix.Signal sig = yield wait_for_next_signal (cancellable);
-				if (sig != (TRAP | 0x80)) {
-					on_syscall_entry = !on_syscall_entry;
-					pending_signal = sig;
+				var wr = yield ChildProcess.wait_for_next_stop (tid, cancellable);
+				wr.check_stopped ();
+
+				if (wr.is_ptrace_event_stop) {
+					if (wr.ptrace_event == PtraceEvent.EXEC)
+						on_syscall_entry = true;
+
 					continue;
 				}
 
-				if (on_syscall_entry) {
-					get_regs (&saved_regs);
-					if (_syscall_satisfies (get_syscall_id (saved_regs), mask))
-						state = SATISFIED;
+				if (wr.is_syscall_stop) {
+					if (on_syscall_entry) {
+						get_regs (&saved_regs);
+						var id = get_syscall_id (saved_regs);
+
+						if (_syscall_satisfies (id, mask))
+							state = SATISFIED;
+					}
+
+					on_syscall_entry = !on_syscall_entry;
+					continue;
 				}
 
-				on_syscall_entry = !on_syscall_entry;
-			} while (state != SATISFIED);
+				if (wr.should_deliver_to_tracee)
+					pending_signal = wr.stop_signal;
+				else
+					pending_signal = 0;
+			}
 		}
 
 		public async void interrupt (Cancellable? cancellable) throws Error, IOError {
@@ -2017,6 +2030,10 @@ namespace Frida {
 			return yield ChildProcess.wait_for_next_signal (tid, cancellable);
 		}
 
+		public async WaitResult wait_for_next_stop (Cancellable? cancellable) throws Error, IOError {
+			return yield ChildProcess.wait_for_next_stop (tid, cancellable);
+		}
+
 		public void get_regs (GPRegs * regs) throws Error {
 #if !MIPS
 			if (regset_supported) {
@@ -3042,6 +3059,12 @@ namespace Frida {
 		}
 
 		private async Posix.Signal wait_for_next_signal (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var wr = yield wait_for_next_stop (pid, cancellable);
+			wr.check_stopped ();
+			return wr.stop_signal;
+		}
+
+		private async WaitResult wait_for_next_stop (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var main_context = MainContext.get_thread_default ();
 
 			bool timed_out = false;
@@ -3054,21 +3077,23 @@ namespace Frida {
 
 			int status = 0;
 			uint[] delays = { 0, 1, 2, 5, 10, 20, 50, 250 };
+
 			try {
 				for (uint i = 0; !timed_out && !cancellable.set_error_if_cancelled (); i++) {
 					int res = Posix.waitpid ((Posix.pid_t) pid, out status, Posix.WNOHANG);
 					if (res == -1)
-						throw new Error.NOT_SUPPORTED ("Unable to wait for next signal: %s", strerror (errno));
+						throw new Error.NOT_SUPPORTED ("Unable to wait for next stop: %s", strerror (errno));
 					if (res != 0)
 						break;
 
 					uint delay_ms = (i < delays.length) ? delays[i] : delays[delays.length - 1];
+
 					var delay_source = new TimeoutSource (delay_ms);
-					delay_source.set_callback (wait_for_next_signal.callback);
+					delay_source.set_callback (wait_for_next_stop.callback);
 					delay_source.attach (main_context);
 
 					var cancel_source = new CancellableSource (cancellable);
-					cancel_source.set_callback (wait_for_next_signal.callback);
+					cancel_source.set_callback (wait_for_next_stop.callback);
 					cancel_source.attach (main_context);
 
 					yield;
@@ -3081,21 +3106,87 @@ namespace Frida {
 			}
 
 			if (timed_out)
-				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for signal from process with PID %u", pid);
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for stop from process with PID %u", pid);
+
+			return WaitResult (pid, status);
+		}
+	}
+
+	public enum WaitKind {
+		EXITED,
+		SIGNALED,
+		STOPPED,
+		OTHER
+	}
+
+	public struct WaitResult {
+		public uint pid;
+		public int status;
+
+		public WaitKind kind;
+
+		public uint exit_status;
+
+		public Posix.Signal term_signal;
+
+		public Posix.Signal stop_signal;
+		public PtraceEvent ptrace_event;
+		public bool is_ptrace_event_stop;
+		public bool is_syscall_stop;
+
+		public bool should_deliver_to_tracee;
+
+		public WaitResult (uint pid, int status) {
+			this.pid = pid;
+			this.status = status;
+
+			kind = WaitKind.OTHER;
+			exit_status = 0;
+			term_signal = 0;
+			stop_signal = 0;
+			ptrace_event = PtraceEvent.NONE;
+			is_ptrace_event_stop = false;
+			is_syscall_stop = false;
+			should_deliver_to_tracee = false;
 
 			if (PosixStatus.is_exit (status)) {
-				throw new Error.NOT_SUPPORTED ("Target exited with status %u",
-					PosixStatus.parse_exit_status (status));
+				kind = WaitKind.EXITED;
+				exit_status = PosixStatus.parse_exit_status (status);
+				return;
 			}
 
 			if (PosixStatus.is_signaled (status)) {
-				throw new Error.NOT_SUPPORTED ("Target terminated with signal %u",
-					PosixStatus.parse_termination_signal (status));
+				kind = WaitKind.SIGNALED;
+				term_signal = PosixStatus.parse_termination_signal (status);
+				return;
 			}
 
-			if (!PosixStatus.is_stopped (status))
-				throw new Error.NOT_SUPPORTED ("Unexpected status: 0x%08x", status);
-			return PosixStatus.parse_stop_signal (status);
+			if (PosixStatus.is_stopped (status)) {
+				kind = WaitKind.STOPPED;
+
+				stop_signal = PosixStatus.parse_stop_signal (status);
+				ptrace_event = PosixStatus.ptrace_event (status);
+
+				is_ptrace_event_stop = (stop_signal == Posix.Signal.TRAP) && (ptrace_event != NONE);
+				is_syscall_stop = (stop_signal == (Posix.Signal.TRAP | 0x80)) && (ptrace_event == NONE);
+
+				should_deliver_to_tracee = !is_syscall_stop && !is_ptrace_event_stop && stop_signal != Posix.Signal.TRAP;
+
+				return;
+			}
+		}
+
+		public void check_stopped () throws Error {
+			switch (kind) {
+				case WaitKind.EXITED:
+					throw new Error.NOT_SUPPORTED ("Target exited with status %u", exit_status);
+				case WaitKind.SIGNALED:
+					throw new Error.NOT_SUPPORTED ("Target terminated with signal %u", term_signal);
+				case WaitKind.STOPPED:
+					return;
+				default:
+					throw new Error.NOT_SUPPORTED ("Unexpected status: 0x%08x", status);
+			}
 		}
 	}
 
@@ -3117,6 +3208,21 @@ namespace Frida {
 
 		[CCode (cname = "WSTOPSIG", cheader_filename = "sys/wait.h")]
 		private extern Posix.Signal parse_stop_signal (int status);
+
+		private PtraceEvent ptrace_event (int status) {
+			return ((uint) status) >> 16;
+		}
+	}
+
+	public enum PtraceEvent {
+		NONE,
+		FORK,
+		VFORK,
+		CLONE,
+		EXEC,
+		VFORK_DONE,
+		EXIT,
+		SECCOMP,
 	}
 
 	private int tgkill (uint tgid, uint tid, Posix.Signal sig) {
