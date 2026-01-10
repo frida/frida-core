@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.lang.Class;
 import java.lang.Exception;
 import java.lang.Object;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -99,27 +100,81 @@ public class Helper {
 		new Helper(socket, context).run();
 	}
 
-	private PackageManager mPackageManager;
-	private ActivityManager mActivityManager;
+	private final PackageManager mPackageManager;
+	private final ActivityManager mActivityManager;
+	private final Context mContext;
+	private final Object mContextWrapper;
+	private final Constructor<?> mContextWrapperCtor;
 
+	private Method mGetApplicationInfoAsUser;
+	private final Method mForceStopPackage;
+	private Method mForceStopPackageAsUser;
+	private Method mUserHandleOf;
+	private Method mCreatePackageContextAsUser;
+	private Method mGetPackageInfoAsUser;
+	private Object mActivityTaskManager;
+	private Method mStartActivityAsUser;
+	private Class<?>[] mStartActivityAsUserParamTypes;
+	private int mStartActivityIntentIndex = -1;
+	private int mStartActivityCallingPackageIndex = -1;
+	private int mStartActivityUserIdIndex = -1;
+	private Method mSendBroadcastAsUser;
+	private boolean mMultiUserSupported;
 	private Field mTopActivityField;
-	private String mLauncherPkgName;
+	private final String mLauncherPkgName;
 	private static Pattern sStatusUidPattern = Pattern.compile("^Uid:\\s+\\d+\\s+(\\d+)\\s+\\d+\\s+\\d+$", Pattern.MULTILINE);
-	private long mSystemBootTime;
-	private long mMillisecondsPerJiffy;
-	private SimpleDateFormat mIso8601;
-	private Method mGetpwuid;
-	private Field mPwnameField;
+	private final long mSystemBootTime;
+	private final long mMillisecondsPerJiffy;
+	private final SimpleDateFormat mIso8601;
+	private final Method mGetpwuid;
+	private final Field mPwnameField;
 
-	private LocalServerSocket mSocket;
-	private Thread mWorker;
+	private final LocalServerSocket mSocket;
+	private final Thread mWorker;
 
 	private final int MAX_REQUEST_SIZE = 128 * 1024;
 
 	public Helper(LocalServerSocket socket, Context ctx) {
 		mPackageManager = ctx.getPackageManager();
 		mActivityManager = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+		mContext = ctx;
 
+		Class<?> ContextWrapper;
+		try {
+			ContextWrapper = Class.forName("android.content.ContextWrapper");
+			mContextWrapperCtor = ContextWrapper.getConstructor(Context.class);
+			mContextWrapper = mContextWrapperCtor.newInstance(mContext);
+		} catch (Throwable e) {
+			throw new RuntimeException(e);
+		}
+
+		initActivityStartApi();
+
+		try {
+			mGetApplicationInfoAsUser = PackageManager.class.getDeclaredMethod("getApplicationInfoAsUser", String.class,
+					int.class, int.class);
+			mGetPackageInfoAsUser = PackageManager.class.getDeclaredMethod("getPackageInfoAsUser", String.class, int.class,
+					int.class);
+
+			mForceStopPackageAsUser = ActivityManager.class.getDeclaredMethod("forceStopPackageAsUser", String.class,
+					int.class);
+
+			Class<?> UserHandle = Class.forName("android.os.UserHandle");
+			mUserHandleOf = UserHandle.getDeclaredMethod("of", int.class);
+
+			mCreatePackageContextAsUser = Context.class.getDeclaredMethod("createPackageContextAsUser", String.class, int.class,
+					UserHandle);
+
+			mSendBroadcastAsUser = ContextWrapper.getDeclaredMethod("sendBroadcastAsUser", Intent.class, UserHandle);
+
+			mMultiUserSupported = true;
+		} catch (Exception e) {
+		}
+		try {
+			mForceStopPackage = ActivityManager.class.getDeclaredMethod("forceStopPackage", String.class);
+		} catch (NoSuchMethodException e) {
+			throw new RuntimeException(e);
+		}
 		try {
 			mTopActivityField = Class.forName("android.app.TaskInfo").getDeclaredField("topActivity");
 		} catch (Exception e) {
@@ -142,6 +197,54 @@ public class Helper {
 				handleIncomingConnections();
 			}
 		};
+	}
+
+	private void initActivityStartApi() {
+		try {
+			Class<?> ActivityTaskManager = Class.forName("android.app.ActivityTaskManager");
+			Method getService = ActivityTaskManager.getDeclaredMethod("getService");
+			mActivityTaskManager = getService.invoke(null);
+
+			Method best = null;
+			int intentIndex = -1;
+			int callingPkgIndex = -1;
+			int userIdIndex = -1;
+
+			for (Method m : mActivityTaskManager.getClass().getMethods()) {
+				if (!m.getName().equals("startActivityAsUser"))
+					continue;
+
+				Class<?>[] p = m.getParameterTypes();
+
+				int iIntent = indexOf(p, Intent.class);
+				if (iIntent == -1)
+					continue;
+
+				int iCalling = indexOfFirst(p, String.class);
+				if (iCalling == -1)
+					continue;
+
+				int iUserId = indexOfLast(p, int.class);
+				if (iUserId == -1)
+					continue;
+
+				best = m;
+				intentIndex = iIntent;
+				callingPkgIndex = iCalling;
+				userIdIndex = iUserId;
+				break;
+			}
+
+			if (best == null)
+				throw new NoSuchMethodException("No compatible startActivityAsUser overload found");
+
+			mStartActivityAsUser = best;
+			mStartActivityAsUserParamTypes = best.getParameterTypes();
+			mStartActivityIntentIndex = intentIndex;
+			mStartActivityCallingPackageIndex = callingPkgIndex;
+			mStartActivityUserIdIndex = userIdIndex;
+		} catch (Exception e) {
+		}
 	}
 
 	private void run() {
@@ -197,6 +300,16 @@ public class Helper {
 					response = enumerateApplications(request);
 				} else if (type.equals("enumerate-processes")) {
 					response = enumerateProcesses(request);
+				} else if (type.equals("get-process-name")) {
+					response = getProcessName(request);
+				} else if (type.equals("start-activity")) {
+					response = startActivity(request);
+				} else if (type.equals("send-broadcast")) {
+					response = sendBroadcast(request);
+				} else if (type.equals("stop-package")) {
+					response = stopPackage(request);
+				} else if (type.equals("try-stop-package-by-pid")) {
+					response = tryStopPackageByPid(request);
 				} else {
 					break;
 				}
@@ -482,6 +595,218 @@ public class Helper {
 		return result;
 	}
 
+	private JSONArray getProcessName(JSONArray request) throws JSONException {
+		String pkgName = request.getString(1);
+		int uid = request.getInt(2);
+
+		try {
+			ApplicationInfo appInfo = getApplicationInfoForUser(pkgName, uid);
+			return ok(appInfo.processName);
+		} catch (NameNotFoundException e) {
+			return error(
+					"INVALID_ARGUMENT",
+					"Unable to find application with identifier '" + pkgName + "'" +
+					((uid != 0) ? " belonging to uid " + uid : ""));
+		} catch (Throwable e) {
+			return error("NOT_SUPPORTED", e.toString());
+		}
+	}
+
+	private JSONArray startActivity(JSONArray request) throws JSONException {
+		String pkgName = request.getString(1);
+		String activity = request.isNull(2) ? null : request.getString(2);
+		int uid = request.getInt(3);
+
+		try {
+			getApplicationInfoForUser(pkgName, uid);
+
+			Context ctx = mContext;
+			PackageManager pm = mPackageManager;
+			Object user = null;
+
+			if (uid != 0) {
+				user = userHandleOf(uid);
+				ctx = (Context) mCreatePackageContextAsUser.invoke(mContext, pkgName, 0, user);
+				pm = ctx.getPackageManager();
+			}
+
+			Intent intent = pm.getLaunchIntentForPackage(pkgName);
+			if (intent == null && activity == null) {
+				return error("INVALID_ARGUMENT", "Unable to find a front-door activity");
+			}
+
+			if (intent == null) {
+				intent = new Intent();
+			}
+
+			intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+			if (activity != null) {
+				PackageInfo pkgInfo = getPackageInfoForUser(pkgName, PackageManager.GET_ACTIVITIES, uid);
+
+				boolean found = false;
+				if (pkgInfo.activities != null) {
+					for (android.content.pm.ActivityInfo ai : pkgInfo.activities) {
+						if (activity.equals(ai.name)) {
+							found = true;
+							break;
+						}
+					}
+				}
+
+				if (!found)
+					return error("INVALID_ARGUMENT", "Unable to find activity with identifier '" + activity + "'");
+
+				intent.setClassName(pkgName, activity);
+			}
+
+			startActivityViaAtm(intent, uid, pkgName);
+
+			return okVoid();
+		} catch (NameNotFoundException e) {
+			return error("INVALID_ARGUMENT",
+					"Unable to find application with identifier '" + pkgName + "'" +
+					((uid != 0) ? " belonging to uid " + uid : ""));
+		} catch (Throwable e) {
+			return error("NOT_SUPPORTED", e.toString());
+		}
+	}
+
+	private void startActivityViaAtm(Intent intent, int uid, String callingPackage) throws Exception {
+		if (mStartActivityAsUser == null)
+			throw new UnsupportedOperationException("startActivityAsUser unavailable");
+
+		Object[] args = new Object[mStartActivityAsUserParamTypes.length];
+
+		for (int i = 0; i != args.length; i++) {
+			if (mStartActivityAsUserParamTypes[i] == int.class)
+				args[i] = 0;
+			else
+				args[i] = null;
+		}
+
+		args[mStartActivityIntentIndex] = intent;
+		args[mStartActivityCallingPackageIndex] = callingPackage;
+		args[mStartActivityUserIdIndex] = (uid != 0) ? uid : 0;
+
+		mStartActivityAsUser.invoke(mActivityTaskManager, args);
+	}
+
+	private JSONArray sendBroadcast(JSONArray request) throws JSONException {
+		String pkgName = request.getString(1);
+		String receiver = request.getString(2);
+		String action = request.getString(3);
+		int uid = request.getInt(4);
+
+		try {
+			getApplicationInfoForUser(pkgName, uid);
+
+			Intent intent = new Intent();
+			intent.setComponent(new ComponentName(pkgName, receiver));
+			intent.setAction(action);
+
+			if (uid != 0) {
+				Object user = userHandleOf(uid);
+				mSendBroadcastAsUser.invoke(mContextWrapper, intent, user);
+			} else {
+				mContext.sendBroadcast(intent);
+			}
+
+			return okVoid();
+		} catch (NameNotFoundException e) {
+			return error("INVALID_ARGUMENT",
+					"Unable to find application with identifier '" + pkgName + "'" +
+					((uid != 0) ? " belonging to uid " + uid : ""));
+		} catch (Throwable e) {
+			return error("NOT_SUPPORTED", e.toString());
+		}
+	}
+
+	private JSONArray stopPackage(JSONArray request) throws JSONException {
+		String pkgName = request.getString(1);
+		int uid = request.getInt(2);
+
+		try {
+			getApplicationInfoForUser(pkgName, uid);
+
+			try {
+				if (uid != 0) {
+					mForceStopPackageAsUser.invoke(mActivityManager, pkgName, uid);
+				} else {
+					mForceStopPackage.invoke(mActivityManager, pkgName);
+				}
+			} catch (InvocationTargetException e) {
+				throw e.getCause();
+			}
+
+			JSONArray r = new JSONArray();
+			r.put("ok");
+			return r;
+		} catch (NameNotFoundException e) {
+			return error(
+					"INVALID_ARGUMENT",
+					"Unable to find application with identifier '" + pkgName + "'" +
+					((uid != 0) ? " belonging to uid " + uid : ""));
+		} catch (Throwable e) {
+			return error("NOT_SUPPORTED", e.toString());
+		}
+	}
+
+	private JSONArray tryStopPackageByPid(JSONArray request) throws JSONException {
+		int pid = request.getInt(1);
+
+		try {
+			List<RunningAppProcessInfo> processes = mActivityManager.getRunningAppProcesses();
+
+			for (RunningAppProcessInfo process : processes) {
+				if (process.pid != pid)
+					continue;
+
+				for (String pkgName : process.pkgList) {
+					try {
+						mForceStopPackage.invoke(mActivityManager, pkgName);
+					} catch (InvocationTargetException e) {
+						throw e.getCause();
+					}
+				}
+
+				return okBoolean(true);
+			}
+
+			return okBoolean(false);
+		} catch (Throwable e) {
+			return error("NOT_SUPPORTED", e.toString());
+		}
+	}
+
+	private static JSONArray ok(Object value) throws JSONException {
+		JSONArray r = new JSONArray();
+		r.put("ok");
+		r.put(value);
+		return r;
+	}
+
+	private static JSONArray okVoid() throws JSONException {
+		JSONArray r = new JSONArray();
+		r.put("ok");
+		return r;
+	}
+
+	private static JSONArray okBoolean(boolean value) throws JSONException {
+		JSONArray r = new JSONArray();
+		r.put("ok");
+		r.put(value);
+		return r;
+	}
+
+	private static JSONArray error(String code, String message) throws JSONException {
+		JSONArray r = new JSONArray();
+		r.put("error");
+		r.put(code);
+		r.put(message);
+		return r;
+	}
+
 	@SuppressWarnings("deprecation")
 	private String getFrontmostPackageName() {
 		if (mTopActivityField == null) {
@@ -604,6 +929,58 @@ public class Helper {
 		return processes;
 	}
 
+	private ApplicationInfo getApplicationInfoForUser(String pkgName, int uid) throws NameNotFoundException {
+		checkUidOptionSupported(uid);
+
+		if (uid == 0) {
+			return mPackageManager.getApplicationInfo(pkgName, 0);
+		}
+
+		if (!mMultiUserSupported) {
+			throw new RuntimeException("uid option not supported");
+		}
+
+		try {
+			return (ApplicationInfo) mGetApplicationInfoAsUser.invoke(mPackageManager, pkgName, 0, uid);
+		} catch (InvocationTargetException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof NameNotFoundException)
+				throw (NameNotFoundException) cause;
+			throw new RuntimeException(cause);
+		} catch (IllegalAccessException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private PackageInfo getPackageInfoForUser(String pkgName, int flags, int uid) throws NameNotFoundException {
+		checkUidOptionSupported(uid);
+
+		if (uid == 0) {
+			return mPackageManager.getPackageInfo(pkgName, flags);
+		}
+
+		try {
+			return (PackageInfo) mGetPackageInfoAsUser.invoke(mPackageManager, pkgName, flags, uid);
+		} catch (InvocationTargetException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof NameNotFoundException)
+				throw (NameNotFoundException) cause;
+			throw new RuntimeException(cause);
+		} catch (IllegalAccessException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private void checkUidOptionSupported(int uid) {
+		if (uid != 0 && !mMultiUserSupported) {
+			throw new UnsupportedOperationException("The “uid” option is not supported on the current Android OS version");
+		}
+	}
+
+	private Object userHandleOf(int uid) throws Exception {
+		return mUserHandleOf.invoke(null, uid);
+	}
+
 	private static String deriveProcessNameFromCmdline(String cmdline) {
 		String str = cmdline;
 		int spaceDashOffset = str.indexOf(" -");
@@ -693,6 +1070,26 @@ public class Helper {
 		}
 
 		return result.toString();
+	}
+
+	private static int indexOf(Class<?>[] p, Class<?> type) {
+		for (int i = 0; i != p.length; i++) {
+			if (p[i] == type)
+				return i;
+		}
+		return -1;
+	}
+
+	private static int indexOfFirst(Class<?>[] p, Class<?> type) {
+		return indexOf(p, type);
+	}
+
+	private static int indexOfLast(Class<?>[] p, Class<?> type) {
+		for (int i = p.length - 1; i >= 0; i--) {
+			if (p[i] == type)
+				return i;
+		}
+		return -1;
 	}
 }
 

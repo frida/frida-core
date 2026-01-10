@@ -1,5 +1,6 @@
 /build/
 /deps/
+/src/android-helper/build/
 /src/barebone/agent/target/
 /src/barebone/agent/xpacks/
 /src/barebone/helpers/memory-scanner/target/
@@ -11,7 +12,6 @@
 /src/darwin/agent/osanalytics/osanalytics.js
 /src/darwin/agent/reportcrash/node_modules/
 /src/darwin/agent/reportcrash/reportcrash.js
-/src/droidy/helper/build/
 /src/fruity/helpers/build/
 /src/linux/agent/system-server/node_modules/
 /src/linux/agent/system-server/system-server.js

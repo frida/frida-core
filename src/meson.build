@@ -29,6 +29,30 @@ backend_vala_args_private = []
 backend_libs = []
 backend_deps = []
 
+if host_os == 'android' or have_droidy_backend
+  subdir('android-helper')
+
+  android_data = custom_target('frida-data-android',
+    input: [
+      'android.resources',
+      android_helper_dex,
+    ],
+    output: [
+      'frida-data-android.vapi',
+      'frida-data-android.h',
+      'frida-data-android.c',
+      'frida-data-android-blob' + resource_blob_extension,
+    ],
+    command: [
+      resource_compiler_cmd_array,
+      '-c', '@INPUT0@',
+      '-o', meson.current_build_dir() / 'frida-data-android',
+      '@INPUT1@',
+    ],
+  )
+  backend_sources += [android_data]
+endif
+
 if have_local_backend
   post_process_helper = post_process + ['executable', 're.frida.Helper']
 
@@ -287,31 +311,9 @@ if have_local_backend
     ]
 
     if host_os == 'android'
-      subdir('linux' / 'agent' / 'system-server')
-
       backend_vala_args_private += frida_selinux_vala_args
       backend_libs += frida_selinux
       backend_deps += frida_selinux_dep
-
-      android_data = custom_target('frida-data-android',
-        input: [
-          'linux' / 'frida-android.resources',
-          system_server_js,
-        ],
-        output: [
-          'frida-data-android.vapi',
-          'frida-data-android.h',
-          'frida-data-android.c',
-          'frida-data-android-blob' + resource_blob_extension,
-        ],
-        command: [
-          resource_compiler_cmd_array,
-          '-c', '@INPUT0@',
-          '-o', meson.current_build_dir() / 'frida-data-android',
-          '@INPUT1@',
-        ],
-      )
-      backend_sources += [android_data]
     endif
 
     helper_backend_sources = [
