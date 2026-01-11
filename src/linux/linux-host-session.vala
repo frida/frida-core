@@ -411,7 +411,7 @@ namespace Frida {
 				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
 				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
 
-				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
 				launcher.setenv ("CLASSPATH", helper_path, true);
 				process = launcher.spawn (
 					"app_process",
@@ -420,13 +420,51 @@ namespace Frida {
 					"re.frida.Helper",
 					instance_id
 				);
+				uint pid = uint.parse (process.get_identifier ());
 
 				var output = new DataInputStream (process.get_stdout_pipe ());
+				var errput = new DataInputStream (process.get_stderr_pipe ());
+
 				string? line = yield output.read_line_utf8_async (Priority.DEFAULT, cancellable);
-				if (line == null)
-					throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper");
-				if (line != "READY.")
-					throw new Error.PROTOCOL ("Unexpected output from Android helper");
+				if (line == null || line != "READY.") {
+					string error_details = "";
+
+					try {
+						StringBuilder sb = new StringBuilder ();
+						while (true) {
+							string? l = yield errput.read_line_utf8_async (Priority.DEFAULT, cancellable);
+							if (l == null)
+								break;
+							sb.append (l);
+							sb.append_c ('\n');
+						}
+						error_details = sb.str;
+					} catch (GLib.Error e) {
+					}
+
+					try {
+						yield process.wait_check_async (cancellable);
+					} catch (GLib.Error e) {
+						if (error_details.length == 0)
+							error_details = e.message;
+						else
+							error_details = error_details + "\n" + e.message;
+					}
+
+					string? logs = yield collect_logcat_for_pid (pid, cancellable);
+					if (logs != null)
+						error_details = error_details + "\n\n" + logs;
+
+					if (line == null) {
+						throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper: %s", error_details);
+					} else {
+						throw new Error.PROTOCOL ("Unexpected output from Android helper: %s\nstderr:\n%s",
+							line, error_details);
+					}
+				}
+
+				process_android_helper_stream.begin (output, "stdout");
+				process_android_helper_stream.begin (errput, "stderr");
 
 				var sc = new SocketClient ();
 				var stream = yield sc.connect_async (helper_address, cancellable);
@@ -455,6 +493,74 @@ namespace Frida {
 			helper.closed.disconnect (on_android_helper_client_closed);
 			android_helper_request = null;
 			android_helper_process = null;
+		}
+
+		private async void process_android_helper_stream (DataInputStream stream, string label) {
+			try {
+				while (true) {
+					string? line = yield stream.read_line_utf8_async (Priority.DEFAULT, io_cancellable);
+					if (line == null)
+						break;
+					printerr ("[android-helper %s] %s\n", label, line);
+				}
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private async string? collect_logcat_for_pid (uint pid, Cancellable? cancellable) throws IOError {
+			string output;
+
+			string header = "[logcat output]\n";
+
+			try {
+				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "--pid=%u".printf (pid));
+
+				yield p.communicate_utf8_async (null, cancellable, out output, null);
+
+				if (p.get_exit_status () == 0) {
+					output = output.chomp ();
+					return (output.length != 0) ? header + output : null;
+				}
+			} catch (GLib.Error e) {
+			}
+
+			try {
+				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "-v", "threadtime");
+
+				yield p.communicate_utf8_async (null, cancellable, out output, null);
+
+				if (p.get_exit_status () == 0) {
+					string? filtered = filter_logcat_threadtime_by_pid (output, pid);
+					if (filtered != null)
+						return header + filtered;
+				}
+			} catch (GLib.Error e) {
+			}
+
+			return null;
+		}
+
+		private static string? filter_logcat_threadtime_by_pid (string log, uint pid) {
+			var sb = new StringBuilder ();
+
+			foreach (string line in log.split ("\n")) {
+				if (line.length == 0)
+					continue;
+
+				string[] parts = line.split_set (" \t");
+				if (parts.length < 5)
+					continue;
+
+				uint line_pid = uint.parse (parts[2]);
+				if (line_pid != pid)
+					continue;
+
+				sb.append (line);
+				sb.append_c ('\n');
+			}
+
+			var result = sb.str.chomp ();
+			return (result.length != 0) ? result : null;
 		}
 
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
