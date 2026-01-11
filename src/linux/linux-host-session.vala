@@ -410,6 +410,7 @@ namespace Frida {
 				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
 				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
 				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
+				Posix.chmod (helper_path, 0644);
 
 				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
 				launcher.setenv ("CLASSPATH", helper_path, true);
