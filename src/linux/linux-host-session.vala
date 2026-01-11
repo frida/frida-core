@@ -404,13 +404,15 @@ namespace Frida {
 			}
 			android_helper_request = new Promise<AndroidHelperClient> ();
 
+			string? helper_path = null;
 			Subprocess? process = null;
 			try {
 				string instance_id = Uuid.string_random ().replace ("-", "");
-				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
-				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
+				helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
 				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
 				Posix.chmod (helper_path, 0644);
+
+				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
 
 				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
 				launcher.setenv ("CLASSPATH", helper_path, true);
@@ -479,6 +481,9 @@ namespace Frida {
 
 				return helper;
 			} catch (GLib.Error e) {
+				if (helper_path != null)
+					Posix.unlink (helper_path);
+
 				if (process != null)
 					process.force_exit ();
 
