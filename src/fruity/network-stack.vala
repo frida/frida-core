@@ -149,7 +149,7 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class VirtualNetworkStack : Object, NetworkStack {
-		public signal void outgoing_datagram (Bytes datagram);
+		public signal void outgoing_datagrams (Gee.Collection<Bytes> datagrams);
 
 		public Bytes? ethernet_address {
 			get;
@@ -181,6 +181,8 @@ namespace Frida.Fruity {
 		}
 
 		private State state = STARTED;
+
+		private Gee.Queue<Bytes>? pending_outgoing;
 
 		private Gee.Queue<Request> requests = new Gee.ArrayQueue<Request> ();
 		private unowned Thread<bool>? lwip_thread;
@@ -281,16 +283,26 @@ namespace Frida.Fruity {
 			return new Ipv6UdpSocket (this);
 		}
 
-		public void handle_incoming_datagram (Bytes datagram) throws Error {
+		public void handle_incoming_datagrams (Gee.Collection<Bytes> datagrams) throws Error {
 			check_started ();
 
 			check (perform_on_lwip_thread (() => {
-				var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) datagram.get_size (), POOL);
-				pbuf.take (datagram.get_data ());
+				begin_output ();
 
-				var err = handle.input (pbuf, ref handle);
-				if (err == OK)
-					*((void **) &pbuf) = null;
+				LWIP.ErrorCode err = OK;
+
+				foreach (var d in datagrams) {
+					var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) d.get_size (), POOL);
+					pbuf.take (d.get_data ());
+
+					err = handle.input (pbuf, ref handle);
+					if (err == OK)
+						*((void **) &pbuf) = null;
+					else
+						break;
+				}
+
+				end_output ();
 
 				return err;
 			}));
@@ -309,14 +321,39 @@ namespace Frida.Fruity {
 			return OK;
 		}
 
+		internal void begin_output () {
+			pending_outgoing = new Gee.ArrayQueue<Bytes> ();
+		}
+
+		internal void end_output () {
+			var datagrams = pending_outgoing;
+			pending_outgoing = null;
+			if (datagrams.is_empty)
+				return;
+
+			schedule_on_frida_thread (() => {
+				if (state == STARTED)
+					outgoing_datagrams (datagrams);
+				return Source.REMOVE;
+			});
+		}
+
 		private void emit_datagram (LWIP.PacketBuffer pbuf) {
 			var buffer = new uint8[pbuf.tot_len];
 			unowned uint8[] packet = pbuf.get_contiguous (buffer, pbuf.tot_len);
 			var datagram = new Bytes (packet[:pbuf.tot_len]);
 
+			if (pending_outgoing != null) {
+				pending_outgoing.offer (datagram);
+				return;
+			}
+
 			schedule_on_frida_thread (() => {
-				if (state == STARTED)
-					outgoing_datagram (datagram);
+				if (state == STARTED) {
+					var datagrams = new Gee.ArrayQueue<Bytes> ();
+					datagrams.offer (datagram);
+					outgoing_datagrams (datagrams);
+				}
 				return Source.REMOVE;
 			});
 		}
@@ -713,15 +750,21 @@ namespace Frida.Fruity {
 						}
 					}
 
+					netstack.begin_output ();
 					var output_err = pcb.output ();
+					netstack.end_output ();
+
 					if (output_err == RTE)
 						return output_err;
 
 					return OK;
 				}));
 
-				if (n == 0)
+				if (n == 0) {
+					if (state == CLOSED)
+						throw new IOError.CLOSED ("Connection is closed");
 					throw new IOError.WOULD_BLOCK ("Resource temporarily unavailable");
+				}
 
 				return n;
 			}

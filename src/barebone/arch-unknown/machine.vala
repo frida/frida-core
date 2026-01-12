@@ -22,12 +22,21 @@ namespace Frida.Barebone {
 			return 4096;
 		}
 
+		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+			throw_not_supported ();
+		}
+
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 				throws Error, IOError {
 		}
 
-		public async Allocation allocate_pages (uint64 physical_address, uint num_pages, Cancellable? cancellable)
+		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
+			throw_not_supported ();
+		}
+
+		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}
 
@@ -40,8 +49,7 @@ namespace Frida.Barebone {
 			throw_not_supported ();
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, uint64 landing_zone, Cancellable? cancellable)
-				throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}
 

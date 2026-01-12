@@ -33,8 +33,9 @@ namespace Frida {
 		private AgentDescriptor? agent;
 
 #if ANDROID
+		private Promise<AndroidHelperClient>? android_helper_request;
+		private Subprocess? android_helper_process;
 		private RoboLauncher robo_launcher;
-		internal SystemServerAgent system_server_agent;
 		private CrashMonitor? crash_monitor;
 #endif
 
@@ -74,9 +75,6 @@ namespace Frida {
 #endif
 
 #if ANDROID
-			system_server_agent = new SystemServerAgent (this);
-			system_server_agent.unloaded.connect (on_system_server_agent_unloaded);
-
 			robo_launcher = new RoboLauncher (this, io_cancellable);
 			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
@@ -90,8 +88,7 @@ namespace Frida {
 
 		public override async void preload (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			yield system_server_agent.preload (cancellable);
-
+			yield get_android_helper_client (cancellable);
 			yield robo_launcher.preload (cancellable);
 #endif
 		}
@@ -102,8 +99,16 @@ namespace Frida {
 			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
 
-			system_server_agent.unloaded.disconnect (on_system_server_agent_unloaded);
-			yield system_server_agent.close (cancellable);
+			if (android_helper_request != null) {
+				try {
+					var client = yield get_android_helper_client (cancellable);
+					client.closed.disconnect (on_android_helper_client_closed);
+					yield client.close (cancellable);
+				} catch (Error e) {
+				}
+			}
+
+			android_helper_process = null;
 #endif
 
 			yield base.close (cancellable);
@@ -168,7 +173,9 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			var opts = FrontmostQueryOptions._deserialize (options);
 #if ANDROID
-			var app = yield system_server_agent.get_frontmost_application (opts, cancellable);
+			var client = yield get_android_helper_client (cancellable);
+
+			var app = yield client.get_frontmost_application (opts, cancellable);
 			if (app.pid == 0)
 				return app;
 
@@ -194,7 +201,9 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			var opts = ApplicationQueryOptions._deserialize (options);
 #if ANDROID
-			var apps = yield system_server_agent.enumerate_applications (opts, cancellable);
+			var client = yield get_android_helper_client (cancellable);
+
+			var apps = yield client.enumerate_applications (opts, cancellable);
 
 			if (opts.scope != MINIMAL) {
 				var app_index_by_pid = new Gee.HashMap<uint, uint> ();
@@ -241,33 +250,12 @@ namespace Frida {
 		public override async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
 			var opts = ProcessQueryOptions._deserialize (options);
-			var processes = yield process_enumerator.enumerate_processes (opts);
-
 #if ANDROID
-			var process_index_by_pid = new Gee.HashMap<uint, uint> ();
-			int i = 0;
-			foreach (var process in processes)
-				process_index_by_pid[process.pid] = i++;
-
-			var extra = yield system_server_agent.get_process_parameters (process_index_by_pid.keys.to_array (), opts.scope,
-				cancellable);
-
-			foreach (var entry in extra.entries) {
-				uint pid = entry.key;
-				HashTable<string, Variant> extra_parameters = entry.value;
-
-				uint index = process_index_by_pid[pid];
-				HashTable<string, Variant> parameters = processes[index].parameters;
-				extra_parameters.foreach ((key, val) => {
-					if (key == "$name")
-						processes[index].name = val.get_string ();
-					else
-						parameters[key] = val;
-				});
-			}
+			var client = yield get_android_helper_client (cancellable);
+			return yield client.enumerate_processes (opts, cancellable);
+#else
+			return yield process_enumerator.enumerate_processes (opts);
 #endif
-
-			return processes;
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -350,7 +338,9 @@ namespace Frida {
 
 		public override async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			if (yield system_server_agent.try_stop_package_by_pid (pid, cancellable))
+			var client = yield get_android_helper_client (cancellable);
+
+			if (yield client.try_stop_package_by_pid (pid, cancellable))
 				return;
 #endif
 
@@ -402,11 +392,181 @@ namespace Frida {
 		}
 
 #if ANDROID
-		private void on_system_server_agent_unloaded (InternalAgent dead_agent) {
-			dead_agent.unloaded.disconnect (on_system_server_agent_unloaded);
+		internal async AndroidHelperClient get_android_helper_client (Cancellable? cancellable) throws Error, IOError {
+			while (android_helper_request != null) {
+				try {
+					return yield android_helper_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			android_helper_request = new Promise<AndroidHelperClient> ();
 
-			system_server_agent = new SystemServerAgent (this);
-			system_server_agent.unloaded.connect (on_system_server_agent_unloaded);
+			string? helper_path = null;
+			Subprocess? process = null;
+			try {
+				string instance_id = Uuid.string_random ().replace ("-", "");
+				helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
+				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
+				Posix.chmod (helper_path, 0644);
+
+				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
+
+				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
+				launcher.setenv ("CLASSPATH", helper_path, true);
+				process = launcher.spawn (
+					"app_process",
+					"/data/local/tmp",
+					"--nice-name=re.frida.helper",
+					"re.frida.Helper",
+					instance_id
+				);
+				uint pid = uint.parse (process.get_identifier ());
+
+				var output = new DataInputStream (process.get_stdout_pipe ());
+				var errput = new DataInputStream (process.get_stderr_pipe ());
+
+				string? line = yield output.read_line_utf8_async (Priority.DEFAULT, cancellable);
+				if (line == null || line != "READY.") {
+					string error_details = "";
+
+					try {
+						StringBuilder sb = new StringBuilder ();
+						while (true) {
+							string? l = yield errput.read_line_utf8_async (Priority.DEFAULT, cancellable);
+							if (l == null)
+								break;
+							sb.append (l);
+							sb.append_c ('\n');
+						}
+						error_details = sb.str;
+					} catch (GLib.Error e) {
+					}
+
+					try {
+						yield process.wait_check_async (cancellable);
+					} catch (GLib.Error e) {
+						if (error_details.length == 0)
+							error_details = e.message;
+						else
+							error_details = error_details + "\n" + e.message;
+					}
+
+					string? logs = yield collect_logcat_for_pid (pid, cancellable);
+					if (logs != null)
+						error_details = error_details + "\n\n" + logs;
+
+					if (line == null) {
+						throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper: %s", error_details);
+					} else {
+						throw new Error.PROTOCOL ("Unexpected output from Android helper: %s\nstderr:\n%s",
+							line, error_details);
+					}
+				}
+
+				process_android_helper_stream.begin (output, "stdout");
+				process_android_helper_stream.begin (errput, "stderr");
+
+				var sc = new SocketClient ();
+				var stream = yield sc.connect_async (helper_address, cancellable);
+
+				var helper = new AndroidHelperClient (stream);
+				helper.closed.connect (on_android_helper_client_closed);
+
+				android_helper_process = process;
+
+				android_helper_request.resolve (helper);
+
+				return helper;
+			} catch (GLib.Error e) {
+				if (helper_path != null)
+					Posix.unlink (helper_path);
+
+				if (process != null)
+					process.force_exit ();
+
+				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+
+				android_helper_request.reject (api_error);
+
+				throw_api_error (api_error);
+			}
+		}
+
+		private void on_android_helper_client_closed (AndroidHelperClient helper) {
+			helper.closed.disconnect (on_android_helper_client_closed);
+			android_helper_request = null;
+			android_helper_process = null;
+		}
+
+		private async void process_android_helper_stream (DataInputStream stream, string label) {
+			try {
+				while (true) {
+					string? line = yield stream.read_line_utf8_async (Priority.DEFAULT, io_cancellable);
+					if (line == null)
+						break;
+					printerr ("[android-helper %s] %s\n", label, line);
+				}
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private async string? collect_logcat_for_pid (uint pid, Cancellable? cancellable) throws IOError {
+			string output;
+
+			string header = "[logcat output]\n";
+
+			try {
+				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "--pid=%u".printf (pid));
+
+				yield p.communicate_utf8_async (null, cancellable, out output, null);
+
+				if (p.get_exit_status () == 0) {
+					output = output.chomp ();
+					return (output.length != 0) ? header + output : null;
+				}
+			} catch (GLib.Error e) {
+			}
+
+			try {
+				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "-v", "threadtime");
+
+				yield p.communicate_utf8_async (null, cancellable, out output, null);
+
+				if (p.get_exit_status () == 0) {
+					string? filtered = filter_logcat_threadtime_by_pid (output, pid);
+					if (filtered != null)
+						return header + filtered;
+				}
+			} catch (GLib.Error e) {
+			}
+
+			return null;
+		}
+
+		private static string? filter_logcat_threadtime_by_pid (string log, uint pid) {
+			var sb = new StringBuilder ();
+
+			foreach (string line in log.split ("\n")) {
+				if (line.length == 0)
+					continue;
+
+				string[] parts = line.split_set (" \t");
+				if (parts.length < 5)
+					continue;
+
+				uint line_pid = uint.parse (parts[2]);
+				if (line_pid != pid)
+					continue;
+
+				sb.append (line);
+				sb.append_c ('\n');
+			}
+
+			var result = sb.str.chomp ();
+			return (result.length != 0) ? result : null;
 		}
 
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
@@ -542,9 +702,9 @@ namespace Frida {
 
 			yield ensure_loaded (cancellable);
 
-			var system_server_agent = host_session.system_server_agent;
+			var helper = yield host_session.get_android_helper_client (cancellable);
 
-			var process_name = yield system_server_agent.get_process_name (package, entrypoint.uid, cancellable);
+			var process_name = yield helper.get_process_name (package, entrypoint.uid, cancellable);
 
 			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
@@ -554,8 +714,8 @@ namespace Frida {
 
 			uint pid = 0;
 			try {
-				yield system_server_agent.stop_package (package, entrypoint.uid, cancellable);
-				yield system_server_agent.start_package (package, entrypoint, cancellable);
+				yield helper.stop_package (package, entrypoint.uid, cancellable);
+				yield helper.start_package (package, entrypoint, cancellable);
 
 				var timeout = new TimeoutSource.seconds (20);
 				timeout.set_callback (() => {
@@ -758,9 +918,9 @@ namespace Frida {
 			set;
 		}
 
-		public ZygoteAgent (LinuxHostSession host_session, uint pid, string name) {
+		public ZygoteAgent (HostSessionConnection connection, uint pid, string name) {
 			Object (
-				host_session: host_session,
+				connection: connection,
 				pid: pid,
 				name: name
 			);
@@ -768,7 +928,7 @@ namespace Frida {
 
 		public async void load (Cancellable? cancellable) throws Error, IOError {
 #if ARM || ARM64
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
+			LinuxHelper helper = ((LinuxHostSession) connection.host_session).helper;
 			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
 #endif
@@ -792,328 +952,6 @@ namespace Frida {
 
 		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
 			return null;
-		}
-	}
-
-	private sealed class SystemServerAgent : InternalAgent {
-		private delegate void CompletionNotify ();
-
-		public SystemServerAgent (LinuxHostSession host_session) {
-			Object (
-				host_session: host_session,
-#if HAVE_V8
-				script_runtime: ScriptRuntime.V8
-#else
-				script_runtime: ScriptRuntime.DEFAULT
-#endif
-			);
-		}
-
-		public async void preload (Cancellable? cancellable) throws Error, IOError {
-			yield enumerate_applications (new ApplicationQueryOptions (), cancellable);
-
-			try {
-				yield get_process_name ("", 0, cancellable);
-			} catch (Error e) {
-			}
-
-			try {
-				yield start_package ("", new DefaultActivityEntrypoint (), cancellable);
-			} catch (Error e) {
-			}
-		}
-
-		public async HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options,
-				Cancellable? cancellable) throws Error, IOError {
-			var scope = options.scope;
-			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
-
-			Json.Node result = yield call ("getFrontmostApplication", new Json.Node[] { scope_node }, null, cancellable);
-
-			if (result.get_node_type () == NULL)
-				return HostApplicationInfo.empty ();
-
-			var item = result.get_array ();
-			var identifier = item.get_string_element (0);
-			var name = item.get_string_element (1);
-			var pid = (uint) item.get_int_element (2);
-			var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
-			if (scope != MINIMAL)
-				add_parameters_from_json (info.parameters, item.get_object_element (3));
-			return info;
-		}
-
-		public async HostApplicationInfo[] enumerate_applications (ApplicationQueryOptions options,
-				Cancellable? cancellable) throws Error, IOError {
-			var identifiers_array = new Json.Array ();
-			options.enumerate_selected_identifiers (identifier => {
-				identifiers_array.add_string_element (identifier);
-			});
-			var identifiers_node = new Json.Node.alloc ().init_array (identifiers_array);
-
-			var scope = options.scope;
-			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
-
-			Json.Node apps = yield call ("enumerateApplications", new Json.Node[] { identifiers_node, scope_node }, null,
-				cancellable);
-
-			var items = apps.get_array ();
-			var length = items.get_length ();
-
-			var result = new HostApplicationInfo[length];
-
-			for (var i = 0; i != length; i++) {
-				var item = items.get_array_element (i);
-				var identifier = item.get_string_element (0);
-				var name = item.get_string_element (1);
-				var pid = (uint) item.get_int_element (2);
-				var info = HostApplicationInfo (identifier, name, pid, make_parameters_dict ());
-				if (scope != MINIMAL)
-					add_parameters_from_json (info.parameters, item.get_object_element (3));
-				result[i] = info;
-			}
-
-			return result;
-		}
-
-		public async string get_process_name (string package, int uid, Cancellable? cancellable) throws Error, IOError {
-			var package_name_node = new Json.Node.alloc ().init_string (package);
-			var uid_node = new Json.Node.alloc ().init_int (uid);
-
-			Json.Node name = yield call ("getProcessName", new Json.Node[] { package_name_node, uid_node }, null, cancellable);
-
-			return name.get_string ();
-		}
-
-		public async Gee.Map<uint, HashTable<string, Variant>> get_process_parameters (uint[] pids, Scope scope,
-				Cancellable? cancellable) throws Error, IOError {
-			var pids_array = new Json.Array ();
-			foreach (uint pid in pids)
-				pids_array.add_int_element ((int64) pid);
-			var pids_node = new Json.Node.alloc ().init_array (pids_array);
-
-			var scope_node = new Json.Node.alloc ().init_string (scope.to_nick ());
-
-			Json.Node by_pid = yield call ("getProcessParameters", new Json.Node[] { pids_node, scope_node }, null,
-				cancellable);
-
-			var result = new Gee.HashMap<uint, HashTable<string, Variant>> ();
-			by_pid.get_object ().foreach_member ((object, pid_str, parameters_node) => {
-				uint pid = uint.parse (pid_str);
-
-				var parameters = make_parameters_dict ();
-				add_parameters_from_json (parameters, parameters_node.get_object ());
-
-				result[pid] = parameters;
-			});
-			return result;
-		}
-
-		public async void start_package (string package, PackageEntrypoint entrypoint, Cancellable? cancellable)
-				throws Error, IOError {
-			var package_node = new Json.Node.alloc ().init_string (package);
-			var uid_node = new Json.Node.alloc ().init_int (entrypoint.uid);
-
-			if (entrypoint is DefaultActivityEntrypoint) {
-				var activity_node = new Json.Node.alloc ().init_null ();
-
-				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, null, cancellable);
-			} else if (entrypoint is ActivityEntrypoint) {
-				var e = entrypoint as ActivityEntrypoint;
-
-				var activity_node = new Json.Node.alloc ().init_string (e.activity);
-
-				yield call ("startActivity", new Json.Node[] { package_node, activity_node, uid_node }, null, cancellable);
-			} else if (entrypoint is BroadcastReceiverEntrypoint) {
-				var e = entrypoint as BroadcastReceiverEntrypoint;
-
-				var receiver_node = new Json.Node.alloc ().init_string (e.receiver);
-				var action_node = new Json.Node.alloc ().init_string (e.action);
-
-				yield call ("sendBroadcast", new Json.Node[] { package_node, receiver_node, action_node, uid_node }, null,
-					cancellable);
-			} else {
-				assert_not_reached ();
-			}
-		}
-
-		public async void stop_package (string package, int uid, Cancellable? cancellable) throws Error, IOError {
-			var package_node = new Json.Node.alloc ().init_string (package);
-			var uid_node = new Json.Node.alloc ().init_int (uid);
-
-			yield call ("stopPackage", new Json.Node[] { package_node, uid_node }, null, cancellable);
-		}
-
-		public async bool try_stop_package_by_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
-			var pid_node = new Json.Node.alloc ().init_int (pid);
-
-			Json.Node success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_node }, null, cancellable);
-
-			return success.get_boolean ();
-		}
-
-		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
-			return LocalProcesses.get_pid ("system_server");
-		}
-
-		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
-			return (string) Frida.Data.Android.get_system_server_js_blob ().data;
-		}
-
-#if ARM || ARM64
-		protected override async void load_script (Cancellable? cancellable) throws Error, IOError {
-			var suspended_threads = yield suspend_sensitive_threads (cancellable);
-			try {
-				yield base.load_script (cancellable);
-			} finally {
-				resume_threads (suspended_threads);
-			}
-		}
-
-		private async Gee.List<uint> suspend_sensitive_threads (Cancellable? cancellable) throws Error, IOError {
-			var thread_ids = new Gee.ArrayList<uint> ();
-			Dir dir;
-			try {
-				dir = Dir.open ("/proc/%u/task".printf (target_pid));
-			} catch (FileError e) {
-				throw new Error.PROCESS_NOT_FOUND ("Unable to query system_server threads: %s", e.message);
-			}
-			string? name;
-			while ((name = dir.read_name ()) != null) {
-				var tid = uint.parse (name);
-				thread_ids.add (tid);
-			}
-
-			var suspended_tids = new Gee.ArrayList<uint> ();
-			uint pending = 1;
-
-			CompletionNotify on_complete = () => {
-				pending--;
-				if (pending == 0) {
-					var source = new IdleSource ();
-					source.set_callback (suspend_sensitive_threads.callback);
-					source.attach (MainContext.get_thread_default ());
-				}
-			};
-
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
-			foreach (var tid in thread_ids) {
-				bool safe_to_suspend = false;
-				string thread_name;
-				if (tid == target_pid) {
-					safe_to_suspend = true;
-					thread_name = "main";
-				} else {
-					try {
-						FileUtils.get_contents ("/proc/%u/task/%u/comm".printf (target_pid, tid), out thread_name);
-						thread_name = thread_name.chomp ();
-						safe_to_suspend = (thread_name == "ActivityManager")
-							|| thread_name == "NetworkPolicy"
-							|| thread_name.has_prefix ("WifiHandler")
-							|| thread_name == "android.anim"
-							|| thread_name == "android.display"
-							|| thread_name == "android.ui"
-							|| thread_name.has_prefix ("binder:")
-							|| thread_name == "jobscheduler.bg"
-							;
-					} catch (FileError e) {
-					}
-				}
-				if (safe_to_suspend) {
-					pending++;
-					await_syscall_for_thread.begin (tid, thread_name, suspended_tids, helper, cancellable, on_complete);
-				}
-			}
-
-			on_complete ();
-
-			yield;
-
-			on_complete = null;
-
-			return suspended_tids;
-		}
-
-		private async void await_syscall_for_thread (uint tid, string thread_name, Gee.Collection<uint> suspended_tids,
-				LinuxHelper helper, Cancellable? cancellable, CompletionNotify on_complete) {
-			try {
-				yield helper.await_syscall (tid, RESTART | IOCTL | POLL_LIKE | FUTEX, cancellable);
-				suspended_tids.add (tid);
-			} catch (GLib.Error e) {
-				if (e is Error.TIMED_OUT) {
-					printerr ("Unexpectedly timed out while waiting for syscall on %s thread; please file a bug!\n",
-						thread_name);
-				}
-			}
-
-			on_complete ();
-		}
-
-		private void resume_threads (Gee.List<uint> thread_ids) {
-			LinuxHelper helper = ((LinuxHostSession) host_session).helper;
-			foreach (var tid in thread_ids)
-				helper.resume_syscall.begin (tid, null);
-		}
-#endif
-
-		private static void add_parameters_from_json (HashTable<string, Variant> parameters, Json.Object object) {
-			var iter = Json.ObjectIter ();
-			unowned string name;
-			unowned Json.Node val;
-			iter.init (object);
-			while (iter.next (out name, out val)) {
-				if (name == "$icon") {
-					var png = new Bytes.take (Base64.decode (val.get_string ()));
-
-					var icons = new VariantBuilder (new VariantType.array (VariantType.VARDICT));
-
-					icons.open (VariantType.VARDICT);
-					icons.add ("{sv}", "format", new Variant.string ("png"));
-					icons.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), png.get_data (), true,
-						png));
-					icons.close ();
-
-					parameters["icons"] = icons.end ();
-
-					continue;
-				}
-
-				parameters[name] = variant_from_json (val);
-			}
-		}
-
-		private static Variant variant_from_json (Json.Node node) {
-			switch (node.get_node_type ()) {
-				case ARRAY: {
-					Json.Array array = node.get_array ();
-
-					uint length = array.get_length ();
-					assert (length >= 1);
-
-					var first_element = variant_from_json (array.get_element (0));
-					var builder = new VariantBuilder (new VariantType.array (first_element.get_type ()));
-					builder.add_value (first_element);
-					for (uint i = 1; i != length; i++)
-						builder.add_value (variant_from_json (array.get_element (i)));
-					return builder.end ();
-				}
-				case VALUE: {
-					Type type = node.get_value_type ();
-
-					if (type == typeof (string))
-						return new Variant.string (node.get_string ());
-
-					if (type == typeof (int64))
-						return new Variant.int64 (node.get_int ());
-
-					if (type == typeof (bool))
-						return new Variant.boolean (node.get_boolean ());
-
-					assert_not_reached ();
-				}
-				default:
-					assert_not_reached ();
-			}
 		}
 	}
 
@@ -1531,129 +1369,6 @@ namespace Frida {
 
 				return false;
 			}
-		}
-	}
-
-	private static string canonicalize_class_name (string klass, string package) {
-		var result = new StringBuilder (klass);
-
-		if (klass.has_prefix (".")) {
-			result.prepend (package);
-		} else if (klass.index_of (".") == -1) {
-			result.prepend_c ('.');
-			result.prepend (package);
-		}
-
-		return result.str;
-	}
-
-	private abstract class PackageEntrypoint : Object {
-		public int uid {
-			get;
-			set;
-		}
-
-		public static PackageEntrypoint parse (string package, HostSpawnOptions options) throws Error {
-			PackageEntrypoint? entrypoint = null;
-
-			HashTable<string, Variant> aux = options.aux;
-
-			Variant? activity_value = aux["activity"];
-			if (activity_value != null) {
-				if (!activity_value.is_of_type (VariantType.STRING))
-					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
-				string activity = canonicalize_class_name (activity_value.get_string (), package);
-
-				if (aux.contains ("action")) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'action' option should only be specified when a 'receiver' is specified");
-				}
-
-				entrypoint = new ActivityEntrypoint (activity);
-			}
-
-			Variant? receiver_value = aux["receiver"];
-			if (receiver_value != null) {
-				if (!receiver_value.is_of_type (VariantType.STRING))
-					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
-				string receiver = canonicalize_class_name (receiver_value.get_string (), package);
-
-				if (entrypoint != null) {
-					throw new Error.INVALID_ARGUMENT (
-						"Only one of 'activity' or 'receiver' (with 'action') may be specified");
-				}
-
-				Variant? action_value = aux["action"];
-				if (action_value == null)
-					throw new Error.INVALID_ARGUMENT ("The 'action' option is required when 'receiver' is specified");
-				if (!action_value.is_of_type (VariantType.STRING))
-					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
-				string action = action_value.get_string ();
-
-				entrypoint = new BroadcastReceiverEntrypoint (receiver, action);
-			}
-
-			if (entrypoint == null)
-				entrypoint = new DefaultActivityEntrypoint ();
-
-			Variant? uid_value = aux["uid"];
-			if (uid_value != null) {
-				if (!uid_value.is_of_type (VariantType.INT64))
-					throw new Error.INVALID_ARGUMENT ("The 'uid' option must be an integer");
-				entrypoint.uid = (int) uid_value.get_int64 ();
-			}
-
-			return entrypoint;
-		}
-	}
-
-	private sealed class DefaultActivityEntrypoint : PackageEntrypoint {
-		public DefaultActivityEntrypoint () {
-			Object ();
-		}
-	}
-
-	private sealed class ActivityEntrypoint : PackageEntrypoint {
-		public string activity {
-			get;
-			construct;
-		}
-
-		public ActivityEntrypoint (string activity) {
-			Object (activity: activity);
-		}
-	}
-
-	private sealed class BroadcastReceiverEntrypoint : PackageEntrypoint {
-		public string receiver {
-			get;
-			construct;
-		}
-
-		public string action {
-			get;
-			construct;
-		}
-
-		public BroadcastReceiverEntrypoint (string receiver, string action) {
-			Object (receiver: receiver, action: action);
-		}
-	}
-
-	namespace LocalProcesses {
-		internal uint find_pid (string name) {
-			foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
-				if (info.name == name)
-					return info.pid;
-			}
-			return 0;
-		}
-
-		internal uint get_pid (string name) throws Error {
-			var pid = find_pid (name);
-			if (pid == 0)
-				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with name '%s'".printf (name));
-			return pid;
 		}
 	}
 #endif

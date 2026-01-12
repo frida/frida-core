@@ -31,9 +31,18 @@ namespace Frida.Fruity {
 		private uint16 ntb_out_max_datagrams;
 		private size_t max_in_transfers;
 		private size_t max_out_transfers;
+		private size_t max_out_bytes_in_flight;
+		private uint16 ndp_reserved_slots;
+		private uint16 ndp_fixed_header_size;
+
 		private VirtualNetworkStack? _netstack;
+		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
+		private bool input_flush_scheduled = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
-		private bool writing = false;
+		private size_t out_in_flight_count = 0;
+		private size_t out_in_flight_bytes = 0;
+		private Gee.Map<Future<uint>, uint16> out_in_flight_sizes = new Gee.HashMap<Future<uint>, uint16> ();
+		private bool out_topup_scheduled = false;
 		private uint16 next_outgoing_sequence = 1;
 
 		private InetAddress? _remote_ipv6_address;
@@ -115,7 +124,7 @@ namespace Frida.Fruity {
 			ndp_out_divisor = ntb_params.read_uint16 (20);
 			ndp_out_payload_remainder = ntb_params.read_uint16 (22);
 			ndp_out_alignment = ntb_params.read_uint16 (24);
-			ntb_out_max_datagrams = uint16.min (ntb_params.read_uint16 (26), 16);
+			ntb_out_max_datagrams = ntb_params.read_uint16 (26);
 
 			if (ntb_in_max_size != device_ntb_in_max_size) {
 				var ntb_size_buf = new BufferBuilder (LITTLE_ENDIAN)
@@ -137,17 +146,24 @@ namespace Frida.Fruity {
 				max_out_transfers = (5 * MAX_TRANSFER_MEMORY) / ntb_out_max_size;
 			} else if (speed == LibUSB.Speed.HIGH) {
 				max_in_transfers = MAX_TRANSFER_MEMORY / ntb_in_max_size;
-				max_out_transfers = MAX_TRANSFER_MEMORY / ntb_out_max_size;
+				max_out_transfers = (3 * MAX_TRANSFER_MEMORY) / ntb_out_max_size;
+				max_out_transfers = size_t.max (max_out_transfers, 6);
+				max_out_transfers = size_t.min (max_out_transfers, 16);
 			} else {
 				max_in_transfers = 4;
 				max_out_transfers = 4;
 			}
 
+			max_out_bytes_in_flight = 4 * MAX_TRANSFER_MEMORY;
+
+			ndp_reserved_slots = (uint16) uint16.min (21, ntb_out_max_datagrams);
+			ndp_fixed_header_size = (uint16) align (8 + (ndp_reserved_slots * 4) + 4, ndp_out_alignment);
+
 			Usb.check (handle.set_interface_alt_setting (config.data_iface, config.data_altsetting),
 				"Failed to set USB interface alt setting");
 
 			_netstack = new VirtualNetworkStack (new Bytes (mac_address), null, 1500);
-			_netstack.outgoing_datagram.connect (on_netif_outgoing_datagram);
+			_netstack.outgoing_datagrams.connect (on_netif_outgoing_datagrams);
 
 			process_incoming_datagrams.begin ();
 
@@ -234,63 +250,96 @@ namespace Frida.Fruity {
 							notify_property ("remote-ipv6-address");
 					}
 
-					_netstack.handle_incoming_datagram (datagram);
+					on_incoming_datagram (datagram);
 				}
 
 				ndp_index = next_ndp_index;
 			} while (ndp_index != 0);
 		}
 
-		private void on_netif_outgoing_datagram (Bytes datagram) {
-			pending_output.offer (datagram);
+		private void on_incoming_datagram (Bytes datagram) {
+			pending_input.offer (datagram);
 
-			if (!writing) {
-				writing = true;
+			if (!input_flush_scheduled) {
 				var source = new IdleSource ();
 				source.set_callback (() => {
-					process_pending_output.begin ();
-					return false;
+					input_flush_scheduled = false;
+					flush_pending_input ();
+					return Source.REMOVE;
 				});
 				source.attach (MainContext.get_thread_default ());
+				input_flush_scheduled = true;
 			}
 		}
 
-		private async void process_pending_output () {
+		private void flush_pending_input () {
+			var datagrams = pending_input;
+			pending_input = new Gee.ArrayQueue<Bytes> ();
 			try {
-				while (!pending_output.is_empty) {
-					var pending = new Gee.ArrayList<Promise<uint>> ();
-
-					do {
-						var request = transfer_next_output_batch ();
-						pending.add (request);
-					} while (pending.size < max_out_transfers && !pending_output.is_empty);
-
-					foreach (var request in pending)
-						yield request.future.wait_async (io_cancellable);
-				}
-			} catch (GLib.Error e) {
-			} finally {
-				writing = false;
+				_netstack.handle_incoming_datagrams (datagrams);
+			} catch (Error e) {
 			}
 		}
 
-		private Promise<uint> transfer_next_output_batch () {
-			size_t num_datagrams = ntb_out_max_datagrams;
-			TransferLayout layout;
-			while ((layout = TransferLayout.compute (pending_output, num_datagrams, ndp_out_alignment,
-					ndp_out_divisor, ndp_out_payload_remainder)).size > ntb_out_max_size) {
-				num_datagrams--;
+		private void on_netif_outgoing_datagrams (Gee.Collection<Bytes> datagrams) {
+			foreach (var d in datagrams)
+				pending_output.offer (d);
+
+			schedule_top_up ();
+		}
+
+		private void schedule_top_up () {
+			if (out_topup_scheduled)
+				return;
+			out_topup_scheduled = true;
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				out_topup_scheduled = false;
+				top_up_output_window ();
+				return Source.REMOVE;
+			});
+			source.attach (MainContext.get_thread_default ());
+		}
+
+		private void top_up_output_window () {
+			while (!pending_output.is_empty && out_in_flight_count < max_out_transfers) {
+				size_t max_datagrams = size_t.min (pending_output.size, (size_t) ndp_reserved_slots);
+				var layout = TransferLayout.compute (pending_output, max_datagrams, ntb_out_max_size, ndp_fixed_header_size,
+					ndp_out_alignment, ndp_out_divisor, ndp_out_payload_remainder);
+				if ((out_in_flight_bytes + layout.size) > max_out_bytes_in_flight)
+					break;
+
+				var batch = new Gee.ArrayList<Bytes> ();
+				for (var i = 0; i != layout.offsets.length; i++)
+					batch.add (pending_output.poll ());
+				var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+
+				var request = new Promise<uint> ();
+				do_transfer_output_batch.begin (transfer, request);
+
+				out_in_flight_count++;
+				out_in_flight_bytes += layout.size;
+
+				out_in_flight_sizes.set (request.future, layout.size);
+
+				request.future.then (fut => {
+					on_output_completed (fut);
+				});
 			}
+		}
 
-			var batch = new Gee.ArrayList<Bytes> ();
-			for (var i = 0; i != layout.offsets.size; i++)
-				batch.add (pending_output.poll ());
+		private void on_output_completed (Future<uint> fut) {
+			uint16 size;
+			out_in_flight_sizes.unset (fut, out size);
 
-			var transfer = build_output_transfer (batch, layout, next_outgoing_sequence++);
+			out_in_flight_count--;
+			out_in_flight_bytes -= size;
 
-			var request = new Promise<uint> ();
-			do_transfer_output_batch.begin (transfer, request);
-			return request;
+			if (fut.error != null)
+				return;
+
+			top_up_output_window ();
 		}
 
 		private async void do_transfer_output_batch (Bytes transfer, Promise<uint> request) {
@@ -306,52 +355,44 @@ namespace Frida.Fruity {
 			public uint16 size;
 			public uint16 ndp_header_offset;
 			public uint16 ndp_header_size;
-			public Gee.List<uint16> offsets;
+			public uint16[] offsets;
 
-			public static TransferLayout compute (Gee.Collection<Bytes> datagrams, size_t max_datagrams, size_t ndp_alignment,
+			public static TransferLayout compute (Gee.Collection<Bytes> datagrams, size_t max_datagrams,
+					uint32 max_transfer_size, uint16 ndp_fixed_header_size, size_t ndp_alignment,
 					size_t datagram_modulus, size_t datagram_remainder) {
-				size_t ndp_header_base_size = 4 + 2 + 2;
-				size_t ndp_entry_size = 2 + 2;
 				size_t ethernet_header_size = 14;
 
 				size_t ndp_header_offset = align (TRANSFER_HEADER_SIZE, ndp_alignment, 0);
-				size_t num_datagram_slots = size_t.min (datagrams.size, max_datagrams);
-				size_t ndp_header_size = ndp_header_base_size + ((num_datagram_slots + 1) * ndp_entry_size);
 
-				size_t current_transfer_size = ndp_header_offset + ndp_header_size;
-				var offsets = new Gee.ArrayList<uint16> ();
+				size_t current_transfer_size = ndp_header_offset + ndp_fixed_header_size;
+				var offsets = new uint16[max_datagrams];
 
-				uint i = 0;
+				int i = 0;
 				foreach (var datagram in datagrams) {
 					var size = (uint16) datagram.get_size ();
 
 					size_t start_offset =
 						align (current_transfer_size + ethernet_header_size, datagram_modulus, datagram_remainder);
 					size_t end_offset = start_offset + size;
-					if (end_offset > uint16.MAX)
+					if (end_offset > uint16.MAX || end_offset > max_transfer_size)
 						break;
 
 					current_transfer_size = end_offset;
-					offsets.add ((uint16) start_offset);
+					offsets[i] = (uint16) start_offset;
 
 					i++;
 					if (i == max_datagrams)
 						break;
 				}
 
+				offsets.resize (i);
+
 				return new TransferLayout () {
 					size = (uint16) current_transfer_size,
 					ndp_header_offset = (uint16) ndp_header_offset,
-					ndp_header_size = (uint16) ndp_header_size,
-					offsets = offsets,
+					ndp_header_size = ndp_fixed_header_size,
+					offsets = (owned) offsets,
 				};
-			}
-
-			private static size_t align (size_t val, size_t modulus, size_t remainder) {
-				var delta = val % modulus;
-				if (delta != remainder)
-					return val + modulus - delta + remainder;
-				return val;
 			}
 		}
 
@@ -408,6 +449,13 @@ namespace Frida.Fruity {
 				return null;
 
 			return new InetAddress.from_bytes (datagram[22:22 + 16].get_data (), IPV6);
+		}
+
+		private static size_t align (size_t val, size_t modulus, size_t remainder = 0) {
+			var delta = val % modulus;
+			if (delta != remainder)
+				return val + modulus - delta + remainder;
+			return val;
 		}
 	}
 

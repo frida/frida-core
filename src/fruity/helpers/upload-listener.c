@@ -67,7 +67,7 @@ failure:
     if (fd != -1)
       api->close (fd);
 
-    return ((uint64_t) error_code << 56);
+    return ((uint64_t) error_code << 57);
   }
 }
 

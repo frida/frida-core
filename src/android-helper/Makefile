@@ -4,8 +4,12 @@ ANDROID_SDK_ROOT ?= $(shell echo ~/Library/Android/sdk)
 android_platform := android-$(ANDROID_API_LEVEL)
 android_jar := $(ANDROID_SDK_ROOT)/platforms/$(android_platform)/android.jar
 
-build/frida-helper.dex: build/frida-helper.jar
-	dx --dex --output=$@ $<
+helper.dex: build/frida-helper.jar
+	d8 \
+		--classpath $(android_jar) \
+		--output build/ \
+		$<
+	mv build/classes.dex $@
 
 build/frida-helper.jar: re/frida/Helper.java
 	javac \

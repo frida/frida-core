@@ -1,12 +1,21 @@
 backend_sources += files(
   'barebone-host-session.vala',
+  'config.vala',
+  'agent-connection.vala',
   'script.vala',
   'machine.vala',
   'allocator.vala',
   'callback.vala',
   'memory-scanner.vala',
   'interceptor.vala',
+  'c-module.vala',
   'rust-module.vala',
+  'console.vala',
+  'layout.vala',
+  'elf.vala',
+  'img4.vala',
+  'lzfse.vala',
+  'qmp-client.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',
@@ -59,4 +68,3 @@ backend_sources += custom_target('frida-data-barebone',
 
 backend_vala_args += gum_vala_args
 backend_vala_args_private += '--pkg=quickjs'
-backend_deps += quickjs_dep

@@ -12,9 +12,11 @@ if not meson.get_compiler('vala').version().endswith('-frida')
   error('''Incompatible Vala compiler detected.
 
 Frida currently relies on features not yet upstream. Grab the Frida-optimized
-Vala compiler from:
+Vala sources from:
 
-    https://github.com/frida/vala''')
+    https://github.com/frida/vala
+
+and compile them with Meson.''')
 endif
 
 c_languages = ['c', 'cpp']
@@ -30,18 +32,34 @@ frida_version = get_option('frida_version')
 if frida_version == ''
   frida_version = run_command(releng / 'frida_version.py', meson.project_source_root(), check: true).stdout().strip()
 endif
-tokens = frida_version.split('.')
-frida_major_version = tokens[0].to_int()
-frida_minor_version = tokens[1].to_int()
-if tokens.length() == 4
-  frida_micro_version = tokens[2].split('-')[0].to_int() - 1
-  frida_nano_version = tokens[3].to_int() + 1
+
+is_dev = frida_version.contains('-dev.')
+if is_dev
+  dev_parts = frida_version.split('-dev.')
+  assert(dev_parts.length() == 2)
+  prefix = dev_parts[0]
+  frida_nano_version = dev_parts[1].to_int() + 1
 else
-  assert(tokens.length() == 3)
-  frida_micro_version = tokens[2].to_int()
+  prefix = frida_version
   frida_nano_version = 0
 endif
-frida_profile = (frida_version != '0.0.0' and frida_nano_version == 0) ? 'prod' : 'dev'
+
+parts = prefix.split('-')
+core = parts[0]
+has_suffix = parts.length() > 1
+
+core_tokens = core.split('.')
+assert(core_tokens.length() == 3)
+
+frida_major_version = core_tokens[0].to_int()
+frida_minor_version = core_tokens[1].to_int()
+micro_encoded = core_tokens[2].to_int()
+
+if is_dev and not has_suffix
+  frida_micro_version = micro_encoded - 1
+else
+  frida_micro_version = micro_encoded
+endif
 
 api_version = '1.0'
 
@@ -90,6 +108,12 @@ elif host_machine.cpu_family() == 'mips64'
   else
     host_abi = 'mips64'
   endif
+elif host_machine.cpu_family() == 'riscv32'
+  host_arch = 'riscv'
+  host_abi = 'riscv32'
+elif host_machine.cpu_family() == 'riscv64'
+  host_arch = 'riscv'
+  host_abi = 'riscv64'
 else
   host_arch = host_machine.cpu_family()
   host_abi = host_arch
@@ -234,6 +258,7 @@ cpu_defines = [
   ['arm', 'HAVE_ARM'],
   ['arm64', 'HAVE_ARM64'],
   ['mips', 'HAVE_MIPS'],
+  ['riscv', 'HAVE_RISCV'],
 ]
 foreach d : cpu_defines
   if d.get(0) == host_arch
@@ -269,12 +294,14 @@ if host_os == 'linux'
 #endif
 '''
   if cc.compiles(glibc_src, name: 'compiling for glibc')
-    cdata.set('HAVE_GLIBC', 1)
+    libc = 'glibc'
   elif cc.compiles(uclibc_src, name: 'compiling for uClibc')
-    cdata.set('HAVE_UCLIBC', 1)
+    libc = 'uclibc'
   else
-    cdata.set('HAVE_MUSL', 1)
+    libc = 'musl'
   endif
+  cdata.set('HAVE_' + libc.to_upper(), 1)
+  vala_flags += '--define=' + libc.to_upper()
 endif
 
 if get_option('b_sanitize') == 'address'
@@ -288,6 +315,7 @@ gum_dep = dependency('frida-gum-1.0', default_options: [
 gumjs_dep = dependency('frida-gumjs-1.0')
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 
+glib_version_req = '>=2.74'
 glib_options = [
   'cocoa=disabled',
   'selinux=disabled',
@@ -311,12 +339,12 @@ if optimize_for_prod
   gee_options += 'disable-internal-asserts=true'
 endif
 
-glib_dep = dependency('glib-2.0', version: '>=2.72', default_options: glib_options)
+glib_dep = dependency('glib-2.0', version: glib_version_req, default_options: glib_options)
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8', default_options: gee_options)
-json_glib_dep = dependency('json-glib-1.0', default_options: [
+json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
   'introspection=disabled',
   'gtk_doc=disabled',
   'tests=false',
@@ -340,8 +368,9 @@ quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), de
   'atomics=disabled',
   'stack_check=disabled',
 ])
+lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'))
 
-native_glib_dep = dependency('glib-2.0', version: '>=2.74', native: true, default_options: glib_options)
+native_glib_dep = dependency('glib-2.0', version: glib_version_req, native: true, default_options: glib_options)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true, default_options: gee_options)
 native_brotlienc_dep = dependency('libbrotlienc', native: true)
@@ -398,6 +427,10 @@ else
 endif
 
 have_local_backend = get_option('local_backend').allowed()
+have_simmy_backend = get_option('simmy_backend') \
+    .disable_auto_if(host_os != 'macos') \
+    .require(host_os == 'macos', error_message: 'Simmy backend is only available on macOS') \
+    .allowed()
 have_fruity_backend = get_option('fruity_backend') \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
@@ -406,7 +439,7 @@ have_droidy_backend = get_option('droidy_backend') \
     .allowed()
 have_socket_backend = get_option('socket_backend').allowed()
 have_barebone_backend = get_option('barebone_backend') \
-    .disable_if(not quickjs_dep.found()) \
+    .disable_if(not (quickjs_dep.found() and lzfse_dep.found())) \
     .disable_auto_if(not host_docks_mobile_devices) \
     .allowed()
 compiler_backend_opt = get_option('compiler_backend') \
@@ -486,6 +519,7 @@ build_tests = get_option('tests') \
     .allowed()
 
 foreach b : [['local', have_local_backend],
+             ['simmy', have_simmy_backend],
              ['fruity', have_fruity_backend],
              ['droidy', have_droidy_backend],
              ['socket', have_socket_backend],
@@ -556,9 +590,6 @@ if have_fruity_backend
     'dns=disabled',
     'arp=disabled',
     'ethernet=enabled',
-    'tcp_mss=4036',
-    'tcp_snd_buf=65535',
-    'tcp_wnd=65535',
   ]
   if optimize_for_prod
     lwip_options += 'lwip_debug=disabled'
@@ -574,7 +605,12 @@ if quickjs_dep.found()
   backend_reqs_private += 'quickjs'
 endif
 
-if host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>')
+if lzfse_dep.found()
+  backend_deps_private += lzfse_dep
+  backend_reqs_private += 'lzfse'
+endif
+
+if host_os_family in ['darwin', 'freebsd'] or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
   vala_flags += '--define=HAVE_OPENPTY'
 endif
 
@@ -646,6 +682,9 @@ endif
 if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
+if host_os_family == 'freebsd'
+  backend_libs_private += ['-lutil']
+endif
 
 if get_option('devkits').length() != 0
   if get_option('default_library') != 'static'
@@ -654,6 +693,7 @@ if get_option('devkits').length() != 0
   mkdevkit = [python, releng / 'mkdevkit.py']
   uninstalled_dir = meson.global_build_root() / 'meson-uninstalled'
   devkit_options = [
+    '--dep-symbol-scope', get_option('devkit_symbol_scope'),
     '--cc', '>>>', cc.cmd_array(), '<<<',
     '--c-args', '>>>', get_option('c_args'), '<<<',
     '--pkg-config', '>>>', find_program('pkg-config'), '<<<',
@@ -778,6 +818,7 @@ endif
 summary(
   {
     'local': have_local_backend,
+    'simmy': have_simmy_backend,
     'fruity': have_fruity_backend,
     'droidy': have_droidy_backend,
     'socket': have_socket_backend,

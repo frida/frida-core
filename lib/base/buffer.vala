@@ -356,8 +356,18 @@ namespace Frida {
 			return *((int8 *) get_pointer (offset, sizeof (int8)));
 		}
 
+		public unowned Buffer write_int8 (size_t offset, int8 val) {
+			*((int8 *) get_pointer (offset, sizeof (int8))) = val;
+			return this;
+		}
+
 		public uint8 read_uint8 (size_t offset) {
 			return *get_pointer (offset, sizeof (uint8));
+		}
+
+		public unowned Buffer write_uint8 (size_t offset, uint8 val) {
+			*((uint8 *) get_pointer (offset, sizeof (uint8))) = val;
+			return this;
 		}
 
 		public int16 read_int16 (size_t offset) {
@@ -367,6 +377,14 @@ namespace Frida {
 				: int16.from_little_endian (val);
 		}
 
+		public unowned Buffer write_int16 (size_t offset, int16 val) {
+			int16 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int16 *) get_pointer (offset, sizeof (int16))) = target_val;
+			return this;
+		}
+
 		public uint16 read_uint16 (size_t offset) {
 			uint16 val = *((uint16 *) get_pointer (offset, sizeof (uint16)));
 			return (byte_order == BIG_ENDIAN)
@@ -374,11 +392,27 @@ namespace Frida {
 				: uint16.from_little_endian (val);
 		}
 
+		public unowned Buffer write_uint16 (size_t offset, uint16 val) {
+			uint16 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((uint16 *) get_pointer (offset, sizeof (uint16))) = target_val;
+			return this;
+		}
+
 		public int32 read_int32 (size_t offset) {
 			int32 val = *((int32 *) get_pointer (offset, sizeof (int32)));
 			return (byte_order == BIG_ENDIAN)
 				? int32.from_big_endian (val)
 				: int32.from_little_endian (val);
+		}
+
+		public unowned Buffer write_int32 (size_t offset, int32 val) {
+			int32 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int32 *) get_pointer (offset, sizeof (int32))) = target_val;
+			return this;
 		}
 
 		public uint32 read_uint32 (size_t offset) {
@@ -401,6 +435,14 @@ namespace Frida {
 			return (byte_order == BIG_ENDIAN)
 				? int64.from_big_endian (val)
 				: int64.from_little_endian (val);
+		}
+
+		public unowned Buffer write_int64 (size_t offset, int64 val) {
+			int64 target_val = (byte_order == BIG_ENDIAN)
+				? val.to_big_endian ()
+				: val.to_little_endian ();
+			*((int64 *) get_pointer (offset, sizeof (int64))) = target_val;
+			return this;
 		}
 
 		public uint64 read_uint64 (size_t offset) {
@@ -446,7 +488,7 @@ namespace Frida {
 
 		public string read_fixed_string (size_t offset, size_t size) throws Error {
 			string * start = (string *) get_pointer (offset, size);
-			size_t max_length = size - offset;
+			size_t max_length = size_t.min (size, this.size - offset);
 			string * end = memchr (start, 0, max_length);
 			size_t n;
 			if (end != null)
@@ -465,6 +507,18 @@ namespace Frida {
 			return this;
 		}
 
+		public Bytes read_bytes (size_t offset, size_t size) {
+			var data = new uint8[size + 1];
+			Memory.copy (data, get_pointer (offset, size), size);
+			return new Bytes.take ((owned) data);
+		}
+
+		public unowned Buffer write_bytes (size_t offset, Bytes bytes) {
+			size_t size = bytes.get_size ();
+			Memory.copy (get_pointer (offset, size), bytes.get_data (), size);
+			return this;
+		}
+
 		private uint8 * get_pointer (size_t offset, size_t n) {
 			size_t minimum_size = offset + n;
 			assert (size >= minimum_size);
@@ -474,121 +528,127 @@ namespace Frida {
 	}
 
 	public sealed class BufferReader {
+		public size_t offset {
+			get {
+				return _offset;
+			}
+		}
+
 		public size_t available {
 			get {
-				return buffer.bytes.get_size () - offset;
+				return buffer.bytes.get_size () - _offset;
 			}
 		}
 
 		private Buffer buffer;
-		private size_t offset = 0;
+		private size_t _offset = 0;
 
 		public BufferReader (Buffer buf) {
 			buffer = buf;
 		}
 
-		public uint64 read_pointer (size_t offset) throws Error {
+		public uint64 read_pointer () throws Error {
 			var pointer_size = buffer.pointer_size;
 			check_available (pointer_size);
-			var ptr = buffer.read_pointer (offset);
-			offset += pointer_size;
+			var ptr = buffer.read_pointer (_offset);
+			_offset += pointer_size;
 			return ptr;
 		}
 
 		public int8 read_int8 () throws Error {
 			check_available (sizeof (int8));
-			var val = buffer.read_int8 (offset);
-			offset += sizeof (int8);
+			var val = buffer.read_int8 (_offset);
+			_offset += sizeof (int8);
 			return val;
 		}
 
 		public uint8 read_uint8 () throws Error {
 			check_available (sizeof (uint8));
-			var val = buffer.read_uint8 (offset);
-			offset += sizeof (uint8);
+			var val = buffer.read_uint8 (_offset);
+			_offset += sizeof (uint8);
 			return val;
 		}
 
 		public int16 read_int16 () throws Error {
 			check_available (sizeof (int16));
-			var val = buffer.read_int16 (offset);
-			offset += sizeof (int16);
+			var val = buffer.read_int16 (_offset);
+			_offset += sizeof (int16);
 			return val;
 		}
 
 		public uint16 read_uint16 () throws Error {
 			check_available (sizeof (uint16));
-			var val = buffer.read_uint16 (offset);
-			offset += sizeof (uint16);
+			var val = buffer.read_uint16 (_offset);
+			_offset += sizeof (uint16);
 			return val;
 		}
 
 		public int32 read_int32 () throws Error {
 			check_available (sizeof (int32));
-			var val = buffer.read_int32 (offset);
-			offset += sizeof (int32);
+			var val = buffer.read_int32 (_offset);
+			_offset += sizeof (int32);
 			return val;
 		}
 
 		public uint32 read_uint32 () throws Error {
 			check_available (sizeof (uint32));
-			var val = buffer.read_uint32 (offset);
-			offset += sizeof (uint32);
+			var val = buffer.read_uint32 (_offset);
+			_offset += sizeof (uint32);
 			return val;
 		}
 
 		public int64 read_int64 () throws Error {
 			check_available (sizeof (int64));
-			var val = buffer.read_int64 (offset);
-			offset += sizeof (int64);
+			var val = buffer.read_int64 (_offset);
+			_offset += sizeof (int64);
 			return val;
 		}
 
 		public uint64 read_uint64 () throws Error {
 			check_available (sizeof (uint64));
-			var val = buffer.read_uint64 (offset);
-			offset += sizeof (uint64);
+			var val = buffer.read_uint64 (_offset);
+			_offset += sizeof (uint64);
 			return val;
 		}
 
 		public float read_float () throws Error {
 			check_available (sizeof (float));
-			var val = buffer.read_float (offset);
-			offset += sizeof (float);
+			var val = buffer.read_float (_offset);
+			_offset += sizeof (float);
 			return val;
 		}
 
 		public double read_double () throws Error {
 			check_available (sizeof (double));
-			var val = buffer.read_double (offset);
-			offset += sizeof (double);
+			var val = buffer.read_double (_offset);
+			_offset += sizeof (double);
 			return val;
 		}
 
 		public string read_string () throws Error {
 			check_available (1);
-			var val = buffer.read_string (offset);
-			offset += val.length + 1;
+			var val = buffer.read_string (_offset);
+			_offset += val.length + 1;
 			return val;
 		}
 
 		public string read_fixed_string (size_t size) throws Error {
 			check_available (size);
-			var val = buffer.read_fixed_string (offset, size);
-			offset += size;
+			var val = buffer.read_fixed_string (_offset, size);
+			_offset += size;
 			return val;
 		}
 
 		public Bytes read_bytes (size_t size) throws Error {
 			check_available (size);
-			var val = buffer.bytes[offset:offset + size];
-			offset += size;
+			var val = buffer.bytes[_offset:_offset + size];
+			_offset += size;
 			return val;
 		}
 
 		public unowned BufferReader skip (size_t n) throws Error {
 			check_available (n);
-			offset += n;
+			_offset += n;
 			return this;
 		}
 
@@ -597,4 +657,6 @@ namespace Frida {
 				throw new Error.PROTOCOL ("Malformed buffer: truncated");
 		}
 	}
+
+	public extern Bytes make_bytes_with_owner<T> (void * data, size_t size, owned T? owner = null);
 }

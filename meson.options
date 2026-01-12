@@ -10,6 +10,12 @@ option('local_backend',
   description: 'Include backend for the local system',
 )
 
+option('simmy_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Include the iDevice Simulator backend',
+)
+
 option('fruity_backend',
   type: 'feature',
   value: 'auto',
@@ -148,6 +154,15 @@ option('devkits',
   choices: ['core'],
   value: [],
   description: 'Devkits to build'
+)
+
+option('devkit_symbol_scope',
+  type: 'combo',
+  choices: ['prefixed', 'original'],
+  value: 'prefixed',
+  description : 'How devkit generation treats third-party symbols:\n'
+                + ' - prefixed: add the \'_frida_\' prefix\n'
+                + ' - original: keep symbols exactly as upstream\n'
 )
 
 option('tests',

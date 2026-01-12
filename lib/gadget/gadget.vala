@@ -24,12 +24,6 @@ namespace Frida.Gadget {
 			default = Gum.CodeSigningPolicy.OPTIONAL;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (Config).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "interaction" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var interaction_node = property_node.get_object ();
@@ -77,20 +71,6 @@ namespace Frida.Gadget {
 			value = Value (pspec.value_type);
 			return false;
 		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
-		}
 	}
 
 	private sealed class ScriptInteraction : Object, Json.Serializable {
@@ -112,12 +92,6 @@ namespace Frida.Gadget {
 			default = Script.ChangeBehavior.IGNORE;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ScriptInteraction).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -128,20 +102,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -183,12 +143,6 @@ namespace Frida.Gadget {
 			default = Script.ChangeBehavior.IGNORE;
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ScriptConfig).class_ref ();
-
-		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
-			return default_serialize_property (property_name, value, pspec);
-		}
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -199,20 +153,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -299,8 +239,6 @@ namespace Frida.Gadget {
 			default = make_empty_json_object ();
 		}
 
-		private ObjectClass klass = (ObjectClass) typeof (ConnectInteraction).class_ref ();
-
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var v = Value (typeof (Json.Node));
@@ -311,20 +249,6 @@ namespace Frida.Gadget {
 
 			value = Value (pspec.value_type);
 			return false;
-		}
-
-		public unowned ParamSpec? find_property (string name) {
-			return klass.find_property (name);
-		}
-
-		public new Value get_property (ParamSpec pspec) {
-			var val = Value (pspec.value_type);
-			base.get_property (pspec.name, ref val);
-			return val;
-		}
-
-		public new void set_property (ParamSpec pspec, Value value) {
-			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -481,6 +405,12 @@ namespace Frida.Gadget {
 
 		interceptor = Gum.Interceptor.obtain ();
 		interceptor.begin_transaction ();
+
+#if DARWIN
+		if (mapped_range != null)
+			Environment.ensure_debugger_breakpoints_only ();
+#endif
+
 		exceptor = Gum.Exceptor.obtain ();
 
 		try {
@@ -700,6 +630,11 @@ namespace Frida.Gadget {
 					controller = null;
 
 					exceptor = null;
+
+#if DARWIN
+					Environment.allow_stolen_breakpoints ();
+#endif
+
 					interceptor = null;
 				}
 			}
@@ -759,7 +694,7 @@ namespace Frida.Gadget {
 		}
 
 		try {
-			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+			return (Config) Json.gobject_from_data (typeof (Config), config_data);
 		} catch (GLib.Error e) {
 			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 		}
@@ -767,7 +702,7 @@ namespace Frida.Gadget {
 
 	private Config parse_config (string config_data) throws Error {
 		try {
-			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+			return (Config) Json.gobject_from_data (typeof (Config), config_data);
 		} catch (GLib.Error e) {
 			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 		}
@@ -775,21 +710,20 @@ namespace Frida.Gadget {
 
 	private Location detect_location (Gum.MemoryRange? mapped_range) {
 		string? executable_name = null;
-		string? executable_path = null;
-		Gum.MemoryRange? executable_range = null;
 		string? our_path = null;
 		Gum.MemoryRange? our_range = mapped_range;
 
 		Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_location));
 
+#if DARWIN
+		Environment.detect_darwin_location_fields (our_address, ref executable_name, ref our_path, ref our_range);
+#else
 		var index = 0;
 		Gum.Process.enumerate_modules ((details) => {
 			var range = details.range;
 
 			if (index == 0) {
 				executable_name = details.name;
-				executable_path = details.path;
-				executable_range = details.range;
 			}
 
 			if (mapped_range != null)
@@ -805,6 +739,7 @@ namespace Frida.Gadget {
 
 			return true;
 		});
+#endif
 
 		assert (our_range != null);
 
@@ -1234,7 +1169,7 @@ namespace Frida.Gadget {
 			}
 
 			try {
-				return Json.gobject_from_data (typeof (ScriptConfig), data) as ScriptConfig;
+				return (ScriptConfig) Json.gobject_from_data (typeof (ScriptConfig), data);
 			} catch (GLib.Error e) {
 				throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 			}
@@ -1748,7 +1683,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class ControlChannel : Object, Peer, HostSession {
+		private class ControlChannel : Object, Peer, HostSession, GadgetSession {
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1778,6 +1713,9 @@ namespace Frida.Gadget {
 				try {
 					HostSession host_session = this;
 					registrations.add (connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session));
+
+					GadgetSession gadget_session = this;
+					registrations.add (connection.register_object (Frida.ObjectPath.GADGET_SESSION, gadget_session));
 
 					AuthenticationService null_auth = new NullAuthenticationService ();
 					registrations.add (connection.register_object (Frida.ObjectPath.AUTHENTICATION_SERVICE, null_auth));
@@ -1939,6 +1877,22 @@ namespace Frida.Gadget {
 
 			public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
+			}
+
+			public async void break_and_resume (Cancellable? cancellable) throws Error, IOError {
+#if DARWIN
+				Environment.break_and_resume ();
+#else
+				throw new Error.NOT_SUPPORTED ("This API is only applicable on Darwin");
+#endif
+			}
+
+			public async void break_and_detach (Cancellable? cancellable) throws Error, IOError {
+#if DARWIN
+				Environment.break_and_detach ();
+#else
+				throw new Error.NOT_SUPPORTED ("This API is only applicable on Darwin");
+#endif
 			}
 
 			private void validate_pid (uint pid) throws Error {
@@ -2176,6 +2130,14 @@ namespace Frida.Gadget {
 		private extern bool has_objc_class (string name);
 
 		private extern void set_thread_name (string name);
+#if DARWIN
+		private extern void detect_darwin_location_fields (Gum.Address our_address, ref string? executable_name,
+			ref string? our_path, ref Gum.MemoryRange? our_range);
+		private extern void ensure_debugger_breakpoints_only ();
+		private extern void allow_stolen_breakpoints ();
+		private extern void break_and_resume ();
+		private extern void break_and_detach ();
+#endif
 	}
 
 	private extern void log_info (string message);

@@ -238,7 +238,7 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
         for elem in core_elements + base_elements:
             if tag_name == "class":
                 for child in list(elem):
-                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") == "FridaBase.AgentMessageSink") \
+                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in {"Frida.HostSessionHub", "FridaBase.AgentMessageSink"}) \
                             or child.tag == CORE_TAG_FIELD \
                             or child.get("name").startswith("_"):
                         elem.remove(child)
@@ -512,6 +512,8 @@ def function_is_public(name):
                 "parse_socket_address",
                 "negotiate_connection",
                 "check_kernel_version",
+                "make_stdio_pipes",
+                "make_stdio_pipe",
             ]
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:

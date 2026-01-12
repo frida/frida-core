@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <gio/gunixmounts.h>
+#include <gum/gum.h>
 
 typedef struct _FridaEnumerateProcessesOperation FridaEnumerateProcessesOperation;
 

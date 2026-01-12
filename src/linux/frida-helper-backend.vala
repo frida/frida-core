@@ -36,21 +36,8 @@ namespace Frida {
 			string[] argv = options.compute_argv (path);
 			string[] envp = options.compute_envp ();
 
-			StdioPipes? pipes = null;
-			FileDescriptor? stdin_read = null, stdin_write = null;
-			FileDescriptor? stdout_read = null, stdout_write = null;
-			FileDescriptor? stderr_read = null, stderr_write = null;
-			switch (options.stdio) {
-				case INHERIT:
-					break;
-				case PIPE: {
-					make_pty (out stdin_read, out stdin_write);
-					make_pty (out stdout_read, out stdout_write);
-					make_pty (out stderr_read, out stderr_write);
-					pipes = new StdioPipes (stdin_write, stdout_read, stderr_read);
-					break;
-				}
-			}
+			FileDescriptor? in_fd, out_fd, err_fd;
+			StdioPipes? pipes = make_stdio_pipes (options.stdio, true, out in_fd, null, out out_fd, null, out err_fd, null);
 
 			string? old_cwd = null;
 			if (options.cwd.length > 0) {
@@ -68,10 +55,10 @@ namespace Frida {
 				if (pid == 0) {
 					Posix.setsid ();
 
-					if (options.stdio == PIPE) {
-						Posix.dup2 (stdin_read.handle, 0);
-						Posix.dup2 (stdout_write.handle, 1);
-						Posix.dup2 (stderr_write.handle, 2);
+					if (pipes != null) {
+						Posix.dup2 (in_fd.handle, 0);
+						Posix.dup2 (out_fd.handle, 1);
+						Posix.dup2 (err_fd.handle, 2);
 					}
 
 					if (_ptrace (TRACEME) == -1) {
@@ -637,9 +624,9 @@ namespace Frida {
 			monitor ();
 
 			if (pipes != null) {
-				stdin_stream = new UnixOutputStream (pipes.input.handle, false);
-				process_next_output_from.begin (new UnixInputStream (pipes.output.handle, false), 1);
-				process_next_output_from.begin (new UnixInputStream (pipes.error.handle, false), 2);
+				stdin_stream = pipes.input;
+				process_next_output_from.begin (pipes.output, 1);
+				process_next_output_from.begin (pipes.error, 2);
 			}
 		}
 
@@ -703,37 +690,6 @@ namespace Frida {
 		}
 	}
 
-	private sealed class StdioPipes : Object {
-		public FileDescriptor input {
-			get;
-			construct;
-		}
-
-		public FileDescriptor output {
-			get;
-			construct;
-		}
-
-		public FileDescriptor error {
-			get;
-			construct;
-		}
-
-		public StdioPipes (FileDescriptor input, FileDescriptor output, FileDescriptor error) {
-			Object (input: input, output: output, error: error);
-		}
-
-		construct {
-			try {
-				Unix.set_fd_nonblocking (input.handle, true);
-				Unix.set_fd_nonblocking (output.handle, true);
-				Unix.set_fd_nonblocking (error.handle, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
-	}
-
 	private sealed class ExecTransitionSession : SeizeSession {
 		private ExecTransitionSession (uint pid) {
 			Object (pid: pid, on_init: SeizeSession.InitBehavior.CONTINUE);
@@ -785,25 +741,38 @@ namespace Frida {
 		public async void wait_for_syscall (LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
 			bool on_syscall_entry = true;
 			int pending_signal = 0;
-			do {
+			while (state != SATISFIED) {
 				ptrace (SYSCALL, tid, null, (void *) pending_signal);
 				pending_signal = 0;
 
-				Posix.Signal sig = yield wait_for_next_signal (cancellable);
-				if (sig != (TRAP | 0x80)) {
-					on_syscall_entry = !on_syscall_entry;
-					pending_signal = sig;
+				var wr = yield ChildProcess.wait_for_next_stop (tid, cancellable);
+				wr.check_stopped ();
+
+				if (wr.is_ptrace_event_stop) {
+					if (wr.ptrace_event == PtraceEvent.EXEC)
+						on_syscall_entry = true;
+
 					continue;
 				}
 
-				if (on_syscall_entry) {
-					get_regs (&saved_regs);
-					if (_syscall_satisfies (get_syscall_id (saved_regs), mask))
-						state = SATISFIED;
+				if (wr.is_syscall_stop) {
+					if (on_syscall_entry) {
+						get_regs (&saved_regs);
+						var id = get_syscall_id (saved_regs);
+
+						if (_syscall_satisfies (id, mask))
+							state = SATISFIED;
+					}
+
+					on_syscall_entry = !on_syscall_entry;
+					continue;
 				}
 
-				on_syscall_entry = !on_syscall_entry;
-			} while (state != SATISFIED);
+				if (wr.should_deliver_to_tracee)
+					pending_signal = wr.stop_signal;
+				else
+					pending_signal = 0;
+			}
 		}
 
 		public async void interrupt (Cancellable? cancellable) throws Error, IOError {
@@ -2061,6 +2030,10 @@ namespace Frida {
 			return yield ChildProcess.wait_for_next_signal (tid, cancellable);
 		}
 
+		public async WaitResult wait_for_next_stop (Cancellable? cancellable) throws Error, IOError {
+			return yield ChildProcess.wait_for_next_stop (tid, cancellable);
+		}
+
 		public void get_regs (GPRegs * regs) throws Error {
 #if !MIPS
 			if (regset_supported) {
@@ -3062,30 +3035,53 @@ namespace Frida {
 
 	namespace ChildProcess {
 		private async void wait_for_early_signal (uint pid, Posix.Signal sig, Cancellable? cancellable) throws Error, IOError {
-			while (true) {
-				Posix.Signal next_signal = yield wait_for_next_signal (pid, cancellable);
-				if (next_signal == sig)
-					return;
-
-				ptrace (CONT, pid);
-			}
+			yield wait_for_signals_common (pid, { sig }, suppress_unmatched, cancellable);
 		}
 
 		private async void wait_for_signal (uint pid, Posix.Signal sig, Cancellable? cancellable) throws Error, IOError {
 			yield wait_for_signals (pid, { sig }, cancellable);
 		}
 
-		private async Posix.Signal wait_for_signals (uint pid, Posix.Signal[] sigs, Cancellable? cancellable) throws Error, IOError {
-			while (true) {
-				Posix.Signal next_signal = yield wait_for_next_signal (pid, cancellable);
-				if (next_signal in sigs)
-					return next_signal;
+		private async Posix.Signal wait_for_signals (uint pid, Posix.Signal[] sigs, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield wait_for_signals_common (pid, sigs, pass_through_unmatched, cancellable);
+		}
 
-				ptrace (CONT, pid, null, (void *) next_signal);
+		private async Posix.Signal wait_for_signals_common (uint pid, Posix.Signal[] sigs, UnmatchedStopHandler on_unmatched,
+				Cancellable? cancellable) throws Error, IOError {
+			while (true) {
+				var wr = yield wait_for_next_stop (pid, cancellable);
+				wr.check_stopped ();
+
+				if (wr.stop_signal in sigs)
+					return wr.stop_signal;
+
+				if (!wr.should_deliver_to_tracee) {
+					ptrace (CONT, pid);
+					continue;
+				}
+
+				on_unmatched (pid, wr);
 			}
 		}
 
+		private delegate void UnmatchedStopHandler (uint pid, WaitResult wr) throws Error;
+
+		private static void pass_through_unmatched (uint pid, WaitResult wr) throws Error {
+			ptrace (CONT, pid, null, (void *) wr.stop_signal);
+		}
+
+		private static void suppress_unmatched (uint pid, WaitResult wr) throws Error {
+			ptrace (CONT, pid);
+		}
+
 		private async Posix.Signal wait_for_next_signal (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var wr = yield wait_for_next_stop (pid, cancellable);
+			wr.check_stopped ();
+			return wr.stop_signal;
+		}
+
+		private async WaitResult wait_for_next_stop (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var main_context = MainContext.get_thread_default ();
 
 			bool timed_out = false;
@@ -3098,21 +3094,23 @@ namespace Frida {
 
 			int status = 0;
 			uint[] delays = { 0, 1, 2, 5, 10, 20, 50, 250 };
+
 			try {
 				for (uint i = 0; !timed_out && !cancellable.set_error_if_cancelled (); i++) {
 					int res = Posix.waitpid ((Posix.pid_t) pid, out status, Posix.WNOHANG);
 					if (res == -1)
-						throw new Error.NOT_SUPPORTED ("Unable to wait for next signal: %s", strerror (errno));
+						throw new Error.NOT_SUPPORTED ("Unable to wait for next stop: %s", strerror (errno));
 					if (res != 0)
 						break;
 
 					uint delay_ms = (i < delays.length) ? delays[i] : delays[delays.length - 1];
+
 					var delay_source = new TimeoutSource (delay_ms);
-					delay_source.set_callback (wait_for_next_signal.callback);
+					delay_source.set_callback (wait_for_next_stop.callback);
 					delay_source.attach (main_context);
 
 					var cancel_source = new CancellableSource (cancellable);
-					cancel_source.set_callback (wait_for_next_signal.callback);
+					cancel_source.set_callback (wait_for_next_stop.callback);
 					cancel_source.attach (main_context);
 
 					yield;
@@ -3125,21 +3123,87 @@ namespace Frida {
 			}
 
 			if (timed_out)
-				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for signal from process with PID %u", pid);
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for stop from process with PID %u", pid);
+
+			return WaitResult (pid, status);
+		}
+	}
+
+	public enum WaitKind {
+		EXITED,
+		SIGNALED,
+		STOPPED,
+		OTHER
+	}
+
+	public struct WaitResult {
+		public uint pid;
+		public int status;
+
+		public WaitKind kind;
+
+		public uint exit_status;
+
+		public Posix.Signal term_signal;
+
+		public Posix.Signal stop_signal;
+		public PtraceEvent ptrace_event;
+		public bool is_ptrace_event_stop;
+		public bool is_syscall_stop;
+
+		public bool should_deliver_to_tracee;
+
+		public WaitResult (uint pid, int status) {
+			this.pid = pid;
+			this.status = status;
+
+			kind = WaitKind.OTHER;
+			exit_status = 0;
+			term_signal = 0;
+			stop_signal = 0;
+			ptrace_event = PtraceEvent.NONE;
+			is_ptrace_event_stop = false;
+			is_syscall_stop = false;
+			should_deliver_to_tracee = false;
 
 			if (PosixStatus.is_exit (status)) {
-				throw new Error.NOT_SUPPORTED ("Target exited with status %u",
-					PosixStatus.parse_exit_status (status));
+				kind = WaitKind.EXITED;
+				exit_status = PosixStatus.parse_exit_status (status);
+				return;
 			}
 
 			if (PosixStatus.is_signaled (status)) {
-				throw new Error.NOT_SUPPORTED ("Target terminated with signal %u",
-					PosixStatus.parse_termination_signal (status));
+				kind = WaitKind.SIGNALED;
+				term_signal = PosixStatus.parse_termination_signal (status);
+				return;
 			}
 
-			if (!PosixStatus.is_stopped (status))
-				throw new Error.NOT_SUPPORTED ("Unexpected status: 0x%08x", status);
-			return PosixStatus.parse_stop_signal (status);
+			if (PosixStatus.is_stopped (status)) {
+				kind = WaitKind.STOPPED;
+
+				stop_signal = PosixStatus.parse_stop_signal (status);
+				ptrace_event = PosixStatus.ptrace_event (status);
+
+				is_ptrace_event_stop = (stop_signal == Posix.Signal.TRAP) && (ptrace_event != NONE);
+				is_syscall_stop = (stop_signal == (Posix.Signal.TRAP | 0x80)) && (ptrace_event == NONE);
+
+				should_deliver_to_tracee = !is_syscall_stop && !is_ptrace_event_stop && stop_signal != Posix.Signal.TRAP;
+
+				return;
+			}
+		}
+
+		public void check_stopped () throws Error {
+			switch (kind) {
+				case WaitKind.EXITED:
+					throw new Error.NOT_SUPPORTED ("Target exited with status %u", exit_status);
+				case WaitKind.SIGNALED:
+					throw new Error.NOT_SUPPORTED ("Target terminated with signal %u", term_signal);
+				case WaitKind.STOPPED:
+					return;
+				default:
+					throw new Error.NOT_SUPPORTED ("Unexpected status: 0x%08x", status);
+			}
 		}
 	}
 
@@ -3161,58 +3225,28 @@ namespace Frida {
 
 		[CCode (cname = "WSTOPSIG", cheader_filename = "sys/wait.h")]
 		private extern Posix.Signal parse_stop_signal (int status);
+
+		private PtraceEvent ptrace_event (int status) {
+			return ((uint) status) >> 16;
+		}
+	}
+
+	public enum PtraceEvent {
+		NONE,
+		FORK,
+		VFORK,
+		CLONE,
+		EXEC,
+		VFORK_DONE,
+		EXIT,
+		SECCOMP,
 	}
 
 	private int tgkill (uint tgid, uint tid, Posix.Signal sig) {
 		return Linux.syscall (SysCall.tgkill, tgid, tid, sig);
 	}
 
-
 	public extern bool _syscall_satisfies (int syscall_id, LinuxSyscall mask);
-
-	private void make_pty (out FileDescriptor read, out FileDescriptor write) throws Error {
-#if HAVE_OPENPTY
-		int rfd = -1, wfd = -1;
-		char name[Posix.Limits.PATH_MAX];
-		if (Linux.openpty (out rfd, out wfd, name, null, null) == -1)
-			throw new Error.NOT_SUPPORTED ("Unable to open PTY: %s", strerror (errno));
-
-		enable_close_on_exec (rfd);
-		enable_close_on_exec (wfd);
-
-		configure_terminal_attributes (rfd);
-
-		read = new FileDescriptor (rfd);
-		write = new FileDescriptor (wfd);
-#else
-		try {
-			int fds[2];
-			Unix.open_pipe (fds, Posix.FD_CLOEXEC);
-
-			read = new FileDescriptor (fds[0]);
-			write = new FileDescriptor (fds[1]);
-		} catch (GLib.Error e) {
-			throw new Error.NOT_SUPPORTED ("Unable to open pipe: %s", e.message);
-		}
-#endif
-	}
-
-#if HAVE_OPENPTY
-	private void enable_close_on_exec (int fd) {
-		Posix.fcntl (fd, Posix.F_SETFD, Posix.fcntl (fd, Posix.F_GETFD) | Posix.FD_CLOEXEC);
-	}
-
-	private void configure_terminal_attributes (int fd) {
-		var tios = Posix.termios ();
-		Posix.tcgetattr (fd, out tios);
-
-		tios.c_oflag &= ~Posix.ONLCR;
-		tios.c_cflag = (tios.c_cflag & Posix.CLOCAL) | Posix.CS8 | Posix.CREAD | Posix.HUPCL;
-		tios.c_lflag &= ~Posix.ECHO;
-
-		Posix.tcsetattr (fd, 0, tios);
-	}
-#endif
 
 	private sealed class ProcMapsSoEntry {
 		public uint64 base_address;

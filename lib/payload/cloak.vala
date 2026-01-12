@@ -44,10 +44,16 @@ namespace Frida {
 
 #if ANDROID
 	public sealed class ThreadCountCloaker : Object {
+		private GetOsThreadStat * get_os_thread_stat_slot;
+		private static GetOsThreadStat old_get_os_thread_stat_impl;
+
 		private ReadFunc * read_slot;
 		private static ReadFunc old_read_impl;
 
 		private static string expected_magic = "%u (".printf (Posix.getpid ());
+
+		[CCode (has_target = false)]
+		private delegate ssize_t GetOsThreadStat (Posix.pid_t tid, void * buf, size_t count);
 
 		[CCode (has_target = false)]
 		private delegate ssize_t ReadFunc (int fd, void * buf, size_t count);
@@ -56,37 +62,62 @@ namespace Frida {
 			var art = Gum.Process.find_module_by_name ("libart.so");
 			if (art != null) {
 				art.enumerate_imports (imp => {
-					if (imp.name == "read") {
+					if (imp.name == "_ZN3art15GetOsThreadStatEiPcm" || imp.name == "_ZN3art15GetOsThreadStatEiPcj") {
+						get_os_thread_stat_slot = (GetOsThreadStat *) imp.slot;
+					} else if (imp.name == "read") {
 						read_slot = (ReadFunc *) imp.slot;
-						return false;
 					}
 					return true;
 				});
-				if (read_slot != null)
-					old_read_impl = update_read_slot (on_read);
+				if (get_os_thread_stat_slot != null) {
+					old_get_os_thread_stat_impl = (GetOsThreadStat) update_slot ((void **) get_os_thread_stat_slot,
+						(void *) on_get_os_thread_stat);
+				}
+				if (read_slot != null) {
+					old_read_impl = (ReadFunc) update_slot ((void **) read_slot, (void *) on_read);
+				}
 			}
 		}
 
-		~ThreadCountCloaker () {
-			if (read_slot != null)
-				update_read_slot (old_read_impl);
+		public override void dispose () {
+			if (get_os_thread_stat_slot != null) {
+				update_slot ((void **) get_os_thread_stat_slot, (void *) old_get_os_thread_stat_impl);
+			}
+			if (read_slot != null) {
+				update_slot ((void **) read_slot, (void *) old_read_impl);
+			}
+
+			base.dispose ();
 		}
 
-		private ReadFunc update_read_slot (ReadFunc new_impl) {
+		private static void * update_slot (void ** orig, void * new_impl) {
 			Gum.PageProtection old_prot = READ;
-			Gum.Memory.query_protection (read_slot, out old_prot);
+			Gum.Memory.query_protection (orig, out old_prot);
 
 			bool is_writable = (old_prot & Gum.PageProtection.WRITE) != 0;
 			if (!is_writable)
-				Gum.mprotect (read_slot, sizeof (void *), old_prot | WRITE);
+				Gum.mprotect (orig, sizeof (void *), old_prot | WRITE);
 
-			ReadFunc old_impl = *read_slot;
-			*read_slot = new_impl;
+			void * old_impl = *orig;
+			*orig = new_impl;
 
 			if (!is_writable)
-				Gum.mprotect (read_slot, sizeof (void *), old_prot);
+				Gum.mprotect (orig, sizeof (void *), old_prot);
 
 			return old_impl;
+		}
+
+		private static ssize_t on_get_os_thread_stat (Posix.pid_t tid, void * buf, size_t count) {
+			ssize_t n = old_get_os_thread_stat_impl (tid, buf, count);
+
+			if (tid == Posix.getpid ()) {
+				try {
+					n = adjust_thread_count (buf, n, count);
+				} catch (FileError e) {
+				}
+			}
+
+			return n;
 		}
 
 		private static ssize_t on_read (int fd, void * buf, size_t count) {
@@ -101,30 +132,34 @@ namespace Frida {
 				if (!file_descriptor_is_proc_self_stat (fd))
 					return n;
 
-				unowned string raw_str = (string) buf;
-				string str = raw_str.substring (0, n);
-
-				MatchInfo info;
-				if (!/^(\d+ \(.+\)(?: [^ ]+){17}) \d+ (.+)/s.match (str, 0, out info))
-					return n;
-				string fields_before = info.fetch (1);
-				string fields_after = info.fetch (2);
-
-				// We cannot simply use the value we got from the kernel and subtract the number of cloaked threads,
-				// as there's a chance the total may have changed in the last moment.
-				uint num_uncloaked_threads = query_num_uncloaked_threads ();
-
-				string adjusted_str = "%s %u %s".printf (fields_before, num_uncloaked_threads, fields_after);
-
-				var adjusted_length = adjusted_str.length;
-				if (adjusted_length > count)
-					return n;
-				Memory.copy (buf, adjusted_str, adjusted_length);
-				n = adjusted_length;
+				n = adjust_thread_count (buf, n, count);
 			} catch (FileError e) {
 			}
 
 			return n;
+		}
+
+		private static ssize_t adjust_thread_count (void * buf, ssize_t n, size_t count) throws FileError {
+			unowned string raw_str = (string) buf;
+			string str = raw_str.substring (0, n);
+
+			MatchInfo info;
+			if (!/^(\d+ \(.+\)(?: [^ ]+){17}) \d+ (.+)/s.match (str, 0, out info))
+				return n;
+			string fields_before = info.fetch (1);
+			string fields_after = info.fetch (2);
+
+			// We cannot simply use the value we got from the kernel and subtract the number of cloaked threads,
+			// as there's a chance the total may have changed in the last moment.
+			uint num_uncloaked_threads = query_num_uncloaked_threads ();
+
+			string adjusted_str = "%s %u %s".printf (fields_before, num_uncloaked_threads, fields_after);
+
+			var adjusted_length = adjusted_str.length;
+			if (adjusted_length > count)
+				return n;
+			Memory.copy (buf, adjusted_str, adjusted_length);
+			return adjusted_length;
 		}
 
 		private static bool file_content_might_be_from_proc_self_stat (void * content, ssize_t size) {

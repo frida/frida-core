@@ -56,6 +56,16 @@
 # else
 #  error Unexpected MIPS ABI
 # endif
+#elif defined (HAVE_RISCV)
+# if GLIB_SIZEOF_VOID_P == 8
+#  define SYS_process_vm_readv   270
+#  define SYS_process_vm_writev  271
+#  define SYS_memfd_create       279
+#  define SYS_pidfd_open         434
+#  define SYS_pidfd_getfd        438
+# else
+#  error RISC-V 32-bit not yet supported
+# endif
 #else
 # error FIXME
 #endif

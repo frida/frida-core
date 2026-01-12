@@ -1400,12 +1400,12 @@ namespace Frida.Agent {
 				if (nb_api.unload_library == null)
 					parameters.append ("|eternal|sticky");
 				/*
-				 * Disable ExitMonitor to work around a bug in Android's libndk_translation.so on Android 11.
-				 * We need to avoid modifying libc.so ranges that the translator potentially depends on, to
-				 * avoid blowing up when Interceptor's CPU cache flush results in the translated code being
-				 * discarded, which seems like an edge-case the translator doesn't handle.
+				 * Disable Exceptor and ExitMonitor to work around a bug in Android's libndk_translation.so
+				 * on Android 11. We need to avoid modifying libc.so ranges that the translator potentially
+				 * depends on, to avoid blowing up when Interceptor's CPU cache flush results in the translated
+				 * code being discarded, which seems like an edge-case the translator doesn't handle.
 				 */
-				parameters.append ("|exit-monitor:off");
+				parameters.append ("|exceptor:off|exit-monitor:off");
 
 				emulated_bridge_state = new BridgeState (parameters.str);
 

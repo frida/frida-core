@@ -109,8 +109,6 @@ _frida_get_springboard_api (void)
         gum_interceptor_replace (interceptor, frida_xpc_look_up_endpoint, frida_replacement_xpc_look_up_endpoint, NULL, NULL);
       else
         g_error ("Unable to locate _xpc_look_up_endpoint(); please file a bug");
-
-      g_object_unref (interceptor);
     }
 #endif
 

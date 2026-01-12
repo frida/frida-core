@@ -314,6 +314,9 @@ namespace Frida {
 
 			SocketService? service = null;
 			TimeoutSource? timeout_source = null;
+			bool timed_out = false;
+			bool child_exited = false;
+			int child_status = 0;
 
 			try {
 				string tempdir;
@@ -341,7 +344,6 @@ namespace Frida {
 					return false;
 				});
 				idle_source.attach (main_context);
-
 				yield;
 
 				var incoming_handler = service.incoming.connect ((c) => {
@@ -350,42 +352,63 @@ namespace Frida {
 					return true;
 				});
 
-				var timer = new Timer ();
-				timeout_source = new TimeoutSource (10);
+				timeout_source = new TimeoutSource.seconds (10);
 				timeout_source.set_callback (() => {
+					timed_out = true;
 					launch_helper.callback ();
-					return Source.CONTINUE;
+					return Source.REMOVE;
 				});
 				timeout_source.attach (main_context);
 
 				string[] argv = { helper_path, socket_address };
 
-				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
+				GLib.SpawnFlags flags =
+					GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN |
+					GLib.SpawnFlags.DO_NOT_REAP_CHILD |
+					/* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
+
 				GLib.Process.spawn_async (null, argv, null, flags, null, out pending_pid);
 
-				while (pending_stream == null && timer.elapsed () < 10.0 && !process_is_dead (pending_pid))
+				var exit_monitor = new ChildExitMonitor (pending_pid, main_context);
+				var exit_handler = exit_monitor.exited.connect ((status) => {
+					child_exited = true;
+					child_status = status;
+					launch_helper.callback ();
+				});
+
+				while (pending_stream == null && !timed_out && !child_exited)
 					yield;
+
+				exit_monitor.disconnect (exit_handler);
+				exit_monitor.stop ();
+
+				timeout_source.destroy ();
+				timeout_source = null;
 
 				service.disconnect (incoming_handler);
 				service.stop ();
 				service = null;
-				timeout_source.destroy ();
-				timeout_source = null;
 
-				if (pending_stream == null)
-					throw new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
+				if (pending_stream == null) {
+					if (child_exited)
+						throw new Error.PROCESS_NOT_FOUND ("Helper exited during launch (status=%d)", child_status);
+					if (timed_out)
+						throw new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper");
+				}
 
 				pending_connection = yield new DBusConnection (pending_stream, ServerGuid.HOST_SESSION_SERVICE,
 					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
+
 				if (pending_connection.is_closed ())
 					throw new Error.NOT_SUPPORTED ("Helper terminated prematurely");
 			} catch (GLib.Error e) {
-				bool died_unexpectedly = pending_pid != 0 && process_is_dead (pending_pid);
-
-				if (pending_pid != 0 && !died_unexpectedly)
+				if (pending_pid != 0 && !child_exited) {
 					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
+					reap_later.begin (pending_pid);
+				}
 
 				if (timeout_source != null)
 					timeout_source.destroy ();
@@ -393,10 +416,6 @@ namespace Frida {
 				if (service != null)
 					service.stop ();
 
-				if (died_unexpectedly) {
-					throw new Error.PROCESS_NOT_FOUND ("Peer process (%d) died unexpectedly: %s",
-						pending_pid, e.message);
-				}
 				if (e is Error)
 					throw (Error) e;
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
@@ -422,10 +441,6 @@ namespace Frida {
 			return proxy;
 		}
 
-		private static bool process_is_dead (uint pid) {
-			return Posix.kill ((Posix.pid_t) pid, 0) == -1 && Posix.errno == Posix.ESRCH;
-		}
-
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			obtain_request = null;
 
@@ -441,7 +456,10 @@ namespace Frida {
 			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
+			Pid pid = process_pid;
 			process_pid = 0;
+			if (pid != 0)
+				reap_later.begin (pid);
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
@@ -557,6 +575,90 @@ namespace Frida {
 #endif
 
 			return false;
+		}
+	}
+
+	private class ChildExitMonitor : Object {
+		public signal void exited (int status);
+
+		private Pid pid;
+		private MainContext? context;
+
+		private TimeoutSource? source;
+
+		private uint interval_ms = 10;
+		private const uint MAX_INTERVAL_MS = 1000;
+
+		public ChildExitMonitor (Pid pid, MainContext? ctx = null) {
+			this.pid = pid;
+
+			context = ctx ?? MainContext.get_thread_default ();
+
+			arm ();
+		}
+
+		public void stop () {
+			if (source != null) {
+				source.destroy ();
+				source = null;
+			}
+		}
+
+		private void arm () {
+			source = new TimeoutSource (interval_ms);
+			source.set_callback (() => {
+				int status;
+				if (try_reap (pid, out status)) {
+					stop ();
+					exited (status);
+					return Source.REMOVE;
+				}
+
+				if (interval_ms < MAX_INTERVAL_MS) {
+					interval_ms = uint.min (MAX_INTERVAL_MS, 2 * interval_ms);
+					stop ();
+					arm ();
+					return Source.REMOVE;
+				}
+
+				return Source.CONTINUE;
+			});
+			source.attach (context);
+		}
+
+		private static bool try_reap (Pid pid, out int status) {
+			status = 0;
+			var r = Posix.waitpid ((Posix.pid_t) pid, out status, Posix.WNOHANG);
+			if (r > 0)
+				return true;
+			if (r == 0)
+				return false;
+
+			if (Posix.errno == Posix.EINTR)
+				return false;
+
+			if (Posix.errno == Posix.ECHILD)
+				return true;
+
+			return true;
+		}
+	}
+
+	private async void reap_later (Pid pid) {
+		var monitor = new ChildExitMonitor (pid);
+
+		bool done = false;
+		ulong h = monitor.exited.connect ((status) => {
+			done = true;
+			reap_later.callback ();
+		});
+
+		try {
+			while (!done)
+				yield;
+		} finally {
+			monitor.disconnect (h);
+			monitor.stop ();
 		}
 	}
 }

@@ -47,6 +47,9 @@ namespace Frida {
 		}
 
 		private void add_nonlocal_backends () {
+#if HAVE_SIMMY_BACKEND
+			add_backend (new SimmyHostSessionBackend ());
+#endif
 #if !IOS && !ANDROID && !TVOS
 #if HAVE_FRUITY_BACKEND
 			add_backend (new FruityHostSessionBackend ());
@@ -161,7 +164,7 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (HostSessionOptions? options = null,
+		public abstract async HostSession create (HostSessionHub hub, HostSessionOptions? options = null,
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_detached (HostSession session);
@@ -178,6 +181,42 @@ namespace Frida {
 		public abstract async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id,
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract void unlink_service_session (HostSession host_session, ServiceSessionId id);
+	}
+
+	public interface HostSessionConnection : Object {
+		public abstract HostSession host_session {
+			get;
+		}
+
+		public abstract async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+			Cancellable? cancellable = null) throws Error, IOError;
+		public abstract void unlink_agent_session (AgentSessionId id);
+	}
+
+	public interface HostSessionHub : Object {
+		public abstract async HostSessionEntry resolve_host_session (string id, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public class NullHostSessionHub : Object, HostSessionHub {
+		public async HostSessionEntry resolve_host_session (string id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Host session lookup not supported");
+		}
+	}
+
+	public class HostSessionEntry : Object {
+		public HostSessionProvider provider {
+			get;
+			construct;
+		}
+
+		public HostSession session {
+			get;
+			construct;
+		}
+
+		public HostSessionEntry (HostSessionProvider provider, HostSession session) {
+			Object (provider: provider, session: session);
+		}
 	}
 
 	public enum HostSessionProviderKind {
@@ -277,7 +316,8 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
+				throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
@@ -332,7 +372,13 @@ namespace Frida {
 		}
 	}
 
-	public abstract class LocalHostSession : Object, HostSession, AgentController {
+	public abstract class LocalHostSession : Object, HostSession, HostSessionConnection, AgentController {
+		public HostSession host_session {
+			get {
+				return this;
+			}
+		}
+
 		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
 
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
@@ -1423,7 +1469,7 @@ namespace Frida {
 	public abstract class InternalAgent : Object, AgentMessageSink, RpcPeer {
 		public signal void unloaded ();
 
-		public weak LocalHostSession host_session {
+		public weak HostSessionConnection connection {
 			get;
 			construct;
 		}
@@ -1447,11 +1493,7 @@ namespace Frida {
 		construct {
 			rpc_client = new RpcClient (this);
 
-			host_session.agent_session_detached.connect (on_agent_session_detached);
-		}
-
-		~InternalAgent () {
-			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+			connection.host_session.agent_session_detached.connect (on_agent_session_detached);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -1463,6 +1505,8 @@ namespace Frida {
 			}
 
 			yield ensure_unloaded (cancellable);
+
+			connection.host_session.agent_session_detached.disconnect (on_agent_session_detached);
 		}
 
 		protected abstract async uint get_target_pid (Cancellable? cancellable) throws Error, IOError;
@@ -1516,9 +1560,9 @@ namespace Frida {
 				target_pid = yield get_target_pid (cancellable);
 
 				try {
-					session_id = yield host_session.attach (target_pid, attach_options, cancellable);
+					session_id = yield connection.host_session.attach (target_pid, attach_options, cancellable);
 
-					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
+					session = yield connection.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 
 					string? source = yield load_source (cancellable);
 					if (source != null) {

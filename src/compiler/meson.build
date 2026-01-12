@@ -4,6 +4,7 @@ compiler_sources = files(
 )
 
 if have_compiler_backend
+  output_suffix = compiler_backend_static_compilation ? '' : '-raw'
   compiler_backend = custom_target('frida-compiler-backend',
     input: [
       'go.mod',
@@ -17,8 +18,8 @@ if have_compiler_backend
       'package-lock.json',
     ],
     output: [
-      'frida-compiler-backend' + (compiler_backend_static_compilation ? '.a' : ('-raw' + shlib_suffix)),
-      'frida-compiler-backend.h',
+      'frida-compiler-backend' + output_suffix + (compiler_backend_static_compilation ? '.a' : shlib_suffix),
+      'frida-compiler-backend' + output_suffix + '.h',
     ],
     command: [
       python,

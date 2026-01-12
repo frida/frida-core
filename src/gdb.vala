@@ -729,6 +729,15 @@ namespace Frida.GDB {
 			check_execute_response (response);
 		}
 
+		public async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request) throws Error, IOError {
+			try {
+				yield execute (command, cancellable);
+				request.resolve (true);
+			} catch (GLib.Error e) {
+				request.reject (e);
+			}
+		}
+
 		private static void check_execute_response (Packet packet) throws Error {
 			unowned string response = packet.payload;
 			if (response[0] == 'E') {
@@ -1678,7 +1687,7 @@ namespace Frida.GDB {
 
 			var response = yield client.query (request, cancellable);
 
-			return Protocol.parse_pointer_value (response.payload, client.pointer_size, client.byte_order);
+			return Protocol.parse_integer_value (response.payload, client.byte_order);
 		}
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null) throws Error, IOError {

@@ -13,10 +13,18 @@ base_sources = [
   'socket.vala',
   'socket-glue.c',
   'buffer.vala',
+  'buffer-glue.c',
   'value.vala',
 ]
 
 extra_vala_args = []
+
+if host_os == 'windows'
+  base_sources += 'windows.vala'
+else
+  base_sources += 'posix.vala'
+  extra_vala_args += '--pkg=posix'
+endif
 
 if host_os == 'macos'
   base_sources += [
@@ -27,6 +35,7 @@ endif
 
 if host_os_family == 'darwin'
   base_sources += 'corefoundation.vala'
+  extra_vala_args += '--pkg=darwin-xnu'
 endif
 
 if host_os_family == 'linux'
@@ -34,19 +43,26 @@ if host_os_family == 'linux'
   extra_vala_args += [
     '--pkg=linux',
     '--pkg=linux-system',
-    '--pkg=posix',
   ]
+endif
+
+if host_os_family == 'freebsd'
+  extra_vala_args += '--pkg=freebsd'
 endif
 
 extra_deps = []
 if host_os_family != 'windows'
-  extra_vala_args += '--pkg=gio-unix-2.0'
   extra_deps += gio_unix_dep
 endif
 
 base_vala_args = [gum_vala_args, '--pkg=gio-2.0', '--pkg=json-glib-1.0']
 if nice_dep.found()
   base_vala_args += '--pkg=nice'
+endif
+if host_os_family != 'windows'
+  base_vala_args += [
+    '--pkg=gio-unix-2.0',
+  ]
 endif
 if host_os_family == 'darwin'
   base_vala_args += [

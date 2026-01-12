@@ -172,8 +172,6 @@ static gboolean frida_exec_instance_try_perform_transition (FridaExecInstance * 
 static void frida_exec_instance_suspend (FridaExecInstance * self);
 static void frida_exec_instance_resume (FridaExecInstance * self);
 
-static void frida_make_pipe (int fds[2]);
-
 static FridaInjectInstance * frida_inject_instance_new (FridaBinjector * binjector, guint id, guint pid, const FridaRemoteApi * api,
     const gchar * temp_path);
 static void frida_inject_instance_recreate_fifo (FridaInjectInstance * self);
@@ -211,7 +209,10 @@ _frida_binjector_do_spawn (FridaBinjector * self, const gchar * path, FridaHostS
 {
   FridaSpawnInstance * instance;
   gchar ** argv, ** envp;
-  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+  FridaFileDescriptor * in_fd = NULL;
+  FridaFileDescriptor * out_fd = NULL;
+  FridaFileDescriptor * err_fd = NULL;
+  GError * stdio_error = NULL;
   gchar * old_cwd = NULL;
   gboolean success;
   const gchar * failed_operation;
@@ -221,24 +222,9 @@ _frida_binjector_do_spawn (FridaBinjector * self, const gchar * path, FridaHostS
   argv = frida_host_spawn_options_compute_argv (options, path, NULL);
   envp = frida_host_spawn_options_compute_envp (options, NULL);
 
-  switch (options->stdio)
-  {
-    case FRIDA_STDIO_INHERIT:
-      *pipes = NULL;
-      break;
-
-    case FRIDA_STDIO_PIPE:
-      frida_make_pipe (stdin_pipe);
-      frida_make_pipe (stdout_pipe);
-      frida_make_pipe (stderr_pipe);
-
-      *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
-
-      break;
-
-    default:
-      g_assert_not_reached ();
-  }
+  *pipes = frida_make_stdio_pipes (options->stdio, TRUE, &in_fd, NULL, &out_fd, NULL, &err_fd, NULL, &stdio_error);
+  if (stdio_error != NULL)
+    goto propagate_stdio_error;
 
   if (strlen (options->cwd) > 0)
   {
@@ -254,9 +240,9 @@ _frida_binjector_do_spawn (FridaBinjector * self, const gchar * path, FridaHostS
 
     if (options->stdio == FRIDA_STDIO_PIPE)
     {
-      dup2 (stdin_pipe[0], 0);
-      dup2 (stdout_pipe[1], 1);
-      dup2 (stderr_pipe[1], 2);
+      dup2 (in_fd->handle, 0);
+      dup2 (out_fd->handle, 1);
+      dup2 (err_fd->handle, 2);
     }
 
     ptrace (PT_TRACE_ME, 0, NULL, 0);
@@ -273,13 +259,6 @@ _frida_binjector_do_spawn (FridaBinjector * self, const gchar * path, FridaHostS
       g_warning ("Failed to restore working directory");
   }
 
-  if (options->stdio == FRIDA_STDIO_PIPE)
-  {
-    close (stdin_pipe[0]);
-    close (stdout_pipe[1]);
-    close (stderr_pipe[1]);
-  }
-
   success = frida_wait_for_child_signal (instance->pid, SIGTRAP, NULL);
   CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
 
@@ -290,6 +269,11 @@ _frida_binjector_do_spawn (FridaBinjector * self, const gchar * path, FridaHostS
 
   goto beach;
 
+propagate_stdio_error:
+  {
+    g_propagate_error (error, stdio_error);
+    goto failure;
+  }
 chdir_failed:
   {
     g_set_error (error,
@@ -316,6 +300,10 @@ failure:
   }
 beach:
   {
+    g_clear_object (&in_fd);
+    g_clear_object (&out_fd);
+    g_clear_object (&err_fd);
+
     g_free (old_cwd);
     g_strfreev (envp);
     g_strfreev (argv);
@@ -734,12 +722,6 @@ frida_exec_instance_resume (FridaExecInstance * self)
   }
 
   ptrace (PT_DETACH, self->pid, NULL, 0);
-}
-
-static void
-frida_make_pipe (int fds[2])
-{
-  g_unix_open_pipe (fds, FD_CLOEXEC, NULL);
 }
 
 static FridaInjectInstance *
@@ -1626,7 +1608,9 @@ frida_run_to_entrypoint (pid_t pid, GError ** error)
   ret = frida_get_regs (pid, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_eip = entrypoint;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rip = entrypoint;
 #elif defined (HAVE_ARM64)
   regs.elr = entrypoint;
@@ -1823,7 +1807,33 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = frida_get_regs (pid, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_esp -= FRIDA_RED_ZONE_SIZE;
+  regs.r_esp -= (regs.r_esp - (args_length * 4)) % FRIDA_STACK_ALIGNMENT;
+
+  regs.r_eip = func;
+
+  if (args_length != 0)
+  {
+    guintptr * stack_args;
+
+    stack_args = g_newa (guintptr, args_length);
+    for (i = 0; i != args_length; i++)
+      stack_args[i] = args[i];
+
+    regs.r_esp -= args_length * sizeof (guintptr);
+    if (!frida_remote_write (pid, regs.r_esp, stack_args, args_length * sizeof (guintptr), error))
+      goto propagate_error;
+  }
+
+  {
+    guintptr dummy_return_address = FRIDA_DUMMY_RETURN_ADDRESS;
+
+    regs.r_esp -= 4;
+    if (!frida_remote_write (pid, regs.r_esp, &dummy_return_address, sizeof (dummy_return_address), error))
+      goto propagate_error;
+  }
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rsp -= FRIDA_RED_ZONE_SIZE;
   regs.r_rsp -= (regs.r_rsp - (MAX (args_length - 6, 0) * 8)) % FRIDA_STACK_ALIGNMENT;
 
@@ -1905,7 +1915,9 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = frida_get_regs (pid, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  *retval = regs.r_eax;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   *retval = regs.r_rax;
 #elif defined (HAVE_ARM64)
   *retval = regs.x[0];
@@ -1924,7 +1936,7 @@ os_failure:
         failed_operation, g_strerror (errno));
     return FALSE;
   }
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#ifdef HAVE_I386
 propagate_error:
   {
     return FALSE;
@@ -1943,7 +1955,10 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   ret = frida_get_regs (pid, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.r_eip = remote_address;
+  regs.r_esp = remote_stack;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.r_rip = remote_address;
   regs.r_rsp = remote_stack;
 #elif defined (HAVE_ARM64)
@@ -1967,7 +1982,9 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
     ret = frida_get_regs (pid, &regs);
     CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+    *result = regs.r_eax;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
     *result = regs.r_rax;
 #elif defined (HAVE_ARM64)
     *result = regs.x[0];

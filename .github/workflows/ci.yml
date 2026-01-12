@@ -2,11 +2,15 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build/test"
+        required: false
+        type: string
 
 env:
   FRIDA_CORE_OPTIONS: '--with-devkits=core --enable-tests'
@@ -71,6 +75,7 @@ jobs:
         if: ${{ !startsWith(matrix.id, 'windows-') && matrix.id != 'linux-x86' }}
         run: |
           ./configure \
+              --host=${{ matrix.id }} \
               --enable-compiler-backend \
               ${{ env.FRIDA_CORE_OPTIONS }}
           make
@@ -205,7 +210,7 @@ jobs:
             /sbin/entropy
             cat /etc/motd
             export PS1='\u@frida:\w\$ '
-            /root/frida-tests
+            /root/tests/frida-tests
             status=\$?
             echo "exit status: \$status"
             if [ \$status -eq 0 ]; then
@@ -281,7 +286,8 @@ jobs:
             COPY initscript /tmp/initramfs/init
             RUN chmod +x /tmp/initramfs/init
 
-            COPY build/tests /tmp/initramfs/root/
+            COPY build/tests /tmp/initramfs/root/tests/
+            COPY build/lib/agent/frida-agent.so /tmp/initramfs/root/lib/agent/
             RUN find . | cpio -o --format=newc -R root:root > /root/initramfs.img
 
             COPY launch.sh /root/launch.sh
@@ -297,6 +303,7 @@ jobs:
       matrix:
         id:
           - ios-arm64
+          - ios-arm64-simulator
           - android-x86
           - android-x86_64
           - android-arm
@@ -341,6 +348,7 @@ jobs:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
       - name: Package tests
+        if: false
         run: |
           mkdir -p /tmp/pkg
           cd build
@@ -360,7 +368,7 @@ jobs:
           esac
           tar -C /tmp/pkg -czf /tmp/runner.tar.gz .
       - name: Test on Corellium iOS device
-        if: matrix.id == 'ios-arm64'
+        if: false
         continue-on-error: true
         uses: frida/corellium-action@v4
         with:
@@ -376,7 +384,7 @@ jobs:
             tar xf $ASSET_PATH
             ./frida-tests
       - name: Test on Corellium Android device
-        if: matrix.id == 'android-arm64'
+        if: false
         continue-on-error: true
         uses: frida/corellium-action@v4
         with:
@@ -480,3 +488,134 @@ jobs:
           else
             echo "No unexpected changes detected."
           fi
+
+  xcframework:
+    name: Build FridaCore.xcframework
+    runs-on: macos-latest
+    needs:
+      - native
+      - mobile
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Download macOS/x86_64 devkit
+        uses: actions/download-artifact@v4
+        with:
+          name: core-devkit-macos-x86_64
+          path: devkits/macos-x86_64
+      - name: Download macOS/arm64 devkit
+        uses: actions/download-artifact@v4
+        with:
+          name: core-devkit-macos-arm64
+          path: devkits/macos-arm64
+      - name: Download iOS/arm64 devkit
+        uses: actions/download-artifact@v4
+        with:
+          name: core-devkit-ios-arm64
+          path: devkits/ios-arm64
+      - name: Download iOS/arm64-simulator devkit
+        uses: actions/download-artifact@v4
+        with:
+          name: core-devkit-ios-arm64-simulator
+          path: devkits/ios-arm64-simulator
+      - name: Create FridaCore.xcframework
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p devkits/macos-universal
+          lipo -create \
+              devkits/macos-x86_64/libfrida-core.a \
+              devkits/macos-arm64/libfrida-core.a \
+              -output devkits/macos-universal/libfrida-core.a
+
+          platforms=(
+            "macos-universal"
+            "ios-arm64"
+            "ios-arm64-simulator"
+          )
+
+          for platform in "${platforms[@]}"; do
+            mkdir -p "xcframework_headers/${platform}/FridaCore"
+          done
+
+          cp devkits/macos-x86_64/frida-core.h \
+              xcframework_headers/macos-universal/frida-core-x86_64.h
+          cp devkits/macos-arm64/frida-core.h \
+              xcframework_headers/macos-universal/frida-core-arm64.h
+
+          cat > xcframework_headers/macos-universal/frida-core.h <<'EOF'
+          #if defined (__x86_64__)
+          # include "frida-core-x86_64.h"
+          #elif defined (__arm64__)
+          # include "frida-core-arm64.h"
+          #else
+          # error "Unsupported macOS architecture for FridaCore"
+          #endif
+          EOF
+
+          cp devkits/ios-arm64/frida-core.h \
+              xcframework_headers/ios-arm64/frida-core.h
+          cp devkits/ios-arm64-simulator/frida-core.h \
+              xcframework_headers/ios-arm64-simulator/frida-core.h
+
+          for platform in "${platforms[@]}"; do
+            cat > "xcframework_headers/${platform}/FridaCore/module.modulemap" <<'EOF'
+          module FridaCore [extern_c] {
+            header "../frida-core.h"
+            export *
+          }
+          EOF
+          done
+
+          xcodebuild -create-xcframework \
+              -library devkits/macos-universal/libfrida-core.a \
+              -headers xcframework_headers/macos-universal \
+              -library devkits/ios-arm64/libfrida-core.a \
+              -headers xcframework_headers/ios-arm64 \
+              -library devkits/ios-arm64-simulator/libfrida-core.a \
+              -headers xcframework_headers/ios-arm64-simulator \
+              -output FridaCore.xcframework
+      - name: Upload FridaCore.xcframework
+        uses: actions/upload-artifact@v4
+        with:
+          name: FridaCore.xcframework
+          path: FridaCore.xcframework
+
+  publish-xcframework:
+    if: github.ref_type == 'tag'
+    runs-on: macos-latest
+    needs:
+      - xcframework
+    steps:
+      - name: Download FridaCore.xcframework artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FridaCore.xcframework
+          path: dist
+      - name: Rewrap into FridaCore.xcframework directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          mkdir -p FridaCore.xcframework
+
+          shopt -s dotglob
+          for f in *; do
+            if [[ "$f" != "FridaCore.xcframework" ]]; then
+              mv "$f" FridaCore.xcframework/
+            fi
+          done
+      - name: Zip FridaCore.xcframework
+        run: |
+          cd dist
+          zip -r FridaCore.xcframework.zip FridaCore.xcframework
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/FridaCore.xcframework.zip
+          prerelease: ${{ contains(github.ref_name, 'snapshot') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

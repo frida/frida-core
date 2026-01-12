@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/selinux.git
-revision = 6d5513fd8069e9ff9b7aa10970d34457b32970c8
+revision = b7c8cd70d821bb3fc69500e6273149299b80b923
 depth = 1
 
 [provide]

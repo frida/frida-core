@@ -231,7 +231,9 @@ namespace Frida.Test {
 		ARM_32,
 		ARM_64,
 		MIPS,
-		MIPSEL
+		MIPSEL,
+		RISCV32,
+		RISCV64
 	}
 
 	public enum Arch {

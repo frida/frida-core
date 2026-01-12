@@ -84,23 +84,15 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
-			size_t vm_size = (size_t) elf.mapped_size;
+			var raw_elf = new Bytes.static (elf.get_file_data ());
 
 			size_t page_size = yield machine.query_page_size (cancellable);
-			uint num_pages = (uint) (vm_size / page_size);
-			if (vm_size % page_size != 0)
-				num_pages++;
 
-			var gdb = machine.gdb;
+			allocation = yield inject_elf (elf, raw_elf, page_size, machine, allocator, cancellable);
 
-			allocation = yield allocator.allocate (num_pages * page_size, page_size, cancellable);
 			uint64 base_va = allocation.virtual_address;
-
-			Bytes relocated_image = machine.relocate (elf, base_va);
-			yield gdb.write_byte_array (base_va, relocated_image, cancellable);
-
 			uint64 console_log_trap = 0;
-			elf.enumerate_dynamic_symbols (e => {
+			elf.enumerate_symbols (e => {
 				if (e.name == "")
 					return true;
 
@@ -116,38 +108,14 @@ namespace Frida.Barebone {
 			});
 
 			if (console_log_trap != 0) {
-				console_log_callback = yield new Callback (console_log_trap, new ConsoleLogHandler (this, gdb),
-					machine, cancellable);
+				var handler = new ConsoleLogHandler (machine.gdb);
+				handler.output.connect (on_console_output);
+				console_log_callback = yield new Callback (console_log_trap, handler, machine, cancellable);
 			}
 		}
 
-		private class ConsoleLogHandler : Object, CallbackHandler {
-			public uint arity {
-				get { return 2; }
-			}
-
-			private weak RustModule parent;
-			private GDB.Client gdb;
-
-			public ConsoleLogHandler (RustModule parent, GDB.Client gdb) {
-				this.parent = parent;
-				this.gdb = gdb;
-			}
-
-			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-					throws Error, IOError {
-				var message = args[0];
-				var len = (long) args[1];
-
-				Bytes str_bytes = yield gdb.read_byte_array (message, len, cancellable);
-				unowned uint8[] str_data = str_bytes.get_data ();
-				unowned string str_raw = (string) str_data;
-				string str = str_raw.substring (0, len);
-
-				parent.console_output (str);
-
-				return 0;
-			}
+		private void on_console_output (string message) {
+			console_output (message);
 		}
 
 		private const string CRATE_NAME = "rustmodule";
@@ -201,7 +169,7 @@ namespace Frida.Barebone {
 							.resolve_relative_path (CRATE_NAME);
 					}
 
-					yield write_text_file (workdir, "module.lds", make_linker_script (symbols), cancellable);
+					yield write_text_file (workdir, "module.lds", make_linker_script (code, symbols), cancellable);
 				} catch (GLib.Error e) {
 					throw new Error.PERMISSION_DENIED ("%s", e.message);
 				}
@@ -270,8 +238,8 @@ namespace Frida.Barebone {
 				return rs.str;
 			}
 
-			private static string make_linker_script (Gee.Map<string, uint64?> symbols) {
-				var script = new StringBuilder.sized (256);
+			private static string make_linker_script (string code, Gee.Map<string, uint64?> symbols) {
+				var script = new StringBuilder.sized (512);
 
 				foreach (var e in symbols.entries) {
 					unowned string name = e.key;
@@ -282,15 +250,16 @@ namespace Frida.Barebone {
 						.append_printf ("0x%" + uint64.FORMAT_MODIFIER + "x;\n", address);
 				}
 
-				script.append (prettify_text_asset (BASE_LINKER_SCRIPT));
-
-				return script.str;
-			}
-
-			private const string BASE_LINKER_SCRIPT = """
+				script.append ("""
 				SECTIONS {
 					.text : {
 						*(.text*);
+				""");
+
+				foreach (string name in extract_extern_c_symbols (code))
+					script.append_printf ("		KEEP(*(.text.%s))\n", name);
+
+				script.append ("""
 						_console_log = .;
 						. += 8;
 					}
@@ -307,7 +276,25 @@ namespace Frida.Barebone {
 						*(.bss*)
 					}
 				}
-			""";
+				""");
+
+				return prettify_text_asset (script.str);
+			}
+
+			private static Gee.List<string> extract_extern_c_symbols (string code) {
+				var names = new Gee.ArrayList<string> ();
+
+				var export_pattern = /\#\[\s*no_mangle\s*\]\s*pub\s+(?:unsafe\s+)?extern\s*"C"\s+fn\s+([A-Za-z_]\w*)\s*\(/;
+
+				try {
+					MatchInfo info;
+					for (export_pattern.match (code, 0, out info); info.matches (); info.next ())
+						names.add (info.fetch (1));
+				} catch (RegexError e) {
+				}
+
+				return names;
+			}
 
 			private const string BUILTINS = """
 				#![no_main]

@@ -30,7 +30,6 @@
 #include <sys/mman.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
-#include <util.h>
 
 #ifndef _POSIX_SPAWN_DISABLE_ASLR
 # define _POSIX_SPAWN_DISABLE_ASLR 0x0100
@@ -80,7 +79,7 @@
     goto bsd_failure; \
   }
 
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 #else
 # define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
@@ -181,6 +180,7 @@ struct _FridaSpawnInstance
   mach_vm_address_t dyld_data;
 
   GumAddress modern_entry_address;
+  GumAddress sim_notify_address;
 
   /* V4+ */
   GumAddress notify_objc_init;
@@ -390,7 +390,7 @@ static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * s
 static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
 static gboolean frida_pick_ios_tvos_bootstrapper (GumModule * module, gpointer user_data);
 #endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
@@ -404,9 +404,6 @@ static void frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self
 static void frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * self, guint n);
 static guint32 frida_spawn_instance_put_software_breakpoint (FridaSpawnInstance * self, GumAddress where, guint index);
 static guint32 frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, GumAddress address, guint32 new_instruction);
-
-static void frida_make_pty (int fds[2]);
-static void frida_configure_terminal_attributes (gint fd);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint pid);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
@@ -804,11 +801,16 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   short flags;
-  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+  FridaFileDescriptor * in_fd = NULL;
+  FridaFileDescriptor * out_fd = NULL;
+  FridaFileDescriptor * err_fd = NULL;
+  GError * stdio_error = NULL;
   FridaAslr aslr = FRIDA_ASLR_AUTO;
   GVariant * aslr_value;
   gchar * old_cwd = NULL;
   int result, spawn_errno;
+
+  *pipes = NULL;
 
   instance = frida_spawn_instance_new (self);
 
@@ -823,33 +825,13 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED;
 
-  switch (options->stdio)
-  {
-    case FRIDA_STDIO_INHERIT:
-      *pipes = NULL;
+  *pipes = frida_make_stdio_pipes (options->stdio, TRUE, &in_fd, NULL, &out_fd, NULL, &err_fd, NULL, &stdio_error);
+  if (stdio_error != NULL)
+    goto propagate_stdio_error;
 
-      posix_spawn_file_actions_adddup2 (&file_actions, 0, 0);
-      posix_spawn_file_actions_adddup2 (&file_actions, 1, 1);
-      posix_spawn_file_actions_adddup2 (&file_actions, 2, 2);
-
-      break;
-
-    case FRIDA_STDIO_PIPE:
-      frida_make_pty (stdin_pipe);
-      frida_make_pty (stdout_pipe);
-      frida_make_pty (stderr_pipe);
-
-      *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
-
-      posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
-      posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
-      posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
-
-      break;
-
-    default:
-      g_assert_not_reached ();
-  }
+  posix_spawn_file_actions_adddup2 (&file_actions, (in_fd != NULL) ? in_fd->handle : 0, 0);
+  posix_spawn_file_actions_adddup2 (&file_actions, (out_fd != NULL) ? out_fd->handle : 1, 1);
+  posix_spawn_file_actions_adddup2 (&file_actions, (err_fd != NULL) ? err_fd->handle : 2, 2);
 
   aslr_value = g_hash_table_lookup (options->aux, "aslr");
   if (aslr_value != NULL && !frida_parse_aslr_option (aslr_value, &aslr, error))
@@ -872,13 +854,6 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   if (old_cwd != NULL)
     chdir (old_cwd);
 
-  if (options->stdio == FRIDA_STDIO_PIPE)
-  {
-    close (stdin_pipe[0]);
-    close (stdout_pipe[1]);
-    close (stderr_pipe[1]);
-  }
-
   posix_spawnattr_destroy (&attributes);
 
   posix_spawn_file_actions_destroy (&file_actions);
@@ -892,6 +867,11 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   goto beach;
 
+propagate_stdio_error:
+  {
+    g_propagate_error (error, stdio_error);
+    goto early_failure;
+  }
 chdir_failed:
   {
     g_set_error (error,
@@ -936,12 +916,18 @@ any_failure:
       kill (instance->pid, SIGKILL);
     frida_spawn_instance_close (instance);
 
+    g_clear_object (pipes);
+
     pid = 0;
 
     goto beach;
   }
 beach:
   {
+    g_clear_object (&in_fd);
+    g_clear_object (&out_fd);
+    g_clear_object (&err_fd);
+
     g_free (old_cwd);
     g_strfreev (envp);
     g_strfreev (argv);
@@ -971,7 +957,7 @@ invalid_pid:
   }
 }
 
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
 
 #import "springboard.h"
 
@@ -1057,6 +1043,8 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   FridaSpringboardApi * api;
   NSMutableDictionary * debug_options, * open_options;
   FridaStdioPipes * pipes = NULL;
+  gchar * stdout_name = NULL;
+  gchar * stderr_name = NULL;
   GError * error = NULL;
   FridaAslr aslr = FRIDA_ASLR_AUTO;
   GVariant * aslr_value;
@@ -1092,22 +1080,12 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   if (strlen (spawn_options->cwd) > 0)
     goto cwd_not_supported;
 
+  pipes = frida_make_stdio_pipes (spawn_options->stdio, FALSE, NULL, NULL, NULL, &stdout_name, NULL, &stderr_name, &error);
+  if (error != NULL)
+    goto failure;
+
   if (spawn_options->stdio == FRIDA_STDIO_PIPE)
   {
-    gint stdout_master, stdout_slave, stderr_master, stderr_slave;
-    gchar stdout_name[PATH_MAX], stderr_name[PATH_MAX];
-
-    openpty (&stdout_master, &stdout_slave, stdout_name, NULL, NULL);
-    openpty (&stderr_master, &stderr_slave, stderr_name, NULL, NULL);
-
-    pipes = frida_stdio_pipes_new (-1, stdout_master, stderr_master);
-
-    frida_configure_terminal_attributes (stdout_master);
-    frida_configure_terminal_attributes (stderr_master);
-
-    frida_stdio_pipes_retain (pipes, stdout_slave);
-    frida_stdio_pipes_retain (pipes, stderr_slave);
-
     chmod (stdout_name, 0666);
     chmod (stderr_name, 0666);
 
@@ -1174,7 +1152,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     }
   });
 
-  return;
+  goto beach;
 
 envp_not_supported:
   {
@@ -1195,6 +1173,16 @@ cwd_not_supported:
 failure:
   {
     on_complete (NULL, error, on_complete_target);
+
+    g_clear_object (&pipes);
+
+    goto beach;
+  }
+beach:
+  {
+    g_free (stdout_name);
+    g_free (stderr_name);
+
     return;
   }
 }
@@ -1881,7 +1869,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  GumAddress modern_entry_address, legacy_entry_address;
+  GumAddress modern_entry_address, legacy_entry_address, sim_notify_address;
   const gchar * launch_with_closure_names[] = {
     "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_R11DiagnosticsPmSG_PbSH_",
     "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
@@ -2101,6 +2089,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
       instance->ret_gadget |= 1;
   }
 
+  sim_notify_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld4L29sim_notifyMonitorOfMainCalledEv");
+  instance->sim_notify_address = sim_notify_address;
+
   instance->ret_state = FRIDA_RET_FROM_HELPER;
 
   kr = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
@@ -2112,6 +2103,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     frida_spawn_instance_set_nth_breakpoint (instance, i++, legacy_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (modern_entry_address != 0)
     frida_spawn_instance_set_nth_breakpoint (instance, i++, modern_entry_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+  if (sim_notify_address != 0)
+    frida_spawn_instance_set_nth_breakpoint (instance, i++, sim_notify_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
     GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
@@ -2669,7 +2662,7 @@ frida_inject_instance_on_mach_thread_dead (void * context)
 
     self->agent_context->posix_thread = MACH_PORT_NULL;
 
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
     port_might_be_guarded = gum_darwin_check_xnu_version (7938, 0, 0);
 #else
     port_might_be_guarded = FALSE;
@@ -3104,7 +3097,11 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
 
   if (self->breakpoint_phase == FRIDA_BREAKPOINT_DETECT_FLAVOR)
   {
-    if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
+    if (pc == self->sim_notify_address)
+    {
+      self->breakpoint_phase = FRIDA_BREAKPOINT_LIBSYSTEM_INITIALIZED;
+    }
+    else if (self->dyld_flavor == FRIDA_DYLD_V4_PLUS)
     {
       if (pc == self->modern_entry_address)
       {
@@ -3284,7 +3281,7 @@ next_phase:
       return TRUE;
 
     case FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER:
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
       if (self->bootstrapper_name != 0)
       {
         frida_spawn_instance_set_libc_initialized (self);
@@ -3577,7 +3574,7 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
   if (!gum_darwin_query_ptrauth_support (self->task, &ptrauth_support))
     return KERN_FAILURE;
 
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
   gum_darwin_enumerate_modules (self->task, frida_pick_ios_tvos_bootstrapper, &data);
 #endif
 
@@ -3655,7 +3652,7 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
   self->dyld_data = 0;
 }
 
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
 
 static gboolean
 frida_pick_ios_tvos_bootstrapper (GumModule * module, gpointer user_data)
@@ -4063,44 +4060,6 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
     return 0;
 
   return original_instruction;
-}
-
-static void
-frida_make_pty (int fds[2])
-{
-  gboolean pipe_opened;
-  int i;
-
-  pipe_opened = openpty (&fds[0], &fds[1], NULL, NULL, NULL) != -1;
-  g_assert (pipe_opened);
-
-  for (i = 0; i != 2; i++)
-  {
-    const int fd = fds[i];
-    int res;
-
-    res = fcntl (fd, F_SETFD, fcntl (fd, F_GETFD) | FD_CLOEXEC);
-    g_assert (res == 0);
-
-    res = fcntl (fd, F_SETNOSIGPIPE, TRUE);
-    g_assert (res == 0);
-  }
-
-  frida_configure_terminal_attributes (fds[0]);
-}
-
-static void
-frida_configure_terminal_attributes (gint fd)
-{
-  struct termios tios;
-
-  tcgetattr (fd, &tios);
-
-  tios.c_oflag &= ~ONLCR;
-  tios.c_cflag = (tios.c_cflag & CLOCAL) | CS8 | CREAD | HUPCL;
-  tios.c_lflag &= ~ECHO;
-
-  tcsetattr (fd, 0, &tios);
 }
 
 static FridaInjectInstance *
@@ -5449,7 +5408,7 @@ frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadStat
 static gboolean
 frida_is_hardware_breakpoint_support_working (void)
 {
-#if defined (HAVE_IOS) || defined (HAVE_TVOS)
+#if defined (HAVE_IOS) || defined (HAVE_TVOS) || defined (HAVE_XROS)
   static gsize cached_result = 0;
 
   if (g_once_init_enter (&cached_result))

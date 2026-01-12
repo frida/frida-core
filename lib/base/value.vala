@@ -57,6 +57,22 @@ namespace Frida {
 			push_scope (v);
 		}
 
+		public string[] list_members () throws Error {
+			var scope = peek_scope ();
+			if (scope.dict == null)
+				throw new Error.PROTOCOL ("Dictionary expected, but at %s", scope.val.print (true));
+
+			var members = new Gee.ArrayList<string> ();
+			foreach (var item in scope.val) {
+				string k;
+				Variant v;
+				item.get ("{sv}", out k, out v);
+
+				members.add (k);
+			}
+			return members.to_array ();
+		}
+
 		public bool has_member (string name) throws Error {
 			var scope = peek_scope ();
 			if (scope.dict == null)

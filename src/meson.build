@@ -29,6 +29,30 @@ backend_vala_args_private = []
 backend_libs = []
 backend_deps = []
 
+if host_os == 'android' or have_droidy_backend
+  subdir('android-helper')
+
+  android_data = custom_target('frida-data-android',
+    input: [
+      'android.resources',
+      android_helper_dex,
+    ],
+    output: [
+      'frida-data-android.vapi',
+      'frida-data-android.h',
+      'frida-data-android.c',
+      'frida-data-android-blob' + resource_blob_extension,
+    ],
+    command: [
+      resource_compiler_cmd_array,
+      '-c', '@INPUT0@',
+      '-o', meson.current_build_dir() / 'frida-data-android',
+      '@INPUT1@',
+    ],
+  )
+  backend_sources += [android_data]
+endif
+
 if have_local_backend
   post_process_helper = post_process + ['executable', 're.frida.Helper']
 
@@ -167,7 +191,7 @@ if have_local_backend
       'darwin' / 'policy-softener.vala',
       'darwin' / 'policy-softener-glue.c',
     ]
-    if host_os in ['macos', 'ios', 'tvos']
+    if host_os in ['macos', 'ios', 'tvos', 'xros']
       helper_backend_sources += [
         'darwin' / 'frida-helper-backend.vala',
         'darwin' / 'frida-helper-backend-glue.m',
@@ -179,7 +203,7 @@ if have_local_backend
         'darwin' / 'frida-helper-null-backend.vala',
       ]
     endif
-    if host_os in ['ios', 'tvos']
+    if host_os in ['ios', 'tvos', 'xros']
       helper_backend_sources += [
         'darwin' / 'springboard.m',
         'darwin' / 'substituted-client.c',
@@ -287,31 +311,9 @@ if have_local_backend
     ]
 
     if host_os == 'android'
-      subdir('linux' / 'agent' / 'system-server')
-
       backend_vala_args_private += frida_selinux_vala_args
       backend_libs += frida_selinux
       backend_deps += frida_selinux_dep
-
-      android_data = custom_target('frida-data-android',
-        input: [
-          'linux' / 'frida-android.resources',
-          system_server_js,
-        ],
-        output: [
-          'frida-data-android.vapi',
-          'frida-data-android.h',
-          'frida-data-android.c',
-          'frida-data-android-blob' + resource_blob_extension,
-        ],
-        command: [
-          resource_compiler_cmd_array,
-          '-c', '@INPUT0@',
-          '-o', meson.current_build_dir() / 'frida-data-android',
-          '@INPUT1@',
-        ],
-      )
-      backend_sources += [android_data]
     endif
 
     helper_backend_sources = [
@@ -500,6 +502,34 @@ if have_local_backend
   endif
 endif
 
+if have_simmy_backend
+  backend_sources += [
+    'simmy' / 'simmy-host-session.vala',
+    'simmy' / 'simmy-host-session-glue.m',
+    'simmy' / 'text-plist.vala',
+  ]
+
+  simmy_data = custom_target('frida-data-simmy',
+    input: [
+      'simmy' / 'frida-simmy.resources',
+      'simmy' / 'agent' / 'springboard.js',
+    ],
+    output: [
+      'frida-data-simmy.vapi',
+      'frida-data-simmy.h',
+      'frida-data-simmy.c',
+      'frida-data-simmy-blob' + resource_blob_extension,
+    ],
+    command: [
+      resource_compiler_cmd_array,
+      '-c', '@INPUT0@',
+      '-o', meson.current_build_dir() / 'frida-data-simmy',
+      '@INPUT1@',
+    ],
+  )
+  backend_sources += [simmy_data]
+endif
+
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
@@ -511,6 +541,7 @@ if have_fruity_backend
     'fruity' / 'springboard-services.vala',
     'fruity' / 'lldb.vala',
     'fruity' / 'injector.vala',
+    'fruity' / 'debugger-mappings.vala',
     'fruity' / 'usbmux.vala',
     'fruity' / 'dns.vala',
     'fruity' / 'keyed-archive.vala',

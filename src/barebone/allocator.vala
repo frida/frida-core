@@ -14,64 +14,144 @@ namespace Frida.Barebone {
 			get;
 		}
 
+		public abstract size_t size {
+			get;
+		}
+
 		public abstract async void deallocate (Cancellable? cancellable) throws Error, IOError;
 	}
 
-	public sealed class SimpleAllocator : Object, Allocator {
+	public sealed class NullAllocator : Object, Allocator {
 		public size_t page_size {
-			get { return _page_size; }
+			get {
+				return _page_size;
+			}
+		}
+
+		private size_t _page_size;
+
+		public NullAllocator (size_t page_size) {
+			this._page_size = page_size;
+		}
+
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("To enable this feature, specify an allocator in your FRIDA_BAREBONE_CONFIG");
+		}
+	}
+
+	public sealed class PhysicalAllocator : Object, Allocator {
+		public size_t page_size {
+			get {
+				return _page_size;
+			}
 		}
 
 		private Machine machine;
 		private size_t _page_size;
-		private uint64 base_pa;
 
 		private uint64 cursor;
 
-		public SimpleAllocator (Machine machine, size_t page_size, uint64 base_pa) {
+		public PhysicalAllocator (Machine machine, size_t page_size, PhysicalAllocatorConfig config) {
 			this.machine = machine;
 			this._page_size = page_size;
-			this.base_pa = base_pa;
-			this.cursor = base_pa;
+			this.cursor = config.physical_base.address;
 		}
 
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			if (base_pa == 0) {
-				uint64 example_base;
-				if ("corellium" in machine.gdb.features)
-					example_base = 0x0800000000 + ((2048 - 3) * 1024 * 1024);
-				else
-					example_base = 0x0040000000 + (128 * 1024 * 1024);
-				throw new Error.NOT_SUPPORTED ("To enable this feature, set FRIDA_BAREBONE_HEAP_BASE to the physical " +
-					"base address to use, e.g. 0x%" + uint64.FORMAT_MODIFIER + "x", example_base);
-			}
-
 			uint64 address_pa = cursor;
 
-			size_t vm_size = round_size_up (size, page_size);
+			size_t vm_size = round_size_up (size, _page_size);
 			cursor += vm_size;
 
-			uint num_pages = (uint) (vm_size / page_size);
+			uint num_pages = (uint) (vm_size / _page_size);
 
-			Allocation page_allocation = yield machine.allocate_pages (address_pa, num_pages, cancellable);
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			for (uint i = 0; i != num_pages; i++)
+				physical_addresses.add (address_pa + (i * _page_size));
 
-			return new SimpleAllocation (page_allocation);
+			Allocation page_allocation = yield machine.allocate_pages (physical_addresses, cancellable);
+
+			return new PhysicalAllocation (page_allocation);
 		}
 
-		private class SimpleAllocation : Object, Allocation {
+		private class PhysicalAllocation : Object, Allocation {
 			public uint64 virtual_address {
-				get { return page_allocation.virtual_address; }
+				get {
+					return page_allocation.virtual_address;
+				}
+			}
+
+			public size_t size {
+				get {
+					return page_allocation.size;
+				}
 			}
 
 			private Allocation page_allocation;
 
-			public SimpleAllocation (Allocation page_allocation) {
-				this.page_allocation = page_allocation;
+			public PhysicalAllocation (Allocation allocation) {
+				page_allocation = allocation;
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
 				// TODO: Add to freelist.
 				yield page_allocation.deallocate (cancellable);
+			}
+		}
+	}
+
+	public sealed class TargetFunctionsAllocator : Object, Allocator {
+		public size_t page_size {
+			get {
+				return _page_size;
+			}
+		}
+
+		private Machine machine;
+		private size_t _page_size;
+		private TargetFunctionsAllocatorConfig config;
+
+		public TargetFunctionsAllocator (Machine machine, size_t page_size, TargetFunctionsAllocatorConfig config) {
+			this.machine = machine;
+			this._page_size = page_size;
+			this.config = config;
+		}
+
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
+			uint64 address = yield machine.invoke (config.alloc_function.address, { size }, cancellable);
+
+			// TODO: Handle alignment.
+
+			return new TargetAllocation (address, size, machine, config);
+		}
+
+		private class TargetAllocation : Object, Allocation {
+			public uint64 virtual_address {
+				get {
+					return _virtual_address;
+				}
+			}
+
+			public size_t size {
+				get {
+					return _size;
+				}
+			}
+
+			private uint64 _virtual_address;
+			public size_t _size;
+			private Machine machine;
+			private TargetFunctionsAllocatorConfig config;
+
+			public TargetAllocation (uint64 address, size_t size, Machine m, TargetFunctionsAllocatorConfig c) {
+				_virtual_address = address;
+				_size = size;
+				machine = m;
+				config = c;
+			}
+
+			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+				yield machine.invoke (config.free_function.address, { _virtual_address, size }, cancellable);
 			}
 		}
 	}

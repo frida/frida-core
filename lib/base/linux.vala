@@ -11,29 +11,6 @@ namespace Frida {
 		return (linux_major == major && linux_minor >= minor) || linux_major > major;
 	}
 
-	public class FileDescriptor : Object, FileDescriptorBased {
-		public int handle;
-
-		public FileDescriptor (int handle) {
-			this.handle = handle;
-		}
-
-		~FileDescriptor () {
-			if (handle != -1)
-				Posix.close (handle);
-		}
-
-		public int steal () {
-			int result = handle;
-			handle = -1;
-			return result;
-		}
-
-		public int get_fd () {
-			return handle;
-		}
-	}
-
 	public sealed class PidFileDescriptor : FileDescriptor {
 		private uint pid;
 

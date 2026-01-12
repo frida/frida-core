@@ -304,6 +304,13 @@ Object.defineProperties(Process, {
 });
 
 const marshalers: { [type: string]: Marshaler } = {
+    void: {
+        fromNative(v) {
+        },
+        toNative(v) {
+            throw new Error("invalid operation");
+        }
+    },
     pointer: {
         fromNative(v) {
             return new BNativePointer(v);
@@ -336,6 +343,28 @@ const marshalers: { [type: string]: Marshaler } = {
                 throw new Error("expected an integer");
             }
             return BigInt(v);
+        }
+    },
+    uint: {
+        fromNative(v) {
+            return Number(v);
+        },
+        toNative(v) {
+            if (typeof v !== "number") {
+                throw new Error("expected an integer");
+            }
+            return BigInt(v);
+        }
+    },
+    size_t: {
+        fromNative(v) {
+            return new BUInt64(v);
+        },
+        toNative(v) {
+            if (typeof v === "number") {
+                return BigInt(v);
+            }
+            return v.$v;
         }
     },
 };

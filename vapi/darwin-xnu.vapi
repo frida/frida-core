@@ -77,6 +77,18 @@ namespace Darwin.XNU {
 	[CCode (cheader_filename = "sys/sysctl.h")]
 	public int sysctlbyname (string name, void * oldp, size_t * oldlenp, void * newp = null, size_t newlen = 0);
 
+	[CCode (cheader_filename = "util.h")]
+	public int openpty (out int amaster, out int aslave, [CCode (array_length=false, array_null_terminated=true)] char[] name,
+		Posix.termios? termp, winsize? winp);
+
+	[CCode (cname = "struct winsize", has_type_id = false, cheader_filename = "sys/ttycom.h", destroy_function = "")]
+	public struct winsize {
+		public ushort ws_row;
+		public ushort ws_col;
+		public ushort ws_xpixel;
+		public ushort ws_ypixel;
+	}
+
 	[CCode (cname = "struct xinpgen", cheader_filename = "netinet/in_pcb.h")]
 	public struct InetPcbGeneration {
 		[CCode (cname = "xig_len")]
@@ -101,4 +113,9 @@ namespace Darwin.XNU {
 		IPV6,
 		V4MAPPEDV6,
 	}
+
+	[CCode (cheader_filename = "fcntl.h")]
+	public const int F_FULLFSYNC;
+	[CCode (cheader_filename = "fcntl.h")]
+	public const int F_SETNOSIGPIPE;
 }
