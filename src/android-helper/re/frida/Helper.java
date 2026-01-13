@@ -113,11 +113,22 @@ public class Helper {
 	private Method mCreatePackageContextAsUser;
 	private Method mGetPackageInfoAsUser;
 	private Object mActivityTaskManager;
+
 	private Method mStartActivityAsUser;
 	private Class<?>[] mStartActivityAsUserParamTypes;
 	private int mStartActivityIntentIndex = -1;
 	private int mStartActivityCallingPackageIndex = -1;
 	private int mStartActivityUserIdIndex = -1;
+
+	private Object mActivityManagerService;
+	private Method mStartActivityLegacy;
+	private Class<?>[] mStartActivityLegacyParamTypes;
+	private int mLegacyStartIntentIndex = -1;
+	private int mLegacyStartCallingPackageIndex = -1;
+	private int mLegacyStartResolvedTypeIndex = -1;
+	private int mLegacyStartRequestCodeIndex = -1;
+	private int mLegacyStartUserIdIndex = -1;
+
 	private Method mSendBroadcastAsUser;
 	private boolean mMultiUserSupported;
 	private Field mTopActivityField;
@@ -148,7 +159,8 @@ public class Helper {
 			throw new RuntimeException(e);
 		}
 
-		initActivityStartApi();
+		if (!tryInitActivityStartApi())
+			initLegacyActivityStartApi();
 
 		try {
 			mGetApplicationInfoAsUser = PackageManager.class.getDeclaredMethod("getApplicationInfoAsUser", String.class,
@@ -199,7 +211,7 @@ public class Helper {
 		};
 	}
 
-	private void initActivityStartApi() {
+	private boolean tryInitActivityStartApi() {
 		try {
 			Class<?> ActivityTaskManager = Class.forName("android.app.ActivityTaskManager");
 			Method getService = ActivityTaskManager.getDeclaredMethod("getService");
@@ -243,6 +255,80 @@ public class Helper {
 			mStartActivityIntentIndex = intentIndex;
 			mStartActivityCallingPackageIndex = callingPkgIndex;
 			mStartActivityUserIdIndex = userIdIndex;
+
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private void initLegacyActivityStartApi() {
+		try {
+			Class<?> ActivityManagerNative = Class.forName("android.app.ActivityManagerNative");
+			Method getDefault = ActivityManagerNative.getDeclaredMethod("getDefault");
+			mActivityManagerService = getDefault.invoke(null);
+
+			Method best = null;
+			int intentIndex = -1;
+			int callingPkgIndex = -1;
+			int resolvedTypeIndex = -1;
+			int requestCodeIndex = -1;
+			int userIdIndex = -1;
+
+			for (String name : new String[] { "startActivityAsUser", "startActivity" }) {
+				for (Method m : mActivityManagerService.getClass().getMethods()) {
+					if (!m.getName().equals(name))
+						continue;
+
+					Class<?>[] p = m.getParameterTypes();
+
+					int iIntent = indexOf(p, Intent.class);
+					if (iIntent == -1)
+						continue;
+
+					int iCalling = indexOfFirst(p, String.class);
+					if (iCalling == -1)
+						continue;
+
+					int iResolvedType = -1;
+					for (int i = iIntent + 1; i != p.length; i++) {
+						if (p[i] == String.class) {
+							iResolvedType = i;
+							break;
+						}
+					}
+					if (iResolvedType == -1)
+						continue;
+
+					int iRequestCode = indexOfFirst(p, int.class);
+					if (iRequestCode == -1)
+						continue;
+
+					int iUserId = name.equals("startActivityAsUser") ? indexOfLast(p, int.class) : -1;
+
+					best = m;
+					intentIndex = iIntent;
+					callingPkgIndex = iCalling;
+					resolvedTypeIndex = iResolvedType;
+					requestCodeIndex = iRequestCode;
+					userIdIndex = iUserId;
+					break;
+				}
+
+				if (best != null)
+					break;
+			}
+
+			if (best == null)
+				throw new NoSuchMethodException("No compatible legacy startActivity overload found");
+
+			mStartActivityLegacy = best;
+			mStartActivityLegacyParamTypes = best.getParameterTypes();
+			mLegacyStartIntentIndex = intentIndex;
+			mLegacyStartCallingPackageIndex = callingPkgIndex;
+			mLegacyStartResolvedTypeIndex = resolvedTypeIndex;
+			mLegacyStartRequestCodeIndex = requestCodeIndex;
+			mLegacyStartUserIdIndex = userIdIndex;
 		} catch (Exception e) {
 		}
 	}
@@ -660,7 +746,10 @@ public class Helper {
 				intent.setClassName(pkgName, activity);
 			}
 
-			startActivityViaAtm(intent, uid, pkgName);
+			if (mStartActivityAsUser != null)
+				startActivityViaAtm(intent, uid, pkgName);
+			else
+				startActivityViaAm(intent, uid, pkgName);
 
 			return okVoid();
 		} catch (NameNotFoundException e) {
@@ -690,6 +779,30 @@ public class Helper {
 		args[mStartActivityUserIdIndex] = (uid != 0) ? uid : 0;
 
 		mStartActivityAsUser.invoke(mActivityTaskManager, args);
+	}
+
+	private void startActivityViaAm(Intent intent, int uid, String callingPackage) throws Exception {
+		if (mStartActivityLegacy == null)
+			throw new UnsupportedOperationException("legacy startActivity unavailable");
+
+		Object[] args = new Object[mStartActivityLegacyParamTypes.length];
+
+		for (int i = 0; i != args.length; i++) {
+			if (mStartActivityLegacyParamTypes[i] == int.class)
+				args[i] = 0;
+			else
+				args[i] = null;
+		}
+
+		args[mLegacyStartIntentIndex] = intent;
+		args[mLegacyStartCallingPackageIndex] = callingPackage;
+		args[mLegacyStartResolvedTypeIndex] = intent.resolveTypeIfNeeded(mContext.getContentResolver());
+		args[mLegacyStartRequestCodeIndex] = -1;
+
+		if (mLegacyStartUserIdIndex != -1)
+			args[mLegacyStartUserIdIndex] = (uid != 0) ? uid : 0;
+
+		mStartActivityLegacy.invoke(mActivityManagerService, args);
 	}
 
 	private JSONArray sendBroadcast(JSONArray request) throws JSONException {
