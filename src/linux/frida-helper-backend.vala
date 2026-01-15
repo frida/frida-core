@@ -3169,16 +3169,10 @@ namespace Frida {
 			if (PosixStatus.is_exit (status)) {
 				kind = WaitKind.EXITED;
 				exit_status = PosixStatus.parse_exit_status (status);
-				return;
-			}
-
-			if (PosixStatus.is_signaled (status)) {
+			} else if (PosixStatus.is_signaled (status)) {
 				kind = WaitKind.SIGNALED;
 				term_signal = PosixStatus.parse_termination_signal (status);
-				return;
-			}
-
-			if (PosixStatus.is_stopped (status)) {
+			} else if (PosixStatus.is_stopped (status)) {
 				kind = WaitKind.STOPPED;
 
 				stop_signal = PosixStatus.parse_stop_signal (status);
@@ -3188,8 +3182,6 @@ namespace Frida {
 				is_syscall_stop = (stop_signal == (Posix.Signal.TRAP | 0x80)) && (ptrace_event == NONE);
 
 				should_deliver_to_tracee = !is_syscall_stop && !is_ptrace_event_stop && stop_signal != Posix.Signal.TRAP;
-
-				return;
 			}
 		}
 
