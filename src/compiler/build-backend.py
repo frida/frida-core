@@ -85,7 +85,7 @@ def build_backend(
     )
 
     if mode == "c-archive":
-        if config.get("mingw") is None:
+        if "mingw" not in config:
             symbol_dest = priv_dir / "symbol-replacer"
             symbol_dest.mkdir(parents=True, exist_ok=True)
 
