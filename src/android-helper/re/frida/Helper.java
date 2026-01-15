@@ -20,9 +20,6 @@ import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.os.Looper;
 import android.os.Process;
-import android.system.ErrnoException;
-import android.system.Os;
-import android.system.OsConstants;
 import android.util.Base64;
 import android.util.Base64OutputStream;
 
@@ -130,15 +127,24 @@ public class Helper {
 	private int mLegacyStartUserIdIndex = -1;
 
 	private Method mSendBroadcastAsUser;
+
 	private boolean mMultiUserSupported;
-	private Field mTopActivityField;
+
 	private final String mLauncherPkgName;
+	private Field mSplitPublicSourceDirsField;
+
 	private static Pattern sStatusUidPattern = Pattern.compile("^Uid:\\s+\\d+\\s+(\\d+)\\s+\\d+\\s+\\d+$", Pattern.MULTILINE);
 	private final long mSystemBootTime;
 	private final long mMillisecondsPerJiffy;
+
 	private final SimpleDateFormat mIso8601;
-	private final Method mGetpwuid;
-	private final Field mPwnameField;
+
+	private Method mGetpwuid;
+	private Object mGetpwuidReceiver;
+	private Field mPwnameField;
+
+	private Method mReadlink;
+	private Object mReadlinkReceiver;
 
 	private final LocalServerSocket mSocket;
 	private final Thread mWorker;
@@ -187,20 +193,46 @@ public class Helper {
 		} catch (NoSuchMethodException e) {
 			throw new RuntimeException(e);
 		}
-		try {
-			mTopActivityField = Class.forName("android.app.TaskInfo").getDeclaredField("topActivity");
-		} catch (Exception e) {
-		}
+
 		mLauncherPkgName = detectLauncherPackageName();
+		try {
+			mSplitPublicSourceDirsField = ApplicationInfo.class.getField("splitPublicSourceDirs");
+		} catch (Throwable t) {
+		}
+
 		mSystemBootTime = querySystemBootTime();
-		mMillisecondsPerJiffy = 1000 / Os.sysconf(OsConstants._SC_CLK_TCK);
+		mMillisecondsPerJiffy = 1000 / getClockTicksPerSecond();
+
 		mIso8601 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
 		mIso8601.setTimeZone(TimeZone.getTimeZone("UTC"));
 		try {
 			mGetpwuid = Class.forName("android.system.Os").getDeclaredMethod("getpwuid", int.class);
+			mGetpwuidReceiver = null;
 			mPwnameField = Class.forName("android.system.StructPasswd").getDeclaredField("pw_name");
-		} catch (Exception e) {
-			throw new RuntimeException(e);
+		} catch (Exception e1) {
+			try {
+				Class<?> libcore = Class.forName("libcore.io.Libcore");
+				Object os = libcore.getField("os").get(null);
+				Class<?> osClass = Class.forName("libcore.io.Os");
+				mGetpwuid = osClass.getDeclaredMethod("getpwuid", int.class);
+				mGetpwuidReceiver = os;
+				mPwnameField = Class.forName("libcore.io.StructPasswd").getDeclaredField("pw_name");
+			} catch (Exception e2) {
+				throw new RuntimeException("getpwuid is not available on this device/API level");
+			}
+		}
+
+		try {
+			mReadlink = Class.forName("android.system.Os").getDeclaredMethod("readlink", String.class);
+			mReadlinkReceiver = null;
+		} catch (Exception e1) {
+			try {
+				mReadlink = java.io.File.class.getDeclaredMethod("readlink", String.class);
+				mReadlink.setAccessible(true);
+				mReadlinkReceiver = null;
+			} catch (Exception e2) {
+				throw new RuntimeException("readlink is not available on this device/API level: " + e2.toString());
+			}
 		}
 
 		mSocket = socket;
@@ -425,9 +457,8 @@ public class Helper {
 		Scope scope = Scope.valueOf(request.getString(1).toUpperCase());
 
 		String pkgName = getFrontmostPackageName();
-		if (pkgName == null) {
+		if (pkgName == null)
 			return null;
-		}
 
 		ApplicationInfo appInfo;
 		try {
@@ -639,9 +670,12 @@ public class Helper {
 				parameters = new JSONObject();
 
 				try {
-					File program = new File(Os.readlink(new File(procDir, "exe").getAbsolutePath()));
-					parameters.put("path", program.getAbsolutePath());
-				} catch (ErrnoException e) {
+					String exe = readlink(new File(procDir, "exe").getAbsolutePath());
+					if (exe != null) {
+						File program = new File(exe);
+						parameters.put("path", program.getAbsolutePath());
+					}
+				} catch (Exception e) {
 				}
 
 				try {
@@ -920,28 +954,20 @@ public class Helper {
 		return r;
 	}
 
-	@SuppressWarnings("deprecation")
 	private String getFrontmostPackageName() {
-		if (mTopActivityField == null) {
-			return null;
-		}
-
-		List<RunningTaskInfo> tasks = mActivityManager.getRunningTasks(1);
+		List<ActivityManager.RunningTaskInfo> tasks = mActivityManager.getRunningTasks(1);
 		if (tasks.isEmpty()) {
 			return null;
 		}
 
-		RunningTaskInfo task = tasks.get(0);
-
-		ComponentName name;
-		try {
-			name = (ComponentName) mTopActivityField.get(task);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
+		ActivityManager.RunningTaskInfo task = tasks.get(0);
+		ComponentName name = task.topActivity;
+		if (name == null) {
+			return null;
 		}
 
 		String pkgName = name.getPackageName();
-		if (pkgName.equals(mLauncherPkgName)) {
+		if (pkgName == null || pkgName.equals(mLauncherPkgName)) {
 			return null;
 		}
 
@@ -988,15 +1014,22 @@ public class Helper {
 		return parameters;
 	}
 
-	private static JSONArray fetchAppSources(ApplicationInfo appInfo) {
+	private JSONArray fetchAppSources(ApplicationInfo appInfo) {
 		JSONArray sources = new JSONArray();
 		sources.put(appInfo.publicSourceDir);
-		String[] splitDirs = appInfo.splitPublicSourceDirs;
-		if (splitDirs != null) {
-			for (String splitDir : splitDirs) {
-				sources.put(splitDir);
+
+		if (mSplitPublicSourceDirsField != null) {
+			try {
+				String[] splitDirs = (String[]) mSplitPublicSourceDirsField.get(appInfo);
+				if (splitDirs != null) {
+					for (String splitDir : splitDirs) {
+						sources.put(splitDir);
+					}
+				}
+			} catch (Throwable t) {
 			}
 		}
+
 		return sources;
 	}
 
@@ -1145,9 +1178,42 @@ public class Helper {
 		return Long.parseLong(m.group(1)) * 1000;
 	}
 
+	private static long getClockTicksPerSecond() {
+		try {
+			Class<?> osClass = Class.forName("android.system.Os");
+			Class<?> osConstants = Class.forName("android.system.OsConstants");
+			int key = osConstants.getField("_SC_CLK_TCK").getInt(null);
+			Method sysconf = osClass.getMethod("sysconf", int.class);
+			return ((Long) sysconf.invoke(null, key)).longValue();
+		} catch (Throwable t1) {
+		}
+
+		try {
+			Class<?> libcore = Class.forName("libcore.io.Libcore");
+			Object os = libcore.getField("os").get(null);
+			Class<?> osClass = Class.forName("libcore.io.Os");
+			Class<?> osConstants = Class.forName("libcore.io.OsConstants");
+			int key = osConstants.getField("_SC_CLK_TCK").getInt(null);
+			Method sysconf = osClass.getMethod("sysconf", int.class);
+			return ((Long) sysconf.invoke(os, key)).longValue();
+		} catch (Throwable t2) {
+			throw new RuntimeException("sysconf(_SC_CLK_TCK) is not available on this device/API level");
+		}
+	}
+
+	private String readlink(String path) throws Exception {
+		try {
+			return (String) mReadlink.invoke(mReadlinkReceiver, path);
+		} catch (InvocationTargetException e) {
+			throw (Exception) e.getCause();
+		} catch (IllegalAccessException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	private String resolveUserIdToName(int uid) {
 		try {
-			return (String) mPwnameField.get(mGetpwuid.invoke(null, uid));
+			return (String) mPwnameField.get(mGetpwuid.invoke(mGetpwuidReceiver, uid));
 		} catch (IllegalArgumentException | IllegalAccessException | InvocationTargetException e) {
 			throw new RuntimeException(e);
 		}

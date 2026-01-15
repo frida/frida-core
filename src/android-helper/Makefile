@@ -1,5 +1,5 @@
-ANDROID_API_LEVEL ?= 21
-ANDROID_SDK_ROOT ?= $(shell echo ~/Library/Android/sdk)
+ANDROID_API_LEVEL ?= 19
+ANDROID_SDK_ROOT ?= $(shell echo ~/Android/Sdk)
 
 android_platform := android-$(ANDROID_API_LEVEL)
 android_jar := $(ANDROID_SDK_ROOT)/platforms/$(android_platform)/android.jar
