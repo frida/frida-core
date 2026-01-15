@@ -84,7 +84,6 @@ frida_on_unload (void)
 void
 frida_gadget_environment_init (void)
 {
-  gum_init_embedded ();
   gio_init ();
 
   g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
@@ -136,13 +135,11 @@ frida_gadget_environment_deinit (void)
   glib_shutdown ();
 
   gio_deinit ();
-  gum_deinit_embedded ();
 
   frida_run_atexit_handlers ();
 
 #ifdef HAVE_DARWIN
-  /* Do what frida_deinit_memory() does on the other platforms. */
-  gum_internal_heap_unref ();
+  frida_libc_shim_deinit ();
 #endif
 }
 

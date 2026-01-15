@@ -1,4 +1,7 @@
 namespace Frida {
+#if DARWIN
+	public extern void libc_shim_deinit ();
+#endif
 	public extern void run_atexit_handlers ();
 
 	public extern uint get_process_id ();

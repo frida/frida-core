@@ -50,9 +50,9 @@ raw_agent = shared_library('frida-agent-raw', agent_sources,
   dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, base_dep, pipe_dep, tls_provider_dep, payload_dep],
 )
 
-operations = ['--move', 'constructor', 'frida_init_memory', 'first']
+operations = ['--move', 'constructor', 'frida_libc_shim_init', 'first']
 if host_os_family != 'darwin'
-  operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
+  operations += ['--move', 'destructor', 'frida_libc_shim_deinit', 'first']
 endif
 modulated_agent = custom_target('frida-agent-modulated',
   input: raw_agent,

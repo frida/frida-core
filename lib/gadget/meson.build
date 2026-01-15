@@ -69,12 +69,12 @@ raw_gadget = shared_library('frida-gadget-raw', gadget_sources,
 )
 
 operations = [
-  '--move', 'constructor', 'frida_init_memory', 'first',
+  '--move', 'constructor', 'frida_libc_shim_init', 'first',
   '--move', 'constructor', 'frida_on_load', 'last',
 ]
 if host_os_family != 'darwin'
   operations += [
-    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    '--move', 'destructor', 'frida_libc_shim_deinit', 'first',
     '--move', 'destructor', 'frida_on_unload', 'last',
   ]
 endif
