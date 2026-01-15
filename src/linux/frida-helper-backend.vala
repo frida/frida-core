@@ -3240,7 +3240,7 @@ namespace Frida {
 
 	public extern bool _syscall_satisfies (int syscall_id, LinuxSyscall mask);
 
-	private sealed class ProcMapsSoEntry {
+	public class ProcMapsSoEntry {
 		public uint64 base_address;
 		public string path;
 		public string identity;
@@ -3252,7 +3252,7 @@ namespace Frida {
 		}
 
 		public static ProcMapsSoEntry? find_by_address (uint pid, uint64 address) {
-			var iter = MapsIter.for_pid (pid);
+			var iter = ProcMapsIter.for_pid (pid);
 			while (iter.next ()) {
 				uint64 start = iter.start_address;
 				uint64 end = iter.end_address;
@@ -3266,7 +3266,7 @@ namespace Frida {
 		public static ProcMapsSoEntry? find_by_path (uint pid, string path) {
 			var candidates = new Gee.ArrayList<Candidate> ();
 			Candidate? latest_candidate = null;
-			var iter = MapsIter.for_pid (pid);
+			var iter = ProcMapsIter.for_pid (pid);
 #if ANDROID
 			unowned string libc_path = Gum.Process.get_libc_module ().path;
 #endif
@@ -3322,80 +3322,80 @@ namespace Frida {
 				return result;
 			}
 		}
+	}
 
-		private class MapsIter {
-			private string? contents;
-			private MatchInfo? info;
-			private uint offset = 0;
+	public sealed class ProcMapsIter {
+		private string? contents;
+		private MatchInfo? info;
+		private uint offset = 0;
 
-			public uint64 start_address {
-				get {
-					return uint64.parse (info.fetch (1), 16);
-				}
+		public uint64 start_address {
+			get {
+				return uint64.parse (info.fetch (1), 16);
+			}
+		}
+
+		public uint64 end_address {
+			get {
+				return uint64.parse (info.fetch (2), 16);
+			}
+		}
+
+		public string flags {
+			owned get {
+				return info.fetch (3);
+			}
+		}
+
+		public uint64 file_offset {
+			get {
+				return uint64.parse (info.fetch (4), 16);
+			}
+		}
+
+		public string identity {
+			owned get {
+				return info.fetch (5);
+			}
+		}
+
+		public string path {
+			owned get {
+				return info.fetch (6);
+			}
+		}
+
+		public static ProcMapsIter for_pid (uint pid) {
+			return new ProcMapsIter (pid);
+		}
+
+		private ProcMapsIter (uint pid) {
+			try {
+				FileUtils.get_contents ("/proc/%u/maps".printf (pid), out contents);
+			} catch (FileError e) {
+				return;
 			}
 
-			public uint64 end_address {
-				get {
-					return uint64.parse (info.fetch (2), 16);
-				}
+			if (!/^([0-9a-f]+)-([0-9a-f]+) (\S{4}) ([0-9a-f]+) ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (
+					contents, 0, out info)) {
+				assert_not_reached ();
 			}
+		}
 
-			public string flags {
-				owned get {
-					return info.fetch (3);
-				}
-			}
+		public bool next () {
+			if (info == null)
+				return false;
 
-			public uint64 file_offset {
-				get {
-					return uint64.parse (info.fetch (4), 16);
-				}
-			}
-
-			public string identity {
-				owned get {
-					return info.fetch (5);
-				}
-			}
-
-			public string path {
-				owned get {
-					return info.fetch (6);
-				}
-			}
-
-			public static MapsIter for_pid (uint pid) {
-				return new MapsIter (pid);
-			}
-
-			private MapsIter (uint pid) {
+			if (offset > 0) {
 				try {
-					FileUtils.get_contents ("/proc/%u/maps".printf (pid), out contents);
-				} catch (FileError e) {
-					return;
-				}
-
-				if (!/^([0-9a-f]+)-([0-9a-f]+) (\S{4}) ([0-9a-f]+) ([0-9a-f]{2,}:[0-9a-f]{2,} \d+) +([^\n]+)$/m.match (
-						contents, 0, out info)) {
-					assert_not_reached ();
-				}
-			}
-
-			public bool next () {
-				if (info == null)
+					info.next ();
+				} catch (RegexError e) {
 					return false;
-
-				if (offset > 0) {
-					try {
-						info.next ();
-					} catch (RegexError e) {
-						return false;
-					}
 				}
-				offset++;
-
-				return info.matches ();
 			}
+			offset++;
+
+			return info.matches ();
 		}
 	}
 

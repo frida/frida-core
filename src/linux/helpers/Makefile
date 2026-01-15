@@ -17,8 +17,9 @@ build: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
 	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
 	$(MESON) compile -C build
-	cp build/bootstrapper.bin bootstrapper-$(host_arch).bin
-	cp build/loader.bin loader-$(host_arch).bin
+	install -m644 build/bootstrapper.bin bootstrapper-$(host_arch).bin
+	install -m644 build/loader.bin loader-$(host_arch).bin
+	[ -f build/zymbiote.bin ] && install -m644 build/zymbiote.bin zymbiote-$(host_arch).bin || true
 
 ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
 	if [ -d ext/linux ]; then \

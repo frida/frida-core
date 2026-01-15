@@ -292,26 +292,6 @@ namespace Frida {
 			return yield helper.spawn (program, options, cancellable);
 		}
 
-		protected override bool try_handle_child (HostChildInfo info) {
-#if ANDROID
-			return robo_launcher.try_handle_child (info);
-#else
-			return false;
-#endif
-		}
-
-		protected override void notify_child_resumed (uint pid) {
-#if ANDROID
-			robo_launcher.notify_child_resumed (pid);
-#endif
-		}
-
-		protected override void notify_child_gating_changed (uint pid, uint subscriber_count) {
-#if ANDROID
-			robo_launcher.notify_child_gating_changed (pid, subscriber_count);
-#endif
-		}
-
 		protected override async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			yield helper.prepare_exec_transition (pid, cancellable);
 		}
@@ -333,6 +313,11 @@ namespace Frida {
 		}
 
 		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+#if ANDROID
+			if (robo_launcher.try_resume (pid))
+				return;
+#endif
+
 			yield helper.resume (pid, cancellable);
 		}
 
@@ -620,7 +605,10 @@ namespace Frida {
 
 		private Promise<bool> ensure_request;
 
-		private Gee.HashMap<uint, ZygoteAgent> zygote_agents = new Gee.HashMap<uint, ZygoteAgent> ();
+		private string? server_name;
+		private UnixSocketAddress? server_address;
+		private Gee.Map<uint, ZymbiotePatches> zymbiote_patches = new Gee.HashMap<uint, ZymbiotePatches> ();
+		private Gee.Map<uint, ZymbioteConnection> zymbiote_connections = new Gee.HashMap<uint, ZymbioteConnection> ();
 
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
@@ -651,9 +639,22 @@ namespace Frida {
 				request.reject (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
 			spawn_requests.clear ();
 
-			foreach (var agent in zygote_agents.values.to_array ())
-				yield agent.close (cancellable);
-			zygote_agents.clear ();
+			foreach (var e in zymbiote_patches.entries) {
+				uint pid = e.key;
+				var patches = e.value;
+				try {
+					Posix.kill ((Posix.pid_t) pid, Posix.Signal.STOP);
+					yield wait_until_stopped (pid, cancellable);
+					try {
+						var fd = open_process_memory (pid);
+						patches.revert (fd);
+					} finally {
+						Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
+					}
+				} catch (Error e) {
+				}
+			}
+			zymbiote_patches.clear ();
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -743,56 +744,17 @@ namespace Frida {
 			return pid;
 		}
 
-		public bool try_handle_child (HostChildInfo info) {
-			var agent = zygote_agents[info.parent_pid];
-			if (agent == null)
+		public bool try_resume (uint pid) {
+			ZymbioteConnection? connection;
+			if (!zymbiote_connections.unset (pid, out connection))
 				return false;
+			connection.resume.begin (io_cancellable);
 
-			uint pid = info.pid;
-			string identifier = info.identifier;
-
-			if (identifier == "usap32" || identifier == "usap64") {
-				handle_usap_child.begin (pid, identifier);
-				return true;
-			}
-
-			Promise<uint> spawn_request;
-			if (spawn_requests.unset (identifier, out spawn_request)) {
-				spawn_request.resolve (pid);
-				return true;
-			}
-
-			if (spawn_gating_enabled) {
-				var spawn_info = HostSpawnInfo (pid, identifier);
-				pending_spawn[pid] = spawn_info;
-				spawn_added (spawn_info);
-				return true;
-			}
-
-			if (agent.child_gating_only_used_by_us) {
-				var source = new IdleSource ();
-				var host_session = this.host_session;
-				source.set_callback (() => {
-					host_session.resume.begin (pid, io_cancellable);
-					return false;
-				});
-				source.attach (MainContext.get_thread_default ());
-				return true;
-			}
-
-			return false;
-		}
-
-		public void notify_child_resumed (uint pid) {
 			HostSpawnInfo? info;
 			if (pending_spawn.unset (pid, out info))
 				spawn_removed (info);
-		}
 
-		public void notify_child_gating_changed (uint pid, uint subscriber_count) {
-			var agent = zygote_agents[pid];
-			if (agent != null)
-				agent.child_gating_only_used_by_us = subscriber_count == 1;
+			return true;
 		}
 
 		private async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
@@ -807,6 +769,26 @@ namespace Frida {
 				}
 			}
 			ensure_request = new Promise<bool> ();
+
+			if (server_name == null) {
+				string name = "/frida-zymbiote-" + Uuid.string_random ().replace ("-", "");
+				var address = new UnixSocketAddress.with_type (name, -1, UnixSocketAddressType.ABSTRACT);
+
+				try {
+					var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);
+					socket.bind (address, true);
+					socket.listen ();
+
+					server_name = name;
+					server_address = address;
+
+					handle_zymbiote_connections.begin (socket);
+				} catch (GLib.Error raw_err) {
+					var err = new Error.TRANSPORT ("%s", raw_err.message);
+					ensure_request.reject (err);
+					throw err;
+				}
+			}
 
 			uint pending = 1;
 			GLib.Error? first_error = null;
@@ -827,7 +809,7 @@ namespace Frida {
 				var name = info.name;
 				if (name == "zygote" || name == "zygote64" || name == "usap32" || name == "usap64") {
 					uint pid = info.pid;
-					if (zygote_agents.has_key (pid))
+					if (zymbiote_patches.has_key (pid))
 						continue;
 
 					pending++;
@@ -853,7 +835,7 @@ namespace Frida {
 
 		private async void do_inject_zygote_agent (uint pid, string name, Cancellable? cancellable, CompletionNotify on_complete) {
 			try {
-				yield inject_zygote_agent (pid, name, cancellable);
+				yield inject_zymbiote (pid, cancellable);
 
 				on_complete (null);
 			} catch (GLib.Error e) {
@@ -861,99 +843,432 @@ namespace Frida {
 			}
 		}
 
-		private async void inject_zygote_agent (uint pid, string name, Cancellable? cancellable) throws Error, IOError {
-			var agent = new ZygoteAgent (host_session, pid, name);
-			zygote_agents[pid] = agent;
-			agent.unloaded.connect (on_zygote_agent_unloaded);
+		private async void inject_zymbiote (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var prep = yield prepare_zymbiote_injection (pid, cancellable);
 
+			Posix.kill ((Posix.pid_t) pid, Posix.Signal.STOP);
+			yield wait_until_stopped (pid, cancellable);
 			try {
-				yield agent.load (cancellable);
-			} catch (GLib.Error e) {
-				agent.unloaded.disconnect (on_zygote_agent_unloaded);
-				zygote_agents.unset (pid);
+				var patches = new ZymbiotePatches ();
 
-				if (e is Error.PERMISSION_DENIED) {
-					throw new Error.NOT_SUPPORTED (
-						"Unable to access PID %u (%s) while preparing for app launch; " +
-						"try disabling Magisk Hide in case it is active",
-						pid, name);
+				unowned uint8[] payload = prep.payload.get_data ();
+				if (prep.already_patched) {
+					var handle = Posix.open (prep.payload_path, Posix.O_RDONLY);
+					if (handle == -1) {
+						throw new Error.PERMISSION_DENIED ("Unable to open payload backing file: %s",
+							strerror (errno));
+					}
+					var backing_file = new FileDescriptor (handle);
+					var original = new uint8[payload.length];
+					backing_file.pread_all (original, prep.payload_file_offset);
+					patches.apply (payload, prep.process_memory, prep.payload_base, new Bytes.take ((owned) original));
+				} else {
+					patches.apply (payload, prep.process_memory, prep.payload_base);
 				}
 
-				if (e is IOError)
-					throw (IOError) e;
+				if (prep.already_patched) {
+					patches.apply (prep.replaced_ptr, prep.process_memory, prep.art_method_slot,
+						new Bytes (prep.original_ptr));
+				} else {
+					patches.apply (prep.replaced_ptr, prep.process_memory, prep.art_method_slot);
+				}
 
-				throw (Error) e;
-			}
-		}
-
-		private async void handle_usap_child (uint pid, string name) throws GLib.Error {
-			try {
-				yield inject_zygote_agent (pid, name, io_cancellable);
+				zymbiote_patches[pid] = patches;
 			} finally {
-				host_session.resume.begin (pid, io_cancellable);
+				Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
 			}
 		}
 
-		private void on_zygote_agent_unloaded (InternalAgent dead_internal_agent) {
-			var dead_agent = (ZygoteAgent) dead_internal_agent;
-			dead_agent.unloaded.disconnect (on_zygote_agent_unloaded);
-			zygote_agents.unset (dead_agent.pid);
+		private class ZymbiotePrepResult : Object {
+			public FileDescriptor process_memory;
+			public bool already_patched;
 
-			if (dead_agent.name.has_prefix ("zygote") && ensure_request != null && ensure_request.future.ready)
-				ensure_request = null;
-		}
-	}
+			public uint64 art_method_slot;
+			public uint8[] original_ptr;
+			public uint8[] replaced_ptr;
 
-	private sealed class ZygoteAgent : InternalAgent {
-		public uint pid {
-			get;
-			construct;
+			public Bytes payload;
+			public uint64 payload_base;
+			public string payload_path;
+			public uint64 payload_file_offset;
 		}
 
-		public string name {
-			get;
-			construct;
-		}
+		private async ZymbiotePrepResult prepare_zymbiote_injection (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var task = new Task (this, cancellable, (obj, res) => {
+				prepare_zymbiote_injection.callback ();
+			});
+			task.set_task_data ((void *) pid, null);
+			task.run_in_thread ((t, source_object, task_data, c) => {
+				unowned RoboLauncher launcher = (RoboLauncher) t.get_unowned_source_object ();
+				uint pid_to_prep = (uint) task_data;
+				try {
+					var r = do_prepare_zymbiote_injection (pid_to_prep, launcher.server_name);
+					t.return_pointer ((owned) r, Object.unref);
+				} catch (GLib.Error e) {
+					t.return_error ((owned) e);
+				}
+			});
+			yield;
 
-		public bool child_gating_only_used_by_us {
-			get;
-			set;
-		}
-
-		public ZygoteAgent (HostSessionConnection connection, uint pid, string name) {
-			Object (
-				connection: connection,
-				pid: pid,
-				name: name
-			);
-		}
-
-		public async void load (Cancellable? cancellable) throws Error, IOError {
-#if ARM || ARM64
-			LinuxHelper helper = ((LinuxHostSession) connection.host_session).helper;
-			yield helper.await_syscall (pid, POLL_LIKE, cancellable);
 			try {
+				return (ZymbiotePrepResult) (owned) task.propagate_pointer ();
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+		}
+
+		private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, string server_name) throws Error, IOError {
+			uint64 payload_base = 0;
+			string? payload_path = null;
+			uint64 payload_file_offset = 0;
+			string? libc_path = null;
+			string? runtime_path = null;
+			Gee.List<Gum.MemoryRange?> heap_candidates = new Gee.ArrayList<Gum.MemoryRange?> ();
+
+			var iter = ProcMapsIter.for_pid (pid);
+			while (iter.next ()) {
+				string path = iter.path;
+				string flags = iter.flags;
+				if (path.has_prefix ("/system/bin/app_process") && "x" in flags) {
+					if (payload_base == 0) {
+						payload_base = iter.end_address - Gum.query_page_size ();
+						payload_path = path;
+						payload_file_offset = iter.file_offset;
+					}
+				} else if (path.has_suffix ("/libc.so")) {
+					if (libc_path == null)
+						libc_path = path;
+				} else if (path.has_suffix ("/libandroid_runtime.so")) {
+					if (runtime_path == null)
+						runtime_path = path;
+				} else if (flags == "rw-p" && is_boot_heap (path)) {
+					uint64 start = iter.start_address;
+					uint64 end = iter.end_address;
+					heap_candidates.add (Gum.MemoryRange () {
+						base_address = start,
+						size = (size_t) (end - start),
+					});
+				}
+			}
+
+			if (payload_base == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to pick a payload base");
+			if (libc_path == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect libc.so path");
+			if (runtime_path == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect libandroid_runtime.so path");
+			if (heap_candidates.is_empty)
+				throw new Error.NOT_SUPPORTED ("Unable to detect any VM heap candidates");
+
+			var libc_entry = ProcMapsSoEntry.find_by_path (pid, libc_path);
+			if (libc_entry == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect libc.so entry");
+
+			var runtime_entry = ProcMapsSoEntry.find_by_path (pid, runtime_path);
+			if (runtime_entry == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect libandroid_runtime.so entry");
+
+			Gum.ElfModule libc;
+			try {
+				libc = new Gum.ElfModule.from_file (libc_path);
+			} catch (Gum.Error e) {
+				throw new Error.NOT_SUPPORTED ("Unable to parse libc.so: %s", e.message);
+			}
+
+			Gum.ElfModule runtime;
+			try {
+				runtime = new Gum.ElfModule.from_file (runtime_path);
+			} catch (Gum.Error e) {
+				throw new Error.NOT_SUPPORTED ("Unable to parse libandroid_runtime.so: %s", e.message);
+			}
+
+			uint64 set_argv0_address = 0;
+			runtime.enumerate_exports (e => {
+				if (e.name == "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring") {
+					set_argv0_address = runtime_entry.base_address + e.address;
+					return false;
+				}
+				return true;
+			});
+			if (set_argv0_address == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to locate android.os.Process.setArgV0(); please file a bug");
+
+			uint pointer_size = ("/lib64/" in libc_path) ? 8 : 4;
+
+			var original_ptr = new uint8[pointer_size];
+			var replaced_ptr = new uint8[pointer_size];
+
+			(new Buffer (new Bytes.static (original_ptr), ByteOrder.HOST, pointer_size)).write_pointer (0, set_argv0_address);
+			(new Buffer (new Bytes.static (replaced_ptr), ByteOrder.HOST, pointer_size)).write_pointer (0, payload_base);
+
+			var fd = open_process_memory (pid);
+
+			uint64 art_method_slot = 0;
+			bool already_patched = false;
+			foreach (var candidate in heap_candidates) {
+				var heap = new uint8[candidate.size];
+				var n = fd.pread (heap, candidate.base_address);
+				if (n != heap.length)
+					throw new Error.NOT_SUPPORTED ("Short read");
+
+				void * p = memmem (heap, original_ptr);
+				if (p == null) {
+					p = memmem (heap, replaced_ptr);
+					already_patched = p != null;
+				}
+
+				if (p != null) {
+					art_method_slot = candidate.base_address + ((uint8 *) p - (uint8 *) heap);
+					break;
+				}
+			}
+			if (art_method_slot == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to locate method slot; please file a bug");
+
+			var blob = (pointer_size == 8)
+#if ARM || ARM64
+				? Frida.Data.Android.get_zymbiote_arm64_bin_blob ()
+				: Frida.Data.Android.get_zymbiote_arm_bin_blob ();
+#else
+				? Frida.Data.Android.get_zymbiote_x86_64_bin_blob ()
+				: Frida.Data.Android.get_zymbiote_x86_bin_blob ();
 #endif
-				yield ensure_loaded (cancellable);
+
+			unowned uint8[] payload_template = blob.data;
+			void * p = memmem (payload_template, "/frida-zymbiote-00000000000000000000000000000000".data);
+			assert (p != null);
+			size_t data_offset = (uint8 *) p - (uint8 *) payload_template;
+
+			var payload = new Buffer (new Bytes (payload_template), ByteOrder.HOST, pointer_size);
+
+			size_t cursor = data_offset;
+			payload.write_string (cursor, server_name);
+			cursor += 64;
+
+			payload.write_pointer (cursor, art_method_slot);
+			cursor += pointer_size;
+
+			payload.write_pointer (cursor, set_argv0_address);
+			cursor += pointer_size;
+
+			string[] wanted = {
+				"socket",
+				"connect",
+				"__errno",
+				"getpid",
+				"getppid",
+				"sendmsg",
+				"recv",
+				"close",
+				"raise",
+			};
+
+			var index_of = new Gee.HashMap<string, int> ();
+			for (int i = 0; i != wanted.length; i++)
+				index_of[wanted[i]] = i;
+
+			var addrs = new uint64[wanted.length];
+			uint pending = wanted.length;
+			libc.enumerate_exports (e => {
+				if (index_of.has_key (e.name)) {
+					int idx = index_of[e.name];
+					addrs[idx] = libc_entry.base_address + e.address;
+					pending--;
+				}
+				return pending != 0;
+			});
+
+			for (int i = 0; i != addrs.length; i++) {
+				assert (addrs[i] != 0);
+				payload.write_pointer (cursor, addrs[i]);
+				cursor += pointer_size;
+			}
+
+			return new ZymbiotePrepResult () {
+				process_memory = fd,
+				already_patched = already_patched,
+
+				art_method_slot = art_method_slot,
+				original_ptr = original_ptr,
+				replaced_ptr = replaced_ptr,
+
+				payload = payload.bytes,
+				payload_base = payload_base,
+				payload_path = payload_path,
+				payload_file_offset = payload_file_offset,
+			};
+		}
+
+		private static bool is_boot_heap (string path) {
+			return
+				"boot.art" in path ||
+				"boot-framework.art" in path ||
+				"dalvik-LinearAlloc" in path;
+		}
+
+		[CCode (cname = "memmem", cheader_filename = "string.h")]
+		private extern static void * memmem (uint8[] haystack, uint8[] needle);
+
+		private async void handle_zymbiote_connections (Socket server_socket) {
+			var listener = new SocketListener ();
+			try {
+				listener.add_socket (server_socket, null);
+
+				while (true) {
+					var raw_connection = (UnixConnection) yield listener.accept_async (io_cancellable);
+					var connection = new ZymbioteConnection (raw_connection);
+					handle_zymbiote_connection.begin (connection);
+				}
+			} catch (GLib.Error e) {
+			} finally {
+				listener.close ();
+			}
+		}
+
+		private async void handle_zymbiote_connection (ZymbioteConnection connection) {
+			try {
+				var hello = yield connection.read_hello (io_cancellable);
+
+				connection.patches_to_revert = zymbiote_patches[hello.ppid];
+
+				bool needs_resume = false;
+
+				Promise<uint> spawn_request;
+				if (spawn_requests.unset (hello.package_name, out spawn_request)) {
+					spawn_request.resolve (hello.pid);
+					needs_resume = true;
+				} else if (spawn_gating_enabled) {
+					var spawn_info = HostSpawnInfo (hello.pid, hello.package_name);
+					pending_spawn[hello.pid] = spawn_info;
+					spawn_added (spawn_info);
+					needs_resume = true;
+				}
+
+				if (needs_resume)
+					zymbiote_connections[hello.pid] = connection;
+				else
+					connection.resume.begin (io_cancellable);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private class ZymbiotePatches {
+			public Gee.Queue<Entry> entries = new Gee.ArrayQueue<Entry> ();
+
+			public class Entry {
+				public uint64 address;
+				public Bytes original;
+			}
+
+			public void apply (uint8[] patch, FileDescriptor fd, uint64 address, Bytes? original = null) throws Error {
+				Bytes? orig = original;
+
+				if (orig == null) {
+					var buf = new uint8[patch.length];
+					fd.pread (buf, address);
+					orig = new Bytes.take ((owned) buf);
+				}
+
+				fd.pwrite (patch, address);
+
+				entries.offer (new Entry () {
+					address = address,
+					original = orig,
+				});
+			}
+
+			public void revert (FileDescriptor fd) throws Error {
+				foreach (var e in entries)
+					fd.pwrite (e.original.get_data (), e.address);
+			}
+		}
+
+		private class ZymbioteConnection : Object {
+			public ZymbiotePatches? patches_to_revert = null;
+
+			private UnixConnection connection;
+			private DataInputStream input;
+
+			private Hello? hello = null;
+
+			public ZymbioteConnection (UnixConnection conn) {
+				connection = conn;
+
+				input = new DataInputStream (conn.get_input_stream ());
+				input.byte_order = HOST_ENDIAN;
+			}
+
+			public async Hello read_hello (Cancellable? cancellable) throws Error, IOError {
+				size_t header_size = 12;
 
 				try {
-					yield session.enable_child_gating (cancellable);
+					yield prepare_to_read (header_size, cancellable);
+
+					uint32 package_name_len = 0;
+					input.peek ((uint8[]) &package_name_len, 8);
+
+					size_t message_size = header_size + package_name_len;
+
+					yield prepare_to_read (message_size, cancellable);
+
+					var r = new BufferReader (new Buffer (input.read_bytes (message_size, cancellable)));
+					uint32 pid = r.read_uint32 ();
+					uint32 ppid = r.read_uint32 ();
+					r.skip (4);
+					string package_name = r.read_fixed_string (package_name_len);
+
+					hello = new Hello () {
+						pid = pid,
+						ppid = ppid,
+						package_name = package_name,
+					};
+
+					return hello;
 				} catch (GLib.Error e) {
-					throw_dbus_error (e);
+					if (e is Error)
+						throw (Error) e;
+					throw new Error.TRANSPORT ("%s", e.message);
 				}
-#if ARM || ARM64
-			} finally {
-				helper.resume_syscall.begin (pid, null);
 			}
-#endif
-		}
 
-		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
-			return pid;
-		}
+			public class Hello {
+				public uint pid;
+				public uint ppid;
+				public string package_name;
+			}
 
-		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
-			return null;
+			public async void resume (Cancellable? cancellable) throws Error, IOError {
+				var priority = Priority.DEFAULT;
+
+				try {
+					uint8 ack[1] = { 0x42 };
+					yield connection.get_output_stream ().write_async (ack, priority, cancellable);
+
+					uint8 bye[1];
+					yield input.read_async (bye, priority, cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+
+				yield wait_until_stopped (hello.pid, cancellable);
+
+				if (patches_to_revert != null)
+					patches_to_revert.revert (open_process_memory (hello.pid));
+
+				Posix.kill ((Posix.pid_t) hello.pid, Posix.Signal.CONT);
+			}
+
+			private async void prepare_to_read (size_t required, Cancellable? cancellable) throws GLib.Error {
+				while (true) {
+					size_t available = input.get_available ();
+					if (available >= required)
+						return;
+					ssize_t n = yield input.fill_async ((ssize_t) (required - available), Priority.DEFAULT,
+						cancellable);
+					if (n == 0)
+						throw new Error.TRANSPORT ("Connection closed");
+				}
+			}
 		}
 	}
 
@@ -1372,6 +1687,73 @@ namespace Frida {
 				return false;
 			}
 		}
+	}
+
+	private FileDescriptor open_process_memory (uint pid) throws Error {
+		int handle = Posix.open ("/proc/%u/mem".printf (pid), Posix.O_RDWR);
+		if (handle == -1)
+			throw new Error.PERMISSION_DENIED ("%s", strerror (errno));
+		return new FileDescriptor (handle);
+	}
+
+	private async void wait_until_stopped (uint pid, Cancellable? cancellable) throws Error, IOError {
+		var main_context = MainContext.get_thread_default ();
+
+		bool timed_out = false;
+		var timeout_source = new TimeoutSource.seconds (5);
+		timeout_source.set_callback (() => {
+			timed_out = true;
+			return Source.REMOVE;
+		});
+		timeout_source.attach (main_context);
+
+		uint[] delays = { 0, 1, 2, 5, 10, 20, 50, 250 };
+
+		try {
+			for (uint i = 0; !timed_out && !cancellable.set_error_if_cancelled (); i++) {
+				if (is_process_stopped (pid))
+					break;
+
+				uint delay_ms = (i < delays.length) ? delays[i] : delays[delays.length - 1];
+
+				var delay_source = new TimeoutSource (delay_ms);
+				delay_source.set_callback (wait_until_stopped.callback);
+				delay_source.attach (main_context);
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (wait_until_stopped.callback);
+				cancel_source.attach (main_context);
+
+				yield;
+
+				cancel_source.destroy ();
+				delay_source.destroy ();
+			}
+		} finally {
+			timeout_source.destroy ();
+		}
+
+		if (timed_out)
+			throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process with PID %u to stop", pid);
+	}
+
+	private bool is_process_stopped (uint pid) throws Error {
+		string path = "/proc/%u/stat".printf (pid);
+
+		string contents;
+		size_t length;
+		try {
+			GLib.FileUtils.get_contents (path, out contents, out length);
+		} catch (FileError e) {
+			throw new Error.PROCESS_NOT_FOUND ("%s", e.message);
+		}
+
+		int rparen = contents.last_index_of (")");
+		assert (rparen != -1 && rparen + 2 < contents.length);
+
+		char state = contents.get (rparen + 2);
+
+		return state == 'T';
 	}
 #endif
 }

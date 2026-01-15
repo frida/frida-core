@@ -1,7 +1,9 @@
 #ifndef __FRIDA_SYSCALL_H__
 #define __FRIDA_SYSCALL_H__
 
-#include <unistd.h>
+#ifndef NOLIBC
+# include <unistd.h>
+#endif
 #include <sys/syscall.h>
 
 #define frida_syscall_0(n)          frida_syscall_4 (n, 0, 0, 0, 0)

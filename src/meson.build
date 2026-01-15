@@ -36,6 +36,10 @@ if host_os == 'android' or have_droidy_backend
     input: [
       'android.resources',
       android_helper_dex,
+      'linux' / 'helpers' / f'zymbiote-x86.bin',
+      'linux' / 'helpers' / f'zymbiote-x86_64.bin',
+      'linux' / 'helpers' / f'zymbiote-arm.bin',
+      'linux' / 'helpers' / f'zymbiote-arm64.bin',
     ],
     output: [
       'frida-data-android.vapi',
@@ -48,6 +52,10 @@ if host_os == 'android' or have_droidy_backend
       '-c', '@INPUT0@',
       '-o', meson.current_build_dir() / 'frida-data-android',
       '@INPUT1@',
+      '@INPUT2@',
+      '@INPUT3@',
+      '@INPUT4@',
+      '@INPUT5@',
     ],
   )
   backend_sources += [android_data]

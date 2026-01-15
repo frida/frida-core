@@ -28,27 +28,10 @@ if host_machine.cpu_family() == 'x86'
   extra_flags += '-fno-stack-protector'
 endif
 
-common_objcopy_flags = [
+objcopy_flags = [
   '-O', 'binary',
-  '-S',
-  '-R', '.plt',
-  '-R', '.rel.dyn',
-  '-R', '.rela.dyn',
-  '-R', '.dynamic',
-  '-R', '.dynstr',
-  '-R', '.dynsym',
-  '-R', '.gnu.version',
-  '-R', '.gnu.version_r',
-  '-R', '.gnu.hash',
-  '-R', '.hash',
-  '-R', '.note.*',
+  '-j', '.payload',
 ]
-if not host_machine.cpu_family().startswith('mips')
-  common_objcopy_flags += [
-    '-R', '.got',
-    '-R', '.got.plt',
-  ]
-endif
 
 helper_lds = meson.current_source_dir() / 'helper.lds'
 
@@ -80,7 +63,7 @@ bootstrapper = shared_module('bootstrapper', bootstrapper_sources,
 custom_target('bootstrapper-bin',
   input: [bootstrapper],
   output: ['bootstrapper.bin'],
-  command: [objcopy, common_objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
+  command: [objcopy, objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
   install_dir: 'share' / 'frida-helpers',
   install: true,
 )
@@ -99,7 +82,23 @@ loader = shared_module('loader', ['loader.c', 'syscall.c'],
 custom_target('loader-bin',
   input: [loader],
   output: ['loader.bin'],
-  command: [objcopy, common_objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
+  command: [objcopy, objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
   install_dir: 'share' / 'frida-helpers',
   install: true,
 )
+
+if host_machine.system() == 'android'
+  zymbiote = shared_module('zymbiote', ['zymbiote.c'],
+    name_prefix: '',
+    c_args: extra_flags,
+    link_args: extra_link_args,
+    link_depends: [helper_lds],
+  )
+  custom_target('zymbiote-bin',
+    input: [zymbiote],
+    output: ['zymbiote.bin'],
+    command: [objcopy, objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
+    install_dir: 'share' / 'frida-helpers',
+    install: true,
+  )
+endif
