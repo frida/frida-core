@@ -97,14 +97,11 @@ def build_backend(
             env_copy.pop("GOOS", None)
             env_copy.pop("GOARCH", None)
 
-            symbol_replacer = symbol_dest / "frida-symbol-replacer"
+            symbol_replacer_name = "frida-symbol-replacer"
 
-            subprocess.run([go,
-                "build",
-                "-o",
-                symbol_replacer.name,
-                *symbol_replacer_sources],
-                cwd=priv_dir,
+            subprocess.run(
+                [go, "build", "-o", symbol_replacer_name, "."],
+                cwd=symbol_dest,
                 env=env_copy,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -112,7 +109,8 @@ def build_backend(
                 check=True,
             )
 
-            run(priv_dir / symbol_replacer.name, backend_a.name, *config["nm"], *config["ranlib"])
+            run(priv_dir / "symbol-replacer" / symbol_replacer_name,
+                backend_a.name, *config["nm"], *config["ranlib"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",
