@@ -101,8 +101,8 @@ def build_backend(
 
             # when we are cross-compiling we want to unset GOOS and GOARCH
             env_copy = config["env"].copy()
-            env_copy["GOOS"] = ""
-            env_copy["GOARCH"] = ""
+            env_copy.pop("GOOS", None)
+            env_copy.pop("GOARCH", None)
 
             symbol_replacer = symbol_dest / "frida-symbol-replacer"
 
