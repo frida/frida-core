@@ -145,7 +145,7 @@ static void frida_file_free (FridaFile * f);
 static int frida_file_flush_write (FridaFile * f);
 static ssize_t frida_file_fill_read (FridaFile * f);
 
-static gboolean frida_parse_fopen_mode (const char * mode, int * oflags);
+static void frida_parse_fopen_mode (const char * mode, int * oflags);
 
 static int frida_write_formatted_to_fd (int fd, const char * format, va_list args);
 
@@ -252,18 +252,15 @@ frida_libc_shim_deinit (void)
 
   while (g_hash_table_iter_next (&iter, &key, NULL))
   {
-    FILE * stream;
+    FILE * stream = key;
     FridaFile * f;
-    int fd;
 
-    stream = key;
     f = frida_file_get_impl (stream);
-    fd = f->fd;
 
     frida_file_flush_write (f);
 
     if (f->close_fd)
-      frida_close_nointr (fd);
+      frida_close_nointr (f->fd);
 
     frida_file_free (f);
     frida_file_unwrap (stream);
@@ -277,16 +274,13 @@ frida_libc_shim_deinit (void)
 
   while (g_hash_table_iter_next (&iter, &key, NULL))
   {
-    DIR * dirp;
+    DIR * dirp = key;
     FridaDir * d;
-    int fd;
 
-    dirp = key;
     d = frida_dir_get_impl (dirp);
-    fd = d->fd;
 
     if (d->close_fd)
-      frida_close_nointr (fd);
+      frida_close_nointr (d->fd);
 
     frida_dir_free (d);
 
@@ -579,8 +573,7 @@ fopen (const char * pathname, const char * mode)
   int oflags, fd;
   FridaFile * impl;
 
-  if (!frida_parse_fopen_mode (mode, &oflags))
-    goto invalid_mode;
+  frida_parse_fopen_mode (mode, &oflags);
 
   fd = frida_open_nointr (pathname, oflags, 0666);
   if (fd == -1)
@@ -592,12 +585,6 @@ fopen (const char * pathname, const char * mode)
   frida_stdio_register_stream (result);
 
   return result;
-
-invalid_mode:
-  {
-    errno = EINVAL;
-    return NULL;
-  }
 }
 
 G_GNUC_INTERNAL FILE *
@@ -607,8 +594,7 @@ fdopen (int fd, const char * mode)
   int oflags;
   FridaFile * impl;
 
-  if (!frida_parse_fopen_mode (mode, &oflags))
-    goto invalid_mode;
+  frida_parse_fopen_mode (mode, &oflags);
 
   impl = frida_file_new (fd, TRUE, _IOFBF);
 
@@ -616,12 +602,6 @@ fdopen (int fd, const char * mode)
   frida_stdio_register_stream (result);
 
   return result;
-
-invalid_mode:
-  {
-    errno = EINVAL;
-    return NULL;
-  }
 }
 
 G_GNUC_INTERNAL int
@@ -653,9 +633,6 @@ setvbuf (FILE * stream, char * buf, int mode, size_t size)
   FridaFile * f;
 
   f = frida_file_get_impl (stream);
-
-  if (mode != _IONBF && mode != _IOFBF && mode != _IOLBF)
-    goto invalid_mode;
 
   if (fflush (stream) != 0)
     return -1;
@@ -689,12 +666,6 @@ setvbuf (FILE * stream, char * buf, int mode, size_t size)
   f->wlen = 0;
 
   return 0;
-
-invalid_mode:
-  {
-    errno = EINVAL;
-    return -1;
-  }
 }
 
 G_GNUC_INTERNAL int
@@ -753,7 +724,6 @@ ferror (FILE * stream)
 G_GNUC_INTERNAL int
 getc_unlocked (FILE * stream)
 {
-  int result = EOF;
   FridaFile * f;
 
   f = frida_file_get_impl (stream);
@@ -761,8 +731,7 @@ getc_unlocked (FILE * stream)
   if (f->has_ungot)
   {
     f->has_ungot = FALSE;
-    result = f->ungot;
-    goto beach;
+    return f->ungot;
   }
 
   if (f->buf_mode == _IONBF)
@@ -774,32 +743,28 @@ getc_unlocked (FILE * stream)
     if (n == -1)
     {
       f->err = errno;
-      goto beach;
+      return EOF;
     }
 
     if (n == 0)
     {
       f->eof = TRUE;
-      goto beach;
+      return EOF;
     }
 
-    result = ch;
-    goto beach;
+    return ch;
   }
 
   if (f->rpos == f->rlen)
   {
     if (frida_file_fill_read (f) == -1)
-      goto beach;
+      return EOF;
 
     if (f->rlen == 0)
-      goto beach;
+      return EOF;
   }
 
-  result = f->rbuf[f->rpos++];
-
-beach:
-  return result;
+  return f->rbuf[f->rpos++];
 }
 
 G_GNUC_INTERNAL int
@@ -811,31 +776,26 @@ getc (FILE * stream)
 G_GNUC_INTERNAL int
 ungetc (int c, FILE * stream)
 {
-  int result = EOF;
   FridaFile * f;
 
   f = frida_file_get_impl (stream);
 
   if (c == EOF)
-    goto beach;
+    return EOF;
 
   if (f->has_ungot)
-    goto beach;
+    return EOF;
 
   f->ungot = c;
   f->has_ungot = TRUE;
   f->eof = FALSE;
 
-  result = c;
-
-beach:
-  return result;
+  return c;
 }
 
 G_GNUC_INTERNAL size_t
 fread (void * ptr, size_t size, size_t nmemb, FILE * stream)
 {
-  size_t result = 0;
   FridaFile * f;
   size_t want, got;
   guint8 * out;
@@ -843,7 +803,7 @@ fread (void * ptr, size_t size, size_t nmemb, FILE * stream)
   f = frida_file_get_impl (stream);
 
   if (size == 0 || nmemb == 0)
-    goto beach;
+    return 0;
 
   want = size * nmemb;
   got = 0;
@@ -889,10 +849,10 @@ fread (void * ptr, size_t size, size_t nmemb, FILE * stream)
     }
 
     {
-      size_t avail, take;
+      size_t available, take;
 
-      avail = f->rlen - f->rpos;
-      take = (want - got < avail) ? (want - got) : avail;
+      available = f->rlen - f->rpos;
+      take = MIN (want - got, available);
 
       memcpy (out + got, f->rbuf + f->rpos, take);
 
@@ -901,16 +861,12 @@ fread (void * ptr, size_t size, size_t nmemb, FILE * stream)
     }
   }
 
-  result = got / size;
-
-beach:
-  return result;
+  return got / size;
 }
 
 G_GNUC_INTERNAL size_t
 fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
 {
-  size_t result = 0;
   FridaFile * f;
   size_t total, off;
   const guint8 * in;
@@ -918,7 +874,7 @@ fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
   f = frida_file_get_impl (stream);
 
   if (size == 0 || nmemb == 0)
-    goto beach;
+    return 0;
 
   total = size * nmemb;
   off = 0;
@@ -940,15 +896,14 @@ fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
       off += n;
     }
 
-    result = off / size;
-    goto beach;
+    return off / size;
   }
 
   while (off != total)
   {
     size_t space, take;
 
-    space = (f->wcap > f->wlen) ? (f->wcap - f->wlen) : 0;
+    space = f->wcap - f->wlen;
 
     if (space == 0)
     {
@@ -958,7 +913,7 @@ fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
       space = f->wcap;
     }
 
-    take = (total - off < space) ? (total - off) : space;
+    take = MIN (total - off, space);
 
     memcpy (f->wbuf + f->wlen, in + off, take);
 
@@ -975,19 +930,14 @@ fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
     }
   }
 
-  result = off / size;
-
-beach:
-  return result;
+  return off / size;
 }
 
 G_GNUC_INTERNAL int
 fputc (int c, FILE * stream)
 {
-  unsigned char ch;
+  unsigned char ch = c;
   size_t n;
-
-  ch = c;
 
   n = fwrite (&ch, 1, 1, stream);
   if (n != 1)
@@ -1014,9 +964,6 @@ G_GNUC_INTERNAL char *
 fgets (char * s, int size, FILE * stream)
 {
   int i = 0;
-
-  if (size <= 0)
-    return NULL;
 
   while (i < size - 1)
   {
@@ -1107,9 +1054,6 @@ getdelim (char ** lineptr, size_t * n, int delimiter, FILE * stream)
 {
   size_t len;
 
-  if (lineptr == NULL || n == NULL)
-    goto invalid_args;
-
   if (*lineptr == NULL || *n == 0)
   {
     *n = FRIDA_GETLINE_INITIAL_SIZE;
@@ -1152,12 +1096,6 @@ getdelim (char ** lineptr, size_t * n, int delimiter, FILE * stream)
   (*lineptr)[len] = '\0';
 
   return len;
-
-invalid_args:
-  {
-    errno = EINVAL;
-    return -1;
-  }
 }
 
 G_GNUC_INTERNAL ssize_t
@@ -1238,7 +1176,7 @@ opendir (const char * name)
   d->fd = fd;
   d->close_fd = TRUE;
   d->cap = FRIDA_STDIO_BUFSIZE;
-  d->buf = g_realloc (d->buf, d->cap);
+  d->buf = g_malloc (d->cap);
 
   result = frida_dir_wrap (d);
   frida_stdio_register_dir (result);
@@ -1257,7 +1195,7 @@ fdopendir (int fd)
   d->fd = fd;
   d->close_fd = TRUE;
   d->cap = FRIDA_STDIO_BUFSIZE;
-  d->buf = g_realloc (d->buf, d->cap);
+  d->buf = g_malloc (d->cap);
 
   result = frida_dir_wrap (d);
   frida_stdio_register_dir (result);
@@ -1506,8 +1444,8 @@ frida_file_new (int fd, gboolean close_fd, int buf_mode)
     f->rcap = FRIDA_STDIO_BUFSIZE;
     f->wcap = FRIDA_STDIO_BUFSIZE;
 
-    f->rbuf = g_realloc (f->rbuf, f->rcap);
-    f->wbuf = g_realloc (f->wbuf, f->wcap);
+    f->rbuf = g_malloc (f->rcap);
+    f->wbuf = g_malloc (f->wcap);
   }
 
   return f;
@@ -1530,7 +1468,7 @@ frida_file_flush_write (FridaFile * f)
 {
   size_t off = 0;
 
-  while (off < f->wlen)
+  while (off != f->wlen)
   {
     ssize_t n;
 
@@ -1584,7 +1522,7 @@ io_failed:
   }
 }
 
-static gboolean
+static void
 frida_parse_fopen_mode (const char * mode, int * oflags)
 {
   char c0;
@@ -1596,22 +1534,22 @@ frida_parse_fopen_mode (const char * mode, int * oflags)
   if (c0 == 'r')
   {
     *oflags = plus ? O_RDWR : O_RDONLY;
-    return TRUE;
+    return;
   }
 
   if (c0 == 'w')
   {
     *oflags = (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_TRUNC;
-    return TRUE;
+    return;
   }
 
   if (c0 == 'a')
   {
     *oflags = (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_APPEND;
-    return TRUE;
+    return;
   }
 
-  return FALSE;
+  g_assert_not_reached ();
 }
 
 static int
@@ -1626,7 +1564,7 @@ frida_write_formatted_to_fd (int fd, const char * format, va_list args)
   len = strlen (message);
   off = 0;
 
-  while (off < len)
+  while (off != len)
   {
     ssize_t n;
 
