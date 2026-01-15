@@ -86,18 +86,12 @@ def build_backend(
 
     if mode == "c-archive":
         if config.get("mingw") is None:
-            replacer_inputs: List[Path] = [
-                Path(priv_dir / "symbol-replacer" / "main.go"),
-                Path(priv_dir / "symbol-replacer" / "trie.go"),
-            ]
-
             symbol_dest = priv_dir / "symbol-replacer"
-            symbol_dest.mkdir(exist_ok=True)
-            shutil.copy(base_dir / "symbol-replacer" / "main.go", symbol_dest)
-            shutil.copy(base_dir / "symbol-replacer" / "trie.go", symbol_dest)
-            shutil.copy(base_dir / "symbol-replacer" / "go.mod", symbol_dest)
+            symbol_dest.mkdir(parents=True, exist_ok=True)
 
-            symbol_replacer_sources = [str("symbol-replacer" / f.relative_to(symbol_dest)) for f in replacer_inputs if f.suffix == ".go"]
+            src_dir = base_dir / "symbol-replacer"
+            for name in ("main.go", "trie.go", "go.mod"):
+                shutil.copy(src_dir / name, symbol_dest)
 
             env_copy = config["env"].copy()
             env_copy.pop("GOOS", None)
