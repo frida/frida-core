@@ -507,6 +507,8 @@ namespace Frida {
 					string? line = yield stream.read_line_utf8_async (Priority.DEFAULT, io_cancellable);
 					if (line == null)
 						break;
+					if (label == "stderr" && line.has_prefix ("WARNING: ") && " has text relocations" in line)
+						continue;
 					printerr ("[android-helper %s] %s\n", label, line);
 				}
 			} catch (GLib.Error e) {
