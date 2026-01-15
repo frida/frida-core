@@ -99,7 +99,6 @@ def build_backend(
 
             symbol_replacer_sources = [str("symbol-replacer" / f.relative_to(symbol_dest)) for f in replacer_inputs if f.suffix == ".go"]
 
-            # when we are cross-compiling we want to unset GOOS and GOARCH
             env_copy = config["env"].copy()
             env_copy.pop("GOOS", None)
             env_copy.pop("GOARCH", None)
