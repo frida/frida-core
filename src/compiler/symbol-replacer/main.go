@@ -37,10 +37,16 @@ func main() {
 	for _, line := range content {
 		splitted := bytes.Split(line, []byte{' '})
 		if len(splitted) >= 3 {
-			if bytes.ContainsAny(splitted[1], "TSt") {
-				symbol := splitted[2]
-				symbolLower := bytes.ToLower(symbol)
+			symbolType := splitted[1]
+			symbol := splitted[2]
+			symbolLower := bytes.ToLower(symbol)
+
+			if bytes.ContainsAny(symbolType, "TSt") {
 				if symbolIsOkay(symbolLower) {
+					t.insert(symbol, flipAlpha(symbol))
+				}
+			} else if bytes.ContainsAny(symbolType, "Rrd") {
+				if bytes.HasPrefix(symbolLower, []byte("go:")) {
 					t.insert(symbol, flipAlpha(symbol))
 				}
 			}
