@@ -54,6 +54,56 @@ namespace Frida {
 		public int get_fd () {
 			return handle;
 		}
+
+		public size_t pread (uint8[] buf, uint64 offset) throws Error {
+			while (true) {
+				ssize_t res = Posix.pread (handle, buf, buf.length, (Posix.off_t) offset);
+				if (res == -1) {
+					if (errno == Posix.EINTR)
+						continue;
+					throw new Error.TRANSPORT ("%s", strerror (errno));
+				}
+
+				return res;
+			}
+		}
+
+		public void pread_all (uint8[] buf, uint64 offset) throws Error {
+			size_t total = 0;
+
+			while (total < buf.length) {
+				void * dst = (uint8 *) buf + total;
+				size_t remaining = buf.length - total;
+
+				while (true) {
+					ssize_t res = Posix.pread (handle, dst, remaining, (Posix.off_t) (offset + total));
+					if (res == -1) {
+						if (errno == Posix.EINTR)
+							continue;
+						throw new Error.TRANSPORT ("%s", strerror (errno));
+					}
+
+					if (res == 0)
+						throw new Error.TRANSPORT ("Unexpected EOF: read %zu of %zu bytes", total, buf.length);
+
+					total += (size_t) res;
+					break;
+				}
+			}
+		}
+
+		public size_t pwrite (uint8[] buf, uint64 offset) throws Error {
+			while (true) {
+				ssize_t res = Posix.pwrite (handle, buf, buf.length, (Posix.off_t) offset);
+				if (res == -1) {
+					if (errno == Posix.EINTR)
+						continue;
+					throw new Error.TRANSPORT ("%s", strerror (errno));
+				}
+
+				return res;
+			}
+		}
 	}
 
 	public StdioPipes? make_stdio_pipes (Stdio stdio, bool in_supported, out FileDescriptor? in_fd, out string? in_name,
