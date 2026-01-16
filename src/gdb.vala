@@ -416,6 +416,7 @@ namespace Frida.GDB {
 					.build ();
 				write_bytes (command);
 			} else {
+				// Expensive roundtrip
 				yield execute_simple ("Hg" + thread.id, cancellable);
 				var command = make_packet_builder_sized (16)
 					.append ("s")
@@ -1694,34 +1695,56 @@ namespace Frida.GDB {
 
 		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
+			Bytes request = null;
+			if ("vcont" in client.features) {
+				request = client.make_packet_builder_sized (32)
+					.append_c ('p')
+					.append_register_id (reg.id)
+					.append (";thread:")
+					.append (id)
+					.append_c (';')
+					.build ();
+			} else {
+				//todo: Expensive roundtrip, how can we avoid this?
+				yield client.execute_simple ("Hg" + id, cancellable);
 
-			var request = client.make_packet_builder_sized (32)
-				.append_c ('p')
-				.append_register_id (reg.id)
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
-
+				request = client.make_packet_builder_sized (32)
+					.append_c ('p')
+					.append_register_id (reg.id)
+					.build ();
+			}
 			var response = yield client.query (request, cancellable);
-
 			return Protocol.parse_integer_value (response.payload, client.byte_order);
 		}
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
 
-			var command = client.make_packet_builder_sized (48)
-				.append_c ('P')
-				.append_register_id (reg.id)
-				.append_c ('=')
-				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
+			if ("vcont" in client.features) {
+				var command = client.make_packet_builder_sized (48)
+					.append_c ('P')
+					.append_register_id (reg.id)
+					.append_c ('=')
+					.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
+					.append (";thread:")
+					.append (id)
+					.append_c (';')
+					.build ();
 
-			yield client.execute (command, cancellable);
+				yield client.execute (command, cancellable);
+			} else {
+				//todo: Expensive roundtrip, how can we avoid this?
+				yield client.execute_simple ("Hg" + id, cancellable);
+
+				var command = client.make_packet_builder_sized (48)
+					.append_c ('P')
+					.append_register_id (reg.id)
+					.append_c ('=')
+					.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
+					.build ();
+
+				yield client.execute (command, cancellable);
+			}
 		}
 	}
 
