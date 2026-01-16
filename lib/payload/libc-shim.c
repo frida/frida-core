@@ -23,16 +23,18 @@
 # include <xlocale.h>
 #endif
 
-#undef memcpy
-#undef sprintf
-#undef snprintf
-#undef vsnprintf
-#undef stdin
-#undef stdout
-#undef stderr
+#undef feof
+#undef ferror
 #undef getc
 #undef getc_unlocked
+#undef memcpy
 #undef putchar
+#undef snprintf
+#undef sprintf
+#undef stderr
+#undef stdin
+#undef stdout
+#undef vsnprintf
 
 #ifdef HAVE_MUSL
 # define FRIDA_STDIO_OPAQUE_FILE 1
@@ -171,8 +173,10 @@ struct _FridaDir
 
 static void frida_stdio_register_stream (FILE * stream);
 static void frida_stdio_unregister_stream (FILE * stream);
+#ifdef HAVE_FRIDA_DIR
 static void frida_stdio_register_dir (DIR * dirp);
 static void frida_stdio_unregister_dir (DIR * dirp);
+#endif
 static void frida_flush_all_streams (int * result);
 
 static FridaFile * frida_file_get_impl (FILE * stream);
