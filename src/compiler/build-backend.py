@@ -100,7 +100,7 @@ def build_backend(
             symbol_replacer_name = "frida-symbol-replacer"
 
             subprocess.run(
-                [go, "build", "-o", symbol_replacer_name, "."],
+                [go, "build", "-buildvcs=false", "-o", symbol_replacer_name, "."],
                 cwd=symbol_dest,
                 env=env_copy,
                 stdout=subprocess.PIPE,
