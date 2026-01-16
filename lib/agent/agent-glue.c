@@ -24,6 +24,9 @@ _frida_agent_environment_init (void)
   been_here = TRUE;
 #endif
 
+#ifdef _MSC_VER
+  frida_libc_shim_init ();
+#endif
   gio_init ();
 
   g_thread_set_garbage_handler (_frida_agent_on_pending_thread_garbage, NULL);
@@ -56,7 +59,7 @@ _frida_agent_environment_deinit (void)
 
   frida_run_atexit_handlers ();
 
-# ifdef HAVE_DARWIN
+# if defined (_MSC_VER) || defined (HAVE_DARWIN)
   frida_libc_shim_deinit ();
 # endif
 #endif

@@ -7,8 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #ifndef HAVE_WINDOWS
+# include <assert.h>
 # include <fcntl.h>
 # include <unistd.h>
+#endif
+#if defined (HAVE_DARWIN)
+# include <sys/attr.h>
+#elif defined (HAVE_LINUX)
 # include <sys/syscall.h>
 #endif
 #ifdef HAVE_LOCALE_H
@@ -25,6 +30,13 @@
 #undef stdin
 #undef stdout
 #undef stderr
+#undef getc
+#undef getc_unlocked
+#undef putchar
+
+#ifdef HAVE_MUSL
+# define FRIDA_STDIO_OPAQUE_FILE 1
+#endif
 
 #if defined (HAVE_WINDOWS) || defined (HAVE_ASAN)
 
@@ -33,23 +45,35 @@ frida_run_atexit_handlers (void)
 {
 }
 
-# ifdef HAVE_ASAN
-
-__attribute__ ((constructor)) static void
+# ifdef _MSC_VER
+G_GNUC_INTERNAL
+# else
+__attribute__ ((constructor)) static
+# endif
+void
 frida_libc_shim_init (void)
 {
-  asm volatile ("");
+# ifdef HAVE_ASAN
+  gum_init ();
+# else
+  gum_init_embedded ();
+# endif
 }
 
-#  ifndef HAVE_DARWIN
-__attribute__ ((destructor)) static void
+# if defined (_MSC_VER) || !defined (HAVE_DARWIN)
+G_GNUC_INTERNAL
+# else
+__attribute__ ((destructor)) static
+# endif
+void
 frida_libc_shim_deinit (void)
 {
-  asm volatile ("");
-}
-#  endif
-
+# ifdef HAVE_ASAN
+  gum_deinit ();
+# else
+  gum_deinit_embedded ();
 # endif
+}
 
 #else
 
@@ -71,6 +95,18 @@ frida_libc_shim_deinit (void)
 
 #define FRIDA_STDIO_BUFSIZE 4096
 #define FRIDA_GETLINE_INITIAL_SIZE 128
+
+#if defined (HAVE_LINUX) || defined (HAVE_DARWIN)
+# define HAVE_FRIDA_DIR
+#endif
+
+#if !defined (SYS_getdents64) && defined (__NR_getdents64)
+# define SYS_getdents64 __NR_getdents64
+#endif
+
+#if !defined (SYS_getdirentries64) && defined (__NR_getdirentries64)
+# define SYS_getdirentries64 __NR_getdirentries64
+#endif
 
 typedef struct _FridaExitEntry FridaExitEntry;
 typedef void (* FridaExitFunc) (gpointer user_data);
@@ -114,6 +150,8 @@ struct _FridaFileHandle
   FridaFile * impl;
 };
 
+#ifdef HAVE_FRIDA_DIR
+
 struct _FridaDir
 {
   guint32 magic;
@@ -128,6 +166,8 @@ struct _FridaDir
 
   struct dirent cur;
 };
+
+#endif
 
 static void frida_stdio_register_stream (FILE * stream);
 static void frida_stdio_unregister_stream (FILE * stream);
@@ -149,16 +189,17 @@ static void frida_parse_fopen_mode (const char * mode, int * oflags);
 
 static int frida_write_formatted_to_fd (int fd, const char * format, va_list args);
 
+#ifdef HAVE_FRIDA_DIR
 static FridaDir * frida_dir_get_impl (DIR * dirp);
 static DIR * frida_dir_wrap (FridaDir * impl);
 static void frida_dir_free (FridaDir * d);
 
-#if defined (SYS_getdents64)
+# ifdef HAVE_DARWIN
+static int frida_dir_refill_darwin (FridaDir * d);
+static guint8 frida_darwin_objtype_to_dtype (guint32 objtype);
+# else
 static ssize_t frida_getdirents_nointr (int fd, void * buf, size_t size);
-#elif defined (SYS_getdirentries64)
-static ssize_t frida_getdirents_nointr (int fd, void * buf, size_t size);
-#else
-# error Unsupported platform: no getdents-style syscall available
+# endif
 #endif
 
 static int frida_open_nointr (const char * pathname, int flags, mode_t mode);
@@ -167,15 +208,25 @@ static ssize_t frida_write_nointr (int fd, const void * buf, size_t count);
 static int frida_close_nointr (int fd);
 static off_t frida_lseek_nointr (int fd, off_t offset, int whence);
 
+#ifndef FRIDA_STDIO_OPAQUE_FILE
 G_GNUC_INTERNAL FILE __sF[3];
 
 G_GNUC_INTERNAL FILE * stdin = &__sF[0];
 G_GNUC_INTERNAL FILE * stdout = &__sF[1];
 G_GNUC_INTERNAL FILE * stderr = &__sF[2];
 
+# ifdef HAVE_DARWIN
 G_GNUC_INTERNAL FILE * __stdinp = &__sF[0];
 G_GNUC_INTERNAL FILE * __stdoutp = &__sF[1];
 G_GNUC_INTERNAL FILE * __stderrp = &__sF[2];
+# endif
+#else
+static FridaFileHandle frida_stdio[3];
+
+G_GNUC_INTERNAL FILE * const stdin = (FILE *) &frida_stdio[0];
+G_GNUC_INTERNAL FILE * const stdout = (FILE *) &frida_stdio[1];
+G_GNUC_INTERNAL FILE * const stderr = (FILE *) &frida_stdio[2];
+#endif
 
 static gboolean frida_libc_shim_initialized = FALSE;
 
@@ -187,7 +238,9 @@ static GumSpinlock frida_shim_lock = GUM_SPINLOCK_INIT;
 G_LOCK_DEFINE_STATIC (frida_stdio);
 
 static GHashTable * frida_streams = NULL;
+#ifdef HAVE_FRIDA_DIR
 static GHashTable * frida_dirs = NULL;
+#endif
 
 __attribute__ ((constructor)) static void
 frida_libc_shim_init (void)
@@ -206,18 +259,32 @@ frida_libc_shim_init (void)
   G_LOCK (frida_stdio);
 
   frida_streams = g_hash_table_new (g_direct_hash, g_direct_equal);
+#ifdef HAVE_FRIDA_DIR
   frida_dirs = g_hash_table_new (g_direct_hash, g_direct_equal);
+#endif
 
   G_UNLOCK (frida_stdio);
 
   f0 = frida_file_new (0, FALSE, _IOFBF);
+#ifndef FRIDA_STDIO_OPAQUE_FILE
   frida_file_bind_slot (&__sF[0], f0);
+#else
+  frida_file_bind_slot ((FILE *) &frida_stdio[0], f0);
+#endif
 
   f1 = frida_file_new (1, FALSE, _IOLBF);
+#ifndef FRIDA_STDIO_OPAQUE_FILE
   frida_file_bind_slot (&__sF[1], f1);
+#else
+  frida_file_bind_slot ((FILE *) &frida_stdio[1], f1);
+#endif
 
   f2 = frida_file_new (2, FALSE, _IONBF);
+#ifndef FRIDA_STDIO_OPAQUE_FILE
   frida_file_bind_slot (&__sF[2], f2);
+#else
+  frida_file_bind_slot ((FILE *) &frida_stdio[2], f2);
+#endif
 
   frida_libc_shim_initialized = TRUE;
 }
@@ -242,7 +309,7 @@ frida_libc_shim_deinit (void)
   GHashTableIter iter;
   gpointer key;
 
-  g_assert (frida_libc_shim_initialized);
+  assert (frida_libc_shim_initialized);
 
   fflush (NULL);
 
@@ -270,6 +337,7 @@ frida_libc_shim_deinit (void)
 
   g_clear_pointer (&frida_streams, g_hash_table_unref);
 
+#ifdef HAVE_FRIDA_DIR
   g_hash_table_iter_init (&iter, frida_dirs);
 
   while (g_hash_table_iter_next (&iter, &key, NULL))
@@ -288,18 +356,19 @@ frida_libc_shim_deinit (void)
   }
 
   g_clear_pointer (&frida_dirs, g_hash_table_unref);
+#endif
 
   G_UNLOCK (frida_stdio);
 
-  sh = (FridaFileHandle *) &__sF[0];
+  sh = (FridaFileHandle *) stdin;
   g_clear_pointer (&sh->impl, frida_file_free);
   sh->magic = 0;
 
-  sh = (FridaFileHandle *) &__sF[1];
+  sh = (FridaFileHandle *) stdout;
   g_clear_pointer (&sh->impl, frida_file_free);
   sh->magic = 0;
 
-  sh = (FridaFileHandle *) &__sF[2];
+  sh = (FridaFileHandle *) stderr;
   g_clear_pointer (&sh->impl, frida_file_free);
   sh->magic = 0;
 
@@ -686,9 +755,9 @@ fflush (FILE * stream)
   {
     FridaFile * f0, * f1, * f2;
 
-    f0 = frida_file_get_impl (&__sF[0]);
-    f1 = frida_file_get_impl (&__sF[1]);
-    f2 = frida_file_get_impl (&__sF[2]);
+    f0 = frida_file_get_impl (stdin);
+    f1 = frida_file_get_impl (stdout);
+    f2 = frida_file_get_impl (stderr);
 
     if (frida_file_flush_write (f0) != 0)
       result = EOF;
@@ -1160,6 +1229,8 @@ puts (const char * s)
   return 1;
 }
 
+#ifdef HAVE_FRIDA_DIR
+
 G_GNUC_INTERNAL DIR *
 opendir (const char * name)
 {
@@ -1232,8 +1303,13 @@ readdir (DIR * dirp)
 
   while (TRUE)
   {
-    if (d->pos >= d->len)
+    if (d->pos == d->len)
     {
+#ifdef HAVE_DARWIN
+      int res = frida_dir_refill_darwin (d);
+      if (res == -1 || res == 0)
+        return NULL;
+#else
       ssize_t n;
 
       d->pos = 0;
@@ -1247,9 +1323,66 @@ readdir (DIR * dirp)
         return NULL;
 
       d->len = n;
+#endif
     }
 
-#if defined (SYS_getdents64)
+#ifdef HAVE_DARWIN
+    {
+      guint8 * group, * base, * p;
+      guint32 group_len;
+      G_GNUC_UNUSED attribute_set_t returned;
+      attrreference_t * name_refp;
+      const char * name;
+      size_t name_len, copy_len;
+      guint32 objtype;
+      fsobj_id_t objid;
+
+      group = d->buf + d->pos;
+
+      group_len = *(guint32 *) group;
+      d->pos += group_len;
+
+      base = group + 4;
+
+      returned = *(attribute_set_t *) base;
+      assert ((returned.commonattr & (ATTR_CMN_NAME | ATTR_CMN_OBJTYPE | ATTR_CMN_OBJID)) ==
+          (ATTR_CMN_NAME | ATTR_CMN_OBJTYPE | ATTR_CMN_OBJID));
+
+      p = base + sizeof (attribute_set_t);
+
+      name_refp = (attrreference_t *) p;
+      p += sizeof (attrreference_t);
+
+      name = (const char *) ((guint8 *) name_refp + name_refp->attr_dataoffset);
+      name_len = (size_t) name_refp->attr_length;
+
+      if (name_len != 0 && name[name_len - 1] == '\0')
+        name_len--;
+
+      objtype = *(guint32 *) p;
+      p += sizeof (guint32);
+
+      p = (guint8 *) (((gsize) p + 3) & ~((gsize) 3));
+      objid = *(fsobj_id_t *) p;
+
+      copy_len = name_len;
+      if (copy_len > sizeof (d->cur.d_name) - 1)
+        copy_len = sizeof (d->cur.d_name) - 1;
+
+      d->cur.d_ino = (ino_t) objid.fid_objno;
+#if __DARWIN_64_BIT_INO_T
+      d->cur.d_seekoff = 0;
+#endif
+      d->cur.d_reclen = sizeof (d->cur);
+      d->cur.d_namlen = copy_len;
+      d->cur.d_type = frida_darwin_objtype_to_dtype (objtype);
+
+      memcpy (d->cur.d_name, name, copy_len);
+      d->cur.d_name[copy_len] = '\0';
+
+      return &d->cur;
+    }
+#elif defined (SYS_getdents64)
     {
       struct linux_dirent64
       {
@@ -1268,9 +1401,7 @@ readdir (DIR * dirp)
       memset (&d->cur, 0, sizeof (d->cur));
 
       d->cur.d_ino = (ino_t) e->d_ino;
-# ifdef _DIRENT_HAVE_D_TYPE
       d->cur.d_type = e->d_type;
-# endif
 
       name_len = strnlen (e->d_name, sizeof (d->cur.d_name) - 1);
       memcpy (d->cur.d_name, e->d_name, name_len);
@@ -1299,6 +1430,136 @@ readdir (DIR * dirp)
   }
 }
 
+#ifdef HAVE_DARWIN
+
+static int
+frida_dir_refill_darwin (FridaDir * d)
+{
+  int n_entries;
+  guint8 * p;
+  int i;
+
+  d->pos = 0;
+  d->len = 0;
+
+  while (TRUE)
+  {
+    static const struct attrlist attrlist =
+    {
+      .bitmapcount = ATTR_BIT_MAP_COUNT,
+      .reserved = 0,
+      .commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_OBJTYPE | ATTR_CMN_OBJID,
+      .volattr = 0,
+      .dirattr = 0,
+      .fileattr = 0,
+      .forkattr = 0
+    };
+
+    n_entries = getattrlistbulk (d->fd, (struct attrlist *) &attrlist, d->buf, d->cap, 0);
+    if (n_entries != -1)
+      break;
+
+    if (errno == EINTR)
+      continue;
+
+    return -1;
+  }
+
+  if (n_entries == 0)
+    return 0;
+
+  p = d->buf;
+
+  for (i = 0; i != n_entries; i++)
+  {
+    guint32 group_len;
+
+    group_len = *(guint32 *) p;
+
+    if (group_len == 0)
+      return -1;
+
+    d->len += group_len;
+    p += group_len;
+  }
+
+  return 1;
+}
+
+static guint8
+frida_darwin_objtype_to_dtype (guint32 objtype)
+{
+  switch (objtype)
+  {
+    case 1:  /* VREG  */
+      return DT_REG;
+    case 2:  /* VDIR  */
+      return DT_DIR;
+    case 3:  /* VBLK  */
+      return DT_BLK;
+    case 4:  /* VCHR  */
+      return DT_CHR;
+    case 5:  /* VLNK  */
+      return DT_LNK;
+    case 6:  /* VSOCK */
+      return DT_SOCK;
+    case 7:  /* VFIFO */
+      return DT_FIFO;
+    default:
+      return DT_UNKNOWN;
+  }
+}
+
+#else
+
+static ssize_t
+frida_getdirents_nointr (int fd, void * buf, size_t size)
+{
+  while (TRUE)
+  {
+#if defined (HAVE_DARWIN)
+    ssize_t n;
+    long basep;
+
+    n = getdirentries (fd, buf, size, &basep);
+    if (n != -1)
+      return n;
+
+    if (errno == EINTR)
+      continue;
+
+    return -1;
+#elif defined (SYS_getdents64)
+    ssize_t n;
+
+    n = (ssize_t) syscall (SYS_getdents64, fd, buf, size);
+    if (n != -1)
+      return n;
+
+    if (errno == EINTR)
+      continue;
+
+    return -1;
+#elif defined (SYS_getdirentries64)
+    ssize_t n;
+    off_t basep;
+
+    n = (ssize_t) syscall (SYS_getdirentries64, fd, buf, size, &basep);
+    if (n != -1)
+      return n;
+
+    if (errno == EINTR)
+      continue;
+
+    return -1;
+#endif
+  }
+}
+
+#endif
+
+#endif
+
 static void
 frida_stdio_register_stream (FILE * stream)
 {
@@ -1319,6 +1580,8 @@ frida_stdio_unregister_stream (FILE * stream)
   G_UNLOCK (frida_stdio);
 }
 
+#ifdef HAVE_FRIDA_DIR
+
 static void
 frida_stdio_register_dir (DIR * dirp)
 {
@@ -1338,6 +1601,8 @@ frida_stdio_unregister_dir (DIR * dirp)
 
   G_UNLOCK (frida_stdio);
 }
+
+#endif
 
 static void
 frida_flush_all_streams (int * result)
@@ -1368,12 +1633,12 @@ frida_file_get_impl (FILE * stream)
 {
   FridaFileHandle * h;
 
-  g_assert (stream != NULL);
+  assert (stream != NULL);
 
   h = (FridaFileHandle *) stream;
 
-  g_assert (h->magic == FRIDA_FILE_MAGIC);
-  g_assert (h->impl != NULL);
+  assert (h->magic == FRIDA_FILE_MAGIC);
+  assert (h->impl != NULL);
 
   return h->impl;
 }
@@ -1383,9 +1648,12 @@ frida_file_bind_slot (FILE * slot, FridaFile * impl)
 {
   FridaFileHandle * h;
 
-  g_assert (slot != NULL);
-  g_assert (impl != NULL);
-  g_assert (sizeof (FILE) >= sizeof (FridaFileHandle));
+  assert (slot != NULL);
+  assert (impl != NULL);
+
+#ifndef FRIDA_STDIO_OPAQUE_FILE
+  assert (sizeof (FILE) >= sizeof (FridaFileHandle));
+#endif
 
   h = (FridaFileHandle *) slot;
 
@@ -1399,10 +1667,14 @@ frida_file_wrap (FridaFile * impl)
   FILE * stream;
   FridaFileHandle * h;
 
-  g_assert (impl != NULL);
-  g_assert (sizeof (FILE) >= sizeof (FridaFileHandle));
+  assert (impl != NULL);
 
+#ifndef FRIDA_STDIO_OPAQUE_FILE
+  assert (sizeof (FILE) >= sizeof (FridaFileHandle));
   stream = g_new0 (FILE, 1);
+#else
+  stream = (FILE *) g_new0 (FridaFileHandle, 1);
+#endif
 
   h = (FridaFileHandle *) stream;
   h->magic = FRIDA_FILE_MAGIC;
@@ -1416,11 +1688,11 @@ frida_file_unwrap (FILE * stream)
 {
   FridaFileHandle * h;
 
-  g_assert (stream != NULL);
+  assert (stream != NULL);
 
   h = (FridaFileHandle *) stream;
 
-  g_assert (h->magic == FRIDA_FILE_MAGIC);
+  assert (h->magic == FRIDA_FILE_MAGIC);
 
   h->magic = 0;
   h->impl = NULL;
@@ -1590,16 +1862,18 @@ beach:
   }
 }
 
+#ifdef HAVE_FRIDA_DIR
+
 static FridaDir *
 frida_dir_get_impl (DIR * dirp)
 {
   FridaDir * d;
 
-  g_assert (dirp != NULL);
+  assert (dirp != NULL);
 
   d = (FridaDir *) dirp;
 
-  g_assert (d->magic == FRIDA_DIR_MAGIC);
+  assert (d->magic == FRIDA_DIR_MAGIC);
 
   return d;
 }
@@ -1607,8 +1881,8 @@ frida_dir_get_impl (DIR * dirp)
 static DIR *
 frida_dir_wrap (FridaDir * impl)
 {
-  g_assert (impl != NULL);
-  g_assert (impl->magic == FRIDA_DIR_MAGIC);
+  assert (impl != NULL);
+  assert (impl->magic == FRIDA_DIR_MAGIC);
 
   return (DIR *) impl;
 }
@@ -1619,7 +1893,7 @@ frida_dir_free (FridaDir * d)
   if (d == NULL)
     return;
 
-  g_assert (d->magic == FRIDA_DIR_MAGIC);
+  assert (d->magic == FRIDA_DIR_MAGIC);
 
   d->magic = 0;
 
@@ -1627,6 +1901,8 @@ frida_dir_free (FridaDir * d)
 
   g_free (d);
 }
+
+#endif
 
 static int
 frida_open_nointr (const char * pathname, int flags, mode_t mode)
@@ -1722,44 +1998,6 @@ frida_lseek_nointr (int fd, off_t offset, int whence)
   }
 }
 
-#if defined (SYS_getdents64)
-static ssize_t
-frida_getdirents_nointr (int fd, void * buf, size_t size)
-{
-  while (TRUE)
-  {
-    ssize_t n;
-
-    n = (ssize_t) syscall (SYS_getdents64, fd, buf, size);
-    if (n != -1)
-      return n;
-
-    if (errno == EINTR)
-      continue;
-
-    return -1;
-  }
-}
-#elif defined (SYS_getdirentries64)
-static ssize_t
-frida_getdirents_nointr (int fd, void * buf, size_t size)
-{
-  while (TRUE)
-  {
-    ssize_t n;
-
-    n = (ssize_t) syscall (SYS_getdirentries64, fd, buf, size, &basep);
-    if (n != -1)
-      return n;
-
-    if (errno == EINTR)
-      continue;
-
-    return -1;
-  }
-}
-#endif
-
 #endif
 
 #ifdef HAVE_DARWIN
@@ -1809,10 +2047,6 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #endif
 
 #ifdef HAVE_LINUX
-
-#include <fcntl.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 #ifndef __NR_dup3
 # if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
