@@ -186,6 +186,17 @@ namespace Frida.GDB {
 			}
 
 			try {
+				var response = yield query_simple ("vCont?", cancellable);
+				unowned string payload = response.payload;
+				if (payload.length > 0 && payload[0] != 'E' && payload != "") {
+					supported_features.add ("vcont");
+				}
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+			}
+
+			try {
 				string response = yield query_property ("qemu.PhyMemMode", cancellable);
 				if (response.length == 1)
 					supported_features.add ("qemu-phy-mem-mode");
@@ -267,6 +278,8 @@ namespace Frida.GDB {
 			check_stopped ();
 
 			change_state (RUNNING);
+
+			//todo error if no vcont?
 
 			var command = make_packet_builder_sized (1)
 				.append ("vCont");
@@ -396,12 +409,20 @@ namespace Frida.GDB {
 			check_stopped ();
 
 			change_state (RUNNING);
+			if ("vcont" in features) {
+				var command = make_packet_builder_sized (16)
+					.append ("vCont;s:")
+					.append (thread.id)
+					.build ();
+				write_bytes (command);
+			} else {
+				yield execute_simple ("Hg" + thread.id, cancellable);
+				var command = make_packet_builder_sized (16)
+					.append ("s")
+					.build ();
+				write_bytes (command);
+			}
 
-			var command = make_packet_builder_sized (16)
-				.append ("vCont;s:")
-				.append (thread.id)
-				.build ();
-			write_bytes (command);
 
 			yield wait_until_stopped (cancellable);
 		}
@@ -411,12 +432,20 @@ namespace Frida.GDB {
 
 			change_state (RUNNING);
 
-			var command = make_packet_builder_sized (16)
-				.append ("vCont;s:")
-				.append (thread.id)
-				.append (";c")
-				.build ();
-			write_bytes (command);
+			if ("vcont" in features) {
+				var command = make_packet_builder_sized (16)
+					.append ("vCont;s:")
+					.append (thread.id)
+					.append (";c")
+					.build ();
+				write_bytes (command);
+			} else {
+				//todo: maybe throw, needs vCont
+				var command = make_packet_builder_sized (16)
+					.append ("s")
+					.build ();
+				write_bytes (command);
+			}
 		}
 
 		public virtual async Bytes read_byte_array (uint64 address, size_t size, Cancellable? cancellable = null)
