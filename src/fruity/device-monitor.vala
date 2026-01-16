@@ -961,7 +961,10 @@ namespace Frida.Fruity {
 		private LibUSB.Context? usb_context;
 		private LibUSB.HotCallbackHandle iphone_callback;
 		private LibUSB.HotCallbackHandle ipad_callback;
-		private uint pending_usb_device_arrivals = 0;
+		private Gee.Set<uint32> startup_counted = new Gee.HashSet<uint32> ();
+		private uint startup_inflight = 0;
+		private uint startup_barrier_reached = 0;
+		private uint usb_started_resolved = 0;
 		private Gee.Map<uint32, LibUSB.Device> polled_usb_devices = new Gee.HashMap<uint32, LibUSB.Device> ();
 		private Source? polled_usb_timer;
 		private uint polled_usb_outdated = 0;
@@ -1099,14 +1102,17 @@ namespace Frida.Fruity {
 				return;
 			}
 
-			AtomicUint.inc (ref pending_usb_device_arrivals);
-
-			bool callbacks_registered = true;
+			bool callbacks_registered = false;
 			if (LibUSB.has_capability (HAS_HOTPLUG) != 0) {
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
 					PRODUCT_ID_IPHONE, LibUSB.HotPlugEvent.MATCH_ANY, on_usb_hotplug_event, out iphone_callback);
 				usb_context.hotplug_register_callback (DEVICE_ARRIVED | DEVICE_LEFT, ENUMERATE, VENDOR_ID_APPLE,
 					PRODUCT_ID_IPAD, LibUSB.HotPlugEvent.MATCH_ANY, on_usb_hotplug_event, out ipad_callback);
+				callbacks_registered = true;
+
+				usb_context.interrupt_event_handler ();
+				int completed = 0;
+				usb_context.handle_events_completed (out completed);
 			} else {
 				refresh_polled_usb_devices ();
 
@@ -1120,21 +1126,17 @@ namespace Frida.Fruity {
 				polled_usb_timer = source;
 			}
 
-			if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals)) {
-				schedule_on_frida_thread (() => {
-					usb_started.resolve (true);
-					return Source.REMOVE;
-				});
-			}
+			schedule_startup_barrier_close ();
 
-			while (state != STOPPING) {
-				int completed = 0;
-				usb_context.handle_events_completed (out completed);
+			while (true) {
+				State s;
+				lock (state)
+					s = state;
 
-				if (AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
-					refresh_polled_usb_devices ();
+				if (s == STOPPING)
+					break;
 
-				if (state == FLUSHING) {
+				if (s == FLUSHING) {
 					if (callbacks_registered) {
 						usb_context.hotplug_deregister_callback (iphone_callback);
 						usb_context.hotplug_deregister_callback (ipad_callback);
@@ -1150,7 +1152,15 @@ namespace Frida.Fruity {
 						if (pending_usb_ops.is_empty)
 							state = STOPPING;
 					}
+
+					continue;
 				}
+
+				int completed = 0;
+				usb_context.handle_events_completed (out completed);
+
+				if (AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
+					refresh_polled_usb_devices ();
 			}
 
 			schedule_on_frida_thread (() => {
@@ -1168,9 +1178,22 @@ namespace Frida.Fruity {
 		}
 
 		private void on_usb_device_arrived (LibUSB.Device device) {
-			AtomicUint.inc (ref pending_usb_device_arrivals);
+			var desc = LibUSB.DeviceDescriptor (device);
+			uint32 id = make_usb_device_id (device, desc);
+
+			bool counted_for_startup = false;
+			lock (state) {
+				if (state == STARTING && AtomicUint.get (ref startup_barrier_reached) == 0) {
+					if (!startup_counted.contains (id)) {
+						startup_counted.add (id);
+						AtomicUint.inc (ref startup_inflight);
+						counted_for_startup = true;
+					}
+				}
+			}
+
 			schedule_on_frida_thread (() => {
-				handle_usb_device_arrival.begin (device);
+				handle_usb_device_arrival.begin (device, counted_for_startup, id);
 				return Source.REMOVE;
 			});
 		}
@@ -1182,7 +1205,7 @@ namespace Frida.Fruity {
 			});
 		}
 
-		private async void handle_usb_device_arrival (LibUSB.Device raw_device) {
+		private async void handle_usb_device_arrival (LibUSB.Device raw_device, bool counted_for_startup, uint32 counted_id) {
 			try {
 				UsbDevice usb_device;
 				try {
@@ -1199,7 +1222,11 @@ namespace Frida.Fruity {
 
 				var transport = usb_transports.first_match (t => t.udid == udid);
 
-				bool may_need_time_to_settle = state != STARTING && (transport == null || transport.modeswitch_in_progress);
+				bool starting;
+				lock (state)
+					starting = state == STARTING;
+
+				bool may_need_time_to_settle = !starting && (transport == null || transport.modeswitch_in_progress);
 				if (may_need_time_to_settle) {
 					try {
 						yield sleep (250, io_cancellable);
@@ -1219,7 +1246,11 @@ namespace Frida.Fruity {
 					transport = new PortableCoreDeviceUsbTransport (this, usb_device, pairing_store);
 					usb_transports.add (transport);
 
-					if (state != STARTING) {
+					bool open_now;
+					lock (state)
+						open_now = state != STARTING;
+
+					if (open_now) {
 						try {
 							yield transport.open (io_cancellable);
 						} catch (GLib.Error e) {
@@ -1229,9 +1260,17 @@ namespace Frida.Fruity {
 					transport_attached (transport);
 				}
 			} finally {
-				if (AtomicUint.dec_and_test (ref pending_usb_device_arrivals) && state == STARTING)
-					usb_started.resolve (true);
+				if (counted_for_startup)
+					resolve_startup_device (counted_id);
 			}
+		}
+
+		private void resolve_startup_device (uint32 id) {
+			lock (state)
+				startup_counted.remove (id);
+
+			if (AtomicUint.dec_and_test (ref startup_inflight))
+				maybe_resolve_usb_started ();
 		}
 
 		private async void handle_usb_device_departure (LibUSB.Device raw_device) {
@@ -1272,6 +1311,32 @@ namespace Frida.Fruity {
 			}
 
 			polled_usb_devices = current_devices;
+		}
+
+		private void maybe_resolve_usb_started () {
+			if (AtomicUint.get (ref startup_barrier_reached) == 0)
+				return;
+			if (AtomicUint.get (ref startup_inflight) != 0)
+				return;
+
+			if (!AtomicUint.compare_and_exchange (ref usb_started_resolved, 0, 1))
+				return;
+
+			schedule_on_frida_thread (() => {
+				usb_started.resolve (true);
+				return Source.REMOVE;
+			});
+		}
+
+		private void schedule_startup_barrier_close () {
+			var source = new IdleSource ();
+			source.set_priority (Priority.LOW);
+			source.set_callback (() => {
+				AtomicUint.set (ref startup_barrier_reached, 1);
+				maybe_resolve_usb_started ();
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
 		}
 
 		private UsbOperation allocate_usb_operation () throws Error {
