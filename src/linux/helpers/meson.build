@@ -88,9 +88,13 @@ custom_target('loader-bin',
 )
 
 if host_machine.system() == 'android'
+  zymbiote_flags = []
+  if host_machine.cpu_family() == 'aarch64'
+    zymbiote_flags += '-mbranch-protection=bti'
+  endif
   zymbiote = shared_module('zymbiote', ['zymbiote.c'],
     name_prefix: '',
-    c_args: extra_flags,
+    c_args: zymbiote_flags + extra_flags,
     link_args: extra_link_args,
     link_depends: [helper_lds],
   )
