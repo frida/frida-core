@@ -243,30 +243,23 @@ namespace Frida {
 #else
 			unowned uint8[] backend_so = Frida.Data.Compiler.get_frida_compiler_backend_so_blob ().data;
 
-			FileDescriptor fd;
-			if (MemoryFileDescriptor.is_supported ()) {
-				fd = MemoryFileDescriptor.from_bytes ("frida-compiler-backend.so", new Bytes.static (backend_so));
-			} else {
-				string name_used;
-				try {
-					fd = new FileDescriptor (FileUtils.open_tmp ("frida-compiler-backend-XXXXXX.so", out name_used));
-					FileUtils.unlink (name_used);
-
-					var output = new UnixOutputStream (fd.handle, false);
-					output.write_all (backend_so, null);
-
-					Posix.lseek (fd.handle, 0, Posix.SEEK_SET);
-				} catch (GLib.Error e) {
-					assert_not_reached ();
-				}
+			string name_used;
+			try {
+				var fd = new FileDescriptor (FileUtils.open_tmp ("frida-compiler-backend-XXXXXX.so", out name_used));
+				fd.pwrite_all (backend_so, 0);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
 			}
 
 			Module backend;
 			try {
-				backend = new Module ("/proc/self/fd/%d".printf (fd.handle), LOCAL);
+				backend = new Module (name_used, LOCAL);
 			} catch (ModuleError e) {
 				assert_not_reached ();
 			}
+
+			FileUtils.unlink (name_used);
+
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
