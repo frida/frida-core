@@ -929,7 +929,7 @@ namespace Frida {
 			while (iter.next ()) {
 				string path = iter.path;
 				string flags = iter.flags;
-				if (path.has_prefix ("/system/bin/app_process") && "x" in flags) {
+				if (path.has_suffix ("/libstagefright.so") && "x" in flags) {
 					if (payload_base == 0) {
 						payload_base = iter.end_address - Gum.query_page_size ();
 						payload_path = path;
