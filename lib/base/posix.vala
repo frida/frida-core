@@ -104,6 +104,26 @@ namespace Frida {
 				return res;
 			}
 		}
+
+		public void pwrite_all (uint8[] buf, uint64 offset) throws Error {
+			size_t total = 0;
+
+			while (total != buf.length) {
+				uint8[] chunk = buf[total : buf.length];
+
+				while (true) {
+					ssize_t res = Posix.pwrite (handle, chunk, chunk.length, (Posix.off_t) (offset + total));
+					if (res == -1) {
+						if (errno == Posix.EINTR)
+							continue;
+						throw new Error.TRANSPORT ("%s", strerror (errno));
+					}
+
+					total += (size_t) res;
+					break;
+				}
+			}
+		}
 	}
 
 	public StdioPipes? make_stdio_pipes (Stdio stdio, bool in_supported, out FileDescriptor? in_fd, out string? in_name,
