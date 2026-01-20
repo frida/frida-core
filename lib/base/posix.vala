@@ -71,7 +71,7 @@ namespace Frida {
 		public void pread_all (uint8[] buf, uint64 offset) throws Error {
 			size_t total = 0;
 
-			while (total < buf.length) {
+			while (total != buf.length) {
 				void * dst = (uint8 *) buf + total;
 				size_t remaining = buf.length - total;
 
