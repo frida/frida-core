@@ -1,7 +1,7 @@
 SECTIONS {
   . = 0;
 
-  .payload : ALIGN(16)
+  .payload : ALIGN(4096)
   {
     KEEP(*(.text.entrypoint))
     *(.text*)
