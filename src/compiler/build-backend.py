@@ -85,32 +85,31 @@ def build_backend(
     )
 
     if mode == "c-archive":
-        if "mingw" not in config:
-            symbol_dest = priv_dir / "symbol-replacer"
-            symbol_dest.mkdir(parents=True, exist_ok=True)
+        symbol_dest = priv_dir / "symbol-replacer"
+        symbol_dest.mkdir(parents=True, exist_ok=True)
 
-            src_dir = base_dir / "symbol-replacer"
-            for name in ("main.go", "trie.go", "go.mod"):
-                shutil.copy(src_dir / name, symbol_dest)
+        src_dir = base_dir / "symbol-replacer"
+        for name in ("main.go", "trie.go", "go.mod"):
+            shutil.copy(src_dir / name, symbol_dest)
 
-            env_copy = config["env"].copy()
-            env_copy.pop("GOOS", None)
-            env_copy.pop("GOARCH", None)
+        env_copy = config["env"].copy()
+        env_copy.pop("GOOS", None)
+        env_copy.pop("GOARCH", None)
 
-            symbol_replacer_name = "frida-symbol-replacer"
+        symbol_replacer_name = "frida-symbol-replacer"
 
-            subprocess.run(
-                [go, "build", "-buildvcs=false", "-o", symbol_replacer_name, "."],
-                cwd=symbol_dest,
-                env=env_copy,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                encoding="utf-8",
-                check=True,
-            )
+        subprocess.run(
+            [go, "build", "-buildvcs=false", "-o", symbol_replacer_name, "."],
+            cwd=symbol_dest,
+            env=env_copy,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            check=True,
+        )
 
-            run(priv_dir / "symbol-replacer" / symbol_replacer_name,
-                backend_a.name, *config["nm"], *config["ranlib"])
+        run(priv_dir / "symbol-replacer" / symbol_replacer_name,
+            backend_a.name, *config["nm"], *config["ranlib"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",

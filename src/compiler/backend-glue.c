@@ -3,11 +3,11 @@
 #include <glib.h>
 
 #ifdef HAVE_ARM64
-# define FRIDA_CGO_INIT_FUNC _tt0_arm64_windows_lib
+# define FRIDA_CGO_INIT_FUNC _st0_arm64_windows_lib
 #elif GLIB_SIZEOF_VOID_P == 8
-# define FRIDA_CGO_INIT_FUNC _tt0_amd64_windows_lib
+# define FRIDA_CGO_INIT_FUNC _st0_amd64_windows_lib
 #else
-# define FRIDA_CGO_INIT_FUNC tt0_386_windows_lib
+# define FRIDA_CGO_INIT_FUNC st0_386_windows_lib
 #endif
 
 extern void FRIDA_CGO_INIT_FUNC ();

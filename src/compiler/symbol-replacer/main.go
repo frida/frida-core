@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"unicode"
 )
 
@@ -12,8 +13,6 @@ var (
 	excludeSymbols = [][]byte{
 		[]byte("fprintf"),
 		[]byte("pthread"),
-		[]byte("st0_"),
-		[]byte("rt0_"),
 		[]byte("cas"),
 	}
 )
@@ -33,7 +32,14 @@ func main() {
 	t := newTrie()
 	t.insert([]byte("internal/"), flipAlpha([]byte("internal/")))
 
-	content := bytes.Split(buf.Bytes(), []byte{'\n'})
+	var content [][]byte
+
+	if runtime.GOOS == "windows" {
+		content = bytes.Split(buf.Bytes(), []byte("\r\n"))
+	} else {
+		content = bytes.Split(buf.Bytes(), []byte{'\n'})
+	}
+
 	for _, line := range content {
 		splitted := bytes.Split(line, []byte{' '})
 		if len(splitted) >= 3 {
@@ -106,6 +112,8 @@ func symbolIsOkay(symbol []byte) bool {
 	switch {
 	case bytes.Contains(symbol, []byte("frida")):
 		return false
+	case bytes.Contains(symbol, []byte("rt0")):
+		return true
 	case bytes.Contains(symbol, []byte("cgo")):
 		return true
 	case bytes.ContainsAny(symbol, "./"):
