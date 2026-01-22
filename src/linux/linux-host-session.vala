@@ -162,7 +162,20 @@ namespace Frida {
 			if (path == null)
 				path = tpl.expand (arch_name);
 
-			system_session_container = yield AgentContainer.create (path, cancellable);
+#if HAVE_EMBEDDED_ASSETS
+			try {
+#endif
+				system_session_container = yield AgentContainer.create (path, cancellable);
+#if HAVE_EMBEDDED_ASSETS
+			} catch (Error e) {
+				if (MemoryFileDescriptor.is_supported ()) {
+					path = agent.get_path_template ().expand (arch_name);
+					system_session_container = yield AgentContainer.create (path, cancellable);
+				} else {
+					throw e;
+				}
+			}
+#endif
 
 			connection = system_session_container.connection;
 
