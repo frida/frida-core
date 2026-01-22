@@ -243,22 +243,35 @@ namespace Frida {
 #else
 			unowned uint8[] backend_so = Frida.Data.Compiler.get_frida_compiler_backend_so_blob ().data;
 
-			string name_used;
-			try {
-				var fd = new FileDescriptor (FileUtils.open_tmp ("frida-compiler-backend-XXXXXX.so", out name_used));
-				fd.pwrite_all (backend_so, 0);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
+			Module? backend = null;
+
+			if (MemoryFileDescriptor.is_supported ()) {
+				var fd = MemoryFileDescriptor.from_bytes ("frida-compiler-backend.so", new Bytes.static (backend_so));
+				try {
+					backend = new Module ("/proc/self/fd/%d".printf (fd.handle), LOCAL);
+				} catch (ModuleError e) {
+				}
 			}
 
-			Module backend;
-			try {
-				backend = new Module (name_used, LOCAL);
-			} catch (ModuleError e) {
-				assert_not_reached ();
-			}
+			if (backend == null) {
+				try {
+					string name_used;
+					{
+						var fd = new FileDescriptor (FileUtils.open_tmp ("frida-compiler-backend-XXXXXX.so", out name_used));
+						fd.pwrite_all (backend_so, 0);
+					}
 
-			FileUtils.unlink (name_used);
+					try {
+						backend = new Module (name_used, LOCAL);
+					} catch (ModuleError e) {
+						assert_not_reached ();
+					}
+
+					FileUtils.unlink (name_used);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+			}
 
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
