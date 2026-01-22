@@ -109,7 +109,7 @@ def build_backend(
         )
 
         run(priv_dir / "symbol-replacer" / symbol_replacer_name,
-            backend_a.name, *config["nm"], *config["ranlib"])
+            backend_a.name, *config["nm"], *config["ranlib"], config["env"]["CC"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",

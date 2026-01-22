@@ -21,6 +21,7 @@ func main() {
 	archive := os.Args[1]
 	nm := os.Args[2]
 	ranlib := os.Args[3]
+	cc := os.Args[4]
 
 	buf := new(bytes.Buffer)
 	c := exec.Command(nm, archive)
@@ -35,7 +36,11 @@ func main() {
 	var content [][]byte
 
 	if runtime.GOOS == "windows" {
-		content = bytes.Split(buf.Bytes(), []byte("\r\n"))
+		if strings.Contains(cc, "clangarm64") {
+			content = bytes.Split(buf.Bytes(), []byte{'\n'})
+		} else {
+			content = bytes.Split(buf.Bytes(), []byte("\r\n"))
+		}
 	} else {
 		content = bytes.Split(buf.Bytes(), []byte{'\n'})
 	}
