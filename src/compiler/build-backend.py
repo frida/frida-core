@@ -85,8 +85,31 @@ def build_backend(
     )
 
     if mode == "c-archive":
-        symbols_to_scramble = detect_conflictful_symbols_in_archive(backend_a, config["nm"])
-        scramble_symbols_in_archive(backend_a, symbols_to_scramble, config["ranlib"])
+        symbol_dest = priv_dir / "symbol-replacer"
+        symbol_dest.mkdir(parents=True, exist_ok=True)
+
+        src_dir = base_dir / "symbol-replacer"
+        for name in ("main.go", "trie.go", "go.mod"):
+            shutil.copy(src_dir / name, symbol_dest)
+
+        env_copy = config["env"].copy()
+        env_copy.pop("GOOS", None)
+        env_copy.pop("GOARCH", None)
+
+        symbol_replacer_name = "frida-symbol-replacer"
+
+        subprocess.run(
+            [go, "build", "-buildvcs=false", "-o", symbol_replacer_name, "."],
+            cwd=symbol_dest,
+            env=env_copy,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            check=True,
+        )
+
+        run(priv_dir / "symbol-replacer" / symbol_replacer_name,
+            backend_a.name, *config["nm"], *config["ranlib"], config["env"]["CC"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",
@@ -131,49 +154,6 @@ def build_backend(
         shutil.copy(priv_dir / backend_shlib.name, output_dir / backend_shlib.name)
 
     shutil.copy(priv_dir / backend_h.name, output_dir / backend_h.name)
-
-
-def detect_conflictful_symbols_in_archive(
-    archive: Path, nm_cmd_array: List[str]
-) -> List[str]:
-    result = []
-    for line in subprocess.run(
-        [*nm_cmd_array, str(archive)], capture_output=True, encoding="utf-8", check=True
-    ).stdout.splitlines():
-        tokens = line.lstrip().split(" ")
-        if len(tokens) >= 3 and tokens[1] in {"S", "T"}:
-            symbol = tokens[2]
-            if all(sub not in symbol for sub in ("/", ".", ":", "frida")):
-                result.append(symbol)
-    return result
-
-
-def scramble_symbols_in_archive(
-    archive: Path, symbols: List[str], ranlib_cmd_array: List[str]
-):
-    data = archive.read_bytes()
-
-    for old_sym in symbols:
-        new_sym = roll_first_alpha(old_sym)
-        data = data.replace(old_sym.encode("ascii"), new_sym.encode("ascii"))
-
-    archive.write_bytes(data)
-
-    subprocess.run([*ranlib_cmd_array, str(archive)], check=True)
-
-
-def roll_first_alpha(s: str) -> str:
-    chars = list(s)
-    for i, c in enumerate(chars):
-        if c.isalpha():
-            if c == "z":
-                chars[i] = "a"
-            elif c == "Z":
-                chars[i] = "A"
-            else:
-                chars[i] = chr(ord(c) + 1)
-            break
-    return "".join(chars)
 
 
 # Work around the Go toolchain's almost-MSVC-compatible object files
