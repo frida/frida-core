@@ -1149,17 +1149,17 @@ namespace Frida.Fruity {
 					}
 
 					lock (state) {
-						if (pending_usb_ops.is_empty)
+						if (pending_usb_ops.is_empty) {
 							state = STOPPING;
+							break;
+						}
 					}
-
-					continue;
 				}
 
 				int completed = 0;
 				usb_context.handle_events_completed (out completed);
 
-				if (AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
+				if (s != FLUSHING && AtomicUint.compare_and_exchange (ref polled_usb_outdated, 1, 0))
 					refresh_polled_usb_devices ();
 			}
 
