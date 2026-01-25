@@ -47,51 +47,22 @@ if host_os_family == 'linux'
     '--pkg=frida-atomics',
   ]
 
-  syscall_specs = {
-    'x86': {
-      'id': 'x86',
-      'caps': 'i386',
-    },
-    'x86_64': {
-      'id': 'x86_64',
-      'caps': 'common,64',
-    },
-    'arm': {
-      'id': 'arm',
-      'caps': 'common,oabi,eabi',
-    },
-    'aarch64': {
-      'id': 'arm64',
-      'caps': 'common,64',
-    },
-    'mips': {
-      'id': 'mips-o32',
-    },
-    'mips64': {
-      'id': 'mips-n64',
-    },
-  }
-
-  cpu = host_machine.cpu_family()
-  if not syscall_specs.has_key(cpu)
-    error('Unsupported cpu_family for linux syscalls: ' + cpu)
-  endif
-  spec = syscall_specs[cpu]
-
-  cmd = [
-    python,
-    files('generate-linux-syscall-vala.py'),
-    '--tbl', '@INPUT@',
-    '--out', '@OUTPUT@',
-  ]
-  if spec.has_key('caps')
-    cmd += ['--capabilities', spec['caps']]
-  endif
-
   linux_syscalls_vala = custom_target('linux-syscalls-vala',
-    input: files('linux-syscalls' / (spec['id'] + '.tbl')),
+    input: files(
+      'linux-syscalls' / 'x86.tbl',
+      'linux-syscalls' / 'x86_64.tbl',
+      'linux-syscalls' / 'arm.tbl',
+      'linux-syscalls' / 'arm64.tbl',
+      'linux-syscalls' / 'mips-o32.tbl',
+      'linux-syscalls' / 'mips-n64.tbl',
+    ),
     output: 'linux-syscalls.vala',
-    command: cmd,
+    command: [
+      python,
+      files('linux-syscalls' / 'generate-bindings.py'),
+      '--abi', host_abi,
+      '--out-vala', '@OUTPUT@',
+    ],
   )
 
   base_sources += linux_syscalls_vala
