@@ -39,10 +39,12 @@ if host_os_family == 'darwin'
 endif
 
 if host_os_family == 'linux'
-  base_sources += 'linux.vala'
+  base_sources += [
+    'linux.vala',
+  ]
   extra_vala_args += [
     '--pkg=linux',
-    '--pkg=linux-system',
+    '--pkg=frida-atomics',
   ]
 endif
 
@@ -74,6 +76,7 @@ endif
 if host_os_family == 'linux'
   base_vala_args += [
     '--vapidir=' + meson.current_source_dir(),
+    '--pkg=frida-linux',
     '--pkg=gio-unix-2.0',
   ]
 endif

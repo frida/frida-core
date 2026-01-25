@@ -382,7 +382,7 @@ if have_local_backend
       vala_args: [
         helper_backend_vala_args,
         '--pkg=linux',
-        '--pkg=linux-system',
+        '--pkg=frida-linux',
         '--pkg=frida-gum-linux-1.0',
       ],
       dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
