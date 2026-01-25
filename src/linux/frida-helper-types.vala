@@ -9,7 +9,7 @@ namespace Frida {
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
-		public abstract async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void resume_syscall (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws Error, IOError;
@@ -25,7 +25,7 @@ namespace Frida {
 	}
 
 	[Flags]
-	public enum LinuxSyscall {
+	public enum LinuxSyscallMask {
 		RESTART,
 		IOCTL,
 		READ,
@@ -53,7 +53,7 @@ namespace Frida {
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume_syscall (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;

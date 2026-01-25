@@ -3,17 +3,17 @@
 #include <sys/syscall.h>
 
 gboolean
-_frida_syscall_satisfies (gint syscall_id, FridaLinuxSyscall mask)
+_frida_syscall_satisfies (gint syscall_id, FridaLinuxSyscallMask mask)
 {
   switch (syscall_id)
   {
     case __NR_restart_syscall:
-      return (mask & FRIDA_LINUX_SYSCALL_RESTART) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_RESTART) != 0;
     case __NR_ioctl:
-      return (mask & FRIDA_LINUX_SYSCALL_IOCTL) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_IOCTL) != 0;
     case __NR_read:
     case __NR_readv:
-      return (mask & FRIDA_LINUX_SYSCALL_READ) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_READ) != 0;
 #ifdef __NR_select
     case __NR_select:
 #endif
@@ -44,7 +44,7 @@ _frida_syscall_satisfies (gint syscall_id, FridaLinuxSyscall mask)
 #ifdef __NR_epoll_pwait2
     case __NR_epoll_pwait2:
 #endif
-      return (mask & FRIDA_LINUX_SYSCALL_POLL_LIKE) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_POLL_LIKE) != 0;
 #ifdef __NR_wait4
     case __NR_wait4:
 #endif
@@ -52,21 +52,21 @@ _frida_syscall_satisfies (gint syscall_id, FridaLinuxSyscall mask)
     case __NR_waitpid:
 #endif
     case __NR_waitid:
-      return (mask & FRIDA_LINUX_SYSCALL_WAIT) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_WAIT) != 0;
     case __NR_rt_sigtimedwait:
 #ifdef __NR_rt_sigtimedwait_time64
     case __NR_rt_sigtimedwait_time64:
 #endif
-      return (mask & FRIDA_LINUX_SYSCALL_SIGWAIT) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_SIGWAIT) != 0;
     case __NR_futex:
-      return (mask & FRIDA_LINUX_SYSCALL_FUTEX) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_FUTEX) != 0;
 #ifdef __NR_accept
     case __NR_accept:
 #endif
 #ifdef __NR_accept4
     case __NR_accept4:
 #endif
-      return (mask & FRIDA_LINUX_SYSCALL_ACCEPT) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_ACCEPT) != 0;
 #ifdef __NR_recv
     case __NR_recv:
 #endif
@@ -82,7 +82,7 @@ _frida_syscall_satisfies (gint syscall_id, FridaLinuxSyscall mask)
 #ifdef __NR_recvmmsg_time64
     case __NR_recvmmsg_time64:
 #endif
-      return (mask & FRIDA_LINUX_SYSCALL_RECV) != 0;
+      return (mask & FRIDA_LINUX_SYSCALL_MASK_RECV) != 0;
     default:
       break;
   }

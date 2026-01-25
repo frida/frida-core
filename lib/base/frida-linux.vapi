@@ -14,18 +14,6 @@ namespace Frida {
 	[CCode (cheader_filename = "sys/mman.h", cname = "MAP_ANONYMOUS")]
 	public const int MAP_ANONYMOUS;
 
-	[CCode (cheader_filename = "frida-linux-syscall.h", cprefix = "SYS_", has_type_id = false)]
-	public enum SysCall {
-		bpf,
-		memfd_create,
-		perf_event_open,
-		pidfd_getfd,
-		pidfd_open,
-		process_vm_readv,
-		process_vm_writev,
-		tgkill,
-	}
-
 	[CCode (cheader_filename = "frida-linux-bpf.h", has_type_id = false)]
 	public enum BpfCommand {
 		MAP_CREATE,

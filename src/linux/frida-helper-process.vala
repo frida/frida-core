@@ -62,7 +62,7 @@ namespace Frida {
 			yield helper.cancel_exec_transition (pid, cancellable);
 		}
 
-		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+		public async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain_for_pid (pid, cancellable);
 			yield helper.await_syscall (pid, mask, cancellable);
 		}
@@ -514,7 +514,7 @@ namespace Frida {
 			}
 		}
 
-		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+		public async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError {
 			try {
 				yield proxy.await_syscall (pid, mask, cancellable);
 			} catch (GLib.Error e) {

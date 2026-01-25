@@ -136,7 +136,7 @@ namespace Frida {
 			yield backend.cancel_exec_transition (pid, cancellable);
 		}
 
-		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+		public async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError {
 			yield backend.await_syscall (pid, mask, cancellable);
 		}
 

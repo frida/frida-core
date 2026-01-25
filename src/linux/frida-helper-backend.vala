@@ -219,15 +219,15 @@ namespace Frida {
 			}
 		}
 
-		public async void await_syscall (uint pid, LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+		public async void await_syscall (uint pid, LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError {
 			yield perform<PausedSyscallSession> (new AwaitSyscallTask (this, mask), pid, cancellable);
 		}
 
 		private class AwaitSyscallTask : Object, Task<PausedSyscallSession> {
 			private weak LinuxHelperBackend backend;
-			private LinuxSyscall mask;
+			private LinuxSyscallMask mask;
 
-			public AwaitSyscallTask (LinuxHelperBackend backend, LinuxSyscall mask) {
+			public AwaitSyscallTask (LinuxHelperBackend backend, LinuxSyscallMask mask) {
 				this.backend = backend;
 				this.mask = mask;
 			}
@@ -738,7 +738,7 @@ namespace Frida {
 			return session;
 		}
 
-		public async void wait_for_syscall (LinuxSyscall mask, Cancellable? cancellable) throws Error, IOError {
+		public async void wait_for_syscall (LinuxSyscallMask mask, Cancellable? cancellable) throws Error, IOError {
 			bool on_syscall_entry = true;
 			int pending_signal = 0;
 			while (state != SATISFIED) {
@@ -2225,8 +2225,8 @@ namespace Frida {
 				[CCode (array_length_type = "unsigned long")]
 				Posix.iovector[] remote_iov,
 				ulong flags) {
-			return Linux.syscall (SysCall.process_vm_readv, pid, local_iov, local_iov.length, remote_iov, remote_iov.length,
-				flags);
+			return Linux.syscall (LinuxSyscall.PROCESS_VM_READV, pid, local_iov, local_iov.length, remote_iov,
+				remote_iov.length, flags);
 		}
 
 		private static ssize_t process_vm_writev_impl (uint pid,
@@ -2235,8 +2235,8 @@ namespace Frida {
 				[CCode (array_length_type = "unsigned long")]
 				Posix.iovector[] remote_iov,
 				ulong flags) {
-			return Linux.syscall (SysCall.process_vm_writev, pid, local_iov, local_iov.length, remote_iov, remote_iov.length,
-				flags);
+			return Linux.syscall (LinuxSyscall.PROCESS_VM_WRITEV, pid, local_iov, local_iov.length, remote_iov,
+				remote_iov.length, flags);
 		}
 	}
 
@@ -3235,10 +3235,10 @@ namespace Frida {
 	}
 
 	private int tgkill (uint tgid, uint tid, Posix.Signal sig) {
-		return Linux.syscall (SysCall.tgkill, tgid, tid, sig);
+		return Linux.syscall (LinuxSyscall.TGKILL, tgid, tid, sig);
 	}
 
-	public extern bool _syscall_satisfies (int syscall_id, LinuxSyscall mask);
+	public extern bool _syscall_satisfies (int syscall_id, LinuxSyscallMask mask);
 
 	public class ProcMapsSoEntry {
 		public uint64 base_address;

@@ -42,11 +42,11 @@ namespace Frida {
 		}
 
 		private static int pidfd_open (uint pid, uint flags) {
-			return Linux.syscall (SysCall.pidfd_open, pid, flags);
+			return Linux.syscall (LinuxSyscall.PIDFD_OPEN, pid, flags);
 		}
 
 		private static int pidfd_getfd (int pidfd, int targetfd, uint flags) {
-			return Linux.syscall (SysCall.pidfd_getfd, pidfd, targetfd, flags);
+			return Linux.syscall (LinuxSyscall.PIDFD_GETFD, pidfd, targetfd, flags);
 		}
 
 		[NoReturn]
@@ -78,7 +78,7 @@ namespace Frida {
 		}
 
 		private int memfd_create (string name, uint flags) {
-			return Linux.syscall (SysCall.memfd_create, name, flags);
+			return Linux.syscall (LinuxSyscall.MEMFD_CREATE, name, flags);
 		}
 	}
 
@@ -400,7 +400,7 @@ namespace Frida {
 		}
 
 		private int bpf_call (BpfCommand cmd, void * attr, size_t attr_size) throws Error {
-			int r = Linux.syscall (SysCall.bpf, cmd, attr, attr_size);
+			int r = Linux.syscall (LinuxSyscall.BPF, cmd, attr, attr_size);
 			if (r == -1)
 				throw_errno ("bpf() failed (cmd=%d)".printf (cmd));
 			return r;
@@ -412,7 +412,7 @@ namespace Frida {
 			public FileDescriptor fd;
 
 			public Monitor (PerfEventAttr * attr, int pid, int cpu, int group_fd, uint flags) throws Error {
-				int r = Linux.syscall (SysCall.perf_event_open, attr, pid, cpu, group_fd, flags);
+				int r = Linux.syscall (LinuxSyscall.PERF_EVENT_OPEN, attr, pid, cpu, group_fd, flags);
 				if (r == -1)
 					throw_errno ("perf_event_open() failed");
 				this.fd = new FileDescriptor (r);
