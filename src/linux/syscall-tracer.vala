@@ -236,10 +236,9 @@ namespace Frida {
 					if (sa.length >= 2)
 						fam = *((uint16 *) sa);
 					string peer = format_sockaddr (fam, (uint32) sa.length, (uint8 *) &sa[0], sa.length);
-					print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s enter %s\n",
-						c->time_ns, c->tgid, c->tid, c->stack_id,
-						(name != null) ? name : "%d".printf (c->syscall_nr),
-						peer);
+					print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] connect enter fd=0x%" +
+							uint64.FORMAT_MODIFIER + "x addr=%s\n",
+						c->time_ns, c->tgid, c->tid, c->stack_id, args[0], peer);
 					return;
 				}
 
