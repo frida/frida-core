@@ -29,9 +29,10 @@ enum _FridaBpfCommand
 
 enum _FridaBpfMapType
 {
-  FRIDA_BPF_MAP_TYPE_ARRAY       = 2,
-  FRIDA_BPF_MAP_TYPE_STACK_TRACE = 7,
-  FRIDA_BPF_MAP_TYPE_RINGBUF     = 27,
+  FRIDA_BPF_MAP_TYPE_ARRAY        = 2,
+  FRIDA_BPF_MAP_TYPE_PERCPU_ARRAY = 6,
+  FRIDA_BPF_MAP_TYPE_STACK_TRACE  = 7,
+  FRIDA_BPF_MAP_TYPE_RINGBUF      = 27,
 };
 
 enum _FridaBpfProgramType

@@ -241,6 +241,18 @@ namespace Frida {
 			}
 		}
 
+		public sealed class PercpuArrayMap : Map {
+			public PercpuArrayMap (size_t value_size, size_t max_entries) throws Error {
+				var attr = BpfAttrMapCreate ();
+				attr.map_type = PERCPU_ARRAY;
+				attr.key_size = (uint32) sizeof (uint32);
+				attr.value_size = (uint32) value_size;
+				attr.max_entries = (uint32) max_entries;
+
+				base (PERCPU_ARRAY, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
+			}
+		}
+
 		public sealed class StackTraceMap : Map {
 			public uint32 max_stack_depth {
 				get;
