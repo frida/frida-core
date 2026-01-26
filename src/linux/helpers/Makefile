@@ -13,13 +13,16 @@ host_arch := $(shell echo $(host_machine) | cut -d"-" -f2)
 
 crossfile := $(BUILDDIR)/frida-$(host_machine).txt
 
-build: ext/linux/tools/include/nolibc/nolibc.h
+artifacts_dir := artifacts
+native_outdir := $(artifacts_dir)/native/$(host_arch)
+
+build-native: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
 	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
 	$(MESON) compile -C build
-	install -m644 build/bootstrapper.bin bootstrapper-$(host_arch).bin
-	install -m644 build/loader.bin loader-$(host_arch).bin
-	[ -f build/zymbiote.bin ] && install -m644 build/zymbiote.bin zymbiote-$(host_arch).bin || true
+	install -m644 build/bootstrapper.bin $(native_outdir)/bootstrapper.bin
+	install -m644 build/loader.bin $(native_outdir)/loader.bin
+	[ -f build/zymbiote.bin ] && install -m644 build/zymbiote.bin $(native_outdir)/zymbiote.bin || true
 
 ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
 	if [ -d ext/linux ]; then \
@@ -32,4 +35,4 @@ ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
 	patch -d ext/linux -p1 < nolibc-tweaks.patch
 	@touch -c $@
 
-.PHONY: build
+.PHONY: build-native

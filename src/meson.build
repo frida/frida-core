@@ -32,14 +32,16 @@ backend_deps = []
 if host_os == 'android' or have_droidy_backend
   subdir('android-helper')
 
+  helpers_native_prefix = 'linux' / 'helpers' / 'artifacts' / 'native'
+  fs = import('fs')
   android_data = custom_target('frida-data-android',
     input: [
       'android.resources',
       android_helper_dex,
-      'linux' / 'helpers' / f'zymbiote-x86.bin',
-      'linux' / 'helpers' / f'zymbiote-x86_64.bin',
-      'linux' / 'helpers' / f'zymbiote-arm.bin',
-      'linux' / 'helpers' / f'zymbiote-arm64.bin',
+      fs.copyfile(helpers_native_prefix / 'x86' / 'zymbiote.bin', 'zymbiote-x86.bin'),
+      fs.copyfile(helpers_native_prefix / 'x86_64' / 'zymbiote.bin', 'zymbiote-x86_64.bin'),
+      fs.copyfile(helpers_native_prefix / 'arm' / 'zymbiote.bin', 'zymbiote-arm.bin'),
+      fs.copyfile(helpers_native_prefix / 'arm64' / 'zymbiote.bin', 'zymbiote-arm64.bin'),
     ],
     output: [
       'frida-data-android.vapi',
@@ -340,18 +342,12 @@ if have_local_backend
     elif host_lowlevel_abi == 'arm64' and host_machine.endian() == 'big'
       host_lowlevel_abi = 'arm64be'
     endif
-    fs = import('fs')
+    helpers_native_dir = 'linux' / 'helpers' / 'artifacts' / 'native' / host_lowlevel_abi
     helper_backend_data = custom_target('frida-data-helper-backend',
       input: [
         'linux' / 'frida-helper-backend.resources',
-        fs.copyfile(
-          'linux' / 'helpers' / f'bootstrapper-@host_lowlevel_abi@.bin',
-          'bootstrapper.bin',
-        ),
-        fs.copyfile(
-          'linux' / 'helpers' / f'loader-@host_lowlevel_abi@.bin',
-          'loader.bin',
-        ),
+        helpers_native_dir / 'bootstrapper.bin',
+        helpers_native_dir / 'loader.bin',
       ],
       output: [
         'frida-data-helper-backend.vapi',
