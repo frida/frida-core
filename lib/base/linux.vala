@@ -156,7 +156,7 @@ namespace Frida {
 
 				Map? map = maps[sym];
 				if (map == null) {
-					pending_error = new Error.NOT_SUPPORTED ("No map fd provided for symbol '%s'".printf (sym));
+					pending_error = new Error.NOT_SUPPORTED ("No Bpf.Map provided for symbol '%s'".printf (sym));
 					return false;
 				}
 
