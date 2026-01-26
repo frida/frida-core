@@ -258,9 +258,9 @@ namespace Frida {
 		}
 
 		private void log_event (SyscallEvent * e, string format = "", ...) {
-			uint nr = (uint) e->syscall_nr;
+			int nr = e->syscall_nr;
 			unowned string? name = null;
-			if (nr < syscall_names.length)
+			if (nr >= 0 && nr < syscall_names.length)
 				name = syscall_names[nr];
 
 			var args = va_list ();
@@ -269,7 +269,7 @@ namespace Frida {
 				e->tgid,
 				e->tid,
 				e->stack_id,
-				(name != null) ? name : "?",
+				(name != null) ? name : "%d".printf (nr),
 				format.vprintf (args));
 		}
 
@@ -294,7 +294,7 @@ namespace Frida {
 			public uint32 tgid;
 			public uint32 tid;
 
-			public uint32 syscall_nr;
+			public int32 syscall_nr;
 			public int32 stack_id;
 
 			public uint16 kind;

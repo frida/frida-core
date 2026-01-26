@@ -46,7 +46,7 @@ struct _SyscallEvent
   __u32 tgid;
   __u32 tid;
 
-  __u32 syscall_nr;
+  __s32 syscall_nr;
   __s32 stack_id;
 
   SyscallEventKind kind;
@@ -168,7 +168,7 @@ struct trace_event_raw_sys_exit
   long ret;
 };
 
-static __always_inline SyscallEventKind classify_syscall (__u32 nr);
+static __always_inline SyscallEventKind classify_syscall (__s32 nr);
 static __always_inline __u32 clamp_u32 (__u32 v, __u32 max);
 
 static __always_inline SyscallEvent *
@@ -189,7 +189,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
   if (tgid != *target)
     return 0;
 
-  __u32 nr = (__u32) ctx->id;
+  __s32 nr = (__s32) ctx->id;
   SyscallEventKind kind = classify_syscall (nr);
 
   __u16 payload_len = 0;
@@ -348,7 +348,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
   if (tgid != *target)
     return 0;
 
-  __u32 nr = (__u32) ctx->id;
+  __s32 nr = (__s32) ctx->id;
   SyscallEventKind kind = classify_syscall (nr);
 
   __u16 payload_len = 0;
@@ -413,7 +413,7 @@ reserve_event (SyscallEventKind kind, __u16 payload_len)
 }
 
 static __always_inline SyscallEventKind
-classify_syscall (__u32 nr)
+classify_syscall (__s32 nr)
 {
   switch (nr)
   {
