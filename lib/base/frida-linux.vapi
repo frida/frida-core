@@ -24,6 +24,7 @@ namespace Frida {
 
 	[CCode (cheader_filename = "frida-linux-bpf.h", has_type_id = false)]
 	public enum BpfMapType {
+		HASH,
 		ARRAY,
 		PERCPU_ARRAY,
 		STACK_TRACE,

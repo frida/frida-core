@@ -211,6 +211,36 @@ namespace Frida {
 			}
 		}
 
+		public sealed class HashMap : Map {
+			public HashMap (size_t value_size, size_t max_entries) throws Error {
+				var attr = BpfAttrMapCreate ();
+				attr.map_type = HASH;
+				attr.key_size = (uint32) sizeof (uint32);
+				attr.value_size = (uint32) value_size;
+				attr.max_entries = (uint32) max_entries;
+
+				base (HASH, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
+			}
+
+			public void update_u32 (uint32 key, uint32 val) throws Error {
+				Bpf.update_map_value (fd, key, &val);
+			}
+
+			public uint32 lookup_u32 (uint32 key) throws Error {
+				uint32 val = 0;
+				Bpf.lookup_map_value (fd, key, &val);
+				return val;
+			}
+
+			public void update_raw (uint32 key, void * val) throws Error {
+				Bpf.update_map_value (fd, key, val);
+			}
+
+			public void lookup_raw (uint32 key, void * val) throws Error {
+				Bpf.lookup_map_value (fd, key, val);
+			}
+		}
+
 		public sealed class ArrayMap : Map {
 			public ArrayMap (size_t value_size, size_t max_entries) throws Error {
 				var attr = BpfAttrMapCreate ();
