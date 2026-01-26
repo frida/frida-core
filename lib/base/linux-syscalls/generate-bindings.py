@@ -116,10 +116,8 @@ def render_c_header(syscalls: Dict[int, str]) -> str:
     lines.append("#ifndef __FRIDA_LINUX_SYSCALLS_H__\n")
     lines.append("#define __FRIDA_LINUX_SYSCALLS_H__\n\n")
 
-    lines.append("enum _FridaLinuxSyscall\n{\n")
     for nr, name in sorted(syscalls.items(), key=lambda kv: kv[0]):
-        lines.append(f"  FRIDA_LINUX_SYSCALL_{name.upper()} = {nr},\n")
-    lines.append("};\n\n")
+        lines.append(f"#define FRIDA_LINUX_SYSCALL_{name.upper()} {nr}\n")
 
     lines.append("#endif\n")
     return "".join(lines)
