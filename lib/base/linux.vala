@@ -254,22 +254,22 @@ namespace Frida {
 		}
 
 		public sealed class StackTraceMap : Map {
-			public uint32 max_stack_depth {
+			public size_t max_stack_depth {
 				get;
 				private set;
 			}
 
-			public uint32 max_entries {
+			public size_t max_entries {
 				get;
 				private set;
 			}
 
-			public StackTraceMap (uint32 max_stack_depth, uint32 max_entries, BpfStackTraceMapFlags flags = 0) throws Error {
+			public StackTraceMap (size_t max_stack_depth, size_t max_entries, BpfStackTraceMapFlags flags = 0) throws Error {
 				var attr = BpfAttrMapCreate ();
 				attr.map_type = STACK_TRACE;
 				attr.key_size = (uint32) sizeof (uint32);
 				attr.value_size = (uint32) (max_stack_depth * (uint32) sizeof (uint64));
-				attr.max_entries = max_entries;
+				attr.max_entries = (uint32) max_entries;
 				attr.map_flags = flags;
 
 				base (STACK_TRACE, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
