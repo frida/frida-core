@@ -1,11 +1,11 @@
 namespace Frida {
 	public sealed class SpawnGater : Object {
 		public delegate void ProcessSpawnedCallback(int pid, string command);
-		private Bpf.RingbufReader? events_reader;
 
 		private const size_t RINGBUF_SIZE = 1U << 22;
 		private const size_t MAX_FILENAME = 256;
 
+        private Bpf.RingbufReader? events_reader;
 		private Source? events_source;
 
 		private FileDescriptor? prog_fd;
@@ -23,7 +23,7 @@ namespace Frida {
 		}
 
 		public void start () throws Error {
-			var events = new Bpf.RingbufMap (RINGBUF_SIZE);
+            var events = new Bpf.RingbufMap (RINGBUF_SIZE);
 			events_reader = new Bpf.RingbufReader (events);
 
 			Gum.ElfModule elf;
@@ -105,8 +105,8 @@ namespace Frida {
 			}
 
 			public bool on_ready (IOChannel ch, IOCondition cond) {
-				reader.drain ((payload, len) => {
-					assert (len == sizeof (ExecveEvent));
+				reader.drain (payload => {
+					assert (payload.length == sizeof (ExecveEvent));
 					gater.handle_event (payload);
 				});
 				return Source.CONTINUE;
