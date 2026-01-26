@@ -12,7 +12,7 @@ namespace Frida {
 
 		private Bpf.StackTraceMap? stacks;
 
-		private Bpf.HashMap? readlinkat_args;
+		private Bpf.HashMap? inflight;
 
 		private FileDescriptor? prog_enter_fd;
 		private FileDescriptor? prog_exit_fd;
@@ -25,9 +25,11 @@ namespace Frida {
 
 		private const size_t MAX_DEPTH = 16;
 		private const size_t MAX_STACK_ENTRIES = 16384;
-		private const size_t MAX_READLINKAT_ARGS_ENTRIES = 4096;
+		private const size_t MAX_INFLIGHT_COPIES = 4096;
 		private const size_t MAX_PATH = 256;
 		private const size_t MAX_SOCK = 128;
+
+		private const size_t SYSCALL_NARGS = 6;
 
 		public SyscallTracer (uint pid) {
 			Object (pid: pid);
@@ -66,8 +68,7 @@ namespace Frida {
 
 			stacks = new Bpf.StackTraceMap (MAX_DEPTH, MAX_STACK_ENTRIES);
 
-			readlinkat_args = new Bpf.HashMap (sizeof (uint64) + sizeof (uint32) + sizeof (uint32),
-				MAX_READLINKAT_ARGS_ENTRIES);
+			inflight = new Bpf.HashMap (sizeof (Inflight), MAX_INFLIGHT_COPIES);
 
 			Gum.ElfModule elf;
 			try {
@@ -81,7 +82,7 @@ namespace Frida {
 			maps["target_tgid"] = target_tgid;
 			maps["events"] = events;
 			maps["stacks"] = stacks;
-			maps["readlinkat_args"] = readlinkat_args;
+			maps["inflight"] = inflight;
 
 			prog_enter_fd = Bpf.load_program_from_elf (TRACEPOINT, elf, "tracepoint/raw_syscalls/sys_enter", maps, "Dual BSD/GPL");
 			prog_exit_fd = Bpf.load_program_from_elf (TRACEPOINT, elf, "tracepoint/raw_syscalls/sys_exit", maps, "Dual BSD/GPL");
@@ -143,144 +144,133 @@ namespace Frida {
 
 			prog_exit_fd = null;
 			prog_enter_fd = null;
-			readlinkat_args = null;
+			inflight = null;
 			stacks = null;
 			events_reader = null;
 			target_tgid = null;
 		}
 
-		private void handle_event (uint8[] payload) {
-			assert (payload.length >= sizeof (SyscallEvent));
+		private void handle_event (uint8[] buf) {
+			assert (buf.length >= sizeof (SyscallEventCommon));
 
-			unowned SyscallEvent * e = (SyscallEvent *) payload;
+			unowned SyscallEventCommon * c = (SyscallEventCommon *) buf;
+			var phase = (Phase) c->phase;
 
-			var phase = (Phase) e->phase;
+			size_t header_len = sizeof (SyscallEventCommon);
+			size_t payload_len = (size_t) c->payload_len;
+			uint16 attach_count = c->attach_count;
 
-			size_t header_len = sizeof (SyscallEvent);
-			size_t payload_len = (size_t) e->payload_len;
-			assert (payload.length == header_len + payload_len);
+			assert (header_len + payload_len <= buf.length);
 
-			uint8 * p = (uint8 *) payload + header_len;
+			uint8 * p = (uint8 *) buf + header_len;
+			uint8 * payload_end = p + payload_len;
 
-			switch ((EventKind) e->kind) {
-			case OPENAT: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadOpenat));
+			uint8 * a = null;
 
-					unowned PayloadOpenat * o = (PayloadOpenat *) p;
-					unowned string path = (o->path_len != 0) ? (string) &o->path[0] : "";
+			uint64 args[SYSCALL_NARGS];
+			int64 retval = 0;
 
-					log_event (e, "enter dfd=%d path=\"%s\" flags=%d mode=0%o", o->dfd, path, o->flags, o->mode);
-				} else {
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
+			if (phase == Phase.ENTER) {
+				assert ((size_t) (payload_end - p) >= sizeof (SyscallEnterPayload));
+				unowned SyscallEnterPayload * ep = (SyscallEnterPayload *) p;
+
+				for (int i = 0; i < SYSCALL_NARGS; i++)
+					args[i] = ep->args[i];
+
+				a = (uint8 *) p + sizeof (SyscallEnterPayload);
+			} else {
+				assert ((size_t) (payload_end - p) >= sizeof (SyscallExitPayload));
+				unowned SyscallExitPayload * xp = (SyscallExitPayload *) p;
+
+				retval = xp->retval;
+				a = (uint8 *) p + sizeof (SyscallExitPayload);
+			}
+
+			string?[] str_arg = new string?[SYSCALL_NARGS];
+			var bytes_arg = new Bytes?[SYSCALL_NARGS];
+			var out_bytes = new Bytes?[SYSCALL_NARGS];
+
+			for (uint i = 0; i < attach_count; i++) {
+				assert ((size_t)(payload_end - a) >= sizeof (AttachHeader));
+				unowned AttachHeader * h = (AttachHeader *) a;
+				a += sizeof (AttachHeader);
+
+				uint idx = h->arg_index;
+				size_t len = (size_t) h->len;
+
+				assert (a + len <= payload_end);
+
+				if (idx < SYSCALL_NARGS) {
+					switch ((AttachType) h->type) {
+					case AttachType.STRING_ARG:
+						str_arg[idx] = (len != 0) ? (string) a : "";
+						break;
+					case AttachType.BYTES_ARG: {
+						var b = new uint8[len];
+						Memory.copy (&b[0], a, len);
+						bytes_arg[idx] = new Bytes.take ((owned) b);
+						break;
+					}
+					case AttachType.OUT_BYTES: {
+						var b = new uint8[len];
+						Memory.copy (&b[0], a, len);
+						out_bytes[idx] = new Bytes.take ((owned) b);
+						break;
+					}
+					default:
+						break;
+					}
 				}
-				break;
+
+				a += len;
 			}
-			case FACCESSAT: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadFaccessat));
 
-					unowned PayloadFaccessat * a = (PayloadFaccessat *) p;
-					unowned string path = (a->path_len != 0) ? (string) &a->path[0] : "";
-
-					log_event (e, "enter dfd=%d path=\"%s\" mode=%d flags=%d", a->dfd, path, a->mode, a->flags);
-				} else {
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
-				}
-				break;
-			}
-			case STATFS: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadStatfs));
-
-					unowned PayloadStatfs * s = (PayloadStatfs *) p;
-					unowned string path = (s->path_len != 0) ? (string) &s->path[0] : "";
-
-					log_event (e, "enter path=\"%s\"", path);
-				} else {
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
-				}
-				break;
-			}
-			case NEWFSTATAT: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadNewfstatat));
-
-					unowned PayloadNewfstatat * s = (PayloadNewfstatat *) p;
-					unowned string path = (s->path_len != 0) ? (string) &s->path[0] : "";
-
-					log_event (e, "enter dfd=%d path=\"%s\" flags=%d", s->dfd, path, s->flags);
-				} else {
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
-				}
-				break;
-			}
-			case READLINKAT: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadReadlinkat));
-					unowned PayloadReadlinkat * r = (PayloadReadlinkat *) p;
-					unowned string path = (r->path_len != 0) ? (string) &r->path[0] : "";
-					log_event (e, "enter dfd=%d path=\"%s\" bufsize=%u", r->dfd, path, r->bufsize);
-				} else {
-					assert (payload_len == sizeof (PayloadReadlinkatExit));
-					unowned PayloadReadlinkatExit * x = (PayloadReadlinkatExit *) p;
-					unowned string link = (x->link_len != 0) ? (string) &x->link[0] : "";
-					log_event (e, "exit ret=%" + int64.FORMAT + " link=\"%s\"", e->retval, link);
-				}
-				break;
-			}
-			case CONNECT: {
-				if (phase == ENTER) {
-					assert (payload_len == sizeof (PayloadConnect));
-
-					unowned PayloadConnect * c = (PayloadConnect *) p;
-
-					string peer = format_sockaddr (
-						c->family,
-						c->addrlen,
-						(uint8 *) &c->addr[0],
-						MAX_SOCK
-					);
-
-					log_event (e, "enter fd=%d %s (family=%u addrlen=%u)", c->fd, peer, c->family, c->addrlen);
-				} else {
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
-				}
-				break;
-			}
-			default:
-				if (phase == ENTER)
-					log_event (e, "enter");
-				else
-					log_event (e, "exit ret=%" + int64.FORMAT, e->retval);
-				break;
-			}
-		}
-
-		private void log_event (SyscallEvent * e, string format = "", ...) {
-			int nr = e->syscall_nr;
 			unowned string? name = null;
-			if (nr >= 0 && nr < syscall_names.length)
-				name = syscall_names[nr];
+			if (c->syscall_nr >= 0 && c->syscall_nr < syscall_names.length)
+				name = syscall_names[c->syscall_nr];
 
-			var args = va_list ();
-			print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s %s\n",
-				e->time_ns,
-				e->tgid,
-				e->tid,
-				e->stack_id,
-				(name != null) ? name : "%d".printf (nr),
-				format.vprintf (args));
-		}
+			if (phase == Phase.ENTER) {
+				if (name == "connect" && bytes_arg[1] != null) {
+					unowned uint8[] sa = bytes_arg[1].get_data ();
+					uint16 fam = 0;
+					if (sa.length >= 2)
+						fam = *((uint16 *) sa);
+					string peer = format_sockaddr (fam, (uint32) sa.length, (uint8 *) &sa[0], sa.length);
+					print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s enter %s\n",
+						c->time_ns, c->tgid, c->tid, c->stack_id,
+						(name != null) ? name : "%d".printf (c->syscall_nr),
+						peer);
+					return;
+				}
 
-		private enum EventKind {
-			GENERIC,
-			OPENAT,
-			FACCESSAT,
-			STATFS,
-			NEWFSTATAT,
-			READLINKAT,
-			CONNECT,
+				var rendered = new StringBuilder ();
+				for (int i = 0; i < SYSCALL_NARGS; i++) {
+					if (i != 0)
+						rendered.append (", ");
+					if (str_arg[i] != null)
+						rendered.append_printf ("arg%d=\"%s\"", i, str_arg[i]);
+					else
+						rendered.append_printf ("arg%d=0x%" + uint64.FORMAT_MODIFIER + "x", i, args[i]);
+				}
+
+				print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s enter %s\n",
+					c->time_ns, c->tgid, c->tid, c->stack_id,
+					(name != null) ? name : "%d".printf (c->syscall_nr),
+					rendered.str);
+			} else {
+				string extra = "";
+				if (out_bytes[2] != null) {
+					unowned uint8[] ob = out_bytes[2].get_data ();
+					unowned string s = (ob.length != 0) ? (string) &ob[0] : "";
+					extra = " out(arg2)=\"%s\"".printf (s);
+				}
+
+				print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s exit ret=0x%" +
+						int64.FORMAT_MODIFIER + "x%s\n",
+					c->time_ns, c->tgid, c->tid, c->stack_id,
+					(name != null) ? name : "%d".printf (c->syscall_nr),
+					retval, extra);
+			}
 		}
 
 		private enum Phase {
@@ -288,8 +278,14 @@ namespace Frida {
 			EXIT,
 		}
 
+		private enum AttachType {
+			STRING_ARG,
+			BYTES_ARG,
+			OUT_BYTES,
+		}
+
 		[Compact]
-		private struct SyscallEvent {
+		private struct SyscallEventCommon {
 			public uint64 time_ns;
 			public uint32 tgid;
 			public uint32 tid;
@@ -297,104 +293,68 @@ namespace Frida {
 			public int32 syscall_nr;
 			public int32 stack_id;
 
-			public uint16 kind;
-			public uint16 payload_len;
-
 			public uint16 phase;
+
+			public uint16 payload_len;
+			public uint16 attach_count;
+		}
+
+		[Compact]
+		private struct SyscallEnterPayload {
+			public uint64 args[6];
+		}
+
+		[Compact]
+		private struct SyscallExitPayload {
 			public int64 retval;
 		}
 
 		[Compact]
-		private struct PayloadOpenat {
-			public int32 dfd;
-			public int32 flags;
-			public uint32 mode;
-			public uint32 path_len;
-			public uint8 path[MAX_PATH];
+		private struct AttachHeader {
+			public uint16 type;
+			public uint16 arg_index;
+			public uint32 len;
 		}
 
 		[Compact]
-		private struct PayloadFaccessat {
-			public int32 dfd;
-			public int32 mode;
-			public int32 flags;
-			public uint32 path_len;
-			public uint8 path[MAX_PATH];
+		private struct Inflight {
+			public int32 syscall_nr;
+
+			public uint16 kind;
+			public uint16 _pad0;
+
+			public InflightOutCopy u;
 		}
 
 		[Compact]
-		private struct PayloadStatfs {
-			public uint32 path_len;
-			public uint8 path[MAX_PATH];
+		private struct InflightOutCopy {
+			public uint16 arg_index;
+			public uint16 _pad1;
+
+			public uint64 user_ptr;
+			public uint32 max_len;
+			public uint32 _pad2;
 		}
 
-		[Compact]
-		private struct PayloadNewfstatat {
-			public int32 dfd;
-			public int32 flags;
-			public uint32 path_len;
-			public uint8 path[MAX_PATH];
-		}
+		private sealed class WatchState : Object {
+			public unowned SyscallTracer tracer;
+			public Bpf.RingbufReader reader;
 
-		[Compact]
-		private struct PayloadReadlinkat {
-			public int32 dfd;
-			public uint32 bufsize;
-			public uint32 path_len;
-			public uint8 path[MAX_PATH];
-		}
+			public WatchState (SyscallTracer tracer, Bpf.RingbufReader reader) {
+				this.tracer = tracer;
+				this.reader = reader;
+			}
 
-		[Compact]
-		private struct PayloadReadlinkatExit {
-			public uint32 link_len;
-			public uint8 link[MAX_PATH];
-		}
-
-		[Compact]
-		private struct PayloadConnect {
-			public int32 fd;
-			public uint32 addrlen;
-			public uint16 family;
-			public uint16 pad;
-			public uint8 addr[MAX_SOCK];
-		}
-
-		[Compact]
-		private struct SockaddrIn {
-			public uint16 sin_family;
-			public uint16 sin_port;      // network byte order
-			public uint32 sin_addr;      // network byte order
-			public uint8  sin_zero[8];
-		}
-
-		[Compact]
-		private struct In6Addr {
-			public uint8 addr[16];
-		}
-
-		[Compact]
-		private struct SockaddrIn6 {
-			public uint16 sin6_family;
-			public uint16 sin6_port;     // network byte order
-			public uint32 sin6_flowinfo; // network byte order (usually 0)
-			public In6Addr sin6_addr;
-			public uint32 sin6_scope_id; // host order
-		}
-
-		[Compact]
-		private struct SockaddrUn {
-			public uint16 sun_family;
-			public uint8  sun_path[108]; // Linux sizeof(sockaddr_un.sun_path)
-		}
-
-		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
-			uint8 buf[46];
-			unowned string? res = Posix.inet_ntop (af, (void *) src, buf);
-			return (res != null) ? res : "?";
+			public bool on_ready (IOChannel ch, IOCondition cond) {
+				reader.drain (payload => {
+					assert (payload.length >= sizeof (SyscallEventCommon));
+					tracer.handle_event (payload);
+				});
+				return Source.CONTINUE;
+			}
 		}
 
 		private static string format_sockaddr (uint16 family, uint32 addrlen, uint8 * addr, size_t addr_buf_len) {
-			// Clamp to what we actually have
 			size_t len = (size_t) addrlen;
 			if (len > addr_buf_len)
 				len = addr_buf_len;
@@ -407,7 +367,6 @@ namespace Frida {
 				unowned SockaddrIn * sa = (SockaddrIn *) addr;
 				uint16 port = uint16.from_network (sa->sin_port);
 
-				// sin_addr is 4 bytes in network order
 				string ip = inet_ntop_to_string (Posix.AF_INET, (uint8 *) &sa->sin_addr, 4);
 				return "%s:%u".printf (ip, port);
 			}
@@ -421,7 +380,6 @@ namespace Frida {
 
 				string ip = inet_ntop_to_string (Posix.AF_INET6, (uint8 *) &sa6->sin6_addr.addr[0], 16);
 
-				// Wrap IPv6 in brackets when appending port (common convention)
 				if (sa6->sin6_scope_id != 0)
 					return "[%s%%%u]:%u".printf (ip, sa6->sin6_scope_id, port);
 
@@ -429,14 +387,11 @@ namespace Frida {
 			}
 
 			case Posix.AF_UNIX: {
-				// Linux: sockaddr_un has sun_family + sun_path
 				if (len < 2)
 					return "unix: <truncated>";
 
 				unowned SockaddrUn * sun = (SockaddrUn *) addr;
 
-				// Actual path bytes available in this instance:
-				// addrlen may be smaller than full struct; subtract family (2 bytes)
 				size_t path_bytes = (len > 2) ? (len - 2) : 0;
 				if (path_bytes > 108)
 					path_bytes = 108;
@@ -444,25 +399,17 @@ namespace Frida {
 				if (path_bytes == 0)
 					return "unix:\"\"";
 
-				// Abstract namespace: first byte is '\0' (not NUL-terminated string)
 				if (sun->sun_path[0] == 0) {
-					// Render abstract as @ + bytes until end (or NUL if present)
-					// We’ll stop at first NUL after the leading 0, or at path_bytes.
 					size_t n = 1;
 					while (n < path_bytes && sun->sun_path[n] != 0)
 						n++;
 
-					// Copy bytes [1..n) into a string safely
-					// Note: abstract names are bytes; treat as UTF-8-ish for logging
-					uint8[] tmp = new uint8[n]; // includes leading 0, we'll skip it
+					uint8[] tmp = new uint8[n];
 					Memory.copy (&tmp[0], &sun->sun_path[0], n);
-					// Build string from bytes after leading 0
 					string name = (n > 1) ? ((string) (&tmp[1])) : "";
 					return "unix:@%s".printf (name);
 				}
 
-				// Filesystem path: sun_path is NUL-terminated (usually)
-				// Ensure we don’t read past what we got:
 				size_t n2 = 0;
 				while (n2 < path_bytes && sun->sun_path[n2] != 0)
 					n2++;
@@ -479,22 +426,38 @@ namespace Frida {
 			}
 		}
 
-		private sealed class WatchState : Object {
-			public unowned SyscallTracer tracer;
-			public Bpf.RingbufReader reader;
+		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
+			uint8 buf[46];
+			unowned string? res = Posix.inet_ntop (af, (void *) src, buf);
+			return (res != null) ? res : "?";
+		}
 
-			public WatchState (SyscallTracer tracer, Bpf.RingbufReader reader) {
-				this.tracer = tracer;
-				this.reader = reader;
-			}
+		[Compact]
+		private struct SockaddrIn {
+			public uint16 sin_family;
+			public uint16 sin_port;
+			public uint32 sin_addr;
+			public uint8  sin_zero[8];
+		}
 
-			public bool on_ready (IOChannel ch, IOCondition cond) {
-				reader.drain (payload => {
-					assert (payload.length >= sizeof (SyscallEvent));
-					tracer.handle_event (payload);
-				});
-				return Source.CONTINUE;
-			}
+		[Compact]
+		private struct In6Addr {
+			public uint8 addr[16];
+		}
+
+		[Compact]
+		private struct SockaddrIn6 {
+			public uint16 sin6_family;
+			public uint16 sin6_port;
+			public uint32 sin6_flowinfo;
+			public In6Addr sin6_addr;
+			public uint32 sin6_scope_id;
+		}
+
+		[Compact]
+		private struct SockaddrUn {
+			public uint16 sun_family;
+			public uint8  sun_path[108];
 		}
 	}
 }
