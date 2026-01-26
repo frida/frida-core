@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from typing import Dict, FrozenSet, Optional, Sequence
 
-
 _TABLES = {
     "x86": ("x86", frozenset(["i386"])),
     "x86_64": ("x86_64", frozenset(["common", "64"])),
@@ -55,14 +54,6 @@ def main() -> int:
         out_h.write_text(render_c_header(syscalls), encoding="utf-8")
 
     return 0
-
-
-def parse_capabilities(value: Optional[str]) -> Optional[FrozenSet[str]]:
-    if value is None:
-        return None
-
-    caps = tuple(item.strip() for item in value.split(",") if item.strip())
-    return frozenset(caps)
 
 
 def parse_tbl(path: Path, capabilities: Optional[FrozenSet[str]]) -> Dict[int, str]:
