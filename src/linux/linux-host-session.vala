@@ -41,6 +41,7 @@ namespace Frida {
 
 #if !ANDROID
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
+        private Spawner? spawn_gater;
 #endif
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
@@ -57,6 +58,14 @@ namespace Frida {
 
 			injector = new Linjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
+
+#if !ANDROID
+            spawn_gater = Spawner.try_open ();
+            if (spawn_gater != null) {
+                    spawn_gater.spawn_added.connect (on_spawn_gater_spawn_added);
+                    spawn_gater.spawn_removed.connect (on_spawn_gater_spawn_removed);
+            }
+#endif
 
 #if HAVE_EMBEDDED_ASSETS
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
@@ -86,6 +95,16 @@ namespace Frida {
 #endif
 		}
 
+#if !ANDROID
+        private void on_spawn_gater_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_spawn_gater_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
+		}
+#endif
+
 		public override async void preload (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
 			yield get_android_helper_client (cancellable);
@@ -109,6 +128,13 @@ namespace Frida {
 			}
 
 			android_helper_process = null;
+#else
+            if (spawn_gater != null) {
+                spawn_gater.spawn_added.disconnect (on_spawn_gater_spawn_added);
+                spawn_gater.spawn_removed.disconnect (on_spawn_gater_spawn_removed);
+                yield spawn_gater.close (cancellable);
+                spawn_gater = null;
+            }
 #endif
 
 			yield base.close (cancellable);
@@ -275,7 +301,8 @@ namespace Frida {
 #if ANDROID
 			yield robo_launcher.enable_spawn_gating (cancellable);
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+            var agent = get_spawn_gater_agent ();
+            yield agent.enable_spawn_gating (cancellable);
 #endif
 		}
 
@@ -283,15 +310,24 @@ namespace Frida {
 #if ANDROID
 			yield robo_launcher.disable_spawn_gating (cancellable);
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+            var agent = get_spawn_gater_agent ();
+            yield agent.disable_spawn_gating (cancellable);
 #endif
 		}
+
+#if !ANDROID
+        private Spawner get_spawn_gater_agent () throws Error {
+            if (spawn_gater == null)
+                throw new Error.NOT_SUPPORTED ("Spawn gating requires additional privileges");
+            return spawn_gater;
+        }
+#endif
 
 		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
 			return robo_launcher.enumerate_pending_spawn ();
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			return spawn_gater.enumerate_pending_spawn ();
 #endif
 		}
 
@@ -329,6 +365,9 @@ namespace Frida {
 #if ANDROID
 			if (robo_launcher.try_resume (pid))
 				return;
+#else
+            if (spawn_gater.try_resume (pid))
+                return;
 #endif
 
 			yield helper.resume (pid, cancellable);
@@ -569,6 +608,7 @@ namespace Frida {
 			return (result.length != 0) ? result : null;
 		}
 
+#if ANDROID
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
@@ -576,6 +616,7 @@ namespace Frida {
 		private void on_robo_launcher_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
 		}
+#endif
 
 		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
 			if (crash_monitor == null)
@@ -1790,5 +1831,83 @@ namespace Frida {
 
 		return state == 'T';
 	}
+#else
+    private sealed class Spawner : Object {
+        public signal void spawn_added (HostSpawnInfo info);
+        public signal void spawn_removed (HostSpawnInfo info);
+
+        public weak LinuxHostSession host_session {
+		get;
+		construct;
+        }
+
+	public Cancellable io_cancellable {
+		get;
+		construct;
+	}
+
+	public static Spawner? try_open () {
+		if (Posix.getuid () != 0)
+			return null;
+		return new Spawner ();
+	}
+
+	private SpawnGater gater = new SpawnGater();
+
+        private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+
+        public async void close (Cancellable? cancellable) throws IOError {
+		if (gater != null) {
+			try {
+			    yield disable_spawn_gating (cancellable);
+			} catch (Error e) {
+			    assert_not_reached ();
+			}
+		}
+        }
+
+	public void spawn_callback(int pid, string command) {
+		var info = HostSpawnInfo (pid, command);
+		pending_spawn[pid] = info;
+		spawn_added (info);
+	}
+
+        public async void enable_spawn_gating (Cancellable? cancellable) throws Error {
+		gater.set_callback (spawn_callback);
+		gater.start ();
+        }
+
+	public HostSpawnInfo[] enumerate_pending_spawn () {
+		var result = new HostSpawnInfo[pending_spawn.size];
+		var index = 0;
+		foreach (var spawn in pending_spawn.values)
+			result[index++] = spawn;
+		return result;
+	}
+
+	public bool try_resume(uint pid) {
+		Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
+		return true;
+	}
+
+        public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		if (gater == null)
+			throw new Error.INVALID_OPERATION ("Already disabled");
+
+
+		var pending = pending_spawn.values.to_array ();
+		pending_spawn.clear ();
+		foreach (var spawn in pending) {
+			spawn_removed (spawn);
+
+			host_session.resume.begin (spawn.pid, io_cancellable);
+		}
+
+		gater.stop ();
+		gater = null;
+
+		io_cancellable.cancel ();
+        }
+    }
 #endif
 }
