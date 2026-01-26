@@ -17,6 +17,7 @@ _TABLES = {
     "mips64": ("mips-n64", None),
     "s390x": ("s390", None),
 }
+_TABLES["armbe"] = _TABLES["arm"]
 _TABLES["armbe8"] = _TABLES["arm"]
 _TABLES["armhf"] = _TABLES["arm"]
 _TABLES["armv6kz"] = _TABLES["arm"]
