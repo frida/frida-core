@@ -761,6 +761,9 @@ namespace Frida {
 			ZymbioteConnection? connection;
 			if (!zymbiote_connections.unset (pid, out connection))
 				return false;
+
+			trace_syscalls.begin (pid);
+
 			connection.resume.begin (io_cancellable);
 
 			HostSpawnInfo? info;
@@ -768,6 +771,25 @@ namespace Frida {
 				spawn_removed (info);
 
 			return true;
+		}
+
+		private async void trace_syscalls (uint pid) {
+			printerr ("=== Starting\n");
+			var tracer = new SyscallTracer (pid);
+			try {
+				tracer.start ();
+			} catch (Error e) {
+				printerr ("=== Error: %s\n", e.message);
+				return;
+			}
+			printerr ("=== Started\n");
+
+			var source = new TimeoutSource.seconds (2);
+			source.set_callback (trace_syscalls.callback);
+			source.attach (MainContext.get_thread_default ());
+
+			yield;
+			printerr ("=== Finished\n");
 		}
 
 		private async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
