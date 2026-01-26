@@ -333,6 +333,7 @@ if have_local_backend
       'linux' / 'frida-helper-types.vala',
       'linux' / 'activity-sampler.vala',
       'linux' / 'syscall-tracer.vala',
+      'linux' / 'spawn-gater.vala',
     ]
     if host_abi == 'armhf'
       host_lowlevel_abi = 'arm'
@@ -362,6 +363,7 @@ if have_local_backend
         helpers_native_dir / 'loader.bin',
         helpers_bpf_noarch_dir  / 'activity-sampler.elf',
         helpers_bpf_arch_dir  / 'syscall-tracer.elf',
+        helpers_bpf_arch_dir  / 'spawn-gater.elf',
       ],
       output: [
         'frida-data-helper-backend.vapi',
@@ -377,6 +379,7 @@ if have_local_backend
         '@INPUT2@',
         '@INPUT3@',
         '@INPUT4@',
+        '@INPUT5@',
       ],
     )
     helper_backend_sources += [helper_backend_data]
