@@ -303,7 +303,7 @@ namespace Frida {
 		}
 
 		public sealed class RingbufReader : Object {
-			public delegate void RecordHandler (void * payload, uint32 payload_len);
+			public delegate void RecordHandler (uint8[] payload);
 
 			private RingbufMap map;
 
@@ -384,8 +384,8 @@ namespace Frida {
 						continue;
 					}
 
-					void * payload = hdrp + BPF_RINGBUF_HEADER_SIZE;
-					on_record (payload, sample_len);
+					unowned uint8[] payload = (uint8[]) (hdrp + BPF_RINGBUF_HEADER_SIZE);
+					on_record (payload[:sample_len]);
 
 					Atomics.store_u64_release (consumer_pos, cons + total_len);
 				}
