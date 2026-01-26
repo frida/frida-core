@@ -95,6 +95,16 @@ namespace Frida {
 #endif
 		}
 
+#if !ANDROID
+        private void on_spawn_gater_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_spawn_gater_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
+		}
+#endif
+
 		public override async void preload (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
 			yield get_android_helper_client (cancellable);
@@ -606,14 +616,6 @@ namespace Frida {
 		private void on_robo_launcher_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
 		}
-#else
-        private void on_spawn_gater_spawn_added (HostSpawnInfo info) {
-            spawn_added (info);
-        }
-
-        private void on_spawn_gater_spawn_removed (HostSpawnInfo info) {
-            spawn_removed (info);
-        }
 #endif
 
 		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
