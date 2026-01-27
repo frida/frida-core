@@ -183,10 +183,17 @@ namespace Frida {
 
 		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
 				throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return yield this.host_session.link_service_session (id, cancellable);
 		}
 
 		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_service_session (id);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -243,6 +250,8 @@ namespace Frida {
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 		private ChannelRegistry channel_registry = new ChannelRegistry ();
+
+		private ServiceSessionRegistry service_session_registry = new ServiceSessionRegistry ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -764,7 +773,24 @@ namespace Frida {
 		}
 
 		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+			var server = yield get_remote_server (cancellable);
+			try {
+				return yield server.session.open_service (address, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async ServiceSession link_service_session (ServiceSessionId id, Cancellable? cancellable) throws Error, IOError {
+			var server = yield get_remote_server (cancellable);
+			ServiceSession session = yield server.connection.get_proxy (null, ObjectPath.for_service_session (id),
+				DO_NOT_LOAD_PROPERTIES, cancellable);
+			service_session_registry.register (id, session);
+			return session;
+		}
+
+		public void unlink_service_session (ServiceSessionId id) {
+			service_session_registry.unlink (id);
 		}
 
 		private void on_gadget_entry_detached (GadgetEntry entry, SessionDetachReason reason) {
