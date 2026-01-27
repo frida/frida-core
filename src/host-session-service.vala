@@ -361,10 +361,17 @@ namespace Frida {
 
 		public async ServiceSession link_service_session (HostSession host_session, ServiceSessionId id, Cancellable? cancellable)
 				throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			return this.host_session.link_service_session (id);
 		}
 
 		public void unlink_service_session (HostSession host_session, ServiceSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_service_session (id);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -396,6 +403,8 @@ namespace Frida {
 
 		protected Injector injector;
 		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
+
+		protected ServiceSessionRegistry service_session_registry = new ServiceSessionRegistry ();
 
 		protected Cancellable io_cancellable = new Cancellable ();
 
@@ -947,8 +956,16 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Channels are not supported by this backend");
 		}
 
-		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+		public virtual async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+		}
+
+		public ServiceSession link_service_session (ServiceSessionId id) throws Error {
+			return service_session_registry.link (id);
+		}
+
+		public void unlink_service_session (ServiceSessionId id) {
+			service_session_registry.unlink (id);
 		}
 
 #if !WINDOWS
