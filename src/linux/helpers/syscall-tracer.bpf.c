@@ -1,14 +1,16 @@
 #include "frida-linux-syscalls.h"
 
+#include <stdbool.h>
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-#define MAX_DEPTH 16
+#define MAX_TARGET_TGIDS 4096
+#define MAX_TARGET_UIDS 256
 #define MAX_STACK_ENTRIES 16384
+#define MAX_INFLIGHT_COPIES 4096
 
-#define MAX_INFLIGHT_ENTRIES 4096
-
+#define MAX_DEPTH 16
 #define MAX_PATH 256
 #define MAX_SOCK 128
 
@@ -19,8 +21,8 @@ typedef struct _SyscallEventCommon SyscallEventCommon;
 typedef struct _SyscallEnterPayload SyscallEnterPayload;
 typedef struct _SyscallExitPayload SyscallExitPayload;
 
-typedef __u16 AttachType;
-typedef struct _AttachHeader AttachHeader;
+typedef __u16 AttachmentType;
+typedef struct _AttachmentHeader AttachmentHeader;
 
 typedef struct _SyscallEnterEventNone SyscallEnterEventNone;
 typedef struct _SyscallEnterEventPath SyscallEnterEventPath;
@@ -64,14 +66,14 @@ struct _SyscallExitPayload
 
 enum
 {
-  ATTACH_STRING_ARG,
-  ATTACH_BYTES_ARG,
-  ATTACH_OUT_BYTES,
+  ATTACHMENT_STRING_ARG,
+  ATTACHMENT_BYTES_ARG,
+  ATTACHMENT_OUT_BYTES,
 };
 
-struct _AttachHeader
+struct _AttachmentHeader
 {
-  AttachType type;
+  AttachmentType type;
   __u16 arg_index;
   __u32 len;
 };
@@ -87,7 +89,7 @@ struct _SyscallEnterEventPath
   SyscallEventCommon common;
   SyscallEnterPayload payload;
 
-  AttachHeader attach;
+  AttachmentHeader attach;
   __u8 data[MAX_PATH];
 };
 
@@ -96,7 +98,7 @@ struct _SyscallEnterEventSock
   SyscallEventCommon common;
   SyscallEnterPayload payload;
 
-  AttachHeader attach;
+  AttachmentHeader attach;
   __u8 data[MAX_SOCK];
 };
 
@@ -111,7 +113,7 @@ struct _SyscallExitEventOut
   SyscallEventCommon common;
   SyscallExitPayload payload;
 
-  AttachHeader attach;
+  AttachmentHeader attach;
   __u8 data[MAX_PATH];
 };
 
@@ -143,12 +145,21 @@ enum
 
 struct
 {
-  __uint (type, BPF_MAP_TYPE_ARRAY);
-  __uint (max_entries, 1);
+  __uint (type, BPF_MAP_TYPE_HASH);
+  __uint (max_entries, MAX_TARGET_TGIDS);
   __type (key, __u32);
-  __type (value, __u32);
+  __type (value, __u8);
 }
-target_tgid SEC (".maps");
+target_tgids SEC (".maps");
+
+struct
+{
+  __uint (type, BPF_MAP_TYPE_HASH);
+  __uint (max_entries, MAX_TARGET_UIDS);
+  __type (key, __u32);
+  __type (value, __u8);
+}
+target_uids SEC (".maps");
 
 struct
 {
@@ -169,7 +180,7 @@ stacks SEC (".maps");
 struct
 {
   __uint (type, BPF_MAP_TYPE_HASH);
-  __uint (max_entries, MAX_INFLIGHT_ENTRIES);
+  __uint (max_entries, MAX_INFLIGHT_COPIES);
   __type (key, __u32);
   __type (value, Inflight);
 }
@@ -189,6 +200,8 @@ struct trace_event_raw_sys_exit
   long ret;
 };
 
+static __always_inline bool should_trace_current (__u32 * out_tgid, __u32 * out_tid);
+
 static __always_inline SyscallEnterEventNone * reserve_enter_none (void);
 static __always_inline SyscallEnterEventPath * reserve_enter_path (void);
 static __always_inline SyscallEnterEventSock * reserve_enter_sock (void);
@@ -199,8 +212,8 @@ static __always_inline SyscallExitEventOut * reserve_exit_out (void);
 static __always_inline void fill_common (SyscallEventCommon * e, __u32 tgid, __u32 tid, __s32 nr, SyscallPhase phase, void * ctx);
 static __always_inline void fill_enter_args (SyscallEnterPayload * p, struct trace_event_raw_sys_enter * ctx);
 
-static __always_inline __u16 write_attach_str_arg (AttachHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str);
-static __always_inline __u16 write_attach_bytes_arg (AttachHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src,
+static __always_inline __u16 write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str);
+static __always_inline __u16 write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src,
     __u32 n);
 
 static __always_inline void maybe_schedule_out_copy ( __u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len );
@@ -209,15 +222,8 @@ SEC ("tracepoint/raw_syscalls/sys_enter")
 int
 on_sys_enter (struct trace_event_raw_sys_enter * ctx)
 {
-  __u32 k0 = 0;
-  __u32 * target = bpf_map_lookup_elem (&target_tgid, &k0);
-  if (target == NULL)
-    return 0;
-
-  __u64 pid_tgid = bpf_get_current_pid_tgid ();
-  __u32 tid  = (__u32) pid_tgid;
-  __u32 tgid = pid_tgid >> 32;
-  if (tgid != *target)
+  __u32 tgid, tid;
+  if (!should_trace_current (&tgid, &tid))
     return 0;
 
   __s32 nr = (__s32) ctx->id;
@@ -247,7 +253,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     else
       used = write_attach_str_arg (&ev->attach, 1, &ev->data[0], MAX_PATH, (void *) ctx->args[1]);
 
-    ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachHeader) + used);
+    ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachmentHeader) + used);
     ev->common.attach_count = 1;
 
     if (nr == FRIDA_LINUX_SYSCALL_READLINKAT)
@@ -271,7 +277,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     __u32 n = (__u32) ctx->args[2];
     __u16 used = write_attach_bytes_arg (&ev->attach, 1, &ev->data[0], MAX_SOCK, (void *) ctx->args[1], n);
 
-    ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachHeader) + used);
+    ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachmentHeader) + used);
     ev->common.attach_count = 1;
 
     bpf_ringbuf_submit (ev, 0);
@@ -297,15 +303,8 @@ SEC ("tracepoint/raw_syscalls/sys_exit")
 int
 on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 {
-  __u32 k0 = 0;
-  __u32 * target = bpf_map_lookup_elem (&target_tgid, &k0);
-  if (target == NULL)
-    return 0;
-
-  __u64 pid_tgid = bpf_get_current_pid_tgid ();
-  __u32 tid  = (__u32) pid_tgid;
-  __u32 tgid = pid_tgid >> 32;
-  if (tgid != *target)
+  __u32 tgid, tid;
+  if (!should_trace_current (&tgid, &tid))
     return 0;
 
   __s32 nr = (__s32) ctx->id;
@@ -332,7 +331,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
       if (to_copy > maxn)
         to_copy = maxn;
 
-      ev->attach.type = ATTACH_OUT_BYTES;
+      ev->attach.type = ATTACHMENT_OUT_BYTES;
       ev->attach.arg_index = in->u.out_copy.arg_index;
 
       __u16 used;
@@ -352,7 +351,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
         used = (__u16) (to_copy + 1);
       }
 
-      ev->common.payload_len = ( __u16 ) (sizeof (SyscallExitPayload) + sizeof (AttachHeader) + used);
+      ev->common.payload_len = ( __u16 ) (sizeof (SyscallExitPayload) + sizeof (AttachmentHeader) + used);
       ev->common.attach_count = 1;
     }
     else
@@ -380,6 +379,30 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
     bpf_ringbuf_submit (ev, 0);
     return 0;
   }
+}
+
+static __always_inline bool
+should_trace_current (__u32 * out_tgid, __u32 * out_tid)
+{
+  __u64 pid_tgid = bpf_get_current_pid_tgid ();
+  __u32 tgid = pid_tgid >> 32;
+  __u32 tid  = (__u32) pid_tgid;
+
+  *out_tgid = tgid;
+  *out_tid = tid;
+
+  __u8 * tgid_enabled = bpf_map_lookup_elem (&target_tgids, &tgid);
+  if (tgid_enabled != NULL)
+    return true;
+
+  __u64 uid_gid = bpf_get_current_uid_gid ();
+  __u32 uid = (__u32) uid_gid;
+
+  __u8 * uid_enabled = bpf_map_lookup_elem(&target_uids, &uid);
+  if (uid_enabled != NULL)
+    return true;
+
+  return false;
 }
 
 static __always_inline SyscallEnterEventNone *
@@ -440,9 +463,9 @@ fill_enter_args (SyscallEnterPayload * p, struct trace_event_raw_sys_enter * ctx
 }
 
 static __always_inline __u16
-write_attach_str_arg (AttachHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str)
+write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str)
 {
-  h->type = ATTACH_STRING_ARG;
+  h->type = ATTACHMENT_STRING_ARG;
   h->arg_index = arg_index;
   h->len = 0;
 
@@ -454,9 +477,9 @@ write_attach_str_arg (AttachHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_c
 }
 
 static __always_inline __u16
-write_attach_bytes_arg (AttachHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src, __u32 n)
+write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src, __u32 n)
 {
-  h->type = ATTACH_BYTES_ARG;
+  h->type = ATTACHMENT_BYTES_ARG;
   h->arg_index = arg_index;
 
   if (n > dst_cap)

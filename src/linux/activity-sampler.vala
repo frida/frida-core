@@ -118,6 +118,7 @@ namespace Frida {
 				reader.drain (payload => {
 					assert (payload.length == sizeof (SampleEvent));
 					sampler.handle_sample ((SampleEvent *) payload);
+					return CONTINUE;
 				});
 				return Source.CONTINUE;
 			}

@@ -389,6 +389,25 @@ namespace Frida {
 			return resource.get_file ().path;
 		}
 
+		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			var session = yield do_open_service (address, cancellable);
+
+			var id = ServiceSessionId.generate ();
+			service_session_registry.register (id, session);
+
+			return id;
+		}
+
+		private async ServiceSession do_open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			string[] tokens = address.split (":", 2);
+			unowned string protocol = tokens[0];
+
+			if (protocol == "syscall-trace")
+				return new SyscallTracerSession ();
+
+			throw new Error.NOT_SUPPORTED ("Unsupported service address");
+		}
+
 #if ANDROID
 		internal async AndroidHelperClient get_android_helper_client (Cancellable? cancellable) throws Error, IOError {
 			while (android_helper_request != null) {
@@ -762,8 +781,6 @@ namespace Frida {
 			if (!zymbiote_connections.unset (pid, out connection))
 				return false;
 
-			trace_syscalls.begin (pid);
-
 			connection.resume.begin (io_cancellable);
 
 			HostSpawnInfo? info;
@@ -771,25 +788,6 @@ namespace Frida {
 				spawn_removed (info);
 
 			return true;
-		}
-
-		private async void trace_syscalls (uint pid) {
-			printerr ("=== Starting\n");
-			var tracer = new SyscallTracer (pid);
-			try {
-				tracer.start ();
-			} catch (Error e) {
-				printerr ("=== Error: %s\n", e.message);
-				return;
-			}
-			printerr ("=== Started\n");
-
-			var source = new TimeoutSource.seconds (2);
-			source.set_callback (trace_syscalls.callback);
-			source.attach (MainContext.get_thread_default ());
-
-			yield;
-			printerr ("=== Finished\n");
 		}
 
 		private async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
@@ -1791,4 +1789,51 @@ namespace Frida {
 		return state == 'T';
 	}
 #endif
+
+	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+		private SyscallTracer? tracer = new SyscallTracer ();
+
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+			ensure_active ();
+
+			if (tracer.state == STOPPED)
+				tracer.start ();
+		}
+
+		private void ensure_active () throws Error {
+			if (tracer == null)
+				throw new Error.INVALID_OPERATION ("Service is closed");
+		}
+
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			if (tracer == null)
+				return;
+
+			tracer.stop ();
+			tracer = null;
+
+			close ();
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			ensure_active ();
+
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			if (type == "add-target") {
+				reader.read_member ("payload");
+				var payload = plist_from_variant (reader.current_object);
+				var raw_response = yield client.query (payload, cancellable);
+				return plist_to_variant (raw_response);
+			} else if (type == "read") {
+				var plist = yield client.read_message (cancellable);
+				return plist_to_variant (plist);
+			} else {
+				throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+			}
+		}
+	}
 }

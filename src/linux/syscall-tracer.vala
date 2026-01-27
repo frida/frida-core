@@ -1,11 +1,20 @@
 namespace Frida {
 	public sealed class SyscallTracer : Object {
-		public uint pid {
-			get;
-			construct;
+		public State state {
+			get {
+				return _state;
+			}
 		}
 
-		private Bpf.ArrayMap? target_tgid;
+		public enum State {
+			STOPPED,
+			STARTED,
+		}
+
+		private State _state = STOPPED;
+
+		private Bpf.HashMap? target_tgids;
+		private Bpf.HashMap? target_uids;
 
 		private Bpf.RingbufReader? events_reader;
 		private Source? events_source;
@@ -23,17 +32,16 @@ namespace Frida {
 
 		private const size_t RINGBUF_SIZE = 1U << 22;
 
-		private const size_t MAX_DEPTH = 16;
+		private const size_t MAX_TARGET_TGIDS = 4096;
+		private const size_t MAX_TARGET_UIDS = 256;
 		private const size_t MAX_STACK_ENTRIES = 16384;
 		private const size_t MAX_INFLIGHT_COPIES = 4096;
+
+		private const size_t MAX_DEPTH = 16;
 		private const size_t MAX_PATH = 256;
 		private const size_t MAX_SOCK = 128;
 
 		private const size_t SYSCALL_NARGS = 6;
-
-		public SyscallTracer (uint pid) {
-			Object (pid: pid);
-		}
 
 		static construct {
 			var syscall_enum = (EnumClass) typeof (LinuxSyscall).class_ref ();
@@ -60,8 +68,10 @@ namespace Frida {
 		}
 
 		public void start () throws Error {
-			target_tgid = new Bpf.ArrayMap (sizeof (uint32), 1);
-			target_tgid.update_u32 (0, pid);
+			assert (state == STOPPED);
+
+			target_tgids = new Bpf.HashMap (sizeof (uint8), MAX_TARGET_TGIDS);
+			target_uids = new Bpf.HashMap (sizeof (uint8), MAX_TARGET_UIDS);
 
 			var events = new Bpf.RingbufMap (RINGBUF_SIZE);
 			events_reader = new Bpf.RingbufReader (events);
@@ -79,7 +89,8 @@ namespace Frida {
 			}
 
 			var maps = new Gee.HashMap<string, Bpf.Map> ();
-			maps["target_tgid"] = target_tgid;
+			maps["target_tgids"] = target_tgids;
+			maps["target_uids"] = target_uids;
 			maps["events"] = events;
 			maps["stacks"] = stacks;
 			maps["inflight"] = inflight;
@@ -127,6 +138,8 @@ namespace Frida {
 			src.set_callback (state.on_ready);
 			src.attach (MainContext.get_thread_default ());
 			events_source = src;
+
+			_state = STARTED;
 		}
 
 		public void stop () {
@@ -147,7 +160,28 @@ namespace Frida {
 			inflight = null;
 			stacks = null;
 			events_reader = null;
-			target_tgid = null;
+			target_uids = null;
+			target_tgids = null;
+
+			_state = STOPPED;
+		}
+
+		public void add_target_tgid (uint tgid) throws Error {
+			uint8 v = 1;
+			target_tgids.update_raw (tgid, &v);
+		}
+
+		public void remove_target_tgid (uint tgid) throws Error {
+			target_tgids.remove (tgid);
+		}
+
+		public void add_target_uid (uint uid) throws Error {
+			uint8 v = 1;
+			target_tgids.update_raw (uid, &v);
+		}
+
+		public void remove_target_uid (uint uid) throws Error {
+			target_uids.remove (uid);
 		}
 
 		private void handle_event (uint8[] buf) {
@@ -158,7 +192,7 @@ namespace Frida {
 
 			size_t header_len = sizeof (SyscallEventCommon);
 			size_t payload_len = (size_t) c->payload_len;
-			uint16 attach_count = c->attach_count;
+			uint16 attachment_count = c->attachment_count;
 
 			assert (header_len + payload_len <= buf.length);
 
@@ -190,10 +224,10 @@ namespace Frida {
 			var bytes_arg = new Bytes?[SYSCALL_NARGS];
 			var out_bytes = new Bytes?[SYSCALL_NARGS];
 
-			for (uint i = 0; i < attach_count; i++) {
-				assert ((size_t)(payload_end - a) >= sizeof (AttachHeader));
-				unowned AttachHeader * h = (AttachHeader *) a;
-				a += sizeof (AttachHeader);
+			for (uint i = 0; i < attachment_count; i++) {
+				assert ((size_t)(payload_end - a) >= sizeof (AttachmentHeader));
+				unowned AttachmentHeader * h = (AttachmentHeader *) a;
+				a += sizeof (AttachmentHeader);
 
 				uint idx = h->arg_index;
 				size_t len = (size_t) h->len;
@@ -201,17 +235,17 @@ namespace Frida {
 				assert (a + len <= payload_end);
 
 				if (idx < SYSCALL_NARGS) {
-					switch ((AttachType) h->type) {
-					case AttachType.STRING_ARG:
+					switch ((AttachmentType) h->type) {
+					case AttachmentType.STRING_ARG:
 						str_arg[idx] = (len != 0) ? (string) a : "";
 						break;
-					case AttachType.BYTES_ARG: {
+					case AttachmentType.BYTES_ARG: {
 						var b = new uint8[len];
 						Memory.copy (&b[0], a, len);
 						bytes_arg[idx] = new Bytes.take ((owned) b);
 						break;
 					}
-					case AttachType.OUT_BYTES: {
+					case AttachmentType.OUT_BYTES: {
 						var b = new uint8[len];
 						Memory.copy (&b[0], a, len);
 						out_bytes[idx] = new Bytes.take ((owned) b);
@@ -277,7 +311,7 @@ namespace Frida {
 			EXIT,
 		}
 
-		private enum AttachType {
+		private enum AttachmentType {
 			STRING_ARG,
 			BYTES_ARG,
 			OUT_BYTES,
@@ -295,7 +329,7 @@ namespace Frida {
 			public uint16 phase;
 
 			public uint16 payload_len;
-			public uint16 attach_count;
+			public uint16 attachment_count;
 		}
 
 		[Compact]
@@ -309,7 +343,7 @@ namespace Frida {
 		}
 
 		[Compact]
-		private struct AttachHeader {
+		private struct AttachmentHeader {
 			public uint16 type;
 			public uint16 arg_index;
 			public uint32 len;
@@ -348,6 +382,7 @@ namespace Frida {
 				reader.drain (payload => {
 					assert (payload.length >= sizeof (SyscallEventCommon));
 					tracer.handle_event (payload);
+					return CONTINUE;
 				});
 				return Source.CONTINUE;
 			}
