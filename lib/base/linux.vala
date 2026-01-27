@@ -106,7 +106,7 @@ namespace Frida {
 
 			attr.log_level = 1;
 			attr.log_size = log_size;
-			attr.log_buf = (uintptr) (&logbuf[0]);
+			attr.log_buf = (uintptr) &logbuf[0];
 
 			try {
 				return new FileDescriptor (bpf_call (PROG_LOAD, &attr, (size_t) sizeof (BpfAttrProgLoad)));
@@ -425,7 +425,7 @@ namespace Frida {
 		private void lookup_map_value (FileDescriptor map_fd, uint32 key, void * value) throws Error {
 			var attr = BpfAttrMapElem ();
 			attr.map_fd = map_fd.handle;
-			attr.key = (uintptr) (&key);
+			attr.key = (uintptr) &key;
 			attr.value = (uintptr) value;
 
 			bpf_call (MAP_LOOKUP_ELEM, &attr, sizeof (BpfAttrMapElem));
@@ -434,7 +434,7 @@ namespace Frida {
 		private void update_map_value (FileDescriptor map_fd, uint32 key, void * value) throws Error {
 			var attr = BpfAttrMapElem ();
 			attr.map_fd = map_fd.handle;
-			attr.key = (uintptr) (&key);
+			attr.key = (uintptr) &key;
 			attr.value = (uintptr) value;
 			attr.flags = BPF_ANY;
 
