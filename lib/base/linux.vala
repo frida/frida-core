@@ -239,6 +239,10 @@ namespace Frida {
 			public void lookup_raw (uint32 key, void * val) throws Error {
 				Bpf.lookup_map_value (fd, key, val);
 			}
+
+			public void remove (uint32 key) throws Error {
+				Bpf.delete_map_value (fd, key);
+			}
 		}
 
 		public sealed class ArrayMap : Map {
@@ -439,6 +443,14 @@ namespace Frida {
 			attr.flags = BPF_ANY;
 
 			bpf_call (MAP_UPDATE_ELEM, &attr, sizeof (BpfAttrMapElem));
+		}
+
+		private void delete_map_value (FileDescriptor map_fd, uint32 key) throws Error {
+			var attr = BpfAttrMapElem ();
+			attr.map_fd = map_fd.handle;
+			attr.key = (uintptr) &key;
+
+			bpf_call (MAP_DELETE_ELEM, &attr, sizeof (BpfAttrMapElem));
 		}
 
 		private int bpf_call (BpfCommand cmd, void * attr, size_t attr_size) throws Error {

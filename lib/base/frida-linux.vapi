@@ -19,6 +19,7 @@ namespace Frida {
 		MAP_CREATE,
 		MAP_LOOKUP_ELEM,
 		MAP_UPDATE_ELEM,
+		MAP_DELETE_ELEM,
 		PROG_LOAD,
 	}
 
