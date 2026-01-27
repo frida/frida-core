@@ -389,7 +389,7 @@ namespace Frida {
 			return resource.get_file ().path;
 		}
 
-		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+		public override async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 			var session = yield do_open_service (address, cancellable);
 
 			var id = ServiceSessionId.generate ();
@@ -403,7 +403,7 @@ namespace Frida {
 			unowned string protocol = tokens[0];
 
 			if (protocol == "syscall-trace")
-				return new SyscallTracerSession ();
+				return new SyscallTraceServiceSession ();
 
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
@@ -1795,14 +1795,14 @@ namespace Frida {
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
 			ensure_active ();
-
-			if (tracer.state == STOPPED)
-				tracer.start ();
 		}
 
 		private void ensure_active () throws Error {
 			if (tracer == null)
 				throw new Error.INVALID_OPERATION ("Service is closed");
+
+			if (tracer.state == STOPPED)
+				tracer.start ();
 		}
 
 		public async void cancel (Cancellable? cancellable) throws IOError {
@@ -1823,16 +1823,53 @@ namespace Frida {
 			string type = reader.read_member ("type").get_string_value ();
 			reader.end_member ();
 
-			if (type == "add-target") {
-				reader.read_member ("payload");
-				var payload = plist_from_variant (reader.current_object);
-				var raw_response = yield client.query (payload, cancellable);
-				return plist_to_variant (raw_response);
-			} else if (type == "read") {
-				var plist = yield client.read_message (cancellable);
-				return plist_to_variant (plist);
-			} else {
-				throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+			if (type == "add-targets") {
+				if (reader.has_member ("pid")) {
+					reader.read_member ("pid");
+					for_each_uint32 (reader, pid => tracer.add_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uid")) {
+					reader.read_member ("uid");
+					for_each_uint32 (reader, uid => tracer.add_target_uid (uid));
+					reader.end_member ();
+				}
+
+				return new Variant.tuple ({});
+			}
+
+			if (type == "remove-targets") {
+				if (reader.has_member ("pid")) {
+					reader.read_member ("pid");
+					for_each_uint32 (reader, pid => tracer.remove_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uid")) {
+					reader.read_member ("uid");
+					for_each_uint32 (reader, uid => tracer.remove_target_uid (uid));
+					reader.end_member ();
+				}
+
+				return new Variant.tuple ({});
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+		}
+
+		private delegate void UInt32Handler (uint32 v) throws Error;
+
+		private static void for_each_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+			uint n = reader.count_elements ();
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < 0 || v > uint32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				cb ((uint32) v);
+
+				reader.end_element ();
 			}
 		}
 	}
