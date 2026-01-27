@@ -337,7 +337,12 @@ namespace Frida {
 		}
 
 		public sealed class RingbufReader : Object {
-			public delegate void RecordHandler (uint8[] payload);
+			public delegate DrainResult RecordHandler (uint8[] payload);
+
+			public enum DrainResult {
+				CONTINUE,
+				STOP,
+			}
 
 			private RingbufMap map;
 
@@ -419,9 +424,12 @@ namespace Frida {
 					}
 
 					unowned uint8[] payload = (uint8[]) (hdrp + BPF_RINGBUF_HEADER_SIZE);
-					on_record (payload[:sample_len]);
+					var drain_result = on_record (payload[:sample_len]);
 
 					Atomics.store_u64_release (consumer_pos, cons + total_len);
+
+					if (drain_result == STOP)
+						return;
 				}
 			}
 		}
