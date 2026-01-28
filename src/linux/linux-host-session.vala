@@ -2124,7 +2124,7 @@ namespace Frida {
 		}
 
 		private static void vardict_add (VariantBuilder b, string key, Variant val) {
-			b.add_value (new Variant.dict_entry (new Variant.string (key), val));
+			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
 		}
 
 		[Compact]
