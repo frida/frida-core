@@ -16,13 +16,13 @@
 
 #define SYSCALL_NARGS 6
 
-typedef __u16 SyscallPhase;
 typedef struct _SyscallEventCommon SyscallEventCommon;
+typedef __u16 SyscallPhase;
 typedef struct _SyscallEnterPayload SyscallEnterPayload;
 typedef struct _SyscallExitPayload SyscallExitPayload;
 
-typedef __u16 AttachmentType;
 typedef struct _AttachmentHeader AttachmentHeader;
+typedef __u16 AttachmentType;
 
 typedef struct _SyscallEnterEventNone SyscallEnterEventNone;
 typedef struct _SyscallEnterEventPath SyscallEnterEventPath;
@@ -32,12 +32,6 @@ typedef struct _SyscallExitEventNone SyscallExitEventNone;
 typedef struct _SyscallExitEventOut SyscallExitEventOut;
 
 typedef struct _Inflight Inflight;
-
-enum
-{
-  SYSCALL_PHASE_ENTER,
-  SYSCALL_PHASE_EXIT,
-};
 
 struct _SyscallEventCommon
 {
@@ -51,7 +45,13 @@ struct _SyscallEventCommon
   SyscallPhase phase;
 
   __u16 payload_len;
-  __u16 attach_count;
+  __u16 attachment_count;
+};
+
+enum _SyscallPhase
+{
+  SYSCALL_PHASE_ENTER,
+  SYSCALL_PHASE_EXIT,
 };
 
 struct _SyscallEnterPayload
@@ -64,18 +64,17 @@ struct _SyscallExitPayload
   __s64 retval;
 };
 
-enum
-{
-  ATTACHMENT_STRING_ARG,
-  ATTACHMENT_BYTES_ARG,
-  ATTACHMENT_OUT_BYTES,
-};
-
 struct _AttachmentHeader
 {
   AttachmentType type;
   __u16 arg_index;
   __u32 len;
+};
+
+enum _AttachmentType
+{
+  ATTACHMENT_STRING,
+  ATTACHMENT_BYTES,
 };
 
 struct _SyscallEnterEventNone
@@ -254,7 +253,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
       used = write_attach_str_arg (&ev->attach, 1, &ev->data[0], MAX_PATH, (void *) ctx->args[1]);
 
     ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachmentHeader) + used);
-    ev->common.attach_count = 1;
+    ev->common.attachment_count = 1;
 
     if (nr == FRIDA_LINUX_SYSCALL_READLINKAT)
     {
@@ -278,7 +277,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     __u16 used = write_attach_bytes_arg (&ev->attach, 1, &ev->data[0], MAX_SOCK, (void *) ctx->args[1], n);
 
     ev->common.payload_len = ( __u16 ) (sizeof (SyscallEnterPayload) + sizeof (AttachmentHeader) + used);
-    ev->common.attach_count = 1;
+    ev->common.attachment_count = 1;
 
     bpf_ringbuf_submit (ev, 0);
     return 0;
@@ -331,7 +330,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
       if (to_copy > maxn)
         to_copy = maxn;
 
-      ev->attach.type = ATTACHMENT_OUT_BYTES;
+      ev->attach.type = ATTACHMENT_BYTES;
       ev->attach.arg_index = in->u.out_copy.arg_index;
 
       __u16 used;
@@ -352,7 +351,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
       }
 
       ev->common.payload_len = ( __u16 ) (sizeof (SyscallExitPayload) + sizeof (AttachmentHeader) + used);
-      ev->common.attach_count = 1;
+      ev->common.attachment_count = 1;
     }
     else
     {
@@ -446,7 +445,7 @@ fill_common (SyscallEventCommon * e, __u32 tgid, __u32 tid, __s32 nr, SyscallPha
   e->phase = phase;
 
   e->payload_len = 0;
-  e->attach_count = 0;
+  e->attachment_count = 0;
 
   e->stack_id = bpf_get_stackid (ctx, &stacks, BPF_F_USER_STACK);
 }
@@ -465,7 +464,7 @@ fill_enter_args (SyscallEnterPayload * p, struct trace_event_raw_sys_enter * ctx
 static __always_inline __u16
 write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str)
 {
-  h->type = ATTACHMENT_STRING_ARG;
+  h->type = ATTACHMENT_STRING;
   h->arg_index = arg_index;
   h->len = 0;
 
@@ -479,7 +478,7 @@ write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 d
 static __always_inline __u16
 write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src, __u32 n)
 {
-  h->type = ATTACHMENT_BYTES_ARG;
+  h->type = ATTACHMENT_BYTES;
   h->arg_index = arg_index;
 
   if (n > dst_cap)

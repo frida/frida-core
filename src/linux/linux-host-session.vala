@@ -1793,6 +1793,10 @@ namespace Frida {
 	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
 		private SyscallTracer? tracer = new SyscallTracer ();
 
+		construct {
+			tracer.notify_readable.connect (on_tracer_readable);
+		}
+
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
 			ensure_active ();
 		}
@@ -1871,6 +1875,12 @@ namespace Frida {
 
 				reader.end_element ();
 			}
+		}
+
+		private void on_tracer_readable () {
+			var b = new VariantBuilder (new VariantType ("a{sv}"));
+			b.add ("{sv}", "type", new Variant.string ("notify-readable"));
+			message (b.end ());
 		}
 	}
 }

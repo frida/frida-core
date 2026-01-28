@@ -1,5 +1,7 @@
 namespace Frida {
 	public sealed class SyscallTracer : Object {
+		public signal void notify_readable ();
+
 		public State state {
 			get {
 				return _state;
@@ -17,6 +19,7 @@ namespace Frida {
 		private Bpf.HashMap? target_uids;
 
 		private Bpf.RingbufReader? events_reader;
+		private IOChannel? events_channel;
 		private Source? events_source;
 
 		private Bpf.StackTraceMap? stacks;
@@ -132,12 +135,8 @@ namespace Frida {
 				}
 			}
 
-			var ch = new IOChannel.unix_new (events.fd.handle);
-			var src = new IOSource (ch, IN);
-			var state = new WatchState (this, events_reader);
-			src.set_callback (state.on_ready);
-			src.attach (MainContext.get_thread_default ());
-			events_source = src;
+			events_channel = new IOChannel.unix_new (events.fd.handle);
+			arm_notify_readable ();
 
 			_state = STARTED;
 		}
@@ -145,6 +144,7 @@ namespace Frida {
 		public void stop () {
 			events_source?.destroy ();
 			events_source = null;
+			events_channel = null;
 
 			foreach (var monitor in monitors) {
 				try {
@@ -182,6 +182,59 @@ namespace Frida {
 
 		public void remove_target_uid (uint uid) throws Error {
 			target_uids.remove (uid);
+		}
+
+		public DrainStatus drain_events (SyscallEventHandler on_event) {
+			var status = events_reader.drain (payload => {
+				assert (payload.length >= sizeof (SyscallEventCommon));
+				unowned SyscallEventCommon * c = (SyscallEventCommon *) payload;
+				SyscallEventView ev = { c, payload };
+
+				return (on_event (ev) == CONTINUE)
+						? Bpf.RingbufReader.RecordAction.CONTINUE
+						: Bpf.RingbufReader.RecordAction.STOP;
+			});
+
+			if (status == DRAINED)
+				arm_notify_readable ();
+
+			return (status == DRAINED)
+				? DrainStatus.DRAINED
+				: DrainStatus.STOPPED;
+		}
+
+		public enum DrainStatus {
+			DRAINED,
+			STOPPED,
+		}
+
+		public delegate EventFlow SyscallEventHandler (SyscallEventView ev);
+
+		public enum EventFlow {
+			CONTINUE,
+			STOP,
+		}
+
+		public struct SyscallEventView {
+			public SyscallEventCommon * common;
+			public unowned uint8[] bytes;
+		}
+
+		private void arm_notify_readable () {
+			if (events_source != null)
+				return;
+
+			var src = new IOSource (events_channel, IOCondition.IN);
+			src.set_callback ((c, cond) => {
+				events_source?.destroy ();
+				events_source = null;
+
+				notify_readable ();
+
+				return Source.REMOVE;
+			});
+			src.attach (MainContext.get_thread_default ());
+			events_source = src;
 		}
 
 		private void handle_event (uint8[] buf) {
@@ -236,21 +289,23 @@ namespace Frida {
 
 				if (idx < SYSCALL_NARGS) {
 					switch ((AttachmentType) h->type) {
-					case AttachmentType.STRING_ARG:
+					case AttachmentType.STRING:
 						str_arg[idx] = (len != 0) ? (string) a : "";
 						break;
-					case AttachmentType.BYTES_ARG: {
+					case AttachmentType.BYTES: {
 						var b = new uint8[len];
 						Memory.copy (&b[0], a, len);
 						bytes_arg[idx] = new Bytes.take ((owned) b);
 						break;
 					}
+					/*
 					case AttachmentType.OUT_BYTES: {
 						var b = new uint8[len];
 						Memory.copy (&b[0], a, len);
 						out_bytes[idx] = new Bytes.take ((owned) b);
 						break;
 					}
+					*/
 					default:
 						break;
 					}
@@ -306,19 +361,8 @@ namespace Frida {
 			}
 		}
 
-		private enum Phase {
-			ENTER,
-			EXIT,
-		}
-
-		private enum AttachmentType {
-			STRING_ARG,
-			BYTES_ARG,
-			OUT_BYTES,
-		}
-
 		[Compact]
-		private struct SyscallEventCommon {
+		public struct SyscallEventCommon {
 			public uint64 time_ns;
 			public uint32 tgid;
 			public uint32 tid;
@@ -332,21 +376,31 @@ namespace Frida {
 			public uint16 attachment_count;
 		}
 
+		public enum Phase {
+			ENTER,
+			EXIT,
+		}
+
 		[Compact]
-		private struct SyscallEnterPayload {
+		public struct SyscallEnterPayload {
 			public uint64 args[6];
 		}
 
 		[Compact]
-		private struct SyscallExitPayload {
+		public struct SyscallExitPayload {
 			public int64 retval;
 		}
 
 		[Compact]
-		private struct AttachmentHeader {
+		public struct AttachmentHeader {
 			public uint16 type;
 			public uint16 arg_index;
 			public uint32 len;
+		}
+
+		public enum AttachmentType {
+			STRING,
+			BYTES,
 		}
 
 		[Compact]
