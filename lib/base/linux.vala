@@ -337,13 +337,6 @@ namespace Frida {
 		}
 
 		public sealed class RingbufReader : Object {
-			public delegate DrainResult RecordHandler (uint8[] payload);
-
-			public enum DrainResult {
-				CONTINUE,
-				STOP,
-			}
-
 			private RingbufMap map;
 
 			private uint8 * consumer_map;
@@ -393,13 +386,13 @@ namespace Frida {
 				return (x + 7U) & ~7U;
 			}
 
-			public void drain (RecordHandler on_record) {
+			public DrainStatus drain (RecordHandler on_record) {
 				while (true) {
 					uint64 prod = Atomics.load_u64_acquire (producer_pos);
 					uint64 cons = Atomics.load_u64_acquire (consumer_pos);
 
 					if (cons >= prod)
-						return;
+						return DRAINED;
 
 					size_t data_size = map.size_bytes;
 					uint64 mask = data_size - 1;
@@ -412,7 +405,7 @@ namespace Frida {
 					uint32 sample_len = hdr_len & ~flags_mask;
 
 					if ((flags & BpfRingbufFlags.BUSY) != 0)
-						return;
+						return DRAINED;
 
 					assert (sample_len <= data_size - BPF_RINGBUF_HEADER_SIZE);
 
@@ -424,13 +417,25 @@ namespace Frida {
 					}
 
 					unowned uint8[] payload = (uint8[]) (hdrp + BPF_RINGBUF_HEADER_SIZE);
-					var drain_result = on_record (payload[:sample_len]);
+					var action = on_record (payload[:sample_len]);
 
 					Atomics.store_u64_release (consumer_pos, cons + total_len);
 
-					if (drain_result == STOP)
-						return;
+					if (action == STOP)
+						return STOPPED;
 				}
+			}
+
+			public enum DrainStatus {
+				DRAINED,
+				STOPPED,
+			}
+
+			public delegate RecordAction RecordHandler (uint8[] payload);
+
+			public enum RecordAction {
+				CONTINUE,
+				STOP,
 			}
 		}
 
