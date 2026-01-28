@@ -1829,6 +1829,8 @@ namespace Frida {
 			string type = reader.read_member ("type").get_string_value ();
 			reader.end_member ();
 
+			var reply = new VariantBuilder (VariantType.VARDICT);
+
 			if (type == "read") {
 				var events = new VariantBuilder (new VariantType ("av"));
 
@@ -1847,7 +1849,6 @@ namespace Frida {
 					return CONTINUE;
 				});
 
-				var reply = new VariantBuilder (VariantType.VARDICT);
 				vardict_add (reply, "events", events.end ());
 				vardict_add (reply, "status", (drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
 
@@ -1867,7 +1868,7 @@ namespace Frida {
 					reader.end_member ();
 				}
 
-				return new Variant.tuple ({});
+				return reply.end ();
 			}
 
 			if (type == "remove-targets") {
@@ -1883,7 +1884,7 @@ namespace Frida {
 					reader.end_member ();
 				}
 
-				return new Variant.tuple ({});
+				return reply.end ();
 			}
 
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
