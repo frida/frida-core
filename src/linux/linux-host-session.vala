@@ -1793,8 +1793,10 @@ namespace Frida {
 	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
 		private SyscallTracer? tracer = new SyscallTracer ();
 
+		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
 		construct {
-			tracer.notify_readable.connect (on_tracer_readable);
+			tracer.events_available.connect (on_events_available);
 		}
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
@@ -1826,6 +1828,31 @@ namespace Frida {
 
 			string type = reader.read_member ("type").get_string_value ();
 			reader.end_member ();
+
+			if (type == "read") {
+				var events = new VariantBuilder (new VariantType ("av"));
+
+				size_t total = 0;
+
+				var drain_status = tracer.drain_events (ev => {
+					Variant item = build_event_variant (ev);
+					size_t item_size = (size_t) item.get_size ();
+
+					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
+						return STOP;
+
+					events.add_value (item);
+					total += item_size;
+
+					return CONTINUE;
+				});
+
+				var reply = new VariantBuilder (VariantType.VARDICT);
+				vardict_add (reply, "events", events.end ());
+				vardict_add (reply, "status", (drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
+
+				return reply.end ();
+			}
 
 			if (type == "add-targets") {
 				if (reader.has_member ("pid")) {
@@ -1862,6 +1889,225 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
+		private void on_events_available () {
+			var b = new VariantBuilder (VariantType.VARDICT);
+			vardict_add (b, "type", "events-available");
+			message (b.end ());
+		}
+
+		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev) {
+			unowned SyscallTracer.SyscallEventCommon * c = ev.common;
+			var phase = (SyscallTracer.Phase) c->phase;
+
+			size_t header_len = sizeof (SyscallTracer.SyscallEventCommon);
+			size_t payload_len = (size_t) c->payload_len;
+			uint16 attach_count = c->attachment_count;
+
+			unowned uint8[] buf = ev.bytes;
+			assert (header_len + payload_len == buf.length);
+
+			uint8 * p = (uint8 *) buf + header_len;
+			uint8 * payload_end = p + payload_len;
+
+			uint64 args[SyscallTracer.SYSCALL_NARGS];
+			int64 retval = 0;
+
+			uint8 * a;
+
+			if (phase == SyscallTracer.Phase.ENTER) {
+				assert ((size_t) (payload_end - p) == sizeof (SyscallTracer.SyscallEnterPayload));
+				unowned SyscallTracer.SyscallEnterPayload * ep = (SyscallTracer.SyscallEnterPayload *) p;
+				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
+					args[i] = ep->args[i];
+				a = (uint8 *) p + sizeof (SyscallTracer.SyscallEnterPayload);
+			} else {
+				assert ((size_t) (payload_end - p) == sizeof (SyscallTracer.SyscallExitPayload));
+				unowned SyscallTracer.SyscallExitPayload * xp = (SyscallTracer.SyscallExitPayload *) p;
+				retval = xp->retval;
+				a = (uint8 *) p + sizeof (SyscallTracer.SyscallExitPayload);
+			}
+
+			var attaches = new VariantBuilder (VariantType.VARDICT);
+
+			for (uint i = 0; i != attach_count; i++) {
+				assert ((size_t) (payload_end - a) >= sizeof (SyscallTracer.AttachmentHeader));
+				unowned SyscallTracer.AttachmentHeader * h = (SyscallTracer.AttachmentHeader *) a;
+				a += sizeof (SyscallTracer.AttachmentHeader);
+
+				uint idx = h->arg_index;
+				size_t len = (size_t) h->len;
+
+				assert (a + len <= payload_end);
+				if (idx < SyscallTracer.SYSCALL_NARGS) {
+					Variant v = decode_attachment_value (phase, idx, (SyscallTracer.AttachmentType) h->type, a, len);
+					attaches.add_value (new Variant.tuple ({ idx, v }));
+				}
+
+				a += len;
+			}
+
+			Variant args_v;
+			{
+				var ab = new VariantBuilder (new VariantType ("at"));
+				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
+					ab.add_value ((Variant) args[i]);
+				args_v = ab.end ();
+			}
+
+			if (phase == ENTER) {
+				return new Variant.tuple ({
+					"enter",
+					c->time_ns,
+					c->tgid,
+					c->tid,
+					c->syscall_nr,
+					c->stack_id,
+					args_v,
+					attaches.end ()
+				});
+			} else {
+				return new Variant.tuple ({
+					"exit",
+					c->time_ns,
+					c->tgid,
+					c->tid,
+					c->syscall_nr,
+					c->stack_id,
+					retval,
+					attaches.end ()
+				});
+			}
+		}
+
+		private static Variant decode_attachment_value (SyscallTracer.Phase phase, uint arg_index,
+				SyscallTracer.AttachmentType type, uint8 * data, size_t len) {
+			switch (type) {
+				case STRING: {
+					if (len == 0)
+						return "";
+
+					size_t n = len;
+					if (n != 0 && data[n - 1] == 0)
+						n--;
+
+					var tmp = new uint8[n + 1];
+					Memory.copy (tmp, data, n);
+					tmp[n] = 0;
+					return (string) tmp;
+				}
+
+				case BYTES: {
+					if (phase == ENTER && arg_index == 1) {
+						Variant? sa = try_decode_sockaddr (data, len);
+						if (sa != null)
+							return sa;
+					}
+
+					var b = new uint8[len];
+					if (len != 0)
+						Memory.copy (b, data, len);
+
+					return Variant.new_from_data<void> (new VariantType ("ay"), b, true);
+				}
+
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private static Variant? try_decode_sockaddr (uint8 * data, size_t len) {
+			if (len < 2)
+				return null;
+
+			uint16 fam = *((uint16 *) data);
+
+			switch ((int) fam) {
+			case Posix.AF_INET: {
+				if (len < sizeof (SockaddrIn))
+					return null;
+
+				unowned SockaddrIn * sa = (SockaddrIn *) data;
+				uint16 port = uint16.from_network (sa->sin_port);
+
+				uint8 ip_bytes[4];
+				Memory.copy (&ip_bytes[0], &sa->sin_addr, 4);
+				string ip = inet_ntop_to_string (Posix.AF_INET, &ip_bytes[0], 4);
+
+				return new Variant.tuple ({ "inet", ip, (uint32) port });
+			}
+
+			case Posix.AF_INET6: {
+				if (len < sizeof (SockaddrIn6))
+					return null;
+
+				unowned SockaddrIn6 * sa6 = (SockaddrIn6 *) data;
+				uint16 port = uint16.from_network (sa6->sin6_port);
+
+				uint8 ip_bytes[16];
+				Memory.copy (&ip_bytes[0], &sa6->sin6_addr.addr[0], 16);
+				string ip = inet_ntop_to_string (Posix.AF_INET6, &ip_bytes[0], 16);
+
+				uint32 scope_id = sa6->sin6_scope_id;
+
+				return new Variant.tuple ({
+					"inet6",
+					ip,
+					(uint32) port,
+					scope_id
+				});
+			}
+
+			case Posix.AF_UNIX: {
+				if (len < 2)
+					return null;
+
+				unowned SockaddrUn * sun = (SockaddrUn *) data;
+
+				size_t path_bytes = (len > 2) ? (len - 2) : 0;
+				if (path_bytes > 108)
+					path_bytes = 108;
+
+				if (path_bytes == 0)
+					return new Variant.tuple ({ "unix", "" });
+
+				if (sun->sun_path[0] == 0) {
+					size_t n = 1;
+					while (n < path_bytes && sun->sun_path[n] != 0)
+						n++;
+
+					size_t name_len = (n > 1) ? (n - 1) : 0;
+
+					uint8[] tmp = new uint8[name_len + 1];
+					if (name_len != 0)
+						Memory.copy (&tmp[0], &sun->sun_path[1], name_len);
+					tmp[name_len] = 0;
+
+					return new Variant.tuple ({ "unix-abstract", (string) &tmp[0] });
+				}
+
+				size_t n2 = 0;
+				while (n2 < path_bytes && sun->sun_path[n2] != 0)
+					n2++;
+
+				uint8[] tmp2 = new uint8[n2 + 1];
+				if (n2 != 0)
+					Memory.copy (&tmp2[0], &sun->sun_path[0], n2);
+				tmp2[n2] = 0;
+
+				return new Variant.tuple ({ "unix", (string) &tmp2[0] });
+			}
+
+			default:
+				return null;
+			}
+		}
+
+		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
+			uint8 buf[46];
+			unowned string? res = Posix.inet_ntop (af, (void *) src, buf);
+			return (res != null) ? res : "?";
+		}
+
 		private delegate void UInt32Handler (uint32 v) throws Error;
 
 		private static void for_each_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
@@ -1877,10 +2123,36 @@ namespace Frida {
 			}
 		}
 
-		private void on_tracer_readable () {
-			var b = new VariantBuilder (new VariantType ("a{sv}"));
-			b.add ("{sv}", "type", new Variant.string ("notify-readable"));
-			message (b.end ());
+		private static void vardict_add (VariantBuilder b, string key, Variant val) {
+			b.add_value (new Variant.dict_entry (new Variant.string (key), val));
+		}
+
+		[Compact]
+		internal struct SockaddrIn {
+			public uint16 sin_family;
+			public uint16 sin_port;
+			public uint32 sin_addr;
+			public uint8  sin_zero[8];
+		}
+
+		[Compact]
+		internal struct In6Addr {
+			public uint8 addr[16];
+		}
+
+		[Compact]
+		internal struct SockaddrIn6 {
+			public uint16 sin6_family;
+			public uint16 sin6_port;
+			public uint32 sin6_flowinfo;
+			public In6Addr sin6_addr;
+			public uint32 sin6_scope_id;
+		}
+
+		[Compact]
+		internal struct SockaddrUn {
+			public uint16 sun_family;
+			public uint8  sun_path[108];
 		}
 	}
 }

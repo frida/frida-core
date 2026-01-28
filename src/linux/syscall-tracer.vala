@@ -1,6 +1,6 @@
 namespace Frida {
 	public sealed class SyscallTracer : Object {
-		public signal void notify_readable ();
+		public signal void events_available ();
 
 		public State state {
 			get {
@@ -44,7 +44,7 @@ namespace Frida {
 		private const size_t MAX_PATH = 256;
 		private const size_t MAX_SOCK = 128;
 
-		private const size_t SYSCALL_NARGS = 6;
+		public const size_t SYSCALL_NARGS = 6;
 
 		static construct {
 			var syscall_enum = (EnumClass) typeof (LinuxSyscall).class_ref ();
@@ -136,7 +136,7 @@ namespace Frida {
 			}
 
 			events_channel = new IOChannel.unix_new (events.fd.handle);
-			arm_notify_readable ();
+			arm_events_watch ();
 
 			_state = STARTED;
 		}
@@ -177,7 +177,7 @@ namespace Frida {
 
 		public void add_target_uid (uint uid) throws Error {
 			uint8 v = 1;
-			target_tgids.update_raw (uid, &v);
+			target_uids.update_raw (uid, &v);
 		}
 
 		public void remove_target_uid (uint uid) throws Error {
@@ -196,7 +196,7 @@ namespace Frida {
 			});
 
 			if (status == DRAINED)
-				arm_notify_readable ();
+				arm_events_watch ();
 
 			return (status == DRAINED)
 				? DrainStatus.DRAINED
@@ -220,145 +220,37 @@ namespace Frida {
 			public unowned uint8[] bytes;
 		}
 
-		private void arm_notify_readable () {
+		private void arm_events_watch () {
 			if (events_source != null)
 				return;
 
 			var src = new IOSource (events_channel, IOCondition.IN);
-			src.set_callback ((c, cond) => {
-				events_source?.destroy ();
-				events_source = null;
-
-				notify_readable ();
-
-				return Source.REMOVE;
-			});
+			var state = new WatchState (this, events_reader);
+			src.set_callback (state.on_ready);
 			src.attach (MainContext.get_thread_default ());
 			events_source = src;
 		}
 
-		private void handle_event (uint8[] buf) {
-			assert (buf.length >= sizeof (SyscallEventCommon));
+		private sealed class WatchState : Object {
+			public unowned SyscallTracer tracer;
+			public Bpf.RingbufReader reader;
 
-			unowned SyscallEventCommon * c = (SyscallEventCommon *) buf;
-			var phase = (Phase) c->phase;
-
-			size_t header_len = sizeof (SyscallEventCommon);
-			size_t payload_len = (size_t) c->payload_len;
-			uint16 attachment_count = c->attachment_count;
-
-			assert (header_len + payload_len <= buf.length);
-
-			uint8 * p = (uint8 *) buf + header_len;
-			uint8 * payload_end = p + payload_len;
-
-			uint8 * a = null;
-
-			uint64 args[SYSCALL_NARGS];
-			int64 retval = 0;
-
-			if (phase == Phase.ENTER) {
-				assert ((size_t) (payload_end - p) >= sizeof (SyscallEnterPayload));
-				unowned SyscallEnterPayload * ep = (SyscallEnterPayload *) p;
-
-				for (int i = 0; i < SYSCALL_NARGS; i++)
-					args[i] = ep->args[i];
-
-				a = (uint8 *) p + sizeof (SyscallEnterPayload);
-			} else {
-				assert ((size_t) (payload_end - p) >= sizeof (SyscallExitPayload));
-				unowned SyscallExitPayload * xp = (SyscallExitPayload *) p;
-
-				retval = xp->retval;
-				a = (uint8 *) p + sizeof (SyscallExitPayload);
+			public WatchState (SyscallTracer tracer, Bpf.RingbufReader reader) {
+				this.tracer = tracer;
+				this.reader = reader;
 			}
 
-			string?[] str_arg = new string?[SYSCALL_NARGS];
-			var bytes_arg = new Bytes?[SYSCALL_NARGS];
-			var out_bytes = new Bytes?[SYSCALL_NARGS];
-
-			for (uint i = 0; i < attachment_count; i++) {
-				assert ((size_t)(payload_end - a) >= sizeof (AttachmentHeader));
-				unowned AttachmentHeader * h = (AttachmentHeader *) a;
-				a += sizeof (AttachmentHeader);
-
-				uint idx = h->arg_index;
-				size_t len = (size_t) h->len;
-
-				assert (a + len <= payload_end);
-
-				if (idx < SYSCALL_NARGS) {
-					switch ((AttachmentType) h->type) {
-					case AttachmentType.STRING:
-						str_arg[idx] = (len != 0) ? (string) a : "";
-						break;
-					case AttachmentType.BYTES: {
-						var b = new uint8[len];
-						Memory.copy (&b[0], a, len);
-						bytes_arg[idx] = new Bytes.take ((owned) b);
-						break;
-					}
-					/*
-					case AttachmentType.OUT_BYTES: {
-						var b = new uint8[len];
-						Memory.copy (&b[0], a, len);
-						out_bytes[idx] = new Bytes.take ((owned) b);
-						break;
-					}
-					*/
-					default:
-						break;
-					}
-				}
-
-				a += len;
+			public bool on_ready (IOChannel ch, IOCondition cond) {
+				tracer.on_ringbuffer_readable ();
+				return Source.REMOVE;
 			}
+		}
 
-			unowned string? name = null;
-			if (c->syscall_nr >= 0 && c->syscall_nr < syscall_names.length)
-				name = syscall_names[c->syscall_nr];
+		private void on_ringbuffer_readable () {
+			events_source?.destroy ();
+			events_source = null;
 
-			if (phase == Phase.ENTER) {
-				if (name == "connect" && bytes_arg[1] != null) {
-					unowned uint8[] sa = bytes_arg[1].get_data ();
-					uint16 fam = 0;
-					if (sa.length >= 2)
-						fam = *((uint16 *) sa);
-					string peer = format_sockaddr (fam, (uint32) sa.length, (uint8 *) &sa[0], sa.length);
-					print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] connect enter fd=0x%" +
-							uint64.FORMAT_MODIFIER + "x addr=%s\n",
-						c->time_ns, c->tgid, c->tid, c->stack_id, args[0], peer);
-					return;
-				}
-
-				var rendered = new StringBuilder ();
-				for (int i = 0; i < SYSCALL_NARGS; i++) {
-					if (i != 0)
-						rendered.append (", ");
-					if (str_arg[i] != null)
-						rendered.append_printf ("arg%d=\"%s\"", i, str_arg[i]);
-					else
-						rendered.append_printf ("arg%d=0x%" + uint64.FORMAT_MODIFIER + "x", i, args[i]);
-				}
-
-				print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s enter %s\n",
-					c->time_ns, c->tgid, c->tid, c->stack_id,
-					(name != null) ? name : "%d".printf (c->syscall_nr),
-					rendered.str);
-			} else {
-				string extra = "";
-				if (out_bytes[2] != null) {
-					unowned uint8[] ob = out_bytes[2].get_data ();
-					unowned string s = (ob.length != 0) ? (string) &ob[0] : "";
-					extra = " out(arg2)=\"%s\"".printf (s);
-				}
-
-				print ("[time=%" + uint64.FORMAT + " tgid=%u tid=%u stack_id=%d] %s exit ret=0x%" +
-						int64.FORMAT_MODIFIER + "x%s\n",
-					c->time_ns, c->tgid, c->tid, c->stack_id,
-					(name != null) ? name : "%d".printf (c->syscall_nr),
-					retval, extra);
-			}
+			events_available ();
 		}
 
 		[Compact]
@@ -421,131 +313,6 @@ namespace Frida {
 			public uint64 user_ptr;
 			public uint32 max_len;
 			public uint32 _pad2;
-		}
-
-		private sealed class WatchState : Object {
-			public unowned SyscallTracer tracer;
-			public Bpf.RingbufReader reader;
-
-			public WatchState (SyscallTracer tracer, Bpf.RingbufReader reader) {
-				this.tracer = tracer;
-				this.reader = reader;
-			}
-
-			public bool on_ready (IOChannel ch, IOCondition cond) {
-				reader.drain (payload => {
-					assert (payload.length >= sizeof (SyscallEventCommon));
-					tracer.handle_event (payload);
-					return CONTINUE;
-				});
-				return Source.CONTINUE;
-			}
-		}
-
-		private static string format_sockaddr (uint16 family, uint32 addrlen, uint8 * addr, size_t addr_buf_len) {
-			size_t len = (size_t) addrlen;
-			if (len > addr_buf_len)
-				len = addr_buf_len;
-
-			switch ((int) family) {
-			case Posix.AF_INET: {
-				if (len < sizeof (SockaddrIn))
-					return "inet: <truncated>";
-
-				unowned SockaddrIn * sa = (SockaddrIn *) addr;
-				uint16 port = uint16.from_network (sa->sin_port);
-
-				string ip = inet_ntop_to_string (Posix.AF_INET, (uint8 *) &sa->sin_addr, 4);
-				return "%s:%u".printf (ip, port);
-			}
-
-			case Posix.AF_INET6: {
-				if (len < sizeof (SockaddrIn6))
-					return "inet6: <truncated>";
-
-				unowned SockaddrIn6 * sa6 = (SockaddrIn6 *) addr;
-				uint16 port = uint16.from_network (sa6->sin6_port);
-
-				string ip = inet_ntop_to_string (Posix.AF_INET6, (uint8 *) &sa6->sin6_addr.addr[0], 16);
-
-				if (sa6->sin6_scope_id != 0)
-					return "[%s%%%u]:%u".printf (ip, sa6->sin6_scope_id, port);
-
-				return "[%s]:%u".printf (ip, port);
-			}
-
-			case Posix.AF_UNIX: {
-				if (len < 2)
-					return "unix: <truncated>";
-
-				unowned SockaddrUn * sun = (SockaddrUn *) addr;
-
-				size_t path_bytes = (len > 2) ? (len - 2) : 0;
-				if (path_bytes > 108)
-					path_bytes = 108;
-
-				if (path_bytes == 0)
-					return "unix:\"\"";
-
-				if (sun->sun_path[0] == 0) {
-					size_t n = 1;
-					while (n < path_bytes && sun->sun_path[n] != 0)
-						n++;
-
-					uint8[] tmp = new uint8[n];
-					Memory.copy (&tmp[0], &sun->sun_path[0], n);
-					string name = (n > 1) ? ((string) (&tmp[1])) : "";
-					return "unix:@%s".printf (name);
-				}
-
-				size_t n2 = 0;
-				while (n2 < path_bytes && sun->sun_path[n2] != 0)
-					n2++;
-
-				uint8[] tmp2 = new uint8[n2 + 1];
-				Memory.copy (&tmp2[0], &sun->sun_path[0], n2);
-				tmp2[n2] = 0;
-
-				return "unix:\"%s\"".printf ((string) &tmp2[0]);
-			}
-
-			default:
-				return "family=%u addrlen=%u".printf (family, addrlen);
-			}
-		}
-
-		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
-			uint8 buf[46];
-			unowned string? res = Posix.inet_ntop (af, (void *) src, buf);
-			return (res != null) ? res : "?";
-		}
-
-		[Compact]
-		private struct SockaddrIn {
-			public uint16 sin_family;
-			public uint16 sin_port;
-			public uint32 sin_addr;
-			public uint8  sin_zero[8];
-		}
-
-		[Compact]
-		private struct In6Addr {
-			public uint8 addr[16];
-		}
-
-		[Compact]
-		private struct SockaddrIn6 {
-			public uint16 sin6_family;
-			public uint16 sin6_port;
-			public uint32 sin6_flowinfo;
-			public In6Addr sin6_addr;
-			public uint32 sin6_scope_id;
-		}
-
-		[Compact]
-		private struct SockaddrUn {
-			public uint16 sun_family;
-			public uint8  sun_path[108];
 		}
 	}
 }
