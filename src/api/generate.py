@@ -327,12 +327,13 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
     }
     internal_type_prefixes = [
         "AgentMessageKind",
-        "DrainResult",
+        "DrainStatus",
         "Fruity",
         "HostSession",
         "MessageType",
         "PeerSetup",
         "PortConflictBehavior",
+        "RecordAction",
         "ResultCode",
         "SpawnStartState",
         "State",
