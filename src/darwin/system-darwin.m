@@ -529,8 +529,6 @@ frida_add_app_icons (GHashTable * parameters, NSImage * image)
 
     g_variant_builder_open (&builder, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("png"));
-    g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (size));
-    g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (size));
     g_variant_builder_add (&builder, "{sv}", "image",
         g_variant_new_from_data (G_VARIANT_TYPE ("ay"), png.bytes, png.length, TRUE, (GDestroyNotify) CFRelease, [png retain]));
     g_variant_builder_close (&builder);
