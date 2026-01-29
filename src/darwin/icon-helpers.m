@@ -73,8 +73,8 @@ _frida_icon_from_native_image_scaled_to (FridaNativeImage native_image, guint ta
 
   g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
-  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (target_width));
-  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (target_height));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_uint16 (target_width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_uint16 (target_height));
   g_variant_builder_add (&builder, "{sv}", "image",
       g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, rep.bitmapData, rowstride * target_height, sizeof (guint8)));
   result = g_variant_ref_sink (g_variant_builder_end (&builder));
@@ -136,8 +136,8 @@ _frida_icon_from_native_image_scaled_to (FridaNativeImage native_image, guint ta
 
   g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
-  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (target_width));
-  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (target_height));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_uint16 (target_width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_uint16 (target_height));
   g_variant_builder_add (&builder, "{sv}", "image",
       g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, CGBitmapContextGetData (cgctx), pixel_buf_size, sizeof (guint8)));
   result = g_variant_ref_sink (g_variant_builder_end (&builder));

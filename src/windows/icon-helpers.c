@@ -234,8 +234,8 @@ _frida_icon_from_native_icon_handle (HICON icon, FridaIconSize size)
 
   g_variant_builder_init (&builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add (&builder, "{sv}", "format", g_variant_new_string ("rgba"));
-  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_int64 (width));
-  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_int64 (height));
+  g_variant_builder_add (&builder, "{sv}", "width", g_variant_new_uint16 (width));
+  g_variant_builder_add (&builder, "{sv}", "height", g_variant_new_uint16 (height));
   g_variant_builder_add (&builder, "{sv}", "image",
       g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, data, rowstride * height, sizeof (guint8)));
   result = g_variant_ref_sink (g_variant_builder_end (&builder));
