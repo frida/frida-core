@@ -276,6 +276,9 @@ namespace Frida {
 		}
 
 		public sealed class PercpuArrayMap : Map {
+			private uint ncpus;
+			private size_t percpu_stride;
+
 			public PercpuArrayMap (size_t value_size, size_t max_entries) throws Error {
 				var attr = BpfAttrMapCreate ();
 				attr.map_type = PERCPU_ARRAY;
@@ -284,7 +287,26 @@ namespace Frida {
 				attr.max_entries = (uint32) max_entries;
 
 				base (PERCPU_ARRAY, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
+
+				ncpus = get_num_processors ();
+				percpu_stride = round_up_8 (value_size);
 			}
+
+			private size_t get_percpu_buffer_size () {
+				return ncpus * percpu_stride;
+			}
+
+			public void foreach_value<T> (uint32 key, ValueFunc<T> func) throws Error {
+				uint8[] buf = new uint8[get_percpu_buffer_size ()];
+				Bpf.lookup_map_value (fd, key, buf);
+
+				for (uint32 cpu = 0; cpu != ncpus; cpu++) {
+					unowned T val = (T) ((uint8 *) buf + (cpu * percpu_stride));
+					func (cpu, val);
+				}
+			}
+
+			public delegate void ValueFunc<T> (uint32 cpu, T val);
 		}
 
 		public sealed class StackTraceMap : Map {
@@ -382,10 +404,6 @@ namespace Frida {
 					Posix.munmap (producer_map, page_size + (2 * map.size_bytes));
 			}
 
-			private static uint32 round_up_8 (uint32 x) {
-				return (x + 7U) & ~7U;
-			}
-
 			public DrainStatus drain (RecordHandler on_record) {
 				while (true) {
 					uint64 prod = Atomics.load_u64_acquire (producer_pos);
@@ -409,7 +427,7 @@ namespace Frida {
 
 					assert (sample_len <= data_size - BPF_RINGBUF_HEADER_SIZE);
 
-					uint32 total_len = round_up_8 (sample_len + BPF_RINGBUF_HEADER_SIZE);
+					var total_len = (uint32) round_up_8 (sample_len + BPF_RINGBUF_HEADER_SIZE);
 
 					if ((flags & BpfRingbufFlags.DISCARD) != 0) {
 						Atomics.store_u64_release (consumer_pos, cons + total_len);
@@ -528,5 +546,9 @@ namespace Frida {
 
 	private void throw_errno (string message) throws Error {
 		throw new Error.NOT_SUPPORTED ("%s (errno=%d: %s)".printf (message, Posix.errno, Posix.strerror (Posix.errno)));
+	}
+
+	private size_t round_up_8 (size_t x) {
+		return (x + 7) & ~((size_t) 7);
 	}
 }
