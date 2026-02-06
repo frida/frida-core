@@ -47,25 +47,21 @@ if host_os_family == 'linux'
     '--pkg=frida-atomics',
   ]
 
-  linux_syscalls_vala = custom_target('linux-syscalls-vala',
-    input: files(
-      'linux-syscalls' / 'x86.tbl',
-      'linux-syscalls' / 'x86_64.tbl',
-      'linux-syscalls' / 'arm.tbl',
-      'linux-syscalls' / 'arm64.tbl',
-      'linux-syscalls' / 'mips-o32.tbl',
-      'linux-syscalls' / 'mips-n64.tbl',
-    ),
-    output: 'linux-syscalls.vala',
-    command: [
-      python,
-      files('linux-syscalls' / 'generate-bindings.py'),
-      '--abi', host_abi,
-      '--out-vala', '@OUTPUT@',
-    ],
-  )
-
-  base_sources += linux_syscalls_vala
+  syscall_arch_from_abi = {
+    'armbe': 'arm',
+    'armbe8': 'arm',
+    'armhf': 'arm',
+    'armv6kz': 'arm',
+    'arm64be': 'arm64',
+    'arm64beilp32': 'arm64',
+    'mipsel': 'mips',
+    'mips64el': 'mips64',
+  }
+  syscall_arch = syscall_arch_from_abi.get(host_abi, host_abi)
+  base_sources += [
+    'linux-syscalls' / (syscall_arch + '.vala'),
+    'linux-syscalls' / (syscall_arch + '-glue.c'),
+  ]
 endif
 
 if host_os_family == 'freebsd'

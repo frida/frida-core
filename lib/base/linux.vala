@@ -11,6 +11,22 @@ namespace Frida {
 		return (linux_major == major && linux_minor >= minor) || linux_major > major;
 	}
 
+	public extern unowned LinuxSyscallSignature[] get_syscall_signatures ();
+
+	public extern unowned LinuxSyscallSignature[]? get_compat32_syscall_signatures ();
+
+	public struct LinuxSyscallSignature {
+		public uint nr;
+		public unowned string name;
+		public uint8 nargs;
+		public LinuxSyscallArg args[6];
+	}
+
+	public struct LinuxSyscallArg {
+		public unowned string? type;
+		public unowned string? name;
+	}
+
 	public sealed class PidFileDescriptor : FileDescriptor {
 		private uint pid;
 

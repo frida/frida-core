@@ -330,6 +330,8 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
         "DrainStatus",
         "Fruity",
         "HostSession",
+        "LinuxCompat32Syscall",
+        "LinuxSyscall",
         "MessageType",
         "PeerSetup",
         "PortConflictBehavior",
@@ -503,7 +505,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
 def function_is_public(name):
     return not name.startswith("_") and \
             not name.startswith("throw_") and \
-            name not in [
+            name not in {
                 "generate_certificate",
                 "get_dbus_context",
                 "invalidate_dbus_context",
@@ -514,9 +516,11 @@ def function_is_public(name):
                 "parse_socket_address",
                 "negotiate_connection",
                 "check_kernel_version",
+                "get_syscall_signatures",
+                "get_compat32_syscall_signatures",
                 "make_stdio_pipes",
                 "make_stdio_pipe",
-            ]
+            }
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
     return [ApiObjectType(m.group(3), m.group(2)) for m in OBJECT_TYPE_PATTERN.finditer(source, re.MULTILINE)]
