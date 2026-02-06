@@ -940,6 +940,9 @@ namespace Frida {
 					Memory.copy (buffer, recv_queue.data, n);
 					recv_queue.remove_range (0, (uint) n);
 
+					if (recv_queue.len == 0)
+						websocket.resume_input ();
+
 					update_pending_io ();
 				} else {
 					if (state == OPEN)
@@ -1006,6 +1009,7 @@ namespace Frida {
 		private void on_message (int type, Bytes message) {
 			with_state_lock (() => {
 				recv_queue.append (message.get_data ());
+				websocket.pause_input ();
 				update_pending_io ();
 			});
 		}
