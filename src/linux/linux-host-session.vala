@@ -389,6 +389,25 @@ namespace Frida {
 			return resource.get_file ().path;
 		}
 
+		public override async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			var session = yield do_open_service (address, cancellable);
+
+			var id = ServiceSessionId.generate ();
+			service_session_registry.register (id, session);
+
+			return id;
+		}
+
+		private async ServiceSession do_open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			string[] tokens = address.split (":", 2);
+			unowned string protocol = tokens[0];
+
+			if (protocol == "syscall-trace")
+				return new SyscallTraceServiceSession ();
+
+			throw new Error.NOT_SUPPORTED ("Unsupported service address");
+		}
+
 #if ANDROID
 		internal async AndroidHelperClient get_android_helper_client (Cancellable? cancellable) throws Error, IOError {
 			while (android_helper_request != null) {
@@ -761,6 +780,7 @@ namespace Frida {
 			ZymbioteConnection? connection;
 			if (!zymbiote_connections.unset (pid, out connection))
 				return false;
+
 			connection.resume.begin (io_cancellable);
 
 			HostSpawnInfo? info;
@@ -1769,4 +1789,486 @@ namespace Frida {
 		return state == 'T';
 	}
 #endif
+
+	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+		private SyscallTracer? tracer = new SyscallTracer ();
+		private SymbolResolver resolver = new SymbolResolver ();
+
+		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
+		construct {
+			tracer.events_available.connect (on_events_available);
+		}
+
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+			ensure_active ();
+		}
+
+		private void ensure_active () throws Error {
+			if (tracer == null)
+				throw new Error.INVALID_OPERATION ("Service is closed");
+
+			if (tracer.state == STOPPED)
+				tracer.start ();
+		}
+
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			if (tracer == null)
+				return;
+
+			tracer.stop ();
+			tracer = null;
+
+			close ();
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			ensure_active ();
+
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			var reply = new VariantBuilder (VariantType.VARDICT);
+
+			if (type == "read-events") {
+				var events = new VariantBuilder (new VariantType ("av"));
+
+				size_t total = 0;
+
+				var drain_status = tracer.drain_events (ev => {
+					Variant item = build_event_variant (ev);
+					size_t item_size = (size_t) item.get_size ();
+
+					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
+						return STOP;
+
+					events.add_value (new Variant.variant (item));
+					total += item_size;
+
+					return CONTINUE;
+				});
+
+				vardict_add (reply, "events", events.end ());
+				vardict_add (reply, "status", (drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
+
+				return reply.end ();
+			}
+
+			if (type == "resolve-stacks") {
+				reader.read_member ("ids");
+				var ids = read_uint32_array (reader);
+				reader.end_member ();
+
+				var stacks = new VariantBuilder (new VariantType ("aat"));
+
+				tracer.resolve_stacks (ids, (sid, frames) => {
+					stacks.open (new VariantType ("at"));
+					foreach (var frame in frames)
+						stacks.add_value (frame);
+					stacks.close ();
+				});
+
+				vardict_add (reply, "stacks", stacks.end ());
+
+				return reply.end ();
+			}
+
+			if (type == "resolve-symbols") {
+				uint pid = (uint) reader.read_member ("pid").get_int64_value ();
+				reader.end_member ();
+
+				reader.read_member ("addresses");
+				var addrs = read_uint64_array (reader);
+				reader.end_member ();
+
+				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
+				var modules = new VariantBuilder (new VariantType ("as"));
+
+				resolver.resolve_addresses (pid, addrs,
+					(addr, mod_idx, rel32) => {
+						symbols.add ("(uu)", mod_idx, rel32);
+					},
+					(module_list) => {
+						foreach (var path in module_list)
+							modules.add_value (path);
+					});
+
+				vardict_add (reply, "modules", modules.end ());
+				vardict_add (reply, "symbols", symbols.end ());
+
+				return reply.end ();
+			}
+
+			if (type == "read-stats") {
+				var stats = tracer.read_stats ();
+
+				vardict_add (reply, "emitted-events", stats.emitted_events);
+				vardict_add (reply, "emitted-bytes", stats.emitted_bytes);
+
+				vardict_add (reply, "dropped-events", stats.dropped_events);
+				vardict_add (reply, "dropped-bytes", stats.dropped_bytes);
+
+				return reply.end ();
+			}
+
+			if (type == "add-targets") {
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					foreach_uint32 (reader, pid => tracer.add_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uids")) {
+					reader.read_member ("uids");
+					foreach_uint32 (reader, uid => tracer.add_target_uid (uid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("users")) {
+					reader.read_member ("users");
+					foreach_string (reader, username => {
+						var uid = resolve_uid_from_username (username);
+						tracer.add_target_uid (uid);
+					});
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "remove-targets") {
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					foreach_uint32 (reader, pid => tracer.remove_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uids")) {
+					reader.read_member ("uids");
+					foreach_uint32 (reader, uid => tracer.remove_target_uid (uid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("users")) {
+					reader.read_member ("users");
+					foreach_string (reader, username => {
+						var uid = resolve_uid_from_username (username);
+						tracer.remove_target_uid (uid);
+					});
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "get-signatures") {
+				vardict_add (reply, "native", build_signatures_variant (get_syscall_signatures ()));
+
+				unowned LinuxSyscallSignature[]? compat = get_compat32_syscall_signatures ();
+				if (compat != null)
+					vardict_add (reply, "compat32", build_signatures_variant (compat));
+
+				return reply.end ();
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+		}
+
+		private void on_events_available () {
+			var b = new VariantBuilder (VariantType.VARDICT);
+			vardict_add (b, "type", "events-available");
+			message (b.end ());
+		}
+
+		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev) {
+			unowned SyscallTracer.SyscallEventCommon * c = ev.common;
+			var phase = (SyscallTracer.Phase) c->phase;
+
+			size_t header_len = sizeof (SyscallTracer.SyscallEventCommon);
+			size_t payload_len = (size_t) c->payload_len;
+			uint16 attach_count = c->attachment_count;
+
+			unowned uint8[] buf = ev.bytes;
+			assert (header_len + payload_len <= buf.length);
+
+			uint8 * p = (uint8 *) buf + header_len;
+			uint8 * payload_end = p + payload_len;
+
+			uint64 args[SyscallTracer.SYSCALL_NARGS];
+			int64 retval = 0;
+
+			uint8 * a;
+
+			if (phase == SyscallTracer.Phase.ENTER) {
+				assert ((size_t) (payload_end - p) >= sizeof (SyscallTracer.SyscallEnterPayload));
+				unowned SyscallTracer.SyscallEnterPayload * ep = (SyscallTracer.SyscallEnterPayload *) p;
+				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
+					args[i] = ep->args[i];
+				a = (uint8 *) p + sizeof (SyscallTracer.SyscallEnterPayload);
+			} else {
+				assert ((size_t) (payload_end - p) >= sizeof (SyscallTracer.SyscallExitPayload));
+				unowned SyscallTracer.SyscallExitPayload * xp = (SyscallTracer.SyscallExitPayload *) p;
+				retval = xp->retval;
+				a = (uint8 *) p + sizeof (SyscallTracer.SyscallExitPayload);
+			}
+
+			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
+
+			for (uint i = 0; i != attach_count; i++) {
+				assert ((size_t) (payload_end - a) >= sizeof (SyscallTracer.AttachmentHeader));
+				unowned SyscallTracer.AttachmentHeader * h = (SyscallTracer.AttachmentHeader *) a;
+				a += sizeof (SyscallTracer.AttachmentHeader);
+
+				uint idx = h->arg_index;
+				size_t len = (size_t) h->len;
+
+				assert (a + len <= payload_end);
+				if (idx < SyscallTracer.SYSCALL_NARGS) {
+					Variant v = decode_attachment_value (phase, idx, (SyscallTracer.AttachmentType) h->type, a, len);
+					attachments.add_value (new Variant.tuple ({ idx, new Variant.variant (v) }));
+				}
+
+				a += len;
+			}
+
+			Variant args_v;
+			{
+				var ab = new VariantBuilder (new VariantType ("at"));
+				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
+					ab.add_value (args[i]);
+				args_v = ab.end ();
+			}
+
+			if (phase == ENTER) {
+				return new Variant.tuple ({
+					"enter",
+					c->time_ns,
+					c->tgid,
+					c->tid,
+					c->syscall_nr,
+					c->stack_id,
+					args_v,
+					attachments.end ()
+				});
+			} else {
+				return new Variant.tuple ({
+					"exit",
+					c->time_ns,
+					c->tgid,
+					c->tid,
+					c->syscall_nr,
+					c->stack_id,
+					retval,
+					attachments.end ()
+				});
+			}
+		}
+
+		private static Variant decode_attachment_value (SyscallTracer.Phase phase, uint arg_index,
+				SyscallTracer.AttachmentType type, uint8 * data, size_t len) {
+			switch (type) {
+				case STRING: {
+					if (len == 0)
+						return "";
+
+					size_t n = len;
+					if (n != 0 && data[n - 1] == 0)
+						n--;
+
+					var tmp = new uint8[n + 1];
+					Memory.copy (tmp, data, n);
+					tmp[n] = 0;
+					return (string) tmp;
+				}
+
+				case BYTES: {
+					if (phase == ENTER && arg_index == 1) {
+						Variant? sa = try_decode_sockaddr (data, len);
+						if (sa != null)
+							return sa;
+					}
+
+					var b = new uint8[len];
+					if (len != 0)
+						Memory.copy (b, data, len);
+
+					return Variant.new_from_data<void> (new VariantType ("ay"), b, true);
+				}
+
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private static Variant? try_decode_sockaddr (uint8 * data, size_t len) {
+			if (len < 2)
+				return null;
+
+			uint16 fam = *((uint16 *) data);
+
+			switch ((int) fam) {
+			case Posix.AF_INET: {
+				if (len < sizeof (Posix.SockAddrIn))
+					return null;
+
+				var sa = (Posix.SockAddrIn *) data;
+				var port = uint16.from_network (sa->sin_port);
+
+				uint8 ip_bytes[4];
+				Memory.copy (ip_bytes, &sa->sin_addr.s_addr, 4);
+				string ip = inet_ntop_to_string (Posix.AF_INET, ip_bytes, 4);
+
+				return new Variant.tuple ({ "inet", ip, (uint32) port });
+			}
+			case Posix.AF_INET6: {
+				if (len < sizeof (Posix.SockAddrIn6))
+					return null;
+
+				var sa6 = (Posix.SockAddrIn6 *) data;
+				var port = uint16.from_network (sa6->sin6_port);
+
+				uint8 ip_bytes[16];
+				Memory.copy (ip_bytes, sa6->sin6_addr.s6_addr, 16);
+				string ip = inet_ntop_to_string (Posix.AF_INET6, ip_bytes, 16);
+
+				uint32 scope_id = sa6->sin6_scope_id;
+
+				return new Variant.tuple ({
+					"inet6",
+					ip,
+					(uint32) port,
+					scope_id
+				});
+			}
+			case Posix.AF_UNIX: {
+				if (len < 2)
+					return null;
+
+				var path = (char *) (data + 2);
+
+				size_t path_bytes = size_t.min (len - 2, 108);
+				if (path_bytes == 0)
+					return new Variant.tuple ({ "unix", "" });
+
+				if (path[0] == 0) {
+					size_t n = 1;
+					while (n < path_bytes && path[n] != 0)
+						n++;
+
+					size_t name_len = (n > 1) ? (n - 1) : 0;
+
+					var str = new uint8[name_len + 1];
+					if (name_len != 0)
+						Memory.copy (str, path + 1, name_len);
+
+					return new Variant.tuple ({ "unix-abstract", (string) str });
+				}
+
+				size_t n = 1;
+				while (n < path_bytes && path[n] != 0)
+					n++;
+
+				var str = new uint8[n + 1];
+				Memory.copy (str, path, n);
+
+				return new Variant.tuple ({ "unix", (string) str });
+			}
+
+			default:
+				return null;
+			}
+		}
+
+		private static Variant build_signatures_variant (LinuxSyscallSignature[] signatures) {
+			var result = new VariantBuilder (new VariantType ("a(usa(ss))"));
+
+			uint32 nr = 0;
+			foreach (unowned LinuxSyscallSignature sig in signatures) {
+				if (sig.name != null) {
+					var args = new VariantBuilder (new VariantType ("a(ss)"));
+					for (uint8 i = 0; i != sig.nargs; i++) {
+						unowned LinuxSyscallArg arg = sig.args[i];
+						args.add_value (new Variant.tuple ({ arg.type, arg.name }));
+					}
+					result.add_value (new Variant.tuple ({ nr, sig.name, args.end () }));
+				}
+				nr++;
+			}
+
+			return result.end ();
+		}
+
+		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
+			uint8 buf[46];
+			unowned string? res = Posix.inet_ntop (af, src, buf);
+			return (res != null) ? res : "?";
+		}
+
+		private static uint32 resolve_uid_from_username (string name) throws Error {
+			unowned Posix.Passwd? pw = Posix.getpwnam (name);
+			if (pw == null)
+				throw new Error.INVALID_ARGUMENT ("Unknown user: %s", name);
+
+			return (uint32) pw.pw_uid;
+		}
+
+		private delegate void UInt32Handler (uint32 v) throws Error;
+		private delegate void StringHandler (string s) throws Error;
+
+		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < 0 || v > uint32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (uint32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static uint64[] read_uint64_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint64[n];
+
+			for (uint i = 0; i != n; i++) {
+				arr[i] = reader.read_element (i).get_uint64_value ();
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+			uint n = reader.count_elements ();
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < 0 || v > uint32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				cb ((uint32) v);
+
+				reader.end_element ();
+			}
+		}
+
+		private static void foreach_string (VariantReader reader, StringHandler cb) throws Error {
+			uint n = reader.count_elements ();
+			for (uint i = 0; i != n; i++) {
+				unowned string s = reader.read_element (i).get_string_value ();
+				cb (s);
+				reader.end_element ();
+			}
+		}
+
+		private static void vardict_add (VariantBuilder b, string key, Variant val) {
+			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
+		}
+	}
 }
