@@ -2044,8 +2044,6 @@ namespace Frida.Fruity {
 		private BufferedInputStream input;
 		private OutputStream output;
 
-		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
-		private bool input_flush_scheduled = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private bool writing = false;
 
@@ -2147,8 +2145,39 @@ namespace Frida.Fruity {
 		private async void process_incoming_messages () {
 			try {
 				while (true) {
-					var datagram = yield read_datagram (io_cancellable);
-					on_incoming_datagram (datagram);
+					var pending_input = new Gee.ArrayQueue<Bytes> ();
+					while (true) {
+						var size = peek_datagram_size ();
+						if (size == -1)
+							break;
+
+						var datagram = new uint8[size];
+						input.read (datagram, io_cancellable);
+
+						pending_input.offer (new Bytes.take ((owned) datagram));
+					}
+
+					if (pending_input.size != 0) {
+						try {
+							yield _tunnel_netstack.handle_incoming_datagrams (pending_input);
+						} catch (Error e) {
+						}
+
+						var source = new IdleSource ();
+						source.set_callback (process_incoming_messages.callback);
+						source.attach (MainContext.get_thread_default ());
+						yield;
+					}
+
+					ssize_t n;
+					try {
+						n = yield input.fill_async (-1, Priority.DEFAULT, io_cancellable);
+					} catch (GLib.Error e) {
+						throw new Error.TRANSPORT ("Connection closed");
+					}
+
+					if (n == 0)
+						throw new Error.TRANSPORT ("Connection closed");
 				}
 			} catch (GLib.Error e) {
 			}
@@ -2171,30 +2200,6 @@ namespace Frida.Fruity {
 			close_request.resolve (true);
 
 			closed ();
-		}
-
-		private void on_incoming_datagram (Bytes datagram) {
-			pending_input.offer (datagram);
-
-			if (!input_flush_scheduled) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					input_flush_scheduled = false;
-					flush_pending_input ();
-					return Source.REMOVE;
-				});
-				source.attach (MainContext.get_thread_default ());
-				input_flush_scheduled = true;
-			}
-		}
-
-		private void flush_pending_input () {
-			var datagrams = pending_input;
-			pending_input = new Gee.ArrayQueue<Bytes> ();
-			try {
-				_tunnel_netstack.handle_incoming_datagrams (datagrams);
-			} catch (Error e) {
-			}
 		}
 
 		private void post (Bytes datagram) {
@@ -2269,24 +2274,21 @@ namespace Frida.Fruity {
 			return new JsonObjectReader (json);
 		}
 
-		private async Bytes read_datagram (Cancellable? cancellable) throws Error, IOError {
-			size_t header_size = 40;
+		private ssize_t peek_datagram_size () {
+			ssize_t header_size = 40;
 			if (input.get_available () < header_size)
-				yield fill_until_n_bytes_available (header_size, cancellable);
+				return -1;
 
 			uint16 payload_size = 0;
 			unowned uint8[] size_buf = ((uint8[]) &payload_size)[:2];
 			input.peek (size_buf, 4);
 			payload_size = uint16.from_big_endian (payload_size);
 
-			size_t full_size = header_size + payload_size;
+			ssize_t full_size = header_size + payload_size;
 			if (input.get_available () < full_size)
-				yield fill_until_n_bytes_available (full_size, cancellable);
+				return -1;
 
-			var datagram = new uint8[full_size];
-			input.read (datagram, cancellable);
-
-			return new Bytes.take ((owned) datagram);
+			return full_size;
 		}
 
 		private async void fill_until_n_bytes_available (size_t minimum, Cancellable? cancellable) throws Error, IOError {
@@ -2367,6 +2369,7 @@ namespace Frida.Fruity {
 		private Gee.Map<int64?, Stream> streams = new Gee.HashMap<int64?, Stream> (Numeric.int64_hash, Numeric.int64_equal);
 		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
 		private bool input_flush_scheduled = false;
+		private bool input_flush_happening = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 
 		private DatagramBasedSource? rx_source;
@@ -2842,7 +2845,7 @@ namespace Frida.Fruity {
 				var source = new IdleSource ();
 				source.set_callback (() => {
 					input_flush_scheduled = false;
-					flush_pending_input ();
+					flush_pending_input.begin ();
 					return Source.REMOVE;
 				});
 				source.attach (MainContext.get_thread_default ());
@@ -2852,13 +2855,20 @@ namespace Frida.Fruity {
 			return 0;
 		}
 
-		private void flush_pending_input () {
+		private async void flush_pending_input () {
+			if (input_flush_happening)
+				return;
+			input_flush_happening = true;
+
 			var datagrams = pending_input;
 			pending_input = new Gee.ArrayQueue<Bytes> ();
+
 			try {
-				_tunnel_netstack.handle_incoming_datagrams (datagrams);
-			} catch (Error e) {
+				yield _tunnel_netstack.handle_incoming_datagrams (datagrams);
+			} catch (GLib.Error e) {
 			}
+
+			input_flush_happening = false;
 		}
 
 		private static void on_rand (uint8[] dest, NGTcp2.RNGContext rand_ctx) {
