@@ -283,13 +283,13 @@ namespace Frida.Fruity {
 			return new Ipv6UdpSocket (this);
 		}
 
-		public void handle_incoming_datagrams (Gee.Collection<Bytes> datagrams) throws Error {
+		public async void handle_incoming_datagrams (Gee.Collection<Bytes> datagrams) throws Error {
+			LWIP.ErrorCode err = OK;
+
 			check_started ();
 
-			check (perform_on_lwip_thread (() => {
+			schedule_on_lwip_thread (() => {
 				begin_output ();
-
-				LWIP.ErrorCode err = OK;
 
 				foreach (var d in datagrams) {
 					var pbuf = LWIP.PacketBuffer.alloc (RAW, (uint16) d.get_size (), POOL);
@@ -304,8 +304,14 @@ namespace Frida.Fruity {
 
 				end_output ();
 
+				schedule_on_frida_thread (handle_incoming_datagrams.callback);
+
 				return err;
-			}));
+			});
+
+			yield;
+
+			check (err);
 		}
 
 		private static LWIP.ErrorCode on_netif_link_output (LWIP.NetworkInterface handle, LWIP.PacketBuffer pbuf) {
@@ -359,6 +365,15 @@ namespace Frida.Fruity {
 		}
 
 		internal LWIP.ErrorCode perform_on_lwip_thread (owned WorkFunc work) {
+			var req = submit_work ((owned) work);
+			return req.join ();
+		}
+
+		internal void schedule_on_lwip_thread (owned WorkFunc work) {
+			submit_work ((owned) work);
+		}
+
+		private Request submit_work (owned WorkFunc work) {
 			var req = new Request ((owned) work);
 
 			if (Thread.self<bool> () == lwip_thread) {
@@ -369,7 +384,7 @@ namespace Frida.Fruity {
 				LWIP.Runtime.schedule (perform_next_request);
 			}
 
-			return req.join ();
+			return req;
 		}
 
 		private void perform_next_request () {
