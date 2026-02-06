@@ -36,8 +36,6 @@ namespace Frida.Fruity {
 		private uint16 ndp_fixed_header_size;
 
 		private VirtualNetworkStack? _netstack;
-		private Gee.Queue<Bytes> pending_input = new Gee.ArrayQueue<Bytes> ();
-		private bool input_flush_scheduled = false;
 		private Gee.Queue<Bytes> pending_output = new Gee.ArrayQueue<Bytes> ();
 		private size_t out_in_flight_count = 0;
 		private size_t out_in_flight_bytes = 0;
@@ -184,8 +182,20 @@ namespace Frida.Fruity {
 				}
 
 				try {
-					var frame = yield pending.poll ().future.wait_async (io_cancellable);
-					handle_ncm_frame (frame);
+					var datagrams = new Gee.ArrayList<Bytes> ();
+					while (true) {
+						var request = pending.peek ();
+
+						if (request == null)
+							break;
+						if (!datagrams.is_empty && !request.future.ready)
+							break;
+
+						var frame = yield pending.poll ().future.wait_async (io_cancellable);
+						datagrams.add_all (handle_ncm_frame (frame));
+					}
+
+					yield _netstack.handle_incoming_datagrams (datagrams);
 				} catch (GLib.Error e) {
 					return;
 				}
@@ -208,7 +218,7 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private void handle_ncm_frame (Bytes frame) throws GLib.Error {
+		private Gee.List<Bytes> handle_ncm_frame (Bytes frame) throws GLib.Error {
 			var input = new DataInputStream (new MemoryInputStream.from_bytes (frame));
 			input.byte_order = LITTLE_ENDIAN;
 
@@ -221,6 +231,8 @@ namespace Frida.Fruity {
 				throw new Error.PROTOCOL ("Invalid NTH16 signature");
 			input.skip (6);
 			var ndp_index = input.read_uint16 ();
+
+			var datagrams = new Gee.ArrayList<Bytes> ();
 
 			do {
 				input.seek (ndp_index, SET);
@@ -250,35 +262,13 @@ namespace Frida.Fruity {
 							notify_property ("remote-ipv6-address");
 					}
 
-					on_incoming_datagram (datagram);
+					datagrams.add (datagram);
 				}
 
 				ndp_index = next_ndp_index;
 			} while (ndp_index != 0);
-		}
 
-		private void on_incoming_datagram (Bytes datagram) {
-			pending_input.offer (datagram);
-
-			if (!input_flush_scheduled) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					input_flush_scheduled = false;
-					flush_pending_input ();
-					return Source.REMOVE;
-				});
-				source.attach (MainContext.get_thread_default ());
-				input_flush_scheduled = true;
-			}
-		}
-
-		private void flush_pending_input () {
-			var datagrams = pending_input;
-			pending_input = new Gee.ArrayQueue<Bytes> ();
-			try {
-				_netstack.handle_incoming_datagrams (datagrams);
-			} catch (Error e) {
-			}
+			return datagrams;
 		}
 
 		private void on_netif_outgoing_datagrams (Gee.Collection<Bytes> datagrams) {
