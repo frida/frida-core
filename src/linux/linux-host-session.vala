@@ -2184,7 +2184,6 @@ namespace Frida {
 		private static Variant build_signatures_variant (LinuxSyscallSignature[] signatures) {
 			var result = new VariantBuilder (new VariantType ("a(usa(ss))"));
 
-			uint32 nr = 0;
 			foreach (unowned LinuxSyscallSignature sig in signatures) {
 				if (sig.name != null) {
 					var args = new VariantBuilder (new VariantType ("a(ss)"));
@@ -2192,9 +2191,8 @@ namespace Frida {
 						unowned LinuxSyscallArg arg = sig.args[i];
 						args.add_value (new Variant.tuple ({ arg.type, arg.name }));
 					}
-					result.add_value (new Variant.tuple ({ nr, sig.name, args.end () }));
+					result.add_value (new Variant.tuple ({ sig.nr, sig.name, args.end () }));
 				}
-				nr++;
 			}
 
 			return result.end ();
