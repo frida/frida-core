@@ -366,7 +366,7 @@ namespace Frida {
 		if (details.length != 0) {
 			message
 				.append (":\n")
-				.append (details);
+				.append (details.chomp ());
 		}
 
 		if (err.abs () == Posix.EPERM)
