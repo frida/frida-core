@@ -238,7 +238,8 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
         for elem in core_elements + base_elements:
             if tag_name == "class":
                 for child in list(elem):
-                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in {"Frida.HostSessionHub", "FridaBase.AgentMessageSink"}) \
+                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in {"Frida.HostSessionHub", "Frida.AgentMessageSink",
+                                                                                   "FridaBase.AgentMessageSink"}) \
                             or child.tag == CORE_TAG_FIELD \
                             or child.get("name").startswith("_"):
                         elem.remove(child)
