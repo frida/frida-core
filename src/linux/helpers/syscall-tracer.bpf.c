@@ -531,7 +531,7 @@ write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32
 
   h->len = n;
   if (n != 0)
-    bpf_probe_read_user (dst, n, user_src);
+    bpf_probe_read_user (dst, (__u32) n, user_src);
   return (__u16) n;
 }
 

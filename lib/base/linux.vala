@@ -98,465 +98,395 @@ namespace Frida {
 		}
 	}
 
-	[CCode (gir_namespace = "FridaBpf", gir_version = "1.0")]
-	namespace Bpf {
-		public FileDescriptor load_program_from_elf (BpfProgramType prog_type, Gum.ElfModule elf, string section_name,
-				Gee.Map<string, Map> maps, string license) throws Error {
-			Bytes relocated_prog = relocate_program_section (elf, section_name, maps);
-			unowned BpfInsn[] insns = (BpfInsn[]) relocated_prog.get_data ();
-
-			return load_program (prog_type, insns, license);
+	public sealed class BpfObject {
+		public Programs programs {
+			get;
 		}
 
-		private FileDescriptor load_program (BpfProgramType prog_type, BpfInsn[] insns, string license) throws Error {
-			const uint32 log_size = 65536;
+		public Maps maps {
+			get;
+		}
 
-			uint8[] logbuf = new uint8[log_size];
+		internal Libbpf.Object handle;
+		private char[] kernel_log_buf;
 
-			var attr = BpfAttrProgLoad ();
+		public static BpfObject open (string name, uint8[] blob) throws Error {
+			var log_buf = new char[64 * 1024];
 
-			attr.prog_type = prog_type;
-			attr.insn_cnt = insns.length;
-			attr.insns = (uintptr) (insns.length > 0 ? &insns[0] : null);
-			attr.license = (uintptr) license;
+			var opts = Libbpf.Object.OpenOpts ();
+			opts.sz = sizeof (Libbpf.Object.OpenOpts);
+			opts.object_name = name;
+			opts.kernel_log_buf = log_buf;
 
-			attr.log_level = 1;
-			attr.log_size = log_size;
-			attr.log_buf = (uintptr) &logbuf[0];
+			var handle = Libbpf.Object.open_mem (blob, opts);
+			if (handle == null)
+				throw_libbpf_error (errno);
 
-			try {
-				return new FileDescriptor (bpf_call (PROG_LOAD, &attr, (size_t) sizeof (BpfAttrProgLoad)));
-			} catch (Error e) {
-				unowned string verifier_log = (string) &logbuf[0];
-				if (verifier_log.length == 0)
-					throw e;
-				var message = new StringBuilder.sized (1024);
-				message
-					.append (e.message)
-					.append (": ")
-					.append (verifier_log);
-				throw new Error.INVALID_ARGUMENT ("%s", message.str);
+			return new BpfObject ((owned) handle, (owned) log_buf);
+		}
+
+		private BpfObject (owned Libbpf.Object handle, owned char[] kernel_log_buf) {
+			this.handle = (owned) handle;
+			this.kernel_log_buf = (owned) kernel_log_buf;
+
+			_programs = new Programs (this);
+			_maps = new Maps (this);
+		}
+
+		public void prepare () throws Error {
+			check_libbpf_result (handle.prepare ());
+		}
+
+		public void load () throws Error {
+			check_libbpf_result (handle.load (), (string) kernel_log_buf);
+		}
+
+		public sealed class Programs {
+			private unowned BpfObject parent;
+
+			internal Programs (BpfObject parent) {
+				this.parent = parent;
 			}
-		}
 
-		private Bytes relocate_program_section (Gum.ElfModule elf, string section_name, Gee.Map<string, Map> maps)
-				throws Error {
-			Gum.ElfSectionDetails? section = null;
+			public BpfProgram get_by_name (string name) throws Error {
+				var p = find_by_name (name);
+				if (p == null)
+					throw new Error.INVALID_ARGUMENT ("No program named '%s'", name);
+				return p;
+			}
 
-			elf.enumerate_sections (s => {
-				if (s.name == section_name) {
-					section = s;
-					return false;
-				}
-				return true;
-			});
+			public BpfProgram? find_by_name (string name) {
+				unowned Libbpf.Program? p = parent.handle.find_program_by_name (name);
+				if (p == null)
+					return null;
+				return new BpfProgram (p, parent);
+			}
 
-			if (section == null)
-				throw new Error.PROTOCOL ("Missing '%s' section in eBPF ELF", section_name);
+			public Iterator iterator () {
+				return new Iterator (parent);
+			}
 
-			var sec_off = (size_t) section.offset;
-			var sec_size = (size_t) section.size;
+			public class Iterator {
+				private BpfObject parent;
+				private BpfProgram? current;
 
-			var relocated = new Bytes (elf.get_file_data ()[sec_off:sec_off + sec_size]);
-			var buf = new Buffer (relocated);
-
-			string rel_section_name = ".rel" + section_name;
-			Error? pending_error = null;
-
-			elf.enumerate_relocations (r => {
-				unowned string parent = r.parent.name;
-				if (parent != rel_section_name)
-					return true;
-
-				unowned string sym = r.symbol.name;
-
-				Map? map = maps[sym];
-				if (map == null) {
-					pending_error = new Error.NOT_SUPPORTED ("No Bpf.Map provided for symbol '%s'".printf (sym));
-					return false;
+				internal Iterator (BpfObject parent) {
+					this.parent = parent;
 				}
 
-				try {
-					apply_bpf_map_relocation (r, map, buf);
-				} catch (Error e) {
-					pending_error = e;
-					return false;
-				}
-
-				return true;
-			});
-
-			if (pending_error != null)
-				throw pending_error;
-
-			return buf.bytes;
-		}
-
-		private void apply_bpf_map_relocation (Gum.ElfRelocationDetails r, Map map, Buffer buf) throws Error {
-			size_t off = (size_t) r.address;
-			if (off + 16 > buf.bytes.get_size ())
-				throw new Error.NOT_SUPPORTED ("BPF relocation out of range");
-
-			uint8 code0 = buf.read_uint8 (off + 0);
-			if (code0 != 0x18)
-				throw new Error.NOT_SUPPORTED ("Expected LD_IMM64 at relocation site (got 0x%02x)".printf (code0));
-
-			uint8 dst_src = buf.read_uint8 (off + 1);
-			uint8 dst = dst_src & 0x0f;
-			const uint8 BPF_PSEUDO_MAP_FD = 1;
-			uint8 patched_dst_src = dst | (BPF_PSEUDO_MAP_FD << 4);
-			buf.write_uint8 (off + 1, patched_dst_src);
-			buf.write_int32 (off + 4, map.fd.handle);
-			buf.write_int32 (off + 12, 0);
-		}
-
-		public abstract class Map {
-			public BpfMapType map_type {
-				get;
-				private set;
-			}
-
-			public FileDescriptor fd {
-				get;
-				private set;
-			}
-
-			protected Map (BpfMapType type, FileDescriptor fd) {
-				this.map_type = type;
-				this.fd = fd;
-			}
-		}
-
-		public sealed class HashMap : Map {
-			public HashMap (size_t value_size, size_t max_entries) throws Error {
-				var attr = BpfAttrMapCreate ();
-				attr.map_type = HASH;
-				attr.key_size = (uint32) sizeof (uint32);
-				attr.value_size = (uint32) value_size;
-				attr.max_entries = (uint32) max_entries;
-
-				base (HASH, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
-			}
-
-			public void update_u32 (uint32 key, uint32 val) throws Error {
-				Bpf.update_map_value (fd, key, &val);
-			}
-
-			public uint32 lookup_u32 (uint32 key) throws Error {
-				uint32 val = 0;
-				Bpf.lookup_map_value (fd, key, &val);
-				return val;
-			}
-
-			public void update_raw (uint32 key, void * val) throws Error {
-				Bpf.update_map_value (fd, key, val);
-			}
-
-			public void lookup_raw (uint32 key, void * val) throws Error {
-				Bpf.lookup_map_value (fd, key, val);
-			}
-
-			public void remove (uint32 key) throws Error {
-				Bpf.delete_map_value (fd, key);
-			}
-		}
-
-		public sealed class ArrayMap : Map {
-			public ArrayMap (size_t value_size, size_t max_entries) throws Error {
-				var attr = BpfAttrMapCreate ();
-				attr.map_type = ARRAY;
-				attr.key_size = (uint32) sizeof (uint32);
-				attr.value_size = (uint32) value_size;
-				attr.max_entries = (uint32) max_entries;
-
-				base (ARRAY, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
-			}
-
-			public void update_u32 (uint32 key, uint32 val) throws Error {
-				Bpf.update_map_value (fd, key, &val);
-			}
-
-			public uint32 lookup_u32 (uint32 key) throws Error {
-				uint32 val = 0;
-				Bpf.lookup_map_value (fd, key, &val);
-				return val;
-			}
-
-			public void update_raw (uint32 key, void * val) throws Error {
-				Bpf.update_map_value (fd, key, val);
-			}
-
-			public void lookup_raw (uint32 key, void * val) throws Error {
-				Bpf.lookup_map_value (fd, key, val);
-			}
-		}
-
-		public sealed class PercpuArrayMap : Map {
-			private uint ncpus;
-			private size_t percpu_stride;
-
-			public PercpuArrayMap (size_t value_size, size_t max_entries) throws Error {
-				var attr = BpfAttrMapCreate ();
-				attr.map_type = PERCPU_ARRAY;
-				attr.key_size = (uint32) sizeof (uint32);
-				attr.value_size = (uint32) value_size;
-				attr.max_entries = (uint32) max_entries;
-
-				base (PERCPU_ARRAY, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
-
-				ncpus = get_num_processors ();
-				percpu_stride = round_up_8 (value_size);
-			}
-
-			private size_t get_percpu_buffer_size () {
-				return ncpus * percpu_stride;
-			}
-
-			public void foreach_value<T> (uint32 key, ValueFunc<T> func) throws Error {
-				uint8[] buf = new uint8[get_percpu_buffer_size ()];
-				Bpf.lookup_map_value (fd, key, buf);
-
-				for (uint32 cpu = 0; cpu != ncpus; cpu++) {
-					unowned T val = (T) ((uint8 *) buf + (cpu * percpu_stride));
-					func (cpu, val);
+				public BpfProgram? next_value () {
+					unowned Libbpf.Program? p = parent.handle.next_program (current?.handle);
+					if (p == null)
+						return null;
+					current = new BpfProgram (p, parent);
+					return current;
 				}
 			}
-
-			public delegate void ValueFunc<T> (uint32 cpu, T val);
 		}
 
-		public sealed class StackTraceMap : Map {
-			public size_t max_stack_depth {
-				get;
-				private set;
+		public sealed class Maps {
+			private unowned BpfObject parent;
+
+			internal Maps (BpfObject parent) {
+				this.parent = parent;
 			}
 
-			public size_t max_entries {
-				get;
-				private set;
+			public BpfMap get_by_name (string name) throws Error {
+				var p = find_by_name (name);
+				if (p == null)
+					throw new Error.INVALID_ARGUMENT ("No map named '%s'", name);
+				return p;
 			}
 
-			public StackTraceMap (size_t max_stack_depth, size_t max_entries, BpfStackTraceMapFlags flags = 0) throws Error {
-				var attr = BpfAttrMapCreate ();
-				attr.map_type = STACK_TRACE;
-				attr.key_size = (uint32) sizeof (uint32);
-				attr.value_size = (uint32) (max_stack_depth * (uint32) sizeof (uint64));
-				attr.max_entries = (uint32) max_entries;
-				attr.map_flags = flags;
-
-				base (STACK_TRACE, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
-
-				this.max_stack_depth = max_stack_depth;
-				this.max_entries = max_entries;
+			public BpfMap? find_by_name (string name) {
+				unowned Libbpf.Map? p = parent.handle.find_map_by_name (name);
+				if (p == null)
+					return null;
+				return new BpfMap (p, parent);
 			}
 
-			public void lookup_raw (uint32 stack_id, void * out_value) throws Error {
-				Bpf.lookup_map_value (fd, stack_id, out_value);
+			public Iterator iterator () {
+				return new Iterator (parent);
+			}
+
+			public class Iterator {
+				private BpfObject parent;
+				private BpfMap? current;
+
+				internal Iterator (BpfObject parent) {
+					this.parent = parent;
+				}
+
+				public BpfMap? next_value () {
+					unowned Libbpf.Map? p = parent.handle.next_map (current?.handle);
+					if (p == null)
+						return null;
+					current = new BpfMap (p, parent);
+					return current;
+				}
+			}
+		}
+	}
+
+	public sealed class BpfProgram {
+		internal unowned Libbpf.Program handle;
+		private BpfObject parent;
+
+		public string name {
+			get {
+				return handle.name;
 			}
 		}
 
-		public sealed class RingbufMap : Map {
-			public size_t size_bytes {
-				get;
-				private set;
-			}
+		internal BpfProgram (Libbpf.Program handle, BpfObject parent) {
+			this.handle = handle;
+			this.parent = parent;
+		}
 
-			public RingbufMap (size_t size_bytes) throws Error {
-				var attr = BpfAttrMapCreate ();
-				attr.map_type = RINGBUF;
-				attr.key_size = 0;
-				attr.value_size = 0;
-				attr.max_entries = (uint32) size_bytes;
+		public BpfLink attach () throws Error {
+			return parse_attach_result (handle.attach ());
+		}
 
-				base (RINGBUF, new FileDescriptor (bpf_call (MAP_CREATE, &attr, sizeof (BpfAttrMapCreate))));
+		public BpfLink attach_perf_event (FileDescriptor pfd) throws Error {
+			return parse_attach_result (handle.attach_perf_event (pfd.handle));
+		}
 
-				this.size_bytes = size_bytes;
+		private BpfLink parse_attach_result (owned Libbpf.Link? l) throws Error {
+			if (l == null)
+				throw_libbpf_error (errno);
+			return new BpfLink ((owned) l);
+		}
+	}
+
+	public sealed class BpfMap {
+		internal unowned Libbpf.Map handle;
+		private BpfObject parent;
+
+		public string name {
+			get {
+				return handle.name;
 			}
 		}
 
-		public sealed class RingbufReader : Object {
-			private RingbufMap map;
-
-			private uint8 * consumer_map;
-			private uint8 * producer_map;
-
-			private uint8 * producer_page;
-			private uint8 * data_base;
-
-			private uint64 * consumer_pos;
-			private uint64 * producer_pos;
-
-			public RingbufReader (RingbufMap map) throws Error {
-				this.map = map;
-
-				var page_size = (size_t) Posix.getpagesize ();
-				int fd = map.fd.handle;
-
-				void * mem = Posix.mmap (null, page_size, Posix.PROT_READ | Posix.PROT_WRITE, Posix.MAP_SHARED, fd, 0);
-				if (mem == Posix.MAP_FAILED)
-					throw_errno ("mmap(consumer) failed");
-				consumer_map = mem;
-
-				size_t prod_len = page_size + (2 * map.size_bytes);
-				mem = Posix.mmap (null, prod_len, Posix.PROT_READ, Posix.MAP_SHARED, fd, (Posix.off_t) page_size);
-				if (mem == Posix.MAP_FAILED)
-					throw_errno ("mmap(producer+data) failed");
-				producer_map = mem;
-
-				producer_page = producer_map;
-				data_base = producer_map + page_size;
-
-				consumer_pos = consumer_map;
-				producer_pos = producer_page;
+		public int fd {
+			get {
+				return handle.fd;
 			}
+		}
 
-			~RingbufReader () {
-				var page_size = (size_t) Posix.getpagesize ();
-
-				if (consumer_map != null)
-					Posix.munmap (consumer_map, page_size);
-
-				if (producer_map != null)
-					Posix.munmap (producer_map, page_size + (2 * map.size_bytes));
+		public uint32 max_entries {
+			get {
+				return handle.max_entries;
 			}
+			set {
+				handle.max_entries = value;
+			}
+		}
 
-			public DrainStatus drain (RecordHandler on_record) {
-				while (true) {
-					uint64 prod = Atomics.load_u64_acquire (producer_pos);
-					uint64 cons = Atomics.load_u64_acquire (consumer_pos);
+		public uint32 key_size {
+			get {
+				return handle.key_size;
+			}
+			set {
+				handle.key_size = value;
+			}
+		}
 
-					if (cons >= prod)
-						return DRAINED;
+		public uint32 value_size {
+			get {
+				return handle.value_size;
+			}
+			set {
+				handle.value_size = value;
+			}
+		}
 
-					size_t data_size = map.size_bytes;
-					uint64 mask = data_size - 1;
-					uint64 off = cons & mask;
-					uint8 * hdrp = data_base + off;
+		internal BpfMap (Libbpf.Map handle, BpfObject parent) {
+			this.handle = handle;
+			this.parent = parent;
+		}
 
-					uint32 hdr_len = Atomics.load_u32_acquire ((uint32 *) hdrp);
-					uint32 flags_mask = BpfRingbufFlags.BUSY | BpfRingbufFlags.DISCARD;
-					uint32 flags = hdr_len & flags_mask;
-					uint32 sample_len = hdr_len & ~flags_mask;
+		public void update_u32_u8 (uint32 key, uint8 val) throws Error {
+			update_raw ((uint8[]) &key, (uint8[]) &val);
+		}
 
-					if ((flags & BpfRingbufFlags.BUSY) != 0)
-						return DRAINED;
+		public void update_u32_u32 (uint32 key, uint32 val) throws Error {
+			update_raw ((uint8[]) &key, (uint8[]) &val);
+		}
 
-					assert (sample_len <= data_size - BPF_RINGBUF_HEADER_SIZE);
+		public void remove_u32 (uint32 key) throws Error {
+			remove_raw ((uint8[]) &key);
+		}
 
-					var total_len = (uint32) round_up_8 (sample_len + BPF_RINGBUF_HEADER_SIZE);
+		public void foreach_percpu_value<T> (uint8[] key, PercpuValueFunc<T> func) throws Error {
+			var ncpus = check_libbpf_result (Libbpf.num_possible_cpus ());
+			var percpu_stride = round_up_8 (value_size);
 
-					if ((flags & BpfRingbufFlags.DISCARD) != 0) {
-						Atomics.store_u64_release (consumer_pos, cons + total_len);
-						continue;
-					}
+			uint8[] buf = new uint8[ncpus * percpu_stride];
+			lookup_raw (key, buf);
 
-					unowned uint8[] payload = (uint8[]) (hdrp + BPF_RINGBUF_HEADER_SIZE);
-					var action = on_record (payload[:sample_len]);
+			for (int cpu = 0; cpu != ncpus; cpu++) {
+				unowned T val = (T) ((uint8 *) buf + (cpu * percpu_stride));
+				func (cpu, val);
+			}
+		}
 
+		public delegate void PercpuValueFunc<T> (uint32 cpu, T val);
+
+		public void lookup_raw (uint8[] key, uint8[] val) throws Error {
+			check_libbpf_result (handle.lookup_elem (key, val));
+		}
+
+		public void update_raw (uint8[] key, uint8[] val) throws Error {
+			check_libbpf_result (handle.update_elem (key, val));
+		}
+
+		public void remove_raw (uint8[] key) throws Error {
+			check_libbpf_result (handle.delete_elem (key));
+		}
+	}
+
+	public sealed class BpfLink {
+		private Libbpf.Link handle;
+
+		internal BpfLink (owned Libbpf.Link handle) {
+			this.handle = (owned) handle;
+		}
+	}
+
+	private int check_libbpf_result (int result, string details = "") throws Error {
+		if (result < 0)
+			throw_libbpf_error (result, details);
+		return result;
+	}
+
+	[NoReturn]
+	private void throw_libbpf_error (int err, string details = "") throws Error {
+		var message = new StringBuilder (error_message_for_libbpf_error (err));
+		if (details.length != 0) {
+			message
+				.append (":\n")
+				.append (details);
+		}
+
+		if (err.abs () == Posix.EPERM)
+			throw new Error.PERMISSION_DENIED ("%s", message.str);
+		else
+			throw new Error.INVALID_ARGUMENT ("%s", message.str);
+	}
+
+	private string error_message_for_libbpf_error (int err) {
+		char message[256];
+		int result = Libbpf.strerror (err, message);
+		assert (result == 0);
+		return (string) message;
+	}
+
+	public sealed class BpfRingbufReader : Object {
+		private BpfMap map;
+
+		private uint8 * consumer_map;
+		private uint8 * producer_map;
+
+		private uint8 * producer_page;
+		private uint8 * data_base;
+
+		private uint64 * consumer_pos;
+		private uint64 * producer_pos;
+
+		public BpfRingbufReader (BpfMap map) throws Error {
+			this.map = map;
+
+			var page_size = (size_t) Posix.getpagesize ();
+			int fd = map.fd;
+
+			void * mem = Posix.mmap (null, page_size, Posix.PROT_READ | Posix.PROT_WRITE, Posix.MAP_SHARED, fd, 0);
+			if (mem == Posix.MAP_FAILED)
+				throw_errno ("mmap(consumer) failed");
+			consumer_map = mem;
+
+			size_t prod_len = page_size + (2 * map.max_entries);
+			mem = Posix.mmap (null, prod_len, Posix.PROT_READ, Posix.MAP_SHARED, fd, (Posix.off_t) page_size);
+			if (mem == Posix.MAP_FAILED)
+				throw_errno ("mmap(producer+data) failed");
+			producer_map = mem;
+
+			producer_page = producer_map;
+			data_base = producer_map + page_size;
+
+			consumer_pos = consumer_map;
+			producer_pos = producer_page;
+		}
+
+		~BpfRingbufReader () {
+			var page_size = (size_t) Posix.getpagesize ();
+
+			if (consumer_map != null)
+				Posix.munmap (consumer_map, page_size);
+
+			if (producer_map != null)
+				Posix.munmap (producer_map, page_size + (2 * map.max_entries));
+		}
+
+		public DrainStatus drain (RecordHandler on_record) {
+			while (true) {
+				uint64 prod = Atomics.load_u64_acquire (producer_pos);
+				uint64 cons = Atomics.load_u64_acquire (consumer_pos);
+
+				if (cons >= prod)
+					return DRAINED;
+
+				size_t data_size = map.max_entries;
+				uint64 mask = data_size - 1;
+				uint64 off = cons & mask;
+				uint8 * hdrp = data_base + off;
+
+				uint32 hdr_len = Atomics.load_u32_acquire ((uint32 *) hdrp);
+				uint32 flags_mask = BpfRingbufFlags.BUSY | BpfRingbufFlags.DISCARD;
+				uint32 flags = hdr_len & flags_mask;
+				uint32 sample_len = hdr_len & ~flags_mask;
+
+				if ((flags & BpfRingbufFlags.BUSY) != 0)
+					return DRAINED;
+
+				assert (sample_len <= data_size - BPF_RINGBUF_HEADER_SIZE);
+
+				var total_len = (uint32) round_up_8 (sample_len + BPF_RINGBUF_HEADER_SIZE);
+
+				if ((flags & BpfRingbufFlags.DISCARD) != 0) {
 					Atomics.store_u64_release (consumer_pos, cons + total_len);
-
-					if (action == STOP)
-						return STOPPED;
+					continue;
 				}
-			}
 
-			public enum DrainStatus {
-				DRAINED,
-				STOPPED,
-			}
+				unowned uint8[] payload = (uint8[]) (hdrp + BPF_RINGBUF_HEADER_SIZE);
+				var action = on_record (payload[:sample_len]);
 
-			public delegate RecordAction RecordHandler (uint8[] payload);
+				Atomics.store_u64_release (consumer_pos, cons + total_len);
 
-			public enum RecordAction {
-				CONTINUE,
-				STOP,
+				if (action == STOP)
+					return STOPPED;
 			}
 		}
 
-		private void lookup_map_value (FileDescriptor map_fd, uint32 key, void * value) throws Error {
-			var attr = BpfAttrMapElem ();
-			attr.map_fd = map_fd.handle;
-			attr.key = (uintptr) &key;
-			attr.value = (uintptr) value;
-
-			bpf_call (MAP_LOOKUP_ELEM, &attr, sizeof (BpfAttrMapElem));
+		public enum DrainStatus {
+			DRAINED,
+			STOPPED,
 		}
 
-		private void update_map_value (FileDescriptor map_fd, uint32 key, void * value) throws Error {
-			var attr = BpfAttrMapElem ();
-			attr.map_fd = map_fd.handle;
-			attr.key = (uintptr) &key;
-			attr.value = (uintptr) value;
-			attr.flags = BPF_ANY;
+		public delegate RecordAction RecordHandler (uint8[] payload);
 
-			bpf_call (MAP_UPDATE_ELEM, &attr, sizeof (BpfAttrMapElem));
-		}
-
-		private void delete_map_value (FileDescriptor map_fd, uint32 key) throws Error {
-			var attr = BpfAttrMapElem ();
-			attr.map_fd = map_fd.handle;
-			attr.key = (uintptr) &key;
-
-			bpf_call (MAP_DELETE_ELEM, &attr, sizeof (BpfAttrMapElem));
-		}
-
-		private int bpf_call (BpfCommand cmd, void * attr, size_t attr_size) throws Error {
-			int r = Linux.syscall (LinuxSyscall.BPF, cmd, attr, attr_size);
-			if (r == -1)
-				throw_errno ("bpf() failed (cmd=%d)".printf (cmd));
-			return r;
+		public enum RecordAction {
+			CONTINUE,
+			STOP,
 		}
 	}
 
 	namespace PerfEvent {
-		public class Monitor {
-			public FileDescriptor fd;
-
-			public Monitor (PerfEventAttr * attr, int pid, int cpu, int group_fd, uint flags) throws Error {
-				int r = Linux.syscall (LinuxSyscall.PERF_EVENT_OPEN, attr, pid, cpu, group_fd, flags);
-				if (r == -1)
-					throw_errno ("perf_event_open() failed");
-				this.fd = new FileDescriptor (r);
-			}
-
-			public void set_bpf (FileDescriptor program) throws Error {
-				if (Posix.ioctl (fd.handle, (int) PerfEventIoctl.SET_BPF, program.handle) == -1)
-					throw_errno ("PerfEventIoctl.SET_BPF failed");
-			}
-
-			public void enable () throws Error {
-				if (Posix.ioctl (fd.handle, (int) PerfEventIoctl.ENABLE, 0) == -1)
-					throw_errno ("PerfEventIoctl.ENABLE failed");
-			}
-
-			public void disable () throws Error {
-				if (Posix.ioctl (fd.handle, (int) PerfEventIoctl.DISABLE, 0) == -1)
-					throw_errno ("PerfEventIoctl.DISABLE failed");
-			}
-		}
-
-		public uint32 get_tracepoint_id (string category, string name) throws Error {
-			string[] roots = {
-				"/sys/kernel/tracing",
-				"/sys/kernel/debug/tracing",
-			};
-
-			foreach (var root in roots) {
-				string path = "%s/events/%s/%s/id".printf (root, category, name);
-				if (!FileUtils.test (path, FileTest.EXISTS))
-					continue;
-
-				string contents;
-				try {
-					FileUtils.get_contents (path, out contents);
-				} catch (FileError e) {
-					throw new Error.PERMISSION_DENIED ("%s", e.message);
-				}
-
-				return uint.parse (contents.chomp ());
-			}
-
-			throw new Error.NOT_SUPPORTED ("Tracefs not available (need tracefs/debugfs mounted and readable)");
+		public FileDescriptor open (PerfEventAttr * attr, int pid, int cpu, int group_fd, uint flags) throws Error {
+			int r = Linux.syscall (LinuxSyscall.PERF_EVENT_OPEN, attr, pid, cpu, group_fd, flags);
+			if (r == -1)
+				throw_errno ("perf_event_open() failed");
+			return new FileDescriptor (r);
 		}
 	}
 

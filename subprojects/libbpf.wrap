@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/frida/libbpf.git
+revision = 6c8d0d00a122fe126b7a3094f0785340128506f5
+depth = 1
+
+[provide]
+dependency_names = libbpf
+

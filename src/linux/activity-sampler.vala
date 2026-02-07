@@ -4,16 +4,11 @@ public sealed class Frida.ActivitySampler : Object {
 		construct;
 	}
 
-	private Bpf.ArrayMap? target_tgid;
-
-	private Bpf.RingbufReader? events_reader;
+	private BpfRingbufReader? events_reader;
 	private Source? events_source;
 
-	private FileDescriptor? prog_fd;
-
-	private Gee.Collection<PerfEvent.Monitor> monitors = new Gee.ArrayList<PerfEvent.Monitor> ();
-
-	private const size_t RINGBUF_SIZE = 1U << 22;
+	private Gee.Collection<FileDescriptor> perf_event_fds = new Gee.ArrayList<FileDescriptor> ();
+	private Gee.Collection<BpfLink> links = new Gee.ArrayList<BpfLink> ();
 
 	public ActivitySampler (uint pid) {
 		Object (pid: pid);
@@ -26,25 +21,19 @@ public sealed class Frida.ActivitySampler : Object {
 	}
 
 	public void start () throws Error {
-		target_tgid = new Bpf.ArrayMap (sizeof (uint32), 1);
-		target_tgid.update_u32 (0, pid);
+		var obj = BpfObject.open ("activity-sampler.elf", Frida.Data.HelperBackend.get_activity_sampler_elf_blob ().data);
 
-		var events = new Bpf.RingbufMap (RINGBUF_SIZE);
-		events_reader = new Bpf.RingbufReader (events);
+		var target_tgid = obj.maps.get_by_name ("target_tgid");
+		var events = obj.maps.get_by_name ("events");
 
-		Gum.ElfModule elf;
-		try {
-			var raw_elf = new Bytes.static (Frida.Data.HelperBackend.get_activity_sampler_elf_blob ().data);
-			elf = new Gum.ElfModule.from_blob (raw_elf);
-		} catch (Gum.Error e) {
-			assert_not_reached ();
-		}
+		obj.prepare ();
 
-		var maps = new Gee.HashMap<string, Bpf.Map> ();
-		maps["target_tgid"] = target_tgid;
-		maps["events"] = events;
+		target_tgid.update_u32_u32 (0, pid);
+		events_reader = new BpfRingbufReader (events);
 
-		prog_fd = Bpf.load_program_from_elf (PERF_EVENT, elf, "perf_event", maps, "Dual BSD/GPL");
+		obj.load ();
+
+		BpfProgram program = obj.programs.get_by_name ("on_perf_event");
 
 		uint ncpus = get_num_processors ();
 		for (uint cpu = 0; cpu != ncpus; cpu++) {
@@ -54,14 +43,14 @@ public sealed class Frida.ActivitySampler : Object {
 			pea.config = PERF_EVENT_COUNT_SW_CPU_CLOCK;
 			pea.sample_period = 1;
 
-			var monitor = new PerfEvent.Monitor (&pea, -1, (int) cpu, -1, 0);
-			monitor.set_bpf (prog_fd);
-			monitor.enable ();
+			var pefd = PerfEvent.open (&pea, -1, (int) cpu, -1, 0);
+			perf_event_fds.add (pefd);
 
-			monitors.add (monitor);
+			var link = program.attach_perf_event (pefd);
+			links.add (link);
 		}
 
-		var ch = new IOChannel.unix_new (events.fd.handle);
+		var ch = new IOChannel.unix_new (events.fd);
 		var src = new IOSource (ch, IN);
 		var state = new WatchState (this, events_reader);
 		src.set_callback (state.on_ready);
@@ -73,18 +62,9 @@ public sealed class Frida.ActivitySampler : Object {
 		events_source?.destroy ();
 		events_source = null;
 
-		foreach (var monitor in monitors) {
-			try {
-				monitor.disable ();
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-		}
-		monitors.clear ();
+		links.clear ();
 
-		prog_fd = null;
 		events_reader = null;
-		target_tgid = null;
 	}
 
 	private void handle_sample (SampleEvent * e) {
@@ -106,9 +86,9 @@ public sealed class Frida.ActivitySampler : Object {
 
 	private class WatchState : Object {
 		public unowned ActivitySampler sampler;
-		public Bpf.RingbufReader reader;
+		public BpfRingbufReader reader;
 
-		public WatchState (ActivitySampler sampler, Bpf.RingbufReader reader) {
+		public WatchState (ActivitySampler sampler, BpfRingbufReader reader) {
 			this.sampler = sampler;
 			this.reader = reader;
 		}

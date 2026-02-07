@@ -14,35 +14,18 @@ public sealed class Frida.SyscallTracer : Object {
 
 	private State _state = STOPPED;
 
-	private Bpf.HashMap? target_tgids;
-	private Bpf.HashMap? target_uids;
+	private BpfMap? target_tgids;
+	private BpfMap? target_uids;
 
-	private Bpf.RingbufReader? events_reader;
+	private BpfRingbufReader? events_reader;
 	private IOChannel? events_channel;
 	private Source? events_source;
 
-	private Bpf.PercpuArrayMap? stats;
+	private BpfMap? stats;
 
-	private Bpf.StackTraceMap? stacks;
+	private BpfMap? stacks;
 
-	private Bpf.HashMap? inflight;
-
-	private FileDescriptor? prog_enter_fd;
-	private FileDescriptor? prog_exit_fd;
-
-	private Gee.Collection<PerfEvent.Monitor> monitors = new Gee.ArrayList<PerfEvent.Monitor> ();
-
-	private const size_t RINGBUF_SIZE = 1U << 22;
-
-	private const size_t MAX_TARGET_TGIDS = 4096;
-	private const size_t MAX_TARGET_UIDS = 256;
-	private const size_t MAX_STACK_ENTRIES = 16384;
-	private const size_t MAX_INFLIGHT_COPIES = 4096;
-	private const size_t INFLIGHT_SIZE = (4 + 2 + 2) + (2 + 2) + (8 + 4 + 4);
-
-	private const size_t MAX_DEPTH = 16;
-	private const size_t MAX_PATH = 256;
-	private const size_t MAX_SOCK = 128;
+	private Gee.Collection<BpfLink> links = new Gee.ArrayList<BpfLink> ();
 
 	public const size_t SYSCALL_NARGS = 6;
 
@@ -55,72 +38,26 @@ public sealed class Frida.SyscallTracer : Object {
 	public void start () throws Error {
 		assert (state == STOPPED);
 
-		target_tgids = new Bpf.HashMap (sizeof (uint8), MAX_TARGET_TGIDS);
-		target_uids = new Bpf.HashMap (sizeof (uint8), MAX_TARGET_UIDS);
+		var obj = BpfObject.open ("syscall-tracer.elf", Frida.Data.HelperBackend.get_syscall_tracer_elf_blob ().data);
 
-		var events = new Bpf.RingbufMap (RINGBUF_SIZE);
-		events_reader = new Bpf.RingbufReader (events);
+		target_tgids = obj.maps.get_by_name ("target_tgids");
+		target_uids = obj.maps.get_by_name ("target_uids");
+		var events = obj.maps.get_by_name ("events");
+		stats = obj.maps.get_by_name ("stats");
+		stacks = obj.maps.get_by_name ("stacks");
 
-		stats = new Bpf.PercpuArrayMap (sizeof (Stats), 1);
+		obj.prepare ();
 
-		stacks = new Bpf.StackTraceMap (MAX_DEPTH, MAX_STACK_ENTRIES);
+		events_reader = new BpfRingbufReader (events);
 
-		inflight = new Bpf.HashMap (INFLIGHT_SIZE, MAX_INFLIGHT_COPIES);
+		obj.load ();
 
-		Gum.ElfModule elf;
-		try {
-			var raw_elf = new Bytes.static (Frida.Data.HelperBackend.get_syscall_tracer_elf_blob ().data);
-			elf = new Gum.ElfModule.from_blob (raw_elf);
-		} catch (Gum.Error e) {
-			assert_not_reached ();
+		foreach (var program in obj.programs) {
+			var link = program.attach ();
+			links.add (link);
 		}
 
-		var maps = new Gee.HashMap<string, Bpf.Map> ();
-		maps["target_tgids"] = target_tgids;
-		maps["target_uids"] = target_uids;
-		maps["events"] = events;
-		maps["stats"] = stats;
-		maps["stacks"] = stacks;
-		maps["inflight"] = inflight;
-
-		prog_enter_fd = Bpf.load_program_from_elf (TRACEPOINT, elf, "tracepoint/raw_syscalls/sys_enter", maps, "Dual BSD/GPL");
-		prog_exit_fd = Bpf.load_program_from_elf (TRACEPOINT, elf, "tracepoint/raw_syscalls/sys_exit", maps, "Dual BSD/GPL");
-
-		uint32 enter_tp_id = PerfEvent.get_tracepoint_id ("raw_syscalls", "sys_enter");
-		uint32 exit_tp_id = PerfEvent.get_tracepoint_id ("raw_syscalls", "sys_exit");
-
-		uint ncpus = get_num_processors ();
-		for (uint cpu = 0; cpu != ncpus; cpu++) {
-			{
-				var pea = PerfEventAttr ();
-				pea.event_type = TRACEPOINT;
-				pea.size = (uint32) sizeof (PerfEventAttr);
-				pea.config = enter_tp_id;
-				pea.sample_period = 1;
-
-				var m = new PerfEvent.Monitor (&pea, -1, 0, -1, 0);
-				if (cpu == 0)
-					m.set_bpf (prog_enter_fd);
-				m.enable ();
-				monitors.add (m);
-			}
-
-			{
-				var pea = PerfEventAttr ();
-				pea.event_type = TRACEPOINT;
-				pea.size = (uint32) sizeof (PerfEventAttr);
-				pea.config = exit_tp_id;
-				pea.sample_period = 1;
-
-				var m = new PerfEvent.Monitor (&pea, -1, 0, -1, 0);
-				if (cpu == 0)
-					m.set_bpf (prog_exit_fd);
-				m.enable ();
-				monitors.add (m);
-			}
-		}
-
-		events_channel = new IOChannel.unix_new (events.fd.handle);
+		events_channel = new IOChannel.unix_new (events.fd);
 		arm_events_watch ();
 
 		_state = STARTED;
@@ -131,21 +68,11 @@ public sealed class Frida.SyscallTracer : Object {
 		events_source = null;
 		events_channel = null;
 
-		foreach (var monitor in monitors) {
-			try {
-				monitor.disable ();
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-		}
-		monitors.clear ();
+		links.clear ();
 
-		prog_exit_fd = null;
-		prog_enter_fd = null;
-		inflight = null;
+		events_reader = null;
 		stacks = null;
 		stats = null;
-		events_reader = null;
 		target_uids = null;
 		target_tgids = null;
 
@@ -153,21 +80,19 @@ public sealed class Frida.SyscallTracer : Object {
 	}
 
 	public void add_target_tgid (uint tgid) throws Error {
-		uint8 v = 1;
-		target_tgids.update_raw (tgid, &v);
+		target_tgids.update_u32_u8 (tgid, 1);
 	}
 
 	public void remove_target_tgid (uint tgid) throws Error {
-		target_tgids.remove (tgid);
+		target_tgids.remove_u32 (tgid);
 	}
 
 	public void add_target_uid (uint uid) throws Error {
-		uint8 v = 1;
-		target_uids.update_raw (uid, &v);
+		target_uids.update_u32_u8 (uid, 1);
 	}
 
 	public void remove_target_uid (uint uid) throws Error {
-		target_uids.remove (uid);
+		target_uids.remove_u32 (uid);
 	}
 
 	public DrainStatus drain_events (SyscallEventHandler on_event) {
@@ -177,8 +102,8 @@ public sealed class Frida.SyscallTracer : Object {
 			SyscallEventView ev = { c, payload };
 
 			return (on_event (ev) == CONTINUE)
-					? Bpf.RingbufReader.RecordAction.CONTINUE
-					: Bpf.RingbufReader.RecordAction.STOP;
+					? BpfRingbufReader.RecordAction.CONTINUE
+					: BpfRingbufReader.RecordAction.STOP;
 		});
 
 		if (status == DRAINED)
@@ -219,9 +144,9 @@ public sealed class Frida.SyscallTracer : Object {
 
 	private class WatchState : Object {
 		public unowned SyscallTracer tracer;
-		public Bpf.RingbufReader reader;
+		public BpfRingbufReader reader;
 
-		public WatchState (SyscallTracer tracer, Bpf.RingbufReader reader) {
+		public WatchState (SyscallTracer tracer, BpfRingbufReader reader) {
 			this.tracer = tracer;
 			this.reader = reader;
 		}
@@ -278,15 +203,15 @@ public sealed class Frida.SyscallTracer : Object {
 	}
 
 	public void resolve_stacks (uint32[] stack_ids, StackFramesHandler on_frames) {
-		uint64 tmp[MAX_DEPTH];
+		var tmp = new uint64[stacks.value_size / sizeof (uint64)];
 
 		foreach (var sid in stack_ids) {
 			uint n = 0;
 
 			try {
-				stacks.lookup_raw (sid, (void *) tmp);
+				stacks.lookup_raw ((uint8[]) &sid, (uint8[]) tmp);
 
-				for (uint i = 0; i != MAX_DEPTH; i++) {
+				for (uint i = 0; i != tmp.length; i++) {
 					if (tmp[i] == 0)
 						break;
 					n++;
@@ -303,7 +228,8 @@ public sealed class Frida.SyscallTracer : Object {
 	public Stats read_stats () throws Error {
 		Stats total = Stats ();
 
-		stats.foreach_value<Stats?> (0, (cpu, s) => {
+		uint32 key = 0;
+		stats.foreach_percpu_value<Stats?> ((uint8[]) &key, (cpu, s) => {
 			total.emitted_events += s.emitted_events;
 			total.emitted_bytes += s.emitted_bytes;
 

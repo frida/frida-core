@@ -45,6 +45,7 @@ if host_os_family == 'linux'
   extra_vala_args += [
     '--pkg=linux',
     '--pkg=frida-atomics',
+    '--pkg=libbpf',
   ]
 
   syscall_arch_from_abi = {
@@ -71,6 +72,9 @@ endif
 extra_deps = []
 if host_os_family != 'windows'
   extra_deps += gio_unix_dep
+endif
+if host_os_family == 'linux'
+  extra_deps += libbpf_dep
 endif
 
 base_vala_args = [gum_vala_args, '--pkg=gio-2.0', '--pkg=json-glib-1.0']

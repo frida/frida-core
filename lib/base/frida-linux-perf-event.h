@@ -2,7 +2,6 @@
 #define __FRIDA_LINUX_PERF_EVENT_H__
 
 #include <glib.h>
-#include <sys/ioctl.h>
 
 G_BEGIN_DECLS
 
@@ -10,7 +9,6 @@ G_BEGIN_DECLS
 
 typedef struct _FridaPerfEventAttr FridaPerfEventAttr;
 typedef guint32 FridaPerfEventType;
-typedef gulong FridaPerfEventIoctl;
 
 struct _FridaPerfEventAttr
 {
@@ -47,15 +45,8 @@ struct _FridaPerfEventAttr
 
 enum _FridaPerfEventType
 {
-  FRIDA_PERF_EVENT_TYPE_SOFTWARE = 1,
-  FRIDA_PERF_EVENT_TYPE_TRACEPOINT,
-};
-
-enum _FridaPerfEventIoctl
-{
-  FRIDA_PERF_EVENT_IOCTL_ENABLE  = _IO ('$', 0),
-  FRIDA_PERF_EVENT_IOCTL_DISABLE = _IO ('$', 1),
-  FRIDA_PERF_EVENT_IOCTL_SET_BPF = _IOW ('$', 8, guint32),
+  FRIDA_PERF_EVENT_TYPE_HARDWARE,
+  FRIDA_PERF_EVENT_TYPE_SOFTWARE,
 };
 
 G_END_DECLS

@@ -381,6 +381,10 @@ else
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
 
+if host_os_family == 'linux'
+  libbpf_dep = dependency('libbpf')
+endif
+
 if host_os == 'android'
   minizip_dep = dependency('minizip', required: false, default_options: [
     'zlib=enabled',

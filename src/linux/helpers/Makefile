@@ -12,8 +12,6 @@ endif
 host_arch := $(shell echo $(host_machine) | cut -d"-" -f2)
 
 crossfile := $(BUILDDIR)/$(host_machine)/frida-$(host_machine).txt
-ebpf_cc := $(shell grep "c = " $(crossfile) | cut -c6- | cut -d] -f1 | sed -e "s/,//g")
-ebpf_strip := $(shell grep "strip = " $(crossfile) | cut -c10- | sed "s,'--strip-all',," | sed -e "s/.$$//" -e "s/,//g")
 valac := $(shell grep "vala = " $(crossfile) | cut -c9- | sed -e "s/.$$//" -e "s/,//g")
 
 artifacts_dir := artifacts
@@ -62,16 +60,15 @@ define recreate_build_dir
 endef
 
 define bpf_compile
-	$(ebpf_cc) \
+	clang \
 		-target $(1) \
-		-O2 -g0 \
+		-O2 -g \
 		-I$(build_dir) \
 		-I$(kernel_headers_dir) \
 		-I$(libbpf_devel_dir) \
 		$< \
 		-c \
 		-o $(bpf_obj)
-	$(ebpf_strip) --strip-debug --strip-unneeded $(bpf_obj)
 	mkdir -p $(@D)
 	install -m644 $(bpf_obj) $@
 endef
@@ -122,19 +119,17 @@ ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
 $(kernel_headers_dir):
 	mkdir -p $(kernel_headers_dir)
 	curl -L -o $(kernel_headers_rpm) $(kernel_headers_url)
-	rpm2cpio $(kernel_headers_rpm) | tar -xpf - \
+	rpm2cpio -f pax $(kernel_headers_rpm) | tar -xpf - \
 		-C $(kernel_headers_dir) \
-		--strip-components=3 \
-		usr/include
+		--strip-components=3
 	rm -f $(kernel_headers_rpm)
 
 $(libbpf_devel_dir):
 	mkdir -p $(libbpf_devel_dir)
 	curl -L -o $(libbpf_devel_rpm) $(libbpf_devel_url)
-	rpm2cpio $(libbpf_devel_rpm) | tar -xpf - \
+	rpm2cpio -f pax $(libbpf_devel_rpm) | tar -xpf - \
 		-C $(libbpf_devel_dir) \
-		--strip-components=3 \
-		usr/include
+		--strip-components=3
 	rm -f $(libbpf_devel_rpm)
 
 .PHONY: build-native build-bpf
