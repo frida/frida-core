@@ -37,7 +37,7 @@ bpf_arch_pairs := \
 
 build-native: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
-	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
+	$(MESON) setup --cross-file $(crossfile) -Db_lto=false build
 	$(MESON) compile -C build
 	install -m644 build/bootstrapper.bin $(native_outdir)/bootstrapper.bin
 	install -m644 build/loader.bin $(native_outdir)/loader.bin
