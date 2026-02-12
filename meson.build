@@ -614,6 +614,11 @@ if lzfse_dep.found()
   backend_reqs_private += 'lzfse'
 endif
 
+if host_os_family == 'linux'
+  backend_deps_private += libbpf_dep
+  backend_reqs_private += 'libbpf'
+endif
+
 if host_os_family in ['darwin', 'freebsd'] or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
   vala_flags += '--define=HAVE_OPENPTY'
 endif
