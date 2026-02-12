@@ -34,6 +34,7 @@ native_outdir := $(artifacts_dir)/native/$(host_arch)
 bpf_outdir := $(artifacts_dir)/bpf
 bpf_noarch_progs := \
 	activity-sampler \
+	softwall \
 	$(NULL)
 bpf_arch_progs := \
 	syscall-tracer \

@@ -405,6 +405,9 @@ namespace Frida {
 			if (protocol == "syscall-trace")
 				return new SyscallTraceServiceSession ();
 
+			if (protocol == "softwall")
+				return new SoftwallServiceSession ();
+
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
 
@@ -2244,76 +2247,267 @@ namespace Frida {
 
 			return null;
 		}
+	}
 
-		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
-			uint8 buf[46];
-			unowned string? res = Posix.inet_ntop (af, src, buf);
-			return (res != null) ? res : "?";
+	private sealed class SoftwallServiceSession : Object, ServiceSession {
+		private Softwall? wall = new Softwall ();
+
+		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
+		construct {
+			wall.events_available.connect (on_events_available);
 		}
 
-		private static uint32 resolve_uid_from_username (string name) throws Error {
-			unowned Posix.Passwd? pw = Posix.getpwnam (name);
-			if (pw == null)
-				throw new Error.INVALID_ARGUMENT ("Unknown user: %s", name);
-
-			return (uint32) pw.pw_uid;
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+			ensure_active ();
 		}
 
-		private delegate void UInt32Handler (uint32 v) throws Error;
-		private delegate void StringHandler (string s) throws Error;
+		private void ensure_active () throws Error {
+			if (wall == null)
+				throw new Error.INVALID_OPERATION ("Service is closed");
 
-		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
-			uint n = reader.count_elements ();
-			var arr = new uint32[n];
+			if (wall.state == Softwall.State.STOPPED)
+				wall.start ();
+		}
 
-			for (uint i = 0; i != n; i++) {
-				int64 v = reader.read_element (i).get_int64_value ();
-				if (v < 0 || v > uint32.MAX)
-					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			if (wall == null)
+				return;
 
-				arr[i] = (uint32) v;
-				reader.end_element ();
+			wall.stop ();
+			wall = null;
+
+			close ();
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			ensure_active ();
+
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			var reply = new VariantBuilder (VariantType.VARDICT);
+
+			if (type == "read-events") {
+				var events = new VariantBuilder (new VariantType ("av"));
+
+				size_t total = 0;
+
+				var drain_status = wall.drain_events (ev => {
+					Variant item = new Variant.tuple ({
+						"audit",
+						ev->parent.time_ns,
+						ev->parent.tgid,
+						ev->parent.tid,
+						ev->rule_id
+					});
+					size_t item_size = (size_t) item.get_size ();
+
+					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
+						return Softwall.EventFlow.STOP;
+
+					events.add_value (new Variant.variant (item));
+					total += item_size;
+
+					return Softwall.EventFlow.CONTINUE;
+				});
+
+				vardict_add (reply, "events", events.end ());
+				vardict_add (reply, "status",
+					(drain_status == Softwall.DrainStatus.DRAINED) ? "drained" : "more");
+
+				return reply.end ();
 			}
 
-			return arr;
-		}
+			if (type == "read-stats") {
+				var stats = wall.read_stats ();
 
-		private static uint64[] read_uint64_array (VariantReader reader) throws Error {
-			uint n = reader.count_elements ();
-			var arr = new uint64[n];
+				vardict_add (reply, "emitted-events", stats.emitted_events);
+				vardict_add (reply, "emitted-bytes", stats.emitted_bytes);
 
-			for (uint i = 0; i != n; i++) {
-				arr[i] = reader.read_element (i).get_uint64_value ();
-				reader.end_element ();
+				vardict_add (reply, "dropped-events", stats.dropped_events);
+				vardict_add (reply, "dropped-bytes", stats.dropped_bytes);
+
+				return reply.end ();
 			}
 
-			return arr;
+			if (type == "add-targets") {
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					foreach_uint32 (reader, pid => wall.add_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uids")) {
+					reader.read_member ("uids");
+					foreach_uint32 (reader, uid => wall.add_target_uid (uid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("users")) {
+					reader.read_member ("users");
+					foreach_string (reader, username => {
+						var uid = resolve_uid_from_username (username);
+						wall.add_target_uid (uid);
+					});
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "remove-targets") {
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					foreach_uint32 (reader, pid => wall.remove_target_tgid (pid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("uids")) {
+					reader.read_member ("uids");
+					foreach_uint32 (reader, uid => wall.remove_target_uid (uid));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("users")) {
+					reader.read_member ("users");
+					foreach_string (reader, username => {
+						var uid = resolve_uid_from_username (username);
+						wall.remove_target_uid (uid);
+					});
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "add-rule") {
+				reader.read_member ("rule");
+
+				reader.read_member ("when");
+				if (!reader.has_member ("file_open"))
+					throw new Error.INVALID_ARGUMENT ("Unsupported rule.when (expected file_open)");
+
+				reader.read_member ("file_open");
+				string path = reader.read_member ("path").get_string_value ();
+				reader.end_member (); /* path */
+				reader.end_member (); /* file_open */
+				reader.end_member (); /* when */
+
+				string action_str = reader.read_member ("action").get_string_value ();
+				reader.end_member (); /* action */
+
+				reader.end_member (); /* rule */
+
+				var action = parse_action (action_str);
+
+				var id = wall.add_file_open_rule (path, action);
+
+				vardict_add (reply, "id", id);
+
+				return reply.end ();
+			}
+
+			if (type == "remove-rule") {
+				uint32 id = (uint32) reader.read_member ("id").get_int64_value ();
+				reader.end_member ();
+
+				wall.remove_rule (id);
+
+				return reply.end ();
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
-		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
-			uint n = reader.count_elements ();
-			for (uint i = 0; i != n; i++) {
-				int64 v = reader.read_element (i).get_int64_value ();
-				if (v < 0 || v > uint32.MAX)
-					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+		private void on_events_available () {
+			var b = new VariantBuilder (VariantType.VARDICT);
+			vardict_add (b, "type", "events-available");
+			message (b.end ());
+		}
 
-				cb ((uint32) v);
-
-				reader.end_element ();
+		private static Softwall.Action parse_action (string s) throws Error {
+			switch (s) {
+				case "deny":
+					return Softwall.Action.DENY;
+				case "not-found":
+					return Softwall.Action.NOT_FOUND;
+				default:
+					throw new Error.INVALID_ARGUMENT ("Unsupported action: %s", s);
 			}
 		}
+	}
 
-		private static void foreach_string (VariantReader reader, StringHandler cb) throws Error {
-			uint n = reader.count_elements ();
-			for (uint i = 0; i != n; i++) {
-				unowned string s = reader.read_element (i).get_string_value ();
-				cb (s);
-				reader.end_element ();
-			}
+	private string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {
+		uint8 buf[46];
+		unowned string? res = Posix.inet_ntop (af, src, buf);
+		return (res != null) ? res : "?";
+	}
+
+	private uint32 resolve_uid_from_username (string name) throws Error {
+		unowned Posix.Passwd? pw = Posix.getpwnam (name);
+		if (pw == null)
+			throw new Error.INVALID_ARGUMENT ("Unknown user: %s", name);
+
+		return (uint32) pw.pw_uid;
+	}
+
+	private delegate void UInt32Handler (uint32 v) throws Error;
+	private delegate void StringHandler (string s) throws Error;
+
+	private uint32[] read_uint32_array (VariantReader reader) throws Error {
+		uint n = reader.count_elements ();
+		var arr = new uint32[n];
+
+		for (uint i = 0; i != n; i++) {
+			int64 v = reader.read_element (i).get_int64_value ();
+			if (v < 0 || v > uint32.MAX)
+				throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+			arr[i] = (uint32) v;
+			reader.end_element ();
 		}
 
-		private static void vardict_add (VariantBuilder b, string key, Variant val) {
-			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
+		return arr;
+	}
+
+	private uint64[] read_uint64_array (VariantReader reader) throws Error {
+		uint n = reader.count_elements ();
+		var arr = new uint64[n];
+
+		for (uint i = 0; i != n; i++) {
+			arr[i] = reader.read_element (i).get_uint64_value ();
+			reader.end_element ();
 		}
+
+		return arr;
+	}
+
+	private void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+		uint n = reader.count_elements ();
+		for (uint i = 0; i != n; i++) {
+			int64 v = reader.read_element (i).get_int64_value ();
+			if (v < 0 || v > uint32.MAX)
+				throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+			cb ((uint32) v);
+
+			reader.end_element ();
+		}
+	}
+
+	private void foreach_string (VariantReader reader, StringHandler cb) throws Error {
+		uint n = reader.count_elements ();
+		for (uint i = 0; i != n; i++) {
+			unowned string s = reader.read_element (i).get_string_value ();
+			cb (s);
+			reader.end_element ();
+		}
+	}
+
+	private void vardict_add (VariantBuilder b, string key, Variant val) {
+		b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
 	}
 }
