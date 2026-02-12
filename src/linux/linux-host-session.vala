@@ -1792,7 +1792,6 @@ namespace Frida {
 
 	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
 		private SyscallTracer? tracer = new SyscallTracer ();
-		private SymbolResolver resolver = new SymbolResolver ();
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
 
@@ -1834,11 +1833,38 @@ namespace Frida {
 
 			if (type == "read-events") {
 				var events = new VariantBuilder (new VariantType ("av"));
+				var processes = new VariantBuilder (new VariantType ("a(us)"));
+
+				var abi_by_tgid = new Gee.HashMap<uint32, SyscallTracer.Abi> ();
+				var expired_tgids = new Gee.HashSet<uint32> ();
 
 				size_t total = 0;
 
 				var drain_status = tracer.drain_events (ev => {
-					Variant item = build_event_variant (ev);
+					var event = ev.event;
+					uint32 tgid = event->tgid;
+
+					if (expired_tgids.contains (tgid))
+						return CONTINUE;
+
+					var abi = abi_by_tgid[tgid];
+					if (abi == INVALID) {
+						try {
+							abi = tracer.get_process_abi (tgid);
+						} catch (Error e) {
+							expired_tgids.add (tgid);
+							return CONTINUE;
+						}
+						abi_by_tgid[tgid] = abi;
+					}
+
+					uint8 nargs = (uint8) SyscallTracer.SYSCALL_NARGS;
+					if (event->type == SyscallTracer.EventType.SYSCALL_ENTER) {
+						var se = (SyscallTracer.SyscallEvent *) ev.bytes;
+						nargs = get_nargs_for (abi, se->syscall_nr);
+					}
+
+					Variant item = build_event_variant (ev, nargs);
 					size_t item_size = (size_t) item.get_size ();
 
 					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
@@ -1850,8 +1876,15 @@ namespace Frida {
 					return CONTINUE;
 				});
 
+				foreach (var e in abi_by_tgid.entries) {
+					unowned string abi = (e.value == COMPAT32) ? "compat32" : "native";
+					processes.add ("(us)", e.key, abi);
+				}
+
 				vardict_add (reply, "events", events.end ());
-				vardict_add (reply, "status", (drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
+				vardict_add (reply, "processes", processes.end ());
+				vardict_add (reply, "status",
+					(drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
 
 				return reply.end ();
 			}
@@ -1876,7 +1909,10 @@ namespace Frida {
 			}
 
 			if (type == "resolve-symbols") {
-				uint pid = (uint) reader.read_member ("pid").get_int64_value ();
+				var pid = (uint) reader.read_member ("pid").get_int64_value ();
+				reader.end_member ();
+
+				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
 				reader.end_member ();
 
 				reader.read_member ("addresses");
@@ -1886,7 +1922,7 @@ namespace Frida {
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
 				var modules = new VariantBuilder (new VariantType ("as"));
 
-				resolver.resolve_addresses (pid, addrs,
+				tracer.resolver.resolve_addresses (pid, gen, addrs,
 					(addr, mod_idx, rel32) => {
 						symbols.add ("(uu)", mod_idx, rel32);
 					},
@@ -1982,53 +2018,47 @@ namespace Frida {
 			message (b.end ());
 		}
 
-		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev) {
-			unowned SyscallTracer.SyscallEventCommon * c = ev.common;
-			var phase = (SyscallTracer.Phase) c->phase;
-
-			size_t header_len = sizeof (SyscallTracer.SyscallEventCommon);
-			size_t payload_len = (size_t) c->payload_len;
-			uint16 attach_count = c->attachment_count;
+		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev, uint8 nargs) {
+			var event = ev.event;
+			var type = (SyscallTracer.EventType) event->type;
 
 			unowned uint8[] buf = ev.bytes;
-			assert (header_len + payload_len <= buf.length);
+			size_t event_size = buf.length;
+			uint8 * payload_end = (uint8 *) buf + event_size;
 
-			uint8 * p = (uint8 *) buf + header_len;
-			uint8 * payload_end = p + payload_len;
-
-			uint64 args[SyscallTracer.SYSCALL_NARGS];
+			var args = new uint64[nargs];
 			int64 retval = 0;
 
 			uint8 * a;
 
-			if (phase == SyscallTracer.Phase.ENTER) {
-				assert ((size_t) (payload_end - p) >= sizeof (SyscallTracer.SyscallEnterPayload));
-				unowned SyscallTracer.SyscallEnterPayload * ep = (SyscallTracer.SyscallEnterPayload *) p;
-				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
-					args[i] = ep->args[i];
-				a = (uint8 *) p + sizeof (SyscallTracer.SyscallEnterPayload);
+			if (type == SYSCALL_ENTER) {
+				assert (event_size >= sizeof (SyscallTracer.SyscallEnterEvent));
+				var e = (SyscallTracer.SyscallEnterEvent *) buf;
+				for (int i = 0; i != nargs; i++)
+					args[i] = e->args[i];
+				a = (uint8 *) (e + 1);
 			} else {
-				assert ((size_t) (payload_end - p) >= sizeof (SyscallTracer.SyscallExitPayload));
-				unowned SyscallTracer.SyscallExitPayload * xp = (SyscallTracer.SyscallExitPayload *) p;
-				retval = xp->retval;
-				a = (uint8 *) p + sizeof (SyscallTracer.SyscallExitPayload);
+				assert (event_size >= sizeof (SyscallTracer.SyscallExitEvent));
+				var e = (SyscallTracer.SyscallExitEvent *) buf;
+				retval = e->retval;
+				a = (uint8 *) (e + 1);
 			}
 
 			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
 
-			for (uint i = 0; i != attach_count; i++) {
-				assert ((size_t) (payload_end - a) >= sizeof (SyscallTracer.AttachmentHeader));
-				unowned SyscallTracer.AttachmentHeader * h = (SyscallTracer.AttachmentHeader *) a;
+			for (uint i = 0; i != event->attachment_count; i++) {
+				assert (payload_end - a >= sizeof (SyscallTracer.AttachmentHeader));
+				var h = (SyscallTracer.AttachmentHeader *) a;
 				a += sizeof (SyscallTracer.AttachmentHeader);
 
-				uint idx = h->arg_index;
-				size_t len = (size_t) h->len;
+				uint32 idx = h->arg_index;
+				assert (idx < nargs);
 
+				var len = h->len;
 				assert (a + len <= payload_end);
-				if (idx < SyscallTracer.SYSCALL_NARGS) {
-					Variant v = decode_attachment_value (phase, idx, (SyscallTracer.AttachmentType) h->type, a, len);
-					attachments.add_value (new Variant.tuple ({ idx, new Variant.variant (v) }));
-				}
+
+				Variant v = decode_attachment_value (type, idx, (SyscallTracer.AttachmentType) h->type, a, len);
+				attachments.add_value (new Variant.tuple ({ idx, new Variant.variant (v) }));
 
 				a += len;
 			}
@@ -2036,37 +2066,40 @@ namespace Frida {
 			Variant args_v;
 			{
 				var ab = new VariantBuilder (new VariantType ("at"));
-				for (int i = 0; i != SyscallTracer.SYSCALL_NARGS; i++)
+				for (int i = 0; i != nargs; i++)
 					ab.add_value (args[i]);
 				args_v = ab.end ();
 			}
 
-			if (phase == ENTER) {
+			var se = (SyscallTracer.SyscallEvent *) buf;
+			if (type == SYSCALL_ENTER) {
 				return new Variant.tuple ({
 					"enter",
-					c->time_ns,
-					c->tgid,
-					c->tid,
-					c->syscall_nr,
-					c->stack_id,
+					event->time_ns,
+					event->tgid,
+					event->tid,
+					se->syscall_nr,
+					se->stack_id,
+					se->map_gen,
 					args_v,
 					attachments.end ()
 				});
 			} else {
 				return new Variant.tuple ({
 					"exit",
-					c->time_ns,
-					c->tgid,
-					c->tid,
-					c->syscall_nr,
-					c->stack_id,
+					event->time_ns,
+					event->tgid,
+					event->tid,
+					se->syscall_nr,
+					se->stack_id,
+					se->map_gen,
 					retval,
 					attachments.end ()
 				});
 			}
 		}
 
-		private static Variant decode_attachment_value (SyscallTracer.Phase phase, uint arg_index,
+		private static Variant decode_attachment_value (SyscallTracer.EventType event_type, uint arg_index,
 				SyscallTracer.AttachmentType type, uint8 * data, size_t len) {
 			switch (type) {
 				case STRING: {
@@ -2084,7 +2117,7 @@ namespace Frida {
 				}
 
 				case BYTES: {
-					if (phase == ENTER && arg_index == 1) {
+					if (event_type == SYSCALL_ENTER && arg_index == 1) {
 						Variant? sa = try_decode_sockaddr (data, len);
 						if (sa != null)
 							return sa;
@@ -2196,6 +2229,37 @@ namespace Frida {
 			}
 
 			return result.end ();
+		}
+
+		private uint8 get_nargs_for (SyscallTracer.Abi abi, int32 nr) {
+			if (nr < 0)
+				return (uint8) SyscallTracer.SYSCALL_NARGS;
+
+			unowned LinuxSyscallSignature[] sigs = (abi == COMPAT32)
+				? get_compat32_syscall_signatures ()
+				: get_syscall_signatures ();
+
+			return find_nargs_by_nr (sigs, nr);
+		}
+
+		private static uint8 find_nargs_by_nr (LinuxSyscallSignature[] sigs, uint32 nr) {
+			uint lo = 0;
+			uint hi = (uint) sigs.length;
+
+			while (lo < hi) {
+				uint mid = lo + ((hi - lo) / 2);
+				unowned LinuxSyscallSignature sig = sigs[mid];
+
+				if (sig.nr == nr)
+					return sig.nargs;
+
+				if (sig.nr < nr)
+					lo = mid + 1;
+				else
+					hi = mid;
+			}
+
+			return (uint8) SyscallTracer.SYSCALL_NARGS;
 		}
 
 		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {

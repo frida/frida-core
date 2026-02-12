@@ -7,6 +7,11 @@ public sealed class Frida.SyscallTracer : Object {
 		}
 	}
 
+	public SymbolResolver resolver {
+		get;
+		default = new SymbolResolver ();
+	}
+
 	public enum State {
 		STOPPED,
 		STARTED,
@@ -17,13 +22,17 @@ public sealed class Frida.SyscallTracer : Object {
 	private BpfMap? target_tgids;
 	private BpfMap? target_uids;
 
-	private BpfRingbufReader? events_reader;
-	private IOChannel? events_channel;
-	private Source? events_source;
+	private BpfRingbufReader? syscall_events_reader;
+	private IOChannel? syscall_events_channel;
+	private Source? syscall_events_source;
 
-	private BpfMap? stats;
+	private BpfRingbufReader? map_events_reader;
+	private IOChannel? map_events_channel;
+	private Source? map_events_source;
 
 	private BpfMap? stacks;
+	private BpfMap? process_states;
+	private BpfMap? stats;
 
 	private Gee.Collection<BpfLink> links = new Gee.ArrayList<BpfLink> ();
 
@@ -42,13 +51,16 @@ public sealed class Frida.SyscallTracer : Object {
 
 		target_tgids = obj.maps.get_by_name ("target_tgids");
 		target_uids = obj.maps.get_by_name ("target_uids");
-		var events = obj.maps.get_by_name ("events");
-		stats = obj.maps.get_by_name ("stats");
+		var syscall_events = obj.maps.get_by_name ("syscall_events");
+		var map_events = obj.maps.get_by_name ("map_events");
 		stacks = obj.maps.get_by_name ("stacks");
+		process_states = obj.maps.get_by_name ("process_states");
+		stats = obj.maps.get_by_name ("stats");
 
 		obj.prepare ();
 
-		events_reader = new BpfRingbufReader (events);
+		syscall_events_reader = new BpfRingbufReader (syscall_events);
+		map_events_reader = new BpfRingbufReader (map_events);
 
 		obj.load ();
 
@@ -57,22 +69,31 @@ public sealed class Frida.SyscallTracer : Object {
 			links.add (link);
 		}
 
-		events_channel = new IOChannel.unix_new (events.fd);
-		arm_events_watch ();
+		syscall_events_channel = new IOChannel.unix_new (syscall_events.fd);
+		arm_syscall_events_watch ();
+
+		map_events_channel = new IOChannel.unix_new (map_events.fd);
+		arm_map_events_watch ();
 
 		_state = STARTED;
 	}
 
 	public void stop () {
-		events_source?.destroy ();
-		events_source = null;
-		events_channel = null;
+		syscall_events_source?.destroy ();
+		syscall_events_source = null;
+		syscall_events_channel = null;
+		syscall_events_reader = null;
+
+		map_events_source?.destroy ();
+		map_events_source = null;
+		map_events_channel = null;
+		map_events_reader = null;
 
 		links.clear ();
 
-		events_reader = null;
-		stacks = null;
 		stats = null;
+		process_states = null;
+		stacks = null;
 		target_uids = null;
 		target_tgids = null;
 
@@ -96,10 +117,10 @@ public sealed class Frida.SyscallTracer : Object {
 	}
 
 	public DrainStatus drain_events (SyscallEventHandler on_event) {
-		var status = events_reader.drain (payload => {
-			assert (payload.length >= sizeof (SyscallEventCommon));
-			unowned SyscallEventCommon * c = (SyscallEventCommon *) payload;
-			SyscallEventView ev = { c, payload };
+		var status = syscall_events_reader.drain (payload => {
+			assert (payload.length >= sizeof (Event));
+			var e = (Event *) payload;
+			SyscallEventView ev = { e, payload };
 
 			return (on_event (ev) == CONTINUE)
 					? BpfRingbufReader.RecordAction.CONTINUE
@@ -107,7 +128,7 @@ public sealed class Frida.SyscallTracer : Object {
 		});
 
 		if (status == DRAINED)
-			arm_events_watch ();
+			arm_syscall_events_watch ();
 
 		return (status == DRAINED)
 			? DrainStatus.DRAINED
@@ -127,68 +148,172 @@ public sealed class Frida.SyscallTracer : Object {
 	}
 
 	public struct SyscallEventView {
-		public SyscallEventCommon * common;
+		public Event * event;
 		public unowned uint8[] bytes;
 	}
 
-	private void arm_events_watch () {
-		if (events_source != null)
+	private void arm_syscall_events_watch () {
+		if (syscall_events_source != null)
 			return;
 
-		var src = new IOSource (events_channel, IOCondition.IN);
-		var state = new WatchState (this, events_reader);
+		var src = new IOSource (syscall_events_channel, IOCondition.IN);
+		var state = new SyscallEventsWatchState (this);
 		src.set_callback (state.on_ready);
 		src.attach (MainContext.get_thread_default ());
-		events_source = src;
+		syscall_events_source = src;
 	}
 
-	private class WatchState : Object {
+	private class SyscallEventsWatchState : Object {
 		public unowned SyscallTracer tracer;
-		public BpfRingbufReader reader;
 
-		public WatchState (SyscallTracer tracer, BpfRingbufReader reader) {
+		public SyscallEventsWatchState (SyscallTracer tracer) {
 			this.tracer = tracer;
-			this.reader = reader;
 		}
 
 		public bool on_ready (IOChannel ch, IOCondition cond) {
-			tracer.on_ringbuffer_readable ();
+			tracer.on_syscall_events_readable ();
 			return Source.REMOVE;
 		}
 	}
 
-	private void on_ringbuffer_readable () {
-		events_source?.destroy ();
-		events_source = null;
+	private void on_syscall_events_readable () {
+		syscall_events_source?.destroy ();
+		syscall_events_source = null;
 
 		events_available ();
 	}
 
-	public struct SyscallEventCommon {
+	private void arm_map_events_watch () {
+		assert (map_events_source == null);
+
+		var src = new IOSource (map_events_channel, IOCondition.IN);
+		var state = new MapEventsWatchState (this);
+		src.set_callback (state.on_ready);
+		src.attach (MainContext.get_thread_default ());
+		map_events_source = src;
+	}
+
+	private class MapEventsWatchState : Object {
+		public unowned SyscallTracer tracer;
+
+		public MapEventsWatchState (SyscallTracer tracer) {
+			this.tracer = tracer;
+		}
+
+		public bool on_ready (IOChannel ch, IOCondition cond) {
+			tracer.on_map_events_readable ();
+			return Source.CONTINUE;
+		}
+	}
+
+	private void on_map_events_readable () {
+		map_events_reader.drain (payload => {
+			assert (payload.length >= sizeof (Event));
+			on_map_event ((Event *) payload);
+
+			return CONTINUE;
+		});
+	}
+
+	private void on_map_event (Event * ev) {
+		var type = (EventType) ev->type;
+
+		switch (type) {
+			case NEED_SNAPSHOT: {
+				try {
+					resolver.refresh_snapshot (ev->tgid);
+
+					var s = ProcessState ();
+					s.abi = compute_abi_from_pid (ev->tgid);
+					s.map_gen = 1;
+					process_states.update_raw ((uint8[]) &ev->tgid, (uint8[]) &s);
+				} catch (GLib.Error e) {
+					try {
+						process_states.remove_u32 (ev->tgid);
+					} catch (Error _) {
+					}
+				}
+
+				Posix.kill ((Posix.pid_t) ev->tgid, Posix.Signal.CONT);
+
+				break;
+			}
+			case MAP_CREATE: {
+				var me = (MapCreateEvent *) ev;
+
+				unowned string? filename = null;
+				if (ev->attachment_count != 0) {
+					var h = (AttachmentHeader *) ((uint8 *) &me->gen + sizeof (uint32));
+					filename = (string) (h + 1);
+				}
+
+				uint64 file_offset = me->pgoff * Gum.query_page_size ();
+
+				resolver.apply_map_create (
+					me->parent.tgid,
+					me->gen,
+					me->start,
+					me->end,
+					file_offset,
+					me->vm_flags,
+					DevId.unpack (me->device),
+					me->inode,
+					filename
+				);
+
+				break;
+			}
+			case MAP_DESTROY_RANGE: {
+				var de = (MapDestroyRangeEvent *) ev;
+
+				resolver.apply_map_destroy_range (
+					de->parent.tgid,
+					de->gen,
+					de->start,
+					de->end
+				);
+
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	private static Abi compute_abi_from_pid (uint32 tgid) {
+#if X86_64 || ARM64
+		try {
+			var cpu = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) tgid);
+#if X86_64
+			return (cpu == IA32) ? Abi.COMPAT32 : Abi.NATIVE;
+#elif ARM64
+			return (cpu == ARM) ? Abi.COMPAT32 : Abi.NATIVE;
+#endif
+		} catch (Gum.Error e) {
+			return NATIVE;
+		}
+#else
+		return NATIVE;
+#endif
+	}
+
+	public struct Event {
 		public uint64 time_ns;
 		public uint32 tgid;
 		public uint32 tid;
 
-		public int32 syscall_nr;
-		public int32 stack_id;
+		public uint16 type;
 
-		public uint16 phase;
-
-		public uint16 payload_len;
 		public uint16 attachment_count;
 	}
 
-	public enum Phase {
-		ENTER,
-		EXIT,
-	}
+	public enum EventType {
+		SYSCALL_ENTER,
+		SYSCALL_EXIT,
 
-	public struct SyscallEnterPayload {
-		public uint64 args[6];
-	}
-
-	public struct SyscallExitPayload {
-		public int64 retval;
+		NEED_SNAPSHOT,
+		MAP_CREATE,
+		MAP_DESTROY_RANGE,
 	}
 
 	public struct AttachmentHeader {
@@ -200,6 +325,67 @@ public sealed class Frida.SyscallTracer : Object {
 	public enum AttachmentType {
 		STRING,
 		BYTES,
+	}
+
+	public struct SyscallEvent {
+		public Event parent;
+
+		public int32 syscall_nr;
+		public int32 stack_id;
+		public uint32 map_gen;
+	}
+
+	public struct SyscallEnterEvent {
+		public SyscallEvent parent;
+
+		public uint64 args[6];
+	}
+
+	public struct SyscallExitEvent {
+		public SyscallEvent parent;
+
+		public int64 retval;
+	}
+
+	private struct MapCreateEvent {
+		public Event parent;
+
+		public uint64 start;
+		public uint64 end;
+
+		public uint64 pgoff;
+		public uint64 vm_flags;
+
+		public uint64 device;
+		public uint64 inode;
+
+		public uint32 gen;
+	}
+
+	private struct MapDestroyRangeEvent {
+		public Event parent;
+
+		public uint64 start;
+		public uint64 end;
+
+		public uint32 gen;
+	}
+
+	private struct ProcessState {
+		public uint8 abi;
+		public uint32 map_gen;
+	}
+
+	public enum Abi {
+		INVALID,
+		NATIVE,
+		COMPAT32,
+	}
+
+	public Abi get_process_abi (uint32 tgid) throws Error {
+		var s = ProcessState ();
+		process_states.lookup_raw ((uint8[]) &tgid, (uint8[]) &s);
+		return s.abi;
 	}
 
 	public void resolve_stacks (uint32[] stack_ids, StackFramesHandler on_frames) {

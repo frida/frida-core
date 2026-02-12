@@ -4,6 +4,18 @@ releng := $(top_srcdir)/releng
 BUILDDIR ?= $(top_srcdir)/build
 MESON ?= $(releng)/meson/meson.py
 
+ifeq ($(shell uname -s),Darwin)
+KERNEL_MAKE ?= gmake
+KERNEL_SED ?= gsed
+KERNEL_AWK ?= gawk
+BPF_CLANG ?= /Applications/AndroidNDK14206865.app/Contents/NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
+else
+KERNEL_MAKE ?= make
+KERNEL_SED ?= sed
+KERNEL_AWK ?= awk
+BPF_CLANG ?= clang
+endif
+
 ifdef FRIDA_HOST
 host_machine := $(FRIDA_HOST)
 else
@@ -46,9 +58,29 @@ build-native: ext/linux/tools/include/nolibc/nolibc.h
 bpf_targets :=
 bpf_obj := $(build_dir)/module.o
 
-kernel_headers_url := https://kojipkgs.fedoraproject.org//packages/kernel/6.19.0/0.rc8.54.eln154/x86_64/kernel-headers-6.19.0-0.rc8.54.eln154.x86_64.rpm
-kernel_headers_rpm := $(notdir $(kernel_headers_url))
 kernel_headers_dir := ext/kernel-headers
+noarch_uapi_arch ?= x86
+
+linux_uapi_arch = $(strip \
+	$(if $(filter x86 x86_64,$1),x86, \
+	$(if $(filter arm armbe,$1),arm, \
+	$(if $(filter arm64 arm64be,$1),arm64, \
+	$(if $(filter mips mipsel mips64 mips64el,$1),mips,unknown)))))
+
+kernel_headers_stamp = $(kernel_headers_dir)/$(1)/.stamp
+kernel_headers_for   = $(call kernel_headers_stamp,$(call linux_uapi_arch,$(1)))
+
+kernel_uapi_arches := x86 arm arm64 mips
+kernel_uapi_stamps := $(foreach a,$(kernel_uapi_arches),$(call kernel_headers_stamp,$(a)))
+
+$(call kernel_headers_stamp,%): ext/linux/tools/include/nolibc/nolibc.h
+	@mkdir -p $(kernel_headers_dir)/$*
+	@$(KERNEL_MAKE) -C ext/linux \
+		ARCH=$* \
+		SED=$(KERNEL_SED) \
+		AWK=$(KERNEL_AWK) \
+		headers_install INSTALL_HDR_PATH=$(abspath $(kernel_headers_dir)/$*)
+	@touch $@
 
 libbpf_devel_url := https://kojipkgs.fedoraproject.org//packages/libbpf/1.6.3/1.fc44/x86_64/libbpf-devel-1.6.3-1.fc44.x86_64.rpm
 libbpf_devel_rpm := $(notdir $(libbpf_devel_url))
@@ -60,12 +92,15 @@ define recreate_build_dir
 endef
 
 define bpf_compile
-	clang \
+	$(BPF_CLANG) \
 		-target $(1) \
+		-D__TARGET_ARCH_$(2) \
 		-O2 -g \
 		-I$(build_dir) \
-		-I$(kernel_headers_dir) \
 		-I$(libbpf_devel_dir) \
+		-isystem $(kernel_headers_dir)/$(2)/include \
+		-isystem $(kernel_headers_dir)/$(2)/include/uapi \
+		-isystem $(kernel_headers_dir)/$(2)/include/asm-generic \
 		$< \
 		-c \
 		-o $(bpf_obj)
@@ -73,39 +108,39 @@ define bpf_compile
 	install -m644 $(bpf_obj) $@
 endef
 
-define declare-bpf-noarch
+define declare_bpf_noarch
 bpf_targets += $(foreach p,$(bpf_noarch_progs),$(bpf_outdir)/noarch-$(1)/$(p).elf)
 
-$(bpf_outdir)/noarch-$(1)/%.elf: %.bpf.c $(kernel_headers_dir) $(libbpf_devel_dir)
+$(bpf_outdir)/noarch-$(1)/%.elf: %.bpf.c $(call kernel_headers_stamp,$(noarch_uapi_arch)) $(libbpf_devel_dir)
 	$$(call recreate_build_dir)
-	$$(call bpf_compile,$(2))
+	$$(call bpf_compile,$(2),$(noarch_uapi_arch))
 endef
 
-define declare-bpf-arch
+define declare_bpf_arch
 bpf_targets += $(foreach p,$(bpf_arch_progs),$(bpf_outdir)/$(1)/$(p).elf)
 
-$(bpf_outdir)/$(1)/%.elf: %.bpf.c $(kernel_headers_dir) $(libbpf_devel_dir)
+$(bpf_outdir)/$(1)/%.elf: %.bpf.c $(call kernel_headers_for,$(1)) $(libbpf_devel_dir)
 	$$(call recreate_build_dir)
 	syscalls_dir=$$(realpath $(top_srcdir)/lib/base/linux-syscalls); cd build && $$(valac) \
 		-C \
 		--header=frida-linux-syscalls.h \
 		--profile=posix \
 		$$$${syscalls_dir}/$(shell echo $(1) | sed -e 's/be$$//' -e 's/el$$//').vala
-	$$(call bpf_compile,$(2))
+	$$(call bpf_compile,$(2),$$(call linux_uapi_arch,$(1)))
 endef
 
 pair_abi    = $(word 1,$(subst :, ,$1))
 pair_target = $(word 2,$(subst :, ,$1))
 
 $(foreach pair,$(bpf_noarch_pairs), \
-	$(eval $(call declare-bpf-noarch,$(call pair_abi,$(pair)),$(call pair_target,$(pair)))))
+	$(eval $(call declare_bpf_noarch,$(call pair_abi,$(pair)),$(call pair_target,$(pair)))))
 
 $(foreach pair,$(bpf_arch_pairs), \
-	$(eval $(call declare-bpf-arch,$(call pair_abi,$(pair)),$(call pair_target,$(pair)))))
+	$(eval $(call declare_bpf_arch,$(call pair_abi,$(pair)),$(call pair_target,$(pair)))))
 
 build-bpf: $(bpf_targets)
 
-ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
+ext/linux/tools/include/nolibc/nolibc.h: patches/linux-headers-install-portability.patch patches/linux-nolibc-tweaks.patch
 	if [ -d ext/linux ]; then \
 		cd ext/linux; \
 		git reset --hard; \
@@ -113,16 +148,10 @@ ext/linux/tools/include/nolibc/nolibc.h: nolibc-tweaks.patch
 	else \
 		git clone --branch=v6.2 --depth=1 https://github.com/torvalds/linux.git ext/linux; \
 	fi
-	patch -d ext/linux -p1 < nolibc-tweaks.patch
+	for fix in $^; do \
+		patch -d ext/linux -p1 < $${fix}; \
+	done
 	@touch -c $@
-
-$(kernel_headers_dir):
-	mkdir -p $(kernel_headers_dir)
-	curl -L -o $(kernel_headers_rpm) $(kernel_headers_url)
-	rpm2cpio -f pax $(kernel_headers_rpm) | tar -xpf - \
-		-C $(kernel_headers_dir) \
-		--strip-components=3
-	rm -f $(kernel_headers_rpm)
 
 $(libbpf_devel_dir):
 	mkdir -p $(libbpf_devel_dir)

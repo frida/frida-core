@@ -1055,15 +1055,15 @@ namespace Frida {
 			uint64 remote_munmap = 0;
 			ProcMapsSoEntry? remote_libc = ProcMapsSoEntry.find_by_path (pid, local_libc.path);
 #if ANDROID
-			bool same_libc = false;
-			if (remote_libc != null) {
-				bool same_device = remote_libc.identity.split (":")[0] == local_libc.identity.split (":")[0];
-				bool same_inode = remote_libc.identity.split (" ")[1] == local_libc.identity.split (" ")[1];
-				bool same_path = remote_libc.path == local_libc.path;
-				same_libc = same_device && same_inode && same_path;
-			}
+			bool same_libc = remote_libc != null
+					&& remote_libc.device.major == local_libc.device.major
+					&& remote_libc.inode == local_libc.inode
+					&& remote_libc.path == local_libc.path;
 #else
-			bool same_libc = remote_libc != null && remote_libc.identity == local_libc.identity;
+			bool same_libc = remote_libc != null
+					&& remote_libc.device.equals (local_libc.device)
+					&& remote_libc.inode == local_libc.inode
+					&& remote_libc.path == local_libc.path;
 #endif
 			if (same_libc) {
 				remote_mmap = remote_libc.base_address + mmap_offset;
@@ -1166,7 +1166,9 @@ namespace Frida {
 
 					if (result.context.rtld_flavor == ANDROID && result.libc.dlopen == null) {
 						ProcMapsSoEntry? remote_ld = ProcMapsSoEntry.find_by_address (pid, (uintptr) result.context.rtld_base);
-						bool same_ld = remote_ld != null && local_android_ld != null && remote_ld.identity == local_android_ld.identity;
+						bool same_ld = remote_ld != null && local_android_ld != null
+							&& remote_ld.device.equals (local_android_ld.device)
+							&& remote_ld.inode == local_android_ld.inode;
 						if (!same_ld)
 							throw new Error.NOT_SUPPORTED ("Unable to locate Android dynamic linker; please file a bug");
 						result.libc.dlopen = rebase_pointer ((uintptr) dlopen, local_android_ld, remote_ld);

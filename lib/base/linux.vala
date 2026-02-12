@@ -11,6 +11,36 @@ namespace Frida {
 		return (linux_major == major && linux_minor >= minor) || linux_major > major;
 	}
 
+	public struct DevId {
+		public uint32 major;
+		public uint32 minor;
+
+		public DevId (uint32 major, uint32 minor) {
+			this.major = major;
+			this.minor = minor;
+		}
+
+		public uint64 pack () {
+			return ((uint64) major << 32) | minor;
+		}
+
+		public static DevId unpack (uint64 dev) {
+			return DevId ((uint32) (dev >> 32), (uint32) dev);
+		}
+
+		public bool equals (DevId other) {
+			return major == other.major && minor == other.minor;
+		}
+
+		public uint hash () {
+			return (uint) (major ^ (minor * 0x9e3779b9));
+		}
+
+		public string to_string () {
+			return "%x:%x".printf (major, minor);
+		}
+	}
+
 	public extern unowned LinuxSyscallSignature[] get_syscall_signatures ();
 
 	public extern unowned LinuxSyscallSignature[]? get_compat32_syscall_signatures ();
