@@ -121,11 +121,24 @@ bpf_targets += $(foreach p,$(bpf_arch_progs),$(bpf_outdir)/$(1)/$(p).elf)
 
 $(bpf_outdir)/$(1)/%.elf: %.bpf.c $(call kernel_headers_for,$(1)) $(libbpf_devel_dir)
 	$$(call recreate_build_dir)
-	syscalls_dir=$$(realpath $(top_srcdir)/lib/base/linux-syscalls); cd build && $$(valac) \
-		-C \
-		--header=frida-linux-syscalls.h \
-		--profile=posix \
-		$$$${syscalls_dir}/$(shell echo $(1) | sed -e 's/be$$//' -e 's/el$$//').vala
+	syscalls_dir=$$(realpath $(top_srcdir)/lib/base/linux-syscalls); \
+		cd build && \
+		$$(valac) \
+			-C \
+			--header=frida-linux-syscalls.h \
+			--profile=posix \
+			$$$${syscalls_dir}/$(shell echo $(1) | sed -e 's/be$$//' -e 's/el$$//').vala && \
+		$(KERNEL_AWK) ' \
+			/typedef[[:space:]]+enum[[:space:]]*\{/ { in_enum=1; next } \
+			in_enum && /^[[:space:]]*}/ { in_enum=0; next } \
+			in_enum { \
+				if (match($$$$0, /^[[:space:]]*([A-Z0-9_]+)[[:space:]]*=[[:space:]]*([^,[:space:]]+)[[:space:]]*,?[[:space:]]*$$$$/, m)) \
+					print "#define " m[1] " " m[2]; \
+				next; \
+			} \
+			{ print } \
+		' frida-linux-syscalls.h > frida-linux-syscalls.h.tmp && \
+		mv frida-linux-syscalls.h.tmp frida-linux-syscalls.h
 	$$(call bpf_compile,$(2),$$(call linux_uapi_arch,$(1)))
 endef
 

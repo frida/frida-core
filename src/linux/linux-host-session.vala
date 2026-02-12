@@ -1858,13 +1858,12 @@ namespace Frida {
 						abi_by_tgid[tgid] = abi;
 					}
 
-					uint8 nargs = (uint8) SyscallTracer.SYSCALL_NARGS;
-					if (event->type == SyscallTracer.EventType.SYSCALL_ENTER) {
-						var se = (SyscallTracer.SyscallEvent *) ev.bytes;
-						nargs = get_nargs_for (abi, se->syscall_nr);
-					}
+					unowned LinuxSyscallSignature[] sigs = (abi == COMPAT32)
+						? get_compat32_syscall_signatures ()
+						: get_syscall_signatures ();
+					LinuxSyscallSignature * sig = find_sig_by_nr (sigs, ev.se->syscall_nr);
 
-					Variant item = build_event_variant (ev, nargs);
+					Variant item = build_event_variant (ev, sig);
 					size_t item_size = (size_t) item.get_size ();
 
 					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
@@ -2018,7 +2017,7 @@ namespace Frida {
 			message (b.end ());
 		}
 
-		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev, uint8 nargs) {
+		private static Variant build_event_variant (SyscallTracer.SyscallEventView ev, LinuxSyscallSignature * sig) {
 			var event = ev.event;
 			var type = (SyscallTracer.EventType) event->type;
 
@@ -2026,6 +2025,7 @@ namespace Frida {
 			size_t event_size = buf.length;
 			uint8 * payload_end = (uint8 *) buf + event_size;
 
+			uint8 nargs = (sig != null) ? sig->nargs : (uint8) SyscallTracer.SYSCALL_NARGS;
 			var args = new uint64[nargs];
 			int64 retval = 0;
 
@@ -2057,7 +2057,7 @@ namespace Frida {
 				var len = h->len;
 				assert (a + len <= payload_end);
 
-				Variant v = decode_attachment_value (type, idx, (SyscallTracer.AttachmentType) h->type, a, len);
+				Variant v = decode_attachment_value (type, sig, idx, (SyscallTracer.AttachmentType) h->type, a, len);
 				attachments.add_value (new Variant.tuple ({ idx, new Variant.variant (v) }));
 
 				a += len;
@@ -2071,7 +2071,7 @@ namespace Frida {
 				args_v = ab.end ();
 			}
 
-			var se = (SyscallTracer.SyscallEvent *) buf;
+			var se = ev.se;
 			if (type == SYSCALL_ENTER) {
 				return new Variant.tuple ({
 					"enter",
@@ -2099,25 +2099,17 @@ namespace Frida {
 			}
 		}
 
-		private static Variant decode_attachment_value (SyscallTracer.EventType event_type, uint arg_index,
-				SyscallTracer.AttachmentType type, uint8 * data, size_t len) {
-			switch (type) {
-				case STRING: {
-					if (len == 0)
-						return "";
+		private static Variant decode_attachment_value (SyscallTracer.EventType event_type, LinuxSyscallSignature * sig,
+				uint arg_index, SyscallTracer.AttachmentType attachment_type, uint8 * data, size_t len) {
+			unowned string? arg_type = null;
+			if (sig != null)
+				arg_type = sig->args[arg_index].type;
 
-					size_t n = len;
-					if (n != 0 && data[n - 1] == 0)
-						n--;
-
-					var tmp = new uint8[n + 1];
-					Memory.copy (tmp, data, n);
-					tmp[n] = 0;
-					return (string) tmp;
-				}
-
-				case BYTES: {
-					if (event_type == SYSCALL_ENTER && arg_index == 1) {
+			switch (attachment_type) {
+				case SyscallTracer.AttachmentType.STRING:
+					return (string) data;
+				case SyscallTracer.AttachmentType.BYTES: {
+					if (arg_type != null && arg_type == "struct sockaddr *") {
 						Variant? sa = try_decode_sockaddr (data, len);
 						if (sa != null)
 							return sa;
@@ -2126,10 +2118,8 @@ namespace Frida {
 					var b = new uint8[len];
 					if (len != 0)
 						Memory.copy (b, data, len);
-
 					return Variant.new_from_data<void> (new VariantType ("ay"), b, true);
 				}
-
 				default:
 					assert_not_reached ();
 			}
@@ -2231,35 +2221,28 @@ namespace Frida {
 			return result.end ();
 		}
 
-		private uint8 get_nargs_for (SyscallTracer.Abi abi, int32 nr) {
+		private static LinuxSyscallSignature * find_sig_by_nr (LinuxSyscallSignature[] sigs, int32 nr) {
 			if (nr < 0)
-				return (uint8) SyscallTracer.SYSCALL_NARGS;
+				return null;
 
-			unowned LinuxSyscallSignature[] sigs = (abi == COMPAT32)
-				? get_compat32_syscall_signatures ()
-				: get_syscall_signatures ();
-
-			return find_nargs_by_nr (sigs, nr);
-		}
-
-		private static uint8 find_nargs_by_nr (LinuxSyscallSignature[] sigs, uint32 nr) {
 			uint lo = 0;
 			uint hi = (uint) sigs.length;
 
 			while (lo < hi) {
 				uint mid = lo + ((hi - lo) / 2);
-				unowned LinuxSyscallSignature sig = sigs[mid];
 
-				if (sig.nr == nr)
-					return sig.nargs;
+				LinuxSyscallSignature * sig = &sigs[mid];
 
-				if (sig.nr < nr)
+				if (sig->nr == nr)
+					return sig;
+
+				if (sig->nr < nr)
 					lo = mid + 1;
 				else
 					hi = mid;
 			}
 
-			return (uint8) SyscallTracer.SYSCALL_NARGS;
+			return null;
 		}
 
 		private static string inet_ntop_to_string (int af, uint8 * src, size_t srclen) {

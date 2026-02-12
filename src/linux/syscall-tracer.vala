@@ -118,9 +118,10 @@ public sealed class Frida.SyscallTracer : Object {
 
 	public DrainStatus drain_events (SyscallEventHandler on_event) {
 		var status = syscall_events_reader.drain (payload => {
-			assert (payload.length >= sizeof (Event));
+			assert (payload.length >= sizeof (SyscallEvent));
 			var e = (Event *) payload;
-			SyscallEventView ev = { e, payload };
+			var se = (SyscallEvent *) payload;
+			SyscallEventView ev = { e, se, payload };
 
 			return (on_event (ev) == CONTINUE)
 					? BpfRingbufReader.RecordAction.CONTINUE
@@ -149,6 +150,7 @@ public sealed class Frida.SyscallTracer : Object {
 
 	public struct SyscallEventView {
 		public Event * event;
+		public SyscallEvent * se;
 		public unowned uint8[] bytes;
 	}
 

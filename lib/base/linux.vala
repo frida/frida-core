@@ -47,14 +47,14 @@ namespace Frida {
 
 	public struct LinuxSyscallSignature {
 		public uint nr;
-		public unowned string name;
+		public string name;
 		public uint8 nargs;
 		public LinuxSyscallArg args[6];
 	}
 
 	public struct LinuxSyscallArg {
-		public unowned string? type;
-		public unowned string? name;
+		public string? type;
+		public string? name;
 	}
 
 	public sealed class PidFileDescriptor : FileDescriptor {

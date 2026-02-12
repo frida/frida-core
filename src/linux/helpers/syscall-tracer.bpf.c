@@ -3,8 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <linux/bpf.h>
+#include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/signal.h>
+#include <linux/time.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -18,6 +20,7 @@
 #define MAX_STACK_DEPTH 16
 #define MAX_PATH_DEPTH 20
 #define MAX_PATH 256
+#define MAX_STAT 512
 #define MAX_SOCK 128
 #define MAX_BUF_BUILDER_SIZE 1024
 
@@ -34,11 +37,16 @@ typedef struct _SyscallEnterEvent SyscallEnterEvent;
 typedef struct _SyscallExitEvent SyscallExitEvent;
 
 typedef struct _SyscallEnterEventNone SyscallEnterEventNone;
+typedef struct _SyscallEnterEventTimespec SyscallEnterEventTimespec;
 typedef struct _SyscallEnterEventPath SyscallEnterEventPath;
+typedef struct _SyscallEnterEventPath2 SyscallEnterEventPath2;
+typedef struct _SyscallEnterEventPath3 SyscallEnterEventPath3;
 typedef struct _SyscallEnterEventSock SyscallEnterEventSock;
 
 typedef struct _SyscallExitEventNone SyscallExitEventNone;
-typedef struct _SyscallExitEventOut SyscallExitEventOut;
+typedef struct _SyscallExitEventStrOut SyscallExitEventStrOut;
+typedef struct _SyscallExitEventStatOut SyscallExitEventStatOut;
+typedef struct _SyscallExitEventSockOut SyscallExitEventSockOut;
 
 typedef struct _NeedSnapshotEvent NeedSnapshotEvent;
 typedef struct _MapCreateEvent MapCreateEvent;
@@ -112,12 +120,45 @@ struct _SyscallEnterEventNone
   SyscallEnterEvent parent;
 };
 
+struct _SyscallEnterEventTimespec
+{
+  SyscallEnterEvent parent;
+
+  AttachmentHeader attach;
+  __u8 data[sizeof (struct timespec)];
+};
+
 struct _SyscallEnterEventPath
 {
   SyscallEnterEvent parent;
 
   AttachmentHeader attach;
   __u8 data[MAX_PATH];
+};
+
+struct _SyscallEnterEventPath2
+{
+  SyscallEnterEvent parent;
+
+  AttachmentHeader attach1;
+  __u8 data1[MAX_PATH];
+
+  AttachmentHeader attach2;
+  __u8 data2[MAX_PATH];
+};
+
+struct _SyscallEnterEventPath3
+{
+  SyscallEnterEvent parent;
+
+  AttachmentHeader attach1;
+  __u8 data1[MAX_PATH];
+
+  AttachmentHeader attach2;
+  __u8 data2[MAX_PATH];
+
+  AttachmentHeader attach3;
+  __u8 data3[MAX_PATH];
 };
 
 struct _SyscallEnterEventSock
@@ -133,12 +174,28 @@ struct _SyscallExitEventNone
   SyscallExitEvent parent;
 };
 
-struct _SyscallExitEventOut
+struct _SyscallExitEventStrOut
 {
   SyscallExitEvent parent;
 
   AttachmentHeader attach;
   __u8 data[MAX_PATH];
+};
+
+struct _SyscallExitEventStatOut
+{
+  SyscallExitEvent parent;
+
+  AttachmentHeader attach;
+  __u8 data[MAX_STAT];
+};
+
+struct _SyscallExitEventSockOut
+{
+  SyscallExitEvent parent;
+
+  AttachmentHeader attach;
+  __u8 data[MAX_SOCK];
 };
 
 struct _NeedSnapshotEvent
@@ -198,13 +255,36 @@ struct _Inflight
       __u64 user_ptr;
       __u32 max_len;
       __u32 _pad2;
-    } out_copy;
+    } str_out_copy;
+
+    struct
+    {
+      __u16 arg_index;
+      __u16 _pad1;
+
+      __u64 user_ptr;
+      __u32 len;
+      __u32 _pad2;
+    } stat_out_copy;
+
+    struct
+    {
+      __u16 arg_index;
+      __u16 _pad1;
+
+      __u64 user_ptr;
+      __u64 user_len_ptr;
+      __u32 max_len;
+      __u32 _pad2;
+    } sock_out_copy;
   } u;
 };
 
 enum
 {
-  INFLIGHT_KIND_OUT_COPY = 1,
+  INFLIGHT_KIND_STR_OUT_COPY = 1,
+  INFLIGHT_KIND_STAT_OUT_COPY,
+  INFLIGHT_KIND_SOCK_OUT_COPY,
 };
 
 struct _Stats
@@ -386,11 +466,16 @@ struct vm_area_struct
 static bool should_trace_current (__u32 * out_tgid, __u32 * out_tid);
 
 static SyscallEnterEventNone * reserve_enter_none (void);
+static SyscallEnterEventTimespec * reserve_enter_timespec (void);
 static SyscallEnterEventPath * reserve_enter_path (void);
+static SyscallEnterEventPath2 * reserve_enter_path2 (void);
+static SyscallEnterEventPath3 * reserve_enter_path3 (void);
 static SyscallEnterEventSock * reserve_enter_sock (void);
 
 static SyscallExitEventNone * reserve_exit_none (void);
-static SyscallExitEventOut * reserve_exit_out (void);
+static SyscallExitEventStrOut * reserve_exit_str_out (void);
+static SyscallExitEventStatOut * reserve_exit_stat_out (void);
+static SyscallExitEventSockOut * reserve_exit_sock_out (void);
 
 static void * reserve_syscall_event (__u64 size);
 
@@ -403,7 +488,9 @@ static __u16 write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8
     const void * user_src, __u32 n);
 static __u16 write_attach_dentry_path (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, struct file * file);
 
-static void maybe_schedule_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len );
+static void maybe_schedule_str_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len);
+static void maybe_schedule_stat_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 len);
+static void maybe_schedule_sock_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u64 user_len_ptr, __u32 max_len);
 
 static __u32 ensure_map_gen (__u32 tgid, __u32 tid);
 static __u32 bump_map_gen (__u32 tgid);
@@ -439,9 +526,6 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
   if (nr == FRIDA_LINUX_SYSCALL_OPENAT ||
       nr == FRIDA_LINUX_SYSCALL_FACCESSAT ||
       nr == FRIDA_LINUX_SYSCALL_STATFS ||
-#ifdef FRIDA_LINUX_SYSCALL_NEWFSTATAT
-      nr == FRIDA_LINUX_SYSCALL_NEWFSTATAT ||
-#endif
       nr == FRIDA_LINUX_SYSCALL_READLINKAT)
   {
     SyscallEnterEventPath * ev = reserve_enter_path ();
@@ -452,22 +536,225 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     fill_enter_args (ev->parent.args, ctx);
 
     if (nr == FRIDA_LINUX_SYSCALL_STATFS)
+    {
       write_attach_str_arg (&ev->attach, 0, &ev->data[0], MAX_PATH, (void *) ctx->args[0]);
+      maybe_schedule_stat_out_copy (tid, nr, 1, (__u64) ctx->args[1], MAX_STAT);
+    }
     else
+    {
       write_attach_str_arg (&ev->attach, 1, &ev->data[0], MAX_PATH, (void *) ctx->args[1]);
+    }
 
     ev->parent.parent.parent.attachment_count = 1;
 
     if (nr == FRIDA_LINUX_SYSCALL_READLINKAT)
     {
-      maybe_schedule_out_copy (tid, nr, 2, (__u64) ctx->args[2], (__u32) ctx->args[3]);
+      maybe_schedule_str_out_copy (tid, nr, 2, (__u64) ctx->args[2], (__u32) ctx->args[3]);
     }
 
     bpf_ringbuf_submit (ev, 0);
     return 0;
   }
 
-  if (nr == FRIDA_LINUX_SYSCALL_CONNECT)
+  if (
+#ifdef FRIDA_LINUX_SYSCALL_NEWFSTATAT
+      nr == FRIDA_LINUX_SYSCALL_NEWFSTATAT ||
+#endif
+      nr == FRIDA_LINUX_SYSCALL_STATX)
+  {
+    SyscallEnterEventPath * ev = reserve_enter_path ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+#ifdef FRIDA_LINUX_SYSCALL_NEWFSTATAT
+    if (nr == FRIDA_LINUX_SYSCALL_NEWFSTATAT)
+    {
+      write_attach_str_arg (&ev->attach, 1, &ev->data[0], MAX_PATH, (void *) ctx->args[1]);
+      ev->parent.parent.parent.attachment_count = 1;
+
+      maybe_schedule_stat_out_copy (tid, nr, 2, (__u64) ctx->args[2], MAX_STAT);
+    }
+    else
+#endif
+    {
+      write_attach_str_arg (&ev->attach, 1, &ev->data[0], MAX_PATH, (void *) ctx->args[1]);
+      ev->parent.parent.parent.attachment_count = 1;
+
+      maybe_schedule_stat_out_copy (tid, nr, 4, (__u64) ctx->args[4], MAX_STAT);
+    }
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (nr == FRIDA_LINUX_SYSCALL_FSTATFS ||
+        nr == FRIDA_LINUX_SYSCALL_FSTAT ||
+        nr == FRIDA_LINUX_SYSCALL_STATMOUNT)
+  {
+    SyscallEnterEventNone * ev = reserve_enter_none ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+    if (nr == FRIDA_LINUX_SYSCALL_FSTATFS)
+    {
+      maybe_schedule_stat_out_copy (tid, nr, 1, (__u64) ctx->args[1], MAX_STAT);
+    }
+    else if (nr == FRIDA_LINUX_SYSCALL_FSTAT)
+    {
+      maybe_schedule_stat_out_copy (tid, nr, 1, (__u64) ctx->args[1], MAX_STAT);
+    }
+    else
+    {
+      __u64 buf = (__u64) ctx->args[1];
+      __u32 bufsize = (__u32) ctx->args[2];
+      if (bufsize > MAX_STAT)
+        bufsize = MAX_STAT;
+      maybe_schedule_stat_out_copy (tid, nr, 1, buf, bufsize);
+    }
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (
+#ifdef FRIDA_LINUX_SYSCALL_RENAME
+      nr == FRIDA_LINUX_SYSCALL_RENAME ||
+#endif
+#ifdef FRIDA_LINUX_SYSCALL_RENAMEAT
+      nr == FRIDA_LINUX_SYSCALL_RENAMEAT ||
+#endif
+      nr == FRIDA_LINUX_SYSCALL_RENAMEAT2 ||
+#ifdef FRIDA_LINUX_SYSCALL_LINK
+      nr == FRIDA_LINUX_SYSCALL_LINK ||
+#endif
+      nr == FRIDA_LINUX_SYSCALL_LINKAT ||
+#ifdef FRIDA_LINUX_SYSCALL_SYMLINK
+      nr == FRIDA_LINUX_SYSCALL_SYMLINK ||
+#endif
+      nr == FRIDA_LINUX_SYSCALL_SYMLINKAT)
+  {
+    SyscallEnterEventPath2 * ev = reserve_enter_path2 ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+    switch (nr)
+    {
+#ifdef FRIDA_LINUX_SYSCALL_RENAME
+      case FRIDA_LINUX_SYSCALL_RENAME:
+        write_attach_str_arg (&ev->attach1, 0, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[0]);
+        write_attach_str_arg (&ev->attach2, 1, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[1]);
+        break;
+#endif
+#ifdef FRIDA_LINUX_SYSCALL_RENAMEAT
+      case FRIDA_LINUX_SYSCALL_RENAMEAT:
+        write_attach_str_arg (&ev->attach1, 1, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[1]);
+        write_attach_str_arg (&ev->attach2, 3, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[3]);
+        break;
+#endif
+      case FRIDA_LINUX_SYSCALL_RENAMEAT2:
+        write_attach_str_arg (&ev->attach1, 1, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[1]);
+        write_attach_str_arg (&ev->attach2, 3, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[3]);
+        break;
+#ifdef FRIDA_LINUX_SYSCALL_LINK
+      case FRIDA_LINUX_SYSCALL_LINK:
+        write_attach_str_arg (&ev->attach1, 0, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[0]);
+        write_attach_str_arg (&ev->attach2, 1, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[1]);
+        break;
+#endif
+      case FRIDA_LINUX_SYSCALL_LINKAT:
+        write_attach_str_arg (&ev->attach1, 1, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[1]);
+        write_attach_str_arg (&ev->attach2, 3, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[3]);
+        break;
+#ifdef FRIDA_LINUX_SYSCALL_SYMLINK
+      case FRIDA_LINUX_SYSCALL_SYMLINK:
+        write_attach_str_arg (&ev->attach1, 0, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[0]);
+        write_attach_str_arg (&ev->attach2, 1, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[1]);
+        break;
+#endif
+      default:
+        write_attach_str_arg (&ev->attach1, 0, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[0]);
+        write_attach_str_arg (&ev->attach2, 2, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[2]);
+        break;
+    }
+
+    ev->parent.parent.parent.attachment_count = 2;
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (nr == FRIDA_LINUX_SYSCALL_MOUNT)
+  {
+    SyscallEnterEventPath3 * ev = reserve_enter_path3 ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+    write_attach_str_arg (&ev->attach1, 0, &ev->data1[0], MAX_PATH, (void *) ev->parent.args[0]);
+    write_attach_str_arg (&ev->attach2, 1, &ev->data2[0], MAX_PATH, (void *) ev->parent.args[1]);
+    write_attach_str_arg (&ev->attach3, 2, &ev->data3[0], MAX_PATH, (void *) ev->parent.args[2]);
+
+    ev->parent.parent.parent.attachment_count = 3;
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (nr == FRIDA_LINUX_SYSCALL_NANOSLEEP ||
+      nr == FRIDA_LINUX_SYSCALL_CLOCK_NANOSLEEP)
+  {
+    SyscallEnterEventTimespec * ev = reserve_enter_timespec ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+    if (nr == FRIDA_LINUX_SYSCALL_NANOSLEEP)
+    {
+      __u64 rqtp = (__u64) ctx->args[0];
+      if (rqtp != 0)
+      {
+        write_attach_bytes_arg (&ev->attach, 0, &ev->data[0], sizeof (ev->data), (void *) rqtp, sizeof (ev->data));
+        ev->parent.parent.parent.attachment_count = 1;
+      }
+
+      __u64 rmtp = (__u64) ctx->args[1];
+      if (rmtp != 0)
+        maybe_schedule_stat_out_copy (tid, nr, 1, rmtp, sizeof (struct timespec));
+    }
+    else
+    {
+      __u64 rqtp = (__u64) ctx->args[2];
+      if (rqtp != 0)
+      {
+        write_attach_bytes_arg (&ev->attach, 2, &ev->data[0], sizeof (ev->data), (void *) rqtp, sizeof (ev->data));
+        ev->parent.parent.parent.attachment_count = 1;
+      }
+
+      __u64 rmtp = (__u64) ctx->args[3];
+      if (rmtp != 0)
+        maybe_schedule_stat_out_copy (tid, nr, 3, rmtp, sizeof (struct timespec));
+    }
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (nr == FRIDA_LINUX_SYSCALL_CONNECT ||
+      nr == FRIDA_LINUX_SYSCALL_BIND ||
+      nr == FRIDA_LINUX_SYSCALL_SENDTO)
   {
     SyscallEnterEventSock * ev = reserve_enter_sock ();
     if (ev == NULL)
@@ -476,9 +763,51 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
     fill_enter_args (ev->parent.args, ctx);
 
-    write_attach_bytes_arg (&ev->attach, 1, &ev->data[0], MAX_SOCK, (void *) ctx->args[1], ctx->args[2]);
+    if (nr == FRIDA_LINUX_SYSCALL_SENDTO)
+    {
+      __u64 user_addr = (__u64) ctx->args[4];
+      __u32 addr_len = (__u32) ctx->args[5];
+
+      write_attach_bytes_arg (&ev->attach, 4, &ev->data[0], MAX_SOCK, (void *) user_addr, addr_len);
+    }
+    else
+    {
+      __u64 uservaddr = (__u64) ctx->args[1];
+      __u32 addrlen = (__u32) ctx->args[2];
+
+      write_attach_bytes_arg (&ev->attach, 1, &ev->data[0], MAX_SOCK, (void *) uservaddr, addrlen);
+    }
 
     ev->parent.parent.parent.attachment_count = 1;
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (
+#ifdef FRIDA_LINUX_SYSCALL_ACCEPT
+      nr == FRIDA_LINUX_SYSCALL_ACCEPT ||
+#endif
+      nr == FRIDA_LINUX_SYSCALL_ACCEPT4 ||
+      nr == FRIDA_LINUX_SYSCALL_GETSOCKNAME ||
+      nr == FRIDA_LINUX_SYSCALL_GETPEERNAME ||
+      nr == FRIDA_LINUX_SYSCALL_RECVFROM)
+  {
+    SyscallEnterEventNone * ev = reserve_enter_none ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_ENTER, tgid, tid, nr, map_gen, ctx);
+    fill_enter_args (ev->parent.args, ctx);
+
+    if (nr == FRIDA_LINUX_SYSCALL_RECVFROM)
+    {
+      maybe_schedule_sock_out_copy (tid, nr, 4, (__u64) ctx->args[4], (__u64) ctx->args[5], MAX_SOCK);
+    }
+    else
+    {
+      maybe_schedule_sock_out_copy (tid, nr, 1, (__u64) ctx->args[1], (__u64) ctx->args[2], MAX_SOCK);
+    }
 
     bpf_ringbuf_submit (ev, 0);
     return 0;
@@ -509,9 +838,9 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
   __u32 map_gen = ensure_map_gen (tgid, tid);
 
   Inflight * in = bpf_map_lookup_elem (&inflight, &tid);
-  if (in != NULL && in->kind == INFLIGHT_KIND_OUT_COPY && in->syscall_nr == nr)
+  if (in != NULL && in->kind == INFLIGHT_KIND_STR_OUT_COPY && in->syscall_nr == nr)
   {
-    SyscallExitEventOut * ev = reserve_exit_out ();
+    SyscallExitEventStrOut * ev = reserve_exit_str_out ();
     if (ev == NULL)
       return 0;
 
@@ -522,7 +851,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
     long n = ctx->ret;
     if (n > 0)
     {
-      __u32 maxn = in->u.out_copy.max_len;
+      __u32 maxn = in->u.str_out_copy.max_len;
       if (maxn > MAX_PATH - 1)
         maxn = MAX_PATH - 1;
 
@@ -530,22 +859,139 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
       if (to_copy > maxn)
         to_copy = maxn;
 
-      ev->attach.type = ATTACHMENT_BYTES;
-      ev->attach.arg_index = in->u.out_copy.arg_index;
+      ev->attach.type = ATTACHMENT_STRING;
+      ev->attach.arg_index = in->u.str_out_copy.arg_index;
 
       if (to_copy == (MAX_PATH - 1))
       {
         ev->attach.len = (MAX_PATH - 1) + 1;
-        bpf_probe_read_user (&ev->data[0], MAX_PATH - 1, (void *) in->u.out_copy.user_ptr);
+        bpf_probe_read_user (&ev->data[0], MAX_PATH - 1, (void *) in->u.str_out_copy.user_ptr);
         ev->data[MAX_PATH - 1] = '\0';
       }
       else
       {
         ev->attach.len = to_copy + 1;
         if (to_copy != 0)
-          bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.out_copy.user_ptr);
+          bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.str_out_copy.user_ptr);
         ev->data[to_copy] = '\0';
       }
+
+      ev->parent.parent.parent.attachment_count = 1;
+    }
+
+    bpf_map_delete_elem (&inflight, &tid);
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (in != NULL && in->kind == INFLIGHT_KIND_STAT_OUT_COPY && in->syscall_nr == nr)
+  {
+    SyscallExitEventStatOut * ev = reserve_exit_stat_out ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_EXIT, tgid, tid, nr, map_gen, ctx);
+
+    ev->parent.retval = (__s64) ctx->ret;
+
+    bool ok;
+    switch (nr)
+    {
+      case FRIDA_LINUX_SYSCALL_NANOSLEEP:
+      case FRIDA_LINUX_SYSCALL_CLOCK_NANOSLEEP:
+        ok = (ctx->ret == 0) || (ctx->ret == -EINTR);
+        break;
+
+      case FRIDA_LINUX_SYSCALL_STATMOUNT:
+      case FRIDA_LINUX_SYSCALL_STATX:
+      case FRIDA_LINUX_SYSCALL_STATFS:
+      case FRIDA_LINUX_SYSCALL_FSTATFS:
+      case FRIDA_LINUX_SYSCALL_FSTAT:
+#ifdef FRIDA_LINUX_SYSCALL_NEWFSTATAT
+      case FRIDA_LINUX_SYSCALL_NEWFSTATAT:
+#endif
+        ok = (ctx->ret == 0);
+        break;
+
+      default:
+        ok = false;
+        break;
+    }
+
+    if (ok)
+    {
+      __u32 to_copy = in->u.stat_out_copy.len;
+      if (to_copy > MAX_STAT)
+        to_copy = MAX_STAT;
+
+      ev->attach.type = ATTACHMENT_BYTES;
+      ev->attach.arg_index = in->u.stat_out_copy.arg_index;
+      ev->attach.len = to_copy;
+
+      if (to_copy != 0)
+        bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.stat_out_copy.user_ptr);
+
+      ev->parent.parent.parent.attachment_count = 1;
+    }
+
+    bpf_map_delete_elem (&inflight, &tid);
+
+    bpf_ringbuf_submit (ev, 0);
+    return 0;
+  }
+
+  if (in != NULL && in->kind == INFLIGHT_KIND_SOCK_OUT_COPY && in->syscall_nr == nr)
+  {
+    SyscallExitEventSockOut * ev = reserve_exit_sock_out ();
+    if (ev == NULL)
+      return 0;
+
+    fill_syscall_event (&ev->parent.parent, EVENT_TYPE_SYSCALL_EXIT, tgid, tid, nr, map_gen, ctx);
+
+    ev->parent.retval = (__s64) ctx->ret;
+
+    bool ok;
+    switch (nr)
+    {
+#ifdef FRIDA_LINUX_SYSCALL_ACCEPT
+      case FRIDA_LINUX_SYSCALL_ACCEPT:
+#endif
+      case FRIDA_LINUX_SYSCALL_ACCEPT4:
+      case FRIDA_LINUX_SYSCALL_RECVFROM:
+        ok = ctx->ret >= 0;
+        break;
+      case FRIDA_LINUX_SYSCALL_GETSOCKNAME:
+      case FRIDA_LINUX_SYSCALL_GETPEERNAME:
+        ok = ctx->ret == 0;
+        break;
+      default:
+        ok = false;
+        break;
+    }
+
+    if (ok)
+    {
+      int user_len = 0;
+      bpf_probe_read_user (&user_len, sizeof (user_len), (void *) in->u.sock_out_copy.user_len_ptr);
+
+      __u32 to_copy = 0;
+      if (user_len > 0)
+        to_copy = (__u32) user_len;
+
+      __u32 maxn = in->u.sock_out_copy.max_len;
+      if (maxn > MAX_SOCK)
+        maxn = MAX_SOCK;
+
+      if (to_copy > maxn)
+        to_copy = maxn;
+
+      ev->attach.type = ATTACHMENT_BYTES;
+      ev->attach.arg_index = in->u.sock_out_copy.arg_index;
+      ev->attach.len = to_copy;
+
+      if (to_copy != 0)
+        bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.sock_out_copy.user_ptr);
 
       ev->parent.parent.parent.attachment_count = 1;
     }
@@ -685,10 +1131,28 @@ reserve_enter_none (void)
   return reserve_syscall_event (sizeof (SyscallEnterEventNone));
 }
 
+static SyscallEnterEventTimespec *
+reserve_enter_timespec (void)
+{
+  return reserve_syscall_event (sizeof (SyscallEnterEventTimespec));
+}
+
 static SyscallEnterEventPath *
 reserve_enter_path (void)
 {
   return reserve_syscall_event (sizeof (SyscallEnterEventPath));
+}
+
+static SyscallEnterEventPath2 *
+reserve_enter_path2 (void)
+{
+  return reserve_syscall_event (sizeof (SyscallEnterEventPath2));
+}
+
+static SyscallEnterEventPath3 *
+reserve_enter_path3 (void)
+{
+  return reserve_syscall_event (sizeof (SyscallEnterEventPath3));
 }
 
 static SyscallEnterEventSock *
@@ -703,10 +1167,22 @@ reserve_exit_none (void)
   return reserve_syscall_event (sizeof (SyscallExitEventNone));
 }
 
-static SyscallExitEventOut *
-reserve_exit_out (void)
+static SyscallExitEventStrOut *
+reserve_exit_str_out (void)
 {
-  return reserve_syscall_event (sizeof (SyscallExitEventOut));
+  return reserve_syscall_event (sizeof (SyscallExitEventStrOut));
+}
+
+static SyscallExitEventStatOut *
+reserve_exit_stat_out (void)
+{
+  return reserve_syscall_event (sizeof (SyscallExitEventStatOut));
+}
+
+static SyscallExitEventSockOut *
+reserve_exit_sock_out (void)
+{
+  return reserve_syscall_event (sizeof (SyscallExitEventSockOut));
 }
 
 static void *
@@ -899,20 +1375,59 @@ flush:
 }
 
 static void
-maybe_schedule_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len)
+maybe_schedule_str_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len)
 {
   Inflight v;
 
   v.syscall_nr = nr;
-  v.kind = INFLIGHT_KIND_OUT_COPY;
+  v.kind = INFLIGHT_KIND_STR_OUT_COPY;
   v._pad0 = 0;
 
-  v.u.out_copy.arg_index = arg_index;
-  v.u.out_copy._pad1 = 0;
+  v.u.str_out_copy.arg_index = arg_index;
+  v.u.str_out_copy._pad1 = 0;
 
-  v.u.out_copy.user_ptr = user_ptr;
-  v.u.out_copy.max_len = max_len;
-  v.u.out_copy._pad2 = 0;
+  v.u.str_out_copy.user_ptr = user_ptr;
+  v.u.str_out_copy.max_len = max_len;
+  v.u.str_out_copy._pad2 = 0;
+
+  bpf_map_update_elem (&inflight, &tid, &v, BPF_ANY);
+}
+
+static void
+maybe_schedule_stat_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 len)
+{
+  Inflight v;
+
+  v.syscall_nr = nr;
+  v.kind = INFLIGHT_KIND_STAT_OUT_COPY;
+  v._pad0 = 0;
+
+  v.u.stat_out_copy.arg_index = arg_index;
+  v.u.stat_out_copy._pad1 = 0;
+
+  v.u.stat_out_copy.user_ptr = user_ptr;
+  v.u.stat_out_copy.len = len;
+  v.u.stat_out_copy._pad2 = 0;
+
+  bpf_map_update_elem (&inflight, &tid, &v, BPF_ANY);
+}
+
+static void
+maybe_schedule_sock_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u64 user_len_ptr, __u32 max_len)
+{
+  Inflight v;
+
+  v.syscall_nr = nr;
+  v.kind = INFLIGHT_KIND_SOCK_OUT_COPY;
+  v._pad0 = 0;
+
+  v.u.sock_out_copy.arg_index = arg_index;
+  v.u.sock_out_copy._pad1 = 0;
+
+  v.u.sock_out_copy.user_ptr = user_ptr;
+  v.u.sock_out_copy.user_len_ptr = user_len_ptr;
+  v.u.sock_out_copy.max_len = max_len;
+  v.u.sock_out_copy._pad2 = 0;
 
   bpf_map_update_elem (&inflight, &tid, &v, BPF_ANY);
 }
