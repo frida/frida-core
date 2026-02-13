@@ -813,22 +813,23 @@ namespace Frida {
 	private const uint64 SOCK_CLOEXEC = 0x80000;
 
 	private sealed class InjectSession : SeizeSession {
-		private static ProcMapsSoEntry local_libc;
+		private static ProcMapsSnapshot.Mapping local_libc;
 		private static uint64 mmap_offset;
 		private static uint64 munmap_offset;
 
 		private static string fallback_ld;
 		private static string fallback_libc;
 
-		private static ProcMapsSoEntry? local_android_ld;
+		private static ProcMapsSnapshot.Mapping? local_android_ld;
 
 		static construct {
 			var libc = Gum.Process.get_libc_module ();
 			uint local_pid = Posix.getpid ();
-			local_libc = ProcMapsSoEntry.find_by_path (local_pid, libc.path);
+			var local_maps = ProcMapsSnapshot.from_pid (local_pid);
+			local_libc = local_maps.find_module_by_path (libc.path);
 			assert (local_libc != null);
-			mmap_offset = (uint64) (uintptr) libc.find_export_by_name ("mmap") - local_libc.base_address;
-			munmap_offset = (uint64) (uintptr) libc.find_export_by_name ("munmap") - local_libc.base_address;
+			mmap_offset = (uint64) (uintptr) libc.find_export_by_name ("mmap") - local_libc.start;
+			munmap_offset = (uint64) (uintptr) libc.find_export_by_name ("munmap") - local_libc.start;
 
 			try {
 				var program = new Gum.ElfModule.from_file ("/proc/self/exe");
@@ -846,7 +847,7 @@ namespace Frida {
 			}
 
 #if ANDROID
-			local_android_ld = ProcMapsSoEntry.find_by_path (local_pid, fallback_ld);
+			local_android_ld = local_maps.find_module_by_path (fallback_ld);
 #endif
 		}
 
@@ -1051,9 +1052,10 @@ namespace Frida {
 			uint64 allocation_base = 0;
 			size_t allocation_size = size_t.max (bootstrapper_size, loader_size) + stack_size;
 
+			var remote_maps = ProcMapsSnapshot.from_pid (pid);
+			var remote_libc = remote_maps.find_module_by_path (local_libc.path);
 			uint64 remote_mmap = 0;
 			uint64 remote_munmap = 0;
-			ProcMapsSoEntry? remote_libc = ProcMapsSoEntry.find_by_path (pid, local_libc.path);
 #if ANDROID
 			bool same_libc = remote_libc != null
 					&& remote_libc.device.major == local_libc.device.major
@@ -1066,8 +1068,8 @@ namespace Frida {
 					&& remote_libc.path == local_libc.path;
 #endif
 			if (same_libc) {
-				remote_mmap = remote_libc.base_address + mmap_offset;
-				remote_munmap = remote_libc.base_address + munmap_offset;
+				remote_mmap = remote_libc.start + mmap_offset;
+				remote_munmap = remote_libc.start + munmap_offset;
 			}
 
 			if (remote_mmap != 0) {
@@ -1165,7 +1167,9 @@ namespace Frida {
 					result.context.libc = &result.libc;
 
 					if (result.context.rtld_flavor == ANDROID && result.libc.dlopen == null) {
-						ProcMapsSoEntry? remote_ld = ProcMapsSoEntry.find_by_address (pid, (uintptr) result.context.rtld_base);
+						if (restart_after_libc_load)
+							remote_maps = ProcMapsSnapshot.from_pid (pid);
+						var remote_ld = remote_maps.find_mapping ((uintptr) result.context.rtld_base);
 						bool same_ld = remote_ld != null && local_android_ld != null
 							&& remote_ld.device.equals (local_android_ld.device)
 							&& remote_ld.inode == local_android_ld.inode;
@@ -1217,9 +1221,9 @@ namespace Frida {
 			}
 		}
 
-		private static void * rebase_pointer (uintptr local_ptr, ProcMapsSoEntry local_module, ProcMapsSoEntry remote_module) {
-			var offset = local_ptr - local_module.base_address;
-			return (void *) (remote_module.base_address + offset);
+		private static void * rebase_pointer (uintptr local_ptr, ProcMapsSnapshot.Mapping local, ProcMapsSnapshot.Mapping remote) {
+			var offset = local_ptr - local.start;
+			return (void *) (remote.start + offset);
 		}
 
 		private static string make_fallback_address () {

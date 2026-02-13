@@ -12,6 +12,7 @@ public sealed class Frida.SymbolResolver : Object {
 		public uint64 end;
 
 		public uint64 file_offset;
+		public uint64 vm_flags;
 		public DevId device;
 		public uint64 inode;
 		public string? path;
@@ -34,12 +35,12 @@ public sealed class Frida.SymbolResolver : Object {
 			}
 
 			uint mod_idx;
-			if (!used_index.has_key (m.module_id)) {
+			if (!used_index.has_key (m.path)) {
 				mod_idx = used_modules.size;
-				used_index[m.module_id] = mod_idx;
-				used_modules.add (m.module_id);
+				used_index[m.path] = mod_idx;
+				used_modules.add (m.path);
 			} else {
-				mod_idx = used_index[m.module_id];
+				mod_idx = used_index[m.path];
 			}
 
 			uint64 rel64 = (addr - m.start) + m.file_offset;
@@ -92,6 +93,7 @@ public sealed class Frida.SymbolResolver : Object {
 		ev.start = start;
 		ev.end = end;
 		ev.file_offset = file_offset;
+		ev.vm_flags = vm_flags;
 		ev.device = device;
 		ev.inode = inode;
 		ev.path = path;
@@ -143,8 +145,8 @@ public sealed class Frida.SymbolResolver : Object {
 			q.unset (next_gen);
 
 			if (ev.is_create) {
-				string module_id = make_module_id (ev.device, ev.inode, ev.path);
-				snap.apply_create (next_gen, ev.start, ev.end, ev.file_offset, ev.device, ev.inode, module_id);
+				string path = make_path (ev.device, ev.inode, ev.path);
+				snap.apply_create (next_gen, ev.start, ev.end, ev.file_offset, ev.vm_flags, ev.device, ev.inode, path);
 			} else {
 				snap.apply_destroy_range (next_gen, ev.start, ev.end);
 			}
@@ -159,7 +161,7 @@ public sealed class Frida.SymbolResolver : Object {
 		cache.clear ();
 	}
 
-	private static string make_module_id (DevId device, uint64 inode, string? path) {
+	private static string make_path (DevId device, uint64 inode, string? path) {
 		if (path != null)
 			return path;
 

@@ -8,27 +8,42 @@ namespace Frida {
 
 		private Gee.List<Mapping> maps = new Gee.ArrayList<Mapping> ();
 
+		private const uint64 VM_READ   = 1;
+		private const uint64 VM_WRITE  = 2;
+		private const uint64 VM_EXEC   = 4;
+		private const uint64 VM_SHARED = 8;
+
 		public class Mapping {
 			public uint64 start;
 			public uint64 end;
+			public size_t size {
+				get {
+					return (size_t) (end - start);
+				}
+			}
 			public uint64 file_offset;
+
+			public bool readable;
+			public bool writable;
+			public bool executable;
+			public bool shared;
 
 			public DevId device;
 			public uint64 inode;
 
-			public string module_id;
+			public string path;
 
 			public uint32 start_gen;
 			public uint32 end_gen;
 		}
 
-		public static ProcMapsSnapshot from_pid (uint32 pid) throws Error {
+		public static ProcMapsSnapshot from_pid (uint32 pid) {
 			var snap = new ProcMapsSnapshot ();
 			snap.build_from_pid (pid);
 			return snap;
 		}
 
-		private void build_from_pid (uint32 pid) throws Error {
+		private void build_from_pid (uint32 pid) {
 			maps.clear ();
 
 			var it = ProcMapsIter.for_pid (pid);
@@ -40,10 +55,16 @@ namespace Frida {
 				m.end = it.end_address;
 				m.file_offset = it.file_offset;
 
+				string flags = it.flags;
+				m.readable = flags[0] == 'r';
+				m.writable = flags[1] == 'w';
+				m.executable = flags[2] == 'x';
+				m.shared = flags[3] == 's';
+
 				m.device = it.device;
 				m.inode = it.inode;
 
-				m.module_id = normalize_module_id (it.path);
+				m.path = normalize_path (it.path);
 
 				m.start_gen = 1;
 				m.end_gen = 0;
@@ -52,17 +73,26 @@ namespace Frida {
 			}
 		}
 
-		public void apply_create (uint32 new_gen, uint64 start, uint64 end, uint64 file_offset, DevId device, uint64 inode,
-				string module_id) {
+		public void apply_create (uint32 new_gen, uint64 start, uint64 end, uint64 file_offset, uint64 vm_flags, DevId device,
+				uint64 inode, string path) {
 			end_range_at_gen (start, end, new_gen);
 
 			var m = new Mapping ();
+
 			m.start = start;
 			m.end = end;
 			m.file_offset = file_offset;
+
+			m.readable = (vm_flags & VM_READ) != 0;
+			m.writable = (vm_flags & VM_WRITE) != 0;
+			m.executable = (vm_flags & VM_EXEC) != 0;
+			m.shared = (vm_flags & VM_SHARED) != 0;
+
 			m.device = device;
 			m.inode = inode;
-			m.module_id = module_id;
+
+			m.path = path;
+
 			m.start_gen = new_gen;
 			m.end_gen = 0;
 
@@ -108,7 +138,7 @@ namespace Frida {
 					dead.file_offset = m.file_offset;
 					dead.device = m.device;
 					dead.inode = m.inode;
-					dead.module_id = m.module_id;
+					dead.path = m.path;
 					dead.start_gen = m.start_gen;
 					dead.end_gen = gen;
 
@@ -128,7 +158,7 @@ namespace Frida {
 					dead.file_offset = m.file_offset + (start - m.start);
 					dead.device = m.device;
 					dead.inode = m.inode;
-					dead.module_id = m.module_id;
+					dead.path = m.path;
 					dead.start_gen = m.start_gen;
 					dead.end_gen = gen;
 
@@ -146,7 +176,7 @@ namespace Frida {
 					dead.file_offset = m.file_offset + (start - m.start);
 					dead.device = m.device;
 					dead.inode = m.inode;
-					dead.module_id = m.module_id;
+					dead.path = m.path;
 					dead.start_gen = m.start_gen;
 					dead.end_gen = gen;
 
@@ -156,7 +186,7 @@ namespace Frida {
 					right.file_offset = m.file_offset + (end - m.start);
 					right.device = m.device;
 					right.inode = m.inode;
-					right.module_id = m.module_id;
+					right.path = m.path;
 					right.start_gen = m.start_gen;
 					right.end_gen = 0;
 
@@ -168,11 +198,19 @@ namespace Frida {
 			}
 		}
 
-		private static string normalize_module_id (string path) {
+		private static string normalize_path (string path) {
 			const string suffix = " (deleted)";
 			if (path.has_suffix (suffix))
 				return path.substring (0, path.length - suffix.length);
 			return path;
+		}
+
+		public Gee.Iterator<Mapping> iterator () {
+			return maps.iterator ();
+		}
+
+		public Mapping? find_mapping (uint64 addr) {
+			return find_mapping_at_gen (addr, gen);
 		}
 
 		public Mapping? find_mapping_at_gen (uint64 addr, uint32 gen) {
@@ -224,91 +262,82 @@ namespace Frida {
 			bool not_ended = m.end_gen == 0 || gen < m.end_gen;
 			return started && not_ended;
 		}
-	}
 
-	public class ProcMapsSoEntry {
-		public uint64 base_address;
-		public string path;
-		public DevId device;
-		public uint64 inode;
-
-		private ProcMapsSoEntry (uint64 base_address, string path, DevId device, uint64 inode) {
-			this.base_address = base_address;
-			this.path = path;
-			this.device = device;
-			this.inode = inode;
+		public Mapping? find_module_by_path (string path) {
+			return find_module_by_path_at_gen (path, gen);
 		}
 
-		public static ProcMapsSoEntry? find_by_address (uint pid, uint64 address) {
-			var iter = ProcMapsIter.for_pid (pid);
-			while (iter.next ()) {
-				uint64 start = iter.start_address;
-				uint64 end = iter.end_address;
-				if (address >= start && address < end)
-					return new ProcMapsSoEntry (start, iter.path, iter.device, iter.inode);
-			}
+		public Mapping? find_module_by_path_at_gen (string path, uint32 at_gen) {
+			Mapping? best_base = null;
+			int best_score = int.MIN;
 
-			return null;
-		}
+			Mapping? cur_base = null;
+			uint cur_total = 0;
+			uint cur_exec = 0;
 
-		public static ProcMapsSoEntry? find_by_path (uint pid, string path) {
-			var candidates = new Gee.ArrayList<Candidate> ();
-			Candidate? latest_candidate = null;
-			var iter = ProcMapsIter.for_pid (pid);
 #if ANDROID
 			unowned string libc_path = Gum.Process.get_libc_module ().path;
 #endif
-			while (iter.next ()) {
-				string current_path = iter.path;
-				if (current_path == "[page size compat]")
+
+			for (int i = 0; i < maps.size; i++) {
+				var m = maps[i];
+				if (!mapping_alive_at (m, at_gen))
 					continue;
-				if (current_path != path) {
-					latest_candidate = null;
+
+				unowned string mp = m.path;
+
+				if (mp == "[page size compat]")
+					continue;
+
+				if (mp != path) {
+					consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
+					cur_base = null;
+					cur_total = 0;
+					cur_exec = 0;
 					continue;
 				}
 
-				string flags = iter.flags;
-
 #if ANDROID
-				if (current_path == libc_path && flags[3] == 's')
+				if (mp == libc_path && m.shared)
 					continue;
 #endif
 
-				if (iter.file_offset == 0) {
-					latest_candidate = new Candidate () {
-						entry = new ProcMapsSoEntry (iter.start_address, current_path, iter.device, iter.inode),
-						total_ranges = 0,
-						executable_ranges = 0,
-					};
-					candidates.add (latest_candidate);
+				if (m.file_offset == 0) {
+					consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
+					cur_base = m;
+					cur_total = 0;
+					cur_exec = 0;
 				}
 
-				if (latest_candidate != null) {
-					latest_candidate.total_ranges++;
-					if (flags[2] == 'x')
-						latest_candidate.executable_ranges++;
+				if (cur_base != null) {
+					cur_total++;
+					if (m.executable)
+						cur_exec++;
 				}
 			}
 
-			candidates.sort ((a, b) => b.score () - a.score ());
+			consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
 
-			if (candidates.is_empty)
-				return null;
-
-			return candidates.first ().entry;
+			return best_base;
 		}
 
-		private class Candidate {
-			public ProcMapsSoEntry entry;
-			public uint total_ranges;
-			public uint executable_ranges;
+		private static void consider_candidate (ref Mapping? best_base, ref int best_score, Mapping? candidate_base, uint total,
+				uint exec) {
+			if (candidate_base == null)
+				return;
 
-			public int score () {
-				int result = (int) total_ranges;
-				if (executable_ranges == 0)
-					result = -result;
-				return result;
+			int score = score_candidate (total, exec);
+			if (score > best_score) {
+				best_score = score;
+				best_base = candidate_base;
 			}
+		}
+
+		private static int score_candidate (uint total, uint exec) {
+			int score = (int) total;
+			if (exec == 0)
+				score = -score;
+			return score;
 		}
 	}
 
