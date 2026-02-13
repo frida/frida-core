@@ -965,9 +965,9 @@ namespace Frida {
 
 		private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, string server_name) throws Error, IOError {
 			uint64 payload_base = 0;
+			int payload_original_protection = 0;
 			unowned string? payload_path = null;
 			uint64 payload_file_offset = 0;
-			int payload_original_protection = 0;
 			unowned string? libc_path = null;
 			unowned string? libselinux_path = null;
 			unowned string? runtime_path = null;
@@ -980,10 +980,10 @@ namespace Frida {
 				if (path.has_suffix ("/libstagefright.so") && m.readable && m.executable) {
 					if (payload_base == 0) {
 						payload_base = m.end - Gum.query_page_size ();
-						payload_path = path;
 						payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
 						if (m.writable)
 							payload_original_protection |= Posix.PROT_WRITE;
+						payload_path = path;
 						payload_file_offset = m.file_offset;
 					}
 				} else if (path.has_suffix ("/libc.so")) {
