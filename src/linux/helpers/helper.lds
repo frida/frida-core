@@ -6,6 +6,7 @@ SECTIONS {
     KEEP(*(.text.entrypoint))
     *(.text*)
     *(.rodata*)
+    *(.data*)
   }
 
   .dynstr : { *(.dynstr) }

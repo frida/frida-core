@@ -2,18 +2,28 @@
 #include <jni.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
-typedef struct _FridaApi FridaApi;
+typedef struct _ZymbioteContext ZymbioteContext;
 
-struct _FridaApi
+struct _ZymbioteContext
 {
-  char name[64];
+  char socket_path[64];
 
-  void    (* original_set_argv0) (JNIEnv * env, jobject clazz, jstring name);
+  void * payload_base;
+  size_t payload_size;
+  size_t payload_original_protection;
+
+  char * package_name;
+
   int     (* original_setcontext) (uid_t uid, bool is_system_server, const char * seinfo, const char * name);
+  void    (* original_set_argv0) (JNIEnv * env, jobject clazz, jstring name);
 
+  int     (* mprotect) (void * addr, size_t len, int prot);
+  char *  (* strdup) (const char * s);
+  void    (* free) (void * ptr);
   int     (* socket) (int domain, int type, int protocol);
   int     (* connect) (int sockfd, const struct sockaddr * addr, socklen_t addrlen);
   int *   (* __errno) (void);
@@ -25,9 +35,9 @@ struct _FridaApi
   int     (* raise) (int sig);
 };
 
-static volatile const FridaApi frida =
+ZymbioteContext zymbiote =
 {
-  .name = "/frida-zymbiote-00000000000000000000000000000000",
+  .socket_path = "/frida-zymbiote-00000000000000000000000000000000",
 };
 
 int frida_zymbiote_replacement_setargv0 (JNIEnv * env, jobject clazz, jstring name);
@@ -36,7 +46,6 @@ int frida_zymbiote_replacement_setcontext (uid_t uid, bool is_system_server, con
 static void frida_wait_for_permission_to_resume (const char * package_name, bool * revert_now);
 
 static int frida_stop_and_return_from_setargv0 (JNIEnv * env, jobject clazz, jstring name);
-static int frida_stop_and_return_from_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name);
 
 static int frida_get_errno (void);
 
@@ -48,18 +57,50 @@ static ssize_t frida_recv (int sockfd, void * buf, size_t len, int flags);
 __attribute__ ((section (".text.entrypoint")))
 __attribute__ ((visibility ("default")))
 int
+frida_zymbiote_replacement_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name)
+{
+  int res;
+
+  res = zymbiote.original_setcontext (uid, is_system_server, seinfo, name);
+  if (res == -1)
+    return -1;
+
+  if (zymbiote.package_name == NULL)
+  {
+    zymbiote.mprotect (zymbiote.payload_base, zymbiote.payload_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    zymbiote.package_name = zymbiote.strdup (name);
+  }
+
+  return res;
+}
+
+__attribute__ ((section (".text.entrypoint")))
+__attribute__ ((visibility ("default")))
+int
 frida_zymbiote_replacement_setargv0 (JNIEnv * env, jobject clazz, jstring name)
 {
   const char * name_utf8;
   bool revert_now;
 
-  frida.original_set_argv0 (env, clazz, name);
+  zymbiote.original_set_argv0 (env, clazz, name);
 
-  name_utf8 = (*env)->GetStringUTFChars (env, name, NULL);
+  if (zymbiote.package_name != NULL)
+    name_utf8 = zymbiote.package_name;
+  else
+    name_utf8 = (*env)->GetStringUTFChars (env, name, NULL);
 
   frida_wait_for_permission_to_resume (name_utf8, &revert_now);
 
-  (*env)->ReleaseStringUTFChars (env, name, name_utf8);
+  if (zymbiote.package_name != NULL)
+  {
+    zymbiote.free (zymbiote.package_name);
+    zymbiote.package_name = NULL;
+    zymbiote.mprotect (zymbiote.payload_base, zymbiote.payload_size, zymbiote.payload_original_protection);
+  }
+  else
+  {
+    (*env)->ReleaseStringUTFChars (env, name, name_utf8);
+  }
 
   if (revert_now)
   {
@@ -68,29 +109,6 @@ frida_zymbiote_replacement_setargv0 (JNIEnv * env, jobject clazz, jstring name)
   }
 
   return 0;
-}
-
-__attribute__ ((section (".text.entrypoint")))
-__attribute__ ((visibility ("default")))
-int
-frida_zymbiote_replacement_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name)
-{
-  int res;
-  bool revert_now;
-
-  res = frida.original_setcontext (uid, is_system_server, seinfo, name);
-  if (res == -1)
-    return -1;
-
-  frida_wait_for_permission_to_resume (name, &revert_now);
-
-  if (revert_now)
-  {
-    __attribute__ ((musttail))
-    return frida_stop_and_return_from_setcontext (uid, is_system_server, seinfo, name);
-  }
-
-  return res;
 }
 
 static void
@@ -103,7 +121,7 @@ frida_wait_for_permission_to_resume (const char * package_name, bool * revert_no
 
   *revert_now = false;
 
-  fd = frida.socket (AF_UNIX, SOCK_STREAM, 0);
+  fd = zymbiote.socket (AF_UNIX, SOCK_STREAM, 0);
   if (fd == -1)
     goto beach;
 
@@ -111,15 +129,15 @@ frida_wait_for_permission_to_resume (const char * package_name, bool * revert_no
   addr.sun_path[0] = '\0';
 
   name_len = 0;
-  for (unsigned int i = 0; i != sizeof (frida.name); i++)
+  for (unsigned int i = 0; i != sizeof (zymbiote.socket_path); i++)
   {
-    if (frida.name[i] == '\0')
+    if (zymbiote.socket_path[i] == '\0')
       break;
 
     if (1u + i >= sizeof (addr.sun_path))
       break;
 
-    addr.sun_path[1u + i] = frida.name[i];
+    addr.sun_path[1u + i] = zymbiote.socket_path[i];
     name_len++;
   }
 
@@ -137,8 +155,8 @@ frida_wait_for_permission_to_resume (const char * package_name, bool * revert_no
     } header;
     struct iovec iov[2];
 
-    header.pid = frida.getpid ();
-    header.ppid = frida.getppid ();
+    header.pid = zymbiote.getpid ();
+    header.ppid = zymbiote.getppid ();
 
     header.package_name_len = 0;
     while (package_name[header.package_name_len] != '\0')
@@ -165,7 +183,7 @@ frida_wait_for_permission_to_resume (const char * package_name, bool * revert_no
 
 beach:
   if (fd != -1)
-    frida.close (fd);
+    zymbiote.close (fd);
 }
 
 #if defined (__i386__)
@@ -177,13 +195,13 @@ beach:
       "call   1f\n"                                                    \
       "1: pop %%eax\n"                                                 \
                                                                        \
-      "addl   $(frida-1b), %%eax\n"                                    \
+      "addl   $(zymbiote-1b), %%eax\n"                                 \
       "movl   %c[raise_off](%%eax), %%eax\n"                           \
                                                                        \
       "jmp    *%%eax\n"                                                \
     :                                                                  \
     : [sig] "i" (SIGSTOP),                                             \
-      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+      [raise_off] "i" (offsetof (ZymbioteContext, raise))              \
     : "eax", "memory"                                                  \
   )
 
@@ -193,13 +211,13 @@ beach:
   __asm__ __volatile__ (                                               \
       "mov    $%c[sig], %%edi\n"                                       \
                                                                        \
-      "leaq   frida(%%rip), %%r11\n"                                   \
+      "leaq   zymbiote(%%rip), %%r11\n"                                \
       "movq   %c[raise_off](%%r11), %%r11\n"                           \
                                                                        \
       "jmp    *%%r11\n"                                                \
     :                                                                  \
     : [sig] "i" (SIGSTOP),                                             \
-      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+      [raise_off] "i" (offsetof (ZymbioteContext, raise))              \
     : "r11", "rdi", "memory"                                           \
   )
 
@@ -209,13 +227,13 @@ beach:
   __asm__ __volatile__ (                                               \
       "mov    r0, %[sig]\n"                                            \
                                                                        \
-      "adr    r12, frida\n"                                            \
+      "adr    r12, zymbiote\n"                                         \
       "ldr    r12, [r12, %[raise_off]]\n"                              \
                                                                        \
       "bx     r12\n"                                                   \
     :                                                                  \
     : [sig] "i" (SIGSTOP),                                             \
-      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+      [raise_off] "i" (offsetof (ZymbioteContext, raise))              \
     : "r12", "memory"                                                  \
   )
 
@@ -225,14 +243,14 @@ beach:
   __asm__ __volatile__ (                                               \
       "mov    w0, #%[sig]\n"                                           \
                                                                        \
-      "adrp   x16, frida\n"                                            \
-      "add    x16, x16, :lo12:frida\n"                                 \
+      "adrp   x16, zymbiote\n"                                         \
+      "add    x16, x16, :lo12:zymbiote\n"                              \
       "ldr    x16, [x16, %[raise_off]]\n"                              \
                                                                        \
       "br     x16\n"                                                   \
     :                                                                  \
     : [sig] "i" (SIGSTOP),                                             \
-      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+      [raise_off] "i" (offsetof (ZymbioteContext, raise))              \
     : "x16", "memory"                                                  \
   )
 
@@ -247,17 +265,10 @@ frida_stop_and_return_from_setargv0 (JNIEnv * env, jobject clazz, jstring name)
   FRIDA_TAILCALL_TO_RAISE_SIGSTOP ();
 }
 
-__attribute__ ((naked, noinline))
-static int
-frida_stop_and_return_from_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name)
-{
-  FRIDA_TAILCALL_TO_RAISE_SIGSTOP ();
-}
-
 static int
 frida_get_errno (void)
 {
-  return *frida.__errno ();
+  return *zymbiote.__errno ();
 }
 
 static int
@@ -265,7 +276,7 @@ frida_connect (int sockfd, const struct sockaddr * addr, socklen_t addrlen)
 {
   for (;;)
   {
-    if (frida.connect (sockfd, addr, addrlen) == 0)
+    if (zymbiote.connect (sockfd, addr, addrlen) == 0)
       return 0;
 
     if (frida_get_errno () == EINTR)
@@ -280,7 +291,7 @@ frida_sendmsg (int sockfd, const struct msghdr * msg, int flags)
 {
   for (;;)
   {
-    ssize_t n = frida.sendmsg (sockfd, msg, flags);
+    ssize_t n = zymbiote.sendmsg (sockfd, msg, flags);
     if (n != -1)
       return n;
 
@@ -344,7 +355,7 @@ frida_recv (int sockfd, void * buf, size_t len, int flags)
 {
   for (;;)
   {
-    ssize_t n = frida.recv (sockfd, buf, len, flags);
+    ssize_t n = zymbiote.recv (sockfd, buf, len, flags);
     if (n != -1)
       return n;
 

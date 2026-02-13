@@ -967,6 +967,7 @@ namespace Frida {
 			uint64 payload_base = 0;
 			unowned string? payload_path = null;
 			uint64 payload_file_offset = 0;
+			int payload_original_protection = 0;
 			unowned string? libc_path = null;
 			unowned string? libselinux_path = null;
 			unowned string? runtime_path = null;
@@ -976,10 +977,13 @@ namespace Frida {
 
 			foreach (var m in maps) {
 				unowned string path = m.path;
-				if (path.has_suffix ("/libstagefright.so") && m.executable) {
+				if (path.has_suffix ("/libstagefright.so") && m.readable && m.executable) {
 					if (payload_base == 0) {
 						payload_base = m.end - Gum.query_page_size ();
 						payload_path = path;
+						payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
+						if (m.writable)
+							payload_original_protection |= Posix.PROT_WRITE;
 						payload_file_offset = m.file_offset;
 					}
 				} else if (path.has_suffix ("/libc.so")) {
@@ -1074,8 +1078,8 @@ namespace Frida {
 
 			uint64 replacement_setargv0;
 			uint64 replacement_setcontext;
-			Bytes payload = make_zymbiote_payload (server_name, payload_base, libc, libc_mapping, original_setargv0,
-				original_setcontext, out replacement_setargv0, out replacement_setcontext);
+			Bytes payload = make_zymbiote_payload (server_name, payload_base, payload_original_protection, libc, libc_mapping,
+				original_setargv0, original_setcontext, out replacement_setargv0, out replacement_setcontext);
 
 			var fd = open_process_memory (pid);
 
@@ -1134,9 +1138,9 @@ namespace Frida {
 			};
 		}
 
-		private static Bytes make_zymbiote_payload (string server_name, uint64 payload_base, Gum.ElfModule libc,
-				ProcMapsSnapshot.Mapping libc_mapping, uint64 original_setargv0, uint64 original_setcontext,
-				out uint64 replacement_setargv0, out uint64 replacement_setcontext) {
+		private static Bytes make_zymbiote_payload (string server_name, uint64 payload_base, int payload_original_protection,
+				Gum.ElfModule libc, ProcMapsSnapshot.Mapping libc_mapping, uint64 original_setargv0,
+				uint64 original_setcontext, out uint64 replacement_setargv0, out uint64 replacement_setcontext) {
 			var pointer_size = libc.pointer_size;
 
 			var blob = (pointer_size == 8)
@@ -1191,13 +1195,27 @@ namespace Frida {
 			payload.write_string (cursor, server_name);
 			cursor += 64;
 
-			payload.write_pointer (cursor, original_setargv0);
+			payload.write_pointer (cursor, payload_base);
+			cursor += pointer_size;
+
+			payload.write_pointer (cursor, payload_template.length);
+			cursor += pointer_size;
+
+			payload.write_pointer (cursor, payload_original_protection);
+			cursor += pointer_size;
+
 			cursor += pointer_size;
 
 			payload.write_pointer (cursor, original_setcontext);
 			cursor += pointer_size;
 
+			payload.write_pointer (cursor, original_setargv0);
+			cursor += pointer_size;
+
 			string[] wanted = {
+				"mprotect",
+				"strdup",
+				"free",
 				"socket",
 				"connect",
 				"__errno",
