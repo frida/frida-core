@@ -900,10 +900,19 @@ namespace Frida {
 				}
 
 				if (prep.already_patched) {
-					patches.apply (prep.replaced_ptr, prep.process_memory, prep.art_method_slot,
-						new Bytes (prep.original_ptr));
+					patches.apply (prep.replaced_setargv0_ptr, prep.process_memory, prep.setargv0_slot,
+						new Bytes (prep.original_setargv0_ptr));
 				} else {
-					patches.apply (prep.replaced_ptr, prep.process_memory, prep.art_method_slot);
+					patches.apply (prep.replaced_setargv0_ptr, prep.process_memory, prep.setargv0_slot);
+				}
+
+				if (prep.setcontext_slot != 0) {
+					if (prep.already_patched) {
+						patches.apply (prep.replaced_setcontext_ptr, prep.process_memory, prep.setcontext_slot,
+							new Bytes (prep.original_setcontext_ptr));
+					} else {
+						patches.apply (prep.replaced_setcontext_ptr, prep.process_memory, prep.setcontext_slot);
+					}
 				}
 
 				zymbiote_patches[pid] = patches;
@@ -916,9 +925,13 @@ namespace Frida {
 			public FileDescriptor process_memory;
 			public bool already_patched;
 
-			public uint64 art_method_slot;
-			public uint8[] original_ptr;
-			public uint8[] replaced_ptr;
+			public uint64 setargv0_slot;
+			public uint8[] original_setargv0_ptr;
+			public uint8[] replaced_setargv0_ptr;
+
+			public uint64 setcontext_slot;
+			public uint8[] original_setcontext_ptr;
+			public uint8[] replaced_setcontext_ptr;
 
 			public Bytes payload;
 			public uint64 payload_base;
@@ -952,35 +965,34 @@ namespace Frida {
 
 		private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, string server_name) throws Error, IOError {
 			uint64 payload_base = 0;
-			string? payload_path = null;
+			unowned string? payload_path = null;
 			uint64 payload_file_offset = 0;
-			string? libc_path = null;
-			string? runtime_path = null;
-			Gee.List<Gum.MemoryRange?> heap_candidates = new Gee.ArrayList<Gum.MemoryRange?> ();
+			unowned string? libc_path = null;
+			unowned string? libselinux_path = null;
+			unowned string? runtime_path = null;
+			Gee.List<ProcMapsSnapshot.Mapping> heap_candidates = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
 
-			var iter = ProcMapsIter.for_pid (pid);
-			while (iter.next ()) {
-				string path = iter.path;
-				string flags = iter.flags;
-				if (path.has_suffix ("/libstagefright.so") && "x" in flags) {
+			var maps = ProcMapsSnapshot.from_pid (pid);
+
+			foreach (var m in maps) {
+				unowned string path = m.path;
+				if (path.has_suffix ("/libstagefright.so") && m.executable) {
 					if (payload_base == 0) {
-						payload_base = iter.end_address - Gum.query_page_size ();
+						payload_base = m.end - Gum.query_page_size ();
 						payload_path = path;
-						payload_file_offset = iter.file_offset;
+						payload_file_offset = m.file_offset;
 					}
 				} else if (path.has_suffix ("/libc.so")) {
 					if (libc_path == null)
 						libc_path = path;
+				} else if (path.has_suffix ("/libselinux.so")) {
+					if (libselinux_path == null)
+						libselinux_path = path;
 				} else if (path.has_suffix ("/libandroid_runtime.so")) {
 					if (runtime_path == null)
 						runtime_path = path;
-				} else if (flags == "rw-p" && is_boot_heap (path)) {
-					uint64 start = iter.start_address;
-					uint64 end = iter.end_address;
-					heap_candidates.add (Gum.MemoryRange () {
-						base_address = start,
-						size = (size_t) (end - start),
-					});
+				} else if (is_boot_heap (m)) {
+					heap_candidates.add (m);
 				}
 			}
 
@@ -993,81 +1005,182 @@ namespace Frida {
 			if (heap_candidates.is_empty)
 				throw new Error.NOT_SUPPORTED ("Unable to detect any VM heap candidates");
 
-			var libc_entry = ProcMapsSoEntry.find_by_path (pid, libc_path);
-			if (libc_entry == null)
-				throw new Error.NOT_SUPPORTED ("Unable to detect libc.so entry");
+			var libc_mapping = maps.find_module_by_path (libc_path);
+			if (libc_mapping == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect mapping for %s", libc_path);
 
-			var runtime_entry = ProcMapsSoEntry.find_by_path (pid, runtime_path);
-			if (runtime_entry == null)
-				throw new Error.NOT_SUPPORTED ("Unable to detect libandroid_runtime.so entry");
+			var runtime_mapping = maps.find_module_by_path (runtime_path);
+			if (runtime_mapping == null)
+				throw new Error.NOT_SUPPORTED ("Unable to detect mapping for %s", runtime_path);
 
 			Gum.ElfModule libc;
 			try {
 				libc = new Gum.ElfModule.from_file (libc_path);
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("Unable to parse libc.so: %s", e.message);
+				throw new Error.NOT_SUPPORTED ("Unable to parse %s: %s", libc_path, e.message);
+			}
+
+			uint64 original_setcontext = 0;
+			if (libselinux_path != null) {
+				Gum.ElfModule? libselinux;
+				try {
+					libselinux = new Gum.ElfModule.from_file (libselinux_path);
+				} catch (Gum.Error e) {
+					throw new Error.NOT_SUPPORTED ("Unable to parse %s: %s", libselinux_path, e.message);
+				}
+
+				var libselinux_mapping = maps.find_module_by_path (libselinux_path);
+				if (libselinux_mapping == null)
+					throw new Error.NOT_SUPPORTED ("Unable to detect mapping for %s", libselinux_path);
+
+				libselinux.enumerate_exports (e => {
+					if (e.name == "selinux_android_setcontext") {
+						original_setcontext = libselinux_mapping.start + e.address;
+						return false;
+					}
+					return true;
+				});
 			}
 
 			Gum.ElfModule runtime;
 			try {
 				runtime = new Gum.ElfModule.from_file (runtime_path);
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("Unable to parse libandroid_runtime.so: %s", e.message);
+				throw new Error.NOT_SUPPORTED ("Unable to parse %s: %s", runtime_path, e.message);
 			}
 
-			uint64 set_argv0_address = 0;
+			uint64 original_setargv0 = 0;
+			uint64 setcontext_slot = 0;
 			runtime.enumerate_exports (e => {
 				if (e.name == "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring") {
-					set_argv0_address = runtime_entry.base_address + e.address;
+					original_setargv0 = runtime_mapping.start + e.address;
 					return false;
 				}
 				return true;
 			});
-			if (set_argv0_address == 0)
+			if (original_setcontext != 0) {
+				runtime.enumerate_imports (i => {
+					if (i.name == "selinux_android_setcontext") {
+						setcontext_slot = runtime_mapping.start + i.slot;
+						return false;
+					}
+					return true;
+				});
+			}
+			if (original_setargv0 == 0)
 				throw new Error.NOT_SUPPORTED ("Unable to locate android.os.Process.setArgV0(); please file a bug");
 
-			uint pointer_size = ("/lib64/" in libc_path) ? 8 : 4;
+			uint pointer_size = libc.pointer_size;
 
-			var original_ptr = new uint8[pointer_size];
-			var replaced_ptr = new uint8[pointer_size];
-
-			(new Buffer (new Bytes.static (original_ptr), ByteOrder.HOST, pointer_size)).write_pointer (0, set_argv0_address);
-			(new Buffer (new Bytes.static (replaced_ptr), ByteOrder.HOST, pointer_size)).write_pointer (0, payload_base);
+			uint64 replacement_setargv0;
+			uint64 replacement_setcontext;
+			Bytes payload = make_zymbiote_payload (server_name, payload_base, libc, libc_mapping, original_setargv0,
+				original_setcontext, out replacement_setargv0, out replacement_setcontext);
 
 			var fd = open_process_memory (pid);
 
-			uint64 art_method_slot = 0;
+			var original_setargv0_ptr = new uint8[pointer_size];
+			var original_setcontext_ptr = new uint8[pointer_size];
+			var replaced_setargv0_ptr = new uint8[pointer_size];
+			var replaced_setcontext_ptr = new uint8[pointer_size];
+
+			(new Buffer (new Bytes.static (original_setargv0_ptr), ByteOrder.HOST, pointer_size))
+				.write_pointer (0, original_setargv0);
+			(new Buffer (new Bytes.static (original_setcontext_ptr), ByteOrder.HOST, pointer_size))
+				.write_pointer (0, original_setcontext);
+			(new Buffer (new Bytes.static (replaced_setargv0_ptr), ByteOrder.HOST, pointer_size))
+				.write_pointer (0, replacement_setargv0);
+			(new Buffer (new Bytes.static (replaced_setcontext_ptr), ByteOrder.HOST, pointer_size))
+				.write_pointer (0, replacement_setcontext);
+
+			uint64 setargv0_slot = 0;
 			bool already_patched = false;
 			foreach (var candidate in heap_candidates) {
 				var heap = new uint8[candidate.size];
-				var n = fd.pread (heap, candidate.base_address);
+				var n = fd.pread (heap, candidate.start);
 				if (n != heap.length)
 					throw new Error.NOT_SUPPORTED ("Short read");
 
-				void * p = memmem (heap, original_ptr);
+				void * p = memmem (heap, original_setargv0_ptr);
 				if (p == null) {
-					p = memmem (heap, replaced_ptr);
+					p = memmem (heap, replaced_setargv0_ptr);
 					already_patched = p != null;
 				}
 
 				if (p != null) {
-					art_method_slot = candidate.base_address + ((uint8 *) p - (uint8 *) heap);
+					setargv0_slot = candidate.start + ((uint8 *) p - (uint8 *) heap);
 					break;
 				}
 			}
-			if (art_method_slot == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to locate method slot; please file a bug");
+			if (setargv0_slot == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to locate android.os.Process.setArgV0() slot; please file a bug");
+
+			return new ZymbiotePrepResult () {
+				process_memory = fd,
+				already_patched = already_patched,
+
+				setargv0_slot = setargv0_slot,
+				original_setargv0_ptr = original_setargv0_ptr,
+				replaced_setargv0_ptr = replaced_setargv0_ptr,
+
+				setcontext_slot = setcontext_slot,
+				original_setcontext_ptr = original_setcontext_ptr,
+				replaced_setcontext_ptr = replaced_setcontext_ptr,
+
+				payload = payload,
+				payload_base = payload_base,
+				payload_path = payload_path,
+				payload_file_offset = payload_file_offset,
+			};
+		}
+
+		private static Bytes make_zymbiote_payload (string server_name, uint64 payload_base, Gum.ElfModule libc,
+				ProcMapsSnapshot.Mapping libc_mapping, uint64 original_setargv0, uint64 original_setcontext,
+				out uint64 replacement_setargv0, out uint64 replacement_setcontext) {
+			var pointer_size = libc.pointer_size;
 
 			var blob = (pointer_size == 8)
 #if ARM || ARM64
-				? Frida.Data.Android.get_zymbiote_arm64_bin_blob ()
-				: Frida.Data.Android.get_zymbiote_arm_bin_blob ();
+				? Frida.Data.Android.get_zymbiote_arm64_elf_blob ()
+				: Frida.Data.Android.get_zymbiote_arm_elf_blob ();
 #else
-				? Frida.Data.Android.get_zymbiote_x86_64_bin_blob ()
-				: Frida.Data.Android.get_zymbiote_x86_bin_blob ();
+				? Frida.Data.Android.get_zymbiote_x86_64_elf_blob ()
+				: Frida.Data.Android.get_zymbiote_x86_elf_blob ();
 #endif
 
-			unowned uint8[] payload_template = blob.data;
+			Gum.ElfModule zymbiote;
+			try {
+				zymbiote = new Gum.ElfModule.from_blob (new Bytes.static (blob.data));
+			} catch (Gum.Error e) {
+				assert_not_reached ();
+			}
+
+			Gum.ElfSegmentDetails? text = null;
+			zymbiote.enumerate_segments (s => {
+				if ((s.protection & Gum.PageProtection.EXECUTE) != 0) {
+					text = s;
+					return false;
+				}
+				return true;
+			});
+			assert (text != null);
+
+			uint64 setargv0 = 0;
+			uint64 setcontext = 0;
+			zymbiote.enumerate_exports (e => {
+				if (e.name == "frida_zymbiote_replacement_setargv0")
+					setargv0 = payload_base + (e.address - text.vm_address);
+				else if (e.name == "frida_zymbiote_replacement_setcontext")
+					setcontext = payload_base + (e.address - text.vm_address);
+				return true;
+			});
+			assert (setargv0 != 0);
+			assert (setcontext != 0);
+			replacement_setargv0 = setargv0;
+			replacement_setcontext = setcontext;
+
+			unowned uint8[] payload_template = blob.data[text.file_offset:text.file_offset + text.file_size];
+
 			void * p = memmem (payload_template, "/frida-zymbiote-00000000000000000000000000000000".data);
 			assert (p != null);
 			size_t data_offset = (uint8 *) p - (uint8 *) payload_template;
@@ -1078,10 +1191,10 @@ namespace Frida {
 			payload.write_string (cursor, server_name);
 			cursor += 64;
 
-			payload.write_pointer (cursor, art_method_slot);
+			payload.write_pointer (cursor, original_setargv0);
 			cursor += pointer_size;
 
-			payload.write_pointer (cursor, set_argv0_address);
+			payload.write_pointer (cursor, original_setcontext);
 			cursor += pointer_size;
 
 			string[] wanted = {
@@ -1105,7 +1218,7 @@ namespace Frida {
 			libc.enumerate_exports (e => {
 				if (index_of.has_key (e.name)) {
 					int idx = index_of[e.name];
-					addrs[idx] = libc_entry.base_address + e.address;
+					addrs[idx] = libc_mapping.start + e.address;
 					pending--;
 				}
 				return pending != 0;
@@ -1117,26 +1230,16 @@ namespace Frida {
 				cursor += pointer_size;
 			}
 
-			return new ZymbiotePrepResult () {
-				process_memory = fd,
-				already_patched = already_patched,
-
-				art_method_slot = art_method_slot,
-				original_ptr = original_ptr,
-				replaced_ptr = replaced_ptr,
-
-				payload = payload.bytes,
-				payload_base = payload_base,
-				payload_path = payload_path,
-				payload_file_offset = payload_file_offset,
-			};
+			return payload.bytes;
 		}
 
-		private static bool is_boot_heap (string path) {
+		private static bool is_boot_heap (ProcMapsSnapshot.Mapping m) {
+			if (!m.readable || !m.writable || m.executable || m.shared)
+				return false;
 			return
-				"boot.art" in path ||
-				"boot-framework.art" in path ||
-				"dalvik-LinearAlloc" in path;
+				"boot.art" in m.path ||
+				"boot-framework.art" in m.path ||
+				"dalvik-LinearAlloc" in m.path;
 		}
 
 		[CCode (cname = "memmem", cheader_filename = "string.h")]

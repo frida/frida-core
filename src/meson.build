@@ -38,10 +38,10 @@ if host_os == 'android' or have_droidy_backend
     input: [
       'android.resources',
       android_helper_dex,
-      fs.copyfile(helpers_native_prefix / 'x86' / 'zymbiote.bin', 'zymbiote-x86.bin'),
-      fs.copyfile(helpers_native_prefix / 'x86_64' / 'zymbiote.bin', 'zymbiote-x86_64.bin'),
-      fs.copyfile(helpers_native_prefix / 'arm' / 'zymbiote.bin', 'zymbiote-arm.bin'),
-      fs.copyfile(helpers_native_prefix / 'arm64' / 'zymbiote.bin', 'zymbiote-arm64.bin'),
+      fs.copyfile(helpers_native_prefix / 'x86' / 'zymbiote.elf', 'zymbiote-x86.elf'),
+      fs.copyfile(helpers_native_prefix / 'x86_64' / 'zymbiote.elf', 'zymbiote-x86_64.elf'),
+      fs.copyfile(helpers_native_prefix / 'arm' / 'zymbiote.elf', 'zymbiote-arm.elf'),
+      fs.copyfile(helpers_native_prefix / 'arm64' / 'zymbiote.elf', 'zymbiote-arm64.elf'),
     ],
     output: [
       'frida-data-android.vapi',

@@ -49,11 +49,11 @@ bpf_arch_pairs := \
 
 build-native: ext/linux/tools/include/nolibc/nolibc.h
 	rm -rf build
-	$(MESON) setup --cross-file $(crossfile) -Db_lto=true build
-	$(MESON) compile -C build
-	install -m644 build/bootstrapper.bin $(native_outdir)/bootstrapper.bin
-	install -m644 build/loader.bin $(native_outdir)/loader.bin
-	[ -f build/zymbiote.bin ] && install -m644 build/zymbiote.bin $(native_outdir)/zymbiote.bin || true
+	$(MESON) setup --prefix /usr --cross-file $(crossfile) -Db_lto=true build
+	DESTDIR=$(abspath build/dist) $(MESON) install -C build
+	for f in build/dist/usr/share/frida-helpers/*; do \
+		install -m644 $$f $(native_outdir)/; \
+	done
 
 bpf_targets :=
 bpf_obj := $(build_dir)/module.o

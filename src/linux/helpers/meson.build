@@ -94,14 +94,10 @@ if host_machine.system() == 'android'
   endif
   zymbiote = shared_module('zymbiote', ['zymbiote.c'],
     name_prefix: '',
+    name_suffix: 'elf',
     c_args: zymbiote_flags + extra_flags,
     link_args: extra_link_args,
     link_depends: [helper_lds],
-  )
-  custom_target('zymbiote-bin',
-    input: [zymbiote],
-    output: ['zymbiote.bin'],
-    command: [objcopy, objcopy_flags, '@INPUT0@', '@OUTPUT0@'],
     install_dir: 'share' / 'frida-helpers',
     install: true,
   )

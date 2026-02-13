@@ -11,8 +11,8 @@ struct _FridaApi
 {
   char name[64];
 
-  void    ** art_method_slot;
   void    (* original_set_argv0) (JNIEnv * env, jobject clazz, jstring name);
+  int     (* original_setcontext) (uid_t uid, bool is_system_server, const char * seinfo, const char * name);
 
   int     (* socket) (int domain, int type, int protocol);
   int     (* connect) (int sockfd, const struct sockaddr * addr, socklen_t addrlen);
@@ -30,7 +30,13 @@ static volatile const FridaApi frida =
   .name = "/frida-zymbiote-00000000000000000000000000000000",
 };
 
-static int frida_stop_and_return (JNIEnv * env, jobject clazz, jstring name);
+int frida_zymbiote_replacement_setargv0 (JNIEnv * env, jobject clazz, jstring name);
+int frida_zymbiote_replacement_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name);
+
+static void frida_wait_for_permission_to_resume (const char * package_name, bool * revert_now);
+
+static int frida_stop_and_return_from_setargv0 (JNIEnv * env, jobject clazz, jstring name);
+static int frida_stop_and_return_from_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name);
 
 static int frida_get_errno (void);
 
@@ -42,17 +48,60 @@ static ssize_t frida_recv (int sockfd, void * buf, size_t len, int flags);
 __attribute__ ((section (".text.entrypoint")))
 __attribute__ ((visibility ("default")))
 int
-frida_zymbiote_replacement_set_argv0 (JNIEnv * env, jobject clazz, jstring name)
+frida_zymbiote_replacement_setargv0 (JNIEnv * env, jobject clazz, jstring name)
 {
-  bool success = false;
+  const char * name_utf8;
+  bool revert_now;
+
+  frida.original_set_argv0 (env, clazz, name);
+
+  name_utf8 = (*env)->GetStringUTFChars (env, name, NULL);
+
+  frida_wait_for_permission_to_resume (name_utf8, &revert_now);
+
+  (*env)->ReleaseStringUTFChars (env, name, name_utf8);
+
+  if (revert_now)
+  {
+    __attribute__ ((musttail))
+    return frida_stop_and_return_from_setargv0 (env, clazz, name);
+  }
+
+  return 0;
+}
+
+__attribute__ ((section (".text.entrypoint")))
+__attribute__ ((visibility ("default")))
+int
+frida_zymbiote_replacement_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name)
+{
+  int res;
+  bool revert_now;
+
+  res = frida.original_setcontext (uid, is_system_server, seinfo, name);
+  if (res == -1)
+    return -1;
+
+  frida_wait_for_permission_to_resume (name, &revert_now);
+
+  if (revert_now)
+  {
+    __attribute__ ((musttail))
+    return frida_stop_and_return_from_setcontext (uid, is_system_server, seinfo, name);
+  }
+
+  return res;
+}
+
+static void
+frida_wait_for_permission_to_resume (const char * package_name, bool * revert_now)
+{
   int fd;
   struct sockaddr_un addr;
   socklen_t addrlen;
   unsigned int name_len;
 
-  *frida.art_method_slot = frida.original_set_argv0;
-
-  frida.original_set_argv0 (env, clazz, name);
+  *revert_now = false;
 
   fd = frida.socket (AF_UNIX, SOCK_STREAM, 0);
   if (fd == -1)
@@ -80,7 +129,6 @@ frida_zymbiote_replacement_set_argv0 (JNIEnv * env, jobject clazz, jstring name)
     goto beach;
 
   {
-    const char * name_utf8;
     struct
     {
       uint32_t pid;
@@ -89,25 +137,21 @@ frida_zymbiote_replacement_set_argv0 (JNIEnv * env, jobject clazz, jstring name)
     } header;
     struct iovec iov[2];
 
-    name_utf8 = (*env)->GetStringUTFChars (env, name, NULL);
-
     header.pid = frida.getpid ();
     header.ppid = frida.getppid ();
 
     header.package_name_len = 0;
-    while (name_utf8[header.package_name_len] != '\0')
+    while (package_name[header.package_name_len] != '\0')
       header.package_name_len++;
 
     iov[0].iov_base = &header;
     iov[0].iov_len = sizeof (header);
 
-    iov[1].iov_base = (void *) name_utf8;
+    iov[1].iov_base = (void *) package_name;
     iov[1].iov_len = header.package_name_len;
 
     if (!frida_sendmsg_all (fd, iov, 2, MSG_NOSIGNAL))
       goto beach;
-
-    (*env)->ReleaseStringUTFChars (env, name, name_utf8);
   }
 
   {
@@ -117,80 +161,97 @@ frida_zymbiote_replacement_set_argv0 (JNIEnv * env, jobject clazz, jstring name)
       goto beach;
   }
 
-  success = true;
+  *revert_now = true;
 
 beach:
   if (fd != -1)
     frida.close (fd);
+}
 
-  if (success)
-  {
-    __attribute__ ((musttail))
-    return frida_stop_and_return (env, clazz, name);
-  }
+#if defined (__i386__)
 
-  return 0;
+# define FRIDA_TAILCALL_TO_RAISE_SIGSTOP()                             \
+  __asm__ __volatile__ (                                               \
+      "movl   $%c[sig], 4(%%esp)\n"                                    \
+                                                                       \
+      "call   1f\n"                                                    \
+      "1: pop %%eax\n"                                                 \
+                                                                       \
+      "addl   $(frida-1b), %%eax\n"                                    \
+      "movl   %c[raise_off](%%eax), %%eax\n"                           \
+                                                                       \
+      "jmp    *%%eax\n"                                                \
+    :                                                                  \
+    : [sig] "i" (SIGSTOP),                                             \
+      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+    : "eax", "memory"                                                  \
+  )
+
+#elif defined (__x86_64__)
+
+# define FRIDA_TAILCALL_TO_RAISE_SIGSTOP()                             \
+  __asm__ __volatile__ (                                               \
+      "mov    $%c[sig], %%edi\n"                                       \
+                                                                       \
+      "leaq   frida(%%rip), %%r11\n"                                   \
+      "movq   %c[raise_off](%%r11), %%r11\n"                           \
+                                                                       \
+      "jmp    *%%r11\n"                                                \
+    :                                                                  \
+    : [sig] "i" (SIGSTOP),                                             \
+      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+    : "r11", "rdi", "memory"                                           \
+  )
+
+#elif defined (__arm__)
+
+# define FRIDA_TAILCALL_TO_RAISE_SIGSTOP()                             \
+  __asm__ __volatile__ (                                               \
+      "mov    r0, %[sig]\n"                                            \
+                                                                       \
+      "adr    r12, frida\n"                                            \
+      "ldr    r12, [r12, %[raise_off]]\n"                              \
+                                                                       \
+      "bx     r12\n"                                                   \
+    :                                                                  \
+    : [sig] "i" (SIGSTOP),                                             \
+      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+    : "r12", "memory"                                                  \
+  )
+
+#elif defined (__aarch64__)
+
+# define FRIDA_TAILCALL_TO_RAISE_SIGSTOP()                             \
+  __asm__ __volatile__ (                                               \
+      "mov    w0, #%[sig]\n"                                           \
+                                                                       \
+      "adrp   x16, frida\n"                                            \
+      "add    x16, x16, :lo12:frida\n"                                 \
+      "ldr    x16, [x16, %[raise_off]]\n"                              \
+                                                                       \
+      "br     x16\n"                                                   \
+    :                                                                  \
+    : [sig] "i" (SIGSTOP),                                             \
+      [raise_off] "i" (offsetof (FridaApi, raise))                     \
+    : "x16", "memory"                                                  \
+  )
+
+#else
+# error Unsupported architecture
+#endif
+
+__attribute__ ((naked, noinline))
+static int
+frida_stop_and_return_from_setargv0 (JNIEnv * env, jobject clazz, jstring name)
+{
+  FRIDA_TAILCALL_TO_RAISE_SIGSTOP ();
 }
 
 __attribute__ ((naked, noinline))
 static int
-frida_stop_and_return (JNIEnv * env, jobject clazz, jstring name)
+frida_stop_and_return_from_setcontext (uid_t uid, bool is_system_server, const char * seinfo, const char * name)
 {
-#if defined (__i386__)
-  __asm__ __volatile__ (
-      "movl   $%c[sig], 4(%%esp)\n"
-
-      "call   1f\n"
-      "1: pop %%eax\n"
-
-      "addl   $(frida-1b), %%eax\n"
-      "movl   %c[raise_off](%%eax), %%eax\n"
-
-      "jmp    *%%eax\n"
-    :
-    : [sig] "i" (SIGSTOP),
-      [raise_off] "i" (offsetof (FridaApi, raise))
-    : "eax", "memory");
-#elif defined (__x86_64__)
-  __asm__ __volatile__ (
-      "mov    $%c[sig], %%edi\n"
-
-      "leaq   frida(%%rip), %%r11\n"
-      "movq   %c[raise_off](%%r11), %%r11\n"
-
-      "jmp    *%%r11\n"
-    :
-    : [sig] "i" (SIGSTOP),
-      [raise_off] "i" (offsetof (FridaApi, raise))
-    : "r11", "rdi", "memory");
-#elif defined (__arm__)
-  __asm__ __volatile__ (
-      "mov    r0, %[sig]\n"
-
-      "adr    r12, frida\n"
-      "ldr    r12, [r12, %[raise_off]]\n"
-
-      "bx     r12\n"
-    :
-    : [sig] "i" (SIGSTOP),
-      [raise_off] "i" (offsetof (FridaApi, raise))
-    : "r12", "memory");
-#elif defined (__aarch64__)
-  __asm__ __volatile__ (
-      "mov    w0, #%[sig]\n"
-
-      "adrp   x16, frida\n"
-      "add    x16, x16, :lo12:frida\n"
-      "ldr    x16, [x16, %[raise_off]]\n"
-
-      "br     x16\n"
-    :
-    : [sig] "i" (SIGSTOP),
-      [raise_off] "i" (offsetof (FridaApi, raise))
-    : "x16", "memory");
-#else
-# error Unsupported architecture
-#endif
+  FRIDA_TAILCALL_TO_RAISE_SIGSTOP ();
 }
 
 static int
