@@ -2175,13 +2175,16 @@ namespace Frida {
 				uint32 idx = h->arg_index;
 				assert (idx < nargs);
 
-				var len = h->len;
-				assert (a + len <= payload_end);
+				var capacity = h->capacity;
+				assert (a + capacity <= payload_end);
 
-				Variant v = decode_attachment_value (type, sig, idx, (SyscallTracer.AttachmentType) h->type, a, len);
+				var size = h->size;
+				assert (a + size <= payload_end);
+
+				Variant v = decode_attachment_value (type, sig, idx, (SyscallTracer.AttachmentType) h->type, a, size);
 				attachments.add_value (new Variant.tuple ({ idx, new Variant.variant (v) }));
 
-				a += len;
+				a += capacity;
 			}
 
 			Variant args_v;

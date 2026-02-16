@@ -321,7 +321,8 @@ public sealed class Frida.SyscallTracer : Object {
 	public struct AttachmentHeader {
 		public uint16 type;
 		public uint16 arg_index;
-		public uint32 len;
+		public uint16 capacity;
+		public uint16 size;
 	}
 
 	public enum AttachmentType {

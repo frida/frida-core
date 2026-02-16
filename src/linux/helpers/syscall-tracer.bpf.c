@@ -83,7 +83,8 @@ struct _AttachmentHeader
 {
   AttachmentType type;
   __u16 arg_index;
-  __u32 len;
+  __u16 capacity;
+  __u16 size;
 };
 
 enum _AttachmentType
@@ -483,8 +484,8 @@ static void fill_syscall_event (SyscallEvent * e, EventType type, __u32 tgid, __
     void * ctx);
 static void fill_enter_args (__u64 args[SYSCALL_NARGS], struct trace_event_raw_sys_enter * ctx);
 
-static __u16 write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str);
-static __u16 write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap,
+static void write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str);
+static void write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap,
     const void * user_src, __u32 n);
 static __u16 write_attach_dentry_path (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, struct file * file);
 
@@ -861,16 +862,17 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 
       ev->attach.type = ATTACHMENT_STRING;
       ev->attach.arg_index = in->u.str_out_copy.arg_index;
+      ev->attach.capacity = MAX_PATH;
 
       if (to_copy == (MAX_PATH - 1))
       {
-        ev->attach.len = (MAX_PATH - 1) + 1;
+        ev->attach.size = (MAX_PATH - 1) + 1;
         bpf_probe_read_user (&ev->data[0], MAX_PATH - 1, (void *) in->u.str_out_copy.user_ptr);
         ev->data[MAX_PATH - 1] = '\0';
       }
       else
       {
-        ev->attach.len = to_copy + 1;
+        ev->attach.size = to_copy + 1;
         if (to_copy != 0)
           bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.str_out_copy.user_ptr);
         ev->data[to_copy] = '\0';
@@ -927,7 +929,8 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 
       ev->attach.type = ATTACHMENT_BYTES;
       ev->attach.arg_index = in->u.stat_out_copy.arg_index;
-      ev->attach.len = to_copy;
+      ev->attach.capacity = MAX_STAT;
+      ev->attach.size = to_copy;
 
       if (to_copy != 0)
         bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.stat_out_copy.user_ptr);
@@ -988,7 +991,8 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 
       ev->attach.type = ATTACHMENT_BYTES;
       ev->attach.arg_index = in->u.sock_out_copy.arg_index;
-      ev->attach.len = to_copy;
+      ev->attach.capacity = MAX_SOCK;
+      ev->attach.size = to_copy;
 
       if (to_copy != 0)
         bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.sock_out_copy.user_ptr);
@@ -1225,30 +1229,35 @@ fill_enter_args (__u64 args[SYSCALL_NARGS], struct trace_event_raw_sys_enter * c
   args[5] = (__u64) ctx->args[5];
 }
 
-static __u16
+static void
 write_attach_str_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_str)
 {
   h->type = ATTACHMENT_STRING;
   h->arg_index = arg_index;
-  h->len = 0;
-
+  h->capacity = dst_cap;
   long r = bpf_probe_read_user_str (dst, dst_cap, user_str);
-  __u32 used = (r > 0) ? (__u32) r : 0;
-
-  h->len = used;
-  return (__u16) used;
+  if (r >= 1)
+  {
+    h->size = r;
+  }
+  else
+  {
+    h->size = 1;
+    dst[0] = '\0';
+  }
 }
 
-static __u16
+static void
 write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32 dst_cap, const void * user_src, __u32 n)
 {
   h->type = ATTACHMENT_BYTES;
   h->arg_index = arg_index;
+  h->capacity = dst_cap;
 
   if (n == 0)
   {
-    h->len = 0;
-    return 0;
+    h->size = 0;
+    return;
   }
 
   if (n > dst_cap)
@@ -1256,9 +1265,7 @@ write_attach_bytes_arg (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u32
 
   bpf_probe_read_user (dst, n, user_src);
 
-  h->len = n;
-
-  return (__u16) n;
+  h->size = n;
 }
 
 static __u16
@@ -1268,7 +1275,8 @@ write_attach_dentry_path (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u
 
   h->type = ATTACHMENT_STRING;
   h->arg_index = arg_index;
-  h->len = 0;
+  h->capacity = dst_cap;
+  h->size = 0;
 
   __u32 key = 0;
   ScratchArea * sa = bpf_map_lookup_elem (&scratch_area, &key);
@@ -1370,7 +1378,7 @@ flush:
   if (n != 0)
     bpf_probe_read_kernel (dst, n, b->buf);
 
-  h->len = n;
+  h->size = n;
   return (__u16) n;
 }
 
