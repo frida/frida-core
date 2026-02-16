@@ -2288,9 +2288,6 @@ namespace Frida {
 				});
 			}
 			case Posix.AF_UNIX: {
-				if (len < 2)
-					return null;
-
 				var path = (char *) (data + 2);
 
 				size_t path_bytes = size_t.min (len - 2, 108);
