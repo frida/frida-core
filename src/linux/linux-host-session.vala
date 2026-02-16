@@ -2239,10 +2239,8 @@ namespace Frida {
 							return sa;
 					}
 
-					var b = new uint8[len];
-					if (len != 0)
-						Memory.copy (b, data, len);
-					return Variant.new_from_data<void> (new VariantType ("ay"), b, true);
+					var b = new Bytes (((uint8[]) data)[:len]);
+					return Variant.new_from_data (new VariantType ("ay"), b.get_data (), true, (owned) b);
 				}
 				default:
 					assert_not_reached ();
