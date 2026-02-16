@@ -2317,7 +2317,6 @@ namespace Frida {
 
 				return new Variant.tuple ({ "unix", (string) str });
 			}
-
 			default:
 				return null;
 			}
