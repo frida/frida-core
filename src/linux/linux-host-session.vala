@@ -2233,10 +2233,12 @@ namespace Frida {
 				case SyscallTracer.AttachmentType.STRING:
 					return (string) data;
 				case SyscallTracer.AttachmentType.BYTES: {
-					if (arg_type != null && arg_type == "struct sockaddr *") {
-						Variant? sa = try_decode_sockaddr (data, len);
-						if (sa != null)
-							return sa;
+					if (arg_type != null) {
+						Variant? v = try_decode_timespec (arg_type, data, len);
+						if (v == null)
+							v = try_decode_sockaddr (arg_type, data, len);
+						if (v != null)
+							return v;
 					}
 
 					var b = new Bytes (((uint8[]) data)[:len]);
@@ -2247,7 +2249,28 @@ namespace Frida {
 			}
 		}
 
-		private static Variant? try_decode_sockaddr (uint8 * data, size_t len) {
+		private static Variant? try_decode_timespec (string arg_type, uint8 * data, size_t len) {
+			if (arg_type.has_suffix ("struct __kernel_timespec *")) {
+				assert (len == 2 * sizeof (int64));
+
+				var p = (int64 *) data;
+				return new Variant.tuple ({ p[0], p[1] });
+			}
+
+			if (arg_type.has_suffix ("struct old_timespec32 *")) {
+				assert (len == 2 * sizeof (int32));
+
+				var p = (int32 *) data;
+				return new Variant.tuple ({ p[0], p[1] });
+			}
+
+			return null;
+		}
+
+		private static Variant? try_decode_sockaddr (string arg_type, uint8 * data, size_t len) {
+			if (arg_type != "struct sockaddr *")
+				return null;
+
 			if (len < 2)
 				return null;
 
