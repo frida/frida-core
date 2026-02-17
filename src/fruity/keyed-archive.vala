@@ -277,6 +277,25 @@ namespace Frida.Fruity {
 		public void add_object (NSObject obj) {
 			storage.add (obj);
 		}
+
+	}
+
+	public sealed class NSSet : NSObject {
+		public Gee.Iterable<NSObject> items {
+			owned get {
+				return storage;
+			}
+		}
+
+		private Gee.HashSet<NSObject> storage;
+
+		public NSSet (Gee.HashSet<NSObject>? storage = null) {
+			this.storage = (storage != null) ? storage : new Gee.HashSet<NSObject> (NSObject.hash_func);
+		}
+
+		public void add_object (NSObject obj) {
+			storage.add (obj);
+		}
 	}
 
 	public sealed class NSDate : NSObject {
@@ -338,6 +357,7 @@ namespace Frida.Fruity {
 
 		private const string[] DICTIONARY_CLASS = { "NSDictionary", "NSObject" };
 		private const string[] ARRAY_CLASS = { "NSArray", "NSObject" };
+		private const string[] SET_CLASS = { "NSSet", "NSObject" };
 
 		[CCode (has_target = false)]
 		private delegate PlistUid EncodeFunc (NSObject instance, EncodingContext ctx);
@@ -455,6 +475,7 @@ namespace Frida.Fruity {
 			encoders[typeof (NSString)] = encode_string;
 			encoders[typeof (NSDictionary)] = encode_dictionary;
 			encoders[typeof (NSArray)] = encode_array;
+			encoders[typeof (NSSet)] = encode_set;
 		}
 
 		private static void ensure_decoders_registered () {
@@ -615,6 +636,21 @@ namespace Frida.Fruity {
 				objs.add_uid (encode_value (element, ctx));
 			object.set_array ("NS.objects", objs);
 			object.set_uid ("$class", ctx.get_class (ARRAY_CLASS));
+
+			return uid;
+		}
+
+		private static PlistUid encode_set (NSObject instance, EncodingContext ctx) {
+			NSSet set = (NSSet) instance;
+
+			var object = new PlistDict ();
+			var uid = ctx.add_object (object);
+
+			var objs = new PlistArray ();
+			foreach (var element in set.items)
+				objs.add_uid (encode_value (element, ctx));
+			object.set_array ("NS.objects", objs);
+			object.set_uid ("$class", ctx.get_class (SET_CLASS));
 
 			return uid;
 		}
