@@ -149,9 +149,20 @@ def setup(role: Role,
             other_triplet: Optional[str] = None
             extra_environ: dict[str, str] = {}
 
-            if host_os == "windows" and host_arch == "x86_64" and host_config == "mingw":
-                other_label = "x86"
-                have_toolchain, other_triplet = detect_mingw_toolchain_for("x86")
+            if host_os == "windows" and host_arch in {"x86_64", "x86"}:
+                if host_arch == "x86_64":
+                    other_label = "x86"
+                    other_kind = "legacy"
+                else:
+                    other_label = "x86_64"
+                    other_kind = "modern"
+
+                if host_config == "mingw":
+                    have_toolchain, other_triplet = detect_mingw_toolchain_for(other_label)
+                else:
+                    have_toolchain = True
+                    other_triplet = None
+
             elif host_os == "linux" and host_arch == "x86_64" and host_config is None:
                 other_label = "x86"
                 other_triplet = "i686-linux-gnu"
@@ -179,21 +190,21 @@ def setup(role: Role,
                     raise ToolchainNotFoundError(f"unable to locate toolchain for {other_triplet}")
                 missing.append(MissingFeature(other_label, other_triplet))
 
-            if host_os == "windows" and host_arch == "x86_64" and have_toolchain:
-                group = OutputGroup("x86", other_triplet, extra_environ)
+            if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_toolchain:
+                group = OutputGroup(other_label, other_triplet, extra_environ)
                 outputs[group] = [
-                    Output(identifier="helper_legacy",
+                    Output(identifier=f"helper_{other_kind}",
                            name=HELPER_FILE_WINDOWS.name,
                            file=HELPER_FILE_WINDOWS,
                            target=HELPER_TARGET),
-                    Output(identifier="agent_legacy",
+                    Output(identifier=f"agent_{other_kind}",
                            name=AGENT_FILE_WINDOWS.name,
                            file=AGENT_FILE_WINDOWS,
                            target=AGENT_TARGET),
                 ]
                 if "gadget" in components:
                     outputs[group] += [
-                        Output(identifier="gadget_legacy",
+                        Output(identifier=f"gadget_{other_kind}",
                                name=GADGET_FILE_WINDOWS.name,
                                file=GADGET_FILE_WINDOWS,
                                target=GADGET_TARGET),
