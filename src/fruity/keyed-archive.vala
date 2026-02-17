@@ -130,7 +130,7 @@ namespace Frida.Fruity {
 		}
 
 		public override string to_string () {
-			return str;
+			return "\"" + str + "\"";
 		}
 	}
 
@@ -156,7 +156,7 @@ namespace Frida.Fruity {
 		}
 
 		public override string to_string () {
-			return "NSData";
+			return "NSData { size = %zu }".printf (bytes.get_size ());
 		}
 	}
 
@@ -219,6 +219,15 @@ namespace Frida.Fruity {
 		public void set_value (string key, NSObject val) {
 			storage[key] = val;
 		}
+
+		public override string to_string () {
+			var s = new StringBuilder.sized (256);
+			s.append ("NSDictionary {\n");
+			foreach (var e in entries)
+				s.append_printf ("\t%s => %s\n", e.key, e.value.to_string ());
+			s.append ("}");
+			return s.str;
+		}
 	}
 
 	public sealed class NSDictionaryRaw : NSObject {
@@ -253,6 +262,10 @@ namespace Frida.Fruity {
 				? storage
 				: new Gee.HashMap<NSObject, NSObject> (NSObject.hash_func, NSObject.equal_func);
 		}
+
+		public override string to_string () {
+			return "NSDictionaryRaw";
+		}
 	}
 
 	public sealed class NSArray : NSObject {
@@ -278,6 +291,14 @@ namespace Frida.Fruity {
 			storage.add (obj);
 		}
 
+		public override string to_string () {
+			var s = new StringBuilder.sized (256);
+			s.append ("NSArray [\n");
+			foreach (var e in elements)
+				s.append_printf ("\t%s,\n", e.to_string ());
+			s.append ("]");
+			return s.str;
+		}
 	}
 
 	public sealed class NSSet : NSObject {
@@ -295,6 +316,15 @@ namespace Frida.Fruity {
 
 		public void add_object (NSObject obj) {
 			storage.add (obj);
+		}
+
+		public override string to_string () {
+			var s = new StringBuilder.sized (256);
+			s.append ("NSSet {\n");
+			foreach (var e in items)
+				s.append_printf ("\t%s,\n", e.to_string ());
+			s.append ("}");
+			return s.str;
 		}
 	}
 
@@ -314,6 +344,10 @@ namespace Frida.Fruity {
 			int64 whole_seconds = (int64) time;
 			return new DateTime.from_unix_utc (MAC_EPOCH_DELTA_FROM_UNIX + whole_seconds)
 				.add_seconds (time - (double) whole_seconds);
+		}
+
+		public override string to_string () {
+			return "NSDate { time = %f }".printf (time);
 		}
 	}
 
@@ -338,6 +372,10 @@ namespace Frida.Fruity {
 			this.code = code;
 			this.user_info = user_info;
 		}
+
+		public override string to_string () {
+			return ("NSError { domain = \"%s\", code = %" + uint64.FORMAT_MODIFIER + "d }").printf (domain.to_string (), code);
+		}
 	}
 
 	public sealed class DTTapMessage : NSObject {
@@ -348,6 +386,10 @@ namespace Frida.Fruity {
 
 		public DTTapMessage (NSDictionary plist) {
 			this.plist = plist;
+		}
+
+		public override string to_string () {
+			return ("DTTapMessage { plist = %s }").printf (plist.to_string ());
 		}
 	}
 
