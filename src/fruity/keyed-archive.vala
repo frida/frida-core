@@ -9,8 +9,20 @@ namespace Frida.Fruity {
 			return other == this;
 		}
 
-		public virtual string to_string () {
-			return "NSObject";
+		public string to_string (uint level = 0) {
+			var s = new StringBuilder.sized (256);
+			append_indent (s, level);
+			append_content (s, level);
+			return s.str;
+		}
+
+		protected virtual void append_content (StringBuilder s, uint level) {
+			s.append ("NSObject {}");
+		}
+
+		protected void append_indent (StringBuilder s, uint level) {
+			for (uint i = 0; i != level; i++)
+				s.append ("  ");
 		}
 
 		public static uint hash_func (NSObject val) {
@@ -103,8 +115,19 @@ namespace Frida.Fruity {
 			return false;
 		}
 
-		public override string to_string () {
-			return integer.to_string ();
+		protected override void append_content (StringBuilder s, uint level) {
+			switch (kind) {
+				case BOOLEAN:
+					s.append (boolean ? "true" : "false");
+					break;
+				case INTEGER:
+					s.append_printf ("%" + int64.FORMAT, integer);
+					break;
+				case FLOAT:
+				case DOUBLE:
+					s.append_printf ("%f", number);
+					break;
+			}
 		}
 	}
 
@@ -129,8 +152,11 @@ namespace Frida.Fruity {
 			return other_string.str == str;
 		}
 
-		public override string to_string () {
-			return "\"" + str + "\"";
+		protected override void append_content (StringBuilder s, uint level) {
+			s
+				.append_c ('"')
+				.append (str.replace ("\"", "\\\""))
+				.append_c ('"');
 		}
 	}
 
@@ -155,8 +181,8 @@ namespace Frida.Fruity {
 			return other_data.bytes.compare (bytes) == 0;
 		}
 
-		public override string to_string () {
-			return "NSData { size = %zu }".printf (bytes.get_size ());
+		protected override void append_content (StringBuilder s, uint level) {
+			s.append_printf ("NSData { size = %" + size_t.FORMAT + " }", bytes.get_size ());
 		}
 	}
 
@@ -220,13 +246,23 @@ namespace Frida.Fruity {
 			storage[key] = val;
 		}
 
-		public override string to_string () {
-			var s = new StringBuilder.sized (256);
-			s.append ("NSDictionary {\n");
-			foreach (var e in entries)
-				s.append_printf ("\t%s => %s\n", e.key, e.value.to_string ());
-			s.append ("}");
-			return s.str;
+		protected override void append_content (StringBuilder s, uint level) {
+			if (storage.size == 0) {
+				s.append ("{}");
+				return;
+			}
+
+			s.append ("{\n");
+			foreach (var e in entries) {
+				append_indent (s, level + 1);
+				s
+					.append (e.key)
+					.append (": ");
+				e.value.append_content (s, level + 1);
+				s.append (",\n");
+			}
+			append_indent (s, level);
+			s.append_c ('}');
 		}
 	}
 
@@ -263,8 +299,22 @@ namespace Frida.Fruity {
 				: new Gee.HashMap<NSObject, NSObject> (NSObject.hash_func, NSObject.equal_func);
 		}
 
-		public override string to_string () {
-			return "NSDictionaryRaw";
+		protected override void append_content (StringBuilder s, uint level) {
+			if (storage.size == 0) {
+				s.append ("{}");
+				return;
+			}
+
+			s.append ("{\n");
+			foreach (var e in entries) {
+				append_indent (s, level + 1);
+				e.key.append_content (s, level + 1);
+				s.append (": ");
+				e.value.append_content (s, level + 1);
+				s.append (",\n");
+			}
+			append_indent (s, level);
+			s.append_c ('}');
 		}
 	}
 
@@ -291,13 +341,20 @@ namespace Frida.Fruity {
 			storage.add (obj);
 		}
 
-		public override string to_string () {
-			var s = new StringBuilder.sized (256);
-			s.append ("NSArray [\n");
-			foreach (var e in elements)
-				s.append_printf ("\t%s,\n", e.to_string ());
-			s.append ("]");
-			return s.str;
+		protected override void append_content (StringBuilder s, uint level) {
+			if (storage.size == 0) {
+				s.append ("[]");
+				return;
+			}
+
+			s.append ("[\n");
+			foreach (var e in elements) {
+				append_indent (s, level + 1);
+				e.append_content (s, level + 1);
+				s.append (",\n");
+			}
+			append_indent (s, level);
+			s.append_c (']');
 		}
 	}
 
@@ -318,13 +375,20 @@ namespace Frida.Fruity {
 			storage.add (obj);
 		}
 
-		public override string to_string () {
-			var s = new StringBuilder.sized (256);
-			s.append ("NSSet {\n");
-			foreach (var e in items)
-				s.append_printf ("\t%s,\n", e.to_string ());
-			s.append ("}");
-			return s.str;
+		protected override void append_content (StringBuilder s, uint level) {
+			if (storage.size == 0) {
+				s.append ("{}");
+				return;
+			}
+
+			s.append ("{\n");
+			foreach (var e in items) {
+				append_indent (s, level + 1);
+				e.append_content (s, level + 1);
+				s.append (",\n");
+			}
+			append_indent (s, level);
+			s.append_c ('}');
 		}
 	}
 
@@ -346,8 +410,8 @@ namespace Frida.Fruity {
 				.add_seconds (time - (double) whole_seconds);
 		}
 
-		public override string to_string () {
-			return "NSDate { time = %f }".printf (time);
+		protected override void append_content (StringBuilder s, uint level) {
+			s.append_printf ("NSDate { time = %f }", time);
 		}
 	}
 
@@ -373,8 +437,33 @@ namespace Frida.Fruity {
 			this.user_info = user_info;
 		}
 
-		public override string to_string () {
-			return ("NSError { domain = \"%s\", code = %" + uint64.FORMAT_MODIFIER + "d }").printf (domain.to_string (), code);
+		protected override void append_content (StringBuilder s, uint level) {
+			s.append ("NSError { domain = ");
+			domain.append_content (s, level);
+			s.append_printf (", code = %" + uint64.FORMAT_MODIFIER + "d, user_info = ", code);
+
+			if (user_info.size == 0) {
+				user_info.append_content (s, level);
+				s.append (" }");
+				return;
+			}
+
+			s.append ("{\n");
+			append_indent (s, level + 1);
+			s.append ("domain: ");
+			domain.append_content (s, level + 1);
+			s.append (",\n");
+
+			append_indent (s, level + 1);
+			s.append_printf ("code: %" + uint64.FORMAT_MODIFIER + "d,\n", code);
+
+			append_indent (s, level + 1);
+			s.append ("user_info: ");
+			user_info.append_content (s, level + 1);
+			s.append_c ('\n');
+
+			append_indent (s, level);
+			s.append_c ('}');
 		}
 	}
 
@@ -388,8 +477,23 @@ namespace Frida.Fruity {
 			this.plist = plist;
 		}
 
-		public override string to_string () {
-			return ("DTTapMessage { plist = %s }").printf (plist.to_string ());
+		protected override void append_content (StringBuilder s, uint level) {
+			if (plist.size == 0) {
+				s.append ("DTTapMessage { plist: ");
+				plist.append_content (s, level);
+				s.append (" }");
+				return;
+			}
+
+			s.append ("DTTapMessage {\n");
+
+			append_indent (s, level + 1);
+			s.append ("plist: ");
+			plist.append_content (s, level + 1);
+			s.append_c ('\n');
+
+			append_indent (s, level);
+			s.append_c ('}');
 		}
 	}
 
