@@ -714,33 +714,37 @@ namespace Frida.Fruity {
 			message.payload_data = raw_message[payload_start_offset:payload_end_offset];
 
 			int32 channel_code = message.channel_code;
-			bool is_notification = false;
-			if (message.type == INVOKE) {
+			if ((message.conversation_index % 2) == 0)
 				channel_code = -channel_code;
-			} else if (message.type == RESULT && channel_code < 0) {
-				channel_code = -channel_code;
-				is_notification = true;
-			}
+
+			bool is_notification = message.conversation_index == 0;
 
 			var channel = channels[channel_code];
 			if (channel == null)
 				return;
 
 			switch (message.type) {
-				case INVOKE:
-					channel.handle_invoke (message);
+				case DISPATCH:
+					channel.handle_dispatch (message);
 					break;
 				case OK:
-				case RESULT:
+				case OBJECT:
 				case ERROR:
 					if (is_notification)
 						channel.handle_notification (message);
 					else
 						channel.handle_response (message);
 					break;
+				case DATA:
+					channel.handle_data (message);
+					break;
 				case BARRIER:
 					channel.handle_barrier (message);
 					break;
+				case PRIMITIVE:
+				case COMPRESSED:
+				case PROXIED_MESSAGE:
+					throw new Error.PROTOCOL ("Unsupported message type: %s", message.type.to_string ());
 			}
 		}
 
@@ -855,7 +859,6 @@ namespace Frida.Fruity {
 		public void notify_of_published_capabilities () throws Error {
 			var capabilities = new NSDictionary ();
 			capabilities.set_value ("com.apple.private.DTXConnection", new NSNumber.from_integer (1));
-			capabilities.set_value ("com.apple.private.DTXBlockCompression", new NSNumber.from_integer (2));
 
 			var args = new DTXArgumentListBuilder ()
 				.append_object (capabilities);
@@ -879,6 +882,7 @@ namespace Frida.Fruity {
 	public class DTXChannel : Object {
 		public signal void invocation (string method_name, DTXArgumentList args, DTXMessageTransportFlags transport_flags);
 		public signal void notification (NSObject obj);
+		public signal void data (Bytes blob);
 		public signal void barrier ();
 
 		public int32 code {
@@ -935,7 +939,7 @@ namespace Frida.Fruity {
 			check_open ();
 
 			var message = DTXMessage ();
-			message.type = INVOKE;
+			message.type = DISPATCH;
 			message.channel_code = code;
 			message.transport_flags = EXPECTS_REPLY;
 
@@ -965,7 +969,7 @@ namespace Frida.Fruity {
 			check_open ();
 
 			var message = DTXMessage ();
-			message.type = INVOKE;
+			message.type = DISPATCH;
 			message.channel_code = code;
 			message.transport_flags = NONE;
 
@@ -982,10 +986,10 @@ namespace Frida.Fruity {
 			transport.send_message (message, out identifier);
 		}
 
-		internal void handle_invoke (DTXMessage message) throws Error {
+		internal void handle_dispatch (DTXMessage message) throws Error {
 			NSString? method_name = NSKeyedArchive.decode (message.payload_data) as NSString;
 			if (method_name == null)
-				throw new Error.PROTOCOL ("Malformed invocation payload");
+				throw new Error.PROTOCOL ("Malformed dispatch payload");
 
 			var args = DTXArgumentList.parse (message.aux_data);
 
@@ -999,7 +1003,7 @@ namespace Frida.Fruity {
 					case OK:
 						request.resolve (null);
 						break;
-					case RESULT:
+					case OBJECT:
 						request.resolve (NSKeyedArchive.decode (message.payload_data));
 						break;
 					case ERROR: {
@@ -1037,6 +1041,10 @@ namespace Frida.Fruity {
 			notification (payload);
 		}
 
+		internal void handle_data (DTXMessage message) throws Error {
+			data (new Bytes (message.payload_data));
+		}
+
 		internal void handle_barrier (DTXMessage message) throws Error {
 			barrier ();
 		}
@@ -1053,11 +1061,15 @@ namespace Frida.Fruity {
 	}
 
 	public enum DTXMessageType {
-		OK = 0,
-		INVOKE = 2,
-		RESULT = 3,
-		ERROR = 4,
-		BARRIER = 5
+		OK,
+		DATA,
+		DISPATCH,
+		OBJECT,
+		ERROR,
+		BARRIER,
+		PRIMITIVE,
+		COMPRESSED,
+		PROXIED_MESSAGE,
 	}
 
 	public struct DTXMessage {
