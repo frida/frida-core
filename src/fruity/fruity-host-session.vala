@@ -1114,6 +1114,12 @@ namespace Frida {
 				return new XpcServiceSession (new Fruity.XpcConnection (stream));
 			}
 
+			if (protocol == "syscall-trace") {
+				var core_profile = yield Fruity.CoreProfileService.open (device, cancellable);
+
+				return new SyscallTraceServiceSession (core_profile);
+			}
+
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
 
@@ -2484,6 +2490,187 @@ namespace Frida {
 					(string) t.peek_string (),
 					(string) v.get_type ().peek_string ());
 			}
+		}
+	}
+
+	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+		public Fruity.CoreProfileService core_profile {
+			get;
+			construct;
+		}
+
+		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile) {
+			Object (core_profile: core_profile);
+		}
+
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+		}
+
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			try {
+				yield core_profile.stop (cancellable);
+			} catch (Error e) {
+			}
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			var reply = new VariantBuilder (VariantType.VARDICT);
+
+			if (type == "read-events") {
+				var events = new VariantBuilder (new VariantType ("av"));
+				var processes = new VariantBuilder (new VariantType ("a(us)"));
+
+				/* TODO */
+
+				vardict_add (reply, "events", events.end ());
+				vardict_add (reply, "processes", processes.end ());
+				vardict_add (reply, "status", "drained");
+
+				return reply.end ();
+			}
+
+			if (type == "resolve-stacks") {
+				reader.read_member ("ids");
+				// var ids = read_uint32_array (reader);
+				reader.end_member ();
+
+				var stacks = new VariantBuilder (new VariantType ("aat"));
+
+				/* TODO */
+
+				vardict_add (reply, "stacks", stacks.end ());
+
+				return reply.end ();
+			}
+
+			if (type == "resolve-symbols") {
+				/*
+				var pid = (uint) reader.read_member ("pid").get_int64_value ();
+				reader.end_member ();
+
+				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
+				reader.end_member ();
+				*/
+
+				reader.read_member ("addresses");
+				var addrs = read_uint64_array (reader);
+				reader.end_member ();
+
+				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
+				var modules = new VariantBuilder (new VariantType ("as"));
+
+				/* TODO */
+				foreach (var addr in addrs)
+					symbols.add ("(uu)", uint32.MAX, 0);
+
+				vardict_add (reply, "modules", modules.end ());
+				vardict_add (reply, "symbols", symbols.end ());
+
+				return reply.end ();
+			}
+
+			if (type == "read-stats") {
+				/* TODO */
+
+				vardict_add (reply, "emitted-events", (uint64) 0);
+				vardict_add (reply, "emitted-bytes", (uint64) 0);
+
+				vardict_add (reply, "dropped-events", (uint64) 0);
+				vardict_add (reply, "dropped-bytes", (uint64) 0);
+
+				return reply.end ();
+			}
+
+			if (type == "add-targets") {
+				check_for_unsupported_targets (reader);
+
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+
+					uint32[] pids = read_uint32_array (reader);
+					yield core_profile.set_config (pids, cancellable);
+
+					yield core_profile.start (cancellable);
+
+					reader.end_member ();
+				}
+
+
+				return reply.end ();
+			}
+
+			if (type == "remove-targets") {
+				check_for_unsupported_targets (reader);
+
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+
+					/* TODO */
+					yield core_profile.stop (cancellable);
+
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "get-signatures") {
+				vardict_add (reply, "native", build_signatures_variant ());
+
+				return reply.end ();
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+		}
+
+		private static void check_for_unsupported_targets (VariantReader reader) throws Error {
+			if (reader.has_member ("uids") || reader.has_member ("users"))
+				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
+		}
+
+		private static Variant build_signatures_variant () {
+			var result = new VariantBuilder (new VariantType ("a(usa(ss))"));
+
+			/* TODO */
+
+			return result.end ();
+		}
+
+		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < 0 || v > uint32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (uint32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static uint64[] read_uint64_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint64[n];
+
+			for (uint i = 0; i != n; i++) {
+				arr[i] = reader.read_element (i).get_uint64_value ();
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static void vardict_add (VariantBuilder b, string key, Variant val) {
+			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
 		}
 	}
 }

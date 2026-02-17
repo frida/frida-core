@@ -346,6 +346,170 @@ namespace Frida.Fruity {
 		}
 	}
 
+	public sealed class CoreProfileService : Object, AsyncInitable {
+		public HostChannelProvider channel_provider {
+			get;
+			construct;
+		}
+
+		private DTXChannel channel;
+
+		private FileOutputStream? output = null;
+
+		private CoreProfileService (HostChannelProvider channel_provider) {
+			Object (channel_provider: channel_provider);
+		}
+
+		public static async CoreProfileService open (HostChannelProvider channel_provider, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var service = new CoreProfileService (channel_provider);
+
+			try {
+				yield service.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
+			}
+
+			return service;
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var connection = yield DTXConnection.obtain (channel_provider, cancellable);
+
+			channel = connection.make_channel ("com.apple.instruments.server.services.coreprofilesessiontap");
+			channel.notification.connect (on_notification);
+			channel.data.connect (on_data);
+
+			return true;
+		}
+
+		public async void set_config (uint[] pids, Cancellable? cancellable = null) throws Error, IOError {
+			var config = new NSDictionary ();
+
+			var buffer_mode = new NSNumber.from_integer (1);
+			config.set_value ("bm", buffer_mode);
+
+			config.set_value ("curkt", new NSNumber.from_integer (1));
+
+			config.set_value ("kco", new NSNumber.from_integer (1000));
+
+			config.set_value ("po", new NSDictionary ());
+
+			var recording_priority = new NSNumber.from_integer (100);
+			config.set_value ("rp", recording_priority);
+
+			var tap_config = new NSArray ();
+			config.set_value ("tc", tap_config);
+
+			var cfg = new NSDictionary ();
+			tap_config.add_object (cfg);
+
+			var call_stack_depth = new NSNumber.from_integer (128);
+			cfg.set_value ("csd", call_stack_depth);
+
+			var kdf = new NSString ("<events><event type=\"KDebug\" class=\"1\" subclass=\"12\" code=\"*\"/><event type=\"KDebug\" class=\"4\" subclass=\"12\" code=\"*\"/></events>");
+			cfg.set_value ("kdf", kdf);
+
+			var kdf2 = new NSSet ();
+			kdf2.add_object (new NSNumber.from_integer (0x010cfffc));
+			kdf2.add_object (new NSNumber.from_integer (0x040cfffc));
+			cfg.set_value ("kdf2", kdf2);
+
+			var pid_filter = new NSArray ();
+			foreach (uint pid in pids)
+				pid_filter.add_object (new NSNumber.from_integer (pid));
+			cfg.set_value ("pf", pid_filter);
+
+			var tap_actions = new NSArray ();
+			cfg.set_value ("ta", tap_actions);
+
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (5));
+			var vals = new NSSet ();
+			vals.add_object (new NSNumber.from_integer (0x010cfffc));
+			vals.add_object (new NSNumber.from_integer (0x040cfffc));
+			a.add_object (vals);
+			tap_actions.add_object (a);
+
+			var b = new NSArray ();
+			b.add_object (new NSNumber.from_integer (0));
+			tap_actions.add_object (b);
+
+			var c = new NSArray ();
+			c.add_object (new NSNumber.from_integer (2));
+			tap_actions.add_object (c);
+
+			var d = new NSArray ();
+			d.add_object (new NSNumber.from_integer (1));
+			d.add_object (new NSNumber.from_integer (1));
+			d.add_object (new NSNumber.from_integer (0));
+			tap_actions.add_object (d);
+
+			var tap_kind = new NSNumber.from_integer (3);
+			cfg.set_value ("tk", tap_kind);
+
+			var uuid = new NSString (Uuid.string_random ().up ());
+			cfg.set_value ("uuid", uuid);
+
+			printerr ("%s\n", config.to_string ());
+
+			var args = new DTXArgumentListBuilder ()
+				.append_object (config);
+			yield channel.invoke ("setConfig:", args, cancellable);
+		}
+
+		public async void start (Cancellable? cancellable = null) throws Error, IOError {
+			yield channel.invoke ("start", null, cancellable);
+
+			schedule_stop.begin ();
+		}
+
+		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+			yield channel.invoke ("stop", null, cancellable);
+		}
+
+		private async void schedule_stop () {
+			var timer = new TimeoutSource.seconds (5);
+			timer.set_callback (schedule_stop.callback);
+			timer.attach (MainContext.get_thread_default ());
+			yield;
+
+			printerr ("Stopping!\n");
+
+			try {
+				yield stop ();
+				printerr ("Stop succeeded\n");
+			} catch (GLib.Error e) {
+				printerr ("Stop failed: %s\n", e.message);
+			}
+
+			if (output != null) {
+				try {
+					output.flush ();
+				} catch (GLib.Error e) {
+					printerr ("%s\n", e.message);
+				}
+				output = null;
+				printerr ("Flushed it\n");
+			}
+		}
+
+		private void on_notification (NSObject obj) {
+			printerr ("on_notification(): %s\n", obj.to_string ());
+		}
+
+		private void on_data (Bytes blob) {
+			printerr ("on_data(): TODO handle blob.size=%zu\n", blob.get_size ());
+			try {
+				if (output == null)
+					output = File.new_for_path ("/Users/oleavr/baufil.bin").create (REPLACE_DESTINATION);
+				output.write_all (blob.get_data (), null);
+			} catch (GLib.Error e) {
+				printerr ("%s\n", e.message);
+			}
+		}
+	}
+
 	public sealed class DTXConnection : Object, DTXTransport {
 		public IOStream stream {
 			get;
