@@ -2592,8 +2592,24 @@ namespace Frida {
 				if (reader.has_member ("pids")) {
 					reader.read_member ("pids");
 
+					var config = new KTraceConfig ();
+
+					var filter = new KDebugCodeSet ();
+					filter.add (DBG_MACH, DBG_MACH_EXCP_SC);
+					filter.add (DBG_BSD, DBG_BSD_EXCP_SC);
+
+					var tc = new KTraceTapTriggerConfig ();
+					tc.filter = filter;
+					tc.kind = START_AND_END;
+					foreach_uint32 (reader, pid => {
+						tc.include_pid (pid);
+					});
+					tc.callstack_frame_depth = 128;
+
+					config.add_trigger_config (tc);
+
 					uint32[] pids = read_uint32_array (reader);
-					yield core_profile.set_config (pids, cancellable);
+					yield core_profile.set_config (config, cancellable);
 
 					yield core_profile.start (cancellable);
 
@@ -2641,20 +2657,19 @@ namespace Frida {
 			return result.end ();
 		}
 
-		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
-			uint n = reader.count_elements ();
-			var arr = new uint32[n];
+		private delegate void UInt32Handler (uint32 v) throws Error;
 
+		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+			uint n = reader.count_elements ();
 			for (uint i = 0; i != n; i++) {
 				int64 v = reader.read_element (i).get_int64_value ();
 				if (v < 0 || v > uint32.MAX)
 					throw new Error.INVALID_ARGUMENT ("Value is out of range");
 
-				arr[i] = (uint32) v;
+				cb ((uint32) v);
+
 				reader.end_element ();
 			}
-
-			return arr;
 		}
 
 		private static uint64[] read_uint64_array (VariantReader reader) throws Error {

@@ -217,6 +217,10 @@ namespace Frida.Fruity {
 			this.storage = (storage != null) ? storage : new Gee.HashMap<string, NSObject> ();
 		}
 
+		public bool has_key (string key) {
+			return storage.has_key (key);
+		}
+
 		public unowned T get_value<T> (string key) throws Error {
 			unowned T? val;
 			if (!get_optional_value<T> (key, out val))
@@ -244,6 +248,10 @@ namespace Frida.Fruity {
 
 		public void set_value (string key, NSObject val) {
 			storage[key] = val;
+		}
+
+		public void unset_value (string key, out T? val = null) {
+			storage.unset (key, out val);
 		}
 
 		protected override void append_content (StringBuilder s, uint level) {

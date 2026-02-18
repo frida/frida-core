@@ -383,78 +383,11 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public async void set_config (uint[] pids, Cancellable? cancellable = null) throws Error, IOError {
-			var config = new NSDictionary ();
-
-			var buffer_mode = new NSNumber.from_integer (1);
-			config.set_value ("bm", buffer_mode);
-
-			config.set_value ("curkt", new NSNumber.from_integer (1));
-
-			config.set_value ("kco", new NSNumber.from_integer (1000));
-
-			config.set_value ("po", new NSDictionary ());
-
-			var recording_priority = new NSNumber.from_integer (100);
-			config.set_value ("rp", recording_priority);
-
-			var tap_config = new NSArray ();
-			config.set_value ("tc", tap_config);
-
-			var cfg = new NSDictionary ();
-			tap_config.add_object (cfg);
-
-			var call_stack_depth = new NSNumber.from_integer (128);
-			cfg.set_value ("csd", call_stack_depth);
-
-			var kdf = new NSString ("<events><event type=\"KDebug\" class=\"1\" subclass=\"12\" code=\"*\"/><event type=\"KDebug\" class=\"4\" subclass=\"12\" code=\"*\"/></events>");
-			cfg.set_value ("kdf", kdf);
-
-			var kdf2 = new NSSet ();
-			kdf2.add_object (new NSNumber.from_integer (0x010cfffc));
-			kdf2.add_object (new NSNumber.from_integer (0x040cfffc));
-			cfg.set_value ("kdf2", kdf2);
-
-			var pid_filter = new NSArray ();
-			foreach (uint pid in pids)
-				pid_filter.add_object (new NSNumber.from_integer (pid));
-			cfg.set_value ("pf", pid_filter);
-
-			var tap_actions = new NSArray ();
-			cfg.set_value ("ta", tap_actions);
-
-			var a = new NSArray ();
-			a.add_object (new NSNumber.from_integer (5));
-			var vals = new NSSet ();
-			vals.add_object (new NSNumber.from_integer (0x010cfffc));
-			vals.add_object (new NSNumber.from_integer (0x040cfffc));
-			a.add_object (vals);
-			tap_actions.add_object (a);
-
-			var b = new NSArray ();
-			b.add_object (new NSNumber.from_integer (0));
-			tap_actions.add_object (b);
-
-			var c = new NSArray ();
-			c.add_object (new NSNumber.from_integer (2));
-			tap_actions.add_object (c);
-
-			var d = new NSArray ();
-			d.add_object (new NSNumber.from_integer (1));
-			d.add_object (new NSNumber.from_integer (1));
-			d.add_object (new NSNumber.from_integer (0));
-			tap_actions.add_object (d);
-
-			var tap_kind = new NSNumber.from_integer (3);
-			cfg.set_value ("tk", tap_kind);
-
-			var uuid = new NSString (Uuid.string_random ().up ());
-			cfg.set_value ("uuid", uuid);
-
-			printerr ("%s\n", config.to_string ());
+		public async void set_config (KTraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
+			printerr ("%s\n", config.dict.to_string ());
 
 			var args = new DTXArgumentListBuilder ()
-				.append_object (config);
+				.append_object (config.dict);
 			yield channel.invoke ("setConfig:", args, cancellable);
 		}
 
@@ -509,6 +442,225 @@ namespace Frida.Fruity {
 			}
 		}
 	}
+
+	public sealed class KTraceConfig : Object {
+		internal NSDictionary dict = new NSDictionary ();
+		private NSArray trigger_configs = new NSArray ();
+
+		construct {
+			var buffer_mode = new NSNumber.from_integer (1);
+			dict.set_value ("bm", buffer_mode);
+
+			dict.set_value ("curkt", new NSNumber.from_integer (1));
+
+			dict.set_value ("kco", new NSNumber.from_integer (1000));
+
+			dict.set_value ("po", new NSDictionary ());
+
+			var recording_priority = new NSNumber.from_integer (100);
+			dict.set_value ("rp", recording_priority);
+
+			dict.set_value ("tc", trigger_configs);
+		}
+
+		public void add_trigger_config (KTraceTapTriggerConfig tc) {
+			trigger_configs.add_object (tc.dict);
+		}
+	}
+
+	public sealed class KTraceTapTriggerConfig : Object {
+		internal NSDictionary dict = new NSDictionary ();
+
+		public KDebugCodeSet? filter {
+			get {
+				return _filter;
+			}
+			set {
+				_filter = value;
+
+				if (_filter != null) {
+					dict.set_value ("kdf", new NSString (_filter.legacy_xml));
+					dict.set_value ("kdf2", _filter.kdebug_codes);
+				} else {
+					dict.unset_value ("kdf");
+					dict.unset_value ("kdf2");
+				}
+			}
+		}
+
+		public KTraceTapTriggerKind kind {
+			get {
+				NSNumber v;
+				if (dict.get_optional_value ("tk", out v))
+					return v.integer;
+				return INVALID;
+			}
+			set {
+				dict.set_value ("tk", new NSNumber.from_integer (value));
+			}
+		}
+
+		public bool is_all_processes {
+			get {
+				return !dict.has_key ("pf");
+			}
+			set {
+				if (value) {
+					dict.unset_value ("pf");
+				} else {
+					if (!dict.has_key ("pf"))
+						dict.set_value ("pf", new NSArray ());
+				}
+			}
+		}
+
+		public int callstack_frame_depth {
+			get {
+				NSNumber v;
+				if (dict.get_optional_value ("csd", out v))
+					return v.integer;
+				return -1;
+			}
+			set {
+				dict.set_value ("csd", new NSNumber.from_integer (value));
+			}
+		}
+
+		private KDebugCodeSet _filter = null;
+
+		construct {
+			var uuid = new NSString (Uuid.string_random ().up ());
+			dict.set_value ("uuid", uuid);
+		}
+
+		public void include_pid (uint pid) {
+			is_all_processes = false;
+
+			NSArray pids = dict.get_value ("pf");
+			foreach (var o in pids.elements) {
+				NSNumber n = (NSNumber) o;
+				if (n.integer == pid)
+					return;
+			}
+			pids.add_object (new NSNumber.from_integer (pid));
+		}
+
+		/*
+			var kdf = new NSString ("<events><event type=\"KDebug\" class=\"1\" subclass=\"12\" code=\"*\"/><event type=\"KDebug\" class=\"4\" subclass=\"12\" code=\"*\"/></events>");
+			dict.set_value ("kdf", kdf);
+
+			var kdf2 = new NSSet ();
+			kdf2.add_object (new NSNumber.from_integer (0x010cfffc));
+			kdf2.add_object (new NSNumber.from_integer (0x040cfffc));
+			dict.set_value ("kdf2", kdf2);
+
+			var tap_actions = new NSArray ();
+			dict.set_value ("ta", tap_actions);
+
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (5));
+			var vals = new NSSet ();
+			vals.add_object (new NSNumber.from_integer (0x010cfffc));
+			vals.add_object (new NSNumber.from_integer (0x040cfffc));
+			a.add_object (vals);
+			tap_actions.add_object (a);
+
+			var b = new NSArray ();
+			b.add_object (new NSNumber.from_integer (0));
+			tap_actions.add_object (b);
+
+			var c = new NSArray ();
+			c.add_object (new NSNumber.from_integer (2));
+			tap_actions.add_object (c);
+
+			var d = new NSArray ();
+			d.add_object (new NSNumber.from_integer (1));
+			d.add_object (new NSNumber.from_integer (1));
+			d.add_object (new NSNumber.from_integer (0));
+			tap_actions.add_object (d);
+		*/
+	}
+
+	public enum KTraceTapTriggerKind {
+		INVALID = -1,
+		NORMAL = 0,
+		START,
+		END,
+		START_AND_END,
+	}
+
+	public sealed class KDebugCodeSet : Object {
+		public string legacy_xml {
+			owned get {
+				var xml = new StringBuilder.sized (256);
+				xml.append ("<events>");
+
+				foreach (var obj in kdebug_codes) {
+					uint32 val = ((NSNumber) obj).integer;
+
+					xml.append ("<event type=\"KDebug\" class=\"");
+
+					var klass = (KDebugClass) (val >> 24);
+					if (klass == ANY)
+						xml.append_c ('*');
+					else
+						xml.append_printf ("%u", klass);
+
+					xml.append ("\" subclass=\"");
+
+					var subclass = (KDebugSubclass) ((val >> 16) & 0xff);
+					if (subclass == ANY)
+						xml.append_c ('*');
+					else
+						xml.append_printf ("%u", subclass);
+
+					xml.append ("\" code=\"");
+
+					uint code = (val >> 2) & 0x3fff;
+					if (code == KDEBUG_CODE_ANY)
+						xml.append_c ('*');
+					else
+						xml.append_printf ("%u", code);
+
+					xml.append ("\"/>");
+				}
+
+				xml.append ("</events>");
+
+				return xml.str;
+			}
+		}
+
+		public NSSet kdebug_codes {
+			get {
+				return _kdebug_codes;
+			}
+		}
+
+		private NSSet _kdebug_codes = new NSSet ();
+
+		public void add (KDebugClass klass, KDebugSubclass subclass = ANY, uint code = KDEBUG_CODE_ANY) {
+			uint32 v = (klass << 24) | (subclass << 16) | (code << 2);
+			_kdebug_codes.add_value (new NSNumber.from_integer (v));
+		}
+	}
+
+	public enum KDebugClass {
+		DBG_MACH = 1,
+		DBG_BSD = 4,
+
+		ANY = 0xff,
+	}
+
+	public enum KDebugSubclass {
+		DBG_MACH_EXCP_SC = 12,
+
+		DBG_BSD_EXCP_SC = 12,
+
+		ANY = 0xff,
+	}
+
+	public const uint KDEBUG_CODE_ANY = 0x3fff;
 
 	public sealed class DTXConnection : Object, DTXTransport {
 		public IOStream stream {
