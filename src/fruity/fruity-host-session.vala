@@ -2598,8 +2598,7 @@ namespace Frida {
 					codes.add (DBG_MACH, DBG_MACH_EXCP_SC);
 					codes.add (DBG_BSD, DBG_BSD_EXCP_SC);
 
-					var tc = new Fruity.KTraceTapTriggerConfig ();
-					tc.kind = KDEBUG;
+					var tc = new Fruity.KTraceTapTriggerConfig (KDEBUG);
 					tc.filter = codes;
 					foreach_uint32 (reader, pid => {
 						tc.include_pid (pid);

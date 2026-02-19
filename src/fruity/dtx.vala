@@ -557,10 +557,10 @@ namespace Frida.Fruity {
 			default = null;
 		}
 
-		private NSArray trigger_configs = new NSArray ();
+		private Gee.List<KTraceTapTriggerConfig> trigger_configs = new Gee.ArrayList<KTraceTapTriggerConfig> ();
 
 		public void add_trigger_config (KTraceTapTriggerConfig tc) {
-			trigger_configs.add_object (tc.dict);
+			trigger_configs.add (tc);
 		}
 
 		internal override NSDictionary encode () {
@@ -583,7 +583,10 @@ namespace Frida.Fruity {
 			if (_provider_options != null)
 				dict.set_value ("po", _provider_options);
 
-			dict.set_value ("tc", trigger_configs);
+			var tc = new NSArray ();
+			foreach (var cfg in trigger_configs)
+				tc.add_object (cfg.encode ());
+			dict.set_value ("tc", tc);
 
 			return dict;
 		}
@@ -595,115 +598,83 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class KTraceTapTriggerConfig : Object {
-		internal NSDictionary dict = new NSDictionary ();
-
 		public KTraceTapTriggerKind kind {
-			get {
-				NSNumber v;
-				try {
-					if (dict.get_optional_value ("tk", out v))
-						return v.integer;
-				} catch (Error e) {
-					assert_not_reached ();
-				}
-				return DEFAULT;
-			}
-			set {
-				dict.set_value ("tk", new NSNumber.from_integer (value));
-			}
+			get;
+			construct;
 		}
 
 		public KDebugCodeSet? filter {
-			get {
-				return _filter;
-			}
-			set {
-				_filter = value;
-
-				if (_filter != null) {
-					dict.set_value ("kdf", new NSString (_filter.legacy_xml));
-					dict.set_value ("kdf2", _filter.kdebug_codes);
-				} else {
-					dict.unset_value<NSString> ("kdf");
-					dict.unset_value<NSSet> ("kdf2");
-				}
-			}
+			get;
+			set;
 		}
 
 		public bool is_all_processes {
 			get {
-				return !dict.has_key ("pf");
+				return included_pids == null;
 			}
 			set {
 				if (value)
-					dict.unset_value<NSArray> ("pf");
+					included_pids = null;
 				else
-					ensure_pid_filter_array ();
+					ensure_included_pids ();
 			}
 		}
 
-		public int callstack_frame_depth {
-			get {
-				NSNumber v;
-				try {
-					if (dict.get_optional_value ("csd", out v))
-						return (int) v.integer;
-				} catch (Error e) {
-					assert_not_reached ();
-				}
-				return -1;
-			}
-			set {
-				dict.set_value ("csd", new NSNumber.from_integer (value));
-			}
+		public uint callstack_frame_depth {
+			get;
+			set;
+			default = 0;
 		}
 
 		public KTraceTapActions actions {
 			get;
+			default = new KTraceTapActions ();
 		}
 
-		private KDebugCodeSet _filter = null;
+		private Gee.Set<uint>? included_pids = null;
 
-		construct {
-			_actions = new KTraceTapActions ();
+		public KTraceTapTriggerConfig (KTraceTapTriggerKind kind) {
+			Object (kind: kind);
 		}
 
 		public void include_pid (uint pid) {
-			NSArray pids = ensure_pid_filter_array ();
-			foreach (var o in pids.elements) {
-				NSNumber n = (NSNumber) o;
-				if (n.integer == pid)
-					return;
-			}
-			pids.add_object (new NSNumber.from_integer (pid));
+			ensure_included_pids ().add (pid);
 		}
 
-		private NSArray ensure_pid_filter_array () {
-			NSArray? pf;
-			try {
-				dict.get_optional_value ("pf", out pf);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-
-			if (pf == null) {
-				pf = new NSArray ();
-				dict.set_value ("pf", pf);
-			}
-
-			return pf;
+		private unowned Gee.Set<uint> ensure_included_pids () {
+			if (included_pids == null)
+				included_pids = new Gee.HashSet<uint> ();
+			return included_pids;
 		}
 
 		internal NSDictionary encode () {
 			var dict = new NSDictionary ();
+
 			dict.set_value ("uuid", new NSString (Uuid.string_random ().up ()));
 
-			var actions = _tap_actions.items;
+			dict.set_value ("tk", new NSNumber.from_integer (_kind));
+
+			if (_filter != null) {
+				dict.set_value ("kdf", new NSString (_filter.legacy_xml));
+				dict.set_value ("kdf2", _filter.kdebug_codes);
+			}
+
+			if (included_pids != null) {
+				var pf = new NSArray ();
+				foreach (var pid in included_pids)
+					pf.add_object (new NSNumber.from_integer (pid));
+				dict.set_value ("pf", pf);
+			}
+
+			if (_callstack_frame_depth != 0)
+				dict.set_value ("csd", new NSNumber.from_integer (_callstack_frame_depth));
+
+			var actions = _actions.items;
 			if (!actions.is_empty) {
 				var arr = new NSArray ();
 				foreach (var action in actions)
 					arr.add_object (action.encode ());
-				_dict.set_value ("ta", arr);
+				dict.set_value ("ta", arr);
 			}
 
 			return dict;
@@ -711,8 +682,7 @@ namespace Frida.Fruity {
 	}
 
 	public enum KTraceTapTriggerKind {
-		DEFAULT,
-		TIME,
+		TIME = 1,
 		PMI,
 		KDEBUG,
 	}
