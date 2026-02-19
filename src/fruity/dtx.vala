@@ -455,18 +455,6 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public bool is_deferred_display {
-			get {
-				return _polling_interval == 0;
-			}
-			set {
-				if (value)
-					polling_interval = 0;
-				else
-					polling_interval = 500;
-			}
-		}
-
 		public uint64 polling_interval {
 			get;
 			set;
