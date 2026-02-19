@@ -354,8 +354,6 @@ namespace Frida.Fruity {
 
 		private DTXChannel channel;
 
-		private FileOutputStream? output = null;
-
 		private CoreProfileService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
 		}
@@ -415,16 +413,6 @@ namespace Frida.Fruity {
 			} catch (GLib.Error e) {
 				printerr ("Stop failed: %s\n", e.message);
 			}
-
-			if (output != null) {
-				try {
-					output.flush ();
-				} catch (GLib.Error e) {
-					printerr ("%s\n", e.message);
-				}
-				output = null;
-				printerr ("Flushed it\n");
-			}
 		}
 
 		private void on_notification (NSObject obj) {
@@ -433,14 +421,36 @@ namespace Frida.Fruity {
 
 		private void on_data (Bytes blob) {
 			printerr ("on_data(): TODO handle blob.size=%zu\n", blob.get_size ());
-			try {
-				if (output == null)
-					output = File.new_for_path ("/Users/oleavr/baufil.bin").create (REPLACE_DESTINATION);
-				output.write_all (blob.get_data (), null);
-			} catch (GLib.Error e) {
-				printerr ("%s\n", e.message);
+			var size = blob.get_size ();
+			hexdump (blob.get_data ()[:size_t.min (size, 256)]);
+		}
+	}
+
+	// https://gist.github.com/phako/96b36b5070beaf7eee27
+	private void hexdump (uint8[] data) {
+		var builder = new StringBuilder.sized (16);
+		var i = 0;
+
+		foreach (var c in data) {
+			if (i % 16 == 0)
+				printerr ("%08x | ", i);
+
+			printerr ("%02x ", c);
+
+			if (((char) c).isprint ())
+				builder.append_c ((char) c);
+			else
+				builder.append (".");
+
+			i++;
+			if (i % 16 == 0) {
+				printerr ("| %s\n", builder.str);
+				builder.erase ();
 			}
 		}
+
+		if (i % 16 != 0)
+			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 
 	public abstract class TapConfig : Object {
