@@ -384,10 +384,10 @@ namespace Frida.Fruity {
 		}
 
 		public async void set_config (KTraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
-			printerr ("%s\n", config.dict.to_string ());
+			printerr ("%s\n", config.encode ().to_string ());
 
 			var args = new DTXArgumentListBuilder ()
-				.append_object (config.dict);
+				.append_object (config.encode ());
 			yield channel.invoke ("setConfig:", args, cancellable);
 		}
 
@@ -443,36 +443,155 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KTraceConfig : Object {
-		internal NSDictionary dict = new NSDictionary ();
-		private NSArray trigger_configs = new NSArray ();
-
-		construct {
-			var buffer_mode = new NSNumber.from_integer (1);
-			dict.set_value ("bm", buffer_mode);
-
-			dict.set_value ("curkt", new NSNumber.from_integer (1));
-
-			dict.set_value ("kco", new NSNumber.from_integer (1000));
-
-			dict.set_value ("po", new NSDictionary ());
-
-			var recording_priority = new NSNumber.from_integer (100);
-			dict.set_value ("rp", recording_priority);
-
-			dict.set_value ("tc", trigger_configs);
+	public abstract class TapConfig : Object {
+		public TapRecordingMode buffer_mode {
+			get {
+				return _buffer_mode;
+			}
+			set {
+				_buffer_mode = value;
+				if (value != POLLED)
+					_polling_interval = 0;
+			}
 		}
+
+		public bool is_deferred_display {
+			get {
+				return _polling_interval == 0;
+			}
+			set {
+				if (value)
+					polling_interval = 0;
+				else
+					polling_interval = 500;
+			}
+		}
+
+		public uint64 polling_interval {
+			get;
+			set;
+			default = 500;
+		}
+
+		public uint64 window_size {
+			get;
+			set;
+			default = 0;
+		}
+
+		public bool spool_to_disk_when_possible {
+			get;
+			set;
+			default = false;
+		}
+
+		public bool discard_heartbeats_when_possible {
+			get;
+			set;
+			default = false;
+		}
+
+		private TapRecordingMode _buffer_mode = POLLED;
+
+		internal virtual NSDictionary encode () {
+			var dict = new NSDictionary ();
+
+			dict.set_value ("bm", new NSNumber.from_integer (_buffer_mode));
+
+			if (_polling_interval != 0)
+				dict.set_value ("ur", new NSNumber.from_integer ((int64) _polling_interval));
+
+			if (_window_size != 0)
+				dict.set_value ("ws", new NSNumber.from_integer ((int64) _window_size));
+
+			if (_spool_to_disk_when_possible)
+				dict.set_value ("s2d", new NSNumber.from_boolean (true));
+
+			if (_discard_heartbeats_when_possible)
+				dict.set_value ("nohb", new NSNumber.from_boolean (true));
+
+			return dict;
+		}
+	}
+
+	public enum TapRecordingMode {
+		POLLED,
+		IMMEDIATE,
+		WINDOWED,
+	}
+
+	public sealed class KTraceConfig : TapConfig {
+		public bool can_use_raw_ktrace_file {
+			get;
+			set;
+			default = false;
+		}
+
+		public KTraceRecordingPriority recording_priority {
+			get;
+			set;
+			default = FOREGROUND;
+		}
+
+		public uint collection_interval {
+			get;
+			set;
+			default = 0;
+		}
+
+		public uint64 buffer_size_override {
+			get;
+			set;
+			default = 0;
+		}
+
+		public uint64 buffer_size_override_clamping {
+			get;
+			set;
+			default = 0;
+		}
+
+		public NSDictionary? provider_options {
+			get;
+			set;
+			default = null;
+		}
+
+		private NSArray trigger_configs = new NSArray ();
 
 		public void add_trigger_config (KTraceTapTriggerConfig tc) {
 			trigger_configs.add_object (tc.dict);
 		}
+
+		internal override NSDictionary encode () {
+			var dict = base.encode ();
+
+			if (can_use_raw_ktrace_file)
+				dict.set_value ("curkt", new NSNumber.from_boolean (true));
+
+			dict.set_value ("rp", new NSNumber.from_integer (_recording_priority));
+
+			if (_collection_interval != 0)
+				dict.set_value ("kco", new NSNumber.from_integer (_collection_interval));
+
+			if (_buffer_size_override != 0)
+				dict.set_value ("bso", new NSNumber.from_integer ((int64) _buffer_size_override));
+
+			if (_buffer_size_override_clamping != 0)
+				dict.set_value ("bsoc", new NSNumber.from_integer ((int64) _buffer_size_override_clamping));
+
+			if (_provider_options != null)
+				dict.set_value ("po", _provider_options);
+
+			dict.set_value ("tc", trigger_configs);
+
+			return dict;
+		}
 	}
 
-	public enum KTraceTapTriggerKind {
-		DEFAULT,
-		TIME,
-		PMI,
-		KDEBUG,
+	public enum KTraceRecordingPriority {
+		BACKGROUND = 10,
+		FOREGROUND = 100,
 	}
 
 	public sealed class KTraceTapTriggerConfig : Object {
@@ -576,6 +695,13 @@ namespace Frida.Fruity {
 
 			return pf;
 		}
+	}
+
+	public enum KTraceTapTriggerKind {
+		DEFAULT,
+		TIME,
+		PMI,
+		KDEBUG,
 	}
 
 	public sealed class KTraceTapActions : Object {
@@ -697,13 +823,10 @@ namespace Frida.Fruity {
 		}
 
 		internal override NSArray encode () {
-			bool collect_user = (_mode & KTraceTapStackCollectionMode.USER) != 0;
-			bool collect_kernel = (_mode & KTraceTapStackCollectionMode.KERNEL) != 0;
-
 			var a = new NSArray ();
 			a.add_object (new NSNumber.from_integer (kind));
-			a.add_object (new NSNumber.from_integer (collect_user ? 1 : 0));
-			a.add_object (new NSNumber.from_integer (collect_kernel ? 1 : 0));
+			a.add_object (new NSNumber.from_boolean ((_mode & KTraceTapStackCollectionMode.USER) != 0));
+			a.add_object (new NSNumber.from_boolean ((_mode & KTraceTapStackCollectionMode.KERNEL) != 0));
 			return a;
 		}
 	}
