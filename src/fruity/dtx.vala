@@ -665,9 +665,7 @@ namespace Frida.Fruity {
 		private KDebugCodeSet _filter = null;
 
 		construct {
-			dict.set_value ("uuid", new NSString (Uuid.string_random ().up ()));
-
-			_actions = new KTraceTapActions (dict);
+			_actions = new KTraceTapActions ();
 		}
 
 		public void include_pid (uint pid) {
@@ -695,6 +693,21 @@ namespace Frida.Fruity {
 
 			return pf;
 		}
+
+		internal NSDictionary encode () {
+			var dict = new NSDictionary ();
+			dict.set_value ("uuid", new NSString (Uuid.string_random ().up ()));
+
+			var actions = _tap_actions.items;
+			if (!actions.is_empty) {
+				var arr = new NSArray ();
+				foreach (var action in actions)
+					arr.add_object (action.encode ());
+				_dict.set_value ("ta", arr);
+			}
+
+			return dict;
+		}
 	}
 
 	public enum KTraceTapTriggerKind {
@@ -705,53 +718,37 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class KTraceTapActions : Object {
-		public bool is_present {
-			get {
-				return _tap_actions != null;
-			}
-		}
-
-		private NSDictionary _dict;
-		private NSArray _tap_actions;
-
-		internal KTraceTapActions (NSDictionary dict) {
-			_dict = dict;
-		}
+		internal Gee.List<KTraceTapAction> items = new Gee.ArrayList<KTraceTapAction> ();
 
 		public unowned KTraceTapActions add (KTraceTapAction action) {
-			var a = ensure_array ();
-			a.add_object (action.encode ());
+			items.add (action);
 			return this;
 		}
 
 		public unowned KTraceTapActions add_stack_collection (KTraceTapStackCollectionMode mode) {
-			return add (new KTraceTapStackCollectionAction (mode));
+			items.add (new KTraceTapStackCollectionAction (mode));
+			return this;
 		}
 
 		public unowned KTraceTapActions add_baseline () {
-			add (new KTraceTapAction0 ());
-			return add (new KTraceTapAction2 ());
+			items.add (new KTraceTapAction0 ());
+			items.add (new KTraceTapAction2 ());
+			return this;
 		}
 
 		public unowned KTraceTapActions add_pmc_event (string event_name, string counter_name, uint32 extra = 0) {
-			return add (new KTraceTapAddPmcEventAction (event_name, counter_name, extra));
+			items.add (new KTraceTapAddPmcEventAction (event_name, counter_name, extra));
+			return this;
 		}
 
 		public unowned KTraceTapActions add_kdebug_codeset (KDebugCodeSet codeset) {
-			return add (new KTraceTapAddKDebugCodeSetAction (codeset.kdebug_codes));
+			items.add (new KTraceTapAddKDebugCodeSetAction (codeset.kdebug_codes));
+			return this;
 		}
 
 		public unowned KTraceTapActions add_kdebug_legacy_backtrace_filter () {
-			return add (new KTraceTapKDebugBacktraceFilterAction ());
-		}
-
-		private NSArray ensure_array () {
-			if (_tap_actions != null)
-				return _tap_actions;
-
-			_tap_actions = new NSArray ();
-			_dict.set_value ("ta", _tap_actions);
-			return _tap_actions;
+			items.add (new KTraceTapKDebugBacktraceFilterAction ());
+			return this;
 		}
 	}
 
