@@ -468,8 +468,31 @@ namespace Frida.Fruity {
 		}
 	}
 
+	public enum KTraceTapTriggerKind {
+		DEFAULT,
+		TIME,
+		PMI,
+		KDEBUG,
+	}
+
 	public sealed class KTraceTapTriggerConfig : Object {
 		internal NSDictionary dict = new NSDictionary ();
+
+		public KTraceTapTriggerKind kind {
+			get {
+				NSNumber v;
+				try {
+					if (dict.get_optional_value ("tk", out v))
+						return v.integer;
+				} catch (Error e) {
+					assert_not_reached ();
+				}
+				return DEFAULT;
+			}
+			set {
+				dict.set_value ("tk", new NSNumber.from_integer (value));
+			}
+		}
 
 		public KDebugCodeSet? filter {
 			get {
@@ -482,21 +505,9 @@ namespace Frida.Fruity {
 					dict.set_value ("kdf", new NSString (_filter.legacy_xml));
 					dict.set_value ("kdf2", _filter.kdebug_codes);
 				} else {
-					dict.unset_value ("kdf");
-					dict.unset_value ("kdf2");
+					dict.unset_value<NSString> ("kdf");
+					dict.unset_value<NSSet> ("kdf2");
 				}
-			}
-		}
-
-		public KTraceTapTriggerKind kind {
-			get {
-				NSNumber v;
-				if (dict.get_optional_value ("tk", out v))
-					return v.integer;
-				return INVALID;
-			}
-			set {
-				dict.set_value ("tk", new NSNumber.from_integer (value));
 			}
 		}
 
@@ -505,20 +516,22 @@ namespace Frida.Fruity {
 				return !dict.has_key ("pf");
 			}
 			set {
-				if (value) {
-					dict.unset_value ("pf");
-				} else {
-					if (!dict.has_key ("pf"))
-						dict.set_value ("pf", new NSArray ());
-				}
+				if (value)
+					dict.unset_value<NSArray> ("pf");
+				else
+					ensure_pid_filter_array ();
 			}
 		}
 
 		public int callstack_frame_depth {
 			get {
 				NSNumber v;
-				if (dict.get_optional_value ("csd", out v))
-					return v.integer;
+				try {
+					if (dict.get_optional_value ("csd", out v))
+						return (int) v.integer;
+				} catch (Error e) {
+					assert_not_reached ();
+				}
 				return -1;
 			}
 			set {
@@ -526,17 +539,20 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public KTraceTapActions actions {
+			get;
+		}
+
 		private KDebugCodeSet _filter = null;
 
 		construct {
-			var uuid = new NSString (Uuid.string_random ().up ());
-			dict.set_value ("uuid", uuid);
+			dict.set_value ("uuid", new NSString (Uuid.string_random ().up ()));
+
+			_actions = new KTraceTapActions (dict);
 		}
 
 		public void include_pid (uint pid) {
-			is_all_processes = false;
-
-			NSArray pids = dict.get_value ("pf");
+			NSArray pids = ensure_pid_filter_array ();
 			foreach (var o in pids.elements) {
 				NSNumber n = (NSNumber) o;
 				if (n.integer == pid)
@@ -545,48 +561,256 @@ namespace Frida.Fruity {
 			pids.add_object (new NSNumber.from_integer (pid));
 		}
 
-		/*
-			var kdf = new NSString ("<events><event type=\"KDebug\" class=\"1\" subclass=\"12\" code=\"*\"/><event type=\"KDebug\" class=\"4\" subclass=\"12\" code=\"*\"/></events>");
-			dict.set_value ("kdf", kdf);
+		private NSArray ensure_pid_filter_array () {
+			NSArray? pf;
+			try {
+				dict.get_optional_value ("pf", out pf);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 
-			var kdf2 = new NSSet ();
-			kdf2.add_object (new NSNumber.from_integer (0x010cfffc));
-			kdf2.add_object (new NSNumber.from_integer (0x040cfffc));
-			dict.set_value ("kdf2", kdf2);
+			if (pf == null) {
+				pf = new NSArray ();
+				dict.set_value ("pf", pf);
+			}
 
-			var tap_actions = new NSArray ();
-			dict.set_value ("ta", tap_actions);
-
-			var a = new NSArray ();
-			a.add_object (new NSNumber.from_integer (5));
-			var vals = new NSSet ();
-			vals.add_object (new NSNumber.from_integer (0x010cfffc));
-			vals.add_object (new NSNumber.from_integer (0x040cfffc));
-			a.add_object (vals);
-			tap_actions.add_object (a);
-
-			var b = new NSArray ();
-			b.add_object (new NSNumber.from_integer (0));
-			tap_actions.add_object (b);
-
-			var c = new NSArray ();
-			c.add_object (new NSNumber.from_integer (2));
-			tap_actions.add_object (c);
-
-			var d = new NSArray ();
-			d.add_object (new NSNumber.from_integer (1));
-			d.add_object (new NSNumber.from_integer (1));
-			d.add_object (new NSNumber.from_integer (0));
-			tap_actions.add_object (d);
-		*/
+			return pf;
+		}
 	}
 
-	public enum KTraceTapTriggerKind {
-		INVALID = -1,
-		NORMAL = 0,
-		START,
-		END,
-		START_AND_END,
+	public sealed class KTraceTapActions : Object {
+		public bool is_present {
+			get {
+				return _tap_actions != null;
+			}
+		}
+
+		private NSDictionary _dict;
+		private NSArray _tap_actions;
+
+		internal KTraceTapActions (NSDictionary dict) {
+			_dict = dict;
+		}
+
+		public unowned KTraceTapActions add (KTraceTapAction action) {
+			var a = ensure_array ();
+			a.add_object (action.encode ());
+			return this;
+		}
+
+		public unowned KTraceTapActions add_stack_collection (KTraceTapStackCollectionMode mode) {
+			return add (new KTraceTapStackCollectionAction (mode));
+		}
+
+		public unowned KTraceTapActions add_baseline () {
+			add (new KTraceTapAction0 ());
+			return add (new KTraceTapAction2 ());
+		}
+
+		public unowned KTraceTapActions add_pmc_event (string event_name, string counter_name, uint32 extra = 0) {
+			return add (new KTraceTapAddPmcEventAction (event_name, counter_name, extra));
+		}
+
+		public unowned KTraceTapActions add_kdebug_codeset (KDebugCodeSet codeset) {
+			return add (new KTraceTapAddKDebugCodeSetAction (codeset.kdebug_codes));
+		}
+
+		public unowned KTraceTapActions add_kdebug_legacy_backtrace_filter () {
+			return add (new KTraceTapKDebugBacktraceFilterAction ());
+		}
+
+		private NSArray ensure_array () {
+			if (_tap_actions != null)
+				return _tap_actions;
+
+			_tap_actions = new NSArray ();
+			_dict.set_value ("ta", _tap_actions);
+			return _tap_actions;
+		}
+	}
+
+	public enum KTraceTapActionKind {
+		ACTION0,
+		STACK_COLLECTION,
+		ACTION2,
+		KDEBUG_BACKTRACE_FILTER,
+		ADD_PMC_EVENT,
+		ADD_KDEBUG_CODESET,
+	}
+
+	public abstract class KTraceTapAction : Object {
+		public abstract KTraceTapActionKind kind {
+			get;
+		}
+
+		internal abstract NSArray encode ();
+	}
+
+	public sealed class KTraceTapAction0 : KTraceTapAction {
+		public override KTraceTapActionKind kind {
+			get {
+				return ACTION0;
+			}
+		}
+
+		internal override NSArray encode () {
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			return a;
+		}
+	}
+
+	public sealed class KTraceTapAction2 : KTraceTapAction {
+		public override KTraceTapActionKind kind {
+			get {
+				return ACTION2;
+			}
+		}
+
+		internal override NSArray encode () {
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			return a;
+		}
+	}
+
+	public sealed class KTraceTapStackCollectionAction : KTraceTapAction {
+		private KTraceTapStackCollectionMode _mode;
+
+		public KTraceTapStackCollectionMode mode {
+			get {
+				return _mode;
+			}
+			set {
+				_mode = value;
+			}
+		}
+
+		public KTraceTapStackCollectionAction (KTraceTapStackCollectionMode mode) {
+			_mode = mode;
+		}
+
+		public override KTraceTapActionKind kind {
+			get {
+				return STACK_COLLECTION;
+			}
+		}
+
+		internal override NSArray encode () {
+			bool collect_user = (_mode & KTraceTapStackCollectionMode.USER) != 0;
+			bool collect_kernel = (_mode & KTraceTapStackCollectionMode.KERNEL) != 0;
+
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			a.add_object (new NSNumber.from_integer (collect_user ? 1 : 0));
+			a.add_object (new NSNumber.from_integer (collect_kernel ? 1 : 0));
+			return a;
+		}
+	}
+
+	[Flags]
+	public enum KTraceTapStackCollectionMode {
+		NONE   = 0,
+		USER   = (1 << 0),
+		KERNEL = (1 << 1),
+	}
+
+	public sealed class KTraceTapKDebugBacktraceFilterAction : KTraceTapAction {
+		public override KTraceTapActionKind kind {
+			get {
+				return KDEBUG_BACKTRACE_FILTER;
+			}
+		}
+
+		internal override NSArray encode () {
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			return a;
+		}
+	}
+
+	public sealed class KTraceTapAddPmcEventAction : KTraceTapAction {
+		private string _event_name;
+		private string _counter_name;
+		private uint32 _extra;
+
+		public string event_name {
+			get {
+				return _event_name;
+			}
+			set {
+				_event_name = value;
+			}
+		}
+
+		public string counter_name {
+			get {
+				return _counter_name;
+			}
+			set {
+				_counter_name = value;
+			}
+		}
+
+		public uint32 extra {
+			get {
+				return _extra;
+			}
+			set {
+				_extra = value;
+			}
+		}
+
+		public KTraceTapAddPmcEventAction (string event_name, string counter_name, uint32 extra = 0) {
+			_event_name = event_name;
+			_counter_name = counter_name;
+			_extra = extra;
+		}
+
+		public override KTraceTapActionKind kind {
+			get {
+				return ADD_PMC_EVENT;
+			}
+		}
+
+		internal override NSArray encode () {
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			a.add_object (new NSString (_event_name));
+			a.add_object (new NSString (_counter_name));
+			a.add_object (new NSNumber.from_integer (_extra));
+			return a;
+		}
+	}
+
+	public sealed class KTraceTapAddKDebugCodeSetAction : KTraceTapAction {
+		private NSSet _codes;
+
+		public NSSet codes {
+			get {
+				return _codes;
+			}
+			set {
+				_codes = value;
+			}
+		}
+
+		public KTraceTapAddKDebugCodeSetAction (NSSet codes) {
+			_codes = codes;
+		}
+
+		public override KTraceTapActionKind kind {
+			get {
+				return ADD_KDEBUG_CODESET;
+			}
+		}
+
+		internal override NSArray encode () {
+			var a = new NSArray ();
+			a.add_object (new NSNumber.from_integer (kind));
+			a.add_object (_codes);
+			return a;
+		}
 	}
 
 	public sealed class KDebugCodeSet : Object {
@@ -595,8 +819,8 @@ namespace Frida.Fruity {
 				var xml = new StringBuilder.sized (256);
 				xml.append ("<events>");
 
-				foreach (var obj in kdebug_codes) {
-					uint32 val = ((NSNumber) obj).integer;
+				foreach (var obj in kdebug_codes.items) {
+					uint32 val = (uint32) ((NSNumber) obj).integer;
 
 					xml.append ("<event type=\"KDebug\" class=\"");
 
@@ -641,7 +865,7 @@ namespace Frida.Fruity {
 
 		public void add (KDebugClass klass, KDebugSubclass subclass = ANY, uint code = KDEBUG_CODE_ANY) {
 			uint32 v = (klass << 24) | (subclass << 16) | (code << 2);
-			_kdebug_codes.add_value (new NSNumber.from_integer (v));
+			_kdebug_codes.add_object (new NSNumber.from_integer (v));
 		}
 	}
 

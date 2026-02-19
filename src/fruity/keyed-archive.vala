@@ -250,8 +250,8 @@ namespace Frida.Fruity {
 			storage[key] = val;
 		}
 
-		public void unset_value (string key, out T? val = null) {
-			storage.unset (key, out val);
+		public bool unset_value<T> (string key, out T? val = null) {
+			return storage.unset (key, out val);
 		}
 
 		protected override void append_content (StringBuilder s, uint level) {

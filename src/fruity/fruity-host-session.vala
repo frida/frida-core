@@ -2592,23 +2592,26 @@ namespace Frida {
 				if (reader.has_member ("pids")) {
 					reader.read_member ("pids");
 
-					var config = new KTraceConfig ();
+					var config = new Fruity.KTraceConfig ();
 
-					var filter = new KDebugCodeSet ();
-					filter.add (DBG_MACH, DBG_MACH_EXCP_SC);
-					filter.add (DBG_BSD, DBG_BSD_EXCP_SC);
+					var codes = new Fruity.KDebugCodeSet ();
+					codes.add (DBG_MACH, DBG_MACH_EXCP_SC);
+					codes.add (DBG_BSD, DBG_BSD_EXCP_SC);
 
-					var tc = new KTraceTapTriggerConfig ();
-					tc.filter = filter;
-					tc.kind = START_AND_END;
+					var tc = new Fruity.KTraceTapTriggerConfig ();
+					tc.kind = KDEBUG;
+					tc.filter = codes;
 					foreach_uint32 (reader, pid => {
 						tc.include_pid (pid);
 					});
 					tc.callstack_frame_depth = 128;
+					tc.actions
+						.add_baseline ()
+						.add_kdebug_codeset (codes)
+						.add_stack_collection (USER);
 
 					config.add_trigger_config (tc);
 
-					uint32[] pids = read_uint32_array (reader);
 					yield core_profile.set_config (config, cancellable);
 
 					yield core_profile.start (cancellable);
