@@ -353,6 +353,9 @@ namespace Frida.Fruity {
 		}
 
 		private DTXChannel channel;
+		private bool got_kcdata = false;
+		private Kperfdata.StreamParser kperf = new Kperfdata.StreamParser ();
+		private uint kperfdata_blobs_seen = 0;
 
 		private CoreProfileService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
@@ -421,8 +424,70 @@ namespace Frida.Fruity {
 
 		private void on_data (Bytes blob) {
 			printerr ("on_data(): TODO handle blob.size=%zu\n", blob.get_size ());
-			var size = blob.get_size ();
-			hexdump (blob.get_data ()[:size_t.min (size, 256)]);
+
+			// size_t size = blob.get_size ();
+			// hexdump (blob.get_data ()[:size_t.min (size, 1024)]);
+
+			printerr (">>>\n");
+			try {
+				if (!got_kcdata) {
+					Frida.Kcdata.parse (blob, (h, payload) => {
+						/*
+						switch (h.type) {
+							case Frida.Kcdata.ItemType.BUFFER_BEGIN_STACKSHOT:
+								printerr ("BEGIN stackshot\n");
+								break;
+							case Frida.Kcdata.ItemType.BUFFER_END:
+								printerr ("END\n");
+								break;
+							case Frida.Kcdata.ItemType.UINT64_DESC:
+								printerr ("TODO: UINT64_DESC\n");
+								break;
+							case Frida.Kcdata.ItemType.UINT32_DESC:
+								printerr ("TODO: UINT32_DESC\n");
+								break;
+							case Frida.Kcdata.ItemType.CONTAINER_BEGIN:
+								printerr ("TODO: CONTAINER BEGIN\n");
+								break;
+							case Frida.Kcdata.ItemType.CONTAINER_END:
+								printerr ("TODO: CONTAINER END\n");
+								break;
+							default:
+								printerr ("type=0x%x size=%u\n", (uint32) h.type, h.size);
+								break;
+						}
+						*/
+					});
+					got_kcdata = true;
+				} else {
+					kperfdata_blobs_seen++;
+					string filename = "/Users/oleavr/kperfdata-%02u.bin".printf (kperfdata_blobs_seen);
+					FileUtils.set_data (filename, blob.get_data ());
+					printerr ("\n=== %s\n", filename);
+
+					uint seen_mach_syscalls = 0;
+					uint seen_bsd_syscalls = 0;
+					kperf.push (blob, (rec) => {
+						var klass = (KDebugClass) ((rec.debugid >> 24) & 0xff);
+						var subclass = (KDebugSubclass) ((rec.debugid >> 16) & 0xff);
+						bool is_mach_syscall = (klass == DBG_MACH) && (subclass == DBG_MACH_EXCP_SC);
+						bool is_bsd_syscall = (klass == DBG_BSD) && (subclass == DBG_BSD_EXCP_SC);
+						if (is_mach_syscall)
+							seen_mach_syscalls++;
+						if (is_bsd_syscall)
+							seen_bsd_syscalls++;
+						if (!is_mach_syscall && !is_bsd_syscall) {
+							printerr ("kperfdata: debugid=0x%x class=0x%02x subclass=0x%02x cpu=%u unused=0x%016" + uint64.FORMAT_MODIFIER + "x ts=0x%016" + uint64.FORMAT_MODIFIER + "x\n",
+								rec.debugid, klass, subclass, rec.cpuid, rec.unused, rec.timestamp);
+						}
+					});
+					printerr ("\tseen_mach_syscalls=%u seen_bsd_syscalls=%u\n", seen_mach_syscalls, seen_bsd_syscalls);
+				}
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				Posix.exit (1);
+			}
+			printerr ("<<<\n");
 		}
 	}
 
