@@ -533,15 +533,17 @@ namespace Frida {
 
 		public size_t available {
 			get {
-				return buffer.bytes.get_size () - _offset;
+				return size - _offset;
 			}
 		}
 
 		private Buffer buffer;
+		private size_t size;
 		private size_t _offset = 0;
 
 		public BufferReader (Buffer buf) {
 			buffer = buf;
+			size = buf.bytes.get_size ();
 		}
 
 		public uint64 read_pointer () throws Error {
@@ -653,6 +655,13 @@ namespace Frida {
 		public unowned BufferReader skip (size_t n) throws Error {
 			check_available (n);
 			_offset += n;
+			return this;
+		}
+
+		public unowned BufferReader seek (size_t offset) throws Error {
+			if (offset > size)
+				throw new Error.PROTOCOL ("Malformed buffer: truncated");
+			_offset = offset;
 			return this;
 		}
 
