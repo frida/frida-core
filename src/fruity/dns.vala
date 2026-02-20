@@ -50,8 +50,8 @@ namespace Frida.Fruity {
 			if (rr.key.klass != IN)
 				throw new Error.PROTOCOL ("Expected an AAAA record of class IN");
 			var subreader = new DnsPacketReader (rr.data);
-			var raw_address = subreader.reader.read_bytes (16);
-			var address = new InetAddress.from_bytes (raw_address.get_data (), IPV6);
+			unowned uint8[] raw_address = subreader.reader.read_data (16);
+			var address = new InetAddress.from_bytes (raw_address, IPV6);
 			return new DnsAaaaRecord () {
 				key = rr.key,
 				ttl = rr.ttl,
