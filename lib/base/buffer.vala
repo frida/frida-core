@@ -470,17 +470,13 @@ namespace Frida {
 			return *((double *) &bits);
 		}
 
-		public string read_string (size_t offset) throws Error {
+		public unowned string read_string (size_t offset) throws Error {
 			string * start = (string *) get_pointer (offset, sizeof (char));
 			size_t max_length = size - offset;
 			string * end = memchr (start, 0, max_length);
 			if (end == null)
 				throw new Error.PROTOCOL ("Missing null character");
-			size_t size = end - start;
-			string val = start->substring (0, (long) size);
-			if (!val.validate ())
-				throw new Error.PROTOCOL ("Invalid UTF-8 string");
-			return val;
+			return start;
 		}
 
 		[CCode (cname = "memchr", cheader_filename = "string.h")]
@@ -625,9 +621,9 @@ namespace Frida {
 			return val;
 		}
 
-		public string read_string () throws Error {
+		public unowned string read_string () throws Error {
 			check_available (1);
-			var val = buffer.read_string (_offset);
+			unowned string val = buffer.read_string (_offset);
 			_offset += val.length + 1;
 			return val;
 		}
