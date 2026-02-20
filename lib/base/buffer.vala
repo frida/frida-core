@@ -491,10 +491,7 @@ namespace Frida {
 				n = end - start;
 			else
 				n = size;
-			string val = start->substring (0, (long) n);
-			if (!val.validate ())
-				throw new Error.PROTOCOL ("Invalid UTF-8 string");
-			return val;
+			return start->substring (0, (long) n);
 		}
 
 		public unowned Buffer write_string (size_t offset, string val) {
