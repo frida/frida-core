@@ -505,6 +505,11 @@ namespace Frida {
 			return bytes[offset:offset + size];
 		}
 
+		public unowned uint8[] read_data (size_t offset, size_t size) {
+			unowned uint8 * ptr = get_pointer (offset, size);
+			return ((uint8[]) ptr)[:size];
+		}
+
 		public unowned Buffer write_bytes (size_t offset, Bytes bytes) {
 			size_t size = bytes.get_size ();
 			Memory.copy (get_pointer (offset, size), bytes.get_data (), size);
@@ -636,6 +641,13 @@ namespace Frida {
 			var val = buffer.read_bytes (_offset, size);
 			_offset += size;
 			return val;
+		}
+
+		public unowned uint8[] read_data (size_t size) throws Error {
+			check_available (size);
+			unowned uint8[] slice = buffer.read_data (_offset, size);
+			_offset += size;
+			return slice;
 		}
 
 		public unowned BufferReader skip (size_t n) throws Error {
