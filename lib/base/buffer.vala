@@ -501,9 +501,8 @@ namespace Frida {
 		}
 
 		public Bytes read_bytes (size_t offset, size_t size) {
-			var data = new uint8[size + 1];
-			Memory.copy (data, get_pointer (offset, size), size);
-			return new Bytes.take ((owned) data);
+			assert (this.size >= offset + size);
+			return bytes[offset:offset + size];
 		}
 
 		public unowned Buffer write_bytes (size_t offset, Bytes bytes) {
@@ -634,7 +633,7 @@ namespace Frida {
 
 		public Bytes read_bytes (size_t size) throws Error {
 			check_available (size);
-			var val = buffer.bytes[_offset:_offset + size];
+			var val = buffer.read_bytes (_offset, size);
 			_offset += size;
 			return val;
 		}
