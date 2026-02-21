@@ -24,7 +24,7 @@ class SyscallSignature:
     args: Tuple[SyscallArg, ...]
 
 
-MACH_TRAP_CALL_RE = re.compile(r"\bMACH_TRAP\s*\(")
+MACH_TRAP_INDEXED_CALL_RE = re.compile(r"/\*\s*(?P<idx>\d+)\s*\*/\s*MACH_TRAP\s*\(")
 MACH_TRAPS_IFNDEF_KERNEL_RE = re.compile(r"^\s*#ifndef\s+KERNEL\b", re.MULTILINE)
 MACH_TRAPS_ELSE_KERNEL_RE = re.compile(r"^\s*#else\b.*\bKERNEL\b", re.MULTILINE)
 
@@ -53,12 +53,12 @@ BSD_MASTER_PROTO_RE = re.compile(
     re.DOTALL,
 )
 
-POINTER_SPACING_RE = re.compile(r"\s*\*\s*")
-TRAILING_ARRAY_SUFFIX_RE = re.compile(r"\[[^\]]*\]\s*$")
-PARAM_NAME_RE = re.compile(r"[A-Za-z_]\w*$")
-
 LINE_COMMENT_RE = re.compile(r"//.*$")
 BLOCK_COMMENT_RE = re.compile(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/")
+
+TRAILING_ARRAY_SUFFIX_RE = re.compile(r"\[[^\]]*\]\s*$")
+POINTER_SPACING_RE = re.compile(r"\s*\*\s*")
+PARAM_NAME_RE = re.compile(r"[A-Za-z_]\w*$")
 
 
 def main() -> int:
@@ -166,14 +166,15 @@ def parse_mach_trap_table(text: str, path: Path) -> List[Tuple[int, str]]:
 
     payload, _ = extract_brace_payload(text, brace, path)
 
-    traps: List[Tuple[int, str]] = []
-    idx = 0
+    by_index: Dict[int, str] = {}
+
     off = 0
     while True:
-        m = MACH_TRAP_CALL_RE.search(payload, off)
+        m = MACH_TRAP_INDEXED_CALL_RE.search(payload, off)
         if m is None:
             break
 
+        idx = int(m.group("idx"), 10)
         open_paren = m.end(0) - 1
         args_blob, end_off = extract_parentheses_payload(payload, open_paren, path)
 
@@ -184,11 +185,25 @@ def parse_mach_trap_table(text: str, path: Path) -> List[Tuple[int, str]]:
             raise RuntimeError(f"{path}: bad MACH_TRAP() entry: {args_blob!r}")
 
         routine = parts[0]
-        traps.append((idx, routine))
-        idx += 1
+
+        prev = by_index.get(idx)
+        if prev is None:
+            by_index[idx] = routine
+        else:
+            if prev == routine:
+                pass
+            elif prev == "kern_invalid" and routine != "kern_invalid":
+                by_index[idx] = routine
+            elif routine == "kern_invalid" and prev != "kern_invalid":
+                pass
+            else:
+                raise RuntimeError(
+                    f"{path}: conflicting MACH_TRAP entries for index {idx}: {prev!r} vs {routine!r}"
+                )
+
         off = end_off
 
-    return traps
+    return sorted(by_index.items(), key=lambda kv: kv[0])
 
 
 def split_mach_traps_header(text: str, path: Path) -> Tuple[str, str]:
@@ -303,19 +318,15 @@ def resolve_mach_trap_signature(
     kernel_argmap: Dict[str, Tuple[SyscallArg, ...]],
     table_path: Path,
 ) -> List[SyscallArg]:
-    tried: List[str] = []
-
     def get_userspace(name: str) -> Optional[Tuple[SyscallArg, ...]]:
         return userspace_protos.get(name)
 
     def get_kernel(name: str) -> Optional[Tuple[SyscallArg, ...]]:
         return kernel_argmap.get(name)
 
-    tried += [routine]
     proto_args = get_userspace(routine)
 
     if proto_args is None and routine.endswith("_trap"):
-        tried += [routine[: -len("_trap")]]
         proto_args = get_userspace(routine[: -len("_trap")])
 
     if proto_args is not None:
@@ -339,7 +350,7 @@ def normalize_mach_name(routine: str) -> str:
     if routine.startswith("kernelrpc_"):
         routine = routine[len("kernelrpc_"):]
     if routine.endswith("_trap"):
-        routine = routine[:-len("_trap")]
+        routine = routine[: -len("_trap")]
     return routine
 
 
