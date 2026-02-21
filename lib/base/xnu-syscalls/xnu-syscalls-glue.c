@@ -13,7 +13,7 @@ static const FridaXnuSyscallSignature frida_xnu_mach_traps[] =
   { -92, "mk_timer_create", 0, { } },
   { -91, "mach_wait_until", 1, { { "uint64_t", "deadline" } } },
   { -90, "mach_timebase_info", 1, { { "user_addr_t", "info" } } },
-  { -89, "_exclaves_ctl", 8, { { "mach_port_name_t", "name" }, { "uint32_t", "operation_and_flags" }, { "uint64_t", "identifier" }, { "mach_vm_address_t", "buffer" }, { "mach_vm_size_t", "size" }, { "mach_vm_size_t", "size2" }, { "mach_vm_size_t", "offset" }, { "mach_vm_address_t", "status" } } },
+  { -89, "exclaves_ctl", 8, { { "mach_port_name_t", "name" }, { "uint32_t", "operation_and_flags" }, { "uint64_t", "identifier" }, { "mach_vm_address_t", "buffer" }, { "mach_vm_size_t", "size" }, { "mach_vm_size_t", "size2" }, { "mach_vm_size_t", "offset" }, { "mach_vm_address_t", "status" } } },
   { -78, "mach_port_request_notification", 7, { { "ipc_space_t", "task" }, { "mach_port_name_t", "name" }, { "mach_msg_id_t", "msgid" }, { "mach_port_mscount_t", "sync" }, { "mach_port_name_t", "notify" }, { "mach_msg_type_name_t", "notifyPoly" }, { "mach_port_name_t *", "previous" } } },
   { -77, "mach_port_type", 3, { { "ipc_space_t", "task" }, { "mach_port_name_t", "name" }, { "mach_port_type_t *", "ptype" } } },
   { -73, "mach_voucher_extract_attr_recipe", 4, { { "mach_port_name_t", "voucher_name" }, { "mach_voucher_attr_key_t", "key" }, { "mach_voucher_attr_raw_recipe_t", "recipe" }, { "mach_msg_type_number_t *", "recipe_size" } } },

@@ -2546,6 +2546,8 @@ namespace Frida {
 					});
 				}
 
+				processes.add ("(us)", 1337, "native");
+
 				vardict_add (reply, "events", events.end ());
 				vardict_add (reply, "processes", processes.end ());
 				vardict_add (reply, "status", pending_kperfdata.is_empty ? "drained" : "more");
@@ -2742,11 +2744,23 @@ namespace Frida {
 		}
 
 		private static Variant build_signatures_variant () {
-			var result = new VariantBuilder (new VariantType ("a(usa(ss))"));
+			var result = new VariantBuilder (new VariantType ("a(isa(ss))"));
 
-			/* TODO */
+			foreach (unowned XnuSyscallSignature sig in get_xnu_mach_traps ())
+				result.add_value (build_signature_variant (sig));
+			foreach (unowned XnuSyscallSignature sig in get_xnu_bsd_syscalls ())
+				result.add_value (build_signature_variant (sig));
 
 			return result.end ();
+		}
+
+		private static Variant build_signature_variant (XnuSyscallSignature sig) {
+			var args = new VariantBuilder (new VariantType ("a(ss)"));
+			for (uint8 i = 0; i != sig.nargs; i++) {
+				unowned XnuSyscallArg arg = sig.args[i];
+				args.add_value (new Variant.tuple ({ arg.type, arg.name }));
+			}
+			return new Variant.tuple ({ sig.nr, sig.name, args.end () });
 		}
 
 		private delegate void UInt32Handler (uint32 v) throws Error;

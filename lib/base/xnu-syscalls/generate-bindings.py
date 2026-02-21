@@ -334,11 +334,12 @@ def resolve_mach_trap_signature(
 
 
 def normalize_mach_name(routine: str) -> str:
-    if routine.startswith("_kernelrpc_") and routine.endswith("_trap"):
-        core = routine[len("_kernelrpc_"):]
-        return core[: -len("_trap")]
+    if routine.startswith("_"):
+        routine = routine[1:]
+    if routine.startswith("kernelrpc_"):
+        routine = routine[len("kernelrpc_"):]
     if routine.endswith("_trap"):
-        return routine[: -len("_trap")]
+        routine = routine[:-len("_trap")]
     return routine
 
 
@@ -702,7 +703,7 @@ def render_vala(*, mach_numbers: Dict[int, str], bsd_numbers: Dict[int, str]) ->
         "\tpublic enum XnuMachTrap {\n",
     ]
 
-    for nr, name in sorted(mach_numbers.items(), key=lambda kv: kv[0]):
+    for nr, name in sorted(mach_numbers.items(), key=lambda kv: kv[0], reverse=True):
         out += [f"\t\t{name.upper()} = {nr},\n"]
 
     out += [

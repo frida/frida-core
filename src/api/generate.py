@@ -519,6 +519,8 @@ def function_is_public(name):
                 "check_kernel_version",
                 "get_syscall_signatures",
                 "get_compat32_syscall_signatures",
+                "get_xnu_mach_traps",
+                "get_xnu_bsd_syscalls",
                 "make_stdio_pipes",
                 "make_stdio_pipe",
             }
