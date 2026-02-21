@@ -2147,7 +2147,7 @@ namespace Frida {
 			uint8 * payload_end = (uint8 *) buf + event_size;
 
 			uint8 nargs = (sig != null) ? sig->nargs : (uint8) SyscallTracer.SYSCALL_NARGS;
-			var args = new uint64[nargs];
+			uint64[]? args = null;
 			int64 retval = 0;
 
 			uint8 * a;
@@ -2155,6 +2155,7 @@ namespace Frida {
 			if (type == SYSCALL_ENTER) {
 				assert (event_size >= sizeof (SyscallTracer.SyscallEnterEvent));
 				var e = (SyscallTracer.SyscallEnterEvent *) buf;
+				args = new uint64[nargs];
 				for (int i = 0; i != nargs; i++)
 					args[i] = e->args[i];
 				a = (uint8 *) (e + 1);
@@ -2187,16 +2188,14 @@ namespace Frida {
 				a += capacity;
 			}
 
-			Variant args_v;
-			{
+			var se = ev.se;
+			if (type == SYSCALL_ENTER) {
+				Variant args_v;
 				var ab = new VariantBuilder (new VariantType ("at"));
 				for (int i = 0; i != nargs; i++)
 					ab.add_value (args[i]);
 				args_v = ab.end ();
-			}
 
-			var se = ev.se;
-			if (type == SYSCALL_ENTER) {
 				return new Variant.tuple ({
 					"enter",
 					event->time_ns,
