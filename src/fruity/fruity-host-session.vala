@@ -2639,7 +2639,6 @@ namespace Frida {
 					reader.end_member ();
 				}
 
-
 				return reply.end ();
 			}
 
