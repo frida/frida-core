@@ -2720,8 +2720,6 @@ namespace Frida {
 					attachments.end ()
 				});
 			} else {
-				pid = (uint32) buf.arg4;
-
 				int64 retval;
 				int error = (int) buf.arg1;
 				if (error != 0)

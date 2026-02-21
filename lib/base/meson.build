@@ -15,6 +15,8 @@ base_sources = [
   'buffer.vala',
   'buffer-glue.c',
   'value.vala',
+  'xnu-syscalls' / 'xnu-syscalls.vala',
+  'xnu-syscalls' / 'xnu-syscalls-glue.c',
 ]
 
 extra_vala_args = []
