@@ -2348,14 +2348,12 @@ namespace Frida {
 			var result = new VariantBuilder (new VariantType ("a(isa(ss))"));
 
 			foreach (unowned LinuxSyscallSignature sig in signatures) {
-				if (sig.name != null) {
-					var args = new VariantBuilder (new VariantType ("a(ss)"));
-					for (uint8 i = 0; i != sig.nargs; i++) {
-						unowned LinuxSyscallArg arg = sig.args[i];
-						args.add_value (new Variant.tuple ({ arg.type, arg.name }));
-					}
-					result.add_value (new Variant.tuple ({ sig.nr, sig.name, args.end () }));
+				var args = new VariantBuilder (new VariantType ("a(ss)"));
+				for (uint8 i = 0; i != sig.nargs; i++) {
+					unowned LinuxSyscallArg arg = sig.args[i];
+					args.add_value (new Variant.tuple ({ arg.type, arg.name }));
 				}
+				result.add_value (new Variant.tuple ({ sig.nr, sig.name, args.end () }));
 			}
 
 			return result.end ();
