@@ -571,6 +571,7 @@ if have_fruity_backend
     'fruity' / 'plist-service.vala',
     'fruity' / 'opack.vala',
     'fruity' / 'kcdata.vala',
+    'fruity' / 'kdebug.vala',
     'fruity' / 'kperfdata.vala',
     'fruity' / 'network-stack.vala',
     'fruity' / 'usb.vala',

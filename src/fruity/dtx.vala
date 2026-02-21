@@ -347,6 +347,8 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class CoreProfileService : Object, AsyncInitable {
+		public signal void kperfdata (Bytes blob);
+
 		public HostChannelProvider channel_provider {
 			get;
 			construct;
@@ -354,8 +356,6 @@ namespace Frida.Fruity {
 
 		private DTXChannel channel;
 		private bool got_kcdata = false;
-		private Kperfdata.StreamParser kperf = new Kperfdata.StreamParser ();
-		private uint kperfdata_blobs_seen = 0;
 
 		private CoreProfileService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
@@ -384,9 +384,7 @@ namespace Frida.Fruity {
 			return true;
 		}
 
-		public async void set_config (KTraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
-			printerr ("%s\n", config.encode ().to_string ());
-
+		public async void set_config (KtraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
 			var args = new DTXArgumentListBuilder ()
 				.append_object (config.encode ());
 			yield channel.invoke ("setConfig:", args, cancellable);
@@ -394,41 +392,17 @@ namespace Frida.Fruity {
 
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
 			yield channel.invoke ("start", null, cancellable);
-
-			schedule_stop.begin ();
 		}
 
 		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
 			yield channel.invoke ("stop", null, cancellable);
 		}
 
-		private async void schedule_stop () {
-			var timer = new TimeoutSource.seconds (5);
-			timer.set_callback (schedule_stop.callback);
-			timer.attach (MainContext.get_thread_default ());
-			yield;
-
-			printerr ("Stopping!\n");
-
-			try {
-				yield stop ();
-				printerr ("Stop succeeded\n");
-			} catch (GLib.Error e) {
-				printerr ("Stop failed: %s\n", e.message);
-			}
-		}
-
 		private void on_notification (NSObject obj) {
-			printerr ("on_notification(): %s\n", obj.to_string ());
+			// printerr ("on_notification(): %s\n", obj.to_string ());
 		}
 
 		private void on_data (Bytes blob) {
-			printerr ("on_data(): TODO handle blob.size=%zu\n", blob.get_size ());
-
-			// size_t size = blob.get_size ();
-			// hexdump (blob.get_data ()[:size_t.min (size, 1024)]);
-
-			printerr (">>>\n");
 			try {
 				if (!got_kcdata) {
 					Frida.Kcdata.parse (blob, (h, payload) => {
@@ -460,34 +434,12 @@ namespace Frida.Fruity {
 					});
 					got_kcdata = true;
 				} else {
-					kperfdata_blobs_seen++;
-					string filename = "/Users/oleavr/kperfdata-%02u.bin".printf (kperfdata_blobs_seen);
-					FileUtils.set_data (filename, blob.get_data ());
-					printerr ("\n=== %s\n", filename);
-
-					uint seen_mach_syscalls = 0;
-					uint seen_bsd_syscalls = 0;
-					kperf.push (blob, (rec) => {
-						var klass = (KDebugClass) ((rec.debugid >> 24) & 0xff);
-						var subclass = (KDebugSubclass) ((rec.debugid >> 16) & 0xff);
-						bool is_mach_syscall = (klass == DBG_MACH) && (subclass == DBG_MACH_EXCP_SC);
-						bool is_bsd_syscall = (klass == DBG_BSD) && (subclass == DBG_BSD_EXCP_SC);
-						if (is_mach_syscall)
-							seen_mach_syscalls++;
-						if (is_bsd_syscall)
-							seen_bsd_syscalls++;
-						if (!is_mach_syscall && !is_bsd_syscall) {
-							printerr ("kperfdata: debugid=0x%x class=0x%02x subclass=0x%02x cpu=%u unused=0x%016" + uint64.FORMAT_MODIFIER + "x ts=0x%016" + uint64.FORMAT_MODIFIER + "x\n",
-								rec.debugid, klass, subclass, rec.cpuid, rec.unused, rec.timestamp);
-						}
-					});
-					printerr ("\tseen_mach_syscalls=%u seen_bsd_syscalls=%u\n", seen_mach_syscalls, seen_bsd_syscalls);
+					kperfdata (blob);
 				}
 			} catch (GLib.Error e) {
 				printerr ("Oops: %s\n", e.message);
 				Posix.exit (1);
 			}
-			printerr ("<<<\n");
 		}
 	}
 
@@ -583,14 +535,14 @@ namespace Frida.Fruity {
 		WINDOWED,
 	}
 
-	public sealed class KTraceConfig : TapConfig {
+	public sealed class KtraceConfig : TapConfig {
 		public bool can_use_raw_ktrace_file {
 			get;
 			set;
 			default = false;
 		}
 
-		public KTraceRecordingPriority recording_priority {
+		public KtraceRecordingPriority recording_priority {
 			get;
 			set;
 			default = FOREGROUND;
@@ -620,9 +572,9 @@ namespace Frida.Fruity {
 			default = null;
 		}
 
-		private Gee.List<KTraceTapTriggerConfig> trigger_configs = new Gee.ArrayList<KTraceTapTriggerConfig> ();
+		private Gee.List<KtraceTapTriggerConfig> trigger_configs = new Gee.ArrayList<KtraceTapTriggerConfig> ();
 
-		public void add_trigger_config (KTraceTapTriggerConfig tc) {
+		public void add_trigger_config (KtraceTapTriggerConfig tc) {
 			trigger_configs.add (tc);
 		}
 
@@ -655,18 +607,18 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public enum KTraceRecordingPriority {
+	public enum KtraceRecordingPriority {
 		BACKGROUND = 10,
 		FOREGROUND = 100,
 	}
 
-	public sealed class KTraceTapTriggerConfig : Object {
-		public KTraceTapTriggerKind kind {
+	public sealed class KtraceTapTriggerConfig : Object {
+		public KtraceTapTriggerKind kind {
 			get;
 			construct;
 		}
 
-		public KDebugCodeSet? filter {
+		public KdebugCodeSet? filter {
 			get;
 			set;
 		}
@@ -689,14 +641,14 @@ namespace Frida.Fruity {
 			default = 0;
 		}
 
-		public KTraceTapActions actions {
+		public KtraceTapActions actions {
 			get;
-			default = new KTraceTapActions ();
+			default = new KtraceTapActions ();
 		}
 
 		private Gee.Set<uint>? included_pids = null;
 
-		public KTraceTapTriggerConfig (KTraceTapTriggerKind kind) {
+		public KtraceTapTriggerConfig (KtraceTapTriggerKind kind) {
 			Object (kind: kind);
 		}
 
@@ -744,48 +696,48 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public enum KTraceTapTriggerKind {
+	public enum KtraceTapTriggerKind {
 		TIME = 1,
 		PMI,
 		KDEBUG,
 	}
 
-	public sealed class KTraceTapActions : Object {
-		internal Gee.List<KTraceTapAction> items = new Gee.ArrayList<KTraceTapAction> ();
+	public sealed class KtraceTapActions : Object {
+		internal Gee.List<KtraceTapAction> items = new Gee.ArrayList<KtraceTapAction> ();
 
-		public unowned KTraceTapActions add (KTraceTapAction action) {
+		public unowned KtraceTapActions add (KtraceTapAction action) {
 			items.add (action);
 			return this;
 		}
 
-		public unowned KTraceTapActions add_stack_collection (KTraceTapStackCollectionMode mode) {
-			items.add (new KTraceTapStackCollectionAction (mode));
+		public unowned KtraceTapActions add_stack_collection (KtraceTapStackCollectionMode mode) {
+			items.add (new KtraceTapStackCollectionAction (mode));
 			return this;
 		}
 
-		public unowned KTraceTapActions add_baseline () {
-			items.add (new KTraceTapAction0 ());
-			items.add (new KTraceTapAction2 ());
+		public unowned KtraceTapActions add_baseline () {
+			items.add (new KtraceTapAction0 ());
+			items.add (new KtraceTapAction2 ());
 			return this;
 		}
 
-		public unowned KTraceTapActions add_pmc_event (string event_name, string counter_name, uint32 extra = 0) {
-			items.add (new KTraceTapAddPmcEventAction (event_name, counter_name, extra));
+		public unowned KtraceTapActions add_pmc_event (string event_name, string counter_name, uint32 extra = 0) {
+			items.add (new KtraceTapAddPmcEventAction (event_name, counter_name, extra));
 			return this;
 		}
 
-		public unowned KTraceTapActions add_kdebug_codeset (KDebugCodeSet codeset) {
-			items.add (new KTraceTapAddKDebugCodeSetAction (codeset.kdebug_codes));
+		public unowned KtraceTapActions add_kdebug_codeset (KdebugCodeSet codeset) {
+			items.add (new KtraceTapAddKdebugCodeSetAction (codeset.kdebug_codes));
 			return this;
 		}
 
-		public unowned KTraceTapActions add_kdebug_legacy_backtrace_filter () {
-			items.add (new KTraceTapKDebugBacktraceFilterAction ());
+		public unowned KtraceTapActions add_kdebug_legacy_backtrace_filter () {
+			items.add (new KtraceTapKdebugBacktraceFilterAction ());
 			return this;
 		}
 	}
 
-	public enum KTraceTapActionKind {
+	public enum KtraceTapActionKind {
 		ACTION0,
 		STACK_COLLECTION,
 		ACTION2,
@@ -794,16 +746,16 @@ namespace Frida.Fruity {
 		ADD_KDEBUG_CODESET,
 	}
 
-	public abstract class KTraceTapAction : Object {
-		public abstract KTraceTapActionKind kind {
+	public abstract class KtraceTapAction : Object {
+		public abstract KtraceTapActionKind kind {
 			get;
 		}
 
 		internal abstract NSArray encode ();
 	}
 
-	public sealed class KTraceTapAction0 : KTraceTapAction {
-		public override KTraceTapActionKind kind {
+	public sealed class KtraceTapAction0 : KtraceTapAction {
+		public override KtraceTapActionKind kind {
 			get {
 				return ACTION0;
 			}
@@ -816,8 +768,8 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KTraceTapAction2 : KTraceTapAction {
-		public override KTraceTapActionKind kind {
+	public sealed class KtraceTapAction2 : KtraceTapAction {
+		public override KtraceTapActionKind kind {
 			get {
 				return ACTION2;
 			}
@@ -830,10 +782,10 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KTraceTapStackCollectionAction : KTraceTapAction {
-		private KTraceTapStackCollectionMode _mode;
+	public sealed class KtraceTapStackCollectionAction : KtraceTapAction {
+		private KtraceTapStackCollectionMode _mode;
 
-		public KTraceTapStackCollectionMode mode {
+		public KtraceTapStackCollectionMode mode {
 			get {
 				return _mode;
 			}
@@ -842,11 +794,11 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public KTraceTapStackCollectionAction (KTraceTapStackCollectionMode mode) {
+		public KtraceTapStackCollectionAction (KtraceTapStackCollectionMode mode) {
 			_mode = mode;
 		}
 
-		public override KTraceTapActionKind kind {
+		public override KtraceTapActionKind kind {
 			get {
 				return STACK_COLLECTION;
 			}
@@ -855,21 +807,21 @@ namespace Frida.Fruity {
 		internal override NSArray encode () {
 			var a = new NSArray ();
 			a.add_object (new NSNumber.from_integer (kind));
-			a.add_object (new NSNumber.from_boolean ((_mode & KTraceTapStackCollectionMode.USER) != 0));
-			a.add_object (new NSNumber.from_boolean ((_mode & KTraceTapStackCollectionMode.KERNEL) != 0));
+			a.add_object (new NSNumber.from_boolean ((_mode & KtraceTapStackCollectionMode.USER) != 0));
+			a.add_object (new NSNumber.from_boolean ((_mode & KtraceTapStackCollectionMode.KERNEL) != 0));
 			return a;
 		}
 	}
 
 	[Flags]
-	public enum KTraceTapStackCollectionMode {
+	public enum KtraceTapStackCollectionMode {
 		NONE   = 0,
 		USER   = (1 << 0),
 		KERNEL = (1 << 1),
 	}
 
-	public sealed class KTraceTapKDebugBacktraceFilterAction : KTraceTapAction {
-		public override KTraceTapActionKind kind {
+	public sealed class KtraceTapKdebugBacktraceFilterAction : KtraceTapAction {
+		public override KtraceTapActionKind kind {
 			get {
 				return KDEBUG_BACKTRACE_FILTER;
 			}
@@ -882,7 +834,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KTraceTapAddPmcEventAction : KTraceTapAction {
+	public sealed class KtraceTapAddPmcEventAction : KtraceTapAction {
 		private string _event_name;
 		private string _counter_name;
 		private uint32 _extra;
@@ -914,13 +866,13 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public KTraceTapAddPmcEventAction (string event_name, string counter_name, uint32 extra = 0) {
+		public KtraceTapAddPmcEventAction (string event_name, string counter_name, uint32 extra = 0) {
 			_event_name = event_name;
 			_counter_name = counter_name;
 			_extra = extra;
 		}
 
-		public override KTraceTapActionKind kind {
+		public override KtraceTapActionKind kind {
 			get {
 				return ADD_PMC_EVENT;
 			}
@@ -936,7 +888,7 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KTraceTapAddKDebugCodeSetAction : KTraceTapAction {
+	public sealed class KtraceTapAddKdebugCodeSetAction : KtraceTapAction {
 		private NSSet _codes;
 
 		public NSSet codes {
@@ -948,11 +900,11 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public KTraceTapAddKDebugCodeSetAction (NSSet codes) {
+		public KtraceTapAddKdebugCodeSetAction (NSSet codes) {
 			_codes = codes;
 		}
 
-		public override KTraceTapActionKind kind {
+		public override KtraceTapActionKind kind {
 			get {
 				return ADD_KDEBUG_CODESET;
 			}
@@ -966,18 +918,18 @@ namespace Frida.Fruity {
 		}
 	}
 
-	public sealed class KDebugCodeSet : Object {
+	public sealed class KdebugCodeSet : Object {
 		public string legacy_xml {
 			owned get {
 				var xml = new StringBuilder.sized (256);
 				xml.append ("<events>");
 
 				foreach (var obj in kdebug_codes.items) {
-					uint32 val = (uint32) ((NSNumber) obj).integer;
+					var kc = KdebugCode ((uint32) ((NSNumber) obj).integer);
 
 					xml.append ("<event type=\"KDebug\" class=\"");
 
-					var klass = (KDebugClass) (val >> 24);
+					var klass = kc.klass;
 					if (klass == ANY)
 						xml.append_c ('*');
 					else
@@ -985,15 +937,15 @@ namespace Frida.Fruity {
 
 					xml.append ("\" subclass=\"");
 
-					var subclass = (KDebugSubclass) ((val >> 16) & 0xff);
-					if (subclass == ANY)
+					var subclass = kc.subclass;
+					if (subclass == KDEBUG_SUBCLASS_ANY)
 						xml.append_c ('*');
 					else
 						xml.append_printf ("%u", subclass);
 
 					xml.append ("\" code=\"");
 
-					uint code = (val >> 2) & 0x3fff;
+					uint code = kc.code;
 					if (code == KDEBUG_CODE_ANY)
 						xml.append_c ('*');
 					else
@@ -1016,28 +968,10 @@ namespace Frida.Fruity {
 
 		private NSSet _kdebug_codes = new NSSet ();
 
-		public void add (KDebugClass klass, KDebugSubclass subclass = ANY, uint code = KDEBUG_CODE_ANY) {
-			uint32 v = (klass << 24) | (subclass << 16) | (code << 2);
-			_kdebug_codes.add_object (new NSNumber.from_integer (v));
+		public void add (KdebugCode code) {
+			_kdebug_codes.add_object (new NSNumber.from_integer (code.raw));
 		}
 	}
-
-	public enum KDebugClass {
-		DBG_MACH = 1,
-		DBG_BSD = 4,
-
-		ANY = 0xff,
-	}
-
-	public enum KDebugSubclass {
-		DBG_MACH_EXCP_SC = 12,
-
-		DBG_BSD_EXCP_SC = 12,
-
-		ANY = 0xff,
-	}
-
-	public const uint KDEBUG_CODE_ANY = 0x3fff;
 
 	public sealed class DTXConnection : Object, DTXTransport {
 		public IOStream stream {

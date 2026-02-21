@@ -1,8 +1,8 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
-namespace Frida.Kperfdata {
-	public delegate void RecordVisitor (KdBuf rec) throws Error;
+namespace Frida.Fruity {
+	public delegate void KperfdataRecordVisitor (KdBuf rec) throws Error;
 
-	public sealed class StreamParser : Object {
+	public sealed class KperfdataStreamParser : Object {
 		private ByteArray stash = new ByteArray ();
 		private size_t cursor = 0;
 
@@ -27,7 +27,7 @@ namespace Frida.Kperfdata {
 			records_offset = 0;
 		}
 
-		public void push (Bytes chunk, RecordVisitor visitor) throws Error {
+		public void push (Bytes chunk, KperfdataRecordVisitor visitor) throws Error {
 			stash.append (chunk.get_data ());
 
 			var stash_bytes = new Bytes.static (stash.data);
@@ -36,7 +36,7 @@ namespace Frida.Kperfdata {
 			compact ();
 		}
 
-		private void parse_bytes (Bytes bytes, RecordVisitor visitor) throws Error {
+		private void parse_bytes (Bytes bytes, KperfdataRecordVisitor visitor) throws Error {
 			var buf = new Frida.Buffer (bytes, LITTLE_ENDIAN);
 			var r = new Frida.BufferReader (buf);
 
@@ -139,5 +139,11 @@ namespace Frida.Kperfdata {
 		public uint32 debugid;
 		public uint32 cpuid;
 		public uint64 unused;
+
+		public KdebugCode kcode {
+			get {
+				return KdebugCode (debugid);
+			}
+		}
 	}
 }

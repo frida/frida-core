@@ -2499,8 +2499,17 @@ namespace Frida {
 			construct;
 		}
 
+		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
+		private Gee.Queue<Bytes> pending_kperfdata = new Gee.ArrayQueue<Bytes> ();
+
+		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
 		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile) {
 			Object (core_profile: core_profile);
+		}
+
+		construct {
+			core_profile.kperfdata.connect (on_kperfdata);
 		}
 
 		public async void activate (Cancellable? cancellable) throws Error, IOError {
@@ -2526,10 +2535,21 @@ namespace Frida {
 				var processes = new VariantBuilder (new VariantType ("a(us)"));
 
 				/* TODO */
+				size_t total = 0;
+				Bytes? blob;
+				while ((blob = pending_kperfdata.poll ()) != null && total < MAX_BATCH_BYTES) {
+					kperf.push (blob, (rec) => {
+						var ev = try_build_event_variant (rec);
+						if (ev == null)
+							return;
+
+						total += ev.get_size ();
+					});
+				}
 
 				vardict_add (reply, "events", events.end ());
 				vardict_add (reply, "processes", processes.end ());
-				vardict_add (reply, "status", "drained");
+				vardict_add (reply, "status", pending_kperfdata.is_empty ? "drained" : "more");
 
 				return reply.end ();
 			}
@@ -2592,13 +2612,13 @@ namespace Frida {
 				if (reader.has_member ("pids")) {
 					reader.read_member ("pids");
 
-					var config = new Fruity.KTraceConfig ();
+					var config = new Fruity.KtraceConfig ();
 
-					var codes = new Fruity.KDebugCodeSet ();
-					codes.add (DBG_MACH, DBG_MACH_EXCP_SC);
-					codes.add (DBG_BSD, DBG_BSD_EXCP_SC);
+					var codes = new Fruity.KdebugCodeSet ();
+					codes.add (Fruity.KdebugCode.from_parts (MACH, Fruity.KdebugMachSubclass.EXCP_SC));
+					codes.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
 
-					var tc = new Fruity.KTraceTapTriggerConfig (KDEBUG);
+					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
 					tc.filter = codes;
 					foreach_uint32 (reader, pid => {
 						tc.include_pid (pid);
@@ -2646,9 +2666,82 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
+		private void on_kperfdata (Bytes blob) {
+			bool should_notify = pending_kperfdata.is_empty;
+			pending_kperfdata.offer (blob);
+
+			if (should_notify) {
+				var b = new VariantBuilder (VariantType.VARDICT);
+				vardict_add (b, "type", "events-available");
+				message (b.end ());
+			}
+		}
+
 		private static void check_for_unsupported_targets (VariantReader reader) throws Error {
 			if (reader.has_member ("uids") || reader.has_member ("users"))
 				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
+		}
+
+		private static Variant? try_build_event_variant (Fruity.KdBuf buf) {
+			var kc = buf.kcode;
+			var klass = kc.klass;
+			var subclass = kc.subclass;
+
+			bool is_mach_syscall = (klass == MACH) && (subclass == Fruity.KdebugMachSubclass.EXCP_SC);
+			bool is_bsd_syscall = (klass == BSD) && (subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
+			if (!is_mach_syscall && !is_bsd_syscall)
+				return null;
+
+			uint32 pid = 1337; // FIXME
+			uint32 tid = (uint32) buf.arg5;
+			int32 syscall_nr = (int32) kc.code;
+			if (is_mach_syscall)
+				syscall_nr = -syscall_nr;
+			int32 stack_id = -1; // FIXME
+			uint32 map_gen = 1;
+
+			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
+
+			if (kc.func_qual == START) {
+				var ab = new VariantBuilder (new VariantType ("at"));
+				ab.add_value (buf.arg1);
+				ab.add_value (buf.arg2);
+				ab.add_value (buf.arg3);
+				ab.add_value (buf.arg4);
+
+				return new Variant.tuple ({
+					"enter",
+					buf.timestamp,
+					pid,
+					tid,
+					syscall_nr,
+					stack_id,
+					map_gen,
+					ab.end (),
+					attachments.end ()
+				});
+			} else {
+				pid = (uint32) buf.arg4;
+
+				int64 retval;
+				int error = (int) buf.arg1;
+				if (error != 0)
+					retval = error;
+				else
+					retval = (int64) (((uint64) buf.arg3 << 32) | (uint64) buf.arg2);
+
+				return new Variant.tuple ({
+					"exit",
+					buf.timestamp,
+					pid,
+					tid,
+					syscall_nr,
+					stack_id,
+					map_gen,
+					retval,
+					attachments.end ()
+				});
+			}
 		}
 
 		private static Variant build_signatures_variant () {
