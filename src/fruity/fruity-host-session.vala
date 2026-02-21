@@ -2534,7 +2534,6 @@ namespace Frida {
 				var events = new VariantBuilder (new VariantType ("av"));
 				var processes = new VariantBuilder (new VariantType ("a(us)"));
 
-				/* TODO */
 				size_t total = 0;
 				Bytes? blob;
 				while ((blob = pending_kperfdata.poll ()) != null && total < MAX_BATCH_BYTES) {
@@ -2542,7 +2541,7 @@ namespace Frida {
 						var ev = try_build_event_variant (rec);
 						if (ev == null)
 							return;
-
+						events.add_value (new Variant.variant (ev));
 						total += ev.get_size ();
 					});
 				}
