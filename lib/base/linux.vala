@@ -46,7 +46,7 @@ namespace Frida {
 	public extern unowned LinuxSyscallSignature[]? get_compat32_syscall_signatures ();
 
 	public struct LinuxSyscallSignature {
-		public uint nr;
+		public int nr;
 		public string name;
 		public uint8 nargs;
 		public LinuxSyscallArg args[6];

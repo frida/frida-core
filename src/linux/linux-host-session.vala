@@ -2345,7 +2345,7 @@ namespace Frida {
 		}
 
 		private static Variant build_signatures_variant (LinuxSyscallSignature[] signatures) {
-			var result = new VariantBuilder (new VariantType ("a(usa(ss))"));
+			var result = new VariantBuilder (new VariantType ("a(isa(ss))"));
 
 			foreach (unowned LinuxSyscallSignature sig in signatures) {
 				if (sig.name != null) {
