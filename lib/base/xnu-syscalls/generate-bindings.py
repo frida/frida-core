@@ -755,6 +755,7 @@ def render_c_source(
         c_var="frida_xnu_mach_traps",
         numbers=mach_numbers,
         sigs=mach_sigs,
+        reverse=True,
     )
 
     emit_c_signature_table(
@@ -781,13 +782,14 @@ def emit_c_signature_table(
     c_var: str,
     numbers: Dict[int, str],
     sigs: Dict[str, SyscallSignature],
+    reverse: bool = False,
 ) -> None:
     out += [
         f"static const FridaXnuSyscallSignature {c_var}[] =\n",
         "{\n",
     ]
 
-    for nr, name in sorted(numbers.items(), key=lambda kv: kv[0]):
+    for nr, name in sorted(numbers.items(), key=lambda kv: kv[0], reverse=reverse):
         sig = sigs[name]
 
         args_parts: List[str] = []
