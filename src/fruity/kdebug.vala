@@ -3,6 +3,7 @@ namespace Frida.Fruity {
 	public enum KdebugClass {
 		MACH = 1,
 		BSD = 4,
+		PERF = 37,
 
 		ANY = 0xff,
 	}
@@ -13,6 +14,11 @@ namespace Frida.Fruity {
 
 	public enum KdebugBsdSubclass {
 		EXCP_SC = 12,
+	}
+
+	public enum KdebugPerfSubclass {
+		THREADINFO = 1,
+		CALLSTACK,
 	}
 
 	public const uint8 KDEBUG_SUBCLASS_ANY = 0xff;

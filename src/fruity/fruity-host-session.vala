@@ -2618,6 +2618,7 @@ namespace Frida {
 					var codes = new Fruity.KdebugCodeSet ();
 					codes.add (Fruity.KdebugCode.from_parts (MACH, Fruity.KdebugMachSubclass.EXCP_SC));
 					codes.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
+					codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
 
 					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
 					tc.filter = codes;
@@ -2689,8 +2690,12 @@ namespace Frida {
 
 			bool is_mach_syscall = (klass == MACH) && (subclass == Fruity.KdebugMachSubclass.EXCP_SC);
 			bool is_bsd_syscall = (klass == BSD) && (subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
-			if (!is_mach_syscall && !is_bsd_syscall)
+			if (!is_mach_syscall && !is_bsd_syscall) {
+				if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.THREADINFO)
+					return null;
+				printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
 				return null;
+			}
 
 			uint32 pid = 1337; // FIXME
 			uint32 tid = (uint32) buf.arg5;
