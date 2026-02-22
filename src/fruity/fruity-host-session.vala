@@ -2501,6 +2501,7 @@ namespace Frida {
 
 		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
 		private Gee.Queue<Bytes> pending_kperfdata = new Gee.ArrayQueue<Bytes> ();
+		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
 
@@ -2509,6 +2510,7 @@ namespace Frida {
 		}
 
 		construct {
+			core_profile.stackshot.connect (on_stackshot);
 			core_profile.kperfdata.connect (on_kperfdata);
 		}
 
@@ -2535,18 +2537,22 @@ namespace Frida {
 				var processes = new VariantBuilder (new VariantType ("a(us)"));
 
 				size_t total = 0;
+				var seen_pids = new Gee.HashSet<uint> ();
 				Bytes? blob;
 				while ((blob = pending_kperfdata.poll ()) != null && total < MAX_BATCH_BYTES) {
 					kperf.push (blob, (rec) => {
-						var ev = try_build_event_variant (rec);
+						uint pid;
+						var ev = try_build_event_variant (rec, out pid);
 						if (ev == null)
 							return;
 						events.add_value (new Variant.variant (ev));
 						total += ev.get_size ();
+						seen_pids.add (pid);
 					});
 				}
 
-				processes.add ("(us)", 1337, "native");
+				foreach (var pid in seen_pids)
+					processes.add ("(us)", pid, "native");
 
 				vardict_add (reply, "events", events.end ());
 				vardict_add (reply, "processes", processes.end ());
@@ -2667,6 +2673,30 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
+		private void on_stackshot (Bytes blob) {
+			tid_to_pid = new Gee.HashMap<uint64?, uint32> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+			var r = new Fruity.Kcdata.Reader (blob);
+			try {
+				r.for_each_container (STACKSHOT_CONTAINER_TASK, task => {
+					var ts = task.get_first (STACKSHOT_TASK_SNAPSHOT);
+					ts.seek (Fruity.Kcdata.TASK_SNAPSHOT_PID_OFFSET);
+					var pid = (uint32) ts.read_int32 ();
+
+					task.for_each_container (STACKSHOT_CONTAINER_THREAD, (thread) => {
+						var ths = thread.get_first (STACKSHOT_THREAD_SNAPSHOT);
+						var tid = ths.read_uint64 ();
+						tid_to_pid[tid] = pid;
+						return CONTINUE;
+					});
+
+					return CONTINUE;
+				});
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
 		private void on_kperfdata (Bytes blob) {
 			bool should_notify = pending_kperfdata.is_empty;
 			pending_kperfdata.offer (blob);
@@ -2683,7 +2713,7 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
 		}
 
-		private static Variant? try_build_event_variant (Fruity.KdBuf buf) {
+		private Variant? try_build_event_variant (Fruity.KdBuf buf, out uint pid) {
 			var kc = buf.kcode;
 			var klass = kc.klass;
 			var subclass = kc.subclass;
@@ -2691,14 +2721,15 @@ namespace Frida {
 			bool is_mach_syscall = (klass == MACH) && (subclass == Fruity.KdebugMachSubclass.EXCP_SC);
 			bool is_bsd_syscall = (klass == BSD) && (subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
 			if (!is_mach_syscall && !is_bsd_syscall) {
+				pid = 0;
 				if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.THREADINFO)
 					return null;
-				printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
+				// printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
 				return null;
 			}
 
-			uint32 pid = 1337; // FIXME
-			uint32 tid = (uint32) buf.arg5;
+			uint64 tid = buf.arg5;
+			pid = tid_to_pid[tid];
 			int32 syscall_nr = (int32) kc.code;
 			if (is_mach_syscall)
 				syscall_nr = -syscall_nr;

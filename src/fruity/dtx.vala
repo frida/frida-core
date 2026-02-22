@@ -347,6 +347,7 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class CoreProfileService : Object, AsyncInitable {
+		public signal void stackshot (Bytes blob);
 		public signal void kperfdata (Bytes blob);
 
 		public HostChannelProvider channel_provider {
@@ -405,59 +406,13 @@ namespace Frida.Fruity {
 		}
 
 		private void on_data (Bytes blob) {
-			try {
-				if (!got_kcdata) {
-					/*
-					 * We typically receive a stackshot with the following flags:
-					 * - GET_DQ
-					 * - SAVE_LOADINFO
-					 * - SAVE_KEXT_LOADINFO
-					 * - SAVE_IMP_DONATION_PIDS
-					 * - KCDATA_FORMAT
-					 * - ENABLE_BT_FAULTING
-					 * - ENABLE_UUID_FAULTING
-					 * - THREAD_GROUP
-					 * - SAVE_JETSAM_COALITIONS
-					 */
-					var dumper = new Kcdata.Dumper ("/Users/oleavr/stackshot.txt");
-					dumper.run (blob);
-					got_kcdata = true;
-					// stackshot (blob);
-				} else {
-					kperfdata (blob);
-				}
-			} catch (GLib.Error e) {
-				printerr ("Oops: %s\n", e.message);
-				Posix.exit (1);
+			if (!got_kcdata) {
+				got_kcdata = true;
+				stackshot (blob);
+			} else {
+				kperfdata (blob);
 			}
 		}
-	}
-
-	// https://gist.github.com/phako/96b36b5070beaf7eee27
-	private void hexdump (uint8[] data) {
-		var builder = new StringBuilder.sized (16);
-		var i = 0;
-
-		foreach (var c in data) {
-			if (i % 16 == 0)
-				printerr ("%08x | ", i);
-
-			printerr ("%02x ", c);
-
-			if (((char) c).isprint ())
-				builder.append_c ((char) c);
-			else
-				builder.append (".");
-
-			i++;
-			if (i % 16 == 0) {
-				printerr ("| %s\n", builder.str);
-				builder.erase ();
-			}
-		}
-
-		if (i % 16 != 0)
-			printerr ("%s| %s\n", string.nfill ((16 - (i % 16)) * 3, ' '), builder.str);
 	}
 
 	public abstract class TapConfig : Object {

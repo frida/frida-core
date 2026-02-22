@@ -1,5 +1,5 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
-namespace Frida.Kcdata {
+namespace Frida.Fruity.Kcdata {
 	public struct ItemHeader {
 		public ItemType type;
 		public uint32 size;
@@ -279,6 +279,8 @@ namespace Frida.Kcdata {
 		SKIP_EXCLAVES                    = (1U << 2),
 	}
 
+	public const size_t TASK_SNAPSHOT_PID_OFFSET = 84;
+
 	public sealed class Reader : Object {
 		private Buffer buf;
 		private BufferReader r;
@@ -313,17 +315,26 @@ namespace Frida.Kcdata {
 			current_end_item_offset = buf.bytes.get_size ();
 		}
 
-		public void for_each (ItemVisitor visitor) throws Error {
+		public enum VisitResult {
+			CONTINUE,
+			STOP
+		}
+
+		public VisitResult for_each (ItemVisitor visitor) throws Error {
 			ItemHeader h;
 			unowned BufferReader p;
 
-			while (read_item (out h, out p))
-				visitor (h, p);
+			while (read_item (out h, out p)) {
+				if (visitor (h, p) == VisitResult.STOP)
+					return VisitResult.STOP;
+			}
+
+			return VisitResult.CONTINUE;
 		}
 
-		public delegate void ItemVisitor (ItemHeader h, BufferReader payload) throws Error;
+		public delegate VisitResult ItemVisitor (ItemHeader h, BufferReader payload) throws Error;
 
-		public void for_each_container (ItemType want_container_type, ScopeVisitor visitor) throws Error {
+		public VisitResult for_each_container (ItemType want_container_type, ScopeVisitor visitor) throws Error {
 			ItemHeader h;
 			unowned BufferReader p;
 
@@ -340,12 +351,34 @@ namespace Frida.Kcdata {
 				}
 
 				enter_container_body (id);
-				visitor (this);
+				var result = visitor (this);
 				leave_container ();
+
+				if (result == VisitResult.STOP)
+					return VisitResult.STOP;
 			}
+
+			return VisitResult.CONTINUE;
 		}
 
-		public delegate void ScopeVisitor (Reader r) throws Error;
+		public delegate VisitResult ScopeVisitor (Reader r) throws Error;
+
+		public unowned BufferReader get_first (ItemType type) throws Error {
+			unowned BufferReader result = null;
+
+			for_each ((h, p) => {
+				if (h.type != type)
+					return VisitResult.CONTINUE;
+
+				result = p;
+				return VisitResult.STOP;
+			});
+
+			if (result == null)
+				throw new Error.PROTOCOL ("Missing item: %s", type.to_nick ());
+
+			return result;
+		}
 
 		private bool read_item (out ItemHeader h, out unowned BufferReader payload) throws Error {
 			if (r.available == 0 || r.offset == current_end_item_offset) {
@@ -482,13 +515,13 @@ namespace Frida.Kcdata {
 					if (scan_container_ids.length != 0) {
 						var top = scan_container_ids.remove_index (scan_container_ids.length - 1);
 						if (top != h.flags) {
-							throw new Error.PROTOCOL ("Malformed container nesting at %zu (id=0x%016" + uint64.FORMAT_MODIFIER + "x)",
-								item_start, h.flags);
+							throw new Error.PROTOCOL ("Malformed container nesting at %zu (id=0x%016" +
+								uint64.FORMAT_MODIFIER + "x)", item_start, h.flags);
 						}
 					} else {
 						if (h.flags != id) {
-							throw new Error.PROTOCOL ("Malformed container end at %zu (id=0x%016" + uint64.FORMAT_MODIFIER + "x)",
-								item_start, h.flags);
+							throw new Error.PROTOCOL ("Malformed container end at %zu (id=0x%016" +
+								uint64.FORMAT_MODIFIER + "x)", item_start, h.flags);
 						}
 
 						end_item_offset = item_start;
@@ -504,94 +537,6 @@ namespace Frida.Kcdata {
 			h.size = r.read_uint32 ();
 			h.flags = r.read_uint64 ();
 			return h;
-		}
-	}
-
-	public sealed class Dumper : Object {
-		private FileStream output;
-		private uint indent;
-
-		public Dumper (string path) throws Error {
-			output = FileStream.open (path, "w");
-			if (output == null)
-				throw new Error.PERMISSION_DENIED ("Unable to open file for writing");
-		}
-
-		public void run (Bytes bytes) throws Error {
-			var r = new Reader (bytes);
-
-			r.for_each ((h, p) => {
-				if (h.type == ItemType.CONTAINER_END) {
-					if (indent != 0)
-						indent--;
-				}
-
-				print_prefix ();
-				output.printf ("%s size=%u flags=0x%016" + uint64.FORMAT + "\n",
-					h.type.to_nick (), h.size, h.flags);
-
-				switch (h.type) {
-					case BUFFER_BEGIN_STACKSHOT:
-					case BUFFER_END:
-						break;
-					case CONTAINER_BEGIN:
-						dump_container_begin (h, p);
-						indent++;
-						break;
-					case UINT32_DESC:
-						dump_uint32_desc (p);
-						break;
-					case UINT64_DESC:
-						dump_uint64_desc (p);
-						break;
-					default:
-						break;
-				}
-			});
-
-			output.flush ();
-		}
-
-		private void dump_container_begin (ItemHeader h, BufferReader p) throws Error {
-			var container_type = (ItemType) p.read_uint32 ();
-
-			print_prefix ();
-			output.printf ("                type=%s id=0x%016" + uint64.FORMAT_MODIFIER + "x\n", container_type.to_nick (), h.flags);
-		}
-
-		private void dump_uint32_desc (BufferReader p) throws Error {
-			unowned string name = p.read_string ();
-			p.seek (32);
-
-			uint32 val = p.read_uint32 ();
-
-			print_prefix ();
-			output.printf ("uint32-desc %s=%u (0x%08x)\n", name, val, val);
-		}
-
-		private void dump_uint64_desc (BufferReader p) throws Error {
-			unowned string name = p.read_string ();
-			p.seek (32);
-
-			uint64 val = p.read_uint64 ();
-
-			print_prefix ();
-			if (name == "stackshot_in_flags") {
-				var low = (StackshotFlagsLow) (val & 0xffffffffU);
-				var high = (StackshotFlagsHigh) (val >> 32);
-				output.printf ("uint64-desc %s high=%s low=%s\n",
-					name,
-					high.to_string ().replace ("FRIDA_KCDATA_STACKSHOT_FLAGS_HIGH_", ""),
-					low.to_string ().replace ("FRIDA_KCDATA_STACKSHOT_FLAGS_LOW_", ""));
-			} else {
-				output.printf ("uint64-desc %s=%" + uint64.FORMAT_MODIFIER + "u (0x%016" + uint64.FORMAT_MODIFIER + "x)\n",
-					name, val, val);
-			}
-		}
-
-		private void print_prefix () {
-			for (uint i = 0; i != indent; i++)
-				output.putc ('\t');
 		}
 	}
 }
