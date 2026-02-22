@@ -2170,7 +2170,10 @@ namespace Frida {
 
 		public static string enum_to_nick<T> (int val) {
 			var klass = (EnumClass) typeof (T).class_ref ();
-			return klass.get_value (val).value_nick;
+			unowned EnumValue? v = klass.get_value (val);
+			if (v == null)
+				return "unknown-0x%x".printf (val);
+			return v.value_nick;
 		}
 	}
 
