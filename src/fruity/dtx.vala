@@ -385,8 +385,10 @@ namespace Frida.Fruity {
 		}
 
 		public async void set_config (KtraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
+			var x = config.encode ();
+			printerr ("set_config() %s\n", x.to_string ());
 			var args = new DTXArgumentListBuilder ()
-				.append_object (config.encode ());
+				.append_object (x);
 			yield channel.invoke ("setConfig:", args, cancellable);
 		}
 
@@ -405,6 +407,12 @@ namespace Frida.Fruity {
 		private void on_data (Bytes blob) {
 			try {
 				if (!got_kcdata) {
+					try {
+						FileUtils.set_data ("/Users/oleavr/stackshot.bin", blob.get_data ());
+					} catch (FileError e) {
+						printerr ("%s\n", e.message);
+					}
+
 					Frida.Kcdata.parse (blob, (h, payload) => {
 						/*
 						switch (h.type) {
