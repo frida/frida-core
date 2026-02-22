@@ -407,39 +407,20 @@ namespace Frida.Fruity {
 		private void on_data (Bytes blob) {
 			try {
 				if (!got_kcdata) {
-					try {
-						FileUtils.set_data ("/Users/oleavr/stackshot.bin", blob.get_data ());
-					} catch (FileError e) {
-						printerr ("%s\n", e.message);
-					}
-
-					Frida.Kcdata.parse (blob, (h, payload) => {
-						/*
-						switch (h.type) {
-							case Frida.Kcdata.ItemType.BUFFER_BEGIN_STACKSHOT:
-								printerr ("BEGIN stackshot\n");
-								break;
-							case Frida.Kcdata.ItemType.BUFFER_END:
-								printerr ("END\n");
-								break;
-							case Frida.Kcdata.ItemType.UINT64_DESC:
-								printerr ("TODO: UINT64_DESC\n");
-								break;
-							case Frida.Kcdata.ItemType.UINT32_DESC:
-								printerr ("TODO: UINT32_DESC\n");
-								break;
-							case Frida.Kcdata.ItemType.CONTAINER_BEGIN:
-								printerr ("TODO: CONTAINER BEGIN\n");
-								break;
-							case Frida.Kcdata.ItemType.CONTAINER_END:
-								printerr ("TODO: CONTAINER END\n");
-								break;
-							default:
-								printerr ("type=0x%x size=%u\n", (uint32) h.type, h.size);
-								break;
-						}
-						*/
-					});
+					/*
+					 * We typically receive a stackshot with the following flags:
+					 * - GET_DQ
+					 * - SAVE_LOADINFO
+					 * - SAVE_KEXT_LOADINFO
+					 * - SAVE_IMP_DONATION_PIDS
+					 * - KCDATA_FORMAT
+					 * - ENABLE_BT_FAULTING
+					 * - ENABLE_UUID_FAULTING
+					 * - THREAD_GROUP
+					 * - SAVE_JETSAM_COALITIONS
+					 */
+					var dumper = new Kcdata.Dumper ();
+					dumper.run (blob);
 					got_kcdata = true;
 				} else {
 					kperfdata (blob);
