@@ -803,7 +803,7 @@ def emit_c_signature_table(
                 f"  {{ {nr}, {c_escape(name)}, {len(sig.args)}, {{ {args_blob} }} }},\n"
             ]
         else:
-            out += [f"  {{ {nr}, {c_escape(name)}, 0, {{ }} }},\n"]
+            out += [f"  {{ {nr}, {c_escape(name)}, 0, {{}} }},\n"]
 
     out += [
         "};\n",
