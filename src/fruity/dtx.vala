@@ -419,9 +419,10 @@ namespace Frida.Fruity {
 					 * - THREAD_GROUP
 					 * - SAVE_JETSAM_COALITIONS
 					 */
-					var dumper = new Kcdata.Dumper ();
+					var dumper = new Kcdata.Dumper ("/Users/oleavr/stackshot.txt");
 					dumper.run (blob);
 					got_kcdata = true;
+					// stackshot (blob);
 				} else {
 					kperfdata (blob);
 				}

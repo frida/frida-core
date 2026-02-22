@@ -1,7 +1,5 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Kcdata {
-	public delegate void ItemVisitor (ItemHeader header, BufferReader payload) throws Error;
-
 	public struct ItemHeader {
 		public ItemType type;
 		public uint32 size;
@@ -281,33 +279,27 @@ namespace Frida.Kcdata {
 		SKIP_EXCLAVES                    = (1U << 2),
 	}
 
-	private const size_t HEADER_SIZE = 16;
-	private const size_t ALIGNMENT_SIZE = 16;
-
 	public sealed class Reader : Object {
-		public size_t offset {
-			get {
-				return r.offset;
-			}
-		}
-
-		public size_t available {
-			get {
-				return r.available;
-			}
-		}
-
-		public bool eof {
-			get {
-				return r.available == 0;
-			}
-		}
-
 		private Buffer buf;
 		private BufferReader r;
 
 		private Buffer payload_buf;
 		private BufferReader payload_r;
+
+		private BufferReader scan_r;
+		private Array<uint64> scan_container_ids = new Array<uint64> ();
+
+		[Compact]
+		private struct Scope {
+			public size_t end_item_offset;
+			public uint64 end_id;
+		}
+
+		private Array<Scope> scopes = new Array<Scope> ();
+		private size_t current_end_item_offset;
+
+		private const size_t HEADER_SIZE = 16;
+		private const size_t ALIGNMENT_SIZE = 16;
 
 		public Reader (Bytes bytes) {
 			buf = new Buffer (bytes, LITTLE_ENDIAN);
@@ -315,47 +307,78 @@ namespace Frida.Kcdata {
 
 			payload_buf = new Buffer.from_data ((uint8[]) null, buf.byte_order, buf.pointer_size);
 			payload_r = new BufferReader (payload_buf);
+
+			scan_r = new BufferReader (buf);
+
+			current_end_item_offset = buf.bytes.get_size ();
 		}
 
-		public ItemHeader peek_header () throws Error {
+		public void for_each (ItemVisitor visitor) throws Error {
+			ItemHeader h;
+			unowned BufferReader p;
+
+			while (read_item (out h, out p))
+				visitor (h, p);
+		}
+
+		public delegate void ItemVisitor (ItemHeader h, BufferReader payload) throws Error;
+
+		public void for_each_container (ItemType want_container_type, ScopeVisitor visitor) throws Error {
+			ItemHeader h;
+			unowned BufferReader p;
+
+			while (read_item (out h, out p)) {
+				if (h.type != ItemType.CONTAINER_BEGIN)
+					continue;
+
+				var ctype = (ItemType) p.read_uint32 ();
+				var id = h.flags;
+
+				if (ctype != want_container_type) {
+					skip_container_body (id);
+					continue;
+				}
+
+				enter_container_body (id);
+				visitor (this);
+				leave_container ();
+			}
+		}
+
+		public delegate void ScopeVisitor (Reader r) throws Error;
+
+		private bool read_item (out ItemHeader h, out unowned BufferReader payload) throws Error {
+			if (r.available == 0 || r.offset == current_end_item_offset) {
+				h = ItemHeader ();
+				payload = null;
+				return false;
+			}
+
+			h = read_header ();
+			payload = read_payload (h);
+			return true;
+		}
+
+		private ItemHeader read_header () throws Error {
 			if (r.available < HEADER_SIZE)
 				throw new Error.PROTOCOL ("KCDATA truncated at %zu (need header, avail=%zu)", r.offset, r.available);
 
-			size_t item_start = r.offset;
+			var item_start = r.offset;
 
-			var h = ItemHeader ();
-			h.type = (ItemType) buf.read_uint32 (item_start);
-			h.size = buf.read_uint32 (item_start + 4);
-			h.flags = buf.read_uint64 (item_start + 8);
+			var h = read_item_header_fields (r);
 
-			if (h.size > (r.available - HEADER_SIZE)) {
+			var avail_payload = current_end_item_offset - r.offset;
+			var avail = size_t.min (r.available, avail_payload);
+
+			if (h.size > avail) {
 				throw new Error.PROTOCOL ("KCDATA truncated at %zu (type=0x%x size=%u avail=%zu)", item_start,
-					(uint32) h.type, h.size, r.available - HEADER_SIZE);
+					(uint32) h.type, h.size, avail);
 			}
 
 			return h;
 		}
 
-		public ItemHeader read_header () throws Error {
-			if (r.available < HEADER_SIZE)
-				throw new Error.PROTOCOL ("KCDATA truncated at %zu (need header, avail=%zu)", r.offset, r.available);
-
-			size_t item_start = r.offset;
-
-			var h = ItemHeader ();
-			h.type = (ItemType) r.read_uint32 ();
-			h.size = r.read_uint32 ();
-			h.flags = r.read_uint64 ();
-
-			if (h.size > r.available) {
-				throw new Error.PROTOCOL ("KCDATA truncated at %zu (type=0x%x size=%u avail=%zu)", item_start,
-					(uint32) h.type, h.size, r.available);
-			}
-
-			return h;
-		}
-
-		public unowned BufferReader read_payload (ItemHeader h) throws Error {
+		private unowned BufferReader read_payload (ItemHeader h) throws Error {
 			unowned uint8[] payload = r.read_data (h.size);
 
 			payload_buf.reset_data (payload);
@@ -366,75 +389,174 @@ namespace Frida.Kcdata {
 			return payload_r;
 		}
 
-		public void skip_payload (ItemHeader h) throws Error {
-			read_payload (h);
+		private void enter_container_body (uint64 id) throws Error {
+			var body_start = r.offset;
+
+			size_t end_item_offset;
+			find_container_end (body_start, id, out end_item_offset);
+
+			var s = Scope ();
+			s.end_item_offset = end_item_offset;
+			s.end_id = id;
+			scopes.append_val (s);
+
+			current_end_item_offset = end_item_offset;
 		}
 
-		public bool read_item (out ItemHeader h, out unowned BufferReader payload) throws Error {
-			if (r.available == 0) {
-				h = ItemHeader ();
-				payload = null;
-				return false;
+		private void leave_container () throws Error {
+			var s = scopes.index (scopes.length - 1);
+			scopes.set_size (scopes.length - 1);
+
+			consume_container_end_at (s.end_item_offset, s.end_id);
+
+			if (scopes.length == 0)
+				current_end_item_offset = buf.bytes.get_size ();
+			else {
+				var parent = scopes.index (scopes.length - 1);
+				current_end_item_offset = parent.end_item_offset;
+			}
+		}
+
+		private void skip_container_body (uint64 id) throws Error {
+			var body_start = r.offset;
+
+			size_t end_item_offset;
+			find_container_end (body_start, id, out end_item_offset);
+
+			consume_container_end_at (end_item_offset, id);
+		}
+
+		private void consume_container_end_at (size_t end_item_offset, uint64 id) throws Error {
+			if (r.offset != end_item_offset)
+				r.seek (end_item_offset);
+
+			if (r.available < HEADER_SIZE)
+				throw new Error.PROTOCOL ("KCDATA truncated at %zu (need header, avail=%zu)", r.offset, r.available);
+
+			var item_start = r.offset;
+
+			var h = read_item_header_fields (r);
+
+			if (h.type != ItemType.CONTAINER_END || h.flags != id) {
+				throw new Error.PROTOCOL ("Malformed container end at %zu (want id=0x%016" + uint64.FORMAT_MODIFIER + "x)",
+					item_start, id);
 			}
 
-			h = read_header ();
-			payload = read_payload (h);
-			return true;
+			if (h.size > r.available) {
+				throw new Error.PROTOCOL ("KCDATA truncated at %zu (type=0x%x size=%u avail=%zu)", item_start,
+					(uint32) h.type, h.size, r.available);
+			}
+
+			r.skip (h.size);
+			r.align (ALIGNMENT_SIZE);
 		}
-	}
 
-	public void parse (Bytes bytes, ItemVisitor visitor) throws Error {
-		var r = new Reader (bytes);
+		private void find_container_end (size_t body_start, uint64 id, out size_t end_item_offset) throws Error {
+			scan_container_ids.set_size (0);
+			scan_r.seek (body_start);
 
-		ItemHeader h;
-		unowned BufferReader payload;
+			while (true) {
+				if (scan_r.available < HEADER_SIZE) {
+					throw new Error.PROTOCOL ("KCDATA truncated at %zu (need header, avail=%zu)",
+						scan_r.offset, scan_r.available);
+				}
 
-		while (r.read_item (out h, out payload))
-			visitor (h, payload);
+				var item_start = scan_r.offset;
+
+				var h = read_item_header_fields (scan_r);
+
+				if (h.size > scan_r.available) {
+					throw new Error.PROTOCOL ("KCDATA truncated at %zu (type=0x%x size=%u avail=%zu)", item_start,
+						(uint32) h.type, h.size, scan_r.available);
+				}
+
+				scan_r.skip (h.size);
+				scan_r.align (ALIGNMENT_SIZE);
+
+				if (h.type == ItemType.CONTAINER_BEGIN) {
+					scan_container_ids.append_val (h.flags);
+					continue;
+				}
+
+				if (h.type == ItemType.CONTAINER_END) {
+					if (scan_container_ids.length != 0) {
+						var top = scan_container_ids.remove_index (scan_container_ids.length - 1);
+						if (top != h.flags) {
+							throw new Error.PROTOCOL ("Malformed container nesting at %zu (id=0x%016" + uint64.FORMAT_MODIFIER + "x)",
+								item_start, h.flags);
+						}
+					} else {
+						if (h.flags != id) {
+							throw new Error.PROTOCOL ("Malformed container end at %zu (id=0x%016" + uint64.FORMAT_MODIFIER + "x)",
+								item_start, h.flags);
+						}
+
+						end_item_offset = item_start;
+						return;
+					}
+				}
+			}
+		}
+
+		private ItemHeader read_item_header_fields (BufferReader r) throws Error {
+			var h = ItemHeader ();
+			h.type = (ItemType) r.read_uint32 ();
+			h.size = r.read_uint32 ();
+			h.flags = r.read_uint64 ();
+			return h;
+		}
 	}
 
 	public sealed class Dumper : Object {
+		private FileStream output;
 		private uint indent;
 
+		public Dumper (string path) throws Error {
+			output = FileStream.open (path, "w");
+			if (output == null)
+				throw new Error.PERMISSION_DENIED ("Unable to open file for writing");
+		}
+
 		public void run (Bytes bytes) throws Error {
-			Frida.Kcdata.parse (bytes, on_item);
+			var r = new Reader (bytes);
+
+			r.for_each ((h, p) => {
+				if (h.type == ItemType.CONTAINER_END) {
+					if (indent != 0)
+						indent--;
+				}
+
+				print_prefix ();
+				output.printf ("%s size=%u flags=0x%016" + uint64.FORMAT + "\n",
+					h.type.to_nick (), h.size, h.flags);
+
+				switch (h.type) {
+					case BUFFER_BEGIN_STACKSHOT:
+					case BUFFER_END:
+						break;
+					case CONTAINER_BEGIN:
+						dump_container_begin (h, p);
+						indent++;
+						break;
+					case UINT32_DESC:
+						dump_uint32_desc (p);
+						break;
+					case UINT64_DESC:
+						dump_uint64_desc (p);
+						break;
+					default:
+						break;
+				}
+			});
+
+			output.flush ();
 		}
 
-		private void on_item (ItemHeader h, BufferReader p) throws Error {
-			if (h.type == ItemType.CONTAINER_END) {
-				if (indent != 0)
-					indent--;
-			}
-
-			print_prefix ();
-			stdout.printf ("%s size=%u flags=0x%016" + uint64.FORMAT + "\n",
-				h.type.to_nick (), h.size, h.flags);
-
-			switch (h.type) {
-				case BUFFER_BEGIN_STACKSHOT:
-				case BUFFER_END:
-					break;
-				case CONTAINER_BEGIN:
-					dump_container_begin (p);
-					indent++;
-					break;
-				case UINT32_DESC:
-					dump_uint32_desc (p);
-					break;
-				case UINT64_DESC:
-					dump_uint64_desc (p);
-					break;
-				default:
-					break;
-			}
-		}
-
-		private void dump_container_begin (BufferReader p) throws Error {
+		private void dump_container_begin (ItemHeader h, BufferReader p) throws Error {
 			var container_type = (ItemType) p.read_uint32 ();
-			uint32 container_id = p.read_uint32 ();
 
 			print_prefix ();
-			stdout.printf ("                type=%s id=0x%08x\n", container_type.to_nick (), container_id);
+			output.printf ("                type=%s id=0x%016" + uint64.FORMAT_MODIFIER + "x\n", container_type.to_nick (), h.flags);
 		}
 
 		private void dump_uint32_desc (BufferReader p) throws Error {
@@ -444,7 +566,7 @@ namespace Frida.Kcdata {
 			uint32 val = p.read_uint32 ();
 
 			print_prefix ();
-			stdout.printf ("uint32-desc %s=%u (0x%08x)\n", name, val, val);
+			output.printf ("uint32-desc %s=%u (0x%08x)\n", name, val, val);
 		}
 
 		private void dump_uint64_desc (BufferReader p) throws Error {
@@ -457,19 +579,19 @@ namespace Frida.Kcdata {
 			if (name == "stackshot_in_flags") {
 				var low = (StackshotFlagsLow) (val & 0xffffffffU);
 				var high = (StackshotFlagsHigh) (val >> 32);
-				stdout.printf ("uint64-desc %s high=%s low=%s\n",
+				output.printf ("uint64-desc %s high=%s low=%s\n",
 					name,
 					high.to_string ().replace ("FRIDA_KCDATA_STACKSHOT_FLAGS_HIGH_", ""),
 					low.to_string ().replace ("FRIDA_KCDATA_STACKSHOT_FLAGS_LOW_", ""));
 			} else {
-				stdout.printf ("uint64-desc %s=%" + uint64.FORMAT_MODIFIER + "u (0x%016" + uint64.FORMAT_MODIFIER + "x)\n",
+				output.printf ("uint64-desc %s=%" + uint64.FORMAT_MODIFIER + "u (0x%016" + uint64.FORMAT_MODIFIER + "x)\n",
 					name, val, val);
 			}
 		}
 
 		private void print_prefix () {
 			for (uint i = 0; i != indent; i++)
-				stdout.putc ('\t');
+				output.putc ('\t');
 		}
 	}
 }
