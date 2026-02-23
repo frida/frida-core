@@ -72,7 +72,7 @@ namespace Frida.Fruity {
 		public async CsSignature query_symbolicator_signature (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			var args = new DTXArgumentListBuilder ()
 				.append_object (new NSNumber.from_integer (pid))
-				.append_object (null);
+				.append_object (new NSString (""));
 			var response = yield channel.invoke ("symbolicatorSignatureForPid:trackingSelector:", args, cancellable);
 
 			NSData? data = response as NSData;
@@ -394,8 +394,7 @@ namespace Frida.Fruity {
 			var args = new DTXArgumentListBuilder ()
 				.append_object (new NSNumber.from_integer (sig))
 				.append_object (new NSNumber.from_integer (pid));
-			var response = yield channel.invoke ("sendSignal:toPid:", args, cancellable);
-			printerr ("Got response: %s\n", response.to_string ());
+			yield channel.invoke ("sendSignal:toPid:", args, cancellable);
 		}
 	}
 

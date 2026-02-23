@@ -815,7 +815,7 @@ namespace Frida {
 				launch_opts.arguments = args;
 
 				uint pid = yield process_control.launch (program, launch_opts, cancellable);
-				printerr ("Used ProcessControlService to spawn pid=%u\n\n", pid);
+				yield process_control.send_signal (pid, LLDB.Signal.SIGSTOP);
 
 				pids_launched_without_lldb.add (pid);
 
@@ -859,8 +859,11 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			if (pids_launched_without_lldb.remove (pid))
+			if (pids_launched_without_lldb.remove (pid)) {
+				var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
+				yield process_control.send_signal (pid, LLDB.Signal.SIGCONT);
 				return;
+			}
 
 			var session = lldb_sessions[pid];
 			if (session != null) {
