@@ -370,7 +370,6 @@ namespace Frida.Fruity {
 		}
 
 		private DTXChannel channel;
-		private bool got_kcdata = false;
 
 		private CoreProfileService (HostChannelProvider channel_provider) {
 			Object (channel_provider: channel_provider);
@@ -420,12 +419,10 @@ namespace Frida.Fruity {
 		}
 
 		private void on_data (Bytes blob) {
-			if (!got_kcdata) {
-				got_kcdata = true;
+			if (Kcdata.is_stackshot (blob))
 				stackshot (blob);
-			} else {
+			else
 				kperfdata (blob);
-			}
 		}
 	}
 

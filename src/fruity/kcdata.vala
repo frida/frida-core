@@ -281,6 +281,22 @@ namespace Frida.Fruity.Kcdata {
 
 	public const size_t TASK_SNAPSHOT_PID_OFFSET = 84;
 
+	public static bool is_stackshot (Bytes bytes) {
+		if (bytes.get_size () < 16)
+			return false;
+
+		var type = (ItemType) uint32.from_little_endian (*((uint32 *) bytes.get_data ()));
+
+		switch (type) {
+			case ItemType.BUFFER_BEGIN_STACKSHOT:
+			case ItemType.BUFFER_BEGIN_DELTA_STACKSHOT:
+			case ItemType.BUFFER_BEGIN_COMPRESSED:
+				return true;
+			default:
+				return false;
+		}
+	}
+
 	public sealed class Reader : Object {
 		private Buffer buf;
 		private BufferReader r;

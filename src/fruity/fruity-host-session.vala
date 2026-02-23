@@ -2676,6 +2676,16 @@ namespace Frida {
 					uint32[] pids = read_uint32_array (reader);
 					reader.end_member ();
 
+					var pids_to_trace = new Gee.ArrayList<uint32> ();
+					pids_to_trace.add_all_array (pids);
+
+					var l = new MutexLocker (mutex);
+					if (!target_pids.is_empty) {
+						pids_to_trace.add_all (target_pids.keys);
+						yield core_profile.stop (cancellable);
+					}
+					l.free ();
+
 					var config = new Fruity.KtraceConfig ();
 
 					var syscall_codes = new Fruity.KdebugCodeSet ();
@@ -2688,7 +2698,7 @@ namespace Frida {
 
 					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
 					tc.filter = all_codes;
-					foreach (var pid in pids)
+					foreach (var pid in pids_to_trace)
 						tc.include_pid (pid);
 					tc.callstack_frame_depth = 128;
 					tc.actions
@@ -2702,8 +2712,10 @@ namespace Frida {
 
 					yield core_profile.start (cancellable);
 
-					var l = new MutexLocker (mutex);
-					foreach (var pid in pids) {
+					l = new MutexLocker (mutex);
+					foreach (var pid in pids_to_trace) {
+						if (target_pids.has_key (pid))
+							continue;
 						var sig = yield info_service.query_symbolicator_signature (pid, cancellable);
 						target_pids[pid] = sig;
 					}
@@ -2718,11 +2730,17 @@ namespace Frida {
 
 				if (reader.has_member ("pids")) {
 					reader.read_member ("pids");
-
-					/* TODO */
-					yield core_profile.stop (cancellable);
-
+					uint32[] pids = read_uint32_array (reader);
 					reader.end_member ();
+
+					var l = new MutexLocker (mutex);
+					foreach (var pid in pids)
+						target_pids.unset (pid);
+					bool no_more_targets = target_pids.is_empty;
+					l.free ();
+
+					if (no_more_targets)
+						yield core_profile.stop (cancellable);
 				}
 
 				return reply.end ();
