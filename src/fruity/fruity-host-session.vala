@@ -2785,15 +2785,15 @@ namespace Frida {
 							case UHDR: {
 								uint64 tid = rec.arg5;
 
-								PendingSyscall pending = pending_syscall_by_tid[tid];
-								if (pending == null)
+								PendingSyscall? sc = pending_syscall_by_tid[tid];
+								if (sc == null)
 									break;
 
 								var nframes = (uint) (rec.arg2 + rec.arg4);
 								uint nevts = (nframes + 3u) / 4u;
 
-								pending.nframes = nframes;
-								pending.remaining_evts = nevts;
+								sc.nframes = nframes;
+								sc.remaining_evts = nevts;
 
 								break;
 							}
@@ -2858,12 +2858,11 @@ namespace Frida {
 								break;
 							}
 							case THREAD_TERMINATE_PID: {
-								uint32 pid = (uint32) rec.arg1;
+								uint64 tid = rec.arg5;
 
-								remove_all_tids_for_pid (pid, new_events);
+								remove_tid (tid, new_events);
 								break;
 							}
-
 							default:
 								assert_not_reached ();
 						}
