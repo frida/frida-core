@@ -353,11 +353,80 @@ namespace Frida.Fruity {
 			return true;
 		}
 
+		public async uint launch (string bundle_id, LaunchOptions? options = null, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var opts = options;
+			if (opts == null)
+				opts = new LaunchOptions ();
+
+			var args_val = new NSArray ();
+			foreach (unowned string arg in opts.arguments)
+				args_val.add_object (new NSString (arg));
+
+			var opts_val = new NSDictionary ();
+			opts_val.set_value ("StartSuspendedKey", new NSNumber.from_boolean (opts.launch_mode == SUSPENDED));
+			opts_val.set_value ("KillExisting", new NSNumber.from_boolean (opts.existing_instance_policy == KILL));
+
+			var dtx_args = new DTXArgumentListBuilder ()
+				.append_object (new NSString (""))
+				.append_object (new NSString (bundle_id))
+				.append_object (new NSDictionary ())
+				.append_object (args_val)
+				.append_object (opts_val);
+			var response = yield channel.invoke (
+				"launchSuspendedProcessWithDevicePath:bundleIdentifier:environment:arguments:options:",
+				dtx_args, cancellable);
+
+			NSNumber? pid = response as NSNumber;
+			if (pid == null)
+				throw new Error.PROTOCOL ("Malformed response");
+
+			return (uint) pid.integer;
+		}
+
 		public async void kill (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			var args = new DTXArgumentListBuilder ()
 				.append_object (new NSNumber.from_integer (pid));
 			yield channel.invoke ("killPid:", args, cancellable);
 		}
+
+		public async void send_signal (uint pid, uint sig, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSNumber.from_integer (sig))
+				.append_object (new NSNumber.from_integer (pid));
+			var response = yield channel.invoke ("sendSignal:toPid:", args, cancellable);
+			printerr ("Got response: %s\n", response.to_string ());
+		}
+	}
+
+	public sealed class LaunchOptions : Object {
+		public string[] arguments {
+			get;
+			set;
+			default = {};
+		}
+
+		public LaunchMode launch_mode {
+			get;
+			set;
+			default = LaunchMode.NORMAL;
+		}
+
+		public ExistingInstancePolicy existing_instance_policy {
+			get;
+			set;
+			default = ExistingInstancePolicy.KEEP;
+		}
+	}
+
+	public enum LaunchMode {
+		NORMAL,
+		SUSPENDED
+	}
+
+	public enum ExistingInstancePolicy {
+		KEEP,
+		KILL
 	}
 
 	public sealed class CoreProfileService : Object, AsyncInitable {
@@ -399,10 +468,8 @@ namespace Frida.Fruity {
 		}
 
 		public async void set_config (KtraceConfig config, Cancellable? cancellable = null) throws Error, IOError {
-			var x = config.encode ();
-			printerr ("set_config() %s\n", x.to_string ());
 			var args = new DTXArgumentListBuilder ()
-				.append_object (x);
+				.append_object (config.encode ());
 			yield channel.invoke ("setConfig:", args, cancellable);
 		}
 
@@ -419,6 +486,7 @@ namespace Frida.Fruity {
 		}
 
 		private void on_data (Bytes blob) {
+			// printerr ("on_data() blob.size=%zu\n", blob.get_size ());
 			if (Kcdata.is_stackshot (blob))
 				stackshot (blob);
 			else
@@ -971,7 +1039,6 @@ namespace Frida.Fruity {
 
 		private Gee.HashMap<uint32, Gee.ArrayList<Fragment>> fragments = new Gee.HashMap<uint32, Gee.ArrayList<Fragment>> ();
 		private uint32 next_fragment_identifier = 1;
-		private size_t total_buffered = 0;
 		private Gee.ArrayQueue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 
 		private DTXControlChannel control_channel;
@@ -979,8 +1046,6 @@ namespace Frida.Fruity {
 		private int32 next_channel_code = 1;
 
 		private const uint32 DTX_FRAGMENT_MAGIC = 0x1f3d5b79U;
-		private const uint MAX_BUFFERED_COUNT = 100;
-		private const size_t MAX_BUFFERED_SIZE = 30 * 1024 * 1024;
 		private const size_t MAX_MESSAGE_SIZE = 128 * 1024 * 1024;
 		private const size_t MAX_FRAGMENT_SIZE = 128 * 1024;
 		private const string REMOTESERVER_ENDPOINT_17PLUS = "lockdown:com.apple.instruments.dtservicehub";
@@ -1164,8 +1229,6 @@ namespace Frida.Fruity {
 
 					Gee.ArrayList<Fragment> entries = fragments[fragment.identifier];
 					if (entries == null) {
-						if (fragments.size == MAX_BUFFERED_COUNT)
-							throw new Error.PROTOCOL ("Total buffered count exceeds maximum");
 						if (fragment.index != 0)
 							throw new Error.PROTOCOL ("Expected first fragment to have index of zero");
 						fragment.data_size = 0;
@@ -1183,10 +1246,6 @@ namespace Frida.Fruity {
 						first_fragment.data_size += (uint32) size;
 						if (first_fragment.data_size > MAX_MESSAGE_SIZE)
 							throw new Error.PROTOCOL ("Message size exceeds maximum");
-
-						total_buffered += size;
-						if (total_buffered > MAX_BUFFERED_SIZE)
-							throw new Error.PROTOCOL ("Total buffered size exceeds maximum");
 					}
 
 					if (entries.size == fragment.count) {
@@ -1212,7 +1271,6 @@ namespace Frida.Fruity {
 						}
 
 						fragments.unset (fragment.identifier);
-						total_buffered -= message.length;
 
 						process_message (message, first_fragment);
 					}

@@ -172,6 +172,7 @@ namespace Frida {
 			construct;
 		}
 
+		private Gee.Set<uint> pids_launched_without_lldb = new Gee.HashSet<uint> ();
 		private Gee.HashMap<uint, LLDBSession> lldb_sessions = new Gee.HashMap<uint, LLDBSession> ();
 		private Gee.HashMap<AgentSessionId?, GadgetEntry> gadget_entries =
 			new Gee.HashMap<AgentSessionId?, GadgetEntry> (AgentSessionId.hash, AgentSessionId.equal);
@@ -798,6 +799,29 @@ namespace Frida {
 			if (app == null)
 				throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
 
+			if (!app.debuggable) {
+				var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
+
+				var launch_opts = new Fruity.LaunchOptions ();
+				launch_opts.existing_instance_policy = KILL;
+
+				string[] args = {};
+				if (options.has_argv) {
+					var provided_argv = options.argv;
+					var length = provided_argv.length;
+					for (int i = 1; i < length; i++)
+						args += provided_argv[i];
+				}
+				launch_opts.arguments = args;
+
+				uint pid = yield process_control.launch (program, launch_opts, cancellable);
+				printerr ("Used ProcessControlService to spawn pid=%u\n\n", pid);
+
+				pids_launched_without_lldb.add (pid);
+
+				return pid;
+			}
+
 			string[] argv = { app.path };
 			if (options.has_argv) {
 				var provided_argv = options.argv;
@@ -835,6 +859,9 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			if (pids_launched_without_lldb.remove (pid))
+				return;
+
 			var session = lldb_sessions[pid];
 			if (session != null) {
 				foreach (var entry in gadget_entries.values) {
@@ -2860,6 +2887,7 @@ namespace Frida {
 									while (sc.frames.length != sc.nframes)
 										sc.frames.remove_index (sc.frames.length - 1);
 
+									// FIXME: De-duplicate.
 									uint32 stack_id_u32 = next_stack_id++;
 									stacks_by_id[stack_id_u32] = sc.frames;
 
