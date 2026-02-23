@@ -2043,8 +2043,8 @@ namespace Frida {
 				var modules = new VariantBuilder (new VariantType ("as"));
 
 				tracer.resolver.resolve_addresses (pid, gen, addrs,
-					(addr, mod_idx, rel32) => {
-						symbols.add ("(uu)", mod_idx, rel32);
+					(addr, mod_idx, rel) => {
+						symbols.add ("(uu)", mod_idx, rel);
 					},
 					(module_list) => {
 						foreach (var path in module_list)
