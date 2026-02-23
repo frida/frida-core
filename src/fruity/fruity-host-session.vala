@@ -2625,13 +2625,8 @@ namespace Frida {
 			}
 
 			if (type == "resolve-symbols") {
-				/*
 				var pid = (uint) reader.read_member ("pid").get_int64_value ();
 				reader.end_member ();
-
-				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
-				reader.end_member ();
-				*/
 
 				reader.read_member ("addresses");
 				var addrs = read_uint64_array (reader);
@@ -2640,9 +2635,20 @@ namespace Frida {
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
 				var modules = new VariantBuilder (new VariantType ("as"));
 
-				/* TODO */
-				foreach (var addr in addrs)
-					symbols.add ("(uu)", uint32.MAX, 0);
+				Fruity.CsSignature? sig = target_pids[pid];
+				if (sig != null) {
+					sig.resolve_addresses (addrs,
+						(addr, mod_idx, rel32) => {
+							symbols.add ("(uu)", mod_idx, rel32);
+						},
+						(module_list) => {
+							foreach (var path in module_list)
+								modules.add_value (new Variant.string (path));
+						});
+				} else {
+					foreach (var addr in addrs)
+						symbols.add ("(uu)", uint32.MAX, 0);
+				}
 
 				vardict_add (reply, "modules", modules.end ());
 				vardict_add (reply, "symbols", symbols.end ());

@@ -7,6 +7,116 @@ namespace Frida.Fruity {
 		public uint32 flags;
 
 		public Gee.List<CsSigOwner> owners = new Gee.ArrayList<CsSigOwner> ();
+
+		private CsSegIndexEntry[]? seg_index = null;
+
+		private struct CsSegIndexEntry {
+			public uint64 start;
+			public uint64 end;
+			public unowned CsSigOwner owner;
+		}
+
+		public void resolve_addresses (uint64[] addrs, AddressResolved on_symbol, ModulesReady on_modules) {
+			ensure_index ();
+
+			var used_owner_to_mod = new Gee.HashMap<CsSigOwner, uint32> ();
+			var module_list = new Gee.ArrayList<string> ();
+
+			foreach (var addr in addrs) {
+				CsSigOwner? owner;
+				uint32 rel;
+
+				if (!try_resolve (addr, out owner, out rel)) {
+					on_symbol (addr, uint32.MAX, 0);
+					continue;
+				}
+
+				uint32 mod_idx;
+				if (!used_owner_to_mod.has_key (owner)) {
+					mod_idx = (uint32) module_list.size;
+					used_owner_to_mod[owner] = mod_idx;
+					module_list.add (owner.path);
+				} else {
+					mod_idx = used_owner_to_mod[owner];
+				}
+
+				on_symbol (addr, mod_idx, rel);
+			}
+
+			on_modules (module_list);
+		}
+
+		public delegate void AddressResolved (uint64 addr, uint32 module_index, uint32 rel);
+		public delegate void ModulesReady (Gee.List<string> modules);
+
+		private void ensure_index () {
+			if (seg_index != null)
+				return;
+
+			var tmp = new Array<CsSegIndexEntry> (false, false);
+
+			foreach (var owner in owners) {
+				foreach (var seg in owner.segments) {
+					if (seg.name == "__PAGEZERO")
+						continue;
+					tmp.append_val (CsSegIndexEntry () {
+						start = seg.vmaddr,
+						end = seg.vmaddr + seg.vmsize,
+						owner = owner,
+					});
+				}
+			}
+
+			tmp.sort ((a, b) => {
+				if (a.start < b.start)
+					return -1;
+				if (a.start > b.start)
+					return 1;
+				return 0;
+			});
+
+			seg_index = tmp.steal ();
+		}
+
+		private bool try_resolve (uint64 addr, out CsSigOwner? owner, out uint32 rel) {
+			owner = null;
+			rel = 0;
+
+			int n = seg_index.length;
+			if (n == 0)
+				return false;
+
+			int lo = 0;
+			int hi = n - 1;
+			int best = -1;
+
+			while (lo <= hi) {
+				int mid = lo + ((hi - lo) / 2);
+				if (seg_index[mid].start <= addr) {
+					best = mid;
+					lo = mid + 1;
+				} else {
+					hi = mid - 1;
+				}
+			}
+
+			if (best == -1)
+				return false;
+
+			for (int i = best; i >= 0; i--) {
+				var e = seg_index[i];
+				if (e.start > addr)
+					continue;
+
+				if (addr < e.end) {
+					owner = e.owner;
+					rel = (uint32) (addr - owner.image_base);
+					return true;
+				}
+			}
+
+			return false;
+		}
 	}
 
 	public class CsSigOwner : Object {
@@ -21,6 +131,8 @@ namespace Frida.Fruity {
 		public uint64 arch;
 
 		public string path;
+		public uint64 image_base;
+		public uint64 image_end;
 		public Gee.List<CsSigSegment> segments = new Gee.ArrayList<CsSigSegment> ();
 
 		public string? version;
@@ -98,6 +210,29 @@ namespace Frida.Fruity {
 				s.vmsize = r.read_uint64 ();
 				o.segments.add (s);
 			}
+
+			o.segments.sort ((a, b) => {
+				if (a.vmaddr < b.vmaddr)
+					return -1;
+				if (a.vmaddr > b.vmaddr)
+					return 1;
+				return 0;
+			});
+
+			uint64 image_base = uint64.MAX;
+			uint64 image_end = 0;
+
+			foreach (var seg in o.segments) {
+				if (seg.name != "__PAGEZERO" && seg.vmaddr < image_base)
+					image_base = seg.vmaddr;
+
+				uint64 seg_end = seg.vmaddr + seg.vmsize;
+				if (seg_end > image_end)
+					image_end = seg_end;
+			}
+
+			o.image_base = image_base;
+			o.image_end = image_end;
 
 			return o;
 		}
