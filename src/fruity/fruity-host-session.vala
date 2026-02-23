@@ -1116,8 +1116,9 @@ namespace Frida {
 
 			if (protocol == "syscall-trace") {
 				var core_profile = yield Fruity.CoreProfileService.open (device, cancellable);
+				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
 
-				return new SyscallTraceServiceSession (core_profile);
+				return new SyscallTraceServiceSession (core_profile, device_info);
 			}
 
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
@@ -2499,7 +2500,14 @@ namespace Frida {
 			construct;
 		}
 
-		private Gee.Set<uint> target_pids = new Gee.HashSet<uint> ();
+		public Fruity.DeviceInfoService info_service {
+			get;
+			construct;
+		}
+
+		private Mutex mutex = Mutex ();
+
+		private Gee.Map<uint, Fruity.CsSignature> target_pids = new Gee.HashMap<uint, Fruity.CsSignature> ();
 
 		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
 		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
@@ -2525,8 +2533,8 @@ namespace Frida {
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
 
-		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile) {
-			Object (core_profile: core_profile);
+		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile, Fruity.DeviceInfoService info_service) {
+			Object (core_profile: core_profile, info_service: info_service);
 		}
 
 		construct {
@@ -2569,8 +2577,11 @@ namespace Frida {
 				bool more = true;
 				do {
 					Variant? ev;
-					lock (pending_events)
+					{
+						var l = new MutexLocker (mutex);
 						ev = pending_events.poll ();
+						l.free ();
+					}
 					if (ev == null) {
 						more = false;
 						break;
@@ -2685,7 +2696,12 @@ namespace Frida {
 
 					yield core_profile.start (cancellable);
 
-					target_pids.add_all_array (pids);
+					var l = new MutexLocker (mutex);
+					foreach (var pid in pids) {
+						var sig = yield info_service.query_symbolicator_signature (pid, cancellable);
+						target_pids[pid] = sig;
+					}
+					l.free ();
 				}
 
 				return reply.end ();
@@ -2761,8 +2777,12 @@ namespace Frida {
 						uint64 tid = rec.arg5;
 						uint pid = tid_to_pid[tid];
 
-						if (!target_pids.contains (pid))
-							return;
+						{
+							var l = new MutexLocker (mutex);
+							if (!target_pids.has_key (pid))
+								return;
+							l.free ();
+						}
 
 						maybe_complete_pending_syscall (tid, new_events);
 
@@ -2880,9 +2900,11 @@ namespace Frida {
 				return;
 
 			bool should_notify;
-			lock (pending_events) {
+			{
+				var l = new MutexLocker (mutex);
 				should_notify = pending_events.is_empty;
 				pending_events.add_all (new_events);
+				l.free ();
 			}
 
 			if (should_notify) {

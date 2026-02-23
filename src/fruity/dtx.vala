@@ -69,6 +69,20 @@ namespace Frida.Fruity {
 			return result;
 		}
 
+		public async CsSignature query_symbolicator_signature (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSNumber.from_integer (pid))
+				.append_object (null);
+			var response = yield channel.invoke ("symbolicatorSignatureForPid:trackingSelector:", args, cancellable);
+
+			NSData? data = response as NSData;
+			if (data == null)
+				throw new Error.PROTOCOL ("Malformed response");
+
+			var parser = new CsSignatureParser (data.bytes);
+			return parser.parse ();
+		}
+
 		private static string resolve_real_app_name (string name) {
 			if (name.has_prefix ("/var/"))
 				return "/private" + name;
