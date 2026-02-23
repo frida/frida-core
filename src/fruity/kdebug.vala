@@ -6,7 +6,11 @@ namespace Frida.Fruity {
 		TRACE = 7,
 		PERF = 37,
 
-		ANY = 0xff,
+		ANY = 0xff;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugClass> (this);
+		}
 	}
 
 	public enum KdebugMachSubclass {
@@ -20,14 +24,22 @@ namespace Frida.Fruity {
 	public enum KdebugTraceSubclass {
 		DATA,
 		STRING,
-		INFO,
+		INFO;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugTraceSubclass> (this);
+		}
 	}
 
 	public enum KdebugTraceDataEvent {
 		NEWTHREAD = 1,
 		EXEC,
 		THREAD_TERMINATE,
-		THREAD_TERMINATE_PID,
+		THREAD_TERMINATE_PID;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugTraceDataEvent> (this);
+		}
 	}
 
 	public enum KdebugTraceStringEvent {
@@ -36,7 +48,11 @@ namespace Frida.Fruity {
 		EXEC,
 		PROC_EXIT,
 		THREADNAME,
-		THREADNAME_PREV,
+		THREADNAME_PREV;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugTraceStringEvent> (this);
+		}
 	}
 
 	public enum KdebugPerfSubclass {
@@ -50,7 +66,11 @@ namespace Frida.Fruity {
 		KDBG,
 		TASK,
 		LAZY,
-		MEMINFO,
+		MEMINFO;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugPerfSubclass> (this);
+		}
 	}
 
 	public enum KdebugPerfCallstackEvent {
@@ -68,7 +88,11 @@ namespace Frida.Fruity {
 		EXDATA,
 		EXSTACKHDR,
 		EXSTACK,
-		KEXOFFSET,
+		KEXOFFSET;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugPerfCallstackEvent> (this);
+		}
 	}
 
 	public const uint8 KDEBUG_SUBCLASS_ANY = 0xff;
@@ -78,7 +102,11 @@ namespace Frida.Fruity {
 	public enum KdebugFunctionQualifier {
 		NONE,
 		START,
-		END,
+		END;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugFunctionQualifier> (this);
+		}
 	}
 
 	public struct KdebugCode {

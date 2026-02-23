@@ -145,5 +145,36 @@ namespace Frida.Fruity {
 				return KdebugCode (debugid);
 			}
 		}
+
+		public string to_string () {
+			var kc = kcode;
+
+			return (
+				"ts=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "arg1=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "arg2=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "arg3=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "arg4=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "arg5=0x%" + uint64.FORMAT_MODIFIER + "x "
+				+ "debugid=0x%08x "
+				+ "klass=%s subclass=%u code=%u func=%s "
+				+ "cpuid=%u "
+				+ "unused=0x%" + uint64.FORMAT_MODIFIER + "x"
+			).printf (
+				timestamp,
+				arg1,
+				arg2,
+				arg3,
+				arg4,
+				arg5,
+				debugid,
+				kc.klass.to_nick (),
+				kc.subclass,
+				kc.code,
+				kc.func_qual.to_nick (),
+				cpuid,
+				unused
+			);
+		}
 	}
 }

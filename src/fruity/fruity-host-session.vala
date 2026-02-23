@@ -2504,10 +2504,24 @@ namespace Frida {
 		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
 		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
 
-		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
-
 		private ThreadPool<Bytes> pool;
 		private MainContext main_context;
+
+		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
+
+		private Gee.Map<uint64?, PendingSyscall> pending_syscall_by_tid =
+			new Gee.HashMap<uint64?, PendingSyscall> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+		private class PendingSyscall {
+			public Fruity.KdBuf buf;
+			public uint pid;
+			public uint nframes;
+			public uint remaining_evts;
+			public Array<uint64> frames = new Array<uint64> (false, false);
+		}
+
+		private uint32 next_stack_id = 1;
+		private Gee.Map<uint32, Array<uint64>> stacks_by_id = new Gee.HashMap<uint32, Array<uint64>> ();
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
 
@@ -2578,15 +2592,24 @@ namespace Frida {
 
 			if (type == "resolve-stacks") {
 				reader.read_member ("ids");
-				// var ids = read_uint32_array (reader);
+				var ids = read_uint32_array (reader);
 				reader.end_member ();
 
 				var stacks = new VariantBuilder (new VariantType ("aat"));
 
-				/* TODO */
+				foreach (var id in ids) {
+					var one = new VariantBuilder (new VariantType ("at"));
+
+					Array<uint64>? frames = stacks_by_id[id];
+					if (frames != null) {
+						foreach (uint64 pc in frames)
+							one.add_value (pc);
+					}
+
+					stacks.add_value (one.end ());
+				}
 
 				vardict_add (reply, "stacks", stacks.end ());
-
 				return reply.end ();
 			}
 
@@ -2734,64 +2757,120 @@ namespace Frida {
 
 			try {
 				kperf.push (blob, rec => {
-					bool unrelated_pid;
-					Variant? ev = try_parse_syscall (rec, out unrelated_pid);
-					if (unrelated_pid)
+					if (is_syscall (rec)) {
+						uint64 tid = rec.arg5;
+						uint pid = tid_to_pid[tid];
+
+						if (!target_pids.contains (pid))
+							return;
+
+						maybe_complete_pending_syscall (tid, new_events);
+
+						pending_syscall_by_tid[tid] = new PendingSyscall () {
+							buf = rec,
+							pid = pid,
+						};
+
 						return;
+					}
 
-					if (ev != null) {
-						new_events.add (ev);
-					} else {
-						var kc = rec.kcode;
-						var klass = kc.klass;
-						var subclass = kc.subclass;
-						if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
-							var e = (Fruity.KdebugTraceDataEvent) kc.code;
-							switch (e) {
-								case NEWTHREAD: {
-									uint64 tid = rec.arg1;
-									uint32 pid = (uint32) rec.arg2;
-									bool is_exec = rec.arg3 == 1;
+					var kc = rec.kcode;
+					var klass = kc.klass;
+					var subclass = kc.subclass;
 
-									if (is_exec)
-										remove_all_tids_for_pid (pid);
+					if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.CALLSTACK) {
+						var e = (Fruity.KdebugPerfCallstackEvent) kc.code;
 
-									tid_to_pid[tid] = pid;
+						switch (e) {
+							case UHDR: {
+								uint64 tid = rec.arg5;
+
+								PendingSyscall pending = pending_syscall_by_tid[tid];
+								if (pending == null)
 									break;
-								}
-								case EXEC: {
-									uint32 pid = (uint32) rec.arg1;
-									uint64 tid = rec.arg5;
 
-									remove_all_tids_for_pid (pid);
-									tid_to_pid[tid] = pid;
+								var nframes = (uint) (rec.arg2 + rec.arg4);
+								uint nevts = (nframes + 3u) / 4u;
 
-									break;
-								}
-								case THREAD_TERMINATE: {
-									uint64 tid = rec.arg1;
+								pending.nframes = nframes;
+								pending.remaining_evts = nevts;
 
-									tid_to_pid.unset (tid);
-									break;
-								}
-								case THREAD_TERMINATE_PID: {
-									uint32 pid = (uint32) rec.arg1;
-
-									remove_all_tids_for_pid (pid);
-									break;
-								}
-
-								default:
-									assert_not_reached ();
+								break;
 							}
-						} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
-							// No need for it for now.
-						} else {
-							printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
-						}
+							case UDATA: {
+								uint64 tid = rec.arg5;
 
-						// if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.THREADINFO)
-						// 	return null;
+								PendingSyscall? sc = pending_syscall_by_tid[tid];
+								if (sc == null)
+									break;
+
+								sc.frames.append_val (rec.arg1);
+								sc.frames.append_val (rec.arg2);
+								sc.frames.append_val (rec.arg3);
+								sc.frames.append_val (rec.arg4);
+
+								if (sc.remaining_evts > 0)
+									sc.remaining_evts--;
+
+								if (sc.remaining_evts == 0) {
+									while (sc.frames.length != sc.nframes)
+										sc.frames.remove_index (sc.frames.length - 1);
+
+									uint32 stack_id_u32 = next_stack_id++;
+									stacks_by_id[stack_id_u32] = sc.frames;
+
+									new_events.add (parse_syscall (sc.buf, sc.pid, (int32) stack_id_u32));
+								}
+
+								break;
+							}
+							default:
+								break;
+						}
+					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
+						var e = (Fruity.KdebugTraceDataEvent) kc.code;
+
+						switch (e) {
+							case NEWTHREAD: {
+								uint64 tid = rec.arg1;
+								uint32 pid = (uint32) rec.arg2;
+								bool is_exec = rec.arg3 == 1;
+
+								if (is_exec)
+									remove_all_tids_for_pid (pid, new_events);
+
+								tid_to_pid[tid] = pid;
+								break;
+							}
+							case EXEC: {
+								uint32 pid = (uint32) rec.arg1;
+								uint64 tid = rec.arg5;
+
+								remove_all_tids_for_pid (pid, new_events);
+								tid_to_pid[tid] = pid;
+
+								break;
+							}
+							case THREAD_TERMINATE: {
+								uint64 tid = rec.arg1;
+
+								remove_tid (tid, new_events);
+								break;
+							}
+							case THREAD_TERMINATE_PID: {
+								uint32 pid = (uint32) rec.arg1;
+
+								remove_all_tids_for_pid (pid, new_events);
+								break;
+							}
+
+							default:
+								assert_not_reached ();
+						}
+					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
+						// No need for it for now.
+					} else {
+						// printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
 					}
 				});
 			} catch (Error e) {
@@ -2819,39 +2898,45 @@ namespace Frida {
 			}
 		}
 
-		private void remove_all_tids_for_pid (uint32 pid) {
+		private void remove_all_tids_for_pid (uint32 pid, Gee.List<Variant> new_events) {
 			var dead = new Gee.ArrayList<uint64?> ();
 			foreach (var e in tid_to_pid.entries) {
 				if (e.value == pid)
 					dead.add (e.key);
 			}
+
 			foreach (var tid in dead)
-				tid_to_pid.unset (tid);
+				remove_tid (tid, new_events);
 		}
 
-		private Variant? try_parse_syscall (Fruity.KdBuf buf, out bool unrelated_pid) {
-			unrelated_pid = false;
+		private void remove_tid (uint64 tid, Gee.List<Variant> new_events) {
+			tid_to_pid.unset (tid);
 
+			maybe_complete_pending_syscall (tid, new_events);
+		}
+
+		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
+			PendingSyscall? sc;
+			if (pending_syscall_by_tid.unset (tid, out sc))
+				new_events.add (parse_syscall (sc.buf, sc.pid, -1));
+		}
+
+		private static bool is_syscall (Fruity.KdBuf buf) {
 			var kc = buf.kcode;
 			var klass = kc.klass;
 			var subclass = kc.subclass;
+			return (klass == MACH && subclass == Fruity.KdebugMachSubclass.EXCP_SC) ||
+				(klass == BSD && subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
+		}
 
-			bool is_mach_syscall = (klass == MACH) && (subclass == Fruity.KdebugMachSubclass.EXCP_SC);
-			bool is_bsd_syscall = (klass == BSD) && (subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
-			if (!is_mach_syscall && !is_bsd_syscall)
-				return null;
-
+		private static Variant parse_syscall (Fruity.KdBuf buf, uint pid, int32 stack_id) {
 			uint64 tid = buf.arg5;
-			uint pid = tid_to_pid[tid];
-			if (!target_pids.contains (pid)) {
-				unrelated_pid = true;
-				return null;
-			}
+
+			var kc = buf.kcode;
 
 			int32 syscall_nr = (int32) kc.code;
-			if (is_mach_syscall)
+			if (kc.klass == MACH && kc.subclass == Fruity.KdebugMachSubclass.EXCP_SC)
 				syscall_nr = -syscall_nr;
-			int32 stack_id = -1; // FIXME
 			uint32 map_gen = 1;
 
 			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
