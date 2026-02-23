@@ -728,8 +728,6 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class KtraceTapStackCollectionAction : KtraceTapAction {
-		private KtraceTapStackCollectionMode _mode;
-
 		public KtraceTapStackCollectionMode mode {
 			get {
 				return _mode;
@@ -738,6 +736,8 @@ namespace Frida.Fruity {
 				_mode = value;
 			}
 		}
+
+		private KtraceTapStackCollectionMode _mode;
 
 		public KtraceTapStackCollectionAction (KtraceTapStackCollectionMode mode) {
 			_mode = mode;
@@ -780,10 +780,6 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class KtraceTapAddPmcEventAction : KtraceTapAction {
-		private string _event_name;
-		private string _counter_name;
-		private uint32 _extra;
-
 		public string event_name {
 			get {
 				return _event_name;
@@ -811,6 +807,10 @@ namespace Frida.Fruity {
 			}
 		}
 
+		private string _event_name;
+		private string _counter_name;
+		private uint32 _extra;
+
 		public KtraceTapAddPmcEventAction (string event_name, string counter_name, uint32 extra = 0) {
 			_event_name = event_name;
 			_counter_name = counter_name;
@@ -834,8 +834,6 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class KtraceTapAddKdebugCodeSetAction : KtraceTapAction {
-		private NSSet _codes;
-
 		public NSSet codes {
 			get {
 				return _codes;
@@ -844,6 +842,8 @@ namespace Frida.Fruity {
 				_codes = value;
 			}
 		}
+
+		private NSSet _codes;
 
 		public KtraceTapAddKdebugCodeSetAction (NSSet codes) {
 			_codes = codes;
@@ -869,8 +869,8 @@ namespace Frida.Fruity {
 				var xml = new StringBuilder.sized (256);
 				xml.append ("<events>");
 
-				foreach (var obj in kdebug_codes.items) {
-					var kc = KdebugCode ((uint32) ((NSNumber) obj).integer);
+				foreach (var c in codes) {
+					var kc = KdebugCode (c);
 
 					xml.append ("<event type=\"KDebug\" class=\"");
 
@@ -907,14 +907,29 @@ namespace Frida.Fruity {
 
 		public NSSet kdebug_codes {
 			get {
+				if (_kdebug_codes == null) {
+					_kdebug_codes = new NSSet ();
+					foreach (var c in codes)
+						_kdebug_codes.add_object (new NSNumber.from_integer (c));
+				}
 				return _kdebug_codes;
 			}
 		}
 
-		private NSSet _kdebug_codes = new NSSet ();
+		private Gee.Set<uint> codes = new Gee.HashSet<uint> ();
+		private NSSet _kdebug_codes = null;
 
-		public void add (KdebugCode code) {
-			_kdebug_codes.add_object (new NSNumber.from_integer (code.raw));
+		public KdebugCodeSet copy () {
+			var s = new KdebugCodeSet ();
+			s.codes.add_all (codes);
+			s._kdebug_codes = _kdebug_codes;
+			return s;
+		}
+
+		public unowned KdebugCodeSet add (KdebugCode code) {
+			codes.add (code.raw);
+			_kdebug_codes = null;
+			return this;
 		}
 	}
 

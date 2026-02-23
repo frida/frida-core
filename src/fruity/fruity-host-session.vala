@@ -2499,9 +2499,15 @@ namespace Frida {
 			construct;
 		}
 
-		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
-		private Gee.Queue<Bytes> pending_kperfdata = new Gee.ArrayQueue<Bytes> ();
+		private Gee.Set<uint> target_pids = new Gee.HashSet<uint> ();
+
+		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
 		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
+
+		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
+
+		private ThreadPool<Bytes> pool;
+		private MainContext main_context;
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
 
@@ -2510,6 +2516,14 @@ namespace Frida {
 		}
 
 		construct {
+			try {
+				pool = new ThreadPool<Bytes>.with_owned_data (handle_kperfdata, 1, false);
+			} catch (ThreadError e) {
+				assert_not_reached ();
+			}
+
+			main_context = MainContext.ref_thread_default ();
+
 			core_profile.stackshot.connect (on_stackshot);
 			core_profile.kperfdata.connect (on_kperfdata);
 		}
@@ -2538,25 +2552,26 @@ namespace Frida {
 
 				size_t total = 0;
 				var seen_pids = new Gee.HashSet<uint> ();
-				Bytes? blob;
-				while ((blob = pending_kperfdata.poll ()) != null && total < MAX_BATCH_BYTES) {
-					kperf.push (blob, (rec) => {
-						uint pid;
-						var ev = try_build_event_variant (rec, out pid);
-						if (ev == null)
-							return;
-						events.add_value (new Variant.variant (ev));
-						total += ev.get_size ();
-						seen_pids.add (pid);
-					});
-				}
+				bool more = true;
+				do {
+					Variant? ev;
+					lock (pending_events)
+						ev = pending_events.poll ();
+					if (ev == null) {
+						more = false;
+						break;
+					}
+					events.add_value (new Variant.variant (ev));
+					total += ev.get_size ();
+					seen_pids.add (ev.get_child_value (2).get_uint32 ());
+				} while (total < MAX_BATCH_BYTES);
 
 				foreach (var pid in seen_pids)
 					processes.add ("(us)", pid, "native");
 
 				vardict_add (reply, "events", events.end ());
 				vardict_add (reply, "processes", processes.end ());
-				vardict_add (reply, "status", pending_kperfdata.is_empty ? "drained" : "more");
+				vardict_add (reply, "status", more ? "more" : "drained");
 
 				return reply.end ();
 			}
@@ -2618,23 +2633,27 @@ namespace Frida {
 
 				if (reader.has_member ("pids")) {
 					reader.read_member ("pids");
+					uint32[] pids = read_uint32_array (reader);
+					reader.end_member ();
 
 					var config = new Fruity.KtraceConfig ();
 
-					var codes = new Fruity.KdebugCodeSet ();
-					codes.add (Fruity.KdebugCode.from_parts (MACH, Fruity.KdebugMachSubclass.EXCP_SC));
-					codes.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
-					codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
+					var syscall_codes = new Fruity.KdebugCodeSet ();
+					syscall_codes
+						.add (Fruity.KdebugCode.from_parts (MACH, Fruity.KdebugMachSubclass.EXCP_SC))
+						.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
+
+					var all_codes = syscall_codes.copy ();
+					all_codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
 
 					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
-					tc.filter = codes;
-					foreach_uint32 (reader, pid => {
+					tc.filter = all_codes;
+					foreach (var pid in pids)
 						tc.include_pid (pid);
-					});
 					tc.callstack_frame_depth = 128;
 					tc.actions
 						.add_baseline ()
-						.add_kdebug_codeset (codes)
+						.add_kdebug_codeset (syscall_codes)
 						.add_stack_collection (USER);
 
 					config.add_trigger_config (tc);
@@ -2643,7 +2662,7 @@ namespace Frida {
 
 					yield core_profile.start (cancellable);
 
-					reader.end_member ();
+					target_pids.add_all_array (pids);
 				}
 
 				return reply.end ();
@@ -2673,6 +2692,11 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
+		private static void check_for_unsupported_targets (VariantReader reader) throws Error {
+			if (reader.has_member ("uids") || reader.has_member ("users"))
+				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
+		}
+
 		private void on_stackshot (Bytes blob) {
 			tid_to_pid = new Gee.HashMap<uint64?, uint32> (Numeric.uint64_hash, Numeric.uint64_equal);
 
@@ -2698,38 +2722,132 @@ namespace Frida {
 		}
 
 		private void on_kperfdata (Bytes blob) {
-			bool should_notify = pending_kperfdata.is_empty;
-			pending_kperfdata.offer (blob);
-
-			if (should_notify) {
-				var b = new VariantBuilder (VariantType.VARDICT);
-				vardict_add (b, "type", "events-available");
-				message (b.end ());
+			try {
+				pool.add (blob);
+			} catch (ThreadError e) {
+				assert_not_reached ();
 			}
 		}
 
-		private static void check_for_unsupported_targets (VariantReader reader) throws Error {
-			if (reader.has_member ("uids") || reader.has_member ("users"))
-				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
+		private void handle_kperfdata (owned Bytes blob) {
+			var new_events = new Gee.ArrayList<Variant> ();
+
+			try {
+				kperf.push (blob, rec => {
+					bool unrelated_pid;
+					Variant? ev = try_parse_syscall (rec, out unrelated_pid);
+					if (unrelated_pid)
+						return;
+
+					if (ev != null) {
+						new_events.add (ev);
+					} else {
+						var kc = rec.kcode;
+						var klass = kc.klass;
+						var subclass = kc.subclass;
+						if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
+							var e = (Fruity.KdebugTraceDataEvent) kc.code;
+							switch (e) {
+								case NEWTHREAD: {
+									uint64 tid = rec.arg1;
+									uint32 pid = (uint32) rec.arg2;
+									bool is_exec = rec.arg3 == 1;
+
+									if (is_exec)
+										remove_all_tids_for_pid (pid);
+
+									tid_to_pid[tid] = pid;
+									break;
+								}
+								case EXEC: {
+									uint32 pid = (uint32) rec.arg1;
+									uint64 tid = rec.arg5;
+
+									remove_all_tids_for_pid (pid);
+									tid_to_pid[tid] = pid;
+
+									break;
+								}
+								case THREAD_TERMINATE: {
+									uint64 tid = rec.arg1;
+
+									tid_to_pid.unset (tid);
+									break;
+								}
+								case THREAD_TERMINATE_PID: {
+									uint32 pid = (uint32) rec.arg1;
+
+									remove_all_tids_for_pid (pid);
+									break;
+								}
+
+								default:
+									assert_not_reached ();
+							}
+						} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
+							// No need for it for now.
+						} else {
+							printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
+						}
+
+						// if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.THREADINFO)
+						// 	return null;
+					}
+				});
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			if (new_events.is_empty)
+				return;
+
+			bool should_notify;
+			lock (pending_events) {
+				should_notify = pending_events.is_empty;
+				pending_events.add_all (new_events);
+			}
+
+			if (should_notify) {
+				var idle = new IdleSource ();
+				idle.set_callback (() => {
+					var b = new VariantBuilder (VariantType.VARDICT);
+					vardict_add (b, "type", "events-available");
+					message (b.end ());
+					return Source.REMOVE;
+				});
+				idle.attach (main_context);
+			}
 		}
 
-		private Variant? try_build_event_variant (Fruity.KdBuf buf, out uint pid) {
+		private void remove_all_tids_for_pid (uint32 pid) {
+			var dead = new Gee.ArrayList<uint64?> ();
+			foreach (var e in tid_to_pid.entries) {
+				if (e.value == pid)
+					dead.add (e.key);
+			}
+			foreach (var tid in dead)
+				tid_to_pid.unset (tid);
+		}
+
+		private Variant? try_parse_syscall (Fruity.KdBuf buf, out bool unrelated_pid) {
+			unrelated_pid = false;
+
 			var kc = buf.kcode;
 			var klass = kc.klass;
 			var subclass = kc.subclass;
 
 			bool is_mach_syscall = (klass == MACH) && (subclass == Fruity.KdebugMachSubclass.EXCP_SC);
 			bool is_bsd_syscall = (klass == BSD) && (subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
-			if (!is_mach_syscall && !is_bsd_syscall) {
-				pid = 0;
-				if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.THREADINFO)
-					return null;
-				// printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
+			if (!is_mach_syscall && !is_bsd_syscall)
+				return null;
+
+			uint64 tid = buf.arg5;
+			uint pid = tid_to_pid[tid];
+			if (!target_pids.contains (pid)) {
+				unrelated_pid = true;
 				return null;
 			}
 
-			uint64 tid = buf.arg5;
-			pid = tid_to_pid[tid];
 			int32 syscall_nr = (int32) kc.code;
 			if (is_mach_syscall)
 				syscall_nr = -syscall_nr;
@@ -2800,17 +2918,20 @@ namespace Frida {
 
 		private delegate void UInt32Handler (uint32 v) throws Error;
 
-		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
 			uint n = reader.count_elements ();
+			var arr = new uint32[n];
+
 			for (uint i = 0; i != n; i++) {
 				int64 v = reader.read_element (i).get_int64_value ();
 				if (v < 0 || v > uint32.MAX)
 					throw new Error.INVALID_ARGUMENT ("Value is out of range");
 
-				cb ((uint32) v);
-
+				arr[i] = (uint32) v;
 				reader.end_element ();
 			}
+
+			return arr;
 		}
 
 		private static uint64[] read_uint64_array (VariantReader reader) throws Error {

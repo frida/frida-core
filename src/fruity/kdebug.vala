@@ -3,6 +3,7 @@ namespace Frida.Fruity {
 	public enum KdebugClass {
 		MACH = 1,
 		BSD = 4,
+		TRACE = 7,
 		PERF = 37,
 
 		ANY = 0xff,
@@ -16,9 +17,58 @@ namespace Frida.Fruity {
 		EXCP_SC = 12,
 	}
 
+	public enum KdebugTraceSubclass {
+		DATA,
+		STRING,
+		INFO,
+	}
+
+	public enum KdebugTraceDataEvent {
+		NEWTHREAD = 1,
+		EXEC,
+		THREAD_TERMINATE,
+		THREAD_TERMINATE_PID,
+	}
+
+	public enum KdebugTraceStringEvent {
+		GLOBAL,
+		NEWTHREAD,
+		EXEC,
+		PROC_EXIT,
+		THREADNAME,
+		THREADNAME_PREV,
+	}
+
 	public enum KdebugPerfSubclass {
-		THREADINFO = 1,
+		GENERIC,
+		THREADINFO,
 		CALLSTACK,
+		TIMER,
+		PET,
+		AST,
+		KPC,
+		KDBG,
+		TASK,
+		LAZY,
+		MEMINFO,
+	}
+
+	public enum KdebugPerfCallstackEvent {
+		KSAMPLE,
+		UPEND,
+		USAMPLE,
+		KDATA,
+		UDATA,
+		KHDR,
+		UHDR,
+		ERROR,
+		BACKTRACE,
+		LOG,
+		EXHDR,
+		EXDATA,
+		EXSTACKHDR,
+		EXSTACK,
+		KEXOFFSET,
 	}
 
 	public const uint8 KDEBUG_SUBCLASS_ANY = 0xff;
