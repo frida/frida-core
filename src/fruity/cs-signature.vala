@@ -9,6 +9,7 @@ namespace Frida.Fruity {
 		public Gee.List<CsSigOwner> owners = new Gee.ArrayList<CsSigOwner> ();
 
 		private CsSegIndexEntry[]? seg_index = null;
+		private uint32 seg_index_gen = 0;
 
 		private struct CsSegIndexEntry {
 			public uint64 start;
@@ -16,8 +17,71 @@ namespace Frida.Fruity {
 			public unowned CsSigOwner owner;
 		}
 
-		public void resolve_addresses (uint64[] addrs, AddressResolved on_symbol, ModulesReady on_modules) {
-			ensure_index ();
+		public void note_unmapped_uuid (Bytes uuid, uint32 gen) {
+			foreach (var o in owners) {
+				if (o.mapped_gen_end != 0)
+					continue;
+				if (o.uuid.compare (uuid) == 0) {
+					o.mapped_gen_end = gen;
+					seg_index = null;
+					seg_index_gen = 0;
+					return;
+				}
+			}
+		}
+
+		public void apply_refresh (CsSignature fresh, uint32 gen) {
+			foreach (var cur in owners) {
+				if (cur.mapped_gen_end != 0)
+					continue;
+
+				bool still_present = false;
+				foreach (var f in fresh.owners) {
+					if (cur.uuid.compare (f.uuid) == 0) {
+						still_present = true;
+						break;
+					}
+				}
+
+				if (!still_present)
+					cur.mapped_gen_end = gen;
+			}
+
+			foreach (var f in fresh.owners) {
+				CsSigOwner? cur = null;
+
+				foreach (var existing in owners) {
+					if (existing.uuid.compare (f.uuid) == 0) {
+						cur = existing;
+						break;
+					}
+				}
+
+				if (cur == null) {
+					f.mapped_gen_start = gen;
+					f.mapped_gen_end = 0;
+					owners.add (f);
+				} else {
+					uint32 start = cur.mapped_gen_start;
+					uint32 end = cur.mapped_gen_end;
+
+					cur.path = f.path;
+					cur.image_base = f.image_base;
+					cur.image_end = f.image_end;
+					cur.segments = f.segments;
+					cur.version = f.version;
+
+					cur.mapped_gen_start = start;
+					cur.mapped_gen_end = end;
+				}
+			}
+
+			seg_index = null;
+			seg_index_gen = 0;
+		}
+
+		public void resolve_addresses (uint32 gen, uint64[] addrs, AddressResolved on_symbol, ModulesReady on_modules) {
+			ensure_index (gen);
 
 			var used_owner_to_mod = new Gee.HashMap<CsSigOwner, uint32> ();
 			var module_list = new Gee.ArrayList<string> ();
@@ -49,13 +113,16 @@ namespace Frida.Fruity {
 		public delegate void AddressResolved (uint64 addr, uint32 module_index, uint32 rel);
 		public delegate void ModulesReady (Gee.List<string> modules);
 
-		private void ensure_index () {
-			if (seg_index != null)
+		private void ensure_index (uint32 gen) {
+			if (seg_index != null && seg_index_gen == gen)
 				return;
 
 			var tmp = new Array<CsSegIndexEntry> (false, false);
 
 			foreach (var owner in owners) {
+				if (!owner_is_mapped_at (owner, gen))
+					continue;
+
 				foreach (var seg in owner.segments) {
 					if (seg.name == "__PAGEZERO")
 						continue;
@@ -76,6 +143,7 @@ namespace Frida.Fruity {
 			});
 
 			seg_index = tmp.steal ();
+			seg_index_gen = gen;
 		}
 
 		private bool try_resolve (uint64 addr, out CsSigOwner? owner, out uint32 rel) {
@@ -117,10 +185,21 @@ namespace Frida.Fruity {
 
 			return false;
 		}
+
+		private static bool owner_is_mapped_at (CsSigOwner owner, uint32 gen) {
+			if (gen < owner.mapped_gen_start)
+				return false;
+
+			uint32 end = owner.mapped_gen_end;
+			if (end == 0)
+				return true;
+
+			return gen < end;
+		}
 	}
 
 	public class CsSigOwner : Object {
-		public uint8[] uuid = new uint8[16];
+		public Bytes uuid;
 
 		public uint32 a;
 		public uint32 flags;
@@ -136,6 +215,9 @@ namespace Frida.Fruity {
 		public Gee.List<CsSigSegment> segments = new Gee.ArrayList<CsSigSegment> ();
 
 		public string? version;
+
+		public uint32 mapped_gen_start = 1;
+		public uint32 mapped_gen_end = 0;
 	}
 
 	public class CsSigSegment {
@@ -181,9 +263,7 @@ namespace Frida.Fruity {
 		private CsSigOwner parse_owner () throws Error {
 			var o = new CsSigOwner ();
 
-			unowned uint8[] uuid_slice = r.read_data (16);
-			for (int i = 0; i != 16; i++)
-				o.uuid[i] = uuid_slice[i];
+			o.uuid = r.read_bytes (16);
 
 			o.a = r.read_uint32 ();
 			o.flags = r.read_uint32 () & 0x7fffffff;

@@ -2535,36 +2535,45 @@ namespace Frida {
 			construct;
 		}
 
+		private MainContext main_context;
+		private ThreadPool<Bytes> pool;
+		private Cancellable io_cancellable = new Cancellable ();
+
 		private Mutex mutex = Mutex ();
 
-		private Gee.Map<uint, Fruity.CsSignature> target_pids = new Gee.HashMap<uint, Fruity.CsSignature> ();
-
 		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
+
+		private Gee.Map<uint, Fruity.CsSignature> target_pids = new Gee.HashMap<uint, Fruity.CsSignature> ();
 		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
 
-		private ThreadPool<Bytes> pool;
-		private MainContext main_context;
+		private Gee.Map<uint, uint32> map_gen_by_pid = new Gee.HashMap<uint, uint32> ();
+
+		private Gee.Set<uint> pids_needing_sig_refresh = new Gee.HashSet<uint> ();
+		private bool sig_refresh_scheduled = false;
 
 		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
 
 		private Gee.Map<uint64?, PendingSyscall> pending_syscall_by_tid =
 			new Gee.HashMap<uint64?, PendingSyscall> (Numeric.uint64_hash, Numeric.uint64_equal);
 
+		private Gee.Map<uint32, StackInfo> stacks_by_id = new Gee.HashMap<uint32, StackInfo> ();
+		private uint32 next_stack_id = 1;
+
+		private Gee.Map<Bytes, Gee.ArrayList<uint32>> stack_ids_by_hash =
+			new Gee.HashMap<Bytes, Gee.ArrayList<uint32>> (Numeric.bytes_hash, Numeric.bytes_equal);
+
 		private class PendingSyscall {
 			public Fruity.KdBuf buf;
+
 			public uint pid;
+			public uint32 map_gen;
+
 			public uint nframes;
 			public uint32 async_index;
 			public uint32 async_nframes;
 			public uint remaining_evts;
 			public Array<uint64> frames = new Array<uint64> (false, false);
 		}
-
-		private Gee.Map<uint32, StackInfo> stacks_by_id = new Gee.HashMap<uint32, StackInfo> ();
-		private uint32 next_stack_id = 1;
-
-		private Gee.Map<Bytes, Gee.ArrayList<uint32>> stack_ids_by_hash =
-			new Gee.HashMap<Bytes, Gee.ArrayList<uint32>> (Numeric.bytes_hash, Numeric.bytes_equal);
 
 		private class StackInfo {
 			public Array<uint64> frames;
@@ -2588,13 +2597,13 @@ namespace Frida {
 		}
 
 		construct {
+			main_context = MainContext.ref_thread_default ();
+
 			try {
 				pool = new ThreadPool<Bytes>.with_owned_data (handle_kperfdata, 1, false);
 			} catch (ThreadError e) {
 				assert_not_reached ();
 			}
-
-			main_context = MainContext.ref_thread_default ();
 
 			core_profile.stackshot.connect (on_stackshot);
 			core_profile.kperfdata.connect (on_kperfdata);
@@ -2678,6 +2687,9 @@ namespace Frida {
 				var pid = (uint) reader.read_member ("pid").get_int64_value ();
 				reader.end_member ();
 
+				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
+				reader.end_member ();
+
 				reader.read_member ("addresses");
 				var addrs = read_uint64_array (reader);
 				reader.end_member ();
@@ -2687,7 +2699,7 @@ namespace Frida {
 
 				Fruity.CsSignature? sig = target_pids[pid];
 				if (sig != null) {
-					sig.resolve_addresses (addrs,
+					sig.resolve_addresses (gen, addrs,
 						(addr, mod_idx, rel32) => {
 							symbols.add ("(uu)", mod_idx, rel32);
 						},
@@ -2744,6 +2756,8 @@ namespace Frida {
 						.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
 
 					var all_codes = syscall_codes.copy ();
+					all_codes.add (Fruity.KdebugCode.from_parts (TRACE, Fruity.KdebugTraceSubclass.DATA));
+					all_codes.add (Fruity.KdebugCode.from_parts (DYLD, Fruity.KdebugDyldSubclass.UUID));
 					all_codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
 
 					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
@@ -2862,6 +2876,9 @@ namespace Frida {
 						handle_trace_data_event (e, buf, new_events);
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
 						// No need for it for now.
+					} else if (klass == DYLD && subclass == Fruity.KdebugDyldSubclass.UUID) {
+						var e = (Fruity.KdebugDyldUuidEvent) kc.code;
+						handle_dyld_uuid_event (e, buf);
 					} else {
 						// printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
 					}
@@ -2909,9 +2926,12 @@ namespace Frida {
 
 			maybe_complete_pending_syscall (tid, new_events);
 
+			uint32 map_gen = get_map_gen (pid);
+
 			pending_syscall_by_tid[tid] = new PendingSyscall () {
 				buf = buf,
 				pid = pid,
+				map_gen = map_gen,
 			};
 
 			return true;
@@ -2920,7 +2940,7 @@ namespace Frida {
 		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
 			PendingSyscall? sc;
 			if (pending_syscall_by_tid.unset (tid, out sc))
-				new_events.add (parse_syscall (sc.buf, sc.pid, -1));
+				new_events.add (parse_syscall (sc.buf, sc.pid, sc.map_gen, -1));
 		}
 
 		private static bool is_syscall (Fruity.KdBuf buf) {
@@ -2931,7 +2951,7 @@ namespace Frida {
 				(klass == BSD && subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
 		}
 
-		private static Variant parse_syscall (Fruity.KdBuf buf, uint pid, int32 stack_id) {
+		private static Variant parse_syscall (Fruity.KdBuf buf, uint pid, uint32 map_gen, int32 stack_id) {
 			uint64 tid = buf.arg5;
 
 			var kc = buf.kcode;
@@ -2939,7 +2959,6 @@ namespace Frida {
 			int32 syscall_nr = (int32) kc.code;
 			if (kc.klass == MACH && kc.subclass == Fruity.KdebugMachSubclass.EXCP_SC)
 				syscall_nr = -syscall_nr;
-			uint32 map_gen = 1;
 
 			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
 
@@ -3034,7 +3053,7 @@ namespace Frida {
 						pending_syscall_by_tid.unset (tid);
 
 						uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
-						new_events.add (parse_syscall (sc.buf, sc.pid, (int32) stack_id_u32));
+						new_events.add (parse_syscall (sc.buf, sc.pid, sc.map_gen, (int32) stack_id_u32));
 					}
 
 					break;
@@ -3098,6 +3117,103 @@ namespace Frida {
 			tid_to_pid.unset (tid);
 
 			maybe_complete_pending_syscall (tid, new_events);
+		}
+
+		private void handle_dyld_uuid_event (Fruity.KdebugDyldUuidEvent e, Fruity.KdBuf buf) {
+			uint64 tid = buf.arg5;
+			uint pid = tid_to_pid[tid];
+			if (!target_pids.has_key (pid))
+				return;
+
+			switch (e) {
+				case MAP_A:
+				case SHARED_CACHE_A:
+				case AOT_MAP_A: {
+					bump_map_gen (pid);
+
+					schedule_signature_refresh (pid);
+
+					break;
+				}
+				case UNMAP_A: {
+					Bytes uuid = uuid_from_u64s (buf.arg1, buf.arg2);
+					uint32 gen = bump_map_gen (pid);
+
+					note_uuid_unmapped (pid, uuid, gen);
+
+					break;
+				}
+				case MAP_B:
+				case UNMAP_B:
+				case SHARED_CACHE_B:
+				case AOT_MAP_B:
+					/* Ignore “B” (fsobjid) for now. */
+					break;
+				default:
+					/* Ignore 32-bit variants for now. */
+					break;
+			}
+		}
+
+		private uint32 get_map_gen (uint pid) {
+			uint32 gen = map_gen_by_pid[pid];
+			if (gen != 0)
+				return gen;
+
+			map_gen_by_pid[pid] = 1;
+			return 1;
+		}
+
+		private uint32 bump_map_gen (uint pid) {
+			uint32 gen = get_map_gen (pid) + 1;
+			map_gen_by_pid[pid] = gen;
+			return gen;
+		}
+
+		private void note_uuid_unmapped (uint pid, Bytes uuid, uint32 gen) {
+			var l = new MutexLocker (mutex);
+			Fruity.CsSignature sig = target_pids[pid];
+			sig.note_unmapped_uuid (uuid, gen);
+			l.free ();
+		}
+
+		private void schedule_signature_refresh (uint pid) {
+			pids_needing_sig_refresh.add (pid);
+
+			if (sig_refresh_scheduled)
+				return;
+
+			sig_refresh_scheduled = true;
+
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				sig_refresh_scheduled = false;
+
+				var pids = new Gee.ArrayList<uint> ();
+				pids.add_all (pids_needing_sig_refresh);
+				pids_needing_sig_refresh.clear ();
+
+				refresh_signatures.begin (pids);
+
+				return Source.REMOVE;
+			});
+			idle.attach (main_context);
+		}
+
+		private async void refresh_signatures (Gee.List<uint> pids) {
+			foreach (var pid in pids) {
+				try {
+					var fresh = yield info_service.query_symbolicator_signature (pid, io_cancellable);
+
+					uint32 gen = get_map_gen (pid);
+
+					var l = new MutexLocker (mutex);
+					Fruity.CsSignature current = target_pids[pid];
+					current.apply_refresh (fresh, gen);
+					l.free ();
+				} catch (GLib.Error e) {
+				}
+			}
 		}
 
 		private static Variant build_signatures_variant () {
@@ -3227,6 +3343,18 @@ namespace Frida {
 			for (uint i = 0; i != 8; i++)
 				b[i] = (uint8) ((v >> (i * 8)) & 0xff);
 			return new Bytes.take ((owned) b);
+		}
+
+		private static Bytes uuid_from_u64s (uint64 a, uint64 b) {
+			var bytes = new uint8[16];
+
+			for (uint i = 0; i != 8; i++)
+				bytes[i] = (uint8) ((a >> (i * 8)) & 0xff);
+
+			for (uint i = 0; i != 8; i++)
+				bytes[8 + i] = (uint8) ((b >> (i * 8)) & 0xff);
+
+			return new Bytes.take ((owned) bytes);
 		}
 	}
 }

@@ -4,6 +4,7 @@ namespace Frida.Fruity {
 		MACH = 1,
 		BSD = 4,
 		TRACE = 7,
+		DYLD = 31,
 		PERF = 37,
 
 		ANY = 0xff;
@@ -52,6 +53,34 @@ namespace Frida.Fruity {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<KdebugTraceStringEvent> (this);
+		}
+	}
+
+	public enum KdebugDyldSubclass {
+		UUID = 5,
+	}
+
+	public enum KdebugDyldUuidEvent {
+		MAP_A,
+		MAP_B,
+		MAP_32_A,
+		MAP_32_B,
+		MAP_32_C,
+		UNMAP_A,
+		UNMAP_B,
+		UNMAP_32_A,
+		UNMAP_32_B,
+		UNMAP_32_C,
+		SHARED_CACHE_A,
+		SHARED_CACHE_B,
+		SHARED_CACHE_32_A,
+		SHARED_CACHE_32_B,
+		SHARED_CACHE_32_C,
+		AOT_MAP_A,
+		AOT_MAP_B;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugDyldUuidEvent> (this);
 		}
 	}
 
