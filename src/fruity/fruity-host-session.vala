@@ -2554,14 +2554,34 @@ namespace Frida {
 			public Fruity.KdBuf buf;
 			public uint pid;
 			public uint nframes;
+			public uint32 async_index;
+			public uint32 async_nframes;
 			public uint remaining_evts;
 			public Array<uint64> frames = new Array<uint64> (false, false);
 		}
 
+		private Gee.Map<uint32, StackInfo> stacks_by_id = new Gee.HashMap<uint32, StackInfo> ();
 		private uint32 next_stack_id = 1;
-		private Gee.Map<uint32, Array<uint64>> stacks_by_id = new Gee.HashMap<uint32, Array<uint64>> ();
+
+		private Gee.Map<Bytes, Gee.ArrayList<uint32>> stack_ids_by_hash =
+			new Gee.HashMap<Bytes, Gee.ArrayList<uint32>> (Numeric.bytes_hash, Numeric.bytes_equal);
+
+		private class StackInfo {
+			public Array<uint64> frames;
+			public uint32 async_index;
+			public uint32 async_nframes;
+
+			public StackInfo (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+				this.frames = frames;
+				this.async_index = async_index;
+				this.async_nframes = async_nframes;
+			}
+		}
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
+		private const uint64 FNV1A64_OFFSET = 1469598103934665603ULL;
+		private const uint64 FNV1A64_PRIME  = 1099511628211ULL;
 
 		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile, Fruity.DeviceInfoService info_service) {
 			Object (core_profile: core_profile, info_service: info_service);
@@ -2641,9 +2661,9 @@ namespace Frida {
 				foreach (var id in ids) {
 					var one = new VariantBuilder (new VariantType ("at"));
 
-					Array<uint64>? frames = stacks_by_id[id];
-					if (frames != null) {
-						foreach (uint64 pc in frames)
+					StackInfo? si = stacks_by_id[id];
+					if (si != null) {
+						foreach (uint64 pc in si.frames)
 							one.add_value (pc);
 					}
 
@@ -2863,10 +2883,16 @@ namespace Frida {
 								if (sc == null)
 									break;
 
-								var nframes = (uint) (rec.arg2 + rec.arg4);
+								uint32 sync_nframes = (uint32) rec.arg2;
+								uint32 async_index = (uint32) rec.arg3;
+								uint32 async_nframes = (uint32) rec.arg4;
+
+								uint32 nframes = sync_nframes + async_nframes;
 								uint nevts = (nframes + 3u) / 4u;
 
 								sc.nframes = nframes;
+								sc.async_index = async_index;
+								sc.async_nframes = async_nframes;
 								sc.remaining_evts = nevts;
 
 								break;
@@ -2879,21 +2905,26 @@ namespace Frida {
 									break;
 
 								sc.frames.append_val (rec.arg1);
-								sc.frames.append_val (rec.arg2);
-								sc.frames.append_val (rec.arg3);
-								sc.frames.append_val (rec.arg4);
+								uint remaining = sc.nframes - sc.frames.length;
+								if (remaining != 0) {
+									sc.frames.append_val (rec.arg2);
+									remaining--;
+								}
+								if (remaining != 0) {
+									sc.frames.append_val (rec.arg3);
+									remaining--;
+								}
+								if (remaining != 0) {
+									sc.frames.append_val (rec.arg4);
+									remaining--;
+								}
 
-								if (sc.remaining_evts > 0)
-									sc.remaining_evts--;
+								sc.remaining_evts--;
 
 								if (sc.remaining_evts == 0) {
-									while (sc.frames.length != sc.nframes)
-										sc.frames.remove_index (sc.frames.length - 1);
+									pending_syscall_by_tid.unset (tid);
 
-									// FIXME: De-duplicate.
-									uint32 stack_id_u32 = next_stack_id++;
-									stacks_by_id[stack_id_u32] = sc.frames;
-
+									uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
 									new_events.add (parse_syscall (sc.buf, sc.pid, (int32) stack_id_u32));
 								}
 
@@ -3109,6 +3140,81 @@ namespace Frida {
 
 		private static void vardict_add (VariantBuilder b, string key, Variant val) {
 			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
+		}
+
+		private uint32 intern_stack (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			uint64 h64 = hash_stack_fnv1a (frames, async_index, async_nframes);
+			Bytes key = u64_to_bytes_key (h64);
+
+			Gee.ArrayList<uint32>? candidates = stack_ids_by_hash[key];
+			if (candidates != null) {
+				foreach (uint32 id in candidates) {
+					StackInfo? existing = stacks_by_id[id];
+					if (existing != null && stack_equal (existing, frames, async_index, async_nframes))
+						return id;
+				}
+			}
+
+			uint32 id = next_stack_id++;
+			stacks_by_id[id] = new StackInfo (frames, async_index, async_nframes);
+
+			if (candidates == null) {
+				candidates = new Gee.ArrayList<uint32> ();
+				stack_ids_by_hash[key] = candidates;
+			}
+			candidates.add (id);
+
+			return id;
+		}
+
+		private static bool stack_equal (StackInfo existing, Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			if (existing.async_index != async_index || existing.async_nframes != async_nframes)
+				return false;
+
+			if (existing.frames.length != frames.length)
+				return false;
+
+			for (uint i = 0; i != frames.length; i++) {
+				if (existing.frames.index (i) != frames.index (i))
+					return false;
+			}
+
+			return true;
+		}
+
+		private static uint64 hash_stack_fnv1a (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			uint64 h = FNV1A64_OFFSET;
+
+			for (uint i = 0; i != frames.length; i++) {
+				uint64 v = frames.index (i);
+				for (uint shift = 0; shift != 64; shift += 8)
+					h = fnv1a64_update_byte (h, (uint8) ((v >> shift) & 0xff));
+			}
+
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((async_index >> shift) & 0xff));
+
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((async_nframes >> shift) & 0xff));
+
+			uint32 len = frames.length;
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((len >> shift) & 0xff));
+
+			return h;
+		}
+
+		private static inline uint64 fnv1a64_update_byte (uint64 h, uint8 b) {
+			h ^= b;
+			h *= FNV1A64_PRIME;
+			return h;
+		}
+
+		private static Bytes u64_to_bytes_key (uint64 v) {
+			var b = new uint8[8];
+			for (uint i = 0; i != 8; i++)
+				b[i] = (uint8) ((v >> (i * 8)) & 0xff);
+			return new Bytes.take ((owned) b);
 		}
 	}
 }
