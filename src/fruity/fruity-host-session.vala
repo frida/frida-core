@@ -2549,6 +2549,8 @@ namespace Frida {
 		private Gee.Map<uint, uint32> map_gen_by_pid = new Gee.HashMap<uint, uint32> ();
 
 		private Gee.Set<uint> pids_needing_sig_refresh = new Gee.HashSet<uint> ();
+		private Gee.Set<uint> pids_with_sig_refresh_in_flight = new Gee.HashSet<uint> ();
+		private Gee.Set<uint> pids_dirtied_during_sig_refresh = new Gee.HashSet<uint> ();
 		private bool sig_refresh_scheduled = false;
 
 		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
@@ -2697,6 +2699,7 @@ namespace Frida {
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
 				var modules = new VariantBuilder (new VariantType ("as"));
 
+				var l = new MutexLocker (mutex);
 				Fruity.CsSignature? sig = target_pids[pid];
 				if (sig != null) {
 					sig.resolve_addresses (gen, addrs,
@@ -2707,7 +2710,9 @@ namespace Frida {
 							foreach (var path in module_list)
 								modules.add_value (new Variant.string (path));
 						});
+					l.free ();
 				} else {
+					l.free ();
 					foreach (var addr in addrs)
 						symbols.add ("(uu)", uint32.MAX, 0);
 				}
@@ -2798,8 +2803,13 @@ namespace Frida {
 					reader.end_member ();
 
 					var l = new MutexLocker (mutex);
-					foreach (var pid in pids)
+					foreach (var pid in pids) {
 						target_pids.unset (pid);
+						map_gen_by_pid.unset (pid);
+						pids_needing_sig_refresh.remove (pid);
+						pids_with_sig_refresh_in_flight.remove (pid);
+						pids_dirtied_during_sig_refresh.remove (pid);
+					}
 					bool no_more_targets = target_pids.is_empty;
 					l.free ();
 
@@ -2917,16 +2927,16 @@ namespace Frida {
 			uint64 tid = buf.arg5;
 			uint pid = tid_to_pid[tid];
 
+			uint32 map_gen;
 			{
 				var l = new MutexLocker (mutex);
 				if (!target_pids.has_key (pid))
 					return true;
+				map_gen = get_map_gen_unlocked (pid);
 				l.free ();
 			}
 
 			maybe_complete_pending_syscall (tid, new_events);
-
-			uint32 map_gen = get_map_gen (pid);
 
 			pending_syscall_by_tid[tid] = new PendingSyscall () {
 				buf = buf,
@@ -3120,26 +3130,44 @@ namespace Frida {
 		}
 
 		private void handle_dyld_uuid_event (Fruity.KdebugDyldUuidEvent e, Fruity.KdBuf buf) {
+			var l = new MutexLocker (mutex);
+
 			uint64 tid = buf.arg5;
 			uint pid = tid_to_pid[tid];
-			if (!target_pids.has_key (pid))
+
+			Fruity.CsSignature? sig = target_pids[pid];
+			if (sig == null)
 				return;
+
+			bool in_flight = pids_with_sig_refresh_in_flight.contains (pid);
 
 			switch (e) {
 				case MAP_A:
 				case SHARED_CACHE_A:
 				case AOT_MAP_A: {
-					bump_map_gen (pid);
+					if (!in_flight)
+						bump_map_gen_unlocked (pid);
+					else
+						pids_dirtied_during_sig_refresh.add (pid);
 
-					schedule_signature_refresh (pid);
+					schedule_signature_refresh_unlocked (pid);
 
 					break;
 				}
 				case UNMAP_A: {
 					Bytes uuid = uuid_from_u64s (buf.arg1, buf.arg2);
-					uint32 gen = bump_map_gen (pid);
 
-					note_uuid_unmapped (pid, uuid, gen);
+					uint32 gen;
+					if (!in_flight) {
+						gen = bump_map_gen_unlocked (pid);
+					} else {
+						gen = get_map_gen_unlocked (pid);
+						pids_dirtied_during_sig_refresh.add (pid);
+					}
+
+					sig.note_unmapped_uuid (uuid, gen);
+
+					schedule_signature_refresh_unlocked (pid);
 
 					break;
 				}
@@ -3153,9 +3181,11 @@ namespace Frida {
 					/* Ignore 32-bit variants for now. */
 					break;
 			}
+
+			l.free ();
 		}
 
-		private uint32 get_map_gen (uint pid) {
+		private uint32 get_map_gen_unlocked (uint pid) {
 			uint32 gen = map_gen_by_pid[pid];
 			if (gen != 0)
 				return gen;
@@ -3164,20 +3194,13 @@ namespace Frida {
 			return 1;
 		}
 
-		private uint32 bump_map_gen (uint pid) {
-			uint32 gen = get_map_gen (pid) + 1;
+		private uint32 bump_map_gen_unlocked (uint pid) {
+			uint32 gen = get_map_gen_unlocked (pid) + 1;
 			map_gen_by_pid[pid] = gen;
 			return gen;
 		}
 
-		private void note_uuid_unmapped (uint pid, Bytes uuid, uint32 gen) {
-			var l = new MutexLocker (mutex);
-			Fruity.CsSignature sig = target_pids[pid];
-			sig.note_unmapped_uuid (uuid, gen);
-			l.free ();
-		}
-
-		private void schedule_signature_refresh (uint pid) {
+		private void schedule_signature_refresh_unlocked (uint pid) {
 			pids_needing_sig_refresh.add (pid);
 
 			if (sig_refresh_scheduled)
@@ -3187,11 +3210,15 @@ namespace Frida {
 
 			var idle = new IdleSource ();
 			idle.set_callback (() => {
+				var l = new MutexLocker (mutex);
+
 				sig_refresh_scheduled = false;
 
 				var pids = new Gee.ArrayList<uint> ();
 				pids.add_all (pids_needing_sig_refresh);
 				pids_needing_sig_refresh.clear ();
+
+				l.free ();
 
 				refresh_signatures.begin (pids);
 
@@ -3202,16 +3229,50 @@ namespace Frida {
 
 		private async void refresh_signatures (Gee.List<uint> pids) {
 			foreach (var pid in pids) {
-				try {
-					var fresh = yield info_service.query_symbolicator_signature (pid, io_cancellable);
-
-					uint32 gen = get_map_gen (pid);
-
+				{
 					var l = new MutexLocker (mutex);
-					Fruity.CsSignature current = target_pids[pid];
-					current.apply_refresh (fresh, gen);
+
+					if (!target_pids.has_key (pid))
+						continue;
+
+					pids_with_sig_refresh_in_flight.add (pid);
+
 					l.free ();
+				}
+
+				Fruity.CsSignature? fresh = null;
+
+				try {
+					fresh = yield info_service.query_symbolicator_signature (pid, io_cancellable);
 				} catch (GLib.Error e) {
+				}
+
+				bool should_rerun = false;
+
+				{
+					var l = new MutexLocker (mutex);
+
+					pids_with_sig_refresh_in_flight.remove (pid);
+
+					Fruity.CsSignature? current = target_pids[pid];
+
+					if (current != null && fresh != null) {
+						uint32 gen = get_map_gen_unlocked (pid);
+						current.apply_refresh (fresh, gen);
+					}
+
+					if (pids_dirtied_during_sig_refresh.remove (pid)) {
+						bump_map_gen_unlocked (pid);
+						should_rerun = current != null;
+					}
+
+					l.free ();
+				}
+
+				if (should_rerun) {
+					var l = new MutexLocker (mutex);
+					schedule_signature_refresh_unlocked (pid);
+					l.free ();
 				}
 			}
 		}

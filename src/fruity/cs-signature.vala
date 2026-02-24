@@ -17,19 +17,6 @@ namespace Frida.Fruity {
 			public unowned CsSigOwner owner;
 		}
 
-		public void note_unmapped_uuid (Bytes uuid, uint32 gen) {
-			foreach (var o in owners) {
-				if (o.mapped_gen_end != 0)
-					continue;
-				if (o.uuid.compare (uuid) == 0) {
-					o.mapped_gen_end = gen;
-					seg_index = null;
-					seg_index_gen = 0;
-					return;
-				}
-			}
-		}
-
 		public void apply_refresh (CsSignature fresh, uint32 gen) {
 			foreach (var cur in owners) {
 				if (cur.mapped_gen_end != 0)
@@ -76,8 +63,19 @@ namespace Frida.Fruity {
 				}
 			}
 
-			seg_index = null;
-			seg_index_gen = 0;
+			invalidate_index ();
+		}
+
+		public void note_unmapped_uuid (Bytes uuid, uint32 gen) {
+			foreach (var o in owners) {
+				if (o.mapped_gen_end != 0)
+					continue;
+				if (o.uuid.compare (uuid) == 0) {
+					o.mapped_gen_end = gen;
+					invalidate_index ();
+					return;
+				}
+			}
 		}
 
 		public void resolve_addresses (uint32 gen, uint64[] addrs, AddressResolved on_symbol, ModulesReady on_modules) {
@@ -144,6 +142,11 @@ namespace Frida.Fruity {
 
 			seg_index = tmp.steal ();
 			seg_index_gen = gen;
+		}
+
+		private void invalidate_index () {
+			seg_index = null;
+			seg_index_gen = 0;
 		}
 
 		private bool try_resolve (uint64 addr, out CsSigOwner? owner, out uint32 rel) {
