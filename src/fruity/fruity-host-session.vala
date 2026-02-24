@@ -2573,6 +2573,8 @@ namespace Frida {
 			public uint pid;
 			public uint32 map_gen;
 
+			public bool stack_ready = false;
+			public int32 stack_id = -1;
 			public uint nframes;
 			public uint32 async_index;
 			public uint32 async_nframes;
@@ -2585,6 +2587,17 @@ namespace Frida {
 			public Gee.List<Variant> enter_attachments = new Gee.ArrayList<Variant> ();
 
 			public Array<uint8>? vfs_bytes = null;
+
+			public bool ready_to_emit {
+				get {
+					if (!stack_ready)
+						return false;
+
+					if (path_arg_indices == null)
+						return true;
+					return path_cursor == path_arg_indices.length;
+				}
+			}
 		}
 
 		private class StackInfo {
@@ -2896,7 +2909,7 @@ namespace Frida {
 						handle_callstack_event (e, buf, new_events);
 					} else if (klass == FSYSTEM && subclass == Fruity.KdebugFsystemSubclass.FSRW) {
 						var e = (Fruity.KdebugFsystemFsrwEvent) kc.code;
-						handle_fsystem_fsrw_event (e, buf);
+						handle_fsystem_fsrw_event (e, buf, new_events);
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
 						var e = (Fruity.KdebugTraceDataEvent) kc.code;
 						handle_trace_data_event (e, buf, new_events);
@@ -2969,10 +2982,17 @@ namespace Frida {
 			return true;
 		}
 
+		private void maybe_emit_ready_syscall (uint64 tid, PendingSyscall sc, Gee.List<Variant> new_events) {
+			if (!sc.ready_to_emit)
+				return;
+			pending_syscall_by_tid.unset (tid);
+			new_events.add (make_syscall_event (sc));
+		}
+
 		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
 			PendingSyscall? sc;
 			if (pending_syscall_by_tid.unset (tid, out sc))
-				new_events.add (make_syscall_event (sc, -1));
+				new_events.add (make_syscall_event (sc));
 		}
 
 		private static bool is_syscall (Fruity.KdBuf buf) {
@@ -2983,7 +3003,7 @@ namespace Frida {
 				(klass == BSD && subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
 		}
 
-		private static Variant make_syscall_event (PendingSyscall sc, int32 stack_id) {
+		private static Variant make_syscall_event (PendingSyscall sc) {
 			Fruity.KdBuf buf = sc.buf;
 			uint64 tid = buf.arg5;
 
@@ -3007,7 +3027,7 @@ namespace Frida {
 					sc.pid,
 					tid,
 					sc.nr,
-					stack_id,
+					sc.stack_id,
 					sc.map_gen,
 					ab.end (),
 					attachments.end ()
@@ -3026,7 +3046,7 @@ namespace Frida {
 					sc.pid,
 					tid,
 					sc.nr,
-					stack_id,
+					sc.stack_id,
 					sc.map_gen,
 					retval,
 					attachments.end ()
@@ -3082,10 +3102,10 @@ namespace Frida {
 					sc.remaining_evts--;
 
 					if (sc.remaining_evts == 0) {
-						pending_syscall_by_tid.unset (tid);
+						sc.stack_id = (int32) intern_stack (sc.frames, sc.async_index, sc.async_nframes);
+						sc.stack_ready = true;
 
-						uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
-						new_events.add (make_syscall_event (sc, (int32) stack_id_u32));
+						maybe_emit_ready_syscall (tid, sc, new_events);
 					}
 
 					break;
@@ -3095,7 +3115,7 @@ namespace Frida {
 			}
 		}
 
-		private void handle_fsystem_fsrw_event (Fruity.KdebugFsystemFsrwEvent e, Fruity.KdBuf buf) {
+		private void handle_fsystem_fsrw_event (Fruity.KdebugFsystemFsrwEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
 			if (e != LOOKUP)
 				return;
 
@@ -3134,6 +3154,8 @@ namespace Frida {
 			if (sc.path_cursor != sc.path_arg_indices.length) {
 				uint32 arg_index = sc.path_arg_indices[sc.path_cursor++];
 				sc.enter_attachments.add (new Variant.tuple ({ arg_index, new Variant.variant (path) }));
+
+				maybe_emit_ready_syscall (tid, sc, new_events);
 			}
 
 			l.free ();
@@ -3539,17 +3561,20 @@ namespace Frida {
 			if (!(type == "char *" || type == "const char *"))
 				return false;
 
-			return (name == "path" ||
+			return (
+				name == "attrname" ||
+				name == "file_path" ||
 				name == "fname" ||
 				name == "from" ||
-				name == "to" ||
-				name == "path1" ||
-				name == "path2" ||
-				name == "file_path" ||
-				name == "path_p" ||
 				name == "mountdir" ||
 				name == "new_rootfs_path_before" ||
-				name == "old_rootfs_path_after");
+				name == "old_rootfs_path_after" ||
+				name == "path" ||
+				name == "path1" ||
+				name == "path2" ||
+				name == "path_p" ||
+				name == "to"
+			);
 		}
 
 		private static unowned uint8[]? get_path_arg_indices_for_syscall_nr (int32 nr) {

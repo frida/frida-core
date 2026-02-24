@@ -518,6 +518,9 @@ def parse_c_param_list(args_blob: str, path: Path, line_no: int) -> List[Syscall
         ty, name = split_param_decl(p, path, line_no)
         if name is None:
             name = f"arg{idx}"
+        ty = ty.replace("* *", "**")
+        if ty == "user_addr_t" and name in {"attrname", "link", "path"}:
+            ty = "char *"
         args.append(SyscallArg(type=ty, name=name))
     return args
 
