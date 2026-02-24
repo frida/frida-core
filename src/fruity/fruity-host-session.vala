@@ -2846,132 +2846,20 @@ namespace Frida {
 			var new_events = new Gee.ArrayList<Variant> ();
 
 			try {
-				kperf.push (blob, rec => {
-					if (is_syscall (rec)) {
-						uint64 tid = rec.arg5;
-						uint pid = tid_to_pid[tid];
-
-						{
-							var l = new MutexLocker (mutex);
-							if (!target_pids.has_key (pid))
-								return;
-							l.free ();
-						}
-
-						maybe_complete_pending_syscall (tid, new_events);
-
-						pending_syscall_by_tid[tid] = new PendingSyscall () {
-							buf = rec,
-							pid = pid,
-						};
-
+				kperf.push (blob, buf => {
+					if (maybe_handle_syscall (buf, new_events))
 						return;
-					}
 
-					var kc = rec.kcode;
+					var kc = buf.kcode;
 					var klass = kc.klass;
 					var subclass = kc.subclass;
 
 					if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.CALLSTACK) {
 						var e = (Fruity.KdebugPerfCallstackEvent) kc.code;
-
-						switch (e) {
-							case UHDR: {
-								uint64 tid = rec.arg5;
-
-								PendingSyscall? sc = pending_syscall_by_tid[tid];
-								if (sc == null)
-									break;
-
-								uint32 sync_nframes = (uint32) rec.arg2;
-								uint32 async_index = (uint32) rec.arg3;
-								uint32 async_nframes = (uint32) rec.arg4;
-
-								uint32 nframes = sync_nframes + async_nframes;
-								uint nevts = (nframes + 3u) / 4u;
-
-								sc.nframes = nframes;
-								sc.async_index = async_index;
-								sc.async_nframes = async_nframes;
-								sc.remaining_evts = nevts;
-
-								break;
-							}
-							case UDATA: {
-								uint64 tid = rec.arg5;
-
-								PendingSyscall? sc = pending_syscall_by_tid[tid];
-								if (sc == null)
-									break;
-
-								sc.frames.append_val (rec.arg1);
-								uint remaining = sc.nframes - sc.frames.length;
-								if (remaining != 0) {
-									sc.frames.append_val (rec.arg2);
-									remaining--;
-								}
-								if (remaining != 0) {
-									sc.frames.append_val (rec.arg3);
-									remaining--;
-								}
-								if (remaining != 0) {
-									sc.frames.append_val (rec.arg4);
-									remaining--;
-								}
-
-								sc.remaining_evts--;
-
-								if (sc.remaining_evts == 0) {
-									pending_syscall_by_tid.unset (tid);
-
-									uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
-									new_events.add (parse_syscall (sc.buf, sc.pid, (int32) stack_id_u32));
-								}
-
-								break;
-							}
-							default:
-								break;
-						}
+						handle_callstack_event (e, buf, new_events);
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
 						var e = (Fruity.KdebugTraceDataEvent) kc.code;
-
-						switch (e) {
-							case NEWTHREAD: {
-								uint64 tid = rec.arg1;
-								uint32 pid = (uint32) rec.arg2;
-								bool is_exec = rec.arg3 == 1;
-
-								if (is_exec)
-									remove_all_tids_for_pid (pid, new_events);
-
-								tid_to_pid[tid] = pid;
-								break;
-							}
-							case EXEC: {
-								uint32 pid = (uint32) rec.arg1;
-								uint64 tid = rec.arg5;
-
-								remove_all_tids_for_pid (pid, new_events);
-								tid_to_pid[tid] = pid;
-
-								break;
-							}
-							case THREAD_TERMINATE: {
-								uint64 tid = rec.arg1;
-
-								remove_tid (tid, new_events);
-								break;
-							}
-							case THREAD_TERMINATE_PID: {
-								uint64 tid = rec.arg5;
-
-								remove_tid (tid, new_events);
-								break;
-							}
-							default:
-								assert_not_reached ();
-						}
+						handle_trace_data_event (e, buf, new_events);
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
 						// No need for it for now.
 					} else {
@@ -3005,21 +2893,28 @@ namespace Frida {
 			}
 		}
 
-		private void remove_all_tids_for_pid (uint32 pid, Gee.List<Variant> new_events) {
-			var dead = new Gee.ArrayList<uint64?> ();
-			foreach (var e in tid_to_pid.entries) {
-				if (e.value == pid)
-					dead.add (e.key);
+		private bool maybe_handle_syscall (Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			if (!is_syscall (buf))
+				return false;
+
+			uint64 tid = buf.arg5;
+			uint pid = tid_to_pid[tid];
+
+			{
+				var l = new MutexLocker (mutex);
+				if (!target_pids.has_key (pid))
+					return true;
+				l.free ();
 			}
 
-			foreach (var tid in dead)
-				remove_tid (tid, new_events);
-		}
-
-		private void remove_tid (uint64 tid, Gee.List<Variant> new_events) {
-			tid_to_pid.unset (tid);
-
 			maybe_complete_pending_syscall (tid, new_events);
+
+			pending_syscall_by_tid[tid] = new PendingSyscall () {
+				buf = buf,
+				pid = pid,
+			};
+
+			return true;
 		}
 
 		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
@@ -3086,6 +2981,123 @@ namespace Frida {
 					attachments.end ()
 				});
 			}
+		}
+
+		private void handle_callstack_event (Fruity.KdebugPerfCallstackEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			switch (e) {
+				case UHDR: {
+					uint64 tid = buf.arg5;
+
+					PendingSyscall? sc = pending_syscall_by_tid[tid];
+					if (sc == null)
+						break;
+
+					uint32 sync_nframes = (uint32) buf.arg2;
+					uint32 async_index = (uint32) buf.arg3;
+					uint32 async_nframes = (uint32) buf.arg4;
+
+					uint32 nframes = sync_nframes + async_nframes;
+					uint nevts = (nframes + 3u) / 4u;
+
+					sc.nframes = nframes;
+					sc.async_index = async_index;
+					sc.async_nframes = async_nframes;
+					sc.remaining_evts = nevts;
+
+					break;
+				}
+				case UDATA: {
+					uint64 tid = buf.arg5;
+
+					PendingSyscall? sc = pending_syscall_by_tid[tid];
+					if (sc == null)
+						break;
+
+					sc.frames.append_val (buf.arg1);
+					uint remaining = sc.nframes - sc.frames.length;
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg2);
+						remaining--;
+					}
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg3);
+						remaining--;
+					}
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg4);
+						remaining--;
+					}
+
+					sc.remaining_evts--;
+
+					if (sc.remaining_evts == 0) {
+						pending_syscall_by_tid.unset (tid);
+
+						uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
+						new_events.add (parse_syscall (sc.buf, sc.pid, (int32) stack_id_u32));
+					}
+
+					break;
+				}
+				default:
+					break;
+			}
+		}
+
+		private void handle_trace_data_event (Fruity.KdebugTraceDataEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			switch (e) {
+				case NEWTHREAD: {
+					uint64 tid = buf.arg1;
+					uint32 pid = (uint32) buf.arg2;
+					bool is_exec = buf.arg3 == 1;
+
+					if (is_exec)
+						remove_all_tids_for_pid (pid, new_events);
+
+					tid_to_pid[tid] = pid;
+					break;
+				}
+				case EXEC: {
+					uint32 pid = (uint32) buf.arg1;
+					uint64 tid = buf.arg5;
+
+					remove_all_tids_for_pid (pid, new_events);
+					tid_to_pid[tid] = pid;
+
+					break;
+				}
+				case THREAD_TERMINATE: {
+					uint64 tid = buf.arg1;
+
+					remove_tid (tid, new_events);
+					break;
+				}
+				case THREAD_TERMINATE_PID: {
+					uint64 tid = buf.arg5;
+
+					remove_tid (tid, new_events);
+					break;
+				}
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private void remove_all_tids_for_pid (uint32 pid, Gee.List<Variant> new_events) {
+			var dead = new Gee.ArrayList<uint64?> ();
+			foreach (var e in tid_to_pid.entries) {
+				if (e.value == pid)
+					dead.add (e.key);
+			}
+
+			foreach (var tid in dead)
+				remove_tid (tid, new_events);
+		}
+
+		private void remove_tid (uint64 tid, Gee.List<Variant> new_events) {
+			tid_to_pid.unset (tid);
+
+			maybe_complete_pending_syscall (tid, new_events);
 		}
 
 		private static Variant build_signatures_variant () {
