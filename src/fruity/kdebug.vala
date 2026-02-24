@@ -2,6 +2,7 @@
 namespace Frida.Fruity {
 	public enum KdebugClass {
 		MACH = 1,
+		FSYSTEM = 3,
 		BSD = 4,
 		TRACE = 7,
 		DYLD = 31,
@@ -16,6 +17,41 @@ namespace Frida.Fruity {
 
 	public enum KdebugMachSubclass {
 		EXCP_SC = 12,
+	}
+
+	public enum KdebugFsystemSubclass {
+		FSRW = 1,
+		DKRW,
+		FSVN,
+		FSLOOOKUP,
+		JOURNAL,
+		IOCTL,
+		BOOTCACHE,
+		HFS,
+		APFS,
+		SMB,
+		MOUNT,
+		EXFAT = 14,
+		MSDOS,
+		ACFS,
+		THROTTLE,
+		DECMP,
+		VFS,
+		LIVEFS,
+		NFS;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugFsystemSubclass> (this);
+		}
+	}
+
+	public enum KdebugFsystemFsrwEvent {
+		LOOKUP = 36,
+		LOOKUP_DONE = 39;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<KdebugFsystemFsrwEvent> (this);
+		}
 	}
 
 	public enum KdebugBsdSubclass {

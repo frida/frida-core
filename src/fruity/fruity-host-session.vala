@@ -2557,6 +2557,7 @@ namespace Frida {
 
 		private Gee.Map<uint64?, PendingSyscall> pending_syscall_by_tid =
 			new Gee.HashMap<uint64?, PendingSyscall> (Numeric.uint64_hash, Numeric.uint64_equal);
+		private static Gee.Map<int32, Bytes>? path_arg_indices_by_syscall = null;
 
 		private Gee.Map<uint32, StackInfo> stacks_by_id = new Gee.HashMap<uint32, StackInfo> ();
 		private uint32 next_stack_id = 1;
@@ -2565,6 +2566,8 @@ namespace Frida {
 			new Gee.HashMap<Bytes, Gee.ArrayList<uint32>> (Numeric.bytes_hash, Numeric.bytes_equal);
 
 		private class PendingSyscall {
+			public int32 nr;
+
 			public Fruity.KdBuf buf;
 
 			public uint pid;
@@ -2575,6 +2578,13 @@ namespace Frida {
 			public uint32 async_nframes;
 			public uint remaining_evts;
 			public Array<uint64> frames = new Array<uint64> (false, false);
+
+			public unowned uint8[]? path_arg_indices = null;
+			public uint path_cursor = 0;
+
+			public Gee.List<Variant> enter_attachments = new Gee.ArrayList<Variant> ();
+
+			public Array<uint8>? vfs_bytes = null;
 		}
 
 		private class StackInfo {
@@ -2606,6 +2616,8 @@ namespace Frida {
 			} catch (ThreadError e) {
 				assert_not_reached ();
 			}
+
+			build_path_arg_index_table ();
 
 			core_profile.stackshot.connect (on_stackshot);
 			core_profile.kperfdata.connect (on_kperfdata);
@@ -2764,6 +2776,7 @@ namespace Frida {
 					all_codes.add (Fruity.KdebugCode.from_parts (TRACE, Fruity.KdebugTraceSubclass.DATA));
 					all_codes.add (Fruity.KdebugCode.from_parts (DYLD, Fruity.KdebugDyldSubclass.UUID));
 					all_codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
+					all_codes.add (Fruity.KdebugCode.from_parts (FSYSTEM, Fruity.KdebugFsystemSubclass.FSRW));
 
 					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
 					tc.filter = all_codes;
@@ -2881,6 +2894,9 @@ namespace Frida {
 					if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.CALLSTACK) {
 						var e = (Fruity.KdebugPerfCallstackEvent) kc.code;
 						handle_callstack_event (e, buf, new_events);
+					} else if (klass == FSYSTEM && subclass == Fruity.KdebugFsystemSubclass.FSRW) {
+						var e = (Fruity.KdebugFsystemFsrwEvent) kc.code;
+						handle_fsystem_fsrw_event (e, buf);
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
 						var e = (Fruity.KdebugTraceDataEvent) kc.code;
 						handle_trace_data_event (e, buf, new_events);
@@ -2938,10 +2954,16 @@ namespace Frida {
 
 			maybe_complete_pending_syscall (tid, new_events);
 
+			var syscall_nr = (int32) buf.kcode.code;
+			if (buf.kcode.klass == MACH)
+				syscall_nr = -syscall_nr;
+
 			pending_syscall_by_tid[tid] = new PendingSyscall () {
+				nr = syscall_nr,
 				buf = buf,
 				pid = pid,
 				map_gen = map_gen,
+				path_arg_indices = get_path_arg_indices_for_syscall_nr (syscall_nr),
 			};
 
 			return true;
@@ -2950,7 +2972,7 @@ namespace Frida {
 		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
 			PendingSyscall? sc;
 			if (pending_syscall_by_tid.unset (tid, out sc))
-				new_events.add (parse_syscall (sc.buf, sc.pid, sc.map_gen, -1));
+				new_events.add (make_syscall_event (sc, -1));
 		}
 
 		private static bool is_syscall (Fruity.KdBuf buf) {
@@ -2961,18 +2983,18 @@ namespace Frida {
 				(klass == BSD && subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
 		}
 
-		private static Variant parse_syscall (Fruity.KdBuf buf, uint pid, uint32 map_gen, int32 stack_id) {
+		private static Variant make_syscall_event (PendingSyscall sc, int32 stack_id) {
+			Fruity.KdBuf buf = sc.buf;
 			uint64 tid = buf.arg5;
-
-			var kc = buf.kcode;
-
-			int32 syscall_nr = (int32) kc.code;
-			if (kc.klass == MACH && kc.subclass == Fruity.KdebugMachSubclass.EXCP_SC)
-				syscall_nr = -syscall_nr;
 
 			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
 
-			if (kc.func_qual == START) {
+			if (buf.kcode.func_qual == START) {
+				if (sc.enter_attachments != null) {
+					foreach (var a in sc.enter_attachments)
+						attachments.add_value (a);
+				}
+
 				var ab = new VariantBuilder (new VariantType ("at"));
 				ab.add_value (buf.arg1);
 				ab.add_value (buf.arg2);
@@ -2982,11 +3004,11 @@ namespace Frida {
 				return new Variant.tuple ({
 					"enter",
 					buf.timestamp,
-					pid,
+					sc.pid,
 					tid,
-					syscall_nr,
+					sc.nr,
 					stack_id,
-					map_gen,
+					sc.map_gen,
 					ab.end (),
 					attachments.end ()
 				});
@@ -3001,11 +3023,11 @@ namespace Frida {
 				return new Variant.tuple ({
 					"exit",
 					buf.timestamp,
-					pid,
+					sc.pid,
 					tid,
-					syscall_nr,
+					sc.nr,
 					stack_id,
-					map_gen,
+					sc.map_gen,
 					retval,
 					attachments.end ()
 				});
@@ -3063,7 +3085,7 @@ namespace Frida {
 						pending_syscall_by_tid.unset (tid);
 
 						uint32 stack_id_u32 = intern_stack (sc.frames, sc.async_index, sc.async_nframes);
-						new_events.add (parse_syscall (sc.buf, sc.pid, sc.map_gen, (int32) stack_id_u32));
+						new_events.add (make_syscall_event (sc, (int32) stack_id_u32));
 					}
 
 					break;
@@ -3071,6 +3093,50 @@ namespace Frida {
 				default:
 					break;
 			}
+		}
+
+		private void handle_fsystem_fsrw_event (Fruity.KdebugFsystemFsrwEvent e, Fruity.KdBuf buf) {
+			if (e != LOOKUP)
+				return;
+
+			uint64 tid = buf.arg5;
+
+			var l = new MutexLocker (mutex);
+
+			PendingSyscall? sc = pending_syscall_by_tid[tid];
+			if (sc == null || sc.path_arg_indices == null)
+				return;
+
+			var kc = buf.kcode;
+			bool is_start = kc.func_qual == START;
+			bool is_end = kc.func_qual == END;
+
+			if (sc.vfs_bytes == null)
+				sc.vfs_bytes = new Array<uint8> (false, false);
+
+			if (is_start) {
+				append_u64_le (sc.vfs_bytes, buf.arg2);
+				append_u64_le (sc.vfs_bytes, buf.arg3);
+				append_u64_le (sc.vfs_bytes, buf.arg4);
+			} else {
+				append_u64_le (sc.vfs_bytes, buf.arg1);
+				append_u64_le (sc.vfs_bytes, buf.arg2);
+				append_u64_le (sc.vfs_bytes, buf.arg3);
+				append_u64_le (sc.vfs_bytes, buf.arg4);
+			}
+
+			if (!is_end)
+				return;
+
+			string path = decode_c_string (sc.vfs_bytes);
+			sc.vfs_bytes = null;
+
+			if (sc.path_cursor != sc.path_arg_indices.length) {
+				uint32 arg_index = sc.path_arg_indices[sc.path_cursor++];
+				sc.enter_attachments.add (new Variant.tuple ({ arg_index, new Variant.variant (path) }));
+			}
+
+			l.free ();
 		}
 
 		private void handle_trace_data_event (Fruity.KdebugTraceDataEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
@@ -3416,6 +3482,81 @@ namespace Frida {
 				bytes[8 + i] = (uint8) ((b >> (i * 8)) & 0xff);
 
 			return new Bytes.take ((owned) bytes);
+		}
+
+		private static void append_u64_le (Array<uint8> arr, uint64 v) {
+			for (uint i = 0; i != 8; i++) {
+				var b = (uint8) ((v >> (i * 8)) & 0xff);
+				arr.append_val (b);
+			}
+		}
+
+		private static string decode_c_string (Array<uint8> data) {
+			uint n = data.length;
+			uint end = n;
+			for (uint i = 0; i != n; i++) {
+				if (data.index (i) == 0) {
+					end = i;
+					break;
+				}
+			}
+
+			var b = new uint8[end + 1];
+			for (uint i = 0; i != end; i++)
+				b[i] = data.index (i);
+
+			return (string) b;
+		}
+
+		private static void build_path_arg_index_table () {
+			var map = new Gee.HashMap<int32, Bytes> ();
+
+			foreach (unowned XnuSyscallSignature sig in get_xnu_mach_traps ())
+				add_path_indices_for_sig (map, sig);
+
+			foreach (unowned XnuSyscallSignature sig in get_xnu_bsd_syscalls ())
+				add_path_indices_for_sig (map, sig);
+
+			path_arg_indices_by_syscall = map;
+		}
+
+		private static void add_path_indices_for_sig (Gee.Map<int32, Bytes> indices, XnuSyscallSignature sig) {
+			var arr = new uint8[0];
+
+			for (uint8 i = 0; i != sig.nargs; i++) {
+				unowned XnuSyscallArg a = sig.args[i];
+				if (arg_is_filesystem_path (a.type, a.name))
+					arr += i;
+			}
+
+			if (arr.length == 0)
+				return;
+
+			indices[sig.nr] = new Bytes.take ((owned) arr);
+		}
+
+		private static bool arg_is_filesystem_path (string type, string name) {
+			if (!(type == "char *" || type == "const char *"))
+				return false;
+
+			return (name == "path" ||
+				name == "fname" ||
+				name == "from" ||
+				name == "to" ||
+				name == "path1" ||
+				name == "path2" ||
+				name == "file_path" ||
+				name == "path_p" ||
+				name == "mountdir" ||
+				name == "new_rootfs_path_before" ||
+				name == "old_rootfs_path_after");
+		}
+
+		private static unowned uint8[]? get_path_arg_indices_for_syscall_nr (int32 nr) {
+			Bytes? indices = path_arg_indices_by_syscall[nr];
+			if (indices == null)
+				return null;
+			return indices.get_data ();
 		}
 	}
 }
