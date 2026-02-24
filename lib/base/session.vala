@@ -2199,5 +2199,13 @@ namespace Frida {
 			uint64 b = val_b;
 			return a == b;
 		}
+
+		public uint bytes_hash (Bytes b) {
+			return b.hash ();
+		}
+
+		public static bool bytes_equal (Bytes a, Bytes b) {
+			return a.compare (b) == 0;
+		}
 	}
 }
