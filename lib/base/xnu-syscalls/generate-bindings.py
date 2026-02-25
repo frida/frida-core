@@ -518,7 +518,6 @@ def parse_c_param_list(args_blob: str, path: Path, line_no: int) -> List[Syscall
         ty, name = split_param_decl(p, path, line_no)
         if name is None:
             name = f"arg{idx}"
-        ty = ty.replace("* *", "**")
         if ty == "user_addr_t" and name in {"attrname", "link", "path"}:
             ty = "char *"
         args.append(SyscallArg(type=ty, name=name))
@@ -527,67 +526,94 @@ def parse_c_param_list(args_blob: str, path: Path, line_no: int) -> List[Syscall
 
 def split_param_decl(decl: str, path: Path, line_no: int) -> Tuple[str, Optional[str]]:
     d = strip_c_comments(decl).strip()
+
     if d == "" or d == "void":
         raise RuntimeError(f"{path}:{line_no}: bad parameter decl: {decl!r}")
 
-    d = TRAILING_ARRAY_SUFFIX_RE.sub("", d).strip()
-    d = POINTER_SPACING_RE.sub(" * ", d)
-    d = normalize_whitespace(d)
+    tokens = _tokenize_decl(d)
+    ty_tokens, name = _split_type_and_name(tokens)
 
-    parts = d.split(" ")
-    if not parts:
-        raise RuntimeError(f"{path}:{line_no}: bad parameter decl: {decl!r}")
-
-    if len(parts) == 1:
-        ty = normalize_whitespace(parts[0])
-        if ty == "":
-            raise RuntimeError(
-                f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
-            )
-        return ty, None
-
-    last = parts[-1]
-
-    if last == "*":
-        ty = normalize_whitespace(d)
-        if ty == "":
-            raise RuntimeError(
-                f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
-            )
-        return ty, None
-
-    if last.startswith("*"):
-        name = last[1:]
-        if not PARAM_NAME_RE.match(name):
-            ty = normalize_whitespace(d)
-            if ty == "":
-                raise RuntimeError(
-                    f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
-                )
-            return ty, None
-        ty = " ".join(parts[:-1] + ["*"]).strip()
-        ty = normalize_whitespace(ty)
-        if ty == "":
-            raise RuntimeError(
-                f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
-            )
-        return ty, name
-
-    if PARAM_NAME_RE.match(last):
-        ty = " ".join(parts[:-1]).strip()
-        ty = normalize_whitespace(ty)
-        if ty == "":
-            raise RuntimeError(
-                f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
-            )
-        return ty, last
-
-    ty = normalize_whitespace(d)
-    if ty == "":
+    ty = _format_type(ty_tokens)
+    if not ty:
         raise RuntimeError(
             f"{path}:{line_no}: cannot parse parameter type from {decl!r}"
         )
-    return ty, None
+
+    return ty, _camel_to_snake(name) if name else None
+
+
+def _tokenize_decl(s: str) -> list[str]:
+    out = []
+    for c in s:
+        out.append(" * " if c == "*" else c)
+    return "".join(out).split()
+
+
+def _split_type_and_name(tokens: list[str]) -> Tuple[list[str], Optional[str]]:
+    if not tokens:
+        return [], None
+
+    last = tokens[-1]
+
+    if last == "*":
+        return tokens, None
+
+    stars, remainder = _split_leading_stars(last)
+    if stars:
+        if _is_identifier(remainder):
+            return tokens[:-1] + ["*"] * stars, remainder
+        return tokens, None
+
+    if _is_identifier(last):
+        return tokens[:-1], last
+
+    return tokens, None
+
+
+def _format_type(tokens: list[str]) -> str:
+    formatted: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] != "*":
+            formatted.append(tokens[i])
+            i += 1
+            continue
+
+        j = i
+        while j < len(tokens) and tokens[j] == "*":
+            j += 1
+        formatted.append("*" * (j - i))
+        i = j
+
+    return " ".join(formatted).strip()
+
+
+def _split_leading_stars(token: str) -> Tuple[int, str]:
+    i = 0
+    while i < len(token) and token[i] == "*":
+        i += 1
+    return i, token[i:]
+
+
+def _is_identifier(s: str) -> bool:
+    if not s:
+        return False
+    if not (s[0].isalpha() or s[0] == "_"):
+        return False
+    return all(c.isalnum() or c == "_" for c in s)
+
+
+def _camel_to_snake(name: str) -> str:
+    out = []
+    for i, c in enumerate(name):
+        if (
+            c.isupper()
+            and i > 0
+            and (name[i - 1].islower() or (i + 1 < len(name) and name[i + 1].islower()))
+        ):
+            out.append("_")
+        out.append(c.lower())
+    return "".join(out)
 
 
 def normalize_whitespace(s: str) -> str:
