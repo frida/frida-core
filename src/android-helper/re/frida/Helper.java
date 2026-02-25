@@ -77,7 +77,7 @@ public class Helper {
 			return;
 		}
 
-		Looper.prepare();
+		Looper.prepareMainLooper();
 
 		Context context;
 		try {
