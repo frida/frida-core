@@ -2722,7 +2722,7 @@ namespace Frida {
 				reader.end_member ();
 
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
-				var modules = new VariantBuilder (new VariantType ("as"));
+				var modules = new VariantBuilder (new VariantType ("a(says)"));
 
 				var l = new MutexLocker (mutex);
 				Fruity.CsSignature? sig = target_pids[pid];
@@ -2734,13 +2734,11 @@ namespace Frida {
 						owners => {
 							var byte_array_type = new VariantType ("ay");
 							foreach (var owner in owners) {
-								Variant fields[3];
-								fields[0] = owner.path;
-								fields[1] = new Variant.from_bytes (byte_array_type, owner.uuid, true);
-								int num_fields = 2;
-								if (owner.version != null)
-									fields[num_fields++] = owner.version;
-								modules.add_value (new Variant.tuple (fields[:num_fields]));
+								modules.add_value (new Variant.tuple ({
+									owner.path,
+									new Variant.from_bytes (byte_array_type, owner.uuid, true),
+									(owner.version != null) ? owner.version : "",
+								});
 							}
 						});
 					l.free ();
