@@ -241,7 +241,7 @@ namespace Frida.Fruity {
 
 		public CsSignature parse () throws Error {
 			uint32 magic = r.read_uint32 ();
-			uint32 sig_version = r.read_uint32 ();
+			uint32 version = r.read_uint32 ();
 			uint32 pid = r.read_uint32 ();
 			uint32 stuff = r.read_uint32 ();
 			uint32 flags = r.read_uint32 ();
@@ -251,7 +251,7 @@ namespace Frida.Fruity {
 				throw new Error.PROTOCOL ("Bad signature magic 0x%08x", magic);
 
 			var sig = new CsSignature ();
-			sig.version = sig_version;
+			sig.version = version;
 			sig.pid = pid;
 			sig.stuff = stuff;
 			sig.flags = flags;

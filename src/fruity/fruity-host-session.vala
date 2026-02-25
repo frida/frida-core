@@ -2913,13 +2913,9 @@ namespace Frida {
 					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
 						var e = (Fruity.KdebugTraceDataEvent) kc.code;
 						handle_trace_data_event (e, buf, new_events);
-					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.STRING) {
-						// No need for it for now.
 					} else if (klass == DYLD && subclass == Fruity.KdebugDyldSubclass.UUID) {
 						var e = (Fruity.KdebugDyldUuidEvent) kc.code;
 						handle_dyld_uuid_event (e, buf);
-					} else {
-						// printerr ("Ignoring klass=%s subclass=%u code=%u\n", klass.to_string (), subclass, kc.code);
 					}
 				});
 			} catch (Error e) {
