@@ -2040,15 +2040,15 @@ namespace Frida {
 				reader.end_member ();
 
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
-				var modules = new VariantBuilder (new VariantType ("as"));
+				var modules = new VariantBuilder (new VariantType ("av"));
 
 				tracer.resolver.resolve_addresses (pid, gen, addrs,
 					(addr, mod_idx, rel) => {
 						symbols.add ("(uu)", mod_idx, rel);
 					},
-					(module_list) => {
+					module_list => {
 						foreach (var path in module_list)
-							modules.add_value (path);
+							modules.add_value (new Variant.variant (new Variant.tuple ({ path })));
 					});
 
 				vardict_add (reply, "modules", modules.end ());
@@ -2199,8 +2199,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"enter",
 					event->time_ns,
+					(uint64) event->tid,
 					event->tgid,
-					event->tid,
 					se->syscall_nr,
 					se->stack_id,
 					se->map_gen,
@@ -2211,8 +2211,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"exit",
 					event->time_ns,
+					(uint64) event->tid,
 					event->tgid,
-					event->tid,
 					se->syscall_nr,
 					se->stack_id,
 					se->map_gen,
