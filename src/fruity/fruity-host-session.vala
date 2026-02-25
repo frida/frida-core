@@ -2674,7 +2674,7 @@ namespace Frida {
 					}
 					events.add_value (new Variant.variant (ev));
 					total += ev.get_size ();
-					seen_pids.add (ev.get_child_value (2).get_uint32 ());
+					seen_pids.add (ev.get_child_value (3).get_uint32 ());
 				} while (total < MAX_BATCH_BYTES);
 
 				foreach (var pid in seen_pids)
@@ -2731,9 +2731,19 @@ namespace Frida {
 						(addr, mod_idx, rel32) => {
 							symbols.add ("(uu)", mod_idx, rel32);
 						},
-						(module_list) => {
-							foreach (var path in module_list)
-								modules.add_value (new Variant.string (path));
+						owners => {
+							var byte_array_type = new VariantType ("ay");
+							foreach (var owner in owners) {
+								Variant fields[3];
+								fields[0] = owner.path;
+								fields[1] = new Variant.from_bytes (byte_array_type, owner.uuid, true);
+								int num_fields = 2;
+								if (owner.version != null) {
+									fields[2] = owner.version;
+									num_fields = 3;
+								}
+								modules.add_value (new Variant.tuple (fields[:num_fields]));
+							}
 						});
 					l.free ();
 				} else {
@@ -3020,8 +3030,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"enter",
 					buf.timestamp,
-					sc.pid,
 					tid,
+					sc.pid,
 					sc.nr,
 					sc.stack_id,
 					sc.map_gen,
@@ -3039,8 +3049,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"exit",
 					buf.timestamp,
-					sc.pid,
 					tid,
+					sc.pid,
 					sc.nr,
 					sc.stack_id,
 					sc.map_gen,
@@ -3255,14 +3265,7 @@ namespace Frida {
 
 					break;
 				}
-				case MAP_B:
-				case UNMAP_B:
-				case SHARED_CACHE_B:
-				case AOT_MAP_B:
-					/* Ignore “B” (fsobjid) for now. */
-					break;
 				default:
-					/* Ignore 32-bit variants for now. */
 					break;
 			}
 

@@ -82,7 +82,7 @@ namespace Frida.Fruity {
 			ensure_index (gen);
 
 			var used_owner_to_mod = new Gee.HashMap<CsSigOwner, uint32> ();
-			var module_list = new Gee.ArrayList<string> ();
+			var module_list = new Gee.ArrayList<CsSigOwner> ();
 
 			foreach (var addr in addrs) {
 				CsSigOwner? owner;
@@ -97,7 +97,7 @@ namespace Frida.Fruity {
 				if (!used_owner_to_mod.has_key (owner)) {
 					mod_idx = (uint32) module_list.size;
 					used_owner_to_mod[owner] = mod_idx;
-					module_list.add (owner.path);
+					module_list.add (owner);
 				} else {
 					mod_idx = used_owner_to_mod[owner];
 				}
@@ -109,7 +109,7 @@ namespace Frida.Fruity {
 		}
 
 		public delegate void AddressResolved (uint64 addr, uint32 module_index, uint32 rel);
-		public delegate void ModulesReady (Gee.List<string> modules);
+		public delegate void ModulesReady (Gee.List<CsSigOwner> modules);
 
 		private void ensure_index (uint32 gen) {
 			if (seg_index != null && seg_index_gen == gen)
