@@ -77,7 +77,7 @@ public class Helper {
 			return;
 		}
 
-		Looper.prepare();
+		android.os.Looper.prepareMainLooper();
 
 		Context context;
 		try {
