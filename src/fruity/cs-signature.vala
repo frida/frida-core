@@ -207,10 +207,11 @@ namespace Frida.Fruity {
 		public uint32 a;
 		public uint32 flags;
 
-		public uint64 x;
-		public uint64 y;
+		public uint64 load_timestamp;
+		public uint64 unload_timestamp;
 
-		public uint64 arch;
+		public uint32 cpu_type;
+		public uint32 cpu_subtype;
 
 		public string path;
 		public uint64 image_base;
@@ -271,15 +272,11 @@ namespace Frida.Fruity {
 			o.a = r.read_uint32 ();
 			o.flags = r.read_uint32 () & 0x7fffffff;
 
-			o.x = r.read_uint64 ();
+			o.load_timestamp = r.read_uint64 ();
+			o.unload_timestamp = r.read_uint64 ();
 
-			o.y = r.read_uint64 ();
-			if ((o.y & 0x8000000000000000ULL) != 0)
-				o.y = 0x7fffffffffffffffULL;
-
-			uint32 arch_lo = r.read_uint32 ();
-			uint32 arch_hi = r.read_uint32 ();
-			o.arch = ((uint64) arch_hi << 32) | (uint64) arch_lo;
+			o.cpu_type = r.read_uint32 ();
+			o.cpu_subtype = r.read_uint32 ();
 
 			uint32 nsegs = r.read_uint32 ();
 			uint32 str_len = r.read_uint32 ();
