@@ -2738,10 +2738,8 @@ namespace Frida {
 								fields[0] = owner.path;
 								fields[1] = new Variant.from_bytes (byte_array_type, owner.uuid, true);
 								int num_fields = 2;
-								if (owner.version != null) {
-									fields[2] = owner.version;
-									num_fields = 3;
-								}
+								if (owner.version != null)
+									fields[num_fields++] = owner.version;
 								modules.add_value (new Variant.tuple (fields[:num_fields]));
 							}
 						});
