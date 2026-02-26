@@ -2899,6 +2899,12 @@ namespace Frida {
 				return reply.end ();
 			}
 
+			if (type == "exclude-syscalls") {
+				// TODO: Wire up.
+
+				return reply.end ();
+			}
+
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
