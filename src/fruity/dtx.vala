@@ -1778,6 +1778,12 @@ namespace Frida.Fruity {
 					}
 					case BUFFER: {
 						size_t size = reader.read_uint32 ();
+						if (size == 0) {
+							var gval = Value (typeof (NSObject));
+							elements += (owned) gval;
+							break;
+						}
+
 						unowned uint8[] buf = reader.read_byte_array (size);
 
 						NSObject? obj = NSKeyedArchive.decode (buf);
