@@ -172,7 +172,8 @@ namespace Frida {
 			construct;
 		}
 
-		private Gee.Set<uint> pids_launched_without_lldb = new Gee.HashSet<uint> ();
+		private Gee.Map<uint, Fruity.ProcessControlService> pids_launched_without_lldb =
+			new Gee.HashMap<uint, Fruity.ProcessControlService> ();
 		private Gee.HashMap<uint, LLDBSession> lldb_sessions = new Gee.HashMap<uint, LLDBSession> ();
 		private Gee.HashMap<AgentSessionId?, GadgetEntry> gadget_entries =
 			new Gee.HashMap<AgentSessionId?, GadgetEntry> (AgentSessionId.hash, AgentSessionId.equal);
@@ -757,16 +758,54 @@ namespace Frida {
 			if (program[0] == '/')
 				throw new Error.NOT_SUPPORTED ("Only able to spawn apps");
 
-			var launch_options = new LLDB.LaunchOptions ();
-
 			if (options.has_envp)
 				throw new Error.NOT_SUPPORTED ("The 'envp' option is not supported when spawning iOS apps");
 
-			if (options.has_env)
-				launch_options.env = options.env;
-
 			if (options.cwd.length > 0)
 				throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning iOS apps");
+
+			var installation_proxy = yield Fruity.InstallationProxyClient.open (device, cancellable);
+
+			var query = new Fruity.PlistDict ();
+			var ids = new Fruity.PlistArray ();
+			ids.add_string (program);
+			query.set_array ("BundleIDs", ids);
+
+			var matches = yield installation_proxy.lookup (query, cancellable);
+			var app = matches[program];
+			if (app == null)
+				throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
+
+			var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
+
+			yield ensure_app_not_running (program, process_control, cancellable);
+
+			if (!app.debuggable) {
+				var launch_options = new Fruity.LaunchOptions ();
+
+				string[] args = {};
+				if (options.has_argv) {
+					var provided_argv = options.argv;
+					var length = provided_argv.length;
+					for (int i = 1; i < length; i++)
+						args += provided_argv[i];
+				}
+				launch_options.arguments = args;
+
+				uint pid = yield process_control.launch (program, launch_options, cancellable);
+				yield process_control.send_signal (pid, LLDB.Signal.SIGSTOP);
+
+				pids_launched_without_lldb[pid] = process_control;
+				process_control.process_terminated.connect (on_non_debuggable_process_terminated);
+				yield process_control.start_observing_pid (pid, cancellable);
+
+				return pid;
+			}
+
+			var launch_options = new LLDB.LaunchOptions ();
+
+			if (options.has_env)
+				launch_options.env = options.env;
 
 			HashTable<string, Variant> aux = options.aux;
 
@@ -785,41 +824,6 @@ namespace Frida {
 						"frida-gadget.dylib to use");
 				}
 				gadget_path = gadget_value.get_string ();
-			}
-
-			var installation_proxy = yield Fruity.InstallationProxyClient.open (device, cancellable);
-
-			var query = new Fruity.PlistDict ();
-			var ids = new Fruity.PlistArray ();
-			ids.add_string (program);
-			query.set_array ("BundleIDs", ids);
-
-			var matches = yield installation_proxy.lookup (query, cancellable);
-			var app = matches[program];
-			if (app == null)
-				throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
-
-			if (!app.debuggable) {
-				var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
-
-				var launch_opts = new Fruity.LaunchOptions ();
-				launch_opts.existing_instance_policy = KILL;
-
-				string[] args = {};
-				if (options.has_argv) {
-					var provided_argv = options.argv;
-					var length = provided_argv.length;
-					for (int i = 1; i < length; i++)
-						args += provided_argv[i];
-				}
-				launch_opts.arguments = args;
-
-				uint pid = yield process_control.launch (program, launch_opts, cancellable);
-				yield process_control.send_signal (pid, LLDB.Signal.SIGSTOP);
-
-				pids_launched_without_lldb.add (pid);
-
-				return pid;
 			}
 
 			string[] argv = { app.path };
@@ -849,6 +853,39 @@ namespace Frida {
 			return process.pid;
 		}
 
+		private async void ensure_app_not_running (string bundle_id, Fruity.ProcessControlService process_control,
+				Cancellable? cancellable) throws Error, IOError {
+			uint existing_pid = yield process_control.process_identifier_for_bundle_identifier (bundle_id, cancellable);
+			if (existing_pid == 0)
+				return;
+
+			var terminated = new Promise<bool> ();
+			var handler = process_control.process_terminated.connect ((pid, exit_code, crashing_signal) => {
+				if (pid == existing_pid)
+					terminated.resolve (true);
+			});
+
+			try {
+				yield process_control.start_observing_pid (existing_pid, cancellable);
+
+				uint pid_now = yield process_control.process_identifier_for_bundle_identifier (bundle_id, cancellable);
+				if (pid_now != existing_pid) {
+					yield process_control.stop_observing_pid (existing_pid, cancellable);
+					return;
+				}
+
+				yield process_control.kill (existing_pid, cancellable);
+
+				yield terminated.future.wait_async (cancellable);
+			} finally {
+				process_control.disconnect (handler);
+			}
+		}
+
+		private void on_non_debuggable_process_terminated (uint pid, int exit_code, int crashing_signal) {
+			pids_launched_without_lldb.unset (pid);
+		}
+
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			var server = yield get_remote_server (cancellable);
 			try {
@@ -859,8 +896,9 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			if (pids_launched_without_lldb.remove (pid)) {
-				var process_control = yield Fruity.ProcessControlService.open (device, cancellable);
+			Fruity.ProcessControlService process_control;
+			if (pids_launched_without_lldb.unset (pid, out process_control)) {
+				yield process_control.stop_observing_pid (pid, cancellable);
 				yield process_control.send_signal (pid, LLDB.Signal.SIGCONT);
 				return;
 			}

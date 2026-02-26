@@ -321,6 +321,8 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class ProcessControlService : Object, AsyncInitable {
+		public signal void process_terminated (uint pid, int exit_code, int crashing_signal);
+
 		public HostChannelProvider channel_provider {
 			get;
 			construct;
@@ -350,7 +352,6 @@ namespace Frida.Fruity {
 
 			channel = connection.make_channel ("com.apple.instruments.server.services.processcontrol");
 			channel.invocation.connect (on_invocation);
-			channel.notification.connect (on_notification);
 
 			return true;
 		}
@@ -445,12 +446,32 @@ namespace Frida.Fruity {
 			yield channel.invoke ("sendSignal:toPid:", args, cancellable);
 		}
 
-		public void on_invocation (string method_name, DTXArgumentList args, DTXMessageTransportFlags transport_flags) {
-			printerr ("on_invocation(): %s\n", method_name);
+		private void on_invocation (string method_name, DTXArgumentList args, DTXMessageTransportFlags transport_flags) {
+			if (method_name == "processWithPID:terminatedWithExitCode:orCrashingSignal:") {
+				if (args.elements.length != 3)
+					return;
+
+				uint pid;
+				if (!try_parse_int (args.elements[0], out pid))
+					return;
+
+				int exit_code = -1;
+				int crashing_signal = -1;
+				if (!try_parse_int (args.elements[1], out exit_code)) {
+					if (!try_parse_int (args.elements[2], out crashing_signal))
+						return;
+				}
+
+				process_terminated (pid, exit_code, crashing_signal);
+			}
 		}
 
-		private void on_notification (NSObject obj) {
-			printerr ("on_notification(): %s\n", obj.to_string ());
+		private bool try_parse_int (Value v, out int i) {
+			i = -1;
+			if (!v.holds (typeof (NSNumber)))
+				return false;
+			i = (int) ((NSNumber) v.get_object ()).integer;
+			return true;
 		}
 	}
 
@@ -547,7 +568,6 @@ namespace Frida.Fruity {
 		}
 
 		private void on_data (Bytes blob) {
-			// printerr ("on_data() blob.size=%zu\n", blob.get_size ());
 			if (Kcdata.is_stackshot (blob))
 				stackshot (blob);
 			else
