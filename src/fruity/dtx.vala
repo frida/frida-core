@@ -349,8 +349,47 @@ namespace Frida.Fruity {
 			var connection = yield DTXConnection.obtain (channel_provider, cancellable);
 
 			channel = connection.make_channel ("com.apple.instruments.server.services.processcontrol");
+			channel.invocation.connect (on_invocation);
+			channel.notification.connect (on_notification);
 
 			return true;
+		}
+
+		public async uint process_identifier_for_bundle_identifier (string bundle_id, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSString (bundle_id));
+			var response = yield channel.invoke ("processIdentifierForBundleIdentifier:", args, cancellable);
+
+			NSNumber? pid = response as NSNumber;
+			if (pid == null)
+				throw new Error.PROTOCOL ("Malformed response");
+
+			return (uint) pid.integer;
+		}
+
+		public async bool is_pid_debuggable (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSNumber.from_integer (pid));
+			var response = yield channel.invoke ("isPidDebuggable:", args, cancellable);
+
+			NSNumber? is_debuggable = response as NSNumber;
+			if (is_debuggable == null)
+				throw new Error.PROTOCOL ("Malformed response");
+
+			return is_debuggable.boolean;
+		}
+
+		public async void start_observing_pid (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSNumber.from_integer (pid));
+			yield channel.invoke ("startObservingPid:", args, cancellable);
+		}
+
+		public async void stop_observing_pid (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			var args = new DTXArgumentListBuilder ()
+				.append_object (new NSNumber.from_integer (pid));
+			yield channel.invoke ("stopObservingPid:", args, cancellable);
 		}
 
 		public async uint launch (string bundle_id, LaunchOptions? options = null, Cancellable? cancellable = null)
@@ -363,14 +402,23 @@ namespace Frida.Fruity {
 			foreach (unowned string arg in opts.arguments)
 				args_val.add_object (new NSString (arg));
 
+			var env_val = new NSDictionary ();
+			foreach (unowned string entry in opts.environment) {
+				string[] tokens = entry.split ("=", 2);
+				if (tokens.length != 2)
+					throw new Error.INVALID_ARGUMENT ("Invalid environment variable entry: %s", entry);
+				env_val.set_value (tokens[0], new NSString (tokens[1]));
+			}
+
 			var opts_val = new NSDictionary ();
 			opts_val.set_value ("StartSuspendedKey", new NSNumber.from_boolean (opts.launch_mode == SUSPENDED));
 			opts_val.set_value ("KillExisting", new NSNumber.from_boolean (opts.existing_instance_policy == KILL));
+			// TODO: Support CaptureOutput + iODestinationKey
 
 			var dtx_args = new DTXArgumentListBuilder ()
 				.append_object (new NSString (""))
 				.append_object (new NSString (bundle_id))
-				.append_object (new NSDictionary ())
+				.append_object (env_val)
 				.append_object (args_val)
 				.append_object (opts_val);
 			var response = yield channel.invoke (
@@ -396,10 +444,24 @@ namespace Frida.Fruity {
 				.append_object (new NSNumber.from_integer (pid));
 			yield channel.invoke ("sendSignal:toPid:", args, cancellable);
 		}
+
+		public void on_invocation (string method_name, DTXArgumentList args, DTXMessageTransportFlags transport_flags) {
+			printerr ("on_invocation(): %s\n", method_name);
+		}
+
+		private void on_notification (NSObject obj) {
+			printerr ("on_notification(): %s\n", obj.to_string ());
+		}
 	}
 
 	public sealed class LaunchOptions : Object {
 		public string[] arguments {
+			get;
+			set;
+			default = {};
+		}
+
+		public string[] environment {
 			get;
 			set;
 			default = {};
@@ -1514,6 +1576,8 @@ namespace Frida.Fruity {
 		public void notify_of_published_capabilities () throws Error {
 			var capabilities = new NSDictionary ();
 			capabilities.set_value ("com.apple.private.DTXConnection", new NSNumber.from_integer (1));
+			capabilities.set_value ("com.apple.instruments.client.processcontrol.capability.terminationCallback",
+				new NSNumber.from_integer (1));
 
 			var args = new DTXArgumentListBuilder ()
 				.append_object (capabilities);
