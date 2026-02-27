@@ -444,6 +444,7 @@ static void frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddre
 static void frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadState * thread_state, gboolean enabled, GumCpuType cpu_type);
 static gboolean frida_is_hardware_breakpoint_support_working (void);
 
+static gboolean frida_find_restart_with_dyld_in_cache (const GumDarwinSymbolDetails * details, gpointer user_data);
 static GumAddress frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start);
 static GHashTable * frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld);
 static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size);
@@ -2107,18 +2108,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     frida_spawn_instance_set_nth_breakpoint (instance, i++, sim_notify_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
-    GumAddress restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
-        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN6mach_o6HeaderEPK15DyldSharedCachePv");
-    if (restart_with_dyld_in_cache == 0)
-    {
-      restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
-          "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv");
-    }
-    if (restart_with_dyld_in_cache == 0)
-    {
-      restart_with_dyld_in_cache = gum_darwin_module_resolve_symbol_address (dyld,
-        "__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv");
-    }
+    GumAddress restart_with_dyld_in_cache = 0;
+    gum_darwin_module_enumerate_symbols (dyld, frida_find_restart_with_dyld_in_cache, &restart_with_dyld_in_cache);
     if (restart_with_dyld_in_cache != 0)
       frida_spawn_instance_set_nth_breakpoint (instance, i++, restart_with_dyld_in_cache, FRIDA_BREAKPOINT_REPEAT_NEVER);
   }
@@ -5440,6 +5431,19 @@ frida_is_hardware_breakpoint_support_working (void)
 #else
   return TRUE;
 #endif
+}
+
+static gboolean
+frida_find_restart_with_dyld_in_cache (const GumDarwinSymbolDetails * details, gpointer user_data)
+{
+  if (strstr (details->name, "restartWithDyldInCache") != NULL)
+  {
+    GumAddress * restart_with_dyld_in_cache = user_data;
+    *restart_with_dyld_in_cache = details->address;
+    return FALSE;
+  }
+
+  return TRUE;
 }
 
 static GumAddress
