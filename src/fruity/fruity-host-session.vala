@@ -2582,6 +2582,7 @@ namespace Frida {
 		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
 
 		private Gee.Map<uint, Fruity.CsSignature> target_pids = new Gee.HashMap<uint, Fruity.CsSignature> ();
+		private Gee.Set<int32> excluded_syscalls = new Gee.HashSet<int32> ();
 		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
 
 		private Gee.Map<uint, uint32> map_gen_by_pid = new Gee.HashMap<uint, uint32> ();
@@ -2900,7 +2901,13 @@ namespace Frida {
 			}
 
 			if (type == "exclude-syscalls") {
-				// TODO: Wire up.
+				reader.read_member ("native");
+				var nrs = read_int32_array (reader);
+				reader.end_member ();
+
+				var l = new MutexLocker (mutex);
+				excluded_syscalls.add_all_array (nrs);
+				l.free ();
 
 				return reply.end ();
 			}
@@ -3005,20 +3012,20 @@ namespace Frida {
 			uint64 tid = buf.arg5;
 			uint pid = tid_to_pid[tid];
 
+			var syscall_nr = (int32) buf.kcode.code;
+			if (buf.kcode.klass == MACH)
+				syscall_nr = -syscall_nr;
+
 			uint32 map_gen;
 			{
 				var l = new MutexLocker (mutex);
-				if (!target_pids.has_key (pid))
+				if (!target_pids.has_key (pid) || excluded_syscalls.contains (syscall_nr))
 					return true;
 				map_gen = get_map_gen_unlocked (pid);
 				l.free ();
 			}
 
 			maybe_complete_pending_syscall (tid, new_events);
-
-			var syscall_nr = (int32) buf.kcode.code;
-			if (buf.kcode.klass == MACH)
-				syscall_nr = -syscall_nr;
 
 			pending_syscall_by_tid[tid] = new PendingSyscall () {
 				nr = syscall_nr,
@@ -3427,7 +3434,21 @@ namespace Frida {
 			return new Variant.tuple ({ sig.nr, sig.name, args.end () });
 		}
 
-		private delegate void UInt32Handler (uint32 v) throws Error;
+		private static int32[] read_int32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new int32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < int32.MIN || v > int32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (int32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
 
 		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
 			uint n = reader.count_elements ();
@@ -3566,8 +3587,7 @@ namespace Frida {
 			}
 
 			var b = new uint8[end + 1];
-			for (uint i = 0; i != end; i++)
-				b[i] = data.index (i);
+			Memory.copy (b, data.data, end);
 
 			return (string) b;
 		}
