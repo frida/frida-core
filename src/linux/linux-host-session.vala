@@ -2130,7 +2130,12 @@ namespace Frida {
 			}
 
 			if (type == "exclude-syscalls") {
-				// TODO: Wire up.
+				int32[]? native_nrs;
+				if (reader.has_member ("native")) {
+					reader.read_member ("native");
+					var nrs = read_int32_array (reader);
+					reader.end_member ();
+				}
 
 				return reply.end ();
 			}
