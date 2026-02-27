@@ -403,7 +403,7 @@ namespace Frida {
 			unowned string protocol = tokens[0];
 
 			if (protocol == "syscall-trace")
-				return new SyscallTraceServiceSession ();
+				return new LinuxSyscallTraceServiceSession ();
 
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
@@ -1911,7 +1911,7 @@ namespace Frida {
 	}
 #endif
 
-	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+	private sealed class LinuxSyscallTraceServiceSession : Object, ServiceSession {
 		private SyscallTracer? tracer = new SyscallTracer ();
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
@@ -2410,6 +2410,22 @@ namespace Frida {
 
 		private delegate void UInt32Handler (uint32 v) throws Error;
 		private delegate void StringHandler (string s) throws Error;
+
+		private static int32[] read_int32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new int32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < int32.MIN || v > int32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (int32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
 
 		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
 			uint n = reader.count_elements ();

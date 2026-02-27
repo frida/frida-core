@@ -1186,7 +1186,7 @@ namespace Frida {
 				var core_profile = yield Fruity.CoreProfileService.open (device, cancellable);
 				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
 
-				return new SyscallTraceServiceSession (core_profile, device_info);
+				return new FruitySyscallTraceServiceSession (core_profile, device_info);
 			}
 
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
@@ -2562,7 +2562,7 @@ namespace Frida {
 		}
 	}
 
-	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+	private sealed class FruitySyscallTraceServiceSession : Object, ServiceSession {
 		public Fruity.CoreProfileService core_profile {
 			get;
 			construct;
@@ -2656,7 +2656,7 @@ namespace Frida {
 		private const uint64 FNV1A64_OFFSET = 1469598103934665603ULL;
 		private const uint64 FNV1A64_PRIME  = 1099511628211ULL;
 
-		public SyscallTraceServiceSession (Fruity.CoreProfileService core_profile, Fruity.DeviceInfoService info_service) {
+		public FruitySyscallTraceServiceSession (Fruity.CoreProfileService core_profile, Fruity.DeviceInfoService info_service) {
 			Object (core_profile: core_profile, info_service: info_service);
 		}
 
