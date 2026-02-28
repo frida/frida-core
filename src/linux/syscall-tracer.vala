@@ -21,6 +21,7 @@ public sealed class Frida.SyscallTracer : Object {
 
 	private BpfMap? target_tgids;
 	private BpfMap? target_uids;
+	private BpfMap? excluded_syscalls;
 
 	private BpfRingbufReader? syscall_events_reader;
 	private IOChannel? syscall_events_channel;
@@ -51,6 +52,7 @@ public sealed class Frida.SyscallTracer : Object {
 
 		target_tgids = obj.maps.get_by_name ("target_tgids");
 		target_uids = obj.maps.get_by_name ("target_uids");
+		excluded_syscalls = obj.maps.get_by_name ("excluded_syscalls");
 		var syscall_events = obj.maps.get_by_name ("syscall_events");
 		var map_events = obj.maps.get_by_name ("map_events");
 		stacks = obj.maps.get_by_name ("stacks");
@@ -94,6 +96,7 @@ public sealed class Frida.SyscallTracer : Object {
 		stats = null;
 		process_states = null;
 		stacks = null;
+		excluded_syscalls = null;
 		target_uids = null;
 		target_tgids = null;
 
@@ -114,6 +117,10 @@ public sealed class Frida.SyscallTracer : Object {
 
 	public void remove_target_uid (uint uid) throws Error {
 		target_uids.remove_u32 (uid);
+	}
+
+	public void exclude_syscall (uint nr) throws Error {
+		excluded_syscalls.update_u32_u8 (nr, 1);
 	}
 
 	public DrainStatus drain_events (SyscallEventHandler on_event) {

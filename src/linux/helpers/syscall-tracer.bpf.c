@@ -13,12 +13,13 @@
 
 #define MAX_TARGET_TGIDS 4096
 #define MAX_TARGET_UIDS 256
+#define MAX_EXCLUDED_SYSCALLS 512
 #define MAX_MAP_STATES 8192
 #define MAX_STACK_ENTRIES 16384
 #define MAX_INFLIGHT_COPIES 4096
 
 #define MAX_STACK_DEPTH 16
-#define MAX_PATH_DEPTH 20
+#define MAX_PATH_DEPTH 18
 #define MAX_PATH 256
 #define MAX_STAT 512
 #define MAX_SOCK 128
@@ -329,6 +330,15 @@ target_uids SEC (".maps");
 
 struct
 {
+  __uint (type, BPF_MAP_TYPE_HASH);
+  __uint (max_entries, MAX_EXCLUDED_SYSCALLS);
+  __type (key, __s32);
+  __type (value, __u8);
+}
+excluded_syscalls SEC (".maps");
+
+struct
+{
   __uint (type, BPF_MAP_TYPE_RINGBUF);
   __uint (max_entries, 1 << 22);
 }
@@ -465,6 +475,7 @@ struct vm_area_struct
 } __attribute__ ((preserve_access_index));
 
 static bool should_trace_current (__u32 * out_tgid, __u32 * out_tid);
+static bool syscall_is_excluded (__s32 nr);
 
 static SyscallEnterEventNone * reserve_enter_none (void);
 static SyscallEnterEventTimespec * reserve_enter_timespec (void);
@@ -522,6 +533,9 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
     return 0;
 
   __s32 nr = (__s32) ctx->id;
+  if (syscall_is_excluded (nr))
+    return 0;
+
   __u32 map_gen = ensure_map_gen (tgid, tid);
 
   if (nr == FRIDA_LINUX_SYSCALL_OPENAT ||
@@ -836,6 +850,9 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
     return 0;
 
   __s32 nr = (__s32) ctx->id;
+  if (syscall_is_excluded (nr))
+    return 0;
+
   __u32 map_gen = ensure_map_gen (tgid, tid);
 
   Inflight * in = bpf_map_lookup_elem (&inflight, &tid);
@@ -1127,6 +1144,12 @@ should_trace_current (__u32 * out_tgid, __u32 * out_tid)
     return true;
 
   return false;
+}
+
+static bool
+syscall_is_excluded (__s32 nr)
+{
+  return bpf_map_lookup_elem (&excluded_syscalls, &nr) != NULL;
 }
 
 static SyscallEnterEventNone *

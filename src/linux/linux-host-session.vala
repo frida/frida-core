@@ -2130,10 +2130,15 @@ namespace Frida {
 			}
 
 			if (type == "exclude-syscalls") {
-				int32[]? native_nrs;
 				if (reader.has_member ("native")) {
 					reader.read_member ("native");
-					var nrs = read_int32_array (reader);
+					foreach_uint32 (reader, nr => tracer.exclude_syscall (nr));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("compat32")) {
+					reader.read_member ("compat32");
+					foreach_uint32 (reader, nr => tracer.exclude_syscall (nr));
 					reader.end_member ();
 				}
 
