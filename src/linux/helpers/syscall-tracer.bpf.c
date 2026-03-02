@@ -13,18 +13,27 @@
 
 #define MAX_TARGET_TGIDS 4096
 #define MAX_TARGET_UIDS 256
+#define MAX_EXCLUDED_SYSCALLS 1024
 #define MAX_MAP_STATES 8192
 #define MAX_STACK_ENTRIES 16384
 #define MAX_INFLIGHT_COPIES 4096
 
 #define MAX_STACK_DEPTH 16
-#define MAX_PATH_DEPTH 20
+#define MAX_PATH_DEPTH 18
 #define MAX_PATH 256
 #define MAX_STAT 512
 #define MAX_SOCK 128
 #define MAX_BUF_BUILDER_SIZE 1024
 
 #define SYSCALL_NARGS 6
+
+#ifdef FRIDA_HAS_COMPAT32
+# if defined (__TARGET_ARCH_x86)
+#  define FRIDA_TIF_COMPAT32 29
+# elif defined (__TARGET_ARCH_arm64)
+#  define FRIDA_TIF_COMPAT32 22
+# endif
+#endif
 
 typedef struct _Event Event;
 typedef __u16 EventType;
@@ -53,6 +62,7 @@ typedef struct _MapCreateEvent MapCreateEvent;
 typedef struct _MapDestroyRangeEvent MapDestroyRangeEvent;
 
 typedef struct _ProcessState ProcessState;
+typedef __u8 Abi;
 typedef struct _Inflight Inflight;
 typedef struct _Stats Stats;
 typedef struct _BufBuilder BufBuilder;
@@ -235,8 +245,15 @@ struct _MapDestroyRangeEvent
 
 struct _ProcessState
 {
-  __u8 abi;
+  Abi abi;
   __u32 map_gen;
+};
+
+enum _Abi
+{
+  ABI_INVALID,
+  ABI_NATIVE,
+  ABI_COMPAT32,
 };
 
 struct _Inflight
@@ -329,6 +346,15 @@ target_uids SEC (".maps");
 
 struct
 {
+  __uint (type, BPF_MAP_TYPE_HASH);
+  __uint (max_entries, MAX_EXCLUDED_SYSCALLS);
+  __type (key, __u64);
+  __type (value, __u8);
+}
+excluded_syscalls SEC (".maps");
+
+struct
+{
   __uint (type, BPF_MAP_TYPE_RINGBUF);
   __uint (max_entries, 1 << 22);
 }
@@ -402,6 +428,16 @@ struct trace_event_raw_sys_exit
 
 typedef __u32 dev_t;
 
+struct thread_info
+{
+  unsigned long flags;
+} __attribute__ ((preserve_access_index));
+
+struct task_struct
+{
+  struct thread_info thread_info;
+} __attribute__ ((preserve_access_index));
+
 struct super_block
 {
   dev_t s_dev;
@@ -465,6 +501,9 @@ struct vm_area_struct
 } __attribute__ ((preserve_access_index));
 
 static bool should_trace_current (__u32 * out_tgid, __u32 * out_tid);
+static Abi get_current_abi (void);
+static bool syscall_is_excluded (Abi abi, __s32 nr);
+static __u64 make_excluded_key (Abi abi, __s32 nr);
 
 static SyscallEnterEventNone * reserve_enter_none (void);
 static SyscallEnterEventTimespec * reserve_enter_timespec (void);
@@ -493,7 +532,7 @@ static void maybe_schedule_str_out_copy (__u32 tid, __s32 nr, __u16 arg_index, _
 static void maybe_schedule_stat_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 len);
 static void maybe_schedule_sock_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u64 user_len_ptr, __u32 max_len);
 
-static __u32 ensure_map_gen (__u32 tgid, __u32 tid);
+static bool ensure_process_state (__u32 tgid, __u32 tid, Abi abi, __u32 * out_map_gen);
 static __u32 bump_map_gen (__u32 tgid);
 static bool emit_need_snapshot (__u32 tgid, __u32 tid);
 
@@ -521,8 +560,15 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
   if (!should_trace_current (&tgid, &tid))
     return 0;
 
+  Abi abi = get_current_abi ();
+
   __s32 nr = (__s32) ctx->id;
-  __u32 map_gen = ensure_map_gen (tgid, tid);
+  if (syscall_is_excluded (abi, nr))
+    return 0;
+
+  __u32 map_gen;
+  if (!ensure_process_state (tgid, tid, abi, &map_gen))
+    return 0;
 
   if (nr == FRIDA_LINUX_SYSCALL_OPENAT ||
       nr == FRIDA_LINUX_SYSCALL_FACCESSAT ||
@@ -835,8 +881,15 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
   if (!should_trace_current (&tgid, &tid))
     return 0;
 
+  Abi abi = get_current_abi ();
+
   __s32 nr = (__s32) ctx->id;
-  __u32 map_gen = ensure_map_gen (tgid, tid);
+  if (syscall_is_excluded (abi, nr))
+    return 0;
+
+  __u32 map_gen;
+  if (!ensure_process_state (tgid, tid, abi, &map_gen))
+    return 0;
 
   Inflight * in = bpf_map_lookup_elem (&inflight, &tid);
   if (in != NULL && in->kind == INFLIGHT_KIND_STR_OUT_COPY && in->syscall_nr == nr)
@@ -1127,6 +1180,33 @@ should_trace_current (__u32 * out_tgid, __u32 * out_tid)
     return true;
 
   return false;
+}
+
+static Abi
+get_current_abi (void)
+{
+#ifdef FRIDA_TIF_COMPAT32
+  struct task_struct * task = bpf_get_current_task_btf ();
+  unsigned long flags = BPF_CORE_READ (task, thread_info.flags);
+
+  if (flags & (1UL << FRIDA_TIF_COMPAT32))
+    return ABI_COMPAT32;
+#endif
+
+  return ABI_NATIVE;
+}
+
+static bool
+syscall_is_excluded (Abi abi, __s32 nr)
+{
+  __u64 k = make_excluded_key (abi, nr);
+  return bpf_map_lookup_elem (&excluded_syscalls, &k) != NULL;
+}
+
+static __u64
+make_excluded_key (Abi abi, __s32 nr)
+{
+  return ((__u64) abi << 32) | (__u32) nr;
 }
 
 static SyscallEnterEventNone *
@@ -1440,15 +1520,15 @@ maybe_schedule_sock_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_p
   bpf_map_update_elem (&inflight, &tid, &v, BPF_ANY);
 }
 
-static __u32
-ensure_map_gen (__u32 tgid, __u32 tid)
+static bool
+ensure_process_state (__u32 tgid, __u32 tid, Abi abi, __u32 * out_map_gen)
 {
   ProcessState * st = bpf_map_lookup_elem (&process_states, &tgid);
   if (st == NULL)
   {
     ProcessState init;
 
-    init.abi = 0;
+    init.abi = abi;
     init.map_gen = 0;
 
     long r = bpf_map_update_elem (&process_states, &tgid, &init, BPF_NOEXIST);
@@ -1461,16 +1541,17 @@ ensure_map_gen (__u32 tgid, __u32 tid)
       else
       {
         bpf_map_delete_elem (&process_states, &tgid);
-        return 0;
+        return false;
       }
     }
 
     st = bpf_map_lookup_elem (&process_states, &tgid);
     if (st == NULL)
-      return 0;
+      return false;
   }
 
-  return st->map_gen;
+  *out_map_gen = st->map_gen;
+  return true;
 }
 
 static __u32

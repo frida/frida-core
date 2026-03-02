@@ -21,6 +21,7 @@ public sealed class Frida.SyscallTracer : Object {
 
 	private BpfMap? target_tgids;
 	private BpfMap? target_uids;
+	private BpfMap? excluded_syscalls;
 
 	private BpfRingbufReader? syscall_events_reader;
 	private IOChannel? syscall_events_channel;
@@ -51,6 +52,7 @@ public sealed class Frida.SyscallTracer : Object {
 
 		target_tgids = obj.maps.get_by_name ("target_tgids");
 		target_uids = obj.maps.get_by_name ("target_uids");
+		excluded_syscalls = obj.maps.get_by_name ("excluded_syscalls");
 		var syscall_events = obj.maps.get_by_name ("syscall_events");
 		var map_events = obj.maps.get_by_name ("map_events");
 		stacks = obj.maps.get_by_name ("stacks");
@@ -94,6 +96,7 @@ public sealed class Frida.SyscallTracer : Object {
 		stats = null;
 		process_states = null;
 		stacks = null;
+		excluded_syscalls = null;
 		target_uids = null;
 		target_tgids = null;
 
@@ -114,6 +117,11 @@ public sealed class Frida.SyscallTracer : Object {
 
 	public void remove_target_uid (uint uid) throws Error {
 		target_uids.remove_u32 (uid);
+	}
+
+	public void exclude_syscall (Abi abi, uint nr) throws Error {
+		uint64 key = ((uint64) abi << 32) | (uint64) nr;
+		excluded_syscalls.update_u64_u8 (key, 1);
 	}
 
 	public DrainStatus drain_events (SyscallEventHandler on_event) {
@@ -226,7 +234,7 @@ public sealed class Frida.SyscallTracer : Object {
 					resolver.refresh_snapshot (ev->tgid);
 
 					var s = ProcessState ();
-					s.abi = compute_abi_from_pid (ev->tgid);
+					process_states.lookup_raw ((uint8[]) &ev->tgid, (uint8[]) &s);
 					s.map_gen = 1;
 					process_states.update_raw ((uint8[]) &ev->tgid, (uint8[]) &s);
 				} catch (GLib.Error e) {
@@ -280,23 +288,6 @@ public sealed class Frida.SyscallTracer : Object {
 			default:
 				break;
 		}
-	}
-
-	private static Abi compute_abi_from_pid (uint32 tgid) {
-#if X86_64 || ARM64
-		try {
-			var cpu = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) tgid);
-#if X86_64
-			return (cpu == IA32) ? Abi.COMPAT32 : Abi.NATIVE;
-#elif ARM64
-			return (cpu == ARM) ? Abi.COMPAT32 : Abi.NATIVE;
-#endif
-		} catch (Gum.Error e) {
-			return NATIVE;
-		}
-#else
-		return NATIVE;
-#endif
 	}
 
 	public struct Event {

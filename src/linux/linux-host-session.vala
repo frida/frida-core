@@ -403,7 +403,7 @@ namespace Frida {
 			unowned string protocol = tokens[0];
 
 			if (protocol == "syscall-trace")
-				return new SyscallTraceServiceSession ();
+				return new LinuxSyscallTraceServiceSession ();
 
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
@@ -1911,7 +1911,7 @@ namespace Frida {
 	}
 #endif
 
-	private sealed class SyscallTraceServiceSession : Object, ServiceSession {
+	private sealed class LinuxSyscallTraceServiceSession : Object, ServiceSession {
 		private SyscallTracer? tracer = new SyscallTracer ();
 
 		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
@@ -2040,15 +2040,15 @@ namespace Frida {
 				reader.end_member ();
 
 				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
-				var modules = new VariantBuilder (new VariantType ("as"));
+				var modules = new VariantBuilder (new VariantType ("av"));
 
 				tracer.resolver.resolve_addresses (pid, gen, addrs,
 					(addr, mod_idx, rel) => {
 						symbols.add ("(uu)", mod_idx, rel);
 					},
-					(module_list) => {
+					module_list => {
 						foreach (var path in module_list)
-							modules.add_value (path);
+							modules.add_value (new Variant.variant (new Variant.tuple ({ path })));
 					});
 
 				vardict_add (reply, "modules", modules.end ());
@@ -2129,6 +2129,22 @@ namespace Frida {
 				return reply.end ();
 			}
 
+			if (type == "exclude-syscalls") {
+				if (reader.has_member ("native")) {
+					reader.read_member ("native");
+					foreach_uint32 (reader, nr => tracer.exclude_syscall (NATIVE, nr));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("compat32")) {
+					reader.read_member ("compat32");
+					foreach_uint32 (reader, nr => tracer.exclude_syscall (COMPAT32, nr));
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
@@ -2199,8 +2215,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"enter",
 					event->time_ns,
+					(uint64) event->tid,
 					event->tgid,
-					event->tid,
 					se->syscall_nr,
 					se->stack_id,
 					se->map_gen,
@@ -2211,8 +2227,8 @@ namespace Frida {
 				return new Variant.tuple ({
 					"exit",
 					event->time_ns,
+					(uint64) event->tid,
 					event->tgid,
-					event->tid,
 					se->syscall_nr,
 					se->stack_id,
 					se->map_gen,

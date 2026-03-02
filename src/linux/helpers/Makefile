@@ -66,6 +66,8 @@ linux_uapi_arch = $(strip \
 	$(if $(filter arm armbe,$1),arm, \
 	$(if $(filter arm64 arm64be,$1),arm64, \
 	$(if $(filter mips mipsel mips64 mips64el,$1),mips,unknown)))))
+has_compat32 = $(strip \
+	$(if $(filter x86_64 arm64 arm64be,$(1)),1,))
 
 kernel_headers_stamp = $(kernel_headers_dir)/$(1)/.stamp
 kernel_headers_for   = $(call kernel_headers_stamp,$(call linux_uapi_arch,$(1)))
@@ -95,6 +97,7 @@ define bpf_compile
 	$(BPF_CLANG) \
 		-target $(1) \
 		-D__TARGET_ARCH_$(2) \
+		$(if $(call has_compat32,$(3)),-DFRIDA_HAS_COMPAT32=1,) \
 		-O2 -g \
 		-I$(build_dir) \
 		-I$(libbpf_devel_dir) \
@@ -113,7 +116,7 @@ bpf_targets += $(foreach p,$(bpf_noarch_progs),$(bpf_outdir)/noarch-$(1)/$(p).el
 
 $(bpf_outdir)/noarch-$(1)/%.elf: %.bpf.c $(call kernel_headers_stamp,$(noarch_uapi_arch)) $(libbpf_devel_dir)
 	$$(call recreate_build_dir)
-	$$(call bpf_compile,$(2),$(noarch_uapi_arch))
+	$$(call bpf_compile,$(2),$(noarch_uapi_arch),noarch)
 endef
 
 define declare_bpf_arch
@@ -139,7 +142,7 @@ $(bpf_outdir)/$(1)/%.elf: %.bpf.c $(call kernel_headers_for,$(1)) $(libbpf_devel
 			{ print } \
 		' frida-linux-syscalls.h > frida-linux-syscalls.h.tmp && \
 		mv frida-linux-syscalls.h.tmp frida-linux-syscalls.h
-	$$(call bpf_compile,$(2),$$(call linux_uapi_arch,$(1)))
+	$$(call bpf_compile,$(2),$$(call linux_uapi_arch,$(1)),$(1))
 endef
 
 pair_abi    = $(word 1,$(subst :, ,$1))
