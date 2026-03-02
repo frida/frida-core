@@ -373,7 +373,6 @@ namespace Frida.Fruity {
 
 		private Gee.HashMap<uint32, Gee.ArrayList<Fragment>> fragments = new Gee.HashMap<uint32, Gee.ArrayList<Fragment>> ();
 		private uint32 next_fragment_identifier = 1;
-		private size_t total_buffered = 0;
 		private Gee.ArrayQueue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 
 		private DTXControlChannel control_channel;
@@ -381,8 +380,6 @@ namespace Frida.Fruity {
 		private int32 next_channel_code = 1;
 
 		private const uint32 DTX_FRAGMENT_MAGIC = 0x1f3d5b79U;
-		private const uint MAX_BUFFERED_COUNT = 100;
-		private const size_t MAX_BUFFERED_SIZE = 30 * 1024 * 1024;
 		private const size_t MAX_MESSAGE_SIZE = 128 * 1024 * 1024;
 		private const size_t MAX_FRAGMENT_SIZE = 128 * 1024;
 		private const string REMOTESERVER_ENDPOINT_17PLUS = "lockdown:com.apple.instruments.dtservicehub";
@@ -566,8 +563,6 @@ namespace Frida.Fruity {
 
 					Gee.ArrayList<Fragment> entries = fragments[fragment.identifier];
 					if (entries == null) {
-						if (fragments.size == MAX_BUFFERED_COUNT)
-							throw new Error.PROTOCOL ("Total buffered count exceeds maximum");
 						if (fragment.index != 0)
 							throw new Error.PROTOCOL ("Expected first fragment to have index of zero");
 						fragment.data_size = 0;
@@ -585,10 +580,6 @@ namespace Frida.Fruity {
 						first_fragment.data_size += (uint32) size;
 						if (first_fragment.data_size > MAX_MESSAGE_SIZE)
 							throw new Error.PROTOCOL ("Message size exceeds maximum");
-
-						total_buffered += size;
-						if (total_buffered > MAX_BUFFERED_SIZE)
-							throw new Error.PROTOCOL ("Total buffered size exceeds maximum");
 					}
 
 					if (entries.size == fragment.count) {
@@ -614,7 +605,6 @@ namespace Frida.Fruity {
 						}
 
 						fragments.unset (fragment.identifier);
-						total_buffered -= message.length;
 
 						process_message (message, first_fragment);
 					}
