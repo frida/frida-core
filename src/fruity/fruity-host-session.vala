@@ -1182,6 +1182,13 @@ namespace Frida {
 				return new XpcServiceSession (new Fruity.XpcConnection (stream));
 			}
 
+			if (protocol == "syscall-trace") {
+				var core_profile = yield Fruity.CoreProfileService.open (device, cancellable);
+				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
+
+				return new FruitySyscallTraceServiceSession (core_profile, device_info);
+			}
+
 			throw new Error.NOT_SUPPORTED ("Unsupported service address");
 		}
 
@@ -2552,6 +2559,1091 @@ namespace Frida {
 					(string) t.peek_string (),
 					(string) v.get_type ().peek_string ());
 			}
+		}
+	}
+
+	private sealed class FruitySyscallTraceServiceSession : Object, ServiceSession {
+		public Fruity.CoreProfileService core_profile {
+			get;
+			construct;
+		}
+
+		public Fruity.DeviceInfoService info_service {
+			get;
+			construct;
+		}
+
+		private MainContext main_context;
+		private ThreadPool<Bytes> pool;
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private Mutex mutex = Mutex ();
+
+		private Gee.Queue<Variant> pending_events = new Gee.ArrayQueue<Variant> ();
+
+		private Gee.Map<uint, Fruity.CsSignature> target_pids = new Gee.HashMap<uint, Fruity.CsSignature> ();
+		private Gee.Set<int32> excluded_syscalls = new Gee.HashSet<int32> ();
+		private Gee.Map<uint64?, uint32>? tid_to_pid = null;
+
+		private Gee.Map<uint, uint32> map_gen_by_pid = new Gee.HashMap<uint, uint32> ();
+
+		private Gee.Set<uint> pids_needing_sig_refresh = new Gee.HashSet<uint> ();
+		private Gee.Set<uint> pids_with_sig_refresh_in_flight = new Gee.HashSet<uint> ();
+		private Gee.Set<uint> pids_dirtied_during_sig_refresh = new Gee.HashSet<uint> ();
+		private bool sig_refresh_scheduled = false;
+
+		private Fruity.KperfdataStreamParser kperf = new Fruity.KperfdataStreamParser ();
+
+		private Gee.Map<uint64?, PendingSyscall> pending_syscall_by_tid =
+			new Gee.HashMap<uint64?, PendingSyscall> (Numeric.uint64_hash, Numeric.uint64_equal);
+		private static Gee.Map<int32, Bytes>? path_arg_indices_by_syscall = null;
+
+		private Gee.Map<uint32, StackInfo> stacks_by_id = new Gee.HashMap<uint32, StackInfo> ();
+		private uint32 next_stack_id = 1;
+
+		private Gee.Map<Bytes, Gee.ArrayList<uint32>> stack_ids_by_hash =
+			new Gee.HashMap<Bytes, Gee.ArrayList<uint32>> (Numeric.bytes_hash, Numeric.bytes_equal);
+
+		private class PendingSyscall {
+			public int32 nr;
+
+			public Fruity.KdBuf buf;
+
+			public uint pid;
+			public uint32 map_gen;
+
+			public bool stack_ready = false;
+			public int32 stack_id = -1;
+			public uint nframes;
+			public uint32 async_index;
+			public uint32 async_nframes;
+			public uint remaining_evts;
+			public Array<uint64> frames = new Array<uint64> (false, false);
+
+			public unowned uint8[]? path_arg_indices = null;
+			public uint path_cursor = 0;
+
+			public Gee.List<Variant> enter_attachments = new Gee.ArrayList<Variant> ();
+
+			public Array<uint8>? vfs_bytes = null;
+
+			public bool ready_to_emit {
+				get {
+					if (!stack_ready)
+						return false;
+
+					if (path_arg_indices == null)
+						return true;
+					return path_cursor == path_arg_indices.length;
+				}
+			}
+		}
+
+		private class StackInfo {
+			public Array<uint64> frames;
+			public uint32 async_index;
+			public uint32 async_nframes;
+
+			public StackInfo (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+				this.frames = frames;
+				this.async_index = async_index;
+				this.async_nframes = async_nframes;
+			}
+		}
+
+		private const size_t MAX_BATCH_BYTES = 4U * 1024U * 1024U;
+
+		private const uint64 FNV1A64_OFFSET = 1469598103934665603ULL;
+		private const uint64 FNV1A64_PRIME  = 1099511628211ULL;
+
+		public FruitySyscallTraceServiceSession (Fruity.CoreProfileService core_profile, Fruity.DeviceInfoService info_service) {
+			Object (core_profile: core_profile, info_service: info_service);
+		}
+
+		construct {
+			main_context = MainContext.ref_thread_default ();
+
+			try {
+				pool = new ThreadPool<Bytes>.with_owned_data (handle_kperfdata, 1, false);
+			} catch (ThreadError e) {
+				assert_not_reached ();
+			}
+
+			build_path_arg_index_table ();
+
+			core_profile.stackshot.connect (on_stackshot);
+			core_profile.kperfdata.connect (on_kperfdata);
+		}
+
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+		}
+
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			try {
+				yield core_profile.stop (cancellable);
+			} catch (Error e) {
+			}
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			var reply = new VariantBuilder (VariantType.VARDICT);
+
+			if (type == "read-events") {
+				var events = new VariantBuilder (new VariantType ("av"));
+				var processes = new VariantBuilder (new VariantType ("a(us)"));
+
+				size_t total = 0;
+				var seen_pids = new Gee.HashSet<uint> ();
+				bool more = true;
+				do {
+					Variant? ev;
+					{
+						var l = new MutexLocker (mutex);
+						ev = pending_events.poll ();
+						l.free ();
+					}
+					if (ev == null) {
+						more = false;
+						break;
+					}
+					events.add_value (new Variant.variant (ev));
+					total += ev.get_size ();
+					seen_pids.add (ev.get_child_value (3).get_uint32 ());
+				} while (total < MAX_BATCH_BYTES);
+
+				foreach (var pid in seen_pids)
+					processes.add ("(us)", pid, "native");
+
+				vardict_add (reply, "events", events.end ());
+				vardict_add (reply, "processes", processes.end ());
+				vardict_add (reply, "status", more ? "more" : "drained");
+
+				return reply.end ();
+			}
+
+			if (type == "resolve-stacks") {
+				reader.read_member ("ids");
+				var ids = read_uint32_array (reader);
+				reader.end_member ();
+
+				var stacks = new VariantBuilder (new VariantType ("aat"));
+
+				foreach (var id in ids) {
+					var one = new VariantBuilder (new VariantType ("at"));
+
+					StackInfo? si = stacks_by_id[id];
+					if (si != null) {
+						foreach (uint64 pc in si.frames)
+							one.add_value (pc);
+					}
+
+					stacks.add_value (one.end ());
+				}
+
+				vardict_add (reply, "stacks", stacks.end ());
+				return reply.end ();
+			}
+
+			if (type == "resolve-symbols") {
+				var pid = (uint) reader.read_member ("pid").get_int64_value ();
+				reader.end_member ();
+
+				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
+				reader.end_member ();
+
+				reader.read_member ("addresses");
+				var addrs = read_uint64_array (reader);
+				reader.end_member ();
+
+				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
+				var modules = new VariantBuilder (new VariantType ("av"));
+
+				var l = new MutexLocker (mutex);
+				Fruity.CsSignature? sig = target_pids[pid];
+				if (sig != null) {
+					sig.resolve_addresses (gen, addrs,
+						(addr, mod_idx, rel32) => {
+							symbols.add ("(uu)", mod_idx, rel32);
+						},
+						owners => {
+							var byte_array_type = new VariantType ("ay");
+							foreach (var owner in owners) {
+								Variant fields[3];
+								fields[0] = owner.path;
+								fields[1] = new Variant.from_bytes (byte_array_type, owner.uuid, true);
+								int num_fields = 2;
+								if (owner.version != null)
+									fields[num_fields++] = owner.version;
+								var tuple = new Variant.tuple (fields[:num_fields]);
+								modules.add_value (new Variant.variant (tuple));
+							}
+						});
+					l.free ();
+				} else {
+					l.free ();
+					foreach (var addr in addrs)
+						symbols.add ("(uu)", uint32.MAX, 0);
+				}
+
+				vardict_add (reply, "modules", modules.end ());
+				vardict_add (reply, "symbols", symbols.end ());
+
+				return reply.end ();
+			}
+
+			if (type == "read-stats") {
+				/* TODO */
+
+				vardict_add (reply, "emitted-events", (uint64) 0);
+				vardict_add (reply, "emitted-bytes", (uint64) 0);
+
+				vardict_add (reply, "dropped-events", (uint64) 0);
+				vardict_add (reply, "dropped-bytes", (uint64) 0);
+
+				return reply.end ();
+			}
+
+			if (type == "add-targets") {
+				check_for_unsupported_targets (reader);
+
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					uint32[] pids = read_uint32_array (reader);
+					reader.end_member ();
+
+					var pids_to_trace = new Gee.ArrayList<uint32> ();
+					pids_to_trace.add_all_array (pids);
+
+					var l = new MutexLocker (mutex);
+					if (!target_pids.is_empty) {
+						pids_to_trace.add_all (target_pids.keys);
+						yield core_profile.stop (cancellable);
+					}
+					l.free ();
+
+					var config = new Fruity.KtraceConfig ();
+
+					var syscall_codes = new Fruity.KdebugCodeSet ();
+					syscall_codes
+						.add (Fruity.KdebugCode.from_parts (MACH, Fruity.KdebugMachSubclass.EXCP_SC))
+						.add (Fruity.KdebugCode.from_parts (BSD, Fruity.KdebugBsdSubclass.EXCP_SC));
+
+					var all_codes = syscall_codes.copy ();
+					all_codes.add (Fruity.KdebugCode.from_parts (TRACE, Fruity.KdebugTraceSubclass.DATA));
+					all_codes.add (Fruity.KdebugCode.from_parts (DYLD, Fruity.KdebugDyldSubclass.UUID));
+					all_codes.add (Fruity.KdebugCode.from_parts (PERF, Fruity.KdebugPerfSubclass.CALLSTACK));
+					all_codes.add (Fruity.KdebugCode.from_parts (FSYSTEM, Fruity.KdebugFsystemSubclass.FSRW));
+
+					var tc = new Fruity.KtraceTapTriggerConfig (KDEBUG);
+					tc.filter = all_codes;
+					foreach (var pid in pids_to_trace)
+						tc.include_pid (pid);
+					tc.callstack_frame_depth = 128;
+					tc.actions
+						.add_baseline ()
+						.add_kdebug_codeset (syscall_codes)
+						.add_stack_collection (USER);
+
+					config.add_trigger_config (tc);
+
+					yield core_profile.set_config (config, cancellable);
+
+					yield core_profile.start (cancellable);
+
+					l = new MutexLocker (mutex);
+					foreach (var pid in pids_to_trace) {
+						if (target_pids.has_key (pid))
+							continue;
+						var sig = yield info_service.query_symbolicator_signature (pid, cancellable);
+						target_pids[pid] = sig;
+					}
+					l.free ();
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "remove-targets") {
+				check_for_unsupported_targets (reader);
+
+				if (reader.has_member ("pids")) {
+					reader.read_member ("pids");
+					uint32[] pids = read_uint32_array (reader);
+					reader.end_member ();
+
+					var l = new MutexLocker (mutex);
+					foreach (var pid in pids) {
+						target_pids.unset (pid);
+						map_gen_by_pid.unset (pid);
+						pids_needing_sig_refresh.remove (pid);
+						pids_with_sig_refresh_in_flight.remove (pid);
+						pids_dirtied_during_sig_refresh.remove (pid);
+					}
+					bool no_more_targets = target_pids.is_empty;
+					l.free ();
+
+					if (no_more_targets)
+						yield core_profile.stop (cancellable);
+				}
+
+				return reply.end ();
+			}
+
+			if (type == "get-signatures") {
+				vardict_add (reply, "native", build_signatures_variant ());
+
+				return reply.end ();
+			}
+
+			if (type == "exclude-syscalls") {
+				reader.read_member ("native");
+				var nrs = read_int32_array (reader);
+				reader.end_member ();
+
+				var l = new MutexLocker (mutex);
+				excluded_syscalls.add_all_array (nrs);
+				l.free ();
+
+				return reply.end ();
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+		}
+
+		private static void check_for_unsupported_targets (VariantReader reader) throws Error {
+			if (reader.has_member ("uids") || reader.has_member ("users"))
+				throw new Error.NOT_SUPPORTED ("Target type not supported on this platform");
+		}
+
+		private void on_stackshot (Bytes blob) {
+			tid_to_pid = new Gee.HashMap<uint64?, uint32> (Numeric.uint64_hash, Numeric.uint64_equal);
+
+			var r = new Fruity.Kcdata.Reader (blob);
+			try {
+				r.for_each_container (STACKSHOT_CONTAINER_TASK, task => {
+					var ts = task.get_first (STACKSHOT_TASK_SNAPSHOT);
+					ts.seek (Fruity.Kcdata.TASK_SNAPSHOT_PID_OFFSET);
+					var pid = (uint32) ts.read_int32 ();
+
+					task.for_each_container (STACKSHOT_CONTAINER_THREAD, (thread) => {
+						var ths = thread.get_first (STACKSHOT_THREAD_SNAPSHOT);
+						var tid = ths.read_uint64 ();
+						tid_to_pid[tid] = pid;
+						return CONTINUE;
+					});
+
+					return CONTINUE;
+				});
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void on_kperfdata (Bytes blob) {
+			try {
+				pool.add (blob);
+			} catch (ThreadError e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void handle_kperfdata (owned Bytes blob) {
+			var new_events = new Gee.ArrayList<Variant> ();
+
+			try {
+				kperf.push (blob, buf => {
+					if (maybe_handle_syscall (buf, new_events))
+						return;
+
+					var kc = buf.kcode;
+					var klass = kc.klass;
+					var subclass = kc.subclass;
+
+					if (klass == PERF && subclass == Fruity.KdebugPerfSubclass.CALLSTACK) {
+						var e = (Fruity.KdebugPerfCallstackEvent) kc.code;
+						handle_callstack_event (e, buf, new_events);
+					} else if (klass == FSYSTEM && subclass == Fruity.KdebugFsystemSubclass.FSRW) {
+						var e = (Fruity.KdebugFsystemFsrwEvent) kc.code;
+						handle_fsystem_fsrw_event (e, buf, new_events);
+					} else if (klass == TRACE && subclass == Fruity.KdebugTraceSubclass.DATA) {
+						var e = (Fruity.KdebugTraceDataEvent) kc.code;
+						handle_trace_data_event (e, buf, new_events);
+					} else if (klass == DYLD && subclass == Fruity.KdebugDyldSubclass.UUID) {
+						var e = (Fruity.KdebugDyldUuidEvent) kc.code;
+						handle_dyld_uuid_event (e, buf);
+					}
+				});
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			if (new_events.is_empty)
+				return;
+
+			bool should_notify;
+			{
+				var l = new MutexLocker (mutex);
+				should_notify = pending_events.is_empty;
+				pending_events.add_all (new_events);
+				l.free ();
+			}
+
+			if (should_notify) {
+				var idle = new IdleSource ();
+				idle.set_callback (() => {
+					var b = new VariantBuilder (VariantType.VARDICT);
+					vardict_add (b, "type", "events-available");
+					message (b.end ());
+					return Source.REMOVE;
+				});
+				idle.attach (main_context);
+			}
+		}
+
+		private bool maybe_handle_syscall (Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			if (!is_syscall (buf))
+				return false;
+
+			uint64 tid = buf.arg5;
+			uint pid = tid_to_pid[tid];
+
+			var syscall_nr = (int32) buf.kcode.code;
+			if (buf.kcode.klass == MACH)
+				syscall_nr = -syscall_nr;
+
+			uint32 map_gen;
+			{
+				var l = new MutexLocker (mutex);
+				if (!target_pids.has_key (pid) || excluded_syscalls.contains (syscall_nr))
+					return true;
+				map_gen = get_map_gen_unlocked (pid);
+				l.free ();
+			}
+
+			maybe_complete_pending_syscall (tid, new_events);
+
+			pending_syscall_by_tid[tid] = new PendingSyscall () {
+				nr = syscall_nr,
+				buf = buf,
+				pid = pid,
+				map_gen = map_gen,
+				path_arg_indices = get_path_arg_indices_for_syscall_nr (syscall_nr),
+			};
+
+			return true;
+		}
+
+		private void maybe_emit_ready_syscall (uint64 tid, PendingSyscall sc, Gee.List<Variant> new_events) {
+			if (!sc.ready_to_emit)
+				return;
+			pending_syscall_by_tid.unset (tid);
+			new_events.add (make_syscall_event (sc));
+		}
+
+		private void maybe_complete_pending_syscall (uint64 tid, Gee.List<Variant> new_events) {
+			PendingSyscall? sc;
+			if (pending_syscall_by_tid.unset (tid, out sc))
+				new_events.add (make_syscall_event (sc));
+		}
+
+		private static bool is_syscall (Fruity.KdBuf buf) {
+			var kc = buf.kcode;
+			var klass = kc.klass;
+			var subclass = kc.subclass;
+			return (klass == MACH && subclass == Fruity.KdebugMachSubclass.EXCP_SC) ||
+				(klass == BSD && subclass == Fruity.KdebugBsdSubclass.EXCP_SC);
+		}
+
+		private static Variant make_syscall_event (PendingSyscall sc) {
+			Fruity.KdBuf buf = sc.buf;
+			uint64 tid = buf.arg5;
+
+			var attachments = new VariantBuilder (new VariantType ("a(uv)"));
+
+			if (buf.kcode.func_qual == START) {
+				if (sc.enter_attachments != null) {
+					foreach (var a in sc.enter_attachments)
+						attachments.add_value (a);
+				}
+
+				var ab = new VariantBuilder (new VariantType ("at"));
+				ab.add_value (buf.arg1);
+				ab.add_value (buf.arg2);
+				ab.add_value (buf.arg3);
+				ab.add_value (buf.arg4);
+
+				return new Variant.tuple ({
+					"enter",
+					buf.timestamp,
+					tid,
+					sc.pid,
+					sc.nr,
+					sc.stack_id,
+					sc.map_gen,
+					ab.end (),
+					attachments.end ()
+				});
+			} else {
+				int64 retval;
+				int error = (int) buf.arg1;
+				if (error != 0)
+					retval = error;
+				else
+					retval = (int64) (((uint64) buf.arg3 << 32) | (uint64) buf.arg2);
+
+				return new Variant.tuple ({
+					"exit",
+					buf.timestamp,
+					tid,
+					sc.pid,
+					sc.nr,
+					sc.stack_id,
+					sc.map_gen,
+					retval,
+					attachments.end ()
+				});
+			}
+		}
+
+		private void handle_callstack_event (Fruity.KdebugPerfCallstackEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			switch (e) {
+				case UHDR: {
+					uint64 tid = buf.arg5;
+
+					PendingSyscall? sc = pending_syscall_by_tid[tid];
+					if (sc == null)
+						break;
+
+					uint32 sync_nframes = (uint32) buf.arg2;
+					uint32 async_index = (uint32) buf.arg3;
+					uint32 async_nframes = (uint32) buf.arg4;
+
+					uint32 nframes = sync_nframes + async_nframes;
+					uint nevts = (nframes + 3u) / 4u;
+
+					sc.nframes = nframes;
+					sc.async_index = async_index;
+					sc.async_nframes = async_nframes;
+					sc.remaining_evts = nevts;
+
+					break;
+				}
+				case UDATA: {
+					uint64 tid = buf.arg5;
+
+					PendingSyscall? sc = pending_syscall_by_tid[tid];
+					if (sc == null)
+						break;
+
+					sc.frames.append_val (buf.arg1);
+					uint remaining = sc.nframes - sc.frames.length;
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg2);
+						remaining--;
+					}
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg3);
+						remaining--;
+					}
+					if (remaining != 0) {
+						sc.frames.append_val (buf.arg4);
+						remaining--;
+					}
+
+					sc.remaining_evts--;
+
+					if (sc.remaining_evts == 0) {
+						sc.stack_id = (int32) intern_stack (sc.frames, sc.async_index, sc.async_nframes);
+						sc.stack_ready = true;
+
+						maybe_emit_ready_syscall (tid, sc, new_events);
+					}
+
+					break;
+				}
+				default:
+					break;
+			}
+		}
+
+		private void handle_fsystem_fsrw_event (Fruity.KdebugFsystemFsrwEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			if (e != LOOKUP)
+				return;
+
+			uint64 tid = buf.arg5;
+
+			var l = new MutexLocker (mutex);
+
+			PendingSyscall? sc = pending_syscall_by_tid[tid];
+			if (sc == null || sc.path_arg_indices == null)
+				return;
+
+			var kc = buf.kcode;
+			bool is_start = kc.func_qual == START;
+			bool is_end = kc.func_qual == END;
+
+			if (sc.vfs_bytes == null)
+				sc.vfs_bytes = new Array<uint8> (false, false);
+
+			if (is_start) {
+				append_u64_le (sc.vfs_bytes, buf.arg2);
+				append_u64_le (sc.vfs_bytes, buf.arg3);
+				append_u64_le (sc.vfs_bytes, buf.arg4);
+			} else {
+				append_u64_le (sc.vfs_bytes, buf.arg1);
+				append_u64_le (sc.vfs_bytes, buf.arg2);
+				append_u64_le (sc.vfs_bytes, buf.arg3);
+				append_u64_le (sc.vfs_bytes, buf.arg4);
+			}
+
+			if (!is_end)
+				return;
+
+			string path = decode_c_string (sc.vfs_bytes);
+			sc.vfs_bytes = null;
+
+			if (sc.path_cursor != sc.path_arg_indices.length) {
+				uint32 arg_index = sc.path_arg_indices[sc.path_cursor++];
+				sc.enter_attachments.add (new Variant.tuple ({ arg_index, new Variant.variant (path) }));
+
+				maybe_emit_ready_syscall (tid, sc, new_events);
+			}
+
+			l.free ();
+		}
+
+		private void handle_trace_data_event (Fruity.KdebugTraceDataEvent e, Fruity.KdBuf buf, Gee.List<Variant> new_events) {
+			switch (e) {
+				case NEWTHREAD: {
+					uint64 tid = buf.arg1;
+					uint32 pid = (uint32) buf.arg2;
+					bool is_exec = buf.arg3 == 1;
+
+					if (is_exec)
+						remove_all_tids_for_pid (pid, new_events);
+
+					tid_to_pid[tid] = pid;
+					break;
+				}
+				case EXEC: {
+					uint32 pid = (uint32) buf.arg1;
+					uint64 tid = buf.arg5;
+
+					remove_all_tids_for_pid (pid, new_events);
+					tid_to_pid[tid] = pid;
+
+					break;
+				}
+				case THREAD_TERMINATE: {
+					uint64 tid = buf.arg1;
+
+					remove_tid (tid, new_events);
+					break;
+				}
+				case THREAD_TERMINATE_PID: {
+					uint64 tid = buf.arg5;
+
+					remove_tid (tid, new_events);
+					break;
+				}
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private void remove_all_tids_for_pid (uint32 pid, Gee.List<Variant> new_events) {
+			var dead = new Gee.ArrayList<uint64?> ();
+			foreach (var e in tid_to_pid.entries) {
+				if (e.value == pid)
+					dead.add (e.key);
+			}
+
+			foreach (var tid in dead)
+				remove_tid (tid, new_events);
+		}
+
+		private void remove_tid (uint64 tid, Gee.List<Variant> new_events) {
+			tid_to_pid.unset (tid);
+
+			maybe_complete_pending_syscall (tid, new_events);
+		}
+
+		private void handle_dyld_uuid_event (Fruity.KdebugDyldUuidEvent e, Fruity.KdBuf buf) {
+			var l = new MutexLocker (mutex);
+
+			uint64 tid = buf.arg5;
+			uint pid = tid_to_pid[tid];
+
+			Fruity.CsSignature? sig = target_pids[pid];
+			if (sig == null)
+				return;
+
+			bool in_flight = pids_with_sig_refresh_in_flight.contains (pid);
+
+			switch (e) {
+				case MAP_A:
+				case SHARED_CACHE_A:
+				case AOT_MAP_A: {
+					if (!in_flight)
+						bump_map_gen_unlocked (pid);
+					else
+						pids_dirtied_during_sig_refresh.add (pid);
+
+					schedule_signature_refresh_unlocked (pid);
+
+					break;
+				}
+				case UNMAP_A: {
+					Bytes uuid = uuid_from_u64s (buf.arg1, buf.arg2);
+
+					uint32 gen;
+					if (!in_flight) {
+						gen = bump_map_gen_unlocked (pid);
+					} else {
+						gen = get_map_gen_unlocked (pid);
+						pids_dirtied_during_sig_refresh.add (pid);
+					}
+
+					sig.note_unmapped_uuid (uuid, gen);
+
+					schedule_signature_refresh_unlocked (pid);
+
+					break;
+				}
+				default:
+					break;
+			}
+
+			l.free ();
+		}
+
+		private uint32 get_map_gen_unlocked (uint pid) {
+			uint32 gen = map_gen_by_pid[pid];
+			if (gen != 0)
+				return gen;
+
+			map_gen_by_pid[pid] = 1;
+			return 1;
+		}
+
+		private uint32 bump_map_gen_unlocked (uint pid) {
+			uint32 gen = get_map_gen_unlocked (pid) + 1;
+			map_gen_by_pid[pid] = gen;
+			return gen;
+		}
+
+		private void schedule_signature_refresh_unlocked (uint pid) {
+			pids_needing_sig_refresh.add (pid);
+
+			if (sig_refresh_scheduled)
+				return;
+
+			sig_refresh_scheduled = true;
+
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				var l = new MutexLocker (mutex);
+
+				sig_refresh_scheduled = false;
+
+				var pids = new Gee.ArrayList<uint> ();
+				pids.add_all (pids_needing_sig_refresh);
+				pids_needing_sig_refresh.clear ();
+
+				l.free ();
+
+				refresh_signatures.begin (pids);
+
+				return Source.REMOVE;
+			});
+			idle.attach (main_context);
+		}
+
+		private async void refresh_signatures (Gee.List<uint> pids) {
+			foreach (var pid in pids) {
+				{
+					var l = new MutexLocker (mutex);
+
+					if (!target_pids.has_key (pid))
+						continue;
+
+					pids_with_sig_refresh_in_flight.add (pid);
+
+					l.free ();
+				}
+
+				Fruity.CsSignature? fresh = null;
+
+				try {
+					fresh = yield info_service.query_symbolicator_signature (pid, io_cancellable);
+				} catch (GLib.Error e) {
+				}
+
+				bool should_rerun = false;
+
+				{
+					var l = new MutexLocker (mutex);
+
+					pids_with_sig_refresh_in_flight.remove (pid);
+
+					Fruity.CsSignature? current = target_pids[pid];
+
+					if (current != null && fresh != null) {
+						uint32 gen = get_map_gen_unlocked (pid);
+						current.apply_refresh (fresh, gen);
+					}
+
+					if (pids_dirtied_during_sig_refresh.remove (pid)) {
+						bump_map_gen_unlocked (pid);
+						should_rerun = current != null;
+					}
+
+					l.free ();
+				}
+
+				if (should_rerun) {
+					var l = new MutexLocker (mutex);
+					schedule_signature_refresh_unlocked (pid);
+					l.free ();
+				}
+			}
+		}
+
+		private static Variant build_signatures_variant () {
+			var result = new VariantBuilder (new VariantType ("a(isa(ss))"));
+
+			foreach (unowned XnuSyscallSignature sig in get_xnu_mach_traps ())
+				result.add_value (build_signature_variant (sig));
+			foreach (unowned XnuSyscallSignature sig in get_xnu_bsd_syscalls ())
+				result.add_value (build_signature_variant (sig));
+
+			return result.end ();
+		}
+
+		private static Variant build_signature_variant (XnuSyscallSignature sig) {
+			var args = new VariantBuilder (new VariantType ("a(ss)"));
+			for (uint8 i = 0; i != sig.nargs; i++) {
+				unowned XnuSyscallArg arg = sig.args[i];
+				args.add_value (new Variant.tuple ({ arg.type, arg.name }));
+			}
+			return new Variant.tuple ({ sig.nr, sig.name, args.end () });
+		}
+
+		private static int32[] read_int32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new int32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < int32.MIN || v > int32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (int32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint32[n];
+
+			for (uint i = 0; i != n; i++) {
+				int64 v = reader.read_element (i).get_int64_value ();
+				if (v < 0 || v > uint32.MAX)
+					throw new Error.INVALID_ARGUMENT ("Value is out of range");
+
+				arr[i] = (uint32) v;
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static uint64[] read_uint64_array (VariantReader reader) throws Error {
+			uint n = reader.count_elements ();
+			var arr = new uint64[n];
+
+			for (uint i = 0; i != n; i++) {
+				arr[i] = reader.read_element (i).get_uint64_value ();
+				reader.end_element ();
+			}
+
+			return arr;
+		}
+
+		private static void vardict_add (VariantBuilder b, string key, Variant val) {
+			b.add_value (new Variant.dict_entry (new Variant.string (key), new Variant.variant (val)));
+		}
+
+		private uint32 intern_stack (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			uint64 h64 = hash_stack_fnv1a (frames, async_index, async_nframes);
+			Bytes key = u64_to_bytes_key (h64);
+
+			Gee.ArrayList<uint32>? candidates = stack_ids_by_hash[key];
+			if (candidates != null) {
+				foreach (uint32 id in candidates) {
+					StackInfo? existing = stacks_by_id[id];
+					if (existing != null && stack_equal (existing, frames, async_index, async_nframes))
+						return id;
+				}
+			}
+
+			uint32 id = next_stack_id++;
+			stacks_by_id[id] = new StackInfo (frames, async_index, async_nframes);
+
+			if (candidates == null) {
+				candidates = new Gee.ArrayList<uint32> ();
+				stack_ids_by_hash[key] = candidates;
+			}
+			candidates.add (id);
+
+			return id;
+		}
+
+		private static bool stack_equal (StackInfo existing, Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			if (existing.async_index != async_index || existing.async_nframes != async_nframes)
+				return false;
+
+			if (existing.frames.length != frames.length)
+				return false;
+
+			for (uint i = 0; i != frames.length; i++) {
+				if (existing.frames.index (i) != frames.index (i))
+					return false;
+			}
+
+			return true;
+		}
+
+		private static uint64 hash_stack_fnv1a (Array<uint64> frames, uint32 async_index, uint32 async_nframes) {
+			uint64 h = FNV1A64_OFFSET;
+
+			for (uint i = 0; i != frames.length; i++) {
+				uint64 v = frames.index (i);
+				for (uint shift = 0; shift != 64; shift += 8)
+					h = fnv1a64_update_byte (h, (uint8) ((v >> shift) & 0xff));
+			}
+
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((async_index >> shift) & 0xff));
+
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((async_nframes >> shift) & 0xff));
+
+			uint32 len = frames.length;
+			for (uint shift = 0; shift != 32; shift += 8)
+				h = fnv1a64_update_byte (h, (uint8) ((len >> shift) & 0xff));
+
+			return h;
+		}
+
+		private static inline uint64 fnv1a64_update_byte (uint64 h, uint8 b) {
+			h ^= b;
+			h *= FNV1A64_PRIME;
+			return h;
+		}
+
+		private static Bytes u64_to_bytes_key (uint64 v) {
+			var b = new uint8[8];
+			for (uint i = 0; i != 8; i++)
+				b[i] = (uint8) ((v >> (i * 8)) & 0xff);
+			return new Bytes.take ((owned) b);
+		}
+
+		private static Bytes uuid_from_u64s (uint64 a, uint64 b) {
+			var bytes = new uint8[16];
+
+			for (uint i = 0; i != 8; i++)
+				bytes[i] = (uint8) ((a >> (i * 8)) & 0xff);
+
+			for (uint i = 0; i != 8; i++)
+				bytes[8 + i] = (uint8) ((b >> (i * 8)) & 0xff);
+
+			return new Bytes.take ((owned) bytes);
+		}
+
+		private static void append_u64_le (Array<uint8> arr, uint64 v) {
+			for (uint i = 0; i != 8; i++) {
+				var b = (uint8) ((v >> (i * 8)) & 0xff);
+				arr.append_val (b);
+			}
+		}
+
+		private static string decode_c_string (Array<uint8> data) {
+			uint n = data.length;
+			uint end = n;
+			for (uint i = 0; i != n; i++) {
+				if (data.index (i) == 0) {
+					end = i;
+					break;
+				}
+			}
+
+			var b = new uint8[end + 1];
+			Memory.copy (b, data.data, end);
+
+			return (string) b;
+		}
+
+		private static void build_path_arg_index_table () {
+			var map = new Gee.HashMap<int32, Bytes> ();
+
+			foreach (unowned XnuSyscallSignature sig in get_xnu_mach_traps ())
+				add_path_indices_for_sig (map, sig);
+
+			foreach (unowned XnuSyscallSignature sig in get_xnu_bsd_syscalls ())
+				add_path_indices_for_sig (map, sig);
+
+			path_arg_indices_by_syscall = map;
+		}
+
+		private static void add_path_indices_for_sig (Gee.Map<int32, Bytes> indices, XnuSyscallSignature sig) {
+			var arr = new uint8[0];
+
+			for (uint8 i = 0; i != sig.nargs; i++) {
+				unowned XnuSyscallArg a = sig.args[i];
+				if (arg_is_filesystem_path (a.type, a.name))
+					arr += i;
+			}
+
+			if (arr.length == 0)
+				return;
+
+			indices[sig.nr] = new Bytes.take ((owned) arr);
+		}
+
+		private static bool arg_is_filesystem_path (string type, string name) {
+			if (!(type == "char *" || type == "const char *"))
+				return false;
+
+			return (
+				name == "attrname" ||
+				name == "file_path" ||
+				name == "fname" ||
+				name == "from" ||
+				name == "mountdir" ||
+				name == "new_rootfs_path_before" ||
+				name == "old_rootfs_path_after" ||
+				name == "path" ||
+				name == "path1" ||
+				name == "path2" ||
+				name == "path_p" ||
+				name == "to"
+			);
+		}
+
+		private static unowned uint8[]? get_path_arg_indices_for_syscall_nr (int32 nr) {
+			Bytes? indices = path_arg_indices_by_syscall[nr];
+			if (indices == null)
+				return null;
+			return indices.get_data ();
 		}
 	}
 }
