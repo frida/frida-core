@@ -348,6 +348,18 @@ namespace Frida {
 			remove_raw ((uint8[]) &key);
 		}
 
+		public void update_u64_u8 (uint64 key, uint8 val) throws Error {
+			update_raw ((uint8[]) &key, (uint8[]) &val);
+		}
+
+		public void update_u64_u32 (uint64 key, uint32 val) throws Error {
+			update_raw ((uint8[]) &key, (uint8[]) &val);
+		}
+
+		public void remove_u64 (uint64 key) throws Error {
+			remove_raw ((uint8[]) &key);
+		}
+
 		public void foreach_percpu_value<T> (uint8[] key, PercpuValueFunc<T> func) throws Error {
 			var ncpus = check_libbpf_result (Libbpf.num_possible_cpus ());
 			var percpu_stride = round_up_8 (value_size);
