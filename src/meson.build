@@ -570,6 +570,7 @@ if have_fruity_backend
     'fruity' / 'plist.vala',
     'fruity' / 'plist-service.vala',
     'fruity' / 'opack.vala',
+    'fruity' / 'cs-signature.vala',
     'fruity' / 'network-stack.vala',
     'fruity' / 'usb.vala',
     'fruity' / 'ncm.vala',
