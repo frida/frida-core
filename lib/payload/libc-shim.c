@@ -10,6 +10,7 @@
 # include <assert.h>
 # include <fcntl.h>
 # include <unistd.h>
+# include <wchar.h>
 #endif
 #if defined (HAVE_DARWIN)
 # include <sys/attr.h>
@@ -25,15 +26,22 @@
 
 #undef feof
 #undef ferror
+#undef fgetwc
+#undef fputwc
 #undef getc
 #undef getc_unlocked
+#undef getwc
 #undef memcpy
+#undef putc
 #undef putchar
+#undef putwc
 #undef snprintf
 #undef sprintf
 #undef stderr
 #undef stdin
 #undef stdout
+#undef ungetc
+#undef ungetwc
 #undef vsnprintf
 
 #ifdef HAVE_MUSL
@@ -153,8 +161,8 @@ struct _FridaFile
   size_t wcap;
   size_t wlen;
 
-  int ungot;
-  gboolean has_ungot;
+  guint8 ungot_buf[8];
+  guint ungot_len;
 };
 
 struct _FridaFileHandle
@@ -203,6 +211,8 @@ static ssize_t frida_file_fill_read (FridaFile * f);
 static void frida_parse_fopen_mode (const char * mode, int * oflags);
 
 static int frida_write_formatted_to_fd (int fd, const char * format, va_list args);
+
+static gboolean frida_utf8_expected_len (guint8 first, guint * out_len);
 
 #ifdef HAVE_FRIDA_DIR
 static FridaDir * frida_dir_get_impl (DIR * dirp);
@@ -815,11 +825,8 @@ getc_unlocked (FILE * stream)
 
   f = frida_file_get_impl (stream);
 
-  if (f->has_ungot)
-  {
-    f->has_ungot = FALSE;
-    return f->ungot;
-  }
+  if (f->ungot_len != 0)
+    return f->ungot_buf[--f->ungot_len];
 
   if (f->buf_mode == _IONBF)
   {
@@ -860,6 +867,58 @@ getc (FILE * stream)
   return getc_unlocked (stream);
 }
 
+G_GNUC_INTERNAL wint_t
+getwc (FILE * stream)
+{
+  return fgetwc (stream);
+}
+
+G_GNUC_INTERNAL wint_t
+fgetwc (FILE * stream)
+{
+  char bytes[4];
+  guint need, have;
+  int c;
+  gunichar ch;
+
+  c = getc_unlocked (stream);
+  if (c == EOF)
+    return WEOF;
+
+  bytes[0] = c;
+
+  if (!frida_utf8_expected_len (bytes[0], &need))
+  {
+    errno = EILSEQ;
+    frida_file_get_impl (stream)->err = errno;
+    return WEOF;
+  }
+
+  have = 1;
+  while (have != need)
+  {
+    c = getc_unlocked (stream);
+    if (c == EOF)
+    {
+      errno = EILSEQ;
+      frida_file_get_impl (stream)->err = errno;
+      return WEOF;
+    }
+
+    bytes[have++] = c;
+  }
+
+  ch = g_utf8_get_char_validated (bytes, (gssize) need);
+  if (ch == (gunichar) -1 || ch == (gunichar) -2)
+  {
+    errno = EILSEQ;
+    frida_file_get_impl (stream)->err = errno;
+    return WEOF;
+  }
+
+  return (wint_t) ch;
+}
+
 G_GNUC_INTERNAL int
 ungetc (int c, FILE * stream)
 {
@@ -870,14 +929,44 @@ ungetc (int c, FILE * stream)
   if (c == EOF)
     return EOF;
 
-  if (f->has_ungot)
+  if (f->ungot_len == G_N_ELEMENTS (f->ungot_buf))
     return EOF;
 
-  f->ungot = c;
-  f->has_ungot = TRUE;
+  f->ungot_buf[f->ungot_len++] = c;
   f->eof = FALSE;
 
   return c;
+}
+
+G_GNUC_INTERNAL wint_t
+ungetwc (wint_t wc, FILE * stream)
+{
+  FridaFile * f;
+  char tmp[4];
+  int len;
+  int i;
+
+  if (wc == WEOF)
+    return WEOF;
+
+  f = frida_file_get_impl (stream);
+
+  len = g_unichar_to_utf8 ((gunichar) wc, tmp);
+  if (len <= 0 || len > 4)
+  {
+    errno = EILSEQ;
+    f->err = errno;
+    return WEOF;
+  }
+
+  if (f->ungot_len + len > G_N_ELEMENTS (f->ungot_buf))
+    return WEOF;
+
+  for (i = 0; i != len; i++)
+    f->ungot_buf[f->ungot_len++] = tmp[i];
+
+  f->eof = FALSE;
+  return wc;
 }
 
 G_GNUC_INTERNAL size_t
@@ -898,10 +987,9 @@ fread (void * ptr, size_t size, size_t nmemb, FILE * stream)
 
   while (got != want)
   {
-    if (f->has_ungot)
+    if (f->ungot_len != 0)
     {
-      out[got++] = (guint8) f->ungot;
-      f->has_ungot = FALSE;
+      out[got++] = f->ungot_buf[--f->ungot_len];
       continue;
     }
 
@@ -1021,6 +1109,12 @@ fwrite (const void * ptr, size_t size, size_t nmemb, FILE * stream)
 }
 
 G_GNUC_INTERNAL int
+putc (int c, FILE * stream)
+{
+  return fputc (c, stream);
+}
+
+G_GNUC_INTERNAL int
 fputc (int c, FILE * stream)
 {
   unsigned char ch = c;
@@ -1031,6 +1125,37 @@ fputc (int c, FILE * stream)
     return EOF;
 
   return ch;
+}
+
+G_GNUC_INTERNAL wint_t
+putwc (wchar_t wc, FILE * stream)
+{
+  return fputwc (wc, stream);
+}
+
+G_GNUC_INTERNAL wint_t
+fputwc (wchar_t wc, FILE * stream)
+{
+  char tmp[4];
+  int len;
+  size_t n;
+
+  if (wc == WEOF)
+    return WEOF;
+
+  len = g_unichar_to_utf8 ((gunichar) wc, tmp);
+  if (len <= 0 || len > 4)
+  {
+    errno = EILSEQ;
+    frida_file_get_impl (stream)->err = errno;
+    return WEOF;
+  }
+
+  n = fwrite (tmp, 1, len, stream);
+  if (n != len)
+    return WEOF;
+
+  return (wint_t) wc;
 }
 
 G_GNUC_INTERNAL int
@@ -1087,7 +1212,7 @@ fseek (FILE * stream, long offset, int whence)
 
   f->rpos = 0;
   f->rlen = 0;
-  f->has_ungot = FALSE;
+  f->ungot_len = 0;
   f->eof = FALSE;
 
   r = frida_lseek_nointr (f->fd, (off_t) offset, whence);
@@ -1118,8 +1243,7 @@ ftell (FILE * stream)
   if (f->buf_mode != _IONBF)
     pos -= (off_t) (f->rlen - f->rpos);
 
-  if (f->has_ungot)
-    pos -= 1;
+  pos -= f->ungot_len;
 
   return (long) pos;
 }
@@ -1878,6 +2002,36 @@ beach:
 
     return result;
   }
+}
+
+static gboolean
+frida_utf8_expected_len (guint8 first, guint * out_len)
+{
+  if (first < 0x80)
+  {
+    *out_len = 1;
+    return TRUE;
+  }
+
+  if ((first & 0xe0) == 0xc0)
+  {
+    *out_len = 2;
+    return TRUE;
+  }
+
+  if ((first & 0xf0) == 0xe0)
+  {
+    *out_len = 3;
+    return TRUE;
+  }
+
+  if ((first & 0xf8) == 0xf0)
+  {
+    *out_len = 4;
+    return TRUE;
+  }
+
+  return FALSE;
 }
 
 #ifdef HAVE_FRIDA_DIR
