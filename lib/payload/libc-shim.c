@@ -30,6 +30,12 @@
 #undef fopen
 #undef fopen64
 #undef fputwc
+#undef fseek
+#undef fseeko
+#undef fseeko64
+#undef ftell
+#undef ftello
+#undef ftello64
 #undef getc
 #undef getc_unlocked
 #undef getwc
@@ -193,6 +199,8 @@ struct _FridaDir
 #endif
 
 static FILE * frida_fopen_impl (const char * pathname, const char * mode);
+static int frida_fseek_impl (FILE * stream, off_t offset, int whence);
+static off_t frida_ftell_impl (FILE * stream);
 
 static void frida_stdio_register_stream (FILE * stream);
 static void frida_stdio_unregister_stream (FILE * stream);
@@ -1232,6 +1240,80 @@ fgets (char * s, int size, FILE * stream)
 G_GNUC_INTERNAL int
 fseek (FILE * stream, long offset, int whence)
 {
+  return frida_fseek_impl (stream, (off_t) offset, whence);
+}
+
+G_GNUC_INTERNAL long
+ftell (FILE * stream)
+{
+  off_t pos = frida_ftell_impl (stream);
+  if (pos == (off_t) -1)
+    return -1;
+
+  return (long) pos;
+}
+
+#ifdef HAVE_GLIBC
+
+G_GNUC_INTERNAL int
+frida_fseeko_glibc_225 (FILE * stream, off_t offset, int whence)
+{
+  return frida_fseek_impl (stream, offset, whence);
+}
+__asm__ (".symver frida_fseeko_glibc_225,fseeko@@GLIBC_2.2.5");
+
+G_GNUC_INTERNAL int
+frida_fseeko64_glibc_225 (FILE * stream, off_t offset, int whence)
+{
+  return frida_fseek_impl (stream, offset, whence);
+}
+__asm__ (".symver frida_fseeko64_glibc_225,fseeko64@@GLIBC_2.2.5");
+
+G_GNUC_INTERNAL off_t
+frida_ftello_glibc_225 (FILE * stream)
+{
+  return frida_ftell_impl (stream);
+}
+__asm__ (".symver frida_ftello_glibc_225,ftello@@GLIBC_2.2.5");
+
+G_GNUC_INTERNAL off_t
+frida_ftello64_glibc_225 (FILE * stream)
+{
+  return frida_ftell_impl (stream);
+}
+__asm__ (".symver frida_ftello64_glibc_225,ftello64@@GLIBC_2.2.5");
+
+#else
+
+G_GNUC_INTERNAL int
+fseeko (FILE * stream, off_t offset, int whence)
+{
+  return frida_fseek_impl (stream, offset, whence);
+}
+
+G_GNUC_INTERNAL int
+fseeko64 (FILE * stream, off_t offset, int whence)
+{
+  return frida_fseek_impl (stream, offset, whence);
+}
+
+G_GNUC_INTERNAL off_t
+ftello (FILE * stream)
+{
+  return frida_ftell_impl (stream);
+}
+
+G_GNUC_INTERNAL off_t
+ftello64 (FILE * stream)
+{
+  return frida_ftell_impl (stream);
+}
+
+#endif
+
+static int
+frida_fseek_impl (FILE * stream, off_t offset, int whence)
+{
   FridaFile * f;
   off_t r;
 
@@ -1245,7 +1327,7 @@ fseek (FILE * stream, long offset, int whence)
   f->ungot_len = 0;
   f->eof = FALSE;
 
-  r = frida_lseek_nointr (f->fd, (off_t) offset, whence);
+  r = frida_lseek_nointr (f->fd, offset, whence);
   if (r == (off_t) -1)
   {
     f->err = errno;
@@ -1255,8 +1337,8 @@ fseek (FILE * stream, long offset, int whence)
   return 0;
 }
 
-G_GNUC_INTERNAL long
-ftell (FILE * stream)
+static off_t
+frida_ftell_impl (FILE * stream)
 {
   FridaFile * f;
   off_t pos;
@@ -1275,7 +1357,7 @@ ftell (FILE * stream)
 
   pos -= f->ungot_len;
 
-  return (long) pos;
+  return pos;
 }
 
 G_GNUC_INTERNAL void
