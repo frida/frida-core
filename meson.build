@@ -302,6 +302,10 @@ if host_os == 'linux'
   endif
   cdata.set('HAVE_' + libc.to_upper(), 1)
   vala_flags += '--define=' + libc.to_upper()
+elif host_os == 'android'
+  libc = 'bionic'
+else
+  libc = 'other'
 endif
 
 if get_option('b_sanitize') == 'address'
