@@ -45,7 +45,7 @@ elif host_os_family == 'darwin'
   extra_link_args += '-Wl,-exported_symbols_list,' + meson.current_source_dir() / symlist
   extra_link_depends += symlist
 else
-  symscript = 'frida-gadget.version'
+  symscript = (libc == 'glibc') ? 'frida-gadget-glibc.version' : 'frida-gadget.version'
   extra_link_args += '-Wl,--version-script,' + meson.current_source_dir() / symscript
   extra_link_depends += symscript
 endif
