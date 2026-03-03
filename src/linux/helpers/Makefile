@@ -19,7 +19,7 @@ endif
 ifdef FRIDA_HOST
 host_machine := $(FRIDA_HOST)
 else
-host_machine := $(shell basename $$(ls -1 $(BUILDDIR)/frida-linux-*.txt | tail -1) | cut -d"." -f1 | cut -d"-" -f2-)
+host_machine := $(shell basename $$(ls -1 $(BUILDDIR)/*/frida-linux-*.txt | tail -1) | cut -d"." -f1 | cut -d"-" -f2-)
 endif
 host_arch := $(shell echo $(host_machine) | cut -d"-" -f2)
 
