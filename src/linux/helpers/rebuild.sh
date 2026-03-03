@@ -16,7 +16,6 @@ CURRENT_FILE="${BASH_SOURCE[0]}"
 HELPERS_DIR="$(cd "$(dirname "$CURRENT_FILE")" && pwd)"
 FRIDA_CORE_DIR="$(cd "$HELPERS_DIR/../../.." && pwd)"
 RELENG_DIR="$FRIDA_CORE_DIR/releng"
-BUILD_DIR="$FRIDA_CORE_DIR/build"
 RELATIVE_TO_FRIDA_CORE_DIR=$(realpath --relative-to="$FRIDA_CORE_DIR" "$CURRENT_FILE")
 
 TMP_MESON_DIR=$(mktemp -d)
@@ -86,9 +85,14 @@ build_arch () {
 
   cd "$FRIDA_CORE_DIR"
 
-  rm -rf "$BUILD_DIR"
+  builddir=build/$FRIDA_HOST
+  rm -rf "$builddir"
+  mkdir -p "$builddir"
+  pushd "$builddir"
+  ../../configure --host="$XTOOLS_HOST" "${EXTRA_FLAGS[@]}"
+  popd
+
   # Note that $XTOOLS_HOST is set by the container.
-  ./configure --host="$XTOOLS_HOST" "${EXTRA_FLAGS[@]}"
   make -C src/linux/helpers
 }
 
