@@ -51,6 +51,8 @@ void
 _frida_agent_environment_deinit (void)
 {
 #ifndef HAVE_MUSL
+  frida_libc_shim_prepare_to_deinit ();
+
   gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();

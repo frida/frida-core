@@ -40,6 +40,14 @@
 # define FRIDA_STDIO_OPAQUE_FILE 1
 #endif
 
+static gboolean frida_deinit_expected = FALSE;
+
+void
+frida_libc_shim_prepare_to_deinit (void)
+{
+  frida_deinit_expected = TRUE;
+}
+
 #if defined (HAVE_WINDOWS) || defined (HAVE_ASAN)
 
 void
@@ -70,6 +78,9 @@ __attribute__ ((destructor)) static
 void
 frida_libc_shim_deinit (void)
 {
+  if (!frida_deinit_expected)
+    return;
+
 # ifdef HAVE_ASAN
   gum_deinit ();
 # else
@@ -316,6 +327,9 @@ frida_libc_shim_deinit (void)
   assert (frida_libc_shim_initialized);
 
   fflush (NULL);
+
+  if (!frida_deinit_expected)
+    return;
 
   G_LOCK (frida_stdio);
 

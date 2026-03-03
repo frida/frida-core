@@ -118,6 +118,8 @@ frida_gadget_environment_deinit (void)
 
   g_assert (worker_loop != NULL);
 
+  frida_libc_shim_prepare_to_deinit ();
+
   source = g_idle_source_new ();
   g_source_set_priority (source, G_PRIORITY_LOW);
   g_source_set_callback (source, stop_worker_loop, NULL, NULL);
