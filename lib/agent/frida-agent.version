@@ -1,7 +1,12 @@
-{
+FRIDA_1.0 {
   global:
     frida_agent_main;
 
   local:
     *;
 };
+
+GLIBC_2.2.5 {
+  local:
+    fopen*;
+} FRIDA_1.0;

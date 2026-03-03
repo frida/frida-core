@@ -27,6 +27,8 @@
 #undef feof
 #undef ferror
 #undef fgetwc
+#undef fopen
+#undef fopen64
 #undef fputwc
 #undef getc
 #undef getc_unlocked
@@ -189,6 +191,8 @@ struct _FridaDir
 };
 
 #endif
+
+static FILE * frida_fopen_impl (const char * pathname, const char * mode);
 
 static void frida_stdio_register_stream (FILE * stream);
 static void frida_stdio_unregister_stream (FILE * stream);
@@ -663,8 +667,34 @@ asprintf_l (char ** ret, locale_t loc, const char * format, ...)
 
 #endif
 
+#ifdef HAVE_GLIBC
+
+G_GNUC_INTERNAL FILE *
+frida_fopen_glibc_225 (const char * pathname, const char * mode)
+{
+  return frida_fopen_impl (pathname, mode);
+}
+__asm__ (".symver frida_fopen_glibc_225,fopen@@GLIBC_2.2.5");
+
+G_GNUC_INTERNAL FILE *
+frida_fopen64_glibc_225 (const char * pathname, const char * mode)
+{
+  return frida_fopen_impl (pathname, mode);
+}
+__asm__ (".symver frida_fopen64_glibc_225,fopen64@@GLIBC_2.2.5");
+
+#else
+
 G_GNUC_INTERNAL FILE *
 fopen (const char * pathname, const char * mode)
+{
+  return frida_fopen_impl (pathname, mode);
+}
+
+#endif
+
+static FILE *
+frida_fopen_impl (const char * pathname, const char * mode)
 {
   FILE * result;
   int oflags, fd;
