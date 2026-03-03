@@ -1291,6 +1291,14 @@ fseeko (FILE * stream, off_t offset, int whence)
   return frida_fseek_impl (stream, offset, whence);
 }
 
+G_GNUC_INTERNAL off_t
+ftello (FILE * stream)
+{
+  return frida_ftell_impl (stream);
+}
+
+# ifndef HAVE_QNX
+
 G_GNUC_INTERNAL int
 fseeko64 (FILE * stream, off_t offset, int whence)
 {
@@ -1298,16 +1306,12 @@ fseeko64 (FILE * stream, off_t offset, int whence)
 }
 
 G_GNUC_INTERNAL off_t
-ftello (FILE * stream)
-{
-  return frida_ftell_impl (stream);
-}
-
-G_GNUC_INTERNAL off_t
 ftello64 (FILE * stream)
 {
   return frida_ftell_impl (stream);
 }
+
+# endif
 
 #endif
 
