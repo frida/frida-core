@@ -6,6 +6,8 @@
 #include <glib.h>
 #include <xpc/xpc.h>
 
+G_BEGIN_DECLS
+
 typedef void (* FridaXpcHandler) (xpc_object_t object, gpointer user_data);
 typedef gboolean (* FridaXpcDictionaryApplier) (const gchar * key, xpc_object_t val, gpointer user_data);
 
@@ -16,6 +18,8 @@ void _frida_xpc_connection_send_message_with_reply (xpc_connection_t connection,
     FridaXpcHandler handler, gpointer user_data, GDestroyNotify notify);
 gchar * _frida_xpc_object_to_string (xpc_object_t object);
 gboolean _frida_xpc_dictionary_apply (xpc_object_t dict, FridaXpcDictionaryApplier applier, gpointer user_data);
+
+G_END_DECLS
 
 #endif
 

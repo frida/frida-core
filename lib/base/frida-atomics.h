@@ -1,6 +1,10 @@
 #ifndef __FRIDA_ATOMICS_H__
 #define __FRIDA_ATOMICS_H__
 
+#include <glib.h>
+
+G_BEGIN_DECLS
+
 #ifdef _MSC_VER
 
 /* TODO: Add once needed. */
@@ -23,5 +27,7 @@ static inline guint32 frida_atomics_load_u32_acquire (volatile guint32 * p)
 }
 
 #endif
+
+G_END_DECLS
 
 #endif
