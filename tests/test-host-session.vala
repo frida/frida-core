@@ -1764,9 +1764,9 @@ namespace Frida.HostSessionTest {
 				Variant? icon = prov.icon;
 				assert_nonnull (icon);
 				var dict = new VariantDict (icon);
-				int64 width, height;
-				assert_true (dict.lookup ("width", "x", out width));
-				assert_true (dict.lookup ("height", "x", out height));
+				uint16 width, height;
+				assert_true (dict.lookup ("width", "q", out width));
+				assert_true (dict.lookup ("height", "q", out height));
 				assert_true (width == 16);
 				assert_true (height == 16);
 				VariantIter image;
@@ -3296,9 +3296,9 @@ namespace Frida.HostSessionTest {
 			Variant? icon = prov.icon;
 			assert_nonnull (icon);
 			var dict = new VariantDict (icon);
-			int64 width, height;
-			assert_true (dict.lookup ("width", "x", out width));
-			assert_true (dict.lookup ("height", "x", out height));
+			uint16 width, height;
+			assert_true (dict.lookup ("width", "q", out width));
+			assert_true (dict.lookup ("height", "q", out height));
 			assert_true (width == 16);
 			assert_true (height == 16);
 			VariantIter image;
@@ -3572,9 +3572,9 @@ namespace Frida.HostSessionTest {
 			Variant? icon = prov.icon;
 			if (icon != null) {
 				var dict = new VariantDict (icon);
-				int64 width, height;
-				assert_true (dict.lookup ("width", "x", out width));
-				assert_true (dict.lookup ("height", "x", out height));
+				uint16 width, height;
+				assert_true (dict.lookup ("width", "q", out width));
+				assert_true (dict.lookup ("height", "q", out height));
 				assert_true (width == 16);
 				assert_true (height == 16);
 				VariantIter image;
@@ -4231,9 +4231,9 @@ namespace Frida.HostSessionTest {
 			Variant? icon = prov.icon;
 			assert_nonnull (icon);
 			var dict = new VariantDict (icon);
-			int64 width, height;
-			assert_true (dict.lookup ("width", "x", out width));
-			assert_true (dict.lookup ("height", "x", out height));
+			uint16 width, height;
+			assert_true (dict.lookup ("width", "q", out width));
+			assert_true (dict.lookup ("height", "q", out height));
 			assert_true (width == 16);
 			assert_true (height == 16);
 			VariantIter image;
