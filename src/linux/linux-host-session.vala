@@ -102,8 +102,14 @@ namespace Frida {
 			if (android_helper_request != null) {
 				try {
 					var client = yield get_android_helper_client (cancellable);
-					client.closed.disconnect (on_android_helper_client_closed);
-					yield client.close (cancellable);
+
+					AndroidHelperTransport transport = client.transport;
+
+					var stream_transport = transport as AndroidHelperStreamTransport;
+					if (stream_transport != null)
+						stream_transport.closed.disconnect (on_android_helper_transport_closed);
+
+					yield transport.close (cancellable);
 				} catch (Error e) {
 				}
 			}
@@ -429,68 +435,24 @@ namespace Frida {
 				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
 				Posix.chmod (helper_path, 0644);
 
-				var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
+				AndroidHelperTransport? transport = yield try_load_android_helper_inprocess (helper_path, cancellable);
+				if (transport != null) {
+					Posix.unlink (helper_path);
+					helper_path = null;
+				} else {
+					process = yield launch_android_helper (helper_path, instance_id, cancellable);
 
-				var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
-				launcher.setenv ("CLASSPATH", helper_path, true);
-				process = launcher.spawn (
-					"app_process",
-					"/data/local/tmp",
-					"--nice-name=re.frida.helper",
-					"re.frida.Helper",
-					instance_id
-				);
-				uint pid = uint.parse (process.get_identifier ());
+					var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
 
-				var output = new DataInputStream (process.get_stdout_pipe ());
-				var errput = new DataInputStream (process.get_stderr_pipe ());
+					var sc = new SocketClient ();
+					var stream = yield sc.connect_async (helper_address, cancellable);
 
-				string? line = yield output.read_line_utf8_async (Priority.DEFAULT, cancellable);
-				if (line == null || line != "READY.") {
-					string error_details = "";
-
-					try {
-						StringBuilder sb = new StringBuilder ();
-						while (true) {
-							string? l = yield errput.read_line_utf8_async (Priority.DEFAULT, cancellable);
-							if (l == null)
-								break;
-							sb.append (l);
-							sb.append_c ('\n');
-						}
-						error_details = sb.str;
-					} catch (GLib.Error e) {
-					}
-
-					try {
-						yield process.wait_check_async (cancellable);
-					} catch (GLib.Error e) {
-						if (error_details.length == 0)
-							error_details = e.message;
-						else
-							error_details = error_details + "\n" + e.message;
-					}
-
-					string? logs = yield collect_logcat_for_pid (pid, cancellable);
-					if (logs != null)
-						error_details = error_details + "\n\n" + logs;
-
-					if (line == null) {
-						throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper: %s", error_details);
-					} else {
-						throw new Error.PROTOCOL ("Unexpected output from Android helper: %s\nstderr:\n%s",
-							line, error_details);
-					}
+					var t = new AndroidHelperStreamTransport (stream);
+					t.closed.connect (on_android_helper_transport_closed);
+					transport = t;
 				}
 
-				process_android_helper_stream.begin (output, "stdout");
-				process_android_helper_stream.begin (errput, "stderr");
-
-				var sc = new SocketClient ();
-				var stream = yield sc.connect_async (helper_address, cancellable);
-
-				var helper = new AndroidHelperClient (stream);
-				helper.closed.connect (on_android_helper_client_closed);
+				var helper = new AndroidHelperClient (transport);
 
 				android_helper_process = process;
 
@@ -504,7 +466,7 @@ namespace Frida {
 				if (process != null)
 					process.force_exit ();
 
-				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+				var api_error = (e is Error) ? e : new Error.NOT_SUPPORTED ("%s", e.message);
 
 				android_helper_request.reject (api_error);
 
@@ -512,8 +474,79 @@ namespace Frida {
 			}
 		}
 
-		private void on_android_helper_client_closed (AndroidHelperClient helper) {
-			helper.closed.disconnect (on_android_helper_client_closed);
+		private async AndroidHelperTransport? try_load_android_helper_inprocess (string helper_path, Cancellable? cancellable)
+				throws IOError {
+			try {
+				var service = new AndroidHelperService ();
+				yield service.start (helper_path, cancellable);
+				return service;
+			} catch (Error e) {
+				return null;
+			}
+		}
+
+		private async Subprocess launch_android_helper (string helper_path, string instance_id, Cancellable? cancellable)
+				throws GLib.Error {
+			var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
+			launcher.setenv ("CLASSPATH", helper_path, true);
+			var process = launcher.spawn (
+				"app_process",
+				"/data/local/tmp",
+				"--nice-name=re.frida.helper",
+				"re.frida.Helper",
+				instance_id
+			);
+			uint pid = uint.parse (process.get_identifier ());
+
+			var output = new DataInputStream (process.get_stdout_pipe ());
+			var errput = new DataInputStream (process.get_stderr_pipe ());
+
+			string? line = yield output.read_line_utf8_async (Priority.DEFAULT, cancellable);
+			if (line == null || line != "READY.") {
+				string error_details = "";
+
+				try {
+					StringBuilder sb = new StringBuilder ();
+					while (true) {
+						string? l = yield errput.read_line_utf8_async (Priority.DEFAULT, cancellable);
+						if (l == null)
+							break;
+						sb.append (l);
+						sb.append_c ('\n');
+					}
+					error_details = sb.str;
+				} catch (GLib.Error e) {
+				}
+
+				try {
+					yield process.wait_check_async (cancellable);
+				} catch (GLib.Error e) {
+					if (error_details.length == 0)
+						error_details = e.message;
+					else
+						error_details = error_details + "\n" + e.message;
+				}
+
+				string? logs = yield collect_logcat_for_pid (pid, cancellable);
+				if (logs != null)
+					error_details = error_details + "\n\n" + logs;
+
+				if (line == null) {
+					throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper: %s", error_details);
+				} else {
+					throw new Error.PROTOCOL ("Unexpected output from Android helper: %s\nstderr:\n%s",
+						line, error_details);
+				}
+			}
+
+			process_android_helper_stream.begin (output, "stdout");
+			process_android_helper_stream.begin (errput, "stderr");
+
+			return process;
+		}
+
+		private void on_android_helper_transport_closed (AndroidHelperStreamTransport transport) {
+			transport.closed.disconnect (on_android_helper_transport_closed);
 			android_helper_request = null;
 			android_helper_process = null;
 		}
@@ -621,6 +654,278 @@ namespace Frida {
 	}
 
 #if ANDROID
+	private sealed class AndroidHelperService : Object, AndroidHelperTransport {
+		private MainLoop main_loop;
+		private MainContext main_context = new MainContext ();
+		private Thread<void>? worker_thread;
+
+		private Android.Module? art_mod;
+		private Android.Module? rt_mod;
+		private JNI.InvokeInterface ** vm;
+		private JNI.NativeInterface ** env;
+		private JNI.ObjectRef * backend;
+		private JNI.MethodID * handle_request_string;
+
+		construct {
+			main_loop = new MainLoop (main_context, false);
+			worker_thread = new Thread<void> ("frida-android-helper", run);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			var promise = new Promise<bool> ();
+			var caller_context = MainContext.ref_thread_default ();
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				close_and_fulfill (promise, caller_context);
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
+
+			try {
+				yield promise.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			worker_thread.join ();
+			worker_thread = null;
+
+			if (vm != null) {
+				var res = (*vm)->destroy_java_vm (vm);
+				assert (res == OK);
+				vm = null;
+			}
+
+			rt_mod = null;
+			art_mod = null;
+		}
+
+		private void close_and_fulfill (Promise<bool> promise, MainContext caller_context) {
+			do_close ();
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				promise.resolve (true);
+				return Source.REMOVE;
+			});
+			source.attach (caller_context);
+		}
+
+		private void do_close () {
+			if (env != null) {
+				if (backend != null) {
+					(*env)->delete_global_ref (env, backend);
+					backend = null;
+				}
+
+				handle_request_string = null;
+
+				var res = (*vm)->detach_current_thread (vm);
+				assert (res == OK);
+				env = null;
+			}
+
+			main_loop.quit ();
+		}
+
+		public async void start (string helper_path, Cancellable? cancellable) throws Error, IOError {
+			var promise = new Promise<bool> ();
+			var caller_context = MainContext.ref_thread_default ();
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				start_and_fulfill (helper_path, promise, caller_context);
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
+
+			yield promise.future.wait_async (cancellable);
+		}
+
+		private void start_and_fulfill (string helper_path, Promise<bool> promise, MainContext caller_context) {
+			Error? error = null;
+			try {
+				do_start (helper_path);
+			} catch (Error e) {
+				error = e;
+			} finally {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					if (error == null)
+						promise.resolve (true);
+					else
+						promise.reject (error);
+					return Source.REMOVE;
+				});
+				source.attach (caller_context);
+			}
+		}
+
+		private void do_start (string helper_path) throws Error {
+			var linker = Gum.Android.get_linker_module ();
+
+			var dlopen_ext = (DlopenExtFunc) linker.find_export_by_name ("__loader_android_dlopen_ext");
+			if (dlopen_ext == null)
+				throw new Error.NOT_SUPPORTED ("Missing android_dlopen_ext");
+
+			var get_exported_namespace = (GetExportedNamespaceFunc) linker.find_export_by_name (
+				"__loader_android_get_exported_namespace");
+			if (get_exported_namespace == null)
+				throw new Error.NOT_SUPPORTED ("Missing android_get_exported_namespace");
+
+			var info = Android.DlExtInfo ();
+			info.flags = USE_NAMESPACE;
+			info.library_namespace = get_exported_namespace ("com_android_art");
+
+			art_mod = dlopen_ext ("libart.so", LAZY | LOCAL, info);
+			if (art_mod == null)
+				throw new Error.NOT_SUPPORTED ("Unable to load libart.so: %s", Android.Module.get_last_error ());
+
+			rt_mod = Android.Module.open ("libandroid_runtime.so", LAZY | LOCAL);
+			assert (rt_mod != null);
+
+			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
+			assert (create_java_vm != null);
+			var register_framework_natives = (RegisterFrameworkNativesFunc) rt_mod.symbol ("registerFrameworkNatives");
+			assert (register_framework_natives != null);
+
+			var args = JNI.VMInitArgs () {
+				version = JNI.VERSION_1_2,
+				options = {
+					JNI.VMOption () { option_string = "-Djava.class.path=" + helper_path },
+				},
+			};
+
+			var res = create_java_vm (out vm, out env, args);
+			assert (res == OK);
+
+			res = register_framework_natives (env);
+			assert (res == OK);
+
+			(*env)->push_local_frame (env, 5);
+			try {
+				var backend_class = (*env)->find_class (env, "re/frida/HelperBackend");
+				assert (backend_class != null);
+
+				var ctor = (*env)->get_method_id (env, backend_class, "<init>", "()V");
+				assert (ctor != null);
+
+				handle_request_string = (*env)->get_method_id (env, backend_class, "handleRequestString",
+					"(Ljava/lang/String;)Ljava/lang/String;");
+				assert (handle_request_string != null);
+
+				var backend_local = (*env)->new_object (env, backend_class, ctor);
+				check_java_exception (env);
+
+				backend = (*env)->new_global_ref (env, backend_local);
+			} finally {
+				(*env)->pop_local_frame (env, null);
+			}
+		}
+
+		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
+			var promise = new Promise<Json.Node> ();
+			var caller_context = MainContext.ref_thread_default ();
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				handle_request_and_fulfill (stanza, promise, caller_context);
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
+
+			return yield promise.future.wait_async (cancellable);
+		}
+
+		private void handle_request_and_fulfill (Json.Node stanza, Promise<Json.Node> promise, MainContext caller_context) {
+			Json.Node? response = null;
+			Error? error = null;
+			try {
+				response = handle_request (stanza);
+			} catch (Error e) {
+				error = e;
+			} finally {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					if (error == null)
+						promise.resolve (response);
+					else
+						promise.reject (error);
+					return Source.REMOVE;
+				});
+				source.attach (caller_context);
+			}
+		}
+
+		private Json.Node handle_request (Json.Node stanza) throws Error {
+			(*env)->push_local_frame (env, 5);
+			try {
+				var stanza_val = (*env)->new_string_utf (env, Json.to_string (stanza, false));
+				assert (stanza_val != null);
+
+				var response_val = (*env)->call_object_method (env, backend, handle_request_string, stanza_val);
+				check_java_exception (env);
+
+				if (response_val != null) {
+					unowned string response_str = (*env)->get_string_utf_chars (env, (JNI.StringRef *) response_val, null);
+					try {
+						return Json.from_string (response_str);
+					} catch (GLib.Error e) {
+						throw new Error.PROTOCOL ("%s", e.message);
+					} finally {
+						(*env)->release_string_utf_chars (env, (JNI.StringRef *) response_val, response_str);
+					}
+				} else {
+					return new Json.Node.alloc ().init_null ();
+				}
+			} finally {
+				(*env)->pop_local_frame (env, null);
+			}
+		}
+
+		private void run () {
+			main_context.push_thread_default ();
+			main_loop.run ();
+			main_context.pop_thread_default ();
+		}
+
+		private static void check_java_exception (JNI.NativeInterface ** env) throws Error {
+			var throwable = (*env)->exception_occurred (env);
+			if (throwable == null)
+				return;
+
+			(*env)->exception_clear (env);
+
+			var throwable_class = (*env)->get_object_class (env, (JNI.ObjectRef *) throwable);
+			var to_string = (*env)->get_method_id (env, throwable_class, "toString", "()Ljava/lang/String;");
+			var text_val = (JNI.StringRef *) (*env)->call_object_method (env, (JNI.ObjectRef *) throwable, to_string);
+
+			unowned string text_str = (*env)->get_string_utf_chars (env, text_val);
+			var e = new Error.NOT_SUPPORTED ("%s", text_str);
+			(*env)->release_string_utf_chars (env, text_val, text_str);
+
+			(*env)->delete_local_ref (env, (JNI.ObjectRef *) text_val);
+			(*env)->delete_local_ref (env, (JNI.ObjectRef *) throwable_class);
+			(*env)->delete_local_ref (env, (JNI.ObjectRef *) throwable);
+
+			throw e;
+		}
+
+		[CCode (has_target = false)]
+		private delegate Android.Module? DlopenExtFunc (string filename, Android.DlOpenFlags flags, Android.DlExtInfo info);
+
+		[CCode (has_target = false)]
+		private delegate Android.Namespace * GetExportedNamespaceFunc (string ns);
+
+		[CCode (has_target = false)]
+		private delegate JNI.Result CreateVMFunc (out JNI.InvokeInterface ** vm, out JNI.NativeInterface ** env,
+			JNI.VMInitArgs vm_args);
+
+		[CCode (has_target = false)]
+		private delegate JNI.Result RegisterFrameworkNativesFunc (void * env);
+	}
+
 	private sealed class RoboLauncher : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);

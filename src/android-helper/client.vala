@@ -1,66 +1,12 @@
 namespace Frida {
-	public sealed class AndroidHelperClient : Object, AsyncInitable {
-		public signal void closed ();
-
-		public IOStream stream {
+	public sealed class AndroidHelperClient : Object {
+		public AndroidHelperTransport transport {
 			get;
 			construct;
 		}
 
-		private BufferedInputStream input;
-		private OutputStream output;
-		private Cancellable io_cancellable = new Cancellable ();
-
-		private State state = CLOSED;
-		private Gee.Queue<Request> pending_requests = new Gee.ArrayQueue<Request> ();
-
-		private ByteArray pending_output = new ByteArray ();
-		private bool writing = false;
-
-		private enum State {
-			CLOSED,
-			OPEN
-		}
-
-		private const uint32 MAX_RESPONSE_SIZE = 100 * 1024 * 1024;
-
-		public AndroidHelperClient (IOStream stream) {
-			Object (stream: stream);
-		}
-
-		construct {
-			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
-				"base-stream", stream.get_input_stream (),
-				"close-base-stream", false,
-				"buffer-size", 128 * 1024);
-			output = stream.get_output_stream ();
-
-			state = OPEN;
-
-			process_incoming_responses.begin ();
-		}
-
-		public async void close (Cancellable? cancellable) throws IOError {
-			io_cancellable.cancel ();
-
-			var source = new IdleSource ();
-			source.set_callback (close.callback);
-			source.attach (MainContext.get_thread_default ());
-			yield;
-
-			try {
-				yield stream.close_async (Priority.DEFAULT, cancellable);
-			} catch (IOError e) {
-			}
-
-			ensure_closed ();
-		}
-
-		private void ensure_closed () {
-			if (state == CLOSED)
-				return;
-			state = CLOSED;
-			closed ();
+		public AndroidHelperClient (AndroidHelperTransport transport) {
+			Object (transport: transport);
 		}
 
 		public async HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options,
@@ -72,7 +18,7 @@ namespace Frida {
 				.add_string_value (options.scope.to_nick ())
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			if (response.is_null ())
 				return HostApplicationInfo.empty ();
@@ -127,7 +73,7 @@ namespace Frida {
 				.add_string_value (options.scope.to_nick ())
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			Json.Reader reader = new Json.Reader (response);
 
@@ -193,7 +139,7 @@ namespace Frida {
 				.add_string_value (options.scope.to_nick ())
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			Json.Reader reader = new Json.Reader (response);
 
@@ -247,7 +193,7 @@ namespace Frida {
 				.add_int_value (uid)
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			var r = new Json.Reader (response);
 			parse_envelope_or_throw (r);
@@ -317,7 +263,7 @@ namespace Frida {
 				.add_int_value (uid)
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			var r = new Json.Reader (response);
 			parse_envelope_or_throw (r);
@@ -331,7 +277,7 @@ namespace Frida {
 				.add_int_value ((int) pid)
 				.end_array ();
 
-			Json.Node response = yield request (stanza.get_root (), cancellable);
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
 			var r = new Json.Reader (response);
 			parse_envelope_or_throw (r);
@@ -341,6 +287,13 @@ namespace Frida {
 			if (val == null || val.get_value_type () != typeof (bool))
 				throw new Error.PROTOCOL ("Malformed response");
 			return r.get_boolean_value ();
+		}
+
+		private async void request_ok (Json.Builder stanza, Cancellable? cancellable) throws Error, IOError {
+			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
+
+			var r = new Json.Reader (response);
+			parse_envelope_or_throw (r);
 		}
 
 		private void parse_envelope_or_throw (Json.Reader r) throws Error {
@@ -452,6 +405,76 @@ namespace Frida {
 
 			throw new Error.PROTOCOL ("Unexpected JSON type: %s", type.name ());
 		}
+	}
+
+	public interface AndroidHelperTransport : Object {
+		public abstract async void close (Cancellable? cancellable) throws IOError;
+		public abstract async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public sealed class AndroidHelperStreamTransport : Object, AndroidHelperTransport {
+		public signal void closed ();
+
+		public IOStream stream {
+			get;
+			construct;
+		}
+
+		private BufferedInputStream input;
+		private OutputStream output;
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private State state = CLOSED;
+		private Gee.Queue<Request> pending_requests = new Gee.ArrayQueue<Request> ();
+
+		private ByteArray pending_output = new ByteArray ();
+		private bool writing = false;
+
+		private enum State {
+			CLOSED,
+			OPEN
+		}
+
+		private const uint32 MAX_RESPONSE_SIZE = 100 * 1024 * 1024;
+
+		public AndroidHelperStreamTransport (IOStream stream) {
+			Object (stream: stream);
+		}
+
+		construct {
+			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+				"base-stream", stream.get_input_stream (),
+				"close-base-stream", false,
+				"buffer-size", 128 * 1024);
+			output = stream.get_output_stream ();
+
+			state = OPEN;
+
+			process_incoming_responses.begin ();
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			io_cancellable.cancel ();
+
+			var source = new IdleSource ();
+			source.set_callback (close.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
+			try {
+				yield stream.close_async (Priority.DEFAULT, cancellable);
+			} catch (IOError e) {
+			}
+
+			ensure_closed ();
+		}
+
+		private void ensure_closed () {
+			if (state == CLOSED)
+				return;
+			state = CLOSED;
+			closed ();
+		}
 
 		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
 			if (state == CLOSED)
@@ -485,13 +508,6 @@ namespace Frida {
 			}
 
 			return r.response;
-		}
-
-		private async void request_ok (Json.Builder stanza, Cancellable? cancellable) throws Error, IOError {
-			Json.Node response = yield request (stanza.get_root (), cancellable);
-
-			var r = new Json.Reader (response);
-			parse_envelope_or_throw (r);
 		}
 
 		private void write_request (Json.Node request) {

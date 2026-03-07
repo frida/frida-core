@@ -11,7 +11,7 @@ helper.dex: build/frida-helper.jar
 		$<
 	mv build/classes.dex $@
 
-build/frida-helper.jar: re/frida/Helper.java
+build/frida-helper.jar: re/frida/Helper.java re/frida/HelperBackend.java
 	javac \
 		-cp .:$(android_jar) \
 		-bootclasspath $(android_jar) \
