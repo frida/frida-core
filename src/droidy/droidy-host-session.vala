@@ -290,8 +290,9 @@ namespace Frida {
 			if (helper_client_request != null) {
 				AndroidHelperClient? helper = yield try_get_helper_client (cancellable);
 				if (helper != null) {
-					on_helper_client_closed (helper);
-					yield helper.close (cancellable);
+					var transport = (AndroidHelperStreamTransport) helper.transport;
+					on_helper_stream_transport_closed (transport);
+					yield transport.close (cancellable);
 				}
 			}
 
@@ -1060,8 +1061,10 @@ namespace Frida {
 					throw e;
 				}
 
-				var helper = new AndroidHelperClient (client.stream);
-				helper.closed.connect (on_helper_client_closed);
+				var transport = new AndroidHelperStreamTransport (client.stream);
+				transport.closed.connect (on_helper_stream_transport_closed);
+
+				var helper = new AndroidHelperClient (transport);
 
 				helper_shell = shell;
 
@@ -1080,8 +1083,8 @@ namespace Frida {
 			}
 		}
 
-		private void on_helper_client_closed (AndroidHelperClient helper) {
-			helper.closed.disconnect (on_helper_client_closed);
+		private void on_helper_stream_transport_closed (AndroidHelperStreamTransport transport) {
+			transport.closed.disconnect (on_helper_stream_transport_closed);
 			helper_client_request = null;
 
 			if (helper_shell != null) {
