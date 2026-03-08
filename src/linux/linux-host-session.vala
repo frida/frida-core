@@ -666,6 +666,18 @@ namespace Frida {
 		private JNI.ObjectRef * backend;
 		private JNI.MethodID * handle_request_string;
 
+		private static string[] SIGCHAIN_STUB_NAMES = {
+			"ClaimSignalChain",
+			"UnclaimSignalChain",
+			"InvokeUserSignalHandler",
+			"InitializeSignalChain",
+			"EnsureFrontOfChain",
+			"SetSpecialSignalHandlerFn",
+			"AddSpecialSignalHandlerFn",
+			"RemoveSpecialSignalHandlerFn",
+			"SkipAddSignalHandler",
+		};
+
 		construct {
 			main_loop = new MainLoop (main_context, false);
 			worker_thread = new Thread<void> ("frida-android-helper", run);
@@ -765,20 +777,21 @@ namespace Frida {
 		private void do_start (string helper_path) throws Error {
 			var linker = Gum.Android.get_linker_module ();
 
-			var dlopen_ext = (DlopenExtFunc) linker.find_export_by_name ("__loader_android_dlopen_ext");
-			if (dlopen_ext == null)
-				throw new Error.NOT_SUPPORTED ("Missing android_dlopen_ext");
-
 			var get_exported_namespace = (GetExportedNamespaceFunc) linker.find_export_by_name (
 				"__loader_android_get_exported_namespace");
-			if (get_exported_namespace == null)
-				throw new Error.NOT_SUPPORTED ("Missing android_get_exported_namespace");
+			if (get_exported_namespace != null) {
+				var dlopen_ext = (DlopenExtFunc) linker.find_export_by_name ("__loader_android_dlopen_ext");
+				if (dlopen_ext == null)
+					throw new Error.NOT_SUPPORTED ("Missing android_dlopen_ext");
 
-			var info = Android.DlExtInfo ();
-			info.flags = USE_NAMESPACE;
-			info.library_namespace = get_exported_namespace ("com_android_art");
+				var info = Android.DlExtInfo ();
+				info.flags = USE_NAMESPACE;
+				info.library_namespace = get_exported_namespace ("com_android_art");
 
-			art_mod = dlopen_ext ("libart.so", LAZY | LOCAL, info);
+				art_mod = dlopen_ext ("libart.so", LAZY | LOCAL, info);
+			} else {
+				art_mod = Android.Module.open ("libart.so", LAZY | LOCAL);
+			}
 			if (art_mod == null)
 				throw new Error.NOT_SUPPORTED ("Unable to load libart.so: %s", Android.Module.get_last_error ());
 			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
@@ -788,12 +801,8 @@ namespace Frida {
 			if (sigchain != null) {
 				var interceptor = Gum.Interceptor.obtain ();
 				sigchain.enumerate_exports (e => {
-					if (e.name == "AddSpecialSignalHandlerFn" ||
-							e.name == "RemoveSpecialSignalHandlerFn" ||
-							e.name == "SkipAddSignalHandler" ||
-							e.name == "EnsureFrontOfChain") {
+					if (e.name in SIGCHAIN_STUB_NAMES)
 						interceptor.replace ((void *) e.address, (void *) on_sigchain_invocation);
-					}
 					return true;
 				});
 			}
