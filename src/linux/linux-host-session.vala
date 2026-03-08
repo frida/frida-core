@@ -781,12 +781,25 @@ namespace Frida {
 			art_mod = dlopen_ext ("libart.so", LAZY | LOCAL, info);
 			if (art_mod == null)
 				throw new Error.NOT_SUPPORTED ("Unable to load libart.so: %s", Android.Module.get_last_error ());
+			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
+			assert (create_java_vm != null);
+
+			var sigchain = Gum.Process.find_module_by_name ("libsigchain.so");
+			if (sigchain != null) {
+				var interceptor = Gum.Interceptor.obtain ();
+				sigchain.enumerate_exports (e => {
+					if (e.name == "AddSpecialSignalHandlerFn" ||
+							e.name == "RemoveSpecialSignalHandlerFn" ||
+							e.name == "SkipAddSignalHandler" ||
+							e.name == "EnsureFrontOfChain") {
+						interceptor.replace ((void *) e.address, (void *) on_sigchain_invocation);
+					}
+					return true;
+				});
+			}
 
 			rt_mod = Android.Module.open ("libandroid_runtime.so", LAZY | LOCAL);
 			assert (rt_mod != null);
-
-			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
-			assert (create_java_vm != null);
 			var register_framework_natives = (RegisterFrameworkNativesFunc) rt_mod.symbol ("registerFrameworkNatives");
 			assert (register_framework_natives != null);
 
@@ -822,6 +835,9 @@ namespace Frida {
 			} finally {
 				(*env)->pop_local_frame (env, null);
 			}
+		}
+
+		private static void on_sigchain_invocation () {
 		}
 
 		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
