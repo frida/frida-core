@@ -34,7 +34,6 @@ namespace Frida {
 
 #if ANDROID
 		private Promise<AndroidHelperClient>? android_helper_request;
-		private Subprocess? android_helper_process;
 		private RoboLauncher robo_launcher;
 		private CrashMonitor? crash_monitor;
 #endif
@@ -102,19 +101,10 @@ namespace Frida {
 			if (android_helper_request != null) {
 				try {
 					var client = yield get_android_helper_client (cancellable);
-
-					AndroidHelperTransport transport = client.transport;
-
-					var stream_transport = transport as AndroidHelperStreamTransport;
-					if (stream_transport != null)
-						stream_transport.closed.disconnect (on_android_helper_transport_closed);
-
-					yield transport.close (cancellable);
+					yield client.transport.close (cancellable);
 				} catch (Error e) {
 				}
 			}
-
-			android_helper_process = null;
 #endif
 
 			yield base.close (cancellable);
@@ -427,198 +417,31 @@ namespace Frida {
 			}
 			android_helper_request = new Promise<AndroidHelperClient> ();
 
-			string? helper_path = null;
-			Subprocess? process = null;
 			try {
 				string instance_id = Uuid.string_random ().replace ("-", "");
-				helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
+				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
 				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
 				Posix.chmod (helper_path, 0644);
 
-				AndroidHelperTransport? transport = yield try_load_android_helper_inprocess (helper_path, cancellable);
-				if (transport != null) {
+				try {
+					var service = new AndroidHelperService ();
+					yield service.start (helper_path, cancellable);
+
+					var helper = new AndroidHelperClient (service);
+
+					android_helper_request.resolve (helper);
+
+					return helper;
+				} finally {
 					Posix.unlink (helper_path);
-					helper_path = null;
-				} else {
-					process = yield launch_android_helper (helper_path, instance_id, cancellable);
-
-					var helper_address = new UnixSocketAddress.with_type ("/frida-helper-" + instance_id, -1, ABSTRACT);
-
-					var sc = new SocketClient ();
-					var stream = yield sc.connect_async (helper_address, cancellable);
-
-					var t = new AndroidHelperStreamTransport (stream);
-					t.closed.connect (on_android_helper_transport_closed);
-					transport = t;
 				}
-
-				var helper = new AndroidHelperClient (transport);
-
-				android_helper_process = process;
-
-				android_helper_request.resolve (helper);
-
-				return helper;
 			} catch (GLib.Error e) {
-				if (helper_path != null)
-					Posix.unlink (helper_path);
-
-				if (process != null)
-					process.force_exit ();
-
-				var api_error = (e is Error) ? e : new Error.NOT_SUPPORTED ("%s", e.message);
+				var api_error = (e is Error) ? e : new Error.PERMISSION_DENIED ("%s", e.message);
 
 				android_helper_request.reject (api_error);
 
 				throw_api_error (api_error);
 			}
-		}
-
-		private async AndroidHelperTransport? try_load_android_helper_inprocess (string helper_path, Cancellable? cancellable)
-				throws IOError {
-			try {
-				var service = new AndroidHelperService ();
-				yield service.start (helper_path, cancellable);
-				return service;
-			} catch (Error e) {
-				return null;
-			}
-		}
-
-		private async Subprocess launch_android_helper (string helper_path, string instance_id, Cancellable? cancellable)
-				throws GLib.Error {
-			var launcher = new SubprocessLauncher (STDIN_INHERIT | STDOUT_PIPE | STDERR_PIPE);
-			launcher.setenv ("CLASSPATH", helper_path, true);
-			var process = launcher.spawn (
-				"app_process",
-				"/data/local/tmp",
-				"--nice-name=re.frida.helper",
-				"re.frida.Helper",
-				instance_id
-			);
-			uint pid = uint.parse (process.get_identifier ());
-
-			var output = new DataInputStream (process.get_stdout_pipe ());
-			var errput = new DataInputStream (process.get_stderr_pipe ());
-
-			string? line = yield output.read_line_utf8_async (Priority.DEFAULT, cancellable);
-			if (line == null || line != "READY.") {
-				string error_details = "";
-
-				try {
-					StringBuilder sb = new StringBuilder ();
-					while (true) {
-						string? l = yield errput.read_line_utf8_async (Priority.DEFAULT, cancellable);
-						if (l == null)
-							break;
-						sb.append (l);
-						sb.append_c ('\n');
-					}
-					error_details = sb.str;
-				} catch (GLib.Error e) {
-				}
-
-				try {
-					yield process.wait_check_async (cancellable);
-				} catch (GLib.Error e) {
-					if (error_details.length == 0)
-						error_details = e.message;
-					else
-						error_details = error_details + "\n" + e.message;
-				}
-
-				string? logs = yield collect_logcat_for_pid (pid, cancellable);
-				if (logs != null)
-					error_details = error_details + "\n\n" + logs;
-
-				if (line == null) {
-					throw new Error.NOT_SUPPORTED ("Unable to spawn Android helper: %s", error_details);
-				} else {
-					throw new Error.PROTOCOL ("Unexpected output from Android helper: %s\nstderr:\n%s",
-						line, error_details);
-				}
-			}
-
-			process_android_helper_stream.begin (output, "stdout");
-			process_android_helper_stream.begin (errput, "stderr");
-
-			return process;
-		}
-
-		private void on_android_helper_transport_closed (AndroidHelperStreamTransport transport) {
-			transport.closed.disconnect (on_android_helper_transport_closed);
-			android_helper_request = null;
-			android_helper_process = null;
-		}
-
-		private async void process_android_helper_stream (DataInputStream stream, string label) {
-			try {
-				while (true) {
-					string? line = yield stream.read_line_utf8_async (Priority.DEFAULT, io_cancellable);
-					if (line == null)
-						break;
-					if (label == "stderr" && line.has_prefix ("WARNING: ") && " has text relocations" in line)
-						continue;
-					printerr ("[android-helper %s] %s\n", label, line);
-				}
-			} catch (GLib.Error e) {
-			}
-		}
-
-		private async string? collect_logcat_for_pid (uint pid, Cancellable? cancellable) throws IOError {
-			string output;
-
-			string header = "[logcat output]\n";
-
-			try {
-				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "--pid=%u".printf (pid));
-
-				yield p.communicate_utf8_async (null, cancellable, out output, null);
-
-				if (p.get_exit_status () == 0) {
-					output = output.chomp ();
-					return (output.length != 0) ? header + output : null;
-				}
-			} catch (GLib.Error e) {
-			}
-
-			try {
-				var p = new Subprocess (STDOUT_PIPE | STDERR_SILENCE, "logcat", "-d", "-v", "threadtime");
-
-				yield p.communicate_utf8_async (null, cancellable, out output, null);
-
-				if (p.get_exit_status () == 0) {
-					string? filtered = filter_logcat_threadtime_by_pid (output, pid);
-					if (filtered != null)
-						return header + filtered;
-				}
-			} catch (GLib.Error e) {
-			}
-
-			return null;
-		}
-
-		private static string? filter_logcat_threadtime_by_pid (string log, uint pid) {
-			var sb = new StringBuilder ();
-
-			foreach (string line in log.split ("\n")) {
-				if (line.length == 0)
-					continue;
-
-				string[] parts = line.split_set (" \t");
-				if (parts.length < 5)
-					continue;
-
-				uint line_pid = uint.parse (parts[2]);
-				if (line_pid != pid)
-					continue;
-
-				sb.append (line);
-				sb.append_c ('\n');
-			}
-
-			var result = sb.str.chomp ();
-			return (result.length != 0) ? result : null;
 		}
 
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
@@ -777,6 +600,8 @@ namespace Frida {
 		private void do_start (string helper_path) throws Error {
 			var linker = Gum.Android.get_linker_module ();
 
+			string vm_soname = (Gum.Android.get_api_level () >= 21) ? "libart.so" : "libdvm.so";
+
 			var get_exported_namespace = (GetExportedNamespaceFunc) linker.find_export_by_name (
 				"__loader_android_get_exported_namespace");
 			if (get_exported_namespace != null) {
@@ -788,12 +613,12 @@ namespace Frida {
 				info.flags = USE_NAMESPACE;
 				info.library_namespace = get_exported_namespace ("com_android_art");
 
-				art_mod = dlopen_ext ("libart.so", LAZY | LOCAL, info);
+				art_mod = dlopen_ext (vm_soname, LAZY | LOCAL, info);
 			} else {
-				art_mod = Android.Module.open ("libart.so", LAZY | LOCAL);
+				art_mod = Android.Module.open (vm_soname, LAZY | LOCAL);
 			}
 			if (art_mod == null)
-				throw new Error.NOT_SUPPORTED ("Unable to load libart.so: %s", Android.Module.get_last_error ());
+				throw new Error.NOT_SUPPORTED ("Unable to load %s: %s", vm_soname, Android.Module.get_last_error ());
 			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
 			assert (create_java_vm != null);
 
@@ -809,8 +634,6 @@ namespace Frida {
 
 			rt_mod = Android.Module.open ("libandroid_runtime.so", LAZY | LOCAL);
 			assert (rt_mod != null);
-			var register_framework_natives = (RegisterFrameworkNativesFunc) rt_mod.symbol ("registerFrameworkNatives");
-			assert (register_framework_natives != null);
 
 			var args = JNI.VMInitArgs () {
 				version = JNI.VERSION_1_2,
@@ -822,8 +645,18 @@ namespace Frida {
 			var res = create_java_vm (out vm, out env, args);
 			assert (res == OK);
 
-			res = register_framework_natives (env);
-			assert (res == OK);
+			var register_natives = (RegisterFrameworkNativesFunc) rt_mod.symbol ("registerFrameworkNatives");
+			if (register_natives != null) {
+				res = register_natives (env);
+				assert (res == OK);
+			} else {
+				var register_natives_legacy = (RegisterFrameworkNativesLegacyFunc) rt_mod.symbol (
+					"Java_com_android_internal_util_WithFramework_registerNatives");
+				assert (register_natives_legacy != null);
+
+				res = register_natives_legacy (env, null);
+				assert (res == OK);
+			}
 
 			(*env)->push_local_frame (env, 5);
 			try {
@@ -949,6 +782,9 @@ namespace Frida {
 
 		[CCode (has_target = false)]
 		private delegate JNI.Result RegisterFrameworkNativesFunc (void * env);
+
+		[CCode (has_target = false)]
+		private delegate JNI.Result RegisterFrameworkNativesLegacyFunc (void * env, JNI.ClassRef * clazz);
 	}
 
 	private sealed class RoboLauncher : Object {
