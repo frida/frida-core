@@ -62,7 +62,7 @@ typedef struct _MapCreateEvent MapCreateEvent;
 typedef struct _MapDestroyRangeEvent MapDestroyRangeEvent;
 
 typedef struct _ProcessState ProcessState;
-typedef __u8 Abi;
+typedef __u32 Abi;
 typedef struct _Inflight Inflight;
 typedef struct _Stats Stats;
 typedef struct _BufBuilder BufBuilder;
@@ -505,18 +505,6 @@ static Abi get_current_abi (void);
 static bool syscall_is_excluded (Abi abi, __s32 nr);
 static __u64 make_excluded_key (Abi abi, __s32 nr);
 
-static SyscallEnterEventNone * reserve_enter_none (void);
-static SyscallEnterEventTimespec * reserve_enter_timespec (void);
-static SyscallEnterEventPath * reserve_enter_path (void);
-static SyscallEnterEventPath2 * reserve_enter_path2 (void);
-static SyscallEnterEventPath3 * reserve_enter_path3 (void);
-static SyscallEnterEventSock * reserve_enter_sock (void);
-
-static SyscallExitEventNone * reserve_exit_none (void);
-static SyscallExitEventStrOut * reserve_exit_str_out (void);
-static SyscallExitEventStatOut * reserve_exit_stat_out (void);
-static SyscallExitEventSockOut * reserve_exit_sock_out (void);
-
 static void * reserve_syscall_event (__u64 size);
 
 static void fill_syscall_event (SyscallEvent * e, EventType type, __u32 tgid, __u32 tid, __s32 nr, __u32 map_gen,
@@ -575,7 +563,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
       nr == FRIDA_LINUX_SYSCALL_STATFS ||
       nr == FRIDA_LINUX_SYSCALL_READLINKAT)
   {
-    SyscallEnterEventPath * ev = reserve_enter_path ();
+    SyscallEnterEventPath * ev = reserve_syscall_event (sizeof (SyscallEnterEventPath));
     if (ev == NULL)
       return 0;
 
@@ -609,7 +597,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
 #endif
       nr == FRIDA_LINUX_SYSCALL_STATX)
   {
-    SyscallEnterEventPath * ev = reserve_enter_path ();
+    SyscallEnterEventPath * ev = reserve_syscall_event (sizeof (SyscallEnterEventPath));
     if (ev == NULL)
       return 0;
 
@@ -641,7 +629,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
         nr == FRIDA_LINUX_SYSCALL_FSTAT ||
         nr == FRIDA_LINUX_SYSCALL_STATMOUNT)
   {
-    SyscallEnterEventNone * ev = reserve_enter_none ();
+    SyscallEnterEventNone * ev = reserve_syscall_event (sizeof (SyscallEnterEventNone));
     if (ev == NULL)
       return 0;
 
@@ -686,7 +674,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
 #endif
       nr == FRIDA_LINUX_SYSCALL_SYMLINKAT)
   {
-    SyscallEnterEventPath2 * ev = reserve_enter_path2 ();
+    SyscallEnterEventPath2 * ev = reserve_syscall_event (sizeof (SyscallEnterEventPath2));
     if (ev == NULL)
       return 0;
 
@@ -741,7 +729,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
 
   if (nr == FRIDA_LINUX_SYSCALL_MOUNT)
   {
-    SyscallEnterEventPath3 * ev = reserve_enter_path3 ();
+    SyscallEnterEventPath3 * ev = reserve_syscall_event (sizeof (SyscallEnterEventPath3));
     if (ev == NULL)
       return 0;
 
@@ -761,7 +749,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
   if (nr == FRIDA_LINUX_SYSCALL_NANOSLEEP ||
       nr == FRIDA_LINUX_SYSCALL_CLOCK_NANOSLEEP)
   {
-    SyscallEnterEventTimespec * ev = reserve_enter_timespec ();
+    SyscallEnterEventTimespec * ev = reserve_syscall_event (sizeof (SyscallEnterEventTimespec));
     if (ev == NULL)
       return 0;
 
@@ -803,7 +791,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
       nr == FRIDA_LINUX_SYSCALL_BIND ||
       nr == FRIDA_LINUX_SYSCALL_SENDTO)
   {
-    SyscallEnterEventSock * ev = reserve_enter_sock ();
+    SyscallEnterEventSock * ev = reserve_syscall_event (sizeof (SyscallEnterEventSock));
     if (ev == NULL)
       return 0;
 
@@ -840,7 +828,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
       nr == FRIDA_LINUX_SYSCALL_GETPEERNAME ||
       nr == FRIDA_LINUX_SYSCALL_RECVFROM)
   {
-    SyscallEnterEventNone * ev = reserve_enter_none ();
+    SyscallEnterEventNone * ev = reserve_syscall_event (sizeof (SyscallEnterEventNone));
     if (ev == NULL)
       return 0;
 
@@ -861,7 +849,7 @@ on_sys_enter (struct trace_event_raw_sys_enter * ctx)
   }
 
   {
-    SyscallEnterEventNone * ev = reserve_enter_none ();
+    SyscallEnterEventNone * ev = reserve_syscall_event (sizeof (SyscallEnterEventNone));
     if (ev == NULL)
       return 0;
 
@@ -894,7 +882,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
   Inflight * in = bpf_map_lookup_elem (&inflight, &tid);
   if (in != NULL && in->kind == INFLIGHT_KIND_STR_OUT_COPY && in->syscall_nr == nr)
   {
-    SyscallExitEventStrOut * ev = reserve_exit_str_out ();
+    SyscallExitEventStrOut * ev = reserve_syscall_event (sizeof (SyscallExitEventStrOut));
     if (ev == NULL)
       return 0;
 
@@ -905,31 +893,22 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
     long n = ctx->ret;
     if (n > 0)
     {
-      __u32 maxn = in->u.str_out_copy.max_len;
-      if (maxn > MAX_PATH - 1)
-        maxn = MAX_PATH - 1;
-
-      __u32 to_copy = (__u32) n;
-      if (to_copy > maxn)
-        to_copy = maxn;
+      __u32 size = (__u32) n;
+      if (size > in->u.str_out_copy.max_len)
+        size = in->u.str_out_copy.max_len;
+      if (size >= MAX_PATH)
+        size = MAX_PATH - 1;
+      size &= MAX_PATH - 1;
+      barrier_var (size);
 
       ev->attach.type = ATTACHMENT_STRING;
       ev->attach.arg_index = in->u.str_out_copy.arg_index;
       ev->attach.capacity = MAX_PATH;
+      ev->attach.size = size + 1;
 
-      if (to_copy == (MAX_PATH - 1))
-      {
-        ev->attach.size = (MAX_PATH - 1) + 1;
-        bpf_probe_read_user (&ev->data[0], MAX_PATH - 1, (void *) in->u.str_out_copy.user_ptr);
-        ev->data[MAX_PATH - 1] = '\0';
-      }
-      else
-      {
-        ev->attach.size = to_copy + 1;
-        if (to_copy != 0)
-          bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.str_out_copy.user_ptr);
-        ev->data[to_copy] = '\0';
-      }
+      if (size > 0)
+        bpf_probe_read_user (&ev->data[0], size, (void *) in->u.str_out_copy.user_ptr);
+      ev->data[size] = '\0';
 
       ev->parent.parent.parent.attachment_count = 1;
     }
@@ -942,7 +921,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 
   if (in != NULL && in->kind == INFLIGHT_KIND_STAT_OUT_COPY && in->syscall_nr == nr)
   {
-    SyscallExitEventStatOut * ev = reserve_exit_stat_out ();
+    SyscallExitEventStatOut * ev = reserve_syscall_event (sizeof (SyscallExitEventStatOut));
     if (ev == NULL)
       return 0;
 
@@ -983,10 +962,19 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
       ev->attach.type = ATTACHMENT_BYTES;
       ev->attach.arg_index = in->u.stat_out_copy.arg_index;
       ev->attach.capacity = MAX_STAT;
-      ev->attach.size = to_copy;
 
-      if (to_copy != 0)
-        bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.stat_out_copy.user_ptr);
+      if (to_copy == MAX_STAT)
+      {
+        ev->attach.size = MAX_STAT;
+        bpf_probe_read_user (&ev->data[0], MAX_STAT, (void *) in->u.stat_out_copy.user_ptr);
+      }
+      else
+      {
+        ev->attach.size = to_copy;
+
+        if (to_copy != 0)
+          bpf_probe_read_user (&ev->data[0], to_copy, (void *) in->u.stat_out_copy.user_ptr);
+      }
 
       ev->parent.parent.parent.attachment_count = 1;
     }
@@ -999,7 +987,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
 
   if (in != NULL && in->kind == INFLIGHT_KIND_SOCK_OUT_COPY && in->syscall_nr == nr)
   {
-    SyscallExitEventSockOut * ev = reserve_exit_sock_out ();
+    SyscallExitEventSockOut * ev = reserve_syscall_event (sizeof (SyscallExitEventSockOut));
     if (ev == NULL)
       return 0;
 
@@ -1060,7 +1048,7 @@ on_sys_exit (struct trace_event_raw_sys_exit * ctx)
   }
 
   {
-    SyscallExitEventNone * ev = reserve_exit_none ();
+    SyscallExitEventNone * ev = reserve_syscall_event (sizeof (SyscallExitEventNone));
     if (ev == NULL)
       return 0;
 
@@ -1209,67 +1197,7 @@ make_excluded_key (Abi abi, __s32 nr)
   return ((__u64) abi << 32) | (__u32) nr;
 }
 
-static SyscallEnterEventNone *
-reserve_enter_none (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventNone));
-}
-
-static SyscallEnterEventTimespec *
-reserve_enter_timespec (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventTimespec));
-}
-
-static SyscallEnterEventPath *
-reserve_enter_path (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventPath));
-}
-
-static SyscallEnterEventPath2 *
-reserve_enter_path2 (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventPath2));
-}
-
-static SyscallEnterEventPath3 *
-reserve_enter_path3 (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventPath3));
-}
-
-static SyscallEnterEventSock *
-reserve_enter_sock (void)
-{
-  return reserve_syscall_event (sizeof (SyscallEnterEventSock));
-}
-
-static SyscallExitEventNone *
-reserve_exit_none (void)
-{
-  return reserve_syscall_event (sizeof (SyscallExitEventNone));
-}
-
-static SyscallExitEventStrOut *
-reserve_exit_str_out (void)
-{
-  return reserve_syscall_event (sizeof (SyscallExitEventStrOut));
-}
-
-static SyscallExitEventStatOut *
-reserve_exit_stat_out (void)
-{
-  return reserve_syscall_event (sizeof (SyscallExitEventStatOut));
-}
-
-static SyscallExitEventSockOut *
-reserve_exit_sock_out (void)
-{
-  return reserve_syscall_event (sizeof (SyscallExitEventSockOut));
-}
-
-static void *
+static __always_inline void *
 reserve_syscall_event (__u64 size)
 {
   void * event = bpf_ringbuf_reserve (&syscall_events, size, 0);
@@ -1447,8 +1375,21 @@ write_attach_dentry_path (AttachmentHeader * h, __u16 arg_index, __u8 * dst, __u
       break;
   }
 
-  if (!bb_putc (b, '\0'))
-    b->buf[MAX_BUF_BUILDER_SIZE - 1] = '\0';
+  {
+    __u32 pos = b->pos;
+
+    if (pos >= MAX_BUF_BUILDER_SIZE - 1)
+    {
+      b->buf[MAX_BUF_BUILDER_SIZE - 1] = '\0';
+    }
+    else
+    {
+      pos &= (MAX_BUF_BUILDER_SIZE - 2);
+      barrier_var (pos);
+      b->buf[pos] = '\0';
+      b->pos = pos + 1;
+    }
+  }
 
 flush:
   n = b->pos;
@@ -1465,7 +1406,7 @@ flush:
 static void
 maybe_schedule_str_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 max_len)
 {
-  Inflight v;
+  Inflight v = {};
 
   v.syscall_nr = nr;
   v.kind = INFLIGHT_KIND_STR_OUT_COPY;
@@ -1484,7 +1425,7 @@ maybe_schedule_str_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_pt
 static void
 maybe_schedule_stat_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u32 len)
 {
-  Inflight v;
+  Inflight v = {};
 
   v.syscall_nr = nr;
   v.kind = INFLIGHT_KIND_STAT_OUT_COPY;
@@ -1503,7 +1444,7 @@ maybe_schedule_stat_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_p
 static void
 maybe_schedule_sock_out_copy (__u32 tid, __s32 nr, __u16 arg_index, __u64 user_ptr, __u64 user_len_ptr, __u32 max_len)
 {
-  Inflight v;
+  Inflight v = {};
 
   v.syscall_nr = nr;
   v.kind = INFLIGHT_KIND_SOCK_OUT_COPY;
@@ -1526,7 +1467,7 @@ ensure_process_state (__u32 tgid, __u32 tid, Abi abi, __u32 * out_map_gen)
   ProcessState * st = bpf_map_lookup_elem (&process_states, &tgid);
   if (st == NULL)
   {
-    ProcessState init;
+    ProcessState init = {};
 
     init.abi = abi;
     init.map_gen = 0;

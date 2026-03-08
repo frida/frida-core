@@ -366,7 +366,7 @@ public sealed class Frida.SyscallTracer : Object {
 	}
 
 	private struct ProcessState {
-		public uint8 abi;
+		public uint32 abi;
 		public uint32 map_gen;
 	}
 
