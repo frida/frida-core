@@ -141,7 +141,7 @@ namespace Frida {
 		private char[] kernel_log_buf;
 
 		public static BpfObject open (string name, uint8[] blob) throws Error {
-			var log_buf = new char[64 * 1024];
+			var log_buf = new char[128 * 1024];
 
 			var opts = Libbpf.Object.OpenOpts ();
 			opts.sz = sizeof (Libbpf.Object.OpenOpts);
