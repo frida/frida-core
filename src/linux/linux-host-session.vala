@@ -482,24 +482,13 @@ namespace Frida {
 		private MainContext main_context = new MainContext ();
 		private Thread<void>? worker_thread;
 
-		private Android.Module? art_mod;
+		private Android.Module? vm_mod;
+		private SigchainCompat? sigchain_compat;
 		private Android.Module? rt_mod;
 		private JNI.InvokeInterface ** vm;
 		private JNI.NativeInterface ** env;
 		private JNI.ObjectRef * backend;
 		private JNI.MethodID * handle_request_string;
-
-		private static string[] SIGCHAIN_STUB_NAMES = {
-			"ClaimSignalChain",
-			"UnclaimSignalChain",
-			"InvokeUserSignalHandler",
-			"InitializeSignalChain",
-			"EnsureFrontOfChain",
-			"SetSpecialSignalHandlerFn",
-			"AddSpecialSignalHandlerFn",
-			"RemoveSpecialSignalHandlerFn",
-			"SkipAddSignalHandler",
-		};
 
 		construct {
 			main_loop = new MainLoop (main_context, false);
@@ -533,7 +522,12 @@ namespace Frida {
 			}
 
 			rt_mod = null;
-			art_mod = null;
+			vm_mod = null;
+
+			if (sigchain_compat != null) {
+				sigchain_compat.disable ();
+				sigchain_compat = null;
+			}
 		}
 
 		private void close_and_fulfill (Promise<bool> promise, MainContext caller_context) {
@@ -613,23 +607,30 @@ namespace Frida {
 				info.flags = USE_NAMESPACE;
 				info.library_namespace = get_exported_namespace ("com_android_art");
 
-				art_mod = dlopen_ext (vm_soname, LAZY | LOCAL, info);
+				vm_mod = dlopen_ext (vm_soname, LAZY | LOCAL, info);
 			} else {
-				art_mod = Android.Module.open (vm_soname, LAZY | LOCAL);
+				vm_mod = Android.Module.open (vm_soname, LAZY | LOCAL);
 			}
-			if (art_mod == null)
+			if (vm_mod == null)
 				throw new Error.NOT_SUPPORTED ("Unable to load %s: %s", vm_soname, Android.Module.get_last_error ());
-			var create_java_vm = (CreateVMFunc) art_mod.symbol ("JNI_CreateJavaVM");
+			var create_java_vm = (CreateVMFunc) vm_mod.symbol ("JNI_CreateJavaVM");
 			assert (create_java_vm != null);
 
 			var sigchain = Gum.Process.find_module_by_name ("libsigchain.so");
 			if (sigchain != null) {
-				var interceptor = Gum.Interceptor.obtain ();
-				sigchain.enumerate_exports (e => {
-					if (e.name in SIGCHAIN_STUB_NAMES)
-						interceptor.replace ((void *) e.address, (void *) on_sigchain_invocation);
+				bool is_stub = true;
+				sigchain.enumerate_imports (imp => {
+					if (imp.name == "sigaddset") {
+						is_stub = false;
+						return false;
+					}
 					return true;
 				});
+				if (is_stub) {
+					sigchain_compat = new SigchainCompat ();
+					sigchain_compat.make_current ();
+					sigchain_compat.enable_for_module (sigchain);
+				}
 			}
 
 			rt_mod = Android.Module.open ("libandroid_runtime.so", LAZY | LOCAL);
@@ -677,9 +678,6 @@ namespace Frida {
 			} finally {
 				(*env)->pop_local_frame (env, null);
 			}
-		}
-
-		private static void on_sigchain_invocation () {
 		}
 
 		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
@@ -785,6 +783,476 @@ namespace Frida {
 
 		[CCode (has_target = false)]
 		private delegate JNI.Result RegisterFrameworkNativesLegacyFunc (void * env, JNI.ClassRef * clazz);
+	}
+
+	private class SigchainCompat : Object {
+		private static unowned SigchainCompat? current_instance;
+
+		private Gum.Interceptor interceptor;
+		private ChainState[] chains;
+		private bool initialized = false;
+		private bool enabled = false;
+
+		private struct ChainState {
+			public bool claimed;
+			public bool owns_signal;
+			public bool skip_add;
+			public CompatSigactionHandler previous_action;
+			public CompatSigactionHandler user_action;
+			public SigchainAction special0;
+			public SigchainAction special1;
+			public uint n_special;
+		}
+
+		private const int MAX_SPECIAL_HANDLERS = 2;
+
+		public SigchainCompat () {
+			interceptor = Gum.Interceptor.obtain ();
+			chains = new ChainState[Android.NSIG];
+		}
+
+		public void make_current () {
+			current_instance = this;
+		}
+
+		public void enable_for_module (Gum.Module sigchain) {
+			initialize ();
+
+			sigchain.enumerate_exports (e => {
+				switch (e.name) {
+					case "ClaimSignalChain":
+						interceptor.replace ((void *) e.address, (void *) shim_claim_signal_chain);
+						break;
+					case "UnclaimSignalChain":
+						interceptor.replace ((void *) e.address, (void *) shim_unclaim_signal_chain);
+						break;
+					case "InvokeUserSignalHandler":
+						interceptor.replace ((void *) e.address, (void *) shim_invoke_user_signal_handler);
+						break;
+					case "InitializeSignalChain":
+						interceptor.replace ((void *) e.address, (void *) shim_initialize_signal_chain);
+						break;
+					case "EnsureFrontOfChain":
+						interceptor.replace ((void *) e.address, (void *) shim_ensure_front_of_chain);
+						break;
+					case "SetSpecialSignalHandlerFn":
+						interceptor.replace ((void *) e.address, (void *) shim_set_special_signal_handler);
+						break;
+					case "AddSpecialSignalHandlerFn":
+						interceptor.replace ((void *) e.address, (void *) shim_add_special_signal_handler);
+						break;
+					case "RemoveSpecialSignalHandlerFn":
+						interceptor.replace ((void *) e.address, (void *) shim_remove_special_signal_handler);
+						break;
+					case "SkipAddSignalHandler":
+						interceptor.replace ((void *) e.address, (void *) shim_skip_add_signal_handler);
+						break;
+					default:
+						break;
+				}
+				return true;
+			});
+
+			enabled = true;
+		}
+
+		public void disable () {
+			if (!enabled)
+				return;
+
+			if (current_instance == this)
+				current_instance = null;
+
+			for (int sig = 1; sig != Android.NSIG; sig++) {
+				var chain = &chains[sig];
+				if (!chain->claimed)
+					continue;
+
+				restore_previous_kernel_handler (sig);
+
+				chain->claimed = false;
+				chain->owns_signal = false;
+				chain->skip_add = false;
+				chain->n_special = 0;
+
+				chain->special0.sc_sigaction = null;
+				chain->special1.sc_sigaction = null;
+				chain->special0.sc_flags = 0;
+				chain->special1.sc_flags = 0;
+				Posix.sigemptyset (out chain->special0.sc_mask);
+				Posix.sigemptyset (out chain->special1.sc_mask);
+
+				chain->previous_action = {};
+				chain->user_action = {};
+			}
+
+			enabled = false;
+		}
+
+		private void initialize () {
+			if (initialized)
+				return;
+
+			for (int i = 0; i != Android.NSIG; i++) {
+				Posix.sigemptyset (out chains[i].special0.sc_mask);
+				Posix.sigemptyset (out chains[i].special1.sc_mask);
+				Posix.sigemptyset (out chains[i].user_action.sa_mask);
+				Posix.sigemptyset (out chains[i].previous_action.sa_mask);
+			}
+
+			initialized = true;
+		}
+
+		private void claim_signal_chain (int sig, out CompatSigactionHandler old_action) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+
+			if (!chain->claimed)
+				register_chain (sig);
+
+			chain->owns_signal = true;
+			chain->user_action = chain->previous_action;
+
+			old_action = chain->previous_action;
+		}
+
+		private void unclaim_signal_chain (int sig) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+			if (!chain->claimed)
+				return;
+
+			chain->owns_signal = false;
+
+			if (chain->n_special == 0) {
+				restore_previous_kernel_handler (sig);
+				chain->claimed = false;
+			}
+		}
+
+		private void set_special_handler (int sig, SigchainAction action) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+
+			chain->special0 = action;
+			chain->special1.sc_sigaction = null;
+			chain->special1.sc_flags = 0;
+			Posix.sigemptyset (out chain->special1.sc_mask);
+
+			chain->n_special = 1;
+
+			if (!chain->skip_add && !chain->claimed)
+				register_chain (sig);
+		}
+
+		private void add_special_handler (int sig, SigchainAction action) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+			assert (chain->n_special < MAX_SPECIAL_HANDLERS);
+
+			var slot = get_special_slot (chain, chain->n_special);
+			*slot = action;
+			chain->n_special++;
+
+			if (!chain->skip_add && !chain->claimed)
+				register_chain (sig);
+		}
+
+		private void remove_special_handler (int sig, void * fn) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+
+			for (uint i = 0; i != chain->n_special; i++) {
+				var slot = get_special_slot (chain, i);
+				if ((void *) slot->sc_sigaction == fn) {
+					for (uint j = i + 1; j != chain->n_special; j++)
+						*get_special_slot (chain, j - 1) = *get_special_slot (chain, j);
+
+					var last = get_special_slot (chain, chain->n_special - 1);
+					last->sc_sigaction = null;
+					last->sc_flags = 0;
+					Posix.sigemptyset (out last->sc_mask);
+
+					chain->n_special--;
+
+					if (!chain->owns_signal && chain->n_special == 0 && chain->claimed) {
+						restore_previous_kernel_handler (sig);
+						chain->claimed = false;
+					}
+					return;
+				}
+			}
+
+			assert_not_reached ();
+		}
+
+		private void invoke_user_signal_handler (int sig, Posix.siginfo_t info, void * ucontext) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+
+			if (chain->owns_signal)
+				chain_to_action (sig, info, ucontext, &chain->user_action);
+			else
+				chain_to_action (sig, info, ucontext, &chain->previous_action);
+		}
+
+		private void ensure_front_of_chain (int sig) {
+			validate_signal (sig);
+
+			var chain = &chains[sig];
+			if (!chain->claimed)
+				return;
+
+			CompatSigactionSiginfo current_action;
+			if (compat_sigaction_siginfo (sig, null, out current_action) != 0)
+				assert_not_reached ();
+
+			if ((void *) current_action.sa_sigaction != (void *) compat_signal_handler) {
+				chain->user_action = compat_sigaction_siginfo_to_handler (current_action);
+				reinstall_front_of_chain (sig);
+			}
+		}
+
+		private void skip_add_signal_handler (bool val) {
+			for (int i = 0; i != Android.NSIG; i++)
+				chains[i].skip_add = val;
+		}
+
+		private void handle_signal (int sig, Posix.siginfo_t info, void * ucontext) {
+			var chain = &chains[sig];
+
+			for (uint i = 0; i != chain->n_special; i++) {
+				var action = get_special_slot (chain, i);
+
+				Posix.sigset_t previous_mask;
+				Posix.sigprocmask (Posix.SIG_SETMASK, action->sc_mask, out previous_mask);
+
+				bool handled = false;
+				if (action->sc_sigaction != null)
+					handled = action->sc_sigaction (sig, info, ucontext);
+
+				Posix.sigset_t ignored_mask;
+				Posix.sigprocmask (Posix.SIG_SETMASK, previous_mask, out ignored_mask);
+
+				if (handled)
+					return;
+			}
+
+			if (chain->owns_signal)
+				chain_to_action (sig, info, ucontext, &chain->user_action);
+			else
+				chain_to_action (sig, info, ucontext, &chain->previous_action);
+		}
+
+		private void validate_signal (int sig) {
+			assert (sig > 0 && sig < Android.NSIG);
+		}
+
+		private void register_chain (int sig) {
+			var chain = &chains[sig];
+			if (chain->claimed)
+				return;
+
+			CompatSigactionSiginfo new_action = {};
+			Posix.sigfillset (out new_action.sa_mask);
+			new_action.sa_sigaction = compat_signal_handler;
+			new_action.sa_flags = Posix.SA_SIGINFO | Posix.SA_ONSTACK | Posix.SA_RESTART;
+
+			CompatSigactionSiginfo old_action;
+			if (compat_sigaction_siginfo (sig, &new_action, out old_action) != 0)
+				assert_not_reached ();
+
+			chain->previous_action = compat_sigaction_siginfo_to_handler (old_action);
+			chain->claimed = true;
+		}
+
+		private void reinstall_front_of_chain (int sig) {
+			var chain = &chains[sig];
+
+			CompatSigactionSiginfo new_action = {};
+			Posix.sigfillset (out new_action.sa_mask);
+			new_action.sa_sigaction = compat_signal_handler;
+			new_action.sa_flags = Posix.SA_SIGINFO | Posix.SA_ONSTACK | Posix.SA_RESTART;
+
+			CompatSigactionSiginfo old_action;
+			if (compat_sigaction_siginfo (sig, &new_action, out old_action) != 0)
+				assert_not_reached ();
+
+			chain->previous_action = compat_sigaction_siginfo_to_handler (old_action);
+			chain->claimed = true;
+		}
+
+		private void restore_previous_kernel_handler (int sig) {
+			var chain = &chains[sig];
+
+			if (compat_sigaction_handler (sig, &chain->previous_action, null) != 0)
+				assert_not_reached ();
+		}
+
+		private void chain_to_action (int sig, Posix.siginfo_t info, void * ucontext, CompatSigactionHandler * action) {
+			if ((action->sa_flags & Posix.SA_SIGINFO) != 0) {
+				var siginfo_action = compat_sigaction_handler_to_siginfo (*action);
+				if ((void *) siginfo_action.sa_sigaction != null) {
+					siginfo_action.sa_sigaction (sig, info, ucontext);
+					return;
+				}
+			} else {
+				if ((void *) action->sa_handler == (void *) Posix.SIG_IGN)
+					return;
+
+				if ((void *) action->sa_handler == (void *) Posix.SIG_DFL) {
+					CompatSigactionHandler dfl = {};
+					Posix.sigemptyset (out dfl.sa_mask);
+					dfl.sa_handler = Posix.SIG_DFL;
+					dfl.sa_flags = 0;
+
+					CompatSigactionHandler ignored;
+					compat_sigaction_handler (sig, &dfl, out ignored);
+					return;
+				}
+
+				if ((void *) action->sa_handler != null) {
+					action->sa_handler (sig);
+					return;
+				}
+			}
+		}
+
+		private static CompatSigactionHandler compat_sigaction_siginfo_to_handler (CompatSigactionSiginfo action) {
+			CompatSigactionHandler result = {};
+			result.sa_handler = (CompatSignalHandler) action.sa_sigaction;
+			result.sa_mask = action.sa_mask;
+			result.sa_flags = action.sa_flags;
+			result.sa_restorer = action.sa_restorer;
+			return result;
+		}
+
+		private static CompatSigactionSiginfo compat_sigaction_handler_to_siginfo (CompatSigactionHandler action) {
+			CompatSigactionSiginfo result = {};
+			result.sa_sigaction = (CompatSiginfoHandler) action.sa_handler;
+			result.sa_mask = action.sa_mask;
+			result.sa_flags = action.sa_flags;
+			result.sa_restorer = action.sa_restorer;
+			return result;
+		}
+
+		private static SigchainAction * get_special_slot (ChainState * chain, uint index) {
+			switch (index) {
+				case 0:
+					return &chain->special0;
+				case 1:
+					return &chain->special1;
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private static unowned SigchainCompat get_current_instance () {
+			unowned SigchainCompat compat = current_instance;
+			assert (compat != null);
+			return compat;
+		}
+
+		private static void shim_claim_signal_chain (int sig, out CompatSigactionHandler old_action) {
+			get_current_instance ().claim_signal_chain (sig, out old_action);
+		}
+
+		private static void shim_unclaim_signal_chain (int sig) {
+			get_current_instance ().unclaim_signal_chain (sig);
+		}
+
+		private static void shim_invoke_user_signal_handler (int sig, Posix.siginfo_t info, void * ucontext) {
+			get_current_instance ().invoke_user_signal_handler (sig, info, ucontext);
+		}
+
+		private static void shim_initialize_signal_chain () {
+		}
+
+		private static void shim_set_special_signal_handler (int sig, SigchainAction sa) {
+			get_current_instance ().set_special_handler (sig, sa);
+		}
+
+		private static void shim_add_special_signal_handler (int sig, SigchainAction sa) {
+			get_current_instance ().add_special_handler (sig, sa);
+		}
+
+		private static void shim_remove_special_signal_handler (int sig, void * fn) {
+			get_current_instance ().remove_special_handler (sig, fn);
+		}
+
+		private static void shim_ensure_front_of_chain (int sig) {
+			get_current_instance ().ensure_front_of_chain (sig);
+		}
+
+		private static void shim_skip_add_signal_handler (bool val) {
+			get_current_instance ().skip_add_signal_handler (val);
+		}
+
+		private static void compat_signal_handler (int sig, Posix.siginfo_t info, void * ucontext) {
+			get_current_instance ().handle_signal (sig, info, ucontext);
+		}
+
+		private struct SigchainAction {
+			public SigchainHandler sc_sigaction;
+			public Posix.sigset_t sc_mask;
+			public uint64 sc_flags;
+		}
+
+		[CCode (has_target = false)]
+		private delegate bool SigchainHandler (int sig, Posix.siginfo_t info, void * ucontext);
+
+		[CCode (cname = "sigaction", cheader_filename = "signal.h")]
+		private extern static int compat_sigaction_handler (int signum, CompatSigactionHandler * act,
+			out CompatSigactionHandler oldact);
+
+		[CCode (cname = "sigaction", cheader_filename = "signal.h")]
+		private extern static int compat_sigaction_siginfo (int signum, CompatSigactionSiginfo * act,
+			out CompatSigactionSiginfo oldact);
+
+#if X86_64 || ARM64
+		private struct CompatSigactionHandler {
+			public int sa_flags;
+			public CompatSignalHandler sa_handler;
+			public Posix.sigset_t sa_mask;
+			public CompatSigRestorer sa_restorer;
+		}
+
+		private struct CompatSigactionSiginfo {
+			public int sa_flags;
+			public CompatSiginfoHandler sa_sigaction;
+			public Posix.sigset_t sa_mask;
+			public CompatSigRestorer sa_restorer;
+		}
+#else
+		private struct CompatSigactionHandler {
+			public CompatSignalHandler sa_handler;
+			public Posix.sigset_t sa_mask;
+			public int sa_flags;
+			public CompatSigRestorer sa_restorer;
+		}
+
+		private struct CompatSigactionSiginfo {
+			public CompatSiginfoHandler sa_sigaction;
+			public Posix.sigset_t sa_mask;
+			public int sa_flags;
+			public CompatSigRestorer sa_restorer;
+		}
+#endif
+
+		[CCode (has_target = false)]
+		private delegate void CompatSignalHandler (int sig);
+
+		[CCode (has_target = false)]
+		private delegate void CompatSiginfoHandler (int sig, Posix.siginfo_t info, void * ucontext);
+
+		[CCode (has_target = false)]
+		private delegate void CompatSigRestorer ();
 	}
 
 	private sealed class RoboLauncher : Object {

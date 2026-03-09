@@ -68,4 +68,7 @@ namespace Android {
 	[CCode (cheader_filename = "android/dlext.h", cname = "struct android_namespace_t", has_type_id = false)]
 	public struct Namespace {
 	}
+
+	[CCode (cheader_filename = "signal.h", cname = "NSIG")]
+	public const int NSIG;
 }
