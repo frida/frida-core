@@ -240,10 +240,15 @@ frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_na
     if (g_str_has_prefix (line, "Uid:"))
     {
       uid_t uid;
+      GVariant * user;
 
       sscanf (line + 4, "%*u %u %*u %*u", &uid);
 
-      g_hash_table_insert (parameters, g_strdup ("user"), frida_uid_to_name (uid));
+      g_hash_table_insert (parameters, g_strdup ("uid"), g_variant_ref_sink (g_variant_new_uint32 (uid)));
+
+      user = frida_uid_to_name (uid);
+      if (user != NULL)
+        g_hash_table_insert (parameters, g_strdup ("user"), user);
 
       break;
     }
@@ -344,25 +349,47 @@ frida_query_boot_time (void)
 static GVariant *
 frida_uid_to_name (uid_t uid)
 {
-  GVariant * name;
-  static size_t buffer_size = 0;
+  GVariant * name = NULL;
+  static size_t cached_buffer_size = 0;
   char * buffer;
+  size_t buffer_size;
   struct passwd pwd, * entry;
 
-  if (buffer_size == 0)
-    buffer_size = sysconf (_SC_GETPW_R_SIZE_MAX);
+  if (cached_buffer_size == 0)
+  {
+    long limit = sysconf (_SC_GETPW_R_SIZE_MAX);
+    if (limit != -1)
+      cached_buffer_size = limit;
+    else
+      cached_buffer_size = 1024;
+  }
 
-  buffer = g_malloc (buffer_size);
+  buffer = NULL;
+  buffer_size = cached_buffer_size;
 
-  entry = NULL;
-  getpwuid_r (uid, &pwd, buffer, buffer_size, &entry);
+  while (TRUE)
+  {
+    int res;
 
-  if (entry != NULL)
-    name = g_variant_new_string (entry->pw_name);
-  else
-    name = g_variant_new_take_string (g_strdup_printf ("%u", uid));
-  name = g_variant_ref_sink (name);
+    buffer = g_realloc (buffer, buffer_size);
+    entry = NULL;
 
+    res = getpwuid_r (uid, &pwd, buffer, buffer_size, &entry);
+    if (res == 0)
+      break;
+
+    if (res != ERANGE)
+      goto beach;
+
+    buffer_size *= 2;
+  }
+
+  if (entry == NULL)
+    goto beach;
+
+  name = g_variant_ref_sink (g_variant_new_string (entry->pw_name));
+
+beach:
   g_free (buffer);
 
   return name;
