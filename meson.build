@@ -412,15 +412,18 @@ endif
 if host_os_family != 'windows'
   if host_os_family == 'darwin'
     readelf = ''
+    objcopy = ''
     otool = find_program('otool')
     libtool = find_program('libtool')
   else
     readelf = find_program('readelf')
+    objcopy = find_program('objcopy')
     otool = ''
     libtool = ''
   endif
 else
   readelf = ''
+  objcopy = ''
   otool = ''
   libtool = ''
 endif
@@ -469,6 +472,7 @@ if compiler_backend_opt.allowed()
         '>>>', cc.cmd_array(), '<<<',
         '>>>', ar, '<<<',
         '>>>', nm, '<<<',
+        '>>>', objcopy, '<<<',
         '>>>', ranlib, '<<<',
       ],
       capture: true,
@@ -722,11 +726,8 @@ if get_option('devkits').length() != 0
     devkit_options += [
       '--ar', '>>>', ar, '<<<',
       '--nm', '>>>', nm, '<<<',
+      '--objcopy', '>>>', objcopy, '<<<',
     ]
-    objcopy = find_program('objcopy', required: false)
-    if objcopy.found()
-      devkit_options += ['--objcopy', '>>>', objcopy, '<<<']
-    endif
   endif
   if host_os_family == 'darwin'
     devkit_options += ['--libtool', '>>>', libtool, '<<<']
