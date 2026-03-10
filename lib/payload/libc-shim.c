@@ -869,7 +869,11 @@ setlinebuf (FILE * stream)
 #endif
 
 G_GNUC_INTERNAL void
+#if defined (HAVE_DARWIN) || defined (HAVE_ANDROID) || defined (HAVE_FREEBSD)
 setbuffer (FILE * stream, char * buf, int size)
+#else
+setbuffer (FILE * stream, char * buf, size_t size)
+#endif
 {
   (void) setvbuf (stream, buf, (buf != NULL) ? _IOFBF : _IONBF, size);
 }
