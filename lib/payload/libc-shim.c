@@ -24,6 +24,7 @@
 # include <xlocale.h>
 #endif
 
+#undef __srget
 #undef feof
 #undef ferror
 #undef fgetwc
@@ -43,6 +44,9 @@
 #undef putc
 #undef putchar
 #undef putwc
+#undef setbuf
+#undef setbuffer
+#undef setlinebuf
 #undef snprintf
 #undef sprintf
 #undef stderr
@@ -161,11 +165,13 @@ struct _FridaFile
   int err;
 
   guint8 * rbuf;
+  gboolean owns_rbuf;
   size_t rcap;
   size_t rpos;
   size_t rlen;
 
   guint8 * wbuf;
+  gboolean owns_wbuf;
   size_t wcap;
   size_t wlen;
 
@@ -776,8 +782,17 @@ setvbuf (FILE * stream, char * buf, int mode, size_t size)
 
   if (mode == _IONBF)
   {
-    g_clear_pointer (&f->rbuf, g_free);
-    g_clear_pointer (&f->wbuf, g_free);
+    if (f->owns_rbuf)
+      g_clear_pointer (&f->rbuf, g_free);
+    else
+      f->rbuf = NULL;
+    f->owns_rbuf = FALSE;
+
+    if (f->owns_wbuf)
+      g_clear_pointer (&f->wbuf, g_free);
+    else
+      f->wbuf = NULL;
+    f->owns_wbuf = FALSE;
 
     f->rcap = 0;
     f->wcap = 0;
@@ -789,18 +804,74 @@ setvbuf (FILE * stream, char * buf, int mode, size_t size)
   }
 
   if (size == 0)
-    size = FRIDA_STDIO_BUFSIZE;
+    size = BUFSIZ;
+
+  if (!f->owns_rbuf)
+  {
+    f->rbuf = NULL;
+    f->rcap = 0;
+  }
 
   f->rbuf = g_realloc (f->rbuf, size);
-  f->wbuf = g_realloc (f->wbuf, size);
-
+  f->owns_rbuf = TRUE;
   f->rcap = size;
-  f->wcap = size;
+
+  if (buf != NULL)
+  {
+    if (f->owns_wbuf)
+      g_clear_pointer (&f->wbuf, g_free);
+
+    f->wbuf = (guint8 *) buf;
+    f->owns_wbuf = FALSE;
+    f->wcap = size;
+  }
+  else
+  {
+    if (!f->owns_wbuf)
+    {
+      f->wbuf = NULL;
+      f->wcap = 0;
+    }
+
+    f->wbuf = g_realloc (f->wbuf, size);
+    f->owns_wbuf = TRUE;
+    f->wcap = size;
+  }
+
   f->rpos = 0;
   f->rlen = 0;
   f->wlen = 0;
 
   return 0;
+}
+
+G_GNUC_INTERNAL void
+setbuf (FILE * stream, char * buf)
+{
+  if (buf == NULL)
+    (void) setvbuf (stream, NULL, _IONBF, 0);
+  else
+    (void) setvbuf (stream, buf, _IOFBF, BUFSIZ);
+}
+
+#if defined (HAVE_DARWIN) || defined (HAVE_ANDROID) || defined (HAVE_FREEBSD)
+G_GNUC_INTERNAL int
+setlinebuf (FILE * stream)
+{
+  return setvbuf (stream, NULL, _IOLBF, 0);
+}
+#else
+G_GNUC_INTERNAL void
+setlinebuf (FILE * stream)
+{
+  setvbuf (stream, NULL, _IOLBF, 0);
+}
+#endif
+
+G_GNUC_INTERNAL void
+setbuffer (FILE * stream, char * buf, int size)
+{
+  (void) setvbuf (stream, buf, (buf != NULL) ? _IOFBF : _IONBF, size);
 }
 
 G_GNUC_INTERNAL int
@@ -901,6 +972,12 @@ getc_unlocked (FILE * stream)
 
 G_GNUC_INTERNAL int
 getc (FILE * stream)
+{
+  return getc_unlocked (stream);
+}
+
+G_GNUC_INTERNAL int
+__srget (FILE * stream)
 {
   return getc_unlocked (stream);
 }
@@ -1971,11 +2048,13 @@ frida_file_new (int fd, gboolean close_fd, int buf_mode)
 
   if (buf_mode != _IONBF)
   {
-    f->rcap = FRIDA_STDIO_BUFSIZE;
-    f->wcap = FRIDA_STDIO_BUFSIZE;
-
     f->rbuf = g_malloc (f->rcap);
+    f->owns_rbuf = TRUE;
+    f->rcap = FRIDA_STDIO_BUFSIZE;
+
     f->wbuf = g_malloc (f->wcap);
+    f->owns_wbuf = TRUE;
+    f->wcap = FRIDA_STDIO_BUFSIZE;
   }
 
   return f;
@@ -1987,8 +2066,15 @@ frida_file_free (FridaFile * f)
   if (f == NULL)
     return;
 
-  g_clear_pointer (&f->rbuf, g_free);
-  g_clear_pointer (&f->wbuf, g_free);
+  if (f->owns_rbuf)
+    g_clear_pointer (&f->rbuf, g_free);
+  else
+    f->rbuf = NULL;
+
+  if (f->owns_wbuf)
+    g_clear_pointer (&f->wbuf, g_free);
+  else
+    f->wbuf = NULL;
 
   g_free (f);
 }
