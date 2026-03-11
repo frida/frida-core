@@ -92,9 +92,7 @@ def build_backend(
         for name in ("main.go", "trie.go", "go.mod"):
             shutil.copy(src_dir / name, symbol_dest)
 
-        env = config["env"]
-
-        env_copy = env.copy()
+        env_copy = config["env"].copy()
         env_copy.pop("GOOS", None)
         env_copy.pop("GOARCH", None)
 
@@ -111,24 +109,7 @@ def build_backend(
         )
 
         run(priv_dir / "symbol-replacer" / symbol_replacer_name,
-            backend_a.name, *config["nm"], *config["ranlib"], env["CC"])
-
-        if config["os"] == "linux":
-            ar = config["ar"]
-            goarch = env["GOARCH"]
-
-            run(*ar, "x", backend_a.name, "go.o")
-            run(
-                *config["objcopy"],
-                "--remove-section=.init_array",
-                "--remove-section=.rela.init_array",
-                f"--globalize-symbol=_st0_{goarch}_linux_lib",
-                "go.o",
-                "go.patched.o",
-            )
-            os.replace(priv_dir / "go.patched.o", priv_dir / "go.o")
-            run(*ar, "r", backend_a.name, "go.o")
-            run(*config["ranlib"], backend_a.name)
+            backend_a.name, *config["nm"], *config["ranlib"], config["env"]["CC"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",

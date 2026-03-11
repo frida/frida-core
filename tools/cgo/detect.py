@@ -57,7 +57,6 @@ def main(argv: List[str]):
     cc_cmd_array = pop_cmd_array_arg(args)
     ar_cmd_array = pop_cmd_array_arg(args)
     nm_cmd_array = pop_cmd_array_arg(args)
-    objcopy_cmd_array = pop_cmd_array_arg(args)
     ranlib_cmd_array = pop_cmd_array_arg(args)
 
     try:
@@ -70,7 +69,6 @@ def main(argv: List[str]):
             cc_cmd_array,
             ar_cmd_array,
             nm_cmd_array,
-            objcopy_cmd_array,
             ranlib_cmd_array,
         )
         print("ok")
@@ -103,7 +101,6 @@ def detect_config(
     cc_cmd_array: List[str],
     ar_cmd_array: Optional[List[str]],
     nm_cmd_array: Optional[List[str]],
-    objcopy_cmd_array: Optional[List[str]],
     ranlib_cmd_array: Optional[List[str]],
 ) -> dict:
     source_root = Path(os.environ["MESON_SOURCE_ROOT"])
@@ -135,7 +132,6 @@ def detect_config(
         env["PATH"] = str(toolchain.cc.parent) + ";" + env["PATH"]
         ar_cmd_array = [str(toolchain.ar)]
         nm_cmd_array = [str(toolchain.nm)]
-        objcopy_cmd_array = [str(toolchain.objcopy)]
         ranlib_cmd_array = [str(toolchain.ranlib)]
     else:
         env["CC"] = shlex.join(
@@ -185,8 +181,6 @@ def detect_config(
         "nm": nm_cmd_array,
         "ranlib": ranlib_cmd_array,
     }
-    if objcopy_cmd_array is not None:
-        config["objcopy"] = objcopy_cmd_array
     if mingw is not None:
         config["mingw"] = mingw
     return config
@@ -208,7 +202,6 @@ class MinGWToolchain:
     cc: Path
     ar: Path
     nm: Path
-    objcopy: Path
     ranlib: Path
     libcc: Path
 
@@ -282,7 +275,6 @@ class MinGWToolchain:
 
         ar_path = cc_path.parent / "ar.exe"
         nm_path = cc_path.parent / "nm.exe"
-        objcopy_path = cc_path.parent / "objcopy.exe"
         ranlib_path = cc_path.parent / "ranlib.exe"
 
         try:
@@ -300,7 +292,6 @@ class MinGWToolchain:
             cc_path,
             ar_path,
             nm_path,
-            objcopy_path,
             ranlib_path,
             libcc_path,
         )
