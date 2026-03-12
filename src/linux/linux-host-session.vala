@@ -596,16 +596,19 @@ namespace Frida {
 
 			string vm_soname = (Gum.Android.get_api_level () >= 21) ? "libart.so" : "libdvm.so";
 
+			Android.Namespace * art_ns = null;
 			var get_exported_namespace = (GetExportedNamespaceFunc) linker.find_export_by_name (
 				"__loader_android_get_exported_namespace");
-			if (get_exported_namespace != null) {
+			if (get_exported_namespace != null)
+				art_ns = get_exported_namespace ("com_android_art");
+			if (art_ns != null) {
 				var dlopen_ext = (DlopenExtFunc) linker.find_export_by_name ("__loader_android_dlopen_ext");
 				if (dlopen_ext == null)
 					throw new Error.NOT_SUPPORTED ("Missing android_dlopen_ext");
 
 				var info = Android.DlExtInfo ();
 				info.flags = USE_NAMESPACE;
-				info.library_namespace = get_exported_namespace ("com_android_art");
+				info.library_namespace = art_ns;
 
 				vm_mod = dlopen_ext (vm_soname, LAZY | LOCAL, info);
 			} else {
