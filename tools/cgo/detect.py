@@ -52,6 +52,8 @@ def main(argv: List[str]):
     go = Path(args.pop(0))
     host_os = args.pop(0)
     host_abi = args.pop(0)
+    libc = args.pop(0)
+    exe_suffix = args.pop(0)
     shlib_suffix = args.pop(0)
     cc_id = args.pop(0)
     cc_cmd_array = pop_cmd_array_arg(args)
@@ -64,6 +66,8 @@ def main(argv: List[str]):
             go,
             host_os,
             host_abi,
+            libc,
+            exe_suffix,
             shlib_suffix,
             cc_id,
             cc_cmd_array,
@@ -96,6 +100,8 @@ def detect_config(
     go: Path,
     host_os: str,
     host_abi: str,
+    libc: str,
+    exe_suffix: str,
     shlib_suffix: str,
     cc_id: str,
     cc_cmd_array: List[str],
@@ -163,7 +169,15 @@ def detect_config(
     env["GOOS"] = goos
     env["GOARCH"] = goarch
 
-    mode = "c-shared" if host_os == "android" else "c-archive"
+    if libc == "musl":
+        mode = "pie"
+    elif host_os == "android":
+        mode = "c-shared"
+    else:
+        mode = "c-archive"
+
+    if mode == "pie":
+        extra_go_args += ["-tags=frida_compiler_backend_executable"]
 
     try:
         run(go, "build", f"-buildmode={mode}", "-o", "cgotest.a", "-buildvcs=false")
@@ -174,6 +188,7 @@ def detect_config(
         "mode": mode,
         "os": host_os,
         "abi": host_abi,
+        "exe_suffix": exe_suffix,
         "shlib_suffix": shlib_suffix,
         "extra_go_args": extra_go_args,
         "env": env,

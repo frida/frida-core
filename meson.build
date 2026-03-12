@@ -453,6 +453,7 @@ have_barebone_backend = get_option('barebone_backend') \
 compiler_backend_opt = get_option('compiler_backend') \
     .disable_auto_if(host_os == 'watchos')
 have_compiler_backend = false
+compiler_backend_mode = ''
 if compiler_backend_opt.allowed()
   go = find_program('go', native: true, required: false)
   if go.found()
@@ -464,6 +465,8 @@ if compiler_backend_opt.allowed()
         go,
         host_os,
         host_abi,
+        libc,
+        exe_suffix,
         shlib_suffix,
         cc.get_id(),
         '>>>', cc.cmd_array(), '<<<',
@@ -479,11 +482,17 @@ if compiler_backend_opt.allowed()
     if status == 'ok'
       have_compiler_backend = true
       tokens = lines[1].split(' ')
-      go_mode = tokens[0]
+      compiler_backend_mode = tokens[0]
       go_config = tokens[1]
-      compiler_backend_static_compilation = go_mode == 'c-archive'
-      if compiler_backend_static_compilation
-        vala_flags += '--define=COMPILER_BACKEND_STATIC_COMPILATION'
+
+      if compiler_backend_mode == 'c-archive'
+        vala_flags += '--define=COMPILER_BACKEND_EMBEDDED'
+      elif compiler_backend_mode == 'c-shared'
+        vala_flags += '--define=COMPILER_BACKEND_SHARED'
+      elif compiler_backend_mode == 'pie'
+        vala_flags += '--define=COMPILER_BACKEND_EXECUTABLE'
+      else
+        error('Unsupported compiler backend mode: ' + compiler_backend_mode)
       endif
     else
       error_message = lines[1]

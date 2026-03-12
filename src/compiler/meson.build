@@ -4,12 +4,30 @@ compiler_sources = files(
 )
 
 if have_compiler_backend
-  output_suffix = compiler_backend_static_compilation ? '' : '-raw'
+  if compiler_backend_mode == 'c-archive'
+    output_files = [
+      'frida-compiler-backend.a',
+      'frida-compiler-backend.h',
+    ]
+  elif compiler_backend_mode == 'c-shared'
+    output_files = [
+      'frida-compiler-backend-raw' + shlib_suffix,
+      'frida-compiler-backend-raw.h',
+    ]
+  elif compiler_backend_mode == 'pie'
+    output_files = [
+      'frida-compiler-backend-raw' + exe_suffix,
+    ]
+  endif
+
   compiler_backend = custom_target('frida-compiler-backend',
     input: [
       'go.mod',
       'go.sum',
+      'frontend_capi.go',
+      'frontend_stdio.go',
       'backend.go',
+      'protocol_types.go',
       'backend.version',
       'tscompiler.go',
       'tsconfig.go',
@@ -17,10 +35,7 @@ if have_compiler_backend
       'package.json',
       'package-lock.json',
     ],
-    output: [
-      'frida-compiler-backend' + output_suffix + (compiler_backend_static_compilation ? '.a' : shlib_suffix),
-      'frida-compiler-backend' + output_suffix + '.h',
-    ],
+    output: output_files,
     command: [
       python,
       files('build-backend.py'),
@@ -32,21 +47,31 @@ if have_compiler_backend
       '@INPUT@',
     ],
   )
-  if compiler_backend_static_compilation
+
+  if compiler_backend_mode == 'c-archive'
     backend_libs += compiler_backend[0]
   else
-    filename = 'frida-compiler-backend' + shlib_suffix
-    identity = (host_os_family == 'darwin') ? 'FridaCompilerBackend' : filename
-    compiler_backend_shlib = custom_target('frida-compiler-backend-shlib',
-      input: compiler_backend[0],
-      output: filename,
-      command: post_process + ['shared-library', identity, 'elf-cleaner:off'],
-    )
+    if compiler_backend_mode == 'c-shared'
+      processed_filename = 'frida-compiler-backend' + shlib_suffix
+      identity = (host_os_family == 'darwin') ? 'FridaCompilerBackend' : processed_filename
+      compiler_backend_binary = custom_target('frida-compiler-backend-binary',
+        input: compiler_backend[0],
+        output: processed_filename,
+        command: post_process + ['shared-library', identity, 'elf-cleaner:off'],
+      )
+    elif compiler_backend_mode == 'pie'
+      processed_filename = 'frida-compiler-backend' + exe_suffix
+      compiler_backend_binary = custom_target('frida-compiler-backend-binary',
+        input: compiler_backend[0],
+        output: processed_filename,
+        command: post_process + ['executable', processed_filename],
+      )
+    endif
 
     compiler_data = custom_target('frida-data-compiler',
       input: [
         'compiler.resources',
-        compiler_backend_shlib,
+        compiler_backend_binary,
       ],
       output: [
         'frida-data-compiler.vapi',

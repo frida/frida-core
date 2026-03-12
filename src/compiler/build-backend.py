@@ -60,11 +60,15 @@ def build_backend(
     mode = config["mode"]
 
     backend_stem = "frida-compiler-backend"
-    if mode == "c-shared":
+    if mode != "c-archive":
         backend_stem += "-raw"
 
-    backend_a = priv_dir / f"{backend_stem}.a"
-    backend_shlib = priv_dir / (f"{backend_stem}" + config["shlib_suffix"])
+    if mode == "c-archive":
+        backend_binary = priv_dir / f"{backend_stem}.a"
+    elif mode == "c-shared":
+        backend_binary = priv_dir / (f"{backend_stem}" + config["shlib_suffix"])
+    else:
+        backend_binary = priv_dir / (f"{backend_stem}" + config["exe_suffix"])
     backend_h = priv_dir / f"{backend_stem}.h"
 
     extra_go_args = config["extra_go_args"].copy()
@@ -78,10 +82,10 @@ def build_backend(
         "build",
         f"-buildmode={mode}",
         "-o",
-        backend_a.name if mode == "c-archive" else backend_shlib.name,
+        backend_binary.name,
         "-buildvcs=false",
         *extra_go_args,
-        *go_sources,
+        ".",
     )
 
     if mode == "c-archive":
@@ -109,7 +113,7 @@ def build_backend(
         )
 
         run(priv_dir / "symbol-replacer" / symbol_replacer_name,
-            backend_a.name, *config["nm"], *config["ranlib"], config["env"]["CC"])
+            backend_binary.name, *config["nm"], *config["ranlib"], config["env"]["CC"])
 
         if (mingw := config.get("mingw")) is not None and (abi := config["abi"]) in {
             "x86",
@@ -143,17 +147,16 @@ def build_backend(
 
             extra_objects = []
             if abi == "x86_64":
-                run(*ar, "x", backend_a.name, "go.o")
+                run(*ar, "x", backend_binary.name, "go.o")
                 sort_pdata_in_object(Path(priv_dir) / "go.o")
                 extra_objects.append("go.o")
 
-            run(*ar, "rs", backend_a.name, *libgcc_objects, *gwex_objects, *extra_objects)
+            run(*ar, "rs", backend_binary.name, *libgcc_objects, *gwex_objects, *extra_objects)
 
-        shutil.copy(priv_dir / backend_a.name, output_dir / backend_a.name)
-    else:
-        shutil.copy(priv_dir / backend_shlib.name, output_dir / backend_shlib.name)
+    shutil.copy(priv_dir / backend_binary.name, output_dir / backend_binary.name)
 
-    shutil.copy(priv_dir / backend_h.name, output_dir / backend_h.name)
+    if mode in {"c-archive", "c-shared"}:
+        shutil.copy(priv_dir / backend_h.name, output_dir / backend_h.name)
 
 
 # Work around the Go toolchain's almost-MSVC-compatible object files
