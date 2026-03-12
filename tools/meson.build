@@ -1,11 +1,11 @@
 extra_link_args = []
 extra_link_depends = []
 if build_os_family == 'darwin'
-  symlist = 'resource-compiler.symbols'
+  symlist = 'executable-no-exports.symbols'
   extra_link_args += ['-Wl,-exported_symbols_list,' + meson.current_source_dir() / symlist]
   extra_link_depends += [symlist]
 elif build_os_family != 'windows'
-  symscript = 'resource-compiler.version'
+  symscript = (build_os == 'freebsd') ? 'executable-no-exports-freebsd.version' : 'executable-no-exports.version'
   extra_link_args += ['-Wl,--version-script,' + meson.current_source_dir() / symscript]
   extra_link_depends += [symscript]
 endif

@@ -62,15 +62,6 @@ frida_tests = static_library('frida-tests', test_sources,
 
 extra_link_args = []
 extra_link_depends = []
-if host_os_family == 'darwin'
-  symlist = 'frida-tests.symbols'
-  extra_link_args += ['-Wl,-exported_symbols_list,' + meson.current_source_dir() / symlist]
-  extra_link_depends += [symlist]
-elif host_os_family != 'windows'
-  symscript = 'frida-tests.version'
-  extra_link_args += ['-Wl,--version-script,' + meson.current_source_dir() / symscript]
-  extra_link_depends += [symscript]
-endif
 if host_os == 'macos'
   runner_plist = 'frida-tests.plist'
   extra_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + meson.current_source_dir() / runner_plist]
@@ -79,8 +70,8 @@ endif
 
 raw_runner = executable('frida-tests-raw', 'main.vala',
   vala_args: [core_vala_args, system_vala_args],
-  link_args: extra_link_args,
-  link_depends: extra_link_depends,
+  link_args: executable_no_exports_link_args + extra_link_args,
+  link_depends: executable_no_exports_link_depends + extra_link_depends,
   link_with: frida_tests,
   dependencies: [core_dep],
 )

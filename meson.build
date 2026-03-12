@@ -766,6 +766,19 @@ post_process = [
   '@INPUT0@',
 ]
 
+executable_no_exports_link_args = []
+executable_no_exports_link_depends = []
+if host_os_family == 'darwin'
+  script = meson.project_source_root() / 'tools' / 'executable-no-exports.symbols'
+  executable_no_exports_link_args = ['-Wl,-exported_symbols_list,' + script]
+  executable_no_exports_link_depends = [script]
+elif host_os_family != 'windows'
+  script_name = (host_os == 'freebsd') ? 'executable-no-exports-freebsd.version' : 'executable-no-exports.version'
+  script = meson.project_source_root() / 'tools' / script_name
+  executable_no_exports_link_args = ['-Wl,--version-script,' + script]
+  executable_no_exports_link_depends = [script]
+endif
+
 compile_js_agent = files('tools' / 'compile-js-agent.py')
 
 mapper_opt = get_option('mapper')
