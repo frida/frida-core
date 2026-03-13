@@ -2052,13 +2052,13 @@ frida_file_new (int fd, gboolean close_fd, int buf_mode)
 
   if (buf_mode != _IONBF)
   {
+    f->rcap = FRIDA_STDIO_BUFSIZE;
     f->rbuf = g_malloc (f->rcap);
     f->owns_rbuf = TRUE;
-    f->rcap = FRIDA_STDIO_BUFSIZE;
 
+    f->wcap = FRIDA_STDIO_BUFSIZE;
     f->wbuf = g_malloc (f->wcap);
     f->owns_wbuf = TRUE;
-    f->wcap = FRIDA_STDIO_BUFSIZE;
   }
 
   return f;
