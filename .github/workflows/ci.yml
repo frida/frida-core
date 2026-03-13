@@ -331,7 +331,7 @@ jobs:
         if: startsWith(matrix.id, 'android-')
         id: setup-ndk
         with:
-          ndk-version: r25c
+          ndk-version: r29
       - name: Add NDK to env
         if: startsWith(matrix.id, 'android-')
         run: echo ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} >> $GITHUB_ENV
