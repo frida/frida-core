@@ -445,7 +445,7 @@ jobs:
       - name: Check for unexpected changes
         run: |
           git config --global --add safe.directory "$(realpath .)"
-          status_output=$(git status --porcelain tests/labrats/{resident-agent,simple-agent}-linux-${{ matrix.arch }}.so tests/labrats/{forker,sleeper,spawner}-linux-${{ matrix.arch }})
+          status_output=$(git status --porcelain src/linux/helpers/artifacts)
           if [ -n "$status_output" ]; then
             echo "Unexpected changes detected:"
             echo "$status_output"
@@ -478,7 +478,7 @@ jobs:
       - name: Check for unexpected changes
         run: |
           git config --global --add safe.directory "$(realpath .)"
-          status_output=$(git status --porcelain src/linux/helpers/{bootstrapper,loader}-${{ matrix.arch }}.bin)
+          status_output=$(git status --porcelain tests/labrats/{resident-agent,simple-agent}-linux-${{ matrix.arch }}.so tests/labrats/{forker,sleeper,spawner}-linux-${{ matrix.arch }})
           if [ -n "$status_output" ]; then
             echo "Unexpected changes detected:"
             echo "$status_output"
