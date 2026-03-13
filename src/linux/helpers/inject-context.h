@@ -7,10 +7,10 @@ typedef long pthread_t;
 # else
 typedef void * pthread_t;
 typedef struct _pthread_attr_t pthread_attr_t;
+typedef unsigned int socklen_t;
 # endif
 struct msghdr;
 struct sockaddr;
-typedef unsigned int socklen_t;
 #else
 # include <dlfcn.h>
 # include <pthread.h>

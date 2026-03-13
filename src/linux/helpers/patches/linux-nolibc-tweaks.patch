@@ -194,10 +194,10 @@ index 137552216..c411bd979 100644
  	return sys_kill(sys_getpid(), signal);
  }
 diff --git a/tools/include/nolibc/std.h b/tools/include/nolibc/std.h
-index 1747ae125..9adbbdf1b 100644
+index 1747ae125..69e54708d 100644
 --- a/tools/include/nolibc/std.h
 +++ b/tools/include/nolibc/std.h
-@@ -25,25 +25,87 @@ typedef unsigned short     uint16_t;
+@@ -25,25 +25,91 @@ typedef unsigned short     uint16_t;
  typedef   signed short      int16_t;
  typedef unsigned int       uint32_t;
  typedef   signed int        int32_t;
@@ -271,7 +271,11 @@ index 1747ae125..9adbbdf1b 100644
 +typedef unsigned short        gid_t;
 +typedef unsigned short      nlink_t;
 +#endif
++#if defined(__ANDROID__)
++typedef   int64_t             off_t;
++#else
  typedef   signed long         off_t;
++#endif
 +#if defined(__ANDROID__)
 +typedef unsigned long     blksize_t;
 +#else
