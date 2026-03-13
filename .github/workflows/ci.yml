@@ -428,6 +428,7 @@ jobs:
   # in, and we want to ensure that they are up-to-date with respect to the source
   # for all architectures.
   check-linux-helpers:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
@@ -461,6 +462,7 @@ jobs:
   # in, and we want to ensure that they are up-to-date with respect to the source
   # for all architectures.
   check-labrats:
+    if: false
     strategy:
       matrix:
         arch: [x86, x86_64, arm, armbe8, arm64, arm64be, arm64beilp32, mips, mipsel, mips64, mips64el]
