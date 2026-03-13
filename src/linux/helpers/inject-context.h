@@ -2,8 +2,12 @@
 #define __FRIDA_INJECT_CONTEXT_H__
 
 #ifdef NOLIBC
+# ifdef __ANDROID__
+typedef long pthread_t;
+# else
 typedef void * pthread_t;
 typedef struct _pthread_attr_t pthread_attr_t;
+# endif
 struct msghdr;
 struct sockaddr;
 typedef unsigned int socklen_t;

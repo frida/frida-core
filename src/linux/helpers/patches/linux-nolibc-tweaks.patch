@@ -194,33 +194,29 @@ index 137552216..c411bd979 100644
  	return sys_kill(sys_getpid(), signal);
  }
 diff --git a/tools/include/nolibc/std.h b/tools/include/nolibc/std.h
-index 1747ae125..5f30e6e0c 100644
+index 1747ae125..9adbbdf1b 100644
 --- a/tools/include/nolibc/std.h
 +++ b/tools/include/nolibc/std.h
-@@ -25,25 +25,71 @@ typedef unsigned short     uint16_t;
+@@ -25,25 +25,87 @@ typedef unsigned short     uint16_t;
  typedef   signed short      int16_t;
  typedef unsigned int       uint32_t;
  typedef   signed int        int32_t;
--typedef unsigned long long uint64_t;
--typedef   signed long long  int64_t;
 +#if defined(__x86_64__) || defined(__aarch64__) || defined(__mips64) || defined(__riscv)
 +#if defined(__ILP32__)
-+typedef unsigned long long uint64_t;
-+typedef   signed long long  int64_t;
+ typedef unsigned long long uint64_t;
+ typedef   signed long long  int64_t;
 +#else
 +typedef unsigned long      uint64_t;
 +typedef   signed long       int64_t;
 +#endif
  typedef unsigned long        size_t;
  typedef   signed long       ssize_t;
--typedef unsigned long     uintptr_t;
--typedef   signed long      intptr_t;
 +#if defined(__ILP32__)
 +typedef unsigned int      uintptr_t;
 +typedef   signed int       intptr_t;
 +#else
-+typedef unsigned long     uintptr_t;
-+typedef   signed long      intptr_t;
+ typedef unsigned long     uintptr_t;
+ typedef   signed long      intptr_t;
 +#endif
  typedef   signed long     ptrdiff_t;
 +#elif defined(__arm__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -242,7 +238,15 @@ index 1747ae125..5f30e6e0c 100644
 +#endif
  
  /* those are commonly provided by sys/types.h */
++#if defined(__ANDROID__)
++#if defined(__LP64__)
++typedef uint64_t              dev_t;
++#else
++typedef uint32_t              dev_t;
++#endif
++#else
  typedef unsigned int          dev_t;
++#endif
  typedef unsigned long         ino_t;
 +#if defined(__x86_64__) || defined(__aarch64__) || defined(__mips__) || defined(__riscv)
  typedef unsigned int         mode_t;
@@ -250,7 +254,11 @@ index 1747ae125..5f30e6e0c 100644
 +typedef unsigned short       mode_t;
 +#endif
  typedef   signed int          pid_t;
-+#if defined(__x86_64__) || defined(__aarch64__) || (defined(__mips__) && !defined(__mips64)) || defined(__riscv)
++#if defined(__ANDROID__)
++typedef unsigned int          uid_t;
++typedef unsigned int          gid_t;
++typedef uint32_t            nlink_t;
++#elif defined(__x86_64__) || defined(__aarch64__) || (defined(__mips__) && !defined(__mips64)) || defined(__riscv)
  typedef unsigned int          uid_t;
  typedef unsigned int          gid_t;
  typedef unsigned long       nlink_t;
@@ -264,8 +272,12 @@ index 1747ae125..5f30e6e0c 100644
 +typedef unsigned short      nlink_t;
 +#endif
  typedef   signed long         off_t;
++#if defined(__ANDROID__)
++typedef unsigned long     blksize_t;
++#else
  typedef   signed long     blksize_t;
-+#if defined(__x86_64__) || defined(__aarch64__) || defined(__riscv)
++#endif
++#if !defined(__ANDROID__) && (defined(__x86_64__) || defined(__aarch64__) || defined(__riscv))
  typedef   signed long      blkcnt_t;
 +#else
 +typedef unsigned long      blkcnt_t;
@@ -323,3 +335,21 @@ index 78473d34e..f17e6f598 100644
 +		mode = va_arg(args, /* mode_t */ unsigned int);
  		va_end(args);
  	}
+diff --git a/tools/include/nolibc/stdlib.h b/tools/include/nolibc/stdlib.h
+index a24000d1e..5b35ddb45 100644
+--- a/tools/include/nolibc/stdlib.h
++++ b/tools/include/nolibc/stdlib.h
+@@ -59,11 +59,13 @@ long atol(const char *s)
+ 	return neg ? -ret : ret;
+ }
+ 
++#ifndef __ANDROID__
+ static __attribute__((unused))
+ int atoi(const char *s)
+ {
+ 	return atol(s);
+ }
++#endif
+ 
+ static __attribute__((unused))
+ void free(void *ptr)
