@@ -335,6 +335,7 @@ index 78473d34e..f17e6f598 100644
 +		mode = va_arg(args, /* mode_t */ unsigned int);
  		va_end(args);
  	}
+
 diff --git a/tools/include/nolibc/stdlib.h b/tools/include/nolibc/stdlib.h
 index a24000d1e..5b35ddb45 100644
 --- a/tools/include/nolibc/stdlib.h
