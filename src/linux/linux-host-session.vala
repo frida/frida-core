@@ -1285,6 +1285,8 @@ namespace Frida {
 
 		private delegate void CompletionNotify (GLib.Error? error);
 
+		private const string CHROME_ZYGOTE_PACKAGE_NAME = "com.android.chrome_zygote";
+
 		public RoboLauncher (LinuxHostSession host_session, Cancellable io_cancellable) {
 			Object (
 				host_session: host_session,
@@ -1477,7 +1479,9 @@ namespace Frida {
 
 			foreach (HostProcessInfo info in System.enumerate_processes (new ProcessQueryOptions ())) {
 				var name = info.name;
-				if (name == "zygote" || name == "zygote64" || name == "usap32" || name == "usap64") {
+				if (name == "zygote" || name == "zygote64" ||
+						name == "usap32" || name == "usap64" ||
+						name == CHROME_ZYGOTE_PACKAGE_NAME) {
 					uint pid = info.pid;
 					if (zymbiote_patches.has_key (pid))
 						continue;
@@ -1919,6 +1923,17 @@ namespace Frida {
 		private async void handle_zymbiote_connection (ZymbioteConnection connection) {
 			try {
 				var hello = yield connection.read_hello (io_cancellable);
+
+				if (hello.package_name == CHROME_ZYGOTE_PACKAGE_NAME) {
+					var patches = zymbiote_patches[hello.ppid];
+					if (patches != null)
+						zymbiote_patches[hello.pid] = patches;
+					/*
+					 * By dropping the connection without sending an ack, zymbiote knows it
+					 * should stick around and not be prepared to have its hooks reverted.
+					 */
+					return;
+				}
 
 				connection.patches_to_revert = zymbiote_patches[hello.ppid];
 
