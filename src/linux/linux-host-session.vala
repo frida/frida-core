@@ -1612,9 +1612,15 @@ namespace Frida {
 			unowned string? libc_path = null;
 			unowned string? libselinux_path = null;
 			unowned string? runtime_path = null;
-			Gee.List<ProcMapsSnapshot.Mapping> heap_candidates = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
+			Gee.List<HeapCandidate> heap_candidates = new Gee.ArrayList<HeapCandidate> ();
 
 			var maps = ProcMapsSnapshot.from_pid (pid);
+			string raw_maps;
+			try {
+				FileUtils.get_contents ("/proc/%u/maps".printf (pid), out raw_maps);
+			} catch (FileError e) {
+				throw new Error.PROCESS_NOT_FOUND ("%s", e.message);
+			}
 
 			foreach (var m in maps) {
 				unowned string path = m.path;
@@ -1637,7 +1643,32 @@ namespace Frida {
 					if (runtime_path == null)
 						runtime_path = path;
 				} else if (is_boot_heap (m)) {
-					heap_candidates.add (m);
+					heap_candidates.add (new HeapCandidate () {
+						start = m.start,
+						end = m.end,
+					});
+				}
+			}
+
+			MatchInfo info;
+			if (!/^([0-9a-f]+)-([0-9a-f]+) rw-p 00000000 00:00 0 *$/m.match (raw_maps, 0, out info)) {
+				assert_not_reached ();
+			}
+			assert (info != null);
+
+			while (info.matches ()) {
+				uint64 start = uint64.parse (info.fetch (1), 16);
+				uint64 end = uint64.parse (info.fetch (2), 16);
+
+				heap_candidates.add (new HeapCandidate () {
+					start = start,
+					end = end,
+				});
+
+				try {
+					info.next ();
+				} catch (RegexError e) {
+					break;
 				}
 			}
 
@@ -1647,8 +1678,6 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Unable to detect libc.so path");
 			if (runtime_path == null)
 				throw new Error.NOT_SUPPORTED ("Unable to detect libandroid_runtime.so path");
-			if (heap_candidates.is_empty)
-				throw new Error.NOT_SUPPORTED ("Unable to detect any VM heap candidates");
 
 			var libc_mapping = maps.find_module_by_path (libc_path);
 			if (libc_mapping == null)
@@ -1742,9 +1771,14 @@ namespace Frida {
 			bool already_patched = false;
 			foreach (var candidate in heap_candidates) {
 				var heap = new uint8[candidate.size];
-				var n = fd.pread (heap, candidate.start);
+				size_t n;
+				try {
+					n = fd.pread (heap, candidate.start);
+				} catch (Error e) {
+					continue;
+				}
 				if (n != heap.length)
-					throw new Error.NOT_SUPPORTED ("Short read");
+					continue;
 
 				void * p = memmem (heap, original_setargv0_ptr);
 				if (p == null) {
@@ -1777,6 +1811,16 @@ namespace Frida {
 				payload_path = payload_path,
 				payload_file_offset = payload_file_offset,
 			};
+		}
+
+		private class HeapCandidate {
+			public uint64 start;
+			public uint64 end;
+			public size_t size {
+				get {
+					return (size_t) (end - start);
+				}
+			}
 		}
 
 		private static Bytes make_zymbiote_payload (string server_name, uint64 payload_base, int payload_original_protection,
