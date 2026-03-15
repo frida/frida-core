@@ -396,16 +396,25 @@ namespace Frida.Fruity {
 		}
 
 		private static int compare_transports (Transport a, Transport b) {
-			return score_transport (b) - score_transport (a);
-		}
-
-		private static int score_transport (Transport t) {
-			int score = 0;
-			if (t.connection_type == USB)
-				score++;
-			if (t.usbmux_device != null)
-				score++;
-			return score;
+			if (a.connection_type != b.connection_type) {
+				return a.connection_type < b.connection_type ? -1 : 1;
+			}
+			if (a.usbmux_device != b.usbmux_device) {
+				return a.usbmux_device != null ? -1 : 1;
+			}
+			if (a.name != null && b.name != null) {
+				var diff = GLib.strcmp(a.name, b.name);
+				if (diff != 0) {
+					return diff;
+				}
+			} else if (a.name != null) {
+				return -1;
+			} else if (b.name != null) {
+				return 1;
+			}
+			var ta = a.get_type().name();
+			var tb = b.get_type().name();
+			return GLib.strcmp(ta, tb);
 		}
 	}
 
