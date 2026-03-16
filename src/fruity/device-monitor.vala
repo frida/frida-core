@@ -396,7 +396,17 @@ namespace Frida.Fruity {
 		}
 
 		private static int compare_transports (Transport a, Transport b) {
-			return score_transport (b) - score_transport (a);
+			int res = score_transport (b) - score_transport (a);
+			if (res != 0)
+				return res;
+
+			if (a == b)
+				return 0;
+
+			uintptr ap = (uintptr) (void *) a;
+			uintptr bp = (uintptr) (void *) b;
+
+			return (ap < bp) ? -1 : 1;
 		}
 
 		private static int score_transport (Transport t) {
