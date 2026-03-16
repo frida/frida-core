@@ -88,11 +88,6 @@ namespace Frida.GDB {
 			SKIP_ACKS
 		}
 
-		public enum ChecksumType {
-			PROPER,
-			ZEROED
-		}
-
 		protected const char NOTIFICATION_TYPE_EXIT_STATUS = 'W';
 		protected const char NOTIFICATION_TYPE_EXIT_SIGNAL = 'X';
 		protected const char NOTIFICATION_TYPE_STOP = 'S';
@@ -156,13 +151,16 @@ namespace Frida.GDB {
 					ack_mode = SKIP_ACKS;
 				}
 
+				if ("qXfer:features:read+" in supported_features) {
+					yield load_target_properties (cancellable);
+				}
+
 				yield detect_vendor_features (cancellable);
 
 				yield enable_extensions (cancellable);
 
 				string attached_response = yield query_property ("Attached", cancellable);
 				if (attached_response == "1") {
-					yield load_target_properties (cancellable);
 					if (_exception == null) {
 						request_stop_info ();
 						yield wait_until_stopped (cancellable);
@@ -182,6 +180,17 @@ namespace Frida.GDB {
 				string info = yield run_remote_command ("info", cancellable);
 				if ("Corellium" in info)
 					supported_features.add ("corellium");
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+			}
+
+			try {
+				var response = yield query_simple ("vCont?", cancellable);
+				unowned string payload = response.payload;
+				if (payload.length > 0 && payload[0] != 'E' && payload != "") {
+					supported_features.add ("vcont");
+				}
 			} catch (GLib.Error e) {
 				if (e is IOError.CANCELLED)
 					throw (IOError) e;
@@ -269,6 +278,8 @@ namespace Frida.GDB {
 			check_stopped ();
 
 			change_state (RUNNING);
+
+			//todo error if no vcont?
 
 			var command = make_packet_builder_sized (1)
 				.append ("vCont");
@@ -398,12 +409,21 @@ namespace Frida.GDB {
 			check_stopped ();
 
 			change_state (RUNNING);
+			if ("vcont" in features) {
+				var command = make_packet_builder_sized (16)
+					.append ("vCont;s:")
+					.append (thread.id)
+					.build ();
+				write_bytes (command);
+			} else {
+				// Expensive roundtrip
+				yield execute_simple ("Hg" + thread.id, cancellable);
+				var command = make_packet_builder_sized (16)
+					.append ("s")
+					.build ();
+				write_bytes (command);
+			}
 
-			var command = make_packet_builder_sized (16)
-				.append ("vCont;s:")
-				.append (thread.id)
-				.build ();
-			write_bytes (command);
 
 			yield wait_until_stopped (cancellable);
 		}
@@ -413,12 +433,20 @@ namespace Frida.GDB {
 
 			change_state (RUNNING);
 
-			var command = make_packet_builder_sized (16)
-				.append ("vCont;s:")
-				.append (thread.id)
-				.append (";c")
-				.build ();
-			write_bytes (command);
+			if ("vcont" in features) {
+				var command = make_packet_builder_sized (16)
+					.append ("vCont;s:")
+					.append (thread.id)
+					.append (";c")
+					.build ();
+				write_bytes (command);
+			} else {
+				//todo: maybe throw, needs vCont
+				var command = make_packet_builder_sized (16)
+					.append ("s")
+					.build ();
+				write_bytes (command);
+			}
 		}
 
 		public virtual async Bytes read_byte_array (uint64 address, size_t size, Cancellable? cancellable = null)
@@ -552,7 +580,7 @@ namespace Frida.GDB {
 			var output = new Gee.ArrayList<Packet> ();
 			Packet response = yield query_with_predicate (builder.build (), packet => {
 				unowned string payload = packet.payload;
-				if (payload.has_prefix ("OK") || payload[0] == 'E')
+				if (payload.has_prefix ("OK") || payload[0] == 'E' || payload == "")
 					return COMPLETE;
 				if (payload[0] == NOTIFICATION_TYPE_OUTPUT) {
 					output.add (packet);
@@ -996,8 +1024,7 @@ namespace Frida.GDB {
 		}
 
 		public PacketBuilder make_packet_builder_sized (size_t capacity) {
-			var checksum_type = (ack_mode == SEND_ACKS) ? ChecksumType.PROPER : ChecksumType.ZEROED;
-			return new PacketBuilder (capacity, checksum_type);
+			return new PacketBuilder (capacity);
 		}
 
 		private async Packet read_packet () throws Error, IOError {
@@ -1118,11 +1145,9 @@ namespace Frida.GDB {
 		public sealed class PacketBuilder {
 			private StringBuilder? buffer;
 			private size_t initial_capacity;
-			private ChecksumType checksum_type;
 
-			public PacketBuilder (size_t capacity, ChecksumType checksum_type) {
+			public PacketBuilder (size_t capacity) {
 				this.initial_capacity = capacity + Packet.OVERHEAD;
-				this.checksum_type = checksum_type;
 
 				reset ();
 			}
@@ -1206,13 +1231,7 @@ namespace Frida.GDB {
 
 			public Bytes build () {
 				buffer.append_c (CHECKSUM_CHARACTER);
-
-				if (checksum_type == PROPER) {
-					buffer.append_printf ("%02x", compute_checksum (buffer.str, 1, buffer.len - 2));
-				} else {
-					buffer.append ("00");
-				}
-
+				buffer.append_printf ("%02x", compute_checksum (buffer.str, 1, buffer.len - 2));
 				return StringBuilder.free_to_bytes ((owned) buffer);
 			}
 		}
@@ -1676,34 +1695,56 @@ namespace Frida.GDB {
 
 		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
+			Bytes request = null;
+			if ("vcont" in client.features) {
+				request = client.make_packet_builder_sized (32)
+					.append_c ('p')
+					.append_register_id (reg.id)
+					.append (";thread:")
+					.append (id)
+					.append_c (';')
+					.build ();
+			} else {
+				//todo: Expensive roundtrip, how can we avoid this?
+				yield client.execute_simple ("Hg" + id, cancellable);
 
-			var request = client.make_packet_builder_sized (32)
-				.append_c ('p')
-				.append_register_id (reg.id)
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
-
+				request = client.make_packet_builder_sized (32)
+					.append_c ('p')
+					.append_register_id (reg.id)
+					.build ();
+			}
 			var response = yield client.query (request, cancellable);
-
 			return Protocol.parse_integer_value (response.payload, client.byte_order);
 		}
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
 
-			var command = client.make_packet_builder_sized (48)
-				.append_c ('P')
-				.append_register_id (reg.id)
-				.append_c ('=')
-				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
+			if ("vcont" in client.features) {
+				var command = client.make_packet_builder_sized (48)
+					.append_c ('P')
+					.append_register_id (reg.id)
+					.append_c ('=')
+					.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
+					.append (";thread:")
+					.append (id)
+					.append_c (';')
+					.build ();
 
-			yield client.execute (command, cancellable);
+				yield client.execute (command, cancellable);
+			} else {
+				//todo: Expensive roundtrip, how can we avoid this?
+				yield client.execute_simple ("Hg" + id, cancellable);
+
+				var command = client.make_packet_builder_sized (48)
+					.append_c ('P')
+					.append_register_id (reg.id)
+					.append_c ('=')
+					.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
+					.build ();
+
+				yield client.execute (command, cancellable);
+			}
 		}
 	}
 
