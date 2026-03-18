@@ -595,6 +595,13 @@ namespace Frida {
 			var linker = Gum.Android.get_linker_module ();
 
 			string vm_soname = (Gum.Android.get_api_level () >= 21) ? "libart.so" : "libdvm.so";
+			var libdir = ((sizeof (void *) == 8) ? "lib64" : "lib");
+			
+			ensure_directories_on_ld_library_path ({
+				"/apex/com.android.runtime/" + libdir,
+				"/apex/com.android.art/" + libdir,
+				"/apex/com.android.conscrypt/" + libdir
+			});
 
 			Android.Namespace * art_ns = null;
 			var get_exported_namespace = (GetExportedNamespaceFunc) linker.find_export_by_name (
@@ -681,6 +688,31 @@ namespace Frida {
 			} finally {
 				(*env)->pop_local_frame (env, null);
 			}
+		}
+
+		private static void ensure_directories_on_ld_library_path (string[] dirs) {
+			var linker = Gum.Android.get_linker_module ();
+			var get_path = (GetLdLibraryPathFunc) linker.find_export_by_name ("__loader_android_get_LD_LIBRARY_PATH");
+			var update_path = (UpdateLdLibraryPathFunc) linker.find_export_by_name ("__loader_android_update_LD_LIBRARY_PATH");
+
+			if (get_path == null || update_path == null)
+				return;
+
+			var path_buf = new char[4096];
+			get_path (path_buf);
+
+			var entries = new Gee.ArrayList<string> ();
+			foreach (unowned string dir in dirs)
+				entries.add (dir);
+
+			unowned string old_path = (string) path_buf;
+			foreach (var dir in old_path.split (":")) {
+				if (!(dir in dirs))
+					entries.add (dir);
+			}
+
+			string new_path = string.joinv (":", entries.to_array ());
+			update_path (new_path);
 		}
 
 		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
@@ -786,6 +818,12 @@ namespace Frida {
 
 		[CCode (has_target = false)]
 		private delegate JNI.Result RegisterFrameworkNativesLegacyFunc (void * env, JNI.ClassRef * clazz);
+		
+		[CCode (has_target = false)]
+		private delegate void GetLdLibraryPathFunc (char[] buf);
+
+		[CCode (has_target = false)]
+		private delegate void UpdateLdLibraryPathFunc (string path);
 	}
 
 	private class SigchainCompat : Object {
