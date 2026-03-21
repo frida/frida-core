@@ -893,11 +893,14 @@ namespace Frida.Fruity.Injector {
 			uint64 initializer = (notify_objc_init != null) ? notify_objc_init : libdyld_initialize;
 			GDB.Breakpoint init_breakpoint = yield lldb.add_breakpoint (SOFT, initializer, 4, cancellable);
 			GDB.Breakpoint? restart_breakpoint = null;
-			uint64? restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN6mach_o6HeaderEPK15DyldSharedCachePv"];
-			if (restart_with_dyld_in_cache == null)
-				restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPK15DyldSharedCachePv"];
-			if (restart_with_dyld_in_cache == null)
-				restart_with_dyld_in_cache = dyld_symbols["__ZN5dyld422restartWithDyldInCacheEPKNS_10KernelArgsEPKN5dyld39MachOFileEPv"];
+
+			uint64? restart_with_dyld_in_cache = null;
+			foreach (var e in dyld_symbols.entries) {
+				if (e.key.contains ("restartWithDyldInCache")) {
+					restart_with_dyld_in_cache = e.value;
+					break;
+				}
+			}
 			if (restart_with_dyld_in_cache != null)
 				restart_breakpoint = yield lldb.add_breakpoint (SOFT, restart_with_dyld_in_cache, 4, cancellable);
 
