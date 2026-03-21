@@ -186,8 +186,14 @@ namespace Frida.Fruity.Injector {
 		}
 
 		private async void teardown (Cancellable? cancellable) throws GLib.Error {
-			yield lldb.deallocate (scratch_page, cancellable);
-			yield lldb.deallocate (jit_page, cancellable);
+			try {
+				yield lldb.deallocate (scratch_page, cancellable);
+			} catch (Error e) {
+			}
+			try {
+				yield lldb.deallocate (jit_page, cancellable);
+			} catch (Error e) {
+			}
 
 			yield restore_main_thread_state (cancellable);
 		}
@@ -1377,8 +1383,12 @@ namespace Frida.Fruity.Injector {
 				}
 			}
 
-			if (state != scratch_page)
-				yield lldb.deallocate (state, cancellable);
+			if (state != scratch_page) {
+				try {
+					yield lldb.deallocate (state, cancellable);
+				} catch (Error e) {
+				}
+			}
 
 			return new SymbolSet (symbols);
 		}
