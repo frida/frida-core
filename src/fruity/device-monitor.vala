@@ -793,7 +793,8 @@ namespace Frida.Fruity {
 		}
 
 		private void on_tunnel_lost () {
-			tunnel_request = null;
+			if (tunnel_request.future.ready)
+				tunnel_request = null;
 		}
 
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
@@ -1682,7 +1683,8 @@ namespace Frida.Fruity {
 		}
 
 		private void on_tunnel_lost () {
-			tunnel_request = null;
+			if (tunnel_request.future.ready)
+				tunnel_request = null;
 		}
 	}
 
