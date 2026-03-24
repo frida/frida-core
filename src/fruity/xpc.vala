@@ -2039,6 +2039,7 @@ namespace Frida.Fruity {
 		private Promise<bool> close_request = new Promise<bool> ();
 
 		private TunnelParameters tunnel_params;
+		private Bytes flush_trigger_datagram;
 		private VirtualNetworkStack _tunnel_netstack;
 
 		private BufferedInputStream input;
@@ -2050,6 +2051,7 @@ namespace Frida.Fruity {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const size_t PREFERRED_MTU = 16000;
+		private const size_t REMOTEPAIRINGDEVICED_DEFER_THRESHOLD = 8192;
 		private const string PSK_IDENTITY = "com.apple.CoreDevice.TunnelService.Identity";
 
 		public static async TcpTunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
@@ -2123,6 +2125,7 @@ namespace Frida.Fruity {
 			post (make_handshake_request (PREFERRED_MTU));
 
 			tunnel_params = TunnelParameters.from_json (yield read_message (cancellable));
+			flush_trigger_datagram = make_minimal_dummy_ipv6_datagram (tunnel_params.address, tunnel_params.server_address);
 
 			_tunnel_netstack = new VirtualNetworkStack (null, tunnel_params.address, tunnel_params.mtu);
 			_tunnel_netstack.outgoing_datagrams.connect (post_batch);
@@ -2236,6 +2239,14 @@ namespace Frida.Fruity {
 				} catch (GLib.Error e) {
 					break;
 				}
+
+				if (pending_output.is_empty && size > REMOTEPAIRINGDEVICED_DEFER_THRESHOLD) {
+					try {
+						yield output.write_all_async (flush_trigger_datagram.get_data (), Priority.DEFAULT,
+							io_cancellable, null);
+					} catch (GLib.Error e) {
+					}
+				}
 			}
 
 			writing = false;
@@ -2310,6 +2321,23 @@ namespace Frida.Fruity {
 
 				available += n;
 			}
+		}
+
+		private static Bytes make_minimal_dummy_ipv6_datagram (InetAddress sender, InetAddress recipient) {
+			assert (sender.get_native_size () == 16 && recipient.get_native_size () == 16);
+
+			uint8 hop_limit = 1;
+			unowned uint8[] src = sender.to_bytes ();
+			unowned uint8[] dst = recipient.to_bytes ();
+
+			return new BufferBuilder (BIG_ENDIAN)
+				.append_uint32 (0x60000000)
+				.append_uint16 (0)
+				.append_uint8 (59)
+				.append_uint8 (hop_limit)
+				.append_data (src[:16])
+				.append_data (dst[:16])
+				.build ();
 		}
 
 		[CCode (cname = "g_tls_connection_openssl_get_ssl")]
