@@ -135,7 +135,18 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Already created");
 
-			host_session = new DroidyHostSession (device_details, this);
+			string control_endpoint = ("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT);
+
+			if (options != null) {
+				Value? control_endpoint_val = options.map["control-endpoint"];
+				if (control_endpoint_val != null) {
+					if (!control_endpoint_val.holds (typeof (string)))
+						throw new Error.INVALID_ARGUMENT ("The control-endpoint option must be a string");
+					control_endpoint = control_endpoint_val.get_string ();
+				}
+			}
+
+			host_session = new DroidyHostSession (device_details, this, control_endpoint);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -231,6 +242,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string control_endpoint {
+			get;
+			construct;
+		}
+
 		private Promise<AndroidHelperClient>? helper_client_request;
 		private Droidy.ShellSession? helper_shell;
 
@@ -258,10 +274,12 @@ namespace Frida {
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 
-		public DroidyHostSession (Droidy.DeviceDetails device_details, HostChannelProvider channel_provider) {
+		public DroidyHostSession (Droidy.DeviceDetails device_details, HostChannelProvider channel_provider,
+				string control_endpoint) {
 			Object (
 				device_details: device_details,
-				channel_provider: channel_provider
+				channel_provider: channel_provider,
+				control_endpoint: control_endpoint
 			);
 		}
 
@@ -838,9 +856,7 @@ namespace Frida {
 
 			DBusConnection? connection = null;
 			try {
-				var stream = yield channel_provider.open_channel (
-					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
-					cancellable);
+				var stream = yield channel_provider.open_channel (control_endpoint, cancellable);
 
 				WebServiceTransport transport = PLAIN;
 				string? origin = null;
