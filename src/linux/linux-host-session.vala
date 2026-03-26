@@ -38,6 +38,8 @@ namespace Frida {
 		private CrashMonitor? crash_monitor;
 #endif
 
+		private SpawnGater? spawn_gater;
+
 #if !ANDROID
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 #endif
@@ -75,8 +77,8 @@ namespace Frida {
 
 #if ANDROID
 			robo_launcher = new RoboLauncher (this, io_cancellable);
-			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
-			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
+			robo_launcher.spawn_added.connect (on_spawn_added);
+			robo_launcher.spawn_removed.connect (on_spawn_removed);
 
 			if (report_crashes) {
 				crash_monitor = new CrashMonitor ();
@@ -95,8 +97,8 @@ namespace Frida {
 		public override async void close (Cancellable? cancellable) throws IOError {
 #if ANDROID
 			yield robo_launcher.close (cancellable);
-			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
-			robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
+			robo_launcher.spawn_added.disconnect (on_spawn_added);
+			robo_launcher.spawn_removed.disconnect (on_spawn_removed);
 
 			if (android_helper_request != null) {
 				try {
@@ -106,6 +108,13 @@ namespace Frida {
 				}
 			}
 #endif
+
+			if (spawn_gater != null) {
+				spawn_gater.spawn_added.disconnect (on_spawn_added);
+				spawn_gater.spawn_removed.disconnect (on_spawn_removed);
+				spawn_gater.stop ();
+				spawn_gater = null;
+			}
 
 			yield base.close (cancellable);
 
@@ -268,27 +277,58 @@ namespace Frida {
 		}
 
 		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			var helper_process = helper as LinuxHelperProcess;
+			if (helper_process != null)
+				yield helper_process.preload (cancellable);
+
+			var gater = ensure_spawn_gater ();
+			if (gater.state == STOPPED) {
+#if ANDROID
+				try {
+					gater.start ();
+				} catch (Error e) {
+				}
+#else
+				gater.start ();
+#endif
+			}
+
 #if ANDROID
 			yield robo_launcher.enable_spawn_gating (cancellable);
-#else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
 		}
 
 		public override async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			spawn_gater?.stop ();
+
 #if ANDROID
 			yield robo_launcher.disable_spawn_gating (cancellable);
-#else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
 		}
 
+		private SpawnGater ensure_spawn_gater () {
+			if (spawn_gater == null) {
+				spawn_gater = new SpawnGater (helper);
+				spawn_gater.spawn_added.connect (on_spawn_added);
+				spawn_gater.spawn_removed.connect (on_spawn_removed);
+			}
+			return spawn_gater;
+		}
+
 		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
+			var result = new HostSpawnInfo[0];
+
+			if (spawn_gater != null) {
+				foreach (var spawn in spawn_gater.enumerate_pending_spawn ())
+					result += spawn;
+			}
+
 #if ANDROID
-			return robo_launcher.enumerate_pending_spawn ();
-#else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			foreach (var spawn in robo_launcher.enumerate_pending_spawn ())
+				result += spawn;
 #endif
+
+			return result;
 		}
 
 		public override async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
@@ -322,6 +362,9 @@ namespace Frida {
 		}
 
 		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			if (spawn_gater != null && spawn_gater.try_resume (pid))
+				return;
+
 #if ANDROID
 			if (robo_launcher.try_resume (pid))
 				return;
@@ -444,14 +487,6 @@ namespace Frida {
 			}
 		}
 
-		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
-			spawn_added (info);
-		}
-
-		private void on_robo_launcher_spawn_removed (HostSpawnInfo info) {
-			spawn_removed (info);
-		}
-
 		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
 			if (crash_monitor == null)
 				return null;
@@ -470,6 +505,14 @@ namespace Frida {
 			}
 		}
 #endif
+
+		private void on_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
+		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
