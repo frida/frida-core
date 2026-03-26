@@ -231,6 +231,12 @@ namespace Frida {
 			set;
 			default = new Gee.HashMap<string, Value?> ();
 		}
+
+		public HostSessionOptions copy () {
+			var opts = new HostSessionOptions ();
+			opts.map.set_all (map);
+			return opts;
+		}
 	}
 
 	public interface HostChannelProvider : Object {
