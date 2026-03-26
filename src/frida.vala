@@ -581,6 +581,40 @@ namespace Frida {
 			return close_request != null;
 		}
 
+		public void override_option (string name, Variant val) throws Error {
+			Value v;
+			switch (val.classify ()) {
+				case BOOLEAN:
+					v = Value (typeof (bool));
+					v.set_boolean (val.get_boolean ());
+					break;
+				case INT64:
+					v = Value (typeof (int64));
+					v.set_int64 (val.get_int64 ());
+					break;
+				case UINT64:
+					v = Value (typeof (uint64));
+					v.set_uint64 (val.get_uint64 ());
+					break;
+				case DOUBLE:
+					v = Value (typeof (double));
+					v.set_double (val.get_double ());
+					break;
+				case STRING:
+					v = Value (typeof (string));
+					v.set_string (val.get_string ());
+					break;
+				default:
+					throw new Error.INVALID_ARGUMENT ("Unsupported option type");
+			}
+
+			lock (host_session_options) {
+				if (host_session_options == null)
+					host_session_options = new HostSessionOptions ();
+				host_session_options.map[name] = v;
+			}
+		}
+
 		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1332,7 +1366,11 @@ namespace Frida {
 			host_session_request = new Promise<HostSession> ();
 
 			try {
-				var session = yield provider.create (manager, host_session_options, cancellable);
+				HostSessionOptions? opts;
+				lock (host_session_options)
+					opts = (host_session_options != null) ? host_session_options.copy () : null;
+
+				var session = yield provider.create (manager, opts, cancellable);
 				attach_host_session (session);
 
 				current_host_session = session;
