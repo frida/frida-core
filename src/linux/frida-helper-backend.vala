@@ -12,6 +12,7 @@ namespace Frida {
 		private Gee.Map<uint, ExecTransitionSession> exec_transitions = new Gee.HashMap<uint, ExecTransitionSession> ();
 		private Gee.Map<uint, AwaitExecTransitionTask> exec_waiters = new Gee.HashMap<uint, AwaitExecTransitionTask> ();
 		private Gee.Map<uint, PausedSyscallSession> paused_syscalls = new Gee.HashMap<uint, PausedSyscallSession> ();
+		private Gee.Map<uint, InjectSession> suspended_by_inject = new Gee.HashMap<uint, InjectSession> ();
 		private Gee.Map<uint, RemoteAgent> agents = new Gee.HashMap<uint, RemoteAgent> ();
 		private Gee.Map<uint, Source> agent_expiries = new Gee.HashMap<uint, Source> ();
 		private Gee.Map<uint, Gee.Queue<TaskEntry>> task_queues = new Gee.HashMap<uint, Gee.Queue<TaskEntry>> ();
@@ -276,6 +277,12 @@ namespace Frida {
 					return null;
 				}
 
+				InjectSession inject_session;
+				if (backend.suspended_by_inject.unset (pid, out inject_session)) {
+					inject_session.close ();
+					return null;
+				}
+
 				SpawnedProcess? p = backend.spawned_processes[pid];
 				if (p != null) {
 					p.resume ();
@@ -313,7 +320,10 @@ namespace Frida {
 					yield pss.interrupt (cancellable);
 				var session = yield InjectSession.open (pid, cancellable);
 				RemoteAgent agent = yield session.inject (spec, cancellable);
-				session.close ();
+				if (session.was_group_stopped)
+					backend.suspended_by_inject[pid] = session;
+				else
+					session.close ();
 				return agent;
 			}
 		}
@@ -1819,6 +1829,11 @@ namespace Frida {
 			}
 		}
 
+		public bool was_group_stopped {
+			get;
+			private set;
+		}
+
 		public enum InitBehavior {
 			INTERRUPT,
 			CONTINUE
@@ -1865,6 +1880,8 @@ namespace Frida {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			PtraceOptions options = PtraceOptions.TRACESYSGOOD | PtraceOptions.TRACEEXEC;
 
+			bool was_stopped = seize_supported && query_process_state (tid) == 'T';
+
 			PtraceRequest req;
 			long res;
 			if (seize_supported) {
@@ -1890,8 +1907,14 @@ namespace Frida {
 						attach_state = ATTACHED;
 
 						if (seize_supported) {
-							ptrace (INTERRUPT, tid);
-							yield wait_for_signal (TRAP, cancellable);
+							if (was_stopped) {
+								was_group_stopped = true;
+								yield wait_for_next_stop (cancellable);
+								Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
+							} else {
+								ptrace (INTERRUPT, tid);
+								yield wait_for_signal (TRAP, cancellable);
+							}
 						} else {
 							yield wait_for_signal (STOP, cancellable);
 							ptrace (SETOPTIONS, tid, null, (void *) options);
@@ -1918,6 +1941,18 @@ namespace Frida {
 			}
 
 			return true;
+		}
+
+		private static char query_process_state (uint tid) {
+			try {
+				string stat;
+				FileUtils.get_contents ("/proc/%u/stat".printf (tid), out stat);
+				int paren_end = stat.last_index_of_char (')');
+				if (paren_end != -1 && paren_end + 2 < stat.length)
+					return stat[paren_end + 2];
+			} catch (FileError e) {
+			}
+			return '?';
 		}
 
 		public void close () throws Error {
