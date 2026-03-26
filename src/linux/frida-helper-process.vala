@@ -36,6 +36,18 @@ namespace Frida {
 			_resource_store = null;
 		}
 
+		public async void preload (Cancellable? cancellable) throws IOError {
+			try {
+				yield obtain_for_64bit (cancellable);
+			} catch (Error e) {
+			}
+
+			try {
+				yield obtain_for_32bit (cancellable);
+			} catch (Error e) {
+			}
+		}
+
 		private ResourceStore get_resource_store () throws Error {
 			if (_resource_store == null)
 				_resource_store = new ResourceStore (tempdir);

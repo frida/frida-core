@@ -36,6 +36,7 @@ bpf_noarch_progs := \
 	activity-sampler \
 	$(NULL)
 bpf_arch_progs := \
+	spawn-gater \
 	syscall-tracer \
 	$(NULL)
 bpf_noarch_pairs := \

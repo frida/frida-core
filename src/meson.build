@@ -336,6 +336,7 @@ if have_local_backend
       'linux' / 'frida-helper-backend-glue.c',
       'linux' / 'frida-helper-backend-types.c',
       'linux' / 'frida-helper-types.vala',
+      'linux' / 'spawn-gater.vala',
       'linux' / 'activity-sampler.vala',
       'linux' / 'syscall-tracer.vala',
       'linux' / 'symbol-resolver.vala',
@@ -368,6 +369,7 @@ if have_local_backend
         helpers_native_dir / 'bootstrapper.bin',
         helpers_native_dir / 'loader.bin',
         helpers_bpf_noarch_dir  / 'activity-sampler.elf',
+        helpers_bpf_arch_dir  / 'spawn-gater.elf',
         helpers_bpf_arch_dir  / 'syscall-tracer.elf',
       ],
       output: [
@@ -384,6 +386,7 @@ if have_local_backend
         '@INPUT2@',
         '@INPUT3@',
         '@INPUT4@',
+        '@INPUT5@',
       ],
     )
     helper_backend_sources += [helper_backend_data]
