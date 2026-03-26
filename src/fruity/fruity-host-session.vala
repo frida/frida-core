@@ -85,7 +85,21 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			host_session = new FruityHostSession (device);
+			uint16 control_port = DEFAULT_CONTROL_PORT;
+
+			if (options != null) {
+				Value? control_endpoint_val = options.map["control-endpoint"];
+				if (control_endpoint_val != null) {
+					if (!control_endpoint_val.holds (typeof (string)))
+						throw new Error.INVALID_ARGUMENT ("The control-endpoint option must be a string");
+					unowned string control_endpoint = control_endpoint_val.get_string ();
+					if (!control_endpoint.has_prefix ("tcp:"))
+						throw new Error.INVALID_ARGUMENT ("The control-endpoint must be TCP-flavored");
+					control_port = (uint16) uint.parse (control_endpoint[4:]);
+				}
+			}
+
+			host_session = new FruityHostSession (device, control_port);
 			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
@@ -172,6 +186,11 @@ namespace Frida {
 			construct;
 		}
 
+		public uint16 control_port {
+			get;
+			construct;
+		}
+
 		private Gee.Map<uint, Fruity.ProcessControlService> pids_launched_without_lldb =
 			new Gee.HashMap<uint, Fruity.ProcessControlService> ();
 		private Gee.HashMap<uint, LLDBSession> lldb_sessions = new Gee.HashMap<uint, LLDBSession> ();
@@ -205,8 +224,8 @@ namespace Frida {
 			DEBUGSERVER_ENDPOINT_LEGACY,
 		};
 
-		public FruityHostSession (Fruity.Device device) {
-			Object (device: device);
+		public FruityHostSession (Fruity.Device device, uint16 control_port) {
+			Object (device: device, control_port: control_port);
 		}
 
 		construct {
@@ -1383,7 +1402,7 @@ namespace Frida {
 					: Fruity.OpenTcpChannelFlags.ALLOW_TUNNEL;
 
 				try {
-					return yield device.open_tcp_channel (DEFAULT_CONTROL_PORT.to_string (), open_flags, cancellable);
+					return yield device.open_tcp_channel (control_port.to_string (), open_flags, cancellable);
 				} catch (Error e) {
 					pending_error = e;
 					if (!(e is Error.SERVER_NOT_RUNNING))
