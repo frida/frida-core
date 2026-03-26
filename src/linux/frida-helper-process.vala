@@ -201,6 +201,10 @@ namespace Frida {
 
 		private async LinuxHelper obtain_for_32bit (Cancellable? cancellable) throws Error, IOError {
 			if (factory32 == null) {
+#if ANDROID
+				if (sizeof (void *) == 8 && _query_android_system_property ("ro.product.cpu.abilist32") == "")
+					throw new Error.NOT_SUPPORTED ("Android system does not support 32-bit processes");
+#endif
 				var store = get_resource_store ();
 				if (sizeof (void *) != 4 && store.helper32 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
