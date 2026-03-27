@@ -2672,13 +2672,10 @@ namespace Frida {
 							is_potentially_numeric = false;
 					}
 
-					if (is_potentially_numeric) {
-						try {
-							parse_uint (id);
-						} catch (Error e) {
-							throw new Error.PROTOCOL ("Invalid numeric pre-release identifier '%s' in '%s': %s",
-								id, version, e.message);
-						}
+					if (is_potentially_numeric && id.length > 1 && id[0] == '0') {
+						throw new Error.PROTOCOL (
+							"Numeric pre-release identifier '%s' in '%s' must not have leading zeros",
+							id, version);
 					}
 				}
 			}
@@ -2754,10 +2751,12 @@ namespace Frida {
 				bool b_is_num = is_numeric_identifier (id_b);
 
 				if (a_is_num && b_is_num) {
-					var val_a = uint.parse (id_a);
-					var val_b = uint.parse (id_b);
-					if (val_a != val_b)
-						return val_a > val_b ? 1 : -1;
+					int len_cmp = id_a.length - id_b.length;
+					if (len_cmp != 0)
+						return len_cmp;
+					int digit_cmp = strcmp (id_a, id_b);
+					if (digit_cmp != 0)
+						return digit_cmp;
 				} else if (a_is_num) {
 					return -1;
 				} else if (b_is_num) {
