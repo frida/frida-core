@@ -27,12 +27,16 @@ frida_init_with_runtime (FridaRuntime rt)
 
   runtime = rt;
 
+#ifdef HAVE_FRIDA_GLIB
   g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
+#endif
 
   if (g_once_init_enter (&frida_initialized))
   {
+#ifdef HAVE_FRIDA_GLIB
     gio_init ();
+#endif
     gum_init ();
     frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
@@ -109,12 +113,16 @@ frida_deinit (void)
   frida_invalidate_dbus_context ();
 
   gum_shutdown ();
+#ifdef HAVE_FRIDA_GLIB
   gio_shutdown ();
   glib_shutdown ();
+#endif
 
   gum_deinit ();
+#ifdef HAVE_FRIDA_GLIB
   gio_deinit ();
   glib_deinit ();
+#endif
 }
 
 GMainContext *

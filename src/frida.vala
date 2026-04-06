@@ -3621,11 +3621,14 @@ namespace Frida {
 		}
 	}
 
+#if HAVE_FRIDA_GLIB
 	private Mutex gc_mutex;
 	private uint gc_generation = 0;
 	private bool gc_scheduled = false;
+#endif
 
 	public void on_pending_garbage (void * data) {
+#if HAVE_FRIDA_GLIB
 		gc_mutex.lock ();
 		gc_generation++;
 		bool already_scheduled = gc_scheduled;
@@ -3651,5 +3654,6 @@ namespace Frida {
 
 			return repeat;
 		});
+#endif
 	}
 }

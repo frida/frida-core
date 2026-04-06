@@ -940,8 +940,11 @@ namespace Frida {
 					Memory.copy (buffer, recv_queue.data, n);
 					recv_queue.remove_range (0, (uint) n);
 
-					if (recv_queue.len == 0)
+					if (recv_queue.len == 0) {
+#if HAVE_SOUP_WEBSOCKET_BACKPRESSURE
 						websocket.resume_input ();
+#endif
+					}
 
 					update_pending_io ();
 				} else {
@@ -1009,7 +1012,9 @@ namespace Frida {
 		private void on_message (int type, Bytes message) {
 			with_state_lock (() => {
 				recv_queue.append (message.get_data ());
+#if HAVE_SOUP_WEBSOCKET_BACKPRESSURE
 				websocket.pause_input ();
+#endif
 				update_pending_io ();
 			});
 		}

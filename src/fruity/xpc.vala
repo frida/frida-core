@@ -2340,11 +2340,33 @@ namespace Frida.Fruity {
 				.build ();
 		}
 
+#if HAVE_GIOOPENSSL
 		[CCode (cname = "g_tls_connection_openssl_get_ssl")]
 		private extern static unowned SSL get_ssl_handle_from_connection (void * connection);
 
 		[CCode (cname = "g_tls_connection_openssl_get_connection_from_ssl")]
 		private extern static void * get_connection_from_ssl_handle (SSL ssl);
+#else
+		[CCode (has_target = false)]
+		private delegate unowned SSL GetSslHandleFromConnectionFunc (void * connection);
+		[CCode (has_target = false)]
+		private delegate void * GetConnectionFromSslHandleFunc (SSL ssl);
+
+		private static unowned SSL get_ssl_handle_from_connection (void * connection) throws Error {
+			var func = (GetSslHandleFromConnectionFunc) (void *) Gum.Module.find_global_export_by_name (
+				"g_tls_connection_openssl_get_ssl");
+			if (func == null)
+				throw new Error.NOT_SUPPORTED ("GIO OpenSSL TLS backend not available");
+			return func (connection);
+		}
+
+		private static void * get_connection_from_ssl_handle (SSL ssl) {
+			var func = (GetConnectionFromSslHandleFunc) (void *) Gum.Module.find_global_export_by_name (
+				"g_tls_connection_openssl_get_connection_from_ssl");
+			assert (func != null);
+			return func (ssl);
+		}
+#endif
 	}
 
 	public sealed class QuicTunnelConnection : Object, TunnelConnection, AsyncInitable {
@@ -2469,15 +2491,22 @@ namespace Frida.Fruity {
 			connection_ref.user_data = this;
 
 			ssl_ctx = new OpenSSL.SSLContext (OpenSSL.SSLMethod.tls_client ());
+#if !HAVE_NGTCP2_CRYPTO_OSSL
 			NGTcp2.Crypto.Quictls.configure_client_context (ssl_ctx);
+#endif
 			ssl_ctx.use_certificate (make_certificate (local_keypair.handle));
 			ssl_ctx.use_private_key (local_keypair.handle);
 
 			ssl = new OpenSSL.SSL (ssl_ctx);
+#if HAVE_NGTCP2_CRYPTO_OSSL
+			NGTcp2.Crypto.Ossl.configure_client_session (ssl);
+#endif
 			ssl.set_app_data (&connection_ref);
 			ssl.set_connect_state ();
 			ssl.set_alpn_protos (ALPN.data);
+#if !HAVE_NGTCP2_CRYPTO_OSSL
 			ssl.set_quic_transport_version (OpenSSL.TLSExtensionType.quic_transport_parameters);
+#endif
 
 			main_context = MainContext.ref_thread_default ();
 		}
