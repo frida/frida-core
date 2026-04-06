@@ -42,6 +42,7 @@ def main(argv):
     command.add_argument("assets", help="whether assets are embedded vs installed and loaded at runtime")
     command.add_argument("components", help="which components will be built",
                          type=parse_array_option_value)
+    command.add_argument("glib_flavor", help="upstream or frida", choices=["upstream", "frida"])
     command.add_argument("compilers", help="compiler command arrays", nargs="+")
     command.set_defaults(func=lambda args: setup(args.role,
                                                  args.builddir,
@@ -53,6 +54,7 @@ def main(argv):
                                                  args.compat,
                                                  args.assets,
                                                  args.components,
+                                                 args.glib_flavor,
                                                  parse_compilers(args.compilers)))
 
     command = subparsers.add_parser("compile", help="compile compatibility assets")
@@ -118,6 +120,7 @@ def setup(role: Role,
           compat: set[str],
           assets: str,
           components: set[str],
+          glib_flavor: str,
           compilers: Compilers):
     try:
         outputs: Mapping[str, Sequence[Output]] = OrderedDict()
@@ -321,10 +324,28 @@ def setup(role: Role,
                                target=AGENT_TARGET),
                     ]
 
+        if glib_flavor == "upstream":
+            kind = "modern" if arch_is_modern(host_os, host_arch) else "legacy"
+            _, agent_file, gadget_file = native_file_paths(host_os)
+            group = OutputGroup(host_arch)
+            outputs[group] = [
+                Output(identifier=f"agent_{kind}",
+                       name=arch_suffixed_name(agent_file.name, host_arch),
+                       file=agent_file,
+                       target=AGENT_TARGET),
+            ]
+            if "gadget" in components:
+                outputs[group] += [
+                    Output(identifier=f"gadget_{kind}",
+                           name=arch_suffixed_name(gadget_file.name, host_arch),
+                           file=gadget_file,
+                           target=GADGET_TARGET),
+                ]
+
         raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
         allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
 
-        state = State(role, builddir, top_builddir, frida_version, host_os, host_config, allowed_prebuilds, outputs)
+        state = State(role, builddir, top_builddir, frida_version, host_os, host_config, glib_flavor, allowed_prebuilds, outputs)
         serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
 
         if missing:
@@ -361,6 +382,7 @@ class State:
     frida_version: str
     host_os: str
     host_config: Optional[str]
+    glib_flavor: str
     allowed_prebuilds: Optional[set[str]]
     outputs: Mapping[OutputGroup, Sequence[Output]]
 
@@ -440,11 +462,22 @@ def compile(privdir: Path, state: State):
 
             host_machine = MachineSpec(state.host_os, group.arch, state.host_config, group.triplet)
 
+            if state.glib_flavor == "upstream":
+                allowed = None
+            else:
+                allowed = state.allowed_prebuilds
+
+            if state.glib_flavor == "upstream":
+                effective_options = [o for o in options if not o.startswith("-Ddefault_library=")]
+                effective_options += ["-Ddefault_library=static"]
+            else:
+                effective_options = options
+
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,
                       host_machine=host_machine,
                       environ={**build_env, **group.extra_environ},
-                      allowed_prebuilds=state.allowed_prebuilds,
+                      allowed_prebuilds=allowed,
                       extra_meson_options=[
                           "-Dcompiler_backend=disabled",
                           "-Dhelper_modern=",
@@ -453,7 +486,7 @@ def compile(privdir: Path, state: State):
                           "-Dagent_legacy=",
                           "-Dagent_emulated_modern=",
                           "-Dagent_emulated_legacy=",
-                          *options,
+                          *effective_options,
                       ],
                       call_meson=call_internal_meson,
                       on_progress=lambda progress: None)
@@ -643,6 +676,28 @@ def detect_mingw_toolchain_for(arch: str) -> Tuple[bool, Optional[str]]:
     return (found, triplet)
 
 
+def arch_is_modern(host_os: str, host_arch: str) -> bool:
+    if host_os in {"macos", "ios", "tvos"} and host_arch == "arm64":
+        return host_arch == "arm64e"
+    return host_arch in MODERN_ARCHS
+
+
+def native_file_paths(host_os: str) -> Tuple[Path, Path, Path]:
+    if host_os == "windows":
+        return (HELPER_FILE_WINDOWS, AGENT_FILE_WINDOWS, GADGET_FILE_WINDOWS)
+    elif host_os in {"macos", "ios", "tvos"}:
+        return (HELPER_FILE_UNIX, AGENT_FILE_DARWIN, GADGET_FILE_DARWIN)
+    else:
+        return (HELPER_FILE_UNIX, AGENT_FILE_ELF, GADGET_FILE_ELF)
+
+
+def arch_suffixed_name(name: str, arch: str) -> str:
+    stem, _, ext = name.partition(".")
+    if ext:
+        return f"{stem}-{arch}.{ext}"
+    return f"{stem}-{arch}"
+
+
 STATE_FILENAME = "state.dat"
 DEPFILE_FILENAME = "compat.deps"
 
@@ -669,6 +724,8 @@ MSVS_ENVVARS = {
     "INCLUDE",
     "LIB",
 }
+
+MODERN_ARCHS = {"x86_64", "arm64", "arm64e", "mips64", "riscv64"}
 
 MINGW_ARCHS = {
     "x86": "i686",

@@ -47,6 +47,7 @@ if no_overridden_compat_bits
     ','.join(get_option('compat')),
     get_option('assets'),
     ','.join(components),
+    have_shared_glib ? 'upstream' : 'frida',
     '--',
     '>>>', cc.cmd_array(), '<<<',
     '>>>', cpp.cmd_array(), '<<<',
