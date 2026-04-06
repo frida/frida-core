@@ -23,57 +23,49 @@ CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
 
 OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed )?(class|interface)\s+(\w+)\b")
 
+TOPLEVEL_NAMES = [
+    "frida.vala",
+    "package-manager.vala",
+    "control-service.vala",
+    "portal-service.vala",
+    "file-monitor.vala",
+    Path("compiler") / "compiler.vala",
+]
+
 def main():
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
-    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp'], default='bundle')
-    parser.add_argument('frida_version', metavar='frida-version', type=str)
-    parser.add_argument('frida_major_version', metavar='frida-major-version', type=str)
-    parser.add_argument('frida_minor_version', metavar='frida-minor-version', type=str)
-    parser.add_argument('frida_micro_version', metavar='frida-micro-version', type=str)
-    parser.add_argument('frida_nano_version', metavar='frida-nano-version', type=str)
-    parser.add_argument('api_version', metavar='api-version', type=str)
-    parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('core_gir', metavar='/path/to/Frida-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('base_header', metavar='/path/to/frida-base.h', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('base_gir', metavar='/path/to/FridaBase-x.y.gir', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('base_vapi', metavar='/path/to/frida-base.vapi', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'gir', 'vapi', 'vapi-stamp', 'symbol-maps'], default='bundle')
     parser.add_argument('output_dir', metavar='/output/dir')
+    parser.add_argument('extra_args', nargs='*')
 
     args = parser.parse_args()
 
     output_type = args.output_type
-    frida_version = args.frida_version
-    frida_version_components = (
-        args.frida_major_version,
-        args.frida_minor_version,
-        args.frida_micro_version,
-        args.frida_nano_version,
-    )
-    api_version = args.api_version
-    core_header = args.core_header.read()
-    core_gir = args.core_gir.read()
-    core_vapi = args.core_vapi.read()
-    base_header = args.base_header.read()
-    base_gir = args.base_gir.read()
-    base_vapi = args.base_vapi.read()
     output_dir = Path(args.output_dir)
+
+    if output_type == 'symbol-maps':
+        emit_symbol_maps_from_source(output_dir)
+        return
+
+    extra = args.extra_args
+    frida_version = extra[0]
+    frida_version_components = tuple(extra[1:5])
+    api_version = extra[5]
 
     if output_type == 'vapi-stamp':
         (output_dir / f"frida-core-{api_version}.vapi.stamp").write_bytes(b"")
         return
 
-    toplevel_names = [
-        "frida.vala",
-        "package-manager.vala",
-        "control-service.vala",
-        "portal-service.vala",
-        "file-monitor.vala",
-        Path("compiler") / "compiler.vala",
-    ]
+    core_header = Path(extra[6]).read_text(encoding='utf-8')
+    core_gir = Path(extra[7]).read_text(encoding='utf-8')
+    core_vapi = Path(extra[8]).read_text(encoding='utf-8')
+    base_header = Path(extra[9]).read_text(encoding='utf-8')
+    base_gir = Path(extra[10]).read_text(encoding='utf-8')
+    base_vapi = Path(extra[11]).read_text(encoding='utf-8')
+
     toplevel_sources = []
     src_dir = Path(__file__).parent.parent.resolve()
-    for name in toplevel_names:
+    for name in TOPLEVEL_NAMES:
         toplevel_sources.append((src_dir / name).read_text(encoding='utf-8'))
     toplevel_code = "\n".join(toplevel_sources)
 
@@ -309,6 +301,17 @@ def emit_vapi(api, output_dir):
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
+
+def emit_symbol_maps_from_source(output_dir: Path):
+    with OutputFile(output_dir / 'frida-core.version') as f:
+        f.write("{\n")
+        f.write("  global:\n")
+        f.write("    frida_*;\n")
+        f.write("    _frida_*;\n")
+        f.write("\n")
+        f.write("  local:\n")
+        f.write("    *;\n")
+        f.write("};\n")
 
 def parse_api(frida_version, frida_version_components, api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi):
     all_headers = core_header + "\n" + base_header
