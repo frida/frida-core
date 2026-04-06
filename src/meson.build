@@ -607,7 +607,7 @@ if have_fruity_backend
   backend_vala_args += [
     '--pkg=libnghttp2',
     '--pkg=libngtcp2',
-    '--pkg=libngtcp2_crypto_quictls',
+    ngtcp2_crypto_quictls_dep.found() ? '--pkg=libngtcp2_crypto_quictls' : '--pkg=libngtcp2_crypto_ossl',
     '--pkg=libusb-1.0',
     '--pkg=lwip',
     '--pkg=openssl',
@@ -690,8 +690,35 @@ core_vala_args = [
 
 core_gir_name = f'Frida-@api_version@.gir'
 
-core = library('frida-core', core_sources,
+is_shared = get_option('default_library') == 'shared'
+
+if is_shared
+  core_lib_name = f'frida-core-@api_version@'
+else
+  core_lib_name = 'frida-core'
+endif
+
+core_extra_link_args = backend_libs_private
+if is_shared
+  symbol_map_outdir = meson.current_build_dir()
+  run_command(python, files('api' / 'generate.py'),
+    '--output=symbol-maps',
+    symbol_map_outdir,
+    check: true,
+  )
+  if host_os_family == 'windows'
+    if host_toolchain != 'microsoft'
+      core_extra_link_args += '-Wl,--retain-symbols-file,' + symbol_map_outdir / 'frida-core.symbols'
+    endif
+  elif host_os_family != 'darwin'
+    core_extra_link_args += '-Wl,--version-script,' + symbol_map_outdir / 'frida-core.version'
+  endif
+endif
+
+core = library(core_lib_name, core_sources,
   c_args: frida_component_cflags,
+  vala_header: 'frida-core.h',
+  vala_vapi: 'frida-core.vapi',
   vala_args: [
     core_vala_args,
     backend_vala_args_private,
@@ -701,17 +728,27 @@ core = library('frida-core', core_sources,
     '--pkg=libsoup-3.0',
   ],
   vala_gir: core_gir_name,
-  link_args: backend_libs_private,
+  link_args: core_extra_link_args,
   link_with: backend_libs,
   dependencies: core_deps + internal_deps,
+  soversion: frida_major_version,
+  install: is_shared,
 )
 
-core_dep = declare_dependency(
-  include_directories: include_directories('.'),
-  link_args: backend_libs_private,
-  link_with: [core] + backend_libs,
-  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
-)
+if is_shared
+  core_dep = declare_dependency(
+    include_directories: include_directories('.'),
+    link_with: [core] + backend_libs,
+    dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
+  )
+else
+  core_dep = declare_dependency(
+    include_directories: include_directories('.'),
+    link_args: backend_libs_private,
+    link_with: [core] + backend_libs,
+    dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
+  )
+endif
 
 core_build_dir = meson.current_build_dir()
 subdir('api')

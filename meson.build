@@ -344,6 +344,23 @@ if optimize_for_prod
 endif
 
 glib_dep = dependency('glib-2.0', version: glib_version_req, default_options: glib_options)
+if glib_dep.type_name() == 'internal'
+  have_shared_glib = get_option('default_library') != 'static'
+else
+  glib_flavor_src = '''
+#include <glib.h>
+
+#ifdef GLIB_STATIC_COMPILATION
+# error GLib is static
+#endif
+'''
+  have_shared_glib = cc.compiles(glib_flavor_src, name: 'compiling with shared GLib', dependencies: [glib_dep])
+endif
+have_frida_glib = glib_dep.type_name() == 'internal' or cc.has_function('g_thread_set_callbacks', dependencies: [glib_dep])
+if have_frida_glib
+  cdata.set('HAVE_FRIDA_GLIB', 1)
+  vala_flags += '--define=HAVE_FRIDA_GLIB'
+endif
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
@@ -365,6 +382,9 @@ libsoup_dep = dependency('libsoup-3.0', default_options: [
   'tests=false',
   'sysprof=disabled',
 ])
+if cc.has_function('soup_websocket_connection_pause_input', dependencies: [libsoup_dep])
+  vala_flags += '--define=HAVE_SOUP_WEBSOCKET_BACKPRESSURE'
+endif
 brotlidec_dep = dependency('libbrotlidec')
 quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
   'libc=false',
@@ -386,7 +406,12 @@ else
 endif
 
 if host_os_family == 'linux'
-  libbpf_dep = dependency('libbpf')
+  if have_frida_glib
+    libbpf_dep = dependency('libbpf')
+  else
+    subproject('libbpf', default_options: ['default_library=static'])
+    libbpf_dep = dependency('libbpf')
+  endif
 endif
 
 if host_os == 'android'
@@ -596,12 +621,32 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  foreach dep : ['libnghttp2', 'libngtcp2', 'libngtcp2_crypto_quictls', 'libusb-1.0']
+  foreach dep : ['libnghttp2', 'libngtcp2']
     backend_deps_private += dependency(dep)
     backend_reqs_private += dep
   endforeach
 
+  if have_frida_glib
+    libusb_dep = dependency('libusb-1.0')
+  else
+    subproject('libusb', default_options: ['default_library=static'])
+    libusb_dep = dependency('libusb-1.0')
+  endif
+  backend_deps_private += libusb_dep
+  backend_reqs_private += 'libusb-1.0'
+
+  ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false)
+  if ngtcp2_crypto_quictls_dep.found()
+    backend_deps_private += ngtcp2_crypto_quictls_dep
+    backend_reqs_private += 'libngtcp2_crypto_quictls'
+  else
+    backend_deps_private += dependency('libngtcp2_crypto_ossl')
+    backend_reqs_private += 'libngtcp2_crypto_ossl'
+    vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
+  endif
+
   lwip_options = [
+    'default_library=static',
     'ipv4=disabled',
     'ipv6=enabled',
     'dns=disabled',
@@ -646,23 +691,27 @@ else
   termux_elf_cleaner = []
 endif
 
-tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'), default_options: [
-  'gnutls=disabled',
-  'openssl=enabled',
-  'libproxy=disabled',
-  'gnome_proxy=disabled',
-  'tests=false',
-])
 tls_provider_vala_args = []
-if tls_provider_dep.found()
-  tls_provider_vala_args += [
-    '--pkg=gioopenssl',
-    '--vapidir=' + tls_provider_dep.get_variable('vapidir'),
-  ]
-  cdata.set('HAVE_GIOOPENSSL', 1)
-  vala_flags += ['--define=HAVE_GIOOPENSSL']
-  backend_deps_private += tls_provider_dep
-  backend_reqs_private += 'gioopenssl'
+if have_shared_glib
+  tls_provider_dep = gio_dep
+else
+  tls_provider_dep = dependency('gioopenssl', required: get_option('connectivity'), default_options: [
+    'gnutls=disabled',
+    'openssl=enabled',
+    'libproxy=disabled',
+    'gnome_proxy=disabled',
+    'tests=false',
+  ])
+  if tls_provider_dep.found()
+    tls_provider_vala_args += [
+      '--pkg=gioopenssl',
+      '--vapidir=' + tls_provider_dep.get_variable('vapidir'),
+    ]
+    cdata.set('HAVE_GIOOPENSSL', 1)
+    vala_flags += ['--define=HAVE_GIOOPENSSL']
+    backend_deps_private += tls_provider_dep
+    backend_reqs_private += 'gioopenssl'
+  endif
 endif
 
 nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
@@ -675,6 +724,7 @@ nice_dep = dependency('nice', required: get_option('connectivity'), default_opti
 ])
 if nice_dep.found()
   usrsctp_dep = dependency('usrsctp', default_options: [
+    'default_library=static',
     'sctp_inet=false',
     'sctp_inet6=false',
     'sctp_build_programs=false',

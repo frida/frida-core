@@ -23,7 +23,9 @@ endif
 if build_gadget
   test_vala_args += '--define=HAVE_GADGET'
   test_sources += 'test-gadget.vala'
-  test_depends += gadget
+  if not have_shared_glib
+    test_depends += gadget
+  endif
 endif
 
 subdir('labrats')
