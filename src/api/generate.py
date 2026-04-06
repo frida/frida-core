@@ -249,6 +249,12 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
     merge_and_transform_elements("interface", object_type_names)
     merge_and_transform_elements("enumeration", enum_type_names | error_type_names)
 
+    for source_root in [core_root, base_root]:
+        for record in source_root.findall(".//record", GIR_NAMESPACES):
+            owner = record.get(f"{{{GLIB_NAMESPACE}}}is-gtype-struct-for")
+            if owner is not None and owner in object_type_names:
+                merged_namespace.append(record)
+
     ET.indent(merged_root, space="  ")
     result = ET.tostring(merged_root,
                          encoding="unicode",
