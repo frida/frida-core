@@ -136,6 +136,16 @@ Test modules: `test-system`, `test-injector`, `test-agent`,
 `test-host-session`, `test-gadget`, `test-compiler`. Test
 helper programs ("labrats") are in `tests/labrats/`.
 
+## Code Style
+
+### Function Order
+
+Use newspaper/stepdown order: high-level entry points
+first, low-level helpers and constants last. In C,
+`main()` is always first. When ordering siblings at the
+same level, use the chronological order of first use
+within their caller.
+
 ## Commit Style
 
 - Subject line: max 50 characters
