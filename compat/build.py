@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import pickle
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -468,7 +469,7 @@ def compile(privdir: Path, state: State):
                 allowed = state.allowed_prebuilds
 
             if state.glib_flavor == "upstream":
-                effective_options = [o for o in options if not o.startswith("-Ddefault_library=")]
+                effective_options = [o for o in options if not re.match(r"^-D[\w-]*:?default_library=", o)]
                 effective_options += ["-Ddefault_library=static"]
             else:
                 effective_options = options
