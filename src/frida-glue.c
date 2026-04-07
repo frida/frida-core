@@ -25,8 +25,6 @@ frida_init_with_runtime (FridaRuntime rt)
 {
   static gsize frida_initialized = FALSE;
 
-  runtime = rt;
-
 #ifdef HAVE_FRIDA_GLIB
   g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
@@ -34,6 +32,8 @@ frida_init_with_runtime (FridaRuntime rt)
 
   if (g_once_init_enter (&frida_initialized))
   {
+    runtime = rt;
+
 #ifdef HAVE_FRIDA_GLIB
     gio_init ();
 #endif
