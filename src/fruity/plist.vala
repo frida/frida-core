@@ -1592,8 +1592,11 @@ namespace Frida.Fruity {
 		if (t == typeof (string))
 			return str_hash (v.get_string ());
 
-		if (t == typeof (Bytes) || t == typeof (PlistDict) || t == typeof (PlistArray))
-			return (uint) v.get_object ();
+		if (t == typeof (Bytes))
+			return ((Bytes) v.get_boxed ()).hash ();
+
+		if (t == typeof (PlistDict) || t == typeof (PlistArray))
+			return (uint) (size_t) v.get_object ();
 
 		if (t == typeof (PlistUid))
 			return (uint) ((PlistUid) v.get_object ()).uid;
@@ -1623,7 +1626,10 @@ namespace Frida.Fruity {
 		if (t == typeof (string))
 			return a.get_string () == b.get_string ();
 
-		if (t == typeof (Bytes) || t == typeof (PlistDict) || t == typeof (PlistArray))
+		if (t == typeof (Bytes))
+			return ((Bytes) a.get_boxed ()).compare ((Bytes) b.get_boxed ()) == 0;
+
+		if (t == typeof (PlistDict) || t == typeof (PlistArray))
 			return a.get_object () == b.get_object ();
 
 		if (t == typeof (PlistNull))
