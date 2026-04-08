@@ -52,7 +52,7 @@ if g_ir_compiler.found()
     output: f'Frida-@api_version@.typelib',
     depends: core,
     install: true,
-    install_dir: get_option('libdir') / 'girepository-1.0',
+    install_dir: typelibdir,
   )
 endif
 

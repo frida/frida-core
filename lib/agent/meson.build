@@ -67,7 +67,7 @@ modulated_agent = custom_target('frida-agent-modulated',
 )
 
 need_universal_agent = host_os_family == 'darwin' \
-    and get_option('assets') == 'installed' \
+    and assets_mode == 'installed' \
     and agent_compat != ''
 
 if host_os_family == 'darwin'
@@ -80,7 +80,7 @@ agent = custom_target('frida-agent',
   output: need_universal_agent ? f'@agent_name@-@host_abi@' : agent_name,
   command: post_process + ['shared-library', identity],
   build_by_default: true,
-  install: get_option('assets') == 'installed' and not need_universal_agent,
+  install: assets_mode == 'installed' and not need_universal_agent,
   install_dir: asset_dir,
 )
 

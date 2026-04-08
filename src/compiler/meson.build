@@ -58,6 +58,8 @@ if have_compiler_backend
         input: compiler_backend[0],
         output: processed_filename,
         command: post_process + ['shared-library', identity, 'elf-cleaner:off'],
+        install: assets_mode == 'installed',
+        install_dir: get_option('libdir') / frida_libdir_name / 'plugins',
       )
     elif compiler_backend_mode == 'pie'
       processed_filename = 'frida-compiler-backend' + exe_suffix
@@ -65,27 +67,33 @@ if have_compiler_backend
         input: compiler_backend[0],
         output: processed_filename,
         command: post_process + ['executable', processed_filename],
+        install: assets_mode == 'installed',
+        install_dir: get_option('libdir') / frida_libdir_name / 'plugins',
       )
     endif
 
-    compiler_data = custom_target('frida-data-compiler',
-      input: [
-        'compiler.resources',
-        compiler_backend_binary,
-      ],
-      output: [
-        'frida-data-compiler.vapi',
-        'frida-data-compiler.h',
-        'frida-data-compiler.c',
-        'frida-data-compiler-blob' + resource_blob_extension,
-      ],
-      command: [
-        resource_compiler_cmd_array,
-        '-c', '@INPUT0@',
-        '-o', meson.current_build_dir() / 'frida-data-compiler',
-        '@INPUT1@',
-      ],
-    )
-    backend_sources += compiler_data
+    if assets_mode == 'installed'
+      core_extra_link_depends += compiler_backend_binary
+    else
+      compiler_data = custom_target('frida-data-compiler',
+        input: [
+          'compiler.resources',
+          compiler_backend_binary,
+        ],
+        output: [
+          'frida-data-compiler.vapi',
+          'frida-data-compiler.h',
+          'frida-data-compiler.c',
+          'frida-data-compiler-blob' + resource_blob_extension,
+        ],
+        command: [
+          resource_compiler_cmd_array,
+          '-c', '@INPUT0@',
+          '-o', meson.current_build_dir() / 'frida-data-compiler',
+          '@INPUT1@',
+        ],
+      )
+      backend_sources += compiler_data
+    endif
   endif
 endif

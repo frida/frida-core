@@ -56,6 +56,7 @@ def main(argv: List[str]):
     exe_suffix = args.pop(0)
     shlib_suffix = args.pop(0)
     cc_id = args.pop(0)
+    assets_mode = args.pop(0)
     cc_cmd_array = pop_cmd_array_arg(args)
     ar_cmd_array = pop_cmd_array_arg(args)
     nm_cmd_array = pop_cmd_array_arg(args)
@@ -70,6 +71,7 @@ def main(argv: List[str]):
             exe_suffix,
             shlib_suffix,
             cc_id,
+            assets_mode,
             cc_cmd_array,
             ar_cmd_array,
             nm_cmd_array,
@@ -104,6 +106,7 @@ def detect_config(
     exe_suffix: str,
     shlib_suffix: str,
     cc_id: str,
+    assets_mode: str,
     cc_cmd_array: List[str],
     ar_cmd_array: Optional[List[str]],
     nm_cmd_array: Optional[List[str]],
@@ -171,7 +174,7 @@ def detect_config(
 
     if libc == "musl":
         mode = "pie"
-    elif host_os == "android":
+    elif host_os == "android" or assets_mode == "installed":
         mode = "c-shared"
     else:
         mode = "c-archive"

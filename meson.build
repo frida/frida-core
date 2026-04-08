@@ -224,15 +224,16 @@ helper_name = 'frida-helper' + exe_suffix
 agent_name = 'frida-agent' + shlib_suffix
 gadget_name = 'frida-gadget' + shlib_suffix
 
-root_asset_dir = get_option('libdir') / 'frida'
+frida_libdir_name = f'frida-@api_version@'
+root_asset_dir = get_option('libdir') / frida_libdir_name
 if host_os_family == 'darwin'
   asset_dir = root_asset_dir
-  default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name
 else
   asset_dir = root_asset_dir / host_cpu_mode
   asset_dir_modern = root_asset_dir / '64'
   asset_dir_legacy = root_asset_dir / '32'
-  default_asset_path_template = get_option('prefix') / get_option('libdir') / 'frida' / '<arch>'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name / '<arch>'
 endif
 
 asset_path_template = get_option('asset_path_template')
@@ -240,7 +241,12 @@ if asset_path_template == ''
   asset_path_template = default_asset_path_template
 endif
 
-if get_option('assets') == 'embedded'
+assets_mode = get_option('assets')
+if assets_mode == 'auto'
+  assets_mode = (get_option('default_library') == 'shared') ? 'installed' : 'embedded'
+endif
+
+if assets_mode == 'embedded'
   vala_flags += '--define=HAVE_EMBEDDED_ASSETS'
 else
   cdata.set_quoted('FRIDA_HELPER_PATH', asset_path_template / helper_name)
@@ -312,11 +318,16 @@ if get_option('b_sanitize') == 'address'
   cdata.set('HAVE_ASAN', 1)
 endif
 
+have_in_tree_payloads = get_option('default_library') != 'shared'
 gum_dep = dependency('frida-gum-1.0', default_options: [
+  'default_library=static',
   f'frida_version=@frida_version@',
-  'gumjs=enabled',
+  'gumjs=' + (have_in_tree_payloads ? 'enabled' : 'disabled'),
+  'inspector=enabled',
 ])
-gumjs_dep = dependency('frida-gumjs-1.0')
+if have_in_tree_payloads
+  gumjs_dep = dependency('frida-gumjs-1.0')
+endif
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
 
 glib_version_req = '>=2.74'
@@ -387,6 +398,7 @@ if cc.has_function('soup_websocket_connection_pause_input', dependencies: [libso
 endif
 brotlidec_dep = dependency('libbrotlidec')
 quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
+  'default_library=static',
   'libc=false',
   'bignum=true',
   'atomics=disabled',
@@ -494,6 +506,7 @@ if compiler_backend_opt.allowed()
         exe_suffix,
         shlib_suffix,
         cc.get_id(),
+        assets_mode,
         '>>>', cc.cmd_array(), '<<<',
         '>>>', ar, '<<<',
         '>>>', nm, '<<<',
@@ -511,11 +524,23 @@ if compiler_backend_opt.allowed()
       go_config = tokens[1]
 
       if compiler_backend_mode == 'c-archive'
-        vala_flags += '--define=COMPILER_BACKEND_EMBEDDED'
+        vala_flags += '--define=COMPILER_BACKEND_LINKED'
       elif compiler_backend_mode == 'c-shared'
-        vala_flags += '--define=COMPILER_BACKEND_SHARED'
+        if assets_mode == 'installed'
+          vala_flags += '--define=COMPILER_BACKEND_INSTALLED_LIBRARY'
+          cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
+            get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + shlib_suffix))
+        else
+          vala_flags += '--define=COMPILER_BACKEND_EMBEDDED_LIBRARY'
+        endif
       elif compiler_backend_mode == 'pie'
-        vala_flags += '--define=COMPILER_BACKEND_EXECUTABLE'
+        if assets_mode == 'installed'
+          vala_flags += '--define=COMPILER_BACKEND_INSTALLED_EXECUTABLE'
+          cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
+            get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + exe_suffix))
+        else
+          vala_flags += '--define=COMPILER_BACKEND_EMBEDDED_EXECUTABLE'
+        endif
       else
         error('Unsupported compiler backend mode: ' + compiler_backend_mode)
       endif
@@ -586,8 +611,10 @@ endif
 gi_dep = dependency('gobject-introspection-1.0', required: false)
 if gi_dep.found()
   girdir = gi_dep.get_variable('girdir')
+  typelibdir = gi_dep.get_variable('typelibdir')
 else
   girdir = get_option('prefix') / get_option('datadir') / 'gir-1.0'
+  typelibdir = get_option('prefix') / get_option('libdir') / 'girepository-1.0'
 endif
 
 vapidir = get_option('prefix') / get_option('datadir') / 'vala' / 'vapi'
@@ -596,12 +623,15 @@ gum_vala_args = [
   '--pkg=frida-gum-1.0',
   '--vapidir=' + gum_dep.get_variable('frida_vapidir'),
 ]
-gumjs_vala_args = ['--pkg=frida-gumjs-1.0', '--pkg=gio-2.0', gum_vala_args]
 gumjs_inspector_vala_args = ['--pkg=frida-gumjs-inspector-1.0', gum_vala_args]
 
-have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
-if have_v8
-  vala_flags += ['--define=HAVE_V8']
+if have_in_tree_payloads
+  gumjs_vala_args = ['--pkg=frida-gumjs-1.0', '--pkg=gio-2.0', gum_vala_args]
+
+  have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
+  if have_v8
+    vala_flags += ['--define=HAVE_V8']
+  endif
 endif
 
 backend_deps_private = []
@@ -916,7 +946,7 @@ summary(
 summary(
   {
     'compat': compat_summary,
-    'assets': get_option('assets'),
+    'assets': assets_mode,
     'mapper': have_mapper,
     'connectivity': tls_provider_dep.found(),
     'gadget': build_gadget,

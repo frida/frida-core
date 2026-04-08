@@ -48,8 +48,8 @@ option('compiler_backend',
 
 option('assets',
   type: 'combo',
-  choices: ['embedded', 'installed'],
-  value: 'embedded',
+  choices: ['auto', 'embedded', 'installed'],
+  value: 'auto',
   description: 'Whether assets such as frida-agent should be embedded vs installed and loaded at runtime'
 )
 

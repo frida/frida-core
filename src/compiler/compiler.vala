@@ -235,12 +235,23 @@ namespace Frida {
 	namespace CompilerBackend {
 		private void init () {
 #if HAVE_COMPILER_BACKEND
-#if COMPILER_BACKEND_EMBEDDED
+#if COMPILER_BACKEND_LINKED
 			_init_go_runtime ();
 			build = (BuildFunc) _build;
 			watch = (WatchFunc) _watch;
 			WatchSession.dispose = (WatchSession.DisposeFunc) WatchSession._dispose;
-#elif COMPILER_BACKEND_SHARED
+#elif COMPILER_BACKEND_INSTALLED_LIBRARY
+			Module? backend = null;
+			try {
+				backend = new Module (Config.FRIDA_COMPILER_BACKEND_PATH, LOCAL);
+			} catch (ModuleError e) {
+				return;
+			}
+
+			build = resolve_symbol (backend, "_frida_compiler_backend_build");
+			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
+			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
+#elif COMPILER_BACKEND_EMBEDDED_LIBRARY
 			unowned uint8[] backend_so = Frida.Data.Compiler.get_frida_compiler_backend_so_blob ().data;
 
 			Module? backend = null;
@@ -276,7 +287,7 @@ namespace Frida {
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
-#elif COMPILER_BACKEND_EXECUTABLE
+#elif COMPILER_BACKEND_EMBEDDED_EXECUTABLE || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 			backend_process = new BackendProcess ();
 
 			build = executable_build;
@@ -287,8 +298,15 @@ namespace Frida {
 		}
 
 		private void check_available () throws Error {
-			if (build == null)
+			if (build == null) {
+#if COMPILER_BACKEND_INSTALLED_LIBRARY || COMPILER_BACKEND_INSTALLED_EXECUTABLE
+				throw new Error.NOT_SUPPORTED (
+					"Compiler backend plugin not installed; expected at: %s",
+					Config.FRIDA_COMPILER_BACKEND_PATH);
+#else
 				throw new Error.NOT_SUPPORTED ("Compiler backend disabled at build-time");
+#endif
+			}
 		}
 
 		private BuildFunc? build;
@@ -305,7 +323,7 @@ namespace Frida {
 			string platform, string[] externals, StartingFunc on_starting, FinishedFunc on_finished,
 			OutputFunc on_output, DiagnosticFunc on_diagnostic, owned WatchReadyFunc on_ready);
 
-#if COMPILER_BACKEND_EMBEDDED
+#if COMPILER_BACKEND_LINKED
 		private extern void _init_go_runtime ();
 		private extern void _build ();
 		private extern void _watch ();
@@ -317,7 +335,7 @@ namespace Frida {
 
 			private DisposeFunc? dispose;
 
-#if COMPILER_BACKEND_EMBEDDED
+#if COMPILER_BACKEND_LINKED
 			private extern void _dispose ();
 #endif
 		}
@@ -330,7 +348,7 @@ namespace Frida {
 		private delegate void DiagnosticFunc (owned string category, int code, owned string? path, int line, int character,
 			owned string text);
 
-#if HAVE_COMPILER_BACKEND && COMPILER_BACKEND_SHARED
+#if HAVE_COMPILER_BACKEND && (COMPILER_BACKEND_EMBEDDED_LIBRARY || COMPILER_BACKEND_INSTALLED_LIBRARY)
 		private T resolve_symbol<T> (Module m, string name) {
 			void * address;
 			if (!m.symbol (name, out address))
@@ -339,7 +357,7 @@ namespace Frida {
 		}
 #endif
 
-#if COMPILER_BACKEND_EXECUTABLE
+#if COMPILER_BACKEND_EMBEDDED_EXECUTABLE || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 		private BackendProcess? backend_process;
 
 		private static void executable_build (string project_root, string entrypoint, OutputFormat output_format,
@@ -393,7 +411,13 @@ namespace Frida {
 				if (process != null)
 					return;
 
+#if COMPILER_BACKEND_INSTALLED_EXECUTABLE
+				string path = Config.FRIDA_COMPILER_BACKEND_PATH;
+				bool unlink_after = false;
+#else
 				string path = extract_backend_executable ();
+				bool unlink_after = true;
+#endif
 				try {
 					var p = new Subprocess (STDIN_PIPE | STDOUT_PIPE | STDERR_PIPE, path);
 					process = p;
@@ -408,10 +432,12 @@ namespace Frida {
 					process_incoming_messages.begin ();
 					process_stderr_stream.begin (errput);
 				} finally {
-					FileUtils.unlink (path);
+					if (unlink_after)
+						FileUtils.unlink (path);
 				}
 			}
 
+#if COMPILER_BACKEND_EMBEDDED_EXECUTABLE
 			private static string extract_backend_executable () throws GLib.Error {
 				unowned uint8[] blob = Frida.Data.Compiler.get_frida_compiler_backend_blob ().data;
 
@@ -425,6 +451,7 @@ namespace Frida {
 
 				return path;
 			}
+#endif
 
 			private void handle_process_failure (string message) {
 				io_cancellable.cancel ();

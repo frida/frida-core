@@ -23,5 +23,5 @@ custom_target('core-devkit',
     meson.current_build_dir(),
   ] + devkit_options,
   install: true,
-  install_dir: get_option('libdir') / 'frida' / 'devkits' / 'core'
+  install_dir: get_option('libdir') / frida_libdir_name / 'devkits' / 'core'
 )

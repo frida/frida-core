@@ -112,7 +112,7 @@ base = static_library('frida-base-' + api_version, base_sources,
   vala_gir: base_gir_name,
   vala_vapi: f'frida-base-@api_version@.vapi',
   dependencies: [glib_dep, gobject_dep, gio_dep, libsoup_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep, openssl_dep] + extra_deps,
-  install: true,
+  install: have_in_tree_payloads,
   install_dir: [true, header_install_dir, true, false],
 )
 
@@ -124,10 +124,12 @@ base_dep = declare_dependency(
 
 base_build_dir = meson.current_build_dir()
 
-pkg = import('pkgconfig')
-pkg.generate(base,
-  filebase: f'frida-base-@api_version@',
-  name: 'Frida Base Library',
-  version: frida_version,
-  description: 'Basic building blocks',
-)
+if have_in_tree_payloads
+  pkg = import('pkgconfig')
+  pkg.generate(base,
+    filebase: f'frida-base-@api_version@',
+    name: 'Frida Base Library',
+    version: frida_version,
+    description: 'Basic building blocks',
+  )
+endif

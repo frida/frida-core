@@ -131,11 +131,11 @@ if have_local_backend
       output: helper_name,
       command: post_process_helper,
       build_by_default: true,
-      install: get_option('assets') == 'installed',
+      install: assets_mode == 'installed',
       install_dir: asset_dir,
     )
 
-    if get_option('assets') == 'embedded'
+    if assets_mode == 'embedded'
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
@@ -256,7 +256,7 @@ if have_local_backend
       override_options: ['b_asneeded=false'],
     )
 
-    need_universal_helper = get_option('assets') == 'installed' and helper_compat != ''
+    need_universal_helper = assets_mode == 'installed' and helper_compat != ''
 
     helper = custom_target('frida-helper',
       input: [
@@ -266,7 +266,7 @@ if have_local_backend
       output: need_universal_helper ? f'@helper_name@-@host_abi@' : helper_name,
       command: post_process_helper + '@INPUT1@',
       build_by_default: true,
-      install: get_option('assets') == 'installed' and not need_universal_helper,
+      install: assets_mode == 'installed' and not need_universal_helper,
       install_dir: asset_dir,
     )
 
@@ -287,7 +287,7 @@ if have_local_backend
       )
     endif
 
-    if get_option('assets') == 'embedded'
+    if assets_mode == 'embedded'
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
@@ -431,11 +431,11 @@ if have_local_backend
       output: helper_name,
       command: post_process_helper,
       build_by_default: true,
-      install: get_option('assets') == 'installed',
+      install: assets_mode == 'installed',
       install_dir: asset_dir,
     )
 
-    if get_option('assets') == 'embedded'
+    if assets_mode == 'embedded'
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
       endif
@@ -484,7 +484,7 @@ if have_local_backend
     ]
   endif
 
-  if get_option('assets') == 'embedded'
+  if assets_mode == 'embedded'
     if agent_modern == 'auto'
       agent_modern = host_is_modern ? agent : ''
     endif
@@ -651,6 +651,8 @@ if host_os_family != 'windows'
   backend_vala_args_private += '--pkg=posix'
 endif
 
+core_extra_link_depends = []
+
 subdir('compiler')
 
 core_sources = base_sources + backend_sources + compiler_sources
@@ -729,6 +731,7 @@ core = library(core_lib_name, core_sources,
   ],
   vala_gir: core_gir_name,
   link_args: core_extra_link_args,
+  link_depends: core_extra_link_depends,
   link_with: backend_libs,
   dependencies: core_deps + internal_deps,
   soversion: frida_major_version,
