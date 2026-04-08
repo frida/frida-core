@@ -263,7 +263,7 @@ namespace Frida.Fruity {
 
 			Json.Reader reader;
 			try {
-				reader = new Json.Reader (Json.from_string (response));
+				reader = make_json_reader (response);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL ("Invalid response JSON");
 			}
@@ -676,7 +676,7 @@ namespace Frida.Fruity {
 
 			Json.Reader reader;
 			try {
-				reader = new Json.Reader (Json.from_string (response));
+				reader = make_json_reader (response);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL ("Invalid createRemoteUnlockKey response JSON");
 			}

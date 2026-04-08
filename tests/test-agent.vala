@@ -234,7 +234,7 @@ Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dyl
 					while (true) {
 						var message = yield h.wait_for_message ();
 
-						var reader = new Json.Reader (Json.from_string (message.text));
+						var reader = make_json_reader (message.text);
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {
@@ -278,7 +278,7 @@ Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dyl
 						var message = yield h.wait_for_message ();
 						printerr ("got message: %s\n", message.text);
 
-						var reader = new Json.Reader (Json.from_string (message.text));
+						var reader = make_json_reader (message.text);
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {

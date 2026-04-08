@@ -1053,7 +1053,7 @@ namespace Frida {
 
 			var parameters = make_parameters_dict ();
 			try {
-				var header = new Json.Reader (Json.from_string (raw_header));
+				var header = make_json_reader (raw_header);
 				foreach (string member in header.list_members ()) {
 					header.read_member (member);
 

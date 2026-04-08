@@ -288,7 +288,7 @@ namespace Frida {
 
 		public JsonObjectReader (string json) throws Error {
 			try {
-				reader = new Json.Reader (Json.from_string (json));
+				reader = make_json_reader (json);
 			} catch (GLib.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
@@ -403,5 +403,27 @@ namespace Frida {
 			reader.end_member ();
 			throw new Error.PROTOCOL ("%s", e.message);
 		}
+	}
+
+	/*
+	 * Constructs a Json.Reader for the given JSON string, working around the
+	 * json_node_copy() bug in unpatched json-glib (GNOME bugzilla #774684).
+	 *
+	 * Json.Reader's set_root() copies the supplied node via json_node_copy().
+	 * For object/array nodes that copy is a thin shell that shares the original
+	 * JsonObject/JsonArray via refcount, but the members inside the shared
+	 * container have their parent pointers set to the *original* root, not the
+	 * shell. If the original is then dropped, json_reader_end_member()'s walk
+	 * via json_node_get_parent() touches a freed node — which on builds with
+	 * glib checks enabled (e.g. Fedora) trips JSON_NODE_IS_VALID and aborts.
+	 *
+	 * We keep the original root alive by attaching it to the reader as object
+	 * data; the destroy notify drops our reference when the reader is finalized.
+	 */
+	public Json.Reader make_json_reader (string json) throws GLib.Error {
+		Json.Node root = Json.from_string (json);
+		var reader = new Json.Reader (root);
+		reader.set_data<Json.Node> ("frida-json-root", (owned) root);
+		return reader;
 	}
 }

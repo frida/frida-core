@@ -151,7 +151,7 @@ namespace Frida.LLDB {
 
 			Json.Reader reader;
 			try {
-				reader = new Json.Reader (Json.from_string (response.payload));
+				reader = make_json_reader (response.payload);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL ("Invalid response");
 			}
@@ -194,7 +194,7 @@ namespace Frida.LLDB {
 
 			Json.Reader reader;
 			try {
-				reader = new Json.Reader (Json.from_string (response.payload));
+				reader = make_json_reader (response.payload);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL ("Invalid response");
 			}
