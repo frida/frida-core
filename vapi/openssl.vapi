@@ -1,7 +1,7 @@
 [CCode (lower_case_cprefix = "OPENSSL_", gir_namespace = "OpenSSL", gir_version = "1.0")]
 namespace OpenSSL {
 	[Compact]
-	[CCode (cname = "SSL_CTX", cprefix = "SSL_CTX_")]
+	[CCode (cheader_filename = "openssl/ssl.h", cname = "SSL_CTX", cprefix = "SSL_CTX_")]
 	public class SSLContext {
 		public SSLContext (SSLMethod meth);
 
@@ -12,10 +12,11 @@ namespace OpenSSL {
 	}
 
 	[Compact]
-	[CCode (cname = "SSL", cprefix = "SSL_")]
+	[CCode (cheader_filename = "openssl/ssl.h", cname = "SSL", cprefix = "SSL_")]
 	public class SSL {
 		public SSL (SSLContext ctx);
 
+		public void * get_app_data ();
 		public void set_app_data (void * data);
 
 		public void set_connect_state ();
@@ -26,13 +27,35 @@ namespace OpenSSL {
 		public void set_psk_client_callback (PskClientCallback callback);
 
 		public void set_quic_transport_version (int version);
+
+		public void set_bio (void * rbio, void * wbio);
+
+		public int do_handshake ();
+		public int read (uint8[] buf);
+		public int write (uint8[] buf);
+		public int shutdown ();
+		public int get_error (int ret);
+		public int pending ();
+	}
+
+	[CCode (cheader_filename = "openssl/ssl.h", cname = "int", cprefix = "SSL_ERROR_", has_type_id = false)]
+	public enum SSLErrorCode {
+		NONE,
+		SSL,
+		WANT_READ,
+		WANT_WRITE,
+		WANT_X509_LOOKUP,
+		SYSCALL,
+		ZERO_RETURN,
+		WANT_CONNECT,
+		WANT_ACCEPT,
 	}
 
 	[CCode (has_target = false)]
 	public delegate uint PskClientCallback (SSL ssl, string? hint, char[] identity, uint8[] psk);
 
 	[Compact]
-	[CCode (cname = "SSL_METHOD", cprefix = "SSL_METHOD_", free_function = "")]
+	[CCode (cheader_filename = "openssl/ssl.h", cname = "SSL_METHOD", cprefix = "SSL_METHOD_", free_function = "")]
 	public class SSLMethod {
 		[CCode (cname = "TLS_method")]
 		public static unowned SSLMethod tls ();
@@ -108,6 +131,23 @@ namespace OpenSSL {
 		public BasicIO.from_static_memory_buffer (uint8[] buf);
 
 		public long get_mem_data ([CCode (array_length = false)] out unowned uint8[] data);
+
+		public int read (uint8[] buf);
+		public int write (uint8[] buf);
+		public size_t ctrl_pending ();
+
+		[CCode (cname = "BIO_new")]
+		public static void * raw_new (BasicIOMethod method);
+		[CCode (cname = "BIO_free")]
+		public static int raw_free (void * bio);
+		[CCode (cname = "BIO_read")]
+		public static int raw_read (void * bio, uint8[] buf);
+		[CCode (cname = "BIO_write")]
+		public static int raw_write (void * bio, uint8[] buf);
+		[CCode (cname = "BIO_ctrl_pending")]
+		public static size_t raw_ctrl_pending (void * bio);
+		[CCode (cname = "BIO_get_mem_data")]
+		public static long raw_get_mem_data (void * bio, [CCode (array_length = false)] out unowned uint8[] data);
 	}
 
 	[Compact]
@@ -534,7 +574,7 @@ namespace OpenSSL {
 		public int memcmp (void * a, void * b, size_t len);
 	}
 
-	[CCode (lower_case_cprefix = "ERR_")]
+	[CCode (cheader_filename = "openssl/err.h", lower_case_cprefix = "ERR_")]
 	namespace Error {
 		public ulong get_error ();
 		public void error_string_n (ulong e, char[] buf);

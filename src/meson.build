@@ -582,6 +582,7 @@ if have_fruity_backend
     'fruity' / 'kdebug.vala',
     'fruity' / 'kperfdata.vala',
     'fruity' / 'cs-signature.vala',
+    'fruity' / 'tls-psk.vala',
     'fruity' / 'network-stack.vala',
     'fruity' / 'usb.vala',
     'fruity' / 'ncm.vala',

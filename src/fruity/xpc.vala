@@ -2056,38 +2056,12 @@ namespace Frida.Fruity {
 
 		public static async TcpTunnelConnection open (InetSocketAddress address, NetworkStack netstack, TunnelKey local_keypair,
 				TunnelKey remote_pubkey, Cancellable? cancellable = null) throws Error, IOError {
-			var stream = yield netstack.open_tcp_connection (address, cancellable);
+			var raw_stream = yield netstack.open_tcp_connection (address, cancellable);
 
-			TlsClientConnection tls_connection;
-			try {
-				tls_connection = TlsClientConnection.new (stream, null);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-			tls_connection.set_data ("tcp-tunnel-keypair", local_keypair);
-			tls_connection.set_database (null);
+			var tls_stream = yield TlsPskClientStream.open (raw_stream, PSK_IDENTITY,
+				get_raw_private_key (local_keypair.handle), cancellable);
 
-			unowned SSL ssl = get_ssl_handle_from_connection (tls_connection);
-			ssl.set_cipher_list ("PSK-AES128-GCM-SHA256:PSK-AES256-GCM-SHA384:PSK-AES256-CBC-SHA384:PSK-AES128-CBC-SHA256");
-			ssl.set_psk_client_callback ((ssl, hint, identity, psk) => {
-				unowned TlsClientConnection conn = (TlsClientConnection) get_connection_from_ssl_handle (ssl);
-				unowned TunnelKey tk = conn.get_data ("tcp-tunnel-keypair");
-
-				Memory.copy (identity, PSK_IDENTITY.data, PSK_IDENTITY.data.length);
-
-				var key = get_raw_private_key (tk.handle).get_data ();
-				Memory.copy (psk, key, key.length);
-
-				return key.length;
-			});
-
-			try {
-				yield tls_connection.handshake_async (Priority.DEFAULT, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
-
-			var connection = new TcpTunnelConnection (tls_connection);
+			var connection = new TcpTunnelConnection (tls_stream);
 
 			try {
 				yield connection.init_async (Priority.DEFAULT, cancellable);
@@ -2339,34 +2313,6 @@ namespace Frida.Fruity {
 				.append_data (dst[:16])
 				.build ();
 		}
-
-#if HAVE_GIOOPENSSL
-		[CCode (cname = "g_tls_connection_openssl_get_ssl")]
-		private extern static unowned SSL get_ssl_handle_from_connection (void * connection);
-
-		[CCode (cname = "g_tls_connection_openssl_get_connection_from_ssl")]
-		private extern static void * get_connection_from_ssl_handle (SSL ssl);
-#else
-		[CCode (has_target = false)]
-		private delegate unowned SSL GetSslHandleFromConnectionFunc (void * connection);
-		[CCode (has_target = false)]
-		private delegate void * GetConnectionFromSslHandleFunc (SSL ssl);
-
-		private static unowned SSL get_ssl_handle_from_connection (void * connection) throws Error {
-			var func = (GetSslHandleFromConnectionFunc) (void *) Gum.Module.find_global_export_by_name (
-				"g_tls_connection_openssl_get_ssl");
-			if (func == null)
-				throw new Error.NOT_SUPPORTED ("GIO OpenSSL TLS backend not available");
-			return func (connection);
-		}
-
-		private static void * get_connection_from_ssl_handle (SSL ssl) {
-			var func = (GetConnectionFromSslHandleFunc) (void *) Gum.Module.find_global_export_by_name (
-				"g_tls_connection_openssl_get_connection_from_ssl");
-			assert (func != null);
-			return func (ssl);
-		}
-#endif
 	}
 
 	public sealed class QuicTunnelConnection : Object, TunnelConnection, AsyncInitable {
