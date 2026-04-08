@@ -134,13 +134,17 @@ pkg_kwargs = {
   'description': 'Instrumentation toolkit for developers, reverse-engineers, and security researchers',
   'requires': ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'json-glib-1.0'],
   'subdirs': f'frida-@api_version@',
-  'libraries': core_public_lib,
   'extra_cflags': ['-I${frida_includedir}'],
   'variables': installed_variables,
   'uninstalled_variables': uninstalled_variables,
 }
-if not is_shared
+if is_shared
   pkg_kwargs += {
+    'libraries': ['-L${libdir}', f'-lfrida-core-@api_version@'],
+  }
+else
+  pkg_kwargs += {
+    'libraries': core_public_lib,
     'requires_private': ['gmodule-2.0', 'gee-0.8', 'libsoup-3.0', 'frida-gum-1.0', 'frida-gumjs-inspector-1.0', 'libbrotlidec'] + backend_reqs_private,
     'libraries_private': backend_libs_private,
   }
