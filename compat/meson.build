@@ -45,7 +45,7 @@ if no_overridden_compat_bits
     host_abi,
     host_config,
     ','.join(get_option('compat')),
-    get_option('assets'),
+    assets_mode,
     ','.join(components),
     have_shared_glib ? 'upstream' : 'frida',
     '--',
@@ -65,18 +65,27 @@ if no_overridden_compat_bits
   depfile = lines[4]
   state = lines[5]
 
+  native_arch_suffix = '-' + host_abi
+
   if host_os_family == 'darwin'
     install = false
     install_dir = asset_dir
   else
     install = true
     install_dir = []
+    i = 0
     foreach varname : varnames
-      if varname != 'arch_support_bundle' and (get_option('assets') == 'installed' or varname.startswith('gadget_'))
+      output_name = outputs[i]
+      is_native_payload = output_name.contains(native_arch_suffix)
+      should_install = varname != 'arch_support_bundle' \
+          and not is_native_payload \
+          and (assets_mode == 'installed' or varname.startswith('gadget_'))
+      if should_install
         install_dir += varname.endswith('_modern') ? asset_dir_modern : asset_dir_legacy
       else
         install_dir += false
       endif
+      i += 1
     endforeach
   endif
 
@@ -97,6 +106,7 @@ if no_overridden_compat_bits
   foreach output : arch_support.to_list()
     outpath = output.full_path()
     varname = varnames[i]
+    output_name = outputs[i]
 
     set_variable(varname, outpath)
 
@@ -114,6 +124,17 @@ if no_overridden_compat_bits
       server_depends += arch_support
     elif varname != 'arch_support_bundle'
       assert(false, f'unexpected variable name: @varname@')
+    endif
+
+    if host_os_family != 'darwin' and output_name.contains(native_arch_suffix)
+      install_name = output_name.replace(native_arch_suffix, '')
+      if assets_mode == 'installed' or varname.startswith('gadget_')
+        meson.add_install_script(python, files('install-renamed.py'),
+          outpath,
+          asset_dir_modern,
+          install_name,
+        )
+      endif
     endif
 
     i += 1

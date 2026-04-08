@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import pickle
 import platform
-import re
 import shlex
 import shutil
 import subprocess
@@ -469,7 +468,7 @@ def compile(privdir: Path, state: State):
                 allowed = state.allowed_prebuilds
 
             if state.glib_flavor == "upstream":
-                effective_options = [o for o in options if not re.match(r"^-D[\w-]*:?default_library=", o)]
+                effective_options = [o for o in options if not is_stripped_compat_option(o)]
                 effective_options += ["-Ddefault_library=static"]
             else:
                 effective_options = options
@@ -516,6 +515,11 @@ def compile(privdir: Path, state: State):
             depfile_lines.append(f"{output_relpath}: {' '.join(input_entries)}")
 
     (state.builddir / DEPFILE_FILENAME).write_text("\n".join(depfile_lines), encoding="utf-8")
+
+
+def is_stripped_compat_option(o: str) -> bool:
+    name = o.split("=", 1)[0].removeprefix("-D")
+    return name in STRIPPED_COMPAT_OPTIONS or name.endswith(":default_library")
 
 
 def load_meson_options(top_builddir: Path,
@@ -701,6 +705,12 @@ def arch_suffixed_name(name: str, arch: str) -> str:
 
 STATE_FILENAME = "state.dat"
 DEPFILE_FILENAME = "compat.deps"
+
+STRIPPED_COMPAT_OPTIONS = {
+    "default_library",
+    "frida-gum:gumjs",
+    "frida-gum:inspector",
+}
 
 HELPER_TARGET = "frida-helper"
 HELPER_FILE_WINDOWS = Path("src") / "frida-helper.exe"
