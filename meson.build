@@ -397,6 +397,17 @@ if cc.has_function('soup_websocket_connection_pause_input', dependencies: [libso
   vala_flags += '--define=HAVE_SOUP_WEBSOCKET_BACKPRESSURE'
 endif
 brotlidec_dep = dependency('libbrotlidec')
+capstone_dep = dependency('capstone')
+if capstone_dep.type_name() != 'internal' \
+    and not cc.has_function('cs_arch_register_x86', dependencies: [capstone_dep])
+  add_project_arguments(
+    '-Dcs_arch_register_x86()=',
+    '-Dcs_arch_register_arm()=',
+    '-Dcs_arch_register_arm64()=',
+    '-Dcs_arch_register_mips()=',
+    language: ['c', 'objc'],
+  )
+endif
 quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
   'default_library=static',
   'libc=false',
@@ -651,45 +662,48 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  foreach dep : ['libnghttp2', 'libngtcp2']
-    backend_deps_private += dependency(dep)
-    backend_reqs_private += dep
-  endforeach
+  backend_deps_private += dependency('libnghttp2')
+  backend_reqs_private += 'libnghttp2'
 
-  if have_frida_glib
-    libusb_dep = dependency('libusb-1.0')
-  else
-    subproject('libusb', default_options: ['default_library=static'])
-    libusb_dep = dependency('libusb-1.0')
-  endif
-  backend_deps_private += libusb_dep
-  backend_reqs_private += 'libusb-1.0'
+  if host_os != 'macos'
+    backend_deps_private += dependency('libngtcp2')
+    backend_reqs_private += 'libngtcp2'
 
-  ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false)
-  if ngtcp2_crypto_quictls_dep.found()
-    backend_deps_private += ngtcp2_crypto_quictls_dep
-    backend_reqs_private += 'libngtcp2_crypto_quictls'
-  else
-    backend_deps_private += dependency('libngtcp2_crypto_ossl')
-    backend_reqs_private += 'libngtcp2_crypto_ossl'
-    vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
-  endif
+    ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false)
+    if ngtcp2_crypto_quictls_dep.found()
+      backend_deps_private += ngtcp2_crypto_quictls_dep
+      backend_reqs_private += 'libngtcp2_crypto_quictls'
+    else
+      backend_deps_private += dependency('libngtcp2_crypto_ossl')
+      backend_reqs_private += 'libngtcp2_crypto_ossl'
+      vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
+    endif
 
-  lwip_options = [
-    'default_library=static',
-    'ipv4=disabled',
-    'ipv6=enabled',
-    'dns=disabled',
-    'arp=disabled',
-    'ethernet=enabled',
-  ]
-  if optimize_for_prod
-    lwip_options += 'lwip_debug=disabled'
-  else
-    lwip_options += 'lwip_debug=enabled'
+    if have_frida_glib
+      libusb_dep = dependency('libusb-1.0')
+    else
+      subproject('libusb', default_options: ['default_library=static'])
+      libusb_dep = dependency('libusb-1.0')
+    endif
+    backend_deps_private += libusb_dep
+    backend_reqs_private += 'libusb-1.0'
+
+    lwip_options = [
+      'default_library=static',
+      'ipv4=disabled',
+      'ipv6=enabled',
+      'dns=disabled',
+      'arp=disabled',
+      'ethernet=enabled',
+    ]
+    if optimize_for_prod
+      lwip_options += 'lwip_debug=disabled'
+    else
+      lwip_options += 'lwip_debug=enabled'
+    endif
+    backend_deps_private += dependency('lwip', default_options: lwip_options)
+    backend_reqs_private += 'lwip'
   endif
-  backend_deps_private += dependency('lwip', default_options: lwip_options)
-  backend_reqs_private += 'lwip'
 endif
 
 if quickjs_dep.found()
@@ -776,7 +790,7 @@ if host_os_family == 'windows'
   backend_libs_private += ['-lsetupapi']
 endif
 if host_os_family == 'darwin'
-  backend_libs_private += ['-Wl,-framework,Foundation', '-lbsm']
+  backend_libs_private += ['-Wl,-framework,Foundation', '-Wl,-framework,CoreFoundation', '-lbsm']
 endif
 if host_os == 'macos'
   backend_libs_private += ['-Wl,-framework,AppKit']
@@ -894,6 +908,15 @@ vala_flags += [
   '--vapidir=' + local_vapidir,
   '--pkg', 'config',
 ]
+if gee_dep.type_name() not in ['internal', 'cmake']
+  gee_prefix = gee_dep.get_variable('prefix', default_value: '')
+  if gee_prefix != ''
+    gee_vapidir = gee_prefix / 'share' / 'vala' / 'vapi'
+    if fs.is_dir(gee_vapidir)
+      vala_flags += '--vapidir=' + gee_vapidir
+    endif
+  endif
+endif
 
 vala_flags += '--define=' + host_os_family.to_upper()
 if host_os != host_os_family
@@ -910,6 +933,15 @@ add_project_arguments('-I' + local_vapidir, language: 'c')
 native_vala_flags = [
   '--vapidir=' + local_vapidir,
 ]
+if native_gee_dep.type_name() not in ['internal', 'cmake']
+  native_gee_prefix = native_gee_dep.get_variable('prefix', default_value: '')
+  if native_gee_prefix != ''
+    native_gee_vapidir = native_gee_prefix / 'share' / 'vala' / 'vapi'
+    if fs.is_dir(native_gee_vapidir)
+      native_vala_flags += '--vapidir=' + native_gee_vapidir
+    endif
+  endif
+endif
 add_project_arguments(native_vala_flags, language: 'vala', native: true)
 add_project_arguments('-I' + local_vapidir, language: 'c', native: true)
 

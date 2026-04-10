@@ -70,12 +70,17 @@ if host_os == 'macos'
   extra_link_depends += [runner_plist]
 endif
 
+runner_deps = [core_dep]
+if host_os_family == 'darwin'
+  runner_deps += dependency('appleframeworks', modules: ['Foundation'])
+endif
+
 raw_runner = executable('frida-tests-raw', 'main.vala',
   vala_args: [core_vala_args, system_vala_args],
   link_args: executable_no_exports_link_args + extra_link_args,
   link_depends: executable_no_exports_link_depends + extra_link_depends,
   link_with: frida_tests,
-  dependencies: [core_dep],
+  dependencies: runner_deps,
 )
 
 runner = custom_target('frida-tests',

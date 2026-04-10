@@ -64,6 +64,12 @@ $ sudo apt install libgee-0.8-dev libjson-glib-dev \
       libnice-dev libngtcp2-crypto-ossl-dev
 ```
 
+Prerequisites on macOS:
+
+```console
+$ brew install libgee json-glib libsoup libnice capstone
+```
+
 ## Internals
 
 For a higher level view of the internals, check out the [architecture diagram][]

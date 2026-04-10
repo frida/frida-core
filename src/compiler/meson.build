@@ -29,6 +29,7 @@ if have_compiler_backend
       'backend.go',
       'protocol_types.go',
       'backend.version',
+      'backend.symbols',
       'tscompiler.go',
       'tsconfig.go',
       'shims.go',

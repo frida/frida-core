@@ -202,7 +202,7 @@ namespace OpenSSL {
 		[Compact]
 		[CCode (cname = "EVP_PKEY", cprefix = "EVP_PKEY_", copy_function = "EVP_PKEY_dup")]
 		public class Key {
-			[CCode (cname = "d2i_PUBKEY_bio")]
+			[CCode (cheader_filename = "openssl/x509.h", cname = "d2i_PUBKEY_bio")]
 			public Key.from_der (BasicIO source, Key ** a = null);
 			[CCode (cname = "EVP_PKEY_new_raw_public_key")]
 			public Key.from_raw_public_key (KeyType type, Engine? engine, uint8[] pub);
@@ -212,7 +212,7 @@ namespace OpenSSL {
 			public int get_raw_public_key ([CCode (array_length = false)] uint8[]? pub, ref size_t len);
 			public int get_raw_private_key ([CCode (array_length = false)] uint8[]? priv, ref size_t len);
 
-			[CCode (cname = "i2d_PUBKEY_bio", instance_pos = 2)]
+			[CCode (cheader_filename = "openssl/x509.h", cname = "i2d_PUBKEY_bio", instance_pos = 2)]
 			public int to_der (BasicIO sink);
 
 			[CCode (cname = "PEM_write_bio_PUBKEY", instance_pos = 2)]

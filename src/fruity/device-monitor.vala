@@ -53,9 +53,11 @@ namespace Frida.Fruity {
 
 			on_complete = null;
 
+#if !MACOS
 			var b = (PortableCoreDeviceBackend) backends.first_match (b => b is PortableCoreDeviceBackend);
 			if (b != null && b.supports_modeswitch)
 				yield b.activate_modeswitch_support (cancellable);
+#endif
 
 			state = STARTED;
 
@@ -736,7 +738,9 @@ namespace Frida.Fruity {
 		internal string _name;
 		internal Variant? _icon;
 
+#if !MACOS
 		private Promise<Tunnel?>? tunnel_request;
+#endif
 
 		private Gee.Queue<UsbmuxLockdownServiceRequest> lockdown_service_requests =
 			new Gee.ArrayQueue<UsbmuxLockdownServiceRequest> ();
@@ -747,6 +751,7 @@ namespace Frida.Fruity {
 		}
 
 		public async Tunnel? find_tunnel (UsbmuxDevice? device, Cancellable? cancellable) throws Error, IOError {
+#if !MACOS
 			while (tunnel_request != null) {
 				try {
 					return yield tunnel_request.future.wait_async (cancellable);
@@ -790,12 +795,17 @@ namespace Frida.Fruity {
 
 				throw_api_error (e);
 			}
+#else
+			return null;
+#endif
 		}
 
+#if !MACOS
 		private void on_tunnel_lost () {
 			if (tunnel_request.future.ready)
 				tunnel_request = null;
 		}
+#endif
 
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
 			if (service_name == "") {
@@ -860,6 +870,7 @@ namespace Frida.Fruity {
 		}
 	}
 
+#if !MACOS
 	private sealed class UsbmuxTunnel : Object, Tunnel {
 		public signal void lost ();
 
@@ -942,7 +953,9 @@ namespace Frida.Fruity {
 			lost ();
 		}
 	}
+#endif
 
+#if !MACOS
 	private sealed class PortableCoreDeviceBackend : Object, Backend, UsbDeviceBackend {
 		public PairingStore pairing_store {
 			get;
@@ -2253,6 +2266,7 @@ namespace Frida.Fruity {
 			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
 	}
+#endif
 
 	public interface FruitFinder : Object {
 		public static FruitFinder make_default () {

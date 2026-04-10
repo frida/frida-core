@@ -74,8 +74,12 @@ def build_backend(
     extra_go_args = config["extra_go_args"].copy()
 
     if mode == "c-shared":
-        version_script = priv_dir / "backend.version"
-        extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,--version-script={version_script}")
+        if config["os_family"] == "darwin":
+            symbols_list = priv_dir / "backend.symbols"
+            extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,-exported_symbols_list,{symbols_list}")
+        else:
+            version_script = priv_dir / "backend.version"
+            extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,--version-script={version_script}")
 
     run(
         go,

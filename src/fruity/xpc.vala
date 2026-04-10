@@ -224,6 +224,7 @@ namespace Frida.Fruity {
 			transport.cancel ();
 		}
 
+#if !MACOS
 		public async TunnelConnection open_tunnel (InetAddress device_address, NetworkStack netstack,
 				Cancellable? cancellable = null) throws Error, IOError {
 			string? protocol = Environment.get_variable ("FRIDA_FRUITY_TUNNEL_PROTOCOL");
@@ -309,6 +310,7 @@ namespace Frida.Fruity {
 					cancellable);
 			}
 		}
+#endif
 
 		private async void attempt_pair_verify (Cancellable? cancellable) throws Error, IOError {
 			Bytes payload = transport.make_object_builder ()
@@ -2012,6 +2014,7 @@ namespace Frida.Fruity {
 		}
 	}
 
+#if !MACOS
 	public sealed class TcpTunnelConnection : Object, TunnelConnection, AsyncInitable {
 		public IOStream stream {
 			get;
@@ -2968,6 +2971,7 @@ namespace Frida.Fruity {
 			this.handle = (owned) handle;
 		}
 	}
+#endif
 
 	public sealed class AppService : TrustedService {
 		public static async AppService open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {

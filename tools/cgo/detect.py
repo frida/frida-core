@@ -172,7 +172,10 @@ def detect_config(
     env["GOOS"] = goos
     env["GOARCH"] = goarch
 
-    if libc == "musl":
+    apple_non_macos = goos == "darwin" and host_os != "macos"
+    if apple_non_macos:
+        mode = "c-archive"
+    elif libc == "musl":
         mode = "pie"
     elif host_os == "android" or assets_mode == "installed":
         mode = "c-shared"
@@ -190,6 +193,7 @@ def detect_config(
     config = {
         "mode": mode,
         "os": host_os,
+        "os_family": goos,
         "abi": host_abi,
         "exe_suffix": exe_suffix,
         "shlib_suffix": shlib_suffix,

@@ -584,9 +584,13 @@ if have_fruity_backend
     'fruity' / 'cs-signature.vala',
     'fruity' / 'tls-psk.vala',
     'fruity' / 'network-stack.vala',
-    'fruity' / 'usb.vala',
-    'fruity' / 'ncm.vala',
   ]
+  if host_os != 'macos'
+    backend_sources += [
+      'fruity' / 'usb.vala',
+      'fruity' / 'ncm.vala',
+    ]
+  endif
 
   if host_os_family == 'windows'
     backend_sources += 'fruity' / 'device-monitor-windows.vala'
@@ -607,12 +611,16 @@ if have_fruity_backend
   backend_deps += openssl_dep
   backend_vala_args += [
     '--pkg=libnghttp2',
-    '--pkg=libngtcp2',
-    ngtcp2_crypto_quictls_dep.found() ? '--pkg=libngtcp2_crypto_quictls' : '--pkg=libngtcp2_crypto_ossl',
-    '--pkg=libusb-1.0',
-    '--pkg=lwip',
     '--pkg=openssl',
   ]
+  if host_os != 'macos'
+    backend_vala_args += [
+      '--pkg=libngtcp2',
+      ngtcp2_crypto_quictls_dep.found() ? '--pkg=libngtcp2_crypto_quictls' : '--pkg=libngtcp2_crypto_ossl',
+      '--pkg=libusb-1.0',
+      '--pkg=lwip',
+    ]
+  endif
   if host_os_family == 'windows'
     backend_vala_args += '--pkg=windows-windns'
   elif host_os_family == 'darwin'

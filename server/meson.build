@@ -29,11 +29,16 @@ if host_os == 'macos'
   extra_link_depends += [server_plist]
 endif
 
+server_deps = [core_dep]
+if host_os_family == 'darwin'
+  server_deps += dependency('appleframeworks', modules: ['CoreFoundation'])
+endif
+
 raw_server = executable('frida-server-raw', server_sources,
   vala_args: [core_vala_args, '--pkg=posix'],
   link_args: extra_link_args,
   link_depends: extra_link_depends,
-  dependencies: [core_dep],
+  dependencies: server_deps,
 )
 
 server_name = 'frida-server' + exe_suffix

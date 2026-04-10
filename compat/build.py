@@ -468,10 +468,10 @@ def compile(privdir: Path, state: State):
                 allowed = state.allowed_prebuilds
 
             if state.glib_flavor == "upstream":
-                effective_options = [o for o in options if not is_stripped_compat_option(o)]
-                effective_options += ["-Ddefault_library=static"]
+                forwarded_options = [o for o in options if not is_stripped_compat_option(o)]
+                forwarded_options += ["-Ddefault_library=static"]
             else:
-                effective_options = options
+                forwarded_options = [o for o in options if not is_overridden_compat_option(o)]
 
             configure(sourcedir=REPO_ROOT,
                       builddir=workdir,
@@ -480,13 +480,14 @@ def compile(privdir: Path, state: State):
                       allowed_prebuilds=allowed,
                       extra_meson_options=[
                           "-Dcompiler_backend=disabled",
+                          "-Dassets=installed",
                           "-Dhelper_modern=",
                           "-Dhelper_legacy=",
                           "-Dagent_modern=",
                           "-Dagent_legacy=",
                           "-Dagent_emulated_modern=",
                           "-Dagent_emulated_legacy=",
-                          *effective_options,
+                          *forwarded_options,
                       ],
                       call_meson=call_internal_meson,
                       on_progress=lambda progress: None)
@@ -518,8 +519,15 @@ def compile(privdir: Path, state: State):
 
 
 def is_stripped_compat_option(o: str) -> bool:
+    if is_overridden_compat_option(o):
+        return True
     name = o.split("=", 1)[0].removeprefix("-D")
     return name in STRIPPED_COMPAT_OPTIONS or name.endswith(":default_library")
+
+
+def is_overridden_compat_option(o: str) -> bool:
+    name = o.split("=", 1)[0].removeprefix("-D")
+    return name in OVERRIDDEN_COMPAT_OPTIONS
 
 
 def load_meson_options(top_builddir: Path,
@@ -710,6 +718,17 @@ STRIPPED_COMPAT_OPTIONS = {
     "default_library",
     "frida-gum:gumjs",
     "frida-gum:inspector",
+}
+
+OVERRIDDEN_COMPAT_OPTIONS = {
+    "compiler_backend",
+    "assets",
+    "helper_modern",
+    "helper_legacy",
+    "agent_modern",
+    "agent_legacy",
+    "agent_emulated_modern",
+    "agent_emulated_legacy",
 }
 
 HELPER_TARGET = "frida-helper"
