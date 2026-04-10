@@ -967,17 +967,17 @@ namespace Frida.Fruity {
 			return get_monotonic_time () * NGTcp2.MICROSECONDS;
 		}
 
-		private static X509 make_certificate (Key keypair) {
-			var cert = new X509 ();
+		private static OpenSSL.X509 make_certificate (OpenSSL.Envelope.Key keypair) {
+			var cert = new OpenSSL.X509 ();
 			cert.get_serial_number ().set_uint64 (1);
 			cert.get_not_before ().adjust (0);
 			cert.get_not_after ().adjust (5260000);
 
-			unowned X509.Name name = cert.get_subject_name ();
+			unowned OpenSSL.X509.Name name = cert.get_subject_name ();
 			cert.set_issuer_name (name);
 			cert.set_pubkey (keypair);
 
-			var mc = new MessageDigestContext ();
+			var mc = new OpenSSL.Envelope.MessageDigestContext ();
 			mc.digest_sign_init (null, null, null, keypair);
 			cert.sign_ctx (mc);
 
@@ -1025,9 +1025,9 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class TunnelKey {
-		public Key handle;
+		public OpenSSL.Envelope.Key handle;
 
-		public TunnelKey (owned Key handle) {
+		public TunnelKey (owned OpenSSL.Envelope.Key handle) {
 			this.handle = (owned) handle;
 		}
 	}

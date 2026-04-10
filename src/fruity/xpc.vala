@@ -1,8 +1,5 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
-	using OpenSSL;
-	using OpenSSL.Envelope;
-
 	public sealed class DiscoveryService : Object, AsyncInitable {
 		public IOStream stream {
 			get;
@@ -1492,17 +1489,17 @@ namespace Frida.Fruity {
 		public const uint32 VERSION = 5;
 	}
 
-	private Key make_keypair (KeyType type) {
-		var ctx = new KeyContext.for_key_type (type);
+	private OpenSSL.Envelope.Key make_keypair (OpenSSL.Envelope.KeyType type) {
+		var ctx = new OpenSSL.Envelope.KeyContext.for_key_type (type);
 		ctx.keygen_init ();
 
-		Key? keypair = null;
+		OpenSSL.Envelope.Key? keypair = null;
 		ctx.keygen (ref keypair);
 
 		return keypair;
 	}
 
-	private Bytes get_raw_public_key (Key key) {
+	private Bytes get_raw_public_key (OpenSSL.Envelope.Key key) {
 		size_t size = 0;
 		key.get_raw_public_key (null, ref size);
 
@@ -1512,7 +1509,7 @@ namespace Frida.Fruity {
 		return new Bytes.take ((owned) result);
 	}
 
-	private Bytes get_raw_private_key (Key key) {
+	private Bytes get_raw_private_key (OpenSSL.Envelope.Key key) {
 		size_t size = 0;
 		key.get_raw_private_key (null, ref size);
 

@@ -1,5 +1,8 @@
 [CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
+	using OpenSSL;
+	using OpenSSL.Envelope;
+
 	public sealed class PairingService : Object, AsyncInitable {
 		public const string DNS_SD_NAME = "_remotepairing._tcp.local";
 
