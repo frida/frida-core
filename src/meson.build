@@ -583,10 +583,13 @@ if have_fruity_backend
     'fruity' / 'kperfdata.vala',
     'fruity' / 'cs-signature.vala',
     'fruity' / 'tls-psk.vala',
-    'fruity' / 'network-stack.vala',
   ]
   if host_os != 'macos'
     backend_sources += [
+      'fruity' / 'device-monitor-portable.vala',
+      'fruity' / 'pairing.vala',
+      'fruity' / 'tunnel.vala',
+      'fruity' / 'network-stack.vala',
       'fruity' / 'usb.vala',
       'fruity' / 'ncm.vala',
     ]

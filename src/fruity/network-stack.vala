@@ -148,7 +148,6 @@ namespace Frida.Fruity {
 		}
 	}
 
-#if !MACOS
 	public sealed class VirtualNetworkStack : Object, NetworkStack {
 		public signal void outgoing_datagrams (Gee.Collection<Bytes> datagrams);
 
@@ -1083,5 +1082,4 @@ namespace Frida.Fruity {
 			return new InetAddress.from_string (address.to_string (buf));
 		}
 	}
-#endif
 }
