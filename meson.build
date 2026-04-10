@@ -395,7 +395,8 @@ libsoup_dep = dependency('libsoup-3.0', default_options: [
   'tests=false',
   'sysprof=disabled',
 ])
-if cc.has_function('soup_websocket_connection_pause_input', dependencies: [libsoup_dep])
+if libsoup_dep.type_name() == 'internal' \
+    or cc.has_function('soup_websocket_connection_pause_input', dependencies: [libsoup_dep])
   vala_flags += '--define=HAVE_SOUP_WEBSOCKET_BACKPRESSURE'
 endif
 brotlidec_dep = dependency('libbrotlidec', default_options: ['default_library=static'])
