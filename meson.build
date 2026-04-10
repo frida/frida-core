@@ -326,12 +326,13 @@ gum_dep = dependency('frida-gum-1.0', default_options: [
   'inspector=enabled',
 ])
 if have_in_tree_payloads
-  gumjs_dep = dependency('frida-gumjs-1.0')
+  gumjs_dep = dependency('frida-gumjs-1.0', default_options: ['default_library=static'])
 endif
-gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0')
+gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0', default_options: ['default_library=static'])
 
 glib_version_req = '>=2.74'
 glib_options = [
+  'default_library=static',
   'cocoa=disabled',
   'selinux=disabled',
   'xattr=false',
@@ -348,6 +349,7 @@ if optimize_for_prod
 endif
 
 gee_options = [
+  'default_library=static',
   'disable-introspection=true',
 ]
 if optimize_for_prod
@@ -396,8 +398,8 @@ libsoup_dep = dependency('libsoup-3.0', default_options: [
 if cc.has_function('soup_websocket_connection_pause_input', dependencies: [libsoup_dep])
   vala_flags += '--define=HAVE_SOUP_WEBSOCKET_BACKPRESSURE'
 endif
-brotlidec_dep = dependency('libbrotlidec')
-capstone_dep = dependency('capstone')
+brotlidec_dep = dependency('libbrotlidec', default_options: ['default_library=static'])
+capstone_dep = dependency('capstone', default_options: ['default_library=static'])
 if capstone_dep.type_name() != 'internal' \
     and not cc.has_function('cs_arch_register_x86', dependencies: [capstone_dep])
   add_project_arguments(
@@ -415,12 +417,12 @@ quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), de
   'atomics=disabled',
   'stack_check=disabled',
 ])
-lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'))
+lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'), default_options: ['default_library=static'])
 
 native_glib_dep = dependency('glib-2.0', version: glib_version_req, native: true, default_options: glib_options)
 native_gio_dep = dependency('gio-2.0', native: true)
 native_gee_dep = dependency('gee-0.8', native: true, default_options: gee_options)
-native_brotlienc_dep = dependency('libbrotlienc', native: true)
+native_brotlienc_dep = dependency('libbrotlienc', native: true, default_options: ['default_library=static'])
 
 if host_os_family == 'windows'
   gio_windows_dep = dependency('gio-windows-2.0')
@@ -430,10 +432,10 @@ endif
 
 if host_os_family == 'linux'
   if have_frida_glib
-    libbpf_dep = dependency('libbpf')
+    libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
   else
     subproject('libbpf', default_options: ['default_library=static'])
-    libbpf_dep = dependency('libbpf')
+    libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
   endif
 endif
 
@@ -650,6 +652,7 @@ backend_reqs_private = []
 backend_libs_private = []
 
 openssl_options = [
+  'default_library=static',
   'cli=disabled',
 ]
 if host_os_family == 'windows' and cc.get_argument_syntax() != 'msvc'
@@ -666,24 +669,24 @@ if have_fruity_backend
   backend_reqs_private += 'libnghttp2'
 
   if host_os != 'macos'
-    backend_deps_private += dependency('libngtcp2')
+    backend_deps_private += dependency('libngtcp2', default_options: ['default_library=static'])
     backend_reqs_private += 'libngtcp2'
 
-    ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false)
+    ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false, default_options: ['default_library=static'])
     if ngtcp2_crypto_quictls_dep.found()
       backend_deps_private += ngtcp2_crypto_quictls_dep
       backend_reqs_private += 'libngtcp2_crypto_quictls'
     else
-      backend_deps_private += dependency('libngtcp2_crypto_ossl')
+      backend_deps_private += dependency('libngtcp2_crypto_ossl', default_options: ['default_library=static'])
       backend_reqs_private += 'libngtcp2_crypto_ossl'
       vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
     endif
 
     if have_frida_glib
-      libusb_dep = dependency('libusb-1.0')
+      libusb_dep = dependency('libusb-1.0', default_options: ['default_library=static'])
     else
       subproject('libusb', default_options: ['default_library=static'])
-      libusb_dep = dependency('libusb-1.0')
+      libusb_dep = dependency('libusb-1.0', default_options: ['default_library=static'])
     endif
     backend_deps_private += libusb_dep
     backend_reqs_private += 'libusb-1.0'
@@ -727,8 +730,8 @@ endif
 
 if host_os == 'android'
   termux_elf_cleaner = find_program('termux-elf-cleaner', native: true)
-  libselinux_dep = dependency('libselinux', version: '>=3.0')
-  libsepol_dep = dependency('libsepol', version: '>=3.0')
+  libselinux_dep = dependency('libselinux', version: '>=3.0', default_options: ['default_library=static'])
+  libsepol_dep = dependency('libsepol', version: '>=3.0', default_options: ['default_library=static'])
   backend_deps_private += [libselinux_dep, libsepol_dep]
   backend_reqs_private += ['libselinux', 'libsepol']
 else
@@ -759,6 +762,7 @@ else
 endif
 
 nice_dep = dependency('nice', required: get_option('connectivity'), default_options: [
+  'default_library=static',
   'gupnp=disabled',
   'gstreamer=disabled',
   'crypto-library=openssl',
