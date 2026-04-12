@@ -3621,6 +3621,37 @@ namespace Frida {
 		}
 	}
 
+#if !HAVE_EMBEDDED_ASSETS
+	[CCode (cname = "FRIDA_HELPER_PATH")]
+	private string _helper_path;
+	[CCode (cname = "FRIDA_AGENT_PATH")]
+	private string _agent_path;
+#if HAVE_COMPILER_BACKEND
+	[CCode (cname = "FRIDA_COMPILER_BACKEND_PATH")]
+	private string _compiler_backend_path;
+#endif
+
+	public void init_asset_paths () {
+		var location = AssetLocation.detect ();
+		if (location == null)
+			return;
+
+		_helper_path = location.derive_asset_path (FRIDA_LIBDIR_NAME, "<arch>", FRIDA_HELPER_NAME);
+		_agent_path = location.derive_asset_path (FRIDA_LIBDIR_NAME, "<arch>", FRIDA_AGENT_NAME);
+#if HAVE_COMPILER_BACKEND
+		_compiler_backend_path = location.derive_plugin_path (FRIDA_LIBDIR_NAME, FRIDA_COMPILER_BACKEND_NAME);
+#endif
+	}
+
+	public void deinit_asset_paths () {
+		_helper_path = null;
+		_agent_path = null;
+#if HAVE_COMPILER_BACKEND
+		_compiler_backend_path = null;
+#endif
+	}
+#endif
+
 #if HAVE_FRIDA_GLIB
 	private Mutex gc_mutex;
 	private uint gc_generation = 0;

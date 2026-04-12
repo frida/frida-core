@@ -254,8 +254,19 @@ endif
 if assets_mode == 'embedded'
   vala_flags += '--define=HAVE_EMBEDDED_ASSETS'
 else
-  cdata.set_quoted('FRIDA_HELPER_PATH', asset_path_template / helper_name)
-  cdata.set_quoted('FRIDA_AGENT_PATH', asset_path_template / agent_name)
+  if is_shared
+    cdata.set_quoted('FRIDA_LIBDIR_NAME', frida_libdir_name)
+    cdata.set_quoted('FRIDA_HELPER_NAME', helper_name)
+    cdata.set_quoted('FRIDA_AGENT_NAME', agent_name)
+    if host_os_family == 'windows'
+      cdata.set_quoted('FRIDA_RELDIR_TO_LIBDIR', 'lib')
+    else
+      cdata.set_quoted('FRIDA_RELDIR_TO_LIBDIR', get_option('libdir'))
+    endif
+  else
+    cdata.set_quoted('FRIDA_HELPER_PATH', asset_path_template / helper_name)
+    cdata.set_quoted('FRIDA_AGENT_PATH', asset_path_template / agent_name)
+  endif
 endif
 
 cdata.set('HAVE_' + host_os_family.to_upper(), 1)
@@ -548,16 +559,24 @@ if compiler_backend_opt.allowed()
       elif compiler_backend_mode == 'c-shared'
         if assets_mode == 'installed'
           vala_flags += '--define=COMPILER_BACKEND_INSTALLED_LIBRARY'
-          cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
-            get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + shlib_suffix))
+          if is_shared
+            cdata.set_quoted('FRIDA_COMPILER_BACKEND_NAME', 'frida-compiler-backend' + shlib_suffix)
+          else
+            cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
+              get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + shlib_suffix))
+          endif
         else
           vala_flags += '--define=COMPILER_BACKEND_EMBEDDED_LIBRARY'
         endif
       elif compiler_backend_mode == 'pie'
         if assets_mode == 'installed'
           vala_flags += '--define=COMPILER_BACKEND_INSTALLED_EXECUTABLE'
-          cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
-            get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + exe_suffix))
+          if is_shared
+            cdata.set_quoted('FRIDA_COMPILER_BACKEND_NAME', 'frida-compiler-backend' + exe_suffix)
+          else
+            cdata.set_quoted('FRIDA_COMPILER_BACKEND_PATH',
+              get_option('prefix') / get_option('libdir') / frida_libdir_name / 'plugins' / ('frida-compiler-backend' + exe_suffix))
+          endif
         else
           vala_flags += '--define=COMPILER_BACKEND_EMBEDDED_EXECUTABLE'
         endif

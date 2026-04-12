@@ -1,4 +1,5 @@
 base_sources = [
+  'asset-location.vala',
   'session.vala',
   'session-glue.c',
   'channel.vala',

@@ -14,6 +14,11 @@ static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
 
+#ifndef HAVE_EMBEDDED_ASSETS
+extern void frida_init_asset_paths (void);
+extern void frida_deinit_asset_paths (void);
+#endif
+
 void
 frida_init (void)
 {
@@ -38,6 +43,9 @@ frida_init_with_runtime (FridaRuntime rt)
     gio_init ();
 #endif
     gum_init ();
+#ifndef HAVE_EMBEDDED_ASSETS
+    frida_init_asset_paths ();
+#endif
     frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
 #ifdef HAVE_GIOOPENSSL
@@ -119,6 +127,9 @@ frida_deinit (void)
 #endif
 
   gum_deinit ();
+#ifndef HAVE_EMBEDDED_ASSETS
+  frida_deinit_asset_paths ();
+#endif
 #ifdef HAVE_FRIDA_GLIB
   gio_deinit ();
   glib_deinit ();

@@ -11,8 +11,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - { arch: x86_64, runner: windows-latest, msvc-arch: amd64, gvsbuild-arch: x64 }
-          - { arch: arm64, runner: windows-11-arm, msvc-arch: arm64, gvsbuild-arch: arm64 }
+          #- { arch: x86_64, runner: windows-latest, msvc-arch: amd64, vcpkg-triplet: x64-windows-release }
+          - { arch: arm64, runner: windows-11-arm, msvc-arch: arm64, vcpkg-triplet: arm64-windows-release }
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -31,32 +31,38 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install meson ninja gvsbuild
+        run: pip install meson ninja setuptools
 
-      - name: Restore GTK cache
-        id: gtk-cache
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
         uses: actions/cache/restore@v4
         with:
-          path: C:\gtk-build
-          key: gvsbuild-${{ matrix.arch }}-v3
+          path: C:\vcpkg\installed
+          key: vcpkg-${{ matrix.vcpkg-triplet }}-v5
 
-      - name: Build GTK dependencies
-        if: steps.gtk-cache.outputs.cache-hit != 'true'
-        run: gvsbuild build --ninja-opts -j2 gtk4 gobject-introspection json-glib libsoup3
+      - name: Install dependencies via vcpkg
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        run: >-
+          vcpkg install
+          --overlay-triplets=${{ github.workspace }}/.github/vcpkg-triplets
+          --triplet ${{ matrix.vcpkg-triplet }}
+          glib json-glib libsoup gobject-introspection
 
-      - name: Save GTK cache
-        if: steps.gtk-cache.outputs.cache-hit != 'true'
+      - name: Save vcpkg cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: C:\gtk-build
-          key: gvsbuild-${{ matrix.arch }}-v3
+          path: C:\vcpkg\installed
+          key: vcpkg-${{ matrix.vcpkg-triplet }}-v5
 
-      - name: Set up GTK environment
+      - name: Set up vcpkg environment
         shell: bash
         run: |
-          echo "C:\\gtk-build\\gtk\\${{ matrix.gvsbuild-arch }}\\release\\bin" >> $GITHUB_PATH
-          GTK_PKG="C:/gtk-build/gtk/${{ matrix.gvsbuild-arch }}/release/lib/pkgconfig"
-          echo "PKG_CONFIG_PATH=$GTK_PKG" >> $GITHUB_ENV
+          TRIPLET="${{ matrix.vcpkg-triplet }}"
+          VCPKG_PREFIX="C:/vcpkg/installed/$TRIPLET"
+          echo "$VCPKG_PREFIX/bin" >> $GITHUB_PATH
+          echo "$VCPKG_PREFIX/tools" >> $GITHUB_PATH
+          echo "PKG_CONFIG_PATH=$VCPKG_PREFIX/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Configure
         run: |
