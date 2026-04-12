@@ -52,6 +52,16 @@ jobs:
           GTK_PKG="C:/gtk-build/gtk/x64/release/lib/pkgconfig"
           echo "PKG_CONFIG_PATH=$GTK_PKG" >> $GITHUB_ENV
 
+      - name: Debug deps
+        shell: bash
+        run: |
+          echo "=== nghttp2 check ==="
+          pkg-config --modversion libnghttp2 2>&1 || echo "NOT FOUND"
+          pkg-config --cflags libnghttp2 2>&1 || echo "NO CFLAGS"
+          echo ""
+          echo "=== Checking Python pkgconfig dir ==="
+          ls "C:/hostedtoolcache/windows/Python/3.12.10/x64/lib/pkgconfig/" 2>/dev/null | head -20 || echo "none"
+
       - name: Configure
         run: |
           python -c "import sys; sys.path.insert(0, '.'); from releng.meson_configure import main; main()" `
@@ -59,7 +69,7 @@ jobs:
               --enable-shared `
               --without-prebuilds=sdk `
               "--prefix=$env:RUNNER_TEMP\frida-prefix" `
-              -- --force-fallback-for=openssl -Dcompiler_backend=disabled
+              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled
 
       - name: Compile
         run: python releng/meson/meson.py compile -C build

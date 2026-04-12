@@ -666,7 +666,7 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  backend_deps_private += dependency('libnghttp2')
+  backend_deps_private += dependency('libnghttp2', default_options: ['default_library=static'])
   backend_reqs_private += 'libnghttp2'
 
   if host_os != 'macos'
