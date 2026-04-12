@@ -46,6 +46,7 @@ namespace Frida {
 			injector = new Winjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
 
+#if HAVE_EMBEDDED_ASSETS
 			agent = new AgentDescriptor (PathTemplate ("<arch>\\frida-agent.dll"),
 				new Bytes.static (Frida.Data.Agent.get_frida_agent_arm64_dll_blob ().data),
 				new Bytes.static (Frida.Data.Agent.get_frida_agent_x86_64_dll_blob ().data),
@@ -66,6 +67,7 @@ namespace Frida {
 				},
 				tempdir
 			);
+#endif
 		}
 
 		public override async void close (Cancellable? cancellable) throws IOError {
