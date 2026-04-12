@@ -721,7 +721,12 @@ if is_shared
     check: true,
   )
   if host_os_family == 'windows'
-    if host_toolchain != 'microsoft'
+    if host_toolchain == 'microsoft'
+      foreach sym : ['frida_init', 'frida_init_with_runtime', 'frida_shutdown', 'frida_deinit',
+                     'frida_get_main_context', 'frida_unref', 'frida_version', 'frida_version_string']
+        core_extra_link_args += '/EXPORT:' + sym
+      endforeach
+    else
       core_extra_link_args += '-Wl,--retain-symbols-file,' + symbol_map_outdir / 'frida-core.symbols'
     endif
   elif host_os_family != 'darwin'

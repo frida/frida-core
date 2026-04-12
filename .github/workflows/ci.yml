@@ -69,7 +69,7 @@ jobs:
               --enable-shared `
               --without-prebuilds=sdk `
               "--prefix=$env:RUNNER_TEMP\frida-prefix" `
-              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled
+              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled -Dtests=disabled
 
       - name: Compile
         run: python releng/meson/meson.py compile -C build

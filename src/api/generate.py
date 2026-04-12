@@ -313,6 +313,7 @@ def emit_symbol_maps_from_source(output_dir: Path):
         f.write("    *;\n")
         f.write("};\n")
 
+
 def parse_api(frida_version, frida_version_components, api_version, toplevel_code, core_header, core_vapi, base_header, base_vapi):
     all_headers = core_header + "\n" + base_header
 
