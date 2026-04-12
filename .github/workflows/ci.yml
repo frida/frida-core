@@ -9,7 +9,7 @@ on:
 jobs:
   windows-shared:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -32,18 +32,18 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: C:\gtk-build
-          key: ${{ runner.os }}-gvsbuild-gtk4-v2
+          key: ${{ runner.os }}-gvsbuild-v3
 
       - name: Build GTK dependencies
         if: steps.gtk-cache.outputs.cache-hit != 'true'
-        run: gvsbuild build --ninja-opts -j2 gtk4 gobject-introspection
+        run: gvsbuild build --ninja-opts -j2 gtk4 gobject-introspection json-glib libsoup3
 
       - name: Save GTK cache
         if: steps.gtk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: C:\gtk-build
-          key: ${{ runner.os }}-gvsbuild-gtk4-v2
+          key: ${{ runner.os }}-gvsbuild-v3
 
       - name: Set up GTK environment
         shell: bash
