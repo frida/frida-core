@@ -10,7 +10,9 @@ namespace Frida {
 		private HelperFactory _normal_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 		private HelperFactory _elevated_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
+#if HAVE_EMBEDDED_ASSETS
 		private ResourceStore _resource_store;
+#endif
 
 		public WindowsHelperProcess (TemporaryDirectory tempdir) {
 			Object (tempdir: tempdir);
@@ -32,26 +34,34 @@ namespace Frida {
 
 			yield inprocess_backend.close (cancellable);
 
+	#if HAVE_EMBEDDED_ASSETS
 			_resource_store = null;
+#endif
 		}
 
 		private HelperFactory get_normal_factory () throws Error {
+#if HAVE_EMBEDDED_ASSETS
 			if (_normal_factory.resource_store == null)
 				_normal_factory.resource_store = get_resource_store ();
+#endif
 			return _normal_factory;
 		}
 
 		private HelperFactory get_elevated_factory () throws Error {
+#if HAVE_EMBEDDED_ASSETS
 			if (_elevated_factory.resource_store == null)
 				_elevated_factory.resource_store = get_resource_store ();
+#endif
 			return _elevated_factory;
 		}
 
+#if HAVE_EMBEDDED_ASSETS
 		private ResourceStore get_resource_store () throws Error {
 			if (_resource_store == null)
 				_resource_store = new ResourceStore (tempdir);
 			return _resource_store;
 		}
+#endif
 
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
@@ -107,10 +117,12 @@ namespace Frida {
 			}
 		}
 
+#if HAVE_EMBEDDED_ASSETS
 		public ResourceStore? resource_store {
 			get;
 			set;
 		}
+#endif
 
 		private PrivilegeLevel level;
 		private MainContext main_context;
@@ -138,7 +150,9 @@ namespace Frida {
 				helper = null;
 			}
 
+#if HAVE_EMBEDDED_ASSETS
 			resource_store = null;
+#endif
 		}
 
 		public async HelperInstance obtain (Cancellable? cancellable) throws Error, IOError {
@@ -170,11 +184,15 @@ namespace Frida {
 			Error? error = null;
 
 			try {
+#if !HAVE_EMBEDDED_ASSETS
+				throw new Error.NOT_SUPPORTED ("Out-of-process helper not yet supported in installed mode on Windows");
+#else
 				string level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
 				void * process = spawn (resource_store.native_helper.path,
 					"MANAGER %s %s".printf (level_str, transport.remote_address),
 					level);
 				instance = new HelperInstance (resource_store.helpers, transport, stream_request, process);
+#endif
 			} catch (Error e) {
 				error = e;
 			}
@@ -366,6 +384,7 @@ namespace Frida {
 		private extern static void close_process_handle (void * handle);
 	}
 
+#if HAVE_EMBEDDED_ASSETS
 	private sealed class ResourceStore {
 		public TemporaryFile native_helper {
 			get;
@@ -406,4 +425,5 @@ namespace Frida {
 			return file;
 		}
 	}
+#endif
 }
