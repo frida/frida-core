@@ -533,6 +533,7 @@ if compiler_backend_opt.allowed()
     status = lines[0]
     if status == 'ok'
       have_compiler_backend = true
+      cdata.set('HAVE_COMPILER_BACKEND', 1)
       tokens = lines[1].split(' ')
       compiler_backend_mode = tokens[0]
       go_config = tokens[1]
@@ -792,7 +793,7 @@ else
 endif
 
 if host_os_family == 'windows'
-  backend_libs_private += ['-lsetupapi']
+  backend_libs_private += ['-lsetupapi', '-lshlwapi']
 endif
 if host_os_family == 'darwin'
   backend_libs_private += ['-Wl,-framework,Foundation', '-Wl,-framework,CoreFoundation', '-lbsm']
