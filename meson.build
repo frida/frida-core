@@ -229,6 +229,11 @@ root_asset_dir = get_option('libdir') / frida_libdir_name
 if host_os_family == 'darwin'
   asset_dir = root_asset_dir
   default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name
+elif host_os_family == 'windows'
+  asset_dir = root_asset_dir / host_abi
+  asset_dir_modern = root_asset_dir / 'x86_64'
+  asset_dir_legacy = root_asset_dir / 'x86'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name / '<arch>'
 else
   asset_dir = root_asset_dir / host_cpu_mode
   asset_dir_modern = root_asset_dir / '64'

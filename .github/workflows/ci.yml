@@ -55,12 +55,15 @@ jobs:
       - name: Debug deps
         shell: bash
         run: |
-          echo "=== nghttp2 check ==="
-          pkg-config --modversion libnghttp2 2>&1 || echo "NOT FOUND"
-          pkg-config --cflags libnghttp2 2>&1 || echo "NO CFLAGS"
+          echo "=== GI pkg-config variables ==="
+          pkg-config --variable=girdir gobject-introspection-1.0 2>&1 || echo "girdir: N/A"
+          pkg-config --variable=typelibdir gobject-introspection-1.0 2>&1 || echo "typelibdir: N/A"
           echo ""
-          echo "=== Checking Python pkgconfig dir ==="
-          ls "C:/hostedtoolcache/windows/Python/3.12.10/x64/lib/pkgconfig/" 2>/dev/null | head -20 || echo "none"
+          echo "=== GIR files ==="
+          find "C:/gtk-build/gtk/x64/release/share" -name '*.gir' 2>/dev/null | head -10 || echo "none"
+          echo ""
+          echo "=== Typelib files ==="
+          find "C:/gtk-build/gtk/x64/release/lib" -name '*.typelib' 2>/dev/null | head -10 || echo "none"
 
       - name: Configure
         run: |
