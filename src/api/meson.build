@@ -45,9 +45,10 @@ gobject_gir = fs.copyfile('GObject-2.0.gir', install: install_glib_girs, install
 gio_gir = fs.copyfile('Gio-2.0.gir', install: install_glib_girs, install_dir: girdir)
 
 g_ir_compiler = find_program('g-ir-compiler', required: false)
-if g_ir_compiler.found() and fs.exists(girdir / 'GObject-2.0.gir')
+if g_ir_compiler.found()
   g_ir_compiler_args = [g_ir_compiler, '--output', '@OUTPUT@']
   g_ir_compiler_args += ['--includedir=' + girdir]
+  g_ir_compiler_args += ['--includedir=' + meson.current_source_dir()]
   g_ir_compiler_args += '@INPUT@'
   custom_target('frida-core-typelib',
     command: g_ir_compiler_args,
