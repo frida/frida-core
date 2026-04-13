@@ -76,9 +76,9 @@ if no_overridden_compat_bits
     i = 0
     foreach varname : varnames
       output_name = outputs[i]
-      is_native_payload = output_name.contains(native_arch_suffix)
+      needs_rename = output_name.contains(native_arch_suffix) or varname.contains('_emulated_')
       should_install = varname != 'arch_support_bundle' \
-          and not is_native_payload \
+          and not needs_rename \
           and (assets_mode == 'installed' or varname.startswith('gadget_'))
       if should_install
         install_dir += varname.endswith('_modern') ? asset_dir_modern : asset_dir_legacy
@@ -126,14 +126,26 @@ if no_overridden_compat_bits
       assert(false, f'unexpected variable name: @varname@')
     endif
 
-    if host_os_family != 'darwin' and output_name.contains(native_arch_suffix)
-      install_name = output_name.replace(native_arch_suffix, '')
-      if assets_mode == 'installed' or varname.startswith('gadget_')
-        meson.add_install_script(python, files('install-renamed.py'),
-          outpath,
-          asset_dir_modern,
-          install_name,
-        )
+    if host_os_family != 'darwin'
+      rename_target_dir = ''
+      if output_name.contains(native_arch_suffix)
+        rename_target_dir = asset_dir
+      elif varname.contains('_emulated_')
+        emulated_arch = output_name.split('-')[-1].split('.')[0]
+        rename_target_dir = root_asset_dir / emulated_arch
+      endif
+      if rename_target_dir != ''
+        install_name = output_name.replace(native_arch_suffix, '')
+        foreach arch_suffix : ['-x86_64', '-x86', '-arm64', '-arm']
+          install_name = install_name.replace(arch_suffix, '')
+        endforeach
+        if assets_mode == 'installed' or varname.startswith('gadget_')
+          meson.add_install_script(python, files('install-renamed.py'),
+            outpath,
+            rename_target_dir,
+            install_name,
+          )
+        endif
       endif
     endif
 

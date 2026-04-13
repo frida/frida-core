@@ -229,6 +229,11 @@ root_asset_dir = get_option('libdir') / frida_libdir_name
 if host_os_family == 'darwin'
   asset_dir = root_asset_dir
   default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name
+elif host_os_family == 'windows'
+  asset_dir = root_asset_dir / host_abi
+  asset_dir_modern = root_asset_dir / 'x86_64'
+  asset_dir_legacy = root_asset_dir / 'x86'
+  default_asset_path_template = get_option('prefix') / get_option('libdir') / frida_libdir_name / '<arch>'
 else
   asset_dir = root_asset_dir / host_cpu_mode
   asset_dir_modern = root_asset_dir / '64'
@@ -539,6 +544,7 @@ if compiler_backend_opt.allowed()
     status = lines[0]
     if status == 'ok'
       have_compiler_backend = true
+      cdata.set('HAVE_COMPILER_BACKEND', 1)
       tokens = lines[1].split(' ')
       compiler_backend_mode = tokens[0]
       go_config = tokens[1]
@@ -796,7 +802,7 @@ else
 endif
 
 if host_os_family == 'windows'
-  backend_libs_private += ['-lsetupapi']
+  backend_libs_private += ['-lsetupapi', '-lshlwapi']
 endif
 if host_os_family == 'darwin'
   backend_libs_private += ['-Wl,-framework,Foundation', '-Wl,-framework,CoreFoundation', '-lbsm']
