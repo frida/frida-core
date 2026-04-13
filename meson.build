@@ -253,11 +253,12 @@ if assets_mode == 'auto'
   assets_mode = is_shared ? 'installed' : 'embedded'
 endif
 
+cdata.set_quoted('FRIDA_LIBDIR_NAME', frida_libdir_name)
+
 if assets_mode == 'embedded'
   cdata.set('HAVE_EMBEDDED_ASSETS', 1)
   vala_flags += '--define=HAVE_EMBEDDED_ASSETS'
 else
-  cdata.set_quoted('FRIDA_LIBDIR_NAME', frida_libdir_name)
   cdata.set_quoted('FRIDA_HELPER_NAME', helper_name)
   cdata.set_quoted('FRIDA_AGENT_NAME', agent_name)
 endif
