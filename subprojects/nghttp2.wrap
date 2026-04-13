@@ -1,0 +1,7 @@
+[wrap-git]
+url = https://github.com/frida/nghttp2.git
+revision = ae13d24ea59c30e36ca53d1b22c4e664588d0445
+depth = 1
+
+[provide]
+dependency_names = libnghttp2
