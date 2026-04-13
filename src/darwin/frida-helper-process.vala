@@ -512,7 +512,7 @@ namespace Frida {
 					tempdir));
 			FileUtils.chmod (helper.path, 0700);
 #else
-			helper = new InstalledHelperFile.for_path (Config.FRIDA_HELPER_PATH);
+			helper = new InstalledHelperFile.for_path (Frida.helper_path);
 #endif
 		}
 

@@ -243,7 +243,7 @@ namespace Frida {
 #elif COMPILER_BACKEND_INSTALLED_LIBRARY
 			Module? backend = null;
 			try {
-				backend = new Module (Config.FRIDA_COMPILER_BACKEND_PATH, LOCAL);
+				backend = new Module (Frida.compiler_backend_path, LOCAL);
 			} catch (ModuleError e) {
 				return;
 			}
@@ -302,7 +302,7 @@ namespace Frida {
 #if COMPILER_BACKEND_INSTALLED_LIBRARY || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 				throw new Error.NOT_SUPPORTED (
 					"Compiler backend plugin not installed; expected at: %s",
-					Config.FRIDA_COMPILER_BACKEND_PATH);
+					Frida.compiler_backend_path);
 #else
 				throw new Error.NOT_SUPPORTED ("Compiler backend disabled at build-time");
 #endif
@@ -412,7 +412,7 @@ namespace Frida {
 					return;
 
 #if COMPILER_BACKEND_INSTALLED_EXECUTABLE
-				string path = Config.FRIDA_COMPILER_BACKEND_PATH;
+				unowned string path = Frida.compiler_backend_path;
 				bool unlink_after = false;
 #else
 				string path = extract_backend_executable ();

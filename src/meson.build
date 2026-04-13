@@ -704,8 +704,6 @@ core_vala_args = [
 
 core_gir_name = f'Frida-@api_version@.gir'
 
-is_shared = get_option('default_library') == 'shared'
-
 if is_shared
   core_lib_name = f'frida-core-@api_version@'
 else

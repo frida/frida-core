@@ -162,7 +162,7 @@ namespace Frida {
 				tpl = agent.get_path_template ();
 			}
 #else
-			tpl = PathTemplate (Config.FRIDA_AGENT_PATH);
+			tpl = PathTemplate (Frida.agent_path);
 #endif
 			if (path == null)
 				path = tpl.expand (arch_name);
@@ -394,7 +394,7 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 			id = yield linjector.inject_library_resource (pid, agent, entrypoint, parameters, features, cancellable);
 #else
-			id = yield linjector.inject_library_file_with_template (pid, PathTemplate (Config.FRIDA_AGENT_PATH), entrypoint,
+			id = yield linjector.inject_library_file_with_template (pid, PathTemplate (Frida.agent_path), entrypoint,
 				parameters, features, cancellable);
 #endif
 			injectee_by_pid[pid] = id;

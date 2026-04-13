@@ -650,7 +650,7 @@ namespace Frida {
 			if (blob64.data.length > 0)
 				helper64 = make_temporary_helper ("frida-helper-64", blob64.data);
 #else
-			var tpl = PathTemplate (Config.FRIDA_HELPER_PATH);
+			var tpl = PathTemplate (Frida.helper_path);
 			string path = tpl.expand ((sizeof (void *) == 8) ? "32" : "64");
 			HelperFile file = new InstalledHelperFile.for_path (path);
 			if (sizeof (void *) == 8)

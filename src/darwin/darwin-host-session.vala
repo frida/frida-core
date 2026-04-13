@@ -44,7 +44,7 @@ namespace Frida {
 #if HAVE_EMBEDDED_ASSETS
 				return null;
 #else
-				unowned string path = Config.FRIDA_AGENT_PATH;
+				unowned string path = Frida.agent_path;
 # if IOS || TVOS
 				unowned string? cryptex_path = Environment.get_variable ("CRYPTEX_MOUNT_PATH");
 				if (cryptex_path != null)
