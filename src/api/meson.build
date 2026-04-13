@@ -47,7 +47,13 @@ gio_gir = fs.copyfile('Gio-2.0.gir', install: install_glib_girs, install_dir: gi
 g_ir_compiler = find_program('g-ir-compiler', required: false)
 if g_ir_compiler.found()
   custom_target('frida-core-typelib',
-    command: [g_ir_compiler, '--output', '@OUTPUT@', '@INPUT@'],
+    command: [
+      g_ir_compiler,
+      '--output', '@OUTPUT@',
+      '--includedir=' + girdir,
+      '--includedir=' + meson.current_source_dir(),
+      '@INPUT@',
+    ],
     input: core_public_gir,
     output: f'Frida-@api_version@.typelib',
     depends: core,
