@@ -621,3 +621,83 @@ jobs:
           prerelease: ${{ contains(github.ref_name, 'snapshot') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows-shared:
+    strategy:
+      matrix:
+        include:
+          - { arch: x86_64, runner: windows-latest, msvc-arch: amd64, vcpkg-triplet: x64-windows-release }
+          - { arch: arm64, runner: windows-11-arm, msvc-arch: arm64, vcpkg-triplet: arm64-windows-release }
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc-arch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          pip install meson ninja setuptools
+          choco install pkgconfiglite -y
+
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-${{ matrix.vcpkg-triplet }}-v5
+
+      - name: Install dependencies via vcpkg
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        run: >-
+          vcpkg install
+          --overlay-triplets=${{ github.workspace }}/.github/vcpkg-triplets
+          --triplet ${{ matrix.vcpkg-triplet }}
+          glib json-glib libsoup
+
+      - name: Save vcpkg cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-${{ matrix.vcpkg-triplet }}-v5
+
+      - name: Set up vcpkg environment
+        shell: bash
+        run: |
+          TRIPLET="${{ matrix.vcpkg-triplet }}"
+          VCPKG_PREFIX="C:/vcpkg/installed/$TRIPLET"
+          echo "$VCPKG_PREFIX/tools/pkgconf" >> $GITHUB_PATH
+          echo "$VCPKG_PREFIX/bin" >> $GITHUB_PATH
+          echo "$VCPKG_PREFIX/tools" >> $GITHUB_PATH
+          echo "PKG_CONFIG_PATH=$VCPKG_PREFIX/lib/pkgconfig" >> $GITHUB_ENV
+
+      - name: Configure
+        run: |
+          python -c "import sys; sys.path.insert(0, '.'); from releng.meson_configure import main; main()" `
+              . `
+              --host=windows-${{ matrix.arch }} `
+              --enable-shared `
+              --without-prebuilds=sdk `
+              "--prefix=$env:RUNNER_TEMP\frida-prefix" `
+              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled -Dtests=disabled
+
+      - name: Compile
+        run: python releng/meson/meson.py compile -C build
+
+      - name: Install
+        run: python releng/meson/meson.py install -C build --no-rebuild --skip-subprojects
+
+      - name: List installed files
+        shell: bash
+        run: find "$RUNNER_TEMP/frida-prefix" -type f | sort
