@@ -171,7 +171,7 @@ namespace Frida {
 
 			try {
 				string level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
-				void * process = spawn (resource_store.native_helper.path,
+				void * process = spawn (resource_store.native_helper_path,
 					"MANAGER %s %s".printf (level_str, transport.remote_address),
 					level);
 				instance = new HelperInstance (resource_store.helpers, transport, stream_request, process);
@@ -367,7 +367,7 @@ namespace Frida {
 	}
 
 	private sealed class ResourceStore {
-		public TemporaryFile native_helper {
+		public string native_helper_path {
 			get;
 			private set;
 		}
@@ -379,25 +379,30 @@ namespace Frida {
 		}
 
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
+#if HAVE_EMBEDDED_ASSETS
 			var helper_arm64 = add_helper ("arm64", Frida.Data.Helper.get_frida_helper_arm64_exe_blob (), tempdir);
 			var helper_x86_64 = add_helper ("x86_64", Frida.Data.Helper.get_frida_helper_x86_64_exe_blob (), tempdir);
 			var helper_x86 = add_helper ("x86", Frida.Data.Helper.get_frida_helper_x86_exe_blob (), tempdir);
 
 			switch (Gum.Windows.query_native_cpu_type ()) {
 				case ARM64:
-					native_helper = helper_arm64;
+					native_helper_path = helper_arm64.path;
 					break;
 				case AMD64:
-					native_helper = helper_x86_64;
+					native_helper_path = helper_x86_64.path;
 					break;
 				case IA32:
-					native_helper = helper_x86;
+					native_helper_path = helper_x86.path;
 					break;
 				default:
 					assert_not_reached ();
 			}
+#else
+			native_helper_path = Frida.helper_path;
+#endif
 		}
 
+#if HAVE_EMBEDDED_ASSETS
 		private TemporaryFile add_helper (string name, Frida.Data.Helper.Blob blob, TemporaryDirectory tempdir) throws Error {
 			var file = new TemporaryFile.from_stream (@"frida-helper-$name.exe",
 				new MemoryInputStream.from_data (blob.data, null),
@@ -405,5 +410,6 @@ namespace Frida {
 			helpers.add (file);
 			return file;
 		}
+#endif
 	}
 }
