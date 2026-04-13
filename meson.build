@@ -383,11 +383,13 @@ gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8', default_options: gee_options)
 json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
+  'default_library=static',
   'introspection=disabled',
   'gtk_doc=disabled',
   'tests=false',
 ])
 libsoup_dep = dependency('libsoup-3.0', default_options: [
+  'default_library=static',
   'gssapi=disabled',
   'ntlm=disabled',
   'brotli=disabled',
@@ -668,7 +670,7 @@ openssl_dep = dependency('openssl',
 )
 
 if have_fruity_backend
-  backend_deps_private += dependency('libnghttp2')
+  backend_deps_private += dependency('libnghttp2', default_options: ['default_library=static'])
   backend_reqs_private += 'libnghttp2'
 
   if host_os != 'macos'
