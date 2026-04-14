@@ -749,7 +749,6 @@ core = library(core_lib_name, core_sources,
   link_depends: core_extra_link_depends,
   link_with: backend_libs,
   dependencies: core_deps + internal_deps,
-  soversion: frida_major_version,
   install: is_shared,
 )
 
