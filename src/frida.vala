@@ -3628,7 +3628,7 @@ namespace Frida {
 	internal string compiler_backend_path;
 #endif
 
-	internal void init_asset_paths () {
+	public void _init_asset_paths () {
 		var location = AssetLocation.detect ();
 		helper_path = location.derive_asset_path ("<arch>", Config.FRIDA_HELPER_NAME);
 		agent_path = location.derive_asset_path ("<arch>", Config.FRIDA_AGENT_NAME);
@@ -3637,7 +3637,7 @@ namespace Frida {
 #endif
 	}
 
-	internal void deinit_asset_paths () {
+	public void _deinit_asset_paths () {
 		helper_path = null;
 		agent_path = null;
 #if HAVE_COMPILER_BACKEND
