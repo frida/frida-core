@@ -1818,4 +1818,34 @@ namespace Frida.Fruity {
 		SIGNATURE = 10,
 		INFO = 17,
 	}
+
+	private OpenSSL.Envelope.Key make_keypair (OpenSSL.Envelope.KeyType type) {
+		var ctx = new OpenSSL.Envelope.KeyContext.for_key_type (type);
+		ctx.keygen_init ();
+
+		OpenSSL.Envelope.Key? keypair = null;
+		ctx.keygen (ref keypair);
+
+		return keypair;
+	}
+
+	private Bytes get_raw_public_key (OpenSSL.Envelope.Key key) {
+		size_t size = 0;
+		key.get_raw_public_key (null, ref size);
+
+		var result = new uint8[size];
+		key.get_raw_public_key (result, ref size);
+
+		return new Bytes.take ((owned) result);
+	}
+
+	private Bytes get_raw_private_key (OpenSSL.Envelope.Key key) {
+		size_t size = 0;
+		key.get_raw_private_key (null, ref size);
+
+		var result = new uint8[size];
+		key.get_raw_private_key (result, ref size);
+
+		return new Bytes.take ((owned) result);
+	}
 }
