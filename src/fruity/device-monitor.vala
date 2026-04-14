@@ -941,22 +941,4 @@ namespace Frida.Fruity {
 		public InetSocketAddress interface_address;
 	}
 
-	private async void sleep (uint duration_msec, Cancellable? cancellable) throws IOError {
-		var main_context = MainContext.get_thread_default ();
-
-		var delay_source = new TimeoutSource (duration_msec);
-		delay_source.set_callback (sleep.callback);
-		delay_source.attach (main_context);
-
-		var cancel_source = new CancellableSource (cancellable);
-		cancel_source.set_callback (sleep.callback);
-		cancel_source.attach (main_context);
-
-		yield;
-
-		cancel_source.destroy ();
-		delay_source.destroy ();
-
-		cancellable.set_error_if_cancelled ();
-	}
 }
