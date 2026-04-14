@@ -247,6 +247,7 @@ namespace Frida {
 			} catch (ModuleError e) {
 				return;
 			}
+			backend.make_resident ();
 
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
@@ -283,6 +284,7 @@ namespace Frida {
 					assert_not_reached ();
 				}
 			}
+			backend.make_resident ();
 
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
