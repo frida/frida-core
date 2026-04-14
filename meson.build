@@ -396,6 +396,7 @@ json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
 ])
 libsoup_dep = dependency('libsoup-3.0', default_options: [
   'default_library=static',
+  'sqlite:default_library=static',
   'gssapi=disabled',
   'ntlm=disabled',
   'brotli=disabled',
