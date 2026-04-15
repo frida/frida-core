@@ -177,6 +177,13 @@ function applyJailbreakQuirks() {
   if (inserterResume !== null) {
     pidsToIgnore = new Set();
     instrumentInserter(inserterResume);
+    return;
+  }
+
+  const ellekitGate = findEllekitShouldEnableTweaks();
+  if (ellekitGate !== null) {
+    pidsToIgnore = new Set();
+    instrumentEllekitInjector(ellekitGate);
   }
 }
 
@@ -235,6 +242,18 @@ function instrumentInserter(at) {
 
     return original(a0, pid, a2, a3);
   }, 'int', ['uint', 'uint', 'uint', 'uint']));
+}
+
+function instrumentEllekitInjector(shouldEnableTweaks) {
+  const retType = 'int';
+  const argTypes = ['uint'];
+  const original = new NativeFunction(shouldEnableTweaks, retType, argTypes);
+  Interceptor.replace(shouldEnableTweaks, new NativeCallback(pid => {
+    if (pidsToIgnore.delete(pid))
+      return 0;
+
+    return original(pid);
+  }, retType, argTypes));
 }
 
 function findJbdCallImpl() {
@@ -326,6 +345,23 @@ function findInserterResume() {
     } catch (e) {
     }
     cursor = cursor.sub(4);
+  }
+
+  return null;
+}
+
+function findEllekitShouldEnableTweaks() {
+  const impl = Module.findGlobalExportByName('should_enable_tweaks');
+  if (impl !== null)
+    return impl;
+
+  for (const name of ['libinjector.dylib', 'TweakLoader.dylib']) {
+    const mod = Process.findModuleByName(name);
+    if (mod !== null) {
+      const exp = mod.findExportByName('should_enable_tweaks');
+      if (exp !== null)
+        return exp;
+    }
   }
 
   return null;
