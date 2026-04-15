@@ -2931,6 +2931,18 @@ namespace Frida {
 				return reply.end ();
 			}
 
+			if (type == "include-syscalls") {
+				reader.read_member ("native");
+				var nrs = read_int32_array (reader);
+				reader.end_member ();
+
+				var l = new MutexLocker (mutex);
+				excluded_syscalls.remove_all_array (nrs);
+				l.free ();
+
+				return reply.end ();
+			}
+
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 

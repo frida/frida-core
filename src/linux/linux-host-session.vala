@@ -2926,6 +2926,22 @@ namespace Frida {
 				return reply.end ();
 			}
 
+			if (type == "include-syscalls") {
+				if (reader.has_member ("native")) {
+					reader.read_member ("native");
+					foreach_uint32 (reader, nr => tracer.include_syscall (NATIVE, nr));
+					reader.end_member ();
+				}
+
+				if (reader.has_member ("compat32")) {
+					reader.read_member ("compat32");
+					foreach_uint32 (reader, nr => tracer.include_syscall (COMPAT32, nr));
+					reader.end_member ();
+				}
+
+				return reply.end ();
+			}
+
 			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
