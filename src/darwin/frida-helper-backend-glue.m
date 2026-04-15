@@ -2127,7 +2127,11 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   previous_ports = &instance->previous_ports;
   kr = thread_swap_exception_ports (child_thread,
-      EXC_MASK_ALL,
+#if __has_feature (ptrauth_calls)
+      EXC_MASK_BAD_ACCESS | EXC_MASK_BREAKPOINT | EXC_MASK_CRASH,
+#else
+      EXC_MASK_BREAKPOINT | EXC_MASK_CRASH,
+#endif
       instance->server_port,
       EXCEPTION_DEFAULT,
       state_flavor,
@@ -2869,6 +2873,7 @@ frida_spawn_instance_on_server_recv (void * context)
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   GumDarwinUnifiedThreadState state;
+  gboolean pc_may_need_fixup_due_to_ptrauth_failure;
   guint i, current_bp_index;
   FridaBreakpoint * breakpoint = NULL;
   gboolean carry_on, pc_changed;
@@ -2897,7 +2902,6 @@ frida_spawn_instance_on_server_recv (void * context)
 #if __has_feature (ptrauth_calls)
   {
     const GumAddress ret_gadget = frida_spawn_instance_get_ret_gadget_address (self);
-    gboolean pc_may_need_fixup_due_to_ptrauth_failure;
 
     pc_may_need_fixup_due_to_ptrauth_failure = gum_strip_code_address (GUM_ADDRESS (state.ts_64.__opaque_pc)) == ret_gadget;
     if (pc_may_need_fixup_due_to_ptrauth_failure)
@@ -2905,6 +2909,8 @@ frida_spawn_instance_on_server_recv (void * context)
       __darwin_arm_thread_state64_set_pc_fptr (state.ts_64, GSIZE_TO_POINTER (gum_sign_code_address (ret_gadget)));
     }
   }
+#else
+  pc_may_need_fixup_due_to_ptrauth_failure = FALSE;
 #endif
 
 #ifdef HAVE_I386
@@ -2920,7 +2926,16 @@ frida_spawn_instance_on_server_recv (void * context)
 #endif
 
   if (request->exception != EXC_BREAKPOINT)
-    goto unexpected_exception;
+  {
+#if __has_feature (ptrauth_calls)
+    if (!pc_may_need_fixup_due_to_ptrauth_failure)
+#endif
+    {
+      if (request->exception == EXC_CRASH)
+        goto unexpected_exception;
+      goto forward_to_system;
+    }
+  }
 
   if (self->single_stepping >= 0)
   {
@@ -3073,6 +3088,27 @@ unexpected_exception:
 
     g_error_free (error);
     g_string_free (message, TRUE);
+
+    return;
+  }
+forward_to_system:
+  {
+    __Reply__exception_raise_t response;
+    mach_msg_header_t * header;
+
+    bzero (&response, sizeof (response));
+    header = &response.Head;
+    header->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+    header->msgh_size = sizeof (response);
+    header->msgh_remote_port = request->Head.msgh_remote_port;
+    header->msgh_local_port = MACH_PORT_NULL;
+    header->msgh_reserved = 0;
+    header->msgh_id = request->Head.msgh_id + 100;
+    response.NDR = NDR_record;
+    response.RetCode = KERN_FAILURE;
+    kr = mach_msg_send (header);
+    if (kr == KERN_SUCCESS)
+      request->Head.msgh_remote_port = MACH_PORT_NULL;
 
     return;
   }
