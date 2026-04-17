@@ -124,6 +124,11 @@ public sealed class Frida.SyscallTracer : Object {
 		excluded_syscalls.update_u64_u8 (key, 1);
 	}
 
+	public void include_syscall (Abi abi, uint nr) throws Error {
+		uint64 key = ((uint64) abi << 32) | (uint64) nr;
+		excluded_syscalls.remove_u64 (key);
+	}
+
 	public DrainStatus drain_events (SyscallEventHandler on_event) {
 		var status = syscall_events_reader.drain (payload => {
 			assert (payload.length >= sizeof (SyscallEvent));
