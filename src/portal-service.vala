@@ -31,8 +31,8 @@ namespace Frida {
 
 		private State state = STOPPED;
 
-		private WebService cluster_service;
-		private WebService? control_service;
+		private Gee.List<WebService> cluster_services = new Gee.ArrayList<WebService> ();
+		private Gee.List<WebService> control_services = new Gee.ArrayList<WebService> ();
 
 		private Gee.Map<uint, ConnectionEntry> connections = new Gee.HashMap<uint, ConnectionEntry> ();
 		private Gee.MultiMap<string, ConnectionEntry> tags = new Gee.HashMultiMap<string, ConnectionEntry> ();
@@ -63,13 +63,9 @@ namespace Frida {
 		construct {
 			_device = new Device (null, new PortalHostSessionProvider (this));
 
-			cluster_service = new WebService (cluster_params, CLUSTER);
-			cluster_service.incoming.connect (on_incoming_cluster_connection);
-
-			if (control_params != null) {
-				control_service = new WebService (control_params, CONTROL);
-				control_service.incoming.connect (on_incoming_control_connection);
-			}
+			cluster_services.add (make_cluster_service (cluster_params));
+			if (control_params != null)
+				control_services.add (make_control_service (control_params));
 		}
 
 		public override void dispose () {
@@ -90,6 +86,30 @@ namespace Frida {
 			}
 		}
 
+		public void add_cluster_endpoint (EndpointParameters endpoint_params) throws Error {
+			if (state != STOPPED)
+				throw new Error.INVALID_OPERATION ("Cannot add endpoint after service has started");
+			cluster_services.add (make_cluster_service (endpoint_params));
+		}
+
+		public void add_control_endpoint (EndpointParameters endpoint_params) throws Error {
+			if (state != STOPPED)
+				throw new Error.INVALID_OPERATION ("Cannot add endpoint after service has started");
+			control_services.add (make_control_service (endpoint_params));
+		}
+
+		private WebService make_cluster_service (EndpointParameters endpoint_params) {
+			var service = new WebService (endpoint_params, CLUSTER);
+			service.incoming.connect (on_incoming_cluster_connection);
+			return service;
+		}
+
+		private WebService make_control_service (EndpointParameters endpoint_params) {
+			var service = new WebService (endpoint_params, CONTROL);
+			service.incoming.connect (on_incoming_control_connection);
+			return service;
+		}
+
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
@@ -98,10 +118,11 @@ namespace Frida {
 			io_cancellable = new Cancellable ();
 
 			try {
-				yield cluster_service.start (cancellable);
+				foreach (var service in cluster_services)
+					yield service.start (cancellable);
 
-				if (control_service != null)
-					yield control_service.start (cancellable);
+				foreach (var service in control_services)
+					yield service.start (cancellable);
 
 				state = STARTED;
 			} catch (GLib.Error e) {
@@ -126,10 +147,11 @@ namespace Frida {
 			if (state != STARTED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
-			if (control_service != null)
-				control_service.stop ();
+			foreach (var service in control_services)
+				service.stop ();
 
-			cluster_service.stop ();
+			foreach (var service in cluster_services)
+				service.stop ();
 
 			if (io_cancellable != null)
 				io_cancellable.cancel ();
