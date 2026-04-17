@@ -978,6 +978,7 @@ namespace Frida {
 			if (lldb_session != null) {
 				var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
+				lldb_session.attach_count++;
 				return yield attach_via_gadget (pid, options, gadget_details, cancellable);
 			}
 
@@ -1004,6 +1005,7 @@ namespace Frida {
 
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
+			lldb_session.attach_count++;
 			return yield attach_via_gadget (pid, options, gadget_details, cancellable);
 		}
 
@@ -1251,11 +1253,14 @@ namespace Frida {
 
 			var lldb_session = lldb_sessions[entry.pid];
 			if (lldb_session != null) {
-				remove_lldb_session (lldb_session);
-				if (reason == SessionDetachReason.APPLICATION_REQUESTED)
-					yield entry.detach_lldb (lldb_session, io_cancellable);
-				else
-					yield lldb_session.close (io_cancellable);
+				lldb_session.attach_count--;
+				if (lldb_session.attach_count == 0) {
+					remove_lldb_session (lldb_session);
+					if (reason == SessionDetachReason.APPLICATION_REQUESTED)
+						yield entry.detach_lldb (lldb_session, io_cancellable);
+					else
+						yield lldb_session.close (io_cancellable);
+				}
 			}
 
 			gadget_entries.unset (id);
@@ -1518,6 +1523,8 @@ namespace Frida {
 				get;
 				construct;
 			}
+
+			public uint attach_count = 0;
 
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
 			private ulong exception_handler = 0;
