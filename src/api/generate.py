@@ -334,6 +334,9 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
         "EndpointParameters": "PortalService",
         "AuthenticationService": "EndpointParameters",
         "StaticAuthenticationService": "AuthenticationService",
+        "WebRequestHandler": "StaticAuthenticationService",
+        "WebRequest": "WebRequestHandler",
+        "WebResponse": "WebRequest",
     }
     internal_type_prefixes = [
         "AgentMessageKind",
@@ -428,7 +431,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
                             object_type.c_method_prototypes.append(method_cprototype)
                     elif method_name == 'get_type':
                         object_type.c_get_type = method_cprototype.replace("G_GNUC_CONST ;", "G_GNUC_CONST;")
-        for d in re.finditer(r"^typedef.+?\(\*(" + object_type.c_name + r".+?)\) \(.+\);$", core_header, re.MULTILINE):
+        for d in re.finditer(r"^typedef.+?\(\*(" + object_type.c_name + r".+?)\) \(.+\);$", all_headers, re.MULTILINE):
             delegate_cname = d.group(1)
             if delegate_cname not in seen_cdelegates:
                 seen_cdelegates.add(delegate_cname)

@@ -128,6 +128,11 @@ namespace Frida {
 			set;
 		}
 
+		public WebRequestHandler? request_handler {
+			get;
+			set;
+		}
+
 		public EndpointParameters (string? address = null, uint16 port = 0, TlsCertificate? certificate = null,
 				string? origin = null, AuthenticationService? auth_service = null, File? asset_root = null) {
 			Object (
@@ -138,6 +143,75 @@ namespace Frida {
 				auth_service: auth_service,
 				asset_root: asset_root
 			);
+		}
+	}
+
+	public interface WebRequestHandler : Object {
+		public abstract async WebResponse? handle_request (WebRequest request, Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public sealed class WebRequest : Object {
+		public string method {
+			get;
+			construct;
+		}
+
+		public string path {
+			get;
+			construct;
+		}
+
+		public string? query_string {
+			get;
+			construct;
+		}
+
+		public Bytes? body {
+			get;
+			construct;
+		}
+
+		private Soup.MessageHeaders raw_headers;
+
+		internal WebRequest (string method, string path, string? query_string, Soup.MessageHeaders headers, Bytes? body) {
+			Object (method: method, path: path, query_string: query_string, body: body);
+			raw_headers = headers;
+		}
+
+		public void foreach_header (WebRequestHeaderFunc func) {
+			raw_headers.foreach ((name, val) => {
+				func (name, val);
+			});
+		}
+	}
+
+	public delegate void WebRequestHeaderFunc (string name, string val);
+
+	public sealed class WebResponse : Object {
+		public uint status {
+			get;
+			construct;
+		}
+
+		public Bytes body {
+			get;
+			construct;
+		}
+
+		private Soup.MessageHeaders raw_headers = new Soup.MessageHeaders (RESPONSE);
+
+		public WebResponse (uint status, Bytes body) {
+			Object (status: status, body: body);
+		}
+
+		public void add_header (string name, string val) {
+			raw_headers.append (name, val);
+		}
+
+		internal void write_headers_to (Soup.MessageHeaders target) {
+			raw_headers.foreach ((name, val) => {
+				target.replace (name, val);
+			});
 		}
 	}
 
@@ -468,14 +542,14 @@ namespace Frida {
 
 				server.add_websocket_handler ("/ws", endpoint_params.origin, null, on_websocket_opened);
 
-				if (endpoint_params.asset_root != null)
-					server.add_handler (null, on_asset_request);
+				if (endpoint_params.request_handler != null || endpoint_params.asset_root != null)
+					server.add_handler (null, on_http_request);
 			}
 
 			public void close () {
 				io_cancellable.cancel ();
 
-				if (endpoint_params.asset_root != null)
+				if (endpoint_params.request_handler != null || endpoint_params.asset_root != null)
 					server.remove_handler ("/");
 				server.remove_handler ("/ws");
 
@@ -575,20 +649,77 @@ namespace Frida {
 				connections.remove (connection);
 			}
 
-			private void on_asset_request (Soup.Server server, Soup.ServerMessage msg, string path,
+			private void on_http_request (Soup.Server server, Soup.ServerMessage msg, string path,
 					HashTable<string, string>? query) {
 				msg.get_response_headers ().replace ("Server", "Frida/" + _version_string ());
 
-				unowned string method = msg.get_method ();
-				if (method != "GET" && method != "HEAD") {
-					msg.set_status (Soup.Status.METHOD_NOT_ALLOWED, null);
+				msg.pause ();
+				handle_http_request.begin (msg, path);
+			}
+
+			private async void handle_http_request (Soup.ServerMessage msg, string path) {
+				WebRequestHandler? handler = endpoint_params.request_handler;
+				if (handler != null) {
+					if (yield try_request_handler (handler, msg, path, io_cancellable))
+						return;
+				}
+
+				File? asset_root = endpoint_params.asset_root;
+				if (asset_root != null) {
+					unowned string method = msg.get_method ();
+					if (method != "GET" && method != "HEAD") {
+						msg.set_status (Soup.Status.METHOD_NOT_ALLOWED, null);
+						msg.unpause ();
+						return;
+					}
+
+					File location = asset_root.resolve_relative_path (path.next_char ());
+					yield handle_asset_request (path, location, msg);
 					return;
 				}
 
-				File location = endpoint_params.asset_root.resolve_relative_path (path.next_char ());
+				msg.set_status (Soup.Status.NOT_FOUND, null);
+				msg.unpause ();
+			}
 
-				msg.pause ();
-				handle_asset_request.begin (path, location, msg);
+			private static async bool try_request_handler (WebRequestHandler handler, Soup.ServerMessage msg, string path,
+					Cancellable? cancellable) {
+				var body = msg.get_request_body ();
+				Bytes? request_body = (body.length != 0) ? body.flatten () : null;
+				unowned Uri? uri = msg.get_uri ();
+				string? query_string = (uri != null) ? uri.get_query () : null;
+				var request = new WebRequest (msg.get_method (), path, query_string, msg.get_request_headers (),
+					request_body);
+
+				WebResponse? response;
+				try {
+					response = yield handler.handle_request (request, cancellable);
+				} catch (Error e) {
+					msg.set_status (Soup.Status.INTERNAL_SERVER_ERROR, null);
+					msg.set_response ("text/plain; charset=utf-8", Soup.MemoryUse.COPY, e.message.data);
+					msg.unpause ();
+					return true;
+				} catch (IOError e) {
+					msg.unpause ();
+					return true;
+				}
+
+				if (response == null)
+					return false;
+
+				apply_response (msg, response);
+				msg.unpause ();
+				return true;
+			}
+
+			private static void apply_response (Soup.ServerMessage msg, WebResponse response) {
+				msg.set_status (response.status, null);
+
+				response.write_headers_to (msg.get_response_headers ());
+
+				Bytes body = response.body;
+				if (body.length > 0)
+					msg.get_response_body ().append_bytes (body);
 			}
 
 			private async void handle_asset_request (string path, File file, Soup.ServerMessage msg) {
