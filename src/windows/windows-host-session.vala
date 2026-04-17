@@ -70,6 +70,25 @@ namespace Frida {
 #endif
 		}
 
+#if !HAVE_EMBEDDED_ASSETS
+		private static PathTemplate installed_agent_path_template () {
+			return PathTemplate (Frida.agent_path);
+		}
+
+		private static string[] installed_agent_dependencies () {
+			string lib_root = Path.get_dirname (Path.get_dirname (Frida.agent_path));
+			string[] deps = {};
+			foreach (unowned string arch in new string[] { "arm64", "x86_64", "x86" }) {
+				foreach (unowned string name in new string[] { "dbghelp.dll", "symsrv.dll" }) {
+					string p = Path.build_filename (lib_root, arch, name);
+					if (FileUtils.test (p, EXISTS))
+						deps += p;
+				}
+			}
+			return deps;
+		}
+#endif
+
 		public override async void close (Cancellable? cancellable) throws IOError {
 			yield base.close (cancellable);
 
@@ -100,7 +119,11 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
+#if HAVE_EMBEDDED_ASSETS
 			var path_template = agent.get_path_template ();
+#else
+			var path_template = installed_agent_path_template ();
+#endif
 
 			unowned string arch;
 			switch (Gum.NATIVE_CPU) {
@@ -227,8 +250,15 @@ namespace Frida {
 			var stream_request = Pipe.open (t.local_address, cancellable);
 
 			var winjector = injector as Winjector;
+#if HAVE_EMBEDDED_ASSETS
 			var id = yield winjector.inject_library_resource (pid, agent, "frida_agent_main",
 				make_agent_parameters (pid, t.remote_address, options), cancellable);
+#else
+			var id = yield winjector.inject_library_file_with_template (pid,
+				installed_agent_path_template (), "frida_agent_main",
+				make_agent_parameters (pid, t.remote_address, options),
+				installed_agent_dependencies (), cancellable);
+#endif
 			injectee_by_pid[pid] = id;
 
 			transport = t;

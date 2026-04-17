@@ -17,9 +17,19 @@ namespace Frida {
 				}
 				return true;
 			});
-
 			assert (module_path != null);
-			return new AssetLocation (Path.get_dirname (module_path));
+
+			string libdir = Path.get_dirname (module_path);
+#if WINDOWS
+			if (Path.get_basename (libdir).down () == "bin") {
+				string parent = Path.get_dirname (libdir);
+				string candidate = Path.build_filename (parent, "lib");
+				if (FileUtils.test (candidate, IS_DIR))
+					libdir = candidate;
+			}
+#endif
+
+			return new AssetLocation (libdir);
 		}
 
 		private AssetLocation (string libdir) {

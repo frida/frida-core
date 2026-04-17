@@ -46,7 +46,7 @@ namespace Frida {
 				cancellable);
 		}
 
-		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
+		public async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, Cancellable? cancellable) throws Error, IOError {
 			uint id = next_injectee_id++;
 			yield helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
