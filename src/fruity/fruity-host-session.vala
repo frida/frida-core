@@ -2885,7 +2885,15 @@ namespace Frida {
 					foreach (var pid in pids_to_trace) {
 						if (target_pids.has_key (pid))
 							continue;
-						var sig = yield info_service.query_symbolicator_signature (pid, cancellable);
+
+						Fruity.CsSignature sig;
+						try {
+							sig = yield info_service.query_symbolicator_signature (pid, cancellable);
+						} catch (Error e) {
+							sig = new Fruity.CsSignature ();
+							sig.pid = pid;
+						}
+
 						target_pids[pid] = sig;
 					}
 					l.free ();
