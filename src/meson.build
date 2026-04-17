@@ -135,6 +135,23 @@ if have_local_backend
       install_dir: asset_dir,
     )
 
+    if assets_mode == 'installed'
+      # frida-gum already has install_data() rules for these, but
+      # releng/meson_make installs with --skip-subprojects when
+      # default_library=shared (to keep other subproject artifacts
+      # like capstone out of the prefix), so re-install them here
+      # alongside the agent / helper where host sessions look for
+      # them at runtime.
+      install_data(
+        gum_dep.get_variable('frida_dbghelp_prefix') / host_abi / 'dbghelp.dll',
+        install_dir: asset_dir,
+      )
+      install_data(
+        gum_dep.get_variable('frida_symsrv_prefix') / host_abi / 'symsrv.dll',
+        install_dir: asset_dir,
+      )
+    endif
+
     if assets_mode == 'embedded'
       if helper_modern == 'auto'
         helper_modern = host_is_modern ? helper : ''
