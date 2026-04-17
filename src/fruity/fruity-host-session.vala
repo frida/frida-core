@@ -2882,7 +2882,7 @@ namespace Frida {
 						Fruity.CsSignature sig;
 						try {
 							sig = yield info_service.query_symbolicator_signature (pid, cancellable);
-						} catch (GLib.Error e) {
+						} catch (Error e) {
 							sig = new Fruity.CsSignature ();
 							sig.pid = pid;
 						}
