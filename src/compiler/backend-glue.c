@@ -1,4 +1,4 @@
-#if defined (_MSC_VER) && defined (HAVE_COMPILER_BACKEND)
+#if defined (_MSC_VER) && defined (HAVE_COMPILER_BACKEND_LINKED)
 
 #include <glib.h>
 

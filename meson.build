@@ -552,6 +552,7 @@ if compiler_backend_opt.allowed()
 
       if compiler_backend_mode == 'c-archive'
         vala_flags += '--define=COMPILER_BACKEND_LINKED'
+        cdata.set('HAVE_COMPILER_BACKEND_LINKED', 1)
       elif compiler_backend_mode == 'c-shared'
         if assets_mode == 'installed'
           vala_flags += '--define=COMPILER_BACKEND_INSTALLED_LIBRARY'
