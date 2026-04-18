@@ -37,6 +37,7 @@ if have_compiler_backend
       'package-lock.json',
     ],
     output: output_files,
+    depend_files: go_config,
     command: [
       python,
       files('build-backend.py'),

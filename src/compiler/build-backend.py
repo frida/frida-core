@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 import shutil
@@ -10,7 +9,7 @@ from typing import List
 
 
 def main(argv):
-    go_config = json.loads(base64.b64decode(argv[1]).decode("utf-8"))
+    go_config = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
     output_dir, priv_dir, go, npm, *inputs = [Path(d).resolve() for d in argv[2:]]
 
     try:

@@ -547,9 +547,8 @@ if compiler_backend_opt.allowed()
     if status == 'ok'
       have_compiler_backend = true
       cdata.set('HAVE_COMPILER_BACKEND', 1)
-      tokens = lines[1].split(' ')
-      compiler_backend_mode = tokens[0]
-      go_config = tokens[1]
+      compiler_backend_mode = lines[1]
+      go_config = lines[2]
 
       if compiler_backend_mode == 'c-archive'
         vala_flags += '--define=COMPILER_BACKEND_LINKED'
