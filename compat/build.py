@@ -195,16 +195,21 @@ def setup(role: Role,
 
             if host_os == "windows" and host_arch in {"x86_64", "x86"} and have_toolchain:
                 group = OutputGroup(other_label, other_triplet, extra_environ)
-                outputs[group] = [
-                    Output(identifier=f"helper_{other_kind}",
-                           name=HELPER_FILE_WINDOWS.name,
-                           file=HELPER_FILE_WINDOWS,
-                           target=HELPER_TARGET),
-                    Output(identifier=f"agent_{other_kind}",
-                           name=AGENT_FILE_WINDOWS.name,
-                           file=AGENT_FILE_WINDOWS,
-                           target=AGENT_TARGET),
-                ]
+                outputs[group] = []
+                if "helper" in components:
+                    outputs[group] += [
+                        Output(identifier=f"helper_{other_kind}",
+                               name=HELPER_FILE_WINDOWS.name,
+                               file=HELPER_FILE_WINDOWS,
+                               target=HELPER_TARGET),
+                    ]
+                if "agent" in components:
+                    outputs[group] += [
+                        Output(identifier=f"agent_{other_kind}",
+                               name=AGENT_FILE_WINDOWS.name,
+                               file=AGENT_FILE_WINDOWS,
+                               target=AGENT_TARGET),
+                    ]
                 if "gadget" in components:
                     outputs[group] += [
                         Output(identifier=f"gadget_{other_kind}",
@@ -221,16 +226,21 @@ def setup(role: Role,
                     other_arch = "arm64e"
                     kind = "modern"
                 group = OutputGroup(other_arch)
-                outputs[group] = [
-                    Output(identifier=f"helper_{kind}",
-                           name=f"frida-helper-{other_arch}",
-                           file=HELPER_FILE_UNIX,
-                           target=HELPER_TARGET),
-                    Output(identifier=f"agent_{kind}",
-                           name=f"frida-agent-{other_arch}.dylib",
-                           file=AGENT_FILE_DARWIN,
-                           target=AGENT_TARGET),
-                ]
+                outputs[group] = []
+                if "helper" in components:
+                    outputs[group] += [
+                        Output(identifier=f"helper_{kind}",
+                               name=f"frida-helper-{other_arch}",
+                               file=HELPER_FILE_UNIX,
+                               target=HELPER_TARGET),
+                    ]
+                if "agent" in components:
+                    outputs[group] += [
+                        Output(identifier=f"agent_{kind}",
+                               name=f"frida-agent-{other_arch}.dylib",
+                               file=AGENT_FILE_DARWIN,
+                               target=AGENT_TARGET),
+                    ]
                 if "gadget" in components:
                     outputs[group] += [
                         Output(identifier=f"gadget_{kind}",
@@ -248,16 +258,21 @@ def setup(role: Role,
 
             if host_os == "linux" and host_arch == "x86_64" and have_toolchain:
                 group = OutputGroup("x86", other_triplet, extra_environ)
-                outputs[group] = [
-                    Output(identifier="helper_legacy",
-                           name=HELPER_FILE_UNIX.name,
-                           file=HELPER_FILE_UNIX,
-                           target=HELPER_TARGET),
-                    Output(identifier="agent_legacy",
-                           name=AGENT_FILE_ELF.name,
-                           file=AGENT_FILE_ELF,
-                           target=AGENT_TARGET),
-                ]
+                outputs[group] = []
+                if "helper" in components:
+                    outputs[group] += [
+                        Output(identifier="helper_legacy",
+                               name=HELPER_FILE_UNIX.name,
+                               file=HELPER_FILE_UNIX,
+                               target=HELPER_TARGET),
+                    ]
+                if "agent" in components:
+                    outputs[group] += [
+                        Output(identifier="agent_legacy",
+                               name=AGENT_FILE_ELF.name,
+                               file=AGENT_FILE_ELF,
+                               target=AGENT_TARGET),
+                    ]
                 if "gadget" in components:
                     outputs[group] += [
                         Output(identifier="gadget_legacy",
@@ -268,16 +283,21 @@ def setup(role: Role,
 
             if host_os == "android" and host_arch in {"arm64", "x86_64"}:
                 group = OutputGroup("arm" if host_arch == "arm64" else "x86")
-                outputs[group] = [
-                    Output(identifier="helper_legacy",
-                           name=HELPER_FILE_UNIX.name,
-                           file=HELPER_FILE_UNIX,
-                           target=HELPER_TARGET),
-                    Output(identifier="agent_legacy",
-                           name=AGENT_FILE_ELF.name,
-                           file=AGENT_FILE_ELF,
-                           target=AGENT_TARGET),
-                ]
+                outputs[group] = []
+                if "helper" in components:
+                    outputs[group] += [
+                        Output(identifier="helper_legacy",
+                               name=HELPER_FILE_UNIX.name,
+                               file=HELPER_FILE_UNIX,
+                               target=HELPER_TARGET),
+                    ]
+                if "agent" in components:
+                    outputs[group] += [
+                        Output(identifier="agent_legacy",
+                               name=AGENT_FILE_ELF.name,
+                               file=AGENT_FILE_ELF,
+                               target=AGENT_TARGET),
+                    ]
                 if "gadget" in components:
                     outputs[group] += [
                         Output(identifier="gadget_legacy",
@@ -298,18 +318,24 @@ def setup(role: Role,
                             continue
                     else:
                         emulated_triplet = None
-                    outputs[OutputGroup(emulated_arch, emulated_triplet, extra_environ)] = [
-                        Output(identifier=f"helper_emulated_{kind}",
-                               name=HELPER_FILE_WINDOWS.name.replace(".exe", f"-{emulated_arch}.exe"),
-                               file=HELPER_FILE_WINDOWS,
-                               target=HELPER_TARGET),
-                        Output(identifier=f"agent_emulated_{kind}",
-                               name=AGENT_FILE_WINDOWS.name.replace(".dll", f"-{emulated_arch}.dll"),
-                               file=AGENT_FILE_WINDOWS,
-                               target=AGENT_TARGET),
-                    ]
+                    group = OutputGroup(emulated_arch, emulated_triplet, extra_environ)
+                    outputs[group] = []
+                    if "helper" in components:
+                        outputs[group] += [
+                            Output(identifier=f"helper_emulated_{kind}",
+                                   name=HELPER_FILE_WINDOWS.name.replace(".exe", f"-{emulated_arch}.exe"),
+                                   file=HELPER_FILE_WINDOWS,
+                                   target=HELPER_TARGET),
+                        ]
+                    if "agent" in components:
+                        outputs[group] += [
+                            Output(identifier=f"agent_emulated_{kind}",
+                                   name=AGENT_FILE_WINDOWS.name.replace(".dll", f"-{emulated_arch}.dll"),
+                                   file=AGENT_FILE_WINDOWS,
+                                   target=AGENT_TARGET),
+                        ]
 
-            if host_os == "android" and host_arch in {"x86_64", "x86"}:
+            if host_os == "android" and host_arch in {"x86_64", "x86"} and "agent" in components:
                 outputs[OutputGroup("arm")] = [
                     Output(identifier="agent_emulated_legacy",
                            name="frida-agent-arm.so",
@@ -328,12 +354,14 @@ def setup(role: Role,
             kind = "modern" if arch_is_modern(host_os, host_arch) else "legacy"
             _, agent_file, gadget_file = native_file_paths(host_os)
             group = OutputGroup(host_arch)
-            outputs[group] = [
-                Output(identifier=f"agent_{kind}",
-                       name=arch_suffixed_name(agent_file.name, host_arch),
-                       file=agent_file,
-                       target=AGENT_TARGET),
-            ]
+            outputs[group] = []
+            if "agent" in components:
+                outputs[group] += [
+                    Output(identifier=f"agent_{kind}",
+                           name=arch_suffixed_name(agent_file.name, host_arch),
+                           file=agent_file,
+                           target=AGENT_TARGET),
+                ]
             if "gadget" in components:
                 outputs[group] += [
                     Output(identifier=f"gadget_{kind}",
@@ -341,6 +369,8 @@ def setup(role: Role,
                            file=gadget_file,
                            target=GADGET_TARGET),
                 ]
+
+        outputs = OrderedDict((g, items) for g, items in outputs.items() if items)
 
         raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
         allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None

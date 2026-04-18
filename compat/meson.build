@@ -28,6 +28,9 @@ if no_overridden_compat_bits
   build_py = [python, files('build.py')]
 
   components = []
+  if have_local_backend
+    components += ['helper', 'agent']
+  endif
   if build_gadget
     components += 'gadget'
   endif
