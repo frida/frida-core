@@ -431,7 +431,20 @@ quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), de
   'atomics=disabled',
   'stack_check=disabled',
 ])
-lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'), default_options: ['default_library=static'])
+lzfse_dep = dependency('lzfse', required: false, default_options: ['default_library=static'])
+lzfse_from_system = false
+if not lzfse_dep.found() and not meson.is_cross_build()
+  if cc.has_header_symbol('lzfse.h', 'lzfse_decode_buffer')
+    lzfse_lib = cc.find_library('lzfse', required: false)
+    if lzfse_lib.found()
+      lzfse_dep = declare_dependency(dependencies: lzfse_lib)
+      lzfse_from_system = true
+    endif
+  endif
+endif
+if not lzfse_dep.found()
+  lzfse_dep = dependency('lzfse', required: get_option('barebone_backend'), default_options: ['default_library=static'])
+endif
 
 native_glib_dep = dependency('glib-2.0', version: glib_version_req, native: true, default_options: glib_options)
 native_gio_dep = dependency('gio-2.0', native: true)
@@ -725,7 +738,11 @@ endif
 
 if lzfse_dep.found()
   backend_deps_private += lzfse_dep
-  backend_reqs_private += 'lzfse'
+  if lzfse_from_system
+    backend_libs_private += '-llzfse'
+  else
+    backend_reqs_private += 'lzfse'
+  endif
 endif
 
 if host_os_family == 'linux' and have_local_backend
