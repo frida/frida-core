@@ -444,7 +444,9 @@ else
   gio_unix_dep = dependency('gio-unix-2.0')
 endif
 
-if host_os_family == 'linux'
+have_local_backend = get_option('local_backend').allowed()
+
+if host_os_family == 'linux' and have_local_backend
   libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
 endif
 
@@ -493,7 +495,6 @@ else
   codesign = ''
 endif
 
-have_local_backend = get_option('local_backend').allowed()
 have_simmy_backend = get_option('simmy_backend') \
     .disable_auto_if(host_os != 'macos') \
     .require(host_os == 'macos', error_message: 'Simmy backend is only available on macOS') \
@@ -727,7 +728,7 @@ if lzfse_dep.found()
   backend_reqs_private += 'lzfse'
 endif
 
-if host_os_family == 'linux'
+if host_os_family == 'linux' and have_local_backend
   backend_deps_private += libbpf_dep
   backend_reqs_private += 'libbpf'
 endif

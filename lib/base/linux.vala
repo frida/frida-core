@@ -128,6 +128,7 @@ namespace Frida {
 		}
 	}
 
+#if HAVE_LOCAL_BACKEND
 	public sealed class BpfObject {
 		public Programs programs {
 			get;
@@ -522,6 +523,7 @@ namespace Frida {
 			STOP,
 		}
 	}
+#endif
 
 	namespace PerfEvent {
 		public FileDescriptor open (PerfEventAttr * attr, int pid, int cpu, int group_fd, uint flags) throws Error {
@@ -536,7 +538,9 @@ namespace Frida {
 		throw new Error.NOT_SUPPORTED ("%s (errno=%d: %s)".printf (message, Posix.errno, Posix.strerror (Posix.errno)));
 	}
 
+#if HAVE_LOCAL_BACKEND
 	private size_t round_up_8 (size_t x) {
 		return (x + 7) & ~((size_t) 7);
 	}
+#endif
 }

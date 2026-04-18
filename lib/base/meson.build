@@ -48,8 +48,10 @@ if host_os_family == 'linux'
   extra_vala_args += [
     '--pkg=linux',
     '--pkg=frida-atomics',
-    '--pkg=libbpf',
   ]
+  if have_local_backend
+    extra_vala_args += '--pkg=libbpf'
+  endif
 
   syscall_arch_from_abi = {
     'armbe': 'arm',
@@ -76,7 +78,7 @@ extra_deps = []
 if host_os_family != 'windows'
   extra_deps += gio_unix_dep
 endif
-if host_os_family == 'linux'
+if host_os_family == 'linux' and have_local_backend
   extra_deps += libbpf_dep
 endif
 
