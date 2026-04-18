@@ -445,12 +445,7 @@ else
 endif
 
 if host_os_family == 'linux'
-  if have_frida_glib
-    libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
-  else
-    subproject('libbpf', default_options: ['default_library=static'])
-    libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
-  endif
+  libbpf_dep = dependency('libbpf', default_options: ['default_library=static'])
 endif
 
 if host_os == 'android'
