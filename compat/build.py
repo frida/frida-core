@@ -373,7 +373,10 @@ def setup(role: Role,
         outputs = OrderedDict((g, items) for g, items in outputs.items() if items)
 
         raw_allowed_prebuilds = os.environ.get("FRIDA_ALLOWED_PREBUILDS")
-        allowed_prebuilds = set(raw_allowed_prebuilds.split(",")) if raw_allowed_prebuilds is not None else None
+        if raw_allowed_prebuilds is not None:
+            allowed_prebuilds = set(filter(None, raw_allowed_prebuilds.split(",")))
+        else:
+            allowed_prebuilds = None
 
         state = State(role, builddir, top_builddir, frida_version, host_os, host_config, glib_flavor, allowed_prebuilds, outputs)
         serialized_state = base64.b64encode(pickle.dumps(state)).decode('ascii')
