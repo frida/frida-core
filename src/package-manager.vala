@@ -1686,7 +1686,7 @@ namespace Frida {
 						packument_cache[name] = packument_promise;
 					}
 					var packument_node = yield packument_promise.future.wait_async (cancellable);
-					var packument_reader = new Json.Reader (packument_node);
+					var packument_reader = make_json_reader_from_node (packument_node);
 
 					string? version_from_dist_tag = null;
 					if (!packument_reader.read_member ("dist-tags"))
@@ -2279,7 +2279,7 @@ namespace Frida {
 
 		private async Json.Reader fetch (string resource, Cancellable? cancellable) throws Error, IOError {
 			var root = yield fetch_node (resource, cancellable);
-			return new Json.Reader (root);
+			return make_json_reader_from_node (root);
 		}
 
 		private async Json.Node fetch_node (string resource, Cancellable? cancellable) throws Error, IOError {
@@ -2560,7 +2560,7 @@ namespace Frida {
 		} catch (GLib.Error e) {
 			throw new Error.PROTOCOL ("%s", e.message);
 		}
-		return new Json.Reader (p.get_root ());
+		return make_json_reader_from_node (p.get_root ());
 	}
 
 	private class SemverVersion {

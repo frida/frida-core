@@ -523,6 +523,7 @@ def function_is_public(name):
                 "get_dbus_context",
                 "invalidate_dbus_context",
                 "make_json_reader",
+                "make_json_reader_from_node",
                 "make_parameters_dict",
                 "compute_system_parameters",
                 "parse_control_address",

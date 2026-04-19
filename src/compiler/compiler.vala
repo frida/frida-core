@@ -743,14 +743,12 @@ namespace Frida {
 			}
 
 			private void handle_message (string json) throws Error {
-				Json.Node root;
+				Json.Reader reader;
 				try {
-					root = Json.from_string (json);
+					reader = make_json_reader (json);
 				} catch (GLib.Error e) {
 					throw new Error.PROTOCOL ("%s", e.message);
 				}
-
-				var reader = new Json.Reader (root);
 
 				reader.read_member ("type");
 				unowned string? type = reader.get_string_value ();

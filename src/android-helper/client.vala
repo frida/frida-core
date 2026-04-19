@@ -23,7 +23,7 @@ namespace Frida {
 			if (response.is_null ())
 				return HostApplicationInfo.empty ();
 
-			Json.Reader reader = new Json.Reader (response);
+			Json.Reader reader = make_json_reader_from_node (response);
 
 			string? identifier = null;
 			string? name = null;
@@ -75,7 +75,7 @@ namespace Frida {
 
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			Json.Reader reader = new Json.Reader (response);
+			Json.Reader reader = make_json_reader_from_node (response);
 
 			int num_apps = reader.count_elements ();
 			if (num_apps == -1)
@@ -141,7 +141,7 @@ namespace Frida {
 
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			Json.Reader reader = new Json.Reader (response);
+			Json.Reader reader = make_json_reader_from_node (response);
 
 			int num_processes = reader.count_elements ();
 			if (num_processes == -1)
@@ -195,7 +195,7 @@ namespace Frida {
 
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			var r = new Json.Reader (response);
+			var r = make_json_reader_from_node (response);
 			parse_envelope_or_throw (r);
 
 			r.read_element (1);
@@ -265,7 +265,7 @@ namespace Frida {
 
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			var r = new Json.Reader (response);
+			var r = make_json_reader_from_node (response);
 			parse_envelope_or_throw (r);
 		}
 
@@ -279,7 +279,7 @@ namespace Frida {
 
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			var r = new Json.Reader (response);
+			var r = make_json_reader_from_node (response);
 			parse_envelope_or_throw (r);
 
 			r.read_element (1);
@@ -292,7 +292,7 @@ namespace Frida {
 		private async void request_ok (Json.Builder stanza, Cancellable? cancellable) throws Error, IOError {
 			Json.Node response = yield transport.request (stanza.get_root (), cancellable);
 
-			var r = new Json.Reader (response);
+			var r = make_json_reader_from_node (response);
 			parse_envelope_or_throw (r);
 		}
 

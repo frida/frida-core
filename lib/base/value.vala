@@ -421,9 +421,12 @@ namespace Frida {
 	 * data; the destroy notify drops our reference when the reader is finalized.
 	 */
 	public Json.Reader make_json_reader (string json) throws GLib.Error {
-		Json.Node root = Json.from_string (json);
+		return make_json_reader_from_node (Json.from_string (json));
+	}
+
+	public Json.Reader make_json_reader_from_node (Json.Node root) {
 		var reader = new Json.Reader (root);
-		reader.set_data<Json.Node> ("frida-json-root", (owned) root);
+		reader.set_data<Json.Node> ("frida-json-root", root);
 		return reader;
 	}
 }

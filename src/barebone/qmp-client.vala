@@ -401,7 +401,7 @@ namespace Frida.Barebone {
 		}
 
 		private void handle_message (Json.Node message) throws Error {
-			var r = new Json.Reader (message);
+			var r = make_json_reader_from_node (message);
 
 			bool is_response = r.read_member ("id");
 			uint id = 0;

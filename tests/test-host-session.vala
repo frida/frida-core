@@ -1218,14 +1218,12 @@ namespace Frida.HostSessionTest {
 					}
 					""");
 				var message_handler = script.message.connect ((json, data) => {
-					var parser = new Json.Parser ();
+					Json.Reader reader;
 					try {
-						parser.load_from_data (json);
+						reader = make_json_reader (json);
 					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
-
-					var reader = new Json.Reader (parser.get_root ());
 
 					assert (reader.read_member ("type") && reader.get_string_value () == "send");
 					reader.end_member ();
@@ -1477,14 +1475,12 @@ namespace Frida.HostSessionTest {
 				}
 				""");
 			var message_handler = script.message.connect ((json, data) => {
-				var parser = new Json.Parser ();
+				Json.Reader reader;
 				try {
-					parser.load_from_data (json);
+					reader = make_json_reader (json);
 				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
-
-				var reader = new Json.Reader (parser.get_root ());
 
 				assert (reader.read_member ("type") && reader.get_string_value () == "send");
 				reader.end_member ();
