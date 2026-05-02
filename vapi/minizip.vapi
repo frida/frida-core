@@ -4,7 +4,7 @@ namespace Minizip {
 	[CCode (cheader_filename = "minizip/mz_strm.h,minizip/mz_zip.h,minizip/mz_zip_rw.h", cname = "gpointer", cprefix = "mz_zip_reader_",
 		has_destroy_function = false)]
 	public struct Reader {
-		public static Reader create (out Reader stream = null);
+		public static Reader create ();
 		[CCode (cname = "mz_zip_reader_delete")]
 		public static void destroy (ref Reader stream);
 

@@ -350,7 +350,7 @@ def setup(role: Role,
                                target=AGENT_TARGET),
                     ]
 
-        if glib_flavor == "upstream":
+        if glib_flavor == "upstream" and len(compat) > 0:
             kind = "modern" if arch_is_modern(host_os, host_arch) else "legacy"
             _, agent_file, gadget_file = native_file_paths(host_os)
             group = OutputGroup(host_arch)
@@ -496,7 +496,10 @@ def compile(privdir: Path, state: State):
             host_machine = MachineSpec(state.host_os, group.arch, state.host_config, group.triplet)
 
             if state.glib_flavor == "upstream":
-                allowed = None
+                if state.allowed_prebuilds is not None and len(state.allowed_prebuilds) == 0:
+                    allowed = state.allowed_prebuilds
+                else:
+                    allowed = None
             else:
                 allowed = state.allowed_prebuilds
 
