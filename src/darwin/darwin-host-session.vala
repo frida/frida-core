@@ -75,7 +75,7 @@ namespace Frida {
 
 #if HAVE_EMBEDDED_ASSETS
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
-			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
+			agent = new AgentResource (blob.name, copy_to_aligned_pages (blob.data), tempdir);
 #endif
 
 #if IOS || TVOS
@@ -323,6 +323,32 @@ namespace Frida {
 		}
 
 		public extern static string _path_for_application_identifier (string identifier) throws Error;
+
+#if HAVE_EMBEDDED_ASSETS
+		private static Bytes copy_to_aligned_pages (uint8[] data) {
+			size_t page_size = Gum.query_page_size ();
+			size_t size = data.length;
+			uint8 * pages = (uint8 *) Gum.memory_allocate (null, size, page_size, READ | WRITE);
+			Memory.copy (pages, data, size);
+			unowned uint8[] view = (uint8[]) pages;
+			view.length = (int) size;
+			return Bytes.new_with_owner<AlignedPages> (view, new AlignedPages (pages, size));
+		}
+
+		private class AlignedPages {
+			private uint8 * pages;
+			private size_t size;
+
+			public AlignedPages (uint8 * pages, size_t size) {
+				this.pages = pages;
+				this.size = size;
+			}
+
+			~AlignedPages () {
+				Gum.memory_free (pages, size);
+			}
+		}
+#endif
 	}
 
 #if IOS || TVOS
