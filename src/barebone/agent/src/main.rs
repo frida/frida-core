@@ -15,21 +15,21 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use bindings::{
     GBytes, GCancellable, GError, GVariant, GVariantIter, GumScript, g_error_free, g_free,
     g_main_context_default, g_main_context_iteration, g_memdup2, g_object_unref,
-    g_variant_check_format_string, g_variant_get, g_variant_get_child_value, g_variant_get_data,
-    g_variant_get_size, g_variant_get_string, g_variant_get_uint32, g_variant_get_uint64,
-    g_variant_iter_init, g_variant_iter_next, g_variant_new, g_variant_new_from_data,
-    g_variant_new_string, g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free,
-    g_variant_type_new, g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create_sync,
-    gum_script_backend_obtain_qjs, gum_script_load_sync, gum_script_post,
-    gum_script_set_message_handler, gum_script_unload_sync,
+    g_variant_check_format_string, g_variant_get, g_variant_get_byte, g_variant_get_child_value,
+    g_variant_get_data, g_variant_get_size, g_variant_get_string, g_variant_get_uint32,
+    g_variant_get_uint64, g_variant_get_variant, g_variant_iter_init, g_variant_iter_next,
+    g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple,
+    g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gchar,
+    gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
+    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
 };
-use hostlink_virtio::Hostlink;
 use symbols::SymbolTable;
 
 mod glib;
 mod gthread;
 mod gum;
 mod hostlink_virtio;
+mod hostlink_vsock;
 
 mod libc;
 mod pac;
@@ -103,10 +103,36 @@ static mut CONFIG_DATA: &'static [u8] = &[];
 pub static mut MODULE_INFO: Vec<ModuleInfo> = Vec::new();
 pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
 
-static mut TRANSPORT_DRIVER: *mut Hostlink = core::ptr::null_mut();
+pub enum Transport {
+    Virtio(hostlink_virtio::Hostlink),
+    Vsock(hostlink_vsock::Hostlink),
+}
+
+impl Transport {
+    pub fn send(&self, payload: &[u8]) {
+        match self {
+            Transport::Virtio(h) => h.send(payload),
+            Transport::Vsock(h) => h.send(payload),
+        }
+    }
+
+    pub fn process(&self) {
+        match self {
+            Transport::Virtio(h) => h.process(),
+            Transport::Vsock(h) => h.process(),
+        }
+    }
+}
+
+pub enum TransportConfig {
+    Virtio { mmio: u64, irq: u32 },
+    Vsock { host_port: u32 },
+}
+
+static mut TRANSPORT_DRIVER: *mut Transport = core::ptr::null_mut();
 
 #[inline(always)]
-fn transport_set(driver: Hostlink) {
+fn transport_set(driver: Transport) {
     unsafe {
         let boxed = Box::into_raw(Box::new(driver));
         TRANSPORT_DRIVER = boxed;
@@ -114,7 +140,7 @@ fn transport_set(driver: Hostlink) {
 }
 
 #[inline(always)]
-fn transport_get_unchecked() -> &'static Hostlink {
+fn transport_get_unchecked() -> &'static Transport {
     unsafe {
         debug_assert!(!TRANSPORT_DRIVER.is_null());
         &*TRANSPORT_DRIVER
@@ -149,21 +175,24 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         bindings::gum_init_embedded();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        let (mmio, irq, kernel_base, module_info, symbol_table) =
+        let (transport_config, kernel_base, module_info, symbol_table) =
             parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
         xnu::set_kernel_base(kernel_base);
         MODULE_INFO = module_info;
         SYMBOL_TABLE = symbol_table;
 
-        transport_set(
-            Hostlink::init(
-                mmio,
-                irq,
-                Some(on_frame_from_host),
-                ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8,
-            )
-            .unwrap(),
-        );
+        let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
+        let transport = match transport_config {
+            TransportConfig::Virtio { mmio, irq } => Transport::Virtio(
+                hostlink_virtio::Hostlink::init(mmio, irq, Some(on_frame_from_host), wake_token)
+                    .unwrap(),
+            ),
+            TransportConfig::Vsock { host_port } => Transport::Vsock(
+                hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
+                    .unwrap(),
+            ),
+        };
+        transport_set(transport);
 
         let main_context = g_main_context_default();
 
@@ -183,9 +212,9 @@ fn on_frame_from_host(frame: &[u8]) {
     }
 }
 
-unsafe fn parse_config(config: &[u8]) -> (u64, u32, u64, Vec<ModuleInfo>, SymbolTable) {
+unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>, SymbolTable) {
     unsafe {
-        let type_string = c"(tuta(ssuuuu)ay)".as_ptr() as *const gchar;
+        let type_string = c"(yvta(ssuuuu)ay)".as_ptr() as *const gchar;
         let variant_type = g_variant_type_new(type_string);
 
         let root_variant = g_variant_new_from_data(
@@ -197,11 +226,30 @@ unsafe fn parse_config(config: &[u8]) -> (u64, u32, u64, Vec<ModuleInfo>, Symbol
             ptr::null_mut(),
         );
 
-        let hostlink_mmio_variant = g_variant_get_child_value(root_variant, 0);
-        let hostlink_mmio = g_variant_get_uint64(hostlink_mmio_variant);
+        let transport_kind_variant = g_variant_get_child_value(root_variant, 0);
+        let transport_kind = g_variant_get_byte(transport_kind_variant);
 
-        let hostlink_irq_variant = g_variant_get_child_value(root_variant, 1);
-        let hostlink_irq = g_variant_get_uint32(hostlink_irq_variant);
+        let transport_cfg_outer = g_variant_get_child_value(root_variant, 1);
+        let transport_cfg_inner = g_variant_get_variant(transport_cfg_outer);
+        let transport_config = match transport_kind {
+            0 => {
+                let mmio_variant = g_variant_get_child_value(transport_cfg_inner, 0);
+                let mmio = g_variant_get_uint64(mmio_variant);
+                let irq_variant = g_variant_get_child_value(transport_cfg_inner, 1);
+                let irq = g_variant_get_uint32(irq_variant);
+                g_variant_unref(irq_variant);
+                g_variant_unref(mmio_variant);
+                TransportConfig::Virtio { mmio, irq }
+            }
+            1 => {
+                let host_port = g_variant_get_uint32(transport_cfg_inner);
+                TransportConfig::Vsock { host_port }
+            }
+            _ => panic!("Unsupported transport kind: {}", transport_kind),
+        };
+        g_variant_unref(transport_cfg_inner);
+        g_variant_unref(transport_cfg_outer);
+        g_variant_unref(transport_kind_variant);
 
         let kernel_base_variant = g_variant_get_child_value(root_variant, 2);
         let kernel_base = g_variant_get_uint64(kernel_base_variant);
@@ -250,18 +298,10 @@ unsafe fn parse_config(config: &[u8]) -> (u64, u32, u64, Vec<ModuleInfo>, Symbol
         g_variant_unref(symbol_array_variant);
         g_variant_unref(module_info_variant);
         g_variant_unref(kernel_base_variant);
-        g_variant_unref(hostlink_irq_variant);
-        g_variant_unref(hostlink_mmio_variant);
         g_variant_unref(root_variant);
         g_variant_type_free(variant_type);
 
-        (
-            hostlink_mmio,
-            hostlink_irq,
-            kernel_base,
-            module_info,
-            symbol_table,
-        )
+        (transport_config, kernel_base, module_info, symbol_table)
     }
 }
 

@@ -42,19 +42,11 @@ namespace Frida.Barebone {
 			return connection;
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			HostlinkTransportConfig? transport_config = agent_config.transport as HostlinkTransportConfig;
-			if (transport_config == null)
-				throw new Error.NOT_SUPPORTED ("Unsupported transport config: only hostlink is supported for now");
+		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
+		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 
-			var qmp = yield QmpClient.open (transport_config.qmp, 0, cancellable);
-			var link = yield qmp.open_hostlink (cancellable);
-			hostlink = link.connection;
-			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
-				"base-stream", hostlink.get_input_stream (),
-				"close-base-stream", false,
-				"buffer-size", 128 * 1024);
-			output = hostlink.get_output_stream ();
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			var transport_tag = yield connect_transport (cancellable);
 
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
@@ -99,9 +91,9 @@ namespace Frida.Barebone {
 			if (thread_block == null)
 				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
 
-			var config_builder = new VariantBuilder (new VariantType ("(tuta(ssuuuu)ay)"));
-			config_builder.add ("t", link.mmio);
-			config_builder.add ("u", link.irq);
+			var config_builder = new VariantBuilder (new VariantType ("(yvta(ssuuuu)ay)"));
+			config_builder.add_value (transport_tag.get_child_value (0));
+			config_builder.add_value (transport_tag.get_child_value (1));
 			config_builder.add ("t", kernel_base);
 
 			config_builder.open (new VariantType ("a(ssuuuu)"));
@@ -129,7 +121,8 @@ namespace Frida.Barebone {
 			}
 
 			var raw_elf = gdb.make_buffer (new Bytes (elf.get_file_data ()));
-			var missing_symbols = new Gee.ArrayList<string> ();
+			// Slots whose symbol is absent on this kernel are left zero; the agent's
+			// xnu.rs uses Option<fn> and falls back across per-kernel name variants.
 			elf.enumerate_symbols (s => {
 				unowned Gum.ElfSectionDetails? sect = s.section;
 				if (sect != null && sect.name == ".kernel_addrs") {
@@ -138,16 +131,10 @@ namespace Frida.Barebone {
 					if (info != null) {
 						size_t file_offset = (size_t) (sect.offset + (s.address - sect.address));
 						raw_elf.write_pointer (file_offset, kernel_base + info.offset);
-					} else {
-						missing_symbols.add (name);
 					}
 				}
 				return true;
 			});
-			if (!missing_symbols.is_empty) {
-				throw new Error.INVALID_ARGUMENT ("Missing symbols for: %s",
-					string.joinv (", ", missing_symbols.to_array ()));
-			}
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
@@ -205,6 +192,54 @@ namespace Frida.Barebone {
 			process_incoming_messages.begin ();
 
 			return true;
+		}
+
+		private async Variant connect_transport (Cancellable? cancellable) throws Error, IOError {
+			if (agent_config.transport is HostlinkTransportConfig)
+				return yield connect_virtio_transport ((HostlinkTransportConfig) agent_config.transport, cancellable);
+			if (agent_config.transport is VsockTransportConfig)
+				return yield connect_vsock_transport ((VsockTransportConfig) agent_config.transport, cancellable);
+			throw new Error.NOT_SUPPORTED ("Unsupported transport config");
+		}
+
+		private async Variant connect_virtio_transport (HostlinkTransportConfig config, Cancellable? cancellable)
+				throws Error, IOError {
+			var qmp = yield QmpClient.open (config.qmp, 0, cancellable);
+			var link = yield qmp.open_hostlink (cancellable);
+			adopt_hostlink_streams (link.connection);
+
+			Variant[] virtio_cfg = { new Variant.uint64 (link.mmio), new Variant.uint32 (link.irq) };
+			return new Variant.tuple ({
+				new Variant.byte (TRANSPORT_KIND_VIRTIO),
+				new Variant.variant (new Variant.tuple (virtio_cfg))
+			});
+		}
+
+		private async Variant connect_vsock_transport (VsockTransportConfig config, Cancellable? cancellable)
+				throws Error, IOError {
+			var address = new UnixSocketAddress (config.socket_path);
+			var client = new SocketClient ();
+			SocketConnection connection;
+			try {
+				connection = yield client.connect_async (address, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to connect to %s: %s", config.socket_path, e.message);
+			}
+			adopt_hostlink_streams (connection);
+
+			return new Variant.tuple ({
+				new Variant.byte (TRANSPORT_KIND_VSOCK),
+				new Variant.variant (new Variant.uint32 (config.port))
+			});
+		}
+
+		private void adopt_hostlink_streams (SocketConnection connection) {
+			hostlink = connection;
+			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
+				"base-stream", hostlink.get_input_stream (),
+				"close-base-stream", false,
+				"buffer-size", 128 * 1024);
+			output = hostlink.get_output_stream ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

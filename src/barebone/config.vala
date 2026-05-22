@@ -229,6 +229,9 @@ namespace Frida.Barebone {
 					case "hostlink":
 						t = typeof (HostlinkTransportConfig);
 						break;
+					case "vsock":
+						t = typeof (VsockTransportConfig);
+						break;
 					default:
 						break;
 					}
@@ -269,6 +272,33 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
 			if (!qmp.has_prefix ("unix:"))
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
+		}
+	}
+
+	/**
+	 * Vsock transport. The agent inside the guest kernel connects out to the host
+	 * over AF_VSOCK on `port`. The host can't speak vsock directly from frida-core
+	 * (the hypervisor proxies it), so a UNIX-socket bridge is provided by the
+	 * embedder (e.g. vphone-cli); frida-core just reads/writes that socket.
+	 */
+	public sealed class VsockTransportConfig : TransportConfig {
+		/** Path to a UNIX socket the embedder has bridged to the guest's hostlink endpoint. */
+		public string socket_path {
+			get;
+			set;
+		}
+
+		/** Vsock port the guest agent will connect to (advertised to the agent via its config). */
+		public uint port {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (socket_path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.socket_path' is missing");
+			if (port == 0)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.port' is missing");
 		}
 	}
 

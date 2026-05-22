@@ -16,14 +16,21 @@ type ContinuationFn = unsafe extern "C" fn(_parameter: *mut c_void, _wait_result
 unsafe extern "C" {
     static _panic: unsafe extern "C" fn(*const u8);
     static _IOLog: unsafe extern "C" fn(*const u8, ...);
-    static _kalloc: unsafe extern "C" fn(usize) -> *mut u8;
-    static _kfree: unsafe extern "C" fn(*mut u8, usize) -> *mut u8;
+    // QEMU XNU exports plain kalloc/kfree; iOS XNU exports kalloc_data/kfree_data
+    // (modern data-typed allocator KPIs). The host fills in whichever pair the
+    // running kernel provides; the other slot stays null.
+    static _kalloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
+    static _kfree: Option<unsafe extern "C" fn(*mut u8, usize) -> *mut u8>;
+    static _kalloc_data: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
+    static _kfree_data: Option<unsafe extern "C" fn(*mut u8, usize)>;
     static _kernel_thread_start:
         unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
     static _assert_wait: unsafe extern "C" fn(*const u8, u32) -> i32;
     static _assert_wait_timeout: unsafe extern "C" fn(*const u8, u32, u32, u32) -> i32;
     static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
-    static _thread_wakeup: unsafe extern "C" fn(*const u8) -> i32;
+    // QEMU XNU exports thread_wakeup; iOS XNU exports the BSD-style wakeup wrapper.
+    static _thread_wakeup: Option<unsafe extern "C" fn(*const u8) -> i32>;
+    static _wakeup: Option<unsafe extern "C" fn(*const u8)>;
     static _mach_absolute_time: unsafe extern "C" fn() -> u64;
     static _absolutetime_to_nanoseconds: unsafe extern "C" fn(u64, *mut u64);
     static _clock_get_calendar_microtime: unsafe extern "C" fn(*mut u32, *mut u32);
@@ -53,13 +60,28 @@ pub fn io_log(msg: &str) {
     }
 }
 
+// Z_WAITOK (modern XNU): block until allocation succeeds.
+const Z_WAITOK: u32 = 0x0200;
+
 pub fn kalloc(size: usize) -> *mut u8 {
-    unsafe { _kalloc(size) }
+    unsafe {
+        if let Some(f) = _kalloc_data {
+            f(size, Z_WAITOK)
+        } else if let Some(f) = _kalloc {
+            f(size)
+        } else {
+            core::ptr::null_mut()
+        }
+    }
 }
 
 pub fn free(ptr: *mut u8, size: usize) {
     unsafe {
-        _kfree(ptr, size);
+        if let Some(f) = _kfree_data {
+            f(ptr, size);
+        } else if let Some(f) = _kfree {
+            f(ptr, size);
+        }
     }
 }
 
@@ -97,7 +119,16 @@ pub fn thread_block(continuation: Option<ContinuationFn>) -> i32 {
 }
 
 pub fn thread_wakeup(event: *const u8) -> i32 {
-    unsafe { _thread_wakeup(event) }
+    unsafe {
+        if let Some(f) = _thread_wakeup {
+            f(event)
+        } else if let Some(f) = _wakeup {
+            f(event);
+            0
+        } else {
+            0
+        }
+    }
 }
 
 pub fn mach_absolute_time() -> u64 {

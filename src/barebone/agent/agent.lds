@@ -26,6 +26,14 @@ SECTIONS {
     __ZN9IOServiceC2Ev = .; . += 8;
     __ZN8OSSymbol17withCStringNoCopyEPKc = .; . += 8;
     __ZN6OSData9withBytesEPKvj = .; . += 8;
+    _kalloc_data = .; . += 8;
+    _kfree_data = .; . += 8;
+    _wakeup = .; . += 8;
+    _sock_socket = .; . += 8;
+    _sock_connect = .; . += 8;
+    _sock_send = .; . += 8;
+    _sock_receive = .; . += 8;
+    _sock_close = .; . += 8;
   }
   .data.rel.ro : {
     *(.data.rel.ro*)
