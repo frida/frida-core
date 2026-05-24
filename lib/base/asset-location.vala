@@ -36,13 +36,13 @@ namespace Frida {
 		}
 
 		public string derive_asset_path (string arch, string filename) {
+			string root = Path.build_filename (libdir, Config.FRIDA_LIBDIR_NAME);
+			if (FileUtils.test (root, IS_DIR))
 #if DARWIN
-			string installed = Path.build_filename (libdir, Config.FRIDA_LIBDIR_NAME, filename);
+				return Path.build_filename (root, filename);
 #else
-			string installed = Path.build_filename (libdir, Config.FRIDA_LIBDIR_NAME, arch, filename);
+				return Path.build_filename (root, arch, filename);
 #endif
-			if (FileUtils.test (installed, EXISTS))
-				return installed;
 			return Path.build_filename (libdir, filename);
 		}
 
