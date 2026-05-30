@@ -117,6 +117,8 @@ namespace Frida.Agent {
 				void * opaque_injector_state) {
 			Environment._init ();
 
+			apply_linker_notifier_offsets (agent_parameters);
+
 			{
 				Gum.MemoryRange? mapped_range = null;
 
@@ -184,6 +186,25 @@ namespace Frida.Agent {
 			}
 
 			Environment._deinit ();
+		}
+
+		private static void apply_linker_notifier_offsets (string agent_parameters) {
+			foreach (unowned string token in agent_parameters.split ("|")) {
+				if (!token.has_prefix ("linker-notifier-offsets:"))
+					continue;
+
+				uint[] offsets = {};
+				foreach (unowned string entry in token[24:].split (",")) {
+					uint offset;
+					if (uint.try_parse (entry, out offset))
+						offsets += offset;
+				}
+
+				if (offsets.length != 0)
+					Gum.ModuleRegistry.set_rtld_notifier_offsets (offsets);
+
+				return;
+			}
 		}
 
 		public static void resume_after_transition (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
@@ -282,27 +303,29 @@ namespace Frida.Agent {
 		private async void start (owned FileDescriptorTablePadder padder) {
 			string[] tokens = agent_parameters.split ("|");
 			unowned string transport_uri = tokens[0];
-			bool enable_exceptor = true;
+			var exceptor_mode = Gum.ExceptorMode.FULL;
+			bool enable_unwind_broker = true;
 			bool enable_exit_monitor = true;
 			bool enable_thread_suspend_monitor = true;
-			bool enable_unwind_sitter = true;
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
 				else if (option == "sticky")
 					stop_thread_on_unload = false;
 				else if (option == "exceptor:off")
-					enable_exceptor = false;
+					exceptor_mode = OFF;
+				else if (option == "exceptor:handler-only")
+					exceptor_mode = HANDLER_ONLY;
+				else if (option == "unwind-broker:off")
+					enable_unwind_broker = false;
 				else if (option == "exit-monitor:off")
 					enable_exit_monitor = false;
 				else if (option == "thread-suspend-monitor:off")
 					enable_thread_suspend_monitor = false;
-				else if (option == "unwind-sitter:off")
-					enable_unwind_sitter = false;
 			}
 
-			if (!enable_exceptor)
-				Gum.Exceptor.disable ();
+			if (exceptor_mode != FULL)
+				Gum.Exceptor.set_mode (exceptor_mode);
 
 			{
 				var interceptor = Gum.Interceptor.obtain ();
@@ -314,7 +337,7 @@ namespace Frida.Agent {
 				if (enable_thread_suspend_monitor)
 					thread_suspend_monitor = new ThreadSuspendMonitor (this);
 
-				if (enable_unwind_sitter)
+				if (enable_unwind_broker)
 					unwind_sitter = new UnwindSitter (this);
 
 				this.interceptor = interceptor;

@@ -957,6 +957,20 @@ namespace Frida {
 		}
 	}
 
+	public enum Exceptor {
+		FULL,
+		HANDLER_ONLY,
+		OFF;
+
+		public static Exceptor from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Exceptor> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Exceptor> (this);
+		}
+	}
+
 	public enum SpawnStartState {
 		RUNNING,
 		SUSPENDED;
@@ -1375,6 +1389,45 @@ namespace Frida {
 			set;
 		}
 
+		public Exceptor exceptor {
+			get;
+			set;
+			default = FULL;
+		}
+
+		public bool unwind_broker {
+			get;
+			set;
+			default = true;
+		}
+
+		public bool exit_monitor {
+			get;
+			set;
+			default = true;
+		}
+
+		public bool thread_suspend_monitor {
+			get;
+			set;
+			default = true;
+		}
+
+		private Gee.List<uint> linker_notifier_offsets = new Gee.ArrayList<uint> ();
+
+		public void clear_linker_notifier_offsets () {
+			linker_notifier_offsets.clear ();
+		}
+
+		public void add_linker_notifier_offset (uint offset) {
+			linker_notifier_offsets.add (offset);
+		}
+
+		public void enumerate_linker_notifier_offsets (Func<uint> func) {
+			foreach (var offset in linker_notifier_offsets)
+				func (offset);
+		}
+
 		public HashTable<string, Variant> _serialize () {
 			var dict = make_parameters_dict ();
 
@@ -1386,6 +1439,25 @@ namespace Frida {
 
 			if (emulated_agent_path != null)
 				dict["emulated-agent-path"] = new Variant.string (emulated_agent_path);
+
+			if (exceptor != FULL)
+				dict["exceptor"] = new Variant.string (exceptor.to_nick ());
+
+			if (!unwind_broker)
+				dict["unwind-broker"] = new Variant.string ("off");
+
+			if (!exit_monitor)
+				dict["exit-monitor"] = new Variant.string ("off");
+
+			if (!thread_suspend_monitor)
+				dict["thread-suspend-monitor"] = new Variant.string ("off");
+
+			if (!linker_notifier_offsets.is_empty) {
+				var builder = new VariantBuilder (new VariantType ("au"));
+				foreach (uint offset in linker_notifier_offsets)
+					builder.add ("u", offset);
+				dict["linker-notifier-offsets"] = builder.end ();
+			}
 
 			return dict;
 		}
@@ -1412,6 +1484,45 @@ namespace Frida {
 				if (!path.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'emulated-agent-path' option must be a string");
 				options.emulated_agent_path = path.get_string ();
+			}
+
+			Variant? exceptor = dict["exceptor"];
+			if (exceptor != null) {
+				if (!exceptor.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'exceptor' option must be a string");
+				options.exceptor = Exceptor.from_nick (exceptor.get_string ());
+			}
+
+			Variant? unwind_broker = dict["unwind-broker"];
+			if (unwind_broker != null) {
+				if (!unwind_broker.is_of_type (VariantType.STRING) || unwind_broker.get_string () != "off")
+					throw new Error.INVALID_ARGUMENT ("The 'unwind-broker' option is invalid");
+				options.unwind_broker = false;
+			}
+
+			Variant? exit_monitor = dict["exit-monitor"];
+			if (exit_monitor != null) {
+				if (!exit_monitor.is_of_type (VariantType.STRING) || exit_monitor.get_string () != "off")
+					throw new Error.INVALID_ARGUMENT ("The 'exit-monitor' option is invalid");
+				options.exit_monitor = false;
+			}
+
+			Variant? thread_suspend_monitor = dict["thread-suspend-monitor"];
+			if (thread_suspend_monitor != null) {
+				if (!thread_suspend_monitor.is_of_type (VariantType.STRING) ||
+						thread_suspend_monitor.get_string () != "off")
+					throw new Error.INVALID_ARGUMENT ("The 'thread-suspend-monitor' option is invalid");
+				options.thread_suspend_monitor = false;
+			}
+
+			Variant? offsets = dict["linker-notifier-offsets"];
+			if (offsets != null) {
+				if (!offsets.is_of_type (new VariantType ("au")))
+					throw new Error.INVALID_ARGUMENT (
+						"The 'linker-notifier-offsets' option must be an array of uint32");
+				uint n = (uint) offsets.n_children ();
+				for (uint i = 0; i != n; i++)
+					options.add_linker_notifier_offset (offsets.get_child_value (i).get_uint32 ());
 			}
 
 			return options;

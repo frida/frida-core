@@ -739,27 +739,48 @@ namespace Frida {
 		protected string make_agent_parameters (uint pid, string remote_address, HashTable<string, Variant> options) throws Error {
 			var parameters = new StringBuilder (remote_address);
 
-			string[] features = { "exceptor", "exit-monitor", "thread-suspend-monitor" };
-			bool is_system_session = pid == 0;
-			foreach (string feature in features) {
-				bool enabled = true;
+			if (pid == 0) {
+				parameters.append ("|exit-monitor:off|thread-suspend-monitor:off");
+				return parameters.str;
+			}
 
-				if (is_system_session) {
-					enabled = feature == "exceptor";
-				} else {
-					Variant? val = options[feature];
-					if (val != null) {
-						if (!val.is_of_type (VariantType.STRING) || val.get_string () != "off")
-							throw new Error.INVALID_ARGUMENT ("The '%s' option is invalid", feature);
-						enabled = false;
-					}
-				}
+			Variant? exceptor = options["exceptor"];
+			if (exceptor != null) {
+				if (!exceptor.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'exceptor' option is invalid");
+				unowned string mode = exceptor.get_string ();
+				if (mode != "off" && mode != "handler-only")
+					throw new Error.INVALID_ARGUMENT ("The 'exceptor' option is invalid");
+				parameters
+					.append ("|exceptor:")
+					.append (mode);
+			}
 
-				if (!enabled) {
+			string[] toggles = { "unwind-broker", "exit-monitor", "thread-suspend-monitor" };
+			foreach (string feature in toggles) {
+				Variant? val = options[feature];
+				if (val != null) {
+					if (!val.is_of_type (VariantType.STRING) || val.get_string () != "off")
+						throw new Error.INVALID_ARGUMENT ("The '%s' option is invalid", feature);
 					parameters
 						.append_c ('|')
 						.append (feature)
 						.append (":off");
+				}
+			}
+
+			Variant? offsets = options["linker-notifier-offsets"];
+			if (offsets != null) {
+				if (!offsets.is_of_type (new VariantType ("au")))
+					throw new Error.INVALID_ARGUMENT ("The 'linker-notifier-offsets' option is invalid");
+				uint n = (uint) offsets.n_children ();
+				if (n != 0) {
+					parameters.append ("|linker-notifier-offsets:");
+					for (uint i = 0; i != n; i++) {
+						if (i != 0)
+							parameters.append_c (',');
+						parameters.append (offsets.get_child_value (i).get_uint32 ().to_string ());
+					}
 				}
 			}
 
