@@ -65,7 +65,9 @@ namespace Frida {
 						if (runtime != null) {
 							var set_argv0 = (void *) runtime.find_export_by_name ("_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring");
 							if (set_argv0 != null) {
-								interceptor.attach (set_argv0, listener, (void *) HookId.SET_ARGV0);
+								var set_argv0_options = Gum.AttachOptions ();
+								set_argv0_options.listener_function_data = (void *) HookId.SET_ARGV0;
+								interceptor.attach (set_argv0, listener, set_argv0_options);
 								child_recovery_behavior = DEFERRED_UNTIL_SET_ARGV0;
 							}
 						}
@@ -73,8 +75,11 @@ namespace Frida {
 						var selinux = Gum.Process.find_module_by_name ("libselinux.so");
 						if (selinux != null) {
 							var setcontext = (void *) selinux.find_export_by_name ("selinux_android_setcontext");
-							if (setcontext != null)
-								interceptor.attach (setcontext, listener, (void *) HookId.SET_CTX);
+							if (setcontext != null) {
+								var setcontext_options = Gum.AttachOptions ();
+								setcontext_options.listener_function_data = (void *) HookId.SET_CTX;
+								interceptor.attach (setcontext, listener, setcontext_options);
+							}
 						}
 					}
 				} catch (FileError e) {
@@ -82,7 +87,9 @@ namespace Frida {
 			}
 #endif
 
-			interceptor.attach (fork_impl, listener, (void *) HookId.FORK);
+			var fork_options = Gum.AttachOptions ();
+			fork_options.listener_function_data = (void *) HookId.FORK;
+			interceptor.attach (fork_impl, listener, fork_options);
 			interceptor.replace (vfork_impl, fork_impl);
 		}
 

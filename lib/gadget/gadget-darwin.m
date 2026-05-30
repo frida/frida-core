@@ -144,10 +144,8 @@ frida_gadget_environment_ensure_debugger_breakpoints_only (void)
 
     interceptor = gum_interceptor_obtain ();
 
-    gum_interceptor_attach (interceptor, exceptions_set, frida_dont_steal_my_breakpoints,
-        NULL, GUM_ATTACH_FLAGS_NONE);
-    gum_interceptor_attach (interceptor, exceptions_swap, frida_dont_steal_my_breakpoints,
-        NULL, GUM_ATTACH_FLAGS_NONE);
+    gum_interceptor_attach (interceptor, exceptions_set, frida_dont_steal_my_breakpoints, NULL);
+    gum_interceptor_attach (interceptor, exceptions_swap, frida_dont_steal_my_breakpoints, NULL);
 
     g_object_unref (interceptor);
   }

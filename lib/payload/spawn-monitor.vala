@@ -59,7 +59,9 @@ namespace Frida {
 
 			interceptor.attach ((void *) posix_spawn, this);
 
-			interceptor.replace (execve, (void *) replacement_execve, this);
+			var replace_options = Gum.ReplaceOptions ();
+			replace_options.replacement_data = this;
+			interceptor.replace (execve, (void *) replacement_execve, null, replace_options);
 #else
 			Gum.Address execve = 0;
 #if ANDROID

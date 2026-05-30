@@ -31,9 +31,11 @@ namespace Frida {
 			thread_suspend = (ThreadSuspendFunc) kernel.find_export_by_name ("thread_suspend");
 			thread_resume = (ThreadResumeFunc) kernel.find_export_by_name ("thread_resume");
 
-			interceptor.replace ((void *) task_threads, (void *) replacement_task_threads, this);
-			interceptor.replace ((void *) thread_suspend, (void *) replacement_thread_suspend, this);
-			interceptor.replace ((void *) thread_resume, (void *) replacement_thread_resume, this);
+			var replace_options = Gum.ReplaceOptions ();
+			replace_options.replacement_data = this;
+			interceptor.replace ((void *) task_threads, (void *) replacement_task_threads, null, replace_options);
+			interceptor.replace ((void *) thread_suspend, (void *) replacement_thread_suspend, null, replace_options);
+			interceptor.replace ((void *) thread_resume, (void *) replacement_thread_resume, null, replace_options);
 		}
 
 		public override void dispose () {
