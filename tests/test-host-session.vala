@@ -2218,11 +2218,26 @@ namespace Frida.HostSessionTest {
 
 					var session = yield device.attach (process.id);
 					var script = yield session.create_script ("""
-						const meth = ObjC.classes.NSBundle['- initWithURL:'];
-						const origImpl = meth.implementation;
-						meth.implementation = ObjC.implement(meth, function (handle, selector, url) {
-						  return origImpl(handle, selector, NULL);
-						});
+						const objc = {};
+						for (const [name, ret, ...args] of [
+						  ['objc_getClass', 'pointer', 'pointer'],
+						  ['sel_registerName', 'pointer', 'pointer'],
+						  ['class_getInstanceMethod', 'pointer', 'pointer', 'pointer'],
+						  ['method_getImplementation', 'pointer', 'pointer'],
+						  ['method_setImplementation', 'pointer', 'pointer', 'pointer'],
+						])
+						  objc[name] = new NativeFunction(Module.getGlobalExportByName(name), ret, args);
+
+						const cls = objc.objc_getClass(Memory.allocUtf8String('NSBundle'));
+						const sel = objc.sel_registerName(Memory.allocUtf8String('initWithURL:'));
+						const meth = objc.class_getInstanceMethod(cls, sel);
+						const origImpl = new NativeFunction(objc.method_getImplementation(meth),
+						    'pointer', ['pointer', 'pointer', 'pointer']);
+						globalThis._replacement = new NativeCallback(
+						    (handle, selector, url) => origImpl(handle, selector, NULL),
+						    'pointer', ['pointer', 'pointer', 'pointer']);
+						objc.method_setImplementation(meth, globalThis._replacement);
+
 						Interceptor.attach(Module.getGlobalExportByName('abort'), function () {
 						  send('abort');
 						  Thread.sleep(1);
@@ -2279,15 +2294,27 @@ namespace Frida.HostSessionTest {
 
 					var session = yield device.attach (process.id);
 					var script = yield session.create_script ("""
-						const { NSBundle } = ObjC.classes;
-						const meth = NSBundle['+ bundleWithURL:'];
-						const methInner = NSBundle['- initWithURL:'];
-						Interceptor.attach(meth.implementation, {
+						const objc = {};
+						for (const [name, ret, ...args] of [
+						  ['objc_getClass', 'pointer', 'pointer'],
+						  ['sel_registerName', 'pointer', 'pointer'],
+						  ['class_getClassMethod', 'pointer', 'pointer', 'pointer'],
+						  ['class_getInstanceMethod', 'pointer', 'pointer', 'pointer'],
+						  ['method_getImplementation', 'pointer', 'pointer'],
+						])
+						  objc[name] = new NativeFunction(Module.getGlobalExportByName(name), ret, args);
+
+						const cls = objc.objc_getClass(Memory.allocUtf8String('NSBundle'));
+						const outer = objc.class_getClassMethod(cls,
+						    objc.sel_registerName(Memory.allocUtf8String('bundleWithURL:')));
+						const inner = objc.class_getInstanceMethod(cls,
+						    objc.sel_registerName(Memory.allocUtf8String('initWithURL:')));
+						Interceptor.attach(objc.method_getImplementation(outer), {
 						  onEnter(args) {
 						    args[2] = NULL;
 						  }
 						});
-						Interceptor.attach(methInner.implementation, {
+						Interceptor.attach(objc.method_getImplementation(inner), {
 						  onEnter(args) {
 						    args[2] = NULL;
 						  }

@@ -31,6 +31,7 @@ if host_os == 'macos'
     'spawner-macos',
     'spawner-macos-arm64e',
     'exception-catcher-macos',
+    'exception-catcher-macos-arm64e',
     'simple-agent-macos.dylib',
     'resident-agent-macos.dylib',
   ]

@@ -1,65 +1,41 @@
 namespace Frida {
 #if DARWIN
-	public sealed class UnwindSitter : Object {
+	public sealed class UnwindSitter : Object, Gum.UnwindSectionsProvider {
 		public weak ProcessInvader invader {
 			get;
 			construct;
 		}
 
-		private DyldFindUnwindSectionsFunc dyld_find_unwind_sections;
+		public unowned Gum.MemoryRange? range {
+			get { return _range; }
+		}
 
-		private const string LIBDYLD = "/usr/lib/system/libdyld.dylib";
-
-		[CCode (has_target = false)]
-		private delegate int DyldFindUnwindSectionsFunc (void * addr, void * info);
+		private Gum.MemoryRange? _range;
+		private Gum.UnwindBroker broker;
 
 		public UnwindSitter (ProcessInvader invader) {
 			Object (invader: invader);
 		}
 
 		construct {
-			var interceptor = Gum.Interceptor.obtain ();
+			_range = invader.get_memory_range ();
 
-			dyld_find_unwind_sections = (DyldFindUnwindSectionsFunc)
-				Gum.Process.find_module_by_name (LIBDYLD).find_export_by_name ("_dyld_find_unwind_sections");
-
-			interceptor.replace ((void *) dyld_find_unwind_sections, (void *) replacement_dyld_find_unwind_sections, this);
-
-			_hook_libunwind ();
+			broker = Gum.UnwindBroker.obtain ();
+			broker.add_sections_provider (this);
 		}
 
 		public override void dispose () {
-			var interceptor = Gum.Interceptor.obtain ();
-
-			_unhook_libunwind ();
-			interceptor.revert ((void *) dyld_find_unwind_sections);
+			broker.remove_sections_provider (this);
 
 			base.dispose ();
 		}
 
-		private static int replacement_dyld_find_unwind_sections (void * addr, void * info) {
-			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
-			unowned UnwindSitter sitter = (UnwindSitter) context.get_replacement_data ();
-
-			Gum.MemoryRange range = sitter.invader.get_memory_range ();
-			var range_end = range.base_address + range.size;
-
-			var address = Gum.Address.from_pointer (addr);
-#if ARM64
-			address &= 0x7ffffffffULL;
-#endif
-			var is_ours = address >= range.base_address && address < range_end;
-			if (!is_ours)
-				return sitter.dyld_find_unwind_sections (addr, info);
-
-			_fill_unwind_sections (range.base_address, range_end, info);
-
-			return 1;
+		public bool fill (Gum.Address address, void * info) {
+			_fill_unwind_sections (_range.base_address, _range.base_address + _range.size, info);
+			return true;
 		}
 
 		public extern static void _fill_unwind_sections (Gum.Address invader_start, Gum.Address invader_end, void * info);
-		public extern static void _hook_libunwind ();
-		public extern static void _unhook_libunwind ();
 	}
 #else
 	public sealed class UnwindSitter : Object {
