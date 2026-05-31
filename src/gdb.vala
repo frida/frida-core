@@ -136,6 +136,8 @@ namespace Frida.GDB {
 				process_incoming_packets.begin ();
 				write_string (ACK_NOTIFICATION);
 
+				yield prepare_connection (cancellable);
+
 				string supported_response = yield query_property ("Supported", cancellable);
 				supported_features.add_all_array (supported_response.split (";"));
 
@@ -172,6 +174,27 @@ namespace Frida.GDB {
 			}
 
 			return true;
+		}
+
+		protected virtual async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
+		}
+
+		protected async void halt (Cancellable? cancellable) throws Error, IOError {
+			change_state (RUNNING);
+			write_bytes (new Bytes ({ STOP_CHARACTER }));
+			yield wait_until_stopped (cancellable);
+		}
+
+		protected void install_registers (Gee.List<Register> regs) {
+			registers = regs;
+
+			register_by_name = new Gee.HashMap<string, Register> ();
+			foreach (var reg in regs) {
+				register_by_name[reg.name] = reg;
+				string? altname = reg.altname;
+				if (altname != null)
+					register_by_name[altname] = reg;
+			}
 		}
 
 		protected virtual async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
@@ -599,15 +622,7 @@ namespace Frida.GDB {
 			pointer_size = infer_pointer_size_from_arch (spec.arch);
 			byte_order = infer_byte_order_from_arch (spec.arch);
 
-			registers = spec.registers;
-
-			register_by_name = new Gee.HashMap<string, Register> ();
-			foreach (var reg in registers) {
-				register_by_name[reg.name] = reg;
-				string? altname = reg.altname;
-				if (altname != null)
-					register_by_name[altname] = reg;
-			}
+			install_registers (spec.registers);
 		}
 
 		protected void request_stop_info () {
