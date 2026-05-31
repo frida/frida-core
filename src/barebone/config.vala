@@ -116,7 +116,7 @@ namespace Frida.Barebone {
 		}
 	}
 
-	public sealed class ConnectionConfig : Object {
+	public sealed class ConnectionConfig : Object, Json.Serializable {
 		public string host {
 			get;
 			set;
@@ -128,6 +128,41 @@ namespace Frida.Barebone {
 			set;
 			default = 3333;
 		}
+
+		public StubFlavor flavor {
+			get;
+			set;
+			default = GDB_REMOTE;
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "flavor") {
+				var v = Value (typeof (StubFlavor));
+				v.set_enum (parse_stub_flavor (property_node.get_string ()));
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		private static StubFlavor parse_stub_flavor (string? name) {
+			switch (name) {
+				case "vz":	return StubFlavor.VZ;
+				default:	return StubFlavor.GDB_REMOTE;
+			}
+		}
+	}
+
+	/**
+	 * Selects which GDB-remote dialect to speak. GDB_REMOTE drives the generic client
+	 * (QEMU, Corellium, debugserver); VZ drives the Apple Virtualization.framework kernel
+	 * stub, whose lldb-flavoured quirks the generic client cannot handle.
+	 */
+	public enum StubFlavor {
+		GDB_REMOTE,
+		VZ
 	}
 
 	public abstract class AllocatorConfig : Object {

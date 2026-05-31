@@ -916,8 +916,11 @@ namespace Frida.Barebone {
 		private static async void set_addressing_mode (GDB.Client gdb, AddressingMode mode, Cancellable? cancellable)
 				throws Error, IOError {
 			Gee.Set<string> features = gdb.features;
+			string enabled = (mode == PHYSICAL) ? "1" : "0";
 			if ("qemu-phy-mem-mode" in features)
-				yield gdb.execute_simple ("Qqemu.PhyMemMode:" + ((mode == PHYSICAL) ? "1" : "0"), cancellable);
+				yield gdb.execute_simple ("Qqemu.PhyMemMode:" + enabled, cancellable);
+			else if ("vf-phy-mem-mode" in features)
+				yield gdb.execute_simple ("Qvf.PhyMemMode:" + enabled, cancellable);
 			else
 				throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
 		}

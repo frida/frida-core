@@ -91,7 +91,11 @@ namespace Frida {
 				throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
 			}
 
-			var gdb = yield GDB.Client.open (stream, cancellable);
+			GDB.Client gdb;
+			if (config.connection.flavor == Barebone.StubFlavor.VZ)
+				gdb = yield Barebone.VzStubClient.open (stream, cancellable);
+			else
+				gdb = yield GDB.Client.open (stream, cancellable);
 
 			Barebone.Machine machine;
 			switch (gdb.arch) {
