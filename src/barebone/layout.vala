@@ -21,19 +21,16 @@ namespace Frida.Barebone {
 			Object (modules: new Gee.ArrayList<ModuleInfo> (), symbols: new Gee.ArrayList<SymbolInfo> ());
 		}
 
-		public static async Layout load_from_symbol_source (File symbol_source, uint64 kernel_base, ByteOrder byte_order,
-				uint pointer_size, Cancellable? cancellable) throws Error, IOError {
-			var payload = yield Img4.parse_file (symbol_source, cancellable);
-
-			Bytes kerncache = payload.data;
-
-			Gum.DarwinModule mod;
+		public static Gum.DarwinModule parse_kernelcache (Bytes kerncache) throws Error {
 			try {
-				mod = new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
+				return new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
 			} catch (Gum.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
+		}
 
+		public static Layout load_from_module (Gum.DarwinModule mod, Bytes kerncache, uint64 kernel_base, ByteOrder byte_order,
+				uint pointer_size) throws Error {
 			var blob = new Blob (kerncache, byte_order, pointer_size);
 
 			var modules = compute_module_list (mod, blob, kernel_base);

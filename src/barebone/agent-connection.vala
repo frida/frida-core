@@ -24,6 +24,10 @@ namespace Frida.Barebone {
 
 		private const int COMMAND_TIMEOUT_MS = 25000;
 
+		private const size_t KERNEL_PAGE_SIZE = 0x4000;
+		private const uint32 MH_MAGIC_64 = 0xfeedfacfU;
+		private const uint32 CPU_TYPE_ARM64 = 0x0100000cU;
+
 		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config, Machine machine,
 				Allocator allocator, Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
@@ -55,9 +59,10 @@ namespace Frida.Barebone {
 			uint64 kernel_base;
 			Layout layout;
 			if (image_config != null) {
-				kernel_base = image_config.base.address;
-				layout = yield Layout.load_from_symbol_source (File.new_for_path (image_config.file), kernel_base,
-					byte_order, pointer_size, cancellable);
+				var payload = yield Img4.parse_file (File.new_for_path (image_config.file), cancellable);
+				var kernelcache = Layout.parse_kernelcache (payload.data);
+				kernel_base = yield resolve_kernel_base (kernelcache, cancellable);
+				layout = Layout.load_from_module (kernelcache, payload.data, kernel_base, byte_order, pointer_size);
 			} else {
 				kernel_base = 0;
 				layout = new Layout.empty ();
@@ -240,6 +245,49 @@ namespace Frida.Barebone {
 				"close-base-stream", false,
 				"buffer-size", 128 * 1024);
 			output = hostlink.get_output_stream ();
+		}
+
+		private async uint64 resolve_kernel_base (Gum.DarwinModule kernelcache, Cancellable? cancellable)
+				throws Error, IOError {
+			if (image_config.base != null)
+				return image_config.base.address;
+
+			return kernelcache.preferred_address + (yield compute_kernel_slide (kernelcache, cancellable));
+		}
+
+		private async uint64 compute_kernel_slide (Gum.DarwinModule kernelcache, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 text_exec_address = 0;
+			uint64 text_exec_size = 0;
+			for (uint i = 0; i != kernelcache.segments.length; i++) {
+				unowned Gum.DarwinSegment segment = kernelcache.segments.index (i);
+				if (segment.name == "__TEXT_EXEC") {
+					text_exec_address = segment.vm_address;
+					text_exec_size = segment.vm_size;
+					break;
+				}
+			}
+			if (text_exec_address == 0)
+				throw new Error.NOT_SUPPORTED ("Kernelcache is missing the __TEXT_EXEC segment");
+
+			uint64 vbar = yield machine.gdb.exception.thread.read_register ("vbar_el1", cancellable);
+			uint64 text_exec_offset = text_exec_address - kernelcache.preferred_address;
+			uint64 predicted_base = page_start (vbar - text_exec_offset, KERNEL_PAGE_SIZE);
+
+			uint64 runtime_base = yield find_kernel_header (predicted_base, (size_t) text_exec_size, cancellable);
+			return runtime_base - kernelcache.preferred_address;
+		}
+
+		private async uint64 find_kernel_header (uint64 predicted_base, size_t search_span, Cancellable? cancellable)
+				throws Error, IOError {
+			var gdb = machine.gdb;
+			uint64 lowest = predicted_base - search_span;
+			for (uint64 candidate = predicted_base + KERNEL_PAGE_SIZE; candidate >= lowest; candidate -= KERNEL_PAGE_SIZE) {
+				Buffer header = yield gdb.read_buffer (candidate, 8, cancellable);
+				if (header.read_uint32 (0) == MH_MAGIC_64 && header.read_uint32 (4) == CPU_TYPE_ARM64)
+					return candidate;
+			}
+			throw new Error.NOT_SUPPORTED ("Unable to locate kernel Mach-O header to compute KASLR slide");
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {

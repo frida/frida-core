@@ -358,9 +358,8 @@ namespace Frida.Barebone {
 			if (file == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'image.file' is missing");
 
-			if (@base == null)
-				throw new Error.NOT_SUPPORTED ("Config for 'image.base' is missing");
-			@base.check ();
+			if (@base != null)
+				@base.check ();
 
 			if (symbols == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'image.symbols' is invalid");
