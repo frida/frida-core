@@ -123,6 +123,21 @@ namespace Frida {
 				page_size = 0;
 			}
 
+			// Resolve the kernel's runtime layout before building the allocator: on a scattered
+			// SPTM kernel collection the config-supplied addresses are static and must be translated.
+			Barebone.KernelRelocation? relocation = null;
+			uint64 kernel_base = 0;
+			Barebone.ImageConfig? image = config.image;
+			if (image != null) {
+				if (image.base != null) {
+					kernel_base = image.base.address;
+				} else {
+					var payload = yield Barebone.Img4.parse_file (File.new_for_path (image.file), cancellable);
+					relocation = yield Barebone.KernelRelocation.compute (machine, payload.data, cancellable);
+					kernel_base = relocation.reference_base;
+				}
+			}
+
 			Barebone.Allocator allocator;
 			Barebone.AllocatorConfig? ac = config.allocator;
 			if (ac == null) {
@@ -131,8 +146,14 @@ namespace Frida {
 				allocator = new Barebone.PhysicalAllocator (machine, page_size,
 					(Barebone.PhysicalAllocatorConfig) ac);
 			} else if (ac is Barebone.TargetFunctionsAllocatorConfig) {
-				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size,
-					(Barebone.TargetFunctionsAllocatorConfig) ac);
+				var tfa = (Barebone.TargetFunctionsAllocatorConfig) ac;
+				if (relocation != null) {
+					tfa.alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function",
+						relocation.translate (tfa.alloc_function.address));
+					tfa.free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function",
+						relocation.translate (tfa.free_function.address));
+				}
+				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, tfa);
 			} else {
 				assert_not_reached ();
 			}
@@ -140,8 +161,8 @@ namespace Frida {
 			Barebone.AgentConnection? agent_connection = null;
 			Barebone.AgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
-				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, machine, allocator,
-					cancellable);
+				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, relocation,
+					kernel_base, machine, allocator, cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);

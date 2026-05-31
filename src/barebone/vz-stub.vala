@@ -32,6 +32,7 @@ namespace Frida.Barebone {
 
 		protected override async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
 			yield halt (cancellable);
+			yield start_no_ack_mode (cancellable);
 		}
 
 		protected override async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
