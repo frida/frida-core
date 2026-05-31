@@ -88,11 +88,6 @@ namespace Frida.GDB {
 			SKIP_ACKS
 		}
 
-		public enum ChecksumType {
-			PROPER,
-			ZEROED
-		}
-
 		protected const char NOTIFICATION_TYPE_EXIT_STATUS = 'W';
 		protected const char NOTIFICATION_TYPE_EXIT_SIGNAL = 'X';
 		protected const char NOTIFICATION_TYPE_STOP = 'S';
@@ -996,8 +991,7 @@ namespace Frida.GDB {
 		}
 
 		public PacketBuilder make_packet_builder_sized (size_t capacity) {
-			var checksum_type = (ack_mode == SEND_ACKS) ? ChecksumType.PROPER : ChecksumType.ZEROED;
-			return new PacketBuilder (capacity, checksum_type);
+			return new PacketBuilder (capacity);
 		}
 
 		private async Packet read_packet () throws Error, IOError {
@@ -1118,11 +1112,9 @@ namespace Frida.GDB {
 		public sealed class PacketBuilder {
 			private StringBuilder? buffer;
 			private size_t initial_capacity;
-			private ChecksumType checksum_type;
 
-			public PacketBuilder (size_t capacity, ChecksumType checksum_type) {
+			public PacketBuilder (size_t capacity) {
 				this.initial_capacity = capacity + Packet.OVERHEAD;
-				this.checksum_type = checksum_type;
 
 				reset ();
 			}
@@ -1206,13 +1198,7 @@ namespace Frida.GDB {
 
 			public Bytes build () {
 				buffer.append_c (CHECKSUM_CHARACTER);
-
-				if (checksum_type == PROPER) {
-					buffer.append_printf ("%02x", compute_checksum (buffer.str, 1, buffer.len - 2));
-				} else {
-					buffer.append ("00");
-				}
-
+				buffer.append_printf ("%02x", compute_checksum (buffer.str, 1, buffer.len - 2));
 				return StringBuilder.free_to_bytes ((owned) buffer);
 			}
 		}
