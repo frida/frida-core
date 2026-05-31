@@ -412,6 +412,7 @@ namespace Frida.GDB {
 					.build ();
 				write_bytes (command);
 			} else {
+				// Expensive roundtrip
 				yield execute_simple ("Hg" + thread.id, cancellable);
 				var command = make_packet_builder_sized (16)
 					.append ("s")
@@ -1691,15 +1692,20 @@ namespace Frida.GDB {
 		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
 
-			var request = client.make_packet_builder_sized (32)
+			var request = client.make_packet_builder_sized (32);
+			request
 				.append_c ('p')
-				.append_register_id (reg.id)
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
+				.append_register_id (reg.id);
+			if ("vcont" in client.features) {
+				request
+					.append (";thread:")
+					.append (id)
+					.append_c (';');
+			} else {
+				yield client.execute_simple ("Hg" + id, cancellable);
+			}
 
-			var response = yield client.query (request, cancellable);
+			var response = yield client.query (request.build (), cancellable);
 
 			return Protocol.parse_integer_value (response.payload, client.byte_order);
 		}
@@ -1707,17 +1713,22 @@ namespace Frida.GDB {
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
 
-			var command = client.make_packet_builder_sized (48)
+			var command = client.make_packet_builder_sized (48);
+			command
 				.append_c ('P')
 				.append_register_id (reg.id)
 				.append_c ('=')
-				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order))
-				.append (";thread:")
-				.append (id)
-				.append_c (';')
-				.build ();
+				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order));
+			if ("vcont" in client.features) {
+				command
+					.append (";thread:")
+					.append (id)
+					.append_c (';');
+			} else {
+				yield client.execute_simple ("Hg" + id, cancellable);
+			}
 
-			yield client.execute (command, cancellable);
+			yield client.execute (command.build (), cancellable);
 		}
 	}
 
