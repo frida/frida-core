@@ -118,7 +118,8 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			uint64 address = yield machine.invoke (config.alloc_function.address, { size }, cancellable);
+			uint64 address = yield machine.invoke (config.alloc_function.address, { size, config.alloc_flags },
+				cancellable);
 
 			// TODO: Handle alignment.
 

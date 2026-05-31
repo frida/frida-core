@@ -209,6 +209,14 @@ namespace Frida.Barebone {
 			set;
 		}
 
+		/** Extra second argument passed to alloc_function. Modern XNU data allocators are
+		 * kalloc_data_external(size, flags); QEMU's kalloc(size) ignores it. Defaults to zero. */
+		public uint64 alloc_flags {
+			get;
+			set;
+			default = 0;
+		}
+
 		public override void check () throws Error {
 			if (alloc_function == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'allocator.alloc_function' is missing");

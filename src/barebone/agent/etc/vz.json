@@ -1,0 +1,25 @@
+{
+  "connection": {
+    "host": "127.0.0.1",
+    "port": 63988,
+    "flavor": "vz"
+  },
+  "allocator": {
+    "mode": "target-functions",
+    "alloc_function": "0xfffffe0007ab6cdc",
+    "free_function": "0xfffffe0007ab74a8",
+    "alloc_flags": 0
+  },
+  "agent": {
+    "path": "/Users/oleavr/src/frida-core/src/barebone/agent/target/aarch64-unknown-none/release/frida-barebone-agent",
+    "transport": {
+      "type": "vsock",
+      "socket_path": "/var/folders/REPLACE/T/vphone-frida-PID.sock",
+      "port": 1339
+    }
+  },
+  "image": {
+    "file": "/Users/oleavr/src/vphone-cli/vm/iPhone17,3_26.1_23B85_Restore/kernelcache.research.vresearch101",
+    "symbols": {}
+  }
+}
