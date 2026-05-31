@@ -95,6 +95,13 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+#if HAVE_BAREBONE_BACKEND
+		GLib.Test.add_func ("/HostSession/Barebone/Manual/vz-stub", () => {
+			var h = new Harness ((h) => Barebone.Manual.vz_stub.begin (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if HAVE_LOCAL_BACKEND
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
@@ -4342,6 +4349,61 @@ namespace Frida.HostSessionTest {
 		}
 	}
 #endif // HAVE_DROIDY_BACKEND
+
+#if HAVE_BAREBONE_BACKEND
+	namespace Barebone {
+
+		namespace Manual {
+
+			private static async void vz_stub (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode against a running vphone VM> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout ();
+
+				try {
+					uint16 port = 63988;
+					unowned string? port_override = Environment.get_variable ("FRIDA_VZ_STUB_PORT");
+					if (port_override != null)
+						port = (uint16) uint.parse (port_override);
+
+					var connectable = NetworkAddress.parse ("127.0.0.1", port);
+					var connection = yield new SocketClient ().connect_async (connectable);
+
+					var gdb = yield Frida.Barebone.VzStubClient.open (connection);
+
+					printerr ("arch=%s pointer_size=%u\n", gdb.arch.to_nick (), gdb.pointer_size);
+					assert_true (gdb.arch == GDB.TargetArch.ARM64);
+					assert_true (gdb.pointer_size == 8);
+					assert_true ("vf-phy-mem-mode" in gdb.features);
+
+					var thread = gdb.exception.thread;
+					uint64 pc = yield thread.read_register ("pc");
+					uint64 sp = yield thread.read_register ("sp");
+					uint64 lr = yield thread.read_register ("lr");
+					printerr ("pc=0x%" + uint64.FORMAT_MODIFIER + "x sp=0x%" + uint64.FORMAT_MODIFIER + "x lr=0x%"
+						+ uint64.FORMAT_MODIFIER + "x\n", pc, sp, lr);
+
+					var code = yield gdb.read_byte_array (pc, 16);
+					var rendered = new StringBuilder ();
+					foreach (uint8 b in code.get_data ())
+						rendered.append_printf ("%02x ", b);
+					printerr ("[pc]: %s\n", rendered.str);
+
+					yield gdb.close ();
+
+					h.done ();
+				} catch (GLib.Error e) {
+					printerr ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+			}
+		}
+	}
+#endif // HAVE_BAREBONE_BACKEND
 
 #if HAVE_LOCAL_BACKEND
 	private static string parse_string_message_payload (string json) {
