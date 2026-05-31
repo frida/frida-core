@@ -55,6 +55,7 @@ namespace Frida.GDB {
 		private Gee.List<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
 		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
+		internal bool bulk_registers = true;
 		private Gee.Queue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 		private Promise<uint>? write_request;
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
@@ -182,7 +183,13 @@ namespace Frida.GDB {
 		protected async void halt (Cancellable? cancellable) throws Error, IOError {
 			change_state (RUNNING);
 			write_bytes (new Bytes ({ STOP_CHARACTER }));
+			request_stop_info ();
 			yield wait_until_stopped (cancellable);
+		}
+
+		protected async void start_no_ack_mode (Cancellable? cancellable) throws Error, IOError {
+			yield execute_simple ("QStartNoAckMode", cancellable);
+			ack_mode = SKIP_ACKS;
 		}
 
 		protected void install_registers (Gee.List<Register> regs) {
@@ -1638,7 +1645,14 @@ namespace Frida.GDB {
 		}
 
 		public async Gee.Map<string, Variant> read_registers (Cancellable? cancellable = null) throws Error, IOError {
+			if (!client.bulk_registers)
+				return yield read_registers_individually (cancellable);
+
 			var response = yield client.query_simple ("g", cancellable);
+			if (response.payload.length == 0) {
+				client.bulk_registers = false;
+				return yield read_registers_individually (cancellable);
+			}
 
 			var result = new Gee.HashMap<string, Variant> ();
 
@@ -1680,7 +1694,30 @@ namespace Frida.GDB {
 			return result;
 		}
 
+		private async Gee.Map<string, Variant> read_registers_individually (Cancellable? cancellable) throws Error, IOError {
+			var result = new Gee.HashMap<string, Variant> ();
+			foreach (var reg in client.get_registers ()) {
+				if (reg.bitsize != 64)
+					continue;
+				try {
+					result[reg.name] = yield read_register (reg.name, cancellable);
+				} catch (Error e) {
+					// Some system registers are not readable in the current context; skip them.
+				}
+			}
+			return result;
+		}
+
 		public async void write_registers (Gee.Map<string, Variant> regs, Cancellable? cancellable = null) throws Error, IOError {
+			if (!client.bulk_registers) {
+				foreach (var e in regs.entries) {
+					var reg = client.get_register_by_name (e.key);
+					if (reg.bitsize == 64 && e.value.is_of_type (VariantType.UINT64))
+						yield write_register (e.key, e.value.get_uint64 (), cancellable);
+				}
+				return;
+			}
+
 			var builder = client.make_packet_builder_sized (2048)
 				.append_c ('G');
 
