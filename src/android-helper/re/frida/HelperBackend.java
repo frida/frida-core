@@ -100,6 +100,8 @@ public class HelperBackend {
 	public HelperBackend() {
 		Looper.prepareMainLooper();
 
+		preInitVendorExtensions();
+
 		Context context;
 		try {
 			Class<?> ActivityThread = Class.forName("android.app.ActivityThread");
@@ -190,6 +192,23 @@ public class HelperBackend {
 			} catch (Exception e2) {
 				throw new RuntimeException("readlink is not available on this device/API level: " + e2.toString());
 			}
+		}
+	}
+
+	private static void preInitVendorExtensions() {
+		// Nothing OS: AppOpsManager.<clinit> chains into NtAppOpsManager.<clinit>, which
+		// calls NtExtFactory.getOrCreate(...). The factory dispatches through a static
+		// INtExtFactory singleton populated by NtExtFactory.init() — normally invoked
+		// from RuntimeInit.commonInit() during process bring-up, which our helper
+		// bypasses. Invoke it ourselves so the static initializer chain doesn't NPE.
+		invokeStaticVoidIfPresent("com.nothing.NtExtFactory", "init");
+	}
+
+	private static void invokeStaticVoidIfPresent(String className, String methodName) {
+		try {
+			Class.forName(className).getMethod(methodName).invoke(null);
+		} catch (ClassNotFoundException e) {
+		} catch (Throwable ignored) {
 		}
 	}
 
