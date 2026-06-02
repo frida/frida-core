@@ -429,9 +429,12 @@ namespace Frida.Barebone {
 		}
 
 		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Error, IOError {
+			var arm64 = (Arm64Machine) machine;
 			var physical_addresses = new Gee.ArrayList<uint64?> ();
-			for (size_t i = 0; i != payload.n_children (); i++)
-				physical_addresses.add (payload.get_child_value (i).get_uint64 ());
+			for (size_t i = 0; i != payload.n_children (); i++) {
+				uint64 va = payload.get_child_value (i).get_uint64 ();
+				physical_addresses.add (yield arm64.translate_address (va, cancellable));
+			}
 
 			Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
 

@@ -14,7 +14,7 @@ use crate::{
         gum_barebone_try_remap_writable_pages as _gum_barebone_try_remap_writable_pages,
         g_variant_unref, gum_module_get_type, gum_mprotect, gum_query_page_size,
     },
-    gthread, host_rpc, libc, xnu, FridaCommand,
+    gthread, host_rpc, libc, FridaCommand,
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
@@ -62,18 +62,17 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
 ) -> gpointer {
     unsafe {
         let page_size = gum_query_page_size() as usize;
-        let mut physical_addrs = alloc::vec::Vec::with_capacity(n_pages as usize);
+        let mut virtual_addrs = alloc::vec::Vec::with_capacity(n_pages as usize);
 
         let mut current_page = first_page as u64;
         for _ in 0..n_pages {
-            let phys_addr = xnu::ml_vtophys(current_page);
-            physical_addrs.push(phys_addr as gpointer);
+            virtual_addrs.push(current_page as gpointer);
             current_page += page_size as u64;
         }
 
         _gum_barebone_try_remap_writable_pages(
-            physical_addrs.as_ptr() as *mut *const core::ffi::c_void,
-            physical_addrs.len() as guint,
+            virtual_addrs.as_ptr() as *mut *const core::ffi::c_void,
+            virtual_addrs.len() as guint,
         )
     }
 }

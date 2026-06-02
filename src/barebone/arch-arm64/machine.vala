@@ -271,7 +271,8 @@ namespace Frida.Barebone {
 				builder.append_uint64 (new_descriptor);
 			}
 			Bytes new_descriptors = builder.build ();
-			Bytes old_descriptors = yield gdb.read_byte_array (first_available_slot, new_descriptors.get_size (), cancellable);
+			Bytes old_descriptors = (yield read_physical_buffer (first_available_slot, new_descriptors.get_size (),
+				cancellable)).bytes;
 			yield write_physical_buffer (first_available_slot, new_descriptors, cancellable);
 
 			size_t size = num_pages * p.granule;
@@ -289,7 +290,7 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 			uint64 descriptor = yield read_level3_descriptor (va, cancellable);
 			uint64 page_mask = (1ULL << inpage_bits_for_granule (p.granule)) - 1;
 			return (descriptor & INT48_MASK & ~page_mask) | (va & page_mask);
@@ -355,8 +356,10 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 read_level3_descriptor (uint64 va, Cancellable? cancellable) throws Error, IOError {
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
+			bool needs_stub_addressing = physical_memory == null;
+			if (needs_stub_addressing)
+				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
 				var cache = new TableWalkCache ();
 				uint64 table_pa = yield find_level3_table (va, p, cache, cancellable);
@@ -368,7 +371,8 @@ namespace Frida.Barebone {
 				var buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
 				return buf.read_uint64 (0);
 			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+				if (needs_stub_addressing)
+					set_addressing_mode.begin (gdb, VIRTUAL, null);
 			}
 		}
 
