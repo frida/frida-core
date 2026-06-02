@@ -55,6 +55,8 @@ pub enum FridaCommand {
     LoadScript = 2,
     DestroyScript = 3,
     PostScriptMessage = 4,
+    RemapWritablePages = 5,
+    MemoryProtect = 6,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -67,6 +69,8 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::LoadScript => write!(f, "LoadScript"),
             FridaCommand::DestroyScript => write!(f, "DestroyScript"),
             FridaCommand::PostScriptMessage => write!(f, "PostScriptMessage"),
+            FridaCommand::RemapWritablePages => write!(f, "RemapWritablePages"),
+            FridaCommand::MemoryProtect => write!(f, "MemoryProtect"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -147,8 +151,16 @@ fn transport_get_unchecked() -> &'static Transport {
     }
 }
 
+#[inline(always)]
+fn transport_is_up() -> bool {
+    unsafe { !TRANSPORT_DRIVER.is_null() }
+}
+
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
+
+static NEXT_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
+static mut PENDING_REPLIES: BTreeMap<u16, *mut GVariant> = BTreeMap::new();
 
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
@@ -379,6 +391,16 @@ fn process_incoming_message(variant: *mut GVariant) {
             core::mem::transmute::<u8, FridaCommand>(cmd_value)
         };
 
+        if cmd == FridaCommand::Reply {
+            unsafe {
+                core::ptr::addr_of_mut!(PENDING_REPLIES)
+                    .as_mut()
+                    .unwrap()
+                    .insert(request_id, payload_variant);
+            }
+            return;
+        }
+
         let response = match cmd {
             FridaCommand::CreateScript => handle_create_script(payload_variant),
             FridaCommand::LoadScript => handle_load_script(payload_variant),
@@ -407,6 +429,41 @@ fn send_command_reply(request_id: u16, response: HandlerResponse) {
         }
 
         g_variant_unref(message);
+    }
+}
+
+pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant {
+    unsafe {
+        let request_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed) as u16;
+        let message = g_variant_new(
+            c"(yqv)".as_ptr(),
+            command as u8 as u32,
+            request_id as u32,
+            payload,
+        );
+        let transport = transport_get_unchecked();
+        transport.send(&serialize_message(message).unwrap());
+        g_variant_unref(message);
+
+        let wait_event = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
+        loop {
+            xnu::assert_wait(wait_event, xnu::THREAD_INTERRUPTIBLE);
+            transport.process();
+            if let Some(reply) = take_pending_reply(request_id) {
+                xnu::thread_wakeup(wait_event);
+                return reply;
+            }
+            xnu::thread_block(None);
+        }
+    }
+}
+
+fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
+    unsafe {
+        core::ptr::addr_of_mut!(PENDING_REPLIES)
+            .as_mut()
+            .unwrap()
+            .remove(&request_id)
     }
 }
 

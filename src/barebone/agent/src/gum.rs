@@ -7,18 +7,21 @@ use crate::{
         GumPageProtection, GumRwxSupport, GumThreadId, GumTlsKey, g_array_append_vals, g_array_new,
         g_free, g_object_get_type, g_object_new, g_object_unref, g_once_init_enter,
         g_once_init_leave, g_strdup, g_type_add_interface_static, g_type_class_peek_parent,
-        g_type_register_static, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
+        g_type_register_static, g_variant_get_boolean, g_variant_get_uint64, g_variant_new,
+        g_variant_new_fixed_array, g_variant_type_free, g_variant_type_new, gboolean, gchar,
+        gconstpointer, gpointer, gsize, guint,
         gum_barebone_register_module,
         gum_barebone_try_remap_writable_pages as _gum_barebone_try_remap_writable_pages,
-        gum_module_get_type, gum_mprotect, gum_query_page_size,
+        g_variant_unref, gum_module_get_type, gum_mprotect, gum_query_page_size,
     },
-    gthread, libc, xnu,
+    gthread, host_rpc, libc, xnu, FridaCommand,
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
 use alloc::format;
+use core::ffi::CStr;
+use core::mem::size_of;
 use core::ptr;
-use core::{ffi::CStr, ptr::read_volatile};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
@@ -76,24 +79,49 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
 }
 
 #[unsafe(no_mangle)]
-#[inline(never)]
 pub extern "C" fn gum_barebone_try_remap_writable_pages(
     addrs: *const gpointer,
     n_addrs: guint,
 ) -> gpointer {
+    if !crate::transport_is_up() {
+        return ptr::null_mut();
+    }
     unsafe {
-        read_volatile(&n_addrs);
-        read_volatile(addrs)
+        let element_type = g_variant_type_new(c"t".as_ptr());
+        let payload = g_variant_new_fixed_array(
+            element_type,
+            addrs as gconstpointer,
+            n_addrs as gsize,
+            size_of::<u64>() as gsize,
+        );
+        g_variant_type_free(element_type);
+
+        let reply = host_rpc(FridaCommand::RemapWritablePages, payload);
+        let virtual_address = g_variant_get_uint64(reply);
+        g_variant_unref(reply);
+
+        virtual_address as gpointer
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_try_mprotect(
-    _address: gpointer,
-    _size: gsize,
-    _prot: GumPageProtection,
+    address: gpointer,
+    size: gsize,
+    prot: GumPageProtection,
 ) -> gboolean {
-    1
+    if !crate::transport_is_up() {
+        return 1;
+    }
+    unsafe {
+        let payload = g_variant_new(c"(ttu)".as_ptr(), address as u64, size as u64, prot as u32);
+
+        let reply = host_rpc(FridaCommand::MemoryProtect, payload);
+        let success = g_variant_get_boolean(reply);
+        g_variant_unref(reply);
+
+        success
+    }
 }
 
 #[unsafe(no_mangle)]

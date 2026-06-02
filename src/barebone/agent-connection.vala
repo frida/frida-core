@@ -19,8 +19,6 @@ namespace Frida.Barebone {
 
 		private Allocation elf_allocation;
 		private Allocation config_allocation;
-		private Callback mprotect_callback;
-		private Callback remap_writable_pages_callback;
 
 		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
 		private uint16 next_request_id = 1;
@@ -167,27 +165,14 @@ namespace Frida.Barebone {
 			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
 
 			uint64 start_address = 0;
-			uint64 remap_writable_pages_address = 0;
-			uint64 mprotect_address = 0;
 			uint64 base_va = elf_allocation.virtual_address;
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
 					start_address = base_va + e.address;
-				else if (e.name == "gum_barebone_try_remap_writable_pages")
-					remap_writable_pages_address = base_va + e.address;
-				else if (e.name == "gum_try_mprotect")
-					mprotect_address = base_va + e.address;
 				return true;
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
-			if (remap_writable_pages_address == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_barebone_try_remap_writable_pages symbol found");
-			if (mprotect_address == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
-
-			// TODO: BRK-based callbacks panic this research kernel (debug exceptions in kernel
-			// mode); deliver these over vsock-RPC instead.
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
@@ -322,16 +307,7 @@ namespace Frida.Barebone {
 		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable) throws Error, IOError {
 			uint16 request_id = next_request_id++;
 
-			var command_message = new Variant ("(yqv)", (uint8) command, request_id, payload);
-			if (machine.gdb.byte_order != ByteOrder.HOST)
-				command_message = command_message.byteswap ();
-			var command_bytes = command_message.get_data_as_bytes ();
-
-			var builder = machine.gdb.make_buffer_builder ();
-			Bytes frame = builder
-				.append_uint32 ((uint32) command_bytes.get_size ())
-				.append_bytes (command_bytes)
-				.build ();
+			Bytes frame = frame_message (command, request_id, payload);
 
 			var promise = new Promise<Variant> ();
 			pending_requests[request_id] = promise;
@@ -405,6 +381,22 @@ namespace Frida.Barebone {
 						payload.get ("(u&s)", out script_handle, out json);
 
 						script_message (AgentScriptId (script_handle), json, null);
+					} else if (command_code == Command.REMAP_WRITABLE_PAGES) {
+						Variant result;
+						try {
+							result = yield remap_writable_pages (payload, io_cancellable);
+						} catch (Error e) {
+							result = new Variant.uint64 (0);
+						}
+						yield send_reply (request_id, result);
+					} else if (command_code == Command.MEMORY_PROTECT) {
+						Variant result;
+						try {
+							result = yield protect_memory (payload, io_cancellable);
+						} catch (Error e) {
+							result = new Variant.boolean (false);
+						}
+						yield send_reply (request_id, result);
 					} else if (command_code == Command.REPLY) {
 						Promise<Variant>? promise;
 						if (pending_requests.unset (request_id, out promise))
@@ -436,62 +428,45 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private class RemapWritablePagesHandler : Object, CallbackHandler {
-			public signal void output (string message);
+		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Error, IOError {
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			for (size_t i = 0; i != payload.n_children (); i++)
+				physical_addresses.add (payload.get_child_value (i).get_uint64 ());
 
-			public uint arity {
-				get { return 2; }
-			}
+			yield machine.gdb.stop (cancellable);
+			Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
+			yield machine.gdb.continue (cancellable);
 
-			private Machine machine;
-
-			public RemapWritablePagesHandler (Machine machine) {
-				this.machine = machine;
-			}
-
-			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-					throws Error, IOError {
-				var pages = args[0];
-				var num_pages = (uint) args[1];
-
-				var physical_addresses = new Gee.ArrayList<uint64?> ();
-				var gdb = machine.gdb;
-				var reader = new BufferReader (yield gdb.read_buffer (pages, num_pages * gdb.pointer_size, cancellable));
-				for (uint i = 0; i != num_pages; i++)
-					physical_addresses.add (reader.read_pointer ());
-
-				Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
-				// TODO: Handle cleanup.
-
-				return allocation.virtual_address;
-			}
+			return new Variant.uint64 (allocation.virtual_address);
 		}
 
-		private class MemoryProtectHandler : Object, CallbackHandler {
-			public signal void output (string message);
+		private async Variant protect_memory (Variant payload, Cancellable? cancellable) throws Error, IOError {
+			uint64 address;
+			uint64 size;
+			uint32 prot;
+			payload.get ("(ttu)", out address, out size, out prot);
 
-			public uint arity {
-				get { return 3; }
-			}
+			yield machine.gdb.stop (cancellable);
+			yield machine.protect_pages (address, (size_t) size, (Gum.PageProtection) prot, cancellable);
+			yield machine.gdb.continue (cancellable);
 
-			private Machine machine;
+			return new Variant.boolean (true);
+		}
 
-			public MemoryProtectHandler (Machine machine) {
-				this.machine = machine;
-			}
+		private async void send_reply (uint16 request_id, Variant payload) throws GLib.Error {
+			Bytes frame = frame_message (Command.REPLY, request_id, payload);
+			yield output.write_all_async (frame.get_data (), Priority.DEFAULT, io_cancellable, null);
+		}
 
-			public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-					throws Error, IOError {
-				var address = args[0];
-				var size = (size_t) args[1];
-				var prot = (Gum.PageProtection) args[2];
-				try {
-					yield machine.protect_pages (address, size, prot, cancellable);
-					return 1;
-				} catch (GLib.Error e) {
-					return 0;
-				}
-			}
+		private Bytes frame_message (Command command, uint16 request_id, Variant payload) {
+			var message = new Variant ("(yqv)", (uint8) command, request_id, payload);
+			if (machine.gdb.byte_order != ByteOrder.HOST)
+				message = message.byteswap ();
+			var message_bytes = message.get_data_as_bytes ();
+			return machine.gdb.make_buffer_builder ()
+				.append_uint32 ((uint32) message_bytes.get_size ())
+				.append_bytes (message_bytes)
+				.build ();
 		}
 
 		private enum Command {
@@ -499,6 +474,8 @@ namespace Frida.Barebone {
 			LOAD_SCRIPT = 2,
 			DESTROY_SCRIPT = 3,
 			POST_SCRIPT_MESSAGE = 4,
+			REMAP_WRITABLE_PAGES = 5,
+			MEMORY_PROTECT = 6,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}
