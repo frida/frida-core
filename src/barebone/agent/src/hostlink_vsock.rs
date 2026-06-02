@@ -16,6 +16,11 @@ const VMADDR_CID_HOST: u32 = 2;
 
 const MSG_DONTWAIT: c_int = 0x80;
 
+// Darwin errno values for a non-blocking connect handshake that completes in the background.
+const EWOULDBLOCK: c_int = 35;
+const EINPROGRESS: c_int = 36;
+const EISCONN: c_int = 56;
+
 #[repr(C)]
 struct SockaddrVm {
     svm_len: u8,
@@ -122,8 +127,12 @@ impl Hostlink {
                 svm_cid: VMADDR_CID_HOST,
                 svm_zero: [0; 4],
             };
+            // The KPI connect is asynchronous: it returns EWOULDBLOCK/EINPROGRESS and the
+            // handshake completes in the background once the host accepts. Re-calling connect to
+            // poll is invalid (it corrupts the connecting state), so accept the in-progress codes
+            // as success and let the main loop drive I/O once the link is up.
             let rc = _sock_connect(so, &addr as *const _ as *const c_void, 0);
-            if rc != 0 {
+            if rc != 0 && !matches!(rc, EWOULDBLOCK | EINPROGRESS | EISCONN) {
                 _sock_close(so);
                 return Err(());
             }
