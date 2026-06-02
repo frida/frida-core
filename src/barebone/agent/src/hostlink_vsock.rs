@@ -98,11 +98,15 @@ impl Hostlink {
     ) -> Result<Self, ()> {
         unsafe {
             let mut so: SocketT = ptr::null_mut();
+            // The kernel invokes the sock_upcall via an authenticated branch (blraa, IA key)
+            // with the sock_upcall type discriminator, so the pointer must be signed to match.
+            let signed_upcall: SockUpcall =
+                core::mem::transmute(crate::pac::ptrauth_sign(upcall as *const u8, 0x12f7));
             let rc = _sock_socket(
                 AF_VSOCK,
                 SOCK_STREAM,
                 0,
-                Some(upcall),
+                Some(signed_upcall),
                 wake_token as *mut c_void,
                 &mut so,
             );
