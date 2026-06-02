@@ -24,6 +24,11 @@ namespace Frida.Barebone {
 
 		public PhysicalMemory? physical_memory;
 
+		// The kernel's MMU registers (TTBR1, TCR) are fixed, so cache them from the first read
+		// (taken while the target is stopped) to serve later page-table work over the bridge
+		// without halting the running agent.
+		private MMUParameters? cached_mmu_parameters;
+
 		private uint64 code_template_descriptor;
 		private bool code_template_known = false;
 
@@ -178,9 +183,13 @@ namespace Frida.Barebone {
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			// The bridge reads and writes guest physical memory directly, so the stub's
+			// physical-addressing mode (which requires a halted target) is unnecessary.
+			bool needs_stub_addressing = physical_memory == null;
+			if (needs_stub_addressing)
+				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
 				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_addresses, p.tt1, p.first_level,
 					p.upper_bits, p, cancellable);
@@ -189,7 +198,8 @@ namespace Frida.Barebone {
 
 				return allocation;
 			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+				if (needs_stub_addressing)
+					set_addressing_mode.begin (gdb, VIRTUAL, null);
 			}
 		}
 
@@ -364,9 +374,11 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
 				throws Error, IOError {
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			bool needs_stub_addressing = physical_memory == null;
+			if (needs_stub_addressing)
+				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 			try {
 				uint64 page_mask = p.granule - 1;
 				uint64 aligned_va = virtual_address & ~page_mask;
@@ -375,8 +387,15 @@ namespace Frida.Barebone {
 
 				yield perform_protect_pages (aligned_va, num_pages, prot, p, cancellable);
 			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+				if (needs_stub_addressing)
+					set_addressing_mode.begin (gdb, VIRTUAL, null);
 			}
+		}
+
+		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
+			if (cached_mmu_parameters == null)
+				cached_mmu_parameters = yield MMUParameters.load (gdb, cancellable);
+			return cached_mmu_parameters;
 		}
 
 		private async void perform_protect_pages (uint64 start_va, uint num_pages, Gum.PageProtection prot, MMUParameters p,

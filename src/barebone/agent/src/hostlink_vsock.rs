@@ -213,13 +213,18 @@ impl Hostlink {
                 s.rx_have += n;
             }
 
-            if let Some(cb) = self.on_rx {
-                cb(&s.rx_buf[..s.rx_need]);
-            }
+            // Detach the frame and reset receive state before dispatching: the callback may
+            // re-enter process() (a synchronous host RPC issued while handling a command), and
+            // it must start from a clean state instead of re-dispatching this same frame.
+            let frame = core::mem::take(&mut s.rx_buf);
+            let need = s.rx_need;
             s.rx_lenhave = 0;
             s.rx_have = 0;
             s.rx_need = 0;
-            s.rx_buf.clear();
+
+            if let Some(cb) = self.on_rx {
+                cb(&frame[..need]);
+            }
         }
     }
 }

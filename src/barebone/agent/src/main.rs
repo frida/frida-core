@@ -25,6 +25,7 @@ use bindings::{
 };
 use symbols::SymbolTable;
 
+mod ffi;
 mod glib;
 mod gthread;
 mod gum;

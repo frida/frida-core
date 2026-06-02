@@ -433,9 +433,7 @@ namespace Frida.Barebone {
 			for (size_t i = 0; i != payload.n_children (); i++)
 				physical_addresses.add (payload.get_child_value (i).get_uint64 ());
 
-			yield machine.gdb.stop (cancellable);
 			Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
-			yield machine.gdb.continue (cancellable);
 
 			return new Variant.uint64 (allocation.virtual_address);
 		}
@@ -446,9 +444,7 @@ namespace Frida.Barebone {
 			uint32 prot;
 			payload.get ("(ttu)", out address, out size, out prot);
 
-			yield machine.gdb.stop (cancellable);
 			yield machine.protect_pages (address, (size_t) size, (Gum.PageProtection) prot, cancellable);
-			yield machine.gdb.continue (cancellable);
 
 			return new Variant.boolean (true);
 		}
