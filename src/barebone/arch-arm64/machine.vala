@@ -730,17 +730,21 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
+			// The callee may reschedule (e.g. kernel_thread_start) onto another core, and the
+			// stub identifies threads by core; matching the original core's id would strand the
+			// call and clobber that core's now-unrelated thread. Nothing else reaches the landing
+			// zone, so any thread stopping there is ours.
 			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 4, cancellable);
 			GDB.Exception ex = null;
 			do {
 				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
-			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
+			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);
 
-			uint64 retval = yield thread.read_register ("x0", cancellable);
+			GDB.Thread landed = ex.thread;
+			uint64 retval = yield landed.read_register ("x0", cancellable);
 
-			yield thread.write_registers (saved_regs, cancellable);
+			yield landed.write_registers (saved_regs, cancellable);
 
 			if (was_running)
 				yield gdb.continue (cancellable);
@@ -763,15 +767,16 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
+			// As in invoke(): the executed code may migrate our thread to another core,
+			// so match on the end breakpoint alone and finish on the core it landed on.
 			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, end, 4, cancellable);
 			GDB.Exception ex = null;
 			do {
 				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp || ex.thread.id != thread.id);
-			// TODO: Improve GDB.Client to guarantee a single GDB.Thread instance per ID.
+			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);
 
-			yield thread.write_registers (saved_regs, cancellable);
+			yield ex.thread.write_registers (saved_regs, cancellable);
 
 			if (was_running)
 				yield gdb.continue (cancellable);
