@@ -664,7 +664,7 @@ namespace Frida.Barebone {
 			Gum.ElfArm64Relocation type = (Gum.ElfArm64Relocation) r.type;
 			switch (type) {
 				case ABS64:
-					relocated.write_uint64 ((size_t) r.address, base_va + r.symbol.address + r.addend);
+					relocated.write_uint64 ((size_t) r.address, base_va + relocated.read_uint64 ((size_t) r.address));
 					break;
 				case PREL32:
 					var diff = (int64) (base_va + r.symbol.address + r.addend) - (int64) (base_va + r.address);
