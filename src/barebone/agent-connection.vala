@@ -187,7 +187,14 @@ namespace Frida.Barebone {
 				},
 				cancellable);
 
-			yield gdb.continue (cancellable);
+			// The vphone research kernel panics on any synchronous exception taken while a
+			// debugger is attached, which the worker hits in the allocator during gum_init.
+			var arm64 = machine as Arm64Machine;
+			bool post_inject_access_uses_bridge = arm64 != null && arm64.physical_memory != null;
+			if (post_inject_access_uses_bridge)
+				yield gdb.detach (cancellable);
+			else
+				yield gdb.continue (cancellable);
 			yield establish_hostlink (cancellable);
 
 			process_incoming_messages.begin ();
