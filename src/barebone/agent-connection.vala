@@ -186,9 +186,8 @@ namespace Frida.Barebone {
 			if (mprotect_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no gum_try_mprotect symbol found");
 
-			remap_writable_pages_callback = yield new Callback (remap_writable_pages_address,
-				new RemapWritablePagesHandler (machine), machine, cancellable);
-			mprotect_callback = yield new Callback (mprotect_address, new MemoryProtectHandler (machine), machine, cancellable);
+			// TODO: BRK-based callbacks panic this research kernel (debug exceptions in kernel
+			// mode); deliver these over vsock-RPC instead.
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
