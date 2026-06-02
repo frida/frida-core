@@ -13,6 +13,8 @@ namespace Frida.Barebone {
 	public sealed class VzStubClient : GDB.Client {
 		private const size_t MAX_BYTES_PER_READ = 0x800;
 
+		private const uint HALT_TIMEOUT_MSEC = 1000;
+
 		private VzStubClient (IOStream stream) {
 			Object (stream: stream);
 		}
@@ -31,7 +33,7 @@ namespace Frida.Barebone {
 		}
 
 		protected override async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
-			yield halt (cancellable);
+			yield halt (cancellable, HALT_TIMEOUT_MSEC);
 			yield start_no_ack_mode (cancellable);
 		}
 
@@ -60,6 +62,12 @@ namespace Frida.Barebone {
 			pointer_size = GDB.Protocol.parse_uint (host.get_string ("ptrsize"), 10);
 			byte_order = (host.get_string ("endian") == "little") ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN;
 
+			set_max_packet_size (0x4000);
+
+			// Force per-register access: the bulk G packet writes every register by position,
+			// which would clobber the system registers (PAC keys, ...) that must be preserved.
+			bulk_registers = false;
+
 			var regs = new Gee.ArrayList<GDB.Client.Register> ();
 			for (uint n = 0; ; n++) {
 				var response = yield query_simple ("qRegisterInfo%x".printf (n), cancellable);
@@ -71,7 +79,11 @@ namespace Frida.Barebone {
 				string name = descriptor.get_string ("name");
 				string? altname = descriptor.has ("alt-name") ? descriptor.get_string ("alt-name") : null;
 				uint bitsize = GDB.Protocol.parse_uint (descriptor.get_string ("bitsize"), 10);
-				regs.add (new GDB.Client.Register (name, altname, n, bitsize));
+				// Writing system registers back would clobber live state such as the PAC keys
+				// (apiakey*, apdakey*, ...), breaking kernel-wide pointer authentication, so mark
+				// only the general-purpose set as writable.
+				bool writable = descriptor.has ("set") && descriptor.get_string ("set") == "General Purpose Registers";
+				regs.add (new GDB.Client.Register (name, altname, n, bitsize, writable));
 			}
 			install_registers (regs);
 		}

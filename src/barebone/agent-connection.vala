@@ -10,6 +10,7 @@ namespace Frida.Barebone {
 		private OutputStream output;
 
 		private AgentConfig agent_config;
+		private VsockTransportConfig? vsock_transport;
 		private ImageConfig? image_config;
 		private KernelRelocation? relocation;
 		private uint64 kernel_base;
@@ -51,7 +52,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			var transport_tag = yield connect_transport (cancellable);
+			var transport_tag = yield resolve_transport (cancellable);
 
 			var gdb = machine.gdb;
 			ByteOrder byte_order = gdb.byte_order;
@@ -106,6 +107,10 @@ namespace Frida.Barebone {
 			if (thread_block == null)
 				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
 
+			SymbolInfo? panic = symbols["panic"];
+			if (panic != null && machine is Arm64Machine)
+				((Arm64Machine) machine).call_landing_zone = kernel_base + panic.offset;
+
 			var config_builder = new VariantBuilder (new VariantType ("(yvta(ssuuuu)ay)"));
 			config_builder.add_value (transport_tag.get_child_value (0));
 			config_builder.add_value (transport_tag.get_child_value (1));
@@ -153,15 +158,11 @@ namespace Frida.Barebone {
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
-			var bp = yield gdb.add_breakpoint (SOFT, kernel_base + thread_block.offset, 4, cancellable);
-			GDB.Breakpoint? hit_breakpoint = null;
-			do {
-				var exception = yield gdb.continue_until_exception (cancellable);
-				hit_breakpoint = exception.breakpoint;
-			} while (hit_breakpoint != bp);
-			yield bp.remove (cancellable);
+			yield run_until_thread_block (kernel_base + thread_block.offset, cancellable);
 
 			size_t page_size = yield machine.query_page_size (cancellable);
+
+			yield ((Arm64Machine) machine).learn_permission_templates (kernel_base + thread_block.offset, cancellable);
 
 			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
 
@@ -176,9 +177,7 @@ namespace Frida.Barebone {
 					remap_writable_pages_address = base_va + e.address;
 				else if (e.name == "gum_try_mprotect")
 					mprotect_address = base_va + e.address;
-				else
-					return true;
-				return start_address == 0 || mprotect_address == 0 || remap_writable_pages_address == 0;
+				return true;
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
@@ -203,18 +202,59 @@ namespace Frida.Barebone {
 				cancellable);
 
 			yield gdb.continue (cancellable);
+			yield establish_hostlink (cancellable);
 
 			process_incoming_messages.begin ();
 
 			return true;
 		}
 
-		private async Variant connect_transport (Cancellable? cancellable) throws Error, IOError {
+		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Error, IOError {
+			var gdb = machine.gdb;
+			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+
+			GDB.Breakpoint? hit = null;
+			do {
+				var exception = yield gdb.continue_until_exception (cancellable);
+				hit = exception.breakpoint;
+			} while (hit != bp);
+
+			yield bp.remove (cancellable);
+		}
+
+		private async Variant resolve_transport (Cancellable? cancellable) throws Error, IOError {
 			if (agent_config.transport is HostlinkTransportConfig)
 				return yield connect_virtio_transport ((HostlinkTransportConfig) agent_config.transport, cancellable);
-			if (agent_config.transport is VsockTransportConfig)
-				return yield connect_vsock_transport ((VsockTransportConfig) agent_config.transport, cancellable);
+			if (agent_config.transport is VsockTransportConfig) {
+				var config = (VsockTransportConfig) agent_config.transport;
+				vsock_transport = config;
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_VSOCK),
+					new Variant.variant (new Variant.uint32 (config.port))
+				});
+			}
 			throw new Error.NOT_SUPPORTED ("Unsupported transport config");
+		}
+
+		private async void establish_hostlink (Cancellable? cancellable) throws Error, IOError {
+			if (vsock_transport == null)
+				return;
+
+			var address = new UnixSocketAddress (vsock_transport.socket_path);
+			var client = new SocketClient ();
+			while (true) {
+				try {
+					adopt_hostlink_streams (yield client.connect_async (address, cancellable));
+					return;
+				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
+					var source = new TimeoutSource (50);
+					source.set_callback (establish_hostlink.callback);
+					source.attach (MainContext.get_thread_default ());
+					yield;
+				}
+			}
 		}
 
 		private async Variant connect_virtio_transport (HostlinkTransportConfig config, Cancellable? cancellable)
@@ -227,24 +267,6 @@ namespace Frida.Barebone {
 			return new Variant.tuple ({
 				new Variant.byte (TRANSPORT_KIND_VIRTIO),
 				new Variant.variant (new Variant.tuple (virtio_cfg))
-			});
-		}
-
-		private async Variant connect_vsock_transport (VsockTransportConfig config, Cancellable? cancellable)
-				throws Error, IOError {
-			var address = new UnixSocketAddress (config.socket_path);
-			var client = new SocketClient ();
-			SocketConnection connection;
-			try {
-				connection = yield client.connect_async (address, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to connect to %s: %s", config.socket_path, e.message);
-			}
-			adopt_hostlink_streams (connection);
-
-			return new Variant.tuple ({
-				new Variant.byte (TRANSPORT_KIND_VSOCK),
-				new Variant.variant (new Variant.uint32 (config.port))
 			});
 		}
 

@@ -18,9 +18,11 @@ namespace Frida.Barebone {
 		private Gee.List<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		private const size_t KERNEL_PAGE_SIZE = 0x4000;
-		private const size_t KERNEL_TEXT_SEARCH_SPAN = 0x4000000;
+		private const size_t HEADER_PROBE_SPAN = 0x20000;
+		private const uint64 COLLECTION_WINDOW = 0x8000000;
 		private const uint32 MH_MAGIC_64 = 0xfeedfacfU;
 		private const uint32 MH_EXECUTE = 0x2;
+		private const uint32 MH_FILESET = 0xc;
 		private const uint32 CPU_TYPE_ARM64 = 0x0100000cU;
 		private const uint32 LC_SEGMENT_64 = 0x19;
 		private const uint32 LC_FILESET_ENTRY = 0x80000035U;
@@ -32,8 +34,7 @@ namespace Frida.Barebone {
 			size_t kernel_header_offset = (size_t) find_kernel_fileoff (image);
 			Gee.List<SegmentInfo> static_segments = parse_segments (image, kernel_header_offset);
 
-			uint64 vbar = yield gdb.exception.thread.read_register ("vbar_el1", cancellable);
-			uint64 runtime_header = yield find_kernel_header (gdb, vbar, cancellable);
+			uint64 runtime_header = yield find_kernel_header (machine, cancellable);
 			uint32 header_span = 32 + image.read_uint32 (kernel_header_offset + 20);
 			Buffer runtime_image = yield gdb.read_buffer (runtime_header, header_span, cancellable);
 			Gee.List<SegmentInfo> runtime_segments = parse_segments (runtime_image, 0);
@@ -63,15 +64,49 @@ namespace Frida.Barebone {
 			return (uint32) (translate (static_address) - reference_base);
 		}
 
-		private static async uint64 find_kernel_header (GDB.Client gdb, uint64 below, Cancellable? cancellable)
+		/**
+		 * Reads of unmapped memory wedge the VZ stub indefinitely, so the runtime header cannot be
+		 * located by blind-scanning down from a kernel pointer: scattered segments leave unmapped
+		 * gaps in between. We instead walk the kernel's own page tables for the readable ranges and
+		 * probe only the first pages of each — every byte touched is guaranteed mapped.
+		 */
+		private static async uint64 find_kernel_header (Machine machine, Cancellable? cancellable)
 				throws Error, IOError {
-			uint64 lowest = page_start (below, KERNEL_PAGE_SIZE) - KERNEL_TEXT_SEARCH_SPAN;
-			for (uint64 candidate = page_start (below, KERNEL_PAGE_SIZE); candidate >= lowest;
-					candidate -= KERNEL_PAGE_SIZE) {
-				Buffer header = yield gdb.read_buffer (candidate, 16, cancellable);
-				if (header.read_uint32 (0) == MH_MAGIC_64 && header.read_uint32 (4) == CPU_TYPE_ARM64
-						&& header.read_uint32 (12) == MH_EXECUTE)
-					return candidate;
+			var gdb = machine.gdb;
+
+			uint64 vbar = yield gdb.exception.thread.read_register ("vbar_el1", cancellable);
+
+			var range_bases = new Gee.ArrayList<uint64?> ();
+			var range_sizes = new Gee.ArrayList<uint64?> ();
+			yield machine.enumerate_ranges (Gum.PageProtection.READ, details => {
+				if (details.base_va < vbar - COLLECTION_WINDOW || details.base_va > vbar + COLLECTION_WINDOW)
+					return true;
+				range_bases.add (details.base_va);
+				range_sizes.add (details.size);
+				return true;
+			}, cancellable);
+
+			for (int i = 0; i != range_bases.size; i++) {
+				uint64 range_base = range_bases[i];
+				if (range_sizes[i] < 16)
+					continue;
+				Buffer head = yield gdb.read_buffer (range_base, 16, cancellable);
+				if (head.read_uint32 (0) != MH_MAGIC_64 || head.read_uint32 (4) != CPU_TYPE_ARM64)
+					continue;
+
+				uint32 filetype = head.read_uint32 (12);
+				if (filetype == MH_EXECUTE)
+					return range_base;
+				if (filetype != MH_FILESET)
+					continue;
+
+				size_t span = (size_t) uint64.min (range_sizes[i], HEADER_PROBE_SPAN);
+				Buffer region = yield gdb.read_buffer (range_base, span, cancellable);
+				for (size_t off = KERNEL_PAGE_SIZE; off + 16 <= span; off += KERNEL_PAGE_SIZE) {
+					if (region.read_uint32 (off) == MH_MAGIC_64 && region.read_uint32 (off + 4) == CPU_TYPE_ARM64
+							&& region.read_uint32 (off + 12) == MH_EXECUTE)
+						return range_base + off;
+				}
 			}
 			throw new Error.NOT_SUPPORTED ("Unable to locate the runtime com.apple.kernel header");
 		}

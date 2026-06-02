@@ -56,6 +56,10 @@ namespace Frida.GDB {
 		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
+
+		protected void set_max_packet_size (size_t size) {
+			max_packet_size = size;
+		}
 		private Gee.Queue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 		private Promise<uint>? write_request;
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
@@ -180,11 +184,11 @@ namespace Frida.GDB {
 		protected virtual async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		protected async void halt (Cancellable? cancellable) throws Error, IOError {
+		protected async void halt (Cancellable? cancellable, uint timeout_msec = 0) throws Error, IOError {
 			change_state (RUNNING);
 			write_bytes (new Bytes ({ STOP_CHARACTER }));
 			request_stop_info ();
-			yield wait_until_stopped (cancellable);
+			yield wait_until_stopped (cancellable, timeout_msec);
 		}
 
 		protected async void start_no_ack_mode (Cancellable? cancellable) throws Error, IOError {
@@ -382,7 +386,7 @@ namespace Frida.GDB {
 			yield wait_until_stopped (cancellable);
 		}
 
-		private async void wait_until_stopped (Cancellable? cancellable) throws Error, IOError {
+		private async void wait_until_stopped (Cancellable? cancellable, uint timeout_msec = 0) throws Error, IOError {
 			var stop_observer = new StopObserverEntry (() => {
 				wait_until_stopped.callback ();
 				return false;
@@ -396,12 +400,28 @@ namespace Frida.GDB {
 			});
 			cancel_source.attach (MainContext.get_thread_default ());
 
+			bool timed_out = false;
+			TimeoutSource? timeout_source = null;
+			if (timeout_msec != 0) {
+				timeout_source = new TimeoutSource (timeout_msec);
+				timeout_source.set_callback (() => {
+					timed_out = true;
+					wait_until_stopped.callback ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
+			}
+
 			yield;
 
+			if (timeout_source != null)
+				timeout_source.destroy ();
 			cancel_source.destroy ();
 
 			on_stop.remove (stop_observer);
 
+			if (timed_out)
+				throw new Error.TIMED_OUT ("Timed out while waiting for target to stop");
 			if (state == CLOSED)
 				throw new Error.TRANSPORT ("Connection closed while waiting for target to stop");
 		}
@@ -1411,11 +1431,17 @@ namespace Frida.GDB {
 				private set;
 			}
 
-			public Register (string name, string? altname, uint id, uint bitsize) {
+			public bool writable {
+				get;
+				private set;
+			}
+
+			public Register (string name, string? altname, uint id, uint bitsize, bool writable = true) {
 				this.name = name;
 				this.altname = altname;
 				this.id = id;
 				this.bitsize = bitsize;
+				this.writable = writable;
 			}
 		}
 
@@ -1712,7 +1738,7 @@ namespace Frida.GDB {
 			if (!client.bulk_registers) {
 				foreach (var e in regs.entries) {
 					var reg = client.get_register_by_name (e.key);
-					if (reg.bitsize == 64 && e.value.is_of_type (VariantType.UINT64))
+					if (reg.writable && reg.bitsize == 64 && e.value.is_of_type (VariantType.UINT64))
 						yield write_register (e.key, e.value.get_uint64 (), cancellable);
 				}
 				return;

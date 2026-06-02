@@ -24,6 +24,10 @@ backend_sources += files(
   'arch-arm64' / 'machine.vala',
   'arch-unknown' / 'machine.vala',
 )
+if host_os_family == 'darwin'
+  backend_sources += files('vz-physical-memory.vala')
+  backend_vala_args += '--pkg=frida-gum-darwin-1.0'
+endif
 barebone_script_runtime = custom_target('frida-barebone-script-runtime',
   input: [
     'package.json',

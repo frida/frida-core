@@ -1,20 +1,21 @@
 {
   "connection": {
     "host": "127.0.0.1",
-    "port": 63988,
-    "flavor": "vz"
+    "port": 52494,
+    "flavor": "vz",
+    "pid": 49248
   },
   "allocator": {
     "mode": "target-functions",
     "alloc_function": "0xfffffe0007ab6cdc",
     "free_function": "0xfffffe0007ab74a8",
-    "alloc_flags": 0
+    "alloc_flags": 512
   },
   "agent": {
     "path": "/Users/oleavr/src/frida-core/src/barebone/agent/target/aarch64-unknown-none/release/frida-barebone-agent",
     "transport": {
       "type": "vsock",
-      "socket_path": "/var/folders/REPLACE/T/vphone-frida-PID.sock",
+      "socket_path": "/tmp/claude-501/vphone-frida-21528.sock",
       "port": 1339
     }
   },

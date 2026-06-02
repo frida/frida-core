@@ -32,6 +32,7 @@
         -- \
         -Dfrida-core:compat=disabled \
         -Dfrida-core:local_backend=disabled \
+        -Dfrida-core:simmy_backend=disabled \
         -Dfrida-core:fruity_backend=disabled \
         -Dfrida-core:droidy_backend=disabled \
         -Dfrida-core:socket_backend=disabled \

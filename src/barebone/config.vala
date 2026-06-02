@@ -129,6 +129,12 @@ namespace Frida.Barebone {
 			default = 3333;
 		}
 
+		public uint pid {
+			get;
+			set;
+			default = 0;
+		}
+
 		public StubFlavor flavor {
 			get;
 			set;

@@ -14,6 +14,19 @@ namespace Frida.Barebone {
 			get { return "tiny"; }
 		}
 
+		/**
+		 * Return-detection landing zone for invoke(). Defaults to the hijacked thread's own pc, but
+		 * that address is typically a hot scheduler routine (thread_block) which every other thread
+		 * also trips, drowning out our thread's return. Point this at a function that is never called
+		 * during normal operation (e.g. panic) so only our returning thread stops here.
+		 */
+		public uint64 call_landing_zone = 0;
+
+		public PhysicalMemory? physical_memory;
+
+		private uint64 code_template_descriptor;
+		private bool code_template_known = false;
+
 		private enum AddressingMode {
 			VIRTUAL,
 			PHYSICAL
@@ -84,7 +97,7 @@ namespace Frida.Barebone {
 		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, MMUParameters p,
 				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
 			uint max_entries = compute_max_entries (level, p);
-			Buffer entries = yield gdb.read_buffer (table_address, max_entries * Descriptor.SIZE, cancellable);
+			Buffer entries = yield read_physical_buffer (table_address, max_entries * Descriptor.SIZE, cancellable);
 			uint shift = address_shift_at_level (level, p.granule);
 			for (uint i = 0; i != max_entries; i++) {
 				uint64 raw_descriptor = entries.read_uint64 (i * Descriptor.SIZE);
@@ -196,7 +209,7 @@ namespace Frida.Barebone {
 				uint64 chunk_base_address = table_address + (chunk_offset * Descriptor.SIZE);
 				uint chunk_size = uint.min (chunk_max_size, max_entries - chunk_offset);
 
-				Buffer descriptors = yield gdb.read_buffer (chunk_base_address, chunk_size * Descriptor.SIZE, cancellable);
+				Buffer descriptors = yield read_physical_buffer (chunk_base_address, chunk_size * Descriptor.SIZE, cancellable);
 				for (uint i = 0; i != chunk_size && num_available_slots != num_pages; i++) {
 					uint buffer_offset = i * Descriptor.SIZE;
 					uint64 raw_descriptor = descriptors.read_uint64 (buffer_offset);
@@ -238,7 +251,7 @@ namespace Frida.Barebone {
 				return null;
 
 			Gum.PageProtection page_prot = Gum.PageProtection.READ | Gum.PageProtection.WRITE;
-			if (!p.sprr_enabled)
+			if (!p.sprr_enabled && !code_template_known)
 				page_prot |= Gum.PageProtection.EXECUTE;
 
 			var builder = gdb.make_buffer_builder ();
@@ -249,10 +262,104 @@ namespace Frida.Barebone {
 			}
 			Bytes new_descriptors = builder.build ();
 			Bytes old_descriptors = yield gdb.read_byte_array (first_available_slot, new_descriptors.get_size (), cancellable);
-			yield gdb.write_byte_array (first_available_slot, new_descriptors, cancellable);
+			yield write_physical_buffer (first_available_slot, new_descriptors, cancellable);
 
 			size_t size = num_pages * p.granule;
 			return new DescriptorAllocation (first_available_va, size, first_available_slot, old_descriptors, gdb);
+		}
+
+		// The VZ kernel GDB stub does not expose the SPRR registers, so we cannot read the
+		// permission-remapping table that turns a descriptor's AP/XN bits into real access rights.
+		// Granting execute is the case that genuinely needs the right SPRR index, so we sample a
+		// known kernel-code page and replay its exact attribute encoding onto agent text; the
+		// read-only/read-write encodings the AP bits already give us continue to work as-is.
+		public async void learn_permission_templates (uint64 code_va, Cancellable? cancellable) throws Error, IOError {
+			code_template_descriptor = yield read_level3_descriptor (code_va, cancellable);
+			code_template_known = true;
+		}
+
+		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			uint64 descriptor = yield read_level3_descriptor (va, cancellable);
+			uint64 page_mask = (1ULL << inpage_bits_for_granule (p.granule)) - 1;
+			return (descriptor & INT48_MASK & ~page_mask) | (va & page_mask);
+		}
+
+		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory == null) {
+				yield gdb.write_byte_array (va, new Bytes (data), cancellable);
+				return;
+			}
+
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			size_t offset = 0;
+			while (offset < data.length) {
+				uint64 cur_va = va + offset;
+				uint64 pa = yield translate_address (cur_va, cancellable);
+				size_t chunk = size_t.min ((size_t) (p.granule - (cur_va & (p.granule - 1))), data.length - offset);
+				physical_memory.write (pa, data[offset : offset + chunk]);
+				offset += chunk;
+			}
+		}
+
+		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null && physical_memory.contains (pa))
+				return gdb.make_buffer (new Bytes (physical_memory.read (pa, size)));
+			return yield gdb.read_buffer (pa, size, cancellable);
+		}
+
+		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null && physical_memory.contains (pa)) {
+				physical_memory.write (pa, data.get_data ());
+				return;
+			}
+			yield gdb.write_byte_array (pa, data, cancellable);
+		}
+
+		public async uint8[] read_physical (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null && physical_memory.contains (pa))
+				return physical_memory.read (pa, size);
+			return yield read_physical_via_stub (pa, size, cancellable);
+		}
+
+		public async void write_physical (uint64 pa, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null && physical_memory.contains (pa)) {
+				physical_memory.write (pa, data);
+				return;
+			}
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			try {
+				yield gdb.write_byte_array (pa, new Bytes (data), cancellable);
+			} finally {
+				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			}
+		}
+
+		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			try {
+				return (yield gdb.read_byte_array (pa, size, cancellable)).get_data ();
+			} finally {
+				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			}
+		}
+
+		public async uint64 read_level3_descriptor (uint64 va, Cancellable? cancellable) throws Error, IOError {
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			try {
+				var cache = new TableWalkCache ();
+				uint64 table_pa = yield find_level3_table (va, p, cache, cancellable);
+				uint index_bits = num_address_bits_at_level (3, p);
+				uint index_shift = inpage_bits_for_granule (p.granule);
+				uint index_mask = (1U << index_bits) - 1;
+				uint64 index = (va >> index_shift) & index_mask;
+				uint64 slot_pa = table_pa + (index * Descriptor.SIZE);
+				var buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				return buf.read_uint64 (0);
+			} finally {
+				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			}
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
@@ -313,7 +420,7 @@ namespace Frida.Barebone {
 			uint64 first_index = (current_va >> index_shift) & index_mask;
 			uint64 first_slot_pa = table_pa + (first_index * Descriptor.SIZE);
 
-			Buffer descriptors = yield gdb.read_buffer (first_slot_pa, batch_size * Descriptor.SIZE, cancellable);
+			Buffer descriptors = yield read_physical_buffer (first_slot_pa, batch_size * Descriptor.SIZE, cancellable);
 
 			bool any_changed = false;
 			for (uint i = 0; i != batch_size; i++) {
@@ -327,7 +434,7 @@ namespace Frida.Barebone {
 			}
 
 			if (any_changed)
-				yield gdb.write_byte_array (first_slot_pa, descriptors.bytes, cancellable);
+				yield write_physical_buffer (first_slot_pa, descriptors.bytes, cancellable);
 		}
 
 		private async uint64 find_level3_table (uint64 va, MMUParameters p, TableWalkCache cache, Cancellable? cancellable)
@@ -352,7 +459,7 @@ namespace Frida.Barebone {
 				uint index = (uint) ((va >> shift) & (entries - 1));
 				uint64 slot_pa = table_pa + ((uint64) index * Descriptor.SIZE);
 
-				Buffer d_buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				Buffer d_buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
 				uint64 raw = d_buf.read_uint64 (0);
 				Descriptor desc = Descriptor.parse (raw, level, p.granule);
 
@@ -375,7 +482,7 @@ namespace Frida.Barebone {
 				uint index = (uint) ((va >> shift) & (entries - 1));
 				uint64 slot_pa = table_pa + (index * Descriptor.SIZE);
 
-				Buffer d_buf = yield gdb.read_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				Buffer d_buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
 				uint64 raw_desc = d_buf.read_uint64 (0);
 				Descriptor desc = Descriptor.parse (raw_desc, level, p.granule);
 				if (desc.kind != TABLE)
@@ -384,7 +491,7 @@ namespace Frida.Barebone {
 				if ((raw_desc & TABLE_PXN_BIT) != 0) {
 					uint64 new_desc = raw_desc & ~TABLE_PXN_BIT;
 					d_buf.write_uint64 (0, new_desc);
-					yield gdb.write_byte_array (slot_pa, d_buf.bytes, cancellable);
+					yield write_physical_buffer (slot_pa, d_buf.bytes, cancellable);
 				}
 
 				table_pa = desc.target_address;
@@ -585,8 +692,11 @@ namespace Frida.Barebone {
 
 			regs["pc"] = impl;
 
-			uint64 landing_zone = saved_regs["pc"].get_uint64 ();
+			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["pc"].get_uint64 ();
+			// The VZ stub exposes "lr" and "x30" as distinct registers; the live link register is
+			// "lr", so the return address must be written there for the callee's RET to land here.
 			regs["x30"] = landing_zone;
+			regs["lr"] = landing_zone;
 
 			uint64 sp = saved_regs["sp"].get_uint64 ();
 			sp -= RED_ZONE_SIZE;
@@ -1279,7 +1389,11 @@ namespace Frida.Barebone {
 			return prot;
 		}
 
-		private static uint64 apply_protection_bits (uint64 descriptor, Gum.PageProtection prot, MMUParameters p) throws Error {
+		private uint64 apply_protection_bits (uint64 descriptor, Gum.PageProtection prot, MMUParameters p) throws Error {
+			bool want_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
+			if (want_exec && code_template_known)
+				return apply_code_template (descriptor, p);
+
 			uint64 result = descriptor;
 
 			if (p.sprr_enabled) {
@@ -1290,6 +1404,13 @@ namespace Frida.Barebone {
 			}
 
 			return result;
+		}
+
+		// Keep the page's own output address but adopt every attribute bit (the AP/XN SPRR index,
+		// memory type, shareability) from a sampled kernel-code page so the MMU grants EL1 execute.
+		private uint64 apply_code_template (uint64 descriptor, MMUParameters p) {
+			uint64 output_address_mask = INT48_MASK & ~((1ULL << inpage_bits_for_granule (p.granule)) - 1);
+			return (descriptor & output_address_mask) | (code_template_descriptor & ~output_address_mask);
 		}
 
 		private static uint64 apply_non_sprr_protection_bits (uint64 descriptor, Gum.PageProtection prot) {

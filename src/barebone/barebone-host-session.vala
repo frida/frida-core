@@ -116,6 +116,14 @@ namespace Frida {
 					break;
 			}
 
+			// Read the daemon's guest-RAM map only once the stub has halted the VM: reading the
+			// high-VA backing while the vCPUs run blocks mach_vm_read. The map is dynamic (the daemon
+			// reclaims idle RAM), so VzPhysicalMemory re-reads it on demand as the agent maps pages.
+#if DARWIN
+			if (config.connection.flavor == VZ && machine is Barebone.Arm64Machine)
+				((Barebone.Arm64Machine) machine).physical_memory = Barebone.VzPhysicalMemory.open (config.connection.pid);
+#endif
+
 			size_t page_size;
 			try {
 				page_size = yield machine.query_page_size (cancellable);

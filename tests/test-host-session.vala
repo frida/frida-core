@@ -100,6 +100,10 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Barebone.Manual.vz_stub.begin (h as Harness));
 			h.run ();
 		});
+		GLib.Test.add_func ("/HostSession/Barebone/Manual/inject", () => {
+			var h = new Harness ((h) => Barebone.Manual.inject.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if HAVE_LOCAL_BACKEND
@@ -4393,6 +4397,25 @@ namespace Frida.HostSessionTest {
 						rendered.append_printf ("%02x ", b);
 					printerr ("[pc]: %s\n", rendered.str);
 
+					// Hold the kernel halted for a long wall-clock interval (the VZ stub keeps the
+					// virtual counter free-running while paused), then resume and see if it survives.
+					printerr ("[halt] holding kernel halted for 3s...\n");
+					var hsrc = new TimeoutSource (3000);
+					hsrc.set_callback (vz_stub.callback);
+					hsrc.attach (MainContext.get_thread_default ());
+					yield;
+
+					printerr ("[halt] resuming for 1s\n");
+					yield gdb.continue ();
+					var rsrc = new TimeoutSource (1000);
+					rsrc.set_callback (vz_stub.callback);
+					rsrc.attach (MainContext.get_thread_default ());
+					yield;
+					yield gdb.stop ();
+
+					uint64 pc2 = yield gdb.exception.thread.read_register ("pc");
+					printerr ("[halt] pc after resume=0x%" + uint64.FORMAT_MODIFIER + "x\n", pc2);
+
 					yield gdb.close ();
 
 					h.done ();
@@ -4400,6 +4423,58 @@ namespace Frida.HostSessionTest {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
+			}
+
+			private static async void inject (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with FRIDA_BAREBONE_CONFIG set> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout ();
+
+				var backend = new BareboneHostSessionBackend ();
+				var prov = yield h.setup_remote_backend (backend);
+
+				try {
+					Cancellable? cancellable = null;
+
+					var timer = new Timer ();
+					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+					printerr ("[*] Injected in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					var session_id = yield host_session.attach (0, make_parameters_dict (), cancellable);
+					var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
+
+					string received_message = null;
+					bool waiting = false;
+					var handler = h.message_from_script.connect ((script_id, message, data) => {
+						received_message = message;
+						printerr ("[*] Message: %s\n", message);
+						if (waiting)
+							inject.callback ();
+					});
+
+					var script_id = yield session.create_script ("send('hello from kernel');",
+						make_parameters_dict (), cancellable);
+					yield session.load_script (script_id, cancellable);
+
+					if (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					h.disconnect (handler);
+					assert_true (received_message != null);
+				} catch (GLib.Error e) {
+					printerr ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+
+				yield h.teardown_backend (backend);
+
+				h.done ();
 			}
 		}
 	}

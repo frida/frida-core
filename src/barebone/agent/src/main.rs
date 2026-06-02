@@ -163,16 +163,28 @@ pub struct ModuleInfo {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) {
     unsafe {
+        xnu::io_log("frida: _start entry\n\0");
         CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
+        xnu::io_log("frida: _start config stored\n\0");
 
-        xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
+        let _r = xnu::kernel_thread_start(frida_agent_worker, 12345usize as *mut core::ffi::c_void);
     }
 }
 
+// KNOWN ISSUE (vphone research kernel): the worker panics during gum_init_embedded with
+// "debug exceptions enabled in kernel mode". The worker itself is healthy — it runs with
+// PSTATE.D=1 (debug masked) throughout. The panic is the research kernel's synchronous-
+// exception handler reacting to ANY exception the agent takes in kernel mode while the VZ
+// debug stub is active. Two confirmed sources: (1) the host's breakpoint-based Callbacks
+// patch BRK at gum_try_mprotect/remap, and the BRK is a debug exception; (2) a stray jump
+// into the agent's data region during GObject init (instruction abort) — looks like a
+// misapplied relocation for a function pointer stored in .data/.rodata.
 unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
     unsafe {
+        xnu::io_log("frida: worker entry\n\0");
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
+        xnu::io_log("frida: gum_init_embedded done\n\0");
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
         let (transport_config, kernel_base, module_info, symbol_table) =
@@ -180,6 +192,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         xnu::set_kernel_base(kernel_base);
         MODULE_INFO = module_info;
         SYMBOL_TABLE = symbol_table;
+        xnu::io_log("frida: config parsed, init transport\n\0");
 
         let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
         let transport = match transport_config {
@@ -193,6 +206,7 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
             ),
         };
         transport_set(transport);
+        xnu::io_log("frida: transport up, entering main loop\n\0");
 
         let main_context = g_main_context_default();
 

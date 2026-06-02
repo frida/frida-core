@@ -59,10 +59,16 @@ namespace Frida.Barebone {
 			});
 			if (pending_error != null)
 				throw pending_error;
-			if (kmod_info == null)
-				throw new Error.NOT_SUPPORTED ("Unable to find __kmod_info");
-			if (kmod_start == null)
-				throw new Error.NOT_SUPPORTED ("Unable to find __kmod_start");
+			if (kmod_info == null || kmod_start == null) {
+				var only_kernel = new Gee.ArrayList<ModuleInfo> ();
+				only_kernel.add (new ModuleInfo () {
+					name = "mach_kernel",
+					version = mod.source_version ?? "",
+					offset = 0,
+					size = (uint32) blob.size,
+				});
+				return only_kernel;
+			}
 
 			var kexts = new Gee.ArrayList<ModuleInfo> ();
 			var info_pointers = new BufferReader (kmod_info);
@@ -160,7 +166,7 @@ namespace Frida.Barebone {
 
 	private class Blob {
 		private Bytes bytes;
-		private size_t size;
+		public size_t size;
 		public ByteOrder byte_order;
 		public uint pointer_size;
 

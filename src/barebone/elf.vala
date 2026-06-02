@@ -26,7 +26,7 @@ namespace Frida.Barebone {
 			uint64 base_va = allocation.virtual_address;
 
 			Bytes relocated_image = machine.relocate (elf, raw_elf, base_va);
-			yield machine.gdb.write_byte_array (base_va, relocated_image, cancellable);
+			yield machine.write_virtual (base_va, relocated_image.get_data (), cancellable);
 
 			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);
 		} catch (GLib.Error e) {

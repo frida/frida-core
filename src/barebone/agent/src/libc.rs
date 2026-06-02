@@ -138,6 +138,13 @@ pub extern "C" fn _unlink(_path: *const u8) -> i32 {
     -1
 }
 
+// GLib's g_get_num_processors() probes this; report a single CPU so the
+// parallel scanners fall back to their inline path.
+#[unsafe(no_mangle)]
+pub extern "C" fn sysconf(_name: i32) -> isize {
+    1
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
     // On AArch64, we need to flush the instruction cache

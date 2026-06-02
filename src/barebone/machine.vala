@@ -1,5 +1,11 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
+	public interface PhysicalMemory : Object {
+		public abstract uint8[] read (uint64 pa, size_t size) throws Error;
+		public abstract void write (uint64 pa, uint8[] data) throws Error;
+		public abstract bool contains (uint64 pa);
+	}
+
 	public interface Machine : Object {
 		public abstract GDB.Client gdb {
 			get;
@@ -15,6 +21,10 @@ namespace Frida.Barebone {
 		}
 
 		public abstract async size_t query_page_size (Cancellable? cancellable) throws Error, IOError;
+
+		public virtual async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			yield gdb.write_byte_array (va, new Bytes (data), cancellable);
+		}
 
 		public abstract async uint query_exception_level (Cancellable? cancellable) throws Error, IOError;
 
