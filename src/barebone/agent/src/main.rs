@@ -21,7 +21,8 @@ use bindings::{
     g_variant_new, g_variant_new_from_data, g_variant_new_string, g_variant_new_tuple,
     g_variant_new_uint32, g_variant_type_free, g_variant_type_new, g_variant_unref, gchar,
     gpointer, gsize, gum_script_backend_create_sync, gum_script_backend_obtain_qjs,
-    gum_script_load_sync, gum_script_post, gum_script_set_message_handler, gum_script_unload_sync,
+    gum_script_get_stalker, gum_script_load_sync, gum_script_post, gum_script_set_message_handler,
+    gum_script_unload_sync, gum_stalker_exclude, GumMemoryRange,
 };
 use symbols::SymbolTable;
 
@@ -159,6 +160,10 @@ fn transport_is_up() -> bool {
 
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
+static mut OWN_RANGE: GumMemoryRange = GumMemoryRange {
+    base_address: 0,
+    size: 0,
+};
 
 static NEXT_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 static mut PENDING_REPLIES: BTreeMap<u16, *mut GVariant> = BTreeMap::new();
@@ -200,11 +205,12 @@ unsafe extern "C" fn frida_agent_worker(_parameter: *mut core::ffi::c_void, _wai
         xnu::io_log("frida: gum_init_embedded done\n\0");
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
-        let (transport_config, kernel_base, module_info, symbol_table) =
+        let (transport_config, kernel_base, module_info, symbol_table, own_range) =
             parse_config(core::ptr::addr_of!(CONFIG_DATA).read());
         xnu::set_kernel_base(kernel_base);
         MODULE_INFO = module_info;
         SYMBOL_TABLE = symbol_table;
+        OWN_RANGE = own_range;
         xnu::io_log("frida: config parsed, init transport\n\0");
 
         let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
@@ -239,9 +245,11 @@ fn on_frame_from_host(frame: &[u8]) {
     }
 }
 
-unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>, SymbolTable) {
+unsafe fn parse_config(
+    config: &[u8],
+) -> (TransportConfig, u64, Vec<ModuleInfo>, SymbolTable, GumMemoryRange) {
     unsafe {
-        let type_string = c"(yvta(ssuuuu)ay)".as_ptr() as *const gchar;
+        let type_string = c"((tt)yvta(ssuuuu)ay)".as_ptr() as *const gchar;
         let variant_type = g_variant_type_new(type_string);
 
         let root_variant = g_variant_new_from_data(
@@ -253,10 +261,10 @@ unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>,
             ptr::null_mut(),
         );
 
-        let transport_kind_variant = g_variant_get_child_value(root_variant, 0);
+        let transport_kind_variant = g_variant_get_child_value(root_variant, 1);
         let transport_kind = g_variant_get_byte(transport_kind_variant);
 
-        let transport_cfg_outer = g_variant_get_child_value(root_variant, 1);
+        let transport_cfg_outer = g_variant_get_child_value(root_variant, 2);
         let transport_cfg_inner = g_variant_get_variant(transport_cfg_outer);
         let transport_config = match transport_kind {
             0 => {
@@ -278,11 +286,11 @@ unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>,
         g_variant_unref(transport_cfg_outer);
         g_variant_unref(transport_kind_variant);
 
-        let kernel_base_variant = g_variant_get_child_value(root_variant, 2);
+        let kernel_base_variant = g_variant_get_child_value(root_variant, 3);
         let kernel_base = g_variant_get_uint64(kernel_base_variant);
         xnu::set_kernel_base(kernel_base);
 
-        let module_info_variant = g_variant_get_child_value(root_variant, 3);
+        let module_info_variant = g_variant_get_child_value(root_variant, 4);
         let mut iter: GVariantIter = core::mem::zeroed();
         g_variant_iter_init(&mut iter as *mut GVariantIter, module_info_variant);
 
@@ -314,7 +322,7 @@ unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>,
             });
         }
 
-        let symbol_array_variant = g_variant_get_child_value(root_variant, 4);
+        let symbol_array_variant = g_variant_get_child_value(root_variant, 5);
         let symbol_data_ptr = g_variant_get_data(symbol_array_variant) as *const u8;
         let symbol_data_size = g_variant_get_size(symbol_array_variant) as usize;
         let symbol_table = SymbolTable::new(core::slice::from_raw_parts(
@@ -322,13 +330,28 @@ unsafe fn parse_config(config: &[u8]) -> (TransportConfig, u64, Vec<ModuleInfo>,
             symbol_data_size,
         ));
 
+        let own_range_variant = g_variant_get_child_value(root_variant, 0);
+        let mut own_base: u64 = 0;
+        let mut own_size: u64 = 0;
+        g_variant_get(
+            own_range_variant,
+            c"(tt)".as_ptr(),
+            &mut own_base,
+            &mut own_size,
+        );
+        let own_range = GumMemoryRange {
+            base_address: own_base,
+            size: own_size as gsize,
+        };
+
+        g_variant_unref(own_range_variant);
         g_variant_unref(symbol_array_variant);
         g_variant_unref(module_info_variant);
         g_variant_unref(kernel_base_variant);
         g_variant_unref(root_variant);
         g_variant_type_free(variant_type);
 
-        (transport_config, kernel_base, module_info, symbol_table)
+        (transport_config, kernel_base, module_info, symbol_table, own_range)
     }
 }
 
@@ -495,6 +518,8 @@ fn handle_create_script(payload_variant: *mut GVariant) -> HandlerResponse {
             return HandlerResponse::error(&error_string);
         }
 
+        exclude_own_range_from_stalker(script);
+
         let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
 
         let script_id_ptr = Box::into_raw(Box::new(script_id));
@@ -511,6 +536,16 @@ fn handle_create_script(payload_variant: *mut GVariant) -> HandlerResponse {
             .insert(script_id, script);
 
         HandlerResponse::success(g_variant_new_uint32(script_id))
+    }
+}
+
+// Stalker must not instrument our own runtime: when it follows the current
+// thread into the hostlink transport it would deadlock on the locks that the
+// RPC it depends on is holding. The host injected the image, so it tells us our
+// range as part of the config.
+unsafe fn exclude_own_range_from_stalker(script: *mut GumScript) {
+    unsafe {
+        gum_stalker_exclude(gum_script_get_stalker(script), core::ptr::addr_of!(OWN_RANGE));
     }
 }
 

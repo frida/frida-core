@@ -109,27 +109,7 @@ namespace Frida.Barebone {
 			if (panic != null && machine is Arm64Machine)
 				((Arm64Machine) machine).call_landing_zone = kernel_base + panic.offset;
 
-			var config_builder = new VariantBuilder (new VariantType ("(yvta(ssuuuu)ay)"));
-			config_builder.add_value (transport_tag.get_child_value (0));
-			config_builder.add_value (transport_tag.get_child_value (1));
-			config_builder.add ("t", kernel_base);
-
-			config_builder.open (new VariantType ("a(ssuuuu)"));
-			foreach (var m in layout.modules) {
-				config_builder.add ("(ssuuuu)",
-					m.name,
-					m.version,
-					m.offset,
-					m.size,
-					m.start_func_offset,
-					m.stop_func_offset
-				);
-			}
-			config_builder.close ();
-
 			Bytes symbol_data = hash_builder.build (byte_order);
-			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
-				symbol_data));
 
 			Gum.ElfModule elf;
 			try {
@@ -173,6 +153,28 @@ namespace Frida.Barebone {
 			});
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
+
+			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(ssuuuu)ay)"));
+			config_builder.add ("(tt)", base_va, (uint64) elf_allocation.size);
+			config_builder.add_value (transport_tag.get_child_value (0));
+			config_builder.add_value (transport_tag.get_child_value (1));
+			config_builder.add ("t", kernel_base);
+
+			config_builder.open (new VariantType ("a(ssuuuu)"));
+			foreach (var m in layout.modules) {
+				config_builder.add ("(ssuuuu)",
+					m.name,
+					m.version,
+					m.offset,
+					m.size,
+					m.start_func_offset,
+					m.stop_func_offset
+				);
+			}
+			config_builder.close ();
+
+			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
+				symbol_data));
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);

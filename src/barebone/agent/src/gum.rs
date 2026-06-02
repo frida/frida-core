@@ -119,7 +119,32 @@ pub extern "C" fn gum_try_mprotect(
         let success = g_variant_get_boolean(reply);
         g_variant_unref(reply);
 
+        if success != 0 {
+            flush_tlb_range(address as u64, size as u64);
+        }
+
         success
+    }
+}
+
+// The host rewrites our page-table descriptors through the physical-memory
+// bridge, which leaves this CPU's TLB holding the stale translation. Stalker
+// flips a slab page RW then RX in place, so without this the freeze never takes
+// effect and executing the page faults with a permission abort.
+unsafe fn flush_tlb_range(address: u64, size: u64) {
+    unsafe {
+        let page_size = gum_query_page_size() as u64;
+        let start = address & !(page_size - 1);
+        let end = (address + size + page_size - 1) & !(page_size - 1);
+
+        core::arch::asm!("dsb ish", options(nostack, preserves_flags));
+        let mut va = start;
+        while va < end {
+            core::arch::asm!("tlbi vaae1is, {operand}", operand = in(reg) va >> 12,
+                options(nostack, preserves_flags));
+            va += page_size;
+        }
+        core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
     }
 }
 

@@ -600,10 +600,14 @@ unsafe fn lock_notify_all() {
     }
 }
 
+// The thread pointer is exposed to JavaScript as a GumThreadId, so it must fit
+// in a double without losing precision; the low bits keep it unique per thread.
+const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
+
 pub unsafe fn get_current_thread_id() -> u64 {
     let thread_ptr: u64;
     unsafe {
         asm!("mrs {}, tpidr_el1", out(reg) thread_ptr, options(nomem, nostack));
     }
-    thread_ptr
+    thread_ptr & JS_SAFE_THREAD_ID_MASK
 }
