@@ -55,7 +55,7 @@ namespace Frida.Barebone {
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			return p.granule;
 		}
