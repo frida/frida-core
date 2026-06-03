@@ -4452,19 +4452,24 @@ namespace Frida.HostSessionTest {
 					var handler = h.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						printerr ("[*] Message: %s\n", message);
-						if (waiting)
+						if (waiting && "hits=" in message)
 							inject.callback ();
 					});
 
-					var script_id = yield session.create_script ("send('hello from kernel');",
+					var script_id = yield session.create_script ("""
+						const target = DebugSymbol.getFunctionByName('sb_evaluate_internal');
+						let n = 0;
+						const l = Interceptor.attach(target, { onEnter(args) { if (n++ === 0) send('onEnter ran on a kernel thread'); } });
+						Interceptor.flush();
+						send('hook live');
+						setTimeout(() => { l.detach(); Interceptor.flush(); send('hits=' + n); }, 3000);
+						""",
 						make_parameters_dict (), cancellable);
 					yield session.load_script (script_id, cancellable);
 
-					if (received_message == null) {
-						waiting = true;
-						yield;
-						waiting = false;
-					}
+					waiting = true;
+					yield;
+					waiting = false;
 					h.disconnect (handler);
 					assert_true (received_message != null);
 				} catch (GLib.Error e) {
