@@ -59,6 +59,7 @@ pub enum FridaCommand {
     PostScriptMessage = 4,
     RemapWritablePages = 5,
     MemoryProtect = 6,
+    PatchCode = 7,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -73,6 +74,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::PostScriptMessage => write!(f, "PostScriptMessage"),
             FridaCommand::RemapWritablePages => write!(f, "RemapWritablePages"),
             FridaCommand::MemoryProtect => write!(f, "MemoryProtect"),
+            FridaCommand::PatchCode => write!(f, "PatchCode"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }

@@ -406,6 +406,14 @@ namespace Frida.Barebone {
 							result = new Variant.boolean (false);
 						}
 						yield send_reply (request_id, result);
+					} else if (command_code == Command.PATCH_CODE) {
+						Variant result;
+						try {
+							result = yield patch_code (payload, io_cancellable);
+						} catch (Error e) {
+							result = new Variant.boolean (false);
+						}
+						yield send_reply (request_id, result);
 					} else if (command_code == Command.REPLY) {
 						Promise<Variant>? promise;
 						if (pending_requests.unset (request_id, out promise))
@@ -461,6 +469,29 @@ namespace Frida.Barebone {
 			return new Variant.boolean (true);
 		}
 
+		// CTRR/KTRR locks kernel text read-only against the guest CPU, so the agent cannot patch it
+		// even through a writable alias. The physical-memory bridge writes the backing store directly,
+		// which the lock does not cover, letting us land hooks in kernel and kext text.
+		private async Variant patch_code (Variant payload, Cancellable? cancellable) throws Error, IOError {
+			var arm64 = (Arm64Machine) machine;
+			uint64 va;
+			Variant bytes_value;
+			payload.get ("(t@ay)", out va, out bytes_value);
+			var data = (uint8[]) bytes_value.get_data_as_bytes ().get_data ();
+
+			size_t page_size = yield machine.query_page_size (cancellable);
+			size_t offset = 0;
+			while (offset < data.length) {
+				uint64 page_va = va + offset;
+				uint64 pa = yield arm64.translate_address (page_va, cancellable);
+				size_t chunk = size_t.min (page_size - (size_t) (page_va & (page_size - 1)), data.length - offset);
+				yield arm64.write_physical (pa, data[offset : offset + chunk], cancellable);
+				offset += chunk;
+			}
+
+			return new Variant.boolean (true);
+		}
+
 		private async void send_reply (uint16 request_id, Variant payload) throws GLib.Error {
 			Bytes frame = frame_message (Command.REPLY, request_id, payload);
 			yield output.write_all_async (frame.get_data (), Priority.DEFAULT, io_cancellable, null);
@@ -484,6 +515,7 @@ namespace Frida.Barebone {
 			POST_SCRIPT_MESSAGE = 4,
 			REMAP_WRITABLE_PAGES = 5,
 			MEMORY_PROTECT = 6,
+			PATCH_CODE = 7,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

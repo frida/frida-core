@@ -1,6 +1,7 @@
 use crate::{
     bindings::{
         _GInterfaceInfo, _GTypeInfo, _GumPageProtection_GUM_PAGE_EXECUTE,
+        _GumPageProtection_GUM_PAGE_READ, _GumPageProtection_GUM_PAGE_WRITE,
         _GumRwxSupport_GUM_RWX_NONE, GArray, GObject, GObjectClass, GPrivate, GType,
         GumDebugSymbolDetails, GumExportDetails, GumExportType_GUM_EXPORT_FUNCTION,
         GumFoundExportFunc, GumMemoryRange, GumModule, GumModuleInterface, GumModuleRegistry,
@@ -19,9 +20,62 @@ use crate::{
 use alloc::boxed::Box;
 use alloc::ffi::CString;
 use alloc::format;
+use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::mem::size_of;
 use core::ptr;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+// Code slabs the agent allocates are normal writable RAM, so gum can keep a real writable alias to
+// them across the slab's lifetime. Pre-existing kernel/kext text is CTRR-locked and can only be
+// modified through the host's physical-memory bridge, so we shadow it and commit on dispose. We
+// distinguish the two by tracking the executable ranges we hand out.
+static SLAB_LOCK: AtomicU32 = AtomicU32::new(0);
+static mut SLABS: Vec<(u64, u64)> = Vec::new();
+
+const SHADOW_MAGIC: u64 = 0x4644_4f48_5341_4853;
+const SHADOW_HEADER: usize = 24;
+const SHADOW_MIN_ADDRESS: u64 = 0xffff_f000_0000_0000;
+
+fn slab_lock() {
+    while SLAB_LOCK
+        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        core::hint::spin_loop();
+    }
+}
+
+fn slab_unlock() {
+    SLAB_LOCK.store(0, Ordering::Release);
+}
+
+fn register_slab(start: u64, size: usize) {
+    slab_lock();
+    unsafe {
+        (*core::ptr::addr_of_mut!(SLABS)).push((start, start + size as u64));
+    }
+    slab_unlock();
+}
+
+fn unregister_slab(start: u64) {
+    slab_lock();
+    unsafe {
+        (*core::ptr::addr_of_mut!(SLABS)).retain(|&(begin, _)| begin != start);
+    }
+    slab_unlock();
+}
+
+fn is_agent_slab(address: u64) -> bool {
+    slab_lock();
+    let found = unsafe {
+        (*core::ptr::addr_of!(SLABS))
+            .iter()
+            .any(|&(begin, end)| address >= begin && address < end)
+    };
+    slab_unlock();
+    found
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
@@ -60,9 +114,16 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
     first_page: gpointer,
     n_pages: guint,
 ) -> gpointer {
+    if is_agent_slab(first_page as u64) {
+        return remap_agent_pages(first_page, n_pages);
+    }
+    shadow_kernel_pages(first_page, n_pages)
+}
+
+fn remap_agent_pages(first_page: gpointer, n_pages: guint) -> gpointer {
     unsafe {
         let page_size = gum_query_page_size() as usize;
-        let mut virtual_addrs = alloc::vec::Vec::with_capacity(n_pages as usize);
+        let mut virtual_addrs = Vec::with_capacity(n_pages as usize);
 
         let mut current_page = first_page as u64;
         for _ in 0..n_pages {
@@ -74,6 +135,53 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
             virtual_addrs.as_ptr() as *mut *const core::ffi::c_void,
             virtual_addrs.len() as guint,
         )
+    }
+}
+
+fn shadow_kernel_pages(first_page: gpointer, n_pages: guint) -> gpointer {
+    unsafe {
+        let total = n_pages as usize * gum_query_page_size() as usize;
+        let buffer = crate::xnu::kalloc(SHADOW_HEADER + total);
+        *(buffer as *mut u64) = SHADOW_MAGIC;
+        *(buffer.add(8) as *mut u64) = first_page as u64;
+        *(buffer.add(16) as *mut u32) = n_pages;
+
+        let body = buffer.add(SHADOW_HEADER);
+        core::ptr::copy_nonoverlapping(first_page as *const u8, body, total);
+        body as gpointer
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages: guint) {
+    if (writable as u64) < SHADOW_MIN_ADDRESS {
+        return;
+    }
+    unsafe {
+        let buffer = (writable as *mut u8).sub(SHADOW_HEADER);
+        if *(buffer as *const u64) != SHADOW_MAGIC {
+            return;
+        }
+        let first_page = *(buffer.add(8) as *const u64);
+        let n_pages = *(buffer.add(16) as *const u32);
+        let total = n_pages as usize * gum_query_page_size() as usize;
+
+        commit_kernel_patch(first_page, writable as *const u8, total);
+        libc::__clear_cache(first_page as *const u8, (first_page + total as u64) as *const u8);
+
+        crate::xnu::free(buffer, SHADOW_HEADER + total);
+    }
+}
+
+unsafe fn commit_kernel_patch(address: u64, data: *const u8, len: usize) {
+    unsafe {
+        let element_type = g_variant_type_new(c"y".as_ptr());
+        let bytes = g_variant_new_fixed_array(element_type, data as gconstpointer, len as gsize, 1);
+        g_variant_type_free(element_type);
+
+        let payload = g_variant_new(c"(t@ay)".as_ptr(), address, bytes);
+        let reply = host_rpc(FridaCommand::PatchCode, payload);
+        g_variant_unref(reply);
     }
 }
 
@@ -159,6 +267,7 @@ pub extern "C" fn gum_memory_allocate(
     unsafe {
         core::ptr::write_bytes(ptr, 0, size as usize);
         if (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0 {
+            register_slab(ptr as u64, size as usize);
             gum_mprotect(ptr as gpointer, size, prot);
         }
     }
@@ -167,6 +276,19 @@ pub extern "C" fn gum_memory_allocate(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
+    // Executable slabs were flipped to RX in the page tables; restore RW before returning them to
+    // the allocator, otherwise the reclaimed pages stay non-writable and the next consumer faults.
+    if is_agent_slab(address as u64) {
+        unsafe {
+            gum_mprotect(
+                address,
+                size,
+                (_GumPageProtection_GUM_PAGE_READ | _GumPageProtection_GUM_PAGE_WRITE)
+                    as GumPageProtection,
+            );
+        }
+        unregister_slab(address as u64);
+    }
     crate::xnu::free(address as *mut u8, size as usize);
     1
 }
