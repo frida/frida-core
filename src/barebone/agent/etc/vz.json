@@ -38,7 +38,12 @@
       "mach_absolute_time": "0xc0548c",
       "absolutetime_to_nanoseconds": "0xc05a34",
       "clock_get_calendar_microtime": "0xa996c0",
-      "kernel_thread_start": "0xafb660"
+      "kernel_thread_start": "0xafb660",
+      "sb_evaluate_internal": "0x214dc00",
+      "hook_cred_label_update_execve": "0x2156004",
+      "hook_vnode_check_create": "0x213cf48",
+      "hook_policy_syscall": "0x21443bc",
+      "gLoadedKextSummaries": "0x24ec160"
     }
   }
 }

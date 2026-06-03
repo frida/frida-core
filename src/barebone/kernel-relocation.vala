@@ -3,11 +3,11 @@ namespace Frida.Barebone {
 	/**
 	 * Translates static kernelcache addresses to their runtime locations.
 	 *
-	 * The on-device kernel collection slides each segment independently (the SPTM loader scatters
-	 * __TEXT, __TEXT_EXEC, __DATA_CONST, ... to unrelated runtime addresses), so a single KASLR
-	 * slide cannot map a static address to its runtime location. The in-memory com.apple.kernel
-	 * Mach-O header carries the rebased per-segment vmaddrs; we pair them with the static segment
-	 * table (same header, same order) to translate any static address.
+	 * The on-device kernel collection slides each fileset entry independently (the SPTM loader
+	 * scatters com.apple.kernel and every kext to unrelated runtime addresses), so a single KASLR
+	 * slide cannot map a static address to its runtime location. Each entry's in-memory Mach-O
+	 * header carries the rebased per-segment vmaddrs; we pair them with the static segment table
+	 * (same header, same order) to translate any static address, kernel or kext.
 	 */
 	public sealed class KernelRelocation : Object {
 		public uint64 reference_base {
@@ -17,30 +17,49 @@ namespace Frida.Barebone {
 
 		private Gee.List<Entry> entries = new Gee.ArrayList<Entry> ();
 
-		private const size_t KERNEL_PAGE_SIZE = 0x4000;
-		private const size_t HEADER_PROBE_SPAN = 0x20000;
 		private const uint64 COLLECTION_WINDOW = 0x8000000;
+		private const uint64 SUMMARY_HEADER_SIZE = 0x10;
+		private const uint64 SUMMARY_SIZE = 0x88;
+		private const size_t SUMMARY_LOAD_ADDRESS = 0x50;
 		private const uint32 MH_MAGIC_64 = 0xfeedfacfU;
-		private const uint32 MH_EXECUTE = 0x2;
 		private const uint32 MH_FILESET = 0xc;
 		private const uint32 CPU_TYPE_ARM64 = 0x0100000cU;
 		private const uint32 LC_SEGMENT_64 = 0x19;
 		private const uint32 LC_FILESET_ENTRY = 0x80000035U;
 
-		public static async KernelRelocation compute (Machine machine, Bytes kernelcache_blob, Cancellable? cancellable)
-				throws Error, IOError {
+		public static async KernelRelocation compute (Machine machine, Bytes kernelcache_blob,
+				uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
 			var gdb = machine.gdb;
 			Buffer image = gdb.make_buffer (kernelcache_blob);
-			size_t kernel_header_offset = (size_t) find_kernel_fileoff (image);
-			Gee.List<SegmentInfo> static_segments = parse_segments (image, kernel_header_offset);
+			Gee.List<FilesetEntry> static_entries = parse_fileset_entries (image);
 
-			uint64 runtime_header = yield find_kernel_header (machine, cancellable);
-			uint32 header_span = 32 + image.read_uint32 (kernel_header_offset + 20);
-			Buffer runtime_image = yield gdb.read_buffer (runtime_header, header_span, cancellable);
-			Gee.List<SegmentInfo> runtime_segments = parse_segments (runtime_image, 0);
+			Gee.List<SegmentInfo> static_segments = parse_segments (image, 0);
+			uint64 preferred_base = static_segments[0].vmaddr;
+
+			uint64 collection_header = yield find_collection_header (machine, cancellable);
+			Buffer collection = yield read_mach_header (gdb, collection_header, cancellable);
+			var header_locator = new KernelRelocation ();
+			pair_segments (header_locator, static_segments, parse_segments (collection, 0));
 
 			var reloc = new KernelRelocation ();
-			reloc.reference_base = runtime_header;
+			FilesetEntry kernel = find_entry (static_entries, "com.apple.kernel");
+			yield add_fileset_entry (reloc, gdb, image, kernel, header_locator.translate (kernel.vmaddr), cancellable);
+			reloc.reference_base = reloc.translate (kernel.vmaddr);
+
+			if (loaded_kext_summaries != 0) {
+				var runtime_headers = yield read_loaded_kext_headers (gdb, reloc,
+					preferred_base + loaded_kext_summaries, cancellable);
+				foreach (var entry in static_entries) {
+					uint64? runtime_header = runtime_headers[entry.name];
+					if (runtime_header != null)
+						yield add_fileset_entry (reloc, gdb, image, entry, runtime_header, cancellable);
+				}
+			}
+			return reloc;
+		}
+
+		private static void pair_segments (KernelRelocation reloc, Gee.List<SegmentInfo> static_segments,
+				Gee.List<SegmentInfo> runtime_segments) {
 			for (int i = 0; i != static_segments.size; i++) {
 				reloc.entries.add (new Entry () {
 					static_base = static_segments[i].vmaddr,
@@ -48,7 +67,42 @@ namespace Frida.Barebone {
 					runtime_base = runtime_segments[i].vmaddr
 				});
 			}
-			return reloc;
+		}
+
+		private static FilesetEntry find_entry (Gee.List<FilesetEntry> entries, string name) throws Error {
+			foreach (var entry in entries) {
+				if (entry.name == name)
+					return entry;
+			}
+			throw new Error.NOT_SUPPORTED ("Kernelcache is missing the %s fileset entry", name);
+		}
+
+		private static async void add_fileset_entry (KernelRelocation reloc, GDB.Client gdb, Buffer image,
+				FilesetEntry entry, uint64 runtime_header, Cancellable? cancellable) throws Error, IOError {
+			Buffer runtime_image = yield read_mach_header (gdb, runtime_header, cancellable);
+			pair_segments (reloc, parse_segments (image, (size_t) entry.fileoff), parse_segments (runtime_image, 0));
+		}
+
+		/**
+		 * The runtime kext metadata embedded in the collection header is unusable: the loader clobbers the
+		 * fileset-entry vmaddrs and repacks the kext mach-headers away from their static positions. The
+		 * gLoadedKextSummaries array, on the other hand, is purpose-built for debuggers — it pairs each
+		 * loaded kext's bundle id with the runtime address of its mach-header, giving us a reliable
+		 * name -> runtime-header map from which to translate that kext's independently scattered segments.
+		 */
+		private static async Gee.Map<string, uint64?> read_loaded_kext_headers (GDB.Client gdb,
+				KernelRelocation reloc, uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
+			uint64 list = (yield gdb.read_buffer (reloc.translate (loaded_kext_summaries), 8, cancellable))
+				.read_uint64 (0);
+			uint32 count = (yield gdb.read_buffer (list, 16, cancellable)).read_uint32 (8);
+
+			var result = new Gee.HashMap<string, uint64?> ();
+			for (uint32 i = 0; i != count; i++) {
+				Buffer summary = yield gdb.read_buffer (list + SUMMARY_HEADER_SIZE + (uint64) i * SUMMARY_SIZE,
+					(size_t) SUMMARY_SIZE, cancellable);
+				result[read_lc_string (summary, 0)] = summary.read_uint64 (SUMMARY_LOAD_ADDRESS);
+			}
+			return result;
 		}
 
 		public uint64 translate (uint64 static_address) throws Error {
@@ -64,13 +118,19 @@ namespace Frida.Barebone {
 			return (uint32) (translate (static_address) - reference_base);
 		}
 
+		private static async Buffer read_mach_header (GDB.Client gdb, uint64 address, Cancellable? cancellable)
+				throws Error, IOError {
+			Buffer head = yield gdb.read_buffer (address, 32, cancellable);
+			return yield gdb.read_buffer (address, 32 + head.read_uint32 (20), cancellable);
+		}
+
 		/**
-		 * Reads of unmapped memory wedge the VZ stub indefinitely, so the runtime header cannot be
-		 * located by blind-scanning down from a kernel pointer: scattered segments leave unmapped
-		 * gaps in between. We instead walk the kernel's own page tables for the readable ranges and
-		 * probe only the first pages of each — every byte touched is guaranteed mapped.
+		 * Reads of unmapped memory wedge the VZ stub indefinitely, so the collection header cannot be
+		 * located by blind-scanning down from a kernel pointer: scattered segments leave unmapped gaps
+		 * in between. We instead walk the kernel's own page tables for the readable ranges and probe
+		 * only the first 16 bytes of each — every byte touched is guaranteed mapped.
 		 */
-		private static async uint64 find_kernel_header (Machine machine, Cancellable? cancellable)
+		private static async uint64 find_collection_header (Machine machine, Cancellable? cancellable)
 				throws Error, IOError {
 			var gdb = machine.gdb;
 
@@ -91,37 +151,30 @@ namespace Frida.Barebone {
 				if (range_sizes[i] < 16)
 					continue;
 				Buffer head = yield gdb.read_buffer (range_base, 16, cancellable);
-				if (head.read_uint32 (0) != MH_MAGIC_64 || head.read_uint32 (4) != CPU_TYPE_ARM64)
-					continue;
-
-				uint32 filetype = head.read_uint32 (12);
-				if (filetype == MH_EXECUTE)
+				if (head.read_uint32 (0) == MH_MAGIC_64 && head.read_uint32 (4) == CPU_TYPE_ARM64
+						&& head.read_uint32 (12) == MH_FILESET)
 					return range_base;
-				if (filetype != MH_FILESET)
-					continue;
-
-				size_t span = (size_t) uint64.min (range_sizes[i], HEADER_PROBE_SPAN);
-				Buffer region = yield gdb.read_buffer (range_base, span, cancellable);
-				for (size_t off = KERNEL_PAGE_SIZE; off + 16 <= span; off += KERNEL_PAGE_SIZE) {
-					if (region.read_uint32 (off) == MH_MAGIC_64 && region.read_uint32 (off + 4) == CPU_TYPE_ARM64
-							&& region.read_uint32 (off + 12) == MH_EXECUTE)
-						return range_base + off;
-				}
 			}
-			throw new Error.NOT_SUPPORTED ("Unable to locate the runtime com.apple.kernel header");
+			throw new Error.NOT_SUPPORTED ("Unable to locate the runtime kernel collection header");
 		}
 
-		private static uint64 find_kernel_fileoff (Buffer image) throws Error {
+		private static Gee.List<FilesetEntry> parse_fileset_entries (Buffer image) throws Error {
+			var result = new Gee.ArrayList<FilesetEntry> ();
 			uint32 ncmds = image.read_uint32 (16);
 			size_t off = 32;
 			for (uint32 i = 0; i != ncmds; i++) {
 				uint32 cmd = image.read_uint32 (off);
 				uint32 cmdsize = image.read_uint32 (off + 4);
-				if (cmd == LC_FILESET_ENTRY && read_lc_string (image, off + 0x20) == "com.apple.kernel")
-					return image.read_uint64 (off + 16);
+				if (cmd == LC_FILESET_ENTRY) {
+					result.add (new FilesetEntry () {
+						name = read_lc_string (image, off + image.read_uint32 (off + 24)),
+						vmaddr = image.read_uint64 (off + 8),
+						fileoff = image.read_uint64 (off + 16)
+					});
+				}
 				off += cmdsize;
 			}
-			throw new Error.NOT_SUPPORTED ("Kernelcache is missing the com.apple.kernel fileset entry");
+			return result;
 		}
 
 		private static Gee.List<SegmentInfo> parse_segments (Buffer image, size_t header_offset) throws Error {
@@ -151,6 +204,12 @@ namespace Frida.Barebone {
 				builder.append_c ((char) c);
 			}
 			return builder.str;
+		}
+
+		private class FilesetEntry {
+			public string name;
+			public uint64 vmaddr;
+			public uint64 fileoff;
 		}
 
 		private class SegmentInfo {

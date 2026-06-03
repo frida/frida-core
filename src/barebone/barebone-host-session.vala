@@ -141,7 +141,9 @@ namespace Frida {
 					kernel_base = image.base.address;
 				} else {
 					var payload = yield Barebone.Img4.parse_file (File.new_for_path (image.file), cancellable);
-					relocation = yield Barebone.KernelRelocation.compute (machine, payload.data, cancellable);
+					uint64? summaries = image.symbols["gLoadedKextSummaries"];
+					relocation = yield Barebone.KernelRelocation.compute (machine, payload.data,
+						summaries ?? 0, cancellable);
 					kernel_base = relocation.reference_base;
 				}
 			}
