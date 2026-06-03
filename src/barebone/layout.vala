@@ -12,6 +12,10 @@ namespace Frida.Barebone {
 		}
 
 		private const uint64 CHAINED_PTR_TARGET_MASK = (1 << 30) - 1;
+		private const uint32 MH_MAGIC_64 = 0xfeedfacfU;
+		private const uint32 MH_FILESET = 0xc;
+		private const uint32 LC_SEGMENT_64 = 0x19;
+		private const uint32 LC_FILESET_ENTRY = 0x80000035U;
 
 		private Layout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols) {
 			Object (modules: modules, symbols: symbols);
@@ -40,6 +44,10 @@ namespace Frida.Barebone {
 		}
 
 		private static Gee.List<ModuleInfo> compute_module_list (Gum.DarwinModule mod, Blob blob, uint64 kernel_base) throws Error {
+			var fileset = compute_fileset_module_list (blob, mod.source_version);
+			if (fileset != null)
+				return fileset;
+
 			Buffer? kmod_info = null;
 			Buffer? kmod_start = null;
 			Error? pending_error = null;
@@ -121,6 +129,66 @@ namespace Frida.Barebone {
 			return result;
 		}
 
+		private static Gee.List<ModuleInfo>? compute_fileset_module_list (Blob blob, string? kernel_version) throws Error {
+			var header = blob.slice (0, 32, "Mach-O header");
+			if (header.read_uint32 (0) != MH_MAGIC_64 || header.read_uint32 (12) != MH_FILESET)
+				return null;
+
+			var image = blob.slice (0, 32 + header.read_uint32 (20), "Mach-O load commands");
+
+			var entries = new Gee.ArrayList<FilesetEntry> ();
+			uint64 image_end = 0;
+			uint32 ncmds = image.read_uint32 (16);
+			size_t off = 32;
+			for (uint32 i = 0; i != ncmds; i++) {
+				uint32 cmd = image.read_uint32 (off);
+				uint32 cmdsize = image.read_uint32 (off + 4);
+				if (cmd == LC_FILESET_ENTRY) {
+					entries.add (new FilesetEntry () {
+						name = read_lc_string (image, off + image.read_uint32 (off + 24)),
+						vmaddr = image.read_uint64 (off + 8)
+					});
+				} else if (cmd == LC_SEGMENT_64) {
+					image_end = uint64.max (image_end,
+						image.read_uint64 (off + 24) + image.read_uint64 (off + 32));
+				}
+				off += cmdsize;
+			}
+
+			entries.sort ((a, b) => {
+				if (a.vmaddr < b.vmaddr)
+					return -1;
+				return (a.vmaddr > b.vmaddr) ? 1 : 0;
+			});
+
+			uint64 kernel_vmaddr = entries[0].vmaddr;
+			var modules = new Gee.ArrayList<ModuleInfo> ();
+			int n = entries.size;
+			for (int i = 0; i != n; i++) {
+				var entry = entries[i];
+				uint64 end = (i + 1 != n) ? entries[i + 1].vmaddr : image_end;
+				bool is_kernel = i == 0;
+				modules.add (new ModuleInfo () {
+					name = is_kernel ? "mach_kernel" : entry.name,
+					version = is_kernel ? (kernel_version ?? "") : "",
+					offset = (uint32) (entry.vmaddr - kernel_vmaddr),
+					size = (uint32) (end - entry.vmaddr)
+				});
+			}
+			return modules;
+		}
+
+		private static string read_lc_string (Buffer image, size_t offset) throws Error {
+			var builder = new StringBuilder ();
+			for (size_t i = 0; ; i++) {
+				uint8 c = image.read_uint8 (offset + i);
+				if (c == 0)
+					break;
+				builder.append_c ((char) c);
+			}
+			return builder.str;
+		}
+
 		private static size_t chained_pointer_to_vm_offset (uint64 val, uint64 kernel_base) {
 			var target = (size_t) (val & CHAINED_PTR_TARGET_MASK);
 
@@ -154,6 +222,11 @@ namespace Frida.Barebone {
 		public uint32 size;
 		public uint32 start_func_offset;
 		public uint32 stop_func_offset;
+	}
+
+	private class FilesetEntry {
+		public string name;
+		public uint64 vmaddr;
 	}
 
 	public class SymbolInfo {
