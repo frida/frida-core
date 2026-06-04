@@ -71,17 +71,7 @@ func main() {
 	}
 
 	data, _ := io.ReadAll(f)
-	modifiedData := make([]byte, len(data))
-
-	for i := 0; i < len(data); {
-		if l, replacement, ok := t.search(data, i); ok {
-			copy(modifiedData[i:], replacement)
-			i += l
-		} else {
-			modifiedData[i] = data[i]
-			i++
-		}
-	}
+	modifiedData := renameSymbolsWithinStringTables(data, t)
 
 	f.Truncate(0)
 	f.Seek(0, 0)
@@ -93,6 +83,24 @@ func main() {
 	if err := ranl.Run(); err != nil {
 		panic(err)
 	}
+}
+
+func renameSymbolsWithinStringTables(data []byte, t *trie) []byte {
+	renamed := make([]byte, len(data))
+	copy(renamed, data)
+
+	for _, r := range symbolStringTableRanges(data) {
+		for i := r.lo; i < r.hi; {
+			if length, replacement, ok := t.search(data, i); ok && i+length <= r.hi {
+				copy(renamed[i:], replacement)
+				i += length
+			} else {
+				i++
+			}
+		}
+	}
+
+	return renamed
 }
 
 func flipAlpha(s []byte) []byte {

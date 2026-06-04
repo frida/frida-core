@@ -96,7 +96,7 @@ def build_backend(
         symbol_dest.mkdir(parents=True, exist_ok=True)
 
         src_dir = base_dir / "symbol-replacer"
-        for name in ("main.go", "trie.go", "go.mod"):
+        for name in ("main.go", "trie.go", "stringtables.go", "go.mod"):
             shutil.copy(src_dir / name, symbol_dest)
 
         env_copy = config["env"].copy()
