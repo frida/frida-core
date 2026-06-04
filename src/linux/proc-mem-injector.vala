@@ -249,8 +249,8 @@ namespace Frida {
 			void * loser = (void *) 1;
 			void * wait_go = (void *) 2;
 
-			// Elect one winner with a single locked compare-and-swap. malloc's size
-			// arg stays on the stack at [esp+4], so we never touch it.
+			// Elect one winner with a single locked compare-and-swap. The trigger's
+			// cdecl args stay on the stack, so we never touch them.
 			writer.put_mov_reg_address (EDX, scratch);
 			writer.put_xor_reg_reg (EAX, EAX);               // expected = 0
 			writer.put_mov_reg_u32 (ECX, 1);                 // desired = 1
@@ -298,7 +298,7 @@ namespace Frida {
 			void * wait_go = (void *) 2;
 
 			// Elect one winner with a single locked compare-and-swap.
-			writer.put_push_reg (RDI);                       // save malloc's size arg
+			save_call_args (writer);
 			writer.put_mov_reg_address (R11, scratch);
 			writer.put_xor_reg_reg (EAX, EAX);               // expected = 0
 			writer.put_mov_reg_u32 (ECX, 1);                 // desired = 1
@@ -331,7 +331,7 @@ namespace Frida {
 
 			// Losers restore the frame and spin at malloc+0 until the real malloc is back.
 			writer.put_label (loser);
-			writer.put_pop_reg (RDI);
+			restore_call_args (writer);
 			writer.put_jmp_address ((Gum.Address) target);
 
 			writer.flush ();
@@ -348,7 +348,7 @@ namespace Frida {
 			// avoid LDAXR/STLXR: under the foreign tracer that put us on this path the
 			// exclusive monitor is cleared out from under us, which livelocks the
 			// store-exclusive (and corrupts the address register across retries).
-			writer.put_stp_reg_reg_reg_offset (X0, LR, SP, -16, PRE_ADJUST);
+			save_call_args (writer);
 			writer.put_ldr_reg_address (X16, scratch);
 			writer.put_instruction ((uint32) 0xd2800000); // movz x0, #0 (expected)
 			writer.put_instruction ((uint32) 0x52800031); // movz w17, #1 (desired)
@@ -383,7 +383,7 @@ namespace Frida {
 
 			// Losers restore the frame and spin at malloc+0 until the real malloc is back.
 			writer.put_label (loser);
-			writer.put_ldp_reg_reg_reg_offset (X0, LR, SP, 16, POST_ADJUST);
+			restore_call_args (writer);
 			if (!writer.put_b_imm ((Gum.Address) target))
 				throw new Error.NOT_SUPPORTED ("malloc prologue is out of branch range");
 
@@ -436,7 +436,7 @@ namespace Frida {
 			writer.put_mov_reg_address (RDI, context);
 			writer.put_call_address ((Gum.Address) region_base);
 
-			writer.put_pop_reg (RDI);
+			restore_call_args (writer);
 			writer.put_jmp_address ((Gum.Address) target);
 
 			writer.flush ();
@@ -457,7 +457,7 @@ namespace Frida {
 			writer.put_ldr_reg_address (X16, region_base);
 			writer.put_blr_reg (X16);
 
-			writer.put_ldp_reg_reg_reg_offset (X0, LR, SP, 16, POST_ADJUST);
+			restore_call_args (writer);
 			writer.put_ldr_reg_address (X16, target);
 			writer.put_br_reg (X16);
 
@@ -467,6 +467,47 @@ namespace Frida {
 			assert_not_reached ();
 #endif
 		}
+
+		// Preserve every integer argument register so the trigger can be re-invoked
+		// intact afterwards, whatever its arity. x86 needs no equivalent: its arguments
+		// ride the stack, which the stub never disturbs.
+#if X86_64
+		private void save_call_args (Gum.X86Writer writer) {
+			writer.put_push_reg (RDI);
+			writer.put_push_reg (RSI);
+			writer.put_push_reg (RDX);
+			writer.put_push_reg (RCX);
+			writer.put_push_reg (R8);
+			writer.put_push_reg (R9);
+			writer.put_add_reg_imm (RSP, -8);                // keep RSP 16-byte aligned at the calls
+		}
+
+		private void restore_call_args (Gum.X86Writer writer) {
+			writer.put_add_reg_imm (RSP, 8);
+			writer.put_pop_reg (R9);
+			writer.put_pop_reg (R8);
+			writer.put_pop_reg (RCX);
+			writer.put_pop_reg (RDX);
+			writer.put_pop_reg (RSI);
+			writer.put_pop_reg (RDI);
+		}
+#elif ARM64
+		private void save_call_args (Gum.Arm64Writer writer) {
+			writer.put_stp_reg_reg_reg_offset (X0, X1, SP, -16, PRE_ADJUST);
+			writer.put_stp_reg_reg_reg_offset (X2, X3, SP, -16, PRE_ADJUST);
+			writer.put_stp_reg_reg_reg_offset (X4, X5, SP, -16, PRE_ADJUST);
+			writer.put_stp_reg_reg_reg_offset (X6, X7, SP, -16, PRE_ADJUST);
+			writer.put_stp_reg_reg_reg_offset (X8, LR, SP, -16, PRE_ADJUST);
+		}
+
+		private void restore_call_args (Gum.Arm64Writer writer) {
+			writer.put_ldp_reg_reg_reg_offset (X8, LR, SP, 16, POST_ADJUST);
+			writer.put_ldp_reg_reg_reg_offset (X6, X7, SP, 16, POST_ADJUST);
+			writer.put_ldp_reg_reg_reg_offset (X4, X5, SP, 16, POST_ADJUST);
+			writer.put_ldp_reg_reg_reg_offset (X2, X3, SP, 16, POST_ADJUST);
+			writer.put_ldp_reg_reg_reg_offset (X0, X1, SP, 16, POST_ADJUST);
+		}
+#endif
 
 #if ARM64
 		private static uint32 movz_imm (uint8 reg, uint16 imm) {
