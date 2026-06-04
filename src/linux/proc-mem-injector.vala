@@ -50,8 +50,10 @@ namespace Frida {
 			string fallback_address = make_fallback_address ();
 			var rendezvous = StackRendezvous.compute (find_stack_scratch (maps));
 			var region = RegionLayout.compute (spec, fallback_address);
+			uint64 reuse_region = reusable_region (maps, region.total);
 
-			uint8[] stub = build_malloc_stub (target, rendezvous.cas, mmap_impl, region.total, region.entry_offset);
+			uint8[] stub = build_malloc_stub (target, rendezvous.cas, mmap_impl, reuse_region, region.total,
+				region.entry_offset);
 			uint8[] original = mem.read_memory (target, BOOTSTRAP_OFFSET + stub.length);
 
 			Future<RemoteAgent> future_agent = establish_connection (spec, fallback_address, cancellable);
@@ -173,6 +175,36 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Unable to locate the main thread stack");
 		}
 
+		// Rediscover a region we mmap()ed on an earlier injection so a long-lived Frida
+		// recycles it rather than leaking one each time. Matching our loader bytes (not a
+		// cache, which the short-lived helper would lose) also rules out a recycled pid.
+		private uint64 reusable_region (ProcMapsSnapshot maps, size_t needed) throws Error {
+			var it = maps.iterator ();
+			while (it.next ()) {
+				var m = it.get ();
+				if (m.executable && m.path == "" && region_fits (maps, m.start, needed)
+						&& region_holds_loader (m.start))
+					return m.start;
+			}
+			return 0;
+		}
+
+		private bool region_fits (ProcMapsSnapshot maps, uint64 start, size_t needed) {
+			uint64 cursor = start;
+			for (var m = maps.find_mapping (cursor); m != null && m.start == cursor; m = maps.find_mapping (cursor)) {
+				cursor = m.end;
+				if (cursor - start >= needed)
+					return true;
+			}
+			return false;
+		}
+
+		private bool region_holds_loader (uint64 address) throws Error {
+			unowned uint8[] loader = Frida.Data.HelperBackend.get_loader_bin_blob ().data;
+			uint8[] current = mem.read_memory (address, loader.length);
+			return Memory.cmp (current, loader, loader.length) == 0;
+		}
+
 		private bool targets_managed_runtime (ProcMapsSnapshot maps) {
 			var it = maps.iterator ();
 			while (it.next ()) {
@@ -207,8 +239,8 @@ namespace Frida {
 			mem.write_memory (region_base + l.fallback_offset, make_cstring (fallback_address));
 		}
 
-		private uint8[] build_malloc_stub (uint64 target, uint64 scratch, uint64 mmap_impl, size_t region_size,
-				size_t entry_offset) throws Error {
+		private uint8[] build_malloc_stub (uint64 target, uint64 scratch, uint64 mmap_impl, uint64 reuse_region,
+				size_t region_size, size_t entry_offset) throws Error {
 #if X86
 			var buffer = new uint8[REGION_CODE_BUDGET];
 			var writer = new Gum.X86Writer ((void *) buffer);
@@ -225,18 +257,22 @@ namespace Frida {
 			writer.put_lock_cmpxchg_reg_ptr_reg (EDX, ECX);
 			writer.put_jcc_short_label (JNE, loser, NO_HINT);
 
-			// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-			writer.put_add_reg_imm (ESP, -4);                // pad to 16-align esp at the call
-			writer.put_push_u32 (0);                         // offset
-			writer.put_push_u32 (uint32.MAX);                // fd = -1
-			writer.put_push_u32 (0x22);                      // MAP_PRIVATE | MAP_ANONYMOUS
-			writer.put_push_u32 (5);                         // PROT_READ | PROT_EXEC
-			writer.put_push_u32 ((uint32) region_size);      // length
-			writer.put_push_u32 (0);                         // addr
-			writer.put_call_address ((Gum.Address) mmap_impl);
-			writer.put_add_reg_imm (ESP, 28);                // cdecl cleanup + the pad
+			if (reuse_region != 0) {
+				writer.put_mov_reg_address (EAX, reuse_region);
+			} else {
+				// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+				writer.put_add_reg_imm (ESP, -4);                // pad to 16-align esp at the call
+				writer.put_push_u32 (0);                         // offset
+				writer.put_push_u32 (uint32.MAX);                // fd = -1
+				writer.put_push_u32 (0x22);                      // MAP_PRIVATE | MAP_ANONYMOUS
+				writer.put_push_u32 (5);                         // PROT_READ | PROT_EXEC
+				writer.put_push_u32 ((uint32) region_size);      // length
+				writer.put_push_u32 (0);                         // addr
+				writer.put_call_address ((Gum.Address) mmap_impl);
+				writer.put_add_reg_imm (ESP, 28);                // cdecl cleanup + the pad
+			}
 
-			writer.put_mov_reg_address (EDX, scratch);       // mmap clobbered edx; reload
+			writer.put_mov_reg_address (EDX, scratch);       // reload the scratch base (mmap clobbers edx)
 			writer.put_mov_reg_offset_ptr_reg (EDX, 8, EAX); // publish region to the mmap-result slot
 
 			// The region holds code only after the host stages it and raises `go`.
@@ -269,16 +305,20 @@ namespace Frida {
 			writer.put_lock_cmpxchg_reg_ptr_reg (R11, ECX);
 			writer.put_jcc_short_label (JNE, loser, NO_HINT);
 
-			// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-			writer.put_xor_reg_reg (EDI, EDI);
-			writer.put_mov_reg_u32 (ESI, (uint32) region_size);
-			writer.put_mov_reg_u32 (EDX, 5);
-			writer.put_mov_reg_u32 (ECX, 0x22);
-			writer.put_mov_reg_u64 (R8, uint64.MAX);         // fd = -1
-			writer.put_xor_reg_reg (R9, R9);
-			writer.put_call_address ((Gum.Address) mmap_impl);
+			if (reuse_region != 0) {
+				writer.put_mov_reg_u64 (RAX, reuse_region);
+			} else {
+				// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+				writer.put_xor_reg_reg (EDI, EDI);
+				writer.put_mov_reg_u32 (ESI, (uint32) region_size);
+				writer.put_mov_reg_u32 (EDX, 5);
+				writer.put_mov_reg_u32 (ECX, 0x22);
+				writer.put_mov_reg_u64 (R8, uint64.MAX);         // fd = -1
+				writer.put_xor_reg_reg (R9, R9);
+				writer.put_call_address ((Gum.Address) mmap_impl);
+			}
 
-			writer.put_mov_reg_address (R11, scratch); // mmap clobbered r11; reload the scratch base
+			writer.put_mov_reg_address (R11, scratch);       // reload the scratch base (mmap clobbers r11)
 			writer.put_mov_reg_offset_ptr_reg (R11, 8, RAX); // publish region to the mmap-result slot
 
 			// The region holds code only after the host stages it and raises `go`.
@@ -297,9 +337,6 @@ namespace Frida {
 			writer.flush ();
 			return buffer[:writer.offset ()];
 #elif ARM64
-			if (region_size > 0xffff)
-				throw new Error.NOT_SUPPORTED ("Region too large for the in-malloc bootstrap");
-
 			var buffer = new uint8[REGION_CODE_BUDGET];
 			var writer = new Gum.Arm64Writer ((void *) buffer);
 			writer.pc = target + BOOTSTRAP_OFFSET;
@@ -318,17 +355,23 @@ namespace Frida {
 			writer.put_instruction ((uint32) 0x88e0fe11); // casal w0, w17, [x16]
 			writer.put_cbnz_reg_label (W0, loser);
 
-			// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-			writer.put_instruction ((uint32) 0xd2800000);                  // movz x0, #0
-			writer.put_instruction (movz_imm (1, (uint16) region_size));   // movz x1, #region_size
-			writer.put_instruction ((uint32) 0xd28000a2);                  // movz x2, #5 (R|X)
-			writer.put_instruction ((uint32) 0xd2800443);                  // movz x3, #0x22
-			writer.put_instruction ((uint32) 0x92800004);                  // movn x4, #0 (-1)
-			writer.put_instruction ((uint32) 0xd2800005);                  // movz x5, #0
-			if (!writer.put_bl_imm ((Gum.Address) mmap_impl))
-				throw new Error.NOT_SUPPORTED ("mmap is out of branch range of malloc");
+			if (reuse_region != 0) {
+				writer.put_ldr_reg_address (X0, reuse_region);
+			} else {
+				if (region_size > 0xffff)
+					throw new Error.NOT_SUPPORTED ("Region too large for the in-malloc bootstrap");
+				// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+				writer.put_instruction ((uint32) 0xd2800000);                  // movz x0, #0
+				writer.put_instruction (movz_imm (1, (uint16) region_size));   // movz x1, #region_size
+				writer.put_instruction ((uint32) 0xd28000a2);                  // movz x2, #5 (R|X)
+				writer.put_instruction ((uint32) 0xd2800443);                  // movz x3, #0x22
+				writer.put_instruction ((uint32) 0x92800004);                  // movn x4, #0 (-1)
+				writer.put_instruction ((uint32) 0xd2800005);                  // movz x5, #0
+				if (!writer.put_bl_imm ((Gum.Address) mmap_impl))
+					throw new Error.NOT_SUPPORTED ("mmap is out of branch range of malloc");
+			}
 
-			writer.put_ldr_reg_address (X16, scratch); // mmap clobbered x16; reload the scratch base
+			writer.put_ldr_reg_address (X16, scratch);  // reload the scratch base (mmap clobbers x16/IP0)
 			writer.put_str_reg_reg_offset (X0, X16, 8); // publish region to the mmap-result slot
 
 			// The region holds code only after the host stages it and raises `go`.

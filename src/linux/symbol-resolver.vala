@@ -29,7 +29,7 @@ public sealed class Frida.SymbolResolver : Object {
 
 		foreach (var addr in addresses) {
 			ProcMapsSnapshot.Mapping? m = snap.find_mapping_at_gen (addr, gen);
-			if (m == null) {
+			if (m == null || m.path == "") {
 				on_symbol (addr, uint32.MAX, 0);
 				continue;
 			}
