@@ -4452,17 +4452,31 @@ namespace Frida.HostSessionTest {
 					var handler = h.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						printerr ("[*] Message: %s\n", message);
-						if (waiting && "hits=" in message)
+						if (waiting && "allowed=" in message)
 							inject.callback ();
 					});
 
 					var script_id = yield session.create_script ("""
-						const target = DebugSymbol.getFunctionByName('sb_evaluate_internal');
-						let n = 0;
-						const l = Interceptor.attach(target, { onEnter(args) { if (n++ === 0) send('onEnter ran on a kernel thread'); } });
+						const TARGET_PID = 1;
+						const evaluate = DebugSymbol.getFunctionByName('sb_evaluate_internal');
+						const procPid = new NativeFunction(
+							DebugSymbol.getFunctionByName('proc_pid'), 'int', ['pointer']);
+						let allowed = 0;
+						const l = Interceptor.attach(evaluate, {
+							onEnter(args) {
+								const proc = args[2].add(0x10).readPointer();
+								this.forceAllow = procPid(proc) === TARGET_PID;
+							},
+							onLeave(retval) {
+								if (this.forceAllow) {
+									retval.replace(0);
+									allowed++;
+								}
+							}
+						});
 						Interceptor.flush();
 						send('hook live');
-						setTimeout(() => { l.detach(); Interceptor.flush(); send('hits=' + n); }, 3000);
+						setTimeout(() => { l.detach(); Interceptor.flush(); send('allowed=' + allowed); }, 3000);
 						""",
 						make_parameters_dict (), cancellable);
 					yield session.load_script (script_id, cancellable);
@@ -4471,7 +4485,7 @@ namespace Frida.HostSessionTest {
 					yield;
 					waiting = false;
 					h.disconnect (handler);
-					assert_true (received_message != null);
+					assert_true ("allowed=" in received_message);
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();

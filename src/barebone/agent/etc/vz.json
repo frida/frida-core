@@ -43,7 +43,8 @@
       "hook_cred_label_update_execve": "0x2156004",
       "hook_vnode_check_create": "0x213cf48",
       "hook_policy_syscall": "0x21443bc",
-      "gLoadedKextSummaries": "0x24ec160"
+      "gLoadedKextSummaries": "0x24ec160",
+      "proc_pid": "0xf65e5c"
     }
   }
 }
