@@ -4,11 +4,21 @@ public sealed class Frida.ActivitySampler : Object {
 		construct;
 	}
 
+	public Gee.List<SampledStack> stacks {
+		get {
+			return collected_stacks;
+		}
+	}
+
 	private BpfRingbufReader? events_reader;
 	private Source? events_source;
 
 	private Gee.Collection<FileDescriptor> perf_event_fds = new Gee.ArrayList<FileDescriptor> ();
 	private Gee.Collection<BpfLink> links = new Gee.ArrayList<BpfLink> ();
+
+	private Gee.List<SampledStack> collected_stacks = new Gee.ArrayList<SampledStack> ();
+
+	private const uint64 SAMPLE_PERIOD_NS = 1000000;
 
 	public ActivitySampler (uint pid) {
 		Object (pid: pid);
@@ -41,7 +51,7 @@ public sealed class Frida.ActivitySampler : Object {
 			pea.event_type = SOFTWARE;
 			pea.size = (uint32) sizeof (PerfEventAttr);
 			pea.config = PERF_EVENT_COUNT_SW_CPU_CLOCK;
-			pea.sample_period = 1;
+			pea.sample_period = SAMPLE_PERIOD_NS;
 
 			var pefd = PerfEvent.open (&pea, -1, (int) cpu, -1, 0);
 			perf_event_fds.add (pefd);
@@ -68,11 +78,11 @@ public sealed class Frida.ActivitySampler : Object {
 	}
 
 	private void handle_sample (SampleEvent * e) {
-		printerr ("[ActivitySampler %p] tgid=%u tid=%u time=%" + uint64.FORMAT + " stack_err=%d depth=%u\n",
-			this, e->tgid, e->tid, e->time_ns, e->stack_err, e->depth);
-
-		for (uint32 i = 0; i != e->depth; i++)
-			printerr ("\t0x%lx\n", (ulong) e->ips[i]);
+		if (e->depth == 0)
+			return;
+		var frames = new uint64[e->depth];
+		Memory.copy (frames, e->ips, e->depth * sizeof (uint64));
+		collected_stacks.add (new SampledStack ((owned) frames));
 	}
 
 	private struct SampleEvent {
@@ -101,5 +111,13 @@ public sealed class Frida.ActivitySampler : Object {
 			});
 			return Source.CONTINUE;
 		}
+	}
+}
+
+public sealed class Frida.SampledStack {
+	public uint64[] frames;
+
+	public SampledStack (owned uint64[] frames) {
+		this.frames = (owned) frames;
 	}
 }
