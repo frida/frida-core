@@ -358,6 +358,7 @@ if have_local_backend
       'linux' / 'syscall-tracer.vala',
       'linux' / 'symbol-resolver.vala',
       'linux' / 'proc-maps.vala',
+      'linux' / 'proc-mem-injector.vala',
     ]
     if host_abi == 'armhf'
       host_lowlevel_abi = 'arm'

@@ -318,13 +318,21 @@ namespace Frida {
 				PausedSyscallSession? pss = backend.paused_syscalls[pid];
 				if (pss != null)
 					yield pss.interrupt (cancellable);
-				var session = yield InjectSession.open (pid, cancellable);
-				RemoteAgent agent = yield session.inject (spec, cancellable);
-				if (session.was_group_stopped)
-					backend.suspended_by_inject[pid] = session;
-				else
-					session.close ();
-				return agent;
+
+				try {
+					var session = yield InjectSession.open (pid, cancellable);
+					RemoteAgent agent = yield session.inject (spec, cancellable);
+					if (session.was_group_stopped)
+						backend.suspended_by_inject[pid] = session;
+					else
+						session.close ();
+					return agent;
+				} catch (Error e) {
+					if (!(e is Error.PERMISSION_DENIED) || !ProcMemInjectSession.is_available ())
+						throw e;
+					var session = yield ProcMemInjectSession.open (pid, cancellable);
+					return yield session.inject (spec, cancellable);
+				}
 			}
 		}
 
@@ -1897,7 +1905,11 @@ namespace Frida {
 				case INTERRUPT: {
 					bool maybe_already_attached = res == -1 && errsv == Posix.EPERM;
 					if (maybe_already_attached) {
-						get_regs (&saved_regs);
+						try {
+							get_regs (&saved_regs);
+						} catch (Error e) {
+							throw new Error.PERMISSION_DENIED ("Process is traced by another process");
+						}
 
 						attach_state = ALREADY_ATTACHED;
 					} else {
