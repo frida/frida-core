@@ -12,6 +12,14 @@ namespace Frida {
 		private const double NUDGE_AFTER_SECONDS = 0.25;
 		private const uint REGION_POLL_INTERVAL_MS = 5;
 		private const uint DRAIN_MS = 50;
+		private const uint SAMPLE_WINDOW_MS = 250;
+		private const uint MIN_TRIGGER_VOTES = 4;
+		private const uint64 MIN_TRIGGER_BYTES = 192;
+#if X86 || X86_64
+		private const int SCAN_STEP = 1;
+#else
+		private const int SCAN_STEP = 4;
+#endif
 		private const size_t REGION_CODE_BUDGET = 256;
 #if X86 || X86_64
 		private const size_t BOOTSTRAP_OFFSET = 2;
@@ -50,24 +58,74 @@ namespace Frida {
 			string fallback_address = make_fallback_address ();
 			var rendezvous = StackRendezvous.compute (find_stack_scratch (maps));
 			var region = RegionLayout.compute (spec, fallback_address);
-			uint64 reuse_region = reusable_region (maps, region.total);
-
-			uint8[] stub = build_malloc_stub (target, rendezvous.cas, mmap_impl, reuse_region, region.total,
-				region.entry_offset);
-			uint8[] original = mem.read_memory (target, BOOTSTRAP_OFFSET + stub.length);
 
 			Future<RemoteAgent> future_agent = establish_connection (spec, fallback_address, cancellable);
 
 			write_rendezvous (rendezvous);
-			yield install_bootstrap (target, stub);
 
-			uint64 region_base = yield await_region (rendezvous.mmap_result, targets_managed_runtime (maps), cancellable);
-			block_callers (target);
-			write_region (region_base, region, spec, fallback_address, libc, target, mprotect_impl);
+			var acquired = yield acquire_region (maps, region, rendezvous, mmap_impl, target, cancellable);
+
+			block_callers (acquired.target);
+			write_region (acquired.region_base, region, spec, fallback_address, libc, acquired.target, mprotect_impl);
 			mem.write_u32 (rendezvous.go, 1);
-			yield restore_malloc (target, original);
+			yield restore_trigger (acquired.target, acquired.original);
 
 			return yield await_agent (future_agent, cancellable);
+		}
+
+		// Install the bootstrap and wait for a thread to run through it. If the trigger
+		// stays quiet we either nudge a managed runtime into allocating, or — when there
+		// is nothing to nudge — sample what the target is actually running and re-hook a
+		// libc function it favours instead.
+		private async AcquiredRegion acquire_region (ProcMapsSnapshot maps, RegionLayout region,
+				StackRendezvous rendezvous, uint64 mmap_impl, uint64 target, Cancellable? cancellable)
+				throws Error, IOError {
+			bool managed = targets_managed_runtime (maps);
+
+			uint8[] original = yield install_trigger (maps, region, rendezvous, mmap_impl, target);
+
+			var timer = new Timer ();
+			bool prodded = false;
+			while (true) {
+				cancellable.set_error_if_cancelled ();
+
+				uint64 region_base = mem.read_pointer (rendezvous.mmap_result);
+				if (region_base == uint64.MAX)
+					throw new Error.NOT_SUPPORTED ("Target failed to mmap a region for the loader");
+				if (region_base != 0)
+					return new AcquiredRegion (region_base, target, original);
+
+				if (!prodded && timer.elapsed () >= NUDGE_AFTER_SECONDS) {
+					prodded = true;
+					if (managed) {
+						Posix.kill ((Posix.pid_t) pid, Posix.Signal.USR1);
+					} else {
+						uint64 alt = yield discover_trigger (maps, target, cancellable);
+						if (alt != 0 && mem.read_pointer (rendezvous.mmap_result) == 0) {
+							yield restore_trigger (target, original);
+							target = alt;
+							original = yield install_trigger (maps, region, rendezvous, mmap_impl, target);
+							timer.start ();
+						}
+					}
+				}
+
+				if (timer.elapsed () >= TRIGGER_TIMEOUT_SECONDS)
+					throw new Error.PROCESS_NOT_RESPONDING (
+						"Timed out waiting for the target to trigger the injected stub");
+
+				yield sleep_ms (REGION_POLL_INTERVAL_MS);
+			}
+		}
+
+		private async uint8[] install_trigger (ProcMapsSnapshot maps, RegionLayout region, StackRendezvous rendezvous,
+				uint64 mmap_impl, uint64 target) throws Error, IOError {
+			uint64 reuse = reusable_region (maps, region.total);
+			uint8[] stub = build_trigger_stub (target, rendezvous.cas, mmap_impl, reuse, region.total,
+				region.entry_offset);
+			uint8[] original = mem.read_memory (target, BOOTSTRAP_OFFSET + stub.length);
+			yield install_bootstrap (target, stub);
+			return original;
 		}
 
 		private async void install_bootstrap (uint64 target, uint8[] stub) throws Error, IOError {
@@ -77,7 +135,7 @@ namespace Frida {
 			release_callers (target);
 		}
 
-		private async void restore_malloc (uint64 target, uint8[] original) throws Error, IOError {
+		private async void restore_trigger (uint64 target, uint8[] original) throws Error, IOError {
 			yield sleep_ms (DRAIN_MS);
 			mem.write_memory (target + BOOTSTRAP_OFFSET, original[BOOTSTRAP_OFFSET:original.length]);
 			restore_prologue (target, original);
@@ -113,7 +171,7 @@ namespace Frida {
 		// live at the bottom of the main thread's stack (the deepest it has ever grown,
 		// so genuinely unused yet CPU-writable). This is all we borrow from the stack:
 		// the election word at offset 0, the mmap-result slot at offset 8 and the go
-		// flag at offset 16, matching the in-malloc stub. The rest of the working set
+		// flag at offset 16, matching the in-trigger stub. The rest of the working set
 		// rides in the mmap()ed region.
 		private struct StackRendezvous {
 			public uint64 cas;
@@ -239,7 +297,7 @@ namespace Frida {
 			mem.write_memory (region_base + l.fallback_offset, make_cstring (fallback_address));
 		}
 
-		private uint8[] build_malloc_stub (uint64 target, uint64 scratch, uint64 mmap_impl, uint64 reuse_region,
+		private uint8[] build_trigger_stub (uint64 target, uint64 scratch, uint64 mmap_impl, uint64 reuse_region,
 				size_t region_size, size_t entry_offset) throws Error {
 #if X86
 			var buffer = new uint8[REGION_CODE_BUDGET];
@@ -283,7 +341,7 @@ namespace Frida {
 			writer.put_add_reg_imm (EAX, (ssize_t) entry_offset);
 			writer.put_jmp_reg (EAX);
 
-			// Losers spin at malloc+0 until the real malloc is back.
+			// Losers spin at the trigger's first instruction until it is restored.
 			writer.put_label (loser);
 			writer.put_jmp_address ((Gum.Address) target);
 
@@ -329,7 +387,7 @@ namespace Frida {
 			writer.put_add_reg_imm (RAX, (ssize_t) entry_offset);
 			writer.put_jmp_reg (RAX);
 
-			// Losers restore the frame and spin at malloc+0 until the real malloc is back.
+			// Losers restore the frame and spin at the trigger's first instruction until it is restored.
 			writer.put_label (loser);
 			restore_call_args (writer);
 			writer.put_jmp_address ((Gum.Address) target);
@@ -359,7 +417,7 @@ namespace Frida {
 				writer.put_ldr_reg_address (X0, reuse_region);
 			} else {
 				if (region_size > 0xffff)
-					throw new Error.NOT_SUPPORTED ("Region too large for the in-malloc bootstrap");
+					throw new Error.NOT_SUPPORTED ("Region too large for the in-trigger bootstrap");
 				// region = mmap (NULL, region_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
 				writer.put_instruction ((uint32) 0xd2800000);                  // movz x0, #0
 				writer.put_instruction (movz_imm (1, (uint16) region_size));   // movz x1, #region_size
@@ -368,7 +426,7 @@ namespace Frida {
 				writer.put_instruction ((uint32) 0x92800004);                  // movn x4, #0 (-1)
 				writer.put_instruction ((uint32) 0xd2800005);                  // movz x5, #0
 				if (!writer.put_bl_imm ((Gum.Address) mmap_impl))
-					throw new Error.NOT_SUPPORTED ("mmap is out of branch range of malloc");
+					throw new Error.NOT_SUPPORTED ("mmap is out of branch range of the trigger");
 			}
 
 			writer.put_ldr_reg_address (X16, scratch);  // reload the scratch base (mmap clobbers x16/IP0)
@@ -381,24 +439,24 @@ namespace Frida {
 			writer.put_add_reg_reg_imm (X17, X0, entry_offset);
 			writer.put_br_reg (X17);
 
-			// Losers restore the frame and spin at malloc+0 until the real malloc is back.
+			// Losers restore the frame and spin at the trigger's first instruction until it is restored.
 			writer.put_label (loser);
 			restore_call_args (writer);
 			if (!writer.put_b_imm ((Gum.Address) target))
-				throw new Error.NOT_SUPPORTED ("malloc prologue is out of branch range");
+				throw new Error.NOT_SUPPORTED ("trigger prologue is out of branch range");
 
 			writer.flush ();
 			return buffer[:writer.offset ()];
 #else
-			throw new Error.NOT_SUPPORTED ("In-malloc bootstrap is only implemented for x86, x86_64 and arm64");
+			throw new Error.NOT_SUPPORTED ("In-trigger bootstrap is only implemented for x86, x86_64 and arm64");
 #endif
 		}
 
 		// Only the winner reaches here. Flip the context page to RW so frida_load can
 		// store its worker handle, run the loader (which spawns the worker thread), then
-		// restore the frame and fall back into the real malloc to satisfy the allocation
-		// that brought us in. By now malloc+0 is blocked, so the branch lands on the spin
-		// until the host restores the prologue.
+		// restore the frame and fall back into the real trigger to satisfy the call that
+		// brought us in. By now the trigger's first instruction is blocked, so the branch
+		// lands on the spin until the host restores the prologue.
 		private uint8[] build_region_code (uint64 region_base, RegionLayout l, uint64 target, uint64 mprotect_impl) {
 			uint64 context = region_base + l.context_offset;
 #if X86
@@ -564,34 +622,192 @@ namespace Frida {
 			}
 		}
 
-		private async uint64 await_region (uint64 slot, bool nudge_runtime, Cancellable? cancellable) throws Error, IOError {
-			var timer = new Timer ();
-			bool nudged = false;
-			while (true) {
-				cancellable.set_error_if_cancelled ();
-
-				uint64 region = mem.read_pointer (slot);
-				if (region == uint64.MAX)
-					throw new Error.NOT_SUPPORTED ("Target failed to mmap a region for the loader");
-				if (region != 0)
-					return region;
-
-				double elapsed = timer.elapsed ();
-
-				// An idle ART/Dalvik process may not call malloc on its own; SIGUSR1
-				// makes its SignalCatcher force a GC, whose allocations fire the stub.
-				if (nudge_runtime && !nudged && elapsed >= NUDGE_AFTER_SECONDS) {
-					Posix.kill ((Posix.pid_t) pid, Posix.Signal.USR1);
-					nudged = true;
-				}
-
-				if (elapsed >= TRIGGER_TIMEOUT_SECONDS)
-					throw new Error.PROCESS_NOT_RESPONDING (
-						"Timed out waiting for the target to trigger the injected stub");
-
-				yield sleep_ms (REGION_POLL_INTERVAL_MS);
+		// Sample what the target runs and pick a libc function to re-hook. Returns 0 when
+		// perf is unavailable or nothing usable turns up.
+		private async uint64 discover_trigger (ProcMapsSnapshot maps, uint64 exclude, Cancellable? cancellable)
+				throws Error, IOError {
+			var sampler = new ActivitySampler (pid);
+			try {
+				sampler.start ();
+			} catch (Error e) {
+				return 0;
 			}
+			yield sleep_ms (SAMPLE_WINDOW_MS);
+			sampler.stop ();
+
+			return hottest_libc_function (maps, sampler.stacks, exclude);
 		}
+
+		// Each sample's leaf is the function the target is actually running; an unwind
+		// past it is unreliable for the frame-less assembly the hot mem*/str* routines
+		// are. Resolve the leaf to its enclosing function and re-hook the hottest one big
+		// enough to hold the stub.
+		private uint64 hottest_libc_function (ProcMapsSnapshot maps, Gee.List<SampledStack> stacks, uint64 exclude)
+				throws Error {
+			unowned Gum.Module libc = Gum.Process.get_libc_module ();
+			var remote = maps.find_module_by_path (libc.path);
+			var local = ProcMapsSnapshot.from_pid (Posix.getpid ()).find_module_by_path (libc.path);
+			if (remote == null || local == null)
+				return 0;
+
+			var symbols = function_symbols (libc, local.start, remote.start);
+			var exports = function_exports (libc, local.start, remote.start);
+
+			var votes = new Gee.HashMap<uint64?, uint> (Numeric.uint64_hash, Numeric.uint64_equal);
+			foreach (var sample in stacks) {
+				if (sample.frames.length == 0)
+					continue;
+				uint64 leaf = sample.frames[0];
+				var m = maps.find_mapping (leaf);
+				if (m == null || m.path != libc.path)
+					continue;
+				uint64 entry = resolve_function (leaf, symbols, exports);
+				if (entry == 0 || entry == exclude)
+					continue;
+				votes[entry] = votes[entry] + 1;
+			}
+
+			uint64 best = 0;
+			uint best_votes = 0;
+			foreach (var vote in votes.entries) {
+				if (vote.value > best_votes) {
+					best_votes = vote.value;
+					best = vote.key;
+				}
+			}
+			return (best_votes >= MIN_TRIGGER_VOTES) ? best : 0;
+		}
+
+		private Gee.List<FunctionExtent> function_symbols (Gum.Module libc, uint64 local_base, uint64 remote_base) {
+			var functions = new Gee.ArrayList<FunctionExtent> ();
+			libc.enumerate_symbols (s => {
+				if (s.size > 0 && s.address >= local_base)
+					functions.add (new FunctionExtent (remote_base + ((uint64) s.address - local_base), (uint64) s.size));
+				return true;
+			});
+			return sorted_by_entry (functions);
+		}
+
+		private Gee.List<FunctionExtent> function_exports (Gum.Module libc, uint64 local_base, uint64 remote_base) {
+			var functions = new Gee.ArrayList<FunctionExtent> ();
+			libc.enumerate_exports (e => {
+				if (e.type == Gum.ExportType.FUNCTION && e.size > 0 && e.address >= local_base)
+					functions.add (new FunctionExtent (remote_base + ((uint64) e.address - local_base), (uint64) e.size));
+				return true;
+			});
+			return sorted_by_entry (functions);
+		}
+
+		private Gee.List<FunctionExtent> sorted_by_entry (Gee.List<FunctionExtent> functions) {
+			functions.sort ((a, b) => (a.entry < b.entry) ? -1 : ((a.entry > b.entry) ? 1 : 0));
+			return functions;
+		}
+
+		// Resolve the leaf to a function start in priority order: a sized symbol that
+		// contains it, then a sized export, then — as a last resort — a scan out to the
+		// nearest function boundary either side, which both finds the entry and sizes it.
+		private uint64 resolve_function (uint64 leaf, Gee.List<FunctionExtent> symbols,
+				Gee.List<FunctionExtent> exports) throws Error {
+			var fn = containing_function (symbols, leaf);
+			if (fn == null)
+				fn = containing_function (exports, leaf);
+			if (fn == null)
+				fn = scan_function_extent (leaf);
+			if (fn == null)
+				return 0;
+			return (fn.size >= MIN_TRIGGER_BYTES) ? fn.entry : 0;
+		}
+
+		private FunctionExtent? containing_function (Gee.List<FunctionExtent> functions, uint64 ip) {
+			int lo = 0;
+			int hi = functions.size - 1;
+			FunctionExtent? found = null;
+			while (lo <= hi) {
+				int mid = (lo + hi) / 2;
+				var fn = functions[mid];
+				if (fn.entry <= ip) {
+					found = fn;
+					lo = mid + 1;
+				} else {
+					hi = mid - 1;
+				}
+			}
+			return (found != null && ip < found.entry + found.size) ? found : null;
+		}
+
+		// Bound the leaf's function without symbols, by scanning out to the nearest
+		// function boundary either side. A boundary is a prologue (paciasp on arm64, an
+		// endbr/frame setup on x86) or, on arm64, a ret followed by alignment padding —
+		// padding is what tells a function's terminating ret apart from an early return.
+		private FunctionExtent? scan_function_extent (uint64 leaf) throws Error {
+			size_t window = 4096;
+			uint64 lo = leaf - window;
+			uint8[] before = mem.read_memory (lo, window);
+			uint8[] after = mem.read_memory (leaf, window);
+
+			uint64 entry = 0;
+			for (int off = (int) window - 8; off >= 0; off -= SCAN_STEP) {
+				if (function_boundary (before, off, window)) {
+					entry = lo + boundary_address (before, off, window);
+					break;
+				}
+			}
+			if (entry == 0)
+				return null;
+
+			uint64 end = 0;
+			for (int off = SCAN_STEP; off <= (int) window - 8; off += SCAN_STEP) {
+				if (function_boundary (after, off, window)) {
+					end = leaf + boundary_address (after, off, window);
+					break;
+				}
+			}
+			if (end == 0)
+				return null;
+
+			return new FunctionExtent (entry, end - entry);
+		}
+
+		private bool function_boundary (uint8[] code, int off, size_t window) {
+#if ARM64
+			uint32 insn = arm64_insn (code, off);
+			if (insn == 0xd503233f || insn == 0xd503237f) // paciasp / pacibsp
+				return true;
+			return (insn & 0xfffffc1f) == 0xd65f0000 && is_padding (arm64_insn (code, off + 4)); // ret then padding
+#elif X86_64
+			return code[off] == 0xf3 && code[off + 1] == 0x0f && code[off + 2] == 0x1e && code[off + 3] == 0xfa;
+#elif X86
+			return code[off] == 0xf3 && code[off + 1] == 0x0f && code[off + 2] == 0x1e && code[off + 3] == 0xfb;
+#else
+			return false;
+#endif
+		}
+
+		// The entry the boundary marks: a prologue is itself the start; a terminating ret
+		// hands the start to the next function, past the padding.
+		private int boundary_address (uint8[] code, int off, size_t window) {
+#if ARM64
+			if (arm64_insn (code, off) == 0xd503233f || arm64_insn (code, off) == 0xd503237f)
+				return off;
+			int e = off + 4;
+			while (e <= (int) window - 4 && is_padding (arm64_insn (code, e)))
+				e += 4;
+			return e;
+#else
+			return off;
+#endif
+		}
+
+#if ARM64
+		private uint32 arm64_insn (uint8[] code, int off) {
+			return code[off] | ((uint32) code[off + 1] << 8) | ((uint32) code[off + 2] << 16)
+				| ((uint32) code[off + 3] << 24);
+		}
+
+		private bool is_padding (uint32 insn) {
+			return insn == 0xd503201f || insn == 0x00000000; // nop / zero fill
+		}
+#endif
 
 		private async void sleep_ms (uint ms) {
 			var source = new TimeoutSource (ms);
@@ -653,6 +869,28 @@ namespace Frida {
 
 		private static uint64 align_up (uint64 value, size_t alignment) {
 			return (value + (alignment - 1)) & ~((uint64) alignment - 1);
+		}
+	}
+
+	private sealed class AcquiredRegion {
+		public uint64 region_base;
+		public uint64 target;
+		public uint8[] original;
+
+		public AcquiredRegion (uint64 region_base, uint64 target, owned uint8[] original) {
+			this.region_base = region_base;
+			this.target = target;
+			this.original = (owned) original;
+		}
+	}
+
+	private sealed class FunctionExtent {
+		public uint64 entry;
+		public uint64 size;
+
+		public FunctionExtent (uint64 entry, uint64 size) {
+			this.entry = entry;
+			this.size = size;
 		}
 	}
 
