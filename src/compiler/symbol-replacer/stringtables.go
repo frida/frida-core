@@ -24,19 +24,32 @@ type span struct {
 	lo, hi int
 }
 
+type member struct {
+	name string
+	span
+}
+
 func symbolStringTableRanges(data []byte) []span {
 	var ranges []span
-	for _, member := range archiveMembers(data) {
-		object := data[member.lo:member.hi]
+	for _, m := range archiveMembers(data) {
+		// The archive symbol index maps names to members and is what the linker
+		// consults; ranlib does not rebuild it for every format, so its names
+		// are renamed wholesale. It holds only names and offsets, never the
+		// runtime data that must be left intact inside objects.
+		if isArchiveSymbolIndex(m.name) {
+			ranges = append(ranges, m.span)
+			continue
+		}
+		object := data[m.lo:m.hi]
 		for _, table := range objectStringTableRanges(object) {
-			ranges = append(ranges, span{member.lo + table.lo, member.lo + table.hi})
+			ranges = append(ranges, span{m.lo + table.lo, m.lo + table.hi})
 		}
 	}
 	return ranges
 }
 
-func archiveMembers(data []byte) []span {
-	var members []span
+func archiveMembers(data []byte) []member {
+	var members []member
 	pos := len("!<arch>\n")
 	for pos+60 <= len(data) {
 		header := data[pos : pos+60]
@@ -50,9 +63,10 @@ func archiveMembers(data []byte) []span {
 		name := string(bytes.TrimRight(header[0:16], " "))
 		if longNameLength, ok := bsdLongNameLength(name); ok {
 			lo += longNameLength
+			name = string(data[body : body+longNameLength])
 		}
 
-		members = append(members, span{lo, end})
+		members = append(members, member{name, span{lo, end}})
 
 		pos = end + end%2
 	}
@@ -65,6 +79,10 @@ func bsdLongNameLength(name string) (int, bool) {
 	}
 	length, _ := strconv.Atoi(name[3:])
 	return length, true
+}
+
+func isArchiveSymbolIndex(name string) bool {
+	return name == "/" || name == "//" || strings.HasPrefix(name, "__.SYMDEF")
 }
 
 func objectStringTableRanges(object []byte) []span {
