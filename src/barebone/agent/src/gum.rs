@@ -524,6 +524,7 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
                 type_: export_type,
                 name: g_strdup(symbol_ref.name_ptr()),
                 address: symbol_ref.address(),
+                size: -1,
             };
 
             let should_continue =
