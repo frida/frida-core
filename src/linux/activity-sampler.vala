@@ -83,6 +83,8 @@ namespace Frida {
 				return;
 			var frames = new uint64[e->depth];
 			Memory.copy (frames, e->ips, e->depth * sizeof (uint64));
+			// XXX: Should we trim these?
+			e->tgid; e->tid; e->time_ns; e->stack_err;
 			collected_stacks.add (new SampledStack ((owned) frames));
 		}
 
