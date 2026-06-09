@@ -622,20 +622,78 @@ namespace Frida {
 			}
 		}
 
-		// Sample what the target runs and pick a libc function to re-hook. Returns 0 when
-		// perf is unavailable or nothing usable turns up.
+		// Sample what the target runs and pick a libc function to re-hook. Prefer eBPF
+		// stack sampling, falling back to /proc when it is unavailable — typically
+		// because perf/eBPF demands privileges we lack. Returns 0 when nothing usable
+		// turns up.
 		private async uint64 discover_trigger (ProcMapsSnapshot maps, uint64 exclude, Cancellable? cancellable)
 				throws Error, IOError {
+			Gee.List<SampledStack> stacks;
+
 			var sampler = new ActivitySampler (pid);
 			try {
 				sampler.start ();
+				yield sleep_ms (SAMPLE_WINDOW_MS);
+				sampler.stop ();
+				stacks = sampler.stacks;
 			} catch (Error e) {
+				stacks = yield sample_threads_via_proc (cancellable);
+			}
+
+			return hottest_libc_function (maps, stacks, exclude);
+		}
+
+		private async Gee.List<SampledStack> sample_threads_via_proc (Cancellable? cancellable)
+				throws Error, IOError {
+			var stacks = new Gee.ArrayList<SampledStack> ();
+
+			var timer = new Timer ();
+			while (timer.elapsed () * 1000.0 < SAMPLE_WINDOW_MS) {
+				cancellable.set_error_if_cancelled ();
+
+				foreach (uint tid in enumerate_thread_ids ()) {
+					uint64 pc = read_thread_pc (tid);
+					if (pc != 0)
+						stacks.add (new SampledStack (new uint64[] { pc }));
+				}
+
+				yield sleep_ms (REGION_POLL_INTERVAL_MS);
+			}
+
+			return stacks;
+		}
+
+		private Gee.List<uint> enumerate_thread_ids () {
+			var tids = new Gee.ArrayList<uint> ();
+			try {
+				var dir = Dir.open ("/proc/%u/task".printf (pid));
+				string? name;
+				while ((name = dir.read_name ()) != null) {
+					uint tid;
+					if (uint.try_parse (name, out tid))
+						tids.add (tid);
+				}
+			} catch (FileError e) {
+			}
+			return tids;
+		}
+
+		// The last field of /proc/<pid>/task/<tid>/syscall is the thread's user-space PC,
+		// landing inside whatever libc routine issued the current syscall.
+		private uint64 read_thread_pc (uint tid) {
+			string contents;
+			try {
+				FileUtils.get_contents ("/proc/%u/task/%u/syscall".printf (pid, tid), out contents);
+			} catch (FileError e) {
 				return 0;
 			}
-			yield sleep_ms (SAMPLE_WINDOW_MS);
-			sampler.stop ();
 
-			return hottest_libc_function (maps, sampler.stacks, exclude);
+			string[] fields = contents.strip ().split (" ");
+			if (fields.length < 2)
+				return 0;
+
+			uint64 pc;
+			return uint64.try_parse (fields[fields.length - 1], out pc, null, 0) ? pc : 0;
 		}
 
 		// Each sample's leaf is the function the target is actually running; an unwind
