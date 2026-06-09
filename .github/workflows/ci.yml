@@ -99,9 +99,35 @@ jobs:
         with:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
+      - name: Upload GObject introspection data
+        if: ${{ matrix.id == 'linux-x86_64' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-gir
+          path: build/src/api/Frida-1.0.gir
       - name: Test
         if: ${{ matrix.id != 'windows-arm64' && !startsWith(matrix.id, 'macos-') }}
         run: make test
+
+  publish-gir:
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.native.result == 'success' }}
+    needs:
+      - native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download GObject introspection data
+        uses: actions/download-artifact@v8
+        with:
+          name: core-gir
+          path: gir
+      - name: Attach to GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            gir/Frida-1.0.gir
+          prerelease: ${{ contains(github.ref_name, 'snapshot') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   cross:
     strategy:
