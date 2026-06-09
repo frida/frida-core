@@ -53,6 +53,7 @@ static void frida_enable_close_on_exec (int fd, const FridaLibcApi * libc);
 
 static size_t frida_strlen (const char * str);
 
+static pid_t frida_getpid (void);
 static pid_t frida_gettid (void);
 
 __attribute__ ((section (".text.entrypoint")))
@@ -111,7 +112,14 @@ frida_main (void * user_data)
     if (agent_codefd == -1)
       goto beach;
 
-    libc->sprintf (agent_path, "/proc/self/fd/%d", agent_codefd);
+    /*
+     * Spell out our PID instead of using /proc/self so the path resolves the same
+     * from outside the process. An attached debugger handles the dynamic linker's
+     * library-load event by reading the new object from this path; with /proc/self
+     * that read hits the debugger's own fd table and fails, wedging the thread mid
+     * dlopen (), so the agent never finishes loading.
+     */
+    libc->sprintf (agent_path, "/proc/%d/fd/%d", frida_getpid (), agent_codefd);
 
     ctx->agent_handle = libc->dlopen (agent_path, libc->dlopen_flags, pretend_caller_addr);
     if (ctx->agent_handle == NULL)
@@ -398,6 +406,12 @@ frida_strlen (const char * str)
   }
 
   return n;
+}
+
+static pid_t
+frida_getpid (void)
+{
+  return frida_syscall_0 (SYS_getpid);
 }
 
 static pid_t
