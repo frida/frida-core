@@ -135,7 +135,12 @@ namespace Frida {
 			release_callers (target);
 		}
 
+		// Tear down symmetrically with install_bootstrap: re-block the entry so callers spin
+		// there while we put the body back, and only then restore the first instruction. A
+		// multi-byte prologue (e.g. endbr64) would otherwise be re-entered mid-restore, with
+		// the fall-through still routing into a half-written instruction.
 		private async void restore_trigger (uint64 target, uint8[] original) throws Error, IOError {
+			block_callers (target);
 			yield sleep_ms (DRAIN_MS);
 			mem.write_memory (target + BOOTSTRAP_OFFSET, original[BOOTSTRAP_OFFSET:original.length]);
 			restore_prologue (target, original);
@@ -916,7 +921,7 @@ namespace Frida {
 			} catch (IOError e) {
 				cancellable.set_error_if_cancelled ();
 				throw new Error.PROCESS_NOT_RESPONDING (
-					"Timed out waiting for the target to trigger the injected stub");
+					"Timed out waiting for the injected agent to connect back");
 			} finally {
 				cancel_source.destroy ();
 				timeout_source.destroy ();
