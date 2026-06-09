@@ -13,6 +13,7 @@ namespace Frida {
 		private const uint REGION_POLL_INTERVAL_MS = 5;
 		private const uint DRAIN_MS = 50;
 		private const uint SAMPLE_WINDOW_MS = 250;
+		private const uint STACK_SCAN_DEPTH = 8;
 		private const uint MIN_TRIGGER_VOTES = 4;
 #if X86 || X86_64
 		private const int SCAN_STEP = 1;
@@ -642,13 +643,13 @@ namespace Frida {
 				sampler.stop ();
 				stacks = sampler.stacks;
 			} catch (Error e) {
-				stacks = yield sample_threads_via_proc (cancellable);
+				stacks = yield sample_threads_via_proc (maps, cancellable);
 			}
 
 			return hottest_libc_function (maps, region, rendezvous, mmap_impl, stacks, exclude);
 		}
 
-		private async Gee.List<SampledStack> sample_threads_via_proc (Cancellable? cancellable)
+		private async Gee.List<SampledStack> sample_threads_via_proc (ProcMapsSnapshot maps, Cancellable? cancellable)
 				throws Error, IOError {
 			var stacks = new Gee.ArrayList<SampledStack> ();
 
@@ -657,9 +658,9 @@ namespace Frida {
 				cancellable.set_error_if_cancelled ();
 
 				foreach (uint tid in enumerate_thread_ids ()) {
-					uint64 pc = read_thread_pc (tid);
-					if (pc != 0)
-						stacks.add (new SampledStack (new uint64[] { pc }));
+					uint64[] frames = read_thread_frames (maps, tid);
+					if (frames.length != 0)
+						stacks.add (new SampledStack (frames));
 				}
 
 				yield sleep_ms (REGION_POLL_INTERVAL_MS);
@@ -683,28 +684,47 @@ namespace Frida {
 			return tids;
 		}
 
-		// The last field of /proc/<pid>/task/<tid>/syscall is the thread's user-space PC,
-		// landing inside whatever libc routine issued the current syscall.
-		private uint64 read_thread_pc (uint tid) {
+		// The last two fields of /proc/<pid>/task/<tid>/syscall are the thread's user-space
+		// stack pointer and PC. The PC lands in whatever libc routine issued the syscall;
+		// once the target is multi-threaded that is a tiny arch wrapper too small to host
+		// the stub, so also hand back a few stack words, where the caller's return address
+		// points at a larger routine we can re-hook instead.
+		private uint64[] read_thread_frames (ProcMapsSnapshot maps, uint tid) throws Error {
 			string contents;
 			try {
 				FileUtils.get_contents ("/proc/%u/task/%u/syscall".printf (pid, tid), out contents);
 			} catch (FileError e) {
-				return 0;
+				return {};
 			}
 
 			string[] fields = contents.strip ().split (" ");
 			if (fields.length < 2)
-				return 0;
+				return {};
 
 			uint64 pc;
-			return uint64.try_parse (fields[fields.length - 1], out pc, null, 0) ? pc : 0;
+			if (!uint64.try_parse (fields[fields.length - 1], out pc, null, 0) || pc == 0)
+				return {};
+
+			uint64 sp;
+			var stack = (uint64.try_parse (fields[fields.length - 2], out sp, null, 0) && sp != 0)
+				? maps.find_mapping (sp)
+				: null;
+			if (stack == null)
+				return new uint64[] { pc };
+
+			uint depth = uint.min (STACK_SCAN_DEPTH, (uint) ((stack.end - sp) / 8));
+			var frames = new uint64[1 + depth];
+			frames[0] = pc;
+			for (uint i = 0; i != depth; i++)
+				frames[1 + i] = mem.read_pointer (sp + (uint64) i * 8);
+			return frames;
 		}
 
-		// Each sample's leaf is the function the target is actually running; an unwind
-		// past it is unreliable for the frame-less assembly the hot mem*/str* routines
-		// are. Resolve the leaf to its enclosing function and re-hook the hottest one big
-		// enough to hold the stub.
+		// Walk each sample from its leaf outward and vote for the first frame that lands in
+		// a libc function big enough to hold the stub, then re-hook the hottest. Preferring
+		// the leaf keeps us on the function actually running; falling through to the caller
+		// rescues the cases where the leaf is a too-small wrapper (e.g. the syscall
+		// cancellation arch shim a multi-threaded target parks in).
 		private uint64 hottest_libc_function (ProcMapsSnapshot maps, RegionLayout region, StackRendezvous rendezvous,
 				uint64 mmap_impl, Gee.List<SampledStack> stacks, uint64 exclude) throws Error {
 			unowned Gum.Module libc = Gum.Process.get_libc_module ();
@@ -720,16 +740,21 @@ namespace Frida {
 
 			var votes = new Gee.HashMap<uint64?, uint> (Numeric.uint64_hash, Numeric.uint64_equal);
 			foreach (var sample in stacks) {
-				if (sample.frames.length == 0)
-					continue;
-				uint64 leaf = sample.frames[0];
-				var m = maps.find_mapping (leaf);
-				if (m == null || m.path != libc.path)
-					continue;
-				uint64 entry = resolve_function (leaf, symbols, exports, min_bytes);
-				if (entry == 0 || entry == exclude)
-					continue;
-				votes[entry] = votes[entry] + 1;
+				for (int depth = 0; depth != sample.frames.length; depth++) {
+					uint64 frame = sample.frames[depth];
+					var m = maps.find_mapping (frame);
+					if (m == null || m.path != libc.path)
+						continue;
+					// The leaf is the live PC; deeper frames are raw stack words, so only
+					// trust those that a call actually returns to rather than stray data.
+					if (depth != 0 && !is_return_site (frame))
+						continue;
+					uint64 entry = resolve_function (frame, symbols, exports, min_bytes);
+					if (entry == 0 || entry == exclude)
+						continue;
+					votes[entry] = votes[entry] + 1;
+					break;
+				}
 			}
 
 			uint64 best = 0;
@@ -781,6 +806,18 @@ namespace Frida {
 			if (fn == null)
 				return 0;
 			return (fn.size >= min_bytes) ? fn.entry : 0;
+		}
+
+		// A real return address has a call right before it; data that merely happens to
+		// point into the text does not, so this keeps stray stack words from being re-hooked.
+		private bool is_return_site (uint64 address) throws Error {
+#if X86 || X86_64
+			return mem.read_memory (address - 5, 1)[0] == 0xe8;
+#elif ARM64
+			return (peek_u32 (mem.read_memory (address - 4, 4)) & 0xfc000000) == 0x94000000;
+#else
+			return false;
+#endif
 		}
 
 		// The trigger is overwritten in place, so a candidate is only usable if it is at
