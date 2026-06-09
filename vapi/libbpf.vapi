@@ -222,4 +222,16 @@ namespace Libbpf {
 	public int num_possible_cpus ();
 
 	public int strerror (int err, char[] buf);
+
+	public PrintFn? set_print (PrintFn? fn);
+
+	[CCode (cname = "libbpf_print_fn_t", has_target = false)]
+	public delegate int PrintFn (PrintLevel level, string format, va_list args);
+
+	[CCode (cname = "enum libbpf_print_level", cprefix = "LIBBPF_", has_type_id = false)]
+	public enum PrintLevel {
+		WARN,
+		INFO,
+		DEBUG
+	}
 }

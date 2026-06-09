@@ -139,37 +139,35 @@ namespace Frida {
 		}
 
 		internal Libbpf.Object handle;
-		private char[] kernel_log_buf;
 
 		public static BpfObject open (string name, uint8[] blob) throws Error {
-			var log_buf = new char[128 * 1024];
-
 			var opts = Libbpf.Object.OpenOpts ();
 			opts.sz = sizeof (Libbpf.Object.OpenOpts);
 			opts.object_name = name;
-			opts.kernel_log_buf = log_buf;
 
+			var log = new LibbpfLogScope ();
 			var handle = Libbpf.Object.open_mem (blob, opts);
 			if (handle == null)
-				throw_libbpf_error (errno);
+				throw_libbpf_error (errno, log.take ());
 
-			return new BpfObject ((owned) handle, (owned) log_buf);
+			return new BpfObject ((owned) handle);
 		}
 
-		private BpfObject (owned Libbpf.Object handle, owned char[] kernel_log_buf) {
+		private BpfObject (owned Libbpf.Object handle) {
 			this.handle = (owned) handle;
-			this.kernel_log_buf = (owned) kernel_log_buf;
 
 			_programs = new Programs (this);
 			_maps = new Maps (this);
 		}
 
 		public void prepare () throws Error {
-			check_libbpf_result (handle.prepare ());
+			var log = new LibbpfLogScope ();
+			check_libbpf_result (handle.prepare (), log.take ());
 		}
 
 		public void load () throws Error {
-			check_libbpf_result (handle.load (), (string) kernel_log_buf);
+			var log = new LibbpfLogScope ();
+			check_libbpf_result (handle.load (), log.take ());
 		}
 
 		public sealed class Programs {
@@ -394,6 +392,30 @@ namespace Frida {
 
 		internal BpfLink (owned Libbpf.Link handle) {
 			this.handle = (owned) handle;
+		}
+	}
+
+	private sealed class LibbpfLogScope {
+		private static StringBuilder buffer;
+
+		public LibbpfLogScope () {
+			if (buffer == null)
+				buffer = new StringBuilder ();
+			buffer.truncate ();
+			Libbpf.set_print (on_message);
+		}
+
+		~LibbpfLogScope () {
+			Libbpf.set_print (null);
+		}
+
+		public string take () {
+			return buffer.str.chomp ();
+		}
+
+		private static int on_message (Libbpf.PrintLevel level, string format, va_list args) {
+			buffer.append_vprintf (format, args);
+			return 0;
 		}
 	}
 
