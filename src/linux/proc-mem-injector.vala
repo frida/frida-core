@@ -14,7 +14,6 @@ namespace Frida {
 		private const uint DRAIN_MS = 50;
 		private const uint SAMPLE_WINDOW_MS = 250;
 		private const uint MIN_TRIGGER_VOTES = 4;
-		private const uint64 MIN_TRIGGER_BYTES = 192;
 #if X86 || X86_64
 		private const int SCAN_STEP = 1;
 #else
@@ -100,7 +99,8 @@ namespace Frida {
 					if (managed) {
 						Posix.kill ((Posix.pid_t) pid, Posix.Signal.USR1);
 					} else {
-						uint64 alt = yield discover_trigger (maps, target, cancellable);
+						uint64 alt = yield discover_trigger (maps, region, rendezvous, mmap_impl, target,
+							cancellable);
 						if (alt != 0 && mem.read_pointer (rendezvous.mmap_result) == 0) {
 							yield restore_trigger (target, original);
 							target = alt;
@@ -626,8 +626,8 @@ namespace Frida {
 		// stack sampling, falling back to /proc when it is unavailable — typically
 		// because perf/eBPF demands privileges we lack. Returns 0 when nothing usable
 		// turns up.
-		private async uint64 discover_trigger (ProcMapsSnapshot maps, uint64 exclude, Cancellable? cancellable)
-				throws Error, IOError {
+		private async uint64 discover_trigger (ProcMapsSnapshot maps, RegionLayout region, StackRendezvous rendezvous,
+				uint64 mmap_impl, uint64 exclude, Cancellable? cancellable) throws Error, IOError {
 			Gee.List<SampledStack> stacks;
 
 			var sampler = new ActivitySampler (pid);
@@ -640,7 +640,7 @@ namespace Frida {
 				stacks = yield sample_threads_via_proc (cancellable);
 			}
 
-			return hottest_libc_function (maps, stacks, exclude);
+			return hottest_libc_function (maps, region, rendezvous, mmap_impl, stacks, exclude);
 		}
 
 		private async Gee.List<SampledStack> sample_threads_via_proc (Cancellable? cancellable)
@@ -700,8 +700,8 @@ namespace Frida {
 		// past it is unreliable for the frame-less assembly the hot mem*/str* routines
 		// are. Resolve the leaf to its enclosing function and re-hook the hottest one big
 		// enough to hold the stub.
-		private uint64 hottest_libc_function (ProcMapsSnapshot maps, Gee.List<SampledStack> stacks, uint64 exclude)
-				throws Error {
+		private uint64 hottest_libc_function (ProcMapsSnapshot maps, RegionLayout region, StackRendezvous rendezvous,
+				uint64 mmap_impl, Gee.List<SampledStack> stacks, uint64 exclude) throws Error {
 			unowned Gum.Module libc = Gum.Process.get_libc_module ();
 			var remote = maps.find_module_by_path (libc.path);
 			var local = ProcMapsSnapshot.from_pid (Posix.getpid ()).find_module_by_path (libc.path);
@@ -711,6 +711,8 @@ namespace Frida {
 			var symbols = function_symbols (libc, local.start, remote.start);
 			var exports = function_exports (libc, local.start, remote.start);
 
+			uint64 min_bytes = trigger_stub_footprint (remote.start, region, rendezvous, mmap_impl);
+
 			var votes = new Gee.HashMap<uint64?, uint> (Numeric.uint64_hash, Numeric.uint64_equal);
 			foreach (var sample in stacks) {
 				if (sample.frames.length == 0)
@@ -719,7 +721,7 @@ namespace Frida {
 				var m = maps.find_mapping (leaf);
 				if (m == null || m.path != libc.path)
 					continue;
-				uint64 entry = resolve_function (leaf, symbols, exports);
+				uint64 entry = resolve_function (leaf, symbols, exports, min_bytes);
 				if (entry == 0 || entry == exclude)
 					continue;
 				votes[entry] = votes[entry] + 1;
@@ -765,7 +767,7 @@ namespace Frida {
 		// contains it, then a sized export, then — as a last resort — a scan out to the
 		// nearest function boundary either side, which both finds the entry and sizes it.
 		private uint64 resolve_function (uint64 leaf, Gee.List<FunctionExtent> symbols,
-				Gee.List<FunctionExtent> exports) throws Error {
+				Gee.List<FunctionExtent> exports, uint64 min_bytes) throws Error {
 			var fn = containing_function (symbols, leaf);
 			if (fn == null)
 				fn = containing_function (exports, leaf);
@@ -773,7 +775,18 @@ namespace Frida {
 				fn = scan_function_extent (leaf);
 			if (fn == null)
 				return 0;
-			return (fn.size >= MIN_TRIGGER_BYTES) ? fn.entry : 0;
+			return (fn.size >= min_bytes) ? fn.entry : 0;
+		}
+
+		// The trigger is overwritten in place, so a candidate is only usable if it is at
+		// least as large as the bootstrap stub we would stamp into it. Build that stub for
+		// the first-injection case (no region to reuse, the larger of the two paths) and
+		// measure it, rather than guessing a fixed floor.
+		private uint64 trigger_stub_footprint (uint64 sample_target, RegionLayout region, StackRendezvous rendezvous,
+				uint64 mmap_impl) throws Error {
+			uint8[] stub = build_trigger_stub (sample_target, rendezvous.cas, mmap_impl, 0, region.total,
+				region.entry_offset);
+			return BOOTSTRAP_OFFSET + stub.length;
 		}
 
 		private FunctionExtent? containing_function (Gee.List<FunctionExtent> functions, uint64 ip) {
