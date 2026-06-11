@@ -11,8 +11,17 @@ namespace Frida {
 	public extern void version (out uint major, out uint minor, out uint micro, out uint nano);
 	public extern unowned string version_string ();
 
+	/**
+	 * Selects which main-loop runtime Frida integrates with.
+	 */
 	public enum Runtime {
+		/**
+		 * Use GLib's own main loop.
+		 */
 		GLIB,
+		/**
+		 * Integrate with a foreign runtime that hosts GLib.
+		 */
 		OTHER;
 
 		public static Runtime from_nick (string nick) throws Error {
@@ -24,11 +33,38 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Enumerates and keeps track of the devices available to Frida, and is the
+	 * usual entry point of the API.
+	 *
+	 * Create one, then obtain a {@link Device} — for example the local system
+	 * via {@link DeviceManager.get_device_by_type} with
+	 * {@link DeviceType.LOCAL}, or a USB-connected device.
+	 */
 	public sealed class DeviceManager : Object, HostSessionHub {
+		/**
+		 * Emitted when a device is added, such as when a phone is plugged in.
+		 *
+		 * @param device the device that appeared
+		 */
 		public signal void added (Device device);
+		/**
+		 * Emitted when a device is removed, such as when a phone is unplugged.
+		 *
+		 * @param device the device that went away
+		 */
 		public signal void removed (Device device);
+		/**
+		 * Emitted when the set of available devices changes.
+		 */
 		public signal void changed ();
 
+		/**
+		 * Predicate deciding whether a device matches.
+		 *
+		 * @param device the device to test
+		 * @return true if @device matches
+		 */
 		public delegate bool Predicate (Device device);
 
 		private Promise<bool>? start_request;
@@ -40,18 +76,33 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
+		/**
+		 * Creates a new device manager with all backends enabled.
+		 */
 		public DeviceManager () {
 			service = new HostSessionService.with_default_backends ();
 		}
 
+		/**
+		 * Creates a device manager with only the non-local backends enabled, so
+		 * the local system is not exposed as a device.
+		 */
 		public DeviceManager.with_nonlocal_backends_only () {
 			service = new HostSessionService.with_nonlocal_backends_only ();
 		}
 
+		/**
+		 * Creates a device manager with only the socket backend enabled, for
+		 * connecting to remote devices over the network.
+		 */
 		public DeviceManager.with_socket_backend_only () {
 			service = new HostSessionService.with_socket_backend_only ();
 		}
 
+		/**
+		 * Closes the device manager, releasing all resources. The instance must
+		 * not be used afterwards.
+		 */
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			yield stop_service (cancellable);
 		}
@@ -70,6 +121,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Gets the device with the given ID, throwing if it cannot be found.
+		 *
+		 * @param id the device identifier
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the matching device
+		 */
 		public async Device get_device_by_id (string id, int timeout = 0, Cancellable? cancellable = null) throws Error, IOError {
 			return check_device (yield find_device_by_id (id, timeout, cancellable));
 		}
@@ -78,6 +136,13 @@ namespace Frida {
 			return check_device (find_device_by_id_sync (id, timeout, cancellable));
 		}
 
+		/**
+		 * Gets the first device of the given type, throwing if none is found.
+		 *
+		 * @param type the kind of device to look for
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the matching device
+		 */
 		public async Device get_device_by_type (DeviceType type, int timeout = 0, Cancellable? cancellable = null)
 				throws Error, IOError {
 			return check_device (yield find_device_by_type (type, timeout, cancellable));
@@ -88,6 +153,14 @@ namespace Frida {
 			return check_device (find_device_by_type_sync (type, timeout, cancellable));
 		}
 
+		/**
+		 * Gets the first device accepted by @predicate, throwing if none is
+		 * found.
+		 *
+		 * @param predicate function deciding whether a device matches
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the matching device
+		 */
 		public async Device get_device (Predicate predicate, int timeout = 0, Cancellable? cancellable = null)
 				throws Error, IOError {
 			return check_device (yield find_device (predicate, timeout, cancellable));
@@ -104,6 +177,13 @@ namespace Frida {
 			return device;
 		}
 
+		/**
+		 * Finds the device with the given ID.
+		 *
+		 * @param id the device identifier
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the device, or null if not found
+		 */
 		public async Device? find_device_by_id (string id, int timeout = 0, Cancellable? cancellable = null) throws Error, IOError {
 			return yield find_device ((device) => { return device.id == id; }, timeout, cancellable);
 		}
@@ -112,6 +192,13 @@ namespace Frida {
 			return find_device_sync ((device) => { return device.id == id; }, timeout, cancellable);
 		}
 
+		/**
+		 * Finds the first device of the given type.
+		 *
+		 * @param type the kind of device to look for
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the device, or null if not found
+		 */
 		public async Device? find_device_by_type (DeviceType type, int timeout = 0, Cancellable? cancellable = null)
 				throws Error, IOError {
 			return yield find_device ((device) => { return device.dtype == type; }, timeout, cancellable);
@@ -122,6 +209,13 @@ namespace Frida {
 			return find_device_sync ((device) => { return device.dtype == type; }, timeout, cancellable);
 		}
 
+		/**
+		 * Finds the first device accepted by @predicate.
+		 *
+		 * @param predicate function deciding whether a device matches
+		 * @param timeout milliseconds to wait for a match, or 0 to not wait
+		 * @return the device, or null if not found
+		 */
 		public async Device? find_device (Predicate predicate, int timeout = 0, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -198,6 +292,11 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enumerates the currently available devices.
+		 *
+		 * @return the available devices
+		 */
 		public async DeviceList enumerate_devices (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -216,6 +315,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Adds a device reachable over the network at the given address.
+		 *
+		 * @param address the host and optional port to connect to
+		 * @param options connection options, such as TLS and authentication, or
+		 *   null
+		 * @return the newly added device
+		 */
 		public async Device add_remote_device (string address, RemoteDeviceOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 #if HAVE_SOCKET_BACKEND
@@ -283,6 +390,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Removes a remote device previously added with
+		 * {@link DeviceManager.add_remote_device}.
+		 *
+		 * @param address the address the device was added with
+		 */
 		public async void remove_remote_device (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -468,6 +581,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * An immutable list of {@link Device} objects.
+	 */
 	public sealed class DeviceList : Object {
 		private Gee.List<Device> items;
 
@@ -475,25 +591,86 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of devices in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the device at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the device
+		 */
 		public new Device get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Represents a device that Frida can interact with, such as the local
+	 * system, a USB-connected phone, or a remote frida-server.
+	 *
+	 * Obtain one through a {@link DeviceManager}, then use it to spawn or attach
+	 * to processes.
+	 */
 	public sealed class Device : Object {
+		/**
+		 * Emitted when a process is spawned while spawn gating is enabled.
+		 *
+		 * @param spawn details of the pending spawn
+		 */
 		public signal void spawn_added (Spawn spawn);
+		/**
+		 * Emitted when a pending spawn is resumed or killed.
+		 *
+		 * @param spawn the spawn that is no longer pending
+		 */
 		public signal void spawn_removed (Spawn spawn);
+		/**
+		 * Emitted when a new child is observed while child gating is enabled.
+		 *
+		 * @param child details of the child process
+		 */
 		public signal void child_added (Child child);
+		/**
+		 * Emitted when a previously added child is resumed or has gone away.
+		 *
+		 * @param child the child that is no longer pending
+		 */
 		public signal void child_removed (Child child);
+		/**
+		 * Emitted when a process crashes.
+		 *
+		 * @param crash details of the crash
+		 */
 		public signal void process_crashed (Crash crash);
+		/**
+		 * Emitted when a spawned process writes to its standard output or error.
+		 *
+		 * @param pid the process ID
+		 * @param fd the file descriptor written to (1 for stdout, 2 for stderr)
+		 * @param data the bytes written, or an empty buffer on EOF
+		 */
 		public signal void output (uint pid, int fd, Bytes data);
+		/**
+		 * Emitted when an injected library has been unloaded.
+		 *
+		 * @param id the injection ID returned when the library was injected
+		 */
 		public signal void uninjected (uint id);
+		/**
+		 * Emitted when the connection to the device is lost.
+		 */
 		public signal void lost ();
 
+		/**
+		 * The device's stable identifier.
+		 */
 		public string id {
 			get {
 				if (_id != null)
@@ -502,6 +679,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * The device's human-readable name.
+		 */
 		public string name {
 			get {
 				if (_name != null)
@@ -510,11 +690,18 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * An icon representing the device, serialized as a variant, or null if
+		 * none is available.
+		 */
 		public Variant? icon {
 			get;
 			construct;
 		}
 
+		/**
+		 * The kind of device: local, remote, or USB.
+		 */
 		public DeviceType dtype {
 			get {
 				switch (provider.kind) {
@@ -530,6 +717,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * The device's message bus, for exchanging messages with the device.
+		 */
 		public Bus bus {
 			get {
 				return _bus;
@@ -577,10 +767,21 @@ namespace Frida {
 			provider.agent_session_detached.connect (on_agent_session_detached);
 		}
 
+		/**
+		 * Checks whether the connection to the device has been lost.
+		 *
+		 * @return true if the device is no longer reachable
+		 */
 		public bool is_lost () {
 			return close_request != null;
 		}
 
+		/**
+		 * Overrides a device-level option.
+		 *
+		 * @param name the option name
+		 * @param val the value to set
+		 */
 		public void override_option (string name, Variant val) throws Error {
 			Value v;
 			switch (val.classify ()) {
@@ -615,6 +816,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Queries a set of parameters describing the device and its operating
+		 * system.
+		 *
+		 * @return a table of system parameters keyed by name
+		 */
 		public async HashTable<string, Variant> query_system_parameters (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -637,6 +844,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Gets the application currently in the foreground, if any.
+		 *
+		 * @param options query options shaping the returned details, or null
+		 * @return the frontmost application, or null if none
+		 */
 		public async Application? get_frontmost_application (FrontmostQueryOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -672,6 +885,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enumerates the applications installed on the device.
+		 *
+		 * @param options query options to scope and shape the results, or null
+		 * @return the matching applications
+		 */
 		public async ApplicationList enumerate_applications (ApplicationQueryOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -708,6 +927,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Gets the process with the given PID, throwing if it cannot be found.
+		 *
+		 * @param pid the process ID
+		 * @param options matching options, such as a scope or timeout, or null
+		 * @return the matching process
+		 */
 		public async Process get_process_by_pid (uint pid, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			return check_process (yield find_process_by_pid (pid, options, cancellable));
@@ -718,6 +944,13 @@ namespace Frida {
 			return check_process (find_process_by_pid_sync (pid, options, cancellable));
 		}
 
+		/**
+		 * Gets the process whose name matches, throwing if none is found.
+		 *
+		 * @param name the process name to match
+		 * @param options matching options, or null
+		 * @return the matching process
+		 */
 		public async Process get_process_by_name (string name, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			return check_process (yield find_process_by_name (name, options, cancellable));
@@ -728,6 +961,14 @@ namespace Frida {
 			return check_process (find_process_by_name_sync (name, options, cancellable));
 		}
 
+		/**
+		 * Gets the first process accepted by @predicate, throwing if none is
+		 * found.
+		 *
+		 * @param predicate function deciding whether a process matches
+		 * @param options matching options, or null
+		 * @return the matching process
+		 */
 		public async Process get_process (ProcessPredicate predicate, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			return check_process (yield find_process (predicate, options, cancellable));
@@ -744,6 +985,13 @@ namespace Frida {
 			return process;
 		}
 
+		/**
+		 * Finds the process with the given PID.
+		 *
+		 * @param pid the process ID
+		 * @param options matching options, or null
+		 * @return the process, or null if not found
+		 */
 		public async Process? find_process_by_pid (uint pid, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			return yield find_process ((process) => { return process.pid == pid; }, options, cancellable);
@@ -754,6 +1002,13 @@ namespace Frida {
 			return find_process_sync ((process) => { return process.pid == pid; }, options, cancellable);
 		}
 
+		/**
+		 * Finds a process whose name matches.
+		 *
+		 * @param name the process name to match
+		 * @param options matching options, or null
+		 * @return the matching process, or null if not found
+		 */
 		public async Process? find_process_by_name (string name, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			var folded_name = name.casefold ();
@@ -766,6 +1021,13 @@ namespace Frida {
 			return find_process_sync ((process) => { return process.name.casefold () == folded_name; }, options, cancellable);
 		}
 
+		/**
+		 * Finds the first process accepted by @predicate.
+		 *
+		 * @param predicate function deciding whether a process matches
+		 * @param options matching options, or null
+		 * @return the matching process, or null if not found
+		 */
 		public async Process? find_process (ProcessPredicate predicate, ProcessMatchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			Process? process = null;
@@ -855,6 +1117,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enumerates the processes running on the device.
+		 *
+		 * @param options query options to scope and shape the results, or null
+		 * @return the matching processes
+		 */
 		public async ProcessList enumerate_processes (ProcessQueryOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -891,6 +1159,10 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enables spawn gating, suspending every newly spawned process until it
+		 * is explicitly resumed.
+		 */
 		public async void enable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -913,6 +1185,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Disables spawn gating.
+		 */
 		public async void disable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -935,6 +1210,11 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enumerates the spawns currently suspended by spawn gating.
+		 *
+		 * @return the pending spawns
+		 */
 		public async SpawnList enumerate_pending_spawn (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -963,6 +1243,11 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enumerates the children currently suspended by child gating.
+		 *
+		 * @return the pending children
+		 */
 		public async ChildList enumerate_pending_children (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -991,6 +1276,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Starts a new process in a suspended state, ready to be resumed once
+		 * instrumentation is in place.
+		 *
+		 * @param program path or identifier of the program to launch
+		 * @param options spawn options such as argv, env, and stdio, or null
+		 * @return the PID of the newly created process
+		 */
 		public async uint spawn (string program, SpawnOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -1053,6 +1346,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Writes data to the standard input of a spawned process.
+		 *
+		 * @param pid the process ID
+		 * @param data the bytes to write
+		 */
 		public async void input (uint pid, Bytes data, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1081,6 +1380,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Resumes a process that was spawned in a suspended state, or
+		 * suspended via spawn gating.
+		 *
+		 * @param pid the process ID to resume
+		 */
 		public async void resume (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1107,6 +1412,11 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Terminates a process.
+		 *
+		 * @param pid the process ID to kill
+		 */
 		public async void kill (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1135,6 +1445,15 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Attaches to a process, giving a {@link Session} through which scripts
+		 * can be created and run inside it.
+		 *
+		 * @param pid the process ID to attach to
+		 * @param options session options, such as the realm or persistence
+		 *   timeout, or null
+		 * @return the new session
+		 */
 		public async Session attach (uint pid, SessionOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -1196,6 +1515,15 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Injects a shared library from a file into a process.
+		 *
+		 * @param pid the process ID to inject into
+		 * @param path path to the library on the device
+		 * @param entrypoint name of the entrypoint function to call
+		 * @param data a string passed to the entrypoint
+		 * @return an injection ID, later matched by {@link Device.uninjected}
+		 */
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -1232,6 +1560,15 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Injects a shared library from an in-memory blob into a process.
+		 *
+		 * @param pid the process ID to inject into
+		 * @param blob the library image
+		 * @param entrypoint name of the entrypoint function to call
+		 * @param data a string passed to the entrypoint
+		 * @return an injection ID, later matched by {@link Device.uninjected}
+		 */
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -1268,6 +1605,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Opens a raw communication channel to the given address on the device.
+		 *
+		 * @param address the address to connect to
+		 * @return a stream for reading from and writing to the channel
+		 */
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1297,6 +1640,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Opens a service identified by the given address.
+		 *
+		 * @param address the service address
+		 * @return the opened service
+		 */
 		public async Service open_service (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1328,6 +1677,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Removes any persistent pairing record this host has with the device.
+		 */
 		public async void unpair (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -1573,9 +1925,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The kind of a {@link Device}.
+	 */
 	public enum DeviceType {
+		/**
+		 * The local system.
+		 */
 		LOCAL,
+		/**
+		 * A device reached over the network.
+		 */
 		REMOTE,
+		/**
+		 * A USB-connected device.
+		 */
 		USB;
 
 		public static DeviceType from_nick (string nick) throws Error {
@@ -1587,22 +1951,38 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for connecting to a remote device with
+	 * {@link DeviceManager.add_remote_device}.
+	 */
 	public sealed class RemoteDeviceOptions : Object {
+		/**
+		 * TLS certificate to present, for connections that require one.
+		 */
 		public TlsCertificate? certificate {
 			get;
 			set;
 		}
 
+		/**
+		 * Origin to send when connecting, if the server checks it.
+		 */
 		public string? origin {
 			get;
 			set;
 		}
 
+		/**
+		 * Authentication token to present to the server.
+		 */
 		public string? token {
 			get;
 			set;
 		}
 
+		/**
+		 * Interval between keepalive messages, in seconds, or -1 to disable.
+		 */
 		public int keepalive_interval {
 			get;
 			set;
@@ -1610,6 +1990,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * An immutable list of {@link Application} objects.
+	 */
 	public sealed class ApplicationList : Object {
 		private Gee.List<Application> items;
 
@@ -1617,31 +2000,57 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of applications in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the application at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the application
+		 */
 		public new Application get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Represents an application installed on a device.
+	 */
 	public sealed class Application : Object {
+		/**
+		 * The application's identifier, such as its bundle or package ID.
+		 */
 		public string identifier {
 			get;
 			construct;
 		}
 
+		/**
+		 * The application's display name.
+		 */
 		public string name {
 			get;
 			construct;
 		}
 
+		/**
+		 * The PID of the application if it is running, or 0 otherwise.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * Additional parameters describing the application, keyed by name.
+		 */
 		public HashTable<string, Variant> parameters {
 			get;
 			construct;
@@ -1652,6 +2061,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * An immutable list of {@link Process} objects.
+	 */
 	public sealed class ProcessList : Object {
 		private Gee.List<Process> items;
 
@@ -1659,26 +2071,49 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of processes in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the process at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the process
+		 */
 		public new Process get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Represents a process running on a device.
+	 */
 	public sealed class Process : Object {
+		/**
+		 * The process ID.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * The process name.
+		 */
 		public string name {
 			get;
 			construct;
 		}
 
+		/**
+		 * Additional parameters describing the process, keyed by name.
+		 */
 		public HashTable<string, Variant> parameters {
 			get;
 			construct;
@@ -1689,13 +2124,22 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for scoping and shaping a process query or match.
+	 */
 	public sealed class ProcessMatchOptions : Object {
+		/**
+		 * How long to wait for a match, in milliseconds, or 0 to not wait.
+		 */
 		public int timeout {
 			get;
 			set;
 			default = 0;
 		}
 
+		/**
+		 * How much detail to include about each process.
+		 */
 		public Scope scope {
 			get;
 			set;
@@ -1703,33 +2147,55 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options controlling how a process is spawned with {@link Device.spawn}.
+	 */
 	public sealed class SpawnOptions : Object {
+		/**
+		 * The argument vector, replacing the default. The first element is
+		 * conventionally the program itself.
+		 */
 		public string[]? argv {
 			get;
 			set;
 		}
 
+		/**
+		 * The complete environment, replacing the default.
+		 */
 		public string[]? envp {
 			get;
 			set;
 		}
 
+		/**
+		 * Environment entries to add to or override in the default environment.
+		 */
 		public string[]? env {
 			get;
 			set;
 		}
 
+		/**
+		 * The working directory to start in.
+		 */
 		public string? cwd {
 			get;
 			set;
 		}
 
+		/**
+		 * How to set up the standard I/O streams of the new process.
+		 */
 		public Stdio stdio {
 			get;
 			set;
 			default = INHERIT;
 		}
 
+		/**
+		 * Auxiliary, platform-specific spawn parameters, keyed by name.
+		 */
 		public HashTable<string, Variant> aux {
 			get;
 			set;
@@ -1737,6 +2203,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * An immutable list of {@link Spawn} objects.
+	 */
 	public sealed class SpawnList : Object {
 		private Gee.List<Spawn> items;
 
@@ -1744,21 +2213,41 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of spawns in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the spawn at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the spawn
+		 */
 		public new Spawn get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Represents a process spawned and held suspended by spawn gating.
+	 */
 	public sealed class Spawn : Object {
+		/**
+		 * The process ID of the spawned process.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * The identifier of the program that was spawned, if known.
+		 */
 		public string? identifier {
 			get;
 			construct;
@@ -1777,6 +2266,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * An immutable list of {@link Child} objects.
+	 */
 	public sealed class ChildList : Object {
 		private Gee.List<Child> items;
 
@@ -1784,46 +2276,81 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of children in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the child at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the child
+		 */
 		public new Child get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Represents a child process observed while child gating is enabled.
+	 */
 	public sealed class Child : Object {
+		/**
+		 * The child's process ID.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * The process ID of the parent.
+		 */
 		public uint parent_pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * How the child came to be, such as fork or exec.
+		 */
 		public ChildOrigin origin {
 			get;
 			construct;
 		}
 
+		/**
+		 * The identifier of the program, if known.
+		 */
 		public string? identifier {
 			get;
 			construct;
 		}
 
+		/**
+		 * The path of the program image, if known.
+		 */
 		public string? path {
 			get;
 			construct;
 		}
 
+		/**
+		 * The argument vector the child was launched with, if known.
+		 */
 		public string[]? argv {
 			get;
 			construct;
 		}
 
+		/**
+		 * The environment the child was launched with, if known.
+		 */
 		public string[]? envp {
 			get;
 			construct;
@@ -1857,27 +2384,45 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Details of a process crash.
+	 */
 	public sealed class Crash : Object {
+		/**
+		 * The process ID that crashed.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * The name of the process that crashed.
+		 */
 		public string process_name {
 			get;
 			construct;
 		}
 
+		/**
+		 * A short, human-readable summary of the crash.
+		 */
 		public string summary {
 			get;
 			construct;
 		}
 
+		/**
+		 * The full crash report.
+		 */
 		public string report {
 			get;
 			construct;
 		}
 
+		/**
+		 * Additional parameters describing the crash, keyed by name.
+		 */
 		public HashTable<string, Variant> parameters {
 			get;
 			construct;
@@ -1906,8 +2451,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A message bus for exchanging messages with a {@link Device}, obtained via
+	 * {@link Device.bus}.
+	 */
 	public sealed class Bus : Object {
+		/**
+		 * Emitted when the bus is detached from the device.
+		 */
 		public signal void detached ();
+		/**
+		 * Emitted when a message is received from the device.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data accompanying the message, if any
+		 */
 		public signal void message (string json, Bytes? data);
 
 		private weak Device device;
@@ -1921,10 +2479,19 @@ namespace Frida {
 			this.device = device;
 		}
 
+		/**
+		 * Checks whether the bus is currently detached.
+		 *
+		 * @return true if not attached
+		 */
 		public bool is_detached () {
 			return attach_request == null;
 		}
 
+		/**
+		 * Attaches to the device's message bus, after which messages can be
+		 * posted and received.
+		 */
 		public async void attach (Cancellable? cancellable = null) throws Error, IOError {
 			while (attach_request != null) {
 				try {
@@ -2000,6 +2567,12 @@ namespace Frida {
 			detached ();
 		}
 
+		/**
+		 * Posts a message to the bus.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public void post (string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -2038,8 +2611,20 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A connection to a device-specific service, opened via
+	 * {@link Device.open_service}.
+	 */
 	public sealed class Service : Object {
+		/**
+		 * Emitted when the service connection is closed.
+		 */
 		public signal void close ();
+		/**
+		 * Emitted when the service sends a message.
+		 *
+		 * @param message the message
+		 */
 		public signal void message (Variant message);
 
 		private ServiceSession? session;
@@ -2090,10 +2675,19 @@ namespace Frida {
 			session = null;
 		}
 
+		/**
+		 * Checks whether the service connection has been closed.
+		 *
+		 * @return true if closed
+		 */
 		public bool is_closed () {
 			return session == null;
 		}
 
+		/**
+		 * Activates the service, completing any handshake needed before
+		 * requests can be made.
+		 */
 		public async void activate (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -2114,6 +2708,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Cancels the service connection, closing it.
+		 */
 		public async void cancel (Cancellable? cancellable = null) throws IOError {
 			if (session == null)
 				return;
@@ -2140,6 +2737,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Sends a request to the service and waits for its response.
+		 *
+		 * @param parameters the request parameters
+		 * @return the service's response
+		 */
 		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -2190,14 +2793,31 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A live connection to a process, obtained via {@link Device.attach},
+	 * through which scripts can be created and run.
+	 */
 	public sealed class Session : Object, AgentMessageSink {
+		/**
+		 * Emitted when the session is detached from the target process.
+		 *
+		 * @param reason why the session was detached
+		 * @param crash the crash that caused the detach, if any
+		 */
 		public signal void detached (SessionDetachReason reason, Crash? crash);
 
+		/**
+		 * The PID of the attached process.
+		 */
 		public uint pid {
 			get;
 			construct;
 		}
 
+		/**
+		 * How long the session may survive a temporary disconnection before
+		 * being torn down, in seconds; 0 means no persistence.
+		 */
 		public uint persist_timeout {
 			get;
 			construct;
@@ -2248,10 +2868,19 @@ namespace Frida {
 			this.device = device;
 		}
 
+		/**
+		 * Checks whether the session has been detached from the target.
+		 *
+		 * @return true if no longer attached
+		 */
 		public bool is_detached () {
 			return state != ATTACHED;
 		}
 
+		/**
+		 * Detaches from the target process, tearing down all scripts created
+		 * through this session.
+		 */
 		public async void detach (Cancellable? cancellable = null) throws IOError {
 			yield _do_close (APPLICATION_REQUESTED, CrashInfo.empty (), true, cancellable);
 		}
@@ -2270,6 +2899,10 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Resumes a session that was persisted across a disconnection,
+		 * reattaching to the target.
+		 */
 		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
 			switch (state) {
 				case ATTACHED:
@@ -2329,6 +2962,10 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Enables child gating, so that children of the target process are held
+		 * suspended until explicitly resumed.
+		 */
 		public async void enable_child_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -2349,6 +2986,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Disables child gating.
+		 */
 		public async void disable_child_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -2369,6 +3009,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Creates a new script from JavaScript source.
+		 *
+		 * @param source the script's JavaScript source code
+		 * @param options script options such as name and runtime, or null
+		 * @return the new script, not yet loaded
+		 */
 		public async Script create_script (string source, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -2407,6 +3054,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Creates a new script from a precompiled bytecode blob, as produced by
+		 * {@link Session.compile_script}.
+		 *
+		 * @param bytes the compiled script
+		 * @param options script options such as name and runtime, or null
+		 * @return the new script, not yet loaded
+		 */
 		public async Script create_script_from_bytes (Bytes bytes, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -2446,6 +3101,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Compiles JavaScript source to a bytecode blob, which can later be
+		 * loaded with {@link Session.create_script_from_bytes}.
+		 *
+		 * @param source the script's JavaScript source code
+		 * @param options script options affecting compilation, or null
+		 * @return the compiled bytecode
+		 */
 		public async Bytes compile_script (string source, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -2479,6 +3142,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Builds a heap snapshot by running the given script, so that scripts
+		 * created later can start from the captured state.
+		 *
+		 * @param embed_script JavaScript to run to set up the snapshot
+		 * @param options snapshot options, or null
+		 * @return the serialized snapshot
+		 */
 		public async Bytes snapshot_script (string embed_script, SnapshotOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -2512,6 +3183,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Sets up a peer-to-peer connection to the target, so that subsequent
+		 * traffic flows directly rather than through the device's host session.
+		 *
+		 * @param options peer connection options, such as STUN and relays, or
+		 *   null
+		 */
 		public async void setup_peer_connection (PeerOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
@@ -2883,6 +3561,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Joins a portal, making the target reachable through it.
+		 *
+		 * @param address the portal address to connect to
+		 * @param options portal options, such as a token or ACL, or null
+		 * @return a membership handle that can later leave the portal
+		 */
 		public async PortalMembership join_portal (string address, PortalOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_open ();
@@ -3158,8 +3843,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A piece of JavaScript loaded into the target process, created through a
+	 * {@link Session}.
+	 */
 	public sealed class Script : Object {
+		/**
+		 * Emitted when the script has been unloaded and is no longer usable.
+		 */
 		public signal void destroyed ();
+		/**
+		 * Emitted when the script sends a message to the host.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data accompanying the message, if any
+		 */
 		public signal void message (string json, Bytes? data);
 
 		private AgentScriptId id;
@@ -3176,10 +3874,18 @@ namespace Frida {
 			this.session = session;
 		}
 
+		/**
+		 * Checks whether the script has been unloaded.
+		 *
+		 * @return true if the script is no longer loaded
+		 */
 		public bool is_destroyed () {
 			return close_request != null;
 		}
 
+		/**
+		 * Loads and starts running the script in the target process.
+		 */
 		public async void load (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -3200,6 +3906,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Unloads the script from the target process.
+		 */
 		public async void unload (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -3216,6 +3925,10 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Eternalizes the script so it keeps running after the session is
+		 * detached, instead of being unloaded.
+		 */
 		public async void eternalize (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -3238,6 +3951,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Posts a message to the script, delivered to its `recv` handlers.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public void post (string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -3259,6 +3978,12 @@ namespace Frida {
 			session._post_to_agent (AgentMessageKind.SCRIPT, id, json, data);
 		}
 
+		/**
+		 * Enables the JavaScript debugger for this script, listening for an
+		 * inspector client.
+		 *
+		 * @param port the TCP port to listen on, or 0 for the default
+		 */
 		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -3308,6 +4033,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Disables the JavaScript debugger for this script.
+		 */
 		public async void disable_debugger (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -3395,6 +4123,9 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A handle to a portal a session has joined via {@link Session.join_portal}.
+	 */
 	public sealed class PortalMembership : Object {
 		private uint id;
 		private Session session;
@@ -3406,6 +4137,9 @@ namespace Frida {
 			this.session = session;
 		}
 
+		/**
+		 * Leaves the portal, ending this membership.
+		 */
 		public async void terminate (Cancellable? cancellable = null) throws Error, IOError {
 			try {
 				yield session.active_session.leave_portal (PortalMembershipId (id), cancellable);
@@ -3436,9 +4170,24 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Injects shared libraries into processes, the lower-level primitive
+	 * underlying agent injection.
+	 */
 	public interface Injector : Object {
+		/**
+		 * Emitted when an injected library has been unloaded.
+		 *
+		 * @param id the injection ID returned when the library was injected
+		 */
 		public signal void uninjected (uint id);
 
+		/**
+		 * Creates an injector backed by a helper process, suitable for
+		 * injecting into other processes.
+		 *
+		 * @return the new injector
+		 */
 		public static Injector new () {
 #if HAVE_LOCAL_BACKEND
 #if WINDOWS
@@ -3467,6 +4216,12 @@ namespace Frida {
 #endif
 		}
 
+		/**
+		 * Creates an in-process injector, for injecting into the current
+		 * process.
+		 *
+		 * @return the new injector
+		 */
 		public static Injector new_inprocess () {
 #if HAVE_LOCAL_BACKEND
 #if WINDOWS
@@ -3495,6 +4250,9 @@ namespace Frida {
 #endif
 		}
 
+		/**
+		 * Closes the injector, releasing its resources.
+		 */
 		public abstract async void close (Cancellable? cancellable = null) throws IOError;
 
 		public void close_sync (Cancellable? cancellable = null) throws IOError {
@@ -3511,6 +4269,15 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Injects a shared library from a file into a process.
+		 *
+		 * @param pid the process ID to inject into
+		 * @param path path to the library
+		 * @param entrypoint name of the entrypoint function to call
+		 * @param data a string passed to the entrypoint
+		 * @return an injection ID, later matched by {@link Injector.uninjected}
+		 */
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data,
 			Cancellable? cancellable = null) throws Error, IOError;
 
@@ -3535,6 +4302,15 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Injects a shared library from an in-memory blob into a process.
+		 *
+		 * @param pid the process ID to inject into
+		 * @param blob the library image
+		 * @param entrypoint name of the entrypoint function to call
+		 * @param data a string passed to the entrypoint
+		 * @return an injection ID, later matched by {@link Injector.uninjected}
+		 */
 		public abstract async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data,
 			Cancellable? cancellable = null) throws Error, IOError;
 
@@ -3559,6 +4335,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Stops monitoring an injected library, so its unload is no longer
+		 * tracked.
+		 *
+		 * @param id the injection ID
+		 */
 		public abstract async void demonitor (uint id, Cancellable? cancellable = null) throws Error, IOError;
 
 		public void demonitor_sync (uint id, Cancellable? cancellable = null) throws Error, IOError {
@@ -3575,6 +4357,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Stops monitoring an injection and clones its state into a new
+		 * injection that inherits it.
+		 *
+		 * @param id the injection ID
+		 * @return the new injection ID
+		 */
 		public abstract async uint demonitor_and_clone_state (uint id, Cancellable? cancellable = null) throws Error, IOError;
 
 		public uint demonitor_and_clone_state_sync (uint id, Cancellable? cancellable = null) throws Error, IOError {
@@ -3591,6 +4380,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Recreates the thread used by an injection in the target process, for
+		 * example after the process has forked.
+		 *
+		 * @param pid the process ID
+		 * @param id the injection ID
+		 */
 		public abstract async void recreate_thread (uint pid, uint id, Cancellable? cancellable = null) throws Error, IOError;
 
 		public void recreate_thread_sync (uint pid, uint id, Cancellable? cancellable = null) throws Error, IOError {
