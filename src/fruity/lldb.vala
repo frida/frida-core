@@ -37,6 +37,7 @@ namespace Frida.LLDB {
 
 		protected override async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
 			yield execute_simple ("QThreadSuffixSupported", cancellable);
+			supported_features.add ("thread-suffix");
 			yield execute_simple ("QListThreadsInStopReply", cancellable);
 			yield execute_simple ("QSetDetachOnError:0", cancellable);
 		}

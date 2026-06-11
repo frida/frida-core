@@ -50,6 +50,7 @@ namespace Frida.Barebone {
 
 		protected override async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
 			yield execute_simple ("QThreadSuffixSupported", cancellable);
+			supported_features.add ("thread-suffix");
 			yield execute_simple ("QListThreadsInStopReply", cancellable);
 
 			yield discover_target (cancellable);

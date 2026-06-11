@@ -1774,7 +1774,7 @@ namespace Frida.GDB {
 			request
 				.append_c ('p')
 				.append_register_id (reg.id);
-			if ("vcont" in client.features) {
+			if ("thread-suffix" in client.features) {
 				request
 					.append (";thread:")
 					.append (id)
@@ -1785,7 +1785,11 @@ namespace Frida.GDB {
 
 			var response = yield client.query (request.build (), cancellable);
 
-			return Protocol.parse_integer_value (response.payload, client.byte_order);
+			unowned string payload = response.payload;
+			if (payload.length == 0 || payload[0] == 'E')
+				throw new Error.NOT_SUPPORTED ("Unable to read register “%s”", name);
+
+			return Protocol.parse_integer_value (payload, client.byte_order);
 		}
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null) throws Error, IOError {
@@ -1797,7 +1801,7 @@ namespace Frida.GDB {
 				.append_register_id (reg.id)
 				.append_c ('=')
 				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order));
-			if ("vcont" in client.features) {
+			if ("thread-suffix" in client.features) {
 				command
 					.append (";thread:")
 					.append (id)

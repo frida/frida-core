@@ -70,6 +70,8 @@ namespace Frida.Test {
 
 		Frida.SystemTest.add_tests ();
 
+		Frida.GDBTest.add_tests ();
+
 #if HAVE_LOCAL_BACKEND
 		Frida.InjectorTest.add_tests ();
 
