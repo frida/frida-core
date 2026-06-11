@@ -303,7 +303,7 @@ def build_doc_index(src_dir: Path) -> DocIndex:
             sources.append(path.read_text(encoding="utf-8"))
     base_dir = src_dir.parent / "lib" / "base"
     if base_dir.is_dir():
-        for path in sorted(base_dir.glob("*.vala")):
+        for path in sorted(base_dir.rglob("*.vala")):
             sources.append(path.read_text(encoding="utf-8"))
 
     index = DocIndex(types={}, members={}, enum_members={})

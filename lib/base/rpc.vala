@@ -1,5 +1,11 @@
 namespace Frida {
+	/**
+	 * Issues RPC calls over a {@link RpcPeer}, matching responses to requests.
+	 */
 	public sealed class RpcClient : Object {
+		/**
+		 * The peer used to send and receive RPC messages.
+		 */
 		public weak RpcPeer peer {
 			get;
 			construct;
@@ -7,10 +13,23 @@ namespace Frida {
 
 		private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
 
+		/**
+		 * Creates an RPC client that talks over @peer.
+		 *
+		 * @param peer the peer to send and receive messages through
+		 */
 		public RpcClient (RpcPeer peer) {
 			Object (peer: peer);
 		}
 
+		/**
+		 * Calls a remote method and waits for its result.
+		 *
+		 * @param method the method name to invoke
+		 * @param args the JSON arguments
+		 * @param data binary data to accompany the call, if any
+		 * @return the method's JSON result
+		 */
 		public async Json.Node call (string method, Json.Node[] args, Bytes? data, Cancellable? cancellable) throws Error, IOError {
 			string request_id = Uuid.string_random ();
 
@@ -157,7 +176,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A transport over which an {@link RpcClient} sends and receives RPC
+	 * messages.
+	 */
 	public interface RpcPeer : Object {
+		/**
+		 * Posts an RPC message to the peer.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public abstract async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError;
 	}
 }

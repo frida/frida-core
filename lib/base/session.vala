@@ -755,10 +755,25 @@ namespace Frida {
 		public abstract async void break_and_detach (Cancellable? cancellable) throws GLib.Error;
 	}
 
+	/**
+	 * What the Gadget should do when a configured breakpoint is hit.
+	 */
 	public enum GadgetBreakpointAction {
+		/**
+		 * Invoke the function and return immediately.
+		 */
 		INVOKE_RETURN,
+		/**
+		 * Resume execution.
+		 */
 		RESUME,
+		/**
+		 * Detach the Gadget.
+		 */
 		DETACH,
+		/**
+		 * Apply the page plan.
+		 */
 		PAGE_PLAN,
 	}
 
@@ -802,16 +817,37 @@ namespace Frida {
 	}
 
 	[DBus (name = "re.frida.AuthenticationService17")]
+	/**
+	 * Authenticates clients connecting to a {@link PortalService} or
+	 * {@link ControlService}.
+	 */
 	public interface AuthenticationService : Object {
+		/**
+		 * Authenticates a client by its token.
+		 *
+		 * @param token the token presented by the client
+		 * @return a JSON string describing the authenticated session
+		 */
 		public abstract async string authenticate (string token, Cancellable? cancellable) throws GLib.Error;
 	}
 
+	/**
+	 * An {@link AuthenticationService} that accepts a single fixed token.
+	 */
 	public sealed class StaticAuthenticationService : Object, AuthenticationService {
+		/**
+		 * The SHA-256 hash of the accepted token.
+		 */
 		public string token_hash {
 			get;
 			construct;
 		}
 
+		/**
+		 * Creates a service that accepts the given token.
+		 *
+		 * @param token the token clients must present
+		 */
 		public StaticAuthenticationService (string token) {
 			Object (token_hash: Checksum.compute_for_string (SHA256, token));
 		}
@@ -966,9 +1002,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * How the agent should take over exception handling in the target.
+	 */
 	public enum Exceptor {
+		/**
+		 * Install handlers and keep the target from overriding them.
+		 */
 		FULL,
+		/**
+		 * Install handlers but let the target replace them.
+		 */
 		HANDLER_ONLY,
+		/**
+		 * Do not handle exceptions.
+		 */
 		OFF;
 
 		public static Exceptor from_nick (string nick) throws Error {
@@ -2009,8 +2057,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * How a script's heap snapshot is delivered to the runtime.
+	 */
 	public enum SnapshotTransport {
+		/**
+		 * Embed the snapshot inline with the script.
+		 */
 		INLINE,
+		/**
+		 * Pass the snapshot through shared memory.
+		 */
 		SHARED_MEMORY
 	}
 
@@ -2110,17 +2167,29 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link Session.join_portal}.
+	 */
 	public sealed class PortalOptions : Object {
+		/**
+		 * TLS certificate to present to the portal.
+		 */
 		public TlsCertificate? certificate {
 			get;
 			set;
 		}
 
+		/**
+		 * Authentication token to present to the portal.
+		 */
 		public string? token {
 			get;
 			set;
 		}
 
+		/**
+		 * Access-control tags scoping what this membership may reach.
+		 */
 		public string[]? acl {
 			get;
 			set;
@@ -2173,7 +2242,14 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link Session.setup_peer_connection}, configuring how the
+	 * peer-to-peer connection is negotiated.
+	 */
 	public sealed class PeerOptions : Object {
+		/**
+		 * The STUN server to use for discovering the public address, if any.
+		 */
 		public string? stun_server {
 			get;
 			set;
@@ -2181,14 +2257,27 @@ namespace Frida {
 
 		private Gee.List<Relay> relays = new Gee.ArrayList<Relay> ();
 
+		/**
+		 * Removes all configured relays.
+		 */
 		public void clear_relays () {
 			relays.clear ();
 		}
 
+		/**
+		 * Adds a relay to use when a direct connection cannot be established.
+		 *
+		 * @param relay the relay to add
+		 */
 		public void add_relay (Relay relay) {
 			relays.add (relay);
 		}
 
+		/**
+		 * Invokes @func for each configured relay.
+		 *
+		 * @param func function called with each relay
+		 */
 		public void enumerate_relays (Func<Relay> func) {
 			foreach (var relay in relays)
 				func (relay);
@@ -2234,27 +2323,51 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * A TURN relay used to establish a peer-to-peer connection when a direct
+	 * one is not possible.
+	 */
 	public sealed class Relay : Object {
+		/**
+		 * The relay's address, as host and port.
+		 */
 		public string address {
 			get;
 			construct;
 		}
 
+		/**
+		 * The username to authenticate with.
+		 */
 		public string username {
 			get;
 			construct;
 		}
 
+		/**
+		 * The password to authenticate with.
+		 */
 		public string password {
 			get;
 			construct;
 		}
 
+		/**
+		 * The kind of relay and transport to use.
+		 */
 		public RelayKind kind {
 			get;
 			construct;
 		}
 
+		/**
+		 * Creates a relay.
+		 *
+		 * @param address the relay's address, as host and port
+		 * @param username the username to authenticate with
+		 * @param password the password to authenticate with
+		 * @param kind the kind of relay and transport
+		 */
 		public Relay (string address, string username, string password, RelayKind kind) {
 			Object (
 				address: address,
@@ -2281,9 +2394,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The kind of a {@link Relay} used for peer-to-peer connections.
+	 */
 	public enum RelayKind {
+		/**
+		 * A TURN relay reached over UDP.
+		 */
 		TURN_UDP,
+		/**
+		 * A TURN relay reached over TCP.
+		 */
 		TURN_TCP,
+		/**
+		 * A TURN relay reached over TLS.
+		 */
 		TURN_TLS
 	}
 

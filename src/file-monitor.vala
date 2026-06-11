@@ -1,7 +1,21 @@
 namespace Frida {
+	/**
+	 * Watches a filesystem path and reports changes to it.
+	 */
 	public sealed class FileMonitor : Object {
+		/**
+		 * Emitted when a change is observed at the watched path.
+		 *
+		 * @param file_path the path that changed
+		 * @param other_file_path the other path involved, for example the
+		 *   destination of a rename, or null
+		 * @param event the kind of change
+		 */
 		public signal void change (string file_path, string? other_file_path, FileMonitorEvent event);
 
+		/**
+		 * The path being watched.
+		 */
 		public string path {
 			get;
 			construct;
@@ -9,6 +23,11 @@ namespace Frida {
 
 		private GLib.FileMonitor monitor;
 
+		/**
+		 * Creates a file monitor for the given path.
+		 *
+		 * @param path the filesystem path to watch
+		 */
 		public FileMonitor (string path) {
 			Object (path: path);
 		}
@@ -17,6 +36,10 @@ namespace Frida {
 			clear ();
 		}
 
+		/**
+		 * Starts watching, after which {@link FileMonitor.change} is emitted on
+		 * each change.
+		 */
 		public async void enable (Cancellable? cancellable = null) throws Error, IOError {
 			if (monitor != null)
 				throw new Error.INVALID_OPERATION ("Already enabled");
@@ -43,6 +66,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Stops watching.
+		 */
 		public async void disable (Cancellable? cancellable = null) throws Error, IOError {
 			if (monitor == null)
 				throw new Error.INVALID_OPERATION ("Already disabled");
