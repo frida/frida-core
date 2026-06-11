@@ -944,8 +944,17 @@ namespace Frida {
 		throw new Error.PERMISSION_DENIED ("Not authorized, authentication required");
 	}
 
+	/**
+	 * The realm an agent should run in.
+	 */
 	public enum Realm {
+		/**
+		 * The process's native realm.
+		 */
 		NATIVE,
+		/**
+		 * An emulated realm, such as code running under binary translation.
+		 */
 		EMULATED;
 
 		public static Realm from_nick (string nick) throws Error {
@@ -1045,11 +1054,29 @@ namespace Frida {
 	}
 #endif
 
+	/**
+	 * Why a {@link Session} was detached from its target.
+	 */
 	public enum SessionDetachReason {
+		/**
+		 * The host asked to detach.
+		 */
 		APPLICATION_REQUESTED = 1,
+		/**
+		 * The target process was replaced, for example by an exec.
+		 */
 		PROCESS_REPLACED,
+		/**
+		 * The target process exited.
+		 */
 		PROCESS_TERMINATED,
+		/**
+		 * The connection to the target was lost.
+		 */
 		CONNECTION_TERMINATED,
+		/**
+		 * The device became unreachable.
+		 */
 		DEVICE_LOST;
 
 		public static SessionDetachReason from_nick (string nick) throws Error {
@@ -1062,19 +1089,61 @@ namespace Frida {
 	}
 
 	[DBus (name = "re.frida.Error")]
+	/**
+	 * The errors that Frida operations can fail with.
+	 */
 	public errordomain Error {
+		/**
+		 * The frida-server is not running.
+		 */
 		SERVER_NOT_RUNNING,
+		/**
+		 * The specified executable was not found.
+		 */
 		EXECUTABLE_NOT_FOUND,
+		/**
+		 * The specified executable is not supported.
+		 */
 		EXECUTABLE_NOT_SUPPORTED,
+		/**
+		 * No process matched the request.
+		 */
 		PROCESS_NOT_FOUND,
+		/**
+		 * The process is not responding.
+		 */
 		PROCESS_NOT_RESPONDING,
+		/**
+		 * An argument was invalid.
+		 */
 		INVALID_ARGUMENT,
+		/**
+		 * The operation is not valid in the current state.
+		 */
 		INVALID_OPERATION,
+		/**
+		 * Permission was denied.
+		 */
 		PERMISSION_DENIED,
+		/**
+		 * The requested address is already in use.
+		 */
 		ADDRESS_IN_USE,
+		/**
+		 * The operation timed out.
+		 */
 		TIMED_OUT,
+		/**
+		 * The operation is not supported.
+		 */
 		NOT_SUPPORTED,
+		/**
+		 * A protocol error occurred.
+		 */
 		PROTOCOL,
+		/**
+		 * A transport-level error occurred.
+		 */
 		TRANSPORT
 	}
 
@@ -1141,7 +1210,13 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link Device.get_frontmost_application}.
+	 */
 	public sealed class FrontmostQueryOptions : Object {
+		/**
+		 * How much detail to include about the application.
+		 */
 		public Scope scope {
 			get;
 			set;
@@ -1171,7 +1246,14 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link Device.enumerate_applications}, including an optional
+	 * set of identifiers to restrict the results to.
+	 */
 	public sealed class ApplicationQueryOptions : Object {
+		/**
+		 * How much detail to include about each application.
+		 */
 		public Scope scope {
 			get;
 			set;
@@ -1180,14 +1262,30 @@ namespace Frida {
 
 		private Gee.List<string> identifiers = new Gee.ArrayList<string> ();
 
+		/**
+		 * Restricts the query to the given application identifier. May be called
+		 * multiple times to select several.
+		 *
+		 * @param identifier the application identifier to include
+		 */
 		public void select_identifier (string identifier) {
 			identifiers.add (identifier);
 		}
 
+		/**
+		 * Checks whether any identifiers have been selected.
+		 *
+		 * @return true if the query is restricted to specific identifiers
+		 */
 		public bool has_selected_identifiers () {
 			return !identifiers.is_empty;
 		}
 
+		/**
+		 * Invokes @func for each selected identifier.
+		 *
+		 * @param func function called with each identifier
+		 */
 		public void enumerate_selected_identifiers (Func<string> func) {
 			foreach (var identifier in identifiers)
 				func (identifier);
@@ -1229,7 +1327,14 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link Device.enumerate_processes}, including an optional set
+	 * of PIDs to restrict the results to.
+	 */
 	public sealed class ProcessQueryOptions : Object {
+		/**
+		 * How much detail to include about each process.
+		 */
 		public Scope scope {
 			get;
 			set;
@@ -1238,14 +1343,30 @@ namespace Frida {
 
 		private Gee.List<uint> pids = new Gee.ArrayList<uint> ();
 
+		/**
+		 * Restricts the query to the given PID. May be called multiple times to
+		 * select several.
+		 *
+		 * @param pid the process ID to include
+		 */
 		public void select_pid (uint pid) {
 			pids.add (pid);
 		}
 
+		/**
+		 * Checks whether any PIDs have been selected.
+		 *
+		 * @return true if the query is restricted to specific PIDs
+		 */
 		public bool has_selected_pids () {
 			return !pids.is_empty;
 		}
 
+		/**
+		 * Invokes @func for each selected PID.
+		 *
+		 * @param func function called with each PID
+		 */
 		public void enumerate_selected_pids (Func<uint> func) {
 			foreach (var pid in pids)
 				func (pid);
@@ -1287,9 +1408,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * How much detail to include in query results.
+	 */
 	public enum Scope {
+		/**
+		 * Only the essential fields.
+		 */
 		MINIMAL,
+		/**
+		 * Essential fields plus metadata.
+		 */
 		METADATA,
+		/**
+		 * Everything available.
+		 */
 		FULL;
 
 		public static Scope from_nick (string nick) throws Error {
@@ -1371,42 +1504,68 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options controlling how {@link Device.attach} sets up a {@link Session}.
+	 */
 	public sealed class SessionOptions : Object {
+		/**
+		 * The realm to attach in.
+		 */
 		public Realm realm {
 			get;
 			set;
 			default = NATIVE;
 		}
 
+		/**
+		 * How long the session may survive a disconnection before being torn
+		 * down, in seconds; 0 disables persistence.
+		 */
 		public uint persist_timeout {
 			get;
 			set;
 			default = 0;
 		}
 
+		/**
+		 * Path to a custom agent to use in the emulated realm.
+		 */
 		public string? emulated_agent_path {
 			get;
 			set;
 		}
 
+		/**
+		 * How the agent should handle exceptions in the target.
+		 */
 		public Exceptor exceptor {
 			get;
 			set;
 			default = FULL;
 		}
 
+		/**
+		 * Whether to install the unwind broker so exceptions can propagate
+		 * through instrumented code.
+		 */
 		public bool unwind_broker {
 			get;
 			set;
 			default = true;
 		}
 
+		/**
+		 * Whether to monitor the target for exit so the session is cleaned up.
+		 */
 		public bool exit_monitor {
 			get;
 			set;
 			default = true;
 		}
 
+		/**
+		 * Whether to monitor thread suspension in the target.
+		 */
 		public bool thread_suspend_monitor {
 			get;
 			set;
@@ -1415,14 +1574,28 @@ namespace Frida {
 
 		private Gee.List<uint> linker_notifier_offsets = new Gee.ArrayList<uint> ();
 
+		/**
+		 * Clears the configured linker notifier offsets.
+		 */
 		public void clear_linker_notifier_offsets () {
 			linker_notifier_offsets.clear ();
 		}
 
+		/**
+		 * Adds a linker notifier offset, used to detect module load and unload
+		 * events in the target.
+		 *
+		 * @param offset the offset into the linker to instrument
+		 */
 		public void add_linker_notifier_offset (uint offset) {
 			linker_notifier_offsets.add (offset);
 		}
 
+		/**
+		 * Invokes @func for each configured linker notifier offset.
+		 *
+		 * @param func function called with each offset
+		 */
 		public void enumerate_linker_notifier_offsets (Func<uint> func) {
 			foreach (var offset in linker_notifier_offsets)
 				func (offset);
@@ -1529,8 +1702,18 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * How to set up the standard I/O streams of a spawned process.
+	 */
 	public enum Stdio {
+		/**
+		 * Inherit the host's streams.
+		 */
 		INHERIT,
+		/**
+		 * Pipe the streams through Frida, surfaced via {@link Device.output}
+		 * and {@link Device.input}.
+		 */
 		PIPE;
 
 		public static Stdio from_nick (string nick) throws Error {
@@ -1594,9 +1777,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * How a {@link Child} came to be.
+	 */
 	public enum ChildOrigin {
+		/**
+		 * Created by fork().
+		 */
 		FORK,
+		/**
+		 * The result of an exec() replacing the image.
+		 */
 		EXEC,
+		/**
+		 * Spawned as a new process.
+		 */
 		SPAWN;
 
 		public static ChildOrigin from_nick (string nick) throws Error {
@@ -1713,23 +1908,39 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for creating a {@link Script} with {@link Session.create_script}.
+	 */
 	public sealed class ScriptOptions : Object {
+		/**
+		 * A name for the script, used in logging and debugging.
+		 */
 		public string? name {
 			get;
 			set;
 		}
 
+		/**
+		 * A heap snapshot to start the script from, as produced by
+		 * {@link Session.snapshot_script}.
+		 */
 		public Bytes? snapshot {
 			get;
 			set;
 		}
 
+		/**
+		 * How the snapshot is delivered to the runtime.
+		 */
 		public SnapshotTransport snapshot_transport {
 			get;
 			set;
 			default = INLINE;
 		}
 
+		/**
+		 * Which JavaScript runtime to run the script in.
+		 */
 		public ScriptRuntime runtime {
 			get;
 			set;
@@ -1803,12 +2014,21 @@ namespace Frida {
 		SHARED_MEMORY
 	}
 
+	/**
+	 * Options for building a heap snapshot with {@link Session.snapshot_script}.
+	 */
 	public sealed class SnapshotOptions : Object {
+		/**
+		 * Script to run to warm up the runtime before capturing the snapshot.
+		 */
 		public string? warmup_script {
 			get;
 			set;
 		}
 
+		/**
+		 * Which JavaScript runtime to capture the snapshot for.
+		 */
 		public ScriptRuntime runtime {
 			get;
 			set;
@@ -1848,9 +2068,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Which JavaScript runtime a script should use.
+	 */
 	public enum ScriptRuntime {
+		/**
+		 * Let Frida choose.
+		 */
 		DEFAULT,
+		/**
+		 * The QuickJS runtime.
+		 */
 		QJS,
+		/**
+		 * The V8 runtime.
+		 */
 		V8;
 
 		public static ScriptRuntime from_nick (string nick) throws Error {
