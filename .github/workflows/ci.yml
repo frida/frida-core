@@ -31,7 +31,7 @@ jobs:
     runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Install MinGW toolchain for cgo support
@@ -42,7 +42,7 @@ jobs:
           msystem: ${{ matrix.sys }}
           install: ${{ matrix.pkg }}
       - name: Install Go toolchain
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
@@ -95,7 +95,7 @@ jobs:
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Install toolchain
@@ -151,7 +151,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install ${{ matrix.pkg }}
       - name: Install Go toolchain
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
@@ -164,7 +164,7 @@ jobs:
           make
       - name: Upload devkit
         if: ${{ !startsWith(matrix.id, 'linux-') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
@@ -178,11 +178,11 @@ jobs:
     container: ghcr.io/frida/x-tools-linux-${{ matrix.arch }}:latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Install Go toolchain
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
@@ -194,7 +194,7 @@ jobs:
               ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-devkit-linux-${{ matrix.arch }}
           path: build/src/devkit/
@@ -211,7 +211,7 @@ jobs:
     container: ghcr.io/frida/x-tools-linux-${{ matrix.arch }}:latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Build
@@ -342,11 +342,11 @@ jobs:
     runs-on: ${{ startsWith(matrix.id, 'ios-') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Install Go toolchain
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'src/compiler/go.mod'
           cache-dependency-path: 'src/compiler/go.mod'
@@ -373,7 +373,7 @@ jobs:
               ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-devkit-${{ matrix.id }}
           path: build/src/devkit/
@@ -432,7 +432,7 @@ jobs:
     container: ghcr.io/frida/qnx-tools:latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Build
@@ -441,7 +441,7 @@ jobs:
               ./configure --host=arm-unknown-nto-qnx6.5.0eabi ${{ env.FRIDA_CORE_OPTIONS }}
           make
       - name: Upload devkit
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-devkit-qnx-armeabi
           path: build/src/devkit/
@@ -467,7 +467,7 @@ jobs:
     container: ghcr.io/frida/core-linux-helpers-${{ matrix.arch }}:latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Build
@@ -501,7 +501,7 @@ jobs:
     container: ghcr.io/frida/core-linux-helpers-${{ matrix.arch }}:latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Build
@@ -530,24 +530,24 @@ jobs:
       - mobile
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download macOS/x86_64 devkit
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: core-devkit-macos-x86_64
           path: devkits/macos-x86_64
       - name: Download macOS/arm64 devkit
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: core-devkit-macos-arm64
           path: devkits/macos-arm64
       - name: Download iOS/arm64 devkit
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: core-devkit-ios-arm64
           path: devkits/ios-arm64
       - name: Download iOS/arm64-simulator devkit
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: core-devkit-ios-arm64-simulator
           path: devkits/ios-arm64-simulator
@@ -610,7 +610,7 @@ jobs:
               -headers xcframework_headers/ios-arm64-simulator \
               -output FridaCore.xcframework
       - name: Upload FridaCore.xcframework
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FridaCore.xcframework
           path: FridaCore.xcframework
@@ -622,7 +622,7 @@ jobs:
       - xcframework
     steps:
       - name: Download FridaCore.xcframework artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: FridaCore.xcframework
           path: dist
@@ -645,7 +645,7 @@ jobs:
           cd dist
           zip -r FridaCore.xcframework.zip FridaCore.xcframework
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/FridaCore.xcframework.zip
