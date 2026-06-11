@@ -1,10 +1,20 @@
 namespace Frida {
+	/**
+	 * Hosts a Frida control endpoint that frida-server-style clients can connect
+	 * to, exposing the local system over the network.
+	 */
 	public sealed class ControlService : Object {
+		/**
+		 * The endpoint the service listens on.
+		 */
 		public EndpointParameters endpoint_params {
 			get;
 			construct;
 		}
 
+		/**
+		 * The options the service was configured with.
+		 */
 		public ControlServiceOptions options {
 			get;
 			construct;
@@ -39,6 +49,12 @@ namespace Frida {
 			STOPPING
 		}
 
+		/**
+		 * Creates a control service listening on the given endpoint.
+		 *
+		 * @param endpoint_params the endpoint to listen on
+		 * @param options service options, or null for the defaults
+		 */
 		public ControlService (EndpointParameters endpoint_params, ControlServiceOptions? options = null) throws Error {
 #if HAVE_LOCAL_BACKEND
 			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
@@ -73,6 +89,14 @@ namespace Frida {
 #endif
 		}
 
+		/**
+		 * Creates a control service exposing a specific device rather than the
+		 * local system.
+		 *
+		 * @param device the device to expose
+		 * @param endpoint_params the endpoint to listen on
+		 * @param options service options, or null for the defaults
+		 */
 		public async ControlService.with_device (Device device, EndpointParameters endpoint_params,
 				ControlServiceOptions? options = null, Cancellable? cancellable = null) throws Error, IOError {
 			ControlServiceOptions opts = (options != null) ? options : new ControlServiceOptions ();
@@ -111,6 +135,9 @@ namespace Frida {
 			this.provider = provider;
 		}
 
+		/**
+		 * Starts the service, binding the endpoint and accepting clients.
+		 */
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
@@ -146,6 +173,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Stops the service, disconnecting clients and releasing the endpoint.
+		 */
 		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STARTED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
@@ -1124,13 +1154,22 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for a {@link ControlService}.
+	 */
 	public sealed class ControlServiceOptions : Object {
+		/**
+		 * Whether to preload the agent for faster first attach.
+		 */
 		public bool enable_preload {
 			get;
 			set;
 			default = true;
 		}
 
+		/**
+		 * Whether to capture and report crashes in instrumented processes.
+		 */
 		public bool report_crashes {
 			get;
 			set;

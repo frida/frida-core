@@ -1,17 +1,80 @@
 namespace Frida {
+	/**
+	 * Hosts a Frida portal: a rendezvous point where instrumented processes
+	 * (nodes) and controllers meet, letting controllers reach nodes without a
+	 * direct connection to them.
+	 */
 	public sealed class PortalService : Object {
+		/**
+		 * Emitted when a node connects to the cluster endpoint.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param remote_address the node's network address
+		 */
 		public signal void node_connected (uint connection_id, SocketAddress remote_address);
+		/**
+		 * Emitted when a node joins the portal, identifying its application.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param application the node's application
+		 */
 		public signal void node_joined (uint connection_id, Application application);
+		/**
+		 * Emitted when a node leaves the portal.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param application the node's application
+		 */
 		public signal void node_left (uint connection_id, Application application);
+		/**
+		 * Emitted when a node disconnects from the cluster endpoint.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param remote_address the node's network address
+		 */
 		public signal void node_disconnected (uint connection_id, SocketAddress remote_address);
 
+		/**
+		 * Emitted when a controller connects to the control endpoint.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param remote_address the controller's network address
+		 */
 		public signal void controller_connected (uint connection_id, SocketAddress remote_address);
+		/**
+		 * Emitted when a controller disconnects from the control endpoint.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param remote_address the controller's network address
+		 */
 		public signal void controller_disconnected (uint connection_id, SocketAddress remote_address);
 
+		/**
+		 * Emitted when a connection successfully authenticates.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param session_info JSON describing the authenticated session
+		 */
 		public signal void authenticated (uint connection_id, string session_info);
+		/**
+		 * Emitted when a controller subscribes to portal messages.
+		 *
+		 * @param connection_id the connection's ID
+		 */
 		public signal void subscribe (uint connection_id);
+		/**
+		 * Emitted when a message is received from a connection.
+		 *
+		 * @param connection_id the connection's ID
+		 * @param json the message as a JSON string
+		 * @param data binary data accompanying the message, if any
+		 */
 		public signal void message (uint connection_id, string json, Bytes? data);
 
+		/**
+		 * A device representing the portal itself, for interacting with the
+		 * connected nodes.
+		 */
 		public Device device {
 			get {
 				return _device;
@@ -19,11 +82,17 @@ namespace Frida {
 		}
 		private Device _device;
 
+		/**
+		 * The endpoint that nodes connect to.
+		 */
 		public EndpointParameters cluster_params {
 			get;
 			construct;
 		}
 
+		/**
+		 * The endpoint that controllers connect to, if any.
+		 */
 		public EndpointParameters? control_params {
 			get;
 			construct;
@@ -56,6 +125,13 @@ namespace Frida {
 			STARTED
 		}
 
+		/**
+		 * Creates a portal service.
+		 *
+		 * @param cluster_params the endpoint that nodes connect to
+		 * @param control_params the endpoint that controllers connect to, or
+		 *   null to disable the control endpoint
+		 */
 		public PortalService (EndpointParameters cluster_params, EndpointParameters? control_params = null) {
 			Object (cluster_params: cluster_params, control_params: control_params);
 		}
@@ -86,12 +162,22 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Adds another endpoint for nodes to connect to.
+		 *
+		 * @param endpoint_params the endpoint to add
+		 */
 		public void add_cluster_endpoint (EndpointParameters endpoint_params) throws Error {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Cannot add endpoint after service has started");
 			cluster_services.add (make_cluster_service (endpoint_params));
 		}
 
+		/**
+		 * Adds another endpoint for controllers to connect to.
+		 *
+		 * @param endpoint_params the endpoint to add
+		 */
 		public void add_control_endpoint (EndpointParameters endpoint_params) throws Error {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Cannot add endpoint after service has started");
@@ -110,6 +196,9 @@ namespace Frida {
 			return service;
 		}
 
+		/**
+		 * Starts the portal, binding its endpoints and accepting connections.
+		 */
 		public async void start (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STOPPED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
@@ -143,6 +232,9 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Stops the portal, disconnecting everyone and releasing its endpoints.
+		 */
 		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
 			if (state != STARTED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
@@ -173,6 +265,11 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Disconnects a connection from the portal.
+		 *
+		 * @param connection_id the connection to disconnect
+		 */
 		public void kick (uint connection_id) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -194,6 +291,13 @@ namespace Frida {
 			entry.connection.close.begin (io_cancellable);
 		}
 
+		/**
+		 * Posts a message to a single connection.
+		 *
+		 * @param connection_id the connection to send to
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public void post (uint connection_id, string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -214,6 +318,13 @@ namespace Frida {
 				entry.post (json, data);
 		}
 
+		/**
+		 * Posts a message to every connection bearing the given tag.
+		 *
+		 * @param tag the tag identifying the recipients
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public void narrowcast (string tag, string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -233,6 +344,12 @@ namespace Frida {
 				entry.post (json, data);
 		}
 
+		/**
+		 * Posts a message to every connection.
+		 *
+		 * @param json the message as a JSON string
+		 * @param data binary data to accompany the message, if any
+		 */
 		public void broadcast (string json, Bytes? data = null) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -264,6 +381,12 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Gets the tags currently applied to a connection.
+		 *
+		 * @param connection_id the connection to inspect
+		 * @return the connection's tags, or null if it has none
+		 */
 		public string[]? enumerate_tags (uint connection_id) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -311,6 +434,13 @@ namespace Frida {
 			return strv;
 		}
 
+		/**
+		 * Applies a tag to a connection, so it can be reached with
+		 * {@link PortalService.narrowcast}.
+		 *
+		 * @param connection_id the connection to tag
+		 * @param tag the tag to apply
+		 */
 		public void tag (uint connection_id, string tag) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
@@ -337,6 +467,12 @@ namespace Frida {
 			entry.tags.add (tag);
 		}
 
+		/**
+		 * Removes a tag from a connection.
+		 *
+		 * @param connection_id the connection to untag
+		 * @param tag the tag to remove
+		 */
 		public void untag (uint connection_id, string tag) {
 			MainContext context = get_main_context ();
 			if (context.is_owner ()) {
