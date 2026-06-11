@@ -1,8 +1,28 @@
 namespace Frida {
+	/**
+	 * Compiles a TypeScript or JavaScript project into a single script bundle
+	 * that can be loaded with {@link Session.create_script}.
+	 */
 	public sealed class Compiler : Object {
+		/**
+		 * Emitted when a build is starting.
+		 */
 		public signal void starting ();
+		/**
+		 * Emitted when a build has finished.
+		 */
 		public signal void finished ();
+		/**
+		 * Emitted with the freshly built bundle, primarily when watching.
+		 *
+		 * @param bundle the compiled script bundle
+		 */
 		public signal void output (string bundle);
+		/**
+		 * Emitted with compiler diagnostics, such as type errors and warnings.
+		 *
+		 * @param diagnostics the diagnostics, as a variant
+		 */
 		public signal void diagnostics (Variant diagnostics);
 
 		private size_t watch_session_handle = 0;
@@ -11,6 +31,11 @@ namespace Frida {
 		private MainContext main_context;
 
 		// TODO: Remove the DeviceManager parameter.
+		/**
+		 * Creates a compiler.
+		 *
+		 * @param manager unused; kept for compatibility
+		 */
 		public Compiler (DeviceManager? manager = null) {
 			Object ();
 		}
@@ -27,6 +52,13 @@ namespace Frida {
 			cancel_watch ();
 		}
 
+		/**
+		 * Builds the project rooted at @entrypoint once.
+		 *
+		 * @param entrypoint path to the project's entrypoint module
+		 * @param options build options, or null for the defaults
+		 * @return the compiled script bundle
+		 */
 		public async string build (string entrypoint, BuildOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			CompilerBackend.check_available ();
@@ -78,6 +110,13 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Builds the project and keeps rebuilding it as its sources change,
+		 * emitting {@link Compiler.output} with each fresh bundle.
+		 *
+		 * @param entrypoint path to the project's entrypoint module
+		 * @param options watch options, or null for the defaults
+		 */
 		public async void watch (string entrypoint, WatchOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			CompilerBackend.check_available ();
@@ -980,42 +1019,66 @@ namespace Frida {
 		return Environment.get_current_dir ();
 	}
 
+	/**
+	 * Options shared by {@link Compiler.build} and {@link Compiler.watch}.
+	 */
 	public class CompilerOptions : Object {
+		/**
+		 * The project root directory, or null to infer it from the entrypoint.
+		 */
 		public string? project_root {
 			get;
 			set;
 		}
 
+		/**
+		 * How the resulting bundle's bytes are encoded.
+		 */
 		public OutputFormat output_format {
 			get;
 			set;
 			default = UNESCAPED;
 		}
 
+		/**
+		 * The module format of the bundle.
+		 */
 		public BundleFormat bundle_format {
 			get;
 			set;
 			default = ESM;
 		}
 
+		/**
+		 * Whether to type-check the project.
+		 */
 		public TypeCheckMode type_check {
 			get;
 			set;
 			default = FULL;
 		}
 
+		/**
+		 * Whether to include source maps in the bundle.
+		 */
 		public SourceMaps source_maps {
 			get;
 			set;
 			default = INCLUDED;
 		}
 
+		/**
+		 * Which compressor to run the output through, if any.
+		 */
 		public JsCompression compression {
 			get;
 			set;
 			default = NONE;
 		}
 
+		/**
+		 * Which platform the bundle targets.
+		 */
 		public JsPlatform platform {
 			get;
 			set;
@@ -1024,29 +1087,60 @@ namespace Frida {
 
 		internal Gee.List<string> externals = new Gee.ArrayList<string> ();
 
+		/**
+		 * Removes all configured externals.
+		 */
 		public void clear_externals () {
 			externals.clear ();
 		}
 
+		/**
+		 * Marks a module as external, leaving it out of the bundle.
+		 *
+		 * @param external the module specifier to treat as external
+		 */
 		public void add_external (string external) {
 			externals.add (external);
 		}
 
+		/**
+		 * Invokes @func for each configured external.
+		 *
+		 * @param func function called with each external
+		 */
 		public void enumerate_externals (Func<string> func) {
 			foreach (var external in externals)
 				func (external);
 		}
 	}
 
+	/**
+	 * Options for {@link Compiler.build}.
+	 */
 	public sealed class BuildOptions : CompilerOptions {
 	}
 
+	/**
+	 * Options for {@link Compiler.watch}.
+	 */
 	public sealed class WatchOptions : CompilerOptions {
 	}
 
+	/**
+	 * How a compiled bundle's bytes are encoded.
+	 */
 	public enum OutputFormat {
+		/**
+		 * Raw, unescaped JavaScript.
+		 */
 		UNESCAPED,
+		/**
+		 * A hex-encoded byte string.
+		 */
 		HEX_BYTES,
+		/**
+		 * A C string literal.
+		 */
 		C_STRING;
 
 		public static OutputFormat from_nick (string nick) throws Error {
@@ -1058,8 +1152,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The module format of a compiled bundle.
+	 */
 	public enum BundleFormat {
+		/**
+		 * An ECMAScript module.
+		 */
 		ESM,
+		/**
+		 * An immediately-invoked function expression.
+		 */
 		IIFE;
 
 		public static BundleFormat from_nick (string nick) throws Error {
@@ -1071,8 +1174,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Whether the compiler type-checks the project.
+	 */
 	public enum TypeCheckMode {
+		/**
+		 * Perform full type checking.
+		 */
 		FULL,
+		/**
+		 * Skip type checking.
+		 */
 		NONE;
 
 		public static TypeCheckMode from_nick (string nick) throws Error {
@@ -1084,8 +1196,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Whether source maps are included in a compiled bundle.
+	 */
 	public enum SourceMaps {
+		/**
+		 * Include source maps.
+		 */
 		INCLUDED,
+		/**
+		 * Omit source maps.
+		 */
 		OMITTED;
 
 		public static SourceMaps from_nick (string nick) throws Error {
@@ -1097,8 +1218,17 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Which compressor the compiled JavaScript is run through.
+	 */
 	public enum JsCompression {
+		/**
+		 * No compression.
+		 */
 		NONE,
+		/**
+		 * Compress with Terser.
+		 */
 		TERSER;
 
 		public static JsCompression from_nick (string nick) throws Error {
@@ -1110,9 +1240,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The platform a compiled bundle targets.
+	 */
 	public enum JsPlatform {
+		/**
+		 * Frida's Gum runtime inside a target process.
+		 */
 		GUM,
+		/**
+		 * A web browser.
+		 */
 		BROWSER,
+		/**
+		 * A platform-neutral environment.
+		 */
 		NEUTRAL;
 
 		public static JsPlatform from_nick (string nick) throws Error {

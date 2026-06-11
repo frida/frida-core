@@ -1,7 +1,21 @@
 namespace Frida {
+	/**
+	 * Searches for and installs npm packages of Frida agents, for use with the
+	 * {@link Compiler}.
+	 */
 	public sealed class PackageManager : Object {
+		/**
+		 * Emitted as an install progresses.
+		 *
+		 * @param phase the current phase of the installation
+		 * @param fraction progress within the phase, from 0 to 1
+		 * @param details optional human-readable detail
+		 */
 		public signal void install_progress (PackageInstallPhase phase, double fraction, string? details = null);
 
+		/**
+		 * The npm registry host to use.
+		 */
 		public string registry {
 			get;
 			set;
@@ -10,6 +24,9 @@ namespace Frida {
 
 		private Soup.Session session;
 
+		/**
+		 * Creates a package manager.
+		 */
 		public PackageManager () {
 			string cache_dir = Path.build_filename (Environment.get_user_cache_dir (), "frida", "package-manager");
 			var cache = new Soup.Cache (cache_dir, Soup.CacheType.SINGLE_USER);
@@ -18,6 +35,13 @@ namespace Frida {
 			session.add_feature (cache);
 		}
 
+		/**
+		 * Searches the registry for packages matching a query.
+		 *
+		 * @param query the search query
+		 * @param options search options such as paging, or null
+		 * @return the matching packages
+		 */
 		public async PackageSearchResult search (string query, PackageSearchOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
 			var opts = (options != null) ? options : new PackageSearchOptions ();
@@ -89,6 +113,14 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Installs packages into a project, emitting {@link
+		 * PackageManager.install_progress} as it goes.
+		 *
+		 * @param options install options, such as the project directory and the
+		 *   packages to install, or null
+		 * @return the result of the installation
+		 */
 		public async PackageInstallResult install (PackageInstallOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 			install_progress (INITIALIZING, 0.0);
@@ -2321,34 +2353,80 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The phases an install passes through, reported via
+	 * {@link PackageManager.install_progress}.
+	 */
 	public enum PackageInstallPhase {
+		/**
+		 * Getting ready to install.
+		 */
 		INITIALIZING,
+		/**
+		 * Preparing the dependency set.
+		 */
 		PREPARING_DEPENDENCIES,
+		/**
+		 * Resolving a package to a concrete version.
+		 */
 		RESOLVING_PACKAGE,
+		/**
+		 * Fetching a resource.
+		 */
 		FETCHING_RESOURCE,
+		/**
+		 * The package was already installed.
+		 */
 		PACKAGE_ALREADY_INSTALLED,
+		/**
+		 * Downloading a package.
+		 */
 		DOWNLOADING_PACKAGE,
+		/**
+		 * A package was installed.
+		 */
 		PACKAGE_INSTALLED,
+		/**
+		 * Resolving and installing the full dependency set.
+		 */
 		RESOLVING_AND_INSTALLING_ALL,
+		/**
+		 * The installation is complete.
+		 */
 		COMPLETE,
 	}
 
+	/**
+	 * A package available in the registry.
+	 */
 	public sealed class Package : Object {
+		/**
+		 * The package name.
+		 */
 		public string name {
 			get;
 			construct;
 		}
 
+		/**
+		 * The package version.
+		 */
 		public string version {
 			get;
 			construct;
 		}
 
+		/**
+		 * A short description of the package, if any.
+		 */
 		public string? description {
 			get;
 			construct;
 		}
 
+		/**
+		 * A URL with more information about the package, if any.
+		 */
 		public string? url {
 			get;
 			construct;
@@ -2372,13 +2450,31 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The role a package plays among a project's dependencies.
+	 */
 	public enum PackageRole {
+		/**
+		 * A regular runtime dependency.
+		 */
 		RUNTIME,
+		/**
+		 * A development-only dependency.
+		 */
 		DEVELOPMENT,
+		/**
+		 * An optional dependency.
+		 */
 		OPTIONAL,
+		/**
+		 * A peer dependency.
+		 */
 		PEER
 	}
 
+	/**
+	 * An immutable list of {@link Package} objects.
+	 */
 	public sealed class PackageList : Object {
 		private Gee.List<Package> items;
 
@@ -2386,22 +2482,42 @@ namespace Frida {
 			this.items = items;
 		}
 
+		/**
+		 * Gets the number of packages in the list.
+		 *
+		 * @return the count
+		 */
 		public int size () {
 			return items.size;
 		}
 
+		/**
+		 * Gets the package at the given position.
+		 *
+		 * @param index zero-based position
+		 * @return the package
+		 */
 		public new Package get (int index) {
 			return items.get (index);
 		}
 	}
 
+	/**
+	 * Options for {@link PackageManager.search}.
+	 */
 	public class PackageSearchOptions : Object {
+		/**
+		 * The number of results to skip, for paging.
+		 */
 		public uint offset {
 			get;
 			set;
 			default = 0;
 		}
 
+		/**
+		 * The maximum number of results to return.
+		 */
 		public uint limit {
 			get;
 			set;
@@ -2409,12 +2525,21 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * The result of a {@link PackageManager.search}.
+	 */
 	public sealed class PackageSearchResult : Object {
+		/**
+		 * The packages on this page of results.
+		 */
 		public PackageList packages {
 			get;
 			construct;
 		}
 
+		/**
+		 * The total number of matching packages, across all pages.
+		 */
 		public uint total {
 			get;
 			construct;
@@ -2425,39 +2550,71 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Options for {@link PackageManager.install}.
+	 */
 	public class PackageInstallOptions : Object {
 		internal Gee.List<string> specs = new Gee.ArrayList<string> ();
 		internal Gee.Set<PackageRole> omits = new Gee.HashSet<PackageRole> ();
 
+		/**
+		 * The project directory to install into, or null for the current
+		 * directory.
+		 */
 		public string? project_root {
 			get;
 			set;
 		}
 
+		/**
+		 * The role to record the installed packages under.
+		 */
 		public PackageRole role {
 			get;
 			set;
 			default = RUNTIME;
 		}
 
+		/**
+		 * Removes all package specs to install.
+		 */
 		public void clear_specs () {
 			specs.clear ();
 		}
 
+		/**
+		 * Adds a package spec to install, such as `foo` or `foo@1.2.3`.
+		 *
+		 * @param spec the package spec
+		 */
 		public void add_spec (string spec) {
 			specs.add (spec);
 		}
 
+		/**
+		 * Removes all omitted roles.
+		 */
 		public void clear_omits () {
 			omits.clear ();
 		}
 
+		/**
+		 * Omits dependencies of the given role from the installation.
+		 *
+		 * @param role the role to omit
+		 */
 		public void add_omit (PackageRole role) {
 			omits.add (role);
 		}
 	}
 
+	/**
+	 * The result of a {@link PackageManager.install}.
+	 */
 	public sealed class PackageInstallResult : Object {
+		/**
+		 * The packages that were installed.
+		 */
 		public PackageList packages {
 			get;
 			construct;

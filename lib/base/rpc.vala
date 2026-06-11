@@ -88,6 +88,13 @@ namespace Frida {
 			return pending.result;
 		}
 
+		/**
+		 * Feeds an incoming message to the client, matching it against pending
+		 * calls if it is an RPC response.
+		 *
+		 * @param json the incoming message as a JSON string
+		 * @return true if the message was an RPC message and was handled
+		 */
 		public bool try_handle_message (string json) {
 			if (json.index_of ("\"frida:rpc\"") == -1)
 				return false;
