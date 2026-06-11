@@ -97,42 +97,77 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Configures the network endpoint a {@link PortalService} or
+	 * {@link ControlService} listens on.
+	 */
 	public sealed class EndpointParameters : Object {
+		/**
+		 * The address to bind to, or null for the default.
+		 */
 		public string? address {
 			get;
 			construct;
 		}
 
+		/**
+		 * The port to listen on, or 0 for the default.
+		 */
 		public uint16 port {
 			get;
 			construct;
 		}
 
+		/**
+		 * TLS certificate to serve, enabling TLS when set.
+		 */
 		public TlsCertificate? certificate {
 			get;
 			construct;
 		}
 
+		/**
+		 * Origin to require from connecting clients, if any.
+		 */
 		public string? origin {
 			get;
 			construct;
 		}
 
+		/**
+		 * Service used to authenticate connecting clients, if any.
+		 */
 		public AuthenticationService? auth_service {
 			get;
 			construct;
 		}
 
+		/**
+		 * Directory whose files are served as static web assets, if any.
+		 */
 		public File? asset_root {
 			get;
 			set;
 		}
 
+		/**
+		 * Handler invoked for web requests, if any.
+		 */
 		public WebRequestHandler? request_handler {
 			get;
 			set;
 		}
 
+		/**
+		 * Creates endpoint parameters.
+		 *
+		 * @param address the address to bind to, or null for the default
+		 * @param port the port to listen on, or 0 for the default
+		 * @param certificate TLS certificate to serve, or null for plaintext
+		 * @param origin origin to require from clients, or null
+		 * @param auth_service service used to authenticate clients, or null
+		 * @param asset_root directory of static assets to serve, or null
+		 */
 		public EndpointParameters (string? address = null, uint16 port = 0, TlsCertificate? certificate = null,
 				string? origin = null, AuthenticationService? auth_service = null, File? asset_root = null) {
 			Object (
@@ -146,26 +181,51 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Handles web requests made to an endpoint's served assets.
+	 */
 	public interface WebRequestHandler : Object {
+		/**
+		 * Handles a single web request.
+		 *
+		 * @param request the incoming request
+		 * @return the response to send, or null to fall through to the default
+		 *   handling
+		 */
 		public abstract async WebResponse? handle_request (WebRequest request, Cancellable? cancellable) throws Error, IOError;
 	}
 
+	/**
+	 * An incoming web request passed to a {@link WebRequestHandler}.
+	 */
 	public sealed class WebRequest : Object {
+		/**
+		 * The HTTP method, such as `GET` or `POST`.
+		 */
 		public string method {
 			get;
 			construct;
 		}
 
+		/**
+		 * The request path.
+		 */
 		public string path {
 			get;
 			construct;
 		}
 
+		/**
+		 * The raw query string, if any.
+		 */
 		public string? query_string {
 			get;
 			construct;
 		}
 
+		/**
+		 * The request body, if any.
+		 */
 		public Bytes? body {
 			get;
 			construct;
@@ -178,6 +238,11 @@ namespace Frida {
 			raw_headers = headers;
 		}
 
+		/**
+		 * Invokes @func for each request header.
+		 *
+		 * @param func function called with each header's name and value
+		 */
 		public void foreach_header (WebRequestHeaderFunc func) {
 			raw_headers.foreach ((name, val) => {
 				func (name, val);
@@ -185,14 +250,29 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Callback invoked for each header while iterating a {@link WebRequest}.
+	 *
+	 * @param name the header name
+	 * @param val the header value
+	 */
 	public delegate void WebRequestHeaderFunc (string name, string val);
 
+	/**
+	 * A response returned from a {@link WebRequestHandler}.
+	 */
 	public sealed class WebResponse : Object {
+		/**
+		 * The HTTP status code.
+		 */
 		public uint status {
 			get;
 			construct;
 		}
 
+		/**
+		 * The response body.
+		 */
 		public Bytes body {
 			get;
 			construct;
@@ -200,10 +280,22 @@ namespace Frida {
 
 		private Soup.MessageHeaders raw_headers = new Soup.MessageHeaders (RESPONSE);
 
+		/**
+		 * Creates a response.
+		 *
+		 * @param status the HTTP status code
+		 * @param body the response body
+		 */
 		public WebResponse (uint status, Bytes body) {
 			Object (status: status, body: body);
 		}
 
+		/**
+		 * Adds a header to the response.
+		 *
+		 * @param name the header name
+		 * @param val the header value
+		 */
 		public void add_header (string name, string val) {
 			raw_headers.append (name, val);
 		}

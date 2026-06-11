@@ -16,6 +16,9 @@ namespace Frida {
 		public string? name;
 	}
 
+	/**
+	 * The XNU Mach trap numbers, as used on Apple platforms.
+	 */
 	public enum XnuMachTrap {
 		MACH_VM_ALLOCATE = -10,
 		MACH_VM_PURGABLE_CONTROL = -11,
@@ -81,6 +84,9 @@ namespace Frida {
 		IOKIT_USER_CLIENT = -100,
 	}
 
+	/**
+	 * The XNU BSD syscall numbers, as used on Apple platforms.
+	 */
 	public enum XnuBsdSyscall {
 		EXIT = 1,
 		FORK = 2,
