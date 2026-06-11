@@ -89,7 +89,7 @@ def main():
         emit_header(api, output_dir)
 
     if enable_gir:
-        emit_gir(api, core_gir, base_gir, output_dir)
+        emit_gir(api, core_gir, base_gir, output_dir, build_doc_index(src_dir))
 
     if enable_vapi:
         emit_vapi(api, output_dir)
@@ -195,7 +195,7 @@ def emit_header(api, output_dir):
 
         output_header_file.write("\n\n#endif\n")
 
-def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> str:
+def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path, docs: DocIndex) -> str:
     ET.register_namespace("", CORE_NAMESPACE)
     ET.register_namespace("c", C_NAMESPACE)
     ET.register_namespace("glib", GLIB_NAMESPACE)
@@ -264,6 +264,8 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
             if callback.get("name") in needed_names:
                 merged_namespace.append(callback)
 
+    inject_documentation(merged_namespace, docs)
+
     ET.indent(merged_root, space="  ")
     result = ET.tostring(merged_root,
                          encoding="unicode",
@@ -274,6 +276,312 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path) -> st
 
 def filter_elements(elements: List[ET.Element], spec_set: Set[str]):
     return [elem for elem in elements if elem.get("name") in spec_set]
+
+@dataclass
+class DocComment:
+    body: str
+    params: dict
+    returns: str
+
+@dataclass
+class DocIndex:
+    types: dict          # type_name -> DocComment
+    members: dict        # (type_name, member_name) -> DocComment
+    enum_members: dict   # (enum_name, member_name) -> DocComment
+
+DOC_TYPE_PATTERN = re.compile(r"public\s+(?:sealed\s+|abstract\s+)?(class|interface|enum|errordomain)\s+(\w+)")
+DOC_SIGNAL_PATTERN = re.compile(r"public\s+signal\s+\S.*?\b(\w+)\s*\(")
+DOC_PROPERTY_PATTERN = re.compile(r"public\s+(?:unowned\s+)?\S.*?\b(\w+)\s*\{")
+DOC_METHOD_PATTERN = re.compile(r"public\s+\S.*?\b(\w+)\s*\(")
+DOC_ENUM_MEMBER_PATTERN = re.compile(r"([A-Z][A-Z0-9_]*)\b")
+
+def build_doc_index(src_dir: Path) -> DocIndex:
+    sources = []
+    for name in TOPLEVEL_NAMES:
+        path = src_dir / name
+        if path.exists():
+            sources.append(path.read_text(encoding="utf-8"))
+    base_dir = src_dir.parent / "lib" / "base"
+    if base_dir.is_dir():
+        for path in sorted(base_dir.glob("*.vala")):
+            sources.append(path.read_text(encoding="utf-8"))
+
+    index = DocIndex(types={}, members={}, enum_members={})
+    for source in sources:
+        _collect_docs_from_source(source, index)
+    return index
+
+def _collect_docs_from_source(source: str, index: DocIndex):
+    lines = source.split("\n")
+    pending = None
+    current_type = None
+    current_is_enum = False
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+
+        if stripped.startswith("/**"):
+            block = [line]
+            while "*/" not in lines[i]:
+                i += 1
+                block.append(lines[i])
+            pending = _parse_doc_block(block)
+            i += 1
+            continue
+
+        if stripped == "" or stripped.startswith("//") or stripped.startswith("["):
+            i += 1
+            continue
+
+        indent = len(line) - len(line.lstrip("\t"))
+
+        type_match = DOC_TYPE_PATTERN.match(stripped)
+        if indent == 1 and type_match is not None:
+            current_type = type_match.group(2)
+            current_is_enum = type_match.group(1) in ("enum", "errordomain")
+            if pending is not None:
+                index.types[current_type] = pending
+            pending = None
+            i += 1
+            continue
+
+        if pending is not None and current_type is not None and indent >= 2:
+            if current_is_enum:
+                member_match = DOC_ENUM_MEMBER_PATTERN.match(stripped)
+                if member_match is not None:
+                    index.enum_members[(current_type, member_match.group(1))] = pending
+            else:
+                name = _parse_member_name(stripped, current_type)
+                if name is not None:
+                    index.members[(current_type, name)] = pending
+            pending = None
+            i += 1
+            continue
+
+        pending = None
+        i += 1
+
+def _parse_member_name(stripped: str, type_name: str):
+    if not stripped.startswith("public"):
+        return None
+    signal_match = DOC_SIGNAL_PATTERN.match(stripped)
+    if signal_match is not None:
+        return signal_match.group(1)
+    brace = stripped.find("{")
+    if brace != -1 and "(" not in stripped[:brace]:
+        property_match = DOC_PROPERTY_PATTERN.match(stripped)
+        if property_match is not None:
+            return property_match.group(1)
+    ctor_match = re.match(r"public\s+" + re.escape(type_name) + r"(?:\.(\w+))?\s*\(", stripped)
+    if ctor_match is not None:
+        return "new" if ctor_match.group(1) is None else ctor_match.group(1)
+    method_match = DOC_METHOD_PATTERN.match(stripped)
+    if method_match is not None:
+        return method_match.group(1)
+    return None
+
+def _parse_doc_block(block: List[str]) -> DocComment:
+    text_lines = []
+    for raw in block:
+        s = raw.strip()
+        if s.startswith("/**"):
+            s = s[3:]
+        if s.endswith("*/"):
+            s = s[:-2]
+        s = s.strip()
+        if s.startswith("*"):
+            s = s[1:]
+            if s.startswith(" "):
+                s = s[1:]
+        text_lines.append(s.rstrip())
+
+    # Valadoc block tags: "@param <name> <description>" and "@return <description>".
+    body_lines = []
+    params = {}
+    returns_lines = []
+    target = body_lines
+    for line in text_lines:
+        param_match = re.match(r"@param\s+(\w+)\s*(.*)", line)
+        return_match = re.match(r"@returns?\s*(.*)", line)
+        if param_match is not None:
+            params[param_match.group(1)] = [param_match.group(2)]
+            target = params[param_match.group(1)]
+            continue
+        if return_match is not None:
+            returns_lines = [return_match.group(1)]
+            target = returns_lines
+            continue
+        target.append(line)
+
+    def finish(lines):
+        return _valadoc_to_markdown("\n".join(lines).strip())
+
+    return DocComment(
+        body=finish(body_lines),
+        params={k: finish(v) for k, v in params.items()},
+        returns=finish(returns_lines),
+    )
+
+def _valadoc_to_markdown(text: str) -> str:
+    if not text:
+        return text
+    # Code blocks: {{{ ... }}} -> fenced ``` blocks.
+    def code_block(match):
+        code = match.group(1).strip("\n")
+        return "\n```\n" + code + "\n```\n"
+    text = re.sub(r"\{\{\{(.*?)\}\}\}", code_block, text, flags=re.DOTALL)
+    # Note: {@link ...} cross-references are resolved later, at injection time,
+    # where the full symbol table is available (see inject_documentation).
+    # Inline monospace: ``x`` -> `x` (valadoc) is already markdown-compatible.
+    # Bold: ''x'' -> **x**.
+    text = re.sub(r"''(.+?)''", r"**\1**", text)
+    # Italic: //x// -> *x*, but leave protocol-relative URLs (://) alone.
+    text = re.sub(r"(?<![:/])//(?!/)(.+?)//", r"*\1*", text)
+    return text
+
+def inject_documentation(merged_namespace: ET.Element, docs: DocIndex):
+    glib_signal_tag = f"{{{GLIB_NAMESPACE}}}signal"
+    callable_tags = {
+        f"{{{CORE_NAMESPACE}}}method",
+        f"{{{CORE_NAMESPACE}}}constructor",
+        f"{{{CORE_NAMESPACE}}}function",
+        f"{{{CORE_NAMESPACE}}}virtual-method",
+        glib_signal_tag,
+    }
+    property_tag = f"{{{CORE_NAMESPACE}}}property"
+    member_tag = f"{{{CORE_NAMESPACE}}}member"
+    doc_tag = f"{{{CORE_NAMESPACE}}}doc"
+
+    # Build a symbol table so {@link ...} can be turned into real gi-docgen
+    # cross-references. Keys use Vala-style names (underscores); values carry the
+    # gi-docgen link kind and the GIR name (dashes for properties/signals).
+    type_kinds = {}      # type_name -> gi-docgen kind ("class"/"iface"/"enum"/"error")
+    member_kinds = {}    # (type_name, vala_member) -> (kind, gir_name)
+    for type_elem in list(merged_namespace):
+        type_name = type_elem.get("name")
+        if type_name is None:
+            continue
+        tag = type_elem.tag.split("}")[-1]
+        if tag == "class":
+            type_kinds[type_name] = "class"
+        elif tag == "interface":
+            type_kinds[type_name] = "iface"
+        elif tag == "enumeration":
+            type_kinds[type_name] = "error" \
+                if type_elem.get(f"{{{GLIB_NAMESPACE}}}error-domain") is not None \
+                else "enum"
+        for child in list(type_elem):
+            cname = child.get("name")
+            if cname is None:
+                continue
+            if child.tag == f"{{{CORE_NAMESPACE}}}method":
+                member_kinds[(type_name, cname)] = ("method", cname)
+            elif child.tag == f"{{{CORE_NAMESPACE}}}constructor":
+                member_kinds[(type_name, cname)] = ("ctor", cname)
+            elif child.tag == property_tag:
+                member_kinds[(type_name, cname.replace("-", "_"))] = ("property", cname)
+            elif child.tag == glib_signal_tag:
+                member_kinds[(type_name, cname.replace("-", "_"))] = ("signal", cname)
+
+    def resolve_links(text: str) -> str:
+        def repl(match):
+            target = re.sub(r"^Frida\.", "", match.group(1).strip())
+            parts = target.split(".")
+            if len(parts) == 1:
+                kind = type_kinds.get(parts[0])
+                if kind is not None:
+                    return f"[{kind}@Frida.{parts[0]}]"
+            elif len(parts) == 2:
+                info = member_kinds.get((parts[0], parts[1]))
+                if info is not None:
+                    kind, gir_name = info
+                    if kind == "method":
+                        return f"[method@Frida.{parts[0]}.{gir_name}]"
+                    if kind == "ctor":
+                        return f"[ctor@Frida.{parts[0]}.{gir_name}]"
+                    if kind == "property":
+                        return f"[property@Frida.{parts[0]}:{gir_name}]"
+                    if kind == "signal":
+                        return f"[signal@Frida.{parts[0]}::{gir_name}]"
+            return "`" + target + "`"
+        return re.sub(r"\{@link\s+([^}]+)\}", repl, text)
+
+    def set_doc(elem: ET.Element, text: str):
+        if not text:
+            return
+        if elem.find(doc_tag) is not None:
+            return
+        doc = ET.Element(doc_tag)
+        doc.set("xml:space", "preserve")
+        doc.text = resolve_links(text)
+        elem.insert(0, doc)
+
+    def member_doc(type_name: str, name: str):
+        comment = docs.members.get((type_name, name))
+        if comment is None:
+            for suffix in ("_finish", "_sync"):
+                if name.endswith(suffix):
+                    comment = docs.members.get((type_name, name[: -len(suffix)]))
+                    if comment is not None:
+                        break
+        return comment
+
+    def apply_callable(elem: ET.Element, comment: DocComment):
+        set_doc(elem, comment.body)
+        if comment.returns:
+            rv = elem.find(f"{{{CORE_NAMESPACE}}}return-value")
+            if rv is not None:
+                set_doc(rv, comment.returns)
+        params_elem = elem.find(f"{{{CORE_NAMESPACE}}}parameters")
+        if params_elem is not None and comment.params:
+            for param in params_elem.findall(f"{{{CORE_NAMESPACE}}}parameter"):
+                text = comment.params.get(param.get("name"))
+                if text:
+                    set_doc(param, text)
+
+    for type_elem in list(merged_namespace):
+        type_name = type_elem.get("name")
+        if type_name is None:
+            continue
+        tag = type_elem.tag.split("}")[-1]
+
+        type_comment = docs.types.get(type_name)
+        if type_comment is not None and tag in ("class", "interface", "enumeration"):
+            set_doc(type_elem, type_comment.body)
+
+        for child in list(type_elem):
+            child_name = child.get("name")
+            if child_name is None:
+                continue
+            if child.tag in callable_tags:
+                lookup = child_name.replace("-", "_") if child.tag == glib_signal_tag \
+                    else child_name
+                comment = member_doc(type_name, lookup)
+                if comment is not None:
+                    apply_callable(child, comment)
+                elif child.tag == f"{{{CORE_NAMESPACE}}}constructor" \
+                        and child_name == "new":
+                    # Vala's implicit default constructor; give it a sensible
+                    # description rather than leaving it bare.
+                    set_doc(child, f"Creates a new [class@Frida.{type_name}].")
+            elif child.tag == property_tag:
+                vala_name = child_name.replace("-", "_")
+                comment = docs.members.get((type_name, vala_name))
+                if comment is not None:
+                    set_doc(child, comment.body)
+                    # The C API also exposes the property through getter/setter
+                    # methods; give them the same description.
+                    accessors = {"get_" + vala_name, "set_" + vala_name}
+                    for sibling in type_elem:
+                        if sibling.tag == f"{{{CORE_NAMESPACE}}}method" \
+                                and sibling.get("name") in accessors:
+                            set_doc(sibling, comment.body)
+            elif child.tag == member_tag:
+                comment = docs.enum_members.get((type_name, child_name.upper()))
+                if comment is not None:
+                    set_doc(child, comment.body)
 
 def emit_vapi(api, output_dir):
     with OutputFile(output_dir / f"frida-core-{api.version}.vapi") as output_vapi_file:
