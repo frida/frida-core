@@ -282,6 +282,8 @@ class DocComment:
     body: str
     params: dict
     returns: str
+    filename: str = "<generated>"
+    line: int = 0
 
 @dataclass
 class DocIndex:
@@ -296,22 +298,26 @@ DOC_METHOD_PATTERN = re.compile(r"public\s+\S.*?\b(\w+)\s*\(")
 DOC_ENUM_MEMBER_PATTERN = re.compile(r"([A-Z][A-Z0-9_]*)\b")
 
 def build_doc_index(src_dir: Path) -> DocIndex:
+    repo_root = src_dir.parent
     sources = []
     for name in TOPLEVEL_NAMES:
         path = src_dir / name
         if path.exists():
-            sources.append(path.read_text(encoding="utf-8"))
+            sources.append(path)
     base_dir = src_dir.parent / "lib" / "base"
     if base_dir.is_dir():
-        for path in sorted(base_dir.rglob("*.vala")):
-            sources.append(path.read_text(encoding="utf-8"))
+        sources.extend(sorted(base_dir.rglob("*.vala")))
 
     index = DocIndex(types={}, members={}, enum_members={})
-    for source in sources:
-        _collect_docs_from_source(source, index)
+    for path in sources:
+        try:
+            filename = path.relative_to(repo_root).as_posix()
+        except ValueError:
+            filename = path.name
+        _collect_docs_from_source(path.read_text(encoding="utf-8"), index, filename)
     return index
 
-def _collect_docs_from_source(source: str, index: DocIndex):
+def _collect_docs_from_source(source: str, index: DocIndex, filename: str):
     lines = source.split("\n")
     pending = None
     current_type = None
@@ -323,11 +329,14 @@ def _collect_docs_from_source(source: str, index: DocIndex):
         stripped = line.strip()
 
         if stripped.startswith("/**"):
+            start_line = i + 1
             block = [line]
             while "*/" not in lines[i]:
                 i += 1
                 block.append(lines[i])
             pending = _parse_doc_block(block)
+            pending.filename = filename
+            pending.line = start_line
             i += 1
             continue
 
@@ -508,13 +517,18 @@ def inject_documentation(merged_namespace: ET.Element, docs: DocIndex):
             return "`" + target + "`"
         return re.sub(r"\{@link\s+([^}]+)\}", repl, text)
 
-    def set_doc(elem: ET.Element, text: str):
+    def set_doc(elem: ET.Element, text: str, filename: str = "<generated>",
+                line: int = 0):
         if not text:
             return
         if elem.find(doc_tag) is not None:
             return
         doc = ET.Element(doc_tag)
         doc.set("xml:space", "preserve")
+        # gi-docgen accesses filename/line unconditionally, so always emit them,
+        # mirroring what g-ir-scanner produces for hand-written C.
+        doc.set("filename", filename)
+        doc.set("line", str(line))
         doc.text = resolve_links(text)
         elem.insert(0, doc)
 
@@ -529,17 +543,17 @@ def inject_documentation(merged_namespace: ET.Element, docs: DocIndex):
         return comment
 
     def apply_callable(elem: ET.Element, comment: DocComment):
-        set_doc(elem, comment.body)
+        set_doc(elem, comment.body, comment.filename, comment.line)
         if comment.returns:
             rv = elem.find(f"{{{CORE_NAMESPACE}}}return-value")
             if rv is not None:
-                set_doc(rv, comment.returns)
+                set_doc(rv, comment.returns, comment.filename, comment.line)
         params_elem = elem.find(f"{{{CORE_NAMESPACE}}}parameters")
         if params_elem is not None and comment.params:
             for param in params_elem.findall(f"{{{CORE_NAMESPACE}}}parameter"):
                 text = comment.params.get(param.get("name"))
                 if text:
-                    set_doc(param, text)
+                    set_doc(param, text, comment.filename, comment.line)
 
     for type_elem in list(merged_namespace):
         type_name = type_elem.get("name")
@@ -549,7 +563,8 @@ def inject_documentation(merged_namespace: ET.Element, docs: DocIndex):
 
         type_comment = docs.types.get(type_name)
         if type_comment is not None and tag in ("class", "interface", "enumeration"):
-            set_doc(type_elem, type_comment.body)
+            set_doc(type_elem, type_comment.body, type_comment.filename,
+                    type_comment.line)
 
         for child in list(type_elem):
             child_name = child.get("name")
@@ -570,18 +585,19 @@ def inject_documentation(merged_namespace: ET.Element, docs: DocIndex):
                 vala_name = child_name.replace("-", "_")
                 comment = docs.members.get((type_name, vala_name))
                 if comment is not None:
-                    set_doc(child, comment.body)
+                    set_doc(child, comment.body, comment.filename, comment.line)
                     # The C API also exposes the property through getter/setter
                     # methods; give them the same description.
                     accessors = {"get_" + vala_name, "set_" + vala_name}
                     for sibling in type_elem:
                         if sibling.tag == f"{{{CORE_NAMESPACE}}}method" \
                                 and sibling.get("name") in accessors:
-                            set_doc(sibling, comment.body)
+                            set_doc(sibling, comment.body, comment.filename,
+                                    comment.line)
             elif child.tag == member_tag:
                 comment = docs.enum_members.get((type_name, child_name.upper()))
                 if comment is not None:
-                    set_doc(child, comment.body)
+                    set_doc(child, comment.body, comment.filename, comment.line)
 
 def emit_vapi(api, output_dir):
     with OutputFile(output_dir / f"frida-core-{api.version}.vapi") as output_vapi_file:
