@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <pwd.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 
@@ -98,6 +99,7 @@ extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
 #endif
 
 static void frida_add_process_metadata (GHashTable * parameters, const struct kinfo_proc * process);
+static GVariant * frida_query_process_argv (guint pid);
 
 static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
 static GVariant * frida_uid_to_name (uid_t uid);
@@ -615,6 +617,13 @@ frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumera
 
     if (scope != FRIDA_SCOPE_MINIMAL)
       g_hash_table_insert (info.parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (path)));
+
+    if (scope == FRIDA_SCOPE_FULL)
+    {
+      GVariant * argv = frida_query_process_argv (info.pid);
+      if (argv != NULL)
+        g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (argv));
+    }
   }
 
   if (still_alive)
@@ -820,6 +829,64 @@ frida_add_process_metadata (GHashTable * parameters, const struct kinfo_proc * p
   g_hash_table_insert (parameters, g_strdup ("started"), g_variant_ref_sink (g_variant_new_take_string (g_date_time_format_iso8601 (t1))));
   g_date_time_unref (t1);
   g_date_time_unref (t0);
+}
+
+static GVariant *
+frida_query_process_argv (guint pid)
+{
+  GVariant * result = NULL;
+  int argmax;
+  size_t argmax_size = sizeof (argmax);
+  int argmax_mib[] = { CTL_KERN, KERN_ARGMAX };
+  gchar * buffer = NULL;
+  size_t buffer_size;
+  int args_mib[] = { CTL_KERN, KERN_PROCARGS2, (int) pid };
+  int argc;
+  const gchar * cursor, * end;
+  GVariantBuilder builder;
+  int i;
+
+  if (sysctl (argmax_mib, G_N_ELEMENTS (argmax_mib), &argmax, &argmax_size, NULL, 0) != 0)
+    goto beach;
+
+  buffer = g_malloc (argmax);
+  buffer_size = argmax;
+
+  if (sysctl (args_mib, G_N_ELEMENTS (args_mib), buffer, &buffer_size, NULL, 0) != 0)
+    goto beach;
+
+  if (buffer_size < sizeof (int))
+    goto beach;
+
+  memcpy (&argc, buffer, sizeof (int));
+  if (argc <= 0)
+    goto beach;
+
+  cursor = buffer + sizeof (int);
+  end = buffer + buffer_size;
+
+  while (cursor != end && *cursor != '\0')
+    cursor++;
+  while (cursor != end && *cursor == '\0')
+    cursor++;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("as"));
+
+  for (i = 0; i != argc && cursor != end; i++)
+  {
+    gsize arg_length = strnlen (cursor, end - cursor);
+    g_variant_builder_add_value (&builder, g_variant_new_take_string (g_strndup (cursor, arg_length)));
+    cursor += arg_length;
+    if (cursor != end)
+      cursor++;
+  }
+
+  result = g_variant_builder_end (&builder);
+
+beach:
+  g_free (buffer);
+
+  return result;
 }
 
 static struct kinfo_proc *

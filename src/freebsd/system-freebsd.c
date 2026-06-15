@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <pwd.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <sys/user.h>
@@ -23,6 +24,7 @@ static void frida_add_process_metadata (GHashTable * parameters, const struct ki
 
 static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
 static gboolean frida_system_query_proc_pathname (pid_t pid, gchar * path, gsize size);
+static GVariant * frida_query_process_argv (guint pid);
 static GVariant * frida_uid_to_name (uid_t uid);
 
 void
@@ -117,6 +119,13 @@ frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumera
 
     if (scope != FRIDA_SCOPE_MINIMAL)
       g_hash_table_insert (info.parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (path)));
+
+    if (scope == FRIDA_SCOPE_FULL)
+    {
+      GVariant * argv = frida_query_process_argv (info.pid);
+      if (argv != NULL)
+        g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (argv));
+    }
   }
 
   if (still_alive)
@@ -219,6 +228,50 @@ frida_system_query_proc_pathname (pid_t pid, gchar * path, gsize size)
     path[0] = '\0';
 
   return success;
+}
+
+static GVariant *
+frida_query_process_argv (guint pid)
+{
+  GVariant * result = NULL;
+  int mib[4];
+  gchar * buffer = NULL;
+  size_t size;
+  const gchar * cursor, * end;
+  GVariantBuilder builder;
+
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_PROC;
+  mib[2] = KERN_PROC_ARGS;
+  mib[3] = pid;
+
+  size = 0;
+  if (sysctl (mib, G_N_ELEMENTS (mib), NULL, &size, NULL, 0) != 0 || size == 0)
+    goto beach;
+
+  buffer = g_malloc (size);
+  if (sysctl (mib, G_N_ELEMENTS (mib), buffer, &size, NULL, 0) != 0)
+    goto beach;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("as"));
+
+  cursor = buffer;
+  end = buffer + size;
+  while (cursor != end)
+  {
+    gsize arg_length = strnlen (cursor, end - cursor);
+    g_variant_builder_add_value (&builder, g_variant_new_take_string (g_strndup (cursor, arg_length)));
+    cursor += arg_length;
+    if (cursor != end)
+      cursor++;
+  }
+
+  result = g_variant_builder_end (&builder);
+
+beach:
+  g_free (buffer);
+
+  return result;
 }
 
 static GVariant *

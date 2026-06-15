@@ -107,6 +107,13 @@ namespace Frida.HostSessionTest {
 #endif
 
 #if HAVE_LOCAL_BACKEND
+#if !QNX
+		GLib.Test.add_func ("/HostSession/process-argv-should-be-available", () => {
+			var h = new Harness ((h) => Local.process_argv_should_be_available.begin (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -1041,6 +1048,50 @@ namespace Frida.HostSessionTest {
 	}
 
 	namespace Local {
+
+#if !QNX
+		private static async void process_argv_should_be_available (Harness h) {
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
+				var marker = "--frida-argv-probe";
+				var target = Frida.Test.Process.start (target_path, new string[] { marker });
+
+				var options = new ProcessQueryOptions ();
+				options.scope = FULL;
+				options.select_pid (target.id);
+
+				Process? match = null;
+				var timer = new Timer ();
+				while (match == null && timer.elapsed () < 5.0) {
+					var processes = yield device.enumerate_processes (options);
+					if (processes.size () > 0) {
+						match = processes.get (0);
+					} else {
+						Timeout.add (50, process_argv_should_be_available.callback);
+						yield;
+					}
+				}
+				assert_true (match != null);
+
+				var argv = match.parameters["argv"];
+				assert_true (argv != null);
+				assert_true (argv.n_children () == 2);
+				assert_true (argv.get_child_value (1).get_string () == marker);
+
+				target.kill ();
+
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+#endif
 
 		private static async void latency_should_be_nominal (Harness h) {
 			h.disable_timeout ();
