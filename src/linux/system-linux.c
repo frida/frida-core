@@ -15,6 +15,7 @@ struct _FridaEnumerateProcessesOperation
 };
 
 static void frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op);
+static GVariant * frida_parse_cmdline_argv (const gchar * cmdline_data, gsize cmdline_length);
 static gboolean frida_is_directory_noexec (const gchar * directory);
 static gchar * frida_get_application_directory (void);
 static gboolean frida_add_process_metadata (GHashTable * parameters, const gchar * proc_entry_name);
@@ -86,6 +87,8 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
   gchar * program_path = NULL;
   gchar * cmdline_path = NULL;
   gchar * cmdline_data = NULL;
+  gsize cmdline_length = 0;
+  GVariant * argv = NULL;
   gchar * name = NULL;
 
   proc_name = g_strdup_printf ("%u", pid);
@@ -100,9 +103,11 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
 
   cmdline_path = g_build_filename ("/proc", proc_name, "cmdline", NULL);
 
-  g_file_get_contents (cmdline_path, &cmdline_data, NULL, NULL);
+  g_file_get_contents (cmdline_path, &cmdline_data, &cmdline_length, NULL);
   if (cmdline_data == NULL)
     goto beach;
+
+  argv = frida_parse_cmdline_argv (cmdline_data, cmdline_length);
 
   if (g_str_has_prefix (cmdline_data, "/proc/"))
   {
@@ -129,6 +134,11 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
     g_hash_table_insert (info.parameters, g_strdup ("path"),
         g_variant_ref_sink (g_variant_new_take_string (g_steal_pointer (&program_path))));
 
+    if (op->scope == FRIDA_SCOPE_FULL && argv != NULL)
+    {
+      g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (g_steal_pointer (&argv)));
+    }
+
     still_alive = frida_add_process_metadata (info.parameters, proc_name);
   }
 
@@ -138,12 +148,38 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
     frida_host_process_info_destroy (&info);
 
 beach:
+  g_clear_pointer (&argv, g_variant_unref);
   g_free (name);
   g_free (cmdline_data);
   g_free (cmdline_path);
   g_free (program_path);
   g_free (exe_path);
   g_free (proc_name);
+}
+
+static GVariant *
+frida_parse_cmdline_argv (const gchar * cmdline_data, gsize cmdline_length)
+{
+  GVariantBuilder builder;
+  const gchar * cursor, * end;
+
+  if (cmdline_length == 0)
+    return NULL;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("as"));
+
+  cursor = cmdline_data;
+  end = cmdline_data + cmdline_length;
+  while (cursor != end)
+  {
+    gsize arg_length = strnlen (cursor, end - cursor);
+    g_variant_builder_add_value (&builder, g_variant_new_take_string (g_strndup (cursor, arg_length)));
+    cursor += arg_length;
+    if (cursor != end)
+      cursor++;
+  }
+
+  return g_variant_builder_end (&builder);
 }
 
 void

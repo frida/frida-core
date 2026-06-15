@@ -3,7 +3,9 @@
 #include "icon-helpers.h"
 
 #include <psapi.h>
+#include <shellapi.h>
 #include <tlhelp32.h>
+#include <winternl.h>
 
 #define DRIVE_STRINGS_MAX_LENGTH     (512)
 
@@ -22,6 +24,7 @@ static void frida_collect_process_info (guint pid, FridaEnumerateProcessesOperat
 static gboolean frida_add_process_metadata (GHashTable * parameters, guint pid, HANDLE process, FridaEnumerateProcessesOperation * op);
 
 static gboolean frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
+static GVariant * frida_query_process_argv (guint pid);
 static GVariant * frida_get_process_user (HANDLE process);
 static GVariant * frida_get_process_start_time (HANDLE process);
 
@@ -128,8 +131,13 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
 
   if (op->scope == FRIDA_SCOPE_FULL)
   {
+    GVariant * argv;
     GVariantBuilder builder;
     GVariant * small_icon, * large_icon;
+
+    argv = frida_query_process_argv (pid);
+    if (argv != NULL)
+      g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (argv));
 
     g_variant_builder_init (&builder, G_VARIANT_TYPE ("aa{sv}"));
 
@@ -252,6 +260,61 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
   }
 
   return FALSE;
+}
+
+static GVariant *
+frida_query_process_argv (guint pid)
+{
+  GVariant * result = NULL;
+  HANDLE process;
+  HMODULE ntdll;
+  NTSTATUS (NTAPI * query_information_process) (HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+  PROCESS_BASIC_INFORMATION basic_info;
+  PEB peb;
+  RTL_USER_PROCESS_PARAMETERS parameters;
+  WCHAR * command_line = NULL;
+  WCHAR ** argv = NULL;
+  int argc, i;
+  GVariantBuilder builder;
+
+  process = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+  if (process == NULL)
+    goto beach;
+
+  ntdll = GetModuleHandleW (L"ntdll.dll");
+  query_information_process = (gpointer) GetProcAddress (ntdll, "NtQueryInformationProcess");
+
+  if (query_information_process (process, ProcessBasicInformation, &basic_info, sizeof (basic_info), NULL) != 0)
+    goto beach;
+
+  if (!ReadProcessMemory (process, basic_info.PebBaseAddress, &peb, sizeof (peb), NULL))
+    goto beach;
+
+  if (!ReadProcessMemory (process, peb.ProcessParameters, &parameters, sizeof (parameters), NULL))
+    goto beach;
+
+  command_line = g_malloc (parameters.CommandLine.Length + sizeof (WCHAR));
+  if (!ReadProcessMemory (process, parameters.CommandLine.Buffer, command_line, parameters.CommandLine.Length, NULL))
+    goto beach;
+  command_line[parameters.CommandLine.Length / sizeof (WCHAR)] = L'\0';
+
+  argv = CommandLineToArgvW (command_line, &argc);
+  if (argv == NULL)
+    goto beach;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("as"));
+  for (i = 0; i != argc; i++)
+    g_variant_builder_add_value (&builder, g_variant_new_take_string (g_utf16_to_utf8 (argv[i], -1, NULL, NULL, NULL)));
+  result = g_variant_builder_end (&builder);
+
+beach:
+  if (argv != NULL)
+    LocalFree (argv);
+  g_free (command_line);
+  if (process != NULL)
+    CloseHandle (process);
+
+  return result;
 }
 
 static GVariant *
