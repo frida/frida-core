@@ -616,11 +616,12 @@ frida_collect_process_info_from_kinfo (struct kinfo_proc * process, FridaEnumera
       info.name = g_path_get_basename (path);
 
     if (scope != FRIDA_SCOPE_MINIMAL)
+    {
+      GVariant * argv;
+
       g_hash_table_insert (info.parameters, g_strdup ("path"), g_variant_ref_sink (g_variant_new_string (path)));
 
-    if (scope == FRIDA_SCOPE_FULL)
-    {
-      GVariant * argv = frida_query_process_argv (info.pid);
+      argv = frida_query_process_argv (info.pid);
       if (argv != NULL)
         g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (argv));
     }

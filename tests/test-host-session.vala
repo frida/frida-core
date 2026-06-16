@@ -1060,7 +1060,7 @@ namespace Frida.HostSessionTest {
 				var target = Frida.Test.Process.start (target_path, new string[] { marker });
 
 				var options = new ProcessQueryOptions ();
-				options.scope = FULL;
+				options.scope = METADATA;
 				options.select_pid (target.id);
 
 				Process? match = null;

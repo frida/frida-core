@@ -134,10 +134,8 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
     g_hash_table_insert (info.parameters, g_strdup ("path"),
         g_variant_ref_sink (g_variant_new_take_string (g_steal_pointer (&program_path))));
 
-    if (op->scope == FRIDA_SCOPE_FULL && argv != NULL)
-    {
+    if (argv != NULL)
       g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (g_steal_pointer (&argv)));
-    }
 
     still_alive = frida_add_process_metadata (info.parameters, proc_name);
   }

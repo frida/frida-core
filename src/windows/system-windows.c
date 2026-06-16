@@ -120,6 +120,8 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
 
   if (op->scope != FRIDA_SCOPE_MINIMAL)
   {
+    GVariant * argv;
+
     g_hash_table_insert (info.parameters, g_strdup ("path"),
         g_variant_ref_sink (g_variant_new_take_string (g_steal_pointer (&program_path))));
 
@@ -127,17 +129,16 @@ frida_collect_process_info (guint pid, FridaEnumerateProcessesOperation * op)
 
     if (pid == op->frontmost_pid)
       g_hash_table_insert (info.parameters, g_strdup ("frontmost"), g_variant_ref_sink (g_variant_new_boolean (TRUE)));
-  }
-
-  if (op->scope == FRIDA_SCOPE_FULL)
-  {
-    GVariant * argv;
-    GVariantBuilder builder;
-    GVariant * small_icon, * large_icon;
 
     argv = frida_query_process_argv (pid);
     if (argv != NULL)
       g_hash_table_insert (info.parameters, g_strdup ("argv"), g_variant_ref_sink (argv));
+  }
+
+  if (op->scope == FRIDA_SCOPE_FULL)
+  {
+    GVariantBuilder builder;
+    GVariant * small_icon, * large_icon;
 
     g_variant_builder_init (&builder, G_VARIANT_TYPE ("aa{sv}"));
 
