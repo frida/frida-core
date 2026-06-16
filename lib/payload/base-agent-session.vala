@@ -179,6 +179,18 @@ namespace Frida {
 			yield script_engine.load_script (script_id);
 		}
 
+		public async void interrupt_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+
+			script_engine.interrupt_script (script_id);
+		}
+
+		public async void terminate_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			check_open ();
+
+			yield script_engine.terminate_script (script_id);
+		}
+
 		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 

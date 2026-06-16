@@ -166,6 +166,14 @@ namespace Frida {
 			yield get_instance (script_id).load ();
 		}
 
+		public void interrupt_script (AgentScriptId script_id) throws Error {
+			get_instance (script_id).interrupt ();
+		}
+
+		public async void terminate_script (AgentScriptId script_id) throws Error {
+			yield get_instance (script_id).terminate ();
+		}
+
 		public Gum.Script eternalize_script (AgentScriptId script_id) throws Error {
 			var instance = get_instance (script_id);
 
@@ -352,6 +360,16 @@ namespace Frida {
 
 				state = LOADED;
 				load_request.resolve (true);
+			}
+
+			public void interrupt () {
+				script.interrupt ();
+			}
+
+			public async void terminate () {
+				script.interrupt ();
+
+				yield close ();
 			}
 
 			private Promise<bool> unload () {

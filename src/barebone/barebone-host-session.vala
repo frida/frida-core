@@ -643,6 +643,14 @@ namespace Frida {
 
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError;
 
+		public async void interrupt_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			throw_not_supported ();
+		}
+
+		public async void terminate_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+			throw_not_supported ();
+		}
+
 		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}

@@ -78,6 +78,8 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void interrupt_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void terminate_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_debugger (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;

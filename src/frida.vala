@@ -3907,6 +3907,30 @@ namespace Frida {
 		}
 
 		/**
+		 * Interrupts any JavaScript currently executing in the script, leaving it
+		 * loaded and able to run again. Does nothing if nothing is executing.
+		 */
+		public async void interrupt (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			try {
+				yield session.active_session.interrupt_script (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void interrupt_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<InterruptTask> ().execute (cancellable);
+		}
+
+		private class InterruptTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.interrupt (cancellable);
+			}
+		}
+
+		/**
 		 * Unloads the script from the target process.
 		 */
 		public async void unload (Cancellable? cancellable = null) throws Error, IOError {
@@ -3922,6 +3946,32 @@ namespace Frida {
 		private class UnloadTask : ScriptTask<void> {
 			protected override async void perform_operation () throws Error, IOError {
 				yield parent.unload (cancellable);
+			}
+		}
+
+		/**
+		 * Interrupts any JavaScript currently executing and unloads the script,
+		 * even if it is stuck in a long-running or infinite operation.
+		 */
+		public async void terminate (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			try {
+				yield session.active_session.terminate_script (id, cancellable);
+
+				yield _do_close (false, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void terminate_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<TerminateTask> ().execute (cancellable);
+		}
+
+		private class TerminateTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.terminate (cancellable);
 			}
 		}
 
