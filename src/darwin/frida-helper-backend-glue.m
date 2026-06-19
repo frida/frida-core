@@ -2873,7 +2873,9 @@ frida_spawn_instance_on_server_recv (void * context)
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   GumDarwinUnifiedThreadState state;
+#if __has_feature (ptrauth_calls)
   gboolean pc_may_need_fixup_due_to_ptrauth_failure;
+#endif
   guint i, current_bp_index;
   FridaBreakpoint * breakpoint = NULL;
   gboolean carry_on, pc_changed;
@@ -2909,8 +2911,6 @@ frida_spawn_instance_on_server_recv (void * context)
       __darwin_arm_thread_state64_set_pc_fptr (state.ts_64, GSIZE_TO_POINTER (gum_sign_code_address (ret_gadget)));
     }
   }
-#else
-  pc_may_need_fixup_due_to_ptrauth_failure = FALSE;
 #endif
 
 #ifdef HAVE_I386
