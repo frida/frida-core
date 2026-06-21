@@ -1709,15 +1709,14 @@ namespace Frida {
 
 			foreach (var m in maps) {
 				unowned string path = m.path;
-				if (path.has_suffix ("/libstagefright.so") && m.readable && m.executable) {
-					if (payload_base == 0) {
-						payload_base = m.end - Gum.query_page_size ();
-						payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
-						if (m.writable)
-							payload_original_protection |= Posix.PROT_WRITE;
-						payload_path = path;
-						payload_file_offset = m.file_offset;
-					}
+				if (payload_base == 0 && m.executable &&
+						(path.has_suffix ("/libstagefright.so") || path.has_suffix ("/libmedia.so"))) {
+					payload_base = m.end - Gum.query_page_size ();
+					payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
+					if (m.writable)
+						payload_original_protection |= Posix.PROT_WRITE;
+					payload_path = path;
+					payload_file_offset = m.file_offset;
 				} else if (path.has_suffix ("/libc.so")) {
 					if (libc_path == null)
 						libc_path = path;
