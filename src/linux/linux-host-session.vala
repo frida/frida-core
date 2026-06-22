@@ -1687,10 +1687,9 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				throw_api_error (e);
 			}
-		}		
+		}
 
-
-private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, string server_name) throws Error, IOError {
+		private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, string server_name) throws Error, IOError {
 			uint64 payload_base = 0;
 			int payload_original_protection = 0;
 			unowned string? payload_path = null;
@@ -1708,12 +1707,17 @@ private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, strin
 				throw new Error.PROCESS_NOT_FOUND ("%s", e.message);
 			}
 
-
 			foreach (var m in maps) {
 				unowned string path = m.path;
-				
-
-				if (path.has_suffix ("/libc.so")) {
+				if (payload_base == 0 && m.executable &&
+						(path.has_suffix ("/libstagefright.so") || path.has_suffix ("/libmedia.so"))) {
+					payload_base = m.end - Gum.query_page_size ();
+					payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
+					if (m.writable)
+						payload_original_protection |= Posix.PROT_WRITE;
+					payload_path = path;
+					payload_file_offset = m.file_offset;
+				} else if (path.has_suffix ("/libc.so")) {
 					if (libc_path == null)
 						libc_path = path;
 				} else if (path.has_suffix ("/libselinux.so")) {
@@ -1728,23 +1732,7 @@ private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, strin
 						end = m.end,
 					});
 				}
-
-
-				if (payload_base == 0 && 
-				   (path.has_suffix ("/libstagefright.so") || path.has_suffix ("/libmedia.so")) && 
-				   m.executable) {
-					
-					payload_base = m.end - Gum.query_page_size ();
-					
-					payload_original_protection = Posix.PROT_READ | Posix.PROT_EXEC;
-					if (m.writable)
-						payload_original_protection |= Posix.PROT_WRITE;
-						
-					payload_path = path;
-					payload_file_offset = m.file_offset;
-				}
 			}
-
 
 			MatchInfo info;
 			if (!/^([0-9a-f]+)-([0-9a-f]+) rw-p 00000000 00:00 0 *$/m.match (raw_maps, 0, out info)) {
@@ -1907,7 +1895,7 @@ private static ZymbiotePrepResult do_prepare_zymbiote_injection (uint pid, strin
 				payload_path = payload_path,
 				payload_file_offset = payload_file_offset,
 			};
-		}		
+		}
 
 		private class HeapCandidate {
 			public uint64 start;
