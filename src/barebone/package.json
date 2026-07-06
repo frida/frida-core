@@ -9,7 +9,7 @@
     "watch": "tsc -w"
   },
   "devDependencies": {
-    "@types/frida-gum": "^19.7.0",
+    "@types/frida-gum": "^19.8.0",
     "esbuild": "^0.25.5",
     "typescript": "^5.8.3"
   }
