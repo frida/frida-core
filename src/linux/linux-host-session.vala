@@ -1598,8 +1598,19 @@ namespace Frida {
 
 				on_complete (null);
 			} catch (GLib.Error e) {
+				if (is_transient_usap_patch_failure (name, e)) {
+					on_complete (null);
+					return;
+				}
+
 				on_complete (e);
 			}
+		}
+
+		private static bool is_transient_usap_patch_failure (string process_name, GLib.Error error) {
+			return process_name.has_prefix ("usap") &&
+				error is Error.NOT_SUPPORTED &&
+				error.message == "Unable to locate android.os.Process.setArgV0() slot; please file a bug";
 		}
 
 		private async void inject_zymbiote (uint pid, Cancellable? cancellable) throws Error, IOError {
