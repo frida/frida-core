@@ -77,6 +77,7 @@ namespace Frida {
 
 #if ANDROID
 			robo_launcher = new RoboLauncher (this, io_cancellable);
+			robo_launcher.gating_cancelled.connect (on_spawn_gating_cancelled);
 			robo_launcher.spawn_added.connect (on_spawn_added);
 			robo_launcher.spawn_removed.connect (on_spawn_removed);
 
@@ -97,6 +98,7 @@ namespace Frida {
 		public override async void close (Cancellable? cancellable) throws IOError {
 #if ANDROID
 			yield robo_launcher.close (cancellable);
+			robo_launcher.gating_cancelled.disconnect (on_spawn_gating_cancelled);
 			robo_launcher.spawn_added.disconnect (on_spawn_added);
 			robo_launcher.spawn_removed.disconnect (on_spawn_removed);
 
@@ -110,6 +112,7 @@ namespace Frida {
 #endif
 
 			if (spawn_gater != null) {
+				spawn_gater.gating_cancelled.disconnect (on_spawn_gating_cancelled);
 				spawn_gater.spawn_added.disconnect (on_spawn_added);
 				spawn_gater.spawn_removed.disconnect (on_spawn_removed);
 				spawn_gater.stop ();
@@ -276,25 +279,28 @@ namespace Frida {
 #endif
 		}
 
-		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		public override async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var helper_process = helper as LinuxHelperProcess;
 			if (helper_process != null)
 				yield helper_process.preload (cancellable);
 
-			var gater = ensure_spawn_gater ();
-			if (gater.state == STOPPED) {
 #if ANDROID
-				try {
+			// RoboLauncher gates app launches; only add the system-wide eBPF gater for PROCESSES.
+			// Let a start failure propagate — the caller opted in, so don't silently downgrade.
+			if (SpawnGatingOptions._deserialize (options).scope == PROCESSES) {
+				var gater = ensure_spawn_gater ();
+				if (gater.state == STOPPED)
 					gater.start ();
-				} catch (Error e) {
-				}
-#else
-				gater.start ();
-#endif
 			}
 
-#if ANDROID
 			yield robo_launcher.enable_spawn_gating (cancellable);
+#else
+			// No portable way to tell a GUI app from any other execve here, so both scopes map to
+			// the same system-wide gater.
+			var gater = ensure_spawn_gater ();
+			if (gater.state == STOPPED)
+				gater.start ();
 #endif
 		}
 
@@ -304,11 +310,14 @@ namespace Frida {
 #if ANDROID
 			yield robo_launcher.disable_spawn_gating (cancellable);
 #endif
+
+			spawn_gating_disabled (APPLICATION_REQUESTED);
 		}
 
 		private SpawnGater ensure_spawn_gater () {
 			if (spawn_gater == null) {
 				spawn_gater = new SpawnGater (helper);
+				spawn_gater.gating_cancelled.connect (on_spawn_gating_cancelled);
 				spawn_gater.spawn_added.connect (on_spawn_added);
 				spawn_gater.spawn_removed.connect (on_spawn_removed);
 			}
@@ -505,6 +514,10 @@ namespace Frida {
 			}
 		}
 #endif
+
+		private void on_spawn_gating_cancelled () {
+			spawn_gating_disabled (WATCHDOG_TIMEOUT);
+		}
 
 		private void on_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
@@ -1344,6 +1357,7 @@ namespace Frida {
 	}
 
 	private sealed class RoboLauncher : Object {
+		public signal void gating_cancelled ();
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
@@ -1367,6 +1381,7 @@ namespace Frida {
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private SpawnGatingWatchdog watchdog = new SpawnGatingWatchdog ();
 
 		private delegate void CompletionNotify (GLib.Error? error);
 
@@ -1379,11 +1394,22 @@ namespace Frida {
 			);
 		}
 
+		construct {
+			watchdog.expired.connect (on_watchdog_expired);
+		}
+
+		private void on_watchdog_expired () {
+			disable_spawn_gating.begin (io_cancellable);
+			gating_cancelled ();
+		}
+
 		public async void preload (Cancellable? cancellable) throws Error, IOError {
 			yield ensure_loaded (cancellable);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			watchdog.clear ();
+
 			if (ensure_request != null) {
 				try {
 					yield ensure_loaded (cancellable);
@@ -1421,6 +1447,8 @@ namespace Frida {
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			spawn_gating_enabled = false;
+
+			watchdog.clear ();
 
 			var pending = pending_spawn.values.to_array ();
 			pending_spawn.clear ();
@@ -1508,8 +1536,10 @@ namespace Frida {
 			connection.resume.begin (io_cancellable);
 
 			HostSpawnInfo? info;
-			if (pending_spawn.unset (pid, out info))
+			if (pending_spawn.unset (pid, out info)) {
+				watchdog.cancel (pid);
 				spawn_removed (info);
+			}
 
 			return true;
 		}
@@ -2090,6 +2120,7 @@ namespace Frida {
 				} else if (spawn_gating_enabled) {
 					var spawn_info = HostSpawnInfo (hello.pid, hello.process_name);
 					pending_spawn[hello.pid] = spawn_info;
+					watchdog.arm (hello.pid);
 					spawn_added (spawn_info);
 					needs_resume = true;
 				}

@@ -742,6 +742,13 @@ namespace Frida {
 			}
 		}
 
+		// Forward the error untranslated so the caller can spot UNKNOWN_METHOD from an older remote.
+		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var server = yield get_remote_server (cancellable);
+			yield server.session.enable_spawn_gating_with_options (options, cancellable);
+		}
+
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			var server = yield get_remote_server (cancellable);
 			try {
@@ -1426,6 +1433,7 @@ namespace Frida {
 			server.connection.on_closed.connect (on_remote_connection_closed);
 
 			var session = server.session;
+			session.spawn_gating_disabled.connect (on_remote_spawn_gating_disabled);
 			session.spawn_added.connect (on_remote_spawn_added);
 			session.spawn_removed.connect (on_remote_spawn_removed);
 			session.child_added.connect (on_remote_child_added);
@@ -1440,6 +1448,7 @@ namespace Frida {
 			server.connection.on_closed.disconnect (on_remote_connection_closed);
 
 			var session = server.session;
+			session.spawn_gating_disabled.disconnect (on_remote_spawn_gating_disabled);
 			session.spawn_added.disconnect (on_remote_spawn_added);
 			session.spawn_removed.disconnect (on_remote_spawn_removed);
 			session.child_added.disconnect (on_remote_child_added);
@@ -1458,6 +1467,10 @@ namespace Frida {
 			var no_crash = CrashInfo.empty ();
 			foreach (var remote_id in remote_agent_sessions.keys.to_array ())
 				on_remote_agent_session_detached (remote_id, CONNECTION_TERMINATED, no_crash);
+		}
+
+		private void on_remote_spawn_gating_disabled (SpawnGatingDisabledReason reason) {
+			spawn_gating_disabled (reason);
 		}
 
 		private void on_remote_spawn_added (HostSpawnInfo info) {

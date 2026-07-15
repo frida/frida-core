@@ -56,10 +56,10 @@ namespace Frida {
 			yield obtain (cancellable);
 		}
 
-		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		public async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain (cancellable);
 			try {
-				yield helper.enable_spawn_gating (cancellable);
+				yield helper.enable_spawn_gating (scope, cancellable);
 			} catch (GLib.Error e) {
 				throw_helper_error (e);
 			}
@@ -420,6 +420,7 @@ namespace Frida {
 
 			proxy = pending_proxy;
 			proxy.output.connect (on_output);
+			proxy.gating_cancelled.connect (on_gating_cancelled);
 			proxy.spawn_added.connect (on_spawn_added);
 			proxy.spawn_removed.connect (on_spawn_removed);
 			proxy.injected.connect (on_injected);
@@ -439,6 +440,7 @@ namespace Frida {
 			obtain_request = null;
 
 			proxy.output.disconnect (on_output);
+			proxy.gating_cancelled.disconnect (on_gating_cancelled);
 			proxy.spawn_added.disconnect (on_spawn_added);
 			proxy.spawn_removed.disconnect (on_spawn_removed);
 			proxy.injected.disconnect (on_injected);
@@ -458,6 +460,10 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_gating_cancelled () {
+			gating_cancelled ();
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {

@@ -44,6 +44,7 @@ namespace Frida {
 		construct {
 			backend.idle.connect (on_backend_idle);
 			backend.output.connect (on_backend_output);
+			backend.gating_cancelled.connect (on_backend_gating_cancelled);
 			backend.spawn_added.connect (on_backend_spawn_added);
 			backend.spawn_removed.connect (on_backend_spawn_removed);
 			backend.injected.connect (on_backend_injected);
@@ -93,6 +94,7 @@ namespace Frida {
 			}
 			backend.idle.disconnect (on_backend_idle);
 			backend.output.disconnect (on_backend_output);
+			backend.gating_cancelled.disconnect (on_backend_gating_cancelled);
 			backend.spawn_added.disconnect (on_backend_spawn_added);
 			backend.spawn_removed.disconnect (on_backend_spawn_removed);
 			backend.injected.disconnect (on_backend_injected);
@@ -147,8 +149,8 @@ namespace Frida {
 				shutdown.begin ();
 		}
 
-		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			yield backend.enable_spawn_gating (cancellable);
+		public async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError {
+			yield backend.enable_spawn_gating (scope, cancellable);
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -235,6 +237,10 @@ namespace Frida {
 
 		private void on_backend_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_backend_gating_cancelled () {
+			gating_cancelled ();
 		}
 
 		private void on_backend_spawn_added (HostSpawnInfo info) {

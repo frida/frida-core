@@ -122,6 +122,7 @@ namespace Frida {
 
 		private void assign_session (HostSession session, HostSessionProvider provider) {
 			host_session = session;
+			host_session.spawn_gating_disabled.connect (on_spawn_gating_disabled);
 			host_session.spawn_added.connect (notify_spawn_added);
 			host_session.child_added.connect (notify_child_added);
 			host_session.child_removed.connect (notify_child_removed);
@@ -399,8 +400,9 @@ namespace Frida {
 				yield parent.teardown_control_channel (channel);
 			}
 
-			public async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
-				yield parent.enable_spawn_gating (requester);
+			public async void enable_spawn_gating (HashTable<string, Variant> options, ControlChannel requester)
+					throws GLib.Error {
+				yield parent.enable_spawn_gating (options, requester);
 			}
 
 			public async void disable_spawn_gating (ControlChannel requester) throws GLib.Error {
@@ -538,20 +540,27 @@ namespace Frida {
 			return channels.iterator ();
 		}
 
-		private async void enable_spawn_gating (ControlChannel requester) throws GLib.Error {
+		private async void enable_spawn_gating (HashTable<string, Variant> options, ControlChannel requester)
+				throws GLib.Error {
 			bool is_first = spawn_gaters.is_empty;
 			spawn_gaters.add (requester);
 			foreach (var spawn in pending_spawn.values)
 				spawn.pending_approvers.add (requester);
 
 			if (is_first)
-				yield host_session.enable_spawn_gating (io_cancellable);
+				yield host_session.enable_spawn_gating_with_options (options, io_cancellable);
 		}
 
 		private async void disable_spawn_gating (ControlChannel requester) throws GLib.Error {
 			if (spawn_gaters.remove (requester)) {
-				foreach (uint pid in pending_spawn.keys.to_array ())
-					host_session.resume.begin (pid, io_cancellable);
+				foreach (uint pid in pending_spawn.keys.to_array ()) {
+					PendingSpawn spawn = pending_spawn[pid];
+					var approvers = spawn.pending_approvers;
+					if (approvers.remove (requester) && approvers.is_empty) {
+						forget_pending_spawn (pid, spawn);
+						host_session.resume.begin (pid, io_cancellable);
+					}
+				}
 			}
 
 			if (spawn_gaters.is_empty)
@@ -576,11 +585,8 @@ namespace Frida {
 			var approvers = spawn.pending_approvers;
 			approvers.remove (requester);
 			if (approvers.is_empty) {
-				pending_spawn.unset (pid);
-
+				forget_pending_spawn (pid, spawn);
 				yield host_session.resume (pid, io_cancellable);
-
-				notify_spawn_removed (spawn.info);
 			}
 		}
 
@@ -687,9 +693,27 @@ namespace Frida {
 			return id;
 		}
 
+		// Backend disabled gating and already resumed everything; drop our mirror, tell the gaters.
+		private void on_spawn_gating_disabled (SpawnGatingDisabledReason reason) {
+			foreach (var spawn in pending_spawn.values.to_array ())
+				notify_spawn_removed (spawn.info);
+			pending_spawn.clear ();
+
+			foreach (ControlChannel channel in spawn_gaters)
+				channel.spawn_gating_disabled (reason);
+			spawn_gaters.clear ();
+		}
+
 		private void notify_spawn_added (HostSpawnInfo info) {
+			pending_spawn[info.pid] = new PendingSpawn (info.pid, info.identifier, spawn_gaters.iterator ());
+
 			foreach (ControlChannel channel in spawn_gaters)
 				channel.spawn_added (info);
+		}
+
+		private void forget_pending_spawn (uint pid, PendingSpawn spawn) {
+			pending_spawn.unset (pid);
+			notify_spawn_removed (spawn.info);
 		}
 
 		private void notify_spawn_removed (HostSpawnInfo info) {
@@ -926,7 +950,12 @@ namespace Frida {
 			}
 
 			public async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error {
-				yield parent.enable_spawn_gating (this);
+				yield parent.enable_spawn_gating (make_parameters_dict (), this);
+			}
+
+			public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws GLib.Error {
+				yield parent.enable_spawn_gating (options, this);
 			}
 
 			public async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error {

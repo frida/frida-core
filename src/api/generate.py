@@ -661,6 +661,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
     enum_types = []
 
     base_public_types = {
+        "SpawnGatingOptions": "ProcessMatchOptions",
         "FrontmostQueryOptions": "SpawnOptions",
         "ApplicationQueryOptions": "FrontmostQueryOptions",
         "ProcessQueryOptions": "ApplicationQueryOptions",
