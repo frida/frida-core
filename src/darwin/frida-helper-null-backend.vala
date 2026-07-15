@@ -23,7 +23,7 @@ namespace Frida {
 		public async void preload (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		public async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}
 

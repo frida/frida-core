@@ -484,7 +484,12 @@ namespace Frida {
 		public abstract async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
 			Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield enable_spawn_gating_with_options (make_parameters_dict (), cancellable);
+		}
+
+		public abstract async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws Error, IOError;
 
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 

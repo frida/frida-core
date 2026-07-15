@@ -12,6 +12,8 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws GLib.Error;
@@ -31,6 +33,7 @@ namespace Frida {
 
 		public abstract async ServiceSessionId open_service (string address, Cancellable? cancellable) throws GLib.Error;
 
+		public signal void spawn_gating_disabled (SpawnGatingDisabledReason reason);
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void child_added (HostChildInfo info);
@@ -903,6 +906,11 @@ namespace Frida {
 			throw_not_authorized ();
 		}
 
+		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
@@ -980,6 +988,46 @@ namespace Frida {
 	[NoReturn]
 	private void throw_not_authorized () throws Error {
 		throw new Error.PERMISSION_DENIED ("Not authorized, authentication required");
+	}
+
+	// Fires `expired` when a gated process goes unresumed too long, so the backend can cancel
+	// gating instead of letting a stalled client wedge process creation.
+	public sealed class SpawnGatingWatchdog : Object {
+		public signal void expired ();
+
+		public uint timeout_msec {
+			get;
+			construct;
+		}
+
+		private Gee.Map<uint, Source> deadlines = new Gee.HashMap<uint, Source> ();
+
+		// Default deadline: under the OS's own spawn-start timeouts (Android's is 10s).
+		public SpawnGatingWatchdog (uint timeout_msec = 8000) {
+			Object (timeout_msec: timeout_msec);
+		}
+
+		public void arm (uint pid) {
+			var deadline = new TimeoutSource (timeout_msec);
+			deadline.set_callback (() => {
+				expired ();
+				return Source.REMOVE;
+			});
+			deadline.attach (MainContext.get_thread_default ());
+			deadlines[pid] = deadline;
+		}
+
+		public void cancel (uint pid) {
+			Source? deadline;
+			if (deadlines.unset (pid, out deadline))
+				deadline.destroy ();
+		}
+
+		public void clear () {
+			foreach (var deadline in deadlines.values)
+				deadline.destroy ();
+			deadlines.clear ();
+		}
 	}
 
 	/**
@@ -1103,6 +1151,29 @@ namespace Frida {
 		public int fifo_fd;
 	}
 #endif
+
+	/**
+	 * Why spawn gating was disabled on a {@link Device}.
+	 */
+	public enum SpawnGatingDisabledReason {
+		/**
+		 * A client asked to disable spawn gating.
+		 */
+		APPLICATION_REQUESTED = 1,
+		/**
+		 * A caught process went unresumed long enough that the gater cancelled gating to
+		 * avoid stalling process creation.
+		 */
+		WATCHDOG_TIMEOUT;
+
+		public static SpawnGatingDisabledReason from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<SpawnGatingDisabledReason> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<SpawnGatingDisabledReason> (this);
+		}
+	}
 
 	/**
 	 * Why a {@link Session} was detached from its target.
@@ -1481,6 +1552,67 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<Scope> (this);
+		}
+	}
+
+	/**
+	 * Options for {@link Device.enable_spawn_gating}.
+	 */
+	public sealed class SpawnGatingOptions : Object {
+		/**
+		 * Which processes to gate. Anything other than DEFAULT requires a Frida new enough to
+		 * support scoping, and fails rather than silently gating something broader than asked.
+		 */
+		public SpawnGatingScope scope {
+			get;
+			set;
+			default = DEFAULT;
+		}
+
+		public HashTable<string, Variant> _serialize () {
+			var dict = make_parameters_dict ();
+
+			if (scope != DEFAULT)
+				dict["scope"] = new Variant.string (scope.to_nick ());
+
+			return dict;
+		}
+
+		public static SpawnGatingOptions _deserialize (HashTable<string, Variant> dict) throws Error {
+			var options = new SpawnGatingOptions ();
+
+			Variant? scope = dict["scope"];
+			if (scope != null) {
+				if (!scope.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'scope' option must be a string");
+				options.scope = SpawnGatingScope.from_nick (scope.get_string ());
+			}
+
+			return options;
+		}
+	}
+
+	public enum SpawnGatingScope {
+		/**
+		 * Leave the choice to the implementation. Sent as a plain enable_spawn_gating call, so
+		 * it still works against a Frida too old to know about scopes.
+		 */
+		DEFAULT,
+		/**
+		 * Application launches only.
+		 */
+		APPLICATIONS,
+		/**
+		 * Every process created on the system. More potent but far more intrusive.
+		 */
+		PROCESSES;
+
+		public static SpawnGatingScope from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<SpawnGatingScope> (nick);
+		}
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<SpawnGatingScope> (this);
 		}
 	}
 

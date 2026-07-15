@@ -65,6 +65,7 @@ namespace Frida {
 
 		construct {
 			helper.output.connect (on_output);
+			helper.gating_cancelled.connect (on_spawn_gating_cancelled);
 			helper.spawn_added.connect (on_spawn_added);
 			helper.spawn_removed.connect (on_spawn_removed);
 
@@ -80,6 +81,7 @@ namespace Frida {
 
 #if IOS || TVOS
 			fruit_controller = new FruitController (this, io_cancellable);
+			fruit_controller.gating_cancelled.connect (on_spawn_gating_cancelled);
 			fruit_controller.spawn_added.connect (on_spawn_added);
 			fruit_controller.spawn_removed.connect (on_spawn_removed);
 			fruit_controller.process_crashed.connect (on_process_crashed);
@@ -91,6 +93,7 @@ namespace Frida {
 
 #if IOS || TVOS
 			yield fruit_controller.close (cancellable);
+			fruit_controller.gating_cancelled.disconnect (on_spawn_gating_cancelled);
 			fruit_controller.spawn_added.disconnect (on_spawn_added);
 			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
 			fruit_controller.process_crashed.disconnect (on_process_crashed);
@@ -113,6 +116,7 @@ namespace Frida {
 
 			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
+			helper.gating_cancelled.disconnect (on_spawn_gating_cancelled);
 			helper.spawn_added.disconnect (on_spawn_added);
 			helper.spawn_removed.disconnect (on_spawn_removed);
 
@@ -182,11 +186,17 @@ namespace Frida {
 			return yield process_enumerator.enumerate_processes (ProcessQueryOptions._deserialize (options));
 		}
 
-		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		public override async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			var scope = SpawnGatingOptions._deserialize (options).scope;
 #if IOS || TVOS
+			if (scope == PROCESSES)
+				throw new Error.NOT_SUPPORTED (
+					"Process-level gating is unavailable on this OS; use the 'applications' scope");
+
 			yield fruit_controller.enable_spawn_gating (cancellable);
 #else
-			yield helper.enable_spawn_gating (cancellable);
+			yield helper.enable_spawn_gating (scope, cancellable);
 #endif
 		}
 
@@ -196,6 +206,8 @@ namespace Frida {
 #else
 			yield helper.disable_spawn_gating (cancellable);
 #endif
+
+			spawn_gating_disabled (APPLICATION_REQUESTED);
 		}
 
 		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
@@ -278,6 +290,10 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
+		private void on_spawn_gating_cancelled () {
+			spawn_gating_disabled (WATCHDOG_TIMEOUT);
+		}
+
 		private void on_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
@@ -353,6 +369,7 @@ namespace Frida {
 
 #if IOS || TVOS
 	private sealed class FruitController : Object, MappedAgentContainer {
+		public signal void gating_cancelled ();
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void process_crashed (CrashInfo crash);
@@ -377,6 +394,7 @@ namespace Frida {
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private SpawnGatingWatchdog watchdog = new SpawnGatingWatchdog ();
 
 		private CrashReporterState crash_reporter_state;
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
@@ -415,6 +433,8 @@ namespace Frida {
 
 			helper.process_resumed.connect (on_process_resumed);
 			helper.process_killed.connect (on_process_killed);
+
+			watchdog.expired.connect (on_watchdog_expired);
 		}
 
 		~FruitController () {
@@ -447,6 +467,8 @@ namespace Frida {
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			spawn_gating_enabled = false;
+
+			watchdog.clear ();
 
 			yield launchd_agent.disable_spawn_gating (cancellable);
 
@@ -512,6 +534,7 @@ namespace Frida {
 			HostSpawnInfo? info;
 			if (!pending_spawn.unset (pid, out info))
 				return false;
+			watchdog.cancel (pid);
 			spawn_removed (info);
 
 			yield helper.resume (pid, cancellable);
@@ -644,6 +667,11 @@ namespace Frida {
 			launchd_agent.claim_process.begin (pid, io_cancellable);
 		}
 
+		private void on_watchdog_expired () {
+			disable_spawn_gating.begin (io_cancellable);
+			gating_cancelled ();
+		}
+
 		private async void handle_spawn (HostSpawnInfo info) {
 			try {
 				var pid = info.pid;
@@ -662,6 +690,7 @@ namespace Frida {
 				}
 
 				pending_spawn[pid] = info;
+				watchdog.arm (pid);
 				spawn_added (info);
 			} catch (GLib.Error e) {
 			}

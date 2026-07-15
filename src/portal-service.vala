@@ -787,7 +787,7 @@ namespace Frida {
 			return filtered_apps;
 		}
 
-		private void enable_spawn_gating (ControlChannel requester) {
+		private void enable_spawn_gating (HashTable<string, Variant> options, ControlChannel requester) {
 			spawn_gaters.add (requester);
 			foreach (PendingSpawn spawn in pending_spawn.values) {
 				bool requester_has_access = find_node_accessible_by (requester, spawn.info.pid) != null;
@@ -1409,7 +1409,12 @@ namespace Frida {
 			}
 
 			public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-				parent.enable_spawn_gating (this);
+				parent.enable_spawn_gating (make_parameters_dict (), this);
+			}
+
+			public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+					Cancellable? cancellable) throws Error, IOError {
+				parent.enable_spawn_gating (options, this);
 			}
 
 			public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

@@ -620,6 +620,14 @@ namespace Frida {
 	 */
 	public sealed class Device : Object {
 		/**
+		 * Emitted when spawn gating is disabled, either by request or because the host
+		 * cancelled it, e.g. a caught process was left unresumed long enough to risk
+		 * stalling process creation.
+		 *
+		 * @param reason why gating was disabled
+		 */
+		public signal void spawn_gating_disabled (SpawnGatingDisabledReason reason);
+		/**
 		 * Emitted when a process is spawned while spawn gating is enabled.
 		 *
 		 * @param spawn details of the pending spawn
@@ -1162,26 +1170,46 @@ namespace Frida {
 		/**
 		 * Enables spawn gating, suspending every newly spawned process until it
 		 * is explicitly resumed.
+		 *
+		 * @param options optional settings, e.g. how much to gate
 		 */
-		public async void enable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
+		public async void enable_spawn_gating (SpawnGatingOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
+
+			var scope = (options != null) ? options.scope : SpawnGatingScope.DEFAULT;
+			var raw_options = (options != null) ? options._serialize () : make_parameters_dict ();
 
 			var host_session = yield get_host_session (cancellable);
 
 			try {
-				yield host_session.enable_spawn_gating (cancellable);
+				yield host_session.enable_spawn_gating_with_options (raw_options, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				DBusError.strip_remote_error (e);
+				if (scope != DEFAULT || !(e is DBusError.UNKNOWN_METHOD))
+					throw_dbus_error (e);
+
+				// Older remote without the scoped call; fall back to the plain one (that's DEFAULT).
+				try {
+					yield host_session.enable_spawn_gating (cancellable);
+				} catch (GLib.Error legacy_error) {
+					throw_dbus_error (legacy_error);
+				}
 			}
 		}
 
-		public void enable_spawn_gating_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<EnableSpawnGatingTask> ().execute (cancellable);
+		public void enable_spawn_gating_sync (SpawnGatingOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<EnableSpawnGatingTask> ();
+			task.options = options;
+			task.execute (cancellable);
 		}
 
 		private class EnableSpawnGatingTask : DeviceTask<void> {
+			public SpawnGatingOptions? options;
+
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.enable_spawn_gating (cancellable);
+				yield parent.enable_spawn_gating (options, cancellable);
 			}
 		}
 
@@ -1750,6 +1778,7 @@ namespace Frida {
 		}
 
 		private void attach_host_session (HostSession session) {
+			session.spawn_gating_disabled.connect (on_spawn_gating_disabled);
 			session.spawn_added.connect (on_spawn_added);
 			session.spawn_removed.connect (on_spawn_removed);
 			session.child_added.connect (on_child_added);
@@ -1760,6 +1789,7 @@ namespace Frida {
 		}
 
 		private void detach_host_session (HostSession session) {
+			session.spawn_gating_disabled.disconnect (on_spawn_gating_disabled);
 			session.spawn_added.disconnect (on_spawn_added);
 			session.spawn_removed.disconnect (on_spawn_removed);
 			session.child_added.disconnect (on_child_added);
@@ -1883,6 +1913,10 @@ namespace Frida {
 				detach_request.resolve (true);
 			else if (session != null)
 				agent_sessions.unset (id);
+		}
+
+		private void on_spawn_gating_disabled (SpawnGatingDisabledReason reason) {
+			spawn_gating_disabled (reason);
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {

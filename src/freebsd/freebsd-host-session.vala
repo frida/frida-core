@@ -77,7 +77,8 @@ namespace Frida {
 			return yield process_enumerator.enumerate_processes (ProcessQueryOptions._deserialize (options));
 		}
 
-		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+		public override async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 

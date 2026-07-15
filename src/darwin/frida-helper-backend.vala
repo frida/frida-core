@@ -49,6 +49,7 @@ namespace Frida {
 
 			dtrace_agent = DTraceAgent.try_open ();
 			if (dtrace_agent != null) {
+				dtrace_agent.gating_cancelled.connect (on_dtrace_agent_gating_cancelled);
 				dtrace_agent.spawn_added.connect (on_dtrace_agent_spawn_added);
 				dtrace_agent.spawn_removed.connect (on_dtrace_agent_spawn_removed);
 			}
@@ -97,6 +98,7 @@ namespace Frida {
 				yield;
 
 			if (dtrace_agent != null) {
+				dtrace_agent.gating_cancelled.disconnect (on_dtrace_agent_gating_cancelled);
 				dtrace_agent.spawn_added.disconnect (on_dtrace_agent_spawn_added);
 				dtrace_agent.spawn_removed.disconnect (on_dtrace_agent_spawn_removed);
 				yield dtrace_agent.close (cancellable);
@@ -107,8 +109,8 @@ namespace Frida {
 		public async void preload (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			get_dtrace_agent ().enable_spawn_gating ();
+		public async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError {
+			get_dtrace_agent ().enable_spawn_gating (scope);
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -629,6 +631,10 @@ namespace Frida {
 			}
 		}
 
+		private void on_dtrace_agent_gating_cancelled () {
+			gating_cancelled ();
+		}
+
 		private void on_dtrace_agent_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
@@ -688,20 +694,36 @@ namespace Frida {
 	}
 
 	public sealed class DTraceAgent : Object {
+		public signal void gating_cancelled ();
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
 		private Subprocess? dtrace;
 		private DataInputStream input;
+		private SpawnGatingScope scope;
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private SpawnGatingWatchdog watchdog = new SpawnGatingWatchdog ();
 
 		private Cancellable io_cancellable = new Cancellable ();
+
+		// Present in every path inside an app bundle, so APPLICATIONS gates the whole app
+		// (helpers, XPC services, ...), not just its entry point.
+		private const string APP_BUNDLE_MARKER = ".app/";
 
 		public static DTraceAgent? try_open () {
 			if (Posix.getuid () != 0)
 				return null;
 
 			return new DTraceAgent ();
+		}
+
+		construct {
+			watchdog.expired.connect (on_watchdog_expired);
+		}
+
+		private void on_watchdog_expired () {
+			disable_spawn_gating.begin (io_cancellable);
+			gating_cancelled ();
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -714,9 +736,11 @@ namespace Frida {
 			}
 		}
 
-		public void enable_spawn_gating () throws Error {
+		public void enable_spawn_gating (SpawnGatingScope scope) throws Error {
 			if (dtrace != null)
 				throw new Error.INVALID_OPERATION ("Already enabled");
+
+			this.scope = scope;
 
 			string? predicate = Environment.get_variable ("FRIDA_DTRACE_PREDICATE");
 			string predicate_clause;
@@ -776,6 +800,7 @@ namespace Frida {
 				spawn_removed (e.value);
 			}
 			pending_spawn.clear ();
+			watchdog.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawn () {
@@ -788,8 +813,10 @@ namespace Frida {
 
 		public void on_resume (uint pid) {
 			HostSpawnInfo? info;
-			if (pending_spawn.unset (pid, out info))
+			if (pending_spawn.unset (pid, out info)) {
+				watchdog.cancel (pid);
 				spawn_removed (info);
+			}
 		}
 
 		private async void process_incoming_messages () {
@@ -837,8 +864,14 @@ namespace Frida {
 						continue;
 					}
 
+					if (scope != PROCESSES && !path.contains (APP_BUNDLE_MARKER)) {
+						DarwinHelperBackend.resume_without_validation (pid);
+						continue;
+					}
+
 					var info = HostSpawnInfo (pid, path);
 					pending_spawn[pid] = info;
+					watchdog.arm (pid);
 					spawn_added (info);
 				}
 			} catch (IOError e) {

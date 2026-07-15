@@ -1,6 +1,7 @@
 namespace Frida {
 	public interface DarwinHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
+		public signal void gating_cancelled ();
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
@@ -16,7 +17,7 @@ namespace Frida {
 
 		public abstract async void preload (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError;
 		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError;
@@ -49,6 +50,7 @@ namespace Frida {
 	[DBus (name = "re.frida.Helper")]
 	public interface DarwinRemoteHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
+		public signal void gating_cancelled ();
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
@@ -58,7 +60,7 @@ namespace Frida {
 
 		public abstract async void stop (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
