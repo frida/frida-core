@@ -507,6 +507,19 @@ namespace Frida.Fruity.Injector {
 					yield output.write_all_async (bytes.get_data (), io_priority, cancellable, out bytes_written);
 				}
 
+				foreach (unowned Gum.DarwinSegment segment in module.segments.data) {
+					uint64 address = segment.vm_address + slide;
+
+					var protect_command = lldb.make_buffer_builder ()
+						.append_uint8 (UploadCommandType.PROTECT)
+						.append_uint64 (address)
+						.append_uint32 ((uint32) segment.vm_size)
+						.append_uint32 ((uint32) segment.protection)
+						.build ();
+					yield output.write_all_async (protect_command.get_data (), io_priority, cancellable,
+						out bytes_written);
+				}
+
 				if (!threaded_items.is_empty) {
 					var command = lldb.make_buffer_builder ()
 						.append_uint8 (UploadCommandType.APPLY_THREADED)
@@ -535,19 +548,6 @@ namespace Frida.Fruity.Injector {
 						.append_uint64 (module.preferred_address)
 						.build ();
 					yield output.write_all_async (fixup_command.get_data (), io_priority, cancellable,
-						out bytes_written);
-				}
-
-				foreach (unowned Gum.DarwinSegment segment in module.segments.data) {
-					uint64 address = segment.vm_address + slide;
-
-					var protect_command = lldb.make_buffer_builder ()
-						.append_uint8 (UploadCommandType.PROTECT)
-						.append_uint64 (address)
-						.append_uint32 ((uint32) segment.vm_size)
-						.append_uint32 ((uint32) segment.protection)
-						.build ();
-					yield output.write_all_async (protect_command.get_data (), io_priority, cancellable,
 						out bytes_written);
 				}
 
