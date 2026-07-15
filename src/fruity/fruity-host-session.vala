@@ -744,7 +744,7 @@ namespace Frida {
 
 		// Forward the error untranslated so the caller can spot UNKNOWN_METHOD from an older remote.
 		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws GLib.Error {
 			var server = yield get_remote_server (cancellable);
 			yield server.session.enable_spawn_gating_with_options (options, cancellable);
 		}
