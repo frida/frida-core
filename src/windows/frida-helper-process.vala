@@ -398,7 +398,21 @@ namespace Frida {
 					assert_not_reached ();
 			}
 #else
-			native_helper_path = Frida.helper_path;
+			string native_arch;
+			switch (Gum.Windows.query_native_cpu_type ()) {
+				case IA32:
+					native_arch = "x86";
+					break;
+				case AMD64:
+					native_arch = "x86_64";
+					break;
+				case ARM64:
+					native_arch = "arm64";
+					break;
+				default:
+					assert_not_reached ();
+			}
+			native_helper_path = PathTemplate (Frida.helper_path).expand (native_arch);
 #endif
 		}
 
