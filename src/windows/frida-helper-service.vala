@@ -28,11 +28,13 @@ namespace Frida {
 			return manager.run ();
 		}
 
+		string? svcname = (args.length > 2) ? args[2] : null;
+
 		HelperService service;
 		if (mode == HelperMode.STANDALONE)
-			service = new StandaloneHelperService ();
+			service = new StandaloneHelperService (svcname);
 		else
-			service = new ManagedHelperService ();
+			service = new ManagedHelperService (svcname);
 		service.run ();
 
 		return 0;
@@ -104,12 +106,14 @@ namespace Frida {
 					archs.add ("x86_64");
 				archs.add ("x86");
 
+				string basename = HelperService.make_svcname_base ();
+
 				foreach (string arch in archs) {
-					var helper = new ServiceConnection (HelperService.derive_svcname_for_suffix (arch));
+					var helper = new ServiceConnection (basename + arch);
 					helpers.add (helper);
 				}
 
-				context = start_services (HelperService.derive_basename (), archs.to_array (), level);
+				context = start_services (basename, archs.to_array (), level);
 
 				foreach (var helper in helpers) {
 					yield helper.open ();
@@ -219,6 +223,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string? svcname {
+			get;
+			construct;
+		}
+
 		private DBusConnection connection;
 		private uint registration_id;
 
@@ -240,7 +249,7 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				var stream_request = Pipe.open ("pipe:role=client,name=" + derive_svcname_for_self (), null);
+				var stream_request = Pipe.open ("pipe:role=client,name=" + (svcname ?? derive_svcname_for_self ()), null);
 				var stream = yield stream_request.wait_async (null);
 
 				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
@@ -297,16 +306,16 @@ namespace Frida {
 			uninjected (id);
 		}
 
+		public extern static string make_svcname_base ();
 		public extern static string derive_basename ();
 		public extern static string derive_svcname_for_self ();
-		public extern static string derive_svcname_for_suffix (string suffix);
 	}
 
 	private sealed class StandaloneHelperService : HelperService {
 		private MainLoop loop;
 
-		public StandaloneHelperService () {
-			Object (level: PrivilegeLevel.NORMAL);
+		public StandaloneHelperService (string? svcname) {
+			Object (level: PrivilegeLevel.NORMAL, svcname: svcname);
 		}
 
 		public override void run () {
@@ -323,8 +332,8 @@ namespace Frida {
 	}
 
 	private sealed class ManagedHelperService : HelperService {
-		public ManagedHelperService () {
-			Object (level: PrivilegeLevel.ELEVATED);
+		public ManagedHelperService (string? svcname) {
+			Object (level: PrivilegeLevel.ELEVATED, svcname: svcname);
 		}
 
 		public override void run () {

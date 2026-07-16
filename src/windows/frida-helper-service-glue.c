@@ -110,6 +110,12 @@ frida_helper_manager_stop_services (void * context)
 }
 
 char *
+frida_helper_service_make_svcname_base (void)
+{
+  return g_strdup_printf ("frida-%lu-", GetCurrentProcessId ());
+}
+
+char *
 frida_helper_service_derive_basename (void)
 {
   WCHAR filename_utf16[MAX_PATH + 1] = { 0, };
@@ -167,18 +173,6 @@ frida_helper_service_derive_svcname_for_self (void)
 
   basename = frida_helper_service_derive_basename ();
   name = g_strconcat (basename, FRIDA_HELPER_SERVICE_ARCH, NULL);
-  g_free (basename);
-
-  return name;
-}
-
-char *
-frida_helper_service_derive_svcname_for_suffix (const char * suffix)
-{
-  gchar * basename, * name;
-
-  basename = frida_helper_service_derive_basename ();
-  name = g_strconcat (basename, suffix, NULL);
   g_free (basename);
 
   return name;
@@ -449,8 +443,9 @@ frida_register_service (FridaServiceContext * self, const gchar * suffix)
   WCHAR * servicename;
   gchar * displayname_utf8;
   WCHAR * displayname;
-  gchar * filename_utf8;
-  WCHAR * filename;
+  gchar * appname_utf8;
+  gchar * cmdline_utf8;
+  WCHAR * cmdline;
 
   servicename_utf8 = g_strconcat (self->service_basename, suffix, NULL);
   servicename = g_utf8_to_utf16 (servicename_utf8, -1, NULL, NULL, NULL);
@@ -458,8 +453,9 @@ frida_register_service (FridaServiceContext * self, const gchar * suffix)
   displayname_utf8 = g_strdup_printf ("Frida %s helper (%s)", suffix, servicename_utf8);
   displayname = g_utf8_to_utf16 (displayname_utf8, -1, NULL, NULL, NULL);
 
-  filename_utf8 = frida_helper_service_derive_filename_for_suffix (suffix);
-  filename = g_utf8_to_utf16 (filename_utf8, -1, NULL, NULL, NULL);
+  appname_utf8 = frida_helper_service_derive_filename_for_suffix (suffix);
+  cmdline_utf8 = g_strconcat ("\"", appname_utf8, "\" SERVICE \"", servicename_utf8, "\"", NULL);
+  cmdline = g_utf8_to_utf16 (cmdline_utf8, -1, NULL, NULL, NULL);
 
   handle = CreateServiceW (self->scm,
       servicename,
@@ -468,15 +464,16 @@ frida_register_service (FridaServiceContext * self, const gchar * suffix)
       SERVICE_WIN32_OWN_PROCESS,
       SERVICE_DEMAND_START,
       SERVICE_ERROR_NORMAL,
-      filename,
+      cmdline,
       NULL,
       NULL,
       NULL,
       NULL,
       NULL);
 
-  g_free (filename);
-  g_free (filename_utf8);
+  g_free (cmdline);
+  g_free (cmdline_utf8);
+  g_free (appname_utf8);
 
   g_free (displayname);
   g_free (displayname_utf8);
@@ -635,17 +632,17 @@ frida_spawn_standalone_service (FridaServiceContext * self, const gchar * suffix
   HANDLE handle = NULL;
   gchar * appname_utf8;
   WCHAR * appname;
+  gchar * svcname_utf8;
   gchar * cmdline_utf8;
   WCHAR * cmdline;
   STARTUPINFOW si = { 0, };
   PROCESS_INFORMATION pi = { 0, };
 
-  (void) self;
-
   appname_utf8 = frida_helper_service_derive_filename_for_suffix (suffix);
   appname = (WCHAR *) g_utf8_to_utf16 (appname_utf8, -1, NULL, NULL, NULL);
 
-  cmdline_utf8 = g_strconcat ("\"", appname_utf8, "\" STANDALONE", NULL);
+  svcname_utf8 = g_strconcat (self->service_basename, suffix, NULL);
+  cmdline_utf8 = g_strconcat ("\"", appname_utf8, "\" STANDALONE \"", svcname_utf8, "\"", NULL);
   cmdline = (WCHAR *) g_utf8_to_utf16 (cmdline_utf8, -1, NULL, NULL, NULL);
 
   si.cb = sizeof (si);
@@ -658,6 +655,7 @@ frida_spawn_standalone_service (FridaServiceContext * self, const gchar * suffix
 
   g_free (cmdline);
   g_free (cmdline_utf8);
+  g_free (svcname_utf8);
 
   g_free (appname);
   g_free (appname_utf8);
