@@ -333,18 +333,6 @@ if get_option('b_sanitize') == 'address'
   cdata.set('HAVE_ASAN', 1)
 endif
 
-have_in_tree_payloads = get_option('default_library') != 'shared'
-gum_dep = dependency('frida-gum-1.0', default_options: [
-  'default_library=static',
-  f'frida_version=@frida_version@',
-  'gumjs=' + (have_in_tree_payloads ? 'enabled' : 'disabled'),
-  'inspector=enabled',
-])
-if have_in_tree_payloads
-  gumjs_dep = dependency('frida-gumjs-1.0', default_options: ['default_library=static'])
-endif
-gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0', default_options: ['default_library=static'])
-
 glib_version_req = '>=2.74'
 glib_options = [
   'default_library=static',
@@ -361,14 +349,6 @@ if optimize_for_prod
     'glib_assert=false',
     'glib_checks=false',
   ]
-endif
-
-gee_options = [
-  'default_library=static',
-  'disable-introspection=true',
-]
-if optimize_for_prod
-  gee_options += 'disable-internal-asserts=true'
 endif
 
 glib_dep = dependency('glib-2.0', version: glib_version_req, default_options: glib_options)
@@ -389,6 +369,27 @@ if have_frida_glib
   cdata.set('HAVE_FRIDA_GLIB', 1)
   vala_flags += '--define=HAVE_FRIDA_GLIB'
 endif
+
+have_in_tree_payloads = not have_shared_glib
+gum_dep = dependency('frida-gum-1.0', default_options: [
+  'default_library=static',
+  f'frida_version=@frida_version@',
+  'gumjs=' + (have_in_tree_payloads ? 'enabled' : 'disabled'),
+  'inspector=enabled',
+])
+if have_in_tree_payloads
+  gumjs_dep = dependency('frida-gumjs-1.0', default_options: ['default_library=static'])
+endif
+gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0', default_options: ['default_library=static'])
+
+gee_options = [
+  'default_library=static',
+  'disable-introspection=true',
+]
+if optimize_for_prod
+  gee_options += 'disable-internal-asserts=true'
+endif
+
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
