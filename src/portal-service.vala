@@ -609,10 +609,21 @@ namespace Frida {
 		private void kick_authentication_channel (AuthenticationChannel channel) {
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				channel.connection.close.begin (io_cancellable);
+				perform_kick.begin (channel);
 				return false;
 			});
 			source.attach (MainContext.get_thread_default ());
+		}
+
+		private async void perform_kick (AuthenticationChannel channel) {
+			try {
+				yield channel.connection.flush (io_cancellable);
+			} catch (GLib.Error e) {
+			}
+			try {
+				yield channel.connection.close (io_cancellable);
+			} catch (GLib.Error e) {
+			}
 		}
 
 		private async Peer setup_authorized_peer (uint connection_id, DBusConnection connection,
