@@ -138,17 +138,17 @@ char *
 frida_helper_service_derive_filename_for_suffix (const char * suffix)
 {
   WCHAR filename_utf16[MAX_PATH + 1] = { 0, };
-  gchar * name, * tail, * tmp;
-  glong len;
+  gchar * name, * native_arch, * tmp;
 
   GetModuleFileNameW (NULL, filename_utf16, MAX_PATH);
 
-  name = g_utf16_to_utf8 (filename_utf16, -1, NULL, &len, NULL);
-  tail = strrchr (name, '-');
-  if (tail != NULL)
+  name = g_utf16_to_utf8 (filename_utf16, -1, NULL, NULL, NULL);
+
+  native_arch = g_strrstr (name, FRIDA_HELPER_SERVICE_ARCH);
+  if (native_arch != NULL)
   {
-    tail[1] = '\0';
-    tmp = g_strconcat (name, suffix, ".exe", NULL);
+    *native_arch = '\0';
+    tmp = g_strconcat (name, suffix, native_arch + strlen (FRIDA_HELPER_SERVICE_ARCH), NULL);
     g_free (name);
     name = tmp;
   }
