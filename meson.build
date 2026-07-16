@@ -130,6 +130,10 @@ if host_os_family == 'darwin'
   add_languages('objc', 'objcpp', native: false)
 endif
 
+if meson.is_cross_build()
+  add_languages('c', 'cpp', 'vala', native: true)
+endif
+
 python = import('python').find_installation()
 
 if cc.get_argument_syntax() == 'msvc'
