@@ -624,7 +624,11 @@ def option_should_be_forwarded(k: "OptionKey",
         return is_for_us or is_for_child
 
     if coredata.CoreData.is_per_machine_option(k):
-        return k.machine is coredata.MachineChoice.BUILD
+        # The compat build generates its own machine files, so forwarding the
+        # parent's build-machine options would inject a foreign toolchain. In a
+        # native compat build that conjures a compiler-less build machine and
+        # breaks any native: true target.
+        return False
 
     if k.is_builtin():
         if k.name in {"buildtype", "genvslite"}:
