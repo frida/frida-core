@@ -312,7 +312,10 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
 
   gum_init ();
 
-  code = gum_alloc_n_pages (1, GUM_PAGE_RWX); /* Executable so debugger can be used to inspect code */
+  page_size = gum_query_page_size ();
+
+  /* Executable so debugger can be used to inspect code */
+  code = gum_memory_allocate (NULL, page_size, page_size, GUM_PAGE_RWX);
   code_size = frida_remote_worker_context_emit_payload (rwc, code);
 
   memset (rwc, 0, sizeof (FridaRemoteWorkerContext));
@@ -327,7 +330,6 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   StringCbCopyA (rwc->entrypoint_name, sizeof (rwc->entrypoint_name), details->entrypoint_name);
   StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
 
-  page_size = gum_query_page_size ();
   g_assert (code_size <= page_size);
 
   alloc_size = page_size + sizeof (FridaRemoteWorkerContext);
@@ -345,7 +347,8 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
   if (!VirtualProtectEx (details->process_handle, rwc->entrypoint, page_size, PAGE_EXECUTE_READ, &old_protect))
     goto virtual_protect_ex_failed;
 
-  gum_free_pages (code);
+  gum_memory_free (code, page_size);
+
   return TRUE;
 
   /* ERRORS */
@@ -387,7 +390,8 @@ virtual_protect_ex_failed:
 error_common:
   {
     frida_remote_worker_context_destroy (rwc, details);
-    gum_free_pages (code);
+    gum_memory_free (code, page_size);
+
     return FALSE;
   }
 }
