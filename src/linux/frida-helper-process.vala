@@ -54,9 +54,10 @@ namespace Frida {
 			return _resource_store;
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain_for_path (path, cancellable);
-			return yield helper.spawn (path, options, cancellable);
+			return yield helper.spawn (path, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 		}
 
 		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -379,7 +380,12 @@ namespace Frida {
 				} catch (Error e) {
 					string[] argv = { helper_file.path, socket_address };
 
-					GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
+					GLib.SpawnFlags flags =
+						GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN |
+						GLib.SpawnFlags.STDOUT_TO_DEV_NULL |
+						GLib.SpawnFlags.STDERR_TO_DEV_NULL |
+						/* GLib.SpawnFlags.STDIN_FROM_DEV_NULL */ 2048 |
+						/* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
 					GLib.Process.spawn_async (null, argv, envp, flags, null, out pending_pid);
 				}
 
@@ -498,8 +504,11 @@ namespace Frida {
 			proxy.uninjected.disconnect (on_uninjected);
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			try {
+				if (stdin_stream != null)
+					return yield proxy.spawn_with_stdio (path, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 				return yield proxy.spawn (path, options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);

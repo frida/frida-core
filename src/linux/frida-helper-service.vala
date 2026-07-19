@@ -121,7 +121,12 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
-			return yield backend.spawn (path, options, cancellable);
+			return yield backend.spawn (path, options, null, null, null, cancellable);
+		}
+
+		public async uint spawn_with_stdio (string path, HostSpawnOptions options, UnixInputStream stdin_stream,
+				UnixOutputStream stdout_stream, UnixOutputStream stderr_stream, Cancellable? cancellable) throws Error, IOError {
+			return yield backend.spawn (path, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 		}
 
 		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {

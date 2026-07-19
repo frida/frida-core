@@ -5,7 +5,8 @@ namespace Frida {
 
 		public abstract async void close (Cancellable? cancellable) throws IOError;
 
-		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+			UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError;
@@ -50,6 +51,8 @@ namespace Frida {
 		public abstract async void stop (Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint spawn_with_stdio (string path, HostSpawnOptions options, UnixInputStream stdin_stream,
+			UnixOutputStream stdout_stream, UnixOutputStream stderr_stream, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void await_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws GLib.Error;

@@ -347,7 +347,16 @@ namespace Frida {
 				return yield robo_launcher.spawn (program, options, cancellable);
 #endif
 
-			return yield helper.spawn (program, options, cancellable);
+			UnixInputStream? stdin_stream = null;
+			UnixOutputStream? stdout_stream = null;
+			UnixOutputStream? stderr_stream = null;
+			if (options.stdio == INHERIT) {
+				stdin_stream = new UnixInputStream (0, false);
+				stdout_stream = new UnixOutputStream (1, false);
+				stderr_stream = new UnixOutputStream (2, false);
+			}
+
+			return yield helper.spawn (program, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 		}
 
 		protected override async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {

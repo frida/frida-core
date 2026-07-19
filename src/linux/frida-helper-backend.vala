@@ -30,7 +30,8 @@ namespace Frida {
 				p.close ();
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			if (!FileUtils.test (path, EXISTS))
 				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
 
@@ -56,7 +57,11 @@ namespace Frida {
 				if (pid == 0) {
 					Posix.setsid ();
 
-					if (pipes != null) {
+					if (stdin_stream != null) {
+						Posix.dup2 (stdin_stream.get_fd (), 0);
+						Posix.dup2 (stdout_stream.get_fd (), 1);
+						Posix.dup2 (stderr_stream.get_fd (), 2);
+					} else if (pipes != null) {
 						Posix.dup2 (in_fd.handle, 0);
 						Posix.dup2 (out_fd.handle, 1);
 						Posix.dup2 (err_fd.handle, 2);
