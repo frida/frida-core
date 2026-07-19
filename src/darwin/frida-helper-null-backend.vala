@@ -35,7 +35,8 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
 		}
 

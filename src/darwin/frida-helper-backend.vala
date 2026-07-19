@@ -128,12 +128,13 @@ namespace Frida {
 			return dtrace_agent;
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			if (!FileUtils.test (path, EXISTS))
 				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
 
 			StdioPipes? pipes;
-			var child_pid = _spawn (path, options, out pipes);
+			var child_pid = _spawn (path, options, stdin_stream, stdout_stream, stderr_stream, out pipes);
 
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
@@ -670,7 +671,8 @@ namespace Frida {
 		protected extern void _destroy_dispatch_context ();
 		protected extern void _schedule_on_dispatch_queue (DispatchWorker worker);
 
-		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
+		protected extern uint _spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+			UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern static bool _is_suspended (uint task) throws Error;
 		public extern static void resume_process (uint task) throws Error;

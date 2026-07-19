@@ -20,7 +20,8 @@ namespace Frida {
 		public abstract async void enable_spawn_gating (SpawnGatingScope scope, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError;
-		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+			UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError;
 		public abstract async void launch (string identifier, HostSpawnOptions options,
 			Cancellable? cancellable) throws Error, IOError;
 		public abstract async void notify_launch_completed (string identifier, uint pid,
@@ -64,6 +65,8 @@ namespace Frida {
 		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint spawn_with_stdio (string path, HostSpawnOptions options, UnixInputStream stdin_stream,
+			UnixOutputStream stdout_stream, UnixOutputStream stderr_stream, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void launch (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void notify_launch_completed (string identifier, uint pid,
 			Cancellable? cancellable) throws GLib.Error;

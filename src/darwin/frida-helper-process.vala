@@ -83,9 +83,12 @@ namespace Frida {
 			}
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+		public async uint spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
+				UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, Cancellable? cancellable) throws Error, IOError {
 			var helper = yield obtain (cancellable);
 			try {
+				if (stdin_stream != null)
+					return yield helper.spawn_with_stdio (path, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 				return yield helper.spawn (path, options, cancellable);
 			} catch (GLib.Error e) {
 				throw_helper_error (e);
@@ -340,6 +343,9 @@ namespace Frida {
 				GLib.SpawnFlags flags =
 					GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN |
 					GLib.SpawnFlags.DO_NOT_REAP_CHILD |
+					GLib.SpawnFlags.STDOUT_TO_DEV_NULL |
+					GLib.SpawnFlags.STDERR_TO_DEV_NULL |
+					/* GLib.SpawnFlags.STDIN_FROM_DEV_NULL */ 2048 |
 					/* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
 
 				GLib.Process.spawn_async (null, argv, null, flags, null, out pending_pid);

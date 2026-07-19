@@ -230,7 +230,16 @@ namespace Frida {
 				return yield fruit_controller.spawn (path, options, cancellable);
 #endif
 
-			return yield helper.spawn (path, options, cancellable);
+			UnixInputStream? stdin_stream = null;
+			UnixOutputStream? stdout_stream = null;
+			UnixOutputStream? stderr_stream = null;
+			if (options.stdio == INHERIT) {
+				stdin_stream = new UnixInputStream (0, false);
+				stdout_stream = new UnixOutputStream (1, false);
+				stderr_stream = new UnixOutputStream (2, false);
+			}
+
+			return yield helper.spawn (path, options, stdin_stream, stdout_stream, stderr_stream, cancellable);
 		}
 
 		protected override async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {

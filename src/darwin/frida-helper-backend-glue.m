@@ -7,6 +7,8 @@
 #include <dlfcn.h>
 #include <errno.h>
 #import <Foundation/Foundation.h>
+#include <gio/gunixinputstream.h>
+#include <gio/gunixoutputstream.h>
 #include <glib-unix.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -793,7 +795,8 @@ _frida_darwin_helper_backend_schedule_on_dispatch_queue (FridaDarwinHelperBacken
 
 guint
 _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path,
-    FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
+    FridaHostSpawnOptions * options, GUnixInputStream * stdin_stream, GUnixOutputStream * stdout_stream,
+    GUnixOutputStream * stderr_stream, FridaStdioPipes ** pipes, GError ** error)
 {
   pid_t pid;
   FridaSpawnInstance * instance;
@@ -830,11 +833,17 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   if (stdio_error != NULL)
     goto propagate_stdio_error;
 
-  if (in_fd != NULL)
+  if (stdin_stream != NULL)
+    posix_spawn_file_actions_adddup2 (&file_actions, g_unix_input_stream_get_fd (stdin_stream), 0);
+  else if (in_fd != NULL)
     posix_spawn_file_actions_adddup2 (&file_actions, in_fd->handle, 0);
-  if (out_fd != NULL)
+  if (stdout_stream != NULL)
+    posix_spawn_file_actions_adddup2 (&file_actions, g_unix_output_stream_get_fd (stdout_stream), 1);
+  else if (out_fd != NULL)
     posix_spawn_file_actions_adddup2 (&file_actions, out_fd->handle, 1);
-  if (err_fd != NULL)
+  if (stderr_stream != NULL)
+    posix_spawn_file_actions_adddup2 (&file_actions, g_unix_output_stream_get_fd (stderr_stream), 2);
+  else if (err_fd != NULL)
     posix_spawn_file_actions_adddup2 (&file_actions, err_fd->handle, 2);
 
   aslr_value = g_hash_table_lookup (options->aux, "aslr");
