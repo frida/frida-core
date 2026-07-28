@@ -274,12 +274,45 @@ namespace Frida.Server {
 				return false;
 			});
 
+#if !WINDOWS
+			process_commands.begin ();
+#endif
+
 			exit_code = 0;
 
 			loop.run ();
 
 			return exit_code;
 		}
+
+#if !WINDOWS
+		// TEMPORARY DEBUG HACK: type “t” + Enter to dump alive GTasks.
+		private async void process_commands () {
+			var input = new DataInputStream (new UnixInputStream (Posix.STDIN_FILENO, false));
+
+			while (true) {
+				string? line;
+				try {
+					line = yield input.read_line_async (Priority.DEFAULT, io_cancellable);
+				} catch (GLib.Error e) {
+					return;
+				}
+				if (line == null)
+					return;
+
+				switch (line.strip ()) {
+					case "t":
+						g_task_print_alive_tasks ();
+						break;
+					case "":
+						break;
+					default:
+						printerr ("Unknown command; try “t”\n");
+						break;
+				}
+			}
+		}
+#endif
 
 		private async void start () {
 			try {
@@ -355,4 +388,8 @@ namespace Frida.Server {
 
 		return new TlsCertificate.from_file (path);
 	}
+
+	// TEMPORARY DEBUG HACK: only present when GLib is built with G_ENABLE_DEBUG.
+	[CCode (cname = "g_task_print_alive_tasks")]
+	private extern void g_task_print_alive_tasks ();
 }
