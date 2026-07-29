@@ -12,6 +12,7 @@ namespace Frida.Server {
 	private static string? directory = null;
 #if !WINDOWS && !TVOS
 	private static bool daemonize = false;
+	private static string? output_path = null;
 #endif
 	private static string? softener_flavor_str = null;
 	private static bool enable_preload = true;
@@ -42,6 +43,7 @@ namespace Frida.Server {
 		{ "directory", 'd', 0, OptionArg.STRING, ref directory, "Store binaries in DIRECTORY", "DIRECTORY" },
 #if !WINDOWS && !TVOS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
+		{ "output", 'o', 0, OptionArg.FILENAME, ref output_path, "Redirect output to FILE", "FILE" },
 #endif
 		{ "policy-softener", 0, 0, OptionArg.STRING, ref softener_flavor_str, "Select policy softener", "system|internal" },
 		{ "disable-preload", 'P', OptionFlags.REVERSE, OptionArg.NONE, ref enable_preload, "Disable preload optimization", null },
@@ -77,6 +79,13 @@ namespace Frida.Server {
 		}
 
 		Environment.set_verbose_logging_enabled (verbose);
+
+#if !WINDOWS && !TVOS
+		if (output_path != null && !daemonize) {
+			if (!redirect_output_to (output_path))
+				return 6;
+		}
+#endif
 
 		EndpointParameters endpoint_params;
 		try {
@@ -156,12 +165,15 @@ namespace Frida.Server {
 					Posix.setsid ();
 
 					var null_in = Posix.open ("/dev/null", Posix.O_RDONLY);
-					var null_out = Posix.open ("/dev/null", Posix.O_WRONLY);
 					Posix.dup2 (null_in, Posix.STDIN_FILENO);
-					Posix.dup2 (null_out, Posix.STDOUT_FILENO);
-					Posix.dup2 (null_out, Posix.STDERR_FILENO);
 					Posix.close (null_in);
-					Posix.close (null_out);
+
+					if (output_path == null || !redirect_output_to (output_path)) {
+						var null_out = Posix.open ("/dev/null", Posix.O_WRONLY);
+						Posix.dup2 (null_out, Posix.STDOUT_FILENO);
+						Posix.dup2 (null_out, Posix.STDERR_FILENO);
+						Posix.close (null_out);
+					}
 				}
 
 				var status = new uint8[1];
@@ -217,6 +229,22 @@ namespace Frida.Server {
 
 		return application.run ();
 	}
+
+#if !WINDOWS && !TVOS
+	private static bool redirect_output_to (string path) {
+		int fd = Posix.open (path, Posix.O_WRONLY | Posix.O_CREAT | Posix.O_APPEND, 0644);
+		if (fd == -1) {
+			printerr ("Unable to open “%s”: %s\n", path, Posix.strerror (Posix.errno));
+			return false;
+		}
+
+		Posix.dup2 (fd, Posix.STDOUT_FILENO);
+		Posix.dup2 (fd, Posix.STDERR_FILENO);
+		Posix.close (fd);
+
+		return true;
+	}
+#endif
 
 	namespace Environment {
 		public extern void init ();
@@ -274,7 +302,10 @@ namespace Frida.Server {
 				return false;
 			});
 
-#if !WINDOWS
+#if !WINDOWS && !TVOS
+			if (!daemonize)
+				process_commands.begin ();
+#elif !WINDOWS
 			process_commands.begin ();
 #endif
 
