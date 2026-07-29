@@ -57,6 +57,8 @@ namespace Frida {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			GLib.info ("detach-trace: BaseAgentSession.close() id=%s close_request=%p", id.handle, close_request);
+
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -84,6 +86,8 @@ namespace Frida {
 			script_engine.message_from_debugger.disconnect (on_message_from_debugger);
 
 			yield transmitter.close (cancellable);
+
+			GLib.info ("detach-trace: BaseAgentSession.close() done id=%s", id.handle);
 
 			close_request.resolve (true);
 		}
@@ -275,6 +279,8 @@ namespace Frida {
 			transmitter.closed.disconnect (on_transmitter_closed);
 			transmitter.new_candidates.disconnect (on_transmitter_new_candidates);
 			transmitter.candidate_gathering_done.disconnect (on_transmitter_candidate_gathering_done);
+
+			GLib.info ("detach-trace: BaseAgentSession emitting closed id=%s", id.handle);
 
 			closed ();
 		}

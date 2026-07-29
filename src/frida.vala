@@ -1885,6 +1885,9 @@ namespace Frida {
 					break;
 				}
 			}
+			GLib.info ("detach-trace: Device._release_session id=%s may_block=%s",
+				(session_id != null) ? session_id.handle : "-", may_block.to_string ());
+
 			if (session_id == null)
 				return;
 
@@ -1900,11 +1903,16 @@ namespace Frida {
 				} catch (Error e) {
 					assert_not_reached ();
 				}
+
+				GLib.info ("detach-trace: Device._release_session resumed id=%s", session_id.handle);
 			}
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];
+			GLib.info ("detach-trace: Device session detached id=%s reason=%d session=%p pending=%s",
+				id.handle, reason, session, pending_detach_requests.has_key (id).to_string ());
+
 			if (session != null)
 				session._on_detached (reason, crash);
 
@@ -3837,14 +3845,19 @@ namespace Frida {
 		}
 
 		private async void close_session_and_peer_connection (Cancellable? cancellable) throws IOError {
+			GLib.info ("detach-trace: Session closing remote id=%s", id.handle);
+
 			try {
 				yield active_session.close (cancellable);
 			} catch (GLib.Error e) {
+				GLib.info ("detach-trace: Session remote close failed id=%s error=%s", id.handle, e.message);
 				if (e is IOError.CANCELLED) {
 					discard_peer_connection ();
 					return;
 				}
 			}
+
+			GLib.info ("detach-trace: Session remote close returned id=%s", id.handle);
 
 			yield teardown_peer_connection (cancellable);
 		}

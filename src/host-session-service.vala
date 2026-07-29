@@ -871,6 +871,8 @@ namespace Frida {
 
 		private void on_agent_session_provider_closed (AgentSessionId id) {
 			var closed_after_opening = agent_sessions.unset (id);
+			GLib.info ("detach-trace: BaseDBusHostSession provider closed id=%s closed_after_opening=%s",
+				id.handle, closed_after_opening.to_string ());
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
@@ -973,7 +975,10 @@ namespace Frida {
 
 			var crash_info = (crash != null) ? crash : CrashInfo.empty ();
 			foreach (var id in entry.sessions) {
-				if (agent_sessions.unset (id))
+				bool still_registered = agent_sessions.unset (id);
+				GLib.info ("detach-trace: BaseDBusHostSession teardown id=%s reason=%d still_registered=%s",
+					id.handle, reason, still_registered.to_string ());
+				if (still_registered)
 					agent_session_detached (id, reason, crash_info);
 			}
 

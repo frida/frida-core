@@ -361,6 +361,8 @@ namespace Frida {
 
 		private async void teardown_peer_connection_and_emit_closed () {
 			schedule_on_frida_thread (() => {
+				GLib.info ("detach-trace: AgentMessageTransmitter %p emitting closed, nice_agent=%p",
+					this, nice_agent);
 				if (nice_agent != null)
 					close_nice_resources_and_emit_closed.begin ();
 				else
@@ -598,6 +600,7 @@ namespace Frida {
 
 		private async void teardown_peer_connection_and_emit_closed () {
 			schedule_on_frida_thread (() => {
+				GLib.info ("detach-trace: AgentMessageTransmitter %p emitting closed", this);
 				closed ();
 				return Source.REMOVE;
 			});

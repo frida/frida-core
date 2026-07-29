@@ -993,7 +993,11 @@ namespace Frida {
 
 		private void on_remote_agent_session_detached (AgentSessionId remote_id, SessionDetachReason reason, CrashInfo crash) {
 			AgentSessionId? local_id;
-			if (!remote_agent_sessions.unset (remote_id, out local_id))
+			bool mapping_found = remote_agent_sessions.unset (remote_id, out local_id);
+			GLib.info ("detach-trace: Droidy remote session detached remote_id=%s reason=%d mapping_found=%s local_id=%s",
+				remote_id.handle, reason, mapping_found.to_string (),
+				mapping_found ? local_id.handle : "-");
+			if (!mapping_found)
 				return;
 
 			bool agent_session_found = agent_sessions.unset (local_id);

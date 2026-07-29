@@ -762,12 +762,13 @@ namespace Frida {
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			AgentSessionEntry entry;
-			if (agent_sessions.unset (id, out entry)) {
-				ControlChannel? controller = entry.controller;
-				if (controller != null) {
-					controller.agent_sessions.remove (id);
-					controller.agent_session_detached (id, reason, crash);
-				}
+			bool entry_found = agent_sessions.unset (id, out entry);
+			ControlChannel? controller = entry_found ? entry.controller : null;
+			GLib.info ("detach-trace: ControlService session detached id=%s reason=%d entry_found=%s controller=%p",
+				id.handle, reason, entry_found.to_string (), controller);
+			if (controller != null) {
+				controller.agent_sessions.remove (id);
+				controller.agent_session_detached (id, reason, crash);
 			}
 		}
 

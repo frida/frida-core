@@ -924,6 +924,8 @@ namespace Frida.Agent {
 		private void on_session_closed (BaseAgentSession base_session) {
 			LiveAgentSession session = (LiveAgentSession) base_session;
 
+			GLib.info ("detach-trace: Agent emitting provider closed id=%s", session.id.handle);
+
 			closed (session.id);
 
 			unregister_session (session);
