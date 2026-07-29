@@ -292,6 +292,8 @@ namespace Frida.Agent {
 
 			start.begin ((owned) padder);
 
+			start_alive_task_dumper ();
+
 			main_loop.run ();
 
 			main_context.pop_thread_default ();
@@ -360,6 +362,16 @@ namespace Frida.Agent {
 			yield;
 
 			padder = null;
+		}
+
+		// TEMPORARY DEBUG HACK: dump alive GTasks every 30 seconds.
+		private void start_alive_task_dumper () {
+			var source = new TimeoutSource.seconds (30);
+			source.set_callback (() => {
+				GLib.info ("%s", g_task_describe_alive_tasks ());
+				return Source.CONTINUE;
+			});
+			source.attach (main_context);
 		}
 
 		private void keep_running_eternalized () {
@@ -1726,4 +1738,8 @@ namespace Frida.Agent {
 			return repeat;
 		});
 	}
+
+	// TEMPORARY DEBUG HACK: only present when GLib is built with G_ENABLE_DEBUG.
+	[CCode (cname = "g_task_describe_alive_tasks")]
+	private extern string g_task_describe_alive_tasks ();
 }

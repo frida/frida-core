@@ -309,6 +309,8 @@ namespace Frida.Server {
 			process_commands.begin ();
 #endif
 
+			start_alive_task_dumper ();
+
 			exit_code = 0;
 
 			loop.run ();
@@ -344,6 +346,16 @@ namespace Frida.Server {
 			}
 		}
 #endif
+
+		// TEMPORARY DEBUG HACK: dump alive GTasks every 30 seconds.
+		private void start_alive_task_dumper () {
+			var source = new TimeoutSource.seconds (30);
+			source.set_callback (() => {
+				GLib.info ("%s", g_task_describe_alive_tasks ());
+				return Source.CONTINUE;
+			});
+			source.attach (MainContext.default ());
+		}
 
 		private async void start () {
 			try {
@@ -423,4 +435,7 @@ namespace Frida.Server {
 	// TEMPORARY DEBUG HACK: only present when GLib is built with G_ENABLE_DEBUG.
 	[CCode (cname = "g_task_print_alive_tasks")]
 	private extern void g_task_print_alive_tasks ();
+
+	[CCode (cname = "g_task_describe_alive_tasks")]
+	private extern string g_task_describe_alive_tasks ();
 }
