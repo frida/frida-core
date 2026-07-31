@@ -34,6 +34,25 @@ one — have to match.
 The prelink half runs anywhere; the kbuild half needs a Linux host. Cross-building
 from macOS means running that step in a container holding the kernel tree.
 
+### Getting a KDIR for an Android device
+
+Nothing here needs the device's own kernel to be built, but the config alone is not
+enough either. `uname -r` ends in the GKI commit and the build number — for
+`6.1.145-android14-11-gc1de4747ac59-ab14219743` that is commit `c1de4747ac59` and
+build `14219743` — and three pieces keyed to them are published:
+
+- `modules_prepare_outdir.tar.gz` and `kernel_aarch64_Module.symvers` from
+  `ci.android.com`, under that build's `kernel_aarch64` target. The first is the
+  configured build tree with `scripts/` already compiled for a Linux x86-64 host; the
+  second carries the CRCs `CONFIG_MODVERSIONS` checks.
+- `kernel/common` at that commit, which a shallow single-commit fetch gets in a few
+  hundred megabytes. Only its makefiles are wanted: the top-level `Makefile` in the
+  prepared tree is a stub that includes the source's, so point it at wherever the
+  fetch landed and build with `make -C <source> O=<outdir> M=<here>`.
+
+A different GKI build of the same branch does not substitute for these: vermagic is
+compared verbatim, and it names the exact build.
+
 ## Loading
 
     insmod frida-agent.ko
@@ -49,14 +68,25 @@ same length-prefixed frames the other transports carry, with `poll` for readines
 It never dials out, so there is no network namespace to get right and no ordering
 requirement between loading the module and attaching a client.
 
-How those bytes reach the host is deliberately left to whoever opens the device — on
-a phone that means a small relay plus `adb forward`, in a VM whatever the guest
-already has. On Android the node is created by devtmpfs without a policy-specific
-label, so an SELinux-enforcing system needs the client's domain granted access to it
-before it can open the device. A socket-based transport was the other option considered and is a worse
-fit: `AF_VSOCK` only reaches a peer when a hypervisor is on the other side, and
+On Android the node is created by devtmpfs without a policy-specific label, so an
+SELinux-enforcing system needs the client's domain granted access to it before it can
+open the device. A socket-based transport was the other option considered and is a
+worse fit: `AF_VSOCK` only reaches a peer when a hypervisor is on the other side, and
 having the kernel connect out to loopback needs something already listening before
 the module loads.
+
+### Reaching it from a host
+
+Serve the Barebone device from a frida-server running on the target, so the `open()`
+happens next to the device node and the host talks to an ordinary frida-server:
+
+    FRIDA_BAREBONE_CONFIG=/data/local/tmp/linux-kmod.json \
+        frida-server --device barebone -l 127.0.0.1:27042
+
+`etc/linux-kmod.json` is that config. From the host, with `adb forward tcp:27042
+tcp:27042` in place:
+
+    frida -H 127.0.0.1:27042 -p 0
 
 ## What the target kernel has to provide
 
