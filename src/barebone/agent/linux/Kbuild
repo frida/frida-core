@@ -1,7 +1,7 @@
 obj-m += frida-agent.o
 
 # frida-agent-prelinked.o is not built from source here: it is the Rust agent, the
-# GumJS devkit and newlib collapsed into a single relocatable object by the prelink
+# GumJS devkit and the C library collapsed into a single relocatable object by the prelink
 # step in Makefile. Copy it in through if_changed rather than kbuild's _shipped rule,
 # so the .cmd file modpost expects gets written.
 frida-agent-y := frida-kmod.o frida-agent-prelinked.o

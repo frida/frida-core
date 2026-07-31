@@ -1,24 +1,23 @@
 #!/bin/sh
 #
 # Assembles the soft-float sysroot's libc.a from a picolibc build plus the
-# compiler-rt builtins, and removes the parts of picolibc the agent replaces.
+# compiler-rt builtins, and removes the part of picolibc the agent replaces.
 #
-# Two families of members come out. The agent defines malloc and friends over the
-# kernel allocator, so picolibc's own allocator would be both redundant and a
-# duplicate definition. Its generic memcpy is worse than redundant: it never
-# returns for a copy of sixteen bytes or more whose source is misaligned, which
-# is what the JavaScript engine does the first time it interns a long string.
+# Only the allocator comes out: the agent puts malloc and friends on the kernel's own
+# allocator rather than a fixed sbrk heap, so picolibc's would be a duplicate
+# definition. Its string and memory routines are kept — they were long blamed for a
+# hang that turned out to be a soft-float ABI mismatch elsewhere.
 #
 # Usage:
 #   make-softfloat-libc.sh <picolibc-build-dir> <builtins.a> <out-libc.a>
 #
 # Re-run this whenever the soft-float SDK is rebuilt: a fresh picolibc drops the
-# replacements back in and the agent hangs on its first script.
+# allocator back in.
 
 set -eu
 
 if [ $# -ne 3 ]; then
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 
@@ -40,8 +39,6 @@ libc_stdlib_posix-memalign.c.o
 libc_stdlib_realloc.c.o
 libc_stdlib_reallocarray.c.o
 libc_stdlib_reallocf.c.o
-memcpy-stub.c.o
-memmove-stub.c.o
 "
 
 rm -f "$output"

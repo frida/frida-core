@@ -274,38 +274,6 @@ mod exports {
 
     const HEAP_HEADER_SIZE: usize = 16;
 
-    // picolibc's generic memcpy never returns for a sixteen-byte copy whose source is
-    // misaligned, which is what the JavaScript engine does the first time it interns a
-    // string longer than fifteen characters. Volatile accesses so this does not get
-    // recognised as a memcpy and turned into a call to itself.
-    #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn memcpy(destination: *mut u8, source: *const u8, n: usize) -> *mut u8 {
-        for i in 0..n {
-            unsafe { destination.add(i).write_volatile(source.add(i).read_volatile()) };
-        }
-        destination
-    }
-
-    /// The same story as memcpy: the C library's generic implementation never returns
-    /// for the sizes the JavaScript engine actually uses. This one bites while the
-    /// compiler is compacting bytecode, so a script hangs between being parsed and
-    /// being run.
-    #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn memmove(destination: *mut u8, source: *const u8, n: usize) -> *mut u8 {
-        unsafe {
-            if (destination as usize) < (source as usize) {
-                for i in 0..n {
-                    destination.add(i).write_volatile(source.add(i).read_volatile());
-                }
-            } else {
-                for i in (0..n).rev() {
-                    destination.add(i).write_volatile(source.add(i).read_volatile());
-                }
-            }
-        }
-        destination
-    }
-
     #[unsafe(no_mangle)]
     pub extern "C" fn malloc(size: usize) -> *mut c_void {
         let total = size + HEAP_HEADER_SIZE;

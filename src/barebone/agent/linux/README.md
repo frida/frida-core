@@ -87,29 +87,33 @@ constraints below are why this flavour is built against a soft-float SDK
   lost on preemption and the FP state of whichever user task was interrupted is
   corrupted. Building everything `-mabi=aapcs-soft -mgeneral-regs-only` removes the
   question rather than answering it.
-- **Shadow call stack.** With `CONFIG_SHADOW_CALL_STACK` the kernel reserves x18,
-  so the SDK and Gum are built `-ffixed-x18` and the Rust half with
-  `+reserve-x18`. Anything linked in that uses x18 as a scratch register clobbers
-  the kernel's SCS pointer and faults the next instrumented function it calls.
+- **Shadow call stack.** With `CONFIG_SHADOW_CALL_STACK` the kernel reserves x18, so
+  the SDK and Gum are built `-ffixed-x18` and the Rust half with `-Zfixed-x18`.
+  Anything linked in that uses x18 as a scratch register overwrites the kernel's SCS
+  pointer, and the thread then returns through whatever that address happens to hold.
+
+  The Rust flag only reaches crates Cargo compiles, so `core`, `alloc` and
+  `compiler_builtins` — which the toolchain ships prebuilt, and which between them
+  account for every x18 write that used to reach the module — are rebuilt from source
+  via `-Z build-std`. That needs `rustup component add rust-src`.
 
 ## The soft-float libc
 
-The sysroot's `libc.a` is picolibc plus the compiler-rt builtins, with two families
-of members removed — see `make-softfloat-libc.sh`, which is what assembles it:
+The sysroot's `libc.a` is picolibc plus the compiler-rt builtins, minus picolibc's
+allocator — see `make-softfloat-libc.sh`, which is what assembles it. The agent
+implements `malloc` and friends over the kernel's own allocator, so picolibc's would
+be a duplicate definition sitting on a fixed sbrk heap.
 
-- **The allocator.** The agent implements `malloc` and friends over the kernel's
-  own allocator, so picolibc's would be a duplicate definition sitting on a fixed
-  sbrk heap.
-- **`memcpy-stub.c.o` and `memmove-stub.c.o`.** Both never return for the sizes the
-  JavaScript engine actually uses, so the agent defines its own. `memcpy` hangs on
-  a copy of sixteen bytes or more whose source is misaligned, which QuickJS first
-  does while interning a predefined atom longer than fifteen characters — the agent
-  then never finishes starting. `memmove` hangs while the compiler compacts
-  bytecode, so a script parses and then wedges between being read and being run.
-  Either way a CPU spins until the host's watchdog fires.
+Re-run `make-softfloat-libc.sh` after rebuilding the SDK: a fresh picolibc puts the
+allocator back.
 
-Re-run `make-softfloat-libc.sh` after rebuilding the SDK: a fresh picolibc puts all
-of these back, and the agent hangs again.
+Those compiler-rt builtins are load-bearing in a way that is easy to miss. Rust's
+toolchain carries its own `compiler_builtins`, compiled for the ordinary AAPCS where a
+double travels in `d0`, and the prelink whole-archives the Rust staticlib — so without
+the filtering step in `Makefile` those definitions answer the C library's calls to
+`__muldf3` and friends, which pass the same double in `x0`. Nothing crashes. The
+arithmetic simply returns garbage, and the first thing to notice is GLib deciding a
+hash table need not grow.
 
 ## What a script may look like
 
