@@ -261,12 +261,12 @@ namespace Frida.Barebone {
 		}
 
 		public void check () throws Error {
-			if (path == null)
-				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
-
 			if (transport == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
 			transport.check ();
+
+			if (path == null && !(transport is DeviceTransportConfig))
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
@@ -280,6 +280,9 @@ namespace Frida.Barebone {
 						break;
 					case "vsock":
 						t = typeof (VsockTransportConfig);
+						break;
+					case "device":
+						t = typeof (DeviceTransportConfig);
 						break;
 					default:
 						break;
@@ -348,6 +351,22 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.socket_path' is missing");
 			if (port == 0)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.port' is missing");
+		}
+	}
+
+	/**
+	 * An agent already resident in the target, reached through a device node it
+	 * exposes. Nothing is injected, so there is no image and no stub.
+	 */
+	public sealed class DeviceTransportConfig : TransportConfig {
+		public string path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
 		}
 	}
 

@@ -5,9 +5,12 @@ namespace Frida.Barebone {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		private SocketConnection hostlink;
+		private IOStream hostlink;
 		private BufferedInputStream input;
 		private OutputStream output;
+
+		private ByteOrder byte_order;
+		private uint pointer_size;
 
 		private AgentConfig agent_config;
 		private VsockTransportConfig? vsock_transport;
@@ -46,6 +49,23 @@ namespace Frida.Barebone {
 			return connection;
 		}
 
+		/**
+		 * Attaches to an agent already resident in the target, which brought its own
+		 * transport with it, such as the Linux kernel module exposing /dev/frida.
+		 */
+		public static async AgentConnection open_resident (IOStream stream, Cancellable? cancellable)
+				throws Error, IOError {
+			var connection = new AgentConnection () {
+				byte_order = ByteOrder.HOST,
+				pointer_size = (uint) sizeof (void *),
+			};
+
+			connection.adopt_hostlink_streams (stream);
+			connection.process_incoming_messages.begin ();
+
+			return connection;
+		}
+
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 
@@ -53,8 +73,8 @@ namespace Frida.Barebone {
 			var transport_tag = yield resolve_transport (cancellable);
 
 			var gdb = machine.gdb;
-			ByteOrder byte_order = gdb.byte_order;
-			uint pointer_size = gdb.pointer_size;
+			byte_order = gdb.byte_order;
+			pointer_size = gdb.pointer_size;
 
 			Layout layout;
 			uint64 preferred_base = 0;
@@ -267,7 +287,7 @@ namespace Frida.Barebone {
 			});
 		}
 
-		private void adopt_hostlink_streams (SocketConnection connection) {
+		private void adopt_hostlink_streams (IOStream connection) {
 			hostlink = connection;
 			input = (BufferedInputStream) Object.new (typeof (BufferedInputStream),
 				"base-stream", hostlink.get_input_stream (),
@@ -341,16 +361,25 @@ namespace Frida.Barebone {
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
 
+			Variant response = null;
 			try {
-				return yield promise.future.wait_async (cancellable);
+				response = yield promise.future.wait_async (cancellable);
 			} finally {
 				timeout_source.destroy ();
 			}
+
+			if (!response.check_format_string ("(bv)", false))
+				throw new Error.PROTOCOL ("Malformed reply from agent");
+			bool succeeded;
+			Variant detail;
+			response.get ("(bv)", out succeeded, out detail);
+			if (!succeeded)
+				throw new Error.NOT_SUPPORTED ("%s", detail.get_string ());
+
+			return detail;
 		}
 
 		private async void process_incoming_messages () {
-			var byte_order = machine.gdb.byte_order;
-
 			try {
 				while (true) {
 					size_t header_size = 4;
@@ -503,10 +532,10 @@ namespace Frida.Barebone {
 
 		private Bytes frame_message (Command command, uint16 request_id, Variant payload) {
 			var message = new Variant ("(yqv)", (uint8) command, request_id, payload);
-			if (machine.gdb.byte_order != ByteOrder.HOST)
+			if (byte_order != ByteOrder.HOST)
 				message = message.byteswap ();
 			var message_bytes = message.get_data_as_bytes ();
-			return machine.gdb.make_buffer_builder ()
+			return new BufferBuilder (byte_order, pointer_size)
 				.append_uint32 ((uint32) message_bytes.get_size ())
 				.append_bytes (message_bytes)
 				.build ();

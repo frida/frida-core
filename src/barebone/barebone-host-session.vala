@@ -71,6 +71,15 @@ namespace Frida {
 				config = new Barebone.Config ();
 			}
 
+			Barebone.AgentConfig? resident_agent = config.agent;
+			if (resident_agent != null && resident_agent.transport is Barebone.DeviceTransportConfig) {
+				host_session = yield attach_to_resident_agent (
+					(Barebone.DeviceTransportConfig) resident_agent.transport, cancellable);
+				host_session.agent_session_detached.connect (on_agent_session_detached);
+
+				return host_session;
+			}
+
 			SocketConnectable connectable;
 			try {
 				Barebone.ConnectionConfig c = config.connection;
@@ -185,6 +194,24 @@ namespace Frida {
 			return host_session;
 		}
 
+		private async BareboneHostSession attach_to_resident_agent (Barebone.DeviceTransportConfig transport,
+				Cancellable? cancellable) throws Error, IOError {
+#if WINDOWS
+			throw new Error.NOT_SUPPORTED ("Resident agents are not available on this OS");
+#else
+			int fd = Posix.open (transport.path, Posix.O_RDWR);
+			if (fd == -1)
+				throw new Error.TRANSPORT ("Unable to open %s: %s", transport.path, Posix.strerror (Posix.errno));
+
+			// Both halves are the same descriptor, so exactly one of them may close it.
+			var stream = new SimpleIOStream (new UnixInputStream (fd, true), new UnixOutputStream (fd, false));
+
+			var connection = yield Barebone.AgentConnection.open_resident (stream, cancellable);
+
+			return new BareboneHostSession (connection, null);
+#endif
+		}
+
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
@@ -236,7 +263,8 @@ namespace Frida {
 			construct;
 		}
 
-		public Barebone.Services services {
+		/** Absent for a resident agent: every service here is built on a debugger stub. */
+		public Barebone.Services? services {
 			get;
 			construct;
 		}
@@ -244,7 +272,7 @@ namespace Frida {
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-		public BareboneHostSession (Barebone.AgentConnection? connection, Barebone.Services services) {
+		public BareboneHostSession (Barebone.AgentConnection? connection, Barebone.Services? services) {
 			Object (connection: connection, services: services);
 		}
 
@@ -333,10 +361,13 @@ namespace Frida {
 			MainContext dbus_context = yield get_dbus_context ();
 
 			BareboneAgentSession session;
-			if (connection != null)
+			if (connection != null) {
 				session = new RemoteBareboneAgentSession (connection, session_id, opts.persist_timeout, dbus_context);
-			else
+			} else {
+				if (services == null)
+					throw new Error.NOT_SUPPORTED ("Barebone target has neither an agent nor a debugger stub");
 				session = new LocalBareboneAgentSession (services, session_id, opts.persist_timeout, dbus_context);
+			}
 			agent_sessions[session_id] = session;
 			session.closed.connect (on_agent_session_closed);
 
