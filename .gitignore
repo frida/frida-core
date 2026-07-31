@@ -3,6 +3,9 @@
 /deps/
 /src/android-helper/build/
 /src/barebone/agent/target/
+/src/barebone/agent/target-linux/
+/src/barebone/agent/linux/*.o
+/src/barebone/agent/linux/*.o.bin
 /src/barebone/agent/xpacks/
 /src/barebone/helpers/memory-scanner/target/
 /src/barebone/helpers/target/

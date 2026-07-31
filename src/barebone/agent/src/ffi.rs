@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 
-use crate::bindings::{gpointer, gsize, GumPageProtection};
-use crate::{gum, libc, xnu};
+use crate::bindings::{gpointer, gsize, gum_try_mprotect, GumPageProtection};
+use crate::{kernel, libc};
 
 const GUM_PAGE_READ: GumPageProtection = 1;
 const GUM_PAGE_EXECUTE: GumPageProtection = 4;
@@ -10,7 +10,7 @@ const GUM_PAGE_EXECUTE: GumPageProtection = 4;
 // static trampoline `text` made executable, followed by a writable parameter
 // table `map_size` bytes later (the trampolines reach their parameters via that
 // fixed offset). The two halves are whole pages, so flipping the first to RX
-// over the hostlink leaves the parameter table writable.
+// leaves the parameter table writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ffi_tramp_embedder_map(
     text: *const c_void,
@@ -19,7 +19,7 @@ pub unsafe extern "C" fn ffi_tramp_embedder_map(
     parm_table: *mut *mut c_void,
 ) -> i32 {
     unsafe {
-        let base = xnu::kalloc(map_size * 2);
+        let base = kernel::alloc_code(map_size * 2);
         if base.is_null() {
             return 0;
         }
@@ -28,9 +28,9 @@ pub unsafe extern "C" fn ffi_tramp_embedder_map(
         libc::__clear_cache(base, base.add(map_size));
 
         let made_executable =
-            gum::gum_try_mprotect(base as gpointer, map_size as gsize, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
+            gum_try_mprotect(base as gpointer, map_size as gsize, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
         if made_executable == 0 {
-            xnu::free(base, map_size * 2);
+            kernel::free_code(base, map_size * 2);
             return 0;
         }
 
@@ -46,7 +46,5 @@ pub unsafe extern "C" fn ffi_tramp_embedder_unmap(
     _parm_table: *mut c_void,
     map_size: usize,
 ) {
-    unsafe {
-        xnu::free(code_table as *mut u8, map_size * 2);
-    }
+    kernel::free_code(code_table as *mut u8, map_size * 2);
 }

@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::xnu;
+use crate::kernel;
 
 const AF_VSOCK: c_int = 40;
 const SOCK_STREAM: c_int = 1;
@@ -262,6 +262,6 @@ unsafe fn recv_nonblocking(so: SocketT, dst: &mut [u8]) -> usize {
 unsafe extern "C" fn upcall(_so: SocketT, cookie: *mut c_void, _waitf: c_int) {
     UPCALL_PENDING.fetch_add(1, Ordering::Release);
     if !cookie.is_null() {
-        xnu::thread_wakeup(cookie as *const u8);
+        kernel::wake(cookie as *const u8);
     }
 }

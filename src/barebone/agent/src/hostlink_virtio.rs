@@ -5,7 +5,7 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::gum::gum_barebone_query_page_size;
-use crate::xnu;
+use crate::{kernel, xnu};
 
 const MMIO_SIZE: u64 = 0x200;
 
@@ -107,14 +107,14 @@ struct DmaPage {
 
 fn dma_page_alloc() -> DmaPage {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    let va = xnu::kalloc(len);
+    let va = kernel::alloc(len);
     let pa = xnu::ml_vtophys(va as u64);
     DmaPage { va, pa }
 }
 
 fn dma_page_free(p: DmaPage) {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    xnu::free(p.va, len);
+    kernel::free(p.va, len);
 }
 
 struct Vq {
@@ -359,7 +359,7 @@ impl Hostlink {
         let s = unsafe { &mut *self.state.get() };
 
         let total = 4 + payload.len();
-        let buf = xnu::kalloc(total);
+        let buf = kernel::alloc(total);
         unsafe {
             let len = payload.len() as u32;
             *buf.add(0) = (len & 0xFF) as u8;
@@ -370,7 +370,7 @@ impl Hostlink {
         }
         let frame: &'static [u8] = unsafe { core::slice::from_raw_parts(buf, total) };
 
-        let node = xnu::kalloc(size_of::<TxNode>()) as *mut TxNode;
+        let node = kernel::alloc(size_of::<TxNode>()) as *mut TxNode;
         unsafe {
             (*node).next = core::ptr::null_mut();
             (*node).frame = frame;
@@ -386,7 +386,7 @@ impl Hostlink {
             s.tx_tail = node;
         }
 
-        xnu::thread_wakeup(s.wake_token);
+        kernel::wake(s.wake_token);
     }
 
     pub fn process(&self) {
@@ -592,7 +592,7 @@ impl Hostlink {
                     | ((s.rx_lenbuf[3] as usize) << 24);
 
                 if s.rx_buf.is_none() && len > 0 {
-                    let buf = xnu::kalloc(len);
+                    let buf = kernel::alloc(len);
                     let slice: &'static mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(buf, len) };
                     s.rx_buf = Some(slice);
@@ -718,8 +718,8 @@ impl Hostlink {
                 self.kick(sel);
             }
 
-            xnu::free(frame.as_ptr() as *mut u8, frame.len());
-            xnu::free(node as *mut u8, core::mem::size_of::<TxNode>());
+            kernel::free(frame.as_ptr() as *mut u8, frame.len());
+            kernel::free(node as *mut u8, core::mem::size_of::<TxNode>());
         }
     }
 
@@ -732,7 +732,7 @@ impl Hostlink {
 }
 
 extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_void, _src: i32) {
-    xnu::thread_wakeup(token as *const u8);
+    kernel::wake(token as *const u8);
 }
 
 fn r32(mmio: *mut u8, off: usize) -> u32 {

@@ -1,0 +1,17 @@
+obj-m += frida-agent.o
+
+# frida-agent-prelinked.o is not built from source here: it is the Rust agent, the
+# GumJS devkit and newlib collapsed into a single relocatable object by the prelink
+# step in Makefile. Copy it in through if_changed rather than kbuild's _shipped rule,
+# so the .cmd file modpost expects gets written.
+frida-agent-y := frida-kmod.o frida-agent-prelinked.o
+
+targets += frida-agent-prelinked.o
+
+quiet_cmd_frida_agent_prelinked = COPY    $@
+      cmd_frida_agent_prelinked = cp $< $@
+
+$(obj)/frida-agent-prelinked.o: $(src)/frida-agent-prelinked.o.bin FORCE
+	$(call if_changed,frida_agent_prelinked)
+
+ccflags-y += -Wno-declaration-after-statement

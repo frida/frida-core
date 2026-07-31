@@ -21,10 +21,29 @@
     export AR_aarch64_unknown_none=aarch64-none-elf-ar
     export RANLIB_aarch64_unknown_none=aarch64-none-elf-ranlib
 
+    cargo build --release --features xnu
+
+## Targets
+
+The agent supports two kernels. One of them has to be picked; neither is a
+default, since neither follows from the host you build on:
+
+- `xnu` — a freestanding ELF executable that the Barebone backend
+  injects into a running kernel from the outside, over a remote stub.
+- `linux` — a static library that becomes a kernel module, loaded from the
+  inside. See `linux/README.md`.
+
+Everything above the `kernel` module is shared; each backend supplies the same
+set of primitives (logging, allocation, threads, waiting, time, symbols) plus its
+half of Gum's platform backend (`gum_xnu.rs` / `gum_linux.rs`).
+
 ## Development loop
 
     export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.json
-    cargo build --release && make -C ~/src/frida-python && killall -9 qemu-system-aarch64 && sleep 2 && frida -D barebone -p 0
+    cargo build --release --features xnu \
+        && make -C ~/src/frida-python \
+        && killall -9 qemu-system-aarch64 && sleep 2 \
+        && frida -D barebone -p 0
 
 ## Speeding up loop
 

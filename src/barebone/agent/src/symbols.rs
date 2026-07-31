@@ -1,7 +1,7 @@
 use crate::bindings::{
     GPatternSpec, g_pattern_spec_free, g_pattern_spec_match_string, g_pattern_spec_new,
 };
-use crate::xnu::get_kernel_base;
+use crate::kernel::get_kernel_base;
 use alloc::ffi::CString;
 use core::cmp::Ordering;
 use core::ffi::{CStr, c_char};

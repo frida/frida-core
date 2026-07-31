@@ -36,20 +36,29 @@ fn main() {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings");
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        devkit_dir.to_str().unwrap()
-    );
-    println!("cargo:rustc-link-lib=static=frida-gumjs");
-    for path in cc_library_paths {
-        println!("cargo:rustc-link-search=native={}", path.to_string_lossy());
+    // The Linux flavour is a staticlib: kbuild owns the final link, so it — not
+    // us — decides where the devkit and libc archives come from.
+    if env::var("CARGO_FEATURE_XNU").is_ok() {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            devkit_dir.to_str().unwrap()
+        );
+        println!("cargo:rustc-link-lib=static=frida-gumjs");
+        for path in cc_library_paths {
+            println!("cargo:rustc-link-search=native={}", path.to_string_lossy());
+        }
+        println!("cargo:rustc-link-lib=static=c");
+        println!("cargo:rustc-link-lib=static=m");
+        println!("cargo:rustc-link-arg=--export-dynamic");
+        println!("cargo:rustc-link-arg=--emit-relocs");
+        println!("cargo:rustc-link-arg=--script=agent.lds");
+        println!("cargo:rustc-link-arg=--gc-sections");
+        // All of the agent lives in the library crate, so nothing in the binary
+        // references the entrypoint the host calls; keep the linker from
+        // dropping it along with the rest of the unreferenced archive members.
+        println!("cargo:rustc-link-arg=--undefined=_start");
     }
-    println!("cargo:rustc-link-lib=static=c");
-    println!("cargo:rustc-link-lib=static=m");
-    println!("cargo:rustc-link-arg=--export-dynamic");
-    println!("cargo:rustc-link-arg=--emit-relocs");
-    println!("cargo:rustc-link-arg=--script=agent.lds");
-    println!("cargo:rustc-link-arg=--gc-sections");
+
     println!("cargo:rerun-if-changed=build.rs");
 }
 

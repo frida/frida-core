@@ -8,7 +8,6 @@ use crate::bindings::GThreadFunc;
 use crate::bindings::{gpointer, gulong};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use core::arch::asm;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
@@ -33,9 +32,11 @@ struct RWLockImpl {
     _padding: [u8; core::mem::size_of::<GRWLock>() - core::mem::size_of::<AtomicU32>()],
 }
 
+// A generation counter rather than a flag: a flag stays set once signalled, so every
+// later wait returns at once and the caller's loop spins instead of blocking.
 #[repr(C, align(8))]
 struct CondImpl {
-    signal: AtomicU32,    // Signal state
+    generation: AtomicU32,
     _padding: [u8; core::mem::size_of::<GCond>() - core::mem::size_of::<AtomicU32>()],
 }
 
@@ -144,10 +145,9 @@ pub extern "C" fn g_rec_mutex_clear(_rec_mutex: *mut GRecMutex) {
 pub extern "C" fn g_rec_mutex_lock(rec_mutex: *mut GRecMutex) {
     unsafe {
         let impl_ = rec_mutex_impl(rec_mutex);
-        let current_thread = get_current_thread_id();
 
         loop {
-            if rec_mutex_try_acquire(impl_, current_thread) {
+            if rec_mutex_try_acquire(impl_) {
                 break;
             }
             rec_mutex_wait(impl_);
@@ -159,9 +159,8 @@ pub extern "C" fn g_rec_mutex_lock(rec_mutex: *mut GRecMutex) {
 pub extern "C" fn g_rec_mutex_trylock(rec_mutex: *mut GRecMutex) -> u32 {
     unsafe {
         let impl_ = rec_mutex_impl(rec_mutex);
-        let current_thread = get_current_thread_id();
 
-        if rec_mutex_try_acquire(impl_, current_thread) {
+        if rec_mutex_try_acquire(impl_) {
             1
         } else {
             0
@@ -183,7 +182,7 @@ pub extern "C" fn g_rec_mutex_unlock(rec_mutex: *mut GRecMutex) {
                     .is_ok()
                 {
                     impl_.owner.store(0, Ordering::Relaxed);
-                    lock_notify_all();
+                    wake_waiters(&impl_.count);
                     break;
                 }
             } else {
@@ -198,7 +197,10 @@ pub extern "C" fn g_rec_mutex_unlock(rec_mutex: *mut GRecMutex) {
     }
 }
 
-unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl, current_thread: u64) -> bool {
+// Asking the kernel who we are costs more than the uncontended acquisition itself, and
+// every allocation takes this path, so the identity is only fetched once the lock turns
+// out to be held.
+unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl) -> bool {
     let current_count = impl_.count.load(Ordering::Relaxed);
 
     if current_count == 0 {
@@ -206,12 +208,12 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl, current_thread: u64) -
             .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            impl_.owner.store(current_thread, Ordering::Relaxed);
+            impl_.owner.store(crate::kernel::current_thread_id(), Ordering::Relaxed);
             return true;
         }
     } else {
         let current_owner = impl_.owner.load(Ordering::Relaxed);
-        if current_owner == current_thread {
+        if current_owner == crate::kernel::current_thread_id() {
             if impl_.count
                 .compare_exchange_weak(
                     current_count,
@@ -230,7 +232,7 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl, current_thread: u64) -
 
 unsafe fn rec_mutex_wait(impl_: &mut RecMutexImpl) {
     while impl_.count.load(Ordering::Relaxed) != 0 {
-        unsafe { lock_wait_primitive() };
+        wait_on(&impl_.count, &mut || impl_.count.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -282,7 +284,7 @@ pub extern "C" fn g_rw_lock_writer_unlock(rw_lock: *mut GRWLock) {
     unsafe {
         let impl_ = rw_lock_impl(rw_lock);
         impl_.state.store(0, Ordering::Release);
-        lock_notify_all();
+        wake_waiters(&impl_.state);
     }
 }
 
@@ -329,7 +331,7 @@ pub extern "C" fn g_rw_lock_reader_unlock(rw_lock: *mut GRWLock) {
                 .is_ok()
             {
                 if current - 1 == 0 {
-                    lock_notify_all();
+                    wake_waiters(&impl_.state);
                 }
                 break;
             }
@@ -355,13 +357,15 @@ unsafe fn rw_lock_reader_try_acquire(impl_: &mut RWLockImpl) -> bool {
 
 unsafe fn rw_lock_wait_for_writers(impl_: &mut RWLockImpl) {
     while impl_.state.load(Ordering::Relaxed) & RW_WRITER_LOCK_BIT != 0 {
-        unsafe { lock_wait_primitive() };
+        wait_on(&impl_.state, &mut || {
+            impl_.state.load(Ordering::Relaxed) & RW_WRITER_LOCK_BIT == 0
+        });
     }
 }
 
 unsafe fn rw_lock_wait_for_all(impl_: &mut RWLockImpl) {
     while impl_.state.load(Ordering::Relaxed) != 0 {
-        unsafe { lock_wait_primitive() };
+        wait_on(&impl_.state, &mut || impl_.state.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -369,7 +373,7 @@ unsafe fn rw_lock_wait_for_all(impl_: &mut RWLockImpl) {
 pub extern "C" fn g_cond_init(cond: *mut GCond) {
     unsafe {
         let impl_ = cond_impl(cond);
-        impl_.signal.store(0, Ordering::Relaxed);
+        impl_.generation.store(0, Ordering::Relaxed);
     }
 }
 
@@ -379,11 +383,17 @@ pub extern "C" fn g_cond_clear(_cond: *mut GCond) {}
 #[unsafe(no_mangle)]
 pub extern "C" fn g_cond_wait(cond: *mut GCond, mutex: *mut GMutex) {
     unsafe {
+        // Read the generation under the mutex, so a signal that lands after the
+        // unlock below is still observed as a change.
+        let seen = cond_impl(cond).generation.load(Ordering::Acquire);
+
         g_mutex_unlock(mutex);
 
         let impl_ = cond_impl(cond);
-        while impl_.signal.load(Ordering::Acquire) == 0 {
-            lock_wait_primitive();
+        while impl_.generation.load(Ordering::Acquire) == seen {
+            wait_on(&impl_.generation, &mut || {
+                impl_.generation.load(Ordering::Acquire) != seen
+            });
         }
 
         g_mutex_lock(mutex);
@@ -394,8 +404,8 @@ pub extern "C" fn g_cond_wait(cond: *mut GCond, mutex: *mut GMutex) {
 pub extern "C" fn g_cond_signal(cond: *mut GCond) {
     unsafe {
         let impl_ = cond_impl(cond);
-        impl_.signal.store(1, Ordering::Release);
-        lock_notify_all();
+        impl_.generation.fetch_add(1, Ordering::Release);
+        wake_waiters(&impl_.generation);
     }
 }
 
@@ -403,22 +413,37 @@ pub extern "C" fn g_cond_signal(cond: *mut GCond) {
 pub extern "C" fn g_cond_broadcast(cond: *mut GCond) {
     unsafe {
         let impl_ = cond_impl(cond);
-        impl_.signal.store(1, Ordering::Release);
-        lock_notify_all();
+        impl_.generation.fetch_add(1, Ordering::Release);
+        wake_waiters(&impl_.generation);
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn g_cond_wait_until(cond: *mut GCond, mutex: *mut GMutex, _end_time: i64) -> u32 {
-    // TODO: Implement proper timeout handling
-    g_cond_wait(cond, mutex);
-    1
+pub extern "C" fn g_cond_wait_until(cond: *mut GCond, mutex: *mut GMutex, end_time: i64) -> u32 {
+    unsafe {
+        let seen = cond_impl(cond).generation.load(Ordering::Acquire);
+
+        g_mutex_unlock(mutex);
+
+        let impl_ = cond_impl(cond);
+        let mut signalled = impl_.generation.load(Ordering::Acquire) != seen;
+        while !signalled && crate::kernel::monotonic_micros() < end_time {
+            wait_on(&impl_.generation, &mut || {
+                impl_.generation.load(Ordering::Acquire) != seen
+            });
+            signalled = impl_.generation.load(Ordering::Acquire) != seen;
+        }
+
+        g_mutex_lock(mutex);
+
+        if signalled { 1 } else { 0 }
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_private_get(key: *mut GPrivate) -> *mut c_void {
     unsafe {
-        let thread_id = get_current_thread_id();
+        let thread_id = crate::kernel::current_thread_id();
         lock_acquire(&TLS_LOCK);
 
         ensure_tls_storage();
@@ -438,7 +463,7 @@ pub extern "C" fn g_private_get(key: *mut GPrivate) -> *mut c_void {
 #[unsafe(no_mangle)]
 pub extern "C" fn g_private_set(key: *mut GPrivate, value: *mut c_void) {
     unsafe {
-        let thread_id = get_current_thread_id();
+        let thread_id = crate::kernel::current_thread_id();
         lock_acquire(&TLS_LOCK);
 
         ensure_tls_storage();
@@ -468,7 +493,9 @@ pub extern "C" fn _g_system_thread_create(
     data: gpointer,
 ) -> *mut GSystemThread {
     unsafe {
-        let system_thread = crate::xnu::kalloc(core::mem::size_of::<SystemThreadImpl>()) as *mut SystemThreadImpl;
+        crate::kernel::log("frida: glib is creating a thread\n\0");
+
+        let system_thread = crate::kernel::alloc(core::mem::size_of::<SystemThreadImpl>()) as *mut SystemThreadImpl;
 
         g_mutex_init(&mut (*system_thread).mutex);
         g_cond_init(&mut (*system_thread).cond);
@@ -478,12 +505,12 @@ pub extern "C" fn _g_system_thread_create(
         (*system_thread).finished.store(0, Ordering::Relaxed);
         (*system_thread).detached.store(0, Ordering::Relaxed);
 
-        let wrapper_data = crate::xnu::kalloc(core::mem::size_of::<ThreadWrapperData>()) as *mut ThreadWrapperData;
+        let wrapper_data = crate::kernel::alloc(core::mem::size_of::<ThreadWrapperData>()) as *mut ThreadWrapperData;
         (*wrapper_data).func = func;
         (*wrapper_data).data = data;
         (*wrapper_data).system_thread = system_thread;
 
-        let _xnu_result = crate::xnu::kernel_thread_start(thread_wrapper, wrapper_data as *mut c_void);
+        let _xnu_result = crate::kernel::spawn_thread(thread_wrapper, wrapper_data as *mut c_void);
 
         system_thread as *mut GSystemThread
     }
@@ -496,8 +523,9 @@ extern "C" fn thread_wrapper(parameter: *mut c_void, _wait_result: i32) {
         let data = (*wrapper_data).data;
         let system_thread = (*wrapper_data).system_thread;
 
-        let current_thread_id = get_current_thread_id();
-        (*system_thread).thread_id.store(current_thread_id, Ordering::Relaxed);
+        let current_thread_id = crate::kernel::current_thread_id();
+        (*system_thread).thread_id.store(current_thread_id, Ordering::Release);
+        wake_waiters(&(*system_thread).thread_id);
 
         func.unwrap()(data);
 
@@ -537,12 +565,10 @@ pub extern "C" fn _g_system_thread_wait(thread: *mut GSystemThread) {
     unsafe {
         let system_thread = thread as *mut SystemThreadImpl;
 
-        loop {
-            let thread_id = (*system_thread).thread_id.load(Ordering::Acquire);
-            if thread_id != 0 {
-                break;
-            }
-            core::hint::spin_loop();
+        while (*system_thread).thread_id.load(Ordering::Acquire) == 0 {
+            wait_on(&(*system_thread).thread_id, &mut || {
+                (*system_thread).thread_id.load(Ordering::Acquire) != 0
+            });
         }
 
         g_mutex_lock(&mut (*system_thread).mutex);
@@ -556,19 +582,16 @@ pub extern "C" fn _g_system_thread_wait(thread: *mut GSystemThread) {
 }
 
 unsafe fn cleanup_system_thread(system_thread: *mut SystemThreadImpl) {
-    crate::xnu::free(system_thread as *mut u8, core::mem::size_of::<SystemThreadImpl>());
+    crate::kernel::free(system_thread as *mut u8, core::mem::size_of::<SystemThreadImpl>());
 }
 
 unsafe fn cleanup_wrapper_data(wrapper_data: *mut ThreadWrapperData) {
-    crate::xnu::free(wrapper_data as *mut u8, core::mem::size_of::<ThreadWrapperData>());
+    crate::kernel::free(wrapper_data as *mut u8, core::mem::size_of::<ThreadWrapperData>());
 }
 
 unsafe fn lock_acquire(lock: &AtomicU32) {
-    loop {
-        if unsafe { lock_try_acquire(lock) } {
-            break;
-        }
-        unsafe { lock_wait(lock) };
+    while !unsafe { lock_try_acquire(lock) } {
+        wait_on(lock, &mut || lock.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -579,35 +602,36 @@ unsafe fn lock_try_acquire(lock: &AtomicU32) -> bool {
 
 unsafe fn lock_release(lock: &AtomicU32) {
     lock.store(0, Ordering::Release);
-    unsafe { lock_notify_all() };
+    wake_waiters(lock);
 }
 
-unsafe fn lock_wait(lock: &AtomicU32) {
-    while lock.load(Ordering::Relaxed) != 0 {
-        unsafe { lock_wait_primitive() };
-    }
+// Sleeps until `ready` holds or the slice expires, whichever comes first.
+//
+// These used to spin on wfe/sev. A kernel thread that spins never reaches the
+// scheduler, so a lost wakeup — or a genuine deadlock, which is how we found this —
+// starves the CPU it is on until the hardware watchdog takes the machine down. The
+// bounded sleep turns both into a stall that can be observed instead.
+//
+// The address of the word being waited on names the wait channel: XNU pairs
+// assert_wait()/thread_wakeup() on it directly, while the Linux shim has a single
+// channel and treats it as a hint. Every caller re-checks its own condition in a
+// loop, so a spurious wakeup costs nothing either way.
+fn wait_on<T>(word: &T, ready: &mut dyn FnMut() -> bool) {
+    crate::kernel::wait(token_of(word), Some(WAIT_SLICE_US), ready);
+
+    // The wait above returns without sleeping whenever `ready` already holds, so on
+    // its own it is not enough to keep a contended loop off the CPU: every caller
+    // here loops, and a loop in a kernel thread that never reaches the scheduler
+    // takes the machine down rather than merely running hot. Yield unconditionally.
+    crate::kernel::yield_now();
 }
 
-unsafe fn lock_wait_primitive() {
-    unsafe {
-        asm!("wfe", options(nomem, nostack));
-    }
+fn wake_waiters<T>(word: &T) {
+    crate::kernel::wake(token_of(word));
 }
 
-unsafe fn lock_notify_all() {
-    unsafe {
-        asm!("sev", options(nomem, nostack));
-    }
+fn token_of<T>(word: &T) -> *const u8 {
+    word as *const T as *const u8
 }
 
-// The thread pointer is exposed to JavaScript as a GumThreadId, so it must fit
-// in a double without losing precision; the low bits keep it unique per thread.
-const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
-
-pub unsafe fn get_current_thread_id() -> u64 {
-    let thread_ptr: u64;
-    unsafe {
-        asm!("mrs {}, tpidr_el1", out(reg) thread_ptr, options(nomem, nostack));
-    }
-    thread_ptr & JS_SAFE_THREAD_ID_MASK
-}
+const WAIT_SLICE_US: u64 = 1000;

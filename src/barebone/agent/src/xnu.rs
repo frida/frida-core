@@ -1,7 +1,83 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-static KERNEL_BASE: AtomicU64 = AtomicU64::new(0);
+use crate::kernel::ThreadEntry;
+
+pub fn log(msg: &str) {
+    unsafe {
+        _IOLog(msg.as_ptr());
+    }
+}
+
+pub fn panic(msg: &str) {
+    unsafe { _panic(msg.as_ptr()) };
+}
+
+pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+    kernel_thread_start(entry, parameter)
+}
+
+pub fn alloc(size: usize) -> *mut u8 {
+    kalloc(size)
+}
+
+// Executable slabs come out of the same allocator; the host flips their page
+// permissions for us through its physical-memory bridge.
+pub fn alloc_code(size: usize) -> *mut u8 {
+    kalloc(size)
+}
+
+pub fn free_code(ptr: *mut u8, size: usize) {
+    free(ptr, size);
+}
+
+// Arms the wait, gives `check` a chance to observe the condition, and only then
+// commits to sleeping — the three-phase Mach protocol, which is race-free
+// because a wakeup landing after assert_wait() cancels the pending block.
+pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    let wait_result = match timeout_us {
+        None => assert_wait(token, THREAD_INTERRUPTIBLE),
+        Some(us) => assert_wait_timeout(token, THREAD_INTERRUPTIBLE, (us * 1000) as u32, 1),
+    };
+    if wait_result != THREAD_WAITING {
+        panic!("assert_wait failed: {}", wait_result);
+    }
+
+    if check() {
+        thread_wakeup(token);
+        return;
+    }
+
+    thread_block(None);
+}
+
+pub fn wake(token: *const u8) {
+    thread_wakeup(token);
+}
+
+// XNU reschedules a kernel thread that stays runnable, so there is nothing this has
+// to do here. It exists because Linux does not forgive a loop that never yields.
+pub fn yield_now() {}
+
+pub fn monotonic_micros() -> i64 {
+    (absolutetime_to_nanoseconds(mach_absolute_time()) / 1000) as i64
+}
+
+pub fn wall_clock_micros() -> (u32, u32) {
+    clock_get_calendar_microtime()
+}
+
+// The thread pointer is exposed to JavaScript as a GumThreadId, so it must fit
+// in a double without losing precision; the low bits keep it unique per thread.
+const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
+
+pub fn current_thread_id() -> u64 {
+    let thread_ptr: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, tpidr_el1", out(reg) thread_ptr, options(nomem, nostack));
+    }
+    thread_ptr & JS_SAFE_THREAD_ID_MASK
+}
 
 pub fn get_kernel_base() -> u64 {
     KERNEL_BASE.load(Ordering::Relaxed)
@@ -11,54 +87,7 @@ pub fn set_kernel_base(base: u64) {
     KERNEL_BASE.store(base, Ordering::Relaxed);
 }
 
-type ContinuationFn = unsafe extern "C" fn(_parameter: *mut c_void, _wait_result: i32);
-
-unsafe extern "C" {
-    static _panic: unsafe extern "C" fn(*const u8);
-    static _IOLog: unsafe extern "C" fn(*const u8, ...);
-    // QEMU XNU exports plain kalloc/kfree; iOS XNU exports kalloc_data/kfree_data
-    // (modern data-typed allocator KPIs). The host fills in whichever pair the
-    // running kernel provides; the other slot stays null.
-    static _kalloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
-    static _kfree: Option<unsafe extern "C" fn(*mut u8, usize) -> *mut u8>;
-    static _kalloc_data: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
-    static _kfree_data: Option<unsafe extern "C" fn(*mut u8, usize)>;
-    static _kernel_thread_start:
-        unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
-    static _assert_wait: unsafe extern "C" fn(*const u8, u32) -> i32;
-    static _assert_wait_timeout: unsafe extern "C" fn(*const u8, u32, u32, u32) -> i32;
-    static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
-    // QEMU XNU exports thread_wakeup; iOS XNU exports the BSD-style wakeup wrapper.
-    static _thread_wakeup: Option<unsafe extern "C" fn(*const u8) -> i32>;
-    static _wakeup: Option<unsafe extern "C" fn(*const u8)>;
-    static _mach_absolute_time: unsafe extern "C" fn() -> u64;
-    static _absolutetime_to_nanoseconds: unsafe extern "C" fn(u64, *mut u64);
-    static _clock_get_calendar_microtime: unsafe extern "C" fn(*mut u32, *mut u32);
-    static _ml_io_map: unsafe extern "C" fn(u64, u64) -> *mut c_void;
-    static _ml_vtophys: unsafe extern "C" fn(u64) -> u64;
-    static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
-    static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
-    static __ZN8OSSymbol17withCStringNoCopyEPKc:
-        unsafe extern "C" fn(*const core::ffi::c_char) -> *const OSSymbol;
-    static __ZN6OSData9withBytesEPKvj:
-        unsafe extern "C" fn(*const core::ffi::c_void, u32) -> *mut OSData;
-}
-
-const IO_SERVICE_VTABLE_LENGTH: isize = 168;
-
-const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
-const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
-const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
-
-pub fn panic(msg: &str) {
-    unsafe { _panic(msg.as_ptr()) };
-}
-
-pub fn io_log(msg: &str) {
-    unsafe {
-        _IOLog(msg.as_ptr());
-    }
-}
+static KERNEL_BASE: AtomicU64 = AtomicU64::new(0);
 
 // Z_WAITOK (modern XNU): block until allocation succeeds.
 const Z_WAITOK: u32 = 0x0200;
@@ -98,8 +127,8 @@ pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut 
     };
 }
 
-pub const THREAD_INTERRUPTIBLE: u32 = 1;
-pub const THREAD_WAITING: i32 = -1;
+const THREAD_INTERRUPTIBLE: u32 = 1;
+const THREAD_WAITING: i32 = -1;
 
 pub fn assert_wait(event: *const u8, interruptible: u32) -> i32 {
     unsafe { _assert_wait(event, interruptible) }
@@ -267,4 +296,43 @@ where
     let entry = unsafe { *vtable.offset(slot) };
     let entry_ptr = unsafe { crate::pac::ptrauth_strip_data(entry as *const u8) };
     unsafe { core::mem::transmute_copy::<*const u8, T>(&entry_ptr) }
+}
+
+const IO_SERVICE_VTABLE_LENGTH: isize = 168;
+
+const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
+const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
+const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
+
+type ContinuationFn = ThreadEntry;
+
+unsafe extern "C" {
+    static _panic: unsafe extern "C" fn(*const u8);
+    static _IOLog: unsafe extern "C" fn(*const u8, ...);
+    // QEMU XNU exports plain kalloc/kfree; iOS XNU exports kalloc_data/kfree_data
+    // (modern data-typed allocator KPIs). The host fills in whichever pair the
+    // running kernel provides; the other slot stays null.
+    static _kalloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
+    static _kfree: Option<unsafe extern "C" fn(*mut u8, usize) -> *mut u8>;
+    static _kalloc_data: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
+    static _kfree_data: Option<unsafe extern "C" fn(*mut u8, usize)>;
+    static _kernel_thread_start:
+        unsafe extern "C" fn(*const (), *mut c_void, *mut *mut c_void) -> isize;
+    static _assert_wait: unsafe extern "C" fn(*const u8, u32) -> i32;
+    static _assert_wait_timeout: unsafe extern "C" fn(*const u8, u32, u32, u32) -> i32;
+    static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
+    // QEMU XNU exports thread_wakeup; iOS XNU exports the BSD-style wakeup wrapper.
+    static _thread_wakeup: Option<unsafe extern "C" fn(*const u8) -> i32>;
+    static _wakeup: Option<unsafe extern "C" fn(*const u8)>;
+    static _mach_absolute_time: unsafe extern "C" fn() -> u64;
+    static _absolutetime_to_nanoseconds: unsafe extern "C" fn(u64, *mut u64);
+    static _clock_get_calendar_microtime: unsafe extern "C" fn(*mut u32, *mut u32);
+    static _ml_io_map: unsafe extern "C" fn(u64, u64) -> *mut c_void;
+    static _ml_vtophys: unsafe extern "C" fn(u64) -> u64;
+    static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
+    static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
+    static __ZN8OSSymbol17withCStringNoCopyEPKc:
+        unsafe extern "C" fn(*const core::ffi::c_char) -> *const OSSymbol;
+    static __ZN6OSData9withBytesEPKvj:
+        unsafe extern "C" fn(*const core::ffi::c_void, u32) -> *mut OSData;
 }
