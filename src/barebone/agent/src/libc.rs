@@ -382,8 +382,11 @@ mod exports {
     // The lock object itself, which we define so the C library's own no-op lock
     // implementation is never pulled out of its archive. Its contents are never
     // read: the address is just a token, and one mutex covers them all.
+    // Nothing here references it, so without #[used] it is dropped before the linker
+    // ever sees it, and the archive member arrives after all to supply it.
     #[allow(non_upper_case_globals)]
     #[unsafe(no_mangle)]
+    #[used]
     pub static mut __lock___libc_recursive_mutex: u8 = 0;
 
     #[unsafe(no_mangle)]
