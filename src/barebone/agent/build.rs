@@ -11,9 +11,13 @@ fn main() {
     let cc_str = env::var("CC_aarch64_unknown_none")
             .or_else(|_| env::var("CC"))
             .unwrap_or_else(|_| "cc".to_string());
-    let cc = Path::new(&cc_str);
-    let cc_include_paths = detect_gcc_include_paths(cc);
-    let cc_library_paths = detect_gcc_library_paths(cc);
+    // Same convention as cc-rs: the variable may carry flags, and a bare-metal
+    // compiler needs them to find its libc at all.
+    let mut cc_argv = cc_str.split_whitespace();
+    let cc = Path::new(cc_argv.next().unwrap());
+    let cc_args: Vec<&str> = cc_argv.collect();
+    let cc_include_paths = detect_gcc_include_paths(cc, &cc_args);
+    let cc_library_paths = detect_gcc_library_paths(cc, &cc_args);
 
     let cc_clang_args: Vec<String> = cc_include_paths
         .iter()
@@ -62,8 +66,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 }
 
-pub fn detect_gcc_include_paths(gcc: &Path) -> Vec<PathBuf> {
+pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
     let out = Command::new(gcc)
+        .args(args)
         .args(["-xc", "-E", "-v", "-"])
         .stdin(Stdio::null())
         .output()
@@ -103,8 +108,8 @@ pub fn detect_gcc_include_paths(gcc: &Path) -> Vec<PathBuf> {
     paths
 }
 
-pub fn detect_gcc_library_paths(gcc: &Path) -> Vec<PathBuf> {
-    let out = Command::new(gcc).arg("-print-search-dirs").output()
+pub fn detect_gcc_library_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
+    let out = Command::new(gcc).args(args).arg("-print-search-dirs").output()
         .expect("Failed to execute GCC to detect library paths");
 
     let stdout = String::from_utf8_lossy(&out.stdout);
