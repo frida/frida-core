@@ -11,6 +11,9 @@
 #
 # See README.md for usage.
 
+# KDIR is the kernel to build against. When it is a source tree that was configured
+# elsewhere — which is what Android's modules_prepare tarball gives — point KOUT at
+# the prepared tree.
 KDIR ?= /lib/modules/$(shell uname -r)/build
 ARCH ?= arm64
 RUST_TARGET ?= aarch64-unknown-none
@@ -22,9 +25,7 @@ AGENT_LIB := $(AGENT_TARGET_DIR)/$(RUST_TARGET)/$(PROFILE)/libfrida_barebone_age
 
 GUMJS_DEVKIT_DIR ?= $(error Set GUMJS_DEVKIT_DIR to the directory holding libfrida-gumjs.a)
 
-# The same freestanding toolchain the agent itself is built with, so the newlib and
-# libgcc archives match the objects that reference them.
-AGENT_CC ?= aarch64-none-elf-gcc
+# Any binutils that speak aarch64 ELF will do; nothing here is compiled with them.
 AGENT_LD ?= aarch64-none-elf-ld
 AGENT_AR ?= aarch64-none-elf-ar
 AGENT_NM ?= aarch64-none-elf-nm
@@ -38,9 +39,11 @@ AGENT_OBJCOPY ?= aarch64-none-elf-objcopy
 AGENT_RUSTFLAGS ?= -Zfixed-x18
 AGENT_BUILD_STD ?= -Z build-std=core,alloc,compiler_builtins
 
-LIBC := $(shell $(AGENT_CC) -print-file-name=libc.a)
-LIBM := $(shell $(AGENT_CC) -print-file-name=libm.a)
-LIBGCC := $(shell $(AGENT_CC) -print-libgcc-file-name)
+# The soft-float SDK, whose libc is picolibc and whose compiler runtime is
+# compiler-rt. GCC's own newlib and libgcc are hard-float and cannot be used here.
+FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-arm64-softfloat SDK prefix)
+LIBM = $(FRIDA_SDK)/lib/libm.a
+LIBBUILTINS = $(FRIDA_SDK)/lib/libclang_rt.builtins.a
 
 PRELINKED := frida-agent-prelinked.o.bin
 
@@ -52,22 +55,28 @@ PRELINKED := frida-agent-prelinked.o.bin
 # since the arithmetic still runs. Drop them and let compiler-rt answer instead.
 AGENT_LIB_SOFTFLOAT := $(AGENT_TARGET_DIR)/libfrida-barebone-agent-softfloat.a
 
+# The agent puts malloc, the C library's locks and its process stubs on the kernel's
+# own facilities, so picolibc's versions are duplicate definitions rather than
+# fallbacks. Work out which members they live in instead of naming them: the set
+# follows from what the agent defines, and picolibc moves things between releases.
+LIBC := $(AGENT_TARGET_DIR)/libc-trimmed.a
+
 ENTRY_POINTS := frida_agent_start frida_agent_stop
 KEEP_GLOBAL := $(foreach s,$(ENTRY_POINTS),--keep-global-symbol=$(s))
 
 all: modules
 
 modules: $(PRELINKED)
-	$(MAKE) -C $(KDIR) M=$(CURDIR) ARCH=$(ARCH) modules
+	$(MAKE) -C $(KDIR) $(if $(KOUT),O=$(KOUT)) M=$(CURDIR) ARCH=$(ARCH) modules
 
-$(PRELINKED): $(AGENT_LIB_SOFTFLOAT)
+$(PRELINKED): $(AGENT_LIB_SOFTFLOAT) $(LIBC)
 	$(AGENT_LD) -r -o $@.tmp \
 		--whole-archive $(AGENT_LIB_SOFTFLOAT) --no-whole-archive \
 		--start-group \
 			$(GUMJS_DEVKIT_DIR)/libfrida-gumjs.a \
 			$(LIBC) \
 			$(LIBM) \
-			$(LIBGCC) \
+			$(LIBBUILTINS) \
 		--end-group
 	$(AGENT_OBJCOPY) $(KEEP_GLOBAL) --strip-debug \
 		--remove-section=.llvmbc --remove-section=.llvmcmd $@.tmp $@
@@ -78,13 +87,22 @@ $(AGENT_LIB_SOFTFLOAT): agent
 	$(AGENT_AR) d $@ $$($(AGENT_NM) --print-armap $@ | sed -n 's/^__muldf3 in //p')
 	$(AGENT_AR) s $@
 
+$(LIBC): $(AGENT_LIB_SOFTFLOAT)
+	cp $(FRIDA_SDK)/lib/libc.a $@
+	$(AGENT_NM) --defined-only $(AGENT_LIB_SOFTFLOAT) \
+		| awk 'NF == 3 && $$2 ~ /^[TDBR]$$/ { print $$3 }' | sort -u > $@.agent-syms
+	$(AGENT_NM) --print-armap $@ | sed -n 's/^\([^ ]*\) in \(.*\)$$/\1 \2/p' | sort -u > $@.members
+	$(AGENT_AR) d $@ $$(join $@.agent-syms $@.members | awk '{ print $$2 }' | sort -u)
+	$(AGENT_AR) s $@
+	rm -f $@.agent-syms $@.members
+
 agent:
 	cd $(AGENT_DIR) && RUSTC_BOOTSTRAP=1 RUSTFLAGS="$(AGENT_RUSTFLAGS)" cargo build --$(PROFILE) \
 		--target $(RUST_TARGET) --features linux \
 		--target-dir $(AGENT_TARGET_DIR) $(AGENT_BUILD_STD)
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(CURDIR) ARCH=$(ARCH) clean
-	rm -f $(PRELINKED) $(PRELINKED).tmp $(AGENT_LIB_SOFTFLOAT)
+	$(MAKE) -C $(KDIR) $(if $(KOUT),O=$(KOUT)) M=$(CURDIR) ARCH=$(ARCH) clean
+	rm -f $(PRELINKED) $(PRELINKED).tmp $(AGENT_LIB_SOFTFLOAT) $(LIBC)
 
 .PHONY: all modules agent clean

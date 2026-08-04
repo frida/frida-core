@@ -129,13 +129,12 @@ constraints below are why this flavour is built against a soft-float SDK
 
 ## The soft-float libc
 
-The sysroot's `libc.a` is picolibc plus the compiler-rt builtins, minus picolibc's
-allocator — see `make-softfloat-libc.sh`, which is what assembles it. The agent
-implements `malloc` and friends over the kernel's own allocator, so picolibc's would
-be a duplicate definition sitting on a fixed sbrk heap.
-
-Re-run `make-softfloat-libc.sh` after rebuilding the SDK: a fresh picolibc puts the
-allocator back.
+The libc is picolibc and the compiler runtime is compiler-rt, both from the
+`none-arm64-softfloat` SDK that `FRIDA_SDK` points at. `Makefile` trims a copy of its
+`libc.a` before the prelink: the agent implements `malloc`, the C library's locks and
+its process stubs over the kernel's own facilities, so picolibc's are duplicate
+definitions rather than fallbacks. The set is derived from what the agent defines
+rather than listed, since picolibc moves things between releases.
 
 Those compiler-rt builtins are load-bearing in a way that is easy to miss. Rust's
 toolchain carries its own `compiler_builtins`, compiled for the ordinary AAPCS where a
