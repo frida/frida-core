@@ -21,37 +21,89 @@ is otherwise identical, so the host side sees the same `(yqv)` frames.
 
 ## Building
 
-    export GUMJS_DEVKIT_DIR=/path/to/frida-gum/build/bindings/gumjs/devkit
-    make -C linux KDIR=/path/to/kernel/build
+Four inputs: this repository, a GumJS devkit built for `none-arm64-softfloat`, the
+soft-float SDK it was built against, and the kernel the module is for. The example
+below targets a Pixel; adapt the kernel step to whatever the system is.
 
-`make` builds the Rust staticlib itself, then prelinks it and hands the result to
-kbuild. `KDIR` must be the configured build tree of the kernel the module is for:
-same source commit, same config. Under `CONFIG_MODVERSIONS` anything else is rejected
-at load time, and the `module_layout` CRC covers `struct module` itself, so even
-config options that merely add fields to it — `CONFIG_DEBUG_INFO_BTF_MODULES`, for
-one — have to match.
+### Toolchain
 
-The prelink half runs anywhere; the kbuild half needs a Linux host. Cross-building
-from macOS means running that step in a container holding the kernel tree.
+    rustup target add aarch64-unknown-none
+    rustup component add rust-src
+    sudo apt-get install build-essential clang binutils-aarch64-linux-gnu
 
-### Getting a KDIR for an Android device
+clang must be 19 or newer, since that is where `-mabi=aapcs-soft` landed; GCC does
+not implement it at any version. The binutils are for the prelink, which reads the
+archive map that only GNU `nm` prints — the LLVM one does not. The host compiler is
+for Cargo's own build scripts, which run on the machine doing the building.
+
+The commands below are run from the top of this repository.
+
+### The devkit and the SDK
+
+    version=17.17.0
+    base=https://github.com/frida/frida/releases/download/$version
+    curl -LO $base/frida-gumjs-devkit-$version-none-arm64-softfloat.tar.xz
+    mkdir -p ~/gumjs-devkit
+    tar -C ~/gumjs-devkit -xf frida-gumjs-devkit-$version-none-arm64-softfloat.tar.xz
+
+    releng/deps.py sync sdk none-arm64-softfloat ~/sdk-none-arm64-softfloat
+
+The SDK carries picolibc and the compiler-rt builtins the devkit expects to be linked
+against, and `releng/deps.toml` pins which one. Mixing a devkit with an SDK built for
+a different libc leaves undefined symbols at prelink time.
+
+### The kernel
 
 Nothing here needs the device's own kernel to be built, but the config alone is not
-enough either. `uname -r` ends in the GKI commit and the build number — for
-`6.1.145-android14-11-gc1de4747ac59-ab14219743` that is commit `c1de4747ac59` and
-build `14219743` — and three pieces keyed to them are published:
+enough either. `uname -r` ends in the GKI commit and the build number:
 
-- `modules_prepare_outdir.tar.gz` and `kernel_aarch64_Module.symvers` from
-  `ci.android.com`, under that build's `kernel_aarch64` target. The first is the
-  configured build tree with `scripts/` already compiled for a Linux x86-64 host; the
-  second carries the CRCs `CONFIG_MODVERSIONS` checks.
-- `kernel/common` at that commit, which a shallow single-commit fetch gets in a few
-  hundred megabytes. Only its makefiles are wanted: the top-level `Makefile` in the
-  prepared tree is a stub that includes the source's, so point it at wherever the
-  fetch landed and build with `make -C <source> O=<outdir> M=<here>`.
+    adb shell uname -r
+    6.1.145-android14-11-gc1de4747ac59-ab14219743
+
+which is commit `c1de4747ac59` and build `14219743`. Three pieces are keyed to them:
+
+    commit=c1de4747ac59
+    build=14219743
+    ci=https://ci.android.com/builds/submitted/$build/kernel_aarch64/latest/raw
+
+    mkdir -p ~/kernel-prepared ~/kernel-source
+    curl -sSL $ci/modules_prepare_outdir.tar.gz | tar -xz -C ~/kernel-prepared
+    curl -sSL $ci/kernel_aarch64_Module.symvers -o ~/kernel-prepared/Module.symvers
+    curl -sSL https://android.googlesource.com/kernel/common/+archive/$commit.tar.gz \
+        | tar -xz -C ~/kernel-source
+
+`modules_prepare_outdir.tar.gz` is the configured build tree with `scripts/` already
+compiled as x86-64 binaries, so the kbuild half has to run on an x86-64 Linux host —
+an arm64 one gets as far as `CC [M]` and then fails to run `fixdep`. `Module.symvers`
+carries the CRCs `CONFIG_MODVERSIONS` checks. The top-level `Makefile` in that prepared tree is a stub
+that includes the source's, hence both `KDIR` and `KOUT` below.
 
 A different GKI build of the same branch does not substitute for these: vermagic is
 compared verbatim, and it names the exact build.
+
+### Build
+
+    make -C src/barebone/agent/linux \
+        FRIDA_SDK=$HOME/sdk-none-arm64-softfloat \
+        GUMJS_DEVKIT_DIR=$HOME/gumjs-devkit \
+        AGENT_LD=aarch64-linux-gnu-ld \
+        AGENT_AR=aarch64-linux-gnu-ar \
+        AGENT_NM=aarch64-linux-gnu-nm \
+        AGENT_OBJCOPY=aarch64-linux-gnu-objcopy \
+        KDIR=$HOME/kernel-source \
+        KOUT=$HOME/kernel-prepared \
+        LLVM=1
+
+`make` builds the Rust staticlib itself, prelinks it against the devkit and the SDK,
+then hands the result to kbuild. The `AGENT_*` overrides are only needed because the
+defaults name the `aarch64-none-elf-` toolchain the XNU flavour uses; drop them if
+that is what is installed.
+
+The prelink half runs anywhere; the kbuild half needs the x86-64 Linux host above.
+Cross-building from macOS means running that step in a container holding the kernel
+tree.
+
+    adb push src/barebone/agent/linux/frida-agent.ko /data/local/tmp/
 
 ## Loading
 

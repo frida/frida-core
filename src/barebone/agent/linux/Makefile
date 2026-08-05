@@ -45,6 +45,13 @@ FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-arm64-softfloat SDK prefix)
 LIBM = $(FRIDA_SDK)/lib/libm.a
 LIBBUILTINS = $(FRIDA_SDK)/lib/libclang_rt.builtins.a
 
+# bindgen reads the devkit header through whatever this compiler reports as its
+# include path, so it has to be one that knows where the SDK keeps its libc. Only
+# clang implements -mabi=aapcs-soft, and only from 19 onwards.
+AGENT_CC ?= clang
+AGENT_CFLAGS ?= --target=aarch64-none-elf -mabi=aapcs-soft -mgeneral-regs-only \
+	-ffixed-x18 -fno-pic --sysroot=$(FRIDA_SDK)
+
 PRELINKED := frida-agent-prelinked.o.bin
 
 # Rust's toolchain ships compiler_builtins compiled for the ordinary AAPCS, where a
@@ -97,7 +104,9 @@ $(LIBC): $(AGENT_LIB_SOFTFLOAT)
 	rm -f $@.agent-syms $@.members
 
 agent:
-	cd $(AGENT_DIR) && RUSTC_BOOTSTRAP=1 RUSTFLAGS="$(AGENT_RUSTFLAGS)" cargo build --$(PROFILE) \
+	cd $(AGENT_DIR) && RUSTC_BOOTSTRAP=1 RUSTFLAGS="$(AGENT_RUSTFLAGS)" \
+		CC_aarch64_unknown_none="$(AGENT_CC) $(AGENT_CFLAGS)" \
+		cargo build --$(PROFILE) \
 		--target $(RUST_TARGET) --features linux \
 		--target-dir $(AGENT_TARGET_DIR) $(AGENT_BUILD_STD)
 
