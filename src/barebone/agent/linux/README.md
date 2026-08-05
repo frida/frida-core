@@ -36,7 +36,8 @@ not implement it at any version. The binutils are for the prelink, which reads t
 archive map that only GNU `nm` prints — the LLVM one does not. The host compiler is
 for Cargo's own build scripts, which run on the machine doing the building.
 
-The commands below are run from the top of this repository.
+The commands below are run from the top of this repository, with `releng` checked
+out — `git submodule update --init releng` if the clone did not recurse.
 
 ### The devkit and the SDK
 
