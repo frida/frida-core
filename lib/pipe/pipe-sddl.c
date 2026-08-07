@@ -12,14 +12,27 @@ frida_pipe_get_sddl_string_for_pipe (void)
   #define DACL_ACE_EVERYONE_RW L"(A;;GRGW;;;WD)"
   #define SACL_START L"S:"
   #define SACL_ACE_LOWINTEGRITY_NORW L"(ML;;NWNR;;;LW)"
+  #define DACL_ACE_SYSTEM_RW L"(A;;GRGW;;;SY)"
+  #define DACL_ACE_ADMINS_RW L"(A;;GRGW;;;BA)"
 
   if (frida_pipe_is_windows_8_or_greater ())
   {
-    return DACL_START_NOINHERIT DACL_ACE_APPCONTAINER_RW DACL_ACE_EVERYONE_RW SACL_START SACL_ACE_LOWINTEGRITY_NORW;
+    return DACL_START_NOINHERIT
+        DACL_ACE_APPCONTAINER_RW
+        DACL_ACE_EVERYONE_RW
+        DACL_ACE_SYSTEM_RW
+        DACL_ACE_ADMINS_RW
+        SACL_START
+        SACL_ACE_LOWINTEGRITY_NORW;
   }
   else if (frida_pipe_is_windows_vista_or_greater ())
   {
-    return DACL_START_NOINHERIT DACL_ACE_EVERYONE_RW SACL_START SACL_ACE_LOWINTEGRITY_NORW;
+    return DACL_START_NOINHERIT
+        DACL_ACE_EVERYONE_RW
+        DACL_ACE_SYSTEM_RW
+        DACL_ACE_ADMINS_RW
+        SACL_START
+        SACL_ACE_LOWINTEGRITY_NORW;
   }
   else
   {
