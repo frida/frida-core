@@ -897,7 +897,9 @@ static int
 frida_spawn_trampoline (void * data)
 {
   struct frida_spawn_ctx ctx = *(struct frida_spawn_ctx *) data;
-  struct pt_regs * regs = task_pt_regs (current);
+  struct pt_regs * regs;
+
+  regs = task_pt_regs (current);
 
   kfree (data);
 
@@ -2224,8 +2226,9 @@ frida_kmod_symbol_name_from_address (u64 address,
 static void
 frida_strip_module_suffix (char * rendered)
 {
-  char * suffix = strchr (rendered, ' ');
+  char * suffix;
 
+  suffix = strchr (rendered, ' ');
   if (suffix != NULL)
     *suffix = '\0';
 }
