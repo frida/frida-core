@@ -68,7 +68,10 @@ AGENT_LIB_SOFTFLOAT := $(AGENT_TARGET_DIR)/libfrida-barebone-agent-softfloat.a
 # follows from what the agent defines, and picolibc moves things between releases.
 LIBC := $(AGENT_TARGET_DIR)/libc-trimmed.a
 
-ENTRY_POINTS := frida_agent_start frida_agent_stop
+ENTRY_POINTS := frida_agent_start frida_agent_stop \
+	gum_interceptor_obtain gum_interceptor_begin_transaction \
+	gum_interceptor_end_transaction gum_interceptor_replace \
+	gum_interceptor_revert
 KEEP_GLOBAL := $(foreach s,$(ENTRY_POINTS),--keep-global-symbol=$(s))
 
 all: modules

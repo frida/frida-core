@@ -9,6 +9,9 @@
  */
 
 #include <linux/delay.h>
+#include <linux/err.h>
+#include <linux/fdtable.h>
+#include <linux/fs_struct.h>
 #include <linux/init.h>
 #include <linux/kallsyms.h>
 #include <linux/kasan.h>
@@ -17,30 +20,88 @@
 #include <linux/kthread.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/nsproxy.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
+#include <linux/sched/mm.h>
+#include <linux/seq_file.h>
 #include <linux/set_memory.h>
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/completion.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 
 #ifdef CONFIG_ARM64
 # include <asm/cacheflush.h>
+# include <asm/ptrace.h>
 #endif
 
 /* Mirrors GumPageProtection. */
 #define FRIDA_PAGE_WRITE   (1 << 1)
 #define FRIDA_PAGE_EXECUTE (1 << 2)
 
+#define FRIDA_CONTROL_MAGIC 0x46524944
+#define FRIDA_CONTROL_TOKEN 0x1d5f9e6b2c7a4038ULL
+
+#define FRIDA_LINK_CAPACITY (1024 * 1024)
+
+#define FRIDA_WAIT_FOREVER_SLICE_US (1000 * 1000)
+
 typedef int (* FridaFoundSymbolFunc) (const char * name, u64 address, void * user_data);
 typedef int (* FridaFoundModuleFunc) (const char * name, const char * version, u64 base, u64 size,
     void * user_data);
 typedef void (* FridaThreadEntry) (void * parameter, int wait_result);
+
+typedef struct task_struct * (* FridaFindTaskByVpidFunc) (pid_t nr);
+typedef struct mm_struct * (* FridaGetTaskMmFunc) (struct task_struct * task);
+typedef void (* FridaMmputFunc) (struct mm_struct * mm);
+typedef void (* FridaKthreadUseMmFunc) (struct mm_struct * mm);
+typedef void (* FridaKthreadUnuseMmFunc) (struct mm_struct * mm);
+typedef unsigned long (* FridaVmMmapFunc) (struct file * file, unsigned long addr, unsigned long len,
+    unsigned long prot, unsigned long flag, unsigned long offset);
+typedef int (* FridaVmMunmapFunc) (unsigned long start, size_t len);
+typedef pid_t (* FridaUserModeThreadFunc) (int (* fn) (void *), void * arg, unsigned long flags);
+typedef void (* FridaDetachPidFunc) (struct task_struct * task, enum pid_type type);
+typedef void (* FridaTaskJoinGroupStopFunc) (struct task_struct * task);
+typedef void (* FridaCleanupSighandFunc) (struct sighand_struct * sighand);
+typedef void (* FridaKmemCacheFreeFunc) (struct kmem_cache * cache, void * object);
+typedef void (* FridaPutFilesStructFunc) (struct files_struct * files);
+typedef void (* FridaSwitchTaskNamespacesFunc) (struct task_struct * tsk, struct nsproxy * new);
+typedef void (* FridaFreeFsStructFunc) (struct fs_struct * fs);
+
+typedef struct _GumInterceptor GumInterceptor;
+
+enum frida_cloak_op
+{
+  FRIDA_CLOAK_OP_ADD_THREAD = 1,
+  FRIDA_CLOAK_OP_REMOVE_THREAD,
+  FRIDA_CLOAK_OP_ADD_RANGE,
+  FRIDA_CLOAK_OP_REMOVE_RANGE,
+  FRIDA_CLOAK_OP_ADD_FD,
+  FRIDA_CLOAK_OP_REMOVE_FD,
+};
+
+enum frida_control_op
+{
+  FRIDA_CONTROL_OP_PING = 32,
+};
+
+enum frida_process_op
+{
+  FRIDA_PROCESS_OP_ALLOC = 64,
+  FRIDA_PROCESS_OP_FREE,
+  FRIDA_PROCESS_OP_WRITE,
+  FRIDA_PROCESS_OP_READ,
+  FRIDA_PROCESS_OP_SPAWN,
+  FRIDA_PROCESS_OP_CLOAK_THREAD,
+  FRIDA_PROCESS_OP_CLOAK_RANGE,
+};
 
 struct frida_thread_ctx
 {
@@ -62,15 +123,151 @@ struct frida_symbol_visit_ctx
   void * user_data;
 };
 
+struct frida_spawn_ctx
+{
+  u64 entry;
+  u64 stack;
+  u64 arg;
+  u64 tls;
+  struct task_struct * leader;
+};
+
+struct frida_sem_undo_list
+{
+  refcount_t refcnt;
+};
+
+struct frida_cloak_range
+{
+  unsigned long start;
+  unsigned long end;
+};
+
+struct frida_fd_data
+{
+  fmode_t mode;
+  unsigned int fd;
+};
+
+struct frida_cloak
+{
+  struct list_head node;
+  pid_t tgid;
+  struct mm_struct * mm;
+
+  pid_t * threads;
+  unsigned int n_threads;
+  struct frida_cloak_range * ranges;
+  unsigned int n_ranges;
+  int * fds;
+  unsigned int n_fds;
+};
+
+struct frida_alloc_args
+{
+  u64 size;
+  u32 pid;
+  u32 prot;
+};
+
+struct frida_free_args
+{
+  u64 address;
+  u64 size;
+  u32 pid;
+};
+
+struct frida_rw_args
+{
+  u64 address;
+  u64 buffer;
+  u64 size;
+  u32 pid;
+};
+
+struct frida_spawn_args
+{
+  u64 entry;
+  u64 stack;
+  u64 arg;
+  u64 tls;
+  u32 pid;
+};
+
+struct frida_cloak_thread_args
+{
+  u32 tgid;
+  u32 tid;
+};
+
+struct frida_cloak_range_args
+{
+  u64 base;
+  u64 size;
+  u32 tgid;
+};
+
+struct frida_xfer_job
+{
+  u32 pid;
+  u64 address;
+  void * buffer;
+  u64 size;
+};
+
+struct frida_kthread_call
+{
+  long (* fn) (void * arg);
+  void * arg;
+  long result;
+  struct completion done;
+};
+
+extern GumInterceptor * gum_interceptor_obtain (void);
+extern void gum_interceptor_begin_transaction (GumInterceptor * self);
+extern void gum_interceptor_end_transaction (GumInterceptor * self);
+extern int gum_interceptor_replace (GumInterceptor * self, void * function_address,
+    void * replacement_function, void * original_function, const void * options);
+extern void gum_interceptor_revert (GumInterceptor * self, void * function_address);
+
 int frida_agent_start (void);
 void frida_agent_stop (void);
 
 u64 frida_kmod_find_symbol (const char * name);
 void frida_kmod_wake (void);
 void frida_kmod_yield (void);
+void frida_kmod_install_hooks (void);
 
 static void frida_resolve_kallsyms (void);
 static void frida_resolve_kernel_range (void);
+static void frida_resolve_process_ops (void);
+static struct mm_struct * frida_grab_process_mm (int pid);
+static struct task_struct * frida_grab_process_leader (int pid);
+static int frida_spawn_trampoline (void * data);
+static void frida_reparent_into_group (struct task_struct * leader);
+static void frida_adopt_target_context (struct task_struct * leader);
+static void frida_remove_cloak_hooks (void);
+static int frida_show_map (struct seq_file * m, void * v);
+static int frida_show_smap (struct seq_file * m, void * v);
+static bool frida_proc_fill_cache (struct file * file, struct dir_context * ctx,
+    const char * name, unsigned int len, void * instantiate, struct task_struct * task,
+    const void * ptr);
+static long frida_sys_prctl (const struct pt_regs * regs);
+static int frida_proc_pid_status (struct seq_file * m, struct pid_namespace * ns,
+    struct pid * pid, struct task_struct * task);
+static int frida_do_task_stat (struct seq_file * m, struct pid_namespace * ns,
+    struct pid * pid, struct task_struct * task, int whole);
+static void frida_release_task (struct task_struct * p);
+static int frida_cloak_count_threads (pid_t tgid);
+static void frida_seq_replace_number (struct seq_file * m, size_t num_off, size_t num_len,
+    int new_val);
+static struct frida_cloak * frida_cloak_get (pid_t tgid);
+static bool frida_reader_is_cloaked (void);
+static bool frida_cloak_has_range (struct mm_struct * mm, unsigned long start, unsigned long end);
+static bool frida_cloak_has_thread (pid_t tid);
+static bool frida_cloak_has_fd (pid_t tgid, int fd);
+static void frida_cloak_forget (pid_t tgid);
+static struct frida_cloak * frida_cloak_find (pid_t tgid);
 static void * frida_resolve_unexported (const char * name);
 static int frida_thread_trampoline (void * data);
 static int frida_dev_open (struct inode * inode, struct file * file);
@@ -91,6 +288,21 @@ static int frida_on_each_symbol (void * data, const char * name, struct module *
 static bool frida_should_wake (unsigned int seq);
 static void frida_strip_module_suffix (char * rendered);
 
+static long frida_prctl_alloc (const struct frida_alloc_args __user * uargs);
+static long frida_prctl_free (const struct frida_free_args __user * uargs);
+static long frida_prctl_write (const struct frida_rw_args __user * uargs);
+static long frida_prctl_read (const struct frida_rw_args __user * uargs);
+static long frida_prctl_spawn (const struct frida_spawn_args __user * uargs);
+static long frida_prctl_cloak_thread (const struct frida_cloak_thread_args __user * uargs);
+static long frida_prctl_cloak_range (const struct frida_cloak_range_args __user * uargs);
+static long frida_call_on_kthread (long (* fn) (void * arg), void * arg);
+static int frida_op_worker_fn (void * unused);
+static long frida_do_alloc (void * data);
+static long frida_do_free (void * data);
+static long frida_do_write (void * data);
+static long frida_do_read (void * data);
+static long frida_do_spawn (void * data);
+
 static DECLARE_WAIT_QUEUE_HEAD (frida_wq);
 static atomic_t frida_wake_seq = ATOMIC_INIT (0);
 
@@ -106,12 +318,57 @@ static typeof (&set_memory_rw) frida_set_memory_rw_impl;
 static typeof (&set_memory_x) frida_set_memory_x_impl;
 static typeof (&set_memory_nx) frida_set_memory_nx_impl;
 
+static FridaFindTaskByVpidFunc frida_find_task_by_vpid_impl;
+static FridaGetTaskMmFunc frida_get_task_mm_impl;
+static FridaMmputFunc frida_mmput_impl;
+static FridaKthreadUseMmFunc frida_kthread_use_mm_impl;
+static FridaKthreadUnuseMmFunc frida_kthread_unuse_mm_impl;
+static FridaVmMmapFunc frida_vm_mmap_impl;
+static FridaVmMunmapFunc frida_vm_munmap_impl;
+static FridaUserModeThreadFunc frida_user_mode_thread_impl;
+static FridaDetachPidFunc frida_detach_pid_impl;
+static FridaTaskJoinGroupStopFunc frida_task_join_group_stop_impl;
+static FridaCleanupSighandFunc frida_cleanup_sighand_impl;
+static FridaKmemCacheFreeFunc frida_kmem_cache_free_impl;
+static FridaPutFilesStructFunc frida_put_files_struct_impl;
+static FridaSwitchTaskNamespacesFunc frida_switch_task_namespaces_impl;
+static FridaFreeFsStructFunc frida_free_fs_struct_impl;
+static struct kmem_cache ** frida_signal_cachep;
+static rwlock_t * frida_tasklist_lock;
+
+static struct task_struct * frida_op_worker;
+static DECLARE_WAIT_QUEUE_HEAD (frida_op_wq);
+static struct frida_kthread_call * frida_op_pending;
+static DEFINE_MUTEX (frida_op_mutex);
+
+static LIST_HEAD (frida_cloaks);
+static DEFINE_SPINLOCK (frida_cloaks_lock);
+
+static GumInterceptor * frida_interceptor;
+static void * frida_show_map_addr;
+static void * frida_show_smap_addr;
+static void * frida_proc_fill_cache_addr;
+static void * frida_sys_prctl_addr;
+static void * frida_proc_pid_status_addr;
+static void * frida_do_task_stat_addr;
+static void * frida_release_task_addr;
+static void * frida_proc_task_instantiate_addr;
+static void * frida_proc_fd_instantiate_addr;
+static void * frida_proc_fdinfo_instantiate_addr;
+static int (* frida_show_map_orig) (struct seq_file * m, void * v);
+static int (* frida_show_smap_orig) (struct seq_file * m, void * v);
+static bool (* frida_proc_fill_cache_orig) (struct file * file, struct dir_context * ctx,
+    const char * name, unsigned int len, void * instantiate, struct task_struct * task,
+    const void * ptr);
+static long (* frida_sys_prctl_orig) (const struct pt_regs * regs);
+static int (* frida_proc_pid_status_orig) (struct seq_file * m, struct pid_namespace * ns,
+    struct pid * pid, struct task_struct * task);
+static int (* frida_do_task_stat_orig) (struct seq_file * m, struct pid_namespace * ns,
+    struct pid * pid, struct task_struct * task, int whole);
+static void (* frida_release_task_orig) (struct task_struct * p);
+
 static LIST_HEAD (frida_writable_aliases);
 static DEFINE_MUTEX (frida_writable_aliases_mutex);
-
-#define FRIDA_LINK_CAPACITY (1024 * 1024)
-
-#define FRIDA_WAIT_FOREVER_SLICE_US (1000 * 1000)
 
 static DECLARE_KFIFO_PTR (frida_to_client, u8);
 static DECLARE_KFIFO_PTR (frida_from_client, u8);
@@ -143,6 +400,7 @@ frida_kmod_init (void)
 {
   frida_resolve_kallsyms ();
   frida_resolve_kernel_range ();
+  frida_resolve_process_ops ();
 
   return frida_agent_start ();
 }
@@ -150,6 +408,7 @@ frida_kmod_init (void)
 static void __exit
 frida_kmod_exit (void)
 {
+  frida_remove_cloak_hooks ();
   frida_agent_stop ();
 }
 
@@ -198,6 +457,28 @@ frida_resolve_kernel_range (void)
 
   frida_kernel_base = start;
   frida_kernel_size = end - start;
+}
+
+static void
+frida_resolve_process_ops (void)
+{
+  frida_find_task_by_vpid_impl = (FridaFindTaskByVpidFunc) frida_kmod_find_symbol ("find_task_by_vpid");
+  frida_get_task_mm_impl = (FridaGetTaskMmFunc) frida_kmod_find_symbol ("get_task_mm");
+  frida_mmput_impl = (FridaMmputFunc) frida_kmod_find_symbol ("mmput");
+  frida_kthread_use_mm_impl = (FridaKthreadUseMmFunc) frida_kmod_find_symbol ("kthread_use_mm");
+  frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_symbol ("kthread_unuse_mm");
+  frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_symbol ("vm_mmap");
+  frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_symbol ("vm_munmap");
+  frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_symbol ("user_mode_thread");
+  frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_symbol ("detach_pid");
+  frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_symbol ("task_join_group_stop");
+  frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_symbol ("__cleanup_sighand");
+  frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_symbol ("kmem_cache_free");
+  frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_symbol ("put_files_struct");
+  frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_symbol ("switch_task_namespaces");
+  frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_symbol ("free_fs_struct");
+  frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
+  frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
 }
 
 /*
@@ -262,6 +543,1162 @@ frida_thread_trampoline (void * data)
   ctx.entry (ctx.parameter, 0);
 
   return 0;
+}
+
+u64
+frida_kmod_process_alloc (int pid,
+                          u64 size,
+                          int prot)
+{
+  u64 address;
+  struct mm_struct * mm;
+
+  mm = frida_grab_process_mm (pid);
+  if (mm == NULL)
+    return 0;
+
+  frida_kthread_use_mm_impl (mm);
+  address = frida_vm_mmap_impl (NULL, 0, size, prot, MAP_ANONYMOUS | MAP_PRIVATE, 0);
+  frida_kthread_unuse_mm_impl (mm);
+
+  frida_mmput_impl (mm);
+
+  return IS_ERR_VALUE (address) ? 0 : address;
+}
+
+int
+frida_kmod_process_free (int pid,
+                         u64 address,
+                         u64 size)
+{
+  int result;
+  struct mm_struct * mm;
+
+  mm = frida_grab_process_mm (pid);
+  if (mm == NULL)
+    return -ESRCH;
+
+  frida_kthread_use_mm_impl (mm);
+  result = frida_vm_munmap_impl (address, size);
+  frida_kthread_unuse_mm_impl (mm);
+
+  frida_mmput_impl (mm);
+
+  return result;
+}
+
+u64
+frida_kmod_process_write (int pid,
+                          u64 address,
+                          const void * data,
+                          u64 size)
+{
+  u64 written;
+  struct mm_struct * mm;
+
+  mm = frida_grab_process_mm (pid);
+  if (mm == NULL)
+    return 0;
+
+  frida_kthread_use_mm_impl (mm);
+  written = size - copy_to_user ((void __user *) (uintptr_t) address, data, size);
+  frida_kthread_unuse_mm_impl (mm);
+
+  frida_mmput_impl (mm);
+
+  return written;
+}
+
+u64
+frida_kmod_process_read (int pid,
+                         u64 address,
+                         void * data,
+                         u64 size)
+{
+  u64 read;
+  struct mm_struct * mm;
+
+  mm = frida_grab_process_mm (pid);
+  if (mm == NULL)
+    return 0;
+
+  frida_kthread_use_mm_impl (mm);
+  read = size - copy_from_user (data, (const void __user *) (uintptr_t) address, size);
+  frida_kthread_unuse_mm_impl (mm);
+
+  frida_mmput_impl (mm);
+
+  return read;
+}
+
+int
+frida_kmod_process_spawn_thread (int pid,
+                                 u64 entry,
+                                 u64 stack,
+                                 u64 arg,
+                                 u64 tls)
+{
+  int tid;
+  struct mm_struct * mm;
+  struct task_struct * leader;
+  struct frida_spawn_ctx * ctx;
+
+  mm = frida_grab_process_mm (pid);
+  if (mm == NULL)
+    return -ESRCH;
+
+  leader = frida_grab_process_leader (pid);
+  if (leader == NULL)
+  {
+    frida_mmput_impl (mm);
+    return -ESRCH;
+  }
+
+  ctx = kmalloc (sizeof (struct frida_spawn_ctx), GFP_KERNEL);
+  ctx->entry = entry;
+  ctx->stack = stack;
+  ctx->arg = arg;
+  ctx->tls = tls;
+  ctx->leader = leader;
+
+  frida_kthread_use_mm_impl (mm);
+  tid = frida_user_mode_thread_impl (frida_spawn_trampoline, ctx, 0);
+  frida_kthread_unuse_mm_impl (mm);
+
+  frida_mmput_impl (mm);
+
+  return tid;
+}
+
+int
+frida_kmod_cloak_add_thread (int tgid, int tid)
+{
+  int result;
+  struct frida_cloak * c;
+  unsigned int i;
+  pid_t * slot;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_get (tgid);
+  if (c == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+
+  result = 0;
+
+  for (i = 0; i != c->n_threads; i++)
+  {
+    if (c->threads[i] == tid)
+      goto beach;
+  }
+
+  slot = krealloc (c->threads, (c->n_threads + 1) * sizeof (pid_t), GFP_ATOMIC);
+  if (slot == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+  c->threads = slot;
+  c->threads[c->n_threads++] = tid;
+
+beach:
+  spin_unlock (&frida_cloaks_lock);
+
+  return result;
+}
+
+int
+frida_kmod_cloak_remove_thread (int tgid, int tid)
+{
+  struct frida_cloak * c;
+  unsigned int i;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+  {
+    for (i = 0; i != c->n_threads; i++)
+    {
+      if (c->threads[i] == tid)
+      {
+        c->threads[i] = c->threads[--c->n_threads];
+        break;
+      }
+    }
+  }
+
+  spin_unlock (&frida_cloaks_lock);
+
+  return 0;
+}
+
+int
+frida_kmod_cloak_add_range (int tgid, u64 base, u64 size)
+{
+  int result;
+  struct frida_cloak * c;
+  struct frida_cloak_range * slot;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_get (tgid);
+  if (c == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+
+  slot = krealloc (c->ranges, (c->n_ranges + 1) * sizeof (struct frida_cloak_range), GFP_ATOMIC);
+  if (slot == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+  c->ranges = slot;
+  c->ranges[c->n_ranges].start = base;
+  c->ranges[c->n_ranges].end = base + size;
+  c->n_ranges++;
+
+  result = 0;
+
+beach:
+  spin_unlock (&frida_cloaks_lock);
+
+  return result;
+}
+
+int
+frida_kmod_cloak_remove_range (int tgid, u64 base, u64 size)
+{
+  struct frida_cloak * c;
+  unsigned int i;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+  {
+    for (i = 0; i != c->n_ranges; i++)
+    {
+      if (c->ranges[i].start == base && c->ranges[i].end == base + size)
+      {
+        c->ranges[i] = c->ranges[--c->n_ranges];
+        break;
+      }
+    }
+  }
+
+  spin_unlock (&frida_cloaks_lock);
+
+  return 0;
+}
+
+int
+frida_kmod_cloak_add_fd (int tgid, int fd)
+{
+  int result;
+  struct frida_cloak * c;
+  unsigned int i;
+  int * slot;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_get (tgid);
+  if (c == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+
+  result = 0;
+
+  for (i = 0; i != c->n_fds; i++)
+  {
+    if (c->fds[i] == fd)
+      goto beach;
+  }
+
+  slot = krealloc (c->fds, (c->n_fds + 1) * sizeof (int), GFP_ATOMIC);
+  if (slot == NULL)
+  {
+    result = -ENOMEM;
+    goto beach;
+  }
+  c->fds = slot;
+  c->fds[c->n_fds++] = fd;
+
+beach:
+  spin_unlock (&frida_cloaks_lock);
+
+  return result;
+}
+
+int
+frida_kmod_cloak_remove_fd (int tgid, int fd)
+{
+  struct frida_cloak * c;
+  unsigned int i;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+  {
+    for (i = 0; i != c->n_fds; i++)
+    {
+      if (c->fds[i] == fd)
+      {
+        c->fds[i] = c->fds[--c->n_fds];
+        break;
+      }
+    }
+  }
+
+  spin_unlock (&frida_cloaks_lock);
+
+  return 0;
+}
+
+static struct mm_struct *
+frida_grab_process_mm (int pid)
+{
+  struct mm_struct * mm;
+  struct task_struct * task;
+
+  rcu_read_lock ();
+  task = frida_find_task_by_vpid_impl (pid);
+  mm = (task != NULL) ? frida_get_task_mm_impl (task) : NULL;
+  rcu_read_unlock ();
+
+  return mm;
+}
+
+static struct task_struct *
+frida_grab_process_leader (int pid)
+{
+  struct task_struct * leader;
+  struct task_struct * task;
+
+  rcu_read_lock ();
+  task = frida_find_task_by_vpid_impl (pid);
+  leader = (task != NULL) ? task->group_leader : NULL;
+  if (leader != NULL)
+    get_task_struct (leader);
+  rcu_read_unlock ();
+
+  return leader;
+}
+
+static int
+frida_spawn_trampoline (void * data)
+{
+  struct frida_spawn_ctx ctx = *(struct frida_spawn_ctx *) data;
+  struct pt_regs * regs = task_pt_regs (current);
+
+  kfree (data);
+
+  frida_reparent_into_group (ctx.leader);
+  put_task_struct (ctx.leader);
+
+  memset (regs, 0, sizeof (struct pt_regs));
+  regs->pc = ctx.entry;
+  regs->sp = ctx.stack;
+  regs->regs[0] = ctx.arg;
+  regs->pstate = PSR_MODE_EL0t;
+
+  current->thread.uw.tp_value = ctx.tls;
+  write_sysreg (ctx.tls, tpidr_el0);
+
+  return 0;
+}
+
+static void
+frida_reparent_into_group (struct task_struct * leader)
+{
+  struct task_struct * child = current;
+  struct signal_struct * old_signal = child->signal;
+  struct sighand_struct * old_sighand = child->sighand;
+
+  write_lock_irq (frida_tasklist_lock);
+
+  frida_detach_pid_impl (child, PIDTYPE_SID);
+  frida_detach_pid_impl (child, PIDTYPE_PGID);
+  frida_detach_pid_impl (child, PIDTYPE_TGID);
+
+  list_del_rcu (&child->tasks);
+  list_del_init (&child->sibling);
+  list_del_rcu (&child->thread_node);
+
+  child->real_parent = leader->real_parent;
+  child->parent = leader->real_parent;
+  child->group_leader = leader;
+  child->tgid = leader->tgid;
+  child->exit_signal = -1;
+  child->signal = leader->signal;
+  child->sighand = leader->sighand;
+
+  refcount_inc (&leader->sighand->count);
+
+  spin_lock (&leader->sighand->siglock);
+
+  leader->signal->nr_threads++;
+  leader->signal->quick_threads++;
+  atomic_inc (&leader->signal->live);
+  refcount_inc (&leader->signal->sigcnt);
+
+  frida_task_join_group_stop_impl (child);
+
+  list_add_tail_rcu (&child->thread_group, &leader->thread_group);
+  list_add_tail_rcu (&child->thread_node, &leader->signal->thread_head);
+
+  spin_unlock (&leader->sighand->siglock);
+
+  write_unlock_irq (frida_tasklist_lock);
+
+  frida_cleanup_sighand_impl (old_sighand);
+  if (refcount_dec_and_test (&old_signal->sigcnt))
+    frida_kmem_cache_free_impl (*frida_signal_cachep, old_signal);
+
+  frida_adopt_target_context (leader);
+}
+
+/*
+ * user_mode_thread hands the new thread the kernel worker's fd table and credentials. The loader
+ * dlopen()s the agent through /proc/<tgid>/fd/<n>, and it must reach the target's fds and pass the
+ * target's SELinux checks (the credentials carry the security context), so adopt them from the
+ * leader — along with its fs, namespaces and SysV semaphore undo list, as a real CLONE_THREAD
+ * sibling would share them.
+ */
+static void
+frida_adopt_target_context (struct task_struct * leader)
+{
+  struct files_struct * old_files = current->files;
+  struct files_struct * files = leader->files;
+  struct fs_struct * old_fs = current->fs;
+  struct fs_struct * fs = leader->fs;
+  const struct cred * old_cred = current->cred;
+  const struct cred * old_real_cred = current->real_cred;
+  void * undo_list = leader->sysvsem.undo_list;
+  int fs_dead;
+
+  atomic_inc (&files->count);
+  task_lock (current);
+  current->files = files;
+  task_unlock (current);
+  frida_put_files_struct_impl (old_files);
+
+  spin_lock (&fs->lock);
+  fs->users++;
+  spin_unlock (&fs->lock);
+  task_lock (current);
+  current->fs = fs;
+  task_unlock (current);
+  spin_lock (&old_fs->lock);
+  fs_dead = --old_fs->users == 0;
+  spin_unlock (&old_fs->lock);
+  if (fs_dead)
+    frida_free_fs_struct_impl (old_fs);
+
+  current->real_cred = get_cred (leader->real_cred);
+  rcu_assign_pointer (current->cred, get_cred (leader->cred));
+  put_cred (old_cred);
+  put_cred (old_real_cred);
+
+  get_nsproxy (leader->nsproxy);
+  frida_switch_task_namespaces_impl (current, leader->nsproxy);
+
+  if (undo_list != NULL)
+  {
+    refcount_inc (&((struct frida_sem_undo_list *) undo_list)->refcnt);
+    current->sysvsem.undo_list = undo_list;
+  }
+}
+
+void
+frida_kmod_install_hooks (void)
+{
+  frida_op_worker = kthread_run (frida_op_worker_fn, NULL, "frida-op");
+
+  frida_interceptor = gum_interceptor_obtain ();
+
+  frida_show_map_addr = (void *) frida_kmod_find_symbol ("show_map");
+  frida_show_smap_addr = (void *) frida_kmod_find_symbol ("show_smap");
+  frida_proc_fill_cache_addr = (void *) frida_kmod_find_symbol ("proc_fill_cache");
+  frida_sys_prctl_addr = (void *) frida_kmod_find_symbol ("__arm64_sys_prctl");
+  frida_proc_pid_status_addr = (void *) frida_kmod_find_symbol ("proc_pid_status");
+  frida_do_task_stat_addr = (void *) frida_kmod_find_symbol ("do_task_stat");
+  frida_release_task_addr = (void *) frida_kmod_find_symbol ("release_task");
+  frida_proc_task_instantiate_addr = (void *) frida_kmod_find_symbol ("proc_task_instantiate");
+  frida_proc_fd_instantiate_addr = (void *) frida_kmod_find_symbol ("proc_fd_instantiate");
+  frida_proc_fdinfo_instantiate_addr = (void *) frida_kmod_find_symbol ("proc_fdinfo_instantiate");
+
+  gum_interceptor_begin_transaction (frida_interceptor);
+  gum_interceptor_replace (frida_interceptor, frida_show_map_addr, frida_show_map,
+      &frida_show_map_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_show_smap_addr, frida_show_smap,
+      &frida_show_smap_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_proc_fill_cache_addr, frida_proc_fill_cache,
+      &frida_proc_fill_cache_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_sys_prctl_addr, frida_sys_prctl,
+      &frida_sys_prctl_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_proc_pid_status_addr, frida_proc_pid_status,
+      &frida_proc_pid_status_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_do_task_stat_addr, frida_do_task_stat,
+      &frida_do_task_stat_orig, NULL);
+  gum_interceptor_replace (frida_interceptor, frida_release_task_addr, frida_release_task,
+      &frida_release_task_orig, NULL);
+  gum_interceptor_end_transaction (frida_interceptor);
+}
+
+static void
+frida_remove_cloak_hooks (void)
+{
+  struct frida_cloak * c, * next;
+
+  if (frida_op_worker != NULL)
+    kthread_stop (frida_op_worker);
+
+  if (frida_interceptor != NULL)
+  {
+    gum_interceptor_revert (frida_interceptor, frida_show_map_addr);
+    gum_interceptor_revert (frida_interceptor, frida_show_smap_addr);
+    gum_interceptor_revert (frida_interceptor, frida_proc_fill_cache_addr);
+    gum_interceptor_revert (frida_interceptor, frida_sys_prctl_addr);
+    gum_interceptor_revert (frida_interceptor, frida_proc_pid_status_addr);
+    gum_interceptor_revert (frida_interceptor, frida_do_task_stat_addr);
+    gum_interceptor_revert (frida_interceptor, frida_release_task_addr);
+  }
+
+  spin_lock (&frida_cloaks_lock);
+  list_for_each_entry_safe (c, next, &frida_cloaks, node)
+  {
+    list_del (&c->node);
+    kfree (c->threads);
+    kfree (c->ranges);
+    kfree (c->fds);
+    kfree (c);
+  }
+  spin_unlock (&frida_cloaks_lock);
+}
+
+static int __nocfi
+frida_show_map (struct seq_file * m,
+                void * v)
+{
+  struct vm_area_struct * vma = v;
+
+  if (!frida_reader_is_cloaked () && frida_cloak_has_range (vma->vm_mm, vma->vm_start, vma->vm_end))
+    return 0;
+
+  return frida_show_map_orig (m, v);
+}
+
+static int __nocfi
+frida_show_smap (struct seq_file * m,
+                 void * v)
+{
+  struct vm_area_struct * vma = v;
+
+  if (!frida_reader_is_cloaked () && frida_cloak_has_range (vma->vm_mm, vma->vm_start, vma->vm_end))
+    return 0;
+
+  return frida_show_smap_orig (m, v);
+}
+
+static bool __nocfi
+frida_proc_fill_cache (struct file * file,
+                       struct dir_context * ctx,
+                       const char * name,
+                       unsigned int len,
+                       void * instantiate,
+                       struct task_struct * task,
+                       const void * ptr)
+{
+  if (frida_reader_is_cloaked ())
+    return frida_proc_fill_cache_orig (file, ctx, name, len, instantiate, task, ptr);
+
+  if (instantiate == frida_proc_task_instantiate_addr)
+  {
+    if (frida_cloak_has_thread (task->pid))
+      return true;
+  }
+  else if (instantiate == frida_proc_fd_instantiate_addr ||
+      instantiate == frida_proc_fdinfo_instantiate_addr)
+  {
+    const struct frida_fd_data * fd = ptr;
+
+    if (frida_cloak_has_fd (task->tgid, fd->fd))
+      return true;
+  }
+
+  return frida_proc_fill_cache_orig (file, ctx, name, len, instantiate, task, ptr);
+}
+
+static long __nocfi
+frida_sys_prctl (const struct pt_regs * regs)
+{
+  int option = regs->regs[0];
+  unsigned long op, arg1, arg2;
+  pid_t tgid;
+  void __user * uargs;
+
+  if (option != FRIDA_CONTROL_MAGIC || regs->regs[4] != FRIDA_CONTROL_TOKEN)
+    return frida_sys_prctl_orig (regs);
+
+  op = regs->regs[1];
+  arg1 = regs->regs[2];
+  arg2 = regs->regs[3];
+  tgid = current->tgid;
+  uargs = (void __user *) regs->regs[2];
+
+  if (op == FRIDA_CONTROL_OP_PING)
+    return FRIDA_CONTROL_MAGIC;
+
+  if (op >= FRIDA_PROCESS_OP_ALLOC && !capable (CAP_SYS_ADMIN))
+    return -EPERM;
+
+  switch (op)
+  {
+    case FRIDA_CLOAK_OP_ADD_THREAD:
+      return frida_kmod_cloak_add_thread (tgid, arg1);
+    case FRIDA_CLOAK_OP_REMOVE_THREAD:
+      return frida_kmod_cloak_remove_thread (tgid, arg1);
+    case FRIDA_CLOAK_OP_ADD_RANGE:
+      return frida_kmod_cloak_add_range (tgid, arg1, arg2);
+    case FRIDA_CLOAK_OP_REMOVE_RANGE:
+      return frida_kmod_cloak_remove_range (tgid, arg1, arg2);
+    case FRIDA_CLOAK_OP_ADD_FD:
+      return frida_kmod_cloak_add_fd (tgid, arg1);
+    case FRIDA_CLOAK_OP_REMOVE_FD:
+      return frida_kmod_cloak_remove_fd (tgid, arg1);
+    case FRIDA_PROCESS_OP_ALLOC:
+      return frida_prctl_alloc (uargs);
+    case FRIDA_PROCESS_OP_FREE:
+      return frida_prctl_free (uargs);
+    case FRIDA_PROCESS_OP_WRITE:
+      return frida_prctl_write (uargs);
+    case FRIDA_PROCESS_OP_READ:
+      return frida_prctl_read (uargs);
+    case FRIDA_PROCESS_OP_SPAWN:
+      return frida_prctl_spawn (uargs);
+    case FRIDA_PROCESS_OP_CLOAK_THREAD:
+      return frida_prctl_cloak_thread (uargs);
+    case FRIDA_PROCESS_OP_CLOAK_RANGE:
+      return frida_prctl_cloak_range (uargs);
+    default:
+      return -EINVAL;
+  }
+}
+
+static long
+frida_prctl_alloc (const struct frida_alloc_args __user * uargs)
+{
+  struct frida_alloc_args args;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  return frida_call_on_kthread (frida_do_alloc, &args);
+}
+
+static long
+frida_prctl_free (const struct frida_free_args __user * uargs)
+{
+  struct frida_free_args args;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  return frida_call_on_kthread (frida_do_free, &args);
+}
+
+static long
+frida_prctl_write (const struct frida_rw_args __user * uargs)
+{
+  long result;
+  struct frida_rw_args args;
+  void * bounce;
+  struct frida_xfer_job job;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  bounce = kvmalloc (args.size, GFP_KERNEL);
+  if (bounce == NULL)
+    return -ENOMEM;
+
+  if (copy_from_user (bounce, (const void __user *) args.buffer, args.size) != 0)
+  {
+    result = -EFAULT;
+  }
+  else
+  {
+    job.pid = args.pid;
+    job.address = args.address;
+    job.buffer = bounce;
+    job.size = args.size;
+    result = frida_call_on_kthread (frida_do_write, &job);
+  }
+
+  kvfree (bounce);
+
+  return result;
+}
+
+static long
+frida_prctl_read (const struct frida_rw_args __user * uargs)
+{
+  long result;
+  struct frida_rw_args args;
+  void * bounce;
+  struct frida_xfer_job job;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  bounce = kvmalloc (args.size, GFP_KERNEL);
+  if (bounce == NULL)
+    return -ENOMEM;
+
+  job.pid = args.pid;
+  job.address = args.address;
+  job.buffer = bounce;
+  job.size = args.size;
+  result = frida_call_on_kthread (frida_do_read, &job);
+
+  if (copy_to_user ((void __user *) args.buffer, bounce, args.size) != 0)
+    result = -EFAULT;
+
+  kvfree (bounce);
+
+  return result;
+}
+
+static long
+frida_prctl_spawn (const struct frida_spawn_args __user * uargs)
+{
+  struct frida_spawn_args args;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  return frida_call_on_kthread (frida_do_spawn, &args);
+}
+
+static long
+frida_prctl_cloak_thread (const struct frida_cloak_thread_args __user * uargs)
+{
+  struct frida_cloak_thread_args args;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  return frida_kmod_cloak_add_thread (args.tgid, args.tid);
+}
+
+static long
+frida_prctl_cloak_range (const struct frida_cloak_range_args __user * uargs)
+{
+  struct frida_cloak_range_args args;
+
+  if (copy_from_user (&args, uargs, sizeof args) != 0)
+    return -EFAULT;
+
+  return frida_kmod_cloak_add_range (args.tgid, args.base, args.size);
+}
+
+static long
+frida_call_on_kthread (long (* fn) (void * arg),
+                       void * arg)
+{
+  struct frida_kthread_call call;
+
+  call.fn = fn;
+  call.arg = arg;
+  init_completion (&call.done);
+
+  mutex_lock (&frida_op_mutex);
+  frida_op_pending = &call;
+  wake_up (&frida_op_wq);
+  wait_for_completion (&call.done);
+  mutex_unlock (&frida_op_mutex);
+
+  return call.result;
+}
+
+static int
+frida_op_worker_fn (void * unused)
+{
+  while (!kthread_should_stop ())
+  {
+    struct frida_kthread_call * call;
+
+    wait_event_interruptible (frida_op_wq, frida_op_pending != NULL || kthread_should_stop ());
+    if (kthread_should_stop ())
+      break;
+
+    call = frida_op_pending;
+    frida_op_pending = NULL;
+    call->result = call->fn (call->arg);
+    complete (&call->done);
+  }
+
+  return 0;
+}
+
+static long
+frida_do_alloc (void * data)
+{
+  const struct frida_alloc_args * args = data;
+
+  return frida_kmod_process_alloc (args->pid, args->size, args->prot);
+}
+
+static long
+frida_do_free (void * data)
+{
+  const struct frida_free_args * args = data;
+
+  return frida_kmod_process_free (args->pid, args->address, args->size);
+}
+
+static long
+frida_do_write (void * data)
+{
+  const struct frida_xfer_job * job = data;
+
+  return frida_kmod_process_write (job->pid, job->address, job->buffer, job->size);
+}
+
+static long
+frida_do_read (void * data)
+{
+  const struct frida_xfer_job * job = data;
+
+  return frida_kmod_process_read (job->pid, job->address, job->buffer, job->size);
+}
+
+static long
+frida_do_spawn (void * data)
+{
+  const struct frida_spawn_args * args = data;
+
+  return frida_kmod_process_spawn_thread (args->pid, args->entry, args->stack, args->arg, args->tls);
+}
+
+static int __nocfi
+frida_proc_pid_status (struct seq_file * m,
+                       struct pid_namespace * ns,
+                       struct pid * pid,
+                       struct task_struct * task)
+{
+  int result;
+  size_t start = m->count;
+  int hidden;
+  char * numstart;
+  int value, digits, i;
+
+  result = frida_proc_pid_status_orig (m, ns, pid, task);
+
+  if (frida_reader_is_cloaked ())
+    return result;
+
+  hidden = frida_cloak_count_threads (task->tgid);
+  if (hidden == 0 || m->count >= m->size || start >= m->count)
+    return result;
+
+  numstart = strnstr (m->buf + start, "Threads:\t", m->count - start);
+  if (numstart == NULL)
+    return result;
+  numstart += sizeof ("Threads:\t") - 1;
+
+  value = 0;
+  digits = 0;
+  for (i = 0; numstart + i < m->buf + m->count && numstart[i] >= '0' && numstart[i] <= '9'; i++)
+  {
+    value = (value * 10) + (numstart[i] - '0');
+    digits++;
+  }
+
+  value = (value > hidden) ? value - hidden : 1;
+  frida_seq_replace_number (m, numstart - m->buf, digits, value);
+
+  return result;
+}
+
+static int __nocfi
+frida_do_task_stat (struct seq_file * m,
+                    struct pid_namespace * ns,
+                    struct pid * pid,
+                    struct task_struct * task,
+                    int whole)
+{
+  int result;
+  size_t start = m->count;
+  int hidden;
+  char * p, * numstart;
+  int spaces, value, digits, i;
+
+  result = frida_do_task_stat_orig (m, ns, pid, task, whole);
+
+  if (frida_reader_is_cloaked ())
+    return result;
+
+  hidden = frida_cloak_count_threads (task->tgid);
+  if (hidden == 0 || m->count >= m->size || start >= m->count)
+    return result;
+
+  numstart = NULL;
+  for (p = m->buf + m->count - 1; p >= m->buf + start; p--)
+  {
+    if (*p == ')')
+    {
+      numstart = p;
+      break;
+    }
+  }
+  if (numstart == NULL)
+    return result;
+
+  spaces = 0;
+  for (p = numstart; p < m->buf + m->count; p++)
+  {
+    if (*p != ' ')
+      continue;
+    if (++spaces == 18)
+    {
+      numstart = p + 1;
+      break;
+    }
+  }
+  if (spaces != 18)
+    return result;
+
+  value = 0;
+  digits = 0;
+  for (i = 0; numstart + i < m->buf + m->count && numstart[i] >= '0' && numstart[i] <= '9'; i++)
+  {
+    value = (value * 10) + (numstart[i] - '0');
+    digits++;
+  }
+
+  value = (value > hidden) ? value - hidden : 1;
+  frida_seq_replace_number (m, numstart - m->buf, digits, value);
+
+  return result;
+}
+
+static void __nocfi
+frida_release_task (struct task_struct * p)
+{
+  frida_kmod_cloak_remove_thread (p->tgid, p->pid);
+  if (p->group_leader == p)
+    frida_cloak_forget (p->tgid);
+
+  frida_release_task_orig (p);
+}
+
+static int
+frida_cloak_count_threads (pid_t tgid)
+{
+  int n = 0;
+  struct frida_cloak * c;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+    n = c->n_threads;
+
+  spin_unlock (&frida_cloaks_lock);
+
+  return n;
+}
+
+static void
+frida_seq_replace_number (struct seq_file * m,
+                          size_t num_off,
+                          size_t num_len,
+                          int new_val)
+{
+  char tmp[12];
+  int nlen;
+  size_t tail_off, tail_len;
+
+  nlen = snprintf (tmp, sizeof tmp, "%d", new_val);
+  tail_off = num_off + num_len;
+  tail_len = m->count - tail_off;
+
+  if ((size_t) nlen != num_len)
+  {
+    memmove (m->buf + num_off + nlen, m->buf + tail_off, tail_len);
+    m->count = m->count - num_len + nlen;
+  }
+
+  memcpy (m->buf + num_off, tmp, nlen);
+}
+
+static struct frida_cloak *
+frida_cloak_get (pid_t tgid)
+{
+  struct frida_cloak * c;
+  struct task_struct * task;
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+    return c;
+
+  c = kzalloc (sizeof (struct frida_cloak), GFP_ATOMIC);
+  if (c == NULL)
+    return NULL;
+
+  c->tgid = tgid;
+
+  rcu_read_lock ();
+  task = frida_find_task_by_vpid_impl (tgid);
+  c->mm = (task != NULL) ? task->mm : NULL;
+  rcu_read_unlock ();
+
+  list_add (&c->node, &frida_cloaks);
+
+  return c;
+}
+
+static bool
+frida_cloak_has_range (struct mm_struct * mm,
+                       unsigned long start,
+                       unsigned long end)
+{
+  bool found = false;
+  struct frida_cloak * c;
+
+  spin_lock (&frida_cloaks_lock);
+
+  list_for_each_entry (c, &frida_cloaks, node)
+  {
+    unsigned int i;
+
+    if (c->mm != mm)
+      continue;
+
+    for (i = 0; i != c->n_ranges; i++)
+    {
+      if (start < c->ranges[i].end && c->ranges[i].start < end)
+      {
+        found = true;
+        goto beach;
+      }
+    }
+  }
+
+beach:
+  spin_unlock (&frida_cloaks_lock);
+
+  return found;
+}
+
+/*
+ * A cloaked thread is one of ours, so let it see through the cloak; RASP threads in the same
+ * process are not cloaked and keep getting the censored view.
+ */
+static bool
+frida_reader_is_cloaked (void)
+{
+  return frida_cloak_has_thread (current->pid);
+}
+
+static bool
+frida_cloak_has_thread (pid_t tid)
+{
+  bool found = false;
+  struct frida_cloak * c;
+
+  spin_lock (&frida_cloaks_lock);
+
+  list_for_each_entry (c, &frida_cloaks, node)
+  {
+    unsigned int i;
+
+    for (i = 0; i != c->n_threads; i++)
+    {
+      if (c->threads[i] == tid)
+      {
+        found = true;
+        goto beach;
+      }
+    }
+  }
+
+beach:
+  spin_unlock (&frida_cloaks_lock);
+
+  return found;
+}
+
+static bool
+frida_cloak_has_fd (pid_t tgid,
+                    int fd)
+{
+  bool found = false;
+  struct frida_cloak * c;
+  unsigned int i;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+  {
+    for (i = 0; i != c->n_fds; i++)
+    {
+      if (c->fds[i] == fd)
+      {
+        found = true;
+        break;
+      }
+    }
+  }
+
+  spin_unlock (&frida_cloaks_lock);
+
+  return found;
+}
+
+static void
+frida_cloak_forget (pid_t tgid)
+{
+  struct frida_cloak * c;
+
+  spin_lock (&frida_cloaks_lock);
+
+  c = frida_cloak_find (tgid);
+  if (c != NULL)
+  {
+    list_del (&c->node);
+    kfree (c->threads);
+    kfree (c->ranges);
+    kfree (c->fds);
+    kfree (c);
+  }
+
+  spin_unlock (&frida_cloaks_lock);
+}
+
+static struct frida_cloak *
+frida_cloak_find (pid_t tgid)
+{
+  struct frida_cloak * c;
+
+  list_for_each_entry (c, &frida_cloaks, node)
+  {
+    if (c->tgid == tgid)
+      return c;
+  }
+
+  return NULL;
 }
 
 void *

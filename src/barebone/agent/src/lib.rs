@@ -390,6 +390,8 @@ mod entrypoint_linux {
 
             init_gum();
 
+            kernel::install_hooks();
+
             let (own_base, own_size) = kernel::own_range();
             OWN_RANGE = GumMemoryRange {
                 base_address: own_base,

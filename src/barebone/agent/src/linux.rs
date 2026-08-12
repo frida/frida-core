@@ -24,6 +24,10 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     unsafe { frida_kmod_spawn_thread(entry, parameter) as isize }
 }
 
+pub fn install_hooks() {
+    unsafe { frida_kmod_install_hooks() };
+}
+
 pub fn alloc(size: usize) -> *mut u8 {
     unsafe { frida_kmod_alloc(size) }
 }
@@ -201,6 +205,7 @@ unsafe extern "C" {
     fn frida_kmod_log(message: *const c_char);
     fn frida_kmod_panic(message: *const c_char) -> !;
     fn frida_kmod_spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> c_int;
+    fn frida_kmod_install_hooks();
     fn frida_kmod_alloc(size: usize) -> *mut u8;
     fn frida_kmod_free(ptr: *mut u8, size: usize);
     fn frida_kmod_alloc_code(size: usize) -> *mut u8;
