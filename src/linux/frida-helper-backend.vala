@@ -324,6 +324,11 @@ namespace Frida {
 				if (pss != null)
 					yield pss.interrupt (cancellable);
 
+				if (KernelInjectSession.is_available ()) {
+					var session = yield KernelInjectSession.open (pid, cancellable);
+					return yield session.inject (spec, cancellable);
+				}
+
 				try {
 					var session = yield InjectSession.open (pid, cancellable);
 					RemoteAgent agent = yield session.inject (spec, cancellable);
