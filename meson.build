@@ -527,7 +527,7 @@ have_droidy_backend = get_option('droidy_backend') \
 have_socket_backend = get_option('socket_backend').allowed()
 have_barebone_backend = get_option('barebone_backend') \
     .disable_if(not (quickjs_dep.found() and lzfse_dep.found())) \
-    .disable_auto_if(not host_docks_mobile_devices) \
+    .disable_auto_if(not host_docks_mobile_devices and host_os != 'android') \
     .allowed()
 compiler_backend_opt = get_option('compiler_backend') \
     .disable_auto_if(host_os == 'watchos')
