@@ -152,33 +152,6 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private Gee.List<RangeDetails> coalesce_ranges (Gee.List<RangeDetails> ranges) {
-			var result = new Gee.ArrayList<RangeDetails> ();
-
-			RangeDetails? pending = null;
-			foreach (RangeDetails r in ranges) {
-				if (pending == null) {
-					pending = r.clone ();
-					continue;
-				}
-
-				if (r.base_va == pending.base_va + pending.size &&
-						r.base_pa == pending.base_pa + pending.size &&
-						r.protection == pending.protection &&
-						r.type == pending.type) {
-					pending.size += r.size;
-					continue;
-				}
-
-				result.add (pending);
-				pending = r.clone ();
-			}
-			if (pending != null)
-				result.add (pending);
-
-			return result;
-		}
-
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);

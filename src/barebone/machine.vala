@@ -221,6 +221,33 @@ namespace Frida.Barebone {
 		throw (Error) failure;
 	}
 
+	internal static Gee.List<RangeDetails> coalesce_ranges (Gee.List<RangeDetails> ranges) {
+		var result = new Gee.ArrayList<RangeDetails> ();
+
+		RangeDetails? pending = null;
+		foreach (RangeDetails r in ranges) {
+			if (pending == null) {
+				pending = r.clone ();
+				continue;
+			}
+
+			if (r.base_va == pending.base_va + pending.size &&
+					r.base_pa == pending.base_pa + pending.size &&
+					r.protection == pending.protection &&
+					r.type == pending.type) {
+				pending.size += r.size;
+				continue;
+			}
+
+			result.add (pending);
+			pending = r.clone ();
+		}
+		if (pending != null)
+			result.add (pending);
+
+		return result;
+	}
+
 	internal static uint64 round_address_up (uint64 address, size_t n) {
 		return (address + n - 1) & ~((uint64) n - 1);
 	}
