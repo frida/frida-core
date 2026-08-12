@@ -17,6 +17,7 @@ backend_sources += files(
   'lzfse.vala',
   'qmp-client.vala',
   'kernel-relocation.vala',
+  'x86-paging.vala',
   'vz-stub.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
