@@ -35,6 +35,7 @@ def main():
         boot_kmod.add_argument("--kernel", type=Path)
         boot_kmod.add_argument("--memory", type=int, default=512)
         boot_kmod.add_argument("--cpus", type=int, default=4)
+        boot_kmod.add_argument("--socket", type=Path)
         boot_kmod.add_argument("--ibt", action=argparse.BooleanOptionalAction, default=True)
 
         args = parser.parse_args()
@@ -144,8 +145,18 @@ def boot_kmod_guest(args):
     if not args.ibt:
         cmdline.append("ibt=off")
 
+    port = PORT_NAME if args.socket is not None else None
+
     with tempfile.TemporaryDirectory() as staging_dir:
-        initramfs = build_initramfs(Path(staging_dir), busybox, args.module)
+        initramfs = build_initramfs(Path(staging_dir), busybox, args.module, port)
+
+        channel = []
+        if args.socket is not None:
+            channel = [
+                "-device", "virtio-serial",
+                "-chardev", f"socket,id=frida,path={args.socket},server=on,wait=off",
+                "-device", f"virtserialport,chardev=frida,name={port}",
+            ]
 
         process = subprocess.Popen([
             qemu,
@@ -160,7 +171,7 @@ def boot_kmod_guest(args):
             "-serial", "stdio",
             "-monitor", "none",
             "-no-reboot",
-        ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        ] + channel, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
         listening = False
         try:
@@ -207,7 +218,8 @@ def host_kernel() -> Path:
     return Path("/boot") / ("vmlinuz-" + os.uname().release)
 
 
-def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
+def build_initramfs(staging_dir: Path, busybox: Path, module: Path,
+                    port: str | None) -> Path:
     root = staging_dir / "root"
     (root / "bin").mkdir(parents=True)
     (root / "dev").mkdir()
@@ -230,6 +242,7 @@ def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
         "  (for j in $(seq 200); do cat /proc/self/maps /proc/1/status > /dev/null; done) &",
         "done",
         "wait",
+        *(BRIDGE if port is not None else []),
         "dmesg",
         "exec sh",
         "",
@@ -298,6 +311,16 @@ GUESTS = {
 KMOD_GUEST_ARCH = "x86_64"
 
 BUSYBOX_URL = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+
+PORT_NAME = "frida"
+PORT_PATH = "/dev/vport0p1"
+
+BRIDGE = [
+    "exec 3<> /dev/frida",
+    f"exec 4<> {PORT_PATH}",
+    "while :; do cat <&3 >&4; done &",
+    "while :; do cat <&4 >&3; sleep 1; done &",
+]
 
 AGENT_READY_MARKER = "frida: listening on /dev/"
 MODULE_LOAD_FAILED_MARKER = "frida-kmod-load-failed"
