@@ -72,9 +72,9 @@ namespace Frida {
 			}
 
 			Barebone.AgentConfig? resident_agent = config.agent;
-			if (resident_agent != null && resident_agent.transport is Barebone.DeviceTransportConfig) {
-				host_session = yield attach_to_resident_agent (
-					(Barebone.DeviceTransportConfig) resident_agent.transport, cancellable);
+			if (resident_agent != null && (resident_agent.transport is Barebone.DeviceTransportConfig
+					|| resident_agent.transport is Barebone.SocketTransportConfig)) {
+				host_session = yield attach_to_resident_agent (resident_agent.transport, cancellable);
 				host_session.agent_session_detached.connect (on_agent_session_detached);
 
 				return host_session;
@@ -194,17 +194,27 @@ namespace Frida {
 			return host_session;
 		}
 
-		private async BareboneHostSession attach_to_resident_agent (Barebone.DeviceTransportConfig transport,
+		private async BareboneHostSession attach_to_resident_agent (Barebone.TransportConfig transport,
 				Cancellable? cancellable) throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Resident agents are not available on this OS");
 #else
-			int fd = Posix.open (transport.path, Posix.O_RDWR);
-			if (fd == -1)
-				throw new Error.TRANSPORT ("Unable to open %s: %s", transport.path, Posix.strerror (Posix.errno));
-
-			// Both halves are the same descriptor, so exactly one of them may close it.
-			var stream = new SimpleIOStream (new UnixInputStream (fd, true), new UnixOutputStream (fd, false));
+			IOStream stream;
+			if (transport is Barebone.SocketTransportConfig) {
+				string path = ((Barebone.SocketTransportConfig) transport).path;
+				var client = new SocketClient ();
+				try {
+					stream = yield client.connect_async (new UnixSocketAddress (path), cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to connect to %s: %s", path, e.message);
+				}
+			} else {
+				string path = ((Barebone.DeviceTransportConfig) transport).path;
+				int fd = Posix.open (path, Posix.O_RDWR);
+				if (fd == -1)
+					throw new Error.TRANSPORT ("Unable to open %s: %s", path, Posix.strerror (Posix.errno));
+				stream = new SimpleIOStream (new UnixInputStream (fd, true), new UnixOutputStream (fd, false));
+			}
 
 			var connection = yield Barebone.AgentConnection.open_resident (stream, cancellable);
 

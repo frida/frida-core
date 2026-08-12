@@ -265,7 +265,8 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
 			transport.check ();
 
-			if (path == null && !(transport is DeviceTransportConfig))
+			if (path == null && !(transport is DeviceTransportConfig)
+					&& !(transport is SocketTransportConfig))
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
 		}
 
@@ -283,6 +284,9 @@ namespace Frida.Barebone {
 						break;
 					case "device":
 						t = typeof (DeviceTransportConfig);
+						break;
+					case "socket":
+						t = typeof (SocketTransportConfig);
 						break;
 					default:
 						break;
@@ -359,6 +363,23 @@ namespace Frida.Barebone {
 	 * exposes. Nothing is injected, so there is no image and no stub.
 	 */
 	public sealed class DeviceTransportConfig : TransportConfig {
+		public string path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
+		}
+	}
+
+	/**
+	 * An agent already resident in the target, reached over a UNIX socket that the
+	 * hypervisor has bridged to a port the guest kernel holds open. Nothing is
+	 * injected, so there is no image and no stub.
+	 */
+	public sealed class SocketTransportConfig : TransportConfig {
 		public string path {
 			get;
 			set;
