@@ -204,7 +204,26 @@ namespace Frida.Barebone {
 		}
 
 		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
-			throw_not_supported ();
+			Gum.ElfIA32Relocation type = (Gum.ElfIA32Relocation) r.type;
+			switch (type) {
+				case NONE:
+					break;
+				case @32:
+				case RELATIVE:
+					// The in-place value is already the link-time target, the image being linked
+					// at zero and loaded as a unit.
+					relocated.write_uint32 ((size_t) r.address,
+						(uint32) (base_va + relocated.read_uint32 ((size_t) r.address)));
+					break;
+				case PC32:
+				case PLT32:
+				case GOTPC:
+					// Both ends of the displacement move by the same amount.
+					break;
+				default:
+					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
+						Marshal.enum_to_nick<Gum.ElfIA32Relocation> (type));
+			}
 		}
 
 		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {

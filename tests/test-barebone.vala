@@ -40,6 +40,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/relocations-apply-load-bias", () => {
+			var h = new Harness ((h) => relocations_apply_load_bias.begin (h as Harness));
+			h.run ();
+		});
+
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
@@ -217,6 +222,43 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async void relocations_apply_load_bias (Harness h) {
+		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			var machine = yield target.open_machine ();
+
+			uint64 base_va = 0xc0010000;
+
+			var image = target.client.make_buffer (new Bytes (new uint8[12]));
+			image.write_uint32 (0, 0x00000040);
+			image.write_uint32 (4, 0x00000080);
+			image.write_uint32 (8, 0x11223344);
+
+			machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.@32, 0), base_va, image);
+			machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.RELATIVE, 4), base_va, image);
+
+			machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.PC32, 8), base_va, image);
+
+			assert_true (image.read_uint32 (0) == 0xc0010040);
+			assert_true (image.read_uint32 (4) == 0xc0010080);
+			assert_true (image.read_uint32 (8) == 0x11223344);
+
+			try {
+				machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.TLS_DESC, 0), base_va, image);
+				assert_not_reached ();
+			} catch (Error e) {
+				assert_true (e is Error.NOT_SUPPORTED);
+			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
 	private static async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.IA32Machine machine,
 			Gum.PageProtection prot) throws Error, IOError {
 		var result = new Gee.ArrayList<Barebone.RangeDetails> ();
@@ -233,6 +275,13 @@ namespace Frida.BareboneTest {
 		assert_true (r.base_pa == base_pa);
 		assert_true (r.size == size);
 		assert_true (r.protection == prot);
+	}
+
+	private static Gum.ElfRelocationDetails make_relocation (Gum.ElfIA32Relocation type, uint64 address) {
+		var r = Gum.ElfRelocationDetails ();
+		r.address = address;
+		r.type = type;
+		return r;
 	}
 
 	private const uint64 PD_PA = 0x1000;
