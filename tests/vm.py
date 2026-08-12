@@ -34,6 +34,7 @@ def main():
         boot_kmod.add_argument("--module", type=Path, required=True)
         boot_kmod.add_argument("--kernel", type=Path)
         boot_kmod.add_argument("--memory", type=int, default=512)
+        boot_kmod.add_argument("--cpus", type=int, default=4)
         boot_kmod.add_argument("--ibt", action=argparse.BooleanOptionalAction, default=True)
 
         args = parser.parse_args()
@@ -149,6 +150,7 @@ def boot_kmod_guest(args):
         process = subprocess.Popen([
             qemu,
             "-m", str(args.memory),
+            "-smp", str(args.cpus),
             "-enable-kvm",
             "-cpu", "host",
             "-kernel", str(kernel),
@@ -167,6 +169,8 @@ def boot_kmod_guest(args):
                 print(line, file=sys.stderr)
                 if MODULE_LOAD_FAILED_MARKER in line:
                     raise Unavailable("the module failed to load")
+                if SLEPT_WHERE_FORBIDDEN_MARKER in line:
+                    raise Unavailable("the module slept where the caller forbids it")
                 if not listening and AGENT_READY_MARKER in line:
                     print("ready", flush=True)
                     listening = True
@@ -211,7 +215,7 @@ def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
 
     shutil.copy(busybox, root / "bin" / "busybox")
     (root / "bin" / "busybox").chmod(0o755)
-    for applet in ("sh", "insmod", "dmesg", "mount", "poweroff", "cat"):
+    for applet in ("sh", "insmod", "dmesg", "mount", "poweroff", "cat", "seq"):
         (root / "bin" / applet).symlink_to("busybox")
 
     shutil.copy(module, root / module.name)
@@ -222,7 +226,10 @@ def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
         "mount -t proc proc /proc",
         "mount -t devtmpfs dev /dev",
         f"insmod /{module.name} || echo {MODULE_LOAD_FAILED_MARKER}",
-        "cat /proc/self/maps > /dev/null",
+        "for i in 1 2 3 4 5 6 7 8; do",
+        "  (for j in $(seq 200); do cat /proc/self/maps /proc/1/status > /dev/null; done) &",
+        "done",
+        "wait",
         "dmesg",
         "exec sh",
         "",
@@ -294,6 +301,8 @@ BUSYBOX_URL = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/b
 
 AGENT_READY_MARKER = "frida: listening on /dev/"
 MODULE_LOAD_FAILED_MARKER = "frida-kmod-load-failed"
+
+SLEPT_WHERE_FORBIDDEN_MARKER = "Voluntary context switch within RCU"
 
 
 if __name__ == "__main__":
