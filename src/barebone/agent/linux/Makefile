@@ -97,6 +97,7 @@ $(AGENT_LIB_SOFTFLOAT): agent
 	$(AGENT_AR) d $@ $$($(AGENT_NM) --print-armap $@ | sed -n 's/^__muldf3 in //p')
 	$(AGENT_AR) s $@
 
+$(LIBC): export LC_ALL = C
 $(LIBC): $(AGENT_LIB_SOFTFLOAT)
 	cp $(FRIDA_SDK)/lib/libc.a $@
 	$(AGENT_NM) --defined-only $(AGENT_LIB_SOFTFLOAT) \
