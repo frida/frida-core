@@ -55,6 +55,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/protect-pages-updates-long-mode-entries", () => {
+			var h = new Harness ((h) => protect_pages_updates_long_mode_entries.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/protect-pages-rejects-large-pages", () => {
+			var h = new Harness ((h) => x64_protect_pages_rejects_large_pages.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_guest.begin (h as SlowHarness));
 			h.run ();
@@ -327,6 +337,56 @@ namespace Frida.BareboneTest {
 			} catch (Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void protect_pages_updates_long_mode_entries (Harness h) {
+		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.X64Machine (target.client);
+
+			yield machine.protect_pages (0x00000000, 4096, READ | EXECUTE, null);
+
+			assert_true (target.read_uint64 (X64_PT_PA + (0 * 8)) == 0x00100001);
+
+			// The levels above already grant what was asked for, so they must be left alone.
+			assert_true (target.read_uint64 (X64_PD_PA + (0 * 8)) == (X64_PT_PA | 0x3));
+			assert_true (target.read_uint64 (X64_PML4_PA + (0 * 8)) == (X64_PDPT_PA | 0x3));
+
+			yield machine.protect_pages (0x00001000, 4096, READ, null);
+			assert_true (target.read_uint64 (X64_PT_PA + (1 * 8)) == (0x00101001 | (1ULL << 63)));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void x64_protect_pages_rejects_large_pages (Harness h) {
+		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.X64Machine (target.client);
+
+			try {
+				yield machine.protect_pages (0xffffc00000000000, 4096, READ | WRITE, null);
+				assert_not_reached ();
+			} catch (Error e) {
+				assert_true (e is Error.NOT_SUPPORTED);
+			}
+
+			assert_true (target.read_uint64 (X64_KERNEL_PDPT_PA + (0 * 8)) == 0x400000e3);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
 			assert_not_reached ();

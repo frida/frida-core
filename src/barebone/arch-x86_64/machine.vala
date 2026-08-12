@@ -58,7 +58,7 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			yield page_tables.protect (virtual_address, size, prot, cancellable);
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
