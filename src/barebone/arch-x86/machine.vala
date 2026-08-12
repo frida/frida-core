@@ -118,7 +118,84 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			MMUParameters p = yield load_mmu_parameters (cancellable);
+			if (!p.paging_enabled)
+				throw new Error.INVALID_OPERATION ("Unable to change protection while paging is disabled");
+
+			uint64 start_va = page_start (virtual_address, PAGE_SIZE);
+			uint64 end_va = round_address_up (virtual_address + size, PAGE_SIZE);
+
+			yield begin_table_access (cancellable);
+			GLib.Error? failure = null;
+			try {
+				var relaxed_tables = new Gee.HashSet<uint64?> (Numeric.uint64_hash, Numeric.uint64_equal);
+				for (uint64 va = start_va; va != end_va; va += PAGE_SIZE) {
+					LeafEntry leaf = yield find_leaf_entry (va, p, cancellable);
+					if (leaf.level != LEAF_LEVEL) {
+						throw new Error.NOT_SUPPORTED (
+							"Unable to change protection of the large page mapping at 0x%08x",
+							(uint32) va);
+					}
+
+					yield relax_parent_entries (va, prot, p, relaxed_tables, cancellable);
+
+					uint64 new_entry = apply_protection_bits (leaf.value, prot, p);
+					if (new_entry != leaf.value)
+						yield write_entry (leaf.slot_pa, new_entry, p, cancellable);
+				}
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield end_table_access (cancellable);
+			throw_if_failed (failure);
+		}
+
+		private async LeafEntry find_leaf_entry (uint64 va, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 table_pa = p.root_table;
+			for (uint level = p.first_level; ; level++) {
+				uint64 slot_pa = slot_address (va, table_pa, level, p);
+				uint64 entry = yield read_entry_at (slot_pa, p, cancellable);
+
+				if ((entry & PRESENT_BIT) == 0)
+					throw new Error.NOT_SUPPORTED ("Address 0x%08x is not mapped", (uint32) va);
+
+				if (is_leaf_entry (entry, level, p))
+					return { slot_pa, entry, level };
+
+				table_pa = table_address (entry, p);
+			}
+		}
+
+		private struct LeafEntry {
+			public uint64 slot_pa;
+			public uint64 value;
+			public uint level;
+		}
+
+		private async void relax_parent_entries (uint64 va, Gum.PageProtection prot, MMUParameters p,
+				Gee.HashSet<uint64?> already_relaxed, Cancellable? cancellable) throws Error, IOError {
+			uint64 table_pa = p.root_table;
+			for (uint level = p.first_level; level != LEAF_LEVEL; level++) {
+				uint64 slot_pa = slot_address (va, table_pa, level, p);
+				uint64 entry = yield read_entry_at (slot_pa, p, cancellable);
+
+				if (!already_relaxed.contains (slot_pa) && has_protection_bits (level, p)) {
+					uint64 new_entry = entry;
+					if ((prot & Gum.PageProtection.WRITE) != 0)
+						new_entry |= WRITABLE_BIT;
+					if ((prot & Gum.PageProtection.EXECUTE) != 0 && p.nx_enabled)
+						new_entry &= ~NX_BIT;
+
+					if (new_entry != entry) {
+						yield write_entry (slot_pa, new_entry, p, cancellable);
+						entry = new_entry;
+					}
+					already_relaxed.add (slot_pa);
+				}
+
+				table_pa = table_address (entry, p);
+			}
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
@@ -267,28 +344,6 @@ namespace Frida.Barebone {
 			return pa;
 		}
 
-		private async LeafEntry find_leaf_entry (uint64 va, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
-			uint64 table_pa = p.root_table;
-			for (uint level = p.first_level; ; level++) {
-				uint64 slot_pa = slot_address (va, table_pa, level, p);
-				uint64 entry = yield read_entry_at (slot_pa, p, cancellable);
-
-				if ((entry & PRESENT_BIT) == 0)
-					throw new Error.NOT_SUPPORTED ("Address 0x%08x is not mapped", (uint32) va);
-
-				if (is_leaf_entry (entry, level, p))
-					return { entry, level };
-
-				table_pa = table_address (entry, p);
-			}
-		}
-
-		private struct LeafEntry {
-			public uint64 value;
-			public uint level;
-		}
-
 		private async void begin_table_access (Cancellable? cancellable) throws Error, IOError {
 			if (physical_memory == null)
 				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
@@ -357,6 +412,24 @@ namespace Frida.Barebone {
 			return prot;
 		}
 
+		private static uint64 apply_protection_bits (uint64 entry, Gum.PageProtection prot, MMUParameters p) {
+			uint64 result = entry;
+
+			if ((prot & Gum.PageProtection.WRITE) != 0)
+				result |= WRITABLE_BIT;
+			else
+				result &= ~WRITABLE_BIT;
+
+			if (p.nx_enabled) {
+				if ((prot & Gum.PageProtection.EXECUTE) != 0)
+					result &= ~NX_BIT;
+				else
+					result |= NX_BIT;
+			}
+
+			return result;
+		}
+
 		private static bool has_protection_bits (uint level, MMUParameters p) {
 			return !(p.pae && level == PDPT_LEVEL);
 		}
@@ -365,6 +438,17 @@ namespace Frida.Barebone {
 				throws Error, IOError {
 			Buffer buf = yield read_physical_buffer (slot_pa, p.entry_size, cancellable);
 			return read_entry (buf, 0, p);
+		}
+
+		private async void write_entry (uint64 slot_pa, uint64 entry, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			Buffer buf = gdb.make_buffer (new Bytes (new uint8[p.entry_size]));
+			if (p.pae)
+				buf.write_uint64 (0, entry);
+			else
+				buf.write_uint32 (0, (uint32) entry);
+
+			yield write_physical_buffer (slot_pa, buf.bytes, cancellable);
 		}
 
 		private static uint64 read_entry (Buffer entries, size_t offset, MMUParameters p) {
@@ -376,6 +460,15 @@ namespace Frida.Barebone {
 			if (physical_memory != null && physical_memory.contains (pa))
 				return gdb.make_buffer (new Bytes (physical_memory.read (pa, size)));
 			return yield gdb.read_buffer (pa, size, cancellable);
+		}
+
+		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable)
+				throws Error, IOError {
+			if (physical_memory != null && physical_memory.contains (pa)) {
+				physical_memory.write (pa, data.get_data ());
+				return;
+			}
+			yield gdb.write_byte_array (pa, data, cancellable);
 		}
 
 		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {

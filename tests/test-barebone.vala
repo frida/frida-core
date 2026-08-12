@@ -25,6 +25,21 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/protect-pages-updates-legacy-entries", () => {
+			var h = new Harness ((h) => protect_pages_updates_legacy_entries.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/protect-pages-widens-pae-parents", () => {
+			var h = new Harness ((h) => protect_pages_widens_pae_parents.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/protect-pages-rejects-large-pages", () => {
+			var h = new Harness ((h) => protect_pages_rejects_large_pages.begin (h as Harness));
+			h.run ();
+		});
+
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
@@ -126,6 +141,72 @@ namespace Frida.BareboneTest {
 			} catch (Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void protect_pages_updates_legacy_entries (Harness h) {
+		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			var machine = yield target.open_machine ();
+
+			yield machine.protect_pages (0x00002000, 4096, READ | WRITE, null);
+
+			assert_true (target.read_uint32 (PT_PA + (2 * 4)) == 0x00102003);
+
+			assert_true (target.read_uint32 (PT_PA + (0 * 4)) == 0x00100003);
+			assert_true (target.read_uint32 (PD_PA + (0 * 4)) == (PT_PA | 0x3));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void protect_pages_widens_pae_parents (Harness h) {
+		var target = new FakeTarget (pae_page_tables (), PAE_MONITOR_DUMP);
+		try {
+			var machine = yield target.open_machine ();
+
+			yield machine.protect_pages (0x00000000, 4096, READ | EXECUTE, null);
+
+			assert_true (target.read_uint64 (PAE_PT_PA + (0 * 8)) == 0x00100001);
+
+			// The levels above already grant what was asked for, so they must be left alone.
+			assert_true (target.read_uint64 (PAE_PD_PA + (0 * 8)) == (PAE_PT_PA | 0x3));
+			assert_true (target.read_uint64 (PAE_PDPT_PA + (0 * 8)) == (PAE_PD_PA | 0x1));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void protect_pages_rejects_large_pages (Harness h) {
+		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			var machine = yield target.open_machine ();
+
+			try {
+				yield machine.protect_pages (0x00400000, 4096, READ | WRITE, null);
+				assert_not_reached ();
+			} catch (Error e) {
+				assert_true (e is Error.NOT_SUPPORTED);
+			}
+
+			assert_true (target.read_uint32 (PD_PA + (1 * 4)) == 0x00800081);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
 			assert_not_reached ();
@@ -298,6 +379,20 @@ namespace Frida.BareboneTest {
 			cancellable.cancel ();
 			if (service != null)
 				service.stop ();
+		}
+
+		public uint32 read_uint32 (uint64 address) {
+			uint32 result = 0;
+			for (uint i = 0; i != 4; i++)
+				result |= ((uint32) ram[address + i]) << (i * 8);
+			return result;
+		}
+
+		public uint64 read_uint64 (uint64 address) {
+			uint64 result = 0;
+			for (uint i = 0; i != 8; i++)
+				result |= ((uint64) ram[address + i]) << (i * 8);
+			return result;
 		}
 
 		private async void serve (IOStream connection) {
