@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import NamedTuple
 import urllib.request
 
@@ -25,12 +26,27 @@ def main():
             boot.add_argument("--gdb-port", type=int, required=True)
             boot.add_argument("--memory", type=int, default=256)
 
+        subparsers.add_parser("check-kmod",
+                              help="verify that a kmod guest can be booted, fetching what it needs")
+
+        boot_kmod = subparsers.add_parser("boot-kmod",
+                                          help="boot the running kernel in a guest and load a module into it")
+        boot_kmod.add_argument("--module", type=Path, required=True)
+        boot_kmod.add_argument("--kernel", type=Path)
+        boot_kmod.add_argument("--memory", type=int, default=512)
+        boot_kmod.add_argument("--ibt", action=argparse.BooleanOptionalAction, default=True)
+
         args = parser.parse_args()
-        action, arch = args.command.split("-", maxsplit=1)
-        if action == "check":
-            check_guest(arch)
+        action, target = args.command.split("-", maxsplit=1)
+        if target == "kmod":
+            if action == "check":
+                check_kmod_guest()
+            else:
+                boot_kmod_guest(args)
+        elif action == "check":
+            check_guest(target)
         else:
-            boot_guest(arch, args)
+            boot_guest(target, args)
         return
 
     arch = sys.argv[1]
@@ -104,6 +120,63 @@ def boot_guest(arch: str, args):
         process.kill()
 
 
+def check_kmod_guest():
+    guest = GUESTS[KMOD_GUEST_ARCH]
+    require_qemu(guest)
+    require_program("cpio")
+    fetch_busybox(guest)
+
+    kernel = host_kernel()
+    if not os.access(kernel, os.R_OK):
+        raise Unavailable(f"{kernel} is not readable")
+
+    print("ok")
+
+
+def boot_kmod_guest(args):
+    guest = GUESTS[KMOD_GUEST_ARCH]
+    qemu = require_qemu(guest)
+    busybox = fetch_busybox(guest)
+    kernel = args.kernel if args.kernel is not None else host_kernel()
+
+    cmdline = ["console=ttyS0", "panic=-1"]
+    if not args.ibt:
+        cmdline.append("ibt=off")
+
+    with tempfile.TemporaryDirectory() as staging_dir:
+        initramfs = build_initramfs(Path(staging_dir), busybox, args.module)
+
+        process = subprocess.Popen([
+            qemu,
+            "-m", str(args.memory),
+            "-enable-kvm",
+            "-cpu", "host",
+            "-kernel", str(kernel),
+            "-initrd", str(initramfs),
+            "-append", " ".join(cmdline),
+            "-display", "none",
+            "-serial", "stdio",
+            "-monitor", "none",
+            "-no-reboot",
+        ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+        listening = False
+        try:
+            for raw_line in process.stdout:
+                line = raw_line.decode(errors="replace").rstrip()
+                print(line, file=sys.stderr)
+                if MODULE_LOAD_FAILED_MARKER in line:
+                    raise Unavailable("the module failed to load")
+                if not listening and AGENT_READY_MARKER in line:
+                    print("ready", flush=True)
+                    listening = True
+
+            if not listening:
+                raise Unavailable("guest exited before the module was listening")
+        finally:
+            process.kill()
+
+
 def require_qemu(guest: "Guest") -> str:
     qemu = shutil.which(guest.qemu_binary)
     if qemu is None:
@@ -112,21 +185,73 @@ def require_qemu(guest: "Guest") -> str:
 
 
 def fetch_kernel(guest: "Guest") -> Path:
-    kernel = cache_dir(guest) / "vmlinuz-lts"
-    if kernel.exists():
-        return kernel
+    return fetch_cached(guest, "vmlinuz-lts", guest.kernel_url)
 
-    kernel.parent.mkdir(parents=True, exist_ok=True)
-    staging = kernel.with_suffix(".partial")
+
+def require_program(name: str) -> str:
+    program = shutil.which(name)
+    if program is None:
+        raise Unavailable(f"{name} is not installed")
+    return program
+
+
+def fetch_busybox(guest: "Guest") -> Path:
+    return fetch_cached(guest, "busybox", BUSYBOX_URL)
+
+
+def host_kernel() -> Path:
+    return Path("/boot") / ("vmlinuz-" + os.uname().release)
+
+
+def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
+    root = staging_dir / "root"
+    (root / "bin").mkdir(parents=True)
+    (root / "proc").mkdir()
+
+    shutil.copy(busybox, root / "bin" / "busybox")
+    (root / "bin" / "busybox").chmod(0o755)
+    for applet in ("sh", "insmod", "dmesg", "mount", "poweroff", "cat"):
+        (root / "bin" / applet).symlink_to("busybox")
+
+    shutil.copy(module, root / module.name)
+
+    init = root / "init"
+    init.write_text("\n".join([
+        "#!/bin/sh",
+        "mount -t proc proc /proc",
+        f"insmod /{module.name} || echo {MODULE_LOAD_FAILED_MARKER}",
+        "cat /proc/self/maps > /dev/null",
+        "dmesg",
+        "exec sh",
+        "",
+    ]))
+    init.chmod(0o755)
+
+    initramfs = staging_dir / "initramfs.cpio"
+    names = subprocess.run(["find", "."], cwd=root, check=True, capture_output=True)
+    with initramfs.open("wb") as f:
+        subprocess.run(["cpio", "--create", "--format=newc", "--quiet"],
+                       cwd=root, input=names.stdout, stdout=f, check=True)
+
+    return initramfs
+
+
+def fetch_cached(guest: "Guest", name: str, url: str) -> Path:
+    cached = cache_dir(guest) / name
+    if cached.exists():
+        return cached
+
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    staging = cached.with_suffix(".partial")
     try:
-        with urllib.request.urlopen(guest.kernel_url, timeout=60) as response, staging.open("wb") as f:
+        with urllib.request.urlopen(url, timeout=60) as response, staging.open("wb") as f:
             shutil.copyfileobj(response, f)
     except Exception as e:
         staging.unlink(missing_ok=True)
-        raise Unavailable(f"unable to download {guest.kernel_url}: {e}")
-    staging.replace(kernel)
+        raise Unavailable(f"unable to download {url}: {e}")
+    staging.replace(cached)
 
-    return kernel
+    return cached
 
 
 def cache_dir(guest: "Guest") -> Path:
@@ -160,6 +285,13 @@ GUESTS = {
         Guest("x86_64", "qemu-system-x86_64", ALPINE_NETBOOT_URL.format("x86_64")),
     ]
 }
+
+KMOD_GUEST_ARCH = "x86_64"
+
+BUSYBOX_URL = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+
+AGENT_READY_MARKER = "frida: listening on /dev/"
+MODULE_LOAD_FAILED_MARKER = "frida-kmod-load-failed"
 
 
 if __name__ == "__main__":
