@@ -71,10 +71,14 @@ namespace Frida.BareboneTest {
 		});
 
 		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
-			var h = new SlowHarness ((h) => qemu_walk_matches_guest.begin (h as SlowHarness));
+			var h = new SlowHarness ((h) => qemu_walk_matches_x86_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/Qemu/walk-matches-guest", () => {
+			var h = new SlowHarness ((h) => qemu_walk_matches_x86_64_guest.begin (h as SlowHarness));
+			h.run ();
+		});
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
@@ -445,20 +449,30 @@ namespace Frida.BareboneTest {
 	 * independently. The guest is non-PAE with PSE, so it covers the legacy two-level walk and
 	 * 4 MiB pages; PAE and NX remain the fake stub's job.
 	 */
-	private static async void qemu_walk_matches_guest (SlowHarness h) {
+	private static async void qemu_walk_matches_x86_guest (SlowHarness h) {
+		yield qemu_walk_matches_guest (h, X86);
+	}
+
+	private static async void qemu_walk_matches_x86_64_guest (SlowHarness h) {
+		yield qemu_walk_matches_guest (h, X86_64);
+	}
+
+	private static async void qemu_walk_matches_guest (SlowHarness h, GuestArch arch) {
 		QemuGuest? guest = null;
 		try {
-			string? unavailable_reason = yield QemuGuest.check_availability ();
+			string? unavailable_reason = yield QemuGuest.check_availability (arch);
 			if (unavailable_reason != null) {
 				stdout.printf ("<skipping: %s> ", unavailable_reason);
 				h.done ();
 				return;
 			}
 
-			guest = yield QemuGuest.boot ();
+			guest = yield QemuGuest.boot (arch);
 			assert_true (guest != null);
 
-			var machine = new Barebone.IA32Machine (guest.client);
+			Barebone.Machine machine = (arch == X86)
+				? (Barebone.Machine) new Barebone.IA32Machine (guest.client)
+				: (Barebone.Machine) new Barebone.X64Machine (guest.client);
 
 			var ours = yield collect_ranges (machine, Gum.PageProtection.READ);
 			assert_true (ours.size != 0);
@@ -484,7 +498,7 @@ namespace Frida.BareboneTest {
 					assert_true (!page.no_execute);
 
 				if (page.large) {
-					assert_true (r.size >= 0x400000);
+					assert_true (r.size >= 0x200000);
 					saw_large_page = true;
 				}
 			}
@@ -977,6 +991,15 @@ namespace Frida.BareboneTest {
 		}
 	}
 
+	private enum GuestArch {
+		X86,
+		X86_64;
+
+		public string to_nick () {
+			return (this == X86) ? "x86" : "x86_64";
+		}
+	}
+
 	private class GuestPage {
 		public uint64 va;
 		public uint64 pa;
@@ -1001,10 +1024,10 @@ namespace Frida.BareboneTest {
 		private const uint CONNECT_TIMEOUT_MSEC = 10000;
 		private const uint BOOT_TIMEOUT_SEC = 180;
 
-		public static async string? check_availability () {
+		public static async string? check_availability (GuestArch arch) {
 			try {
 				var checker = new Subprocess (SubprocessFlags.STDOUT_SILENCE | SubprocessFlags.STDERR_PIPE,
-					"python3", script_path (), "check-x86");
+					"python3", script_path (), "check-" + arch.to_nick ());
 
 				string stderr_buf;
 				yield checker.communicate_utf8_async (null, null, null, out stderr_buf);
@@ -1017,13 +1040,14 @@ namespace Frida.BareboneTest {
 			}
 		}
 
-		public static async QemuGuest? boot () throws Error, IOError {
+		public static async QemuGuest? boot (GuestArch arch) throws Error, IOError {
 			uint16 port = pick_unused_port ();
 
 			Subprocess process;
 			try {
 				process = new Subprocess (SubprocessFlags.STDOUT_PIPE,
-					"python3", script_path (), "boot-x86", "--gdb-port", port.to_string ());
+					"python3", script_path (), "boot-" + arch.to_nick (), "--gdb-port",
+					port.to_string ());
 			} catch (GLib.Error e) {
 				return null;
 			}
@@ -1094,7 +1118,7 @@ namespace Frida.BareboneTest {
 		public async Gee.List<Interval> query_mapped_intervals () throws Error, IOError {
 			var result = new Gee.ArrayList<Interval> ();
 
-			// E.g.: 00000000c0000000-00000000c009b000 000000000009b000 -rw
+			// E.g.: 0000000000000000-0000800000000000 0000800000000000 -rw
 			string dump = yield client.run_remote_command ("info mem", cancellable);
 			foreach (string line in dump.split ("\n")) {
 				string[] tokens = tokenize (line);
