@@ -37,6 +37,13 @@
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 
+#if defined (__has_include)
+# if __has_include (<linux/execmem.h>)
+#  include <linux/execmem.h>
+#  define FRIDA_HAVE_EXECMEM
+# endif
+#endif
+
 #ifdef CONFIG_X86_64
 # include <asm/msr.h>
 # include <asm/processor-flags.h>
@@ -109,6 +116,10 @@ typedef void (* FridaKmemCacheFreeFunc) (struct kmem_cache * cache, void * objec
 typedef void (* FridaPutFilesStructFunc) (struct files_struct * files);
 typedef void (* FridaSwitchTaskNamespacesFunc) (struct task_struct * tsk, struct nsproxy * new);
 typedef void (* FridaFreeFsStructFunc) (struct fs_struct * fs);
+#ifdef FRIDA_HAVE_EXECMEM
+typedef void * (* FridaExecmemAllocRwFunc) (enum execmem_type type, size_t size);
+typedef void (* FridaExecmemFreeFunc) (void * ptr);
+#endif
 
 typedef struct _GumInterceptor GumInterceptor;
 
@@ -276,6 +287,7 @@ void frida_kmod_install_hooks (void);
 static void frida_resolve_kallsyms (void);
 static void frida_resolve_kernel_range (void);
 static void frida_resolve_process_ops (void);
+static void frida_resolve_code_allocator (void);
 static struct mm_struct * frida_grab_process_mm (int pid);
 static struct task_struct * frida_grab_process_leader (int pid);
 static int frida_spawn_trampoline (void * data);
@@ -369,6 +381,10 @@ static FridaKmemCacheFreeFunc frida_kmem_cache_free_impl;
 static FridaPutFilesStructFunc frida_put_files_struct_impl;
 static FridaSwitchTaskNamespacesFunc frida_switch_task_namespaces_impl;
 static FridaFreeFsStructFunc frida_free_fs_struct_impl;
+#ifdef FRIDA_HAVE_EXECMEM
+static FridaExecmemAllocRwFunc frida_execmem_alloc_rw_impl;
+static FridaExecmemFreeFunc frida_execmem_free_impl;
+#endif
 static struct kmem_cache ** frida_signal_cachep;
 static rwlock_t * frida_tasklist_lock;
 
@@ -437,6 +453,7 @@ frida_kmod_init (void)
   frida_resolve_kallsyms ();
   frida_resolve_kernel_range ();
   frida_resolve_process_ops ();
+  frida_resolve_code_allocator ();
 
   return frida_agent_start ();
 }
@@ -515,6 +532,23 @@ frida_resolve_process_ops (void)
   frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_symbol ("free_fs_struct");
   frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
   frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
+}
+
+static void
+frida_resolve_code_allocator (void)
+{
+#ifdef FRIDA_HAVE_EXECMEM
+  FridaExecmemAllocRwFunc alloc_rw;
+  FridaExecmemFreeFunc free;
+
+  alloc_rw = (FridaExecmemAllocRwFunc) frida_kmod_find_symbol ("execmem_alloc_rw");
+  free = (FridaExecmemFreeFunc) frida_kmod_find_symbol ("execmem_free");
+  if (alloc_rw == NULL || free == NULL)
+    return;
+
+  frida_execmem_alloc_rw_impl = alloc_rw;
+  frida_execmem_free_impl = free;
+#endif
 }
 
 /*
@@ -1775,13 +1809,28 @@ frida_kmod_free (void * ptr,
 void *
 frida_kmod_alloc_code (size_t size)
 {
-  return __vmalloc (PAGE_ALIGN (size), GFP_KERNEL | __GFP_ZERO);
+  size_t n_bytes = PAGE_ALIGN (size);
+
+#ifdef FRIDA_HAVE_EXECMEM
+  if (frida_execmem_alloc_rw_impl != NULL)
+    return frida_execmem_alloc_rw_impl (EXECMEM_MODULE_TEXT, n_bytes);
+#endif
+
+  return __vmalloc (n_bytes, GFP_KERNEL | __GFP_ZERO);
 }
 
 void
 frida_kmod_free_code (void * ptr,
                       size_t size)
 {
+#ifdef FRIDA_HAVE_EXECMEM
+  if (frida_execmem_alloc_rw_impl != NULL)
+    {
+      frida_execmem_free_impl (ptr);
+      return;
+    }
+#endif
+
   vfree (ptr);
 }
 
