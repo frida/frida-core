@@ -62,8 +62,8 @@ AGENT_RUSTFLAGS ?= -Zcf-protection=branch \
 	-Crelocation-model=static -Zplt=yes
 AGENT_CFLAGS ?= --target=x86_64-none-elf \
 	-Xclang -target-feature -Xclang +soft-float -mno-mmx -mno-sse -mno-red-zone \
-	-mlong-double-64 -mcmodel=kernel -fcf-protection=branch -fno-pic \
-	--sysroot=$(FRIDA_SDK)
+	-mlong-double-64 -mcmodel=kernel -fcf-protection=branch -fno-jump-tables \
+	-fno-pic --sysroot=$(FRIDA_SDK)
 else
 AGENT_RUSTFLAGS ?= -Zfixed-x18
 AGENT_CFLAGS ?= --target=aarch64-none-elf -mabi=aapcs-soft -mgeneral-regs-only \
