@@ -206,6 +206,7 @@ def host_kernel() -> Path:
 def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
     root = staging_dir / "root"
     (root / "bin").mkdir(parents=True)
+    (root / "dev").mkdir()
     (root / "proc").mkdir()
 
     shutil.copy(busybox, root / "bin" / "busybox")
@@ -219,6 +220,7 @@ def build_initramfs(staging_dir: Path, busybox: Path, module: Path) -> Path:
     init.write_text("\n".join([
         "#!/bin/sh",
         "mount -t proc proc /proc",
+        "mount -t devtmpfs dev /dev",
         f"insmod /{module.name} || echo {MODULE_LOAD_FAILED_MARKER}",
         "cat /proc/self/maps > /dev/null",
         "dmesg",
