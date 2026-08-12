@@ -141,6 +141,34 @@ tcp:27042` in place:
 
     frida -H 127.0.0.1:27042 -p 0
 
+## Injecting into userspace
+
+Loaded on a live system the module doubles as a ptrace-free injector for ordinary
+processes — how the Linux local backend reaches its targets when the module is
+present, falling back to `ptrace` when it is not. There is no second device node;
+the channel is `prctl()` with a magic option and a token in the fifth argument,
+
+    prctl(0x46524944, op, arg1, arg2, 0x1d5f9e6b2c7a4038)
+
+and any call whose option or token does not match falls through to the real
+prctl, so probing for the module looks like a stock kernel. `op` 32 pings and
+returns the magic.
+
+Allocate, free, read, write and spawn — the primitives the injector drives
+against a target pid — require `CAP_SYS_ADMIN`. A spawned thread is a real
+`CLONE_THREAD` sibling that adopts the target's mm, files, credentials,
+namespaces, fs and SysV semaphore undo list, so it is a native member of the
+group rather than a kernel thread wearing its address space.
+
+Cloaking is Gum's own registry mirrored into the kernel so it holds against
+`/proc` too: the module intercepts the `maps`, `smaps`, task and status readers
+and drops cloaked threads, ranges and fds while keeping the counts consistent. A
+process cloaks its own resources with the token alone — no capability — so an
+injected agent self-cloaks by forwarding Gum's updates over the same channel,
+and the loader adds the footprint the agent itself never sees. A cloaked thread
+still sees through the cloak when it reads `/proc`, so the agent is not blind to
+its own process.
+
 ## What the target kernel has to provide
 
 - **arm64.** The register-level pieces (`tcr_el1` for the page size, cache
@@ -151,7 +179,6 @@ tcp:27042` in place:
   table to the KMI symbol list on top of that. The shim resolves them by name
   through a kprobe, which is the standard way back in. Without kallsyms the module
   still loads but cannot look up symbols or change page permissions.
-- **`CONFIG_VSOCKETS`**, plus a vsock transport for the guest.
 - **Unsigned modules.** `CONFIG_MODULE_SIG_FORCE` must be off. Android's
   `CONFIG_MODULE_SIG_PROTECT` is fine: it only demands signatures for modules on
   the GKI list.
