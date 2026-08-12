@@ -137,9 +137,13 @@ FRIDA_KMOD_DEFS := \
 
 all: modules
 
+# A module that dies in its init path is left wedged under its own name until the
+# next boot, so bring-up wants a fresh one per attempt.
+MODULE_NAME ?= frida-agent
+
 modules: $(PRELINKED)
 	$(MAKE) -C $(KDIR) $(if $(KOUT),O=$(KOUT)) M=$(CURDIR) ARCH=$(ARCH) \
-		FRIDA_KMOD_DEFS="$(FRIDA_KMOD_DEFS)" modules
+		FRIDA_KMOD_DEFS="$(FRIDA_KMOD_DEFS)" MODULE_NAME=$(MODULE_NAME) modules
 
 $(PRELINKED): $(AGENT_LIB_SOFTFLOAT) $(LIBC)
 	$(AGENT_LD) -r -o $@.tmp \

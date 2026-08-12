@@ -149,6 +149,10 @@ pub fn find_symbol(name: &CStr) -> u64 {
     unsafe { frida_kmod_find_symbol(name.as_ptr()) }
 }
 
+pub fn find_function(name: &CStr) -> u64 {
+    unsafe { frida_kmod_find_function(name.as_ptr()) }
+}
+
 /// Resolves `address` to `(name, symbol_address)`, or `None` when it falls
 /// outside every known symbol.
 pub fn symbol_from_address(address: u64) -> Option<(String, u64)> {
@@ -225,6 +229,7 @@ unsafe extern "C" {
     fn frida_kmod_kernel_size() -> u64;
     fn frida_kmod_enumerate_modules(func: FoundModuleFunc, user_data: *mut c_void);
     fn frida_kmod_find_symbol(name: *const c_char) -> u64;
+    fn frida_kmod_find_function(name: *const c_char) -> u64;
     fn frida_kmod_symbol_name_from_address(
         address: u64,
         buffer: *mut c_char,

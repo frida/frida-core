@@ -1,10 +1,12 @@
-obj-m += frida-agent.o
+MODULE_NAME ?= frida-agent
+
+obj-m += $(MODULE_NAME).o
 
 # frida-agent-prelinked.o is not built from source here: it is the Rust agent, the
 # GumJS devkit and the C library collapsed into a single relocatable object by the prelink
 # step in Makefile. Copy it in through if_changed rather than kbuild's _shipped rule,
 # so the .cmd file modpost expects gets written.
-frida-agent-y := frida-kmod.o frida-agent-prelinked.o
+$(MODULE_NAME)-y := frida-kmod.o frida-agent-prelinked.o
 
 targets += frida-agent-prelinked.o
 
@@ -21,6 +23,6 @@ $(obj)/frida-agent-prelinked.o: $(src)/frida-agent-prelinked.o.bin FORCE
 # into. Both the blob and the module object it is linked into have to be excused,
 # since objtool runs over each.
 OBJECT_FILES_NON_STANDARD_frida-agent-prelinked.o := y
-OBJECT_FILES_NON_STANDARD_frida-agent.o := y
+OBJECT_FILES_NON_STANDARD_$(MODULE_NAME).o := y
 
 ccflags-y += -Wno-declaration-after-statement $(FRIDA_KMOD_DEFS)

@@ -45,6 +45,7 @@
 #endif
 
 #ifdef CONFIG_X86_64
+# include <asm/ibt.h>
 # include <asm/msr.h>
 # include <asm/processor-flags.h>
 # include <asm/segment.h>
@@ -280,6 +281,9 @@ int frida_agent_start (void);
 void frida_agent_stop (void);
 
 u64 frida_kmod_find_symbol (const char * name);
+u64 frida_kmod_find_function (const char * name);
+void * frida_kmod_remap_writable (u64 first_page, unsigned int n_pages);
+void frida_kmod_unmap_writable (void * mapping);
 void frida_kmod_wake (void);
 void frida_kmod_yield (void);
 void frida_kmod_install_hooks (void);
@@ -317,6 +321,7 @@ static void frida_cloak_forget (pid_t tgid);
 static struct frida_cloak * frida_cloak_find (pid_t tgid);
 static void * frida_resolve_unexported (const char * name);
 static void * frida_rewind_to_function_entry (void * address);
+static void * frida_unseal_landing_pad (void * address);
 static int frida_thread_trampoline (void * data);
 static int frida_dev_open (struct inode * inode, struct file * file);
 static int frida_dev_release (struct inode * inode, struct file * file);
@@ -493,10 +498,10 @@ frida_resolve_kallsyms (void)
    * callable but unexported. Being absent from Module.symvers only stops the module
    * loader from resolving them, so go through kallsyms like everything else here.
    */
-  frida_set_memory_ro_impl = (void *) frida_kallsyms_lookup_name_impl ("set_memory_ro");
-  frida_set_memory_rw_impl = (void *) frida_kallsyms_lookup_name_impl ("set_memory_rw");
-  frida_set_memory_x_impl = (void *) frida_kallsyms_lookup_name_impl ("set_memory_x");
-  frida_set_memory_nx_impl = (void *) frida_kallsyms_lookup_name_impl ("set_memory_nx");
+  frida_set_memory_ro_impl = (void *) frida_kmod_find_function ("set_memory_ro");
+  frida_set_memory_rw_impl = (void *) frida_kmod_find_function ("set_memory_rw");
+  frida_set_memory_x_impl = (void *) frida_kmod_find_function ("set_memory_x");
+  frida_set_memory_nx_impl = (void *) frida_kmod_find_function ("set_memory_nx");
 }
 
 static void
@@ -516,21 +521,21 @@ frida_resolve_kernel_range (void)
 static void
 frida_resolve_process_ops (void)
 {
-  frida_find_task_by_vpid_impl = (FridaFindTaskByVpidFunc) frida_kmod_find_symbol ("find_task_by_vpid");
-  frida_get_task_mm_impl = (FridaGetTaskMmFunc) frida_kmod_find_symbol ("get_task_mm");
-  frida_mmput_impl = (FridaMmputFunc) frida_kmod_find_symbol ("mmput");
-  frida_kthread_use_mm_impl = (FridaKthreadUseMmFunc) frida_kmod_find_symbol ("kthread_use_mm");
-  frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_symbol ("kthread_unuse_mm");
-  frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_symbol ("vm_mmap");
-  frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_symbol ("vm_munmap");
-  frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_symbol ("user_mode_thread");
-  frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_symbol ("detach_pid");
-  frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_symbol ("task_join_group_stop");
-  frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_symbol ("__cleanup_sighand");
-  frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_symbol ("kmem_cache_free");
-  frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_symbol ("put_files_struct");
-  frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_symbol ("switch_task_namespaces");
-  frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_symbol ("free_fs_struct");
+  frida_find_task_by_vpid_impl = (FridaFindTaskByVpidFunc) frida_kmod_find_function ("find_task_by_vpid");
+  frida_get_task_mm_impl = (FridaGetTaskMmFunc) frida_kmod_find_function ("get_task_mm");
+  frida_mmput_impl = (FridaMmputFunc) frida_kmod_find_function ("mmput");
+  frida_kthread_use_mm_impl = (FridaKthreadUseMmFunc) frida_kmod_find_function ("kthread_use_mm");
+  frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_function ("kthread_unuse_mm");
+  frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_function ("vm_mmap");
+  frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_function ("vm_munmap");
+  frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
+  frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
+  frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
+  frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
+  frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_function ("kmem_cache_free");
+  frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_function ("put_files_struct");
+  frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_function ("switch_task_namespaces");
+  frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_function ("free_fs_struct");
   frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
   frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
 }
@@ -568,18 +573,45 @@ frida_resolve_unexported (const char * name)
   address = kp.addr;
   unregister_kprobe (&kp);
 
-  return frida_rewind_to_function_entry (address);
+  return frida_unseal_landing_pad (frida_rewind_to_function_entry (address));
 }
 
 static void *
 frida_rewind_to_function_entry (void * address)
 {
-#ifdef CONFIG_X86_64
-  static const u8 endbr64[] = { 0xf3, 0x0f, 0x1e, 0xfa };
-  u8 * entry = (u8 *) address - sizeof (endbr64);
+#ifdef HAS_KERNEL_IBT
+  u32 * pad = (u32 *) ((u8 *) address - ENDBR_INSN_SIZE);
 
-  if (memcmp (entry, endbr64, sizeof (endbr64)) == 0)
-    return entry;
+  if (__is_endbr (*pad))
+    return pad;
+#endif
+
+  return address;
+}
+
+static void *
+frida_unseal_landing_pad (void * address)
+{
+#ifdef HAS_KERNEL_IBT
+  u32 * pad = address;
+  unsigned long first_page;
+  unsigned int n_pages;
+  void * alias;
+
+  if (*pad != gen_endbr_poison ())
+    return address;
+
+  first_page = (unsigned long) address & PAGE_MASK;
+  n_pages = ((((unsigned long) address + ENDBR_INSN_SIZE - 1) & PAGE_MASK)
+      - first_page) / PAGE_SIZE + 1;
+
+  alias = frida_kmod_remap_writable (first_page, n_pages);
+  if (alias == NULL)
+    return address;
+
+  *(u32 *) ((u8 *) alias + ((unsigned long) address - first_page)) = gen_endbr ();
+
+  frida_kmod_unmap_writable (alias);
 #endif
 
   return address;
@@ -2317,6 +2349,18 @@ frida_kmod_find_symbol (const char * name)
     return 0;
 
   return frida_kallsyms_lookup_name_impl (name);
+}
+
+u64
+frida_kmod_find_function (const char * name)
+{
+  u64 address;
+
+  address = frida_kmod_find_symbol (name);
+  if (address == 0)
+    return 0;
+
+  return (u64) (uintptr_t) frida_unseal_landing_pad ((void *) (uintptr_t) address);
 }
 
 /*

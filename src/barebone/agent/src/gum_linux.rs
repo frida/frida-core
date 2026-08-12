@@ -181,7 +181,7 @@ pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_find_function(name: *const gchar) -> gpointer {
-    let address = kernel::find_symbol(unsafe { CStr::from_ptr(name) });
+    let address = kernel::find_function(unsafe { CStr::from_ptr(name) });
     address as gpointer
 }
 
