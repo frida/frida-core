@@ -25,4 +25,4 @@ $(obj)/frida-agent-prelinked.o: $(src)/frida-agent-prelinked.o.bin FORCE
 OBJECT_FILES_NON_STANDARD_frida-agent-prelinked.o := y
 OBJECT_FILES_NON_STANDARD_$(MODULE_NAME).o := y
 
-ccflags-y += -Wno-declaration-after-statement $(FRIDA_KMOD_DEFS)
+ccflags-y += $(FRIDA_KMOD_DEFS)
