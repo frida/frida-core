@@ -37,9 +37,44 @@
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 
+#ifdef CONFIG_X86_64
+# include <asm/msr.h>
+# include <asm/processor-flags.h>
+# include <asm/segment.h>
+#endif
 #ifdef CONFIG_ARM64
 # include <asm/cacheflush.h>
 # include <asm/ptrace.h>
+#endif
+
+#ifdef CONFIG_X86_64
+# define FRIDA_SYSCALL_NAME_PRCTL "__x64_sys_prctl"
+# define FRIDA_SYSCALL_ARG0(regs) ((regs)->di)
+# define FRIDA_SYSCALL_ARG1(regs) ((regs)->si)
+# define FRIDA_SYSCALL_ARG2(regs) ((regs)->dx)
+# define FRIDA_SYSCALL_ARG3(regs) ((regs)->r10)
+# define FRIDA_SYSCALL_ARG4(regs) ((regs)->r8)
+# if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 16, 0)
+#  define frida_write_fsbase(value) wrmsrq (MSR_FS_BASE, value)
+# else
+#  define frida_write_fsbase(value) wrmsrl (MSR_FS_BASE, value)
+# endif
+#endif
+#ifdef CONFIG_ARM64
+# define FRIDA_SYSCALL_NAME_PRCTL "__arm64_sys_prctl"
+# define FRIDA_SYSCALL_ARG0(regs) ((regs)->regs[0])
+# define FRIDA_SYSCALL_ARG1(regs) ((regs)->regs[1])
+# define FRIDA_SYSCALL_ARG2(regs) ((regs)->regs[2])
+# define FRIDA_SYSCALL_ARG3(regs) ((regs)->regs[3])
+# define FRIDA_SYSCALL_ARG4(regs) ((regs)->regs[4])
+#endif
+
+#ifdef FRIDA_HAVE_FS_STRUCT_LOCK
+# define frida_fs_lock(fs) spin_lock (&(fs)->lock)
+# define frida_fs_unlock(fs) spin_unlock (&(fs)->lock)
+#else
+# define frida_fs_lock(fs) read_seqlock_excl (&(fs)->seq)
+# define frida_fs_unlock(fs) read_sequnlock_excl (&(fs)->seq)
 #endif
 
 /* Mirrors GumPageProtection. */
@@ -279,6 +314,7 @@ static ssize_t frida_dev_write (struct file * file, const char __user * buffer, 
 static __poll_t frida_dev_poll (struct file * file, struct poll_table_struct * wait);
 static struct page * frida_page_for_virtual (unsigned long address);
 static bool frida_is_vmalloc_or_module_addr (const void * x);
+static void frida_flush_icache_range (unsigned long start, unsigned long size);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 4, 0)
 static int frida_on_each_symbol (void * data, const char * name, unsigned long address);
 #else
@@ -907,6 +943,19 @@ frida_spawn_trampoline (void * data)
   put_task_struct (ctx.leader);
 
   memset (regs, 0, sizeof (struct pt_regs));
+#ifdef CONFIG_X86_64
+  regs->ip = ctx.entry;
+  regs->sp = ctx.stack;
+  regs->di = ctx.arg;
+  regs->cs = __USER_CS;
+  regs->ss = __USER_DS;
+  regs->flags = X86_EFLAGS_IF;
+  regs->orig_ax = -1;
+
+  current->thread.fsbase = ctx.tls;
+  frida_write_fsbase (ctx.tls);
+#endif
+#ifdef CONFIG_ARM64
   regs->pc = ctx.entry;
   regs->sp = ctx.stack;
   regs->regs[0] = ctx.arg;
@@ -914,6 +963,7 @@ frida_spawn_trampoline (void * data)
 
   current->thread.uw.tp_value = ctx.tls;
   write_sysreg (ctx.tls, tpidr_el0);
+#endif
 
   return 0;
 }
@@ -954,7 +1004,9 @@ frida_reparent_into_group (struct task_struct * leader)
 
   frida_task_join_group_stop_impl (child);
 
+#ifdef FRIDA_HAVE_TASK_THREAD_GROUP
   list_add_tail_rcu (&child->thread_group, &leader->thread_group);
+#endif
   list_add_tail_rcu (&child->thread_node, &leader->signal->thread_head);
 
   spin_unlock (&leader->sighand->siglock);
@@ -993,15 +1045,15 @@ frida_adopt_target_context (struct task_struct * leader)
   task_unlock (current);
   frida_put_files_struct_impl (old_files);
 
-  spin_lock (&fs->lock);
+  frida_fs_lock (fs);
   fs->users++;
-  spin_unlock (&fs->lock);
+  frida_fs_unlock (fs);
   task_lock (current);
   current->fs = fs;
   task_unlock (current);
-  spin_lock (&old_fs->lock);
+  frida_fs_lock (old_fs);
   fs_dead = --old_fs->users == 0;
-  spin_unlock (&old_fs->lock);
+  frida_fs_unlock (old_fs);
   if (fs_dead)
     frida_free_fs_struct_impl (old_fs);
 
@@ -1030,7 +1082,7 @@ frida_kmod_install_hooks (void)
   frida_show_map_addr = (void *) frida_kmod_find_symbol ("show_map");
   frida_show_smap_addr = (void *) frida_kmod_find_symbol ("show_smap");
   frida_proc_fill_cache_addr = (void *) frida_kmod_find_symbol ("proc_fill_cache");
-  frida_sys_prctl_addr = (void *) frida_kmod_find_symbol ("__arm64_sys_prctl");
+  frida_sys_prctl_addr = (void *) frida_kmod_find_symbol (FRIDA_SYSCALL_NAME_PRCTL);
   frida_proc_pid_status_addr = (void *) frida_kmod_find_symbol ("proc_pid_status");
   frida_do_task_stat_addr = (void *) frida_kmod_find_symbol ("do_task_stat");
   frida_release_task_addr = (void *) frida_kmod_find_symbol ("release_task");
@@ -1143,19 +1195,19 @@ frida_proc_fill_cache (struct file * file,
 static long __nocfi
 frida_sys_prctl (const struct pt_regs * regs)
 {
-  int option = regs->regs[0];
+  int option = FRIDA_SYSCALL_ARG0 (regs);
   unsigned long op, arg1, arg2;
   pid_t tgid;
   void __user * uargs;
 
-  if (option != FRIDA_CONTROL_MAGIC || regs->regs[4] != FRIDA_CONTROL_TOKEN)
+  if (option != FRIDA_CONTROL_MAGIC || FRIDA_SYSCALL_ARG4 (regs) != FRIDA_CONTROL_TOKEN)
     return frida_sys_prctl_orig (regs);
 
-  op = regs->regs[1];
-  arg1 = regs->regs[2];
-  arg2 = regs->regs[3];
+  op = FRIDA_SYSCALL_ARG1 (regs);
+  arg1 = FRIDA_SYSCALL_ARG2 (regs);
+  arg2 = FRIDA_SYSCALL_ARG3 (regs);
   tgid = current->tgid;
-  uargs = (void __user *) regs->regs[2];
+  uargs = (void __user *) FRIDA_SYSCALL_ARG2 (regs);
 
   if (op == FRIDA_CONTROL_OP_PING)
     return FRIDA_CONTROL_MAGIC;
@@ -2080,7 +2132,6 @@ void
 frida_kmod_unmap_writable (void * mapping)
 {
   struct frida_writable_alias * alias = NULL, * candidate;
-  unsigned long mapped_size;
 
   mutex_lock (&frida_writable_aliases_mutex);
   list_for_each_entry (candidate, &frida_writable_aliases, node)
@@ -2094,14 +2145,10 @@ frida_kmod_unmap_writable (void * mapping)
     }
   mutex_unlock (&frida_writable_aliases_mutex);
 
-  mapped_size = (unsigned long) alias->n_pages * PAGE_SIZE;
-
   vunmap (mapping);
 
-  /* flush_icache_range() inlines a reference to __icache_flags, which GKI does not
-   * export; these two are what it would have called. */
-  caches_clean_inval_pou (alias->first_page, alias->first_page + mapped_size);
-  kick_all_cpus_sync ();
+  frida_flush_icache_range (alias->first_page,
+      (unsigned long) alias->n_pages * PAGE_SIZE);
 
   kfree (alias);
 }
@@ -2136,6 +2183,18 @@ frida_is_vmalloc_or_module_addr (const void * x)
 #endif
 
   return is_vmalloc_addr (x);
+}
+
+static void
+frida_flush_icache_range (unsigned long start, unsigned long size)
+{
+#ifdef CONFIG_ARM64
+  /* flush_icache_range() inlines a reference to __icache_flags, which GKI does not
+   * export; these two are what it would have called. */
+  caches_clean_inval_pou (start, start + size);
+#endif
+
+  kick_all_cpus_sync ();
 }
 
 u64

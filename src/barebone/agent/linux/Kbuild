@@ -14,4 +14,13 @@ quiet_cmd_frida_agent_prelinked = COPY    $@
 $(obj)/frida-agent-prelinked.o: $(src)/frida-agent-prelinked.o.bin FORCE
 	$(call if_changed,frida_agent_prelinked)
 
-ccflags-y += -Wno-declaration-after-statement
+# On x86 objtool validates every object going into a module and generates its ORC
+# unwind tables. It was not built to read a JavaScript runtime linked against a
+# freestanding libc: it gives up on the first Rust switch jump table it cannot
+# follow, and the tables would only ever describe frames no kernel stack trace walks
+# into. Both the blob and the module object it is linked into have to be excused,
+# since objtool runs over each.
+OBJECT_FILES_NON_STANDARD_frida-agent-prelinked.o := y
+OBJECT_FILES_NON_STANDARD_frida-agent.o := y
+
+ccflags-y += -Wno-declaration-after-statement $(FRIDA_KMOD_DEFS)
