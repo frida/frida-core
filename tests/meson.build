@@ -41,6 +41,10 @@ if have_local_backend
   ]
 endif
 
+if have_barebone_backend
+  test_sources += 'test-barebone.vala'
+endif
+
 if have_compiler_backend
   test_sources += 'test-compiler.vala'
 endif
