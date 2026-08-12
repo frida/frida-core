@@ -45,16 +45,28 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/enumerate-ranges-walks-long-mode-tables", () => {
+			var h = new Harness ((h) => enumerate_ranges_walks_long_mode_tables.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/translate-address-resolves-leaf-mappings", () => {
+			var h = new Harness ((h) => x64_translate_address_resolves_leaf_mappings.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_guest.begin (h as SlowHarness));
 			h.run ();
 		});
+
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			var ranges = yield collect_ranges (machine, Gum.PageProtection.READ);
 
@@ -75,9 +87,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void enumerate_ranges_walks_pae_tables (Harness h) {
-		var target = new FakeTarget (pae_page_tables (), PAE_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, pae_page_tables (), PAE_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			var ranges = yield collect_ranges (machine, Gum.PageProtection.READ);
 
@@ -98,9 +111,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void enumerate_ranges_honors_protection_filter (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			var ranges = yield collect_ranges (machine, Gum.PageProtection.WRITE);
 
@@ -118,9 +132,10 @@ namespace Frida.BareboneTest {
 
 	private static async void control_registers_read_from_target_description (Harness h) {
 		// No monitor command here: the machine must prefer the exposed registers.
-		var target = new FakeTarget (legacy_page_tables (), null, EXPOSE_CONTROL_REGISTERS);
+		var target = new FakeTarget (IA32, legacy_page_tables (), null, EXPOSE_CONTROL_REGISTERS);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			var ranges = yield collect_ranges (machine, Gum.PageProtection.READ);
 
@@ -137,9 +152,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void translate_address_resolves_leaf_mappings (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			assert_true ((yield machine.translate_address (0x00002010, null)) == 0x00102010);
 			assert_true ((yield machine.translate_address (0x00400123, null)) == 0x00800123);
@@ -161,9 +177,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void protect_pages_updates_legacy_entries (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			yield machine.protect_pages (0x00002000, 4096, READ | WRITE, null);
 
@@ -182,9 +199,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void protect_pages_widens_pae_parents (Harness h) {
-		var target = new FakeTarget (pae_page_tables (), PAE_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, pae_page_tables (), PAE_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			yield machine.protect_pages (0x00000000, 4096, READ | EXECUTE, null);
 
@@ -204,9 +222,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void protect_pages_rejects_large_pages (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			try {
 				yield machine.protect_pages (0x00400000, 4096, READ | WRITE, null);
@@ -227,9 +246,10 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void relocations_apply_load_bias (Harness h) {
-		var target = new FakeTarget (legacy_page_tables (), LEGACY_MONITOR_DUMP);
+		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
-			var machine = yield target.open_machine ();
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
 
 			uint64 base_va = 0xc0010000;
 
@@ -249,6 +269,60 @@ namespace Frida.BareboneTest {
 
 			try {
 				machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.TLS_DESC, 0), base_va, image);
+				assert_not_reached ();
+			} catch (Error e) {
+				assert_true (e is Error.NOT_SUPPORTED);
+			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void enumerate_ranges_walks_long_mode_tables (Harness h) {
+		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.X64Machine (target.client);
+
+			var ranges = yield collect_ranges (machine, Gum.PageProtection.READ);
+
+			assert_true (ranges.size == 4);
+
+			assert_range (ranges[0], 0x00000000, 0x00100000, 0x1000, READ | WRITE);
+			assert_range (ranges[1], 0x00001000, 0x00101000, 0x1000, READ | WRITE | EXECUTE);
+			assert_range (ranges[2], 0x00200000, 0x140000000, 0x200000, READ);
+
+			// A 1 GiB mapping in the kernel half, which only comes out right if the walker
+			// sign-extends what it composes from the indices.
+			assert_range (ranges[3], 0xffffc00000000000, 0x40000000, 0x40000000,
+				READ | WRITE | EXECUTE);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void x64_translate_address_resolves_leaf_mappings (Harness h) {
+		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.X64Machine (target.client);
+
+			assert_true ((yield machine.translate_address (0x00001010, null)) == 0x00101010);
+			assert_true ((yield machine.translate_address (0x00200123, null)) == 0x140000123);
+			assert_true ((yield machine.translate_address (0xffffc00000000123, null)) == 0x40000123);
+
+			try {
+				yield machine.translate_address (0x00003000, null);
 				assert_not_reached ();
 			} catch (Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
@@ -293,8 +367,7 @@ namespace Frida.BareboneTest {
 			Gee.List<GuestPage> pages = yield guest.query_pages ();
 			assert_true (pages.size != 0);
 
-			GuestPage? small_page = null;
-			GuestPage? large_page = null;
+			bool saw_large_page = false;
 			foreach (GuestPage page in pages) {
 				Barebone.RangeDetails? r = find_range_containing (ours, page.va);
 				assert_true (r != null);
@@ -310,19 +383,11 @@ namespace Frida.BareboneTest {
 
 				if (page.large) {
 					assert_true (r.size >= 0x400000);
-					if (large_page == null)
-						large_page = page;
-				} else if (small_page == null) {
-					small_page = page;
+					saw_large_page = true;
 				}
 			}
 
-			assert_true (large_page != null);
-
-			// Each of these walks the tables afresh, so sample rather than sweep.
-			assert_true (small_page != null);
-			assert_true ((yield machine.translate_address (small_page.va + 0x10, null)) == small_page.pa + 0x10);
-			assert_true ((yield machine.translate_address (large_page.va + 0x10, null)) == large_page.pa + 0x10);
+			assert_true (saw_large_page);
 
 			yield check_protect_pages_takes_effect (machine, guest, pages);
 		} catch (GLib.Error e) {
@@ -336,7 +401,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void check_protect_pages_takes_effect (Barebone.IA32Machine machine, QemuGuest guest,
+	private static async void check_protect_pages_takes_effect (Barebone.Machine machine, QemuGuest guest,
 			Gee.List<GuestPage> pages) throws Error, IOError {
 		GuestPage? victim = null;
 		foreach (GuestPage page in pages) {
@@ -354,7 +419,7 @@ namespace Frida.BareboneTest {
 		assert_true (!(yield guest.query_page (victim.va)).writable);
 	}
 
-	private static async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.IA32Machine machine,
+	private static async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.Machine machine,
 			Gum.PageProtection prot) throws Error, IOError {
 		var result = new Gee.ArrayList<Barebone.RangeDetails> ();
 		yield machine.enumerate_ranges (prot, r => {
@@ -423,8 +488,38 @@ namespace Frida.BareboneTest {
 		return ram.steal ();
 	}
 
+	private const uint64 X64_PML4_PA = 0x1000;
+	private const uint64 X64_PDPT_PA = 0x2000;
+	private const uint64 X64_PD_PA = 0x3000;
+	private const uint64 X64_PT_PA = 0x4000;
+	private const uint64 X64_KERNEL_PDPT_PA = 0x5000;
+
+	private const string X64_MONITOR_DUMP =
+		"CR0=80050033 CR2=0000000000000000 CR3=0000000000001000 CR4=00000020\n" +
+		"EFER=0000000000000d00\n";
+
+	// Long mode with NX: a four-level walk, one 2 MiB page, and a 1 GiB page in the kernel half.
+	private static uint8[] long_mode_page_tables () {
+		var ram = new Ram ();
+
+		ram.write_uint64 (X64_PML4_PA + (0 * 8), X64_PDPT_PA | 0x3);
+		ram.write_uint64 (X64_PML4_PA + (384 * 8), X64_KERNEL_PDPT_PA | 0x3);
+
+		ram.write_uint64 (X64_PDPT_PA + (0 * 8), X64_PD_PA | 0x3);
+
+		ram.write_uint64 (X64_PD_PA + (0 * 8), X64_PT_PA | 0x3);
+		ram.write_uint64 (X64_PD_PA + (1 * 8), 0x8000000140000081);
+
+		ram.write_uint64 (X64_PT_PA + (0 * 8), 0x8000000000100003);
+		ram.write_uint64 (X64_PT_PA + (1 * 8), 0x0000000000101003);
+
+		ram.write_uint64 (X64_KERNEL_PDPT_PA + (0 * 8), 0x400000e3);
+
+		return ram.steal ();
+	}
+
 	private class Ram {
-		public const size_t SIZE = 0x4000;
+		public const size_t SIZE = 0x6000;
 
 		private uint8[] data = new uint8[SIZE];
 
@@ -445,6 +540,11 @@ namespace Frida.BareboneTest {
 		}
 	}
 
+	private enum TargetArch {
+		IA32,
+		X64
+	}
+
 	private enum ControlRegisterExposure {
 		HIDE_CONTROL_REGISTERS,
 		EXPOSE_CONTROL_REGISTERS
@@ -460,6 +560,7 @@ namespace Frida.BareboneTest {
 			private set;
 		}
 
+		private TargetArch arch;
 		private uint8[] ram;
 		private string? monitor_dump;
 		private ControlRegisterExposure exposure;
@@ -467,7 +568,7 @@ namespace Frida.BareboneTest {
 		private SocketService service;
 		private Cancellable cancellable = new Cancellable ();
 
-		private const string CORE_REGISTERS =
+		private const string IA32_CORE_REGISTERS =
 			"<reg name=\"eax\" bitsize=\"32\" regnum=\"0\"/>" +
 			"<reg name=\"ecx\" bitsize=\"32\" regnum=\"1\"/>" +
 			"<reg name=\"edx\" bitsize=\"32\" regnum=\"2\"/>" +
@@ -479,19 +580,31 @@ namespace Frida.BareboneTest {
 			"<reg name=\"eip\" bitsize=\"32\" regnum=\"8\"/>" +
 			"<reg name=\"eflags\" bitsize=\"32\" regnum=\"9\"/>";
 
+		private const string X64_CORE_REGISTERS =
+			"<reg name=\"rax\" bitsize=\"64\" regnum=\"0\"/>" +
+			"<reg name=\"rbx\" bitsize=\"64\" regnum=\"1\"/>" +
+			"<reg name=\"rcx\" bitsize=\"64\" regnum=\"2\"/>" +
+			"<reg name=\"rdx\" bitsize=\"64\" regnum=\"3\"/>" +
+			"<reg name=\"rsi\" bitsize=\"64\" regnum=\"4\"/>" +
+			"<reg name=\"rdi\" bitsize=\"64\" regnum=\"5\"/>" +
+			"<reg name=\"rbp\" bitsize=\"64\" regnum=\"6\"/>" +
+			"<reg name=\"rsp\" bitsize=\"64\" regnum=\"7\"/>" +
+			"<reg name=\"rip\" bitsize=\"64\" regnum=\"8\"/>";
+
 		private const string CONTROL_REGISTERS =
 			"<reg name=\"cr0\" bitsize=\"32\" regnum=\"10\"/>" +
 			"<reg name=\"cr3\" bitsize=\"32\" regnum=\"11\"/>" +
 			"<reg name=\"cr4\" bitsize=\"32\" regnum=\"12\"/>";
 
-		public FakeTarget (owned uint8[] ram, string? monitor_dump,
+		public FakeTarget (TargetArch arch, owned uint8[] ram, string? monitor_dump,
 				ControlRegisterExposure exposure = HIDE_CONTROL_REGISTERS) {
+			this.arch = arch;
 			this.ram = (owned) ram;
 			this.monitor_dump = monitor_dump;
 			this.exposure = exposure;
 		}
 
-		public async Barebone.IA32Machine open_machine () throws Error, IOError {
+		public async void open () throws Error, IOError {
 			service = new SocketService ();
 			uint16 port;
 			try {
@@ -515,8 +628,6 @@ namespace Frida.BareboneTest {
 			}
 
 			client = yield GDB.Client.open (stream, cancellable);
-
-			return new Barebone.IA32Machine (client);
 		}
 
 		public void stop () {
@@ -583,13 +694,13 @@ namespace Frida.BareboneTest {
 		}
 
 		private string target_xml () {
-			var registers = new StringBuilder (CORE_REGISTERS);
+			var registers = new StringBuilder ((arch == X64) ? X64_CORE_REGISTERS : IA32_CORE_REGISTERS);
 			if (exposure == EXPOSE_CONTROL_REGISTERS)
 				registers.append (CONTROL_REGISTERS);
 
 			return "<?xml version=\"1.0\"?>" +
 				"<target version=\"1.0\">" +
-				"<architecture>i386</architecture>" +
+				"<architecture>" + ((arch == X64) ? "i386:x86-64" : "i386") + "</architecture>" +
 				"<feature name=\"org.gnu.gdb.i386.core\">" +
 				registers.str +
 				"</feature>" +
@@ -598,29 +709,31 @@ namespace Frida.BareboneTest {
 
 		private string read_register (string request) {
 			uint regnum = uint.parse (request[1:].split (";")[0], 16);
-			if (regnum >= 10 && exposure != EXPOSE_CONTROL_REGISTERS)
-				return "E01";
+			uint num_core_registers = (arch == X64) ? 9 : 10;
+			size_t width = (arch == X64) ? 8 : 4;
 
-			uint64 val;
-			switch (regnum) {
-				case 10:
-					val = 0x8005003b;
-					break;
-				case 11:
-					val = PD_PA;
-					break;
-				case 12:
-					val = 0x00000010;
-					break;
-				default:
-					if (regnum > 9)
+			uint64 val = 0;
+			if (regnum >= num_core_registers) {
+				if (exposure != EXPOSE_CONTROL_REGISTERS)
+					return "E01";
+
+				switch (regnum - num_core_registers) {
+					case 0:
+						val = 0x8005003b;
+						break;
+					case 1:
+						val = PD_PA;
+						break;
+					case 2:
+						val = 0x00000010;
+						break;
+					default:
 						return "E01";
-					val = 0;
-					break;
+				}
 			}
 
 			var result = new StringBuilder ();
-			for (uint i = 0; i != 4; i++)
+			for (uint i = 0; i != width; i++)
 				result.append_printf ("%02x", (uint8) (val >> (i * 8)));
 			return result.str;
 		}

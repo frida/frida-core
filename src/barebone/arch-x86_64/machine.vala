@@ -14,10 +14,23 @@ namespace Frida.Barebone {
 			get { return "small"; }
 		}
 
+		public PhysicalMemory? physical_memory {
+			get {
+				return page_tables.physical_memory;
+			}
+			set {
+				page_tables.physical_memory = value;
+			}
+		}
+
+		private X86PageTables page_tables;
+
 		private const uint NUM_ARGS_IN_REGS = 6;
 
 		public X64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
+
+			page_tables = new X86PageTables (gdb);
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
@@ -30,7 +43,12 @@ namespace Frida.Barebone {
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 				throws Error, IOError {
-			throw_not_supported ();
+			foreach (RangeDetails r in coalesce_ranges (yield page_tables.collect_ranges (cancellable))) {
+				if ((r.protection & prot) != prot)
+					continue;
+				if (!func (r))
+					return;
+			}
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
@@ -192,6 +210,10 @@ namespace Frida.Barebone {
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
 				throws Error, IOError {
 			throw_not_supported ();
+		}
+
+		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+			return yield page_tables.translate (va, cancellable);
 		}
 	}
 }
