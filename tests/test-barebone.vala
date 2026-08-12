@@ -65,6 +65,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/relocations-apply-load-bias", () => {
+			var h = new Harness ((h) => x64_relocations_apply_load_bias.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_guest.begin (h as SlowHarness));
 			h.run ();
@@ -397,6 +402,43 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async void x64_relocations_apply_load_bias (Harness h) {
+		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.X64Machine (target.client);
+
+			uint64 base_va = 0xffffffff81000000;
+
+			var image = target.client.make_buffer (new Bytes (new uint8[20]));
+			image.write_uint64 (0, 0x40);
+			image.write_uint64 (8, 0x80);
+			image.write_uint32 (16, 0x11223344);
+
+			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.@64, 0), base_va, image);
+			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.RELATIVE, 8), base_va, image);
+			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.PC32, 16), base_va, image);
+
+			assert_true (image.read_uint64 (0) == 0xffffffff81000040);
+			assert_true (image.read_uint64 (8) == 0xffffffff81000080);
+			assert_true (image.read_uint32 (16) == 0x11223344);
+
+			try {
+				machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.TLSGD, 0), base_va, image);
+				assert_not_reached ();
+			} catch (Error e) {
+				assert_true (e is Error.NOT_SUPPORTED);
+			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
 	/**
 	 * The fake-stub tests above pin down the bit-level behaviour; this one checks the walker
 	 * against a real MMU, using a stock Linux guest whose page tables QEMU can describe to us
@@ -497,7 +539,7 @@ namespace Frida.BareboneTest {
 		assert_true (r.protection == prot);
 	}
 
-	private static Gum.ElfRelocationDetails make_relocation (Gum.ElfIA32Relocation type, uint64 address) {
+	private static Gum.ElfRelocationDetails make_relocation (uint32 type, uint64 address) {
 		var r = Gum.ElfRelocationDetails ();
 		r.address = address;
 		r.type = type;
