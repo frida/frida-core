@@ -21,25 +21,61 @@ is otherwise identical, so the host side sees the same `(yqv)` frames.
 
 ## Building
 
-Four inputs: this repository, a GumJS devkit built for `none-arm64-softfloat`, the
-soft-float SDK it was built against, and the kernel the module is for. The example
-below targets a Pixel; adapt the kernel step to whatever the system is.
+Four inputs: this repository, a GumJS devkit built for `none-<arch>-softfloat`, the
+soft-float SDK it was built against, and the kernel the module is for. `Makefile`
+covers x86_64 and arm64, and defaults to the architecture of the machine building.
+
+Building for the running kernel is a good deal shorter than cross-building for a
+device, so that walkthrough comes first; the arm64 one below it is the same steps
+with the kernel obtained from elsewhere.
 
 ### Toolchain
 
-    rustup target add aarch64-unknown-none
+    rustup target add x86_64-unknown-none    # or aarch64-unknown-none
     rustup component add rust-src
-    sudo apt-get install build-essential clang binutils-aarch64-linux-gnu
+    sudo dnf install clang binutils kernel-devel-$(uname -r)
 
 clang must be 19 or newer, since that is where `-mabi=aapcs-soft` landed; GCC does
-not implement it at any version. The binutils are for the prelink, which reads the
-archive map that only GNU `nm` prints — the LLVM one does not. The host compiler is
-for Cargo's own build scripts, which run on the machine doing the building.
+not implement it at any version, nor does it reach x86_64's soft-float ABI. The
+binutils are for the prelink, which reads the archive map that only GNU `nm` prints —
+the LLVM one does not; cross-building wants the target's, natively the host's own
+will do. The host compiler is for Cargo's own build scripts, which run on the machine
+doing the building.
 
 The commands below are run from the top of this repository, with `releng` checked
 out — `git submodule update --init releng` if the clone did not recurse.
 
-### The devkit and the SDK
+### For the running x86_64 kernel
+
+No prebuilt bundles are published for `none-x86_64-softfloat`, so both inputs are
+built locally, against the same SDK:
+
+    releng/deps.py build --bundle=sdk --host=none-x86_64-softfloat
+    mkdir -p ~/sdk-none-x86_64-softfloat
+    tar -C ~/sdk-none-x86_64-softfloat -xf deps/sdk-none-x86_64-softfloat.tar.xz
+
+    gum=subprojects/frida-gum
+    mkdir -p $gum/build/none-x86_64-softfloat
+    (cd $gum/build/none-x86_64-softfloat \
+        && FRIDA_DEPS=$PWD/../../../../deps ../../configure \
+            --host=none-x86_64-softfloat \
+            --enable-gumjs \
+            --with-devkits=gumjs \
+            --with-devkit-symbol-scope=original \
+        && make)
+
+    make -C src/barebone/agent/linux \
+        FRIDA_SDK=$HOME/sdk-none-x86_64-softfloat \
+        GUMJS_DEVKIT_DIR=$PWD/$gum/build/none-x86_64-softfloat/bindings/gumjs/devkit
+
+Everything else — `KDIR`, the Rust target, the binutils, the kernel's own name for the
+architecture — follows from the running kernel.
+
+### For an arm64 device
+
+Here there are published bundles to start from, and the kernel has to be assembled.
+
+#### The devkit and the SDK
 
     version=17.17.0
     base=https://github.com/frida/frida/releases/download/$version
@@ -53,7 +89,7 @@ The SDK carries picolibc and the compiler-rt builtins the devkit expects to be l
 against, and `releng/deps.toml` pins which one. Mixing a devkit with an SDK built for
 a different libc leaves undefined symbols at prelink time.
 
-### The kernel
+#### The kernel
 
 Nothing here needs the device's own kernel to be built, but the config alone is not
 enough either. `uname -r` ends in the GKI commit and the build number:
@@ -82,7 +118,7 @@ that includes the source's, hence both `KDIR` and `KOUT` below.
 A different GKI build of the same branch does not substitute for these: vermagic is
 compared verbatim, and it names the exact build.
 
-### Build
+#### Build
 
     make -C src/barebone/agent/linux \
         FRIDA_SDK=$HOME/sdk-none-arm64-softfloat \
@@ -171,8 +207,10 @@ its own process.
 
 ## What the target kernel has to provide
 
-- **arm64.** The register-level pieces (`tcr_el1` for the page size, cache
-  maintenance) are aarch64-only, matching the XNU flavour.
+- **x86_64 or arm64.** The register-level pieces — the page size, cache maintenance,
+  where the syscall ABI leaves prctl()'s arguments, and how a spawned thread's
+  registers are set up for its return to userspace — have a half for each. The XNU
+  flavour remains arm64-only.
 - **`CONFIG_KPROBES` and `CONFIG_KALLSYMS_ALL`.** A good deal of what the shim
   needs is compiled in but not exported — `kallsyms_lookup_name`,
   `kallsyms_on_each_symbol` and `set_memory_*` all are, and GKI trims its export
@@ -185,19 +223,36 @@ its own process.
 
 ## Kernel ABI constraints
 
-A hardened arm64 kernel imposes an ABI on anything linked into it, and both of the
-constraints below are why this flavour is built against a soft-float SDK
-(`none-arm64-softfloat`) rather than the prebuilt `none-arm64` one.
+A hardened kernel imposes an ABI on anything linked into it, and the FP constraint
+below is why this flavour is built against a soft-float SDK
+(`none-arm64-softfloat`, `none-x86_64-softfloat`) rather than an ordinary bare-metal
+one. The remaining constraints are per-architecture.
 
 - **FP/SIMD.** JavaScript numbers are doubles, so a hardfloat build would use FP
-  for as long as the runtime lives. Kernels from 6.9 preserve kernel-mode FP/SIMD
-  across sleeping, but before 6.9 there is no correct way to hold it:
+  for as long as the runtime lives, and neither architecture lets a kernel thread
+  hold it for free — x86 wants every stretch bracketed by `kernel_fpu_begin()`, and
+  on arm64 kernels before 6.9 there is no correct way to hold it at all:
   `kernel_neon_begin()` runs with preemption disabled so we cannot sleep under it,
   and the scheduler does not save a kernel thread's FP registers — live values are
   lost on preemption and the FP state of whichever user task was interrupted is
-  corrupted. Building everything `-mabi=aapcs-soft -mgeneral-regs-only` removes the
-  question rather than answering it.
-- **Shadow call stack.** With `CONFIG_SHADOW_CALL_STACK` the kernel reserves x18, so
+  corrupted. Building everything soft-float removes the question rather than
+  answering it: `-mabi=aapcs-soft -mgeneral-regs-only` on arm64, and on x86_64
+  LLVM's `+soft-float`, which is also what Rust's own `x86_64-unknown-none` turns
+  on, so the two halves agree on where a double travels. `-mno-sse` alone does not
+  reach the ABI; and `long double` has to be narrowed to 64 bits with
+  `-mlong-double-64`, since soft-float has no lowering for x87's 80-bit format and
+  LLVM crashes rather than calling out to a builtin.
+- **Indirect branch tracking (x86_64).** With `CONFIG_X86_KERNEL_IBT` an indirect
+  call landing on anything but an `endbr64` faults, so everything linked in is built
+  `-fcf-protection=branch` and the Rust half `-Zcf-protection=branch`.
+- **Kernel code model and red zone (x86_64).** Modules are loaded into the top 2GB
+  of the address space and their relocations are resolved as if by `-mcmodel=kernel`,
+  and there is no red zone below the stack pointer for an interrupt to step on. Both
+  come with the Rust target; the C half is told explicitly.
+- **objtool (x86_64).** It validates every object entering a module and builds its
+  ORC unwind tables, and was not written to read a JavaScript runtime linked against
+  a freestanding libc. `Kbuild` marks the prelinked blob `OBJECT_FILES_NON_STANDARD`.
+- **Shadow call stack (arm64).** With `CONFIG_SHADOW_CALL_STACK` the kernel reserves x18, so
   the SDK and Gum are built `-ffixed-x18` and the Rust half with `-Zfixed-x18`.
   Anything linked in that uses x18 as a scratch register overwrites the kernel's SCS
   pointer, and the thread then returns through whatever that address happens to hold.
@@ -210,25 +265,27 @@ constraints below are why this flavour is built against a soft-float SDK
 ## The soft-float libc
 
 The libc is picolibc and the compiler runtime is compiler-rt, both from the
-`none-arm64-softfloat` SDK that `FRIDA_SDK` points at. `Makefile` trims a copy of its
+soft-float SDK that `FRIDA_SDK` points at. `Makefile` trims a copy of its
 `libc.a` before the prelink: the agent implements `malloc`, the C library's locks and
 its process stubs over the kernel's own facilities, so picolibc's are duplicate
 definitions rather than fallbacks. The set is derived from what the agent defines
 rather than listed, since picolibc moves things between releases.
 
-Those compiler-rt builtins are load-bearing in a way that is easy to miss. Rust's
-toolchain carries its own `compiler_builtins`, compiled for the ordinary AAPCS where a
-double travels in `d0`, and the prelink whole-archives the Rust staticlib — so without
-the filtering step in `Makefile` those definitions answer the C library's calls to
-`__muldf3` and friends, which pass the same double in `x0`. Nothing crashes. The
+On arm64 those compiler-rt builtins are load-bearing in a way that is easy to miss.
+Rust's toolchain carries its own `compiler_builtins`, compiled for the ordinary AAPCS
+where a double travels in `d0`, and the prelink whole-archives the Rust staticlib — so
+without the filtering step in `Makefile` those definitions answer the C library's calls
+to `__muldf3` and friends, which pass the same double in `x0`. Nothing crashes. The
 arithmetic simply returns garbage, and the first thing to notice is GLib deciding a
-hash table need not grow.
+hash table need not grow. x86_64 needs none of that filtering: soft-float is part of
+the Rust target there, so the copy `-Z build-std` compiles already agrees with the C
+half.
 
 ## What a script may look like
 
 The runtime compiles scripts on a kernel thread's stack, and QuickJS parses
 expressions by recursion, so the ceiling is nesting rather than length: roughly
-fourteen levels of parentheses or fifteen of object literals on arm64 Linux, where
-that stack is 16 KiB. A script that exceeds it fails to compile rather than taking
+fourteen levels of parentheses or fifteen of object literals on arm64 Linux, whose
+kernel stack is 16 KiB — as is x86_64's. A script that exceeds it fails to compile rather than taking
 anything down, though the message is not always `stack overflow` — an over-deep
 `if`/`else` chain reports `expecting ';'`. Long scripts are fine; deep ones are not.
