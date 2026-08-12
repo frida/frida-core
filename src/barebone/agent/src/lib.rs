@@ -127,7 +127,7 @@ impl HandlerResponse {
                 g_variant_new(
                     c"(bv)".as_ptr(),
                     0,
-                    g_variant_new_string(c_message.as_ptr()),
+                    g_variant_new_string(c_message.as_ptr() as *const core::ffi::c_char),
                 )
             },
         }
@@ -946,7 +946,10 @@ unsafe fn get_script_by_id(script_id: u32) -> Option<*mut GumScript> {
     }
 }
 
-unsafe extern "C" fn frida_panic_handler(message: *const u8, _user_data: *mut c_void) {
+unsafe extern "C" fn frida_panic_handler(
+    message: *const core::ffi::c_char,
+    _user_data: *mut c_void,
+) {
     let msg = unsafe { CStr::from_ptr(message).to_str().unwrap() };
     panic!("[Frida] {}", msg);
 }

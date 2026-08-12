@@ -28,6 +28,13 @@ pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
     kernel::current_thread_id()
 }
 
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_page_size() -> guint {
+    4096
+}
+
+#[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_page_size() -> guint {
     unsafe {

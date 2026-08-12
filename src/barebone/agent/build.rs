@@ -8,7 +8,8 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let devkit_dir = PathBuf::from(env::var("GUMJS_DEVKIT_DIR").unwrap());
 
-    let cc_str = env::var("CC_aarch64_unknown_none")
+    let target = env::var("TARGET").unwrap();
+    let cc_str = env::var(format!("CC_{}", target.replace('-', "_")))
             .or_else(|_| env::var("CC"))
             .unwrap_or_else(|_| "cc".to_string());
     // Same convention as cc-rs: the variable may carry flags, and a bare-metal
@@ -29,7 +30,7 @@ fn main() {
         .header(devkit_dir.join("frida-gumjs.h").to_str().unwrap())
         .clang_arg("-nostdinc")
         .clang_arg("-target")
-        .clang_arg("aarch64-none-elf")
+        .clang_arg(format!("{}-none-elf", target.split('-').next().unwrap()))
         .clang_args(cc_clang_args)
         .clang_arg(format!("-I{}", devkit_dir.to_str().unwrap()))
         .merge_extern_blocks(true)
