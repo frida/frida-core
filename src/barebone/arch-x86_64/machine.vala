@@ -63,10 +63,10 @@ namespace Frida.Barebone {
 			var num_stack_args = int.max ((int) arity - (int) NUM_ARGS_IN_REGS, 0);
 			var stack = yield gdb.read_buffer (original_rsp, (1 + num_stack_args) * 8, cancellable);
 
-			return new Arm64CallFrame (thread, regs, stack, original_rsp);
+			return new X64CallFrame (thread, regs, stack, original_rsp);
 		}
 
-		private class Arm64CallFrame : Object, CallFrame {
+		private class X64CallFrame : Object, CallFrame {
 			public uint64 return_address {
 				get { return stack.read_uint64 (0); }
 			}
@@ -90,7 +90,7 @@ namespace Frida.Barebone {
 				MODIFIED
 			}
 
-			public Arm64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_rsp) {
+			public X64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_rsp) {
 				this.thread = thread;
 
 				this.regs = regs;
