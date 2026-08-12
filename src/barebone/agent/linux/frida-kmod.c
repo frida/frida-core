@@ -284,6 +284,8 @@ u64 frida_kmod_find_symbol (const char * name);
 u64 frida_kmod_find_function (const char * name);
 void * frida_kmod_remap_writable (u64 first_page, unsigned int n_pages);
 void frida_kmod_unmap_writable (void * mapping);
+unsigned int frida_kmod_wait_prepare (void);
+void frida_kmod_wait_commit (unsigned int seq, s64 timeout_us);
 void frida_kmod_wake (void);
 void frida_kmod_yield (void);
 void frida_kmod_install_hooks (void);
@@ -339,6 +341,8 @@ static int frida_on_each_symbol (void * data, const char * name, unsigned long a
 static int frida_on_each_symbol (void * data, const char * name, struct module * mod,
     unsigned long address);
 #endif
+static bool frida_can_sleep (void);
+static void frida_spin_until_woken (unsigned int seq, s64 timeout_us);
 static bool frida_should_wake (unsigned int seq);
 static void frida_strip_module_suffix (char * rendered);
 
@@ -2095,6 +2099,13 @@ frida_kmod_wait_commit (unsigned int seq,
   capped_timeout_us = (timeout_us < 0)
       ? FRIDA_WAIT_FOREVER_SLICE_US
       : min_t (s64, timeout_us, FRIDA_WAIT_FOREVER_SLICE_US);
+
+  if (!frida_can_sleep ())
+    {
+      frida_spin_until_woken (seq, capped_timeout_us);
+      return;
+    }
+
   timeout = max_t (long, (capped_timeout_us * HZ) / USEC_PER_SEC, 1);
 
   wait_event_timeout (frida_wq, frida_should_wake (seq), timeout);
@@ -2106,6 +2117,24 @@ frida_kmod_wait_commit (unsigned int seq,
  * bump the sequence that the arming then reads as its baseline — and the agent would
  * sleep with a frame already waiting.
  */
+static bool
+frida_can_sleep (void)
+{
+  return preemptible () && rcu_preempt_depth () == 0;
+}
+
+static void
+frida_spin_until_woken (unsigned int seq,
+                        s64 timeout_us)
+{
+  ktime_t deadline;
+
+  deadline = ktime_add_us (ktime_get (), timeout_us);
+
+  while (!frida_should_wake (seq) && ktime_before (ktime_get (), deadline))
+    cpu_relax ();
+}
+
 static bool
 frida_should_wake (unsigned int seq)
 {
@@ -2130,7 +2159,10 @@ frida_kmod_wake (void)
 void
 frida_kmod_yield (void)
 {
-  cond_resched ();
+  if (frida_can_sleep ())
+    cond_resched ();
+  else
+    cpu_relax ();
 }
 
 s64
