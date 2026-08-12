@@ -45,6 +45,10 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
+			var h = new SlowHarness ((h) => qemu_walk_matches_guest.begin (h as SlowHarness));
+			h.run ();
+		});
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
@@ -257,6 +261,97 @@ namespace Frida.BareboneTest {
 		}
 
 		h.done ();
+	}
+
+	/**
+	 * The fake-stub tests above pin down the bit-level behaviour; this one checks the walker
+	 * against a real MMU, using a stock Linux guest whose page tables QEMU can describe to us
+	 * independently. The guest is non-PAE with PSE, so it covers the legacy two-level walk and
+	 * 4 MiB pages; PAE and NX remain the fake stub's job.
+	 */
+	private static async void qemu_walk_matches_guest (SlowHarness h) {
+		QemuGuest? guest = null;
+		try {
+			string? unavailable_reason = yield QemuGuest.check_availability ();
+			if (unavailable_reason != null) {
+				stdout.printf ("<skipping: %s> ", unavailable_reason);
+				h.done ();
+				return;
+			}
+
+			guest = yield QemuGuest.boot ();
+			assert_true (guest != null);
+
+			var machine = new Barebone.IA32Machine (guest.client);
+
+			var ours = yield collect_ranges (machine, Gum.PageProtection.READ);
+			assert_true (ours.size != 0);
+
+			Gee.List<Interval> mapped_by_guest = yield guest.query_mapped_intervals ();
+			assert_intervals_equal (merge_by_virtual_address (ours), mapped_by_guest);
+
+			Gee.List<GuestPage> pages = yield guest.query_pages ();
+			assert_true (pages.size != 0);
+
+			GuestPage? small_page = null;
+			GuestPage? large_page = null;
+			foreach (GuestPage page in pages) {
+				Barebone.RangeDetails? r = find_range_containing (ours, page.va);
+				assert_true (r != null);
+
+				assert_true (r.virtual_to_physical (page.va) == page.pa);
+
+				// QEMU reports the leaf entry's own bits, while the walker ANDs in every level
+				// above it, so the walker's rights can only ever be the narrower of the two.
+				if ((r.protection & Gum.PageProtection.WRITE) != 0)
+					assert_true (page.writable);
+				if ((r.protection & Gum.PageProtection.EXECUTE) != 0)
+					assert_true (!page.no_execute);
+
+				if (page.large) {
+					assert_true (r.size >= 0x400000);
+					if (large_page == null)
+						large_page = page;
+				} else if (small_page == null) {
+					small_page = page;
+				}
+			}
+
+			assert_true (large_page != null);
+
+			// Each of these walks the tables afresh, so sample rather than sweep.
+			assert_true (small_page != null);
+			assert_true ((yield machine.translate_address (small_page.va + 0x10, null)) == small_page.pa + 0x10);
+			assert_true ((yield machine.translate_address (large_page.va + 0x10, null)) == large_page.pa + 0x10);
+
+			yield check_protect_pages_takes_effect (machine, guest, pages);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			if (guest != null)
+				guest.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void check_protect_pages_takes_effect (Barebone.IA32Machine machine, QemuGuest guest,
+			Gee.List<GuestPage> pages) throws Error, IOError {
+		GuestPage? victim = null;
+		foreach (GuestPage page in pages) {
+			if (!page.writable && !page.large) {
+				victim = page;
+				break;
+			}
+		}
+		assert_true (victim != null);
+
+		yield machine.protect_pages (victim.va, 4096, READ | WRITE, null);
+		assert_true ((yield guest.query_page (victim.va)).writable);
+
+		yield machine.protect_pages (victim.va, 4096, READ, null);
+		assert_true (!(yield guest.query_page (victim.va)).writable);
 	}
 
 	private static async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.IA32Machine machine,
@@ -617,9 +712,284 @@ namespace Frida.BareboneTest {
 		}
 	}
 
+	private static Barebone.RangeDetails? find_range_containing (Gee.List<Barebone.RangeDetails> ranges, uint64 va) {
+		int lo = 0;
+		int hi = ranges.size - 1;
+		while (lo <= hi) {
+			int mid = (lo + hi) / 2;
+			Barebone.RangeDetails r = ranges[mid];
+			if (va < r.base_va)
+				hi = mid - 1;
+			else if (va >= r.end)
+				lo = mid + 1;
+			else
+				return r;
+		}
+		return null;
+	}
+
+	private static Gee.List<Interval> merge_by_virtual_address (Gee.List<Barebone.RangeDetails> ranges) {
+		var result = new Gee.ArrayList<Interval> ();
+
+		foreach (Barebone.RangeDetails r in ranges) {
+			if (result.size != 0 && result[result.size - 1].end == r.base_va) {
+				result[result.size - 1].end = r.end;
+				continue;
+			}
+			result.add (new Interval (r.base_va, r.end));
+		}
+
+		return result;
+	}
+
+	private static void assert_intervals_equal (Gee.List<Interval> actual, Gee.List<Interval> expected) {
+		assert_true (actual.size == expected.size);
+		for (int i = 0; i != actual.size; i++) {
+			assert_true (actual[i].start == expected[i].start);
+			assert_true (actual[i].end == expected[i].end);
+		}
+	}
+
+	// A class rather than a struct: the merging below updates entries in place, and a Gee list
+	// hands back copies of struct elements.
+	private class Interval {
+		public uint64 start;
+		public uint64 end;
+
+		public Interval (uint64 start, uint64 end) {
+			this.start = start;
+			this.end = end;
+		}
+	}
+
+	private class GuestPage {
+		public uint64 va;
+		public uint64 pa;
+		public bool writable;
+		public bool no_execute;
+		public bool large;
+	}
+
+	/**
+	 * A QEMU guest with the GDB stub attached, plus the monitor commands that let us check our
+	 * own answers against QEMU's view of the very same tables.
+	 */
+	private class QemuGuest : Object {
+		public GDB.Client client {
+			get;
+			private set;
+		}
+
+		private Subprocess process;
+		private Cancellable cancellable = new Cancellable ();
+
+		private const uint CONNECT_TIMEOUT_MSEC = 10000;
+		private const uint BOOT_TIMEOUT_SEC = 180;
+
+		public static async string? check_availability () {
+			try {
+				var checker = new Subprocess (SubprocessFlags.STDOUT_SILENCE | SubprocessFlags.STDERR_PIPE,
+					"python3", script_path (), "check-x86");
+
+				string stderr_buf;
+				yield checker.communicate_utf8_async (null, null, null, out stderr_buf);
+				if (checker.get_exit_status () == 0)
+					return null;
+
+				return (stderr_buf != null) ? stderr_buf.strip () : "unable to prepare the guest";
+			} catch (GLib.Error e) {
+				return e.message;
+			}
+		}
+
+		public static async QemuGuest? boot () throws Error, IOError {
+			uint16 port = pick_unused_port ();
+
+			Subprocess process;
+			try {
+				process = new Subprocess (SubprocessFlags.STDOUT_PIPE,
+					"python3", script_path (), "boot-x86", "--gdb-port", port.to_string ());
+			} catch (GLib.Error e) {
+				return null;
+			}
+
+			var guest = new QemuGuest ();
+			guest.process = process;
+
+			if (!yield guest.wait_until_booted ()) {
+				guest.stop ();
+				return null;
+			}
+
+			IOStream? stream = yield guest.connect_to_stub (port);
+			if (stream == null) {
+				guest.stop ();
+				return null;
+			}
+
+			// Attaching is what pauses the guest, and it stays paused for the rest of the test.
+			guest.client = yield GDB.Client.open (stream, guest.cancellable);
+
+			return guest;
+		}
+
+		public void stop () {
+			cancellable.cancel ();
+			process.force_exit ();
+		}
+
+		private async IOStream? connect_to_stub (uint16 port) throws Error, IOError {
+			var timer = new Timer ();
+			var socket_client = new SocketClient ();
+
+			do {
+				try {
+					return yield socket_client.connect_to_host_async ("127.0.0.1", port, cancellable);
+				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
+				}
+
+				yield sleep (250);
+			} while ((uint) (timer.elapsed () * 1000.0) < CONNECT_TIMEOUT_MSEC);
+
+			return null;
+		}
+
+		private async bool wait_until_booted () throws IOError {
+			var input = new DataInputStream (process.get_stdout_pipe ());
+
+			var timeout_source = new TimeoutSource.seconds (BOOT_TIMEOUT_SEC);
+			timeout_source.set_callback (() => {
+				cancellable.cancel ();
+				return false;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+
+			try {
+				string? line = yield input.read_line_async (Priority.DEFAULT, cancellable);
+				return line != null && line.strip () == "ready";
+			} catch (GLib.Error e) {
+				return false;
+			} finally {
+				timeout_source.destroy ();
+			}
+		}
+
+		public async Gee.List<Interval> query_mapped_intervals () throws Error, IOError {
+			var result = new Gee.ArrayList<Interval> ();
+
+			// E.g.: 00000000c0000000-00000000c009b000 000000000009b000 -rw
+			string dump = yield client.run_remote_command ("info mem", cancellable);
+			foreach (string line in dump.split ("\n")) {
+				string[] tokens = tokenize (line);
+				if (tokens.length != 3)
+					continue;
+
+				string[] bounds = tokens[0].split ("-");
+				if (bounds.length != 2)
+					continue;
+
+				var interval = new Interval (uint64.parse (bounds[0], 16), uint64.parse (bounds[1], 16));
+
+				if (result.size != 0 && result[result.size - 1].end == interval.start) {
+					result[result.size - 1].end = interval.end;
+					continue;
+				}
+				result.add (interval);
+			}
+
+			return result;
+		}
+
+		public async Gee.List<GuestPage> query_pages () throws Error, IOError {
+			var result = new Gee.ArrayList<GuestPage> ();
+
+			// E.g.: 00000000d07ea000: 0000000001150000 -G--A----
+			string dump = yield client.run_remote_command ("info tlb", cancellable);
+			foreach (string line in dump.split ("\n")) {
+				string[] tokens = tokenize (line);
+				if (tokens.length != 3 || !tokens[0].has_suffix (":"))
+					continue;
+				unowned string flags = tokens[2];
+				if (flags.length != NUM_PAGE_FLAGS)
+					continue;
+
+				result.add (new GuestPage () {
+					va = uint64.parse (tokens[0][0:-1], 16),
+					pa = uint64.parse (tokens[1], 16),
+					writable = flags[WRITABLE_FLAG] == 'W',
+					no_execute = flags[NO_EXECUTE_FLAG] == 'X',
+					large = flags[LARGE_PAGE_FLAG] == 'P'
+				});
+			}
+
+			return result;
+		}
+
+		public async GuestPage query_page (uint64 va) throws Error, IOError {
+			foreach (GuestPage page in yield query_pages ()) {
+				if (page.va == va)
+					return page;
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Guest no longer maps 0x%08x", (uint32) va);
+		}
+
+		private static string[] tokenize (string text) {
+			var result = new Gee.ArrayList<string> ();
+			foreach (string token in text.split_set (" \t\r\n")) {
+				if (token.length != 0)
+					result.add (token);
+			}
+			return result.to_array ();
+		}
+
+		private static string script_path () {
+			return Path.build_filename (TESTS_SRCDIR, "vm.py");
+		}
+
+		private static uint16 pick_unused_port () throws Error {
+			var service = new SocketService ();
+			try {
+				uint16 port = service.add_any_inet_port (null);
+				service.stop ();
+				return port;
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		private async void sleep (uint msec) {
+			var source = new TimeoutSource (msec);
+			source.set_callback (sleep.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+		}
+
+		private const int NUM_PAGE_FLAGS = 9;
+		private const int NO_EXECUTE_FLAG = 0;
+		private const int LARGE_PAGE_FLAG = 2;
+		private const int WRITABLE_FLAG = 8;
+	}
+
+	[CCode (cname = "FRIDA_TESTS_SRCDIR")]
+	private extern const string TESTS_SRCDIR;
+
 	private class Harness : Frida.Test.AsyncHarness {
 		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
+		}
+	}
+
+	// The first run downloads the kernel before it can boot the guest.
+	private class SlowHarness : Frida.Test.AsyncHarness {
+		public SlowHarness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
+			base ((owned) func);
+		}
+
+		protected override uint provide_timeout () {
+			return 900;
 		}
 	}
 }

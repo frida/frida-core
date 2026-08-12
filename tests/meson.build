@@ -58,6 +58,7 @@ else
 endif
 
 frida_tests = static_library('frida-tests', test_sources,
+  c_args: ['-DFRIDA_TESTS_SRCDIR="' + meson.current_source_dir() + '"'],
   vala_args: [
     '--pkg=gmodule-2.0',
     test_vala_args,
