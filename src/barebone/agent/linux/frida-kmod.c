@@ -547,8 +547,8 @@ frida_resolve_code_allocator (void)
   FridaExecmemAllocRwFunc alloc_rw;
   FridaExecmemFreeFunc free;
 
-  alloc_rw = (FridaExecmemAllocRwFunc) frida_kmod_find_symbol ("execmem_alloc_rw");
-  free = (FridaExecmemFreeFunc) frida_kmod_find_symbol ("execmem_free");
+  alloc_rw = (FridaExecmemAllocRwFunc) frida_kmod_find_function ("execmem_alloc_rw");
+  free = (FridaExecmemFreeFunc) frida_kmod_find_function ("execmem_free");
   if (alloc_rw == NULL || free == NULL)
     return;
 
