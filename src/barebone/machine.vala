@@ -192,6 +192,35 @@ namespace Frida.Barebone {
 		public abstract async void disable (Cancellable? cancellable) throws Error, IOError;
 	}
 
+	internal enum AddressingMode {
+		VIRTUAL,
+		PHYSICAL
+	}
+
+	// Restoring the mode must be awaited rather than fired and forgotten: a reply left in flight
+	// arrives while the next command is pending, and that command consumes it instead — leaving
+	// its caller with an empty response and the stub still in the old mode. Vala rejects a yield
+	// inside a finally block, so callers hold on to any failure across the restore.
+	internal static async void set_addressing_mode (GDB.Client gdb, AddressingMode mode, Cancellable? cancellable)
+			throws Error, IOError {
+		Gee.Set<string> features = gdb.features;
+		string enabled = (mode == PHYSICAL) ? "1" : "0";
+		if ("qemu-phy-mem-mode" in features)
+			yield gdb.execute_simple ("Qqemu.PhyMemMode:" + enabled, cancellable);
+		else if ("vf-phy-mem-mode" in features)
+			yield gdb.execute_simple ("Qvf.PhyMemMode:" + enabled, cancellable);
+		else
+			throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
+	}
+
+	internal static void throw_if_failed (GLib.Error? failure) throws Error, IOError {
+		if (failure == null)
+			return;
+		if (failure is IOError)
+			throw (IOError) failure;
+		throw (Error) failure;
+	}
+
 	internal static uint64 round_address_up (uint64 address, size_t n) {
 		return (address + n - 1) & ~((uint64) n - 1);
 	}

@@ -32,11 +32,6 @@ namespace Frida.Barebone {
 		private uint64 code_template_descriptor;
 		private bool code_template_known = false;
 
-		private enum AddressingMode {
-			VIRTUAL,
-			PHYSICAL
-		}
-
 		private const uint NUM_ARGS_IN_REGS = 8;
 
 		private const uint64 INT2_MASK = 0x3ULL;
@@ -90,11 +85,14 @@ namespace Frida.Barebone {
 			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
 
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			GLib.Error? failure = null;
 			try {
 				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p, result, cancellable);
-			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			throw_if_failed (failure);
 
 			return result;
 		}
@@ -185,22 +183,22 @@ namespace Frida.Barebone {
 				throws Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
-			// The bridge reads and writes guest physical memory directly, so the stub's
-			// physical-addressing mode (which requires a halted target) is unnecessary.
-			bool needs_stub_addressing = physical_memory == null;
-			if (needs_stub_addressing)
-				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield begin_physical_addressing (cancellable);
+			Allocation? allocation = null;
+			GLib.Error? failure = null;
 			try {
-				Allocation? allocation = yield maybe_insert_descriptor_in_table (physical_addresses, p.tt1, p.first_level,
+				allocation = yield maybe_insert_descriptor_in_table (physical_addresses, p.tt1, p.first_level,
 					p.upper_bits, p, cancellable);
-				if (allocation == null)
-					throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
-
-				return allocation;
-			} finally {
-				if (needs_stub_addressing)
-					set_addressing_mode.begin (gdb, VIRTUAL, null);
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield end_physical_addressing (cancellable);
+			throw_if_failed (failure);
+
+			if (allocation == null)
+				throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
+
+			return allocation;
 		}
 
 		private async Allocation? maybe_insert_descriptor_in_table (Gee.List<uint64?> physical_addresses,
@@ -339,27 +337,36 @@ namespace Frida.Barebone {
 				return;
 			}
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			GLib.Error? failure = null;
 			try {
 				yield gdb.write_byte_array (pa, new Bytes (data), cancellable);
-			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			throw_if_failed (failure);
 		}
 
 		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
 			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			uint8[]? data = null;
+			GLib.Error? failure = null;
 			try {
-				return (yield gdb.read_byte_array (pa, size, cancellable)).get_data ();
-			} finally {
-				set_addressing_mode.begin (gdb, VIRTUAL, null);
+				data = (yield gdb.read_byte_array (pa, size, cancellable)).get_data ();
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			throw_if_failed (failure);
+
+			return data;
 		}
 
 		public async uint64 read_level3_descriptor (uint64 va, Cancellable? cancellable) throws Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
-			bool needs_stub_addressing = physical_memory == null;
-			if (needs_stub_addressing)
-				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield begin_physical_addressing (cancellable);
+			uint64 descriptor = 0;
+			GLib.Error? failure = null;
 			try {
 				var cache = new TableWalkCache ();
 				uint64 table_pa = yield find_level3_table (va, p, cache, cancellable);
@@ -369,20 +376,22 @@ namespace Frida.Barebone {
 				uint64 index = (va >> index_shift) & index_mask;
 				uint64 slot_pa = table_pa + (index * Descriptor.SIZE);
 				var buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
-				return buf.read_uint64 (0);
-			} finally {
-				if (needs_stub_addressing)
-					set_addressing_mode.begin (gdb, VIRTUAL, null);
+				descriptor = buf.read_uint64 (0);
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield end_physical_addressing (cancellable);
+			throw_if_failed (failure);
+
+			return descriptor;
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
 				throws Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
-			bool needs_stub_addressing = physical_memory == null;
-			if (needs_stub_addressing)
-				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield begin_physical_addressing (cancellable);
+			GLib.Error? failure = null;
 			try {
 				uint64 page_mask = p.granule - 1;
 				uint64 aligned_va = virtual_address & ~page_mask;
@@ -390,10 +399,23 @@ namespace Frida.Barebone {
 				uint num_pages = (uint) ((aligned_end - aligned_va) / p.granule);
 
 				yield perform_protect_pages (aligned_va, num_pages, prot, p, cancellable);
-			} finally {
-				if (needs_stub_addressing)
-					set_addressing_mode.begin (gdb, VIRTUAL, null);
+			} catch (GLib.Error e) {
+				failure = e;
 			}
+			yield end_physical_addressing (cancellable);
+			throw_if_failed (failure);
+		}
+
+		// The bridge reads and writes guest physical memory directly, so the stub's
+		// physical-addressing mode, which requires a halted target, is unnecessary.
+		private async void begin_physical_addressing (Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory == null)
+				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+		}
+
+		private async void end_physical_addressing (Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory == null)
+				yield set_addressing_mode (gdb, VIRTUAL, cancellable);
 		}
 
 		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
@@ -1051,18 +1073,6 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private static async void set_addressing_mode (GDB.Client gdb, AddressingMode mode, Cancellable? cancellable)
-				throws Error, IOError {
-			Gee.Set<string> features = gdb.features;
-			string enabled = (mode == PHYSICAL) ? "1" : "0";
-			if ("qemu-phy-mem-mode" in features)
-				yield gdb.execute_simple ("Qqemu.PhyMemMode:" + enabled, cancellable);
-			else if ("vf-phy-mem-mode" in features)
-				yield gdb.execute_simple ("Qvf.PhyMemMode:" + enabled, cancellable);
-			else
-				throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
-		}
-
 		private class MMUParameters {
 			public Granule granule;
 			public uint first_level;
@@ -1280,11 +1290,14 @@ namespace Frida.Barebone {
 				Bytes d = old_descriptors;
 				old_descriptors = null;
 				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+				GLib.Error? failure = null;
 				try {
 					yield gdb.write_byte_array (first_slot, d, cancellable);
-				} finally {
-					set_addressing_mode.begin (gdb, VIRTUAL, null);
+				} catch (GLib.Error e) {
+					failure = e;
 				}
+				yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+				throw_if_failed (failure);
 			}
 		}
 
