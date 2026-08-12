@@ -316,6 +316,7 @@ static bool frida_cloak_has_fd (pid_t tgid, int fd);
 static void frida_cloak_forget (pid_t tgid);
 static struct frida_cloak * frida_cloak_find (pid_t tgid);
 static void * frida_resolve_unexported (const char * name);
+static void * frida_rewind_to_function_entry (void * address);
 static int frida_thread_trampoline (void * data);
 static int frida_dev_open (struct inode * inode, struct file * file);
 static int frida_dev_release (struct inode * inode, struct file * file);
@@ -566,6 +567,20 @@ frida_resolve_unexported (const char * name)
     return NULL;
   address = kp.addr;
   unregister_kprobe (&kp);
+
+  return frida_rewind_to_function_entry (address);
+}
+
+static void *
+frida_rewind_to_function_entry (void * address)
+{
+#ifdef CONFIG_X86_64
+  static const u8 endbr64[] = { 0xf3, 0x0f, 0x1e, 0xfa };
+  u8 * entry = (u8 *) address - sizeof (endbr64);
+
+  if (memcmp (entry, endbr64, sizeof (endbr64)) == 0)
+    return entry;
+#endif
 
   return address;
 }
