@@ -9,24 +9,27 @@ use crate::bindings::{gpointer, gulong};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 // Our implementation structures that overlay the opaque GLib structures
 
-#[repr(C, align(8))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 struct MutexImpl {
     lock: AtomicU32,
     _padding: [u8; core::mem::size_of::<GMutex>() - core::mem::size_of::<AtomicU32>()],
 }
 
-#[repr(C, align(8))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 struct RecMutexImpl {
-    owner: AtomicU64,     // Thread ID of the owner (uses the 'p' field)
+    owner: AtomicUsize,   // Thread ID of the owner (uses the 'p' field)
     count: AtomicU32,     // Recursion count (uses i[0])
     _unused: u32,         // Unused (uses i[1])
 }
 
-#[repr(C, align(8))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 struct RWLockImpl {
     state: AtomicU32,     // Lock state (readers count + writer bit)
     _padding: [u8; core::mem::size_of::<GRWLock>() - core::mem::size_of::<AtomicU32>()],
@@ -34,7 +37,8 @@ struct RWLockImpl {
 
 // A generation counter rather than a flag: a flag stays set once signalled, so every
 // later wait returns at once and the caller's loop spins instead of blocking.
-#[repr(C, align(8))]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 struct CondImpl {
     generation: AtomicU32,
     _padding: [u8; core::mem::size_of::<GCond>() - core::mem::size_of::<AtomicU32>()],
@@ -208,12 +212,12 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl) -> bool {
             .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            impl_.owner.store(crate::kernel::current_thread_id(), Ordering::Relaxed);
+            impl_.owner.store(crate::kernel::current_thread_id() as usize, Ordering::Relaxed);
             return true;
         }
     } else {
         let current_owner = impl_.owner.load(Ordering::Relaxed);
-        if current_owner == crate::kernel::current_thread_id() {
+        if current_owner == crate::kernel::current_thread_id() as usize {
             if impl_.count
                 .compare_exchange_weak(
                     current_count,

@@ -627,11 +627,11 @@ fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
         }
 
         let variant_type = g_variant_type_new(c"(yqv)".as_ptr());
-        let data_copy = g_memdup2(data.as_ptr() as *const c_void, data.len() as u64);
+        let data_copy = g_memdup2(data.as_ptr() as *const c_void, data.len() as gsize);
         let variant = g_variant_new_from_data(
             variant_type,
             data_copy,
-            data.len() as u64,
+            data.len() as gsize,
             0,
             Some(g_free),
             data_copy,

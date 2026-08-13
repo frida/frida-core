@@ -25,7 +25,7 @@ use crate::gum_xnu::enumerate_exports_in_range;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
-    kernel::current_thread_id()
+    kernel::current_thread_id() as GumThreadId
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -243,7 +243,7 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
 
         enumerate_exports_in_range(
             range.base_address,
-            range.base_address + range.size,
+            range.base_address + range.size as u64,
             &mut on_export,
         );
     }
