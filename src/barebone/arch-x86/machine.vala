@@ -51,7 +51,7 @@ namespace Frida.Barebone {
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
-			throw_not_supported ();
+			return yield page_tables.map (physical_addresses, cancellable);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
