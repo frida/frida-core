@@ -19,17 +19,29 @@ PROFILE ?= release
 
 # The kernel's own name for the architecture, and the one Rust knows it by. Both
 # follow from the machine this is built for, which defaults to the one building.
-ARCH ?= $(shell uname -m | sed -e 's/^x86_64$$/x86/' -e 's/^aarch64$$/arm64/')
+ARCH ?= $(shell uname -m \
+	| sed -e 's/^i[3-6]86$$/x86/' -e 's/^x86_64$$/x86/' -e 's/^aarch64$$/arm64/')
+BITS ?= $(shell uname -m \
+	| sed -e 's/^i[3-6]86$$/32/' -e 's/^x86_64$$/64/' -e 's/^aarch64$$/64/')
 
-ifeq ($(ARCH),x86)
-RUST_TARGET ?= x86_64-unknown-none
+ifeq ($(ARCH)-$(BITS),x86-32)
+RUST_TARGET ?= i686-unknown-none
+AGENT_TARGET_FLAGS ?= --target $(AGENT_DIR)/$(RUST_TARGET).json -Z json-target-spec
+SDK_ARCH ?= x86
 TOOLPREFIX ?=
-else ifeq ($(ARCH),arm64)
+else ifeq ($(ARCH)-$(BITS),x86-64)
+RUST_TARGET ?= x86_64-unknown-none
+SDK_ARCH ?= x86_64
+TOOLPREFIX ?=
+else ifeq ($(ARCH)-$(BITS),arm64-64)
 RUST_TARGET ?= aarch64-unknown-none
+SDK_ARCH ?= arm64
 TOOLPREFIX ?= aarch64-none-elf-
 else
-$(error Unsupported ARCH "$(ARCH)"; this flavour covers x86 and arm64)
+$(error Unsupported ARCH "$(ARCH)" and BITS "$(BITS)"; this flavour covers \
+	x86/32, x86/64 and arm64/64)
 endif
+AGENT_TARGET_FLAGS ?= --target $(RUST_TARGET)
 
 AGENT_DIR := $(CURDIR)/..
 AGENT_TARGET_DIR := $(AGENT_DIR)/target-linux
@@ -56,7 +68,12 @@ AGENT_OBJCOPY ?= $(TOOLPREFIX)objcopy
 # itself. On arm64
 # it is x18, which the kernel reserves for the shadow call stack, so nothing linked in
 # may use it as a general-purpose register.
-ifeq ($(ARCH),x86)
+ifeq ($(ARCH)-$(BITS),x86-32)
+AGENT_RUSTFLAGS ?=
+AGENT_CFLAGS ?= --target=i386-none-elf \
+	-Xclang -target-feature -Xclang +soft-float -mno-mmx -mno-sse \
+	-mlong-double-64 -fno-pic --sysroot=$(FRIDA_SDK)
+else ifeq ($(ARCH)-$(BITS),x86-64)
 AGENT_RUSTFLAGS ?= -Zcf-protection=branch \
 	-Cllvm-args=--min-jump-table-entries=65536 \
 	-Crelocation-model=static -Zplt=yes
@@ -83,7 +100,7 @@ AGENT_CFLAGS += -isystem $(FRIDA_SDK)/include \
 
 # The soft-float SDK, whose libc is picolibc and whose compiler runtime is
 # compiler-rt. GCC's own newlib and libgcc are hard-float and cannot be used here.
-FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-$(if $(filter x86,$(ARCH)),x86_64,arm64)-softfloat SDK prefix)
+FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-$(SDK_ARCH)-softfloat SDK prefix)
 LIBM = $(FRIDA_SDK)/lib/libm.a
 LIBBUILTINS = $(FRIDA_SDK)/lib/libclang_rt.builtins.a
 
@@ -176,7 +193,7 @@ agent:
 	cd $(AGENT_DIR) && RUSTC_BOOTSTRAP=1 RUSTFLAGS="$(AGENT_RUSTFLAGS)" \
 		CC_$(subst -,_,$(RUST_TARGET))="$(AGENT_CC) $(AGENT_CFLAGS)" \
 		cargo build --$(PROFILE) \
-		--target $(RUST_TARGET) --features linux \
+		$(AGENT_TARGET_FLAGS) --features linux \
 		--target-dir $(AGENT_TARGET_DIR) $(AGENT_BUILD_STD)
 
 clean:
