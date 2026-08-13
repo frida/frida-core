@@ -5,7 +5,7 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::gum::gum_barebone_query_page_size;
-use crate::{kernel, xnu};
+use crate::kernel;
 
 const MMIO_SIZE: u64 = 0x200;
 
@@ -108,7 +108,7 @@ struct DmaPage {
 fn dma_page_alloc() -> DmaPage {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
     let va = kernel::alloc(len);
-    let pa = xnu::ml_vtophys(va as u64);
+    let pa = kernel::virt_to_phys(va as u64);
     DmaPage { va, pa }
 }
 
@@ -274,7 +274,7 @@ impl Hostlink {
         let page_size = gum_barebone_query_page_size();
         PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
 
-        let mmio = xnu::ml_io_map(mmio_base, MMIO_SIZE) as *mut u8;
+        let mmio = kernel::map_io(mmio_base, MMIO_SIZE) as *mut u8;
         if mmio.is_null() {
             return Err(());
         }
@@ -313,7 +313,7 @@ impl Hostlink {
 
         w32(mmio, STATUS, r32(mmio, STATUS) | ST_DRV_OK);
 
-        xnu::install_interrupt_handler(
+        kernel::install_interrupt_handler(
             irq_line,
             wake_token as *mut c_void,
             isr_wake,
@@ -758,6 +758,12 @@ fn feat_set(mmio: *mut u8, sel: u32, v: u32) {
     w32(mmio, DRVFEAT, v)
 }
 
+#[cfg(target_arch = "x86")]
+fn wmb() {
+    unsafe { core::arch::asm!("sfence", options(nostack, preserves_flags)) }
+}
+
+#[cfg(target_arch = "aarch64")]
 fn wmb() {
     unsafe { core::arch::asm!("dmb ishst", options(nostack, preserves_flags)) }
 }

@@ -181,11 +181,11 @@ pub fn clock_get_calendar_microtime() -> (u32, u32) {
     (secs, microsecs)
 }
 
-pub fn ml_io_map(phys_addr: u64, size: u64) -> *mut c_void {
+pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe { _ml_io_map(phys_addr, size) }
 }
 
-pub fn ml_vtophys(vaddr: u64) -> u64 {
+pub fn virt_to_phys(vaddr: u64) -> u64 {
     unsafe { _ml_vtophys(vaddr) }
 }
 
