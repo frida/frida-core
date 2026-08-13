@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import NamedTuple
 import urllib.request
 
@@ -25,6 +26,18 @@ def main():
                                          help=f"boot a minimal {arch} guest with the GDB stub enabled")
             boot.add_argument("--gdb-port", type=int, required=True)
             boot.add_argument("--memory", type=int, default=256)
+
+        for command, help_text in [
+            ("check-win95", "verify that the Windows 95 guest can be booted"),
+            ("boot-win95", "boot a Windows 95 disk image with the GDB stub enabled"),
+        ]:
+            win95 = subparsers.add_parser(command, help=help_text)
+            win95.add_argument("--image", type=Path, required=True)
+            win95.add_argument("--format", default="qcow2")
+            if command.startswith("boot"):
+                win95.add_argument("--gdb-port", type=int, required=True)
+                win95.add_argument("--memory", type=int, default=128)
+                win95.add_argument("--boot-seconds", type=int, default=120)
 
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
@@ -45,6 +58,11 @@ def main():
                 check_kmod_guest()
             else:
                 boot_kmod_guest(args)
+        elif target == "win95":
+            if action == "check":
+                check_win95_guest(args)
+            else:
+                boot_win95_guest(args)
         elif action == "check":
             check_guest(target)
         else:
@@ -120,6 +138,59 @@ def boot_guest(arch: str, args):
         raise Unavailable("guest exited before it finished booting")
     finally:
         process.kill()
+
+
+def check_win95_guest(args):
+    require_win95(args)
+    print("ok")
+
+
+def boot_win95_guest(args):
+    """
+    Boot a Windows 95 disk image and hand it to QEMU's GDB stub.
+
+    Windows 95 says nothing on the serial line, so there is no marker to wait for the way the
+    Linux guests provide one. Give the boot a fixed budget instead and let the caller decide
+    whether what it finds looks like a kernel with its page tables up.
+
+    TCG rather than KVM: the stub is well-behaved there, and it sidesteps the divide overflow
+    that fast processors provoke in this kernel.
+    """
+    qemu = require_win95(args)
+
+    process = subprocess.Popen([
+        qemu,
+        "-machine", "pc,accel=tcg",
+        "-cpu", "pentium",
+        "-m", str(args.memory),
+        "-drive", f"file={args.image},format={args.format},if=ide",
+        "-vga", "cirrus",
+        "-nic", "none",
+        "-display", "none",
+        "-monitor", "none",
+        "-no-reboot",
+        "-gdb", f"tcp::{args.gdb_port}",
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    try:
+        for _ in range(args.boot_seconds):
+            if process.poll() is not None:
+                raise Unavailable("guest exited before it finished booting")
+            time.sleep(1)
+
+        print("ready", flush=True)
+        process.wait()
+    finally:
+        process.kill()
+
+
+def require_win95(args) -> str:
+    qemu = shutil.which("qemu-system-i386")
+    if qemu is None:
+        raise Unavailable("qemu-system-i386 is not installed")
+    if not args.image.exists():
+        raise Unavailable(f"{args.image} does not exist")
+    return qemu
 
 
 def check_kmod_guest():
