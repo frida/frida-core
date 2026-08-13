@@ -45,6 +45,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/allocate-pages-spans-leaf-tables", () => {
+			var h = new Harness ((h) => allocate_pages_spans_leaf_tables.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/protect-pages-spans-leaf-tables", () => {
+			var h = new Harness ((h) => protect_pages_spans_leaf_tables.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/enumerate-ranges-walks-long-mode-tables", () => {
 			var h = new Harness ((h) => enumerate_ranges_walks_long_mode_tables.begin (h as Harness));
 			h.run ();
@@ -332,6 +342,68 @@ namespace Frida.BareboneTest {
 			} catch (Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void allocate_pages_spans_leaf_tables (Harness h) {
+		var target = new FakeTarget (IA32, adjacent_leaf_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
+
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			for (uint i = 0; i != 3; i++)
+				physical_addresses.add (0x00200000 + (i * 4096));
+
+			var allocation = yield machine.allocate_pages (physical_addresses, null);
+
+			// The last two of the first table, then the first of the second.
+			uint64 first_free = (uint64) (SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST) * 4096;
+			assert_true (allocation.virtual_address == first_free);
+			assert_true (allocation.size == 3 * 4096);
+
+			uint slot = SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST;
+			assert_true (target.read_uint32 (SPAN_PT0_PA + (slot * 4)) == 0x00200003);
+			assert_true (target.read_uint32 (SPAN_PT0_PA + ((slot + 1) * 4)) == 0x00201003);
+			assert_true (target.read_uint32 (SPAN_PT1_PA + (0 * 4)) == 0x00202003);
+
+			yield allocation.deallocate (null);
+
+			assert_true (target.read_uint32 (SPAN_PT0_PA + (slot * 4)) == 0);
+			assert_true (target.read_uint32 (SPAN_PT1_PA + (0 * 4)) == 0);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void protect_pages_spans_leaf_tables (Harness h) {
+		var target = new FakeTarget (IA32, adjacent_leaf_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
+
+			// The last mapped page of the first table, and the first page of the second.
+			uint last_slot = SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST - 1;
+			uint64 start_va = (uint64) last_slot * 4096;
+			yield machine.protect_pages (start_va, 4096, READ, null);
+
+			uint32 entry = target.read_uint32 (SPAN_PT0_PA + (last_slot * 4));
+			assert_true ((entry & 0x2) == 0);
+			assert_true ((entry & 0x1) != 0);
+
+			assert_true ((target.read_uint32 (SPAN_PT0_PA + ((last_slot - 1) * 4)) & 0x2) != 0);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
 			assert_not_reached ();
@@ -962,6 +1034,26 @@ namespace Frida.BareboneTest {
 		ram.write_uint32 (PT_PA + (0 * 4), 0x00100003);
 		ram.write_uint32 (PT_PA + (1 * 4), 0x00101003);
 		ram.write_uint32 (PT_PA + (2 * 4), 0x00102001);
+
+		return ram.steal ();
+	}
+
+	private const uint64 SPAN_PT0_PA = 0x4000;
+	private const uint64 SPAN_PT1_PA = 0x5000;
+	private const uint SPAN_ENTRIES_PER_TABLE = 1024;
+	private const uint SPAN_FREE_IN_FIRST = 2;
+
+	// Two adjacent leaf tables, the first all but full, so anything longer than what
+	// it has left has to carry on into the second.
+	private static uint8[] adjacent_leaf_tables () {
+		var ram = new Ram ();
+
+		ram.write_uint32 (PD_PA + (0 * 4), (uint32) SPAN_PT0_PA | 0x7);
+		ram.write_uint32 (PD_PA + (1 * 4), (uint32) SPAN_PT1_PA | 0x7);
+
+		uint occupied = SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST;
+		for (uint i = 0; i != occupied; i++)
+			ram.write_uint32 (SPAN_PT0_PA + (i * 4), (uint32) (0x00100000 + (i * 0x1000)) | 0x3);
 
 		return ram.steal ();
 	}
