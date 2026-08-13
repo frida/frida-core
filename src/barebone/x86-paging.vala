@@ -117,25 +117,65 @@ namespace Frida.Barebone {
 			GLib.Error? failure = null;
 			try {
 				var relaxed_slots = new Gee.HashSet<uint64?> (Numeric.uint64_hash, Numeric.uint64_equal);
-				for (uint64 page_va = start_va; page_va != end_va; page_va += PAGE_SIZE) {
-					LeafEntry leaf = yield find_leaf_entry (page_va, p, cancellable);
-					if (leaf.level != p.leaf_level) {
-						throw new Error.NOT_SUPPORTED (
-							"Unable to change protection of the large page mapping at 0x%" +
-							uint64.FORMAT_MODIFIER + "x", page_va);
-					}
+				Level leaf = p.levels[p.leaf_level];
+
+				uint64 page_va = start_va;
+				while (page_va != end_va) {
+					uint64 table_pa = yield find_leaf_table (page_va, p, cancellable);
+
+					uint index = (uint) ((page_va >> leaf.shift) & (leaf.num_entries - 1));
+					uint64 remaining_here = (uint64) (leaf.num_entries - index) * PAGE_SIZE;
+					uint64 chunk_end = uint64.min (end_va, page_va + remaining_here);
+					uint num_pages = (uint) ((chunk_end - page_va) / PAGE_SIZE);
 
 					yield relax_parent_entries (page_va, prot, p, relaxed_slots, cancellable);
 
-					uint64 new_entry = apply_protection_bits (leaf.value, prot, p);
-					if (new_entry != leaf.value)
-						yield write_entry (leaf.slot_pa, new_entry, p, cancellable);
+					uint64 first_slot = table_pa + ((uint64) index * p.entry_size);
+					Buffer current = yield read_buffer (first_slot, num_pages * p.entry_size,
+						cancellable);
+
+					var builder = gdb.make_buffer_builder ();
+					bool changed = false;
+					for (uint i = 0; i != num_pages; i++) {
+						uint64 entry = read_entry (current, i * p.entry_size, p);
+						uint64 updated = apply_protection_bits (entry, prot, p);
+						changed = changed || updated != entry;
+						if (p.entry_size == 8)
+							builder.append_uint64 (updated);
+						else
+							builder.append_uint32 ((uint32) updated);
+					}
+					if (changed)
+						yield write_buffer (first_slot, builder.build (), cancellable);
+
+					page_va = chunk_end;
 				}
 			} catch (GLib.Error e) {
 				failure = e;
 			}
 			yield end_access (cancellable);
 			throw_if_failed (failure);
+		}
+
+		private async uint64 find_leaf_table (uint64 va, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 table_pa = p.root_table;
+
+			for (uint level = 0; level != p.leaf_level; level++) {
+				uint64 entry = yield read_entry_at (slot_address (va, table_pa, level, p), p, cancellable);
+				if ((entry & PRESENT_BIT) == 0) {
+					throw new Error.NOT_SUPPORTED ("Unable to resolve 0x%" + uint64.FORMAT_MODIFIER + "x",
+						va);
+				}
+				if (is_leaf_entry (entry, level, p)) {
+					throw new Error.NOT_SUPPORTED (
+						"Unable to change protection of the large page mapping at 0x%" +
+						uint64.FORMAT_MODIFIER + "x", va);
+				}
+				table_pa = table_address (entry, p);
+			}
+
+			return table_pa;
 		}
 
 		private async LeafEntry find_leaf_entry (uint64 va, MMUParameters p, Cancellable? cancellable)
