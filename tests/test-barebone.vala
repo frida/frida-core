@@ -70,32 +70,32 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/IA32/Qemu/walk-matches-guest", () => {
+		GLib.Test.add_func ("/Barebone/IA32/QEMU/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_x86_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/IA32/Qemu/allocate-pages-maps-into-guest", () => {
+		GLib.Test.add_func ("/Barebone/IA32/QEMU/allocate-pages-maps-into-guest", () => {
 			var h = new SlowHarness ((h) => qemu_allocate_pages_maps_into_x86_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/IA32/Qemu/invoke-calls-into-guest", () => {
+		GLib.Test.add_func ("/Barebone/IA32/QEMU/invoke-calls-into-guest", () => {
 			var h = new SlowHarness ((h) => qemu_invoke_calls_into_x86_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/X64/Qemu/walk-matches-guest", () => {
+		GLib.Test.add_func ("/Barebone/X64/QEMU/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/X64/Qemu/allocate-pages-maps-into-guest", () => {
+		GLib.Test.add_func ("/Barebone/X64/QEMU/allocate-pages-maps-into-guest", () => {
 			var h = new SlowHarness ((h) => qemu_allocate_pages_maps_into_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/X64/Qemu/invoke-calls-into-guest", () => {
+		GLib.Test.add_func ("/Barebone/X64/QEMU/invoke-calls-into-guest", () => {
 			var h = new SlowHarness ((h) => qemu_invoke_calls_into_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
 		});
