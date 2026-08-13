@@ -76,6 +76,12 @@ namespace Frida.Barebone {
 			set;
 		}
 
+		public KernelKind kernel {
+			get;
+			set;
+			default = AUTO;
+		}
+
 		public void check () throws Error {
 			if (allocator != null)
 				allocator.check ();
@@ -111,9 +117,36 @@ namespace Frida.Barebone {
 				return true;
 			}
 
+			if (property_name == "kernel") {
+				var v = Value (typeof (KernelKind));
+				v.set_enum (parse_kernel_kind (property_node.get_string ()));
+				value = v;
+				return true;
+			}
+
 			value = Value (pspec.value_type);
 			return false;
 		}
+
+		private static KernelKind parse_kernel_kind (string? name) {
+			switch (name) {
+				case "bare":	return KernelKind.BARE;
+				case "xnu":	return KernelKind.XNU;
+				case "win9x":	return KernelKind.WIN9X;
+				default:	return KernelKind.AUTO;
+			}
+		}
+	}
+
+	/**
+	 * Selects which bring-up dance the target kernel needs before the agent can be
+	 * injected. AUTO infers XNU when an image is configured, and BARE otherwise.
+	 */
+	public enum KernelKind {
+		AUTO,
+		BARE,
+		XNU,
+		WIN9X
 	}
 
 	public sealed class ConnectionConfig : Object, Json.Serializable {

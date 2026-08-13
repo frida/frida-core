@@ -55,6 +55,13 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
+			assert_true (parse_config ("{}").kernel == Barebone.KernelKind.AUTO);
+			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == Barebone.KernelKind.BARE);
+			assert_true (parse_config ("{ \"kernel\": \"xnu\" }").kernel == Barebone.KernelKind.XNU);
+			assert_true (parse_config ("{ \"kernel\": \"win9x\" }").kernel == Barebone.KernelKind.WIN9X);
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/enumerate-ranges-walks-long-mode-tables", () => {
 			var h = new Harness ((h) => enumerate_ranges_walks_long_mode_tables.begin (h as Harness));
 			h.run ();
@@ -129,6 +136,14 @@ namespace Frida.BareboneTest {
 			var h = new SlowHarness ((h) => QEMU.inline_hook_fires_in_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
 		});
+	}
+
+	private static Barebone.Config parse_config (string json) {
+		try {
+			return (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), json);
+		} catch (GLib.Error e) {
+			assert_not_reached ();
+		}
 	}
 
 	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {

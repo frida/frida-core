@@ -15,6 +15,7 @@ namespace Frida.Barebone {
 		private AgentConfig agent_config;
 		private VsockTransportConfig? vsock_transport;
 		private ImageConfig? image_config;
+		private KernelKind kernel_kind;
 		private KernelRelocation? relocation;
 		private uint64 kernel_base;
 		private Machine machine;
@@ -29,11 +30,12 @@ namespace Frida.Barebone {
 		private const int COMMAND_TIMEOUT_MS = 25000;
 
 		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config,
-				KernelRelocation? relocation, uint64 kernel_base, Machine machine, Allocator allocator,
-				Cancellable? cancellable) throws Error, IOError {
+				KernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
+				Allocator allocator, Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
 				agent_config = agent_config,
 				image_config = image_config,
+				kernel_kind = kernel_kind,
 				relocation = relocation,
 				kernel_base = kernel_base,
 				machine = machine,
@@ -119,8 +121,12 @@ namespace Frida.Barebone {
 				}
 			}
 
+			KernelKind kind = kernel_kind;
+			if (kind == AUTO)
+				kind = (image_config != null) ? KernelKind.XNU : KernelKind.BARE;
+
 			KernelFlavor flavor;
-			if (image_config != null) {
+			if (kind == XNU) {
 				if (kernel_base == 0)
 					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
 				flavor = new XnuKernelFlavor (machine, kernel_base, symbols);

@@ -180,8 +180,8 @@ namespace Frida {
 			Barebone.AgentConnection? agent_connection = null;
 			Barebone.AgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
-				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, relocation,
-					kernel_base, machine, allocator, cancellable);
+				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
+					relocation, kernel_base, machine, allocator, cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);
