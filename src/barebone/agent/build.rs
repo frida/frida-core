@@ -33,6 +33,7 @@ fn main() {
         .clang_arg(format!("{}-none-elf", target.split('-').next().unwrap()))
         .clang_args(cc_clang_args)
         .clang_arg(format!("-I{}", devkit_dir.to_str().unwrap()))
+        .blocklist_type("max_align_t")
         .merge_extern_blocks(true)
         .generate()
         .expect("Unable to generate bindings");
