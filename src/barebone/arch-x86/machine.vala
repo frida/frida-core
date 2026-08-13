@@ -239,7 +239,7 @@ namespace Frida.Barebone {
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
 				throws Error, IOError {
-			throw_not_supported ();
+			return yield X86InlineHook.create (target, handler, IA32, allocator, gdb, cancellable);
 		}
 
 		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
