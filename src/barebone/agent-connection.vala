@@ -93,8 +93,6 @@ namespace Frida.Barebone {
 			} else {
 				layout = new Layout.empty ();
 			}
-			if (kernel_base == 0)
-				throw new Error.NOT_SUPPORTED ("Missing kernel_base");
 
 			var symbols = new Gee.HashMap<string, SymbolInfo> ();
 			var hash_builder = new SymbolHashBuilder ();
@@ -121,13 +119,14 @@ namespace Frida.Barebone {
 				}
 			}
 
-			SymbolInfo? thread_block = symbols["thread_block"];
-			if (thread_block == null)
-				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
-
-			SymbolInfo? panic = symbols["panic"];
-			if (panic != null && machine is Arm64Machine)
-				((Arm64Machine) machine).call_landing_zone = kernel_base + panic.offset;
+			KernelFlavor flavor;
+			if (image_config != null) {
+				if (kernel_base == 0)
+					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
+				flavor = new XnuKernelFlavor (machine, kernel_base, symbols);
+			} else {
+				flavor = new BareKernelFlavor (machine);
+			}
 
 			Bytes symbol_data = hash_builder.build (byte_order);
 
@@ -154,13 +153,9 @@ namespace Frida.Barebone {
 				return true;
 			});
 
-			yield machine.enter_exception_level (1, 1000, cancellable);
-
-			yield run_until_thread_block (kernel_base + thread_block.offset, cancellable);
+			yield flavor.prepare (cancellable);
 
 			size_t page_size = yield machine.query_page_size (cancellable);
-
-			yield ((Arm64Machine) machine).learn_permission_templates (kernel_base + thread_block.offset, cancellable);
 
 			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
 
@@ -207,32 +202,12 @@ namespace Frida.Barebone {
 				},
 				cancellable);
 
-			// The vphone research kernel panics on any synchronous exception taken while a
-			// debugger is attached, which the worker hits in the allocator during gum_init.
-			var arm64 = machine as Arm64Machine;
-			bool post_inject_access_uses_bridge = arm64 != null && arm64.physical_memory != null;
-			if (post_inject_access_uses_bridge)
-				yield gdb.detach (cancellable);
-			else
-				yield gdb.continue (cancellable);
+			yield flavor.settle (cancellable);
 			yield establish_hostlink (cancellable);
 
 			process_incoming_messages.begin ();
 
 			return true;
-		}
-
-		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			var gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
-
-			GDB.Breakpoint? hit = null;
-			do {
-				var exception = yield gdb.continue_until_exception (cancellable);
-				hit = exception.breakpoint;
-			} while (hit != bp);
-
-			yield bp.remove (cancellable);
 		}
 
 		private async Variant resolve_transport (Cancellable? cancellable) throws Error, IOError {
