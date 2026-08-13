@@ -110,6 +110,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/QEMU/whole-agent-loads-into-guest", () => {
+			var h = new SlowHarness ((h) => QEMU.whole_agent_loads_into_x86_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/QEMU/inline-hook-fires-in-guest", () => {
 			var h = new SlowHarness ((h) => QEMU.inline_hook_fires_in_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
@@ -754,10 +759,11 @@ namespace Frida.BareboneTest {
 
 		private const uint32 MARKER_VALUE = 0xdeadbeefU;
 
-		private static Barebone.Allocator make_scratch_allocator (Barebone.Machine machine) {
+		private static Barebone.Allocator make_scratch_allocator (Barebone.Machine machine,
+				uint mb_below_top = 1) {
 			var config = new Barebone.PhysicalAllocatorConfig ();
 			config.physical_base = new Barebone.NonNullMemoryAddress ("scratch",
-				((uint64) QemuGuest.MEMORY_SIZE_IN_MB << 20) - (1024 * 1024));
+				((uint64) (QemuGuest.MEMORY_SIZE_IN_MB - mb_below_top)) << 20);
 			return new Barebone.PhysicalAllocator (machine, 4096, config);
 		}
 
@@ -826,6 +832,67 @@ namespace Frida.BareboneTest {
 
 		private static string marker_path () {
 			return Path.build_filename (TESTS_SRCDIR, "..", "src", "barebone", "helpers", "marker-x86.elf");
+		}
+
+		private static async void whole_agent_loads_into_x86_guest (SlowHarness h) {
+			string? agent_path = Environment.get_variable ("FRIDA_BAREBONE_AGENT_X86");
+			if (agent_path == null) {
+				stdout.printf ("<skipping: set FRIDA_BAREBONE_AGENT_X86 to an agent blob> ");
+				h.done ();
+				return;
+			}
+
+			QemuGuest? guest = null;
+			try {
+				string? unavailable_reason = yield QemuGuest.check_availability (X86);
+				if (unavailable_reason != null) {
+					stdout.printf ("<skipping: %s> ", unavailable_reason);
+					h.done ();
+					return;
+				}
+
+				guest = yield QemuGuest.boot (X86);
+
+				Barebone.Machine machine = make_machine (X86, guest);
+				Barebone.Allocator allocator = make_scratch_allocator (machine, 32);
+
+				var elf = new Gum.ElfModule.from_file (agent_path);
+				size_t page_size = yield machine.query_page_size (null);
+
+				var timer = new Timer ();
+				Barebone.Allocation image = yield Barebone.inject_elf (elf, new Bytes (elf.get_file_data ()),
+					page_size, machine, allocator, null);
+				stdout.printf ("<%u KiB in %.1fs> ", (uint) (image.size / 1024), timer.elapsed ());
+
+				uint64 base_va = image.virtual_address;
+				assert_true (base_va != 0);
+				assert_true (image.size >= elf.mapped_size);
+
+				uint64 start = 0;
+				elf.enumerate_symbols (e => {
+					if (e.name == "_start")
+						start = base_va + e.address;
+					return true;
+				});
+				assert_true (start != 0);
+
+				Buffer entry = yield guest.client.read_buffer (start, 16, null);
+				bool entry_populated = false;
+				for (uint i = 0; i != 16; i++)
+					entry_populated |= entry.read_uint8 (i) != 0;
+				assert_true (entry_populated);
+
+				// The far end has to be mapped too, not just the first pages.
+				yield guest.client.read_buffer (base_va + image.size - 16, 16, null);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n", e.message);
+				assert_not_reached ();
+			} finally {
+				if (guest != null)
+					guest.stop ();
+			}
+
+			h.done ();
 		}
 
 		private static Barebone.Machine make_machine (GuestArch arch, QemuGuest guest) {
