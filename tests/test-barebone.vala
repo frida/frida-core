@@ -105,6 +105,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/QEMU/injected-elf-runs-in-guest", () => {
+			var h = new SlowHarness ((h) => QEMU.injected_elf_runs_in_x86_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/QEMU/inline-hook-fires-in-guest", () => {
 			var h = new SlowHarness ((h) => QEMU.inline_hook_fires_in_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
@@ -762,6 +767,65 @@ namespace Frida.BareboneTest {
 
 		private static async uint32 read_marker (QemuGuest guest, uint64 va) throws Error, IOError {
 			return (yield guest.client.read_buffer (va, 4, null)).read_uint32 (0);
+		}
+
+		private static async void injected_elf_runs_in_x86_guest (SlowHarness h) {
+			QemuGuest? guest = null;
+			try {
+				string? unavailable_reason = yield QemuGuest.check_availability (X86);
+				if (unavailable_reason != null) {
+					stdout.printf ("<skipping: %s> ", unavailable_reason);
+					h.done ();
+					return;
+				}
+
+				guest = yield QemuGuest.boot (X86);
+
+				Barebone.Machine machine = make_machine (X86, guest);
+				Barebone.Allocator allocator = make_scratch_allocator (machine);
+
+				var elf = new Gum.ElfModule.from_file (marker_path ());
+				size_t page_size = yield machine.query_page_size (null);
+				Barebone.Allocation image = yield Barebone.inject_elf (elf, new Bytes (elf.get_file_data ()),
+					page_size, machine, allocator, null);
+				uint64 base_va = image.virtual_address;
+
+				uint64 start = 0;
+				elf.enumerate_symbols (e => {
+					if (e.name == "_start")
+						start = base_va + e.address;
+					return true;
+				});
+				assert_true (start != 0);
+
+				Barebone.Allocation reported = yield allocator.allocate (8, 4, null);
+				yield guest.client.write_byte_array (reported.virtual_address, new Bytes (new uint8[8]), null);
+
+				uint64[] args = { reported.virtual_address, 8 };
+				yield machine.invoke (start, args, null);
+
+				Buffer answer = yield guest.client.read_buffer (reported.virtual_address, 8, null);
+
+				uint64 answer_address = answer.read_uint32 (0);
+				assert_true (answer_address >= base_va);
+				assert_true (answer_address < base_va + image.size);
+
+				assert_true (answer.read_uint32 (4) == MARKER_ANSWER);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n", e.message);
+				assert_not_reached ();
+			} finally {
+				if (guest != null)
+					guest.stop ();
+			}
+
+			h.done ();
+		}
+
+		private const uint32 MARKER_ANSWER = 0x1234abcdU;
+
+		private static string marker_path () {
+			return Path.build_filename (TESTS_SRCDIR, "..", "src", "barebone", "helpers", "marker-x86.elf");
 		}
 
 		private static Barebone.Machine make_machine (GuestArch arch, QemuGuest guest) {
