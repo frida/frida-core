@@ -75,6 +75,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/Qemu/allocate-pages-maps-into-guest", () => {
+			var h = new SlowHarness ((h) => qemu_allocate_pages_maps_into_x86_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/Qemu/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
@@ -506,6 +511,57 @@ namespace Frida.BareboneTest {
 			assert_true (saw_large_page);
 
 			yield check_protect_pages_takes_effect (machine, guest, pages);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			if (guest != null)
+				guest.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void qemu_allocate_pages_maps_into_x86_guest (SlowHarness h) {
+		QemuGuest? guest = null;
+		try {
+			string? unavailable_reason = yield QemuGuest.check_availability (X86);
+			if (unavailable_reason != null) {
+				stdout.printf ("<skipping: %s> ", unavailable_reason);
+				h.done ();
+				return;
+			}
+
+			guest = yield QemuGuest.boot (X86);
+
+			var machine = new Barebone.IA32Machine (guest.client);
+
+			Gee.List<GuestPage> pages = yield guest.query_pages ();
+			assert_true (pages.size != 0);
+
+			uint64 first_pa = pages[0].pa;
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			physical_addresses.add (first_pa);
+			physical_addresses.add (first_pa + 4096);
+
+			Barebone.Allocation allocation = yield machine.allocate_pages (physical_addresses, null);
+			uint64 va = allocation.virtual_address;
+			assert_true (va != 0);
+			assert_true (allocation.size == 2 * 4096);
+
+			GuestPage first = yield guest.query_page (va);
+			assert_true (first.pa == first_pa);
+			assert_true (first.writable);
+			assert_true (!first.no_execute);
+
+			GuestPage second = yield guest.query_page (va + 4096);
+			assert_true (second.pa == first_pa + 4096);
+
+			assert_true ((yield machine.translate_address (va, null)) == first_pa);
+
+			yield allocation.deallocate (null);
+			foreach (GuestPage page in yield guest.query_pages ())
+				assert_true (page.va != va);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
 			assert_not_reached ();
