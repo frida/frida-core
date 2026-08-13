@@ -29,10 +29,12 @@ RUST_TARGET ?= i686-unknown-none
 AGENT_TARGET_FLAGS ?= --target $(AGENT_DIR)/$(RUST_TARGET).json -Z json-target-spec
 SDK_ARCH ?= x86
 TOOLPREFIX ?=
+AGENT_LD_EMULATION ?= elf_i386
 else ifeq ($(ARCH)-$(BITS),x86-64)
 RUST_TARGET ?= x86_64-unknown-none
 SDK_ARCH ?= x86_64
 TOOLPREFIX ?=
+AGENT_LD_EMULATION ?= elf_x86_64
 else ifeq ($(ARCH)-$(BITS),arm64-64)
 RUST_TARGET ?= aarch64-unknown-none
 SDK_ARCH ?= arm64
@@ -163,7 +165,7 @@ modules: $(PRELINKED)
 		FRIDA_KMOD_DEFS="$(FRIDA_KMOD_DEFS)" MODULE_NAME=$(MODULE_NAME) modules
 
 $(PRELINKED): $(AGENT_LIB_SOFTFLOAT) $(LIBC)
-	$(AGENT_LD) -r -o $@.tmp \
+	$(AGENT_LD) -r $(if $(AGENT_LD_EMULATION),-m $(AGENT_LD_EMULATION)) -o $@.tmp \
 		--whole-archive $(AGENT_LIB_SOFTFLOAT) --no-whole-archive \
 		--start-group \
 			$(GUMJS_DEVKIT_DIR)/libfrida-gumjs.a \
