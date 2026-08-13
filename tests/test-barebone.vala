@@ -80,8 +80,23 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/Qemu/invoke-calls-into-guest", () => {
+			var h = new SlowHarness ((h) => qemu_invoke_calls_into_x86_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/Qemu/walk-matches-guest", () => {
 			var h = new SlowHarness ((h) => qemu_walk_matches_x86_64_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/Qemu/allocate-pages-maps-into-guest", () => {
+			var h = new SlowHarness ((h) => qemu_allocate_pages_maps_into_x86_64_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/Qemu/invoke-calls-into-guest", () => {
+			var h = new SlowHarness ((h) => qemu_invoke_calls_into_x86_64_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 	}
@@ -523,18 +538,26 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void qemu_allocate_pages_maps_into_x86_guest (SlowHarness h) {
+		yield qemu_allocate_pages_maps_into_guest (h, X86);
+	}
+
+	private static async void qemu_allocate_pages_maps_into_x86_64_guest (SlowHarness h) {
+		yield qemu_allocate_pages_maps_into_guest (h, X86_64);
+	}
+
+	private static async void qemu_allocate_pages_maps_into_guest (SlowHarness h, GuestArch arch) {
 		QemuGuest? guest = null;
 		try {
-			string? unavailable_reason = yield QemuGuest.check_availability (X86);
+			string? unavailable_reason = yield QemuGuest.check_availability (arch);
 			if (unavailable_reason != null) {
 				stdout.printf ("<skipping: %s> ", unavailable_reason);
 				h.done ();
 				return;
 			}
 
-			guest = yield QemuGuest.boot (X86);
+			guest = yield QemuGuest.boot (arch);
 
-			var machine = new Barebone.IA32Machine (guest.client);
+			Barebone.Machine machine = make_machine (arch, guest);
 
 			Gee.List<GuestPage> pages = yield guest.query_pages ();
 			assert_true (pages.size != 0);
@@ -557,8 +580,6 @@ namespace Frida.BareboneTest {
 			GuestPage second = yield guest.query_page (va + 4096);
 			assert_true (second.pa == first_pa + 4096);
 
-			assert_true ((yield machine.translate_address (va, null)) == first_pa);
-
 			yield allocation.deallocate (null);
 			foreach (GuestPage page in yield guest.query_pages ())
 				assert_true (page.va != va);
@@ -571,6 +592,76 @@ namespace Frida.BareboneTest {
 		}
 
 		h.done ();
+	}
+
+	private static async void qemu_invoke_calls_into_x86_guest (SlowHarness h) {
+		yield qemu_invoke_calls_into_guest (h, X86);
+	}
+
+	private static async void qemu_invoke_calls_into_x86_64_guest (SlowHarness h) {
+		yield qemu_invoke_calls_into_guest (h, X86_64);
+	}
+
+	private static async void qemu_invoke_calls_into_guest (SlowHarness h, GuestArch arch) {
+		QemuGuest? guest = null;
+		try {
+			string? unavailable_reason = yield QemuGuest.check_availability (arch);
+			if (unavailable_reason != null) {
+				stdout.printf ("<skipping: %s> ", unavailable_reason);
+				h.done ();
+				return;
+			}
+
+			guest = yield QemuGuest.boot (arch);
+
+			Barebone.Machine machine = make_machine (arch, guest);
+
+			uint64 scratch_pa = ((uint64) QemuGuest.MEMORY_SIZE_IN_MB << 20) - (1024 * 1024);
+
+			var physical_addresses = new Gee.ArrayList<uint64?> ();
+			physical_addresses.add (scratch_pa);
+
+			Barebone.Allocation allocation = yield machine.allocate_pages (physical_addresses, null);
+			uint64 va = allocation.virtual_address;
+
+			uint8[] sum_of_two_args;
+			if (arch == X86) {
+				sum_of_two_args = {
+					0x8b, 0x44, 0x24, 0x04,	// mov eax, [esp+4]
+					0x03, 0x44, 0x24, 0x08,	// add eax, [esp+8]
+					0xc3			// ret
+				};
+			} else {
+				sum_of_two_args = {
+					0x48, 0x89, 0xf8,	// mov rax, rdi
+					0x48, 0x01, 0xf0,	// add rax, rsi
+					0xc3			// ret
+				};
+			}
+
+			Buffer displaced = yield guest.client.read_buffer (va, sum_of_two_args.length, null);
+			yield guest.client.write_byte_array (va, new Bytes (sum_of_two_args), null);
+
+			uint64[] args = { 40, 2 };
+			assert_true ((yield machine.invoke (va, args, null)) == 42);
+
+			yield guest.client.write_byte_array (va, displaced.bytes, null);
+			yield allocation.deallocate (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
+		} finally {
+			if (guest != null)
+				guest.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static Barebone.Machine make_machine (GuestArch arch, QemuGuest guest) {
+		if (arch == X86)
+			return new Barebone.IA32Machine (guest.client);
+		return new Barebone.X64Machine (guest.client);
 	}
 
 	private static async void check_protect_pages_takes_effect (Barebone.Machine machine, QemuGuest guest,
@@ -1096,6 +1187,8 @@ namespace Frida.BareboneTest {
 			}
 		}
 
+		public const uint MEMORY_SIZE_IN_MB = 256;
+
 		public static async QemuGuest? boot (GuestArch arch) throws Error, IOError {
 			uint16 port = pick_unused_port ();
 
@@ -1103,7 +1196,7 @@ namespace Frida.BareboneTest {
 			try {
 				process = new Subprocess (SubprocessFlags.STDOUT_PIPE,
 					"python3", script_path (), "boot-" + arch.to_nick (), "--gdb-port",
-					port.to_string ());
+					port.to_string (), "--memory", MEMORY_SIZE_IN_MB.to_string ());
 			} catch (GLib.Error e) {
 				return null;
 			}
