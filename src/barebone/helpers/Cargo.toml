@@ -9,6 +9,11 @@ name = "memory-scanner"
 path = "bin/memory_scanner.rs"
 test = false
 
+[[bin]]
+name = "marker"
+path = "bin/marker.rs"
+test = false
+
 [features]
 panic-info = []
 
