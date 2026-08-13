@@ -1738,7 +1738,7 @@ namespace Frida.GDB {
 			if (!client.bulk_registers) {
 				foreach (var e in regs.entries) {
 					var reg = client.get_register_by_name (e.key);
-					if (reg.writable && reg.bitsize == 64 && e.value.is_of_type (VariantType.UINT64))
+					if (reg.writable && e.value.is_of_type (VariantType.UINT64))
 						yield write_register (e.key, e.value.get_uint64 (), cancellable);
 				}
 				return;
@@ -1756,9 +1756,11 @@ namespace Frida.GDB {
 					throw new Error.INVALID_ARGUMENT ("Missing %s", reg.name);
 
 				if (val.is_of_type (VariantType.UINT64)) {
-					builder.append (Protocol.unparse_integer_value (val.get_uint64 (), sizeof (uint64), byte_order));
+					builder.append (Protocol.unparse_integer_value (val.get_uint64 (), reg.bitsize / 8,
+						byte_order));
 				} else if (val.is_of_type (VariantType.UINT32)) {
-					builder.append (Protocol.unparse_integer_value (val.get_uint64 (), sizeof (uint32), byte_order));
+					builder.append (Protocol.unparse_integer_value (val.get_uint32 (), reg.bitsize / 8,
+						byte_order));
 				} else {
 					builder.append (Protocol.unparse_hex_bytes (val.get_data_as_bytes ()));
 				}
@@ -1800,7 +1802,7 @@ namespace Frida.GDB {
 				.append_c ('P')
 				.append_register_id (reg.id)
 				.append_c ('=')
-				.append (Protocol.unparse_integer_value (val, client.pointer_size, client.byte_order));
+				.append (Protocol.unparse_integer_value (val, reg.bitsize / 8, client.byte_order));
 			if ("thread-suffix" in client.features) {
 				command
 					.append (";thread:")
