@@ -26,6 +26,8 @@ namespace Frida.Barebone {
 		private X86PageTables page_tables;
 
 		private const uint NUM_ARGS_IN_REGS = 6;
+		private const string[] ARG_REG_NAMES = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+		private const size_t RED_ZONE_SIZE = 128;
 
 		public X64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
@@ -53,7 +55,7 @@ namespace Frida.Barebone {
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 				throws Error, IOError {
-			throw_not_supported ();
+			return yield page_tables.map (physical_addresses, cancellable);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
@@ -90,7 +92,51 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (args.length > NUM_ARGS_IN_REGS)
+				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
+
+			bool was_running = gdb.state != STOPPED;
+			if (was_running)
+				yield gdb.stop (cancellable);
+
+			GDB.Thread thread = gdb.exception.thread;
+			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
+
+			var regs = new Gee.HashMap<string, Variant> ();
+			regs.set_all (saved_regs);
+
+			uint64 landing_zone = saved_regs["rip"].get_uint64 ();
+
+			uint64 sp = saved_regs["rsp"].get_uint64 () - RED_ZONE_SIZE - 8;
+			sp = (sp & ~15ULL) - 8;
+
+			var builder = gdb.make_buffer_builder ();
+			builder.append_uint64 (landing_zone);
+			yield gdb.write_byte_array (sp, builder.build (), cancellable);
+
+			for (uint i = 0; i != args.length; i++)
+				regs[ARG_REG_NAMES[i]] = args[i];
+
+			regs["rip"] = impl;
+			regs["rsp"] = sp;
+			yield thread.write_registers (regs, cancellable);
+
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 1, cancellable);
+			GDB.Exception ex = null;
+			do {
+				ex = yield gdb.continue_until_exception (cancellable);
+			} while (ex.breakpoint != bp);
+			yield bp.remove (cancellable);
+
+			GDB.Thread landed = ex.thread;
+			uint64 retval = yield landed.read_register ("rax", cancellable);
+
+			yield landed.write_registers (saved_regs, cancellable);
+
+			if (was_running)
+				yield gdb.continue (cancellable);
+
+			return retval;
 		}
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
@@ -120,7 +166,6 @@ namespace Frida.Barebone {
 			private uint64 original_rsp;
 			private State stack_state = PRISTINE;
 
-			private const string[] ARG_REG_NAMES = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 
 			private enum State {
 				PRISTINE,

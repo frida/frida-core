@@ -88,7 +88,47 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			bool was_running = gdb.state != STOPPED;
+			if (was_running)
+				yield gdb.stop (cancellable);
+
+			GDB.Thread thread = gdb.exception.thread;
+			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
+
+			var regs = new Gee.HashMap<string, Variant> ();
+			regs.set_all (saved_regs);
+
+			uint64 landing_zone = saved_regs["eip"].get_uint64 ();
+
+			uint64 sp = saved_regs["esp"].get_uint64 () - ((1 + args.length) * 4);
+			sp = (sp & ~15ULL) - 4;
+
+			var builder = gdb.make_buffer_builder ();
+			builder.append_uint32 ((uint32) landing_zone);
+			foreach (uint64 arg in args)
+				builder.append_uint32 ((uint32) arg);
+			yield gdb.write_byte_array (sp, builder.build (), cancellable);
+
+			regs["eip"] = impl;
+			regs["esp"] = sp;
+			yield thread.write_registers (regs, cancellable);
+
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 1, cancellable);
+			GDB.Exception ex = null;
+			do {
+				ex = yield gdb.continue_until_exception (cancellable);
+			} while (ex.breakpoint != bp);
+			yield bp.remove (cancellable);
+
+			GDB.Thread landed = ex.thread;
+			uint64 retval = yield landed.read_register ("eax", cancellable);
+
+			yield landed.write_registers (saved_regs, cancellable);
+
+			if (was_running)
+				yield gdb.continue (cancellable);
+
+			return retval;
 		}
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
