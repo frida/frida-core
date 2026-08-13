@@ -194,11 +194,14 @@ namespace Frida.Barebone {
 			if (!p.paging_enabled)
 				throw new Error.NOT_SUPPORTED ("Paging is disabled");
 
+			var run = new Run (physical_addresses.size);
+
 			yield begin_access (cancellable);
 			Allocation? allocation = null;
 			GLib.Error? failure = null;
 			try {
-				allocation = yield map_in_table (physical_addresses, p.root_table, 0, 0, p, cancellable);
+				if (yield scan_for_run (run, p.root_table, 0, 0, p, cancellable))
+					allocation = yield occupy (run, physical_addresses, p, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
@@ -211,80 +214,155 @@ namespace Frida.Barebone {
 			return allocation;
 		}
 
-		private async Allocation? map_in_table (Gee.List<uint64?> physical_addresses, uint64 table_pa, uint level,
-				uint64 upper_bits, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+		// A run has to be contiguous in virtual address space but not in the tables
+		// describing it, so anything longer than a table holds is gathered a segment
+		// at a time and a gap anywhere above the leaves starts the search over.
+		private async bool scan_for_run (Run run, uint64 table_pa, uint level, uint64 upper_bits,
+				MMUParameters p, Cancellable? cancellable) throws Error, IOError {
 			Level l = p.levels[level];
-			uint num_pages = physical_addresses.size;
 			bool at_leaf_level = level == p.leaf_level;
 
 			Buffer entries = yield read_buffer (table_pa, l.num_entries * p.entry_size, cancellable);
-
-			uint64 run_va = 0;
-			uint64 run_slot_pa = 0;
-			uint num_free_slots = 0;
 
 			for (uint i = 0; i != l.num_entries; i++) {
 				uint64 entry = read_entry (entries, i * p.entry_size, p);
 				uint64 prefix = upper_bits | ((uint64) i << l.shift);
 
 				if (!at_leaf_level) {
-					if ((entry & PRESENT_BIT) == 0 || is_leaf_entry (entry, level, p))
+					bool usable = (entry & PRESENT_BIT) != 0
+						&& !is_leaf_entry (entry, level, p)
+						&& (protection_from_entry (entry, level, p) & MAPPING_PROTECTION)
+							== MAPPING_PROTECTION;
+					if (!usable) {
+						run.reset ();
 						continue;
-					if ((protection_from_entry (entry, level, p) & MAPPING_PROTECTION) != MAPPING_PROTECTION)
-						continue;
+					}
 
-					Allocation? allocation = yield map_in_table (physical_addresses, table_address (entry, p),
-						level + 1, prefix, p, cancellable);
-					if (allocation != null)
-						return allocation;
+					if (yield scan_for_run (run, table_address (entry, p), level + 1, prefix, p,
+							cancellable))
+						return true;
 					continue;
 				}
 
 				uint64 va = canonicalize (prefix, p);
 				if ((entry & PRESENT_BIT) != 0 || va == 0) {
-					num_free_slots = 0;
+					run.reset ();
 					continue;
 				}
 
-				if (num_free_slots == 0) {
-					run_va = va;
-					run_slot_pa = table_pa + ((uint64) i * p.entry_size);
-				}
-				num_free_slots++;
-				if (num_free_slots == num_pages)
-					break;
+				run.take (va, table_pa + ((uint64) i * p.entry_size), p.entry_size);
+				if (run.is_complete ())
+					return true;
 			}
 
-			if (num_free_slots != num_pages)
-				return null;
-
-			var builder = gdb.make_buffer_builder ();
-			foreach (uint64? pa in physical_addresses) {
-				uint64 entry = apply_protection_bits (pa | PRESENT_BIT, MAPPING_PROTECTION, p);
-				if (p.entry_size == 8)
-					builder.append_uint64 (entry);
-				else
-					builder.append_uint32 ((uint32) entry);
-			}
-			Bytes new_entries = builder.build ();
-
-			Bytes old_entries = (yield read_buffer (run_slot_pa, new_entries.get_size (), cancellable)).bytes;
-			yield write_buffer (run_slot_pa, new_entries, cancellable);
-
-			return new EntryAllocation (run_va, num_pages * PAGE_SIZE, run_slot_pa, old_entries, this);
+			return false;
 		}
 
-		private async void restore_entries (uint64 slot_pa, Bytes entries, Cancellable? cancellable)
+		private async Allocation occupy (Run run, Gee.List<uint64?> physical_addresses, MMUParameters p,
+				Cancellable? cancellable) throws Error, IOError {
+			var displaced = new Gee.ArrayList<DisplacedEntries> ();
+
+			uint next_page = 0;
+			foreach (RunSegment segment in run.segments) {
+				var builder = gdb.make_buffer_builder ();
+				for (uint i = 0; i != segment.num_entries; i++) {
+					uint64 pa = physical_addresses[(int) (next_page + i)];
+					uint64 entry = apply_protection_bits (pa | PRESENT_BIT, MAPPING_PROTECTION, p);
+					if (p.entry_size == 8)
+						builder.append_uint64 (entry);
+					else
+						builder.append_uint32 ((uint32) entry);
+				}
+				Bytes new_entries = builder.build ();
+
+				Bytes old_entries = (yield read_buffer (segment.slot_pa, new_entries.get_size (),
+					cancellable)).bytes;
+				yield write_buffer (segment.slot_pa, new_entries, cancellable);
+
+				displaced.add (new DisplacedEntries (segment.slot_pa, old_entries));
+				next_page += segment.num_entries;
+			}
+
+			return new EntryAllocation (run.va, run.count * PAGE_SIZE, displaced, this);
+		}
+
+		private async void restore_entries (Gee.List<DisplacedEntries> displaced, Cancellable? cancellable)
 				throws Error, IOError {
 			yield begin_access (cancellable);
 			GLib.Error? failure = null;
 			try {
-				yield write_buffer (slot_pa, entries, cancellable);
+				foreach (DisplacedEntries d in displaced)
+					yield write_buffer (d.slot_pa, d.entries, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
 			yield end_access (cancellable);
 			throw_if_failed (failure);
+		}
+
+		private class Run {
+			public uint needed;
+			public uint64 va;
+			public uint count;
+			public Gee.ArrayList<RunSegment> segments = new Gee.ArrayList<RunSegment> ();
+
+			private uint64 next_va;
+			private size_t entry_size;
+
+			public Run (uint needed) {
+				this.needed = needed;
+			}
+
+			public void reset () {
+				va = 0;
+				count = 0;
+				next_va = 0;
+				segments.clear ();
+			}
+
+			public void take (uint64 page_va, uint64 slot_pa, size_t entry_size) {
+				if (count != 0 && page_va != next_va)
+					reset ();
+
+				this.entry_size = entry_size;
+
+				if (count == 0) {
+					va = page_va;
+					segments.add (new RunSegment (slot_pa));
+				} else {
+					RunSegment last = segments[segments.size - 1];
+					if (slot_pa == last.slot_pa + (last.num_entries * entry_size))
+						last.num_entries++;
+					else
+						segments.add (new RunSegment (slot_pa));
+				}
+
+				count++;
+				next_va = page_va + PAGE_SIZE;
+			}
+
+			public bool is_complete () {
+				return count == needed;
+			}
+		}
+
+		private class RunSegment {
+			public uint64 slot_pa;
+			public uint num_entries = 1;
+
+			public RunSegment (uint64 slot_pa) {
+				this.slot_pa = slot_pa;
+			}
+		}
+
+		private class DisplacedEntries {
+			public uint64 slot_pa;
+			public Bytes entries;
+
+			public DisplacedEntries (uint64 slot_pa, Bytes entries) {
+				this.slot_pa = slot_pa;
+				this.entries = entries;
+			}
 		}
 
 		private class EntryAllocation : Object, Allocation {
@@ -298,21 +376,19 @@ namespace Frida.Barebone {
 
 			private uint64 va;
 			private size_t allocated_size;
-			private uint64 slot_pa;
-			private Bytes old_entries;
+			private Gee.List<DisplacedEntries> displaced;
 			private X86PageTables page_tables;
 
-			public EntryAllocation (uint64 va, size_t allocated_size, uint64 slot_pa, Bytes old_entries,
+			public EntryAllocation (uint64 va, size_t allocated_size, Gee.List<DisplacedEntries> displaced,
 					X86PageTables page_tables) {
 				this.va = va;
 				this.allocated_size = allocated_size;
-				this.slot_pa = slot_pa;
-				this.old_entries = old_entries;
+				this.displaced = displaced;
 				this.page_tables = page_tables;
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
-				yield page_tables.restore_entries (slot_pa, old_entries, cancellable);
+				yield page_tables.restore_entries (displaced, cancellable);
 			}
 		}
 
