@@ -455,6 +455,10 @@ unsafe extern "C" {
     fn frida_win9x_fault_thunk_pf();
     fn frida_win9x_time_out_thunk();
     fn get_cur_vm_handle() -> u32;
+    fn get_sys_vm_handle() -> u32;
+    fn get_next_vm_handle(vm: u32) -> u32;
+    fn get_initial_thread_handle(vm: u32) -> u32;
+    fn get_next_thread_handle(thread: u32) -> u32;
     fn frida_win9x_hw_int_thunk();
     fn frida_win9x_thread_thunk();
     fn vmm_create_thread(ss: u32, esp: u32, cs: u32, eip: u32, ds: u32, es: u32,
@@ -541,6 +545,54 @@ fatal_error_handler:
     call dword ptr [_Fatal_Error_Handler]
     pop edi
     pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global get_sys_vm_handle
+get_sys_vm_handle:
+    push ebx
+    call dword ptr [_Get_Sys_VM_Handle]
+    mov eax, ebx
+    pop ebx
+    ret
+
+.global get_next_vm_handle
+get_next_vm_handle:
+    push ebp
+    mov ebp, esp
+    push ebx
+    mov ebx, [ebp + 8]
+    call dword ptr [_Get_Next_VM_Handle]
+    mov eax, ebx
+    pop ebx
+    pop ebp
+    ret
+
+.global get_initial_thread_handle
+get_initial_thread_handle:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push edi
+    mov ebx, [ebp + 8]
+    call dword ptr [_Get_Initial_Thread_Handle]
+    mov eax, edi
+    pop edi
+    pop ebx
+    pop ebp
+    ret
+
+.global get_next_thread_handle
+get_next_thread_handle:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push edi
+    mov edi, [ebp + 8]
+    call dword ptr [_Get_Next_Thread_Handle]
+    mov eax, edi
+    pop edi
     pop ebx
     pop ebp
     ret
@@ -742,9 +794,11 @@ frida_win9x_hw_int_thunk:
 
 unsafe extern "C" {
     static _Get_Cur_VM_Handle: unsafe extern "C" fn();
+    static _Get_Sys_VM_Handle: unsafe extern "C" fn();
     static _Create_Semaphore: unsafe extern "C" fn();
     static _Wait_Semaphore: unsafe extern "C" fn();
     static _Signal_Semaphore: unsafe extern "C" fn();
+    static _Get_Next_VM_Handle: unsafe extern "C" fn();
     static _Release_Time_Slice: unsafe extern "C" fn();
     static _Set_Global_Time_Out: unsafe extern "C" fn();
     static _Cancel_Time_Out: unsafe extern "C" fn();
@@ -760,8 +814,12 @@ unsafe extern "C" {
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _VMMCreateThread: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
+    static _Get_Initial_Thread_Handle: unsafe extern "C" fn();
+    static _Get_Next_Thread_Handle: unsafe extern "C" fn();
     static __Debug_Printf_Service: unsafe extern "C" fn(*const u8, ...);
+    static __ContextSwitch: unsafe extern "C" fn(u32);
     static __PageModifyPermissions: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
+    static __GetCurrentContext: unsafe extern "C" fn() -> u32;
     static _VPICD_Virtualize_IRQ: unsafe extern "C" fn();
     static _VPICD_Phys_EOI: unsafe extern "C" fn();
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();

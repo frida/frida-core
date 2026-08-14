@@ -9,9 +9,11 @@ SECTIONS {
   .kernel_addrs : ALIGN(4) {
     . = ALIGN(4);
     _Get_Cur_VM_Handle = .; . += 4;
+    _Get_Sys_VM_Handle = .; . += 4;
     _Create_Semaphore = .; . += 4;
     _Wait_Semaphore = .; . += 4;
     _Signal_Semaphore = .; . += 4;
+    _Get_Next_VM_Handle = .; . += 4;
     _Release_Time_Slice = .; . += 4;
     _Set_Global_Time_Out = .; . += 4;
     _Cancel_Time_Out = .; . += 4;
@@ -26,8 +28,12 @@ SECTIONS {
     _Fatal_Error_Handler = .; . += 4;
     _VMMCreateThread = .; . += 4;
     _Get_Cur_Thread_Handle = .; . += 4;
+    _Get_Initial_Thread_Handle = .; . += 4;
+    _Get_Next_Thread_Handle = .; . += 4;
     __Debug_Printf_Service = .; . += 4;
+    __ContextSwitch = .; . += 4;
     __PageModifyPermissions = .; . += 4;
+    __GetCurrentContext = .; . += 4;
     _VPICD_Virtualize_IRQ = .; . += 4;
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
