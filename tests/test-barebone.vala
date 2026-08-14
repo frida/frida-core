@@ -1144,10 +1144,13 @@ namespace Frida.BareboneTest {
 
 	private static async void enumerates_modules_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, """
-			const vmm = Process.enumerateModules().find(m => m.name === 'VMM.VXD');
+			const mods = Process.enumerateModules();
+			const vmm = mods.find(m => m.name === 'VMM.VXD');
 			const named = vmm.enumerateExports().some(e => e.name === 'Get_Sys_VM_Handle');
-			send({ modules: Process.enumerateModules().length, named });
-		""", "\"named\":true");
+			const serviceless = mods.some(m => m.name === 'VFAT.VXD');
+			const mixedCase = mods.some(m => m.name === 'VNetSup.VXD');
+			send({ named, serviceless, mixedCase });
+		""", "\"named\":true,\"serviceless\":true,\"mixedCase\":true");
 	}
 
 	private static async void agent_recovers_from_exception_in_live_guest (Harness h) {

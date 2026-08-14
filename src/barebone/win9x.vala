@@ -12,6 +12,8 @@ namespace Frida.Barebone {
 				"memory is paged in yet");
 		}
 
+		var images = yield read_loader_images (machine, blocks, cancellable);
+
 		foreach (DeviceDescriptorBlock ddb in blocks) {
 			unowned string[]? names = known_service_names (ddb.name);
 
@@ -37,14 +39,25 @@ namespace Frida.Barebone {
 				highest = uint64.max (highest, address);
 			}
 
-			if (highest == 0)
-				continue;
+			uint64 image_base = 0;
+			uint32 image_size = 0;
+			LoaderImage? image = find_loader_image (images, ddb.address);
+			if (image != null) {
+				image_base = image.base_address;
+				image_size = image.size;
+			} else if (highest != 0) {
+				image_base = lowest;
+				image_size = (uint32) (highest - lowest);
+			} else {
+				image_base = ddb.address;
+				image_size = (uint32) DDB_SIZE;
+			}
 
 			modules.add (new ModuleInfo () {
 				name = "%s.VXD".printf (ddb.name),
 				version = "",
-				offset = (uint32) lowest,
-				size = (uint32) (highest - lowest),
+				offset = (uint32) image_base,
+				size = image_size,
 			});
 		}
 
@@ -67,7 +80,111 @@ namespace Frida.Barebone {
 		}
 	}
 
-	private static async Gee.List<DeviceDescriptorBlock> find_descriptor_blocks (Machine machine, Cancellable? cancellable)
+	// Every VxD is on VMM's chain, including the ones that export no services and would
+	// therefore be indistinguishable from noise when sweeping. Sweep only far enough to
+	// find VMM itself, then follow it.
+	// VXDLDR knows the object each dynamically loaded VxD was scattered into; the one holding
+	// the descriptor block is the VxD proper. Statically linked VxDs live inside VMM32.VXD and
+	// have no image of their own to ask about.
+	private static async Gee.List<LoaderImage> read_loader_images (Machine machine,
+			Gee.List<DeviceDescriptorBlock> blocks, Cancellable? cancellable) throws Error, IOError {
+		var images = new Gee.ArrayList<LoaderImage> ();
+
+		DeviceDescriptorBlock? loader = null;
+		foreach (DeviceDescriptorBlock ddb in blocks) {
+			if (ddb.name == "VXDLDR")
+				loader = ddb;
+		}
+		if (loader == null || loader.service_count <= GET_DEVICE_LIST_ORDINAL)
+			return images;
+
+		GDB.Client gdb = machine.gdb;
+		uint64 getter = gdb.make_buffer (yield gdb.read_byte_array (
+			loader.service_table + GET_DEVICE_LIST_ORDINAL * 4, 4, cancellable)).read_uint32 (0);
+
+		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (getter, 5, cancellable));
+		if (code.read_uint8 (0) != LOAD_EAX_ABSOLUTE)
+			return images;
+
+		uint64 head = gdb.make_buffer (yield gdb.read_byte_array (code.read_uint32 (1), 4, cancellable))
+			.read_uint32 (0);
+
+		uint64 record = head;
+		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
+		while (is_arena_address (record) && !visited.contains (record)) {
+			visited.add (record);
+
+			Buffer r = gdb.make_buffer (yield gdb.read_byte_array (record, LOADER_RECORD_SIZE, cancellable));
+			uint64 ddb_address = r.read_uint32 (LOADER_DDB_OFFSET);
+			uint objects = r.read_uint8 (LOADER_OBJECT_COUNT_OFFSET);
+			uint64 table = r.read_uint32 (LOADER_OBJECT_TABLE_OFFSET);
+
+			if (objects != 0 && is_arena_address (table)) {
+				Buffer entries = gdb.make_buffer (yield gdb.read_byte_array (table,
+					objects * LOADER_OBJECT_SIZE, cancellable));
+				for (uint i = 0; i != objects; i++) {
+					uint64 object_base = entries.read_uint32 (i * LOADER_OBJECT_SIZE);
+					uint32 object_size = entries.read_uint32 (i * LOADER_OBJECT_SIZE + 4);
+					if (ddb_address >= object_base && ddb_address < object_base + object_size) {
+						images.add (new LoaderImage () {
+							ddb = ddb_address,
+							base_address = object_base,
+							size = object_size,
+						});
+						break;
+					}
+				}
+			}
+
+			record = r.read_uint32 (NEXT_OFFSET);
+		}
+
+		return images;
+	}
+
+	private static LoaderImage? find_loader_image (Gee.List<LoaderImage> images, uint64 ddb) {
+		foreach (LoaderImage image in images) {
+			if (image.ddb == ddb)
+				return image;
+		}
+		return null;
+	}
+
+	private class LoaderImage {
+		public uint64 ddb;
+		public uint64 base_address;
+		public uint32 size;
+	}
+
+	private static async Gee.List<DeviceDescriptorBlock> find_descriptor_blocks (Machine machine,
+			Cancellable? cancellable) throws Error, IOError {
+		var blocks = new Gee.ArrayList<DeviceDescriptorBlock> ();
+
+		uint64 address = yield find_kernel_descriptor_block (machine, cancellable);
+		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
+		while (is_arena_address (address) && !visited.contains (address)) {
+			visited.add (address);
+
+			Bytes raw;
+			try {
+				raw = yield machine.gdb.read_byte_array (address, DDB_SIZE, cancellable);
+			} catch (Error e) {
+				break;
+			}
+
+			Buffer buf = machine.gdb.make_buffer (raw);
+			DeviceDescriptorBlock? ddb = DeviceDescriptorBlock.parse_linked (buf, address);
+			if (ddb == null)
+				break;
+			blocks.add (ddb);
+
+			address = buf.read_uint32 (NEXT_OFFSET);
+		}
+
+		return blocks;
+	}
+
+	private static async uint64 find_kernel_descriptor_block (Machine machine, Cancellable? cancellable)
 			throws Error, IOError {
 		var arena = new Gee.ArrayList<RangeDetails> ();
 		yield machine.enumerate_ranges (Gum.PageProtection.READ, r => {
@@ -76,15 +193,14 @@ namespace Frida.Barebone {
 			return true;
 		}, cancellable);
 
-		var blocks = new Gee.ArrayList<DeviceDescriptorBlock> ();
 		foreach (RangeDetails r in arena) {
 			foreach (DeviceDescriptorBlock candidate in yield harvest_candidates (machine, r, cancellable)) {
-				if (yield candidate.is_credible (machine, cancellable))
-					blocks.add (candidate);
+				if (candidate.name == "VMM" && yield candidate.is_credible (machine, cancellable))
+					return candidate.address;
 			}
 		}
 
-		return blocks;
+		return 0;
 	}
 
 	private static async Gee.List<DeviceDescriptorBlock> harvest_candidates (Machine machine, RangeDetails range,
@@ -133,6 +249,24 @@ namespace Frida.Barebone {
 		public uint64 service_table;
 		public uint32 service_count;
 
+		public static DeviceDescriptorBlock? parse_linked (Buffer buf, uint64 address) {
+			string? name = parse_name (buf, NAME_OFFSET);
+			if (name == null)
+				return null;
+
+			uint32 count = buf.read_uint32 (SERVICE_TABLE_SIZE_OFFSET);
+			uint32 table = buf.read_uint32 (SERVICE_TABLE_PTR_OFFSET);
+			if (count > MAX_SERVICES || !is_arena_address (table))
+				count = 0;
+
+			return new DeviceDescriptorBlock () {
+				name = name,
+				address = address,
+				service_table = table,
+				service_count = count,
+			};
+		}
+
 		public static DeviceDescriptorBlock? parse (Buffer buf, size_t offset, uint64 address) {
 			string? name = parse_name (buf, offset + NAME_OFFSET);
 			if (name == null)
@@ -179,7 +313,7 @@ namespace Frida.Barebone {
 				}
 				if (padding_reached)
 					return null;
-				if (!c.isupper () && !c.isdigit () && c != '_' && c != '$')
+				if (!c.isalpha () && !c.isdigit () && c != '_' && c != '$')
 					return null;
 				name.append_c (c);
 			}
@@ -215,6 +349,14 @@ namespace Frida.Barebone {
 		return service_address != 0;
 	}
 
+	private const size_t NEXT_OFFSET = 0x00;
+	private const uint GET_DEVICE_LIST_ORDINAL = 5;
+	private const uint8 LOAD_EAX_ABSOLUTE = 0xa1;
+	private const size_t LOADER_RECORD_SIZE = 0x24;
+	private const size_t LOADER_DDB_OFFSET = 0x05;
+	private const size_t LOADER_OBJECT_COUNT_OFFSET = 0x13;
+	private const size_t LOADER_OBJECT_TABLE_OFFSET = 0x17;
+	private const size_t LOADER_OBJECT_SIZE = 0x10;
 	private const size_t DDB_SIZE = 0x38;
 	private const size_t STRADDLE_ALLOWANCE = DDB_SIZE;
 
