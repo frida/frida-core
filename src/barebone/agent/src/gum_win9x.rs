@@ -12,6 +12,7 @@ use crate::{
     gum::{self, FoundExportCallback},
     kernel,
 };
+use alloc::format;
 use core::ptr;
 
 #[unsafe(no_mangle)]
@@ -82,27 +83,35 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
-    let kernel_base = kernel::get_kernel_base();
-    if kernel_base == 0 {
-        return;
-    }
-
     unsafe {
-        let range = GumMemoryRange {
-            base_address: kernel_base,
-            size: 0,
-        };
-        let module = gum::gum_native_module_new("/VMM32.VXD", "", &range);
-        gum_barebone_register_module(registry, module);
-        g_object_unref(module as gpointer);
+        let modules = &*core::ptr::addr_of!(crate::MODULE_INFO);
+
+        for module_info in modules.iter() {
+            let path = format!("/WINDOWS/SYSTEM/VMM32/{}", module_info.name);
+            let range = GumMemoryRange {
+                base_address: module_info.offset as u64,
+                size: module_info.size as gsize,
+            };
+
+            let module = gum::gum_native_module_new(&path, &module_info.version, &range);
+            gum_barebone_register_module(registry, module);
+            g_object_unref(module as gpointer);
+        }
     }
 }
 
-// Nothing here has a symbol table to walk: the loader resolves VxD services
-// through a dispatch table rather than by name.
 pub(crate) unsafe fn enumerate_exports_in_range(
-    _start: u64,
-    _end: u64,
-    _callback: &mut FoundExportCallback,
+    start_address: u64,
+    end_address: u64,
+    callback: &mut FoundExportCallback,
 ) {
+    unsafe {
+        let symbol_table = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
+
+        for symbol_ref in symbol_table.iter_symbols_in_range(start_address, end_address) {
+            if !callback(symbol_ref.name_ptr(), symbol_ref.address()) {
+                break;
+            }
+        }
+    }
 }

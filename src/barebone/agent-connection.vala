@@ -20,6 +20,7 @@ namespace Frida.Barebone {
 		private uint64 kernel_base;
 		private Machine machine;
 		private Allocator allocator;
+		private Gee.List<ModuleInfo> kernel_modules;
 		private Gee.List<SymbolInfo> kernel_symbols;
 
 		private Allocation elf_allocation;
@@ -32,8 +33,8 @@ namespace Frida.Barebone {
 
 		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config,
 				KernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
-				Allocator allocator, Gee.List<SymbolInfo> kernel_symbols, Cancellable? cancellable)
-				throws Error, IOError {
+				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
+				Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
 				agent_config = agent_config,
 				image_config = image_config,
@@ -42,6 +43,7 @@ namespace Frida.Barebone {
 				kernel_base = kernel_base,
 				machine = machine,
 				allocator = allocator,
+				kernel_modules = kernel_modules,
 				kernel_symbols = kernel_symbols,
 			};
 
@@ -193,6 +195,9 @@ namespace Frida.Barebone {
 			config_builder.add ("t", kernel_base);
 
 			config_builder.open (new VariantType ("a(ssuuuu)"));
+			foreach (var m in kernel_modules) {
+				config_builder.add ("(ssuuuu)", m.name, m.version, m.offset, m.size, 0, 0);
+			}
 			foreach (var m in layout.modules) {
 				config_builder.add ("(ssuuuu)",
 					m.name,

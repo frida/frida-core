@@ -166,9 +166,13 @@ namespace Frida {
 				}
 			}
 
+			Gee.List<Barebone.ModuleInfo> kernel_modules = new Gee.ArrayList<Barebone.ModuleInfo> ();
 			Gee.List<Barebone.SymbolInfo> kernel_symbols = new Gee.ArrayList<Barebone.SymbolInfo> ();
-			if (config.kernel == WIN9X)
-				kernel_symbols = yield Barebone.collect_win9x_symbols (machine, cancellable);
+			if (config.kernel == WIN9X) {
+				var win9x_layout = yield Barebone.collect_win9x_layout (machine, cancellable);
+				kernel_modules = win9x_layout.modules;
+				kernel_symbols = win9x_layout.symbols;
+			}
 
 			Barebone.Allocator allocator;
 			Barebone.AllocatorConfig? ac = config.allocator;
@@ -196,7 +200,8 @@ namespace Frida {
 			Barebone.AgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
 				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
-					relocation, kernel_base, machine, allocator, kernel_symbols, cancellable);
+					relocation, kernel_base, machine, allocator, kernel_modules, kernel_symbols,
+					cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);

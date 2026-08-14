@@ -1,7 +1,8 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public static async Gee.List<SymbolInfo> collect_win9x_symbols (Machine machine, Cancellable? cancellable)
+	public static async Win9xLayout collect_win9x_layout (Machine machine, Cancellable? cancellable)
 			throws Error, IOError {
+		var modules = new Gee.ArrayList<ModuleInfo> ();
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
 		var blocks = yield find_descriptor_blocks (machine, cancellable);
@@ -13,8 +14,9 @@ namespace Frida.Barebone {
 
 		foreach (DeviceDescriptorBlock ddb in blocks) {
 			unowned string[]? names = known_service_names (ddb.name);
-			if (names == null)
-				continue;
+
+			uint64 lowest = uint64.MAX;
+			uint64 highest = 0;
 
 			var addresses = yield read_service_table (machine, ddb, cancellable);
 			for (int ordinal = 0; ordinal != addresses.size; ordinal++) {
@@ -23,17 +25,46 @@ namespace Frida.Barebone {
 					continue;
 
 				symbols.add (new SymbolInfo () {
-					name = (ordinal < names.length)
+					name = (names != null && ordinal < names.length)
 						? names[ordinal]
 						: "%s_service_%d".printf (ddb.name, ordinal),
 					offset = (uint32) address,
 					symbol_type = 0xf,
 					section = 0x10,
 				});
+
+				lowest = uint64.min (lowest, address);
+				highest = uint64.max (highest, address);
 			}
+
+			if (highest == 0)
+				continue;
+
+			modules.add (new ModuleInfo () {
+				name = "%s.VXD".printf (ddb.name),
+				version = "",
+				offset = (uint32) lowest,
+				size = (uint32) (highest - lowest),
+			});
 		}
 
-		return symbols;
+		return new Win9xLayout (modules, symbols);
+	}
+
+	public sealed class Win9xLayout : Object {
+		public Gee.List<ModuleInfo> modules {
+			get;
+			construct;
+		}
+
+		public Gee.List<SymbolInfo> symbols {
+			get;
+			construct;
+		}
+
+		public Win9xLayout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols) {
+			Object (modules: modules, symbols: symbols);
+		}
 	}
 
 	private static async Gee.List<DeviceDescriptorBlock> find_descriptor_blocks (Machine machine, Cancellable? cancellable)

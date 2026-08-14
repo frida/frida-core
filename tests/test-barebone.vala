@@ -70,6 +70,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-modules-in-live-guest", () => {
+			var h = new Harness ((h) => enumerates_modules_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/agent-recovers-from-exception-in-live-guest", () => {
 			var h = new Harness ((h) => agent_recovers_from_exception_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1067,13 +1072,20 @@ namespace Frida.BareboneTest {
 			yield target.open ();
 			var machine = new Barebone.IA32Machine (target.client);
 
-			var symbols = yield Barebone.collect_win9x_symbols (machine, null);
+			var layout = yield Barebone.collect_win9x_layout (machine, null);
 
+			var symbols = layout.symbols;
 			assert_true (symbols.size == IMPLEMENTED_SERVICES);
 			assert_symbol (symbols[0], "Get_VMM_Version", (uint32) 0xc0001000);
 			assert_symbol (symbols[1], "Get_Cur_VM_Handle", (uint32) 0xc0001010);
 			assert_symbol (symbols[2], "Get_Sys_VM_Handle", (uint32) 0xc0001030);
 			assert_symbol (symbols[6], "Begin_Reentrant_Execution", (uint32) 0xc0001070);
+
+			assert_true (layout.modules.size == 1);
+			var vmm = layout.modules[0];
+			assert_true (vmm.name == "VMM.VXD");
+			assert_true (vmm.offset == 0xc0001000);
+			assert_true (vmm.size == 0xc0001070 - 0xc0001000);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1128,6 +1140,14 @@ namespace Frida.BareboneTest {
 
 	private static async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void enumerates_modules_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, """
+			const vmm = Process.enumerateModules().find(m => m.name === 'VMM.VXD');
+			const named = vmm.enumerateExports().some(e => e.name === 'Get_Sys_VM_Handle');
+			send({ modules: Process.enumerateModules().length, named });
+		""", "\"named\":true");
 	}
 
 	private static async void agent_recovers_from_exception_in_live_guest (Harness h) {
