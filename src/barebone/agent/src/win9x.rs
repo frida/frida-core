@@ -80,24 +80,16 @@ pub fn free_code(ptr: *mut u8, _size: usize) {
 }
 
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
-    let stack = alloc_code(THREAD_STACK_SIZE);
-    if stack.is_null() {
-        return 0;
-    }
-
     unsafe {
         THREAD_ENTRY = Some(entry);
         THREAD_PARAMETER = parameter;
 
-        vmm_create_thread(
-            segment_ss(),
-            stack as u32 + THREAD_STACK_SIZE as u32,
-            segment_cs(),
-            frida_win9x_thread_thunk as u32,
-            segment_ds(),
-            segment_es(),
+        vwin32_create_ring0_thread(
+            THREAD_STACK_SIZE as u32,
             0,
-        )
+            frida_win9x_thread_thunk as u32,
+            0,
+        ) as isize
     }
 }
 
@@ -133,29 +125,7 @@ static mut THREAD_PARAMETER: *mut c_void = core::ptr::null_mut();
 
 const THREAD_STACK_SIZE: usize = 64 * 1024;
 
-fn segment_cs() -> u32 {
-    let selector: u32;
-    unsafe { core::arch::asm!("mov {0:e}, cs", out(reg) selector, options(nomem, nostack, preserves_flags)) };
-    selector
-}
 
-fn segment_ss() -> u32 {
-    let selector: u32;
-    unsafe { core::arch::asm!("mov {0:e}, ss", out(reg) selector, options(nomem, nostack, preserves_flags)) };
-    selector
-}
-
-fn segment_ds() -> u32 {
-    let selector: u32;
-    unsafe { core::arch::asm!("mov {0:e}, ds", out(reg) selector, options(nomem, nostack, preserves_flags)) };
-    selector
-}
-
-fn segment_es() -> u32 {
-    let selector: u32;
-    unsafe { core::arch::asm!("mov {0:e}, es", out(reg) selector, options(nomem, nostack, preserves_flags)) };
-    selector
-}
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let semaphore = semaphore_for(token);
@@ -533,8 +503,7 @@ unsafe extern "C" {
     fn get_next_thread_handle(thread: u32) -> u32;
     fn frida_win9x_hw_int_thunk();
     fn frida_win9x_thread_thunk();
-    fn vmm_create_thread(ss: u32, esp: u32, cs: u32, eip: u32, ds: u32, es: u32,
-        ref_data: u32) -> isize;
+    fn vwin32_create_ring0_thread(stack_size: u32, parameter: u32, entry: u32, event: u32) -> u32;
 }
 
 core::arch::global_asm!(
@@ -688,6 +657,24 @@ get_next_thread_handle:
     call dword ptr [_Get_Next_Thread_Handle]
     mov eax, edi
     pop edi
+    pop ebx
+    pop ebp
+    ret
+
+.global vwin32_create_ring0_thread
+vwin32_create_ring0_thread:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov ecx, [ebp + 8]
+    mov edx, [ebp + 12]
+    mov ebx, [ebp + 16]
+    mov esi, [ebp + 20]
+    call dword ptr [__VWIN32_CreateRing0Thread]
+    pop edi
+    pop esi
     pop ebx
     pop ebp
     ret
@@ -847,28 +834,6 @@ vpicd_virtualize_irq:
     pop ebp
     ret
 
-.global vmm_create_thread
-vmm_create_thread:
-    push ebp
-    mov ebp, esp
-    push ebx
-    push esi
-    push edi
-    push dword ptr [ebp + 32]
-    push dword ptr [ebp + 28]
-    push dword ptr [ebp + 24]
-    push dword ptr [ebp + 20]
-    push dword ptr [ebp + 16]
-    push dword ptr [ebp + 12]
-    push dword ptr [ebp + 8]
-    call dword ptr [_VMMCreateThread]
-    add esp, 28
-    pop edi
-    pop esi
-    pop ebx
-    pop ebp
-    ret
-
 .global frida_win9x_thread_thunk
 frida_win9x_thread_thunk:
     call frida_win9x_thread_start
@@ -908,7 +873,6 @@ unsafe extern "C" {
     static __MapPhysToLinear: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
-    static _VMMCreateThread: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
     static _Get_Initial_Thread_Handle: unsafe extern "C" fn();
     static _Get_Next_Thread_Handle: unsafe extern "C" fn();
@@ -919,4 +883,5 @@ unsafe extern "C" {
     static _VPICD_Virtualize_IRQ: unsafe extern "C" fn();
     static _VPICD_Phys_EOI: unsafe extern "C" fn();
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();
+    static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
 }

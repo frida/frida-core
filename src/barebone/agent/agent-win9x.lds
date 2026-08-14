@@ -27,7 +27,6 @@ SECTIONS {
     __MapPhysToLinear = .; . += 4;
     _Hook_VMM_Fault = .; . += 4;
     _Fatal_Error_Handler = .; . += 4;
-    _VMMCreateThread = .; . += 4;
     _Get_Cur_Thread_Handle = .; . += 4;
     _Get_Initial_Thread_Handle = .; . += 4;
     _Get_Next_Thread_Handle = .; . += 4;
@@ -38,6 +37,7 @@ SECTIONS {
     _VPICD_Virtualize_IRQ = .; . += 4;
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
+    __VWIN32_CreateRing0Thread = .; . += 4;
   }
   .data.rel.ro : {
     *(.data.rel.ro*)
