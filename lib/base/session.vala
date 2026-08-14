@@ -2274,7 +2274,11 @@ namespace Frida {
 		/**
 		 * The V8 runtime.
 		 */
-		V8;
+		V8,
+		/**
+		 * The Pharo runtime.
+		 */
+		PHARO;
 
 		public static ScriptRuntime from_nick (string nick) throws Error {
 			return Marshal.enum_from_nick<ScriptRuntime> (nick);

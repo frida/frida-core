@@ -91,7 +91,27 @@ namespace Frida {
 			if (name == null)
 				name = "script%u".printf (script_id.handle);
 
-			Gum.ScriptBackend backend = pick_backend (options.runtime);
+			ScriptRuntime runtime = options.runtime;
+			if (runtime == DEFAULT)
+				runtime = preferred_runtime;
+
+#if HAVE_GUMPHARO
+			if (runtime == PHARO) {
+				if (source == null)
+					throw new Error.NOT_SUPPORTED ("The Pharo runtime cannot load precompiled scripts");
+
+				var instance = new PharoScriptInstance (script_id, new Gum.PharoScript (name, source));
+				instances[script_id] = instance;
+
+				instance.closed.connect (on_instance_closed);
+				instance.message.connect (on_instance_message);
+				instance.debug_message.connect (on_instance_debug_message);
+
+				return instance;
+			}
+#endif
+
+			Gum.ScriptBackend backend = pick_backend (runtime);
 
 			Gum.Script script;
 			try {
@@ -109,7 +129,8 @@ namespace Frida {
 				return Source.REMOVE;
 			});
 
-			var instance = new ScriptInstance (script_id, script);
+			var js_instance = new JSScriptInstance (script_id, script);
+			ScriptInstance instance = js_instance;
 			instances[script_id] = instance;
 
 			instance.closed.connect (on_instance_closed);
@@ -175,7 +196,9 @@ namespace Frida {
 		}
 
 		public Gum.Script eternalize_script (AgentScriptId script_id) throws Error {
-			var instance = get_instance (script_id);
+			var instance = get_instance (script_id) as JSScriptInstance;
+			if (instance == null)
+				throw new Error.NOT_SUPPORTED ("Only JavaScript scripts may be eternalized");
 
 			var script = instance.eternalize ();
 
@@ -231,7 +254,7 @@ namespace Frida {
 			source.attach (Gum.ScriptBackend.get_scheduler ().get_js_context ());
 		}
 
-		public sealed class ScriptInstance : Object, RpcPeer {
+		public abstract class ScriptInstance : Object, RpcPeer {
 			public signal void closed ();
 			public signal void message (string json, Bytes? data);
 			public signal void debug_message (string message);
@@ -241,6 +264,120 @@ namespace Frida {
 				construct;
 			}
 
+			public abstract async void close ();
+			public abstract async void flush ();
+			public abstract async void load () throws Error;
+			public abstract void post (string json, Bytes? data) throws Error;
+			public abstract async void prepare_for_termination (TerminationReason reason);
+			public abstract void unprepare_for_termination ();
+
+			public abstract async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable)
+				throws Error, IOError;
+
+			public virtual void interrupt () throws Error {
+				throw new Error.NOT_SUPPORTED ("Interrupt is not available for this runtime");
+			}
+
+			public virtual async void terminate () {
+				yield close ();
+			}
+
+			public virtual void enable_debugger () throws Error {
+				throw new Error.NOT_SUPPORTED ("Debugger is not available for this runtime");
+			}
+
+			public virtual void disable_debugger () {
+			}
+
+			public virtual void post_debug_message (string message) throws Error {
+				throw new Error.NOT_SUPPORTED ("Debugger is not available for this runtime");
+			}
+		}
+
+
+#if HAVE_GUMPHARO
+		public sealed class PharoScriptInstance : ScriptInstance {
+			private Gum.PharoScript? script;
+
+			private State state = CREATED;
+
+			private enum State {
+				CREATED,
+				LOADED,
+				UNLOADED,
+				DESTROYED
+			}
+
+			private RpcClient rpc_client;
+
+			public PharoScriptInstance (AgentScriptId script_id, Gum.PharoScript script) {
+				Object (script_id: script_id);
+
+				this.script = script;
+				script.set_message_handler (on_message);
+			}
+
+			construct {
+				rpc_client = new RpcClient (this);
+			}
+
+			public override async void close () {
+				if (state == DESTROYED)
+					return;
+
+				if (state == LOADED) {
+					script.unload ();
+					state = UNLOADED;
+				}
+
+				script = null;
+				state = DESTROYED;
+
+				closed ();
+			}
+
+			public override async void flush () {
+				yield close ();
+			}
+
+			public override async void load () throws Error {
+				if (state != CREATED)
+					throw new Error.INVALID_OPERATION ("Script cannot be loaded in its current state");
+
+				script.load ();
+
+				state = LOADED;
+			}
+
+			public override void post (string json, Bytes? data) throws Error {
+				if (state != LOADED)
+					throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
+
+				script.post (json, data);
+			}
+
+			public override async void prepare_for_termination (TerminationReason reason) {
+			}
+
+			public override void unprepare_for_termination () {
+			}
+
+			private void on_message (Gum.PharoScript script, string json, Bytes? data) {
+				bool handled = rpc_client.try_handle_message (json);
+				if (!handled)
+					this.message (json, data);
+			}
+
+			public override async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable)
+					throws Error, IOError {
+				if (script == null)
+					throw new Error.INVALID_OPERATION ("Script is destroyed");
+				script.post (json, data);
+			}
+		}
+#endif
+
+		public sealed class JSScriptInstance : ScriptInstance {
 			public Gum.Script? script {
 				get {
 					return _script;
@@ -274,7 +411,7 @@ namespace Frida {
 
 			private RpcClient rpc_client;
 
-			public ScriptInstance (AgentScriptId script_id, Gum.Script script) {
+			public JSScriptInstance (AgentScriptId script_id, Gum.Script script) {
 				Object (script_id: script_id, script: script);
 			}
 
@@ -282,7 +419,7 @@ namespace Frida {
 				rpc_client = new RpcClient (this);
 			}
 
-			public async void close () {
+			public override async void close () {
 				if (close_request != null) {
 					try {
 						yield close_request.future.wait_async (null);
@@ -338,7 +475,7 @@ namespace Frida {
 				close_request.resolve (true);
 			}
 
-			public async void flush () {
+			public override async void flush () {
 				if (close_request == null)
 					close.begin ();
 
@@ -349,7 +486,7 @@ namespace Frida {
 				}
 			}
 
-			public async void load () throws Error {
+			public override async void load () throws Error {
 				if (state != CREATED)
 					throw new Error.INVALID_OPERATION ("Script cannot be loaded in its current state");
 
@@ -362,11 +499,11 @@ namespace Frida {
 				load_request.resolve (true);
 			}
 
-			public void interrupt () {
+			public override void interrupt () throws Error {
 				script.interrupt ();
 			}
 
-			public async void terminate () {
+			public override async void terminate () {
 				script.interrupt ();
 
 				yield close ();
@@ -397,7 +534,7 @@ namespace Frida {
 				return result;
 			}
 
-			public async void prepare_for_termination (TerminationReason reason) {
+			public override async void prepare_for_termination (TerminationReason reason) {
 				if (state == LOADED) {
 					schedule_on_js_thread (() => {
 						script.get_stalker ().flush ();
@@ -408,7 +545,7 @@ namespace Frida {
 				yield ensure_dispose_called (reason);
 			}
 
-			public void unprepare_for_termination () {
+			public override void unprepare_for_termination () {
 				if (state == DISPOSED) {
 					state = LOADED;
 					dispose_request = null;
@@ -448,7 +585,7 @@ namespace Frida {
 				dispose_request.resolve (true);
 			}
 
-			public void post (string json, Bytes? data) throws Error {
+			public override void post (string json, Bytes? data) throws Error {
 				switch (state) {
 					case LOADING:
 					case LOADED:
@@ -460,17 +597,17 @@ namespace Frida {
 				}
 			}
 
-			public void enable_debugger () throws Error {
+			public override void enable_debugger () throws Error {
 				if (_script != null)
 					_script.set_debug_message_handler (on_debug_message);
 			}
 
-			public void disable_debugger () {
+			public override void disable_debugger () {
 				if (_script != null)
 					_script.set_debug_message_handler (null);
 			}
 
-			public void post_debug_message (string message) {
+			public override void post_debug_message (string message) throws Error {
 				if (_script != null)
 					_script.post_debug_message (message);
 			}
@@ -485,7 +622,8 @@ namespace Frida {
 				this.debug_message (message);
 			}
 
-			private async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable) throws Error, IOError {
+			public override async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable)
+					throws Error, IOError {
 				if (script == null)
 					throw new Error.INVALID_OPERATION ("Script is destroyed");
 				script.post (json, data);

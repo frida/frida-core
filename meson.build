@@ -675,6 +675,9 @@ gumjs_inspector_vala_args = ['--pkg=frida-gumjs-inspector-1.0', gum_vala_args]
 
 if have_in_tree_payloads
   gumjs_vala_args = ['--pkg=frida-gumjs-1.0', '--pkg=gio-2.0', gum_vala_args]
+  if have_gumpharo
+    gumjs_vala_args += ['--pkg=frida-gumpharo-' + api_version]
+  endif
 
   have_v8 = gumjs_dep.get_variable('gumjs_v8') == 'enabled'
   if have_v8
