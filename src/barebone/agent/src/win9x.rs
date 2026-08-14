@@ -264,7 +264,7 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
                 seen[count] = pdb;
                 count += 1;
                 found(ProcessInfo {
-                    id: pdb,
+                    id: process_id(pdb),
                     path: image_path(pdb),
                 });
             }
@@ -273,6 +273,16 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
+}
+
+// KERNEL32 hands out its process database pointer XOR a per-boot value, and so must we.
+fn process_id(pdb: u32) -> u32 {
+    let slot = unsafe { core::ptr::addr_of!(_KERNEL32_ProcessIdObfuscator).read() };
+    if slot == 0 {
+        return pdb;
+    }
+
+    pdb ^ unsafe { (slot as *const u32).read() }
 }
 
 fn image_path(pdb: u32) -> *const u8 {
@@ -1136,4 +1146,5 @@ unsafe extern "C" {
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();
+    static _KERNEL32_ProcessIdObfuscator: u32;
 }

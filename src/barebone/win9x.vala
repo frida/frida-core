@@ -14,6 +14,16 @@ namespace Frida.Barebone {
 
 		var images = yield read_loader_images (machine, blocks, cancellable);
 
+		uint64 obfuscator = yield find_process_id_obfuscator (machine, cancellable);
+		if (obfuscator != 0) {
+			symbols.add (new SymbolInfo () {
+				name = PROCESS_ID_OBFUSCATOR,
+				offset = (uint32) obfuscator,
+				symbol_type = 0xf,
+				section = 0x10,
+			});
+		}
+
 		foreach (DeviceDescriptorBlock ddb in blocks) {
 			unowned string[]? names = known_service_names (ddb.name);
 
@@ -83,6 +93,91 @@ namespace Frida.Barebone {
 	// Every VxD is on VMM's chain, including the ones that export no services and would
 	// therefore be indistinguishable from noise when sweeping. Sweep only far enough to
 	// find VMM itself, then follow it.
+	// A Win9x process id is its database pointer XOR a per-boot value, so ask KERNEL32 where it
+	// keeps that value: GetCurrentProcessId() pushes the pointer and tail-calls a helper whose
+	// first instruction loads the obfuscator.
+	private static async uint64 find_process_id_obfuscator (Machine machine, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		uint64 kernel32 = yield find_kernel32 (machine, cancellable);
+		if (kernel32 == 0)
+			return 0;
+
+		uint64 getter = yield find_export (machine, kernel32, "GetCurrentProcessId", cancellable);
+		if (getter == 0)
+			return 0;
+
+		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (getter, 12, cancellable));
+		if (code.read_uint8 (0) != LOAD_EAX_ABSOLUTE || code.read_uint8 (7) != CALL_RELATIVE)
+			return 0;
+		uint64 helper = getter + 12 + code.read_uint32 (8);
+
+		Buffer body = gdb.make_buffer (yield gdb.read_byte_array (helper, 5, cancellable));
+		if (body.read_uint8 (0) != LOAD_EAX_ABSOLUTE)
+			return 0;
+
+		return body.read_uint32 (1);
+	}
+
+	private static async uint64 find_kernel32 (Machine machine, Cancellable? cancellable) throws Error, IOError {
+		for (uint64 candidate = KERNEL32_SEARCH_BASE; candidate < KERNEL32_SEARCH_LIMIT;
+				candidate += IMAGE_ALIGNMENT) {
+			if ((yield find_export (machine, candidate, "GetCurrentProcessId", cancellable)) != 0)
+				return candidate;
+		}
+
+		return 0;
+	}
+
+	private static async uint64 find_export (Machine machine, uint64 image, string wanted, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		Bytes header;
+		try {
+			header = yield gdb.read_byte_array (image, 0x200, cancellable);
+		} catch (Error e) {
+			return 0;
+		}
+		Buffer h = gdb.make_buffer (header);
+		if (h.read_uint16 (0) != DOS_SIGNATURE)
+			return 0;
+		uint32 headers = h.read_uint32 (DOS_HEADERS_OFFSET);
+		if (headers > 0x180 || h.read_uint32 (headers) != PE_SIGNATURE)
+			return 0;
+
+		uint32 directory = h.read_uint32 (headers + EXPORT_DIRECTORY_OFFSET);
+		if (directory == 0)
+			return 0;
+
+		Buffer d = gdb.make_buffer (yield gdb.read_byte_array (image + directory, 0x28, cancellable));
+		uint32 count = d.read_uint32 (0x18);
+		uint32 functions = d.read_uint32 (0x1c);
+		uint32 names = d.read_uint32 (0x20);
+		uint32 ordinals = d.read_uint32 (0x24);
+		if (count == 0 || count > MAX_EXPORTS)
+			return 0;
+
+		Buffer name_rvas = gdb.make_buffer (yield gdb.read_byte_array (image + names, count * 4, cancellable));
+		Buffer ordinal_values = gdb.make_buffer (yield gdb.read_byte_array (image + ordinals, count * 2,
+			cancellable));
+		for (uint32 i = 0; i != count; i++) {
+			Bytes raw = yield gdb.read_byte_array (image + name_rvas.read_uint32 (i * 4), wanted.length + 1,
+				cancellable);
+			unowned uint8[] actual = raw.get_data ();
+			if (actual[wanted.length] != 0 || Memory.cmp (actual, wanted.data, wanted.length) != 0)
+				continue;
+
+			uint32 ordinal = ordinal_values.read_uint16 (i * 2);
+			Buffer entry = gdb.make_buffer (yield gdb.read_byte_array (image + functions + ordinal * 4, 4,
+				cancellable));
+			return image + entry.read_uint32 (0);
+		}
+
+		return 0;
+	}
+
 	// VXDLDR knows the object each dynamically loaded VxD was scattered into; the one holding
 	// the descriptor block is the VxD proper. Statically linked VxDs live inside VMM32.VXD and
 	// have no image of their own to ask about.
@@ -350,6 +445,18 @@ namespace Frida.Barebone {
 	}
 
 	private const size_t NEXT_OFFSET = 0x00;
+	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
+
+	private const uint64 KERNEL32_SEARCH_BASE = 0xbff00000;
+	private const uint64 KERNEL32_SEARCH_LIMIT = 0xc0000000;
+	private const uint64 IMAGE_ALIGNMENT = 0x10000;
+	private const uint16 DOS_SIGNATURE = 0x5a4d;
+	private const size_t DOS_HEADERS_OFFSET = 0x3c;
+	private const uint32 PE_SIGNATURE = 0x00004550;
+	private const size_t EXPORT_DIRECTORY_OFFSET = 0x78;
+	private const uint32 MAX_EXPORTS = 0x2000;
+	private const uint8 CALL_RELATIVE = 0xe8;
+
 	private const uint GET_DEVICE_LIST_ORDINAL = 5;
 	private const uint8 LOAD_EAX_ABSOLUTE = 0xa1;
 	private const size_t LOADER_RECORD_SIZE = 0x24;

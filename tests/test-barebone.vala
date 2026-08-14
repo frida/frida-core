@@ -1115,6 +1115,10 @@ namespace Frida.BareboneTest {
 			}
 			assert_nonnull (shell);
 
+			// An unobfuscated id would still be the process database pointer, which lives in
+			// the shared arena.
+			assert_true (shell.pid < 0x80000000 || shell.pid >= 0x83000000);
+
 			var icons = shell.parameters["icons"];
 			assert_nonnull (icons);
 			assert_true (icons.n_children () != 0);
