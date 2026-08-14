@@ -23,6 +23,7 @@ use bindings::{
     g_variant_get, g_variant_get_data, g_variant_get_size, g_variant_get_string,
     g_variant_get_uint32, g_variant_new, g_variant_new_from_data, g_variant_new_string,
     g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
+    g_variant_builder_add, g_variant_builder_end, g_variant_builder_new,
     g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create,
     gum_script_backend_create_finish, gum_script_backend_get_scheduler,
     gum_script_backend_obtain_qjs, gum_script_get_stalker, gum_script_load,
@@ -86,6 +87,7 @@ pub enum FridaCommand {
     RemapWritablePages = 5,
     MemoryProtect = 6,
     PatchCode = 7,
+    EnumerateProcesses = 8,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -101,6 +103,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::RemapWritablePages => write!(f, "RemapWritablePages"),
             FridaCommand::MemoryProtect => write!(f, "MemoryProtect"),
             FridaCommand::PatchCode => write!(f, "PatchCode"),
+            FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -705,6 +708,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
+            #[cfg(feature = "win9x")]
+            FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes()),
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -713,6 +718,24 @@ fn process_incoming_message(variant: *mut GVariant) {
         }
 
         unsafe { g_variant_unref(payload_variant) };
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn handle_enumerate_processes() -> HandlerResponse {
+    unsafe {
+        let builder = g_variant_builder_new(g_variant_type_new(c"a(us)".as_ptr() as *const gchar));
+
+        kernel::enumerate_processes(&mut |process| {
+            let path = if process.path.is_null() {
+                c"".as_ptr()
+            } else {
+                process.path as *const core::ffi::c_char
+            };
+            g_variant_builder_add(builder, c"(us)".as_ptr(), process.id, path);
+        });
+
+        HandlerResponse::success(g_variant_builder_end(builder))
     }
 }
 

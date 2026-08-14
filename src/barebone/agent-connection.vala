@@ -309,6 +309,30 @@ namespace Frida.Barebone {
 			io_cancellable.cancel ();
 		}
 
+		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
+			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.tuple ({}), cancellable);
+			if (!response.check_format_string ("a(us)", false))
+				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
+
+			var result = new Gee.ArrayList<HostProcessInfo?> ();
+			uint32 pid;
+			unowned string path;
+			var it = response.iterator ();
+			while (it.next ("(u&s)", out pid, out path)) {
+				result.add (HostProcessInfo (pid, basename_of (path),
+					new HashTable<string, Variant> (str_hash, str_equal)));
+			}
+			var processes = new HostProcessInfo[result.size];
+			for (int i = 0; i != result.size; i++)
+				processes[i] = result[i];
+			return processes;
+		}
+
+		private static string basename_of (string path) {
+			int start = path.last_index_of_char ('\\');
+			return (start != -1) ? path[start + 1:] : path;
+		}
+
 		public async AgentScriptId create_script (string source, Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("s", source);
 			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable);
@@ -548,6 +572,7 @@ namespace Frida.Barebone {
 			REMAP_WRITABLE_PAGES = 5,
 			MEMORY_PROTECT = 6,
 			PATCH_CODE = 7,
+			ENUMERATE_PROCESSES = 8,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

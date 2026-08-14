@@ -65,6 +65,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => enumerates_processes_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/agent-recovers-from-exception-in-live-guest", () => {
 			var h = new Harness ((h) => agent_recovers_from_exception_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1079,6 +1084,35 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async void enumerates_processes_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+			var processes = yield device.enumerate_processes (null);
+
+			bool found_shell = false;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					found_shell = true;
+			}
+			assert_true (found_shell);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private static async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
 	}
@@ -1095,13 +1129,13 @@ namespace Frida.BareboneTest {
 		""", "\"caught\":\"yes\"");
 	}
 
-	private static async void run_script_in_live_guest (Harness h, string source, string expected) {
+	private static Barebone.Config? win9x_config_from_environment (Harness h) {
 		string? agent_path = Environment.get_variable ("FRIDA_TEST_WIN9X_AGENT");
 		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WIN9X_QMP");
 		string? stub_port = Environment.get_variable ("FRIDA_TEST_WIN9X_GDB_PORT");
 		if (agent_path == null || qmp_path == null || stub_port == null) {
 			h.done ();
-			return;
+			return null;
 		}
 
 		var config = new Barebone.Config ();
@@ -1115,6 +1149,14 @@ namespace Frida.BareboneTest {
 				bus = Environment.get_variable ("FRIDA_TEST_WIN9X_BUS"),
 			},
 		};
+
+		return config;
+	}
+
+	private static async void run_script_in_live_guest (Harness h, string source, string expected) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
 
 		var manager = new DeviceManager ();
 		try {

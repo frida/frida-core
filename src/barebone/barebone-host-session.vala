@@ -354,7 +354,9 @@ namespace Frida {
 
 		public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (connection == null)
+				throw_not_supported ();
+			return yield connection.enumerate_processes (cancellable);
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

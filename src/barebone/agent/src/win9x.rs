@@ -270,6 +270,58 @@ pub fn install_interrupt_handler(
     if handle == 0 { -1 } else { 0 }
 }
 
+pub struct ProcessInfo {
+    pub id: u32,
+    pub path: *const u8,
+}
+
+// Win32 threads carry the process they belong to in VWIN32's per-thread block, so the
+// process list is the deduplicated set of those, and the image path is where the command
+// line starts.
+pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
+    let slot = unsafe { (0xc00211ccu32 as *const u32).read() };
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+
+    let mut seen: [u32; 64] = [0; 64];
+    let mut count = 0usize;
+    let mut thread = first;
+    while thread != 0 && count < seen.len() {
+        if unsafe { (thread as *const u32).add(0x2c / 4).read() } == WIN32_THREAD {
+            let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+            let pdb = unsafe { (block as *const u32).add(1).read() };
+            if !seen[..count].contains(&pdb) {
+                seen[count] = pdb;
+                count += 1;
+                found(ProcessInfo {
+                    id: pdb,
+                    path: image_path(pdb),
+                });
+            }
+        }
+
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+}
+
+fn image_path(pdb: u32) -> *const u8 {
+    let env_db = unsafe { (pdb as *const u32).byte_add(0x40).read() };
+    if env_db < ARENA_FLOOR {
+        return core::ptr::null();
+    }
+
+    let command_line = unsafe { (env_db as *const u32).byte_add(0x08).read() };
+    if command_line < ARENA_FLOOR || unsafe { (command_line as *const u8).add(1).read() } != b':' {
+        return core::ptr::null();
+    }
+
+    command_line as *const u8
+}
+
+const WIN32_THREAD: u32 = 0x2a;
+const ARENA_FLOOR: u32 = 0x10000;
+
 pub fn install_fault_reporter() {
     unsafe {
         FAULT_CHAIN[INVALID_OPCODE as usize] = hook_vmm_fault(INVALID_OPCODE, frida_win9x_fault_thunk_ud);
