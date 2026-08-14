@@ -101,6 +101,24 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     }
 }
 
+// VMM refuses to build a thread from the borrowed context the host enters us on, and only
+// says so by never returning, so hand the work to a point where VMM is between jobs.
+pub fn run_when_ready(action: fn()) {
+    unsafe {
+        READY_ACTION = Some(action);
+        schedule_global_event(frida_win9x_event_thunk);
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_event() {
+    if let Some(action) = unsafe { READY_ACTION } {
+        action();
+    }
+}
+
+static mut READY_ACTION: Option<fn()> = None;
+
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_thread_start() {
     unsafe {
@@ -456,6 +474,8 @@ unsafe extern "C" {
     fn frida_win9x_time_out_thunk();
     fn get_cur_vm_handle() -> u32;
     fn get_sys_vm_handle() -> u32;
+    fn schedule_global_event(callback: unsafe extern "C" fn()) -> u32;
+    fn frida_win9x_event_thunk();
     fn get_next_vm_handle(vm: u32) -> u32;
     fn get_initial_thread_handle(vm: u32) -> u32;
     fn get_next_thread_handle(thread: u32) -> u32;
@@ -547,6 +567,29 @@ fatal_error_handler:
     pop esi
     pop ebx
     pop ebp
+    ret
+
+.global schedule_global_event
+schedule_global_event:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov esi, [ebp + 8]
+    call dword ptr [_Schedule_Global_Event]
+    mov eax, ebx
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global frida_win9x_event_thunk
+frida_win9x_event_thunk:
+    pushad
+    call frida_win9x_on_event
+    popad
     ret
 
 .global get_sys_vm_handle
@@ -795,6 +838,7 @@ frida_win9x_hw_int_thunk:
 unsafe extern "C" {
     static _Get_Cur_VM_Handle: unsafe extern "C" fn();
     static _Get_Sys_VM_Handle: unsafe extern "C" fn();
+    static _Schedule_Global_Event: unsafe extern "C" fn();
     static _Create_Semaphore: unsafe extern "C" fn();
     static _Wait_Semaphore: unsafe extern "C" fn();
     static _Signal_Semaphore: unsafe extern "C" fn();

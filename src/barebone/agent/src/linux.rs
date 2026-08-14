@@ -20,6 +20,10 @@ pub fn panic(msg: &str) -> ! {
     unsafe { frida_kmod_panic(msg.as_ptr() as *const c_char) }
 }
 
+pub fn run_when_ready(action: fn()) {
+    action();
+}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     unsafe { frida_kmod_spawn_thread(entry, parameter) as isize }
 }

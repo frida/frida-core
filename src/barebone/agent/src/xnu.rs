@@ -13,6 +13,10 @@ pub fn panic(msg: &str) {
     unsafe { _panic(msg.as_ptr()) };
 }
 
+pub fn run_when_ready(action: fn()) {
+    action();
+}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     kernel_thread_start(entry, parameter)
 }

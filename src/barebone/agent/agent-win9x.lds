@@ -10,6 +10,7 @@ SECTIONS {
     . = ALIGN(4);
     _Get_Cur_VM_Handle = .; . += 4;
     _Get_Sys_VM_Handle = .; . += 4;
+    _Schedule_Global_Event = .; . += 4;
     _Create_Semaphore = .; . += 4;
     _Wait_Semaphore = .; . += 4;
     _Signal_Semaphore = .; . += 4;

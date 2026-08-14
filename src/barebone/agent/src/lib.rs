@@ -163,7 +163,7 @@ mod entrypoint_blob {
         unsafe {
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
-            kernel::spawn_thread(worker, 12345usize as *mut c_void);
+            kernel::run_when_ready(start_worker);
         }
     }
 
@@ -175,6 +175,10 @@ mod entrypoint_blob {
     // patch BRK at gum_try_mprotect/remap, and the BRK is a debug exception; (2) a stray jump
     // into the agent's data region during GObject init (instruction abort) — looks like a
     // misapplied relocation for a function pointer stored in .data/.rodata.
+    fn start_worker() {
+        kernel::spawn_thread(worker, 12345usize as *mut c_void);
+    }
+
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
             kernel::install_fault_reporter();
@@ -398,6 +402,10 @@ mod entrypoint_linux {
 
     pub fn stop_requested() -> bool {
         STOP_REQUESTED.load(Ordering::Acquire)
+    }
+
+    fn start_worker() {
+        kernel::spawn_thread(worker, 12345usize as *mut c_void);
     }
 
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
