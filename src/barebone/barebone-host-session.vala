@@ -356,7 +356,8 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			if (connection == null)
 				throw_not_supported ();
-			return yield connection.enumerate_processes (cancellable);
+			return yield connection.enumerate_processes (ProcessQueryOptions._deserialize (options).scope,
+				cancellable);
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {

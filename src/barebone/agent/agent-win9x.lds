@@ -38,6 +38,7 @@ SECTIONS {
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
     __VWIN32_CreateRing0Thread = .; . += 4;
+    _IFSMgr_Ring0_FileIO = .; . += 4;
   }
   .data.rel.ro : {
     *(.data.rel.ro*)

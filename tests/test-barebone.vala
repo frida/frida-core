@@ -1092,14 +1092,27 @@ namespace Frida.BareboneTest {
 		var manager = new DeviceManager ();
 		try {
 			var device = yield manager.add_barebone_device (config, null);
-			var processes = yield device.enumerate_processes (null);
+			var options = new ProcessQueryOptions ();
+			options.scope = FULL;
+			var processes = yield device.enumerate_processes (options, null);
 
-			bool found_shell = false;
+			Process? shell = null;
 			for (int i = 0; i != processes.size (); i++) {
 				if (processes.get (i).name.down () == "explorer.exe")
-					found_shell = true;
+					shell = processes.get (i);
 			}
-			assert_true (found_shell);
+			assert_nonnull (shell);
+
+			var icons = shell.parameters["icons"];
+			assert_nonnull (icons);
+			assert_true (icons.n_children () != 0);
+
+			var icon = icons.get_child_value (0);
+			assert_true (icon.lookup_value ("format", VariantType.STRING).get_string () == "rgba");
+			uint16 width = icon.lookup_value ("width", VariantType.UINT16).get_uint16 ();
+			uint16 height = icon.lookup_value ("height", VariantType.UINT16).get_uint16 ();
+			assert_true (width != 0 && height != 0);
+			assert_true (icon.lookup_value ("image", new VariantType ("ay")).get_size () == width * height * 4);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

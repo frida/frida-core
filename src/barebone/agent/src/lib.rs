@@ -20,10 +20,12 @@ use bindings::{
     GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
-    g_variant_get, g_variant_get_data, g_variant_get_size, g_variant_get_string,
+    g_variant_get, g_variant_get_boolean, g_variant_get_data, g_variant_get_size, g_variant_get_string,
     g_variant_get_uint32, g_variant_new, g_variant_new_from_data, g_variant_new_string,
     g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
-    g_variant_builder_add, g_variant_builder_end, g_variant_builder_new,
+    g_variant_builder_add, g_variant_builder_add_value, g_variant_builder_close,
+    g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
+    g_variant_new_fixed_array,
     g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create,
     gum_script_backend_create_finish, gum_script_backend_get_scheduler,
     gum_script_backend_obtain_qjs, gum_script_get_stalker, gum_script_load,
@@ -709,7 +711,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
             #[cfg(feature = "win9x")]
-            FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes()),
+            FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -722,9 +724,15 @@ fn process_incoming_message(variant: *mut GVariant) {
 }
 
 #[cfg(feature = "win9x")]
-fn handle_enumerate_processes() -> HandlerResponse {
+fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let builder = g_variant_builder_new(g_variant_type_new(c"a(us)".as_ptr() as *const gchar));
+        let list_type = g_variant_type_new(c"a(usaay)".as_ptr() as *const gchar);
+        let process_type = g_variant_type_new(c"(usaay)".as_ptr() as *const gchar);
+        let icons_type = g_variant_type_new(c"aay".as_ptr() as *const gchar);
+        let byte_type = g_variant_type_new(c"y".as_ptr() as *const gchar);
+        let builder = g_variant_builder_new(list_type);
+
+        let include_icons = g_variant_get_boolean(payload) != 0;
 
         kernel::enumerate_processes(&mut |process| {
             let path = if process.path.is_null() {
@@ -732,10 +740,36 @@ fn handle_enumerate_processes() -> HandlerResponse {
             } else {
                 process.path as *const core::ffi::c_char
             };
-            g_variant_builder_add(builder, c"(us)".as_ptr(), process.id, path);
+
+            g_variant_builder_open(builder, process_type);
+            g_variant_builder_add(builder, c"u".as_ptr(), process.id);
+            g_variant_builder_add(builder, c"s".as_ptr(), path);
+
+            g_variant_builder_open(builder, icons_type);
+            if include_icons && !process.path.is_null() {
+                kernel::enumerate_icons(process.path, &mut |bytes| {
+                    let icon = g_variant_new_fixed_array(
+                        byte_type,
+                        bytes.as_ptr() as *const c_void,
+                        bytes.len() as gsize,
+                        1,
+                    );
+                    g_variant_builder_add_value(builder, icon);
+                });
+            }
+            g_variant_builder_close(builder);
+
+            g_variant_builder_close(builder);
         });
 
-        HandlerResponse::success(g_variant_builder_end(builder))
+        let processes = g_variant_builder_end(builder);
+
+        g_variant_type_free(byte_type);
+        g_variant_type_free(icons_type);
+        g_variant_type_free(process_type);
+        g_variant_type_free(list_type);
+
+        HandlerResponse::success(processes)
     }
 }
 

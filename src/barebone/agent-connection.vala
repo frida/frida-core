@@ -309,22 +309,27 @@ namespace Frida.Barebone {
 			io_cancellable.cancel ();
 		}
 
-		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
-			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.tuple ({}), cancellable);
-			if (!response.check_format_string ("a(us)", false))
+		public async HostProcessInfo[] enumerate_processes (Scope scope, Cancellable? cancellable) throws Error, IOError {
+			bool include_icons = scope == FULL;
+			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.boolean (include_icons),
+				cancellable);
+			if (!response.check_format_string ("a(usaay)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
 
-			var result = new Gee.ArrayList<HostProcessInfo?> ();
-			uint32 pid;
-			unowned string path;
-			var it = response.iterator ();
-			while (it.next ("(u&s)", out pid, out path)) {
-				result.add (HostProcessInfo (pid, basename_of (path),
-					new HashTable<string, Variant> (str_hash, str_equal)));
+			var processes = new HostProcessInfo[response.n_children ()];
+			for (size_t i = 0; i != processes.length; i++) {
+				var entry = response.get_child_value (i);
+				var parameters = new HashTable<string, Variant> (str_hash, str_equal);
+
+				unowned string path = entry.get_child_value (1).get_string ();
+				if (scope != MINIMAL)
+					parameters["path"] = path;
+				if (include_icons)
+					parameters["icons"] = icons_from_resources (entry.get_child_value (2));
+
+				processes[i] = HostProcessInfo (entry.get_child_value (0).get_uint32 (), basename_of (path),
+					parameters);
 			}
-			var processes = new HostProcessInfo[result.size];
-			for (int i = 0; i != result.size; i++)
-				processes[i] = result[i];
 			return processes;
 		}
 
@@ -332,6 +337,99 @@ namespace Frida.Barebone {
 			int start = path.last_index_of_char ('\\');
 			return (start != -1) ? path[start + 1:] : path;
 		}
+
+		private static Variant icons_from_resources (Variant resources) {
+			var icons = new VariantBuilder (new VariantType ("aa{sv}"));
+			foreach (var resource in resources) {
+				var icon = icon_from_resource (resource.get_data_as_bytes ().get_data ());
+				if (icon != null)
+					icons.add_value (icon);
+			}
+			return icons.end ();
+		}
+
+		private static Variant? icon_from_resource (uint8[] dib) {
+			if (dib.length < BITMAP_INFO_HEADER_SIZE)
+				return null;
+
+			uint32 width = read_uint32 (dib, 4);
+			uint32 height = read_uint32 (dib, 8) / 2;
+			uint16 depth = read_uint16 (dib, 14);
+			if (width == 0 || width > MAX_ICON_DIMENSION || height == 0 || height > MAX_ICON_DIMENSION)
+				return null;
+
+			uint32 palette_size = read_uint32 (dib, 32);
+			if (palette_size == 0 && depth <= 8)
+				palette_size = 1u << depth;
+			size_t palette = BITMAP_INFO_HEADER_SIZE;
+			size_t colors = palette + palette_size * 4;
+
+			size_t color_stride = stride_of (width * depth);
+			size_t mask = colors + color_stride * height;
+			size_t mask_stride = stride_of (width);
+			if (mask + mask_stride * height > dib.length)
+				return null;
+
+			var image = new uint8[width * height * 4];
+			for (uint32 y = 0; y != height; y++) {
+				size_t color_row = colors + color_stride * (height - 1 - y);
+				size_t mask_row = mask + mask_stride * (height - 1 - y);
+				for (uint32 x = 0; x != width; x++) {
+					uint8 red, green, blue;
+					read_color (dib, color_row, x, depth, palette, out red, out green, out blue);
+
+					bool transparent = (dib[mask_row + x / 8] & (0x80 >> (int) (x % 8))) != 0;
+
+					size_t pixel = (y * width + x) * 4;
+					image[pixel + 0] = red;
+					image[pixel + 1] = green;
+					image[pixel + 2] = blue;
+					image[pixel + 3] = transparent ? 0 : 255;
+				}
+			}
+
+			var icon = new VariantBuilder (VariantType.VARDICT);
+			icon.add ("{sv}", "format", new Variant.string ("rgba"));
+			icon.add ("{sv}", "width", new Variant.uint16 ((uint16) width));
+			icon.add ("{sv}", "height", new Variant.uint16 ((uint16) height));
+			icon.add ("{sv}", "image", Variant.new_from_data<void *> (new VariantType ("ay"), image, true));
+			return icon.end ();
+		}
+
+		private static void read_color (uint8[] dib, size_t row, uint32 x, uint16 depth, size_t palette,
+				out uint8 red, out uint8 green, out uint8 blue) {
+			if (depth >= 24) {
+				size_t pixel = row + x * (depth / 8);
+				blue = dib[pixel + 0];
+				green = dib[pixel + 1];
+				red = dib[pixel + 2];
+				return;
+			}
+
+			size_t bit = x * depth;
+			uint8 packed = dib[row + bit / 8];
+			uint index = (packed >> (int) (8 - depth - (bit % 8))) & ((1 << depth) - 1);
+
+			size_t entry = palette + index * 4;
+			blue = dib[entry + 0];
+			green = dib[entry + 1];
+			red = dib[entry + 2];
+		}
+
+		private static size_t stride_of (uint32 bits) {
+			return ((bits + 31) / 32) * 4;
+		}
+
+		private static uint32 read_uint32 (uint8[] data, size_t offset) {
+			return data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24);
+		}
+
+		private static uint16 read_uint16 (uint8[] data, size_t offset) {
+			return (uint16) (data[offset] | (data[offset + 1] << 8));
+		}
+
+		private const size_t BITMAP_INFO_HEADER_SIZE = 40;
+		private const uint32 MAX_ICON_DIMENSION = 256;
 
 		public async AgentScriptId create_script (string source, Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("s", source);

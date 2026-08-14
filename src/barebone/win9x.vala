@@ -164,6 +164,8 @@ namespace Frida.Barebone {
 			return VPICD_SERVICE_NAMES;
 		if (vxd == "VWIN32")
 			return VWIN32_SERVICE_NAMES;
+		if (vxd == "IFSMGR")
+			return IFSMGR_SERVICE_NAMES;
 		return null;
 	}
 
