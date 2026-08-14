@@ -161,11 +161,9 @@ mod entrypoint_blob {
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) {
         unsafe {
-            kernel::log("frida: _start entry\n\0");
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
-            kernel::log("frida: _start config stored\n\0");
 
-            let _r = kernel::spawn_thread(worker, 12345usize as *mut c_void);
+            kernel::spawn_thread(worker, 12345usize as *mut c_void);
         }
     }
 
@@ -179,7 +177,7 @@ mod entrypoint_blob {
     // misapplied relocation for a function pointer stored in .data/.rodata.
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
-            kernel::log("frida: worker entry\n\0");
+            kernel::install_fault_reporter();
             init_gum();
 
             let (transport_config, kernel_base, module_info, symbol_table, own_range) =
@@ -188,7 +186,6 @@ mod entrypoint_blob {
             MODULE_INFO = module_info;
             SYMBOL_TABLE = symbol_table;
             OWN_RANGE = own_range;
-            kernel::log("frida: config parsed, init transport\n\0");
 
             let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
             let transport = match transport_config {
@@ -201,6 +198,11 @@ mod entrypoint_blob {
                     )
                     .unwrap(),
                 ),
+                #[cfg(feature = "win9x")]
+                TransportConfig::VirtioPci => Transport::Virtio(
+                    hostlink_virtio::Hostlink::init_pci(Some(on_frame_from_host), wake_token)
+                        .unwrap(),
+                ),
                 #[cfg(feature = "xnu")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
@@ -208,7 +210,6 @@ mod entrypoint_blob {
                 ),
             };
             transport_set(transport);
-            kernel::log("frida: transport up, entering main loop\n\0");
 
             run_main_loop(adopt_js_context());
         }
@@ -262,6 +263,12 @@ mod entrypoint_blob {
                     { TransportConfig::Vsock { host_port } }
                     #[cfg(not(feature = "xnu"))]
                     { let _ = host_port; panic!("vsock is XNU's") }
+                }
+                2 => {
+                    #[cfg(feature = "win9x")]
+                    { TransportConfig::VirtioPci }
+                    #[cfg(not(feature = "win9x"))]
+                    { panic!("virtio-pci is Win9x's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -415,7 +422,6 @@ mod entrypoint_linux {
                     return;
                 }
             }
-            kernel::log("frida: transport up, entering main loop\n\0");
 
             let main_context = adopt_js_context();
 
@@ -471,6 +477,8 @@ impl Transport {
 #[cfg(feature = "blob")]
 pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
+    #[cfg(feature = "win9x")]
+    VirtioPci,
     #[cfg(feature = "xnu")]
     Vsock { host_port: u32 },
 }
@@ -515,7 +523,7 @@ unsafe fn init_gum() {
     unsafe {
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
-        kernel::log("frida: gum_init_embedded done\n\0");
+        bindings::gum_exceptor_obtain();
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
         gum_script_scheduler_disable_background_thread(gum_script_backend_get_scheduler());

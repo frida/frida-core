@@ -55,6 +55,21 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/services-resolve-from-descriptor-block", () => {
+			var h = new Harness ((h) => services_resolve_from_descriptor_block.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Win9x/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => agent_runs_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Win9x/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => agent_recovers_from_exception_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
 			assert_true (parse_config ("{}").kernel == Barebone.KernelKind.AUTO);
 			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == Barebone.KernelKind.BARE);
@@ -1040,6 +1055,155 @@ namespace Frida.BareboneTest {
 		"CR0=8005003b CR2=00000000 CR3=00001000 CR4=00000010\n";
 
 	// Paging on, PSE on, PAE off: 32-bit entries, one of them a 4 MiB page.
+	private static async void services_resolve_from_descriptor_block (Harness h) {
+		var target = new FakeTarget (IA32, arena_page_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			target.map_virtual (ARENA_VA, arena_with_vmm_block ());
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
+
+			var symbols = yield Barebone.collect_win9x_symbols (machine, null);
+
+			assert_true (symbols.size == IMPLEMENTED_SERVICES);
+			assert_symbol (symbols[0], "Get_VMM_Version", (uint32) 0xc0001000);
+			assert_symbol (symbols[1], "Get_Cur_VM_Handle", (uint32) 0xc0001010);
+			assert_symbol (symbols[2], "Get_Sys_VM_Handle", (uint32) 0xc0001030);
+			assert_symbol (symbols[6], "Begin_Reentrant_Execution", (uint32) 0xc0001070);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static async void agent_runs_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void agent_recovers_from_exception_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, """
+			let caught = 'no';
+			try {
+				ptr('0xfffff000').readU32();
+			} catch (e) {
+				caught = 'yes';
+			}
+			send({ caught: caught });
+		""", "\"caught\":\"yes\"");
+	}
+
+	private static async void run_script_in_live_guest (Harness h, string source, string expected) {
+		string? agent_path = Environment.get_variable ("FRIDA_TEST_WIN9X_AGENT");
+		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WIN9X_QMP");
+		string? stub_port = Environment.get_variable ("FRIDA_TEST_WIN9X_GDB_PORT");
+		if (agent_path == null || qmp_path == null || stub_port == null) {
+			h.done ();
+			return;
+		}
+
+		var config = new Barebone.Config ();
+		config.connection.host = "127.0.0.1";
+		config.connection.port = (uint16) uint.parse (stub_port);
+		config.kernel = WIN9X;
+		config.agent = new Barebone.AgentConfig () {
+			path = agent_path,
+			transport = new Barebone.HostlinkTransportConfig () {
+				qmp = "unix:" + qmp_path,
+				bus = Environment.get_variable ("FRIDA_TEST_WIN9X_BUS"),
+			},
+		};
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+			var session = yield device.attach (0, null, null);
+			var script = yield session.create_script (source, null, null);
+
+			string? received = null;
+			script.message.connect ((json, data) => {
+				received = json;
+				run_script_in_live_guest.callback ();
+			});
+			yield script.load (null);
+			if (received == null)
+				yield;
+
+			assert_true (received.contains (expected));
+
+			yield session.detach (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static void assert_symbol (Barebone.SymbolInfo symbol, string name, uint32 address) {
+		assert_true (symbol.name == name);
+		assert_true (symbol.offset == address);
+	}
+
+	private const uint64 ARENA_VA = 0xc0000000;
+	private const uint64 ARENA_PA = 0x3000;
+	private const size_t ARENA_SIZE = 0x1000;
+
+	private const size_t SERVICE_TABLE_OFFSET = 0x100;
+	private const size_t VMM_BLOCK_OFFSET = 0x200;
+	private const size_t DECOY_BLOCK_OFFSET = 0x300;
+
+	private const uint32 UNIMPLEMENTED_SERVICE = 0;
+	private const uint32 SERVICE_TABLE_OUTSIDE_ARENA = 0x00001000;
+	private const int IMPLEMENTED_SERVICES = 7;
+
+	private static uint8[] arena_page_tables () {
+		var ram = new Ram ();
+
+		ram.write_uint32 (PD_PA + ((ARENA_VA >> 22) * 4), (uint32) PT_PA | 0x3);
+		ram.write_uint32 (PT_PA + (0 * 4), (uint32) ARENA_PA | 0x3);
+
+		return ram.steal ();
+	}
+
+	private static Bytes arena_with_vmm_block () {
+		var arena = new uint8[ARENA_SIZE];
+
+		uint32[] services = { (uint32) 0xc0001000, (uint32) 0xc0001010, UNIMPLEMENTED_SERVICE,
+			(uint32) 0xc0001030, (uint32) 0xc0001040, (uint32) 0xc0001050, (uint32) 0xc0001060,
+			(uint32) 0xc0001070 };
+		for (uint i = 0; i != services.length; i++)
+			put_uint32 (arena, SERVICE_TABLE_OFFSET + (i * 4), services[i]);
+
+		put_descriptor_block (arena, VMM_BLOCK_OFFSET, "VMM     ", (uint32) (ARENA_VA + SERVICE_TABLE_OFFSET),
+			services.length);
+		put_descriptor_block (arena, DECOY_BLOCK_OFFSET, "VCACHE  ", SERVICE_TABLE_OUTSIDE_ARENA,
+			services.length);
+
+		return new Bytes.take ((owned) arena);
+	}
+
+	private static void put_descriptor_block (uint8[] arena, size_t offset, string name, uint32 service_table,
+			uint service_count) {
+		for (uint i = 0; i != name.length; i++)
+			arena[offset + 0x0c + i] = (uint8) name[i];
+		put_uint32 (arena, offset + 0x18, (uint32) ARENA_VA);
+		put_uint32 (arena, offset + 0x30, service_table);
+		put_uint32 (arena, offset + 0x34, service_count);
+	}
+
+	private static void put_uint32 (uint8[] buf, size_t offset, uint32 val) {
+		for (uint i = 0; i != 4; i++)
+			buf[offset + i] = (uint8) (val >> (i * 8));
+	}
+
 	private static uint8[] legacy_page_tables () {
 		var ram = new Ram ();
 
@@ -1170,8 +1334,14 @@ namespace Frida.BareboneTest {
 
 		private TargetArch arch;
 		private uint8[] ram;
+		private Gee.List<Region> regions = new Gee.ArrayList<Region> ();
 		private string? monitor_dump;
 		private ControlRegisterExposure exposure;
+
+		private class Region {
+			public uint64 address;
+			public Bytes data;
+		}
 
 		private SocketService service;
 		private Cancellable cancellable = new Cancellable ();
@@ -1242,6 +1412,13 @@ namespace Frida.BareboneTest {
 			cancellable.cancel ();
 			if (service != null)
 				service.stop ();
+		}
+
+		public void map_virtual (uint64 address, Bytes data) {
+			regions.add (new Region () {
+				address = address,
+				data = data,
+			});
 		}
 
 		public uint32 read_uint32 (uint64 address) {
@@ -1350,13 +1527,29 @@ namespace Frida.BareboneTest {
 			string[] tokens = request[1:].split (",");
 			uint64 address = uint64.parse (tokens[0], 16);
 			size_t size = (size_t) uint64.parse (tokens[1], 16);
-			if (address + size > ram.length)
+
+			uint8[]? data = read_span (address, size);
+			if (data == null)
 				return "E01";
 
 			var result = new StringBuilder ();
-			for (size_t i = 0; i != size; i++)
-				result.append_printf ("%02x", ram[address + i]);
+			foreach (uint8 b in data)
+				result.append_printf ("%02x", b);
 			return result.str;
+		}
+
+		private uint8[]? read_span (uint64 address, size_t size) {
+			foreach (Region r in regions) {
+				unowned uint8[] mapped = r.data.get_data ();
+				if (address >= r.address && address + size <= r.address + mapped.length) {
+					size_t start = (size_t) (address - r.address);
+					return mapped[start:start + size];
+				}
+			}
+
+			if (address + size > ram.length)
+				return null;
+			return ram[(size_t) address:(size_t) address + size];
 		}
 
 		private string write_memory (string request) {

@@ -83,4 +83,39 @@ namespace Frida.Barebone {
 			yield bp.remove (cancellable);
 		}
 	}
+
+	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {
+		private Machine machine;
+		private uint64 yield_point;
+
+		public Win9xKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Error {
+			this.machine = machine;
+
+			SymbolInfo? get_system_time = symbols["Get_System_Time"];
+			if (get_system_time == null)
+				throw new Error.NOT_SUPPORTED ("Missing symbol for Get_System_Time");
+			yield_point = get_system_time.offset;
+		}
+
+		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+			yield run_until_yield_point (cancellable);
+		}
+
+		public async void settle (Cancellable? cancellable) throws Error, IOError {
+			yield machine.gdb.continue (cancellable);
+		}
+
+		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
+			GDB.Client gdb = machine.gdb;
+			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
+
+			GDB.Breakpoint? hit = null;
+			do {
+				var exception = yield gdb.continue_until_exception (cancellable);
+				hit = exception.breakpoint;
+			} while (hit != bp);
+
+			yield bp.remove (cancellable);
+		}
+	}
 }

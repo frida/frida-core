@@ -20,6 +20,7 @@ namespace Frida.Barebone {
 		private uint64 kernel_base;
 		private Machine machine;
 		private Allocator allocator;
+		private Gee.List<SymbolInfo> kernel_symbols;
 
 		private Allocation elf_allocation;
 		private Allocation config_allocation;
@@ -31,7 +32,8 @@ namespace Frida.Barebone {
 
 		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config,
 				KernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
-				Allocator allocator, Cancellable? cancellable) throws Error, IOError {
+				Allocator allocator, Gee.List<SymbolInfo> kernel_symbols, Cancellable? cancellable)
+				throws Error, IOError {
 			var connection = new AgentConnection () {
 				agent_config = agent_config,
 				image_config = image_config,
@@ -40,6 +42,7 @@ namespace Frida.Barebone {
 				kernel_base = kernel_base,
 				machine = machine,
 				allocator = allocator,
+				kernel_symbols = kernel_symbols,
 			};
 
 			try {
@@ -70,6 +73,7 @@ namespace Frida.Barebone {
 
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
+		private const uint8 TRANSPORT_KIND_VIRTIO_PCI = 2;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var transport_tag = yield resolve_transport (cancellable);
@@ -125,11 +129,18 @@ namespace Frida.Barebone {
 			if (kind == AUTO)
 				kind = (image_config != null) ? KernelKind.XNU : KernelKind.BARE;
 
+			foreach (var s in kernel_symbols) {
+				symbols[s.name] = s;
+				hash_builder.add_symbol (s);
+			}
+
 			KernelFlavor flavor;
 			if (kind == XNU) {
 				if (kernel_base == 0)
 					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
 				flavor = new XnuKernelFlavor (machine, kernel_base, symbols);
+			} else if (kind == WIN9X) {
+				flavor = new Win9xKernelFlavor (machine, symbols);
 			} else {
 				flavor = new BareKernelFlavor (machine);
 			}
@@ -258,8 +269,15 @@ namespace Frida.Barebone {
 		private async Variant connect_virtio_transport (HostlinkTransportConfig config, Cancellable? cancellable)
 				throws Error, IOError {
 			var qmp = yield QmpClient.open (config.qmp, 0, cancellable);
-			var link = yield qmp.open_hostlink (cancellable);
+			var link = yield qmp.open_hostlink (config.bus, cancellable);
 			adopt_hostlink_streams (link.connection);
+
+			if (config.bus != null) {
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_VIRTIO_PCI),
+					new Variant.variant (new Variant.tuple ({}))
+				});
+			}
 
 			Variant[] virtio_cfg = { new Variant.uint64 (link.mmio), new Variant.uint32 (link.irq) };
 			return new Variant.tuple ({

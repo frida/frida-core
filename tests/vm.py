@@ -38,6 +38,8 @@ def main():
                 win95.add_argument("--gdb-port", type=int, required=True)
                 win95.add_argument("--memory", type=int, default=128)
                 win95.add_argument("--boot-seconds", type=int, default=120)
+                win95.add_argument("--qmp", type=Path)
+                win95.add_argument("--debugcon", type=Path)
 
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
@@ -158,19 +160,34 @@ def boot_win95_guest(args):
     """
     qemu = require_win95(args)
 
+    control = []
+    if args.qmp is not None:
+        control = [
+            "-qmp", f"unix:{args.qmp},server=on,wait=off",
+            "-device", "virtio-serial-pci,id=" + VIRTIO_SERIAL_ID,
+        ]
+
+    diagnostics = []
+    if args.debugcon is not None:
+        diagnostics = [
+            "-chardev", f"file,id={DEBUGCON_ID},path={args.debugcon}",
+            "-device", f"isa-debugcon,iobase={DEBUGCON_PORT:#x},chardev={DEBUGCON_ID}",
+        ]
+
     process = subprocess.Popen([
         qemu,
         "-machine", "pc,accel=tcg",
-        "-cpu", "pentium",
+        "-cpu", GUEST_CPU,
         "-m", str(args.memory),
         "-drive", f"file={args.image},format={args.format},if=ide",
         "-vga", "cirrus",
         "-nic", "none",
         "-display", "none",
         "-monitor", "none",
-        "-no-reboot",
-        "-gdb", f"tcp::{args.gdb_port}",
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        "-no-shutdown",
+        "-chardev", f"socket,id={GDB_ID},host=127.0.0.1,port={args.gdb_port},server=on,wait=off",
+        "-gdb", f"chardev:{GDB_ID}",
+    ] + control + diagnostics, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
         for _ in range(args.boot_seconds):
@@ -382,6 +399,16 @@ GUESTS = {
 KMOD_GUEST_ARCH = "x86_64"
 
 BUSYBOX_URL = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+
+VIRTIO_SERIAL_ID = "frida-vserial"
+
+GDB_ID = "frida-gdb"
+
+# Newest model that boots 95; older ones lack the CMOVs the agent emits.
+GUEST_CPU = "pentium3"
+
+DEBUGCON_ID = "frida-debugcon"
+DEBUGCON_PORT = 0xe9
 
 PORT_NAME = "frida"
 PORT_PATH = "/dev/vport0p1"

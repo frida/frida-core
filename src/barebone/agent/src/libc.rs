@@ -279,9 +279,11 @@ mod exports {
 
     const HEAP_HEADER_SIZE: usize = 16;
 
+    const MALLOC_ALIGNMENT: usize = 2 * core::mem::size_of::<*const u8>();
+
     #[unsafe(no_mangle)]
     pub extern "C" fn malloc(size: usize) -> *mut c_void {
-        let total = size + HEAP_HEADER_SIZE;
+        let total = size + HEAP_HEADER_SIZE + MALLOC_ALIGNMENT;
         let block = crate::kernel::alloc(total);
         if block.is_null() {
             return ptr::null_mut();
@@ -289,7 +291,11 @@ mod exports {
 
         offer_preemption_point();
 
-        unsafe { attach_header(block, total, block.add(HEAP_HEADER_SIZE)) }
+        unsafe {
+            let lowest = block.add(HEAP_HEADER_SIZE) as usize;
+            let aligned = (lowest + MALLOC_ALIGNMENT - 1) & !(MALLOC_ALIGNMENT - 1);
+            attach_header(block, total, aligned as *mut u8)
+        }
     }
 
     #[unsafe(no_mangle)]

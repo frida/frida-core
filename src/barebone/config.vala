@@ -356,6 +356,11 @@ namespace Frida.Barebone {
 			set;
 		}
 
+		public string? bus {
+			get;
+			set;
+		}
+
 		public override void check () throws Error {
 			if (qmp == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");

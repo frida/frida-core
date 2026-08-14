@@ -381,6 +381,45 @@ namespace Frida {
 			return task.execute (cancellable);
 		}
 
+		public async Device add_barebone_device (Barebone.Config config, Cancellable? cancellable = null)
+				throws Error, IOError {
+#if HAVE_BAREBONE_BACKEND
+			check_open ();
+
+			var barebone_device = yield get_device ((device) => {
+					return device.provider is BareboneHostSessionProvider;
+				}, 0, cancellable);
+
+			var raw_options = new HostSessionOptions ();
+			raw_options.map["config"] = config;
+
+			var device = new Device (this, barebone_device.provider, barebone_device.provider.id,
+				barebone_device.provider.name, raw_options);
+			devices.add (device);
+			added (device);
+			changed ();
+
+			return device;
+#else
+			throw new Error.NOT_SUPPORTED ("Barebone backend not available");
+#endif
+		}
+
+		public Device add_barebone_device_sync (Barebone.Config config, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var task = create<AddBareboneDeviceTask> ();
+			task.config = config;
+			return task.execute (cancellable);
+		}
+
+		private class AddBareboneDeviceTask : ManagerTask<Device> {
+			public Barebone.Config config;
+
+			protected override async Device perform_operation () throws Error, IOError {
+				return yield parent.add_barebone_device (config, cancellable);
+			}
+		}
+
 		private class AddRemoteDeviceTask : ManagerTask<Device> {
 			public string address;
 			public RemoteDeviceOptions? options;

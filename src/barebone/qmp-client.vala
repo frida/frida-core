@@ -48,7 +48,13 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			var connectable = parse_socket_address (address, port, "localhost", 4444);
+			SocketConnectable connectable;
+			if (address.has_prefix ("unix:")) {
+				connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
+					UnixSocketAddressType.PATH);
+			} else {
+				connectable = parse_socket_address (address, port, "localhost", 4444);
+			}
 
 			try {
 				var client = new SocketClient ();
@@ -101,13 +107,19 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public async Hostlink open_hostlink (Cancellable? cancellable = null) throws Error, IOError {
+		public async Hostlink open_hostlink (string? preferred_bus = null, Cancellable? cancellable = null)
+				throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
 #else
-			uint64 mmio = (uint64) yield get_qom_property_int ("/machine", "hostlink-mmio", cancellable);
-			uint irq = (uint) yield get_qom_property_int ("/machine", "hostlink-irq", cancellable);
-			string bus = yield get_qom_property_string ("/machine", "hostlink-bus", cancellable);
+			uint64 mmio = 0;
+			uint irq = 0;
+			string bus = preferred_bus;
+			if (bus == null) {
+				mmio = (uint64) yield get_qom_property_int ("/machine", "hostlink-mmio", cancellable);
+				irq = (uint) yield get_qom_property_int ("/machine", "hostlink-irq", cancellable);
+				bus = yield get_qom_property_string ("/machine", "hostlink-bus", cancellable);
+			}
 
 			int fds[2];
 			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)

@@ -51,6 +51,46 @@ const F_MULTIPORT: u64 = 1u64 << 1;
 
 const INT_VRING: u32 = 1;
 
+const PCI_CONFIG_ADDRESS: u16 = 0xcf8;
+const PCI_CONFIG_DATA: u16 = 0xcfc;
+
+const PCI_VENDOR_VIRTIO: u16 = 0x1af4;
+const PCI_DEVICE_CONSOLE_LEGACY: u16 = 0x1003;
+const PCI_DEVICE_CONSOLE_MODERN: u16 = 0x1043;
+
+const PCI_COMMAND: u8 = 0x04;
+const PCI_CAP_LIST_POINTER: u8 = 0x34;
+const PCI_INTERRUPT_LINE: u8 = 0x3c;
+const PCI_BASE_ADDRESS_0: u8 = 0x10;
+
+const PCI_COMMAND_MEMORY: u32 = 1 << 1;
+const PCI_COMMAND_BUS_MASTER: u32 = 1 << 2;
+
+const PCI_CAP_ID_VENDOR: u8 = 0x09;
+
+const VIRTIO_CAP_CFG_TYPE: u8 = 3;
+const VIRTIO_CAP_BAR: u8 = 4;
+const VIRTIO_CAP_OFFSET: u8 = 8;
+const VIRTIO_CAP_LENGTH: u8 = 12;
+const VIRTIO_CAP_NOTIFY_MULTIPLIER: u8 = 16;
+
+const CFG_TYPE_COMMON: u8 = 1;
+const CFG_TYPE_NOTIFY: u8 = 2;
+const CFG_TYPE_ISR: u8 = 3;
+
+const COMMON_DEVFEAT_SEL: usize = 0x00;
+const COMMON_DEVFEAT: usize = 0x04;
+const COMMON_DRVFEAT_SEL: usize = 0x08;
+const COMMON_DRVFEAT: usize = 0x0c;
+const COMMON_STATUS: usize = 0x14;
+const COMMON_QSEL: usize = 0x16;
+const COMMON_QNUM: usize = 0x18;
+const COMMON_QREADY: usize = 0x1c;
+const COMMON_QNOTIFY_OFF: usize = 0x1e;
+const COMMON_QDESC: usize = 0x20;
+const COMMON_QAVAIL: usize = 0x28;
+const COMMON_QUSED: usize = 0x30;
+
 const Q_RX0: u16 = 0;
 const Q_TX0: u16 = 1;
 const Q_CTRL_RX: u16 = 2;
@@ -107,18 +147,19 @@ struct DmaPage {
 
 fn dma_page_alloc() -> DmaPage {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    let va = kernel::alloc(len);
+    let va = kernel::alloc_code(len);
     let pa = kernel::virt_to_phys(va as u64);
     DmaPage { va, pa }
 }
 
 fn dma_page_free(p: DmaPage) {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    kernel::free(p.va, len);
+    kernel::free_code(p.va, len);
 }
 
 struct Vq {
     sel: u16,
+    notify_off: u16,
     size: u16,
     desc_va: *mut u8,
     avail_va: *mut u8,
@@ -129,12 +170,7 @@ struct Vq {
     free_cnt: u16,
 }
 impl Vq {
-    fn new(mmio: *mut u8, sel: u16, size: u16) -> Self {
-        w32(mmio, QSEL, sel as u32);
-        let max = r32(mmio, QNUM_MAX) as u16;
-        debug_assert!(max >= size && max != 0);
-        w32(mmio, QNUM, size as u32);
-
+    fn new(regs: &Regs, sel: u16, size: u16) -> Self {
         let d = dma_page_alloc();
         let a = dma_page_alloc();
         let u = dma_page_alloc();
@@ -146,10 +182,6 @@ impl Vq {
             core::ptr::write_bytes(u.va, 0, ps);
         }
 
-        w64(mmio, QDESC_LO, QDESC_HI, d.pa);
-        w64(mmio, QAVAIL_LO, QAVAIL_HI, a.pa);
-        w64(mmio, QUSED_LO, QUSED_HI, u.pa);
-
         let dp = d.va as *mut Desc;
         for i in 0..size {
             unsafe {
@@ -158,10 +190,11 @@ impl Vq {
             }
         }
 
-        w32(mmio, QREADY, 1);
+        let notify_off = regs.queue_prepare(sel, size, d.pa, a.pa, u.pa);
 
         Self {
             sel,
+            notify_off,
             size,
             desc_va: d.va,
             avail_va: a.va,
@@ -230,7 +263,7 @@ impl Vq {
 }
 
 struct Inner {
-    mmio: *mut u8,
+    regs: Regs,
 
     ctrl_rx: Vq,
     ctrl_tx: Vq,
@@ -271,27 +304,46 @@ unsafe impl Send for Hostlink {}
 
 impl Hostlink {
     pub fn init(mmio_base: u64, irq_line: u32, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
-        let page_size = gum_barebone_query_page_size();
-        PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
-
         let mmio = kernel::map_io(mmio_base, MMIO_SIZE) as *mut u8;
         if mmio.is_null() {
             return Err(());
         }
+        let regs = Regs::Mmio(mmio);
 
-        w32(mmio, STATUS, 0);
-        w32(mmio, STATUS, ST_ACK | ST_DRV);
+        regs.reset();
 
         let magic_ok = r32(mmio, MAGIC) == 0x7472_6976;
         let version_ok = r32(mmio, VERSION) == 2;
         let device_ok = r32(mmio, DEVICE) == DEV_ID_CONSOLE;
         if !(magic_ok && version_ok && device_ok) {
-            w32(mmio, STATUS, ST_FAILED);
+            regs.set_status(ST_FAILED);
             return Err(());
         }
 
-        let dev_lo = feat_get(mmio, 0) as u64;
-        let dev_hi = (feat_get(mmio, 1) as u64) << 32;
+        Self::start(regs, irq_line, on_rx, wake_token)
+    }
+
+    #[cfg(target_arch = "x86")]
+    pub fn init_pci(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
+        let Some(device) = PciDevice::find_console() else {
+            return Err(());
+        };
+
+        let Some(regs) = device.map_virtio_regs() else {
+            return Err(());
+        };
+
+        regs.reset();
+
+        Self::start(regs, device.irq_line(), on_rx, wake_token)
+    }
+
+    fn start(regs: Regs, irq_line: u32, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
+        let page_size = gum_barebone_query_page_size();
+        PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
+
+        let dev_lo = regs.feat_get(0) as u64;
+        let dev_hi = (regs.feat_get(1) as u64) << 32;
         let mut drv: u64 = 0;
         if (dev_hi & F_VERSION_1) != 0 {
             drv |= F_VERSION_1;
@@ -299,20 +351,23 @@ impl Hostlink {
         if (dev_lo & F_MULTIPORT) != 0 {
             drv |= F_MULTIPORT;
         }
-        feat_set(mmio, 0, (drv & 0xffff_ffff) as u32);
-        feat_set(mmio, 1, (drv >> 32) as u32);
-        w32(mmio, STATUS, r32(mmio, STATUS) | ST_FEAT_OK);
-        let feats_ok = (r32(mmio, STATUS) & ST_FEAT_OK) != 0;
+        regs.feat_set(0, (drv & 0xffff_ffff) as u32);
+        regs.feat_set(1, (drv >> 32) as u32);
+        regs.set_status(regs.status() | ST_FEAT_OK);
+        let feats_ok = (regs.status() & ST_FEAT_OK) != 0;
         if !feats_ok {
-            w32(mmio, STATUS, ST_FAILED);
+            regs.set_status(ST_FAILED);
             return Err(());
         }
 
-        let ctrl_rx = Vq::new(mmio, Q_CTRL_RX, QSZ);
-        let ctrl_tx = Vq::new(mmio, Q_CTRL_TX, QSZ);
+        let ctrl_rx = Vq::new(&regs, Q_CTRL_RX, QSZ);
+        let ctrl_tx = Vq::new(&regs, Q_CTRL_TX, QSZ);
 
-        w32(mmio, STATUS, r32(mmio, STATUS) | ST_DRV_OK);
+        regs.set_status(regs.status() | ST_DRV_OK);
 
+        unsafe {
+            ISR_REGS = Some(regs);
+        }
         kernel::install_interrupt_handler(
             irq_line,
             wake_token as *mut c_void,
@@ -321,7 +376,7 @@ impl Hostlink {
         );
 
         let inner = Inner {
-            mmio,
+            regs,
             ctrl_rx,
             ctrl_tx,
             port_id: None,
@@ -392,9 +447,7 @@ impl Hostlink {
     pub fn process(&self) {
         let s = unsafe { &mut *self.state.get() };
 
-        if (r32(s.mmio, ISR) & INT_VRING) != 0 {
-            w32(s.mmio, ISR_ACK, INT_VRING);
-        }
+        s.regs.isr_ack();
 
         self.ctrl_complete();
         self.ctrl_prime_rx(QSZ as usize);
@@ -425,8 +478,8 @@ impl Hostlink {
             s.ctrl_rx.push_avail(h);
             posted += 1;
         }
-        let sel = s.ctrl_rx.sel;
-        self.kick(sel);
+        let (sel, notify_off) = (s.ctrl_rx.sel, s.ctrl_rx.notify_off);
+        self.kick(sel, notify_off);
     }
 
     fn ctrl_send(&self, msg: VConsCtrl) {
@@ -445,8 +498,8 @@ impl Hostlink {
         }
         s.tx_pages[h as usize] = Some(pg);
         s.ctrl_tx.push_avail(h);
-        let sel = s.ctrl_tx.sel;
-        self.kick(sel);
+        let (sel, notify_off) = (s.ctrl_tx.sel, s.ctrl_tx.notify_off);
+        self.kick(sel, notify_off);
     }
 
     fn ctrl_complete(&self) {
@@ -488,8 +541,8 @@ impl Hostlink {
                 s.ctrl_rx.push_avail(h);
             }
         }
-        let sel = s.ctrl_rx.sel;
-        self.kick(sel);
+        let (sel, notify_off) = (s.ctrl_rx.sel, s.ctrl_rx.notify_off);
+        self.kick(sel, notify_off);
 
         while let Some(u) = s.ctrl_tx.pop_used() {
             let head = u.id as u16;
@@ -511,8 +564,8 @@ impl Hostlink {
             let base = 4 + ((id as u16 - 1) * 2);
             (base, base + 1)
         };
-        let rx = Vq::new(s.mmio, rx_i, QSZ);
-        let tx = Vq::new(s.mmio, tx_i, QSZ);
+        let rx = Vq::new(&s.regs, rx_i, QSZ);
+        let tx = Vq::new(&s.regs, tx_i, QSZ);
         s.rx = Some(rx);
         s.tx = Some(tx);
         s.port_id = Some(id);
@@ -537,8 +590,8 @@ impl Hostlink {
             s.data_rx_pages[h as usize] = Some(pg);
             rxq.push_avail(h);
         }
-        let sel = rxq.sel;
-        self.kick(sel);
+        let (sel, notify_off) = (rxq.sel, rxq.notify_off);
+        self.kick(sel, notify_off);
     }
 
     fn data_rx_complete(&self) {
@@ -569,8 +622,8 @@ impl Hostlink {
                 rxq.push_avail(h);
             }
         }
-        let sel = rxq.sel;
-        self.kick(sel);
+        let (sel, notify_off) = (rxq.sel, rxq.notify_off);
+        self.kick(sel, notify_off);
     }
 
     fn feed_rx_stream(&self, mut chunk: &[u8]) {
@@ -713,9 +766,9 @@ impl Hostlink {
             }
 
             if let Some(h) = head {
-                let sel = txq.sel;
+                let (sel, notify_off) = (txq.sel, txq.notify_off);
                 txq.push_avail(h);
-                self.kick(sel);
+                self.kick(sel, notify_off);
             }
 
             kernel::free(frame.as_ptr() as *mut u8, frame.len());
@@ -723,16 +776,268 @@ impl Hostlink {
         }
     }
 
-    fn kick(&self, sel: u16) {
+    fn kick(&self, sel: u16, notify_off: u16) {
         let s = unsafe { &*self.state.get() };
         wmb();
-        w32(s.mmio, QSEL, sel as u32);
-        w32(s.mmio, QNOTIFY, sel as u32);
+        s.regs.notify(sel, notify_off);
     }
 }
 
 extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_void, _src: i32) {
+    unsafe {
+        if let Some(regs) = ISR_REGS {
+            regs.isr_ack();
+        }
+    }
     kernel::wake(token as *const u8);
+}
+
+static mut ISR_REGS: Option<Regs> = None;
+
+#[derive(Copy, Clone)]
+enum Regs {
+    Mmio(*mut u8),
+    Pci(PciRegs),
+}
+
+#[derive(Copy, Clone)]
+struct PciRegs {
+    common: *mut u8,
+    notify: *mut u8,
+    notify_off_multiplier: u32,
+    isr: *mut u8,
+}
+
+impl Regs {
+    fn reset(&self) {
+        match self {
+            Regs::Mmio(base) => {
+                w32(*base, STATUS, 0);
+                w32(*base, STATUS, ST_ACK | ST_DRV);
+            }
+            Regs::Pci(p) => {
+                w8(p.common, COMMON_STATUS, 0);
+                while r8(p.common, COMMON_STATUS) != 0 {}
+                w8(p.common, COMMON_STATUS, (ST_ACK | ST_DRV) as u8);
+            }
+        }
+    }
+
+    fn feat_get(&self, sel: u32) -> u32 {
+        match self {
+            Regs::Mmio(base) => {
+                w32(*base, DEVFEAT_SEL, sel);
+                r32(*base, DEVFEAT)
+            }
+            Regs::Pci(p) => {
+                w32(p.common, COMMON_DEVFEAT_SEL, sel);
+                r32(p.common, COMMON_DEVFEAT)
+            }
+        }
+    }
+
+    fn feat_set(&self, sel: u32, v: u32) {
+        match self {
+            Regs::Mmio(base) => {
+                w32(*base, DRVFEAT_SEL, sel);
+                w32(*base, DRVFEAT, v);
+            }
+            Regs::Pci(p) => {
+                w32(p.common, COMMON_DRVFEAT_SEL, sel);
+                w32(p.common, COMMON_DRVFEAT, v);
+            }
+        }
+    }
+
+    fn status(&self) -> u32 {
+        match self {
+            Regs::Mmio(base) => r32(*base, STATUS),
+            Regs::Pci(p) => r8(p.common, COMMON_STATUS) as u32,
+        }
+    }
+
+    fn set_status(&self, v: u32) {
+        match self {
+            Regs::Mmio(base) => w32(*base, STATUS, v),
+            Regs::Pci(p) => w8(p.common, COMMON_STATUS, v as u8),
+        }
+    }
+
+    fn queue_prepare(&self, sel: u16, size: u16, desc: u64, avail: u64, used: u64) -> u16 {
+        match self {
+            Regs::Mmio(base) => {
+                let base = *base;
+                w32(base, QSEL, sel as u32);
+                debug_assert!(r32(base, QNUM_MAX) as u16 >= size);
+                w32(base, QNUM, size as u32);
+                w64(base, QDESC_LO, QDESC_HI, desc);
+                w64(base, QAVAIL_LO, QAVAIL_HI, avail);
+                w64(base, QUSED_LO, QUSED_HI, used);
+                w32(base, QREADY, 1);
+                0
+            }
+            Regs::Pci(p) => {
+                w16(p.common, COMMON_QSEL, sel);
+                debug_assert!(r16(p.common, COMMON_QNUM) >= size);
+                w16(p.common, COMMON_QNUM, size);
+                w64(p.common, COMMON_QDESC, COMMON_QDESC + 4, desc);
+                w64(p.common, COMMON_QAVAIL, COMMON_QAVAIL + 4, avail);
+                w64(p.common, COMMON_QUSED, COMMON_QUSED + 4, used);
+                let notify_off = r16(p.common, COMMON_QNOTIFY_OFF);
+                w16(p.common, COMMON_QREADY, 1);
+                notify_off
+            }
+        }
+    }
+
+    fn notify(&self, sel: u16, notify_off: u16) {
+        match self {
+            Regs::Mmio(base) => {
+                w32(*base, QSEL, sel as u32);
+                w32(*base, QNOTIFY, sel as u32);
+            }
+            Regs::Pci(p) => {
+                let off = notify_off as usize * p.notify_off_multiplier as usize;
+                w16(p.notify, off, sel);
+            }
+        }
+    }
+
+    fn isr_ack(&self) {
+        match self {
+            Regs::Mmio(base) => {
+                if (r32(*base, ISR) & INT_VRING) != 0 {
+                    w32(*base, ISR_ACK, INT_VRING);
+                }
+            }
+            Regs::Pci(p) => {
+                r8(p.isr, 0);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86")]
+#[derive(Copy, Clone)]
+struct PciDevice {
+    bus: u8,
+    devfn: u8,
+}
+
+#[cfg(target_arch = "x86")]
+impl PciDevice {
+    fn find_console() -> Option<Self> {
+        for devfn in 0..=u8::MAX {
+            let device = PciDevice { bus: 0, devfn };
+
+            let identity = device.read_config(0);
+            let vendor = (identity & 0xffff) as u16;
+            let model = (identity >> 16) as u16;
+            if vendor != PCI_VENDOR_VIRTIO {
+                continue;
+            }
+            if model != PCI_DEVICE_CONSOLE_LEGACY && model != PCI_DEVICE_CONSOLE_MODERN {
+                continue;
+            }
+
+            return Some(device);
+        }
+        None
+    }
+
+    fn map_virtio_regs(&self) -> Option<Regs> {
+        self.enable_memory_and_bus_mastering();
+
+        let mut common = core::ptr::null_mut();
+        let mut notify = core::ptr::null_mut();
+        let mut notify_off_multiplier = 0;
+        let mut isr = core::ptr::null_mut();
+
+        let mut cap = (self.read_config(PCI_CAP_LIST_POINTER) & 0xfc) as u8;
+        while cap != 0 {
+            let header = self.read_config(cap);
+            if (header & 0xff) as u8 == PCI_CAP_ID_VENDOR {
+                let cfg_type = self.read_config_byte(cap + VIRTIO_CAP_CFG_TYPE);
+                let bar = self.read_config_byte(cap + VIRTIO_CAP_BAR);
+                let offset = self.read_config(cap + VIRTIO_CAP_OFFSET);
+                let length = self.read_config(cap + VIRTIO_CAP_LENGTH);
+
+                match cfg_type {
+                    CFG_TYPE_COMMON => {
+                        common = self.map_bar_region(bar, offset, length);
+                    }
+                    CFG_TYPE_NOTIFY => {
+                        notify = self.map_bar_region(bar, offset, length);
+                        notify_off_multiplier =
+                            self.read_config(cap + VIRTIO_CAP_NOTIFY_MULTIPLIER);
+                    }
+                    CFG_TYPE_ISR => {
+                        isr = self.map_bar_region(bar, offset, length);
+                    }
+                    _ => {}
+                }
+            }
+            cap = ((header >> 8) & 0xfc) as u8;
+        }
+
+        if common.is_null() || notify.is_null() || isr.is_null() {
+            return None;
+        }
+
+        Some(Regs::Pci(PciRegs {
+            common,
+            notify,
+            notify_off_multiplier,
+            isr,
+        }))
+    }
+
+    fn irq_line(&self) -> u32 {
+        self.read_config_byte(PCI_INTERRUPT_LINE) as u32
+    }
+
+    fn enable_memory_and_bus_mastering(&self) {
+        let command = self.read_config(PCI_COMMAND);
+        self.write_config(
+            PCI_COMMAND,
+            command | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER,
+        );
+    }
+
+    fn map_bar_region(&self, bar: u8, offset: u32, length: u32) -> *mut u8 {
+        let slot = PCI_BASE_ADDRESS_0 + bar * 4;
+        let lo = self.read_config(slot);
+
+        let is_sixty_four_bit = (lo & 0b110) == 0b100;
+        let base = if is_sixty_four_bit {
+            ((self.read_config(slot + 4) as u64) << 32) | ((lo & !0xf) as u64)
+        } else {
+            (lo & !0xf) as u64
+        };
+
+        kernel::map_io(base + offset as u64, length as u64) as *mut u8
+    }
+
+    fn read_config_byte(&self, offset: u8) -> u8 {
+        (self.read_config(offset) >> ((offset & 3) * 8)) as u8
+    }
+
+    fn read_config(&self, offset: u8) -> u32 {
+        outl(PCI_CONFIG_ADDRESS, self.config_address(offset));
+        inl(PCI_CONFIG_DATA)
+    }
+
+    fn write_config(&self, offset: u8, value: u32) {
+        outl(PCI_CONFIG_ADDRESS, self.config_address(offset));
+        outl(PCI_CONFIG_DATA, value);
+    }
+
+    fn config_address(&self, offset: u8) -> u32 {
+        0x8000_0000
+            | ((self.bus as u32) << 16)
+            | ((self.devfn as u32) << 8)
+            | ((offset as u32) & 0xfc)
+    }
 }
 
 fn r32(mmio: *mut u8, off: usize) -> u32 {
@@ -748,14 +1053,38 @@ fn w64(mmio: *mut u8, lo: usize, hi: usize, v: u64) {
     w32(mmio, hi, (v >> 32) as u32);
 }
 
-fn feat_get(mmio: *mut u8, sel: u32) -> u32 {
-    w32(mmio, DEVFEAT_SEL, sel);
-    r32(mmio, DEVFEAT)
+fn r16(mmio: *mut u8, off: usize) -> u16 {
+    unsafe { read_volatile(mmio.add(off) as *const u16) }
 }
 
-fn feat_set(mmio: *mut u8, sel: u32, v: u32) {
-    w32(mmio, DRVFEAT_SEL, sel);
-    w32(mmio, DRVFEAT, v)
+fn w16(mmio: *mut u8, off: usize, val: u16) {
+    unsafe { write_volatile(mmio.add(off) as *mut u16, val) }
+}
+
+fn r8(mmio: *mut u8, off: usize) -> u8 {
+    unsafe { read_volatile(mmio.add(off)) }
+}
+
+fn w8(mmio: *mut u8, off: usize, val: u8) {
+    unsafe { write_volatile(mmio.add(off), val) }
+}
+
+#[cfg(target_arch = "x86")]
+fn inl(port: u16) -> u32 {
+    let value: u32;
+    unsafe {
+        core::arch::asm!("in eax, dx", out("eax") value, in("dx") port,
+            options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
+#[cfg(target_arch = "x86")]
+fn outl(port: u16, value: u32) {
+    unsafe {
+        core::arch::asm!("out dx, eax", in("dx") port, in("eax") value,
+            options(nomem, nostack, preserves_flags));
+    }
 }
 
 #[cfg(target_arch = "x86")]

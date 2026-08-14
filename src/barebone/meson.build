@@ -18,6 +18,8 @@ backend_sources += files(
   'qmp-client.vala',
   'kernel-relocation.vala',
   'kernel-flavor.vala',
+  'win9x.vala',
+  'win9x-service-names.vala',
   'x86-paging.vala',
   'x86-inline-hook.vala',
   'vz-stub.vala',

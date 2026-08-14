@@ -56,9 +56,17 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			Barebone.Config config;
+			Barebone.Config? config = null;
+			if (options != null) {
+				Value? val = options.map["config"];
+				if (val != null) {
+					config = (Barebone.Config) val.get_object ();
+					config.check ();
+				}
+			}
+
 			unowned string? config_path = Environment.get_variable ("FRIDA_BAREBONE_CONFIG");
-			if (config_path != null) {
+			if (config == null && config_path != null) {
 				try {
 					var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
 					var cfg = (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), config_data);
@@ -67,9 +75,10 @@ namespace Frida {
 				} catch (GLib.Error e) {
 					throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
 				}
-			} else {
-				config = new Barebone.Config ();
 			}
+
+			if (config == null)
+				config = new Barebone.Config ();
 
 			Barebone.AgentConfig? resident_agent = config.agent;
 			if (resident_agent != null && (resident_agent.transport is Barebone.DeviceTransportConfig
@@ -157,8 +166,14 @@ namespace Frida {
 				}
 			}
 
+			Gee.List<Barebone.SymbolInfo> kernel_symbols = new Gee.ArrayList<Barebone.SymbolInfo> ();
+			if (config.kernel == WIN9X)
+				kernel_symbols = yield Barebone.collect_win9x_symbols (machine, cancellable);
+
 			Barebone.Allocator allocator;
 			Barebone.AllocatorConfig? ac = config.allocator;
+			if (ac == null)
+				ac = infer_allocator_config (config.kernel, kernel_symbols);
 			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
 			} else if (ac is Barebone.PhysicalAllocatorConfig) {
@@ -181,7 +196,7 @@ namespace Frida {
 			Barebone.AgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
 				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
-					relocation, kernel_base, machine, allocator, cancellable);
+					relocation, kernel_base, machine, allocator, kernel_symbols, cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);
@@ -220,6 +235,28 @@ namespace Frida {
 
 			return new BareboneHostSession (connection, null);
 #endif
+		}
+
+		private static Barebone.AllocatorConfig? infer_allocator_config (Barebone.KernelKind kind,
+				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
+			if (kind != WIN9X)
+				return null;
+
+			Barebone.SymbolInfo? alloc = null;
+			Barebone.SymbolInfo? free = null;
+			foreach (var s in kernel_symbols) {
+				if (s.name == "_HeapAllocate")
+					alloc = s;
+				else if (s.name == "_HeapFree")
+					free = s;
+			}
+			if (alloc == null || free == null)
+				return null;
+
+			return new Barebone.TargetFunctionsAllocatorConfig () {
+				alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
+				free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function", free.offset),
+			};
 		}
 
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
