@@ -44,7 +44,7 @@ fn main() {
 
     // The Linux flavour is a staticlib: kbuild owns the final link, so it — not
     // us — decides where the devkit and libc archives come from.
-    if env::var("CARGO_FEATURE_XNU").is_ok() {
+    if env::var("CARGO_FEATURE_BLOB").is_ok() {
         println!(
             "cargo:rustc-link-search=native={}",
             devkit_dir.to_str().unwrap()
@@ -53,11 +53,21 @@ fn main() {
         for path in cc_library_paths {
             println!("cargo:rustc-link-search=native={}", path.to_string_lossy());
         }
+        for arg in &cc_args {
+            if let Some(path) = arg.strip_prefix("-L") {
+                println!("cargo:rustc-link-search=native={path}");
+            }
+        }
         println!("cargo:rustc-link-lib=static=c");
         println!("cargo:rustc-link-lib=static=m");
         println!("cargo:rustc-link-arg=--export-dynamic");
         println!("cargo:rustc-link-arg=--emit-relocs");
-        println!("cargo:rustc-link-arg=--script=agent.lds");
+        let script = if env::var("CARGO_FEATURE_WIN9X").is_ok() {
+            "agent-win9x.lds"
+        } else {
+            "agent.lds"
+        };
+        println!("cargo:rustc-link-arg=--script={script}");
         println!("cargo:rustc-link-arg=--gc-sections");
         // All of the agent lives in the library crate, so nothing in the binary
         // references the entrypoint the host calls; keep the linker from

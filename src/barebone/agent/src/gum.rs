@@ -20,6 +20,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(feature = "linux")]
 use crate::gum_linux::enumerate_exports_in_range;
+#[cfg(feature = "win9x")]
+use crate::gum_win9x::enumerate_exports_in_range;
 #[cfg(feature = "xnu")]
 use crate::gum_xnu::enumerate_exports_in_range;
 

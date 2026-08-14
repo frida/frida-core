@@ -14,10 +14,13 @@ crate-type = ["rlib", "staticlib"]
 [[bin]]
 name = "frida-barebone-agent"
 path = "src/main.rs"
-required-features = ["xnu"]
+required-features = ["blob"]
 
 [features]
-xnu = []
+# Flavors the host injects and calls into, as opposed to the module Linux loads.
+blob = []
+xnu = ["blob"]
+win9x = ["blob"]
 linux = []
 
 [profile.release]

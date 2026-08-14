@@ -9,6 +9,8 @@
 
 #[cfg(feature = "linux")]
 pub use crate::linux::*;
+#[cfg(feature = "win9x")]
+pub use crate::win9x::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu::*;
 

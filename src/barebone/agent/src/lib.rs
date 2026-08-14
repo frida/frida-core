@@ -1,9 +1,9 @@
 #![no_std]
 
-#[cfg(not(any(feature = "xnu", feature = "linux")))]
-compile_error!("pick a flavour: --features xnu or --features linux");
+#[cfg(not(any(feature = "xnu", feature = "win9x", feature = "linux")))]
+compile_error!("pick a flavour: --features xnu, --features win9x or --features linux");
 
-#[cfg(all(feature = "xnu", feature = "linux"))]
+#[cfg(all(feature = "blob", feature = "linux"))]
 compile_error!("pick one flavour, not both");
 
 use alloc::boxed::Box;
@@ -46,15 +46,20 @@ mod hostlink_chardev;
 #[cfg(feature = "linux")]
 mod linux;
 
+#[cfg(feature = "win9x")]
+mod gum_win9x;
+#[cfg(feature = "win9x")]
+mod win9x;
+
 #[cfg(feature = "xnu")]
 mod gum_xnu;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "blob")]
 mod hostlink_virtio;
 #[cfg(feature = "xnu")]
 mod hostlink_vsock;
 #[cfg(feature = "xnu")]
 mod pac;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "blob")]
 mod symbols;
 #[cfg(feature = "xnu")]
 mod xnu;
@@ -134,8 +139,8 @@ impl HandlerResponse {
     }
 }
 
-#[cfg(feature = "xnu")]
-mod entrypoint_xnu {
+#[cfg(feature = "blob")]
+mod entrypoint_blob {
     use super::*;
     use crate::symbols::SymbolTable;
 
@@ -196,6 +201,7 @@ mod entrypoint_xnu {
                     )
                     .unwrap(),
                 ),
+                #[cfg(feature = "xnu")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
                         .unwrap(),
@@ -252,7 +258,10 @@ mod entrypoint_xnu {
                 }
                 1 => {
                     let host_port = g_variant_get_uint32(transport_cfg_inner);
-                    TransportConfig::Vsock { host_port }
+                    #[cfg(feature = "xnu")]
+                    { TransportConfig::Vsock { host_port } }
+                    #[cfg(not(feature = "xnu"))]
+                    { let _ = host_port; panic!("vsock is XNU's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -423,11 +432,11 @@ mod entrypoint_linux {
 
 #[cfg(feature = "linux")]
 pub use entrypoint_linux::{frida_agent_start, frida_agent_stop};
-#[cfg(feature = "xnu")]
-pub use entrypoint_xnu::{MODULE_INFO, ModuleInfo, SYMBOL_TABLE, _start};
+#[cfg(feature = "blob")]
+pub use entrypoint_blob::{MODULE_INFO, ModuleInfo, SYMBOL_TABLE, _start};
 
 pub enum Transport {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "blob")]
     Virtio(hostlink_virtio::Hostlink),
     #[cfg(feature = "xnu")]
     Vsock(hostlink_vsock::Hostlink),
@@ -438,7 +447,7 @@ pub enum Transport {
 impl Transport {
     pub fn send(&self, payload: &[u8]) {
         match self {
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.send(payload),
             #[cfg(feature = "xnu")]
             Transport::Vsock(h) => h.send(payload),
@@ -449,7 +458,7 @@ impl Transport {
 
     pub fn process(&self) {
         match self {
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.process(),
             #[cfg(feature = "xnu")]
             Transport::Vsock(h) => h.process(),
@@ -459,9 +468,10 @@ impl Transport {
     }
 }
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "blob")]
 pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
+    #[cfg(feature = "xnu")]
     Vsock { host_port: u32 },
 }
 

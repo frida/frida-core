@@ -263,7 +263,7 @@ mod exports {
     pub static __fini_array_end: [extern "C" fn(); 0] = [];
 }
 
-#[cfg(feature = "linux")]
+#[cfg(any(feature = "linux", feature = "win9x"))]
 mod exports {
     use super::*;
 
