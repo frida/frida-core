@@ -99,6 +99,8 @@ namespace Frida.GDB {
 		protected const char NOTIFICATION_TYPE_STOP_WITH_PROPERTIES = 'T';
 		protected const char NOTIFICATION_TYPE_OUTPUT = 'O';
 
+		private bool binary_writes_supported = true;
+
 		private const char STOP_CHARACTER = 0x03;
 		private const string ACK_NOTIFICATION = "+";
 		private const string NACK_NOTIFICATION = "-";
@@ -526,7 +528,8 @@ namespace Frida.GDB {
 
 		public async void write_byte_array (uint64 address, Bytes bytes, Cancellable? cancellable = null)
 				throws Error, IOError {
-			size_t max_bytes_per_packet = (max_packet_size - 1 - 16 - 1 - 8 - 1 - Packet.OVERHEAD) / 2;
+			size_t header_size = 1 + 16 + 1 + 8 + 1 + Packet.OVERHEAD;
+			size_t budget = max_packet_size - header_size;
 
 			var data = bytes.get_data ();
 			size_t offset = 0;
@@ -535,27 +538,64 @@ namespace Frida.GDB {
 			var builder = make_packet_builder_sized (32 + (remaining * 2));
 
 			while (remaining != 0) {
-				uint64 slice_address = address + offset;
-				size_t slice_size = size_t.min (remaining, max_bytes_per_packet);
+				size_t slice_size, cost;
+				if (binary_writes_supported) {
+					slice_size = 0;
+					cost = 0;
+					while (slice_size != remaining) {
+						size_t byte_cost = needs_escaping (data[offset + slice_size]) ? 2 : 1;
+						if (cost + byte_cost > budget)
+							break;
+						cost += byte_cost;
+						slice_size++;
+					}
+				} else {
+					slice_size = size_t.min (remaining, budget / 2);
+				}
 
 				builder
-					.append_c ('M')
-					.append_address (slice_address)
+					.append_c (binary_writes_supported ? 'X' : 'M')
+					.append_address (address + offset)
 					.append_c (',')
 					.append_size (slice_size)
 					.append_c (':');
 
 				for (size_t i = 0; i != slice_size; i++) {
 					uint8 byte = data[offset + i];
-					builder.append_hexbyte (byte);
+					if (binary_writes_supported)
+						builder.append_c ((char) byte);
+					else
+						builder.append_hexbyte (byte);
 				}
 
-				yield execute (builder.build (), cancellable);
+				if (binary_writes_supported) {
+					try {
+						yield execute (builder.build (), cancellable);
+					} catch (Error e) {
+						binary_writes_supported = false;
+						builder.reset ();
+						continue;
+					}
+				} else {
+					yield execute (builder.build (), cancellable);
+				}
 
 				builder.reset ();
 
 				offset += slice_size;
 				remaining -= slice_size;
+			}
+		}
+
+		private static bool needs_escaping (uint8 byte) {
+			switch ((char) byte) {
+				case PACKET_CHARACTER:
+				case CHECKSUM_CHARACTER:
+				case ESCAPE_CHARACTER:
+				case REPEAT_CHARACTER:
+					return true;
+				default:
+					return false;
 			}
 		}
 
