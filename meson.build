@@ -382,6 +382,12 @@ if have_in_tree_payloads
 endif
 gumjs_inspector_dep = dependency('frida-gumjs-inspector-1.0', default_options: ['default_library=static'])
 
+gumpharo_dep = dependency('frida-gumpharo-' + api_version, required: false)
+have_gumpharo = gumpharo_dep.found()
+if have_gumpharo
+  vala_flags += '--define=HAVE_GUMPHARO'
+endif
+
 gee_options = [
   'default_library=static',
   'disable-introspection=true',

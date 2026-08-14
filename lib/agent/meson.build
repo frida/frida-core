@@ -63,7 +63,7 @@ if build_agent
     link_depends: extra_link_depends,
     vs_module_defs: 'frida-agent.def',
     override_options: ['b_asneeded=true'],
-    dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, base_dep, pipe_dep, tls_provider_dep, payload_dep],
+    dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, gumpharo_dep, base_dep, pipe_dep, tls_provider_dep, payload_dep],
   )
 
   operations = ['--move', 'constructor', 'frida_libc_shim_init', 'first']

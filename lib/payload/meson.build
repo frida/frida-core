@@ -49,7 +49,7 @@ payload = static_library('frida-payload-' + api_version, payload_sources,
   ],
   vala_header: 'frida-payload.h',
   vala_vapi: f'frida-payload-@api_version@.vapi',
-  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, base_dep],
+  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, gumpharo_dep, base_dep],
   install: true,
   install_dir: [true, header_install_dir, true],
 )
