@@ -4,7 +4,14 @@ namespace Frida.Barebone {
 			throws Error, IOError {
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
-		foreach (DeviceDescriptorBlock ddb in yield find_descriptor_blocks (machine, cancellable)) {
+		var blocks = yield find_descriptor_blocks (machine, cancellable);
+		if (blocks.is_empty) {
+			throw new Error.NOT_SUPPORTED (
+				"Unable to find any VxD; the guest is probably still booting, as none of its " +
+				"memory is paged in yet");
+		}
+
+		foreach (DeviceDescriptorBlock ddb in blocks) {
 			unowned string[]? names = known_service_names (ddb.name);
 			if (names == null)
 				continue;
