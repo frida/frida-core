@@ -11,6 +11,8 @@
 pub use crate::linux::*;
 #[cfg(feature = "win9x")]
 pub use crate::win9x::*;
+#[cfg(feature = "winnt")]
+pub use crate::winnt::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu::*;
 
@@ -25,4 +27,21 @@ pub type ThreadEntry = unsafe extern "C" fn(parameter: *mut c_void, wait_result:
 pub enum Mode {
     Kernel,
     User,
+}
+
+pub struct ThreadInfo {
+    pub id: u32,
+    pub cpu_state: Option<CpuState>,
+}
+
+pub struct CpuState {
+    pub eip: u32,
+    pub edi: u32,
+    pub esi: u32,
+    pub ebp: u32,
+    pub esp: u32,
+    pub ebx: u32,
+    pub edx: u32,
+    pub ecx: u32,
+    pub eax: u32,
 }

@@ -39,7 +39,19 @@ namespace Frida.Barebone {
 	 *    }
 	 *  }
 	 *
-	 * 4. Injecting a remote agent:
+	 * 4. Spelling out the arguments those functions take, for the ones that don't take the
+	 *    size first, such as NT's ExAllocatePoolWithTag(pool_type, size, tag):
+	 *  {
+	 *    "allocator": {
+	 *      "mode": "target-functions",
+	 *      "alloc_function": "0x804e1000",
+	 *      "alloc_arguments": [ "0", "size", "0x64697246" ],
+	 *      "free_function": "0x804e2000",
+	 *      "free_arguments": [ "address", "0x64697246" ]
+	 *    }
+	 *  }
+	 *
+	 * 5. Injecting a remote agent:
 	 *  {
 	 *    "agent": {
 	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent",
@@ -133,6 +145,7 @@ namespace Frida.Barebone {
 				case "bare":	return KernelKind.BARE;
 				case "xnu":	return KernelKind.XNU;
 				case "win9x":	return KernelKind.WIN9X;
+				case "winnt":	return KernelKind.WINNT;
 				default:	return KernelKind.AUTO;
 			}
 		}
@@ -146,7 +159,8 @@ namespace Frida.Barebone {
 		AUTO,
 		BARE,
 		XNU,
-		WIN9X
+		WIN9X,
+		WINNT
 	}
 
 	public sealed class ConnectionConfig : Object, Json.Serializable {
@@ -256,6 +270,20 @@ namespace Frida.Barebone {
 			default = 0;
 		}
 
+		/** Full argument list for alloc_function, for allocators that don't take the size first.
+		 * NT's ExAllocatePoolWithTag(pool_type, size, tag) is ["0", "size", "0x64697246"].
+		 * Defaults to ["size", alloc_flags]. */
+		public Gee.List<CallArgument>? alloc_arguments {
+			get;
+			set;
+		}
+
+		/** Full argument list for free_function. Defaults to ["address", "size"]. */
+		public Gee.List<CallArgument>? free_arguments {
+			get;
+			set;
+		}
+
 		public override void check () throws Error {
 			if (alloc_function == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'allocator.alloc_function' is missing");
@@ -264,6 +292,29 @@ namespace Frida.Barebone {
 			if (free_function == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'allocator.free_function' is missing");
 			free_function.check ();
+
+			check_arguments ("allocator.alloc_arguments", alloc_arguments, SIZE);
+			check_arguments ("allocator.free_arguments", free_arguments, ADDRESS);
+		}
+
+		public Gee.List<CallArgument> effective_alloc_arguments () {
+			if (alloc_arguments != null)
+				return alloc_arguments;
+
+			var arguments = new Gee.ArrayList<CallArgument> ();
+			arguments.add (new CallArgument (SIZE, 0));
+			arguments.add (new CallArgument (LITERAL, alloc_flags));
+			return arguments;
+		}
+
+		public Gee.List<CallArgument> effective_free_arguments () {
+			if (free_arguments != null)
+				return free_arguments;
+
+			var arguments = new Gee.ArrayList<CallArgument> ();
+			arguments.add (new CallArgument (ADDRESS, 0));
+			arguments.add (new CallArgument (SIZE, 0));
+			return arguments;
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
@@ -277,9 +328,95 @@ namespace Frida.Barebone {
 				return true;
 			}
 
+			if (property_name == "alloc-arguments" || property_name == "free-arguments") {
+				value = deserialize_arguments (property_node);
+				return true;
+			}
+
 			value = Value (pspec.value_type);
 			return false;
 		}
+
+		private static void check_arguments (string label, Gee.List<CallArgument>? arguments, CallArgumentRole required)
+				throws Error {
+			if (arguments == null)
+				return;
+
+			if (arguments.is_empty)
+				throw new Error.NOT_SUPPORTED ("Config for '%s' is invalid", label);
+
+			foreach (CallArgument a in arguments) {
+				if (a.role == required)
+					return;
+			}
+
+			throw new Error.NOT_SUPPORTED ("Config for '%s' must mention '%s'", label,
+				(required == SIZE) ? "size" : "address");
+		}
+
+		private static Value deserialize_arguments (Json.Node node) {
+			Gee.List<CallArgument>? arguments = null;
+
+			if (node.get_node_type () == Json.NodeType.ARRAY) {
+				arguments = new Gee.ArrayList<CallArgument> ();
+
+				node.get_array ().foreach_element ((array, index, element) => {
+					if (arguments == null)
+						return;
+
+					CallArgument? a = CallArgument.parse (element);
+					if (a == null)
+						arguments = null;
+					else
+						arguments.add (a);
+				});
+			}
+
+			var v = Value (typeof (Gee.List));
+			v.set_object (arguments);
+			return v;
+		}
+	}
+
+	/**
+	 * One argument in an allocator's argument list: either the requested size, the address being
+	 * freed, or a constant the target function needs in that slot.
+	 */
+	public sealed class CallArgument : Object {
+		public CallArgumentRole role {
+			get;
+			construct;
+		}
+
+		public uint64 value {
+			get;
+			construct;
+		}
+
+		public CallArgument (CallArgumentRole role, uint64 value) {
+			Object (role: role, value: value);
+		}
+
+		public static CallArgument? parse (Json.Node node) {
+			if (node.get_value_type () == typeof (string)) {
+				unowned string text = node.get_string ();
+				if (text == "size")
+					return new CallArgument (SIZE, 0);
+				if (text == "address")
+					return new CallArgument (ADDRESS, 0);
+			}
+
+			uint64 literal;
+			if (!try_deserialize_address (node, out literal))
+				return null;
+			return new CallArgument (LITERAL, literal);
+		}
+	}
+
+	public enum CallArgumentRole {
+		SIZE,
+		ADDRESS,
+		LITERAL
 	}
 
 	public sealed class AgentConfig : Object, Json.Serializable {

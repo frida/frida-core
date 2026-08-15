@@ -10,7 +10,9 @@ use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::kernel::{Mode, ThreadEntry};
+use crate::kernel::{CpuState, Mode, ThreadEntry, ThreadInfo};
+
+pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
 const PAGE_SIZE: u32 = 4096;
 
@@ -883,6 +885,7 @@ const CREATE_CALL_SITE: [u8; 25] = [
     0x10, 0xe8, 0, 0, 0, 0,
 ];
 const RESUME_SEARCH_RANGE: u32 = 0x60;
+const DOS_HEADERS_OFFSET: u32 = 0x3c;
 const IMAGE_SIZE_OFFSET: u32 = 0x50;
 
 // The host cannot resolve these, because parts of the export names of KERNEL32 are out of
@@ -1093,25 +1096,6 @@ pub fn install_interrupt_handler(
 }
 
 // VMM schedules only ring 0 threads. The ring 3 part of a Win32 thread is not ours to report.
-pub struct ThreadInfo {
-    pub id: u32,
-    pub cpu_state: Option<CpuState>,
-}
-
-pub struct CpuState {
-    pub eip: u32,
-    pub edi: u32,
-    pub esi: u32,
-    pub ebp: u32,
-    pub esp: u32,
-    pub ebx: u32,
-    pub edx: u32,
-    pub ecx: u32,
-    pub eax: u32,
-}
-
-// Every thread VMM schedules is a ring-0 thread; the ring-3 side of a Win32 thread is not
-// ours to enumerate.
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
@@ -1265,31 +1249,11 @@ const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
 const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
-    let file = match File::open(path) {
-        Some(file) => file,
-        None => return,
+    let Some(file) = File::open(path) else {
+        return;
     };
 
-    let resources = match file.resource_directory() {
-        Some(resources) => resources,
-        None => return,
-    };
-
-    let group = match resources.first_leaf(RT_GROUP_ICON) {
-        Some(group) => group,
-        None => return,
-    };
-
-    let count = file.read_u16(group.offset + GROUP_COUNT_OFFSET);
-    for index in 0..count as u32 {
-        let entry = group.offset + GROUP_ENTRIES_OFFSET + index * GROUP_ENTRY_SIZE;
-        let id = file.read_u16(entry + GROUP_ENTRY_ID_OFFSET);
-        if let Some(icon) = resources.leaf(RT_ICON, id) {
-            if let Some(bytes) = file.read_blob(icon.offset, icon.size) {
-                found(bytes);
-            }
-        }
-    }
+    crate::icons::enumerate(&file, found);
 }
 
 struct File {
@@ -1314,64 +1278,9 @@ impl File {
 
         Some(File { handle })
     }
+}
 
-    fn resource_directory(&self) -> Option<ResourceDirectory> {
-        let headers = self.read_u32(DOS_HEADERS_OFFSET);
-        if self.read_u32(headers) != PE_SIGNATURE {
-            return None;
-        }
-
-        let optional = headers + OPTIONAL_HEADER_OFFSET;
-        let directory_rva = self.read_u32(optional + RESOURCE_DIRECTORY_OFFSET);
-        if directory_rva == 0 {
-            return None;
-        }
-
-        let sections = optional + self.read_u16(headers + OPTIONAL_HEADER_SIZE_OFFSET) as u32;
-        let section_count = self.read_u16(headers + SECTION_COUNT_OFFSET) as u32;
-        for index in 0..section_count {
-            let section = sections + index * SECTION_SIZE;
-            let virtual_address = self.read_u32(section + SECTION_RVA_OFFSET);
-            let virtual_size = self.read_u32(section + SECTION_VIRTUAL_SIZE_OFFSET);
-            if directory_rva >= virtual_address && directory_rva < virtual_address + virtual_size {
-                let raw_data = self.read_u32(section + SECTION_RAW_DATA_OFFSET);
-                return Some(ResourceDirectory {
-                    file: self,
-                    rva: directory_rva,
-                    offset: directory_rva - virtual_address + raw_data,
-                });
-            }
-        }
-
-        None
-    }
-
-    fn read_u32(&self, position: u32) -> u32 {
-        let mut bytes = [0u8; 4];
-        self.read_at(position, &mut bytes);
-        u32::from_le_bytes(bytes)
-    }
-
-    fn read_u16(&self, position: u32) -> u16 {
-        let mut bytes = [0u8; 2];
-        self.read_at(position, &mut bytes);
-        u16::from_le_bytes(bytes)
-    }
-
-    fn read_blob(&self, position: u32, size: u32) -> Option<&'static [u8]> {
-        let blob = unsafe { &mut *core::ptr::addr_of_mut!(ICON_BUFFER) };
-        if size as usize > blob.len() {
-            return None;
-        }
-
-        let read = self.read_at(position, &mut blob[..size as usize]);
-        if read != size {
-            return None;
-        }
-
-        Some(&blob[..size as usize])
-    }
-
+impl crate::icons::Image for File {
     fn read_at(&self, position: u32, buffer: &mut [u8]) -> u32 {
         unsafe {
             ifsmgr_ring0_file_io(
@@ -1392,73 +1301,6 @@ impl Drop for File {
     }
 }
 
-struct ResourceDirectory<'f> {
-    file: &'f File,
-    rva: u32,
-    offset: u32,
-}
-
-struct Resource {
-    offset: u32,
-    size: u32,
-}
-
-impl ResourceDirectory<'_> {
-    fn first_leaf(&self, kind: u16) -> Option<Resource> {
-        let by_name = self.subdirectory(self.offset, kind)?;
-        let by_language = self.first_subdirectory(by_name)?;
-
-        self.leaf_at(self.first_subdirectory(by_language)?)
-    }
-
-    fn leaf(&self, kind: u16, name: u16) -> Option<Resource> {
-        let by_name = self.subdirectory(self.offset, kind)?;
-        let by_language = self.subdirectory(by_name, name)?;
-
-        self.leaf_at(self.first_subdirectory(by_language)?)
-    }
-
-    fn subdirectory(&self, directory: u32, id: u16) -> Option<u32> {
-        for entry in self.entries(directory) {
-            if self.file.read_u32(entry) == id as u32 {
-                return Some(self.child(entry));
-            }
-        }
-
-        None
-    }
-
-    fn first_subdirectory(&self, directory: u32) -> Option<u32> {
-        self.entries(directory).next().map(|e| self.child(e))
-    }
-
-    fn entries(&self, directory: u32) -> impl Iterator<Item = u32> + '_ {
-        let named = self.file.read_u16(directory + NAMED_ENTRY_COUNT_OFFSET) as u32;
-        let identified = self.file.read_u16(directory + ID_ENTRY_COUNT_OFFSET) as u32;
-        let first = directory + DIRECTORY_HEADER_SIZE + named * DIRECTORY_ENTRY_SIZE;
-
-        (0..identified).map(move |index| first + index * DIRECTORY_ENTRY_SIZE)
-    }
-
-    fn child(&self, entry: u32) -> u32 {
-        let value = self.file.read_u32(entry + DIRECTORY_ENTRY_CHILD_OFFSET);
-        self.offset + (value & !SUBDIRECTORY_FLAG)
-    }
-
-    fn leaf_at(&self, data_entry: u32) -> Option<Resource> {
-        let data_rva = self.file.read_u32(data_entry);
-
-        Some(Resource {
-            offset: self.offset + data_rva - self.rva,
-            size: self.file.read_u32(data_entry + DATA_ENTRY_SIZE_OFFSET),
-        })
-    }
-}
-
-static mut ICON_BUFFER: [u8; MAX_ICON_SIZE] = [0; MAX_ICON_SIZE];
-
-const MAX_ICON_SIZE: usize = 16 * 1024;
-
 const R0_OPENCREATFILE: u32 = 0xd500;
 const R0_READFILE: u32 = 0xd600;
 const R0_CLOSEFILE: u32 = 0xd700;
@@ -1466,30 +1308,7 @@ const ACCESS_READONLY: u32 = 0x0000;
 const SHARE_DENYNONE: u32 = 0x0040;
 const ACTION_OPENEXISTING: u32 = 0x01;
 
-const DOS_HEADERS_OFFSET: u32 = 0x3c;
-const PE_SIGNATURE: u32 = 0x00004550;
-const SECTION_COUNT_OFFSET: u32 = 0x06;
-const OPTIONAL_HEADER_SIZE_OFFSET: u32 = 0x14;
-const OPTIONAL_HEADER_OFFSET: u32 = 0x18;
-const RESOURCE_DIRECTORY_OFFSET: u32 = 0x70;
-const SECTION_SIZE: u32 = 0x28;
-const SECTION_VIRTUAL_SIZE_OFFSET: u32 = 0x08;
-const SECTION_RVA_OFFSET: u32 = 0x0c;
-const SECTION_RAW_DATA_OFFSET: u32 = 0x14;
 
-const RT_ICON: u16 = 3;
-const RT_GROUP_ICON: u16 = 14;
-const NAMED_ENTRY_COUNT_OFFSET: u32 = 0x0c;
-const ID_ENTRY_COUNT_OFFSET: u32 = 0x0e;
-const DIRECTORY_HEADER_SIZE: u32 = 0x10;
-const DIRECTORY_ENTRY_SIZE: u32 = 0x08;
-const DIRECTORY_ENTRY_CHILD_OFFSET: u32 = 0x04;
-const SUBDIRECTORY_FLAG: u32 = 0x8000_0000;
-const DATA_ENTRY_SIZE_OFFSET: u32 = 0x04;
-const GROUP_COUNT_OFFSET: u32 = 0x04;
-const GROUP_ENTRIES_OFFSET: u32 = 0x06;
-const GROUP_ENTRY_SIZE: u32 = 0x0e;
-const GROUP_ENTRY_ID_OFFSET: u32 = 0x0c;
 
 pub fn install_fault_reporter() {
     unsafe {

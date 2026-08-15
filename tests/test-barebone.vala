@@ -100,11 +100,77 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/modules-resolve-from-loaded-module-list", () => {
+			var h = new Harness ((h) => modules_resolve_from_loaded_module_list.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-modules-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_modules_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_agent_recovers_from_exception_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/hooks-kernel-function-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/reads-and-writes-memory-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_reads_and_writes_memory_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-threads-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_threads_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
 			assert_true (parse_config ("{}").kernel == Barebone.KernelKind.AUTO);
 			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == Barebone.KernelKind.BARE);
 			assert_true (parse_config ("{ \"kernel\": \"xnu\" }").kernel == Barebone.KernelKind.XNU);
 			assert_true (parse_config ("{ \"kernel\": \"win9x\" }").kernel == Barebone.KernelKind.WIN9X);
+			assert_true (parse_config ("{ \"kernel\": \"winnt\" }").kernel == Barebone.KernelKind.WINNT);
+		});
+
+		GLib.Test.add_func ("/Barebone/Config/parses-allocator-arguments", () => {
+			var allocator = (Barebone.TargetFunctionsAllocatorConfig) parse_config (
+				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"804e1000\", \"free_function\": \"804e2000\", \"alloc_arguments\": [ \"0\", \"size\", \"64697246\" ], \"free_arguments\": [ \"address\", \"64697246\" ] } }").allocator;
+
+			var alloc = allocator.effective_alloc_arguments ();
+			assert_true (alloc.size == 3);
+			assert_argument (alloc[0], Barebone.CallArgumentRole.LITERAL, 0);
+			assert_argument (alloc[1], Barebone.CallArgumentRole.SIZE, 0);
+			assert_argument (alloc[2], Barebone.CallArgumentRole.LITERAL, 0x64697246);
+
+			var free = allocator.effective_free_arguments ();
+			assert_true (free.size == 2);
+			assert_argument (free[0], Barebone.CallArgumentRole.ADDRESS, 0);
+			assert_argument (free[1], Barebone.CallArgumentRole.LITERAL, 0x64697246);
+
+			// Without a template, the flags still give the argument list.
+			var shorthand = (Barebone.TargetFunctionsAllocatorConfig) parse_config (
+				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"1000\", \"free_function\": \"2000\", \"alloc_flags\": 3 } }").allocator;
+
+			var inferred = shorthand.effective_alloc_arguments ();
+			assert_true (inferred.size == 2);
+			assert_argument (inferred[0], Barebone.CallArgumentRole.SIZE, 0);
+			assert_argument (inferred[1], Barebone.CallArgumentRole.LITERAL, 3);
 		});
 
 		GLib.Test.add_func ("/Barebone/X64/enumerate-ranges-walks-long-mode-tables", () => {
@@ -122,8 +188,8 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Barebone/X64/protect-pages-rejects-large-pages", () => {
-			var h = new Harness ((h) => x64_protect_pages_rejects_large_pages.begin (h as Harness));
+		GLib.Test.add_func ("/Barebone/X64/protect-pages-copes-with-large-pages", () => {
+			var h = new Harness ((h) => x64_protect_pages_copes_with_large_pages.begin (h as Harness));
 			h.run ();
 		});
 
@@ -554,20 +620,26 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void x64_protect_pages_rejects_large_pages (Harness h) {
+	private static async void x64_protect_pages_copes_with_large_pages (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
 			var machine = new Barebone.X64Machine (target.client);
 
+			// This gigabyte page is already writable, thus there is nothing to do. Do not make it more
+			// restrictive, because the kernel put other data in the same mapping.
+			yield machine.protect_pages (0xffffc00000000000, 4096, READ | WRITE, null);
+			assert_true (target.read_uint64 (X64_KERNEL_PDPT_PA + (0 * 8)) == 0x400000e3);
+
+			// This range is read-only, and you cannot make one part of it writable.
 			try {
-				yield machine.protect_pages (0xffffc00000000000, 4096, READ | WRITE, null);
+				yield machine.protect_pages (0x200000, 4096, READ | WRITE, null);
 				assert_not_reached ();
 			} catch (Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
 			}
 
-			assert_true (target.read_uint64 (X64_KERNEL_PDPT_PA + (0 * 8)) == 0x400000e3);
+			assert_true (target.read_uint64 (X64_PD_PA + (1 * 8)) == 0x8000000140000081);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
 			assert_not_reached ();
@@ -1216,6 +1288,16 @@ namespace Frida.BareboneTest {
 			uint16 height = icon.lookup_value ("height", VariantType.UINT16).get_uint16 ();
 			assert_true (width != 0 && height != 0);
 			assert_true (icon.lookup_value ("image", new VariantType ("ay")).get_size () == width * height * 4);
+
+			// The image gives each size one time, at its best color depth.
+			var seen = new Gee.HashSet<uint32> ();
+			for (size_t i = 0; i != icons.n_children (); i++) {
+				var one = icons.get_child_value (i);
+				uint32 shape = ((uint32) one.lookup_value ("width", VariantType.UINT16).get_uint16 () << 16)
+					| one.lookup_value ("height", VariantType.UINT16).get_uint16 ();
+				assert_false (seen.contains (shape));
+				seen.add (shape);
+			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1291,7 +1373,175 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void agent_runs_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
+		yield run_script_in_live_guest (h, win9x_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void winnt_agent_runs_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void winnt_enumerates_modules_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const mods = Process.enumerateModules();
+			const kernel = mods.find(m => m.name === 'ntoskrnl.exe');
+			const named = kernel.enumerateExports().some(e => e.name === 'ExAllocatePoolWithTag');
+			const hal = mods.some(m => m.name === 'hal.dll');
+			const drivers = mods.some(m => m.name === 'atapi.sys');
+			send({ named, hal, drivers });
+		""", "\"named\":true,\"hal\":true,\"drivers\":true");
+	}
+
+	private static async void winnt_enumerates_processes_in_live_guest (Harness h) {
+		var config = winnt_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+			var options = new ProcessQueryOptions ();
+			options.scope = FULL;
+			var processes = yield device.enumerate_processes (options, null);
+
+			Process? shell = null;
+			Process? system = null;
+			for (int i = 0; i != processes.size (); i++) {
+				string name = processes.get (i).name.down ();
+				if (name == "explorer.exe")
+					shell = processes.get (i);
+				else if (name == "system")
+					system = processes.get (i);
+			}
+			assert_nonnull (shell);
+			assert_nonnull (system);
+
+			// Each of these is an id from the handle table, but the idle process is different.
+			assert_true (system.pid == 4);
+			assert_true (shell.pid > 4);
+
+			for (int i = 0; i != processes.size (); i++)
+				assert_true (processes.get (i).name != "");
+
+			// A process gives its path and its command line. The processes of the kernel have neither.
+			assert_true (shell.parameters["path"].get_string ().down ().has_suffix ("explorer.exe"));
+
+			var argv = shell.parameters["argv"];
+			assert_nonnull (argv);
+			assert_true (argv.n_children () >= 1);
+
+			var icons = shell.parameters["icons"];
+			assert_nonnull (icons);
+			assert_true (icons.n_children () != 0);
+
+			var icon = icons.get_child_value (0);
+			assert_true (icon.lookup_value ("format", VariantType.STRING).get_string () == "rgba");
+			uint16 width = icon.lookup_value ("width", VariantType.UINT16).get_uint16 ();
+			uint16 height = icon.lookup_value ("height", VariantType.UINT16).get_uint16 ();
+			assert_true (width != 0 && height != 0);
+			assert_true (icon.lookup_value ("image", new VariantType ("ay")).get_size () == width * height * 4);
+
+			// This icon is drawn for 32 bits, thus its edges and its shadow are partly transparent. A
+			// one-bit mask gives only full transparency or none.
+			var pixels = icon.lookup_value ("image", new VariantType ("ay"));
+			unowned uint8[] rgba = (uint8[]) pixels.get_data ();
+			rgba.length = (int) pixels.get_size ();
+			uint partly = 0;
+			for (int i = 3; i < rgba.length; i += 4) {
+				if (rgba[i] != 0 && rgba[i] != 255)
+					partly++;
+			}
+			assert_true (partly != 0);
+
+			// The image gives each size one time, at its best color depth.
+			var seen = new Gee.HashSet<uint32> ();
+			for (size_t i = 0; i != icons.n_children (); i++) {
+				var one = icons.get_child_value (i);
+				uint32 shape = ((uint32) one.lookup_value ("width", VariantType.UINT16).get_uint16 () << 16)
+					| one.lookup_value ("height", VariantType.UINT16).get_uint16 ();
+				assert_false (seen.contains (shape));
+				seen.add (shape);
+			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static async void winnt_enumerates_threads_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const threads = Process.enumerateThreads();
+			const mine = Process.getCurrentThreadId();
+			send({
+				several: threads.length > 10,
+				listed: threads.some(t => t.id === mine),
+				distinct: new Set(threads.map(t => t.id)).size === threads.length
+			});
+		""", "\"several\":true,\"listed\":true,\"distinct\":true");
+	}
+
+	private static async void winnt_reads_and_writes_memory_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const header = new Uint8Array(kernel.base.readByteArray(2));
+
+			const scratch = Memory.alloc(8);
+			scratch.writeByteArray([1, 2, 3, 4]);
+			const written = new Uint8Array(scratch.readByteArray(4));
+
+			let missing = 'no';
+			try {
+				if (ptr('0xfffff000').readByteArray(16) === null)
+					missing = 'yes';
+			} catch (e) {
+				missing = 'yes';
+			}
+
+			send({
+				mz: header[0] === 0x4d && header[1] === 0x5a,
+				roundtrip: written[0] === 1 && written[3] === 4,
+				missing: missing
+			});
+		""", "\"mz\":true,\"roundtrip\":true,\"missing\":\"yes\"");
+	}
+
+	// RtlUpperChar has no side effects and the kernel almost never calls it. Thus the hook sees
+	// only the calls from this test.
+	private static async void winnt_hooks_kernel_function_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
+
+			let seen = null;
+			Interceptor.attach(upper, {
+				onEnter(args) {
+					seen = args[0].toInt32();
+				}
+			});
+			Interceptor.flush();
+
+			const call = new NativeFunction(upper, 'uint8', ['uint8'], { abi: 'stdcall' });
+			const result = call(0x61);
+			send({ seen: seen, result: result });
+		""", "\"seen\":97,\"result\":65");
+	}
+
+	private static async void winnt_agent_recovers_from_exception_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			let caught = 'no';
+			try {
+				ptr('0xfffff000').readU32();
+			} catch (e) {
+				caught = 'yes';
+			}
+			send({ caught: caught });
+		""", "\"caught\":\"yes\"");
 	}
 
 	// Two sessions on one process use the same copy. Thus one session can detach and the other
@@ -1356,7 +1606,7 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void enumerates_threads_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, """
+		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
 			const contextual = threads.filter(t => t.context !== undefined);
@@ -1371,7 +1621,7 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void enumerates_modules_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, """
+		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			const mods = Process.enumerateModules();
 			const vmm = mods.find(m => m.name === 'VMM.VXD');
 			const named = vmm.enumerateExports().some(e => e.name === 'Get_Sys_VM_Handle');
@@ -1382,7 +1632,7 @@ namespace Frida.BareboneTest {
 	}
 
 	private static async void agent_recovers_from_exception_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, """
+		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			let caught = 'no';
 			try {
 				ptr('0xfffff000').readU32();
@@ -1417,8 +1667,32 @@ namespace Frida.BareboneTest {
 		return config;
 	}
 
-	private static async void run_script_in_live_guest (Harness h, string source, string expected) {
-		var config = win9x_config_from_environment (h);
+	private static Barebone.Config? winnt_config_from_environment (Harness h) {
+		string? agent_path = Environment.get_variable ("FRIDA_TEST_WINNT_AGENT");
+		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WINNT_QMP");
+		string? stub_port = Environment.get_variable ("FRIDA_TEST_WINNT_GDB_PORT");
+		if (agent_path == null || qmp_path == null || stub_port == null) {
+			h.done ();
+			return null;
+		}
+
+		var config = new Barebone.Config ();
+		config.connection.host = "127.0.0.1";
+		config.connection.port = (uint16) uint.parse (stub_port);
+		config.kernel = WINNT;
+		config.agent = new Barebone.AgentConfig () {
+			path = agent_path,
+			transport = new Barebone.HostlinkTransportConfig () {
+				qmp = "unix:" + qmp_path,
+				bus = Environment.get_variable ("FRIDA_TEST_WINNT_BUS"),
+			},
+		};
+
+		return config;
+	}
+
+	private static async void run_script_in_live_guest (Harness h, Barebone.Config? config, string source,
+			string expected) {
 		if (config == null)
 			return;
 
@@ -1451,6 +1725,47 @@ namespace Frida.BareboneTest {
 		}
 
 		h.done ();
+	}
+
+	private static async void modules_resolve_from_loaded_module_list (Harness h) {
+		var target = new FakeTarget (IA32, new Ram ().steal (), LEGACY_MONITOR_DUMP);
+		try {
+			target.map_virtual (PCR_VA, pcr_page ());
+			target.map_virtual (NT_STRUCTS_VA, nt_kernel_structs ());
+			target.map_virtual (NT_KERNEL_VA, nt_kernel_image ());
+			target.map_virtual (NT_HAL_VA, nt_hal_image ());
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
+
+			var layout = yield Barebone.collect_winnt_layout (machine, null);
+
+			var modules = layout.modules;
+			assert_true (modules.size == 2);
+			assert_true (modules[0].name == "ntoskrnl.exe");
+			assert_true (modules[0].offset == NT_KERNEL_VA);
+			assert_true (modules[0].size == NT_IMAGE_SIZE);
+			assert_true (modules[1].name == "hal.dll");
+			assert_true (modules[1].offset == NT_HAL_VA);
+
+			// The forwarded export is skipped, and the module without an export directory
+			// contributes nothing.
+			var symbols = layout.symbols;
+			assert_true (symbols.size == 1);
+			assert_symbol (symbols[0], "NtWaitForSingleObject", (uint32) (NT_KERNEL_VA + NT_WAIT_RVA));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static void assert_argument (Barebone.CallArgument argument, Barebone.CallArgumentRole role,
+			uint64 value) {
+		assert_true (argument.role == role);
+		assert_true (argument.value == value);
 	}
 
 	private static void assert_symbol (Barebone.SymbolInfo symbol, string name, uint32 address) {
@@ -1510,6 +1825,123 @@ namespace Frida.BareboneTest {
 	private static void put_uint32 (uint8[] buf, size_t offset, uint32 val) {
 		for (uint i = 0; i != 4; i++)
 			buf[offset + i] = (uint8) (val >> (i * 8));
+	}
+
+	private static void put_uint16 (uint8[] buf, size_t offset, uint16 val) {
+		for (uint i = 0; i != 2; i++)
+			buf[offset + i] = (uint8) (val >> (i * 8));
+	}
+
+	private static void put_utf16 (uint8[] buf, size_t offset, string text) {
+		for (uint i = 0; i != text.length; i++)
+			put_uint16 (buf, offset + (i * 2), (uint16) text[i]);
+	}
+
+	private static void put_ascii (uint8[] buf, size_t offset, string text) {
+		for (uint i = 0; i != text.length; i++)
+			buf[offset + i] = (uint8) text[i];
+	}
+
+	private const uint64 PCR_VA = 0xffdff000;
+	private const uint64 NT_STRUCTS_VA = 0x80500000;
+	private const uint64 NT_KERNEL_VA = 0x80400000;
+	private const uint64 NT_HAL_VA = 0x80410000;
+	private const size_t NT_PAGE_SIZE = 0x1000;
+
+	private const size_t VERSION_BLOCK_OFFSET = 0x000;
+	private const size_t MODULE_LIST_OFFSET = 0x100;
+	private const size_t KERNEL_ENTRY_OFFSET = 0x200;
+	private const size_t HAL_ENTRY_OFFSET = 0x280;
+	private const size_t KERNEL_NAME_OFFSET = 0x300;
+	private const size_t HAL_NAME_OFFSET = 0x340;
+
+	private const uint32 NT_IMAGE_SIZE = 0x200000;
+	private const uint32 NT_WAIT_RVA = 0x1000;
+	private const size_t PE_HEADERS_OFFSET = 0xc0;
+	private const uint32 EXPORT_DIRECTORY_RVA = 0x400;
+	private const uint32 EXPORT_DIRECTORY_SIZE = 0x100;
+	private const uint32 FORWARDED_EXPORT_RVA = 0x420;
+	private const uint32 FUNCTION_TABLE_RVA = 0x430;
+	private const uint32 NAME_TABLE_RVA = 0x440;
+	private const uint32 ORDINAL_TABLE_RVA = 0x450;
+	private const uint32 WAIT_NAME_RVA = 0x460;
+	private const uint32 FORWARDED_NAME_RVA = 0x480;
+
+	private static Bytes pcr_page () {
+		var page = new uint8[NT_PAGE_SIZE];
+
+		put_uint32 (page, 0x1c, (uint32) PCR_VA);
+		put_uint32 (page, 0x34, (uint32) (NT_STRUCTS_VA + VERSION_BLOCK_OFFSET));
+
+		return new Bytes.take ((owned) page);
+	}
+
+	private static Bytes nt_kernel_structs () {
+		var structs = new uint8[NT_PAGE_SIZE];
+
+		put_uint16 (structs, VERSION_BLOCK_OFFSET + 0x08, 0x014c);
+		put_uint32 (structs, VERSION_BLOCK_OFFSET + 0x10, (uint32) NT_KERNEL_VA);
+		put_uint32 (structs, VERSION_BLOCK_OFFSET + 0x18, (uint32) (NT_STRUCTS_VA + MODULE_LIST_OFFSET));
+
+		put_uint32 (structs, MODULE_LIST_OFFSET, (uint32) (NT_STRUCTS_VA + KERNEL_ENTRY_OFFSET));
+
+		put_table_entry (structs, KERNEL_ENTRY_OFFSET, NT_STRUCTS_VA + HAL_ENTRY_OFFSET, NT_KERNEL_VA,
+			NT_IMAGE_SIZE, NT_STRUCTS_VA + KERNEL_NAME_OFFSET, "ntoskrnl.exe");
+		put_table_entry (structs, HAL_ENTRY_OFFSET, NT_STRUCTS_VA + MODULE_LIST_OFFSET, NT_HAL_VA,
+			0x20000, NT_STRUCTS_VA + HAL_NAME_OFFSET, "hal.dll");
+
+		put_utf16 (structs, KERNEL_NAME_OFFSET, "ntoskrnl.exe");
+		put_utf16 (structs, HAL_NAME_OFFSET, "hal.dll");
+
+		return new Bytes.take ((owned) structs);
+	}
+
+	private static void put_table_entry (uint8[] structs, size_t offset, uint64 next, uint64 dll_base, uint32 size,
+			uint64 name_buffer, string name) {
+		put_uint32 (structs, offset + 0x00, (uint32) next);
+		put_uint32 (structs, offset + 0x18, (uint32) dll_base);
+		put_uint32 (structs, offset + 0x20, size);
+		put_uint16 (structs, offset + 0x2c, (uint16) (name.length * 2));
+		put_uint16 (structs, offset + 0x2e, (uint16) (name.length * 2));
+		put_uint32 (structs, offset + 0x30, (uint32) name_buffer);
+	}
+
+	private static Bytes nt_kernel_image () {
+		var image = new uint8[NT_PAGE_SIZE];
+
+		put_pe_headers (image, EXPORT_DIRECTORY_RVA, EXPORT_DIRECTORY_SIZE);
+
+		put_uint32 (image, EXPORT_DIRECTORY_RVA + 0x18, 2);
+		put_uint32 (image, EXPORT_DIRECTORY_RVA + 0x1c, FUNCTION_TABLE_RVA);
+		put_uint32 (image, EXPORT_DIRECTORY_RVA + 0x20, NAME_TABLE_RVA);
+		put_uint32 (image, EXPORT_DIRECTORY_RVA + 0x24, ORDINAL_TABLE_RVA);
+
+		put_uint32 (image, FUNCTION_TABLE_RVA, NT_WAIT_RVA);
+		put_uint32 (image, FUNCTION_TABLE_RVA + 4, FORWARDED_EXPORT_RVA);
+		put_uint32 (image, NAME_TABLE_RVA, WAIT_NAME_RVA);
+		put_uint32 (image, NAME_TABLE_RVA + 4, FORWARDED_NAME_RVA);
+		put_uint16 (image, ORDINAL_TABLE_RVA, 0);
+		put_uint16 (image, ORDINAL_TABLE_RVA + 2, 1);
+		put_ascii (image, WAIT_NAME_RVA, "NtWaitForSingleObject");
+		put_ascii (image, FORWARDED_NAME_RVA, "Forwarded");
+
+		return new Bytes.take ((owned) image);
+	}
+
+	private static Bytes nt_hal_image () {
+		var image = new uint8[NT_PAGE_SIZE];
+
+		put_pe_headers (image, 0, 0);
+
+		return new Bytes.take ((owned) image);
+	}
+
+	private static void put_pe_headers (uint8[] image, uint32 export_directory_rva, uint32 export_directory_size) {
+		put_uint16 (image, 0, 0x5a4d);
+		put_uint32 (image, 0x3c, (uint32) PE_HEADERS_OFFSET);
+		put_uint32 (image, PE_HEADERS_OFFSET, 0x00004550);
+		put_uint32 (image, PE_HEADERS_OFFSET + 0x78, export_directory_rva);
+		put_uint32 (image, PE_HEADERS_OFFSET + 0x7c, export_directory_size);
 	}
 
 	private static uint8[] legacy_page_tables () {

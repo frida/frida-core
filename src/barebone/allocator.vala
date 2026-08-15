@@ -163,20 +163,50 @@ namespace Frida.Barebone {
 		private Machine machine;
 		private size_t _page_size;
 		private TargetFunctionsAllocatorConfig config;
+		private Gee.List<CallArgument> alloc_arguments;
+		private Gee.List<CallArgument> free_arguments;
 
 		public TargetFunctionsAllocator (Machine machine, size_t page_size, TargetFunctionsAllocatorConfig config) {
 			this.machine = machine;
 			this._page_size = page_size;
 			this.config = config;
+			this.alloc_arguments = config.effective_alloc_arguments ();
+			this.free_arguments = config.effective_free_arguments ();
 		}
 
+		// A kernel allocator gives blocks with an alignment of less than a page, and the caller can
+		// change the protection. Thus allocate more, give out full pages, and keep the start of the
+		// block for the release.
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			uint64 address = yield machine.invoke (config.alloc_function.address, { size, config.alloc_flags },
-				cancellable);
+			size_t padded_size = size + alignment - 1;
 
-			// TODO: Handle alignment.
+			uint64 block = yield machine.invoke (config.alloc_function.address,
+				resolve_arguments (alloc_arguments, padded_size, 0), cancellable);
+			if (block == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to allocate %zu bytes in the target", padded_size);
 
-			return new TargetAllocation (address, size, machine, config);
+			uint64 address = (block + alignment - 1) & ~((uint64) alignment - 1);
+
+			return new TargetAllocation (address, size, block, padded_size, machine, config, free_arguments);
+		}
+
+		private static uint64[] resolve_arguments (Gee.List<CallArgument> template, size_t size, uint64 address) {
+			var arguments = new uint64[template.size];
+			for (int i = 0; i != arguments.length; i++) {
+				CallArgument a = template[i];
+				switch (a.role) {
+					case SIZE:
+						arguments[i] = size;
+						break;
+					case ADDRESS:
+						arguments[i] = address;
+						break;
+					default:
+						arguments[i] = a.value;
+						break;
+				}
+			}
+			return arguments;
 		}
 
 		private class TargetAllocation : Object, Allocation {
@@ -194,18 +224,26 @@ namespace Frida.Barebone {
 
 			private uint64 _virtual_address;
 			public size_t _size;
+			private uint64 block;
+			private size_t block_size;
 			private Machine machine;
 			private TargetFunctionsAllocatorConfig config;
+			private Gee.List<CallArgument> free_arguments;
 
-			public TargetAllocation (uint64 address, size_t size, Machine m, TargetFunctionsAllocatorConfig c) {
+			public TargetAllocation (uint64 address, size_t size, uint64 block, size_t block_size, Machine m,
+					TargetFunctionsAllocatorConfig c, Gee.List<CallArgument> free_arguments) {
 				_virtual_address = address;
 				_size = size;
+				this.block = block;
+				this.block_size = block_size;
 				machine = m;
 				config = c;
+				this.free_arguments = free_arguments;
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
-				yield machine.invoke (config.free_function.address, { _virtual_address, size }, cancellable);
+				yield machine.invoke (config.free_function.address,
+					resolve_arguments (free_arguments, block_size, block), cancellable);
 			}
 		}
 	}

@@ -19,8 +19,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(feature = "linux")]
 use crate::gum_linux::enumerate_exports_in_range;
-#[cfg(feature = "win9x")]
-use crate::gum_win9x::enumerate_exports_in_range;
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+use crate::gum_windows::enumerate_exports_in_range;
 #[cfg(feature = "xnu")]
 use crate::gum_xnu::enumerate_exports_in_range;
 
@@ -295,6 +295,24 @@ pub(crate) fn unregister_slab(start: u64) {
         (*core::ptr::addr_of_mut!(SLABS)).retain(|&(begin, _)| begin != start);
     }
     slab_unlock();
+}
+
+// For callers that must not block, primarily a fault handler, which can interrupt the code
+// that holds the lock. Report a busy registry and let the caller decide.
+pub(crate) fn is_agent_slab_if_idle(address: u64) -> Option<bool> {
+    if SLAB_LOCK
+        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        return None;
+    }
+    let found = unsafe {
+        (*core::ptr::addr_of!(SLABS))
+            .iter()
+            .any(|&(begin, end)| address >= begin && address < end)
+    };
+    slab_unlock();
+    Some(found)
 }
 
 pub(crate) fn is_agent_slab(address: u64) -> bool {

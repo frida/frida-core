@@ -64,6 +64,8 @@ fn main() {
         println!("cargo:rustc-link-arg=--emit-relocs");
         let script = if env::var("CARGO_FEATURE_WIN9X").is_ok() {
             "agent-win9x.lds"
+        } else if env::var("CARGO_FEATURE_WINNT").is_ok() {
+            "agent-winnt.lds"
         } else {
             "agent.lds"
         };

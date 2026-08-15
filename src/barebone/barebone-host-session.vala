@@ -172,6 +172,10 @@ namespace Frida {
 				var win9x_layout = yield Barebone.collect_win9x_layout (machine, cancellable);
 				kernel_modules = win9x_layout.modules;
 				kernel_symbols = win9x_layout.symbols;
+			} else if (config.kernel == WINNT) {
+				var winnt_layout = yield Barebone.collect_winnt_layout (machine, cancellable);
+				kernel_modules = winnt_layout.modules;
+				kernel_symbols = winnt_layout.symbols;
 			}
 
 			Barebone.Allocator allocator;
@@ -244,17 +248,17 @@ namespace Frida {
 
 		private static Barebone.AllocatorConfig? infer_allocator_config (Barebone.KernelKind kind,
 				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
-			if (kind != WIN9X)
-				return null;
+			if (kind == WIN9X)
+				return infer_win9x_allocator_config (kernel_symbols);
+			if (kind == WINNT)
+				return infer_winnt_allocator_config (kernel_symbols);
+			return null;
+		}
 
-			Barebone.SymbolInfo? alloc = null;
-			Barebone.SymbolInfo? free = null;
-			foreach (var s in kernel_symbols) {
-				if (s.name == "_HeapAllocate")
-					alloc = s;
-				else if (s.name == "_HeapFree")
-					free = s;
-			}
+		private static Barebone.AllocatorConfig? infer_win9x_allocator_config (
+				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
+			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "_HeapAllocate");
+			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "_HeapFree");
 			if (alloc == null || free == null)
 				return null;
 
@@ -263,6 +267,43 @@ namespace Frida {
 				free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function", free.offset),
 			};
 		}
+
+		// A driver uses the pool, and on NT the pool is executable. The paged and session allocators
+		// are not.
+		private static Barebone.AllocatorConfig? infer_winnt_allocator_config (
+				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
+			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "ExAllocatePoolWithTag");
+			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "ExFreePoolWithTag");
+			if (alloc == null || free == null)
+				return null;
+
+			var alloc_arguments = new Gee.ArrayList<Barebone.CallArgument> ();
+			alloc_arguments.add (new Barebone.CallArgument (LITERAL, NON_PAGED_POOL));
+			alloc_arguments.add (new Barebone.CallArgument (SIZE, 0));
+			alloc_arguments.add (new Barebone.CallArgument (LITERAL, POOL_TAG));
+
+			var free_arguments = new Gee.ArrayList<Barebone.CallArgument> ();
+			free_arguments.add (new Barebone.CallArgument (ADDRESS, 0));
+			free_arguments.add (new Barebone.CallArgument (LITERAL, POOL_TAG));
+
+			return new Barebone.TargetFunctionsAllocatorConfig () {
+				alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
+				free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function", free.offset),
+				alloc_arguments = alloc_arguments,
+				free_arguments = free_arguments,
+			};
+		}
+
+		private static Barebone.SymbolInfo? find_symbol (Gee.List<Barebone.SymbolInfo> symbols, string name) {
+			foreach (var s in symbols) {
+				if (s.name == name)
+					return s;
+			}
+			return null;
+		}
+
+		private const uint64 NON_PAGED_POOL = 0;
+		private const uint64 POOL_TAG = 0x64697246;
 
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)

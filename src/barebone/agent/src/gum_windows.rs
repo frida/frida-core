@@ -1,7 +1,5 @@
-// Win9x half of Gum's platform backend. The processors this kernel runs on have
-// no execute permission to withhold and no supervisor write protection worth
-// speaking of, so code is writable where it lies and none of the aliasing the
-// other backends need arises.
+// The Windows part of Gum's platform backend, for Win9x and NT. Kernel code is writable on
+// both, thus this backend needs no alias. Only the position of the modules is different.
 
 use crate::{
     bindings::{
@@ -89,7 +87,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
         let modules = &*core::ptr::addr_of!(crate::MODULE_INFO);
 
         for module_info in modules.iter() {
-            let path = format!("/WINDOWS/SYSTEM/VMM32/{}", module_info.name);
+            let path = format!("{}{}", kernel::MODULE_DIRECTORY, module_info.name);
             let range = GumMemoryRange {
                 base_address: module_info.offset as u64,
                 size: module_info.size as gsize,

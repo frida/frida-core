@@ -118,4 +118,41 @@ namespace Frida.Barebone {
 			yield bp.remove (cancellable);
 		}
 	}
+
+	internal sealed class WinNtKernelFlavor : Object, KernelFlavor {
+		private Machine machine;
+		private uint64 yield_point;
+
+		public WinNtKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Error {
+			this.machine = machine;
+
+			// A thread in this system service is at PASSIVE_LEVEL on its own kernel stack, which the
+			// agent needs to start.
+			SymbolInfo? wait_for_single_object = symbols["NtWaitForSingleObject"];
+			if (wait_for_single_object == null)
+				throw new Error.NOT_SUPPORTED ("Missing symbol for NtWaitForSingleObject");
+			yield_point = wait_for_single_object.offset;
+		}
+
+		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+			yield run_until_yield_point (cancellable);
+		}
+
+		public async void settle (Cancellable? cancellable) throws Error, IOError {
+			yield machine.gdb.continue (cancellable);
+		}
+
+		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
+			GDB.Client gdb = machine.gdb;
+			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
+
+			GDB.Breakpoint? hit = null;
+			do {
+				var exception = yield gdb.continue_until_exception (cancellable);
+				hit = exception.breakpoint;
+			} while (hit != bp);
+
+			yield bp.remove (cancellable);
+		}
+	}
 }

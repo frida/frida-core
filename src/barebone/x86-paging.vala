@@ -121,7 +121,11 @@ namespace Frida.Barebone {
 
 				uint64 page_va = start_va;
 				while (page_va != end_va) {
-					uint64 table_pa = yield find_leaf_table (page_va, p, cancellable);
+					LeafEntry mapping = yield find_leaf_entry (page_va, p, cancellable);
+					if (mapping.level != p.leaf_level) {
+						page_va = skip_large_page (page_va, end_va, mapping, prot, p);
+						continue;
+					}
 
 					uint index = (uint) ((page_va >> leaf.shift) & (leaf.num_entries - 1));
 					uint64 remaining_here = (uint64) (leaf.num_entries - index) * PAGE_SIZE;
@@ -130,7 +134,7 @@ namespace Frida.Barebone {
 
 					yield relax_parent_entries (page_va, prot, p, relaxed_slots, cancellable);
 
-					uint64 first_slot = table_pa + ((uint64) index * p.entry_size);
+					uint64 first_slot = mapping.slot_pa;
 					Buffer current = yield read_buffer (first_slot, num_pages * p.entry_size,
 						cancellable);
 
@@ -157,25 +161,26 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 		}
 
-		private async uint64 find_leaf_table (uint64 va, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
-			uint64 table_pa = p.root_table;
-
-			for (uint level = 0; level != p.leaf_level; level++) {
-				uint64 entry = yield read_entry_at (slot_address (va, table_pa, level, p), p, cancellable);
-				if ((entry & PRESENT_BIT) == 0) {
-					throw new Error.NOT_SUPPORTED ("Unable to resolve 0x%" + uint64.FORMAT_MODIFIER + "x",
-						va);
-				}
-				if (is_leaf_entry (entry, level, p)) {
-					throw new Error.NOT_SUPPORTED (
-						"Unable to change protection of the large page mapping at 0x%" +
-						uint64.FORMAT_MODIFIER + "x", va);
-				}
-				table_pa = table_address (entry, p);
+		// You cannot divide a large page here. Thus it is a problem only if it gives less than the
+		// request. Windows maps its kernel pool this way, and other data shares the mapping.
+		private static uint64 skip_large_page (uint64 page_va, uint64 end_va, LeafEntry mapping,
+				Gum.PageProtection prot, MMUParameters p) throws Error {
+			if (!grants (mapping.value, prot, p)) {
+				throw new Error.NOT_SUPPORTED (
+					"Unable to change protection of the large page mapping at 0x%" +
+					uint64.FORMAT_MODIFIER + "x", page_va);
 			}
 
-			return table_pa;
+			uint64 span = (uint64) 1 << p.levels[mapping.level].shift;
+			return uint64.min (end_va, round_address_up (page_va + 1, (size_t) span));
+		}
+
+		private static bool grants (uint64 entry, Gum.PageProtection prot, MMUParameters p) {
+			if ((prot & Gum.PageProtection.WRITE) != 0 && (entry & WRITABLE_BIT) == 0)
+				return false;
+			if ((prot & Gum.PageProtection.EXECUTE) != 0 && p.nx_enabled && (entry & NX_BIT) != 0)
+				return false;
+			return true;
 		}
 
 		private async LeafEntry find_leaf_entry (uint64 va, MMUParameters p, Cancellable? cancellable)

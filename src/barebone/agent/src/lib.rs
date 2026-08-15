@@ -1,7 +1,7 @@
 #![no_std]
 
-#[cfg(not(any(feature = "xnu", feature = "win9x", feature = "linux")))]
-compile_error!("pick a flavour: --features xnu, --features win9x or --features linux");
+#[cfg(not(any(feature = "xnu", feature = "win9x", feature = "winnt", feature = "linux")))]
+compile_error!("pick a flavor: --features xnu, --features win9x, --features winnt or --features linux");
 
 #[cfg(all(feature = "blob", feature = "linux"))]
 compile_error!("pick one flavour, not both");
@@ -50,10 +50,14 @@ mod hostlink_chardev;
 #[cfg(feature = "linux")]
 mod linux;
 
-#[cfg(feature = "win9x")]
-mod gum_win9x;
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+mod gum_windows;
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+mod icons;
 #[cfg(feature = "win9x")]
 mod win9x;
+#[cfg(feature = "winnt")]
+mod winnt;
 
 #[cfg(feature = "xnu")]
 mod gum_xnu;
@@ -214,7 +218,7 @@ mod entrypoint_blob {
                     )
                     .unwrap(),
                 ),
-                #[cfg(feature = "win9x")]
+                #[cfg(any(feature = "win9x", feature = "winnt"))]
                 TransportConfig::VirtioPci => Transport::Virtio(
                     hostlink_virtio::Hostlink::init_pci(Some(on_frame_from_host), wake_token)
                         .unwrap(),
@@ -291,10 +295,10 @@ mod entrypoint_blob {
                     { let _ = host_port; panic!("vsock is XNU's") }
                 }
                 2 => {
-                    #[cfg(feature = "win9x")]
+                    #[cfg(any(feature = "win9x", feature = "winnt"))]
                     { TransportConfig::VirtioPci }
-                    #[cfg(not(feature = "win9x"))]
-                    { panic!("virtio-pci is Win9x's") }
+                    #[cfg(not(any(feature = "win9x", feature = "winnt")))]
+                    { panic!("virtio-pci is Windows'") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -507,7 +511,7 @@ impl Transport {
 #[cfg(feature = "blob")]
 pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     VirtioPci,
     #[cfg(feature = "xnu")]
     Vsock { host_port: u32 },
@@ -807,7 +811,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
@@ -956,7 +960,7 @@ static mut INJECTION_PENDING: bool = false;
 #[cfg(feature = "win9x")]
 static mut PENDING_INJECTION: (u16, u32, u32, u32) = (0, 0, 0, 0);
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
         let list_type = g_variant_type_new(c"a(ussaay)".as_ptr() as *const gchar);
@@ -1003,7 +1007,7 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
     if text.is_null() {
         c"".as_ptr()

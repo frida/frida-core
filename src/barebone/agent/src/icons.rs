@@ -1,0 +1,213 @@
+// The icons of a process are resources in its image on disk, thus the walk is the same on all
+// versions of Windows. The resource directory gives an icon group, and the group gives the
+// icons. Only the file operations are different, and a flavor supplies these.
+
+pub trait Image {
+    fn read_at(&self, position: u32, buffer: &mut [u8]) -> u32;
+}
+
+pub fn enumerate(image: &dyn Image, found: &mut dyn FnMut(&[u8])) {
+    let Some(resources) = resource_directory(image) else {
+        return;
+    };
+
+    let Some(group) = resources.first_leaf(RT_GROUP_ICON) else {
+        return;
+    };
+
+    // A group contains each size one time for each color depth. Keep only the best of each size.
+    let count = read_u16(image, group.offset + GROUP_COUNT_OFFSET) as u32;
+    for index in 0..count {
+        if !is_best_of_its_size(image, group.offset, count, index) {
+            continue;
+        }
+
+        let entry = group.offset + GROUP_ENTRIES_OFFSET + index * GROUP_ENTRY_SIZE;
+        let id = read_u16(image, entry + GROUP_ENTRY_ID_OFFSET);
+        if let Some(icon) = resources.leaf(RT_ICON, id) {
+            if let Some(bytes) = read_blob(image, icon.offset, icon.size) {
+                found(bytes);
+            }
+        }
+    }
+}
+
+fn is_best_of_its_size(image: &dyn Image, group: u32, count: u32, index: u32) -> bool {
+    let mine = entry_shape(image, group, index);
+
+    (0..count).filter(|other| *other != index).all(|other| {
+        let theirs = entry_shape(image, group, other);
+        theirs.0 != mine.0 || theirs.1 != mine.1 || theirs.2 < mine.2
+            || (theirs.2 == mine.2 && other > index)
+    })
+}
+
+fn entry_shape(image: &dyn Image, group: u32, index: u32) -> (u8, u8, u16) {
+    let entry = group + GROUP_ENTRIES_OFFSET + index * GROUP_ENTRY_SIZE;
+
+    (
+        read_u8(image, entry + GROUP_ENTRY_WIDTH_OFFSET),
+        read_u8(image, entry + GROUP_ENTRY_HEIGHT_OFFSET),
+        read_u16(image, entry + GROUP_ENTRY_DEPTH_OFFSET),
+    )
+}
+
+// A resource has the address that it gets after the loader maps it. The section gives the
+// distance from that address to the position in the file.
+fn resource_directory(image: &dyn Image) -> Option<ResourceDirectory<'_>> {
+    let headers = read_u32(image, DOS_HEADERS_OFFSET);
+    if read_u32(image, headers) != PE_SIGNATURE {
+        return None;
+    }
+
+    let optional = headers + OPTIONAL_HEADER_OFFSET;
+    let directory_rva = read_u32(image, optional + RESOURCE_DIRECTORY_OFFSET);
+    if directory_rva == 0 {
+        return None;
+    }
+
+    let sections = optional + read_u16(image, headers + OPTIONAL_HEADER_SIZE_OFFSET) as u32;
+    let section_count = read_u16(image, headers + SECTION_COUNT_OFFSET) as u32;
+    for index in 0..section_count {
+        let section = sections + index * SECTION_SIZE;
+        let virtual_address = read_u32(image, section + SECTION_RVA_OFFSET);
+        let virtual_size = read_u32(image, section + SECTION_VIRTUAL_SIZE_OFFSET);
+        if directory_rva >= virtual_address && directory_rva < virtual_address + virtual_size {
+            let raw_data = read_u32(image, section + SECTION_RAW_DATA_OFFSET);
+            return Some(ResourceDirectory {
+                image,
+                rva: directory_rva,
+                offset: directory_rva - virtual_address + raw_data,
+            });
+        }
+    }
+
+    None
+}
+
+struct ResourceDirectory<'i> {
+    image: &'i dyn Image,
+    rva: u32,
+    offset: u32,
+}
+
+struct Resource {
+    offset: u32,
+    size: u32,
+}
+
+impl ResourceDirectory<'_> {
+    fn first_leaf(&self, kind: u16) -> Option<Resource> {
+        let by_name = self.subdirectory(self.offset, kind)?;
+        let by_language = self.first_subdirectory(by_name)?;
+
+        self.leaf_at(self.first_subdirectory(by_language)?)
+    }
+
+    fn leaf(&self, kind: u16, name: u16) -> Option<Resource> {
+        let by_name = self.subdirectory(self.offset, kind)?;
+        let by_language = self.subdirectory(by_name, name)?;
+
+        self.leaf_at(self.first_subdirectory(by_language)?)
+    }
+
+    fn subdirectory(&self, directory: u32, id: u16) -> Option<u32> {
+        for entry in self.entries(directory) {
+            if read_u32(self.image, entry) == id as u32 {
+                return Some(self.child(entry));
+            }
+        }
+
+        None
+    }
+
+    fn first_subdirectory(&self, directory: u32) -> Option<u32> {
+        self.entries(directory).next().map(|e| self.child(e))
+    }
+
+    fn entries(&self, directory: u32) -> impl Iterator<Item = u32> + '_ {
+        let named = read_u16(self.image, directory + NAMED_ENTRY_COUNT_OFFSET) as u32;
+        let identified = read_u16(self.image, directory + ID_ENTRY_COUNT_OFFSET) as u32;
+        let first = directory + DIRECTORY_HEADER_SIZE + named * DIRECTORY_ENTRY_SIZE;
+
+        (0..identified).map(move |index| first + index * DIRECTORY_ENTRY_SIZE)
+    }
+
+    fn child(&self, entry: u32) -> u32 {
+        let value = read_u32(self.image, entry + DIRECTORY_ENTRY_CHILD_OFFSET);
+        self.offset + (value & !SUBDIRECTORY_FLAG)
+    }
+
+    fn leaf_at(&self, data_entry: u32) -> Option<Resource> {
+        let data_rva = read_u32(self.image, data_entry);
+
+        Some(Resource {
+            offset: self.offset + data_rva - self.rva,
+            size: read_u32(self.image, data_entry + DATA_ENTRY_SIZE_OFFSET),
+        })
+    }
+}
+
+fn read_u32(image: &dyn Image, position: u32) -> u32 {
+    let mut bytes = [0u8; 4];
+    image.read_at(position, &mut bytes);
+    u32::from_le_bytes(bytes)
+}
+
+fn read_u8(image: &dyn Image, position: u32) -> u8 {
+    let mut bytes = [0u8; 1];
+    image.read_at(position, &mut bytes);
+    bytes[0]
+}
+
+fn read_u16(image: &dyn Image, position: u32) -> u16 {
+    let mut bytes = [0u8; 2];
+    image.read_at(position, &mut bytes);
+    u16::from_le_bytes(bytes)
+}
+
+fn read_blob(image: &dyn Image, position: u32, size: u32) -> Option<&'static [u8]> {
+    let blob = unsafe { &mut *core::ptr::addr_of_mut!(ICON_BUFFER) };
+    if size as usize > blob.len() {
+        return None;
+    }
+
+    let read = image.read_at(position, &mut blob[..size as usize]);
+    if read != size {
+        return None;
+    }
+
+    Some(&blob[..size as usize])
+}
+
+static mut ICON_BUFFER: [u8; MAX_ICON_SIZE] = [0; MAX_ICON_SIZE];
+
+const MAX_ICON_SIZE: usize = 16 * 1024;
+
+const DOS_HEADERS_OFFSET: u32 = 0x3c;
+const PE_SIGNATURE: u32 = 0x00004550;
+const SECTION_COUNT_OFFSET: u32 = 0x06;
+const OPTIONAL_HEADER_SIZE_OFFSET: u32 = 0x14;
+const OPTIONAL_HEADER_OFFSET: u32 = 0x18;
+const RESOURCE_DIRECTORY_OFFSET: u32 = 0x70;
+const SECTION_SIZE: u32 = 0x28;
+const SECTION_VIRTUAL_SIZE_OFFSET: u32 = 0x08;
+const SECTION_RVA_OFFSET: u32 = 0x0c;
+const SECTION_RAW_DATA_OFFSET: u32 = 0x14;
+
+const RT_ICON: u16 = 3;
+const RT_GROUP_ICON: u16 = 14;
+const NAMED_ENTRY_COUNT_OFFSET: u32 = 0x0c;
+const ID_ENTRY_COUNT_OFFSET: u32 = 0x0e;
+const DIRECTORY_HEADER_SIZE: u32 = 0x10;
+const DIRECTORY_ENTRY_SIZE: u32 = 0x08;
+const DIRECTORY_ENTRY_CHILD_OFFSET: u32 = 0x04;
+const SUBDIRECTORY_FLAG: u32 = 0x8000_0000;
+const DATA_ENTRY_SIZE_OFFSET: u32 = 0x04;
+const GROUP_COUNT_OFFSET: u32 = 0x04;
+const GROUP_ENTRIES_OFFSET: u32 = 0x06;
+const GROUP_ENTRY_SIZE: u32 = 0x0e;
+const GROUP_ENTRY_WIDTH_OFFSET: u32 = 0x00;
+const GROUP_ENTRY_HEIGHT_OFFSET: u32 = 0x01;
+const GROUP_ENTRY_DEPTH_OFFSET: u32 = 0x06;
+const GROUP_ENTRY_ID_OFFSET: u32 = 0x0c;

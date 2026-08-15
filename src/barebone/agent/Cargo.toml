@@ -21,6 +21,7 @@ required-features = ["blob"]
 blob = []
 xnu = ["blob"]
 win9x = ["blob"]
+winnt = ["blob"]
 linux = []
 
 [profile.release]

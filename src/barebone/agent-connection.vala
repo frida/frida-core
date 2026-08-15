@@ -164,6 +164,8 @@ namespace Frida.Barebone {
 				flavor = new XnuKernelFlavor (machine, kernel_base, symbols);
 			} else if (kind == WIN9X) {
 				flavor = new Win9xKernelFlavor (machine, symbols);
+			} else if (kind == WINNT) {
+				flavor = new WinNtKernelFlavor (machine, symbols);
 			} else {
 				flavor = new BareKernelFlavor (machine);
 			}
@@ -553,16 +555,17 @@ namespace Frida.Barebone {
 				size_t color_row = colors + color_stride * (height - 1 - y);
 				size_t mask_row = mask + mask_stride * (height - 1 - y);
 				for (uint32 x = 0; x != width; x++) {
-					uint8 red, green, blue;
-					read_color (dib, color_row, x, depth, palette, out red, out green, out blue);
+					uint8 red, green, blue, alpha;
+					read_color (dib, color_row, x, depth, palette, out red, out green, out blue,
+						out alpha);
 
-					bool transparent = (dib[mask_row + x / 8] & (0x80 >> (int) (x % 8))) != 0;
+					bool masked = (dib[mask_row + x / 8] & (0x80 >> (int) (x % 8))) != 0;
 
 					size_t pixel = (y * width + x) * 4;
 					image[pixel + 0] = red;
 					image[pixel + 1] = green;
 					image[pixel + 2] = blue;
-					image[pixel + 3] = transparent ? 0 : 255;
+					image[pixel + 3] = masked ? 0 : alpha;
 				}
 			}
 
@@ -570,19 +573,26 @@ namespace Frida.Barebone {
 			icon.add ("{sv}", "format", new Variant.string ("rgba"));
 			icon.add ("{sv}", "width", new Variant.uint16 ((uint16) width));
 			icon.add ("{sv}", "height", new Variant.uint16 ((uint16) height));
-			icon.add ("{sv}", "image", Variant.new_from_data<void *> (new VariantType ("ay"), image, true));
+			var pixels = new Bytes.take ((owned) image);
+			icon.add ("{sv}", "image",
+				Variant.new_from_data<Bytes> (new VariantType ("ay"), pixels.get_data (), true, pixels));
 			return icon.end ();
 		}
 
+		// A 32-bit icon contains its own alpha channel. The one-bit mask of the older format contains
+		// no such data.
 		private static void read_color (uint8[] dib, size_t row, uint32 x, uint16 depth, size_t palette,
-				out uint8 red, out uint8 green, out uint8 blue) {
+				out uint8 red, out uint8 green, out uint8 blue, out uint8 alpha) {
 			if (depth >= 24) {
 				size_t pixel = row + x * (depth / 8);
 				blue = dib[pixel + 0];
 				green = dib[pixel + 1];
 				red = dib[pixel + 2];
+				alpha = (depth == 32) ? dib[pixel + 3] : 255;
 				return;
 			}
+
+			alpha = 255;
 
 			size_t bit = x * depth;
 			uint8 packed = dib[row + bit / 8];
