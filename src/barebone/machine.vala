@@ -76,7 +76,9 @@ namespace Frida.Barebone {
 			Error? pending_error = null;
 			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
-				if (parent_section == ".rela.text" || parent_section.has_prefix (".rela.debug_"))
+				if (parent_section.has_prefix (".rela.debug_"))
+					return true;
+				if (parent_section == ".rela.text" && !relocates_text ())
 					return true;
 
 				try {
@@ -100,6 +102,13 @@ namespace Frida.Barebone {
 		}
 
 		public abstract void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error;
+
+		// Code that uses displacements in the instructions needs no relocation, and its relocation
+		// section holds types that this code does not know. Code that uses absolute addresses needs
+		// all of them.
+		public virtual bool relocates_text () {
+			return false;
+		}
 
 		public abstract async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError;
 

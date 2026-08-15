@@ -1,5 +1,10 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
+	public enum CallingConvention {
+		SYSTEM_V,
+		MICROSOFT
+	}
+
 	public sealed class X64Machine : Object, Machine {
 		public override GDB.Client gdb {
 			get;
@@ -25,9 +30,30 @@ namespace Frida.Barebone {
 
 		private X86PageTables page_tables;
 
-		private const uint NUM_ARGS_IN_REGS = 6;
-		private const string[] ARG_REG_NAMES = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+		// The two conventions use different registers for the first arguments. They also disagree
+		// about the space below the return address: one needs none, the other needs four slots.
+		public CallingConvention calling_convention {
+			get;
+			set;
+			default = SYSTEM_V;
+		}
+
+		internal unowned string[] arg_reg_names {
+			get {
+				return (calling_convention == MICROSOFT) ? ARG_REG_NAMES_MS : ARG_REG_NAMES_SYSV;
+			}
+		}
+
+		private size_t reserved_below_sp {
+			get {
+				return (calling_convention == MICROSOFT) ? SHADOW_SPACE_SIZE : RED_ZONE_SIZE;
+			}
+		}
+
+		private const string[] ARG_REG_NAMES_SYSV = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+		private const string[] ARG_REG_NAMES_MS = { "rcx", "rdx", "r8", "r9" };
 		private const size_t RED_ZONE_SIZE = 128;
+		private const size_t SHADOW_SPACE_SIZE = 32;
 
 		public X64Machine (GDB.Client gdb) {
 			Object (gdb: gdb);
@@ -91,8 +117,13 @@ namespace Frida.Barebone {
 			}
 		}
 
+		// The large code model gives each target address in full.
+		public bool relocates_text () {
+			return true;
+		}
+
 		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
-			if (args.length > NUM_ARGS_IN_REGS)
+			if (args.length > arg_reg_names.length)
 				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
 			bool was_running = gdb.state != STOPPED;
@@ -107,7 +138,7 @@ namespace Frida.Barebone {
 
 			uint64 landing_zone = saved_regs["rip"].get_uint64 ();
 
-			uint64 sp = saved_regs["rsp"].get_uint64 () - RED_ZONE_SIZE - 8;
+			uint64 sp = saved_regs["rsp"].get_uint64 () - reserved_below_sp - 8;
 			sp = (sp & ~15ULL) - 8;
 
 			var builder = gdb.make_buffer_builder ();
@@ -115,17 +146,24 @@ namespace Frida.Barebone {
 			yield gdb.write_byte_array (sp, builder.build (), cancellable);
 
 			for (uint i = 0; i != args.length; i++)
-				regs[ARG_REG_NAMES[i]] = args[i];
+				regs[arg_reg_names[i]] = args[i];
 
 			regs["rip"] = impl;
 			regs["rsp"] = sp;
 			yield thread.write_registers (regs, cancellable);
 
+			// The rest of the kernel also runs through this return address. Thus arrival is not
+			// sufficient: only our call returns on the stack that we supplied.
+			uint64 landing_sp = sp + 8;
 			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 1, cancellable);
 			GDB.Exception ex = null;
-			do {
+			while (true) {
 				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp);
+				if (ex.breakpoint != bp)
+					continue;
+				if ((yield ex.thread.read_register ("rsp", cancellable)) == landing_sp)
+					break;
+			}
 			yield bp.remove (cancellable);
 
 			GDB.Thread landed = ex.thread;
@@ -143,10 +181,17 @@ namespace Frida.Barebone {
 			var regs = yield thread.read_registers (cancellable);
 
 			uint64 original_rsp = regs["rsp"].get_uint64 ();
-			var num_stack_args = int.max ((int) arity - (int) NUM_ARGS_IN_REGS, 0);
-			var stack = yield gdb.read_buffer (original_rsp, (1 + num_stack_args) * 8, cancellable);
+			var num_stack_args = int.max ((int) arity - arg_reg_names.length, 0);
+			size_t stack_args_offset = stack_args_offset_of_frame;
+			var stack = yield gdb.read_buffer (original_rsp, stack_args_offset + num_stack_args * 8, cancellable);
 
-			return new X64CallFrame (thread, regs, stack, original_rsp);
+			return new X64CallFrame (thread, regs, stack, original_rsp, arg_reg_names, stack_args_offset);
+		}
+
+		private size_t stack_args_offset_of_frame {
+			get {
+				return (calling_convention == MICROSOFT) ? 8 + SHADOW_SPACE_SIZE : 8;
+			}
 		}
 
 		private class X64CallFrame : Object, CallFrame {
@@ -164,6 +209,8 @@ namespace Frida.Barebone {
 
 			private Buffer stack;
 			private uint64 original_rsp;
+			private unowned string[] arg_reg_names;
+			private size_t stack_args_offset;
 			private State stack_state = PRISTINE;
 
 
@@ -172,13 +219,16 @@ namespace Frida.Barebone {
 				MODIFIED
 			}
 
-			public X64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_rsp) {
+			public X64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_rsp,
+					unowned string[] arg_reg_names, size_t stack_args_offset) {
 				this.thread = thread;
 
 				this.regs = regs;
 
 				this.stack = stack;
 				this.original_rsp = original_rsp;
+				this.arg_reg_names = arg_reg_names;
+				this.stack_args_offset = stack_args_offset;
 			}
 
 			public uint64 get_nth_argument (uint n) {
@@ -209,21 +259,21 @@ namespace Frida.Barebone {
 			}
 
 			private bool try_get_register_name_of_nth_argument (uint n, out unowned string name) {
-				if (n >= ARG_REG_NAMES.length) {
+				if (n >= arg_reg_names.length) {
 					name = "";
 					return false;
 				}
 
-				name = ARG_REG_NAMES[n];
+				name = arg_reg_names[n];
 				return true;
 			}
 
 			private bool try_get_stack_offset_of_nth_argument (uint n, out size_t offset) {
 				offset = 0;
 
-				if (n < NUM_ARGS_IN_REGS)
+				if (n < arg_reg_names.length)
 					return false;
-				size_t start = (n - NUM_ARGS_IN_REGS) * 8;
+				size_t start = stack_args_offset + (n - arg_reg_names.length) * 8;
 				size_t end = start + 8;
 				if (end > stack.bytes.get_size ())
 					return false;

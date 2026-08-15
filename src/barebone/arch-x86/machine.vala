@@ -147,11 +147,21 @@ namespace Frida.Barebone {
 			regs["esp"] = sp;
 			yield thread.write_registers (regs, cancellable);
 
+			// The rest of the kernel also runs through this return address. Thus arrival is not
+			// sufficient: only our call returns on the stack that we supplied.
+			// The position in the stack depends on the callee, which can remove the arguments.
+			uint64 first_landing_sp = sp + 4;
+			uint64 last_landing_sp = sp + ((1 + args.length) * 4);
 			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 1, cancellable);
 			GDB.Exception ex = null;
-			do {
+			while (true) {
 				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp);
+				if (ex.breakpoint != bp)
+					continue;
+				uint64 landed_sp = yield ex.thread.read_register ("esp", cancellable);
+				if (landed_sp >= first_landing_sp && landed_sp <= last_landing_sp)
+					break;
+			}
 			yield bp.remove (cancellable);
 
 			GDB.Thread landed = ex.thread;

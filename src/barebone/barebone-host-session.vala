@@ -121,7 +121,11 @@ namespace Frida {
 					machine = new Barebone.IA32Machine (gdb);
 					break;
 				case X64:
-					machine = new Barebone.X64Machine (gdb);
+					machine = new Barebone.X64Machine (gdb) {
+						calling_convention = (config.kernel == WINNT)
+							? Barebone.CallingConvention.MICROSOFT
+							: Barebone.CallingConvention.SYSTEM_V,
+					};
 					break;
 				case ARM:
 					machine = new Barebone.ArmMachine (gdb);
