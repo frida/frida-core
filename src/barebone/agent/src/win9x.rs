@@ -160,6 +160,23 @@ const THREAD_STACK_SIZE: usize = 64 * 1024;
 
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    if mode() == Mode::User {
+        let event = event_for(token);
+        if check() {
+            return;
+        }
+
+        let wait_for_single_object: unsafe extern "stdcall" fn(u32, u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().wait_for_single_object as usize) };
+        let timeout = match timeout_us {
+            None => INFINITE,
+            Some(us) => (us / 1000).max(1) as u32,
+        };
+        unsafe { wait_for_single_object(event, timeout) };
+
+        return;
+    }
+
     let semaphore = semaphore_for(token);
     if check() {
         return;
@@ -185,8 +202,32 @@ fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
 }
 
 pub fn wake(token: *const u8) {
+    if mode() == Mode::User {
+        let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().set_event as usize) };
+        unsafe { set_event(event_for(token)) };
+
+        return;
+    }
+
     unsafe {
         signal_semaphore(semaphore_for(token));
+    }
+}
+
+fn event_for(token: *const u8) -> u32 {
+    let slot = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
+    let existing = EVENTS[slot].load(Ordering::Acquire);
+    if existing != 0 {
+        return existing;
+    }
+
+    let create_event: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().create_event as usize) };
+    let created = unsafe { create_event(0, 0, 0, 0) };
+    match EVENTS[slot].compare_exchange(0, created, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => created,
+        Err(raced) => raced,
     }
 }
 
@@ -279,21 +320,19 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 
     spawn_ring3_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
-        return Injection { arena, thread: 0, home: 0 };
+        return Injection { arena, thread: 0 };
     }
 
     let thread = find_thread_on(stack, INJECTION_STACK_SIZE as u32);
-    let home = owner_of(thread);
     retarget(thread, process);
     unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
 
-    Injection { arena, thread, home }
+    Injection { arena, thread }
 }
 
 pub struct Injection {
     pub arena: u32,
     pub thread: u32,
-    pub home: u32,
 }
 
 // KERNEL32 makes threads from its own worker in ring 3. Thus an APC to thread -1 runs our
@@ -430,6 +469,9 @@ fn resolve_user_api() {
             virtual_alloc: kernel32_export(b"VirtualAlloc"),
             virtual_free: kernel32_export(b"VirtualFree"),
             virtual_protect: kernel32_export(b"VirtualProtect"),
+            create_event: kernel32_export(b"CreateEventA"),
+            set_event: kernel32_export(b"SetEvent"),
+            wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
         };
     }
 }
@@ -449,6 +491,9 @@ struct UserApi {
     virtual_alloc: u32,
     virtual_free: u32,
     virtual_protect: u32,
+    create_event: u32,
+    set_event: u32,
+    wait_for_single_object: u32,
 }
 
 static mut USER_API: UserApi = UserApi {
@@ -462,6 +507,9 @@ static mut USER_API: UserApi = UserApi {
     virtual_alloc: 0,
     virtual_free: 0,
     virtual_protect: 0,
+    create_event: 0,
+    set_event: 0,
+    wait_for_single_object: 0,
 };
 
 // The privilege level gives the half that runs, thus the code keeps no such value.
@@ -530,6 +578,7 @@ const MEM_RESERVE: u32 = 0x0000_2000;
 const MEM_RELEASE: u32 = 0x0000_8000;
 const PAGE_EXECUTE_READ: u32 = 0x20;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+const INFINITE: u32 = 0xffff_ffff;
 
 const INJECTION_ARENA_SIZE: usize = 0x1000;
 const HANDSHAKE_SIZE: usize = 0x40;
@@ -1241,6 +1290,7 @@ fn semaphore_for(token: *const u8) -> u32 {
 
 const NUM_SEMAPHORES: usize = 64;
 static SEMAPHORES: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
+static EVENTS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 
 unsafe extern "C" {
     fn wait_semaphore(semaphore: u32, flags: u32);
