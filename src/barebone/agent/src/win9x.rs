@@ -285,22 +285,40 @@ fn process_id(pdb: u32) -> u32 {
     pdb ^ unsafe { (slot as *const u32).read() }
 }
 
+// The command line would do for most processes, but it is empty for the ones Windows starts
+// itself and can carry arguments besides. KERNEL32 names a module the way GetModuleFileName
+// does: the process's own MODREF, indexed into the module table.
 fn image_path(pdb: u32) -> *const u8 {
-    let env_db = unsafe { (pdb as *const u32).byte_add(0x40).read() };
-    if env_db < ARENA_FLOOR {
+    let slot = unsafe { core::ptr::addr_of!(_KERNEL32_ModuleTable).read() };
+    if slot == 0 {
         return core::ptr::null();
     }
 
-    let command_line = unsafe { (env_db as *const u32).byte_add(0x08).read() };
-    if command_line < ARENA_FLOOR || unsafe { (command_line as *const u8).add(1).read() } != b':' {
+    let table = unsafe { (slot as *const u32).read() };
+    let modref = unsafe { (pdb as *const u32).byte_add(PDB_MODREF_OFFSET).read() };
+    if table < ARENA_FLOOR || modref < ARENA_FLOOR {
         return core::ptr::null();
     }
 
-    command_line as *const u8
+    let index = unsafe { (modref as *const u16).byte_add(MODREF_MTE_INDEX_OFFSET).read() };
+    let entry = unsafe { (table as *const u32).add(index as usize).read() };
+    if entry < ARENA_FLOOR {
+        return core::ptr::null();
+    }
+
+    let path = unsafe { (entry as *const u32).byte_add(IMTE_FILE_NAME_OFFSET).read() };
+    if path < ARENA_FLOOR {
+        return core::ptr::null();
+    }
+
+    path as *const u8
 }
 
 const WIN32_THREAD: u32 = 0x2a;
 const ARENA_FLOOR: u32 = 0x10000;
+const PDB_MODREF_OFFSET: usize = 0x94;
+const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
+const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let file = match File::open(path) {
@@ -1147,4 +1165,5 @@ unsafe extern "C" {
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();
     static _KERNEL32_ProcessIdObfuscator: u32;
+    static _KERNEL32_ModuleTable: u32;
 }

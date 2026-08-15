@@ -14,15 +14,7 @@ namespace Frida.Barebone {
 
 		var images = yield read_loader_images (machine, blocks, cancellable);
 
-		uint64 obfuscator = yield find_process_id_obfuscator (machine, cancellable);
-		if (obfuscator != 0) {
-			symbols.add (new SymbolInfo () {
-				name = PROCESS_ID_OBFUSCATOR,
-				offset = (uint32) obfuscator,
-				symbol_type = 0xf,
-				section = 0x10,
-			});
-		}
+		yield add_kernel32_symbols (machine, symbols, cancellable);
 
 		foreach (DeviceDescriptorBlock ddb in blocks) {
 			unowned string[]? names = known_service_names (ddb.name);
@@ -93,16 +85,37 @@ namespace Frida.Barebone {
 	// Every VxD is on VMM's chain, including the ones that export no services and would
 	// therefore be indistinguishable from noise when sweeping. Sweep only far enough to
 	// find VMM itself, then follow it.
-	// A Win9x process id is its database pointer XOR a per-boot value, so ask KERNEL32 where it
-	// keeps that value: GetCurrentProcessId() pushes the pointer and tail-calls a helper whose
-	// first instruction loads the obfuscator.
-	private static async uint64 find_process_id_obfuscator (Machine machine, Cancellable? cancellable)
-			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
-
+	// Two things only KERNEL32 knows: the value it XORs process ids with, and the table its
+	// modules are named through. Read both out of its own code rather than hardcoding them.
+	private static async void add_kernel32_symbols (Machine machine, Gee.List<SymbolInfo> symbols,
+			Cancellable? cancellable) throws Error, IOError {
 		uint64 kernel32 = yield find_kernel32 (machine, cancellable);
 		if (kernel32 == 0)
-			return 0;
+			return;
+
+		uint64 obfuscator = yield find_process_id_obfuscator (machine, kernel32, cancellable);
+		if (obfuscator != 0)
+			symbols.add (make_symbol (PROCESS_ID_OBFUSCATOR, obfuscator));
+
+		uint64 table = yield find_module_table (machine, kernel32, cancellable);
+		if (table != 0)
+			symbols.add (make_symbol (MODULE_TABLE, table));
+	}
+
+	private static SymbolInfo make_symbol (string name, uint64 address) {
+		return new SymbolInfo () {
+			name = name,
+			offset = (uint32) address,
+			symbol_type = 0xf,
+			section = 0x10,
+		};
+	}
+
+	// GetCurrentProcessId() pushes the process database pointer and tail-calls a helper whose
+	// first instruction loads the obfuscator.
+	private static async uint64 find_process_id_obfuscator (Machine machine, uint64 kernel32,
+			Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
 
 		uint64 getter = yield find_export (machine, kernel32, "GetCurrentProcessId", cancellable);
 		if (getter == 0)
@@ -118,6 +131,43 @@ namespace Frida.Barebone {
 			return 0;
 
 		return body.read_uint32 (1);
+	}
+
+	// GetModuleFileNameA() reaches the name through the module table, indexing it by the word
+	// at MODREF+0x10, which is the one instruction pair worth recognising.
+	private static async uint64 find_module_table (Machine machine, uint64 kernel32, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		uint64 thunk = yield find_export (machine, kernel32, "GetModuleFileNameA", cancellable);
+		if (thunk == 0)
+			return 0;
+
+		Buffer prologue = gdb.make_buffer (yield gdb.read_byte_array (thunk, 0x40, cancellable));
+		uint64 body = 0;
+		for (size_t i = 0; i != 0x40 - 5; i++) {
+			if (prologue.read_uint8 (i) == JUMP_RELATIVE) {
+				body = thunk + i + 5 + prologue.read_uint32 (i + 1);
+				break;
+			}
+		}
+		if (body == 0)
+			return 0;
+
+		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (body, 0x100, cancellable));
+		for (size_t i = 0; i != 0x100 - INDEX_MODULE_TABLE.length - 4; i++) {
+			bool matched = true;
+			for (size_t j = 0; j != INDEX_MODULE_TABLE.length; j++) {
+				if (code.read_uint8 (i + j) != INDEX_MODULE_TABLE[j]) {
+					matched = false;
+					break;
+				}
+			}
+			if (matched)
+				return code.read_uint32 (i + INDEX_MODULE_TABLE.length);
+		}
+
+		return 0;
 	}
 
 	private static async uint64 find_kernel32 (Machine machine, Cancellable? cancellable) throws Error, IOError {
@@ -446,6 +496,11 @@ namespace Frida.Barebone {
 
 	private const size_t NEXT_OFFSET = 0x00;
 	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
+	public const string MODULE_TABLE = "KERNEL32_ModuleTable";
+
+	// movsx ecx, WORD PTR [eax+0x10] ; mov eax, ds:<table>
+	private const uint8[] INDEX_MODULE_TABLE = { 0x0f, 0xbf, 0x48, 0x10, 0xa1 };
+	private const uint8 JUMP_RELATIVE = 0xe9;
 
 	private const uint64 KERNEL32_SEARCH_BASE = 0xbff00000;
 	private const uint64 KERNEL32_SEARCH_LIMIT = 0xc0000000;

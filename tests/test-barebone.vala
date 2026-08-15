@@ -1119,6 +1119,9 @@ namespace Frida.BareboneTest {
 			// the shared arena.
 			assert_true (shell.pid < 0x80000000 || shell.pid >= 0x83000000);
 
+			for (int i = 0; i != processes.size (); i++)
+				assert_true (processes.get (i).name != "");
+
 			var icons = shell.parameters["icons"];
 			assert_nonnull (icons);
 			assert_true (icons.n_children () != 0);
