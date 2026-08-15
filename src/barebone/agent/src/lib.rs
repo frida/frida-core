@@ -779,9 +779,6 @@ const INJECTION_POLL_MS: u32 = 20;
 static mut INJECTION_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
-static mut INJECTION_RESULT: u32 = 0;
-
-#[cfg(feature = "win9x")]
 static mut PENDING_INJECTION: (u16, u32) = (0, 0);
 
 #[cfg(feature = "win9x")]

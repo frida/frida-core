@@ -112,6 +112,19 @@ pub fn free_code(ptr: *mut u8, _size: usize) {
 }
 
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+    if mode() == Mode::User {
+        let create_thread: unsafe extern "stdcall" fn(u32, u32, u32, *mut c_void, u32, *mut u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().create_thread as usize) };
+
+        let start = alloc(core::mem::size_of::<UserThreadStart>()) as *mut UserThreadStart;
+        unsafe { start.write(UserThreadStart { entry, parameter }) };
+
+        return unsafe {
+            create_thread(0, USER_THREAD_STACK_SIZE, frida_win9x_user_thread as usize as u32,
+                start as *mut c_void, 0, core::ptr::null_mut()) as isize
+        };
+    }
+
     unsafe {
         THREAD_ENTRY = Some(entry);
         THREAD_PARAMETER = parameter;
@@ -123,6 +136,21 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
             0,
         ) as isize
     }
+}
+
+unsafe extern "stdcall" fn frida_win9x_user_thread(start: *mut c_void) -> u32 {
+    let start = start as *mut UserThreadStart;
+    let UserThreadStart { entry, parameter } = unsafe { start.read() };
+    free(start as *mut u8, core::mem::size_of::<UserThreadStart>());
+
+    unsafe { entry(parameter, 0) };
+
+    0
+}
+
+struct UserThreadStart {
+    entry: ThreadEntry,
+    parameter: *mut c_void,
 }
 
 // VMM refuses to build a thread from the borrowed context the host enters us on, and only
@@ -271,15 +299,6 @@ pub fn inject_agent(pid: u32) -> u32 {
     unsafe { ((injection.arena + OBSERVED_PID) as *const u32).read_volatile() }
 }
 
-fn owner_of(thread: u32) -> u32 {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
-    let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
-    if block < 0x10000 {
-        return 0;
-    }
-
-    unsafe { (block as *const u32).add(1).read() }
-}
 
 fn process_for_pid(pid: u32) -> u32 {
     let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
@@ -313,18 +332,34 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
         core::ptr::copy_nonoverlapping(payload.as_ptr(), entry as *mut u8, payload.len());
     }
 
-    // Retargeting takes the creating process's arena away, so the thread has to be running
-    // on a stack the target can see before we point it anywhere.
     let stack = alloc_shared(INJECTION_STACK_SIZE) as u32;
     write_trampoline(arena + TRAMPOLINE_OFFSET, entry, stack + INJECTION_STACK_SIZE as u32 - 0x40);
 
-    spawn_ring3_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena);
-    if !await_flag(arena + RUNNING_FLAG) {
+    create_suspended_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena, process);
+    if !await_flag(arena + THREAD_DATABASE) {
         return Injection { arena, thread: 0 };
     }
 
-    let thread = find_thread_on(stack, INJECTION_STACK_SIZE as u32);
-    retarget(thread, process);
+    // KERNEL32 writes the first frame on a stack in the process that calls it. Thus the target
+    // needs these bytes at the same address before the thread runs.
+    let database = unsafe { ((arena + THREAD_DATABASE) as *const u32).read_volatile() };
+    let thread = unsafe { (database as *const u32).byte_add(TDB_CONTROL_BLOCK).read() };
+    // TCB+0x1c gets its value only after the thread runs. Thus ask VWIN32 for the frame.
+    let mut state = [0u8; CONTEXT_SIZE];
+    state[..4].copy_from_slice(&CONTEXT_FULL.to_le_bytes());
+    unsafe { __VWIN32_Get_Thread_Context(thread, state.as_mut_ptr()) };
+    let esp = u32::from_le_bytes([
+        state[CONTEXT_ESP],
+        state[CONTEXT_ESP + 1],
+        state[CONTEXT_ESP + 2],
+        state[CONTEXT_ESP + 3],
+    ]);
+    mirror_startup_stack(process, esp);
+
+    resume_thread(arena + RESUME_STUB_OFFSET, arena);
+    if !await_flag(arena + RUNNING_FLAG) {
+        return Injection { arena, thread: 0 };
+    }
     unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
 
     Injection { arena, thread }
@@ -339,19 +374,39 @@ pub struct Injection {
 // code, and the target does nothing. CreateThread would use the process of that worker, not
 // the target, thus the code calls the internal function, which receives the process. The
 // thread starts suspended, which gives time to make the stack available.
-fn spawn_ring3_thread(stub: u32, entry: u32, parameter: u32) {
+fn create_suspended_thread(stub: u32, entry: u32, parameter: u32, process: u32) {
     let mut code = [
-        0x6a, 0x00, 0x6a, 0x00,
+        0x6a, 0x68,
         0x68, 0, 0, 0, 0,
         0x68, 0, 0, 0, 0,
         0x68, 0x00, 0x00, 0x01, 0x00,
-        0x6a, 0x00,
+        0x68, 0, 0, 0, 0,
         0xe8, 0, 0, 0, 0,
+        0xa3, 0, 0, 0, 0,
         0xc2, 0x04, 0x00,
     ];
-    code[5..9].copy_from_slice(&parameter.to_le_bytes());
-    code[10..14].copy_from_slice(&entry.to_le_bytes());
-    code[22..26].copy_from_slice(&(kernel32_export(b"CreateThread") - (stub + 26)).to_le_bytes());
+    code[3..7].copy_from_slice(&parameter.to_le_bytes());
+    code[8..12].copy_from_slice(&entry.to_le_bytes());
+    code[18..22].copy_from_slice(&process.to_le_bytes());
+    code[23..27].copy_from_slice(&(thread_creator() - (stub + 27)).to_le_bytes());
+    code[28..32].copy_from_slice(&(parameter + THREAD_DATABASE).to_le_bytes());
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len());
+        __VWIN32_QueueUserApc(stub, 0, ANY_THREAD);
+    }
+}
+
+fn resume_thread(stub: u32, arena: u32) {
+    let mut code = [
+        0xff, 0x35, 0, 0, 0, 0,
+        0xe8, 0, 0, 0, 0,
+        0xc7, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0x00, 0x00,
+        0xc2, 0x04, 0x00,
+    ];
+    code[2..6].copy_from_slice(&(arena + THREAD_DATABASE).to_le_bytes());
+    code[7..11].copy_from_slice(&(thread_resumer() - (stub + 11)).to_le_bytes());
+    code[13..17].copy_from_slice(&(arena + RESUMED_FLAG).to_le_bytes());
 
     unsafe {
         core::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len());
@@ -377,33 +432,56 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
 
-// The stack we handed the thread is the one thing that stays ours no matter where its code
-// ends up running, so identify it by that rather than by its instruction pointer.
-fn find_thread_on(stack: u32, size: u32) -> u32 {
-    let vm = unsafe { get_sys_vm_handle() };
-    let first = unsafe { get_initial_thread_handle(vm) };
-    let mut thread = first;
-    while thread != 0 {
-        let esp = unsafe { (thread as *const u32).byte_add(TCB_RING3_ESP).read() };
-        if esp >= stack && esp < stack + size {
-            return thread;
+
+fn mirror_startup_stack(process: u32, esp: u32) {
+    let base = esp & !0xffff;
+    let first = base / PAGE_SIZE;
+    let pages = 0x10000 / PAGE_SIZE;
+
+    let carrier = alloc_code(0x10000);
+    let mut present = [false; 0x10];
+    for page in 0..pages {
+        let address = base + page * PAGE_SIZE;
+        present[page as usize] = page_entry(address) & PAGE_PRESENT != 0;
+        if present[page as usize] {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    address as *const u8,
+                    carrier.byte_add((page * PAGE_SIZE) as usize),
+                    PAGE_SIZE as usize,
+                )
+            };
         }
-        let next = unsafe { get_next_thread_handle(thread) };
-        thread = if next == first { 0 } else { next };
     }
 
-    0
-}
-
-fn retarget(thread: u32, process: u32) {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
-    let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
     let context = unsafe { (process as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
+    let saved = unsafe { __GetCurrentContext() };
     unsafe {
-        (block as *mut u32).add(1).write(process);
-        (block as *mut u32).add(2).write(context);
+        __ContextSwitch(context);
+        __PageReserve(first, pages, 0);
+        __PageCommit(first, pages, PD_FIXEDZERO, 0,
+            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE);
+        for page in 0..pages {
+            if present[page as usize] {
+                core::ptr::copy_nonoverlapping(
+                    carrier.byte_add((page * PAGE_SIZE) as usize),
+                    (base + page * PAGE_SIZE) as *mut u8,
+                    PAGE_SIZE as usize,
+                );
+            }
+        }
+        __ContextSwitch(saved);
     }
+
+    free_code(carrier, 0x10000);
 }
+
+fn page_entry(address: u32) -> u32 {
+    let mut entry = 0u32;
+    unsafe { __CopyPageTable(address / PAGE_SIZE, 1, &mut entry, 0) };
+    entry
+}
+
 
 fn await_flag(address: u32) -> bool {
     static mut TOKEN: u8 = 0;
@@ -469,6 +547,7 @@ fn resolve_user_api() {
             virtual_alloc: kernel32_export(b"VirtualAlloc"),
             virtual_free: kernel32_export(b"VirtualFree"),
             virtual_protect: kernel32_export(b"VirtualProtect"),
+            create_thread: kernel32_export(b"CreateThread"),
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
@@ -491,6 +570,7 @@ struct UserApi {
     virtual_alloc: u32,
     virtual_free: u32,
     virtual_protect: u32,
+    create_thread: u32,
     create_event: u32,
     set_event: u32,
     wait_for_single_object: u32,
@@ -507,6 +587,7 @@ static mut USER_API: UserApi = UserApi {
     virtual_alloc: 0,
     virtual_free: 0,
     virtual_protect: 0,
+    create_thread: 0,
     create_event: 0,
     set_event: 0,
     wait_for_single_object: 0,
@@ -519,6 +600,82 @@ pub fn mode() -> Mode {
 
     if cs & 3 != 0 { Mode::User } else { Mode::Kernel }
 }
+
+// KERNEL32 exports neither the creator that receives a process nor the code behind
+// ResumeThread. Thus find them by the shape of the code that calls them. The ring 3 worker
+// for _VWIN32_CreateRing0Thread calls the creator with the same five arguments.
+fn thread_creator() -> u32 {
+    let cached = unsafe { core::ptr::addr_of!(THREAD_CREATOR).read() };
+    if cached != 0 {
+        return cached;
+    }
+
+    let base = unsafe { core::ptr::addr_of!(_KERNEL32_Base).read() };
+    let last = base + image_size(base) - CREATE_CALL_SITE.len() as u32;
+    let mut address = base;
+    while address != last {
+        if read_u8(address) == 0x6a && read_u8(address + 1) == 0x28 && matches_call_site(address) {
+            let found = (address + CREATE_CALL_SITE.len() as u32)
+                .wrapping_add(read_u32(address + 21));
+            unsafe { THREAD_CREATOR = found };
+            return found;
+        }
+        address += 1;
+    }
+
+    0
+}
+
+fn matches_call_site(address: u32) -> bool {
+    for (offset, expected) in CREATE_CALL_SITE.iter().enumerate() {
+        if *expected != 0 && read_u8(address + offset as u32) != *expected {
+            return false;
+        }
+    }
+
+    true
+}
+
+// ResumeThread gives the thread database to it and examines the result for -1.
+fn thread_resumer() -> u32 {
+    let cached = unsafe { core::ptr::addr_of!(THREAD_RESUMER).read() };
+    if cached != 0 {
+        return cached;
+    }
+
+    let entry = kernel32_export(b"ResumeThread");
+    let mut address = entry;
+    while address != entry + RESUME_SEARCH_RANGE {
+        if read_u8(address) == 0x57
+            && read_u8(address + 1) == 0xe8
+            && read_u8(address + 6) == 0x83
+            && read_u8(address + 7) == 0xf8
+            && read_u8(address + 8) == 0xff
+        {
+            let found = (address + 6).wrapping_add(read_u32(address + 2));
+            unsafe { THREAD_RESUMER = found };
+            return found;
+        }
+        address += 1;
+    }
+
+    0
+}
+
+fn image_size(base: u32) -> u32 {
+    read_u32(base + read_u32(base + DOS_HEADERS_OFFSET) + IMAGE_SIZE_OFFSET)
+}
+
+static mut THREAD_CREATOR: u32 = 0;
+static mut THREAD_RESUMER: u32 = 0;
+
+// push 0x28; push esi; push imm32; push [esi+8]; push [imm32]; mov edi,[esi+0x10]; call rel32
+const CREATE_CALL_SITE: [u8; 25] = [
+    0x6a, 0x28, 0x56, 0x68, 0, 0, 0, 0, 0xff, 0x76, 0x08, 0xff, 0x35, 0, 0, 0, 0, 0x8b, 0x7e,
+    0x10, 0xe8, 0, 0, 0, 0,
+];
+const RESUME_SEARCH_RANGE: u32 = 0x60;
+const IMAGE_SIZE_OFFSET: u32 = 0x50;
 
 // The host cannot resolve these, because parts of the export names of KERNEL32 are out of
 // memory. Only the guest can get these pages again.
@@ -579,12 +736,16 @@ const MEM_RELEASE: u32 = 0x0000_8000;
 const PAGE_EXECUTE_READ: u32 = 0x20;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 const INFINITE: u32 = 0xffff_ffff;
+const USER_THREAD_STACK_SIZE: u32 = 0x10000;
 
 const INJECTION_ARENA_SIZE: usize = 0x1000;
 const HANDSHAKE_SIZE: usize = 0x40;
 const RUNNING_FLAG: u32 = 0x00;
 const GO_FLAG: u32 = 0x04;
 const OBSERVED_PID: u32 = 0x08;
+const THREAD_DATABASE: u32 = 0x14;
+const RESUMED_FLAG: u32 = 0x18;
+const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;
 const PARKED_SLEEP_MS: u32 = 200;
 const STUB_OFFSET: u32 = 0x100;
@@ -592,8 +753,9 @@ const PAYLOAD_OFFSET: u32 = 0x200;
 const INJECTION_ATTEMPTS: u32 = 100;
 const INJECTION_POLL_US: u64 = 100_000;
 const ANY_THREAD: u32 = 0xffff_ffff;
-const TCB_RING3_ESP: usize = 0x1c;
+const RESUME_STUB_OFFSET: u32 = 0x140;
 const TRAMPOLINE_OFFSET: u32 = 0x180;
+
 const INJECTION_STACK_SIZE: usize = 0x4000;
 const THREAD_BLOCK_SLOT: u32 = 0xc002_11cc;
 const PDB_MEMORY_CONTEXT: usize = 0x1c;
