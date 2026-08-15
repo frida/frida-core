@@ -242,6 +242,8 @@ namespace Frida.Barebone {
 		if (kernel32 == 0)
 			return;
 
+		symbols.add (make_symbol (KERNEL32_BASE, kernel32));
+
 		uint64 obfuscator = yield find_process_id_obfuscator (machine, kernel32, cancellable);
 		if (obfuscator != 0)
 			symbols.add (make_symbol (PROCESS_ID_OBFUSCATOR, obfuscator));
@@ -495,6 +497,7 @@ namespace Frida.Barebone {
 	}
 
 	private const size_t NEXT_OFFSET = 0x00;
+	public const string KERNEL32_BASE = "KERNEL32_Base";
 	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
 	public const string MODULE_TABLE = "KERNEL32_ModuleTable";
 

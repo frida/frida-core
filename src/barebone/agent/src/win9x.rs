@@ -164,6 +164,59 @@ pub fn yield_now() {
     }
 }
 
+// The host cannot resolve these, because parts of the export names of KERNEL32 are out of
+// memory. Only the guest can get these pages again.
+pub fn kernel32_export(wanted: &[u8]) -> u32 {
+    let base = unsafe { core::ptr::addr_of!(_KERNEL32_Base).read() };
+    let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
+    let directory = base + read_u32(headers + EXPORT_DIRECTORY_OFFSET);
+    let count = read_u32(directory + 0x18);
+    let functions = base + read_u32(directory + 0x1c);
+    let names = base + read_u32(directory + 0x20);
+    let ordinals = base + read_u32(directory + 0x24);
+
+    let mut lowest = 0;
+    let mut highest = count;
+    while lowest < highest {
+        let middle = (lowest + highest) / 2;
+        match compare_export(base + read_u32(names + middle * 4), wanted) {
+            core::cmp::Ordering::Equal => {
+                let ordinal = read_u16(ordinals + middle * 2) as u32;
+                return base + read_u32(functions + ordinal * 4);
+            }
+            core::cmp::Ordering::Less => lowest = middle + 1,
+            core::cmp::Ordering::Greater => highest = middle,
+        }
+    }
+
+    0
+}
+
+fn compare_export(name: u32, wanted: &[u8]) -> core::cmp::Ordering {
+    for (index, expected) in wanted.iter().enumerate() {
+        let actual = read_u8(name + index as u32);
+        if actual != *expected {
+            return actual.cmp(expected);
+        }
+    }
+
+    read_u8(name + wanted.len() as u32).cmp(&0)
+}
+
+fn read_u32(address: u32) -> u32 {
+    unsafe { (address as *const u32).read_unaligned() }
+}
+
+fn read_u16(address: u32) -> u16 {
+    unsafe { (address as *const u16).read_unaligned() }
+}
+
+fn read_u8(address: u32) -> u8 {
+    unsafe { (address as *const u8).read() }
+}
+
+const EXPORT_DIRECTORY_OFFSET: u32 = 0x78;
+
 pub fn monotonic_micros() -> i64 {
     unsafe { _Get_System_Time() as i64 * 1000 }
 }
@@ -1257,6 +1310,7 @@ unsafe extern "C" {
     static __VWIN32_Get_Thread_Context: unsafe extern "C" fn(u32, *mut u8) -> u32;
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();
+    static _KERNEL32_Base: u32;
     static _KERNEL32_ProcessIdObfuscator: u32;
     static _KERNEL32_ModuleTable: u32;
 }
