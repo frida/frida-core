@@ -150,6 +150,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
 			assert_true (parse_config ("{}").kernel == Barebone.KernelKind.AUTO);
 			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == Barebone.KernelKind.BARE);
@@ -1484,6 +1489,25 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async void winnt_resolves_symbols_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const alloc = Module.getGlobalExportByName('ExAllocatePoolWithTag');
+
+			const exact = DebugSymbol.fromAddress(alloc);
+			const inside = DebugSymbol.fromAddress(alloc.add(4));
+			const byName = DebugSymbol.getFunctionByName('ExFreePoolWithTag');
+			const matching = DebugSymbol.findFunctionsMatching('ExAllocatePool*');
+
+			send({
+				named: exact.name === 'ExAllocatePoolWithTag',
+				module: exact.moduleName === 'ntoskrnl.exe',
+				closest: inside.name === 'ExAllocatePoolWithTag',
+				byName: !byName.isNull(),
+				matching: matching.length > 0
+			});
+		""", "\"named\":true,\"module\":true,\"closest\":true,\"byName\":true,\"matching\":true");
+	}
+
 	private static async void winnt_enumerates_ranges_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
@@ -1755,6 +1779,8 @@ namespace Frida.BareboneTest {
 			if (received == null)
 				yield;
 
+			if (!received.contains (expected))
+				printerr ("\nexpected %s in: %s\n", expected, received);
 			assert_true (received.contains (expected));
 
 			yield session.detach (null);

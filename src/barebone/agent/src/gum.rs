@@ -7,7 +7,7 @@ use crate::{
         GumExportType_GUM_EXPORT_FUNCTION, GumFoundExportFunc, GumMemoryRange, GumModule,
         GumModuleInterface, GumThreadId, GumTlsKey, g_free, g_object_get_type, g_object_new,
         g_once_init_enter, g_once_init_leave, g_strdup, g_type_add_interface_static,
-        g_type_class_peek_parent, g_type_register_static, gchar, gpointer, gsize, guint,
+        g_type_class_peek_parent, g_type_register_static, gchar, gboolean, gpointer, gsize, guint,
     },
     gthread, kernel, libc,
 };
@@ -324,4 +324,135 @@ pub(crate) fn is_agent_slab(address: u64) -> bool {
     };
     slab_unlock();
     found
+}
+
+// The host gives the symbol table, thus this makes a name from an address.
+#[cfg(feature = "blob")]
+mod symbolication {
+    use super::*;
+    use crate::bindings::{
+        GArray, GumAddress, GumDebugSymbolDetails, g_array_append_vals, g_array_new, gconstpointer,
+    };
+    use core::ffi::CStr;
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_symbol_name_from_address(address: gpointer) -> *mut gchar {
+        match closest_to(address) {
+            Some(symbol) => unsafe { g_strdup(symbol.name_ptr()) },
+            None => ptr::null_mut(),
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_symbol_details_from_address(
+        address: gpointer,
+        details: *mut GumDebugSymbolDetails,
+    ) -> gboolean {
+        let Some(symbol) = closest_to(address) else {
+            return 0;
+        };
+
+        let details = unsafe { &mut *details };
+        *details = unsafe { core::mem::zeroed() };
+        details.address = address as u64;
+        put_text(symbol.name(), &mut details.symbol_name);
+        if let Some(module) = module_containing(address as u64) {
+            put_text(&module.name, &mut details.module_name);
+        }
+
+        1
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_module_find_global_export_by_name(name: *const gchar) -> GumAddress {
+        let Some(name) = text_of(name) else {
+            return 0;
+        };
+        let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
+
+        match table.find_symbol_by_name(name) {
+            Some(symbol) => symbol.address(),
+            None => 0,
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_find_function(name: *const gchar) -> gpointer {
+        let Some(name) = text_of(name) else {
+            return ptr::null_mut();
+        };
+        let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
+
+        match table.find_symbol_by_name(name) {
+            Some(symbol) => symbol.address() as gpointer,
+            None => ptr::null_mut(),
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_find_functions_named(name: *const gchar) -> *mut GArray {
+        let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
+        let found = text_of(name)
+            .map(|name| table.find_symbols_by_name(name).map(|s| s.address()).collect())
+            .unwrap_or_else(Vec::new);
+
+        pointer_array_of(&found)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn gum_find_functions_matching(pattern: *const gchar) -> *mut GArray {
+        let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
+        let found = text_of(pattern)
+            .map(|pattern| {
+                table
+                    .find_symbols_matching_glob(pattern)
+                    .map(|s| s.address())
+                    .collect()
+            })
+            .unwrap_or_else(Vec::new);
+
+        pointer_array_of(&found)
+    }
+
+    fn closest_to(address: gpointer) -> Option<crate::symbols::SymbolRef<'static>> {
+        let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
+        table.find_closest_symbol_by_address(address as u64)
+    }
+
+    fn module_containing(address: u64) -> Option<&'static crate::ModuleInfo> {
+        let modules = unsafe { &*ptr::addr_of!(crate::MODULE_INFO) };
+
+        modules.iter().find(|m| {
+            address >= m.offset as u64 && address < m.offset as u64 + m.size as u64
+        })
+    }
+
+    fn pointer_array_of(addresses: &[u64]) -> *mut GArray {
+        let pointers: Vec<gpointer> = addresses.iter().map(|a| *a as gpointer).collect();
+
+        unsafe {
+            let array = g_array_new(0, 0, core::mem::size_of::<gpointer>() as guint);
+            g_array_append_vals(
+                array,
+                pointers.as_ptr() as gconstpointer,
+                pointers.len() as guint,
+            );
+            array
+        }
+    }
+
+    fn text_of(value: *const gchar) -> Option<&'static str> {
+        if value.is_null() {
+            return None;
+        }
+        unsafe { CStr::from_ptr(value) }.to_str().ok()
+    }
+
+    fn put_text(text: &str, out: &mut [gchar]) {
+        let limit = out.len() - 1;
+        for (i, byte) in text.bytes().take(limit).enumerate() {
+            out[i] = byte as gchar;
+        }
+        out[text.len().min(limit)] = 0;
+    }
 }
