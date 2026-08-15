@@ -74,7 +74,7 @@ def main():
                 boot_kmod_guest(args)
         elif target in WINDOWS_GUESTS:
             if action == "check":
-                check_windows_guest(args)
+                check_windows_guest(WINDOWS_GUESTS[target], args)
             elif action == "rewind":
                 rewind_windows_guest(args)
             else:
@@ -156,8 +156,8 @@ def boot_guest(arch: str, args):
         process.kill()
 
 
-def check_windows_guest(args):
-    require_windows_guest(args)
+def check_windows_guest(guest: "WindowsGuest", args):
+    require_windows_guest(guest, args)
     print("ok")
 
 
@@ -172,7 +172,7 @@ def boot_windows_guest(guest: "WindowsGuest", args):
     TCG rather than KVM: the stub is well-behaved there, and it sidesteps the divide overflow
     that fast processors provoke in Windows 95.
     """
-    qemu = require_windows_guest(args)
+    qemu = require_windows_guest(guest, args)
 
     control = []
     if args.qmp is not None:
@@ -330,10 +330,10 @@ def disk_arguments(args) -> [str]:
     ]
 
 
-def require_windows_guest(args) -> str:
-    qemu = shutil.which("qemu-system-i386")
+def require_windows_guest(guest: "WindowsGuest", args) -> str:
+    qemu = shutil.which(guest.emulator)
     if qemu is None:
-        raise Unavailable("qemu-system-i386 is not installed")
+        raise Unavailable(f"{guest.emulator} is not installed")
     if not args.image.exists():
         raise Unavailable(f"{args.image} does not exist")
     return qemu
@@ -536,6 +536,7 @@ GDB_ID = "frida-gdb"
 # Newest model that boots 95; older ones lack the CMOVs the agent emits.
 class WindowsGuest(NamedTuple):
     description: str
+    emulator: str
     cpu: str
     memory: int
     boot_seconds: int
@@ -545,8 +546,11 @@ class WindowsGuest(NamedTuple):
 
 WINDOWS_GUESTS = {
     # Old enough for Windows 95, new enough for the CMOV the agent is built with.
-    "win95": WindowsGuest("Windows 95", "pentium3", 128, 120, "ide", settle_win95_desktop),
-    "winxp": WindowsGuest("Windows XP", "core2duo", 512, 600, "ide", None),
+    "win95": WindowsGuest("Windows 95", "qemu-system-i386", "pentium3", 128, 120, "ide",
+                          settle_win95_desktop),
+    "winxp": WindowsGuest("Windows XP", "qemu-system-i386", "core2duo", 512, 600, "ide", None),
+    "winxp64": WindowsGuest("Windows XP x64", "qemu-system-x86_64", "core2duo", 1024, 900, "ide",
+                            None),
 }
 
 DEBUGCON_ID = "frida-debugcon"
