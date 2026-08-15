@@ -29,25 +29,29 @@ def main():
             boot.add_argument("--gdb-port", type=int, required=True)
             boot.add_argument("--memory", type=int, default=256)
 
-        for command, help_text in [
-            ("check-win95", "verify that the Windows 95 guest can be booted"),
-            ("boot-win95", "boot a Windows 95 disk image with the GDB stub enabled"),
-        ]:
-            win95 = subparsers.add_parser(command, help=help_text)
-            win95.add_argument("--image", type=Path, required=True)
-            win95.add_argument("--format", default="qcow2")
-            if command.startswith("boot"):
-                win95.add_argument("--gdb-port", type=int, required=True)
-                win95.add_argument("--memory", type=int, default=128)
-                win95.add_argument("--boot-seconds", type=int, default=120)
-                win95.add_argument("--qmp", type=Path)
-                win95.add_argument("--debugcon", type=Path)
-                win95.add_argument("--snapshot", default=SNAPSHOT_NAME)
+        for name, guest in WINDOWS_GUESTS.items():
+            check = subparsers.add_parser(f"check-{name}",
+                                          help=f"verify that the {guest.description} guest can be booted")
+            check.add_argument("--image", type=Path, required=True)
+            check.add_argument("--format", default="qcow2")
 
-        rewind = subparsers.add_parser("rewind-win95",
-                                       help="restore a Windows 95 snapshot and put a fresh hostlink port on it")
-        rewind.add_argument("--qmp", type=Path, required=True)
-        rewind.add_argument("--snapshot", default=SNAPSHOT_NAME)
+            windows = subparsers.add_parser(f"boot-{name}",
+                                            help=f"boot a {guest.description} disk image with the GDB stub enabled")
+            windows.add_argument("--image", type=Path, required=True)
+            windows.add_argument("--format", default="qcow2")
+            windows.add_argument("--disk-interface", choices=["ide", "lsi"], default=guest.disk_interface)
+            windows.add_argument("--gdb-port", type=int, required=True)
+            windows.add_argument("--memory", type=int, default=guest.memory)
+            windows.add_argument("--boot-seconds", type=int, default=guest.boot_seconds)
+            windows.add_argument("--qmp", type=Path)
+            windows.add_argument("--debugcon", type=Path)
+            windows.add_argument("--snapshot", default=SNAPSHOT_NAME)
+
+            rewind = subparsers.add_parser(f"rewind-{name}",
+                                           help=f"restore a {guest.description} snapshot and put a fresh "
+                                                "hostlink port on it")
+            rewind.add_argument("--qmp", type=Path, required=True)
+            rewind.add_argument("--snapshot", default=SNAPSHOT_NAME)
 
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
@@ -68,13 +72,13 @@ def main():
                 check_kmod_guest()
             else:
                 boot_kmod_guest(args)
-        elif target == "win95":
+        elif target in WINDOWS_GUESTS:
             if action == "check":
-                check_win95_guest(args)
+                check_windows_guest(args)
             elif action == "rewind":
-                rewind_win95_guest(args)
+                rewind_windows_guest(args)
             else:
-                boot_win95_guest(args)
+                boot_windows_guest(WINDOWS_GUESTS[target], args)
         elif action == "check":
             check_guest(target)
         else:
@@ -152,23 +156,23 @@ def boot_guest(arch: str, args):
         process.kill()
 
 
-def check_win95_guest(args):
-    require_win95(args)
+def check_windows_guest(args):
+    require_windows_guest(args)
     print("ok")
 
 
-def boot_win95_guest(args):
+def boot_windows_guest(guest: "WindowsGuest", args):
     """
-    Boot a Windows 95 disk image and hand it to QEMU's GDB stub.
+    Boot a Windows disk image and hand it to QEMU's GDB stub.
 
-    Windows 95 says nothing on the serial line, so there is no marker to wait for the way the
+    These guests say nothing on the serial line, so there is no marker to wait for the way the
     Linux guests provide one. Give the boot a fixed budget instead and let the caller decide
     whether what it finds looks like a kernel with its page tables up.
 
     TCG rather than KVM: the stub is well-behaved there, and it sidesteps the divide overflow
-    that fast processors provoke in this kernel.
+    that fast processors provoke in Windows 95.
     """
-    qemu = require_win95(args)
+    qemu = require_windows_guest(args)
 
     control = []
     if args.qmp is not None:
@@ -187,9 +191,9 @@ def boot_win95_guest(args):
     process = subprocess.Popen([
         qemu,
         "-machine", "pc,accel=tcg",
-        "-cpu", GUEST_CPU,
+        "-cpu", guest.cpu,
         "-m", str(args.memory),
-        "-drive", f"file={args.image},format={args.format},if=ide",
+    ] + disk_arguments(args) + [
         "-vga", "cirrus",
         "-nic", "none",
         "-display", "none",
@@ -205,8 +209,13 @@ def boot_win95_guest(args):
                 if process.poll() is not None:
                     raise Unavailable("guest exited before it finished booting")
                 time.sleep(1)
+        elif guest.settle is not None:
+            guest.settle(Qmp(args.qmp, process), args.snapshot)
         else:
-            settle_win95_desktop(Qmp(args.qmp, process), args.snapshot)
+            for _ in range(args.boot_seconds):
+                if process.poll() is not None:
+                    raise Unavailable("guest exited before it finished booting")
+                time.sleep(1)
 
         print("ready", flush=True)
         process.wait()
@@ -238,7 +247,7 @@ def settle_win95_desktop(qmp, snapshot):
 # The snapshot is of a machine that never had a hostlink port, and the port a previous run added
 # goes away asynchronously: restoring before it is gone leaves QEMU unable to load the device's
 # state, and every rewind after that runs a wedged machine.
-def rewind_win95_guest(args):
+def rewind_windows_guest(args):
     qmp = Qmp(args.qmp)
 
     qmp.execute("device_del", {"id": PORT_DEVICE_ID})
@@ -308,7 +317,20 @@ class Qmp:
             return (int(header[1]), int(header[2]))
 
 
-def require_win95(args) -> str:
+# Images exported from VMware put the system disk on a SCSI adapter, which the guest's own
+# driver expects to find; handing it over as IDE bugchecks the kernel.
+def disk_arguments(args) -> [str]:
+    drive = f"file={args.image},format={args.format}"
+    if args.disk_interface == "ide":
+        return ["-drive", drive + ",if=ide"]
+    return [
+        "-drive", drive + ",if=none,id=disk",
+        "-device", "lsi53c895a,id=scsi0",
+        "-device", "scsi-hd,drive=disk,bus=scsi0.0",
+    ]
+
+
+def require_windows_guest(args) -> str:
     qemu = shutil.which("qemu-system-i386")
     if qemu is None:
         raise Unavailable("qemu-system-i386 is not installed")
@@ -512,7 +534,20 @@ VIRTIO_SERIAL_ID = "frida-vserial"
 GDB_ID = "frida-gdb"
 
 # Newest model that boots 95; older ones lack the CMOVs the agent emits.
-GUEST_CPU = "pentium3"
+class WindowsGuest(NamedTuple):
+    description: str
+    cpu: str
+    memory: int
+    boot_seconds: int
+    disk_interface: str
+    settle: object
+
+
+WINDOWS_GUESTS = {
+    # Old enough for Windows 95, new enough for the CMOV the agent is built with.
+    "win95": WindowsGuest("Windows 95", "pentium3", 128, 120, "ide", settle_win95_desktop),
+    "winxp": WindowsGuest("Windows XP", "core2duo", 512, 600, "ide", None),
+}
 
 DEBUGCON_ID = "frida-debugcon"
 DEBUGCON_PORT = 0xe9
