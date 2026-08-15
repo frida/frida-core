@@ -6,9 +6,10 @@
 use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
-        GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
-        gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundThreadFunc,
-        GumThreadDetails, GumThreadId,
+        GumCpuContext, GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref,
+        gboolean, gpointer, gsize, guint, gum_barebone_register_module, gum_mprotect,
+        GumFoundThreadFunc, GumThreadDetails, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
+        GumThreadId,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -107,10 +108,26 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
         return;
     };
 
-    kernel::enumerate_threads(&mut |id| {
+    kernel::enumerate_threads(&mut |thread| {
         let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
         details.flags = 0;
-        details.id = id as GumThreadId;
+        details.id = thread.id as GumThreadId;
+
+        if let Some(state) = thread.cpu_state {
+            details.flags = GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
+            details.cpu_context = GumCpuContext {
+                eip: state.eip,
+                edi: state.edi,
+                esi: state.esi,
+                ebp: state.ebp,
+                esp: state.esp,
+                ebx: state.ebx,
+                edx: state.edx,
+                ecx: state.ecx,
+                eax: state.eax,
+                xmm: ptr::null_mut(),
+            };
+        }
 
         unsafe { emit(&details, user_data) };
     });

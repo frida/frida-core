@@ -1165,8 +1165,15 @@ namespace Frida.BareboneTest {
 		yield run_script_in_live_guest (h, """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
-			send({ several: threads.length > 1, listed: threads.some(t => t.id === mine) });
-		""", "\"several\":true,\"listed\":true");
+			const contextual = threads.filter(t => t.context !== undefined);
+			const distinct = new Set(contextual.map(t => t.context.esp.toString())).size > 1;
+			send({
+				several: threads.length > 1,
+				listed: threads.some(t => t.id === mine),
+				contextual: contextual.length > 1,
+				distinct
+			});
+		""", "\"several\":true,\"listed\":true,\"contextual\":true,\"distinct\":true");
 	}
 
 	private static async void enumerates_modules_in_live_guest (Harness h) {

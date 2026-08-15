@@ -240,20 +240,79 @@ pub fn install_interrupt_handler(
     if handle == 0 { -1 } else { 0 }
 }
 
+// VMM schedules only ring 0 threads. The ring 3 part of a Win32 thread is not ours to report.
+pub struct ThreadInfo {
+    pub id: u32,
+    pub cpu_state: Option<CpuState>,
+}
+
+pub struct CpuState {
+    pub eip: u32,
+    pub edi: u32,
+    pub esi: u32,
+    pub ebp: u32,
+    pub esp: u32,
+    pub ebx: u32,
+    pub edx: u32,
+    pub ecx: u32,
+    pub eax: u32,
+}
+
 // Every thread VMM schedules is a ring-0 thread; the ring-3 side of a Win32 thread is not
 // ours to enumerate.
-pub fn enumerate_threads(found: &mut dyn FnMut(u32)) {
+pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
     let mut thread = first;
     while thread != 0 {
-        found(thread);
+        found(ThreadInfo { id: thread, cpu_state: thread_cpu_state(thread) });
 
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
 }
+
+// VWIN32 gives the registers of Win32 threads only, and it fails for the others.
+fn thread_cpu_state(thread: u32) -> Option<CpuState> {
+    let mut context = [0u8; CONTEXT_SIZE];
+    let base = context.as_mut_ptr();
+
+    unsafe {
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        if __VWIN32_Get_Thread_Context(thread, base) == 0 {
+            return None;
+        }
+
+        let field = |offset: usize| base.add(offset).cast::<u32>().read_unaligned();
+
+        Some(CpuState {
+            eip: field(CONTEXT_EIP),
+            edi: field(CONTEXT_EDI),
+            esi: field(CONTEXT_ESI),
+            ebp: field(CONTEXT_EBP),
+            esp: field(CONTEXT_ESP),
+            ebx: field(CONTEXT_EBX),
+            edx: field(CONTEXT_EDX),
+            ecx: field(CONTEXT_ECX),
+            eax: field(CONTEXT_EAX),
+        })
+    }
+}
+
+const CONTEXT_SIZE: usize = 0xcc;
+const CONTEXT_FULL: u32 = 0x0001_0007;
+const CONTEXT_FLAGS: usize = 0x00;
+const CONTEXT_EDI: usize = 0x9c;
+const CONTEXT_ESI: usize = 0xa0;
+const CONTEXT_EBX: usize = 0xa4;
+const CONTEXT_EDX: usize = 0xa8;
+const CONTEXT_ECX: usize = 0xac;
+const CONTEXT_EAX: usize = 0xb0;
+const CONTEXT_EBP: usize = 0xb4;
+const CONTEXT_EIP: usize = 0xb8;
+const CONTEXT_ESP: usize = 0xc4;
 
 pub struct ProcessInfo {
     pub id: u32,
@@ -1195,6 +1254,7 @@ unsafe extern "C" {
     static _VPICD_Virtualize_IRQ: unsafe extern "C" fn();
     static _VPICD_Phys_EOI: unsafe extern "C" fn();
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();
+    static __VWIN32_Get_Thread_Context: unsafe extern "C" fn(u32, *mut u8) -> u32;
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();
     static _KERNEL32_ProcessIdObfuscator: u32;

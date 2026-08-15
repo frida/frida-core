@@ -1,6 +1,5 @@
-// Gum's platform backend, minus the parts that depend on which kernel we are
-// running inside: memory protection, symbols and the module registry live in
-// gum_xnu.rs and gum_linux.rs respectively.
+// Gum's platform backend, without the parts that depend on the kernel. Memory protection,
+// symbols and the module registry are in gum_xnu.rs, gum_linux.rs and gum_windows.rs.
 
 use crate::{
     bindings::{
