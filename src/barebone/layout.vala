@@ -73,7 +73,7 @@ namespace Frida.Barebone {
 					name = "mach_kernel",
 					version = mod.source_version ?? "",
 					offset = 0,
-					size = (uint32) blob.size,
+					size = blob.size,
 				});
 				return only_kernel;
 			}
@@ -97,8 +97,8 @@ namespace Frida.Barebone {
 				kexts.add (new ModuleInfo () {
 					name = name,
 					version = version,
-					start_func_offset = (uint32) start,
-					stop_func_offset = (uint32) stop,
+					start_func_offset = start,
+					stop_func_offset = stop,
 				});
 			}
 
@@ -171,8 +171,8 @@ namespace Frida.Barebone {
 				modules.add (new ModuleInfo () {
 					name = is_kernel ? "mach_kernel" : entry.name,
 					version = is_kernel ? (kernel_version ?? "") : "",
-					offset = (uint32) (entry.vmaddr - kernel_vmaddr),
-					size = (uint32) (end - entry.vmaddr)
+					offset = entry.vmaddr - kernel_vmaddr,
+					size = end - entry.vmaddr
 				});
 			}
 			return modules;
@@ -204,7 +204,7 @@ namespace Frida.Barebone {
 			mod.enumerate_symbols (s => {
 				symbols.add (new SymbolInfo () {
 					name = (s.name[0] == '_') ? s.name[1:] : s.name,
-					offset = (uint32) s.address,
+					offset = s.address,
 					symbol_type = s.type,
 					section = s.section,
 					description = s.description
@@ -218,10 +218,10 @@ namespace Frida.Barebone {
 	public class ModuleInfo {
 		public string name;
 		public string version;
-		public uint32 offset;
-		public uint32 size;
-		public uint32 start_func_offset;
-		public uint32 stop_func_offset;
+		public uint64 offset;
+		public uint64 size;
+		public uint64 start_func_offset;
+		public uint64 stop_func_offset;
 	}
 
 	private class FilesetEntry {
@@ -231,7 +231,7 @@ namespace Frida.Barebone {
 
 	public class SymbolInfo {
 		public string name;
-		public uint32 offset;
+		public uint64 offset;
 		public uint8 symbol_type;
 		public uint8 section;
 		public uint16 description;

@@ -32,7 +32,7 @@ namespace Frida.Barebone {
 					name = (names != null && ordinal < names.length)
 						? names[ordinal]
 						: "%s_service_%d".printf (ddb.name, ordinal),
-					offset = (uint32) address,
+					offset = address,
 					symbol_type = 0xf,
 					section = 0x10,
 				});
@@ -58,7 +58,7 @@ namespace Frida.Barebone {
 			modules.add (new ModuleInfo () {
 				name = "%s.VXD".printf (ddb.name),
 				version = "",
-				offset = (uint32) image_base,
+				offset = image_base,
 				size = image_size,
 			});
 		}
@@ -302,7 +302,7 @@ namespace Frida.Barebone {
 	private static SymbolInfo make_symbol (string name, uint64 address) {
 		return new SymbolInfo () {
 			name = name,
-			offset = (uint32) address,
+			offset = address,
 			symbol_type = 0xf,
 			section = 0x10,
 		};

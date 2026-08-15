@@ -12,7 +12,7 @@ namespace Frida.Barebone {
 			modules.add (new ModuleInfo () {
 				name = module.name,
 				version = "",
-				offset = (uint32) module.base_address,
+				offset = module.base_address,
 				size = module.size,
 			});
 
@@ -120,7 +120,7 @@ namespace Frida.Barebone {
 		foreach (Export e in yield enumerate_exports (machine, module.base_address, cancellable)) {
 			symbols.add (new SymbolInfo () {
 				name = e.name,
-				offset = (uint32) (module.base_address + e.rva),
+				offset = module.base_address + e.rva,
 				symbol_type = 0xf,
 				section = 0x10,
 			});
@@ -148,7 +148,7 @@ namespace Frida.Barebone {
 
 		symbols.add (new SymbolInfo () {
 			name = PROCESS_LIST_HEAD,
-			offset = (uint32) head,
+			offset = head,
 			symbol_type = 0xf,
 			section = 0x10,
 		});

@@ -213,18 +213,19 @@ namespace Frida.Barebone {
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
-			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(ssuuuu)ay)"));
+			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)ay)"));
 			config_builder.add ("(tt)", base_va, (uint64) elf_allocation.size);
 			config_builder.add_value (transport_tag.get_child_value (0));
 			config_builder.add_value (transport_tag.get_child_value (1));
 			config_builder.add ("t", kernel_base);
 
-			config_builder.open (new VariantType ("a(ssuuuu)"));
+			config_builder.open (new VariantType ("a(sstttt)"));
 			foreach (var m in kernel_modules) {
-				config_builder.add ("(ssuuuu)", m.name, m.version, m.offset, m.size, 0, 0);
+				config_builder.add ("(sstttt)", m.name, m.version, m.offset, m.size,
+					(uint64) 0, (uint64) 0);
 			}
 			foreach (var m in layout.modules) {
-				config_builder.add ("(ssuuuu)",
+				config_builder.add ("(sstttt)",
 					m.name,
 					m.version,
 					m.offset,
@@ -914,10 +915,10 @@ namespace Frida.Barebone {
 			for (uint i = 0; i != total_symbols; i++) {
 				var symbol = all_symbols[(int) i];
 
-				builder.align (4);
+				builder.align (8);
 				symbol_offsets[i] = (uint32) builder.offset;
 
-				builder.append_uint32 (symbol.offset);
+				builder.append_uint64 (symbol.offset);
 				// TODO: Only include details we need.
 				builder.append_uint8 (symbol.symbol_type);
 				builder.append_uint8 (symbol.section);

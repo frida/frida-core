@@ -101,7 +101,7 @@ impl SymbolTable {
     }
 
     pub fn find_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
-        let target_offset = (address - get_kernel_base()) as u32;
+        let target_offset = address - get_kernel_base();
         let (_, entry) = self.binary_search_by_address(target_offset)?;
         Some(SymbolRef {
             symbol_table: self,
@@ -111,7 +111,7 @@ impl SymbolTable {
     }
 
     pub fn find_symbol_name_ptr_by_address(&self, address: u64) -> *const c_char {
-        let target_offset = (address - get_kernel_base()) as u32;
+        let target_offset = address - get_kernel_base();
         if let Some((_, entry)) = self.binary_search_by_address(target_offset) {
             entry.name_ptr(self)
         } else {
@@ -121,7 +121,7 @@ impl SymbolTable {
 
     pub fn find_closest_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
         let kernel_base = get_kernel_base();
-        let target_offset = (address - kernel_base) as u32;
+        let target_offset = address - kernel_base;
         let (_, entry) = self.binary_search_closest_by_address(target_offset)?;
         Some(SymbolRef {
             symbol_table: self,
@@ -142,8 +142,8 @@ impl SymbolTable {
         }
 
         let kernel_base = get_kernel_base();
-        let start_offset = (start_address - kernel_base) as u32;
-        let end_offset = (end_address - kernel_base) as u32;
+        let start_offset = start_address - kernel_base;
+        let end_offset = end_address - kernel_base;
 
         let mut left = 0;
         let mut right = self.symbol_count;
@@ -152,7 +152,7 @@ impl SymbolTable {
             let mid = left + (right - left) / 2;
             let entry = self.get_symbol_entry_by_address_index(mid);
 
-            if entry.address_offset < start_offset {
+            if { entry.address_offset } < start_offset {
                 left = mid + 1;
             } else {
                 right = mid;
@@ -161,7 +161,7 @@ impl SymbolTable {
 
         while left > 0 {
             let prev_entry = self.get_symbol_entry_by_address_index(left - 1);
-            if prev_entry.address_offset >= start_offset {
+            if { prev_entry.address_offset } >= start_offset {
                 left -= 1;
             } else {
                 break;
@@ -209,21 +209,21 @@ impl SymbolTable {
         )
     }
 
-    fn binary_search_by_address(&self, target_offset: u32) -> Option<(usize, &SymbolEntry)> {
+    fn binary_search_by_address(&self, target_offset: u64) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
             |table, mid| table.get_symbol_entry_by_address_index(mid),
-            |entry| entry.address_offset.cmp(&target_offset),
+            |entry| { entry.address_offset }.cmp(&target_offset),
             false,
         )
     }
 
     fn binary_search_closest_by_address(
         &self,
-        target_offset: u32,
+        target_offset: u64,
     ) -> Option<(usize, &SymbolEntry)> {
         self.binary_search(
             |table, mid| table.get_symbol_entry_by_address_index(mid),
-            |entry| entry.address_offset.cmp(&target_offset),
+            |entry| { entry.address_offset }.cmp(&target_offset),
             true,
         )
     }
@@ -266,9 +266,10 @@ impl SymbolTable {
     }
 }
 
-#[repr(C)]
+// The host writes this layout, thus the compiler must add no padding.
+#[repr(C, packed)]
 struct SymbolEntry {
-    address_offset: u32,
+    address_offset: u64,
     symbol_type: u8,
     section: u8,
     description: u16,
@@ -309,7 +310,7 @@ impl<'a> SymbolRef<'a> {
     }
 
     pub fn address(&self) -> u64 {
-        self.kernel_base + self.entry.address_offset as u64
+        self.kernel_base + { self.entry.address_offset }
     }
 
     pub fn symbol_type(&self) -> u8 {
@@ -415,7 +416,7 @@ pub struct SymbolsInRangeIterator<'a> {
     symbol_table: &'a SymbolTable,
     current_index: usize,
     end_index: usize,
-    end_offset: u32,
+    end_offset: u64,
     kernel_base: u64,
 }
 
@@ -427,7 +428,7 @@ impl<'a> Iterator for SymbolsInRangeIterator<'a> {
             let entry = self.symbol_table.get_symbol_entry_by_address_index(self.current_index);
             self.current_index += 1;
 
-            if entry.address_offset >= self.end_offset {
+            if { entry.address_offset } >= self.end_offset {
                 break;
             }
 

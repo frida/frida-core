@@ -168,10 +168,10 @@ mod entrypoint_blob {
     pub struct ModuleInfo {
         pub name: String,
         pub version: String,
-        pub offset: u32,
-        pub size: u32,
-        pub start_func_offset: u32,
-        pub stop_func_offset: u32,
+        pub offset: u64,
+        pub size: u64,
+        pub start_func_offset: u64,
+        pub stop_func_offset: u64,
     }
 
     #[unsafe(no_mangle)]
@@ -260,7 +260,7 @@ mod entrypoint_blob {
         };
 
         unsafe {
-            let type_string = c"((tt)yvta(ssuuuu)ay)".as_ptr() as *const gchar;
+            let type_string = c"((tt)yvta(sstttt)ay)".as_ptr() as *const gchar;
             let variant_type = g_variant_type_new(type_string);
 
             let root_variant = g_variant_new_from_data(
@@ -317,13 +317,13 @@ mod entrypoint_blob {
             let mut module_info: Vec<ModuleInfo> = Vec::new();
             let mut raw_name: *mut gchar = ptr::null_mut();
             let mut raw_version: *mut gchar = ptr::null_mut();
-            let mut offset: u32 = 0;
-            let mut size: u32 = 0;
-            let mut start_func_offset: u32 = 0;
-            let mut stop_func_offset: u32 = 0;
+            let mut offset: u64 = 0;
+            let mut size: u64 = 0;
+            let mut start_func_offset: u64 = 0;
+            let mut stop_func_offset: u64 = 0;
             while g_variant_iter_next(
                 &mut iter as *mut GVariantIter,
-                c"(&s&suuuu)".as_ptr(),
+                c"(&s&stttt)".as_ptr(),
                 &mut raw_name,
                 &mut raw_version,
                 &mut offset,
