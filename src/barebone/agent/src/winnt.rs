@@ -259,6 +259,83 @@ fn maps_small_page(address: usize) -> bool {
     }
 }
 
+// Walk the page tables the kernel maps into itself, coalescing neighbouring pages that grant
+// the same thing. Only the half above the split is worth reporting: the other one belongs to
+// whichever process happens to be current, which is nobody in particular from in here.
+pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
+    let page_size = PAGE_SIZE as usize;
+    let mut base = 0usize;
+    let mut size = 0usize;
+    let mut protection = 0u32;
+
+    let mut address = KERNEL_SPACE_START;
+    while address != 0 {
+        let here = protection_at(address);
+
+        if here != protection || base + size != address {
+            if protection != 0 {
+                found(base as u64, size as u64, protection);
+            }
+            base = address;
+            size = 0;
+            protection = here;
+        }
+        size += page_size;
+
+        address = address.wrapping_add(page_size);
+    }
+
+    if protection != 0 {
+        found(base as u64, size as u64, protection);
+    }
+}
+
+pub fn protection_at(address: usize) -> u32 {
+    unsafe {
+        if pae_enabled() {
+            let pde = ((PAE_PDE_BASE + (address >> 21) * 8) as *const u64).read_volatile();
+            if (pde & PAGE_PRESENT as u64) == 0 {
+                return 0;
+            }
+            if (pde & PAGE_LARGE as u64) != 0 {
+                return protection_of(pde, PAGE_NO_EXECUTE);
+            }
+            let pte = ((PTE_BASE + (address >> 12) * 8) as *const u64).read_volatile();
+            if (pte & PAGE_PRESENT as u64) == 0 {
+                return 0;
+            }
+            protection_of(pte, PAGE_NO_EXECUTE)
+        } else {
+            let pde = ((PDE_BASE + (address >> 22) * 4) as *const u32).read_volatile();
+            if (pde & PAGE_PRESENT) == 0 {
+                return 0;
+            }
+            if (pde & PAGE_LARGE) != 0 {
+                return protection_of(pde as u64, 0);
+            }
+            let pte = ((PTE_BASE + (address >> 12) * 4) as *const u32).read_volatile();
+            if (pte & PAGE_PRESENT) == 0 {
+                return 0;
+            }
+            protection_of(pte as u64, 0)
+        }
+    }
+}
+
+fn protection_of(entry: u64, no_execute: u64) -> u32 {
+    let mut prot = GUM_PAGE_READ as u32;
+    if (entry & PAGE_WRITEABLE as u64) != 0 {
+        prot |= GUM_PAGE_WRITE as u32;
+    }
+    if no_execute == 0 || (entry & no_execute) == 0 {
+        prot |= GUM_PAGE_EXECUTE as u32;
+    }
+    prot
+}
+
+const KERNEL_SPACE_START: usize = 0x8000_0000;
+const GUM_PAGE_READ: u64 = 0x1;
+
 fn apply_protection(entry: u64, gum_prot: u64, writeable: u64, no_execute: u64) -> u64 {
     let mut value = entry;
 

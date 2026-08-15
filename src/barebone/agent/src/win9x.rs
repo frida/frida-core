@@ -1045,6 +1045,63 @@ pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
 }
 
+// This kernel has no self-map, but VMM copies a run of page table entries into a buffer,
+// which gives the same data. Report only the arena, because the memory below it belongs to
+// the VM that is current.
+pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
+    let mut base = 0usize;
+    let mut size = 0usize;
+    let mut protection = 0u32;
+
+    let mut address = ARENA_START;
+    while address != ARENA_END {
+        let here = protection_at(address);
+
+        if here != protection || base + size != address {
+            if protection != 0 {
+                found(base as u64, size as u64, protection);
+            }
+            base = address;
+            size = 0;
+            protection = here;
+        }
+        size += PAGE_SIZE as usize;
+
+        address += PAGE_SIZE as usize;
+    }
+
+    if protection != 0 {
+        found(base as u64, size as u64, protection);
+    }
+}
+
+pub fn protection_at(address: usize) -> u32 {
+    let mut entry: u32 = 0;
+    let copied = unsafe { __CopyPageTable((address / PAGE_SIZE as usize) as u32, 1, &mut entry, 0) };
+    if copied == 0 {
+        return 0;
+    }
+    protection_of(entry)
+}
+
+// These processors have no execute permission, thus all present pages are executable.
+fn protection_of(entry: u32) -> u32 {
+    if (entry & PAGE_PRESENT) == 0 {
+        return 0;
+    }
+
+    let mut prot = GUM_PAGE_READ | GUM_PAGE_EXECUTE;
+    if (entry & PAGE_WRITEABLE) != 0 {
+        prot |= GUM_PAGE_WRITE;
+    }
+    prot
+}
+
+const ARENA_START: usize = 0xc000_0000;
+const ARENA_END: usize = 0xc400_0000;
+const GUM_PAGE_READ: u32 = 0x1;
+const GUM_PAGE_EXECUTE: u32 = 0x4;
+
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     let pages = (size as usize).div_ceil(PAGE_SIZE as usize) as u32;
     unsafe { __MapPhysToLinear(phys_addr as u32, pages * PAGE_SIZE, 0) as *mut c_void }

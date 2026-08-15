@@ -4,10 +4,11 @@
 use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
-        GumCpuContext, GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref,
-        gboolean, gpointer, gsize, guint, gum_barebone_register_module, gum_mprotect,
-        GumFoundThreadFunc, GumThreadDetails, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
-        GumThreadId,
+        GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
+        gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
+        GumFoundThreadFunc, GumRangeDetails, GumThreadDetails, GumThreadId,
+        GumCpuContext,
+        GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -35,6 +36,20 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_dispose_writable_pages(_writable: gpointer, _n_pages: guint) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_query_protection(
+    address: gpointer,
+    prot: *mut GumPageProtection,
+) -> gboolean {
+    let protection = kernel::protection_at(address as usize);
+    if protection == 0 {
+        return 0;
+    }
+
+    unsafe { *prot = protection as GumPageProtection };
+    1
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_try_mprotect(
@@ -98,6 +113,35 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             g_object_unref(module as gpointer);
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn _gum_process_enumerate_ranges(
+    prot: GumPageProtection,
+    func: GumFoundRangeFunc,
+    user_data: gpointer,
+) {
+    let Some(emit) = func else {
+        return;
+    };
+
+    kernel::enumerate_ranges(&mut |base, size, protection| {
+        if (protection & prot as u32) != prot as u32 {
+            return;
+        }
+
+        let range = GumMemoryRange {
+            base_address: base,
+            size: size as gsize,
+        };
+        let details = GumRangeDetails {
+            range: &range,
+            protection: protection as GumPageProtection,
+            file: ptr::null(),
+        };
+
+        unsafe { emit(&details, user_data) };
+    });
 }
 
 #[unsafe(no_mangle)]

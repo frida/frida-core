@@ -90,6 +90,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-ranges-in-live-guest", () => {
+			var h = new Harness ((h) => win9x_enumerates_ranges_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-modules-in-live-guest", () => {
 			var h = new Harness ((h) => enumerates_modules_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -137,6 +142,11 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-threads-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_enumerates_threads_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-ranges-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_ranges_in_live_guest.begin (h as Harness));
 			h.run ();
 		});
 
@@ -1474,6 +1484,27 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async void winnt_enumerates_ranges_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const ranges = Process.enumerateRanges('r--');
+
+			const covering = ranges.find(r => r.base.compare(kernel.base) <= 0 &&
+				r.base.add(r.size).compare(kernel.base) > 0);
+			const kernelSpace = ranges.every(r => r.base.compare(ptr('0x80000000')) >= 0);
+			const sorted = ranges.every((r, i) =>
+				i === 0 || ranges[i - 1].base.add(ranges[i - 1].size).compare(r.base) <= 0);
+
+			send({
+				found: ranges.length > 1,
+				covering: covering !== undefined,
+				kernelSpace: kernelSpace,
+				sorted: sorted,
+				executable: covering.protection.indexOf('x') !== -1
+			});
+		""", "\"found\":true,\"covering\":true,\"kernelSpace\":true,\"sorted\":true,\"executable\":true");
+	}
+
 	private static async void winnt_enumerates_threads_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
 			const threads = Process.enumerateThreads();
@@ -1618,6 +1649,19 @@ namespace Frida.BareboneTest {
 				distinct
 			});
 		""", "\"several\":true,\"listed\":true,\"contextual\":true,\"distinct\":true");
+	}
+
+	private static async void win9x_enumerates_ranges_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
+			const vmm = Process.enumerateModules().find(m => m.name === 'VMM.VXD');
+			const ranges = Process.enumerateRanges('r--');
+
+			const covering = ranges.find(r => r.base.compare(vmm.base) <= 0 &&
+				r.base.add(r.size).compare(vmm.base) > 0);
+			const arena = ranges.every(r => r.base.compare(ptr('0xc0000000')) >= 0);
+
+			send({ found: ranges.length > 1, covering: covering !== undefined, arena: arena });
+		""", "\"found\":true,\"covering\":true,\"arena\":true");
 	}
 
 	private static async void enumerates_modules_in_live_guest (Harness h) {
