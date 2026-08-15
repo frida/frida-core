@@ -110,48 +110,109 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/maps-out-a-64-bit-kernel-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_maps_out_a_64_bit_kernel_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		// One suite for each word size. Each suite uses its own set of variables and its own guest.
 		GLib.Test.add_func ("/Barebone/WinNt/agent-runs-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-modules-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_enumerates_modules_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_enumerates_modules_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/compiles-c-calling-kernel-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_compiles_c_calling_kernel_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/agent-recovers-from-exception-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_agent_recovers_from_exception_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_agent_recovers_from_exception_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/hooks-kernel-function-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-processes-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/reads-and-writes-memory-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_reads_and_writes_memory_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_reads_and_writes_memory_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-threads-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_enumerates_threads_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_enumerates_threads_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-ranges-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_enumerates_ranges_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_enumerates_ranges_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
-			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-modules-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_modules_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/compiles-c-calling-kernel-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_compiles_c_calling_kernel_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_agent_recovers_from_exception_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/hooks-kernel-function-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/reads-and-writes-memory-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_reads_and_writes_memory_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-threads-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_threads_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-ranges-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_ranges_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/resolves-symbols-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT64"));
 			h.run ();
 		});
 
@@ -1391,12 +1452,61 @@ namespace Frida.BareboneTest {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
 	}
 
-	private static async void winnt_agent_runs_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
+	// This test injects nothing. The agent is 32-bit, and the test examines only the host, which
+	// must read a kernel of twice the width.
+	private static async void winnt_maps_out_a_64_bit_kernel_in_live_guest (Harness h) {
+		string? port = Environment.get_variable ("FRIDA_TEST_WINNT64_GDB_PORT");
+		if (port == null) {
+			h.done ();
+			return;
+		}
+
+		try {
+			var client = new SocketClient ();
+			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
+			var gdb = yield GDB.Client.open (connection, null);
+			assert_true (gdb.pointer_size == 8);
+
+			var machine = new Barebone.X64Machine (gdb);
+			var layout = yield Barebone.collect_winnt_layout (machine, null);
+
+			Barebone.ModuleInfo? kernel = null;
+			foreach (var m in layout.modules) {
+				if (m.name.down () == "ntoskrnl.exe")
+					kernel = m;
+			}
+			assert_nonnull (kernel);
+
+			// All of these addresses are above the limit of a 32-bit kernel.
+			assert_true (kernel.offset > uint32.MAX);
+			assert_true (layout.modules.size > 20);
+
+			bool named = false;
+			bool wide = true;
+			foreach (var sym in layout.symbols) {
+				if (sym.name == "ExAllocatePoolWithTag")
+					named = true;
+				if (sym.offset <= uint32.MAX)
+					wide = false;
+			}
+			assert_true (named);
+			assert_true (wide);
+
+			yield gdb.close (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
 	}
 
-	private static async void winnt_enumerates_modules_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_agent_runs_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void winnt_enumerates_modules_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const mods = Process.enumerateModules();
 			const kernel = mods.find(m => m.name === 'ntoskrnl.exe');
 			const named = kernel.enumerateExports().some(e => e.name === 'ExAllocatePoolWithTag');
@@ -1406,8 +1516,8 @@ namespace Frida.BareboneTest {
 		""", "\"named\":true,\"hal\":true,\"drivers\":true");
 	}
 
-	private static async void winnt_enumerates_processes_in_live_guest (Harness h) {
-		var config = winnt_config_from_environment (h);
+	private static async void winnt_enumerates_processes_in_live_guest (Harness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
 
@@ -1489,8 +1599,8 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_resolves_symbols_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_resolves_symbols_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const alloc = Module.getGlobalExportByName('ExAllocatePoolWithTag');
 
 			const exact = DebugSymbol.fromAddress(alloc);
@@ -1508,8 +1618,8 @@ namespace Frida.BareboneTest {
 		""", "\"named\":true,\"module\":true,\"closest\":true,\"byName\":true,\"matching\":true");
 	}
 
-	private static async void winnt_enumerates_ranges_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_enumerates_ranges_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const ranges = Process.enumerateRanges('r--');
 
@@ -1529,8 +1639,8 @@ namespace Frida.BareboneTest {
 		""", "\"found\":true,\"covering\":true,\"kernelSpace\":true,\"sorted\":true,\"executable\":true");
 	}
 
-	private static async void winnt_enumerates_threads_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_enumerates_threads_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
 			send({
@@ -1541,8 +1651,8 @@ namespace Frida.BareboneTest {
 		""", "\"several\":true,\"listed\":true,\"distinct\":true");
 	}
 
-	private static async void winnt_reads_and_writes_memory_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_reads_and_writes_memory_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const header = new Uint8Array(kernel.base.readByteArray(2));
 
@@ -1568,8 +1678,8 @@ namespace Frida.BareboneTest {
 
 	// RtlUpperChar has no side effects and the kernel almost never calls it. Thus the hook sees
 	// only the calls from this test.
-	private static async void winnt_hooks_kernel_function_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	private static async void winnt_hooks_kernel_function_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
 
@@ -1581,14 +1691,38 @@ namespace Frida.BareboneTest {
 			});
 			Interceptor.flush();
 
-			const call = new NativeFunction(upper, 'uint8', ['uint8'], { abi: 'stdcall' });
+			const abi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
+			const call = new NativeFunction(upper, 'uint8', ['uint8'], { abi });
 			const result = call(0x61);
 			send({ seen: seen, result: result });
 		""", "\"seen\":97,\"result\":65");
 	}
 
-	private static async void winnt_agent_recovers_from_exception_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, winnt_config_from_environment (h), """
+	// The compiler backend and the kernel must agree about the position of the arguments. This
+	// answer is different for each word size.
+	private static async void winnt_compiles_c_calling_kernel_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
+
+			const convention = (Process.pointerSize === 4) ? '__attribute__((stdcall))' : '';
+			const cm = new CModule(`
+				extern unsigned char ${convention} RtlUpperChar (unsigned char c);
+
+				unsigned char
+				shout (unsigned char c)
+				{
+				  return RtlUpperChar (c);
+				}
+			`, { RtlUpperChar: upper });
+
+			const shout = new NativeFunction(cm.shout, 'uint8', ['uint8']);
+			send({ result: shout(0x62) });
+		""", "\"result\":66");
+	}
+
+	private static async void winnt_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			let caught = 'no';
 			try {
 				ptr('0xfffff000').readU32();
@@ -1735,10 +1869,12 @@ namespace Frida.BareboneTest {
 		return config;
 	}
 
-	private static Barebone.Config? winnt_config_from_environment (Harness h) {
-		string? agent_path = Environment.get_variable ("FRIDA_TEST_WINNT_AGENT");
-		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WINNT_QMP");
-		string? stub_port = Environment.get_variable ("FRIDA_TEST_WINNT_GDB_PORT");
+	// The same guest is described the same way whatever its word size, so the two differ only in
+	// which set of variables names it.
+	private static Barebone.Config? winnt_config_from_environment (Harness h, string prefix) {
+		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
+		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
+		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
 		if (agent_path == null || qmp_path == null || stub_port == null) {
 			h.done ();
 			return null;
@@ -1752,7 +1888,7 @@ namespace Frida.BareboneTest {
 			path = agent_path,
 			transport = new Barebone.HostlinkTransportConfig () {
 				qmp = "unix:" + qmp_path,
-				bus = Environment.get_variable ("FRIDA_TEST_WINNT_BUS"),
+				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
 			},
 		};
 
