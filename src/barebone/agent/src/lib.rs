@@ -58,6 +58,8 @@ mod icons;
 mod win9x;
 #[cfg(feature = "winnt")]
 mod winnt;
+#[cfg(feature = "winnt")]
+mod winnt_paging;
 
 #[cfg(feature = "xnu")]
 mod gum_xnu;
@@ -174,8 +176,19 @@ mod entrypoint_blob {
         pub stop_func_offset: u64,
     }
 
+    #[cfg(all(feature = "winnt", target_arch = "x86_64"))]
+    #[unsafe(no_mangle)]
+    pub unsafe extern "win64" fn _start(config_data: *const u8, config_size: usize) {
+        unsafe { enter(config_data, config_size) }
+    }
+
+    #[cfg(not(all(feature = "winnt", target_arch = "x86_64")))]
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn _start(config_data: *const u8, config_size: usize) {
+        unsafe { enter(config_data, config_size) }
+    }
+
+    unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 

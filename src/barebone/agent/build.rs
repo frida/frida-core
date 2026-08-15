@@ -65,7 +65,11 @@ fn main() {
         let script = if env::var("CARGO_FEATURE_WIN9X").is_ok() {
             "agent-win9x.lds"
         } else if env::var("CARGO_FEATURE_WINNT").is_ok() {
-            "agent-winnt.lds"
+            if target.starts_with("x86_64") {
+                "agent-winnt-x86_64.lds"
+            } else {
+                "agent-winnt.lds"
+            }
         } else {
             "agent.lds"
         };

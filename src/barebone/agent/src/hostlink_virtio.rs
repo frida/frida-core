@@ -323,7 +323,7 @@ impl Hostlink {
         Self::start(regs, irq_line, on_rx, wake_token)
     }
 
-    #[cfg(target_arch = "x86")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     pub fn init_pci(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let Some(device) = PciDevice::find_console() else {
             return Err(());
@@ -920,14 +920,14 @@ impl Regs {
     }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[derive(Copy, Clone)]
 struct PciDevice {
     bus: u8,
     devfn: u8,
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 impl PciDevice {
     fn find_console() -> Option<Self> {
         for devfn in 0..=u8::MAX {
@@ -1072,7 +1072,7 @@ fn w8(mmio: *mut u8, off: usize, val: u8) {
     unsafe { write_volatile(mmio.add(off), val) }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn inl(port: u16) -> u32 {
     let value: u32;
     unsafe {
@@ -1082,7 +1082,7 @@ fn inl(port: u16) -> u32 {
     value
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn outl(port: u16, value: u32) {
     unsafe {
         core::arch::asm!("out dx, eax", in("dx") port, in("eax") value,
@@ -1090,7 +1090,7 @@ fn outl(port: u16, value: u32) {
     }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn wmb() {
     unsafe { core::arch::asm!("sfence", options(nostack, preserves_flags)) }
 }

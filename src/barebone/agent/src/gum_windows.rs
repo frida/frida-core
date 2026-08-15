@@ -7,12 +7,12 @@ use crate::{
         GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
         gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
         GumFoundThreadFunc, GumRangeDetails, GumThreadDetails, GumThreadId,
-        GumCpuContext,
-        GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
     },
     gum::{self, FoundExportCallback},
     kernel,
 };
+#[cfg(target_arch = "x86")]
+use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT};
 use alloc::format;
 use core::ptr;
 
@@ -155,6 +155,7 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
         details.flags = 0;
         details.id = thread.id as GumThreadId;
 
+        #[cfg(target_arch = "x86")]
         if let Some(state) = thread.cpu_state {
             details.flags = GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
             details.cpu_context = GumCpuContext {

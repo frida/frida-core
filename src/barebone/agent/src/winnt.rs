@@ -4,7 +4,7 @@
 
 use alloc::boxed::Box;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::kernel::{ThreadEntry, ThreadInfo};
 
@@ -21,8 +21,8 @@ pub fn log(msg: &str) {
     }
 }
 
-pub fn log_hex(value: u32) {
-    let mut shift = 32;
+pub fn log_hex(value: usize) {
+    let mut shift = usize::BITS;
     while shift != 0 {
         shift -= 4;
         let digit = ((value >> shift) & 0xf) as u8;
@@ -41,7 +41,7 @@ fn write_debug_byte(byte: u8) {
 pub fn panic(msg: &str) -> ! {
     log(msg);
     unsafe {
-        (_KeBugCheckEx)(MANUALLY_INITIATED_CRASH, msg.as_ptr() as u32, 0, 0, 0);
+        (_KeBugCheckEx)(MANUALLY_INITIATED_CRASH, msg.as_ptr() as usize, 0, 0, 0);
     }
     loop {}
 }
@@ -49,7 +49,7 @@ pub fn panic(msg: &str) -> ! {
 const MANUALLY_INITIATED_CRASH: u32 = 0xe2;
 
 pub fn alloc(size: usize) -> *mut u8 {
-    unsafe { (_ExAllocatePoolWithTag)(NON_PAGED_POOL, size as u32, POOL_TAG) }
+    unsafe { (_ExAllocatePoolWithTag)(NON_PAGED_POOL, size, POOL_TAG) }
 }
 
 pub fn free(ptr: *mut u8, _size: usize) {
@@ -101,7 +101,17 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 
 // The kernel gives a system thread a stack of a few pages, and you cannot increase it. The
 // script runtime needs more space, thus the body runs on a different stack.
+#[cfg(target_arch = "x86")]
 unsafe extern "stdcall" fn thread_start(context: *mut c_void) {
+    unsafe { start_on_own_stack(context) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn thread_start(context: *mut c_void) {
+    unsafe { start_on_own_stack(context) }
+}
+
+unsafe fn start_on_own_stack(context: *mut c_void) {
     let stack = alloc(THREAD_STACK_SIZE);
     unsafe {
         frida_winnt_run_on_stack(stack.add(THREAD_STACK_SIZE), run_agent, context);
@@ -160,7 +170,7 @@ fn event_for(token: *const u8) -> *mut c_void {
     unsafe {
         (_KeInitializeEvent)(created, SYNCHRONIZATION_EVENT, 0);
     }
-    match EVENTS[slot].compare_exchange(0, created as u32, Ordering::AcqRel, Ordering::Acquire) {
+    match EVENTS[slot].compare_exchange(0, created as usize, Ordering::AcqRel, Ordering::Acquire) {
         Ok(_) => created,
         Err(raced) => {
             free(created as *mut u8, EVENT_SIZE);
@@ -170,7 +180,7 @@ fn event_for(token: *const u8) -> *mut c_void {
 }
 
 const NUM_EVENTS: usize = 64;
-static EVENTS: [AtomicU32; NUM_EVENTS] = [const { AtomicU32::new(0) }; NUM_EVENTS];
+static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
 const EVENT_SIZE: usize = 0x10;
 const SYNCHRONIZATION_EVENT: u32 = 1;
@@ -206,7 +216,10 @@ fn read_system_time(offset: usize) -> i64 {
     }
 }
 
+#[cfg(target_arch = "x86")]
 const SHARED_DATA: usize = 0xffdf_0000;
+#[cfg(target_arch = "x86_64")]
+const SHARED_DATA: usize = 0xffff_f780_0000_0000;
 const INTERRUPT_TIME_OFFSET: usize = 0x08;
 const SYSTEM_TIME_OFFSET: usize = 0x14;
 const UNIX_EPOCH_MICROS: i64 = 11_644_473_600_000_000;
@@ -215,178 +228,25 @@ pub fn current_thread_id() -> u64 {
     unsafe { (_PsGetCurrentThreadId)() as u64 }
 }
 
-// Windows keeps the page tables mapped into themselves, so a page's entry is at
-// a fixed address derived from the page itself, and no kernel export is needed.
-pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
-    let first_page = (address / PAGE_SIZE as u64) as usize;
-    let pages = (size + (address as usize & (PAGE_SIZE as usize - 1))).div_ceil(PAGE_SIZE as usize);
+pub use crate::winnt_paging::{enumerate_ranges, protect, protection_at};
 
-    for page in first_page..first_page + pages {
-        if !maps_small_page(page * PAGE_SIZE as usize) {
-            continue;
-        }
-
-        if pae_enabled() {
-            let entry = (PTE_BASE + page * 8) as *mut u64;
-            let mut value = unsafe { entry.read_volatile() };
-            value = apply_protection(value, gum_prot as u64, PAGE_WRITEABLE as u64, PAGE_NO_EXECUTE);
-            unsafe { entry.write_volatile(value) };
-        } else {
-            let entry = (PTE_BASE + page * 4) as *mut u32;
-            let mut value = unsafe { entry.read_volatile() };
-            value = apply_protection(value as u64, gum_prot as u64, PAGE_WRITEABLE as u64, 0) as u32;
-            unsafe { entry.write_volatile(value) };
-        }
-
-        invalidate_page(page * PAGE_SIZE as usize);
-    }
-
-    true
-}
-
-// The kernel maps its pool with large pages, which have no page table, so the entry the self-map
-// would point at is not there to change. Such a mapping is writable and executable already, which
-// is all that is ever wanted of it here.
-fn maps_small_page(address: usize) -> bool {
-    unsafe {
-        if pae_enabled() {
-            let pde = ((PAE_PDE_BASE + (address >> 21) * 8) as *const u64).read_volatile();
-            (pde & PAGE_PRESENT as u64) != 0 && (pde & PAGE_LARGE as u64) == 0
-        } else {
-            let pde = ((PDE_BASE + (address >> 22) * 4) as *const u32).read_volatile();
-            (pde & PAGE_PRESENT) != 0 && (pde & PAGE_LARGE) == 0
-        }
-    }
-}
-
-// Walk the page tables the kernel maps into itself, coalescing neighbouring pages that grant
-// the same thing. Only the half above the split is worth reporting: the other one belongs to
-// whichever process happens to be current, which is nobody in particular from in here.
-pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
-    let page_size = PAGE_SIZE as usize;
-    let mut base = 0usize;
-    let mut size = 0usize;
-    let mut protection = 0u32;
-
-    let mut address = KERNEL_SPACE_START;
-    while address != 0 {
-        let here = protection_at(address);
-
-        if here != protection || base + size != address {
-            if protection != 0 {
-                found(base as u64, size as u64, protection);
-            }
-            base = address;
-            size = 0;
-            protection = here;
-        }
-        size += page_size;
-
-        address = address.wrapping_add(page_size);
-    }
-
-    if protection != 0 {
-        found(base as u64, size as u64, protection);
-    }
-}
-
-pub fn protection_at(address: usize) -> u32 {
-    unsafe {
-        if pae_enabled() {
-            let pde = ((PAE_PDE_BASE + (address >> 21) * 8) as *const u64).read_volatile();
-            if (pde & PAGE_PRESENT as u64) == 0 {
-                return 0;
-            }
-            if (pde & PAGE_LARGE as u64) != 0 {
-                return protection_of(pde, PAGE_NO_EXECUTE);
-            }
-            let pte = ((PTE_BASE + (address >> 12) * 8) as *const u64).read_volatile();
-            if (pte & PAGE_PRESENT as u64) == 0 {
-                return 0;
-            }
-            protection_of(pte, PAGE_NO_EXECUTE)
-        } else {
-            let pde = ((PDE_BASE + (address >> 22) * 4) as *const u32).read_volatile();
-            if (pde & PAGE_PRESENT) == 0 {
-                return 0;
-            }
-            if (pde & PAGE_LARGE) != 0 {
-                return protection_of(pde as u64, 0);
-            }
-            let pte = ((PTE_BASE + (address >> 12) * 4) as *const u32).read_volatile();
-            if (pte & PAGE_PRESENT) == 0 {
-                return 0;
-            }
-            protection_of(pte as u64, 0)
-        }
-    }
-}
-
-fn protection_of(entry: u64, no_execute: u64) -> u32 {
-    let mut prot = GUM_PAGE_READ as u32;
-    if (entry & PAGE_WRITEABLE as u64) != 0 {
-        prot |= GUM_PAGE_WRITE as u32;
-    }
-    if no_execute == 0 || (entry & no_execute) == 0 {
-        prot |= GUM_PAGE_EXECUTE as u32;
-    }
-    prot
-}
-
-const KERNEL_SPACE_START: usize = 0x8000_0000;
-const GUM_PAGE_READ: u64 = 0x1;
-
-fn apply_protection(entry: u64, gum_prot: u64, writeable: u64, no_execute: u64) -> u64 {
-    let mut value = entry;
-
-    if (gum_prot & GUM_PAGE_WRITE) != 0 {
-        value |= writeable;
-    } else {
-        value &= !writeable;
-    }
-
-    if no_execute != 0 {
-        if (gum_prot & GUM_PAGE_EXECUTE) != 0 {
-            value &= !no_execute;
-        } else {
-            value |= no_execute;
-        }
-    }
-
-    value
-}
-
-fn pae_enabled() -> bool {
-    let cr4: u32;
-    unsafe { core::arch::asm!("mov {0:e}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags)) };
-    (cr4 & CR4_PAE) != 0
-}
-
-fn invalidate_page(address: usize) {
-    unsafe { core::arch::asm!("invlpg [{0:e}]", in(reg) address, options(nostack, preserves_flags)) };
-}
-
-const PAGE_SIZE: u32 = 4096;
-const PTE_BASE: usize = 0xc000_0000;
-const PDE_BASE: usize = 0xc030_0000;
-const PAE_PDE_BASE: usize = 0xc060_0000;
-const PAGE_PRESENT: u32 = 0x1;
-const PAGE_LARGE: u32 = 0x80;
-const PAGE_WRITEABLE: u32 = 0x2;
-const PAGE_NO_EXECUTE: u64 = 1 << 63;
-const CR4_PAE: u32 = 1 << 5;
-const GUM_PAGE_WRITE: u64 = 0x2;
-const GUM_PAGE_EXECUTE: u64 = 0x4;
-
+// A 32-bit kernel receives the physical address as two halves. A 64-bit kernel receives it
+// as one value.
+#[cfg(target_arch = "x86")]
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe {
         (_MmMapIoSpace)(
             phys_addr as u32,
             (phys_addr >> 32) as u32,
-            size as u32,
+            size as usize,
             MM_NON_CACHED,
         )
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
+    unsafe { (_MmMapIoSpace)(phys_addr as i64, size as usize, MM_NON_CACHED) }
 }
 
 pub fn virt_to_phys(vaddr: u64) -> u64 {
@@ -407,8 +267,8 @@ pub fn install_interrupt_handler(
         HW_INT_REFCON = refcon;
     }
 
-    let mut irql: u32 = 0;
-    let mut affinity: u32 = 0;
+    let mut irql: u8 = 0;
+    let mut affinity: usize = 0;
     let vector = unsafe {
         (_HalGetInterruptVector)(PCI_BUS, 0, irq, irq, &mut irql, &mut affinity)
     };
@@ -431,7 +291,17 @@ pub fn install_interrupt_handler(
     if status < 0 { -1 } else { 0 }
 }
 
-unsafe extern "stdcall" fn on_hw_int(_interrupt: *mut c_void, _context: *mut c_void) -> u8 {
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void) -> u8 {
+    unsafe { serve_hw_int(interrupt, context) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void) -> u8 {
+    unsafe { serve_hw_int(interrupt, context) }
+}
+
+unsafe fn serve_hw_int(_interrupt: *mut c_void, _context: *mut c_void) -> u8 {
     unsafe {
         if let Some(handler) = HW_INT_HANDLER {
             handler(HW_INT_TARGET, HW_INT_REFCON, core::ptr::null_mut(), 0);
@@ -462,35 +332,62 @@ pub fn install_fault_reporter() {
     }
 }
 
-unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> u32 {
+#[cfg(target_arch = "x86")]
+unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> usize {
     let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
 
-    let previous = unsafe {
-        ((gate.add(3).read() as u32) << 16) | (gate.read() as u32)
-    };
-
-    let handler = thunk as usize;
     unsafe {
+        let previous = ((gate.add(3).read() as usize) << 16) | (gate.read() as usize);
+
+        let handler = thunk as usize;
         gate.write(handler as u16);
         gate.add(3).write((handler >> 16) as u16);
-    }
 
-    previous
+        previous
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> usize {
+    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
+
+    unsafe {
+        let high = gate.add(4) as *mut u32;
+        let previous = ((high.read() as usize) << 32)
+            | ((gate.add(3).read() as usize) << 16)
+            | (gate.read() as usize);
+
+        let handler = thunk as usize;
+        gate.write(handler as u16);
+        gate.add(3).write((handler >> 16) as u16);
+        high.write((handler >> 32) as u32);
+
+        previous
+    }
 }
 
 fn descriptor_table_base() -> usize {
-    let mut descriptor = [0u16; 5];
-    unsafe { core::arch::asm!("sidt [{0:e}]", in(reg) descriptor.as_mut_ptr(), options(nostack, preserves_flags)) };
-    ((descriptor[2] as usize) << 16) | (descriptor[1] as usize)
+    let mut descriptor = [0u8; DESCRIPTOR_SIZE];
+    unsafe {
+        core::arch::asm!("sidt [{0}]", in(reg) descriptor.as_mut_ptr(),
+            options(nostack, preserves_flags));
+        descriptor.as_ptr().add(2).cast::<usize>().read_unaligned()
+    }
 }
 
+#[cfg(target_arch = "x86")]
 const GATE_SIZE: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const GATE_SIZE: usize = 16;
+
+const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 
 // Report only the faults from our own code. Send the other faults, primarily the paging
 // faults of the kernel, to the handler that was there before.
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
-extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> u32 {
-    let eip_slot = fault_frame_eip_slot(fault);
+extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
+    let eip_slot = fault_frame_pc_slot(fault);
     let eip = unsafe { frame.add(eip_slot).read() };
     if !is_ours(eip as u64) {
         return unsafe { FAULT_CHAIN[fault as usize] };
@@ -511,15 +408,7 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> u32 {
         }
     };
 
-    let handled = unsafe {
-        crate::bindings::gum_barebone_handle_exception(
-            exception_type_for(fault),
-            eip as *mut c_void,
-            faulting_address() as *mut c_void,
-            &mut cpu_context,
-        )
-    };
-    if handled == 0 {
+    if !handle(fault, eip as u64, &mut cpu_context) {
         return unsafe { FAULT_CHAIN[fault as usize] };
     }
 
@@ -543,8 +432,87 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> u32 {
     0
 }
 
+#[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 static mut frida_winnt_resume: [u32; 10] = [0; 10];
+
+// A long-mode frame always contains the stack pointer. Thus write the values from Gum into
+// the frame.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
+    let rip_slot = fault_frame_pc_slot(fault);
+    let rip = unsafe { frame.add(rip_slot).read() };
+    if !is_ours(rip) {
+        return unsafe { FAULT_CHAIN[fault as usize] };
+    }
+
+    let mut cpu_context = unsafe {
+        crate::bindings::_GumX64CpuContext {
+            rip,
+            r15: frame.read(),
+            r14: frame.add(1).read(),
+            r13: frame.add(2).read(),
+            r12: frame.add(3).read(),
+            r11: frame.add(4).read(),
+            r10: frame.add(5).read(),
+            r9: frame.add(6).read(),
+            r8: frame.add(7).read(),
+            rdi: frame.add(8).read(),
+            rsi: frame.add(9).read(),
+            rbp: frame.add(10).read(),
+            rsp: frame.add(rip_slot + STACK_POINTER_IN_FRAME).read(),
+            rbx: frame.add(12).read(),
+            rdx: frame.add(13).read(),
+            rcx: frame.add(14).read(),
+            rax: frame.add(15).read(),
+            xmm: core::ptr::null_mut(),
+        }
+    };
+
+    if !handle(fault, rip, &mut cpu_context) {
+        return unsafe { FAULT_CHAIN[fault as usize] };
+    }
+
+    unsafe {
+        frame.add(rip_slot).write(cpu_context.rip);
+        frame.add(rip_slot + STACK_POINTER_IN_FRAME).write(cpu_context.rsp);
+
+        frame.write(cpu_context.r15);
+        frame.add(1).write(cpu_context.r14);
+        frame.add(2).write(cpu_context.r13);
+        frame.add(3).write(cpu_context.r12);
+        frame.add(4).write(cpu_context.r11);
+        frame.add(5).write(cpu_context.r10);
+        frame.add(6).write(cpu_context.r9);
+        frame.add(7).write(cpu_context.r8);
+        frame.add(8).write(cpu_context.rdi);
+        frame.add(9).write(cpu_context.rsi);
+        frame.add(10).write(cpu_context.rbp);
+        frame.add(12).write(cpu_context.rbx);
+        frame.add(13).write(cpu_context.rdx);
+        frame.add(14).write(cpu_context.rcx);
+        frame.add(15).write(cpu_context.rax);
+    }
+
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
+const STACK_POINTER_IN_FRAME: usize = 3;
+
+fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
+    let handled = unsafe {
+        crate::bindings::gum_barebone_handle_exception(
+            exception_type_for(fault),
+            pc as *mut c_void,
+            faulting_address() as *mut c_void,
+            cpu_context,
+        )
+    };
+
+    handled != 0
+}
 
 fn is_ours(address: u64) -> bool {
     let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
@@ -554,8 +522,7 @@ fn is_ours(address: u64) -> bool {
     crate::gum::is_agent_slab_if_idle(address).unwrap_or(false)
 }
 
-fn fault_frame_eip_slot(fault: u32) -> usize {
-    const PUSHED_REGISTERS: usize = 8;
+fn fault_frame_pc_slot(fault: u32) -> usize {
     const VECTOR: usize = 1;
 
     let error_code = match fault {
@@ -566,6 +533,11 @@ fn fault_frame_eip_slot(fault: u32) -> usize {
     PUSHED_REGISTERS + VECTOR + error_code
 }
 
+#[cfg(target_arch = "x86")]
+const PUSHED_REGISTERS: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const PUSHED_REGISTERS: usize = 16;
+
 fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
     use crate::bindings::*;
 
@@ -575,16 +547,19 @@ fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
     }
 }
 
-fn faulting_address() -> u32 {
-    let address: u32;
-    unsafe { core::arch::asm!("mov {0:e}, cr2", out(reg) address, options(nomem, nostack, preserves_flags)) };
+fn faulting_address() -> usize {
+    let address: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, cr2", out(reg) address,
+            options(nomem, nostack, preserves_flags));
+    }
     address
 }
 
-static mut FAULT_CHAIN: [u32; 32] = [0; 32];
+static mut FAULT_CHAIN: [usize; 32] = [0; 32];
 
 #[unsafe(no_mangle)]
-static mut frida_winnt_fault_chain: u32 = 0;
+static mut frida_winnt_fault_chain: usize = 0;
 
 const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;
@@ -598,13 +573,13 @@ pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
 
     enumerate_processes(&mut |process| unsafe {
         let head = process.handle as usize + layout.head;
-        let mut entry = (head as *const u32).read_volatile() as usize;
+        let mut entry = (head as *const usize).read_volatile();
         while entry != head && entry != 0 {
             found(ThreadInfo {
                 id: (_PsGetThreadId)((entry - layout.entry) as *mut c_void),
                 cpu_state: None,
             });
-            entry = (entry as *const u32).read_volatile() as usize;
+            entry = (entry as *const usize).read_volatile();
         }
     });
 }
@@ -620,18 +595,18 @@ fn thread_layout() -> Option<ThreadLayout> {
         let me = (_PsGetCurrentThread)() as usize;
         let process = (_PsGetThreadProcess)(me as *mut c_void) as usize;
 
-        for entry in (MIN_THREAD_ENTRY_OFFSET..MAX_OBJECT_SIZE).step_by(4) {
-            let mut node = try_read_u32(me + entry)? as usize;
+        for entry in (MIN_THREAD_ENTRY_OFFSET..MAX_OBJECT_SIZE).step_by(POINTER_SIZE) {
+            let mut node = try_read_pointer(me + entry)?;
             for _ in 0..MAX_THREADS_PER_PROCESS {
                 if node >= process && node < process + MAX_OBJECT_SIZE {
                     let layout = ThreadLayout { head: node - process, entry };
                     THREAD_LAYOUT = Some(layout);
                     return Some(layout);
                 }
-                let Some(next) = try_read_u32(node) else {
+                let Some(next) = try_read_pointer(node) else {
                     break;
                 };
-                node = next as usize;
+                node = next;
             }
         }
 
@@ -648,24 +623,35 @@ struct ThreadLayout {
 static mut THREAD_LAYOUT: Option<ThreadLayout> = None;
 
 // This walk uses calculated addresses, thus read through Gum, which recovers from a fault.
-unsafe fn try_read_u32(address: usize) -> Option<u32> {
+unsafe fn try_read_pointer(address: usize) -> Option<usize> {
     unsafe {
         let mut read: crate::bindings::gsize = 0;
-        let data = crate::bindings::gum_memory_read(address as *const c_void, 4, &mut read);
+        let data = crate::bindings::gum_memory_read(address as *const c_void, POINTER_SIZE as crate::bindings::gsize,
+            &mut read);
         if data.is_null() {
             return None;
         }
 
-        let value = (data as *const u32).read_unaligned();
+        let value = (data as *const usize).read_unaligned();
         crate::bindings::g_free(data as *mut c_void);
 
         Some(value)
     }
 }
 
+const POINTER_SIZE: usize = core::mem::size_of::<usize>();
+
+#[cfg(target_arch = "x86")]
 const MIN_THREAD_ENTRY_OFFSET: usize = 0x100;
+#[cfg(target_arch = "x86")]
 const MAX_OBJECT_SIZE: usize = 0x300;
-const MAX_THREADS_PER_PROCESS: usize = 4096;
+
+#[cfg(target_arch = "x86_64")]
+const MIN_THREAD_ENTRY_OFFSET: usize = 0x200;
+#[cfg(target_arch = "x86_64")]
+const MAX_OBJECT_SIZE: usize = 0x700;
+
+const MAX_THREADS_PER_PROCESS: usize = 1024;
 
 pub struct ProcessInfo {
     pub id: u32,
@@ -677,13 +663,13 @@ pub struct ProcessInfo {
 // Find only the head of the list. Read the other data with the accessors that the kernel
 // exports, thus the code assumes no layout.
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
-    let head = unsafe { _PsActiveProcessHead } as usize;
-    let system = unsafe { (_PsInitialSystemProcess as usize as *const u32).read_volatile() } as usize;
+    let head = unsafe { _PsActiveProcessHead };
+    let system = unsafe { (_PsInitialSystemProcess as *const usize).read_volatile() };
     if head == 0 || system == 0 {
         return;
     }
 
-    let first = unsafe { (head as *const u32).read_volatile() } as usize;
+    let first = unsafe { (head as *const usize).read_volatile() };
     let links = first.wrapping_sub(system);
 
     let mut entry = first;
@@ -698,7 +684,7 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
                 handle: process,
             });
         }
-        entry = unsafe { (entry as *const u32).read_volatile() } as usize;
+        entry = unsafe { (entry as *const usize).read_volatile() };
     }
 }
 
@@ -711,12 +697,12 @@ unsafe fn describe(process: *mut c_void) -> (*const u8, *const u8) {
         path[0] = 0;
         command_line[0] = 0;
 
-        let mut apc_state = [0u32; APC_STATE_SIZE];
+        let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
 
         let peb = (_PsGetProcessPeb)(process) as usize;
         if peb != 0 {
-            let parameters = ((peb + PEB_PARAMETERS_OFFSET) as *const u32).read_unaligned() as usize;
+            let parameters = ((peb + PEB_PARAMETERS_OFFSET) as *const usize).read_unaligned();
             read_user_string(parameters + PARAMETERS_IMAGE_PATH_OFFSET, path);
             read_user_string(parameters + PARAMETERS_COMMAND_LINE_OFFSET, command_line);
         }
@@ -734,7 +720,7 @@ unsafe fn read_user_string(address: usize, out: &mut [u8]) {
     unsafe {
         let string = address as *const u8;
         let length = (string as *const u16).read_unaligned() as usize;
-        let buffer = (string.add(UNICODE_STRING_BUFFER_OFFSET) as *const u32).read_unaligned() as usize;
+        let buffer = (string.add(UNICODE_STRING_BUFFER_OFFSET) as *const usize).read_unaligned();
         if buffer == 0 {
             return;
         }
@@ -771,11 +757,23 @@ fn encode_utf8(c: u16, out: &mut [u8]) -> usize {
 static mut PATH: [u8; MAX_PATH_SIZE] = [0; MAX_PATH_SIZE];
 static mut COMMAND_LINE: [u8; MAX_COMMAND_LINE_SIZE] = [0; MAX_COMMAND_LINE_SIZE];
 
-const APC_STATE_SIZE: usize = 8;
+const APC_STATE_WORDS: usize = 8;
+
+#[cfg(target_arch = "x86")]
 const PEB_PARAMETERS_OFFSET: usize = 0x10;
+#[cfg(target_arch = "x86")]
 const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x38;
+#[cfg(target_arch = "x86")]
 const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x40;
-const UNICODE_STRING_BUFFER_OFFSET: usize = 0x04;
+
+#[cfg(target_arch = "x86_64")]
+const PEB_PARAMETERS_OFFSET: usize = 0x20;
+#[cfg(target_arch = "x86_64")]
+const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x60;
+#[cfg(target_arch = "x86_64")]
+const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x70;
+
+const UNICODE_STRING_BUFFER_OFFSET: usize = POINTER_SIZE;
 const MAX_PATH_SIZE: usize = 1024;
 const MAX_COMMAND_LINE_SIZE: usize = 2048;
 
@@ -795,12 +793,90 @@ static mut IMAGE_NAME: [u8; IMAGE_NAME_SIZE + 1] = [0; IMAGE_NAME_SIZE + 1];
 const IMAGE_NAME_SIZE: usize = 16;
 
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
-    let Some(file) = File::open(path) else {
-        return;
+    let mut read = || {
+        let Some(file) = File::open(path) else {
+            return;
+        };
+
+        crate::icons::enumerate(&file, found);
     };
 
-    crate::icons::enumerate(&file, found);
+    on_kernel_stack(&mut read);
 }
+
+// The system-service dispatcher accepts only the stack that the kernel gave to the thread.
+// The agent uses a larger stack for the script runtime. Thus a different thread, which keeps
+// its kernel stack, makes these calls while the caller waits.
+fn on_kernel_stack(work: &mut dyn FnMut()) {
+    unsafe {
+        if READER_RUNNING == 0 {
+            READER_RUNNING = 1;
+            spawn_reader();
+        }
+
+        WORK = Some(core::mem::transmute::<&mut dyn FnMut(), *mut (dyn FnMut() + 'static)>(work));
+        wake(request_token());
+
+        while core::ptr::addr_of!(WORK).read().is_some() {
+            wait(done_token(), None, &mut || core::ptr::addr_of!(WORK).read().is_none());
+        }
+    }
+}
+
+fn spawn_reader() {
+    let mut handle: *mut c_void = core::ptr::null_mut();
+    unsafe {
+        (_PsCreateSystemThread)(
+            &mut handle,
+            THREAD_ALL_ACCESS,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            reader_start,
+            core::ptr::null_mut(),
+        );
+    }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn reader_start(context: *mut c_void) {
+    unsafe { read_for_others(context) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn reader_start(context: *mut c_void) {
+    unsafe { read_for_others(context) }
+}
+
+unsafe fn read_for_others(_context: *mut c_void) {
+    loop {
+        wait(request_token(), None, &mut || unsafe {
+            core::ptr::addr_of!(WORK).read().is_some()
+        });
+
+        let pending = unsafe { core::ptr::addr_of!(WORK).read() };
+        let Some(work) = pending else {
+            continue;
+        };
+
+        unsafe {
+            (*work)();
+            WORK = None;
+        }
+        wake(done_token());
+    }
+}
+
+fn request_token() -> *const u8 {
+    core::ptr::addr_of!(READER_RUNNING)
+}
+
+fn done_token() -> *const u8 {
+    core::ptr::addr_of!(WORK) as *const u8
+}
+
+static mut READER_RUNNING: u8 = 0;
+static mut WORK: Option<*mut dyn FnMut()> = None;
 
 struct File {
     handle: *mut c_void,
@@ -811,7 +887,7 @@ impl File {
     fn open(path: *const u8) -> Option<File> {
         let name = unsafe { &mut *core::ptr::addr_of_mut!(OBJECT_NAME) };
         let mut length = 0;
-        for c in DEVICE_PREFIX.iter().copied().chain(ascii_of(path)) {
+        for c in object_directory_of(path).iter().copied().chain(ascii_of(path)) {
             if length == name.len() {
                 return None;
             }
@@ -834,7 +910,7 @@ impl File {
         };
 
         let mut handle: *mut c_void = core::ptr::null_mut();
-        let mut status_block = [0u32; 2];
+        let mut status_block = [0usize; 2];
         let status = unsafe {
             (_ZwCreateFile)(
                 &mut handle,
@@ -860,7 +936,7 @@ impl File {
 
 impl crate::icons::Image for File {
     fn read_at(&self, position: u32, buffer: &mut [u8]) -> u32 {
-        let mut status_block = [0u32; 2];
+        let mut status_block = [0usize; 2];
         let offset = position as i64;
         let status = unsafe {
             (_ZwReadFile)(
@@ -879,7 +955,7 @@ impl crate::icons::Image for File {
             return 0;
         }
 
-        status_block[1]
+        status_block[1] as u32
     }
 }
 
@@ -889,6 +965,16 @@ impl Drop for File {
             (_ZwClose)(self.handle);
         }
     }
+}
+
+// A path with a drive letter goes through the directory of symbolic links. A path that starts
+// at the root of the object manager needs no change.
+fn object_directory_of(path: *const u8) -> &'static [u8] {
+    if unsafe { path.read() } == b'\\' {
+        return &[];
+    }
+
+    &DEVICE_PREFIX
 }
 
 fn ascii_of(text: *const u8) -> impl Iterator<Item = u8> {
@@ -932,10 +1018,10 @@ pub fn get_kernel_base() -> u64 {
 }
 
 pub fn set_kernel_base(base: u64) {
-    KERNEL_BASE.store(base as u32, Ordering::Relaxed);
+    KERNEL_BASE.store(base as usize, Ordering::Relaxed);
 }
 
-static KERNEL_BASE: AtomicU32 = AtomicU32::new(0);
+static KERNEL_BASE: AtomicUsize = AtomicUsize::new(0);
 
 unsafe extern "C" {
     fn frida_winnt_run_on_stack(stack_top: *mut u8, entry: unsafe extern "C" fn(*mut c_void),
@@ -947,6 +1033,7 @@ unsafe extern "C" {
 
 // To give a fault back to the kernel, remove only the vector from the frame. Thus the error
 // code stays where the previous handler reads it.
+#[cfg(target_arch = "x86")]
 core::arch::global_asm!(
     r#"
 .intel_syntax noprefix
@@ -998,45 +1085,169 @@ FAULT_THUNK frida_winnt_fault_thunk_pf, 14
 "#
 );
 
-unsafe extern "C" {
-    static _ExAllocatePoolWithTag: unsafe extern "stdcall" fn(u32, u32, u32) -> *mut u8;
-    static _ExFreePoolWithTag: unsafe extern "stdcall" fn(*mut u8, u32);
-    static _PsCreateSystemThread: unsafe extern "stdcall" fn(
+// The code pushes the registers in the order that Gum uses, thus the handler reads them where
+// they are. A long-mode iret loads the stack pointer from the frame, thus the handler changes
+// the frame.
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(
+    r#"
+.intel_syntax noprefix
+
+.global frida_winnt_run_on_stack
+frida_winnt_run_on_stack:
+    and rdi, -16
+    mov rsp, rdi
+    mov rdi, rdx
+    call rsi
+1:
+    jmp 1b
+
+.macro PUSH_GPRS
+    push rax
+    push rcx
+    push rdx
+    push rbx
+    push rsp
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+.endm
+
+.macro POP_GPRS
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    add rsp, 8
+    pop rbx
+    pop rdx
+    pop rcx
+    pop rax
+.endm
+
+// To chain, remove only the vector, thus the error code stays where the previous handler
+// reads it. The return must also step over that code, because iret reads the frame from the
+// position that the processor used.
+.macro FAULT_THUNK name, vector, error_code
+.global \name
+\name:
+    push \vector
+    PUSH_GPRS
+    mov rdi, \vector
+    mov rsi, rsp
+    mov rbx, rsp
+    and rsp, -16
+    call frida_winnt_on_fault
+    mov rsp, rbx
+    test rax, rax
+    jnz 1f
+    POP_GPRS
+    add rsp, 8 + \error_code
+    iretq
+1:
+    mov qword ptr [rip + frida_winnt_fault_chain], rax
+    POP_GPRS
+    add rsp, 8
+    jmp qword ptr [rip + frida_winnt_fault_chain]
+.endm
+
+FAULT_THUNK frida_winnt_fault_thunk_ud, 6, 0
+FAULT_THUNK frida_winnt_fault_thunk_gp, 13, 8
+FAULT_THUNK frida_winnt_fault_thunk_pf, 14, 8
+"#
+);
+
+#[cfg(target_arch = "x86")]
+macro_rules! kernel_abi {
+    ($($declaration:tt)*) => {
+        unsafe extern "C" {
+            $($declaration)*
+        }
+
+        type ThreadStartRoutine = unsafe extern "stdcall" fn(*mut c_void);
+        type ServiceRoutine = unsafe extern "stdcall" fn(*mut c_void, *mut c_void) -> u8;
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+macro_rules! kernel_abi {
+    ($($declaration:tt)*) => {
+        unsafe extern "C" {
+            $($declaration)*
+        }
+
+        type ThreadStartRoutine = unsafe extern "win64" fn(*mut c_void);
+        type ServiceRoutine = unsafe extern "win64" fn(*mut c_void, *mut c_void) -> u8;
+    };
+}
+
+#[cfg(target_arch = "x86")]
+macro_rules! kernel_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "stdcall" fn($($argument),*) -> $result
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+macro_rules! kernel_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "win64" fn($($argument),*) -> $result
+    };
+}
+
+kernel_abi! {
+    static _ExAllocatePoolWithTag: kernel_fn!(u32, usize, u32 => *mut u8);
+    static _ExFreePoolWithTag: kernel_fn!(*mut u8, u32);
+    static _PsCreateSystemThread: kernel_fn!(
         *mut *mut c_void,
         u32,
         *mut c_void,
         *mut c_void,
         *mut c_void,
-        unsafe extern "stdcall" fn(*mut c_void),
+        ThreadStartRoutine,
         *mut c_void,
-    ) -> i32;
-    static _PsTerminateSystemThread: unsafe extern "stdcall" fn(i32) -> i32;
-    static _PsGetCurrentThreadId: unsafe extern "stdcall" fn() -> u32;
-    static _KeInitializeEvent: unsafe extern "stdcall" fn(*mut c_void, u32, u8);
-    static _KeWaitForSingleObject:
-        unsafe extern "stdcall" fn(*mut c_void, u32, u32, u8, *const i64) -> i32;
-    static _KeSetEvent: unsafe extern "stdcall" fn(*mut c_void, u32, u8) -> i32;
-    static _ZwYieldExecution: unsafe extern "stdcall" fn() -> i32;
-    static _KeBugCheckEx: unsafe extern "stdcall" fn(u32, u32, u32, u32, u32) -> !;
-    static _MmMapIoSpace: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> *mut c_void;
-    static _MmGetPhysicalAddress: unsafe extern "stdcall" fn(*const c_void) -> u64;
-    static _HalGetInterruptVector:
-        unsafe extern "stdcall" fn(u32, u32, u32, u32, *mut u32, *mut u32) -> u32;
-    static _PsActiveProcessHead: u32;
-    static _PsInitialSystemProcess: u32;
-    static _PsGetProcessId: unsafe extern "stdcall" fn(*mut c_void) -> u32;
-    static _PsGetProcessImageFileName: unsafe extern "stdcall" fn(*mut c_void) -> *const u8;
-    static _PsGetProcessPeb: unsafe extern "stdcall" fn(*mut c_void) -> *mut c_void;
-    static _PsGetCurrentThread: unsafe extern "stdcall" fn() -> *mut c_void;
-    static _PsGetThreadProcess: unsafe extern "stdcall" fn(*mut c_void) -> *mut c_void;
-    static _PsGetThreadId: unsafe extern "stdcall" fn(*mut c_void) -> u32;
-    static _KeStackAttachProcess: unsafe extern "stdcall" fn(*mut c_void, *mut u8);
-    static _KeUnstackDetachProcess: unsafe extern "stdcall" fn(*mut u8);
-    static _ZwCreateFile: unsafe extern "stdcall" fn(
+        => i32);
+    static _PsTerminateSystemThread: kernel_fn!(i32 => i32);
+    static _PsGetCurrentThreadId: kernel_fn!( => u32);
+    static _KeInitializeEvent: kernel_fn!(*mut c_void, u32, u8);
+    static _KeWaitForSingleObject: kernel_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
+    static _KeSetEvent: kernel_fn!(*mut c_void, u32, u8 => i32);
+    static _ZwYieldExecution: kernel_fn!( => i32);
+    static _KeBugCheckEx: kernel_fn!(u32, usize, usize, usize, usize => !);
+    static _MmGetPhysicalAddress: kernel_fn!(*const c_void => u64);
+    static _HalGetInterruptVector: kernel_fn!(u32, u32, u32, u32, *mut u8, *mut usize => u32);
+    static _PsActiveProcessHead: usize;
+    static _PsInitialSystemProcess: usize;
+    static _PsGetProcessId: kernel_fn!(*mut c_void => u32);
+    static _PsGetProcessImageFileName: kernel_fn!(*mut c_void => *const u8);
+    static _PsGetProcessPeb: kernel_fn!(*mut c_void => *mut c_void);
+    static _PsGetCurrentThread: kernel_fn!( => *mut c_void);
+    static _PsGetThreadProcess: kernel_fn!(*mut c_void => *mut c_void);
+    static _PsGetThreadId: kernel_fn!(*mut c_void => u32);
+    static _KeStackAttachProcess: kernel_fn!(*mut c_void, *mut u8);
+    static _KeUnstackDetachProcess: kernel_fn!(*mut u8);
+    static _ZwCreateFile: kernel_fn!(
         *mut *mut c_void,
         u32,
         *const ObjectAttributes,
-        *mut u32,
+        *mut usize,
         *const i64,
         u32,
         u32,
@@ -1044,30 +1255,40 @@ unsafe extern "C" {
         u32,
         *const c_void,
         u32,
-    ) -> i32;
-    static _ZwReadFile: unsafe extern "stdcall" fn(
+        => i32);
+    static _ZwReadFile: kernel_fn!(
         *mut c_void,
         *mut c_void,
         *mut c_void,
         *mut c_void,
-        *mut u32,
+        *mut usize,
         *mut u8,
         u32,
         *const i64,
         *const u32,
-    ) -> i32;
-    static _ZwClose: unsafe extern "stdcall" fn(*mut c_void) -> i32;
-    static _IoConnectInterrupt: unsafe extern "stdcall" fn(
+        => i32);
+    static _ZwClose: kernel_fn!(*mut c_void => i32);
+    static _IoConnectInterrupt: kernel_fn!(
         *mut *mut c_void,
-        unsafe extern "stdcall" fn(*mut c_void, *mut c_void) -> u8,
+        ServiceRoutine,
         *mut c_void,
         *mut c_void,
         u32,
-        u32,
-        u32,
-        u32,
+        u8,
         u8,
         u32,
         u8,
-    ) -> i32;
+        usize,
+        u8,
+        => i32);
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    static _MmMapIoSpace: unsafe extern "stdcall" fn(u32, u32, usize, u32) -> *mut c_void;
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" {
+    static _MmMapIoSpace: unsafe extern "win64" fn(i64, usize, u32) -> *mut c_void;
 }

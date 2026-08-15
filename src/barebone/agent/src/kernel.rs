@@ -34,6 +34,12 @@ pub struct ThreadInfo {
     pub cpu_state: Option<CpuState>,
 }
 
+// Only a 32-bit thread's registers are recoverable from outside it; on 64-bit nothing
+// reports any, so there is no state to name.
+#[cfg(target_arch = "x86_64")]
+pub enum CpuState {}
+
+#[cfg(target_arch = "x86")]
 pub struct CpuState {
     pub eip: u32,
     pub edi: u32,

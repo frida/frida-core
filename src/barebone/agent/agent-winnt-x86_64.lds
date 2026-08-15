@@ -1,0 +1,70 @@
+SECTIONS {
+  /* The large code model gives every section an l-prefixed name of its own, so that
+     the compiler can reach it with a 64-bit displacement rather than assume 2GB. */
+  .text : {
+    *(.text.entrypoint)
+    *(.ltext.entrypoint)
+    *(.text*)
+    *(.ltext*)
+  }
+  .rodata : {
+    *(.rodata*)
+    *(.lrodata*)
+  }
+  .kernel_addrs : ALIGN(8) {
+    . = ALIGN(8);
+    _ExAllocatePoolWithTag = .; . += 8;
+    _ExFreePoolWithTag = .; . += 8;
+    _PsCreateSystemThread = .; . += 8;
+    _PsTerminateSystemThread = .; . += 8;
+    _PsGetCurrentThreadId = .; . += 8;
+    _KeInitializeEvent = .; . += 8;
+    _KeWaitForSingleObject = .; . += 8;
+    _KeSetEvent = .; . += 8;
+    _ZwYieldExecution = .; . += 8;
+    _KeBugCheckEx = .; . += 8;
+    _MmMapIoSpace = .; . += 8;
+    _MmGetPhysicalAddress = .; . += 8;
+    _HalGetInterruptVector = .; . += 8;
+    _IoConnectInterrupt = .; . += 8;
+    _PsActiveProcessHead = .; . += 8;
+    _PsInitialSystemProcess = .; . += 8;
+    _PsGetProcessId = .; . += 8;
+    _PsGetProcessImageFileName = .; . += 8;
+    _PsGetProcessPeb = .; . += 8;
+    _PsGetCurrentThread = .; . += 8;
+    _PsGetThreadProcess = .; . += 8;
+    _PsGetThreadId = .; . += 8;
+    _KeStackAttachProcess = .; . += 8;
+    _KeUnstackDetachProcess = .; . += 8;
+    _ZwCreateFile = .; . += 8;
+    _ZwReadFile = .; . += 8;
+    _ZwClose = .; . += 8;
+  }
+  .data.rel.ro : {
+    *(.data.rel.ro*)
+  }
+  .got : {
+    *(.got*)
+  }
+  .data : {
+    *(.data*)
+    *(.ldata*)
+  }
+  .bss : {
+    *(.bss*)
+    *(.lbss*)
+  }
+  . = ALIGN(8);
+  _heap_start = .;
+}
+
+VERSION {
+  {
+    global:
+      _start;
+
+    local:
+      *;
+  };
+}

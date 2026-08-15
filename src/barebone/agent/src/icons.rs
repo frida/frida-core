@@ -61,7 +61,7 @@ fn resource_directory(image: &dyn Image) -> Option<ResourceDirectory<'_>> {
     }
 
     let optional = headers + OPTIONAL_HEADER_OFFSET;
-    let directory_rva = read_u32(image, optional + RESOURCE_DIRECTORY_OFFSET);
+    let directory_rva = read_u32(image, optional + resource_directory_offset(image, optional));
     if directory_rva == 0 {
         return None;
     }
@@ -83,6 +83,16 @@ fn resource_directory(image: &dyn Image) -> Option<ResourceDirectory<'_>> {
     }
 
     None
+}
+
+// The magic value gives the form of the optional header, and the two forms have different
+// widths before the data directories.
+fn resource_directory_offset(image: &dyn Image, optional: u32) -> u32 {
+    if read_u16(image, optional) == PE32_MAGIC {
+        return PE32_RESOURCE_DIRECTORY_OFFSET;
+    }
+
+    PE32PLUS_RESOURCE_DIRECTORY_OFFSET
 }
 
 struct ResourceDirectory<'i> {
@@ -189,7 +199,9 @@ const PE_SIGNATURE: u32 = 0x00004550;
 const SECTION_COUNT_OFFSET: u32 = 0x06;
 const OPTIONAL_HEADER_SIZE_OFFSET: u32 = 0x14;
 const OPTIONAL_HEADER_OFFSET: u32 = 0x18;
-const RESOURCE_DIRECTORY_OFFSET: u32 = 0x70;
+const PE32_MAGIC: u16 = 0x010b;
+const PE32_RESOURCE_DIRECTORY_OFFSET: u32 = 0x70;
+const PE32PLUS_RESOURCE_DIRECTORY_OFFSET: u32 = 0x80;
 const SECTION_SIZE: u32 = 0x28;
 const SECTION_VIRTUAL_SIZE_OFFSET: u32 = 0x08;
 const SECTION_RVA_OFFSET: u32 = 0x0c;
