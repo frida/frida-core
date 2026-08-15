@@ -70,6 +70,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => injects_into_process_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-threads-in-live-guest", () => {
 			var h = new Harness ((h) => enumerates_threads_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1144,6 +1149,46 @@ namespace Frida.BareboneTest {
 			uint16 height = icon.lookup_value ("height", VariantType.UINT16).get_uint16 ();
 			assert_true (width != 0 && height != 0);
 			assert_true (icon.lookup_value ("image", new VariantType ("ay")).get_size () == width * height * 4);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static async void injects_into_process_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+			assert_true (pid != 0);
+
+			// Success shows that the injected agent started and reported this process.
+			var session = yield device.attach (pid, null, null);
+			assert_nonnull (session);
+
+			try {
+				yield device.attach (pid ^ 0x1234, null, null);
+				assert_not_reached ();
+			} catch (GLib.Error e) {
+			}
+
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

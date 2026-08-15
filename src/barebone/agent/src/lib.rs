@@ -17,7 +17,8 @@ use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use bindings::{
-    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange,
+    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange, gboolean, g_source_attach, g_source_set_callback, g_source_unref,
+    g_timeout_source_new,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
     g_variant_get, g_variant_get_boolean, g_variant_get_data, g_variant_get_size, g_variant_get_string,
@@ -90,6 +91,7 @@ pub enum FridaCommand {
     MemoryProtect = 6,
     PatchCode = 7,
     EnumerateProcesses = 8,
+    InjectIntoProcess = 9,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -106,6 +108,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::MemoryProtect => write!(f, "MemoryProtect"),
             FridaCommand::PatchCode => write!(f, "PatchCode"),
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
+            FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -220,7 +223,17 @@ mod entrypoint_blob {
             };
             transport_set(transport);
 
-            run_main_loop(adopt_js_context());
+            let context = adopt_js_context();
+            // g_timeout_add uses the default context, but the loop below runs the context of the script
+            // scheduler. Thus attach the source to that context.
+            #[cfg(feature = "win9x")]
+            {
+                let source = g_timeout_source_new(INJECTION_POLL_MS);
+                g_source_set_callback(source, Some(poll_injection), ptr::null_mut(), None);
+                g_source_attach(source, context);
+                g_source_unref(source);
+            }
+            run_main_loop(context);
         }
     }
 
@@ -712,6 +725,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
+            #[cfg(feature = "win9x")]
+            FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -722,6 +737,52 @@ fn process_incoming_message(variant: *mut GVariant) {
         unsafe { g_variant_unref(payload_variant) };
     }
 }
+
+// You can queue this APC only when VMM is between jobs, not during a host command. Thus the
+// work is deferred and the answer comes later.
+#[cfg(feature = "win9x")]
+fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
+    unsafe {
+        PENDING_INJECTION = (request_id, g_variant_get_uint32(payload));
+        INJECTION_PENDING = true;
+    }
+
+    None
+}
+
+// Commands arrive in the interrupt callback of the transport, where VMM makes no threads and
+// gives no heap. Thus that callback only sets a flag, and this source does the work.
+#[cfg(feature = "win9x")]
+unsafe extern "C" fn poll_injection(_data: gpointer) -> gboolean {
+    if !unsafe { ptr::addr_of!(INJECTION_PENDING).read() } {
+        return 1;
+    }
+    unsafe { INJECTION_PENDING = false };
+
+    let (request_id, pid) = unsafe { PENDING_INJECTION };
+
+    let observed = kernel::inject_agent(pid);
+    let response = if observed == 0 {
+        HandlerResponse::error("Unable to inject into process")
+    } else {
+        HandlerResponse::success(unsafe { g_variant_new_uint32(observed) })
+    };
+    send_command_reply(request_id, response);
+
+    1
+}
+
+#[cfg(feature = "win9x")]
+const INJECTION_POLL_MS: u32 = 20;
+
+#[cfg(feature = "win9x")]
+static mut INJECTION_PENDING: bool = false;
+
+#[cfg(feature = "win9x")]
+static mut INJECTION_RESULT: u32 = 0;
+
+#[cfg(feature = "win9x")]
+static mut PENDING_INJECTION: (u16, u32) = (0, 0);
 
 #[cfg(feature = "win9x")]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {

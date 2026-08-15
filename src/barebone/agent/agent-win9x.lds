@@ -25,6 +25,8 @@ SECTIONS {
     __PageFree = .; . += 4;
     __CopyPageTable = .; . += 4;
     __MapPhysToLinear = .; . += 4;
+    __PageReserve = .; . += 4;
+    __PageCommit = .; . += 4;
     _Hook_VMM_Fault = .; . += 4;
     _Fatal_Error_Handler = .; . += 4;
     _Get_Cur_Thread_Handle = .; . += 4;
@@ -37,6 +39,7 @@ SECTIONS {
     _VPICD_Virtualize_IRQ = .; . += 4;
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
+    __VWIN32_QueueUserApc = .; . += 4;
     __VWIN32_Get_Thread_Context = .; . += 4;
     __VWIN32_CreateRing0Thread = .; . += 4;
     _IFSMgr_Ring0_FileIO = .; . += 4;

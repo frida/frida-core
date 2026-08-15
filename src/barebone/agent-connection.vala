@@ -30,6 +30,8 @@ namespace Frida.Barebone {
 		private uint16 next_request_id = 1;
 
 		private const int COMMAND_TIMEOUT_MS = 25000;
+		private const uint INJECT_MAX_ATTEMPTS = 100;
+		private const uint INJECT_POLL_INTERVAL_MS = 100;
 
 		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config,
 				KernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
@@ -312,6 +314,29 @@ namespace Frida.Barebone {
 
 		public async void close (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
+		}
+
+		public async uint inject_into_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			// The agent cannot answer from the context that does the work. Thus it reports the result at
+			// the next request.
+			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
+				var response = yield execute_command (Command.INJECT_INTO_PROCESS,
+					new Variant.uint32 (pid), cancellable);
+				if (!response.is_of_type (VariantType.UINT32))
+					throw new Error.PROTOCOL ("Invalid inject_into_process response format");
+
+				uint reached = response.get_uint32 ();
+				if (reached != 0)
+					return reached;
+
+				var timeout = new TimeoutSource (INJECT_POLL_INTERVAL_MS);
+				timeout.set_callback (inject_into_process.callback);
+				timeout.attach (MainContext.get_thread_default ());
+				yield;
+				timeout.destroy ();
+			}
+
+			throw new Error.TIMED_OUT ("Timed out while injecting into process");
 		}
 
 		public async HostProcessInfo[] enumerate_processes (Scope scope, Cancellable? cancellable) throws Error, IOError {
@@ -732,6 +757,7 @@ namespace Frida.Barebone {
 			MEMORY_PROTECT = 6,
 			PATCH_CODE = 7,
 			ENUMERATE_PROCESSES = 8,
+			INJECT_INTO_PROCESS = 9,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

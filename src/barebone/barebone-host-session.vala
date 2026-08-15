@@ -404,8 +404,16 @@ namespace Frida {
 
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options, Cancellable? cancellable)
 				throws Error, IOError {
-			if (pid != 0)
-				throw_not_supported ();
+			if (pid != 0) {
+				if (connection == null)
+					throw_not_supported ();
+
+				// The agent reports the process that it started in. A different value shows that the copy
+				// went to the incorrect process.
+				uint reached = yield connection.inject_into_process (pid, cancellable);
+				if (reached != pid)
+					throw new Error.NOT_SUPPORTED ("Agent landed in process %u, not %u", reached, pid);
+			}
 
 			var opts = SessionOptions._deserialize (options);
 			if (opts.realm == EMULATED)

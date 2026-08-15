@@ -7,7 +7,7 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::kernel::ThreadEntry;
+use crate::kernel::{Mode, ThreadEntry};
 
 const PAGE_SIZE: u32 = 4096;
 
@@ -59,21 +59,53 @@ pub fn panic(msg: &str) {
 }
 
 pub fn alloc(size: usize) -> *mut u8 {
+    if mode() == Mode::User {
+        let get_process_heap: unsafe extern "stdcall" fn() -> u32 =
+            unsafe { core::mem::transmute(user_api().get_process_heap as usize) };
+        let heap_alloc: unsafe extern "stdcall" fn(u32, u32, u32) -> *mut u8 =
+            unsafe { core::mem::transmute(user_api().heap_alloc as usize) };
+        return unsafe { heap_alloc(get_process_heap(), 0, size as u32) };
+    }
+
     unsafe { __HeapAllocate(size as u32, 0) }
 }
 
 pub fn free(ptr: *mut u8, _size: usize) {
+    if mode() == Mode::User {
+        let get_process_heap: unsafe extern "stdcall" fn() -> u32 =
+            unsafe { core::mem::transmute(user_api().get_process_heap as usize) };
+        let heap_free: unsafe extern "stdcall" fn(u32, u32, *mut u8) -> u32 =
+            unsafe { core::mem::transmute(user_api().heap_free as usize) };
+        unsafe { heap_free(get_process_heap(), 0, ptr) };
+        return;
+    }
+
     unsafe {
         __HeapFree(ptr, 0);
     }
 }
 
 pub fn alloc_code(size: usize) -> *mut u8 {
+    if mode() == Mode::User {
+        let virtual_alloc: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> *mut u8 =
+            unsafe { core::mem::transmute(user_api().virtual_alloc as usize) };
+        return unsafe {
+            virtual_alloc(0, size as u32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+        };
+    }
+
     let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
     unsafe { __PageAllocate(pages, PG_SYS, 0, 0, 0, 0, core::ptr::null_mut(), PAGE_FLAGS_CODE) }
 }
 
 pub fn free_code(ptr: *mut u8, _size: usize) {
+    if mode() == Mode::User {
+        let virtual_free: unsafe extern "stdcall" fn(*mut u8, u32, u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().virtual_free as usize) };
+        unsafe { virtual_free(ptr, 0, MEM_RELEASE) };
+        return;
+    }
+
     unsafe {
         __PageFree(ptr, 0);
     }
@@ -159,9 +191,285 @@ pub fn wake(token: *const u8) {
 }
 
 pub fn yield_now() {
+    if mode() == Mode::User {
+        let sleep: unsafe extern "stdcall" fn(u32) =
+            unsafe { core::mem::transmute(user_api().sleep as usize) };
+        unsafe { sleep(10) };
+        return;
+    }
+
     unsafe {
         _Release_Time_Slice();
     }
+}
+
+// The payload is a call into this image, not a copy of it. The pages of the agent are
+// available in ring 3, thus the new thread runs the same code as the kernel half.
+pub fn inject_agent(pid: u32) -> u32 {
+    let process = process_for_pid(pid);
+    if process == 0 {
+        return 0;
+    }
+
+    let mut payload = [
+        0xff, 0x74, 0x24, 0x04,
+        0xba, 0, 0, 0, 0,
+        0xff, 0xd2,
+        0xeb, 0xfe,
+    ];
+    payload[5..9].copy_from_slice(&(frida_win9x_user_main as usize as u32).to_le_bytes());
+
+    let injection = inject(process, &payload);
+    if injection.thread == 0 {
+        return 0;
+    }
+    if !await_flag(injection.arena + OBSERVED_PID) {
+        return 0;
+    }
+
+    unsafe { ((injection.arena + OBSERVED_PID) as *const u32).read_volatile() }
+}
+
+fn owner_of(thread: u32) -> u32 {
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+    if block < 0x10000 {
+        return 0;
+    }
+
+    unsafe { (block as *const u32).add(1).read() }
+}
+
+fn process_for_pid(pid: u32) -> u32 {
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+
+    let mut thread = first;
+    while thread != 0 {
+        if unsafe { (thread as *const u32).add(0x2c / 4).read() } == WIN32_THREAD {
+            let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+            let pdb = unsafe { (block as *const u32).add(1).read() };
+            if process_id(pdb) == pid {
+                return pdb;
+            }
+        }
+
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+
+    0
+}
+
+// Ring 3 cannot write to a different process. Thus KERNEL32 makes the thread in the target,
+// with the stack and the payload in the shared arena, which all processes can read.
+pub fn inject(process: u32, payload: &[u8]) -> Injection {
+    let arena = alloc_shared(INJECTION_ARENA_SIZE) as u32;
+    let entry = arena + PAYLOAD_OFFSET;
+    unsafe {
+        core::ptr::write_bytes(arena as *mut u8, 0, HANDSHAKE_SIZE);
+        core::ptr::copy_nonoverlapping(payload.as_ptr(), entry as *mut u8, payload.len());
+    }
+
+    // Retargeting takes the creating process's arena away, so the thread has to be running
+    // on a stack the target can see before we point it anywhere.
+    let stack = alloc_shared(INJECTION_STACK_SIZE) as u32;
+    write_trampoline(arena + TRAMPOLINE_OFFSET, entry, stack + INJECTION_STACK_SIZE as u32 - 0x40);
+
+    spawn_ring3_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena);
+    if !await_flag(arena + RUNNING_FLAG) {
+        return Injection { arena, thread: 0, home: 0 };
+    }
+
+    let thread = find_thread_on(stack, INJECTION_STACK_SIZE as u32);
+    let home = owner_of(thread);
+    retarget(thread, process);
+    unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
+
+    Injection { arena, thread, home }
+}
+
+pub struct Injection {
+    pub arena: u32,
+    pub thread: u32,
+    pub home: u32,
+}
+
+// KERNEL32 makes threads from its own worker in ring 3. Thus an APC to thread -1 runs our
+// code, and the target does nothing. CreateThread would use the process of that worker, not
+// the target, thus the code calls the internal function, which receives the process. The
+// thread starts suspended, which gives time to make the stack available.
+fn spawn_ring3_thread(stub: u32, entry: u32, parameter: u32) {
+    let mut code = [
+        0x6a, 0x00, 0x6a, 0x00,
+        0x68, 0, 0, 0, 0,
+        0x68, 0, 0, 0, 0,
+        0x68, 0x00, 0x00, 0x01, 0x00,
+        0x6a, 0x00,
+        0xe8, 0, 0, 0, 0,
+        0xc2, 0x04, 0x00,
+    ];
+    code[5..9].copy_from_slice(&parameter.to_le_bytes());
+    code[10..14].copy_from_slice(&entry.to_le_bytes());
+    code[22..26].copy_from_slice(&(kernel32_export(b"CreateThread") - (stub + 26)).to_le_bytes());
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len());
+        __VWIN32_QueueUserApc(stub, 0, ANY_THREAD);
+    }
+}
+
+fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
+    let mut code = [
+        0x8b, 0x44, 0x24, 0x04,
+        0xbc, 0, 0, 0, 0,
+        0x50,
+        0xba, 0, 0, 0, 0,
+        0xff, 0xd2,
+        0x6a, 0x00,
+        0xba, 0, 0, 0, 0,
+        0xff, 0xd2,
+    ];
+    code[5..9].copy_from_slice(&stack_top.to_le_bytes());
+    code[11..15].copy_from_slice(&entry.to_le_bytes());
+    code[20..24].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
+
+    unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
+}
+
+// The stack we handed the thread is the one thing that stays ours no matter where its code
+// ends up running, so identify it by that rather than by its instruction pointer.
+fn find_thread_on(stack: u32, size: u32) -> u32 {
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+    let mut thread = first;
+    while thread != 0 {
+        let esp = unsafe { (thread as *const u32).byte_add(TCB_RING3_ESP).read() };
+        if esp >= stack && esp < stack + size {
+            return thread;
+        }
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+
+    0
+}
+
+fn retarget(thread: u32, process: u32) {
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+    let context = unsafe { (process as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
+    unsafe {
+        (block as *mut u32).add(1).write(process);
+        (block as *mut u32).add(2).write(context);
+    }
+}
+
+fn await_flag(address: u32) -> bool {
+    static mut TOKEN: u8 = 0;
+    for _ in 0..INJECTION_ATTEMPTS {
+        wait(core::ptr::addr_of!(TOKEN), Some(INJECTION_POLL_US), &mut || false);
+        if unsafe { (address as *const u32).read_volatile() } != 0 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn alloc_shared(size: usize) -> *mut u8 {
+    let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+    let address = unsafe { __PageReserve(PR_SHARED, pages, 0) };
+    let committed = unsafe {
+        __PageCommit(address / PAGE_SIZE, pages, PD_FIXEDZERO, 0,
+            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE)
+    };
+    let _ = committed;
+
+    address as *mut u8
+}
+
+// This is the ring 3 half. It has its own copy of the image, thus its data is its own. Only
+// the primitives that need the kernel are different.
+#[unsafe(no_mangle)]
+pub extern "C" fn frida_win9x_user_main(arena: u32) {
+    resolve_user_api();
+
+    let sleep: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().sleep as usize) };
+
+    // This thread waits for the host. Do not use yield_now() here, because that rate makes the
+    // guest slow.
+    unsafe { ((arena + RUNNING_FLAG) as *mut u32).write_volatile(1) };
+    while unsafe { ((arena + GO_FLAG) as *const u32).read_volatile() } == 0 {
+        unsafe { sleep(PARKED_SLEEP_MS) };
+    }
+
+    // Reporting our own identity is what lets the host prove the agent really landed in the
+    // process it asked for.
+    let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
+        unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
+    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(get_current_process_id()) };
+
+    loop {
+        unsafe { sleep(IDLE_SLEEP_MS) };
+    }
+}
+
+fn resolve_user_api() {
+    unsafe {
+        USER_API = UserApi {
+            sleep: kernel32_export(b"Sleep"),
+            get_tick_count: kernel32_export(b"GetTickCount"),
+            get_current_thread_id: kernel32_export(b"GetCurrentThreadId"),
+            get_current_process_id: kernel32_export(b"GetCurrentProcessId"),
+            get_process_heap: kernel32_export(b"GetProcessHeap"),
+            heap_alloc: kernel32_export(b"HeapAlloc"),
+            heap_free: kernel32_export(b"HeapFree"),
+            virtual_alloc: kernel32_export(b"VirtualAlloc"),
+            virtual_free: kernel32_export(b"VirtualFree"),
+            virtual_protect: kernel32_export(b"VirtualProtect"),
+        };
+    }
+}
+
+fn user_api() -> &'static UserApi {
+    unsafe { &*core::ptr::addr_of!(USER_API) }
+}
+
+struct UserApi {
+    sleep: u32,
+    get_tick_count: u32,
+    get_current_thread_id: u32,
+    get_current_process_id: u32,
+    get_process_heap: u32,
+    heap_alloc: u32,
+    heap_free: u32,
+    virtual_alloc: u32,
+    virtual_free: u32,
+    virtual_protect: u32,
+}
+
+static mut USER_API: UserApi = UserApi {
+    sleep: 0,
+    get_tick_count: 0,
+    get_current_thread_id: 0,
+    get_current_process_id: 0,
+    get_process_heap: 0,
+    heap_alloc: 0,
+    heap_free: 0,
+    virtual_alloc: 0,
+    virtual_free: 0,
+    virtual_protect: 0,
+};
+
+// The privilege level gives the half that runs, thus the code keeps no such value.
+pub fn mode() -> Mode {
+    let cs: u16;
+    unsafe { core::arch::asm!("mov {0:x}, cs", out(reg) cs, options(nomem, nostack, preserves_flags)) };
+
+    if cs & 3 != 0 { Mode::User } else { Mode::Kernel }
 }
 
 // The host cannot resolve these, because parts of the export names of KERNEL32 are out of
@@ -217,7 +525,43 @@ fn read_u8(address: u32) -> u8 {
 
 const EXPORT_DIRECTORY_OFFSET: u32 = 0x78;
 
+const MEM_COMMIT: u32 = 0x0000_1000;
+const MEM_RESERVE: u32 = 0x0000_2000;
+const MEM_RELEASE: u32 = 0x0000_8000;
+const PAGE_EXECUTE_READ: u32 = 0x20;
+const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+
+const INJECTION_ARENA_SIZE: usize = 0x1000;
+const HANDSHAKE_SIZE: usize = 0x40;
+const RUNNING_FLAG: u32 = 0x00;
+const GO_FLAG: u32 = 0x04;
+const OBSERVED_PID: u32 = 0x08;
+const IDLE_SLEEP_MS: u32 = 1000;
+const PARKED_SLEEP_MS: u32 = 200;
+const STUB_OFFSET: u32 = 0x100;
+const PAYLOAD_OFFSET: u32 = 0x200;
+const INJECTION_ATTEMPTS: u32 = 100;
+const INJECTION_POLL_US: u64 = 100_000;
+const ANY_THREAD: u32 = 0xffff_ffff;
+const TCB_RING3_ESP: usize = 0x1c;
+const TRAMPOLINE_OFFSET: u32 = 0x180;
+const INJECTION_STACK_SIZE: usize = 0x4000;
+const THREAD_BLOCK_SLOT: u32 = 0xc002_11cc;
+const PDB_MEMORY_CONTEXT: usize = 0x1c;
+const PR_SHARED: u32 = 0x8006_0000;
+const PD_FIXEDZERO: u32 = 0x3;
+const PC_FIXED: u32 = 0x0000_0008;
+const PC_WRITEABLE: u32 = 0x0002_0000;
+const PC_USER: u32 = 0x0004_0000;
+const PC_PRESENT: u32 = 0x8000_0000;
+
 pub fn monotonic_micros() -> i64 {
+    if mode() == Mode::User {
+        let get_tick_count: unsafe extern "stdcall" fn() -> u32 =
+            unsafe { core::mem::transmute(user_api().get_tick_count as usize) };
+        return unsafe { get_tick_count() } as i64 * 1000;
+    }
+
     unsafe { _Get_System_Time() as i64 * 1000 }
 }
 
@@ -227,10 +571,30 @@ pub fn wall_clock_micros() -> (u32, u32) {
 }
 
 pub fn current_thread_id() -> u64 {
+    if mode() == Mode::User {
+        let get_current_thread_id: unsafe extern "stdcall" fn() -> u32 =
+            unsafe { core::mem::transmute(user_api().get_current_thread_id as usize) };
+        return unsafe { get_current_thread_id() } as u64;
+    }
+
     unsafe { get_cur_thread_handle() as u64 }
 }
 
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
+    if mode() == Mode::User {
+        let virtual_protect: unsafe extern "stdcall" fn(u32, u32, u32, *mut u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().virtual_protect as usize) };
+        let wanted = if (gum_prot & GUM_PAGE_WRITE) != 0 {
+            PAGE_EXECUTE_READWRITE
+        } else {
+            PAGE_EXECUTE_READ
+        };
+        let mut previous = 0;
+        return unsafe {
+            virtual_protect(address as u32, size as u32, wanted, &mut previous) != 0
+        };
+    }
+
     let first_page = address / PAGE_SIZE as u64;
     let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
 
@@ -1295,6 +1659,9 @@ unsafe extern "C" {
     static __PageFree: unsafe extern "C" fn(*mut u8, u32);
     static __CopyPageTable: unsafe extern "C" fn(u32, u32, *mut u32, u32) -> u32;
     static __MapPhysToLinear: unsafe extern "C" fn(u32, u32, u32) -> u32;
+    static __PageReserve: unsafe extern "C" fn(u32, u32, u32) -> u32;
+    static __PageCommit: unsafe extern "C" fn(u32, u32, u32, u32, u32) -> u32;
+    static __VWIN32_QueueUserApc: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
