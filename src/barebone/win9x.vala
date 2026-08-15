@@ -377,68 +377,6 @@ namespace Frida.Barebone {
 		return 0;
 	}
 
-	private static async uint64 find_export (Machine machine, uint64 image, string wanted, Cancellable? cancellable)
-			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
-
-		Bytes header;
-		try {
-			header = yield gdb.read_byte_array (image, 0x200, cancellable);
-		} catch (Error e) {
-			return 0;
-		}
-		Buffer h = gdb.make_buffer (header);
-		if (h.read_uint16 (0) != DOS_SIGNATURE)
-			return 0;
-		uint32 headers = h.read_uint32 (DOS_HEADERS_OFFSET);
-		if (headers > 0x180 || h.read_uint32 (headers) != PE_SIGNATURE)
-			return 0;
-
-		uint32 directory = h.read_uint32 (headers + EXPORT_DIRECTORY_OFFSET);
-		if (directory == 0)
-			return 0;
-
-		// Sweeping for the image means most candidates are not KERNEL32, and one that happens to
-		// carry a PE header will point this anywhere at all.
-		Bytes raw_directory;
-		try {
-			raw_directory = yield gdb.read_byte_array (image + directory, 0x28, cancellable);
-		} catch (Error e) {
-			return 0;
-		}
-		Buffer d = gdb.make_buffer (raw_directory);
-		uint32 count = d.read_uint32 (0x18);
-		uint32 functions = d.read_uint32 (0x1c);
-		uint32 names = d.read_uint32 (0x20);
-		uint32 ordinals = d.read_uint32 (0x24);
-		if (count == 0 || count > MAX_EXPORTS)
-			return 0;
-
-		Buffer name_rvas = gdb.make_buffer (yield read_sparse (machine, image + names, count * 4, cancellable));
-		Buffer ordinal_values = gdb.make_buffer (yield read_sparse (machine, image + ordinals, count * 2,
-			cancellable));
-		for (uint32 i = 0; i != count; i++) {
-			// Parts of the name table are paged out, and a debugger read cannot fault them in.
-			Bytes raw;
-			try {
-				raw = yield gdb.read_byte_array (image + name_rvas.read_uint32 (i * 4),
-					wanted.length + 1, cancellable);
-			} catch (Error e) {
-				continue;
-			}
-			unowned uint8[] actual = raw.get_data ();
-			if (actual[wanted.length] != 0 || Memory.cmp (actual, wanted.data, wanted.length) != 0)
-				continue;
-
-			uint32 ordinal = ordinal_values.read_uint16 (i * 2);
-			Buffer entry = gdb.make_buffer (yield gdb.read_byte_array (image + functions + ordinal * 4, 4,
-				cancellable));
-			return image + entry.read_uint32 (0);
-		}
-
-		return 0;
-	}
-
 	private static async Gee.List<uint64?> read_service_table (Machine machine, DeviceDescriptorBlock ddb,
 			Cancellable? cancellable) throws Error, IOError {
 		Bytes raw = yield machine.gdb.read_byte_array (ddb.service_table, ddb.service_count * 4, cancellable);
@@ -558,28 +496,6 @@ namespace Frida.Barebone {
 
 	private const size_t NEXT_OFFSET = 0x00;
 	public const string KERNEL32_BASE = "KERNEL32_Base";
-	// The name and ordinal tables straddle pages that are paged out, and a debugger read cannot
-	// fault those in, so missing pages read back as zeroes and their entries simply never match.
-	private static async Bytes read_sparse (Machine machine, uint64 address, size_t size,
-			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
-
-		var result = new uint8[size];
-		size_t offset = 0;
-		while (offset != size) {
-			uint64 cursor = address + offset;
-			size_t chunk = size_t.min (size - offset, PAGE_SIZE - (size_t) (cursor % PAGE_SIZE));
-			try {
-				Bytes page = yield gdb.read_byte_array (cursor, chunk, cancellable);
-				Memory.copy ((uint8 *) result + offset, page.get_data (), chunk);
-			} catch (Error e) {
-			}
-			offset += chunk;
-		}
-
-		return new Bytes.take ((owned) result);
-	}
-
 	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
 	public const string MODULE_TABLE = "KERNEL32_ModuleTable";
 
@@ -590,11 +506,6 @@ namespace Frida.Barebone {
 	private const uint64 KERNEL32_SEARCH_BASE = 0xbff00000;
 	private const uint64 KERNEL32_SEARCH_LIMIT = 0xc0000000;
 	private const uint64 IMAGE_ALIGNMENT = 0x10000;
-	private const uint16 DOS_SIGNATURE = 0x5a4d;
-	private const size_t DOS_HEADERS_OFFSET = 0x3c;
-	private const uint32 PE_SIGNATURE = 0x00004550;
-	private const size_t EXPORT_DIRECTORY_OFFSET = 0x78;
-	private const uint32 MAX_EXPORTS = 0x2000;
 	private const uint8 CALL_RELATIVE = 0xe8;
 
 	private const uint GET_DEVICE_LIST_ORDINAL = 5;
@@ -615,6 +526,5 @@ namespace Frida.Barebone {
 	// The descriptor block is in the first pages, and the sweep reads one page at a time.
 	private const uint64 VMM_SEARCH_SPAN = 1024 * 1024;
 	private const uint64 PAGE_TABLES_BASE = 0xff800000;
-	private const size_t PAGE_SIZE = 4096;
 	private const size_t SCAN_CHUNK_SIZE = 256 * 1024;
 }
