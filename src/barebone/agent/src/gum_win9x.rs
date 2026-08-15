@@ -7,7 +7,8 @@ use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
-        gsize, guint, gum_barebone_register_module, gum_mprotect,
+        gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundThreadFunc,
+        GumThreadDetails, GumThreadId,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -98,6 +99,21 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             g_object_unref(module as gpointer);
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
+    let Some(emit) = func else {
+        return;
+    };
+
+    kernel::enumerate_threads(&mut |id| {
+        let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+        details.flags = 0;
+        details.id = id as GumThreadId;
+
+        unsafe { emit(&details, user_data) };
+    });
 }
 
 pub(crate) unsafe fn enumerate_exports_in_range(

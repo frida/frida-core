@@ -240,6 +240,21 @@ pub fn install_interrupt_handler(
     if handle == 0 { -1 } else { 0 }
 }
 
+// Every thread VMM schedules is a ring-0 thread; the ring-3 side of a Win32 thread is not
+// ours to enumerate.
+pub fn enumerate_threads(found: &mut dyn FnMut(u32)) {
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+
+    let mut thread = first;
+    while thread != 0 {
+        found(thread);
+
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+}
+
 pub struct ProcessInfo {
     pub id: u32,
     pub path: *const u8,

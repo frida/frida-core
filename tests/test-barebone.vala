@@ -70,6 +70,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-threads-in-live-guest", () => {
+			var h = new Harness ((h) => enumerates_threads_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-modules-in-live-guest", () => {
 			var h = new Harness ((h) => enumerates_modules_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1154,6 +1159,14 @@ namespace Frida.BareboneTest {
 
 	private static async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
+	}
+
+	private static async void enumerates_threads_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, """
+			const threads = Process.enumerateThreads();
+			const mine = Process.getCurrentThreadId();
+			send({ several: threads.length > 1, listed: threads.some(t => t.id === mine) });
+		""", "\"several\":true,\"listed\":true");
 	}
 
 	private static async void enumerates_modules_in_live_guest (Harness h) {
