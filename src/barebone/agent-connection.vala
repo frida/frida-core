@@ -318,7 +318,7 @@ namespace Frida.Barebone {
 			bool include_icons = scope == FULL;
 			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.boolean (include_icons),
 				cancellable);
-			if (!response.check_format_string ("a(usaay)", false))
+			if (!response.check_format_string ("a(ussaay)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
 
 			var processes = new HostProcessInfo[response.n_children ()];
@@ -327,10 +327,15 @@ namespace Frida.Barebone {
 				var parameters = new HashTable<string, Variant> (str_hash, str_equal);
 
 				unowned string path = entry.get_child_value (1).get_string ();
-				if (scope != MINIMAL)
+				if (scope != MINIMAL) {
 					parameters["path"] = path;
+
+					unowned string command_line = entry.get_child_value (2).get_string ();
+					if (command_line != "")
+						parameters["argv"] = argv_from_command_line (command_line);
+				}
 				if (include_icons)
-					parameters["icons"] = icons_from_resources (entry.get_child_value (2));
+					parameters["icons"] = icons_from_resources (entry.get_child_value (3));
 
 				processes[i] = HostProcessInfo (entry.get_child_value (0).get_uint32 (), basename_of (path),
 					parameters);
@@ -341,6 +346,57 @@ namespace Frida.Barebone {
 		private static string basename_of (string path) {
 			int start = path.last_index_of_char ('\\');
 			return (start != -1) ? path[start + 1:] : path;
+		}
+
+		// Windows quoting: a run of backslashes only escapes a quote, and then only half of
+		// them survive.
+		private static Variant argv_from_command_line (string command_line) {
+			var argv = new VariantBuilder (new VariantType ("as"));
+			var argument = new StringBuilder ();
+			bool quoted = false;
+			bool present = false;
+			uint pending = 0;
+
+			foreach (char c in (char[]) command_line.data) {
+				if (c == '\\') {
+					pending++;
+					continue;
+				}
+
+				if (c == '"') {
+					for (uint i = 0; i != pending / 2; i++)
+						argument.append_c ('\\');
+					if (pending % 2 == 1)
+						argument.append_c ('"');
+					else
+						quoted = !quoted;
+					pending = 0;
+					present = true;
+					continue;
+				}
+
+				for (uint i = 0; i != pending; i++)
+					argument.append_c ('\\');
+				pending = 0;
+
+				if ((c == ' ' || c == '\t') && !quoted) {
+					if (present)
+						argv.add_value (new Variant.string (argument.str));
+					argument.truncate ();
+					present = false;
+					continue;
+				}
+
+				argument.append_c (c);
+				present = true;
+			}
+
+			for (uint i = 0; i != pending; i++)
+				argument.append_c ('\\');
+			if (present || argument.len != 0)
+				argv.add_value (new Variant.string (argument.str));
+
+			return argv.end ();
 		}
 
 		private static Variant icons_from_resources (Variant resources) {

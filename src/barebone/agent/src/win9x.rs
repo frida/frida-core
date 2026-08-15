@@ -243,6 +243,7 @@ pub fn install_interrupt_handler(
 pub struct ProcessInfo {
     pub id: u32,
     pub path: *const u8,
+    pub command_line: *const u8,
 }
 
 // Win32 threads carry the process they belong to in VWIN32's per-thread block, so the
@@ -266,6 +267,7 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
                 found(ProcessInfo {
                     id: process_id(pdb),
                     path: image_path(pdb),
+                    command_line: command_line(pdb),
                 });
             }
         }
@@ -283,6 +285,20 @@ fn process_id(pdb: u32) -> u32 {
     }
 
     pdb ^ unsafe { (slot as *const u32).read() }
+}
+
+fn command_line(pdb: u32) -> *const u8 {
+    let env_db = unsafe { (pdb as *const u32).byte_add(PDB_ENVIRONMENT_OFFSET).read() };
+    if env_db < ARENA_FLOOR {
+        return core::ptr::null();
+    }
+
+    let text = unsafe { (env_db as *const u32).byte_add(ENVIRONMENT_COMMAND_LINE_OFFSET).read() };
+    if text < ARENA_FLOOR {
+        return core::ptr::null();
+    }
+
+    text as *const u8
 }
 
 // The command line would do for most processes, but it is empty for the ones Windows starts
@@ -317,6 +333,8 @@ fn image_path(pdb: u32) -> *const u8 {
 const WIN32_THREAD: u32 = 0x2a;
 const ARENA_FLOOR: u32 = 0x10000;
 const PDB_MODREF_OFFSET: usize = 0x94;
+const PDB_ENVIRONMENT_OFFSET: usize = 0x40;
+const ENVIRONMENT_COMMAND_LINE_OFFSET: usize = 0x08;
 const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
 const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 

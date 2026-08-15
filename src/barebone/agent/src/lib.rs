@@ -726,8 +726,8 @@ fn process_incoming_message(variant: *mut GVariant) {
 #[cfg(feature = "win9x")]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let list_type = g_variant_type_new(c"a(usaay)".as_ptr() as *const gchar);
-        let process_type = g_variant_type_new(c"(usaay)".as_ptr() as *const gchar);
+        let list_type = g_variant_type_new(c"a(ussaay)".as_ptr() as *const gchar);
+        let process_type = g_variant_type_new(c"(ussaay)".as_ptr() as *const gchar);
         let icons_type = g_variant_type_new(c"aay".as_ptr() as *const gchar);
         let byte_type = g_variant_type_new(c"y".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
@@ -735,15 +735,12 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
         let include_icons = g_variant_get_boolean(payload) != 0;
 
         kernel::enumerate_processes(&mut |process| {
-            let path = if process.path.is_null() {
-                c"".as_ptr()
-            } else {
-                process.path as *const core::ffi::c_char
-            };
+            let path = text_or_empty(process.path);
 
             g_variant_builder_open(builder, process_type);
             g_variant_builder_add(builder, c"u".as_ptr(), process.id);
             g_variant_builder_add(builder, c"s".as_ptr(), path);
+            g_variant_builder_add(builder, c"s".as_ptr(), text_or_empty(process.command_line));
 
             g_variant_builder_open(builder, icons_type);
             if include_icons && !process.path.is_null() {
@@ -770,6 +767,15 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
         g_variant_type_free(list_type);
 
         HandlerResponse::success(processes)
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
+    if text.is_null() {
+        c"".as_ptr()
+    } else {
+        text as *const core::ffi::c_char
     }
 }
 

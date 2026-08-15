@@ -1122,6 +1122,13 @@ namespace Frida.BareboneTest {
 			for (int i = 0; i != processes.size (); i++)
 				assert_true (processes.get (i).name != "");
 
+			assert_true (shell.parameters["path"].get_string ().has_suffix ("EXPLORER.EXE"));
+
+			var argv = shell.parameters["argv"];
+			assert_nonnull (argv);
+			assert_true (argv.n_children () == 1);
+			assert_true (argv.get_child_value (0).get_string ().down ().has_suffix ("explorer.exe"));
+
 			var icons = shell.parameters["icons"];
 			assert_nonnull (icons);
 			assert_true (icons.n_children () != 0);
