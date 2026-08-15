@@ -2010,6 +2010,7 @@ namespace Frida.BareboneTest {
 		put_uint16 (image, 0, 0x5a4d);
 		put_uint32 (image, 0x3c, (uint32) PE_HEADERS_OFFSET);
 		put_uint32 (image, PE_HEADERS_OFFSET, 0x00004550);
+		put_uint16 (image, PE_HEADERS_OFFSET + 0x18, 0x010b);
 		put_uint32 (image, PE_HEADERS_OFFSET + 0x78, export_directory_rva);
 		put_uint32 (image, PE_HEADERS_OFFSET + 0x7c, export_directory_size);
 	}

@@ -27,11 +27,25 @@ namespace Frida.Barebone {
 		if (headers.read_uint16 (0) != DOS_SIGNATURE)
 			return exports;
 		uint32 pe = headers.read_uint32 (DOS_HEADERS_OFFSET);
-		if (pe > HEADERS_SIZE - EXPORT_DIRECTORY_OFFSET - 8 || headers.read_uint32 (pe) != PE_SIGNATURE)
+		if (pe > MAX_PE_OFFSET || headers.read_uint32 (pe) != PE_SIGNATURE)
 			return exports;
 
-		uint32 directory_rva = headers.read_uint32 (pe + EXPORT_DIRECTORY_OFFSET);
-		uint32 directory_size = headers.read_uint32 (pe + EXPORT_DIRECTORY_OFFSET + 4);
+		// The two forms of the optional header have different widths before the data directories.
+		// Thus the directories start at different offsets.
+		size_t directories;
+		switch (headers.read_uint16 (pe + OPTIONAL_HEADER_OFFSET)) {
+			case PE32_MAGIC:
+				directories = pe + PE32_DIRECTORIES_OFFSET;
+				break;
+			case PE32_PLUS_MAGIC:
+				directories = pe + PE32_PLUS_DIRECTORIES_OFFSET;
+				break;
+			default:
+				return exports;
+		}
+
+		uint32 directory_rva = headers.read_uint32 (directories);
+		uint32 directory_size = headers.read_uint32 (directories + 4);
 		if (directory_rva == 0 || directory_size < DIRECTORY_SIZE || directory_size > MAX_DIRECTORY_SIZE)
 			return exports;
 
@@ -154,7 +168,12 @@ namespace Frida.Barebone {
 	private const uint16 DOS_SIGNATURE = 0x5a4d;
 	private const size_t DOS_HEADERS_OFFSET = 0x3c;
 	private const uint32 PE_SIGNATURE = 0x00004550;
-	private const size_t EXPORT_DIRECTORY_OFFSET = 0x78;
+	private const size_t OPTIONAL_HEADER_OFFSET = 0x18;
+	private const uint16 PE32_MAGIC = 0x010b;
+	private const uint16 PE32_PLUS_MAGIC = 0x020b;
+	private const size_t PE32_DIRECTORIES_OFFSET = 0x78;
+	private const size_t PE32_PLUS_DIRECTORIES_OFFSET = 0x88;
+	private const size_t MAX_PE_OFFSET = HEADERS_SIZE - PE32_PLUS_DIRECTORIES_OFFSET - 8;
 
 	private const size_t DIRECTORY_SIZE = 0x28;
 	private const uint32 MAX_DIRECTORY_SIZE = 1024 * 1024;
