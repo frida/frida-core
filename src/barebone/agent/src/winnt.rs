@@ -96,6 +96,10 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
         return -1;
     }
 
+    unsafe {
+        (_ZwClose)(handle);
+    }
+
     0
 }
 
@@ -915,7 +919,7 @@ fn on_kernel_stack(work: &mut dyn FnMut()) {
 fn spawn_reader() {
     let mut handle: *mut c_void = core::ptr::null_mut();
     unsafe {
-        (_PsCreateSystemThread)(
+        let status = (_PsCreateSystemThread)(
             &mut handle,
             THREAD_ALL_ACCESS,
             core::ptr::null_mut(),
@@ -924,6 +928,9 @@ fn spawn_reader() {
             reader_start,
             core::ptr::null_mut(),
         );
+        if status >= 0 {
+            (_ZwClose)(handle);
+        }
     }
 }
 
