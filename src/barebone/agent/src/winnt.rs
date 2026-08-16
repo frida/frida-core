@@ -238,11 +238,9 @@ pub fn install_shareable_wake_event(token: *const u8) {
     let mut make = || created = create_event_object();
     on_kernel_stack(&mut make);
 
-    if EVENTS[slot_for(token)]
-        .compare_exchange(0, created as usize, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
-        unsafe { SHAREABLE_WAKE_EVENT = created };
+    unsafe {
+        SHAREABLE_WAKE_EVENT = created;
+        SHAREABLE_TOKEN = token;
     }
 }
 
@@ -265,6 +263,10 @@ fn create_event_object() -> *mut c_void {
 }
 
 fn open_event_in_current_process(event: *mut c_void) -> *mut c_void {
+    if event.is_null() {
+        return core::ptr::null_mut();
+    }
+
     let mut handle: *mut c_void = core::ptr::null_mut();
 
     unsafe {
@@ -277,9 +279,15 @@ fn open_event_in_current_process(event: *mut c_void) -> *mut c_void {
 }
 
 static mut SHAREABLE_WAKE_EVENT: *mut c_void = core::ptr::null_mut();
+static mut SHAREABLE_TOKEN: *const u8 = core::ptr::null();
 
 // The kernel has no futex. Thus each token uses an event, which the code makes on first use.
 fn event_for(token: *const u8) -> *mut c_void {
+    let shareable = unsafe { SHAREABLE_WAKE_EVENT };
+    if !shareable.is_null() && core::ptr::eq(token, unsafe { SHAREABLE_TOKEN }) {
+        return shareable;
+    }
+
     let slot = slot_for(token);
     let existing = EVENTS[slot].load(Ordering::Acquire);
     if existing != 0 {
@@ -313,6 +321,11 @@ const EXECUTIVE: u32 = 0;
 const KERNEL_MODE: u32 = 0;
 
 pub fn yield_now() {
+    if mode() == Mode::User {
+        unsafe { (user_api().yield_execution)() };
+        return;
+    }
+
     unsafe {
         (_ZwYieldExecution)();
     }
@@ -359,7 +372,12 @@ const INTERRUPT_TIME_OFFSET: usize = 0x08;
 const SYSTEM_TIME_OFFSET: usize = 0x14;
 const UNIX_EPOCH_MICROS: i64 = 11_644_473_600_000_000;
 
+// A kernel export is not available in ring 3. Thus the copy reads its own block.
 pub fn current_thread_id() -> u64 {
+    if mode() == Mode::User {
+        return current_client_id(BLOCK_THREAD_ID) as u64;
+    }
+
     unsafe { (_PsGetCurrentThreadId)() as u64 }
 }
 
@@ -611,7 +629,14 @@ const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 #[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
 extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
-    let eip_slot = fault_frame_pc_slot(fault);
+    let rip_slot = fault_frame_pc_slot(fault);
+    // A fault from ring 3 is never ours, because all of our code runs in ring 0. Do not use our
+    // own ranges to decide this, because that reads our data in an unknown context.
+    if (unsafe { frame.add(rip_slot + 1).read() } & 3) != 0 {
+        return unsafe { FAULT_CHAIN[fault as usize] };
+    }
+
+    let eip_slot = rip_slot;
     let eip = unsafe { frame.add(eip_slot).read() };
     if !is_ours(eip as u64) {
         return unsafe { FAULT_CHAIN[fault as usize] };
@@ -666,6 +691,12 @@ static mut frida_winnt_resume: [u32; 10] = [0; 10];
 #[unsafe(no_mangle)]
 extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
     let rip_slot = fault_frame_pc_slot(fault);
+    // A fault from ring 3 is never ours, because all of our code runs in ring 0. Do not use our
+    // own ranges to decide this, because that reads our data in an unknown context.
+    if (unsafe { frame.add(rip_slot + 1).read() } & 3) != 0 {
+        return unsafe { FAULT_CHAIN[fault as usize] };
+    }
+
     let rip = unsafe { frame.add(rip_slot).read() };
     if !is_ours(rip) {
         return unsafe { FAULT_CHAIN[fault as usize] };
@@ -795,15 +826,25 @@ pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
         return;
     };
 
+    let _ = layout;
+    enumerate_thread_objects(&mut |thread| unsafe {
+        found(ThreadInfo {
+            id: (_PsGetThreadId)(thread),
+            cpu_state: capture(thread),
+        });
+    });
+}
+
+fn enumerate_thread_objects(found: &mut dyn FnMut(*mut c_void)) {
+    let Some(layout) = thread_layout() else {
+        return;
+    };
+
     enumerate_processes(&mut |process| unsafe {
         let head = process.handle as usize + layout.head;
         let mut entry = (head as *const usize).read_volatile();
         while entry != head && entry != 0 {
-            let thread = (entry - layout.entry) as *mut c_void;
-            found(ThreadInfo {
-                id: (_PsGetThreadId)(thread),
-                cpu_state: capture(thread),
-            });
+            found((entry - layout.entry) as *mut c_void);
             entry = (entry as *const usize).read_volatile();
         }
     });
@@ -1158,8 +1199,8 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
             if (_MmMapLockedPagesSpecifyCache)(private_mdl, USER_MODE, MM_CACHED, wanted, 0,
                     NORMAL_PAGE_PRIORITY) == wanted {
                 // The mapping gives no permission to execute.
-                protect(text as u64, shared_size, GUM_PAGE_RWX);
-                placed.seen_by_process = text as u64;
+                        protect(text as u64, shared_size, GUM_PAGE_RWX);
+                        placed.seen_by_process = text as u64;
                 placed.writable_from_here = private as u64;
                 break;
             }
@@ -1201,6 +1242,8 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
                 arena: placed.arena_here,
                 wake,
                 started: false,
+                text: placed.seen_by_process,
+                size: size as u64,
             })
         };
     }
@@ -1347,6 +1390,15 @@ unsafe extern "win64" fn descend_to_user(context: *mut c_void) {
     let descent = unsafe { (context as *const Descent).read() };
     free(context as *mut u8, core::mem::size_of::<Descent>());
 
+    // These values are available only after the thread starts, and ring 3 cannot read them.
+    unsafe {
+        let thread = (_PsGetCurrentThread)();
+        ((descent.block + BLOCK_PROCESS_ID as u64) as *mut usize)
+            .write((_PsGetProcessId)((_PsGetThreadProcess)(thread)) as usize);
+        ((descent.block + BLOCK_THREAD_ID as u64) as *mut usize)
+            .write((_PsGetCurrentThreadId)() as usize);
+    }
+
     unsafe {
         frida_winnt_descend_to_user(descent.entry, descent.argument, descent.stack, descent.block);
     }
@@ -1396,7 +1448,7 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
     let context = unsafe { crate::adopt_js_context() };
 
     unsafe {
-        ((arena + OBSERVED_PID as usize) as *mut u32).write_volatile(current_process_id());
+        ((arena + OBSERVED_PID as usize) as *mut u32).write_volatile(current_client_id(BLOCK_PROCESS_ID));
 
         crate::route_frames_through(arena as u64);
     }
@@ -1424,6 +1476,7 @@ fn resolve_user_api() {
             free_memory: core::mem::transmute(export(ntdll, b"NtFreeVirtualMemory")),
             protect_memory: core::mem::transmute(export(ntdll, b"NtProtectVirtualMemory")),
             query_memory: core::mem::transmute(export(ntdll, b"NtQueryVirtualMemory")),
+            yield_execution: core::mem::transmute(export(ntdll, b"NtYieldExecution")),
             wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
@@ -1442,6 +1495,7 @@ struct UserApi {
     free_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32 => i32),
     protect_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32, *mut u32 => i32),
     query_memory: kernel_fn!(*mut c_void, *mut u8, u32, *mut u8, usize, *mut usize => i32),
+    yield_execution: kernel_fn!( => i32),
     wait_for_object: kernel_fn!(*mut c_void, u8, *const i64 => i32),
     set_event: kernel_fn!(*mut c_void, *mut u32 => i32),
     exit_thread: kernel_fn!(u32 => !),
@@ -1541,23 +1595,23 @@ unsafe fn read_u32(address: usize) -> u32 {
 }
 
 #[cfg(target_arch = "x86")]
-fn current_process_id() -> u32 {
-    let pid: u32;
+fn current_client_id(offset: u32) -> u32 {
+    let id: u32;
     unsafe {
-        core::arch::asm!("mov {0:e}, fs:[0x20]", out(reg) pid,
+        core::arch::asm!("mov {0:e}, fs:[{1:e}]", out(reg) id, in(reg) offset,
             options(nomem, nostack, preserves_flags));
     }
-    pid
+    id
 }
 
 #[cfg(target_arch = "x86_64")]
-fn current_process_id() -> u32 {
-    let pid: u64;
+fn current_client_id(offset: u32) -> u32 {
+    let id: u64;
     unsafe {
-        core::arch::asm!("mov {0}, gs:[0x40]", out(reg) pid,
+        core::arch::asm!("mov {0}, gs:[{1:e}]", out(reg) id, in(reg) offset,
             options(nomem, nostack, preserves_flags));
     }
-    pid as u32
+    id as u32
 }
 
 // The two halves use the same code, thus the address tells you nothing. The ring tells you
@@ -1612,6 +1666,16 @@ const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
 const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
 #[cfg(target_arch = "x86_64")]
 const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
+
+#[cfg(target_arch = "x86")]
+const BLOCK_PROCESS_ID: u32 = 0x20;
+#[cfg(target_arch = "x86")]
+const BLOCK_THREAD_ID: u32 = 0x24;
+
+#[cfg(target_arch = "x86_64")]
+const BLOCK_PROCESS_ID: u32 = 0x40;
+#[cfg(target_arch = "x86_64")]
+const BLOCK_THREAD_ID: u32 = 0x48;
 
 const PE_HEADERS_OFFSET: usize = 0x3c;
 const OPTIONAL_HEADER_OFFSET: usize = 0x18;
@@ -1774,6 +1838,8 @@ struct Target {
     arena: u64,
     wake: *mut c_void,
     started: bool,
+    text: u64,
+    size: u64,
 }
 
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
