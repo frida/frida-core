@@ -75,6 +75,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/shares-one-agent-between-sessions-in-live-guest", () => {
+			var h = new Harness ((h) => shares_one_agent_between_sessions_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-threads-in-live-guest", () => {
 			var h = new Harness ((h) => enumerates_threads_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1225,6 +1230,67 @@ namespace Frida.BareboneTest {
 
 	private static async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, "send(1 + 1);", "\"payload\":2");
+	}
+
+	// Two sessions on one process use the same copy. Thus one session can detach and the other
+	// keeps a working agent and its own scripts.
+	private static async void shares_one_agent_between_sessions_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield find_explorer (device);
+
+			var first = yield device.attach (pid, null, null);
+			var second = yield device.attach (pid, null, null);
+
+			var survivor = yield second.create_script ("recv('ping', () => { send('alive'); });", null, null);
+			var messages = new Gee.ArrayList<string> ();
+			survivor.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield survivor.load (null);
+
+			var doomed = yield first.create_script ("send('doomed');", null, null);
+			yield doomed.load (null);
+			yield first.detach (null);
+
+			// The copy stays for the session that is still attached.
+			survivor.post ("""{"type":"ping"}""");
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("alive"));
+
+			yield second.detach (null);
+
+			// No session is attached now, thus the next attach places a new copy.
+			var again = yield device.attach (pid, null, null);
+			assert_nonnull (again);
+			yield again.detach (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static async uint find_explorer (Device device) throws GLib.Error {
+		var processes = yield device.enumerate_processes (null, null);
+		for (int i = 0; i != processes.size (); i++) {
+			if (processes.get (i).name.down () == "explorer.exe")
+				return processes.get (i).pid;
+		}
+		return 0;
 	}
 
 	private static async void enumerates_threads_in_live_guest (Harness h) {

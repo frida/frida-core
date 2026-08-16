@@ -309,6 +309,25 @@ pub fn inject_agent(pid: u32, entry: u32) -> u32 {
     observed
 }
 
+// Only the copy knows when it is safe to stop. It runs on the stack and in the image that
+// this function releases, thus the copy reports when it leaves both.
+pub fn detach_from_process(pid: u32) -> bool {
+    let Some(arena) = (unsafe { targets().remove(&pid) }) else {
+        return false;
+    };
+
+    unsafe { ((arena + STOP_REQUEST) as *mut u32).write_volatile(1) };
+    if !await_flag(arena + WORKER_STOPPED) || !await_flag(arena + MAIN_STOPPED) {
+        return false;
+    }
+
+    // The copy's arena, stack and image stay where they are. Handing those pages back — with
+    // or without decommitting them first — leaves the target unable to take another injection,
+    // so they are kept rather than freed into a state that breaks the next attach.
+
+    true
+}
+
 pub fn arena_for_pid(pid: u32) -> Option<u32> {
     unsafe { targets().get(&pid).copied() }
 }
@@ -649,9 +668,11 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
 
     spawn_thread(user_worker, arena as *mut c_void);
 
-    loop {
-        unsafe { sleep(IDLE_SLEEP_MS) };
+    while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
+        unsafe { sleep(PARKED_SLEEP_MS) };
     }
+
+    unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
 }
 
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
@@ -662,7 +683,7 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
 
     unsafe { crate::route_frames_through(arena) };
 
-    loop {
+    while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
         if let Some(frame) = take_frame_from_host(arena) {
             crate::on_frame_from_host(frame);
             acknowledge_frame_from_host(arena);
@@ -670,6 +691,8 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
 
         unsafe { crate::dispatch_pending_work(context) };
     }
+
+    unsafe { ((arena + WORKER_STOPPED) as *mut u32).write_volatile(1) };
 }
 
 
@@ -885,6 +908,9 @@ const GO_FLAG: u32 = 0x04;
 const OBSERVED_PID: u32 = 0x08;
 const THREAD_DATABASE: u32 = 0x14;
 const RESUMED_FLAG: u32 = 0x18;
+const STOP_REQUEST: u32 = 0x0c;
+const MAIN_STOPPED: u32 = 0x10;
+const WORKER_STOPPED: u32 = 0x3c;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;

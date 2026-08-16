@@ -321,6 +321,7 @@ namespace Frida {
 			construct;
 		}
 
+		private Gee.Map<uint, uint> injected_agents = new Gee.HashMap<uint, uint> ();
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
@@ -408,12 +409,7 @@ namespace Frida {
 				if (connection == null)
 					throw_not_supported ();
 
-				// The agent reports the process that it started in. A different value shows that the copy
-				// went to the incorrect process.
-				uint64 entry = yield connection.place_user_agent (cancellable);
-				uint reached = yield connection.inject_into_process (pid, entry, cancellable);
-				if (reached != pid)
-					throw new Error.NOT_SUPPORTED ("Agent landed in process %u, not %u", reached, pid);
+				yield acquire_injected_agent (pid, cancellable);
 			}
 
 			var opts = SessionOptions._deserialize (options);
@@ -486,9 +482,52 @@ namespace Frida {
 			session.closed.disconnect (on_agent_session_closed);
 			agent_sessions.unset (id);
 
+			tear_down.begin (session);
+
 			SessionDetachReason reason = APPLICATION_REQUESTED;
 			var no_crash = CrashInfo.empty ();
 			agent_session_detached (id, reason, no_crash);
+		}
+
+		private async void tear_down (BareboneAgentSession session) {
+			yield session.discard_scripts ();
+			yield release_injected_agent (session.pid);
+		}
+
+		// Each process has one copy for all its sessions, and the copy stays until the last session
+		// ends.
+		private async void acquire_injected_agent (uint pid, Cancellable? cancellable) throws Error, IOError {
+			uint users = injected_agents[pid];
+			if (users != 0) {
+				injected_agents[pid] = users + 1;
+				return;
+			}
+
+			// The agent reports the process that it started in. A different value shows that the copy
+			// went to the incorrect process.
+			uint64 entry = yield connection.place_user_agent (cancellable);
+			uint reached = yield connection.inject_into_process (pid, entry, cancellable);
+			if (reached != pid)
+				throw new Error.NOT_SUPPORTED ("Agent landed in process %u, not %u", reached, pid);
+
+			injected_agents[pid] = 1;
+		}
+
+		private async void release_injected_agent (uint pid) {
+			uint users = injected_agents[pid];
+			if (users == 0)
+				return;
+
+			if (users > 1) {
+				injected_agents[pid] = users - 1;
+				return;
+			}
+
+			injected_agents.unset (pid);
+			try {
+				yield connection.detach_from_process (pid, null);
+			} catch (GLib.Error e) {
+			}
 		}
 	}
 
@@ -584,12 +623,6 @@ namespace Frida {
 			construct;
 		}
 
-		// Zero selects the kernel, which is the only target that runs scripts without a copy.
-		public uint pid {
-			get;
-			construct;
-		}
-
 		public RemoteBareboneAgentSession (Barebone.AgentConnection connection, uint pid, AgentSessionId id,
 				uint persist_timeout, MainContext dbus_context) {
 			Object (
@@ -602,8 +635,21 @@ namespace Frida {
 			);
 		}
 
+		private Gee.Set<AgentScriptId?> own_scripts =
+			new Gee.HashSet<AgentScriptId?> (AgentScriptId.hash, AgentScriptId.equal);
+
 		construct {
 			connection.script_message.connect (on_message_from_script);
+		}
+
+		public override async void discard_scripts () {
+			foreach (AgentScriptId script_id in own_scripts.to_array ()) {
+				try {
+					yield connection.destroy_script (script_id, pid, null);
+				} catch (GLib.Error e) {
+				}
+			}
+			own_scripts.clear ();
 		}
 
 		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
@@ -614,13 +660,17 @@ namespace Frida {
 			if (opts.runtime == V8)
 				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
 
-			return yield connection.create_script (source, pid, cancellable);
+			var script_id = yield connection.create_script (source, pid, cancellable);
+			own_scripts.add (script_id);
+
+			return script_id;
 		}
 
 		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			yield connection.destroy_script (script_id, pid, cancellable);
+			own_scripts.remove (script_id);
 		}
 
 		public override async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
@@ -654,6 +704,16 @@ namespace Frida {
 
 	private abstract class BareboneAgentSession : Object, AgentSession {
 		public signal void closed ();
+
+		// Zero selects the kernel, which is the only target that runs scripts without a copy.
+		public uint pid {
+			get;
+			construct;
+		}
+
+		// A session owns the scripts it created, and takes only those with it.
+		public virtual async void discard_scripts () {
+		}
 
 		public AgentSessionId id {
 			get;

@@ -93,6 +93,7 @@ pub enum FridaCommand {
     EnumerateProcesses = 8,
     InjectIntoProcess = 9,
     AllocateShared = 10,
+    DetachFromProcess = 11,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -111,6 +112,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
+            FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -800,6 +802,14 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
+            #[cfg(feature = "win9x")]
+            FridaCommand::DetachFromProcess => {
+                unsafe {
+                    PENDING_DETACH = (request_id, g_variant_get_uint32(payload_variant));
+                    DETACH_PENDING = true;
+                }
+                None
+            }
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -842,28 +852,39 @@ fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<Han
 // gives no heap. Thus that callback only sets a flag, and this source does the work.
 #[cfg(feature = "win9x")]
 unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
-    if unsafe { ptr::addr_of!(ALLOCATION_PENDING).read() } {
-        unsafe { ALLOCATION_PENDING = false };
-
-        let (request_id, size) = unsafe { PENDING_ALLOCATION };
-        let address = kernel::allocate_shared(size as usize);
-        let response = if address == 0 {
-            HandlerResponse::error("Unable to allocate shared memory")
-        } else {
-            HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
-        };
-        send_command_reply(request_id, response);
-    }
-
+    serve_pending_allocation();
+    serve_pending_injection();
+    serve_pending_detach();
     relay_frames_from_targets();
 
+    1
+}
+
+#[cfg(feature = "win9x")]
+fn serve_pending_allocation() {
+    if !unsafe { ptr::addr_of!(ALLOCATION_PENDING).read() } {
+        return;
+    }
+    unsafe { ALLOCATION_PENDING = false };
+
+    let (request_id, size) = unsafe { PENDING_ALLOCATION };
+    let address = kernel::allocate_shared(size as usize);
+    let response = if address == 0 {
+        HandlerResponse::error("Unable to allocate shared memory")
+    } else {
+        HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
+    };
+    send_command_reply(request_id, response);
+}
+
+#[cfg(feature = "win9x")]
+fn serve_pending_injection() {
     if !unsafe { ptr::addr_of!(INJECTION_PENDING).read() } {
-        return 1;
+        return;
     }
     unsafe { INJECTION_PENDING = false };
 
     let (request_id, pid, entry) = unsafe { PENDING_INJECTION };
-
     let observed = kernel::inject_agent(pid, entry);
     let response = if observed == 0 {
         HandlerResponse::error("Unable to inject into process")
@@ -871,9 +892,24 @@ unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
         HandlerResponse::success(unsafe { g_variant_new_uint32(observed) })
     };
     send_command_reply(request_id, response);
-
-    1
 }
+
+#[cfg(feature = "win9x")]
+fn serve_pending_detach() {
+    if !unsafe { ptr::addr_of!(DETACH_PENDING).read() } {
+        return;
+    }
+    unsafe { DETACH_PENDING = false };
+
+    let (request_id, pid) = unsafe { PENDING_DETACH };
+    let response = if kernel::detach_from_process(pid) {
+        HandlerResponse::success(unsafe { g_variant_new_uint32(pid) })
+    } else {
+        HandlerResponse::error("Unable to detach from process")
+    };
+    send_command_reply(request_id, response);
+}
+
 
 #[cfg(feature = "win9x")]
 const DEFERRED_WORK_POLL_MS: u32 = 20;
@@ -895,6 +931,12 @@ static mut ALLOCATION_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
 static mut PENDING_ALLOCATION: (u16, u32) = (0, 0);
+
+#[cfg(feature = "win9x")]
+static mut DETACH_PENDING: bool = false;
+
+#[cfg(feature = "win9x")]
+static mut PENDING_DETACH: (u16, u32) = (0, 0);
 
 #[cfg(feature = "win9x")]
 static mut INJECTION_PENDING: bool = false;

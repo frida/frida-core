@@ -25,7 +25,6 @@ namespace Frida.Barebone {
 
 		private Allocation elf_allocation;
 		private Gee.Map<string, SymbolInfo> resolved_symbols;
-		private uint64 user_entry;
 		private Allocation config_allocation;
 
 		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
@@ -327,10 +326,10 @@ namespace Frida.Barebone {
 		 * halves cannot share one image: its globals are one instance, so the user-mode side
 		 * would tear down the state the kernel side is running on.
 		 */
+		// Each process needs its own copy, because the copies share the arena and would write the
+		// same data. The process receives the code as it is, thus only the writable half needs a new
+		// location, in memory that both sides can address.
 		public async uint64 place_user_agent (Cancellable? cancellable) throws Error, IOError {
-			if (user_entry != 0)
-				return user_entry;
-
 			Gum.ElfModule elf;
 			try {
 				elf = new Gum.ElfModule.from_file (agent_config.path);
@@ -370,9 +369,12 @@ namespace Frida.Barebone {
 			});
 			if (entry == 0)
 				throw new Error.NOT_SUPPORTED ("Agent has no user-mode entry point");
-			user_entry = entry;
 
 			return entry;
+		}
+
+		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield execute_command (Command.DETACH_FROM_PROCESS, new Variant.uint32 (pid), cancellable);
 		}
 
 		public async uint allocate_shared (uint size, Cancellable? cancellable) throws Error, IOError {
@@ -838,6 +840,7 @@ namespace Frida.Barebone {
 			ENUMERATE_PROCESSES = 8,
 			INJECT_INTO_PROCESS = 9,
 			ALLOCATE_SHARED = 10,
+			DETACH_FROM_PROCESS = 11,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}
