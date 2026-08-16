@@ -122,10 +122,16 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
         let start = alloc(core::mem::size_of::<UserThreadStart>()) as *mut UserThreadStart;
         unsafe { start.write(UserThreadStart { entry, parameter }) };
 
-        return unsafe {
+        let thread = unsafe {
             create_thread(0, USER_THREAD_STACK_SIZE, frida_win9x_user_thread as usize as u32,
-                start as *mut c_void, 0, core::ptr::null_mut()) as isize
+                start as *mut c_void, 0, core::ptr::null_mut())
         };
+
+        let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().close_handle as usize) };
+        unsafe { close_handle(thread) };
+
+        return thread as isize;
     }
 
     unsafe {
@@ -748,6 +754,7 @@ fn resolve_user_api() {
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
             exit_thread: kernel32_export(b"ExitThread"),
+            close_handle: kernel32_export(b"CloseHandle"),
         };
     }
 }
@@ -772,6 +779,7 @@ struct UserApi {
     set_event: u32,
     wait_for_single_object: u32,
     exit_thread: u32,
+    close_handle: u32,
 }
 
 static mut USER_API: UserApi = UserApi {
@@ -790,6 +798,7 @@ static mut USER_API: UserApi = UserApi {
     set_event: 0,
     wait_for_single_object: 0,
     exit_thread: 0,
+    close_handle: 0,
 };
 
 // The privilege level gives the half that runs, thus the code keeps no such value.
