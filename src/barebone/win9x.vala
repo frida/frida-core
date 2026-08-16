@@ -352,7 +352,15 @@ namespace Frida.Barebone {
 		if (directory == 0)
 			return 0;
 
-		Buffer d = gdb.make_buffer (yield gdb.read_byte_array (image + directory, 0x28, cancellable));
+		// Sweeping for the image means most candidates are not KERNEL32, and one that happens to
+		// carry a PE header will point this anywhere at all.
+		Bytes raw_directory;
+		try {
+			raw_directory = yield gdb.read_byte_array (image + directory, 0x28, cancellable);
+		} catch (Error e) {
+			return 0;
+		}
+		Buffer d = gdb.make_buffer (raw_directory);
 		uint32 count = d.read_uint32 (0x18);
 		uint32 functions = d.read_uint32 (0x1c);
 		uint32 names = d.read_uint32 (0x20);
@@ -360,12 +368,18 @@ namespace Frida.Barebone {
 		if (count == 0 || count > MAX_EXPORTS)
 			return 0;
 
-		Buffer name_rvas = gdb.make_buffer (yield gdb.read_byte_array (image + names, count * 4, cancellable));
-		Buffer ordinal_values = gdb.make_buffer (yield gdb.read_byte_array (image + ordinals, count * 2,
+		Buffer name_rvas = gdb.make_buffer (yield read_sparse (machine, image + names, count * 4, cancellable));
+		Buffer ordinal_values = gdb.make_buffer (yield read_sparse (machine, image + ordinals, count * 2,
 			cancellable));
 		for (uint32 i = 0; i != count; i++) {
-			Bytes raw = yield gdb.read_byte_array (image + name_rvas.read_uint32 (i * 4), wanted.length + 1,
-				cancellable);
+			// Parts of the name table are paged out, and a debugger read cannot fault them in.
+			Bytes raw;
+			try {
+				raw = yield gdb.read_byte_array (image + name_rvas.read_uint32 (i * 4),
+					wanted.length + 1, cancellable);
+			} catch (Error e) {
+				continue;
+			}
 			unowned uint8[] actual = raw.get_data ();
 			if (actual[wanted.length] != 0 || Memory.cmp (actual, wanted.data, wanted.length) != 0)
 				continue;
@@ -498,6 +512,28 @@ namespace Frida.Barebone {
 
 	private const size_t NEXT_OFFSET = 0x00;
 	public const string KERNEL32_BASE = "KERNEL32_Base";
+	// The name and ordinal tables straddle pages that are paged out, and a debugger read cannot
+	// fault those in, so missing pages read back as zeroes and their entries simply never match.
+	private static async Bytes read_sparse (Machine machine, uint64 address, size_t size,
+			Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		var result = new uint8[size];
+		size_t offset = 0;
+		while (offset != size) {
+			uint64 cursor = address + offset;
+			size_t chunk = size_t.min (size - offset, PAGE_SIZE - (size_t) (cursor % PAGE_SIZE));
+			try {
+				Bytes page = yield gdb.read_byte_array (cursor, chunk, cancellable);
+				Memory.copy ((uint8 *) result + offset, page.get_data (), chunk);
+			} catch (Error e) {
+			}
+			offset += chunk;
+		}
+
+		return new Bytes.take ((owned) result);
+	}
+
 	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
 	public const string MODULE_TABLE = "KERNEL32_ModuleTable";
 
@@ -530,5 +566,6 @@ namespace Frida.Barebone {
 
 	private const uint32 MAX_SERVICES = 0x400;
 
+	private const size_t PAGE_SIZE = 4096;
 	private const size_t SCAN_CHUNK_SIZE = 256 * 1024;
 }
