@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::kernel::{ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/system32/";
 
@@ -575,14 +575,42 @@ pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
         let head = process.handle as usize + layout.head;
         let mut entry = (head as *const usize).read_volatile();
         while entry != head && entry != 0 {
+            let thread = (entry - layout.entry) as *mut c_void;
             found(ThreadInfo {
-                id: (_PsGetThreadId)((entry - layout.entry) as *mut c_void),
-                cpu_state: None,
+                id: (_PsGetThreadId)(thread),
+                cpu_state: capture(thread),
             });
             entry = (entry as *const usize).read_volatile();
         }
     });
 }
+
+// The kernel gives the registers of a thread only if the thread has a user-mode part. If the
+// thread runs only in the kernel, the kernel reads after the end of its stack and stops the
+// machine. A thread also cannot ask about itself.
+unsafe fn capture(thread: *mut c_void) -> Option<CpuState> {
+    unsafe {
+        if (_PsGetProcessPeb)((_PsGetThreadProcess)(thread)).is_null() {
+            return None;
+        }
+        if thread == (_PsGetCurrentThread)() {
+            return None;
+        }
+
+        let context = &mut *core::ptr::addr_of_mut!(CONTEXT);
+        context.fill(0);
+        let base = context.as_mut_ptr().add(context.as_ptr().align_offset(CONTEXT_ALIGNMENT));
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        if (_PsGetContextThread)(thread, base, KERNEL_MODE as u8) < 0 {
+            return None;
+        }
+
+        Some(cpu_state_of(base))
+    }
+}
+
+static mut CONTEXT: [u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT] = [0; CONTEXT_SIZE + CONTEXT_ALIGNMENT];
 
 // No export gives the position of the thread list in a process. Thus calculate both offsets:
 // the caller is on the list, and its own links go back into its process.
@@ -652,6 +680,67 @@ const MIN_THREAD_ENTRY_OFFSET: usize = 0x200;
 const MAX_OBJECT_SIZE: usize = 0x700;
 
 const MAX_THREADS_PER_PROCESS: usize = 1024;
+
+// The layout of a CONTEXT is part of the architecture, thus these offsets are known.
+#[cfg(target_arch = "x86")]
+unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+    let field = |offset: usize| unsafe { base.add(offset).cast::<u32>().read_unaligned() };
+
+    CpuState {
+        eip: field(0xb8),
+        edi: field(0x9c),
+        esi: field(0xa0),
+        ebp: field(0xb4),
+        esp: field(0xc4),
+        ebx: field(0xa4),
+        edx: field(0xa8),
+        ecx: field(0xac),
+        eax: field(0xb0),
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+    let field = |offset: usize| unsafe { base.add(offset).cast::<u64>().read_unaligned() };
+
+    CpuState {
+        rip: field(0xf8),
+        r15: field(0xf0),
+        r14: field(0xe8),
+        r13: field(0xe0),
+        r12: field(0xd8),
+        r11: field(0xd0),
+        r10: field(0xc8),
+        r9: field(0xc0),
+        r8: field(0xb8),
+        rdi: field(0xb0),
+        rsi: field(0xa8),
+        rbp: field(0xa0),
+        rsp: field(0x98),
+        rbx: field(0x90),
+        rdx: field(0x88),
+        rcx: field(0x80),
+        rax: field(0x78),
+    }
+}
+
+#[cfg(target_arch = "x86")]
+const CONTEXT_SIZE: usize = 716;
+#[cfg(target_arch = "x86")]
+const CONTEXT_ALIGNMENT: usize = 4;
+#[cfg(target_arch = "x86")]
+const CONTEXT_FLAGS: usize = 0x00;
+#[cfg(target_arch = "x86")]
+const CONTEXT_FULL: u32 = 0x0001_0007;
+
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_SIZE: usize = 1232;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_ALIGNMENT: usize = 16;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_FLAGS: usize = 0x30;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_FULL: u32 = 0x0010_0003;
 
 pub struct ProcessInfo {
     pub id: u32,
@@ -1241,6 +1330,7 @@ kernel_abi! {
     static _PsGetCurrentThread: kernel_fn!( => *mut c_void);
     static _PsGetThreadProcess: kernel_fn!(*mut c_void => *mut c_void);
     static _PsGetThreadId: kernel_fn!(*mut c_void => u32);
+    static _PsGetContextThread: kernel_fn!(*mut c_void, *mut u8, u8 => i32);
     static _KeStackAttachProcess: kernel_fn!(*mut c_void, *mut u8);
     static _KeUnstackDetachProcess: kernel_fn!(*mut u8);
     static _ZwCreateFile: kernel_fn!(

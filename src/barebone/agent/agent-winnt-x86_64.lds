@@ -35,6 +35,7 @@ SECTIONS {
     _PsGetCurrentThread = .; . += 8;
     _PsGetThreadProcess = .; . += 8;
     _PsGetThreadId = .; . += 8;
+    _PsGetContextThread = .; . += 8;
     _KeStackAttachProcess = .; . += 8;
     _KeUnstackDetachProcess = .; . += 8;
     _ZwCreateFile = .; . += 8;

@@ -1643,12 +1643,24 @@ namespace Frida.BareboneTest {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
+
+			// The kernel gives the registers of a thread only if the thread has a user-mode part. Thus
+			// the threads that run only in the kernel give none.
+			const pc = (Process.pointerSize === 4) ? 'eip' : 'rip';
+			const sp = (Process.pointerSize === 4) ? 'esp' : 'rsp';
+			const contextual = threads.filter(t => t.context !== undefined);
+
 			send({
 				several: threads.length > 10,
 				listed: threads.some(t => t.id === mine),
-				distinct: new Set(threads.map(t => t.id)).size === threads.length
+				distinct: new Set(threads.map(t => t.id)).size === threads.length,
+				reported: contextual.length > 0,
+				quiet: contextual.length < threads.length,
+				somewhere: contextual.every(t => !t.context[pc].isNull() && !t.context[sp].isNull()),
+				apart: new Set(contextual.map(t => t.context[sp].toString())).size > 1
 			});
-		""", "\"several\":true,\"listed\":true,\"distinct\":true");
+		""", "\"several\":true,\"listed\":true,\"distinct\":true," +
+			"\"reported\":true,\"quiet\":true,\"somewhere\":true,\"apart\":true");
 	}
 
 	private static async void winnt_reads_and_writes_memory_in_live_guest (Harness h, string prefix) {

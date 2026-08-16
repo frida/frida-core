@@ -11,7 +11,6 @@ use crate::{
     gum::{self, FoundExportCallback},
     kernel,
 };
-#[cfg(target_arch = "x86")]
 use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT};
 use alloc::format;
 use core::ptr;
@@ -155,25 +154,53 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
         details.flags = 0;
         details.id = thread.id as GumThreadId;
 
-        #[cfg(target_arch = "x86")]
         if let Some(state) = thread.cpu_state {
             details.flags = GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
-            details.cpu_context = GumCpuContext {
-                eip: state.eip,
-                edi: state.edi,
-                esi: state.esi,
-                ebp: state.ebp,
-                esp: state.esp,
-                ebx: state.ebx,
-                edx: state.edx,
-                ecx: state.ecx,
-                eax: state.eax,
-                xmm: ptr::null_mut(),
-            };
+            details.cpu_context = cpu_context_from(state);
         }
 
         unsafe { emit(&details, user_data) };
     });
+}
+
+#[cfg(target_arch = "x86")]
+fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        eip: state.eip,
+        edi: state.edi,
+        esi: state.esi,
+        ebp: state.ebp,
+        esp: state.esp,
+        ebx: state.ebx,
+        edx: state.edx,
+        ecx: state.ecx,
+        eax: state.eax,
+        xmm: ptr::null_mut(),
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        rip: state.rip,
+        r15: state.r15,
+        r14: state.r14,
+        r13: state.r13,
+        r12: state.r12,
+        r11: state.r11,
+        r10: state.r10,
+        r9: state.r9,
+        r8: state.r8,
+        rdi: state.rdi,
+        rsi: state.rsi,
+        rbp: state.rbp,
+        rsp: state.rsp,
+        rbx: state.rbx,
+        rdx: state.rdx,
+        rcx: state.rcx,
+        rax: state.rax,
+        xmm: ptr::null_mut(),
+    }
 }
 
 pub(crate) unsafe fn enumerate_exports_in_range(
