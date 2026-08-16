@@ -505,8 +505,8 @@ namespace Frida {
 
 			// The agent reports the process that it started in. A different value shows that the copy
 			// went to the incorrect process.
-			uint64 entry = yield connection.place_user_agent (cancellable);
-			uint reached = yield connection.inject_into_process (pid, entry, cancellable);
+			var agent = yield connection.place_user_agent (cancellable);
+			uint reached = yield connection.inject_into_process (pid, agent, cancellable);
 			if (reached != pid)
 				throw new Error.NOT_SUPPORTED ("Agent landed in process %u, not %u", reached, pid);
 

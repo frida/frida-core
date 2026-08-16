@@ -1,5 +1,21 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
+	public sealed class PlacedAgent : Object {
+		public uint64 base_address {
+			get;
+			construct;
+		}
+
+		public uint64 entry {
+			get;
+			construct;
+		}
+
+		public PlacedAgent (uint64 base_address, uint64 entry) {
+			Object (base_address: base_address, entry: entry);
+		}
+	}
+
 	public sealed class AgentConnection : Object, AsyncInitable {
 		public signal void script_message (AgentScriptId id, string json, Bytes? data);
 
@@ -329,7 +345,7 @@ namespace Frida.Barebone {
 		// Each process needs its own copy, because the copies share the arena and would write the
 		// same data. The process receives the code as it is, thus only the writable half needs a new
 		// location, in memory that both sides can address.
-		public async uint64 place_user_agent (Cancellable? cancellable) throws Error, IOError {
+		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
 			Gum.ElfModule elf;
 			try {
 				elf = new Gum.ElfModule.from_file (agent_config.path);
@@ -370,7 +386,7 @@ namespace Frida.Barebone {
 			if (entry == 0)
 				throw new Error.NOT_SUPPORTED ("Agent has no user-mode entry point");
 
-			return entry;
+			return new PlacedAgent (image_base, entry);
 		}
 
 		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -390,13 +406,14 @@ namespace Frida.Barebone {
 			return address;
 		}
 
-		public async uint inject_into_process (uint pid, uint64 entry, Cancellable? cancellable)
+		public async uint inject_into_process (uint pid, PlacedAgent agent, Cancellable? cancellable)
 				throws Error, IOError {
 			// The agent cannot answer from the context that does the work. Thus it reports the result at
 			// the next request.
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.INJECT_INTO_PROCESS,
-					new Variant ("(uu)", pid, (uint32) entry), cancellable);
+					new Variant ("(uuu)", pid, (uint32) agent.entry, (uint32) agent.base_address),
+					cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
 					throw new Error.PROTOCOL ("Invalid inject_into_process response format");
 

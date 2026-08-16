@@ -830,7 +830,8 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     unsafe {
         let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
         let entry = g_variant_get_uint32(g_variant_get_child_value(payload, 1));
-        PENDING_INJECTION = (request_id, pid, entry);
+        let image_base = g_variant_get_uint32(g_variant_get_child_value(payload, 2));
+        PENDING_INJECTION = (request_id, pid, entry, image_base);
         INJECTION_PENDING = true;
     }
 
@@ -884,8 +885,8 @@ fn serve_pending_injection() {
     }
     unsafe { INJECTION_PENDING = false };
 
-    let (request_id, pid, entry) = unsafe { PENDING_INJECTION };
-    let observed = kernel::inject_agent(pid, entry);
+    let (request_id, pid, entry, image_base) = unsafe { PENDING_INJECTION };
+    let observed = kernel::inject_agent(pid, entry, image_base);
     let response = if observed == 0 {
         HandlerResponse::error("Unable to inject into process")
     } else {
@@ -942,7 +943,7 @@ static mut PENDING_DETACH: (u16, u32) = (0, 0);
 static mut INJECTION_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
-static mut PENDING_INJECTION: (u16, u32, u32) = (0, 0, 0);
+static mut PENDING_INJECTION: (u16, u32, u32, u32) = (0, 0, 0, 0);
 
 #[cfg(feature = "win9x")]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {

@@ -281,7 +281,7 @@ pub fn allocate_shared(size: usize) -> u32 {
 
 // The payload is a call into this image, not a copy of it. The pages of the agent are
 // available in ring 3, thus the new thread runs the same code as the kernel half.
-pub fn inject_agent(pid: u32, entry: u32) -> u32 {
+pub fn inject_agent(pid: u32, entry: u32, image_base: u32) -> u32 {
     let process = process_for_pid(pid);
     if process == 0 {
         return 0;
@@ -304,7 +304,13 @@ pub fn inject_agent(pid: u32, entry: u32) -> u32 {
     }
 
     let observed = unsafe { ((injection.arena + OBSERVED_PID) as *const u32).read_volatile() };
-    unsafe { targets().insert(observed, injection.arena) };
+    unsafe {
+        targets().insert(observed, Target {
+            arena: injection.arena,
+            stack: injection.stack,
+            image_base,
+        })
+    };
 
     observed
 }
@@ -312,35 +318,52 @@ pub fn inject_agent(pid: u32, entry: u32) -> u32 {
 // Only the copy knows when it is safe to stop. It runs on the stack and in the image that
 // this function releases, thus the copy reports when it leaves both.
 pub fn detach_from_process(pid: u32) -> bool {
-    let Some(arena) = (unsafe { targets().remove(&pid) }) else {
+    let Some(target) = (unsafe { targets().remove(&pid) }) else {
         return false;
     };
+    let arena = target.arena;
 
     unsafe { ((arena + STOP_REQUEST) as *mut u32).write_volatile(1) };
     if !await_flag(arena + WORKER_STOPPED) || !await_flag(arena + MAIN_STOPPED) {
         return false;
     }
 
-    // The copy's arena, stack and image stay where they are. Handing those pages back — with
-    // or without decommitting them first — leaves the target unable to take another injection,
-    // so they are kept rather than freed into a state that breaks the next attach.
+    // A thread sets the flag before it leaves. Thus wait for the time it needs to run its last
+    // instructions and return into KERNEL32.
+    wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
+
+    unsafe {
+        free_shared(((arena + TO_TARGET.buffer) as *const u32).read_volatile());
+        free_shared(((arena + FROM_TARGET.buffer) as *const u32).read_volatile());
+    }
+    free_shared(target.stack);
+    free_shared(target.image_base);
+    free_shared(arena);
 
     true
 }
 
+struct Target {
+    arena: u32,
+    stack: u32,
+    image_base: u32,
+}
+
+static mut TEARDOWN_TOKEN: u8 = 0;
+
 pub fn arena_for_pid(pid: u32) -> Option<u32> {
-    unsafe { targets().get(&pid).copied() }
+    unsafe { targets().get(&pid).map(|t| t.arena) }
 }
 
 pub fn injected_arenas() -> alloc::vec::Vec<u32> {
-    unsafe { targets().values().copied().collect() }
+    unsafe { targets().values().map(|t| t.arena).collect() }
 }
 
-unsafe fn targets() -> &'static mut BTreeMap<u32, u32> {
+unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
     unsafe { core::ptr::addr_of_mut!(TARGETS).as_mut().unwrap() }
 }
 
-static mut TARGETS: BTreeMap<u32, u32> = BTreeMap::new();
+static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
 
 
 fn process_for_pid(pid: u32) -> u32 {
@@ -387,7 +410,7 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 
     create_suspended_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena, process);
     if !await_flag(arena + THREAD_DATABASE) {
-        return Injection { arena, thread: 0 };
+        return Injection { arena, thread: 0, stack };
     }
 
     // KERNEL32 writes the first frame on a stack in the process that calls it. Thus the target
@@ -408,11 +431,11 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 
     resume_thread(arena + RESUME_STUB_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
-        return Injection { arena, thread: 0 };
+        return Injection { arena, thread: 0, stack };
     }
     unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
 
-    Injection { arena, thread }
+    Injection { arena, thread, stack }
 }
 
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
@@ -506,6 +529,7 @@ const FROM_TARGET: Channel = Channel {
 pub struct Injection {
     pub arena: u32,
     pub thread: u32,
+    pub stack: u32,
 }
 
 // KERNEL32 makes threads from its own worker in ring 3. Thus an APC to thread -1 runs our
@@ -633,6 +657,10 @@ fn await_flag(address: u32) -> bool {
     false
 }
 
+fn free_shared(address: u32) {
+    unsafe { __PageFree(address as *mut u8, 0) };
+}
+
 fn alloc_shared(size: usize) -> *mut u8 {
     let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
     let address = unsafe { __PageReserve(PR_SHARED, pages, 0) };
@@ -672,7 +700,12 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
         unsafe { sleep(PARKED_SLEEP_MS) };
     }
 
+    // The stub that called this function ends with a loop, thus a return keeps the thread in the
+    // arena.
+    let exit_thread: unsafe extern "stdcall" fn(u32) -> ! =
+        unsafe { core::mem::transmute(user_api().exit_thread as usize) };
     unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
+    unsafe { exit_thread(0) };
 }
 
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
@@ -714,6 +747,7 @@ fn resolve_user_api() {
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
+            exit_thread: kernel32_export(b"ExitThread"),
         };
     }
 }
@@ -737,6 +771,7 @@ struct UserApi {
     create_event: u32,
     set_event: u32,
     wait_for_single_object: u32,
+    exit_thread: u32,
 }
 
 static mut USER_API: UserApi = UserApi {
@@ -754,6 +789,7 @@ static mut USER_API: UserApi = UserApi {
     create_event: 0,
     set_event: 0,
     wait_for_single_object: 0,
+    exit_thread: 0,
 };
 
 // The privilege level gives the half that runs, thus the code keeps no such value.
@@ -912,6 +948,7 @@ const STOP_REQUEST: u32 = 0x0c;
 const MAIN_STOPPED: u32 = 0x10;
 const WORKER_STOPPED: u32 = 0x3c;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
+const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;
 const PARKED_SLEEP_MS: u32 = 200;
