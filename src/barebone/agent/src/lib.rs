@@ -559,6 +559,13 @@ fn transport_is_up() -> bool {
 
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
+pub(crate) fn own_range_contains(address: u32) -> bool {
+    let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
+    let base = range.base_address as u32;
+
+    address >= base && address - base < range.size as u32
+}
+
 static mut OWN_RANGE: GumMemoryRange = GumMemoryRange {
     base_address: 0,
     size: 0,

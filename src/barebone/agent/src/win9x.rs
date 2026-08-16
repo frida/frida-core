@@ -1517,7 +1517,18 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
         )
     };
     if handled == 0 {
-        return unsafe { FAULT_CHAIN[fault as usize] };
+        // Windows corrects most faults, and a page fault on an absent page is normal. Thus send those
+        // to Windows. An invalid opcode is different: Windows runs the instruction again and the
+        // machine stops. Thus stop the thread here, which keeps the guest available.
+        let Some(faulted_at) = our_faulting_eip(frame) else {
+            return unsafe { FAULT_CHAIN[fault as usize] };
+        };
+        if fault != INVALID_OPCODE {
+            return unsafe { FAULT_CHAIN[fault as usize] };
+        }
+
+        report_unhandled_fault(fault, faulted_at);
+        cpu_context.eip = frida_win9x_park as u32;
     }
 
     unsafe {
@@ -1536,6 +1547,36 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
 
     0
 }
+
+// VMM enters a fault hook with EBP at the frame that the processor and its dispatcher made:
+// the registers from pushad, then the error code, EIP, CS and the flags. Use that EIP. The
+// frame of the thunk holds the address that VMM returns to.
+fn our_faulting_eip(frame: *mut u32) -> Option<u32> {
+    let registers = unsafe { frame.add(THUNK_FRAME_EBP).read() } as *const u32;
+    let eip = unsafe { registers.byte_add(FAULT_FRAME_EIP).read() };
+    let cs = unsafe { registers.byte_add(FAULT_FRAME_CS).read() };
+
+    (cs & 3 == 0 && crate::own_range_contains(eip)).then_some(eip)
+}
+
+fn report_unhandled_fault(fault: u32, eip: u32) {
+    log("frida: unhandled fault in the agent\n");
+    log("frida:   vector ");
+    log_hex(fault);
+    log("frida:   eip ");
+    log_hex(eip);
+    log("frida:   address ");
+    log_hex(faulting_address());
+}
+
+// Nothing can recover from this, thus the thread stops here.
+extern "C" fn frida_win9x_park() -> ! {
+    loop {
+        wait(core::ptr::addr_of!(PARK_TOKEN), Some(PARK_SLICE_US), &mut || false);
+    }
+}
+
+static mut PARK_TOKEN: u8 = 0;
 
 #[unsafe(no_mangle)]
 static mut frida_win9x_resume: [u32; 9] = [0; 9];
@@ -1575,6 +1616,11 @@ fn fault_frame_eip_slot(fault: u32) -> usize {
 
     PUSHED_REGISTERS + VECTOR + error_code
 }
+
+const THUNK_FRAME_EBP: usize = 2;
+const FAULT_FRAME_EIP: usize = 0x24;
+const FAULT_FRAME_CS: usize = 0x28;
+const PARK_SLICE_US: u64 = 1_000_000;
 
 fn faulting_address() -> u32 {
     let address: u32;
