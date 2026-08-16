@@ -669,13 +669,16 @@ impl Hostlink {
             chunk = &chunk[take..];
 
             if s.rx_have == s.rx_need {
-                if let (Some(cb), Some(buf)) = (s.on_rx, &s.rx_buf) {
-                    cb(&buf[..]);
-                }
-                s.rx_buf = None;
+                // Detach the frame and clear the receive state before you dispatch. The callback can call
+                // process() again for a synchronous host RPC, thus it must start with a clean state.
+                let frame = s.rx_buf.take();
                 s.rx_need = 0;
                 s.rx_have = 0;
                 s.rx_lenhave = 0;
+
+                if let (Some(cb), Some(frame)) = (s.on_rx, frame) {
+                    cb(frame);
+                }
             }
         }
     }
