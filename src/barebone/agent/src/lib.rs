@@ -93,8 +93,6 @@ pub enum FridaCommand {
     EnumerateProcesses = 8,
     InjectIntoProcess = 9,
     AllocateShared = 10,
-    CreateScriptInProcess = 11,
-    LoadScriptInProcess = 12,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -113,8 +111,6 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
-            FridaCommand::CreateScriptInProcess => write!(f, "CreateScriptInProcess"),
-            FridaCommand::LoadScriptInProcess => write!(f, "LoadScriptInProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -526,6 +522,24 @@ fn transport_set(driver: Transport) {
 }
 
 #[inline(always)]
+fn send_frame(frame: &[u8]) {
+    #[cfg(feature = "win9x")]
+    if unsafe { ROUTED_ARENA } != 0 {
+        kernel::publish_frame_to_host(unsafe { ROUTED_ARENA }, frame);
+        return;
+    }
+
+    transport_get_unchecked().send(frame);
+}
+
+#[cfg(feature = "win9x")]
+pub(crate) unsafe fn route_frames_through(arena: u32) {
+    unsafe { ROUTED_ARENA = arena };
+}
+
+#[cfg(feature = "win9x")]
+static mut ROUTED_ARENA: u32 = 0;
+
 fn transport_get_unchecked() -> &'static Transport {
     unsafe {
         debug_assert!(!TRANSPORT_DRIVER.is_null());
@@ -574,13 +588,43 @@ unsafe fn init_gum_with_exceptor(exceptor: bool) {
     }
 }
 
-fn on_frame_from_host(frame: &[u8]) {
-    if let Some(variant) = deserialize_message(&frame) {
-        process_incoming_message(variant);
-        unsafe {
-            g_variant_unref(variant);
-        }
+pub(crate) fn on_frame_from_host(frame: &[u8]) {
+    let Some(variant) = deserialize_message(frame) else {
+        return;
+    };
+
+    // A frame for a process that the host attached to belongs to the copy in that process. The
+    // copy also runs this code, but it has no targets, thus it continues.
+    #[cfg(feature = "win9x")]
+    if let Some(arena) = kernel::arena_for_pid(destination_of(variant)) {
+        unsafe { g_variant_unref(variant) };
+        kernel::forward_frame(arena, frame);
+        return;
     }
+
+    process_incoming_message(variant);
+    unsafe { g_variant_unref(variant) };
+}
+
+#[cfg(feature = "win9x")]
+fn destination_of(variant: *mut GVariant) -> u32 {
+    let mut command: u8 = 0;
+    let mut request_id: u16 = 0;
+    let mut destination: u32 = 0;
+    let mut payload: *mut GVariant = ptr::null_mut();
+    unsafe {
+        g_variant_get(
+            variant,
+            c"(yquv)".as_ptr(),
+            &mut command,
+            &mut request_id,
+            &mut destination,
+            &mut payload,
+        );
+        g_variant_unref(payload);
+    }
+
+    destination
 }
 
 pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
@@ -695,7 +739,7 @@ fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
             return None;
         }
 
-        let variant_type = g_variant_type_new(c"(yqv)".as_ptr());
+        let variant_type = g_variant_type_new(c"(yquv)".as_ptr());
         let data_copy = g_memdup2(data.as_ptr() as *const c_void, data.len() as gsize);
         let variant = g_variant_new_from_data(
             variant_type,
@@ -721,12 +765,14 @@ fn process_incoming_message(variant: *mut GVariant) {
         let mut request_id: u16 = 0;
         let mut payload_variant: *mut GVariant = ptr::null_mut();
 
+        let mut destination: u32 = 0;
         let cmd = unsafe {
             g_variant_get(
                 variant,
-                c"(yqv)".as_ptr(),
+                c"(yquv)".as_ptr(),
                 &mut cmd_value,
                 &mut request_id,
+                &mut destination,
                 &mut payload_variant,
             );
 
@@ -754,15 +800,6 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
-            #[cfg(feature = "win9x")]
-            FridaCommand::CreateScriptInProcess => {
-                handle_create_script_in_process(payload_variant, request_id)
-            }
-            #[cfg(feature = "win9x")]
-            FridaCommand::LoadScriptInProcess => {
-                unsafe { LOAD_PENDING = (request_id, true) };
-                None
-            }
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -801,24 +838,6 @@ fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<Han
     None
 }
 
-// The script runs in the injected copy, which the host cannot reach: the source goes across
-// through the arena, and the reply waits on the copy saying it came up.
-#[cfg(feature = "win9x")]
-fn handle_create_script_in_process(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
-    unsafe {
-        if g_variant_check_format_string(payload, c"s".as_ptr(), 0) == 0 {
-            return Some(HandlerResponse::error("Invalid payload format: expected string"));
-        }
-        let source = g_variant_get_string(payload, ptr::null_mut());
-        let length = CStr::from_ptr(source).to_bytes().len();
-
-        PENDING_REMOTE_SCRIPT = (request_id, source, length);
-        REMOTE_SCRIPT_PENDING = true;
-    }
-
-    None
-}
-
 // Commands arrive in the interrupt callback of the transport, where VMM makes no threads and
 // gives no heap. Thus that callback only sets a flag, and this source does the work.
 #[cfg(feature = "win9x")]
@@ -836,38 +855,7 @@ unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
         send_command_reply(request_id, response);
     }
 
-    if unsafe { ptr::addr_of!(REMOTE_SCRIPT_PENDING).read() } {
-        unsafe { REMOTE_SCRIPT_PENDING = false };
-
-        let (request_id, source, length) = unsafe { PENDING_REMOTE_SCRIPT };
-        let source =
-            unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(source as *const u8, length)) };
-
-        let arena = kernel::injected_arena();
-        let response = if arena != 0 && kernel::create_script_in_process(arena, source) {
-            let script_id = NEXT_SCRIPT_ID.fetch_add(1, Ordering::Relaxed);
-            unsafe { REMOTE_SCRIPT_ID = script_id };
-            HandlerResponse::success(unsafe { g_variant_new_uint32(script_id) })
-        } else {
-            HandlerResponse::error("Unable to create script in target process")
-        };
-        send_command_reply(request_id, response);
-    }
-
-    if unsafe { ptr::addr_of!(LOAD_PENDING).read() }.1 {
-        let (request_id, _) = unsafe { LOAD_PENDING };
-        unsafe { LOAD_PENDING = (0, false) };
-
-        let arena = kernel::injected_arena();
-        let response = if arena != 0 && kernel::load_script_in_process(arena) {
-            HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
-        } else {
-            HandlerResponse::error("Unable to load script in target process")
-        };
-        send_command_reply(request_id, response);
-    }
-
-    forward_remote_script_messages();
+    relay_frames_from_targets();
 
     if !unsafe { ptr::addr_of!(INJECTION_PENDING).read() } {
         return 1;
@@ -890,48 +878,17 @@ unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
 #[cfg(feature = "win9x")]
 const DEFERRED_WORK_POLL_MS: u32 = 20;
 
-// The injected copy has no hostlink of its own, so its messages reach the host by way of the
-// half that does.
+// The copy sends complete frames, thus the half with the hostlink sends the bytes without a
+// change.
 #[cfg(feature = "win9x")]
-fn forward_remote_script_messages() {
-    let arena = kernel::injected_arena();
-    if arena == 0 {
-        return;
-    }
-
-    while let Some(message) = kernel::take_script_message(arena) {
-        let script_id = unsafe { REMOTE_SCRIPT_ID };
-        // The arena holds it NUL-terminated, which is what GVariant wants anyway.
-        unsafe {
-            let message_variant = g_variant_new(
-                c"(yqv)".as_ptr(),
-                FridaCommand::ScriptMessage as u8 as u32,
-                0u32,
-                g_variant_new(c"(us)".as_ptr(), script_id, message.as_ptr() as *const gchar),
-            );
-
-            if let Some(serialized) = serialize_message(message_variant) {
-                transport_get_unchecked().send(&serialized);
-            }
-
-            g_variant_unref(message_variant);
+fn relay_frames_from_targets() {
+    for arena in kernel::injected_arenas() {
+        while let Some(frame) = kernel::take_frame_from_target(arena) {
+            send_frame(frame);
+            kernel::acknowledge_frame_from_target(arena);
         }
-
-        kernel::acknowledge_script_message(arena);
     }
 }
-
-#[cfg(feature = "win9x")]
-static mut LOAD_PENDING: (u16, bool) = (0, false);
-
-#[cfg(feature = "win9x")]
-static mut REMOTE_SCRIPT_PENDING: bool = false;
-
-#[cfg(feature = "win9x")]
-static mut PENDING_REMOTE_SCRIPT: (u16, *const gchar, usize) = (0, ptr::null(), 0);
-
-#[cfg(feature = "win9x")]
-static mut REMOTE_SCRIPT_ID: u32 = 0;
 
 #[cfg(feature = "win9x")]
 static mut ALLOCATION_PENDING: bool = false;
@@ -1004,14 +961,15 @@ fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
 fn send_command_reply(request_id: u16, response: HandlerResponse) {
     unsafe {
         let message = g_variant_new(
-            c"(yqv)".as_ptr(),
+            c"(yquv)".as_ptr(),
             FridaCommand::Reply as u8 as u32,
             request_id as u32,
+            0u32,
             response.variant,
         );
 
         if let Some(serialized) = serialize_message(message) {
-            transport_get_unchecked().send(&serialized);
+            send_frame(&serialized);
         }
 
         g_variant_unref(message);
@@ -1022,9 +980,10 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
     unsafe {
         let request_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed) as u16;
         let message = g_variant_new(
-            c"(yqv)".as_ptr(),
+            c"(yquv)".as_ptr(),
             command as u8 as u32,
             request_id as u32,
+            0u32,
             payload,
         );
         let transport = transport_get_unchecked();
@@ -1137,14 +1096,15 @@ unsafe extern "C" fn frida_message_handler(
         let script_id = *(user_data as *const u32);
 
         let message_variant = g_variant_new(
-            c"(yqv)".as_ptr(),
+            c"(yquv)".as_ptr(),
             FridaCommand::ScriptMessage as u8 as u32,
+            0u32,
             0u32,
             g_variant_new(c"(us)".as_ptr(), script_id, message),
         );
 
         if let Some(serialized) = serialize_message(message_variant) {
-            transport_get_unchecked().send(&serialized);
+            send_frame(&serialized);
         }
 
         g_variant_unref(message_variant);

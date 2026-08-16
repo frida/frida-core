@@ -614,31 +614,19 @@ namespace Frida {
 			if (opts.runtime == V8)
 				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
 
-			if (pid != 0)
-				return yield connection.create_script_in_process (source, cancellable);
-
-			return yield connection.create_script (source, cancellable);
+			return yield connection.create_script (source, pid, cancellable);
 		}
 
 		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			// The kernel half only knows the scripts it runs itself.
-			if (pid != 0)
-				return;
-
-			yield connection.destroy_script (script_id, cancellable);
+			yield connection.destroy_script (script_id, pid, cancellable);
 		}
 
 		public override async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			if (pid != 0) {
-				yield connection.load_script_in_process (cancellable);
-				return;
-			}
-
-			yield connection.load_script (script_id, cancellable);
+			yield connection.load_script (script_id, pid, cancellable);
 		}
 
 		public override async void post_messages (AgentMessage[] messages, uint batch_id, Cancellable? cancellable)
@@ -649,7 +637,7 @@ namespace Frida {
 				switch (m.kind) {
 					case SCRIPT:
 						yield connection.post_script_message (m.script_id, m.text,
-							m.has_data ? new Bytes (m.data) : null, cancellable);
+							m.has_data ? new Bytes (m.data) : null, pid, cancellable);
 						break;
 					case DEBUGGER:
 						break;

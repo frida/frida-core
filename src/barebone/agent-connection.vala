@@ -590,9 +590,10 @@ namespace Frida.Barebone {
 		private const size_t BITMAP_INFO_HEADER_SIZE = 40;
 		private const uint32 MAX_ICON_DIMENSION = 256;
 
-		public async AgentScriptId create_script (string source, Cancellable? cancellable) throws Error, IOError {
+		public async AgentScriptId create_script (string source, uint destination, Cancellable? cancellable)
+				throws Error, IOError {
 			var payload = new Variant ("s", source);
-			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable);
+			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable, destination);
 			if (!response.check_format_string ("u", false))
 				throw new Error.PROTOCOL ("Invalid create_script response format");
 			uint32 script_handle;
@@ -600,44 +601,31 @@ namespace Frida.Barebone {
 			return AgentScriptId (script_handle);
 		}
 
-		// Scripts for an attached process run in the copy injected there, which the host cannot
-		// reach: the kernel half passes the source across and answers once it is up.
-		public async AgentScriptId create_script_in_process (string source, Cancellable? cancellable)
+		public async void load_script (AgentScriptId script_id, uint destination, Cancellable? cancellable)
 				throws Error, IOError {
-			var response = yield execute_command (Command.CREATE_SCRIPT_IN_PROCESS, new Variant ("s", source),
-				cancellable);
-			if (!response.check_format_string ("u", false))
-				throw new Error.PROTOCOL ("Invalid create_script_in_process response format");
-			uint32 script_handle;
-			response.get ("u", out script_handle);
-			return AgentScriptId (script_handle);
-		}
-
-		public async void load_script_in_process (Cancellable? cancellable) throws Error, IOError {
-			yield execute_command (Command.LOAD_SCRIPT_IN_PROCESS, new Variant.uint32 (0), cancellable);
-		}
-
-		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("u", script_id.handle);
-			yield execute_command (Command.LOAD_SCRIPT, payload, cancellable);
+			yield execute_command (Command.LOAD_SCRIPT, payload, cancellable, destination);
 		}
 
-		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("u", script_id.handle);
-			yield execute_command (Command.DESTROY_SCRIPT, payload, cancellable);
-		}
-
-		public async void post_script_message (AgentScriptId script_id, string message, Bytes? data, Cancellable? cancellable)
+		public async void destroy_script (AgentScriptId script_id, uint destination, Cancellable? cancellable)
 				throws Error, IOError {
+			var payload = new Variant ("u", script_id.handle);
+			yield execute_command (Command.DESTROY_SCRIPT, payload, cancellable, destination);
+		}
+
+		public async void post_script_message (AgentScriptId script_id, string message, Bytes? data, uint destination,
+				Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("(us)", script_id.handle, message);
 			// TODO: Include data.
-			yield execute_command (Command.POST_SCRIPT_MESSAGE, payload, cancellable);
+			yield execute_command (Command.POST_SCRIPT_MESSAGE, payload, cancellable, destination);
 		}
 
-		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable) throws Error, IOError {
+		// Zero selects the agent in the kernel. A different value selects a process that has a copy.
+		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable,
+				uint destination = 0) throws Error, IOError {
 			uint16 request_id = next_request_id++;
 
-			Bytes frame = frame_message (command, request_id, payload);
+			Bytes frame = frame_message (command, request_id, destination, payload);
 
 			var promise = new Promise<Variant> ();
 			pending_requests[request_id] = promise;
@@ -699,17 +687,18 @@ namespace Frida.Barebone {
 
 					var raw_message = new Bytes.take ((owned) body);
 
-					var message = Variant.new_from_data (new VariantType ("(yqv)"), raw_message.get_data (), false,
+					var message = Variant.new_from_data (new VariantType ("(yquv)"), raw_message.get_data (), false,
 						raw_message);
 					if (byte_order != ByteOrder.HOST)
 						message = message.byteswap ();
-					if (!message.check_format_string ("(yqv)", false))
+					if (!message.check_format_string ("(yquv)", false))
 						throw new Error.PROTOCOL ("Invalid message format");
 
 					uint8 command_code;
 					uint16 request_id;
+					uint32 destination;
 					Variant payload;
-					message.get ("(yqv)", out command_code, out request_id, out payload);
+					message.get ("(yquv)", out command_code, out request_id, out destination, out payload);
 
 					if (command_code == Command.SCRIPT_MESSAGE) {
 						if (!payload.check_format_string ("(us)", false))
@@ -823,12 +812,12 @@ namespace Frida.Barebone {
 		}
 
 		private async void send_reply (uint16 request_id, Variant payload) throws GLib.Error {
-			Bytes frame = frame_message (Command.REPLY, request_id, payload);
+			Bytes frame = frame_message (Command.REPLY, request_id, 0, payload);
 			yield output.write_all_async (frame.get_data (), Priority.DEFAULT, io_cancellable, null);
 		}
 
-		private Bytes frame_message (Command command, uint16 request_id, Variant payload) {
-			var message = new Variant ("(yqv)", (uint8) command, request_id, payload);
+		private Bytes frame_message (Command command, uint16 request_id, uint destination, Variant payload) {
+			var message = new Variant ("(yquv)", (uint8) command, request_id, destination, payload);
 			if (byte_order != ByteOrder.HOST)
 				message = message.byteswap ();
 			var message_bytes = message.get_data_as_bytes ();
@@ -849,8 +838,6 @@ namespace Frida.Barebone {
 			ENUMERATE_PROCESSES = 8,
 			INJECT_INTO_PROCESS = 9,
 			ALLOCATE_SHARED = 10,
-			CREATE_SCRIPT_IN_PROCESS = 11,
-			LOAD_SCRIPT_IN_PROCESS = 12,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

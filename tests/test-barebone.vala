@@ -1184,18 +1184,25 @@ namespace Frida.BareboneTest {
 			assert_nonnull (session);
 
 			// The script runs in the target process, thus Process.id gives the id of the target.
-			var script = yield session.create_script ("send(Process.id >>> 0);", null, null);
+			var script = yield session.create_script ("""
+				recv('ping', () => { send(Process.id >>> 0); });
+				send('ready');
+			""", null, null);
 
-			string? received = null;
+			var messages = new Gee.ArrayList<string> ();
 			script.message.connect ((json, data) => {
-				received = json;
-				injects_into_process_in_live_guest.callback ();
+				messages.add (json);
 			});
 			yield script.load (null);
-			if (received == null)
-				yield;
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("ready"));
 
-			assert_true (received.contains (pid.to_string ()));
+			// The script answers only if the message arrives, thus this tests the reverse direction.
+			script.post ("""{"type":"ping"}""");
+			while (messages.size < 2)
+				yield h.process_events ();
+			assert_true (messages[1].contains (pid.to_string ()));
 
 			try {
 				yield device.attach (pid ^ 0x1234, null, null);
