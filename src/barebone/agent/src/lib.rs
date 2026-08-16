@@ -649,8 +649,6 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
     }
 }
 
-const IDLE_SLICE_US: u64 = 50_000;
-
 fn run_main_loop(main_context: *mut GMainContext) {
     unsafe {
         loop {
@@ -661,14 +659,17 @@ fn run_main_loop(main_context: *mut GMainContext) {
                 return;
             }
 
-            dispatch_pending_work(main_context);
+            // This call blocks. GLib sleeps until one of its timeouts is due, or until something wakes
+            // the loop.
+            g_main_context_iteration(main_context, 1);
         }
     }
 }
 
 // The copy in a process has no hostlink, because the transport belongs to the kernel half.
 // Nothing there can wake this loop, thus it returns after a short time.
-pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
+#[cfg(feature = "win9x")]
+pub(crate) unsafe fn poll_pending_work(main_context: *mut GMainContext) {
     unsafe {
         g_main_context_iteration(main_context, 0);
 
@@ -681,6 +682,9 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
         kernel::yield_now();
     }
 }
+
+#[cfg(feature = "win9x")]
+const IDLE_SLICE_US: u64 = 50_000;
 
 #[cfg(feature = "linux")]
 fn destroy_all_scripts(main_context: *mut GMainContext) {

@@ -722,7 +722,7 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
             acknowledge_frame_from_host(arena);
         }
 
-        unsafe { crate::dispatch_pending_work(context) };
+        unsafe { crate::poll_pending_work(context) };
     }
 
     unsafe { ((arena + WORKER_STOPPED) as *mut u32).write_volatile(1) };
