@@ -5,6 +5,7 @@ namespace Frida.Barebone {
 		public uint64 writable_from_kernel;
 		public uint64 arena_seen_by_process;
 		public uint64 arena_from_kernel;
+		public uint64 entry;
 
 		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel,
 				uint64 arena_seen_by_process, uint64 arena_from_kernel) {
@@ -380,8 +381,77 @@ namespace Frida.Barebone {
 				arena_from_kernel);
 		}
 
-		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
+		/**
+		 * Puts a copy of the agent in a process and starts it, answering with the process the
+		 * copy reports having woken up in.
+		 */
+		public async uint inject_agent_into_process (uint pid, Cancellable? cancellable)
+				throws Error, IOError {
+			if (kernel_kind == WINNT) {
+				var copy = yield place_winnt_user_agent (pid, cancellable);
+				return yield start_winnt_agent_in_process (pid, copy, cancellable);
+			}
+
+			var agent = yield place_user_agent (cancellable);
+			return yield inject_into_process (pid, agent, cancellable);
+		}
+
+		/**
+		 * Places a copy of the agent inside a process: the code it is already running is lent
+		 * out as it stands, so only the half that gets written to has to be put there, and that
+		 * half is reachable from the kernel alone.
+		 */
+		public async PlacedCopy place_winnt_user_agent (uint pid, Cancellable? cancellable)
+				throws Error, IOError {
 			Gum.ElfModule elf;
+			Buffer raw_elf = load_patched_agent (out elf);
+
+			uint64 private_offset = offset_of_symbol (elf, "_agent_private_start");
+			var copy = yield place_agent_in_process (pid, private_offset, elf.mapped_size,
+				cancellable);
+
+			// Relocate for the address that the process uses, which is not the address that receives the
+			// writable half.
+			Bytes image = machine.relocate (elf, raw_elf.bytes, copy.seen_by_process);
+			unowned uint8[] data = image.get_data ();
+
+			yield machine.gdb.stop (cancellable);
+			yield machine.write_virtual (copy.writable_from_kernel,
+				data[private_offset:data.length], cancellable);
+			yield machine.gdb.continue (cancellable);
+
+			copy.entry = copy.seen_by_process + offset_of_symbol (elf, "frida_winnt_user_main");
+
+			return copy;
+		}
+
+		// The copy cannot answer from the thread that starts it. Thus ask again until it reports its
+		// process id.
+		private async uint start_winnt_agent_in_process (uint pid, PlacedCopy copy,
+				Cancellable? cancellable) throws Error, IOError {
+			var payload = new Variant ("(utt)", pid, copy.entry, copy.arena_seen_by_process);
+
+			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
+				var response = yield execute_command (Command.START_AGENT_IN_PROCESS, payload,
+					cancellable);
+				if (!response.is_of_type (VariantType.UINT32))
+					throw new Error.PROTOCOL ("Invalid start_agent_in_process response format");
+
+				uint reached = response.get_uint32 ();
+				if (reached != 0)
+					return reached;
+
+				var timeout = new TimeoutSource (INJECT_POLL_INTERVAL_MS);
+				timeout.set_callback (start_winnt_agent_in_process.callback);
+				timeout.attach (MainContext.get_thread_default ());
+				yield;
+				timeout.destroy ();
+			}
+
+			throw new Error.TIMED_OUT ("Timed out while starting the agent in the process");
+		}
+
+		private Buffer load_patched_agent (out Gum.ElfModule elf) throws Error {
 			try {
 				elf = new Gum.ElfModule.from_file (agent_config.path);
 			} catch (Gum.Error e) {
@@ -389,7 +459,8 @@ namespace Frida.Barebone {
 			}
 
 			var raw_elf = machine.gdb.make_buffer (new Bytes (elf.get_file_data ()));
-			elf.enumerate_symbols (s => {
+			unowned Gum.ElfModule module = elf;
+			module.enumerate_symbols (s => {
 				unowned Gum.ElfSectionDetails? sect = s.section;
 				if (sect != null && sect.name == ".kernel_addrs") {
 					SymbolInfo? info = resolved_symbols[s.name[1:]];
@@ -400,6 +471,28 @@ namespace Frida.Barebone {
 				}
 				return true;
 			});
+
+			return raw_elf;
+		}
+
+		private static uint64 offset_of_symbol (Gum.ElfModule elf, string name) throws Error {
+			uint64 address = 0;
+			elf.enumerate_symbols (s => {
+				if (s.name == name) {
+					address = s.address;
+					return false;
+				}
+				return true;
+			});
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Agent has no %s", name);
+
+			return address;
+		}
+
+		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
+			Gum.ElfModule elf;
+			Buffer raw_elf = load_patched_agent (out elf);
 
 			// The agent reserves the memory while the guest runs. The image is written while the guest
 			// is stopped.
@@ -902,6 +995,7 @@ namespace Frida.Barebone {
 			ALLOCATE_SHARED = 10,
 			DETACH_FROM_PROCESS = 11,
 			PLACE_AGENT_IN_PROCESS = 12,
+			START_AGENT_IN_PROCESS = 13,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

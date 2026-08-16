@@ -37,6 +37,9 @@ SECTIONS {
     _ZwReadFile = .; . += 4;
     _ZwClose = .; . += 4;
     _ZwCreateEvent = .; . += 4;
+    _ZwAllocateVirtualMemory = .; . += 4;
+    _ZwCreateThread = .; . += 4;
+    _PsProcessType = .; . += 4;
     _ObReferenceObjectByHandle = .; . += 4;
     _ObOpenObjectByPointer = .; . += 4;
     _ExEventObjectType = .; . += 4;
@@ -66,6 +69,7 @@ VERSION {
   {
     global:
       _start;
+      frida_winnt_user_main;
 
     local:
       *;

@@ -104,6 +104,7 @@ pub enum FridaCommand {
     AllocateShared = 10,
     DetachFromProcess = 11,
     PlaceAgentInProcess = 12,
+    StartAgentInProcess = 13,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -123,6 +124,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
             FridaCommand::PlaceAgentInProcess => write!(f, "PlaceAgentInProcess"),
+            FridaCommand::StartAgentInProcess => write!(f, "StartAgentInProcess"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
@@ -851,6 +853,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
             #[cfg(feature = "winnt")]
             FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
+            #[cfg(feature = "winnt")]
+            FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
                 unsafe {
@@ -900,6 +904,20 @@ fn handle_place_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
 
         HandlerResponse::success(g_variant_new(c"(tttt)".as_ptr(), placed.seen_by_process,
             placed.writable_from_here, placed.arena_seen_by_process, placed.arena_here))
+    }
+}
+
+#[cfg(feature = "winnt")]
+fn handle_start_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
+    use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64};
+
+    unsafe {
+        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
+        let entry = g_variant_get_uint64(g_variant_get_child_value(payload, 1));
+        let argument = g_variant_get_uint64(g_variant_get_child_value(payload, 2));
+
+        let reached = kernel::start_agent_in_process(pid, entry, argument);
+        HandlerResponse::success(g_variant_new_uint32(reached))
     }
 }
 

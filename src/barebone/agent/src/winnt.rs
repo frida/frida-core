@@ -363,7 +363,72 @@ pub fn current_thread_id() -> u64 {
     unsafe { (_PsGetCurrentThreadId)() as u64 }
 }
 
-pub use crate::winnt_paging::{enumerate_ranges, protection_at};
+// Only the kernel half can read the page tables. The copy asks the memory manager.
+pub fn protection_at(address: usize) -> u32 {
+    if mode() == Mode::User {
+        let mut region = [0u8; MEMORY_INFORMATION_SIZE];
+        if !query_region(address as u64, &mut region) {
+            return 0;
+        }
+        return gum_protection_of(&region);
+    }
+
+    crate::winnt_paging::protection_at(address)
+}
+
+pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
+    if mode() == Mode::User {
+        let mut address = 0u64;
+        let mut region = [0u8; MEMORY_INFORMATION_SIZE];
+        while query_region(address, &mut region) {
+            let size = read_field(&region, MEMORY_REGION_SIZE);
+            if size == 0 {
+                return;
+            }
+
+            let protection = gum_protection_of(&region);
+            if protection != 0 {
+                found(read_field(&region, MEMORY_BASE), size, protection);
+            }
+
+            address = address.wrapping_add(size);
+        }
+        return;
+    }
+
+    crate::winnt_paging::enumerate_ranges(found)
+}
+
+fn query_region(address: u64, region: &mut [u8; MEMORY_INFORMATION_SIZE]) -> bool {
+    let mut written = 0usize;
+
+    unsafe {
+        (user_api().query_memory)(CURRENT_PROCESS, address as *mut u8, MEMORY_BASIC_INFORMATION,
+            region.as_mut_ptr(), MEMORY_INFORMATION_SIZE, &mut written) >= 0
+    }
+}
+
+fn gum_protection_of(region: &[u8; MEMORY_INFORMATION_SIZE]) -> u32 {
+    if read_field(region, MEMORY_STATE) as u32 != MEM_COMMIT {
+        return 0;
+    }
+
+    match (read_field(region, MEMORY_PROTECT) as u32) & PAGE_PROTECTION_MASK {
+        PAGE_READONLY => GUM_PAGE_READ,
+        PAGE_READWRITE | PAGE_WRITECOPY => GUM_PAGE_READ | GUM_PAGE_WRITE,
+        PAGE_EXECUTE => GUM_PAGE_EXECUTE,
+        PAGE_EXECUTE_READ => GUM_PAGE_READ | GUM_PAGE_EXECUTE,
+        PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY =>
+            GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
+        _ => 0,
+    }
+}
+
+fn read_field(region: &[u8; MEMORY_INFORMATION_SIZE], offset: usize) -> u64 {
+    let mut value = [0u8; 8];
+    value.copy_from_slice(&region[offset..offset + 8]);
+    u64::from_le_bytes(value)
+}
 
 // The copy must ask the memory manager to do this.
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
@@ -1135,6 +1200,7 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
             targets().insert(pid, Target {
                 arena: placed.arena_here,
                 wake,
+                started: false,
             })
         };
     }
@@ -1155,6 +1221,163 @@ const USER_MODE: u8 = 1;
 const MM_CACHED: u32 = 1;
 const NORMAL_PAGE_PRIORITY: u32 = 16;
 const GUM_PAGE_RWX: u32 = 7;
+
+// Start the copy on a thread of the target. The system makes the thread, thus ntdll accepts
+// calls from it. The copy cannot answer from that thread, thus this function returns the
+// process id only after the copy writes it.
+pub fn start_agent_in_process(pid: u32, entry: u64, argument: u64) -> u32 {
+    let Some(target) = (unsafe { targets().get(&pid) }) else {
+        return 0;
+    };
+    let arena = target.arena;
+
+    if !target.started {
+        let mut process: *mut c_void = core::ptr::null_mut();
+        enumerate_processes(&mut |p| {
+            if p.id == pid {
+                process = p.handle;
+            }
+        });
+        if process.is_null() {
+            return 0;
+        }
+
+        let mut work = || {
+            create_user_thread(process, entry, argument);
+        };
+        on_kernel_stack(&mut work);
+
+        unsafe { targets().get_mut(&pid).unwrap().started = true };
+    }
+
+    unsafe {
+        ((arena + OBSERVED_PID) as *const u32).read_volatile()
+    }
+}
+
+#[cfg(target_arch = "x86")]
+fn create_user_thread(_process: *mut c_void, _entry: u64, _argument: u64) -> bool {
+    false
+}
+
+// This kernel exports no function that makes a user thread. Thus make a system thread in the
+// target, then move that thread to ring 3.
+#[cfg(target_arch = "x86_64")]
+fn create_user_thread(process: *mut c_void, entry: u64, argument: u64) -> bool {
+    unsafe {
+        let mut process_handle: *mut c_void = core::ptr::null_mut();
+        let process_type = (_PsProcessType as *const *mut c_void).read();
+        if (_ObOpenObjectByPointer)(process, 0, core::ptr::null_mut(), PROCESS_ALL_ACCESS,
+                process_type, KERNEL_MODE as u32, &mut process_handle) < 0 {
+            return false;
+        }
+
+        let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
+        let block = allocate_in_process(process_handle, BLOCK_SIZE, PAGE_READWRITE);
+        if stack == 0 || block == 0 {
+            (_ZwClose)(process_handle);
+            return false;
+        }
+
+        let descent = alloc(core::mem::size_of::<Descent>()) as *mut Descent;
+        descent.write(Descent {
+            entry,
+            argument,
+            stack: stack + STACK_SIZE as u64,
+            block,
+        });
+
+        describe_block(process, block, stack);
+
+        let mut thread: *mut c_void = core::ptr::null_mut();
+        let status = (_PsCreateSystemThread)(
+            &mut thread,
+            THREAD_ALL_ACCESS,
+            core::ptr::null_mut(),
+            process_handle,
+            core::ptr::null_mut(),
+            descend_to_user,
+            descent as *mut c_void,
+        );
+        if status >= 0 {
+            (_ZwClose)(thread);
+        }
+        (_ZwClose)(process_handle);
+
+        status >= 0
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn allocate_in_process(process_handle: *mut c_void, size: usize, protection: u32) -> u64 {
+    let mut address: *mut u8 = core::ptr::null_mut();
+    let mut region = size;
+
+    unsafe {
+        if (_ZwAllocateVirtualMemory)(process_handle, &mut address, 0, &mut region,
+                MEM_COMMIT | MEM_RESERVE, protection) < 0 {
+            return 0;
+        }
+    }
+
+    address as u64
+}
+
+#[cfg(target_arch = "x86_64")]
+fn describe_block(process: *mut c_void, block: u64, stack: u64) {
+    unsafe {
+        let peb = (_PsGetProcessPeb)(process) as u64;
+
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+
+        ((block + BLOCK_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
+        ((block + BLOCK_STACK_LIMIT) as *mut u64).write(stack);
+        ((block + BLOCK_SELF) as *mut u64).write(block);
+        ((block + BLOCK_PEB) as *mut u64).write(peb);
+
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    }
+}
+
+// This is a system thread, but it uses the address space of the target. The code after the
+// descent runs in ring 3.
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn descend_to_user(context: *mut c_void) {
+    let descent = unsafe { (context as *const Descent).read() };
+    free(context as *mut u8, core::mem::size_of::<Descent>());
+
+    unsafe {
+        frida_winnt_descend_to_user(descent.entry, descent.argument, descent.stack, descent.block);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+struct Descent {
+    entry: u64,
+    argument: u64,
+    stack: u64,
+    block: u64,
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" {
+    fn frida_winnt_descend_to_user(entry: u64, argument: u64, stack: u64, block: u64) -> !;
+}
+
+const STACK_SIZE: usize = 256 * 1024;
+const BLOCK_SIZE: usize = 4096;
+const PROCESS_ALL_ACCESS: u32 = 0x1f_0fff;
+
+const BLOCK_STACK_BASE: u64 = 0x08;
+const BLOCK_STACK_LIMIT: u64 = 0x10;
+const BLOCK_SELF: u64 = 0x30;
+const BLOCK_PEB: u64 = 0x60;
+
+const USER_CS: u64 = 0x33;
+const USER_SS: u64 = 0x2b;
+const INITIAL_EFLAGS: u64 = 0x200;
+const IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
 
 // No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
 #[used]
@@ -1200,6 +1423,7 @@ fn resolve_user_api() {
             allocate_memory: core::mem::transmute(export(ntdll, b"NtAllocateVirtualMemory")),
             free_memory: core::mem::transmute(export(ntdll, b"NtFreeVirtualMemory")),
             protect_memory: core::mem::transmute(export(ntdll, b"NtProtectVirtualMemory")),
+            query_memory: core::mem::transmute(export(ntdll, b"NtQueryVirtualMemory")),
             wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
@@ -1217,6 +1441,7 @@ struct UserApi {
     allocate_memory: kernel_fn!(*mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32),
     free_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32 => i32),
     protect_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32, *mut u32 => i32),
+    query_memory: kernel_fn!(*mut c_void, *mut u8, u32, *mut u8, usize, *mut usize => i32),
     wait_for_object: kernel_fn!(*mut c_void, u8, *const i64 => i32),
     set_event: kernel_fn!(*mut c_void, *mut u32 => i32),
     exit_thread: kernel_fn!(u32 => !),
@@ -1402,10 +1627,21 @@ const CURRENT_PROCESS: *mut c_void = -1isize as *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
 const MEM_RESERVE: u32 = 0x2000;
 const MEM_RELEASE: u32 = 0x8000;
+const MEMORY_BASIC_INFORMATION: u32 = 0;
+const MEMORY_BASE: usize = 0x00;
+const MEMORY_REGION_SIZE: usize = if core::mem::size_of::<usize>() == 8 { 0x18 } else { 0x0c };
+const MEMORY_STATE: usize = if core::mem::size_of::<usize>() == 8 { 0x20 } else { 0x10 };
+const MEMORY_PROTECT: usize = if core::mem::size_of::<usize>() == 8 { 0x24 } else { 0x14 };
+const MEMORY_INFORMATION_SIZE: usize = if core::mem::size_of::<usize>() == 8 { 0x30 } else { 0x1c };
+const PAGE_PROTECTION_MASK: u32 = 0xff;
+const PAGE_WRITECOPY: u32 = 0x08;
+const PAGE_EXECUTE: u32 = 0x10;
+const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
 const PAGE_READONLY: u32 = 0x02;
 const PAGE_READWRITE: u32 = 0x04;
 const PAGE_EXECUTE_READ: u32 = 0x20;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+const GUM_PAGE_READ: u32 = 0x1;
 const GUM_PAGE_WRITE: u32 = 0x2;
 const GUM_PAGE_EXECUTE: u32 = 0x4;
 
@@ -1537,6 +1773,7 @@ static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
 struct Target {
     arena: u64,
     wake: *mut c_void,
+    started: bool,
 }
 
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
@@ -1838,6 +2075,54 @@ FAULT_THUNK frida_winnt_fault_thunk_pf, 14
 "#
 );
 
+// To go to ring 3, make the frame that an interrupt makes, then do an iret. Set the block
+// that the copy reads through gs before this, with swapgs.
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(
+    r#"
+.intel_syntax noprefix
+
+.global frida_winnt_descend_to_user
+frida_winnt_descend_to_user:
+    mov r10, rdi
+    mov r11, rsi
+    mov r9, rdx
+
+    mov rax, rcx
+    mov rdx, rcx
+    shr rdx, 32
+    mov ecx, {gs_base}
+    wrmsr
+
+    // Between swapgs and iret the processor is in ring 0 with the gs of ring 3. An interrupt here
+    // would use the incorrect gs, thus interrupts stay off. The iret enables them again.
+    cli
+    swapgs
+
+    mov rdi, r11
+    push {ss}
+    push r9
+    push {eflags}
+    push {cs}
+    push r10
+    xor eax, eax
+    xor ebx, ebx
+    xor ecx, ecx
+    xor edx, edx
+    xor esi, esi
+    xor ebp, ebp
+    xor r8, r8
+    xor r9, r9
+    xor r10, r10
+    xor r11, r11
+    iretq
+"#,
+    ss = const USER_SS,
+    cs = const USER_CS,
+    eflags = const INITIAL_EFLAGS,
+    gs_base = const IA32_KERNEL_GS_BASE,
+);
+
 // The code pushes the registers in the order that Gum uses, thus the handler reads them where
 // they are. A long-mode iret loads the stack pointer from the frame, thus the handler changes
 // the frame.
@@ -2008,6 +2293,9 @@ kernel_abi! {
         => i32);
     static _ZwClose: kernel_fn!(*mut c_void => i32);
     static _ZwCreateEvent: kernel_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
+    static _ZwAllocateVirtualMemory: kernel_fn!(
+        *mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32);
+    static _PsProcessType: usize;
     static _ObReferenceObjectByHandle: kernel_fn!(
         *mut c_void, u32, *mut c_void, u8, *mut *mut c_void, *mut c_void => i32);
     static _ObOpenObjectByPointer: kernel_fn!(

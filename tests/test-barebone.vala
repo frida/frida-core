@@ -141,6 +141,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_injects_into_process_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-processes-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
@@ -188,6 +193,11 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/hooks-kernel-function-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_injects_into_process_in_live_guest.begin (h as Harness, "WINNT64"));
 			h.run ();
 		});
 
@@ -1514,6 +1524,60 @@ namespace Frida.BareboneTest {
 			const drivers = mods.some(m => m.name === 'atapi.sys');
 			send({ named, hal, drivers });
 		""", "\"named\":true,\"hal\":true,\"drivers\":true");
+	}
+
+	private static async void winnt_injects_into_process_in_live_guest (Harness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+			assert_true (pid != 0);
+
+			// Success shows that the placed copy started and reported this process.
+			var session = yield device.attach (pid, null, null);
+			assert_nonnull (session);
+
+			// The script runs in the target process, thus Process.id gives the id of the target.
+			var script = yield session.create_script ("""
+				recv('ping', () => { send(Process.id >>> 0); });
+				send('ready');
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("ready"));
+
+			// The script answers only if the message arrives, thus this tests the reverse direction.
+			script.post ("""{"type":"ping"}""");
+			while (messages.size < 2)
+				yield h.process_events ();
+			assert_true (messages[1].contains (pid.to_string ()));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private static async void winnt_enumerates_processes_in_live_guest (Harness h, string prefix) {
