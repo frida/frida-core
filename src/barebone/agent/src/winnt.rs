@@ -7,13 +7,33 @@ use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, Mode, ThreadEntry, ThreadInfo};
+
+#[cfg(target_arch = "x86")]
+macro_rules! kernel_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "stdcall" fn($($argument),*) -> $result
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+macro_rules! kernel_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "win64" fn($($argument),*) -> $result
+    };
+}
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/system32/";
 
 const DEBUG_CONSOLE_PORT: u16 = 0xe9;
 
 pub fn log(msg: &str) {
+    if mode() == Mode::User {
+        return;
+    }
+
     for byte in msg.bytes() {
         if byte == 0 {
             break;
@@ -50,10 +70,19 @@ pub fn panic(msg: &str) -> ! {
 const MANUALLY_INITIATED_CRASH: u32 = 0xe2;
 
 pub fn alloc(size: usize) -> *mut u8 {
+    if mode() == Mode::User {
+        return unsafe { (user_api().allocate_heap)(process_heap(), 0, size) };
+    }
+
     unsafe { (_ExAllocatePoolWithTag)(NON_PAGED_POOL, size, POOL_TAG) }
 }
 
 pub fn free(ptr: *mut u8, _size: usize) {
+    if mode() == Mode::User {
+        unsafe { (user_api().free_heap)(process_heap(), 0, ptr) };
+        return;
+    }
+
     unsafe {
         (_ExFreePoolWithTag)(ptr, POOL_TAG);
     }
@@ -61,10 +90,29 @@ pub fn free(ptr: *mut u8, _size: usize) {
 
 // The non-paged pool is executable, and you can use it at a high IRQL.
 pub fn alloc_code(size: usize) -> *mut u8 {
+    if mode() == Mode::User {
+        let mut address: *mut u8 = core::ptr::null_mut();
+        let mut region = size;
+        unsafe {
+            (user_api().allocate_memory)(CURRENT_PROCESS, &mut address, 0, &mut region,
+                MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        }
+        return address;
+    }
+
     alloc(size)
 }
 
 pub fn free_code(ptr: *mut u8, size: usize) {
+    if mode() == Mode::User {
+        let mut address = ptr;
+        let mut region = 0usize;
+        unsafe {
+            (user_api().free_memory)(CURRENT_PROCESS, &mut address, &mut region, MEM_RELEASE)
+        };
+        return;
+    }
+
     free(ptr, size);
 }
 
@@ -141,6 +189,19 @@ struct ThreadStart {
 const THREAD_ALL_ACCESS: u32 = 0x1f_03ff;
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    if mode() == Mode::User {
+        if check() {
+            return;
+        }
+
+        let due_time = timeout_us.map(|us| -((us as i64) * 10));
+        unsafe {
+            (user_api().wait_for_object)(target_wake_handle(), 0,
+                due_time.as_ref().map_or(core::ptr::null(), |t| t))
+        };
+        return;
+    }
+
     let event = event_for(token);
     if check() {
         return;
@@ -158,6 +219,11 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
 }
 
 pub fn wake(token: *const u8) {
+    if mode() == Mode::User {
+        unsafe { (user_api().set_event)(target_wake_handle(), core::ptr::null_mut()) };
+        return;
+    }
+
     unsafe {
         (_KeSetEvent)(event_for(token), 0, 0);
     }
@@ -252,6 +318,15 @@ pub fn yield_now() {
     }
 }
 
+// The kernel and the applications read the same page at different addresses.
+fn shared_data() -> usize {
+    if mode() == Mode::User {
+        USER_SHARED_DATA
+    } else {
+        SHARED_DATA
+    }
+}
+
 pub fn monotonic_micros() -> i64 {
     read_system_time(INTERRUPT_TIME_OFFSET) / 10
 }
@@ -263,7 +338,7 @@ pub fn wall_clock_micros() -> (u32, u32) {
 
 // The kernel writes the two halves without a lock. Thus read them again until they agree.
 fn read_system_time(offset: usize) -> i64 {
-    let time = (SHARED_DATA + offset) as *const u32;
+    let time = (shared_data() + offset) as *const u32;
     loop {
         unsafe {
             let high = time.add(2).read_volatile();
@@ -279,6 +354,7 @@ fn read_system_time(offset: usize) -> i64 {
 const SHARED_DATA: usize = 0xffdf_0000;
 #[cfg(target_arch = "x86_64")]
 const SHARED_DATA: usize = 0xffff_f780_0000_0000;
+const USER_SHARED_DATA: usize = 0x7ffe_0000;
 const INTERRUPT_TIME_OFFSET: usize = 0x08;
 const SYSTEM_TIME_OFFSET: usize = 0x14;
 const UNIX_EPOCH_MICROS: i64 = 11_644_473_600_000_000;
@@ -287,7 +363,31 @@ pub fn current_thread_id() -> u64 {
     unsafe { (_PsGetCurrentThreadId)() as u64 }
 }
 
-pub use crate::winnt_paging::{enumerate_ranges, protect, protection_at};
+pub use crate::winnt_paging::{enumerate_ranges, protection_at};
+
+// The copy must ask the memory manager to do this.
+pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
+    if mode() == Mode::User {
+        let mut base = address as *mut u8;
+        let mut region = size;
+        let mut previous = 0u32;
+        return unsafe {
+            (user_api().protect_memory)(CURRENT_PROCESS, &mut base, &mut region,
+                page_protection_of(gum_prot), &mut previous) >= 0
+        };
+    }
+
+    crate::winnt_paging::protect(address, size, gum_prot)
+}
+
+fn page_protection_of(gum_prot: u32) -> u32 {
+    match (gum_prot & GUM_PAGE_WRITE != 0, gum_prot & GUM_PAGE_EXECUTE != 0) {
+        (true, true) => PAGE_EXECUTE_READWRITE,
+        (true, false) => PAGE_READWRITE,
+        (false, true) => PAGE_EXECUTE_READ,
+        (false, false) => PAGE_READONLY,
+    }
+}
 
 // A 32-bit kernel receives the physical address as two halves. A 64-bit kernel receives it
 // as one value.
@@ -1056,6 +1156,259 @@ const MM_CACHED: u32 = 1;
 const NORMAL_PAGE_PRIORITY: u32 = 16;
 const GUM_PAGE_RWX: u32 = 7;
 
+// No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
+#[used]
+static USER_ENTRY: extern "C" fn(usize) = frida_winnt_user_main;
+
+// This is the half that runs in a process. It has its own copy of the image, thus its data is
+// its own. The ring selects which primitives it uses.
+#[unsafe(no_mangle)]
+pub extern "C" fn frida_winnt_user_main(arena: usize) {
+    unsafe {
+        ARENA = arena as u64;
+    }
+    resolve_user_api();
+
+    unsafe { crate::init_gum_without_exceptor() };
+    let context = unsafe { crate::adopt_js_context() };
+
+    unsafe {
+        ((arena + OBSERVED_PID as usize) as *mut u32).write_volatile(current_process_id());
+
+        crate::route_frames_through(arena as u64);
+    }
+
+    while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
+        while let Some(frame) = take_frame_from_host(arena as u64) {
+            crate::on_frame_from_host(frame);
+            acknowledge_frame_from_host(arena as u64);
+        }
+
+        unsafe { crate::dispatch_pending_work(context) };
+    }
+
+    unsafe { (user_api().exit_thread)(0) };
+}
+
+fn resolve_user_api() {
+    let ntdll = module_base(b"ntdll.dll");
+
+    unsafe {
+        USER_API = Some(UserApi {
+            allocate_heap: core::mem::transmute(export(ntdll, b"RtlAllocateHeap")),
+            free_heap: core::mem::transmute(export(ntdll, b"RtlFreeHeap")),
+            allocate_memory: core::mem::transmute(export(ntdll, b"NtAllocateVirtualMemory")),
+            free_memory: core::mem::transmute(export(ntdll, b"NtFreeVirtualMemory")),
+            protect_memory: core::mem::transmute(export(ntdll, b"NtProtectVirtualMemory")),
+            wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
+            set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
+            exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
+        });
+    }
+}
+
+fn user_api() -> &'static UserApi {
+    unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }
+}
+
+struct UserApi {
+    allocate_heap: kernel_fn!(usize, u32, usize => *mut u8),
+    free_heap: kernel_fn!(usize, u32, *mut u8 => u8),
+    allocate_memory: kernel_fn!(*mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32),
+    free_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32 => i32),
+    protect_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32, *mut u32 => i32),
+    wait_for_object: kernel_fn!(*mut c_void, u8, *const i64 => i32),
+    set_event: kernel_fn!(*mut c_void, *mut u32 => i32),
+    exit_thread: kernel_fn!(u32 => !),
+}
+
+static mut USER_API: Option<UserApi> = None;
+
+fn module_base(wanted: &[u8]) -> usize {
+    unsafe {
+        let head = read_pointer(peb() + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
+
+        let mut entry = read_pointer(head);
+        while entry != head {
+            let name = read_pointer(entry + ENTRY_BASE_NAME_OFFSET + UNICODE_STRING_BUFFER_OFFSET);
+            if name_matches(name, wanted) {
+                return read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
+            }
+            entry = read_pointer(entry);
+        }
+    }
+
+    0
+}
+
+// The loader writes the names as wide characters, and the letter case can be different.
+fn name_matches(name: usize, wanted: &[u8]) -> bool {
+    for (index, expected) in wanted.iter().enumerate() {
+        let actual = unsafe { ((name + index * 2) as *const u16).read() };
+        if actual == 0 || (actual as u8).to_ascii_lowercase() != expected.to_ascii_lowercase() {
+            return false;
+        }
+    }
+
+    unsafe { ((name + wanted.len() * 2) as *const u16).read() == 0 }
+}
+
+fn export(base: usize, wanted: &[u8]) -> usize {
+    unsafe {
+        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
+        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
+        let directories = headers
+            + OPTIONAL_HEADER_OFFSET
+            + if magic.read() == PE32_PLUS_MAGIC {
+                DATA_DIRECTORIES_OFFSET_64
+            } else {
+                DATA_DIRECTORIES_OFFSET_32
+            };
+
+        let exports = base + read_u32(directories) as usize;
+        let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
+        let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
+        let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
+        let ordinals = base + read_u32(exports + EXPORT_ORDINALS_OFFSET) as usize;
+
+        for index in 0..count {
+            let name = base + read_u32(names + index * 4) as usize;
+            if name_is(name, wanted) {
+                let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
+                return base + read_u32(functions + ordinal * 4) as usize;
+            }
+        }
+    }
+
+    0
+}
+
+fn name_is(name: usize, wanted: &[u8]) -> bool {
+    for (index, expected) in wanted.iter().enumerate() {
+        if unsafe { ((name + index) as *const u8).read() } != *expected {
+            return false;
+        }
+    }
+
+    unsafe { ((name + wanted.len()) as *const u8).read() == 0 }
+}
+
+fn process_heap() -> usize {
+    unsafe { read_pointer(peb() + PEB_PROCESS_HEAP_OFFSET) }
+}
+
+fn target_wake_handle() -> *mut c_void {
+    unsafe { ((ARENA + TARGET_WAKE_HANDLE) as *const u64).read() as *mut c_void }
+}
+
+fn agent_wake_handle() -> *mut c_void {
+    unsafe { ((ARENA + AGENT_WAKE_HANDLE) as *const u64).read() as *mut c_void }
+}
+
+static mut ARENA: u64 = 0;
+
+unsafe fn read_pointer(address: usize) -> usize {
+    unsafe { (address as *const usize).read() }
+}
+
+unsafe fn read_u32(address: usize) -> u32 {
+    unsafe { (address as *const u32).read() }
+}
+
+#[cfg(target_arch = "x86")]
+fn current_process_id() -> u32 {
+    let pid: u32;
+    unsafe {
+        core::arch::asm!("mov {0:e}, fs:[0x20]", out(reg) pid,
+            options(nomem, nostack, preserves_flags));
+    }
+    pid
+}
+
+#[cfg(target_arch = "x86_64")]
+fn current_process_id() -> u32 {
+    let pid: u64;
+    unsafe {
+        core::arch::asm!("mov {0}, gs:[0x40]", out(reg) pid,
+            options(nomem, nostack, preserves_flags));
+    }
+    pid as u32
+}
+
+// The two halves use the same code, thus the address tells you nothing. The ring tells you
+// which half this is.
+pub fn mode() -> Mode {
+    let cs: u16;
+    unsafe {
+        core::arch::asm!("mov {0:x}, cs", out(reg) cs, options(nomem, nostack, preserves_flags));
+    }
+
+    if cs & 3 != 0 { Mode::User } else { Mode::Kernel }
+}
+
+#[cfg(target_arch = "x86")]
+fn peb() -> usize {
+    let peb: usize;
+    unsafe {
+        core::arch::asm!("mov {0:e}, fs:[0x30]", out(reg) peb,
+            options(nomem, nostack, preserves_flags));
+    }
+    peb
+}
+
+#[cfg(target_arch = "x86_64")]
+fn peb() -> usize {
+    let peb: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, gs:[0x60]", out(reg) peb,
+            options(nomem, nostack, preserves_flags));
+    }
+    peb
+}
+
+#[cfg(target_arch = "x86")]
+const PEB_LDR_OFFSET: usize = 0x0c;
+#[cfg(target_arch = "x86")]
+const PEB_PROCESS_HEAP_OFFSET: usize = 0x18;
+#[cfg(target_arch = "x86")]
+const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
+#[cfg(target_arch = "x86")]
+const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
+#[cfg(target_arch = "x86")]
+const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
+
+#[cfg(target_arch = "x86_64")]
+const PEB_LDR_OFFSET: usize = 0x18;
+#[cfg(target_arch = "x86_64")]
+const PEB_PROCESS_HEAP_OFFSET: usize = 0x30;
+#[cfg(target_arch = "x86_64")]
+const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
+#[cfg(target_arch = "x86_64")]
+const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
+#[cfg(target_arch = "x86_64")]
+const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
+
+const PE_HEADERS_OFFSET: usize = 0x3c;
+const OPTIONAL_HEADER_OFFSET: usize = 0x18;
+const PE32_PLUS_MAGIC: u16 = 0x20b;
+const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
+const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
+const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
+const EXPORT_FUNCTIONS_OFFSET: usize = 0x1c;
+const EXPORT_NAMES_OFFSET: usize = 0x20;
+const EXPORT_ORDINALS_OFFSET: usize = 0x24;
+
+const CURRENT_PROCESS: *mut c_void = -1isize as *mut c_void;
+const MEM_COMMIT: u32 = 0x1000;
+const MEM_RESERVE: u32 = 0x2000;
+const MEM_RELEASE: u32 = 0x8000;
+const PAGE_READONLY: u32 = 0x02;
+const PAGE_READWRITE: u32 = 0x04;
+const PAGE_EXECUTE_READ: u32 = 0x20;
+const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+const GUM_PAGE_WRITE: u32 = 0x2;
+const GUM_PAGE_EXECUTE: u32 = 0x4;
+
 // Each copy reads this region at a different address. Thus all values in it are offsets from
 // the start of the region.
 struct Channel {
@@ -1107,7 +1460,8 @@ impl Channel {
     }
 }
 
-// Where each side leaves the other something to be woken by, and what the copy answers with.
+const STOP_REQUEST: u64 = 0x00;
+const OBSERVED_PID: u64 = 0x04;
 const AGENT_WAKE_HANDLE: u64 = 0x08;
 const TARGET_WAKE_HANDLE: u64 = 0x10;
 
@@ -1163,8 +1517,15 @@ pub fn acknowledge_frame_from_host(arena: u64) {
     TO_TARGET.acknowledge(arena)
 }
 
+// The kernel half waits for an event, thus set the event after you write the frame.
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    FROM_TARGET.publish(arena, frame)
+    if !FROM_TARGET.publish(arena, frame) {
+        return false;
+    }
+
+    unsafe { (user_api().set_event)(agent_wake_handle(), core::ptr::null_mut()) };
+
+    true
 }
 
 unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
@@ -1588,21 +1949,6 @@ macro_rules! kernel_abi {
     };
 }
 
-#[cfg(target_arch = "x86")]
-macro_rules! kernel_fn {
-    ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
-    ($($argument:ty),* $(,)? => $result:ty) => {
-        unsafe extern "stdcall" fn($($argument),*) -> $result
-    };
-}
-
-#[cfg(target_arch = "x86_64")]
-macro_rules! kernel_fn {
-    ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
-    ($($argument:ty),* $(,)? => $result:ty) => {
-        unsafe extern "win64" fn($($argument),*) -> $result
-    };
-}
 
 kernel_abi! {
     static _ExAllocatePoolWithTag: kernel_fn!(u32, usize, u32 => *mut u8);

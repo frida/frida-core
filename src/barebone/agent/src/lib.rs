@@ -561,12 +561,12 @@ fn send_frame(frame: &[u8]) {
     transport_get_unchecked().send(frame);
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) unsafe fn route_frames_through(arena: u64) {
     unsafe { ROUTED_ARENA = arena };
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut ROUTED_ARENA: u64 = 0;
 
 fn transport_get_unchecked() -> &'static Transport {
@@ -689,10 +689,16 @@ fn run_main_loop(main_context: *mut GMainContext) {
                 return;
             }
 
-            // This call blocks. GLib sleeps until one of its timeouts is due, or until something wakes
-            // the loop.
-            g_main_context_iteration(main_context, 1);
+            dispatch_pending_work(main_context);
         }
+    }
+}
+
+// This call blocks. GLib sleeps until one of its timeouts is due, or until something wakes
+// the loop.
+pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
+    unsafe {
+        g_main_context_iteration(main_context, 1);
     }
 }
 
