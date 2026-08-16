@@ -548,14 +548,25 @@ static NEXT_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 static mut PENDING_REPLIES: BTreeMap<u16, *mut GVariant> = BTreeMap::new();
 
 unsafe fn init_gum() {
+    unsafe { init_gum_with_exceptor(true) };
+}
+
+// The Exceptor installs fault handling for the full machine, which only the kernel half may
+// do. A copy in a process would take it from the half that uses it.
+pub(crate) unsafe fn init_gum_without_exceptor() {
+    unsafe { init_gum_with_exceptor(false) };
+}
+
+unsafe fn init_gum_with_exceptor(exceptor: bool) {
     unsafe {
         bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
         bindings::gum_init_embedded();
-        bindings::gum_exceptor_obtain();
+        if exceptor {
+            bindings::gum_exceptor_obtain();
+        }
         bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
 
         gum_script_scheduler_disable_background_thread(gum_script_backend_get_scheduler());
-
     }
 }
 
@@ -568,7 +579,7 @@ fn on_frame_from_host(frame: &[u8]) {
     }
 }
 
-unsafe fn adopt_js_context() -> *mut GMainContext {
+pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
     unsafe {
         let context = gum_script_scheduler_get_js_context(gum_script_backend_get_scheduler());
 
@@ -593,16 +604,30 @@ fn run_main_loop(main_context: *mut GMainContext) {
                 return;
             }
 
-            g_main_context_iteration(main_context, 0);
-
-            kernel::wait(
-                ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
-                Some(IDLE_SLICE_US),
-                &mut || false,
-            );
-
-            kernel::yield_now();
+            dispatch_pending_work(main_context);
         }
+    }
+}
+
+// The copy in a process has no hostlink, because the transport belongs to the kernel half.
+// Nothing there can wake this loop, thus it returns after a short time.
+pub(crate) fn run_script_loop(main_context: *mut GMainContext) {
+    loop {
+        unsafe { dispatch_pending_work(main_context) };
+    }
+}
+
+unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
+    unsafe {
+        g_main_context_iteration(main_context, 0);
+
+        kernel::wait(
+            ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
+            Some(IDLE_SLICE_US),
+            &mut || false,
+        );
+
+        kernel::yield_now();
     }
 }
 

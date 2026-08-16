@@ -520,6 +520,7 @@ static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
 #[unsafe(no_mangle)]
 pub extern "C" fn frida_win9x_user_main(arena: u32) {
     resolve_user_api();
+    unsafe { crate::init_gum_without_exceptor() };
 
     let sleep: unsafe extern "stdcall" fn(u32) =
         unsafe { core::mem::transmute(user_api().sleep as usize) };
@@ -531,23 +532,7 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
         unsafe { sleep(PARKED_SLEEP_MS) };
     }
 
-    // Everything the agent goes on to do runs on threads of its own, so bring one up before
-    // reporting in: a host that gets an answer knows the agent is able to work.
-    let ready = (arena + WORKER_READY) as *mut u32;
-    unsafe { ready.write_volatile(0) };
-    spawn_thread(user_worker, ready as *mut c_void);
-    wait(ready as *const u8, Some(WORKER_TIMEOUT_US), &mut || unsafe {
-        ready.read_volatile() != 0
-    });
-    if unsafe { ready.read_volatile() } == 0 {
-        return;
-    }
-
-    // Reporting our own identity is what lets the host prove the agent really landed in the
-    // process it asked for.
-    let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
-        unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
-    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(get_current_process_id()) };
+    spawn_thread(user_worker, arena as *mut c_void);
 
     loop {
         unsafe { sleep(IDLE_SLEEP_MS) };
@@ -555,14 +540,14 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
 }
 
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
-    unsafe { (parameter as *mut u32).write_volatile(1) };
-    wake(parameter as *const u8);
+    let arena = parameter as u32;
+    let context = unsafe { crate::adopt_js_context() };
 
-    let sleep: unsafe extern "stdcall" fn(u32) =
-        unsafe { core::mem::transmute(user_api().sleep as usize) };
-    loop {
-        unsafe { sleep(IDLE_SLEEP_MS) };
-    }
+    let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
+        unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
+    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(get_current_process_id()) };
+
+    crate::run_script_loop(context);
 }
 
 fn resolve_user_api() {
@@ -776,8 +761,6 @@ const GO_FLAG: u32 = 0x04;
 const OBSERVED_PID: u32 = 0x08;
 const THREAD_DATABASE: u32 = 0x14;
 const RESUMED_FLAG: u32 = 0x18;
-const WORKER_READY: u32 = 0x1c;
-const WORKER_TIMEOUT_US: u64 = 3_000_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;
 const PARKED_SLEEP_MS: u32 = 200;
