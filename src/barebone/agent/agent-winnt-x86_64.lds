@@ -41,7 +41,15 @@ SECTIONS {
     _ZwCreateFile = .; . += 8;
     _ZwReadFile = .; . += 8;
     _ZwClose = .; . += 8;
+    _IoAllocateMdl = .; . += 8;
+    _MmBuildMdlForNonPagedPool = .; . += 8;
+    _MmMapLockedPagesSpecifyCache = .; . += 8;
+    _MmUnmapLockedPages = .; . += 8;
   }
+  /* Everything above is only ever read, so a process being instrumented can be shown the very
+     same pages; everything below it each copy needs its own of. */
+  . = ALIGN(4096);
+  _agent_private_start = .;
   .data.rel.ro : {
     *(.data.rel.ro*)
   }

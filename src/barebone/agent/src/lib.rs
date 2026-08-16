@@ -100,6 +100,7 @@ pub enum FridaCommand {
     InjectIntoProcess = 9,
     AllocateShared = 10,
     DetachFromProcess = 11,
+    PlaceAgentInProcess = 12,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -118,6 +119,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
+            FridaCommand::PlaceAgentInProcess => write!(f, "PlaceAgentInProcess"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
@@ -830,6 +832,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
+            #[cfg(feature = "winnt")]
+            FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
                 unsafe {
@@ -864,6 +868,23 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     }
 
     None
+}
+
+#[cfg(feature = "winnt")]
+fn handle_place_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
+    use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64};
+
+    unsafe {
+        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
+        let private_offset = g_variant_get_uint64(g_variant_get_child_value(payload, 1)) as usize;
+        let size = g_variant_get_uint64(g_variant_get_child_value(payload, 2)) as usize;
+
+        let (seen_by_process, writable_from_here) =
+            kernel::place_agent_in_process(pid, private_offset, size);
+
+        HandlerResponse::success(g_variant_new(c"(tt)".as_ptr(), seen_by_process,
+            writable_from_here))
+    }
 }
 
 // All processes can read the shared arena, and ring 3 can execute from it.

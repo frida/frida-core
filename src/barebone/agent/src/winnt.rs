@@ -885,6 +885,80 @@ static mut IMAGE_NAME: [u8; IMAGE_NAME_SIZE + 1] = [0; IMAGE_NAME_SIZE + 1];
 
 const IMAGE_NAME_SIZE: usize = 16;
 
+// The process receives the same code pages as the kernel half, because code is read-only. It
+// also receives its own writable half, thus the two copies do not share data.
+pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> (u64, u64) {
+    let mut placed = (0u64, 0u64);
+
+    let mut process: *mut c_void = core::ptr::null_mut();
+    enumerate_processes(&mut |p| {
+        if p.id == pid {
+            process = p.handle;
+        }
+    });
+    if process.is_null() {
+        return placed;
+    }
+
+    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+    let shared_size = private_offset;
+    let private_size = size - private_offset;
+
+    let mut work = || unsafe {
+        let private = alloc(private_size);
+        if private.is_null() {
+            return;
+        }
+        core::ptr::write_bytes(private, 0, private_size);
+
+        let shared_mdl = (_IoAllocateMdl)(own.base_address as *mut c_void, shared_size as u32, 0, 0,
+            core::ptr::null_mut());
+        let private_mdl = (_IoAllocateMdl)(private as *mut c_void, private_size as u32, 0, 0,
+            core::ptr::null_mut());
+        if shared_mdl.is_null() || private_mdl.is_null() {
+            return;
+        }
+        (_MmBuildMdlForNonPagedPool)(shared_mdl);
+        (_MmBuildMdlForNonPagedPool)(private_mdl);
+
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+
+        // The memory manager selects the address of the code. The distance to the writable half is a
+        // property of the image, thus the code asks for that address.
+        for _ in 0..MAX_PLACEMENT_TRIES {
+            let text = (_MmMapLockedPagesSpecifyCache)(shared_mdl, USER_MODE, MM_CACHED,
+                core::ptr::null_mut(), 0, NORMAL_PAGE_PRIORITY);
+            if text.is_null() {
+                break;
+            }
+
+            let wanted = (text as usize + private_offset) as *mut c_void;
+            if (_MmMapLockedPagesSpecifyCache)(private_mdl, USER_MODE, MM_CACHED, wanted, 0,
+                    NORMAL_PAGE_PRIORITY) == wanted {
+                // The mapping gives no permission to execute.
+                protect(text as u64, shared_size, GUM_PAGE_RWX);
+                placed = (text as u64, private as u64);
+                break;
+            }
+
+            (_MmUnmapLockedPages)(text, shared_mdl);
+        }
+
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    };
+
+    on_kernel_stack(&mut work);
+
+    placed
+}
+
+const MAX_PLACEMENT_TRIES: usize = 8;
+const USER_MODE: u8 = 1;
+const MM_CACHED: u32 = 1;
+const NORMAL_PAGE_PRIORITY: u32 = 16;
+const GUM_PAGE_RWX: u32 = 7;
+
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let mut read = || {
         let Some(file) = File::open(path) else {
@@ -1365,6 +1439,11 @@ kernel_abi! {
         *const u32,
         => i32);
     static _ZwClose: kernel_fn!(*mut c_void => i32);
+    static _IoAllocateMdl: kernel_fn!(*mut c_void, u32, u8, u8, *mut c_void => *mut c_void);
+    static _MmBuildMdlForNonPagedPool: kernel_fn!(*mut c_void);
+    static _MmMapLockedPagesSpecifyCache: kernel_fn!(
+        *mut c_void, u8, u32, *mut c_void, u32, u32, => *mut c_void);
+    static _MmUnmapLockedPages: kernel_fn!(*mut c_void, *mut c_void);
     static _IoConnectInterrupt: kernel_fn!(
         *mut *mut c_void,
         ServiceRoutine,

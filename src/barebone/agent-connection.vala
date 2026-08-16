@@ -1,5 +1,15 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
+	public sealed class PlacedCopy {
+		public uint64 seen_by_process;
+		public uint64 writable_from_kernel;
+
+		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel) {
+			this.seen_by_process = seen_by_process;
+			this.writable_from_kernel = writable_from_kernel;
+		}
+	}
+
 	public sealed class PlacedAgent : Object {
 		public uint64 base_address {
 			get;
@@ -348,6 +358,21 @@ namespace Frida.Barebone {
 		// Each process needs its own copy, because the copies share the arena and would write the
 		// same data. The process receives the code as it is, thus only the writable half needs a new
 		// location, in memory that both sides can address.
+		public async PlacedCopy place_agent_in_process (uint pid, uint64 private_offset, uint64 size,
+				Cancellable? cancellable) throws Error, IOError {
+			var payload = new Variant ("(utt)", pid, private_offset, size);
+			var response = yield execute_command (Command.PLACE_AGENT_IN_PROCESS, payload, cancellable);
+			if (!response.check_format_string ("(tt)", false))
+				throw new Error.PROTOCOL ("Invalid place_agent_in_process response format");
+
+			uint64 seen_by_process, writable_from_kernel;
+			response.get ("(tt)", out seen_by_process, out writable_from_kernel);
+			if (seen_by_process == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to place the agent in the target process");
+
+			return new PlacedCopy (seen_by_process, writable_from_kernel);
+		}
+
 		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
 			Gum.ElfModule elf;
 			try {
@@ -869,6 +894,7 @@ namespace Frida.Barebone {
 			INJECT_INTO_PROCESS = 9,
 			ALLOCATE_SHARED = 10,
 			DETACH_FROM_PROCESS = 11,
+			PLACE_AGENT_IN_PROCESS = 12,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}
