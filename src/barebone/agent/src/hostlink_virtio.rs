@@ -62,6 +62,10 @@ const PCI_COMMAND: u8 = 0x04;
 const PCI_CAP_LIST_POINTER: u8 = 0x34;
 const PCI_INTERRUPT_LINE: u8 = 0x3c;
 const PCI_BASE_ADDRESS_0: u8 = 0x10;
+const PCI_INTERRUPT_PIN: u8 = 0x3d;
+const ISA_BRIDGE_DEVFN: u8 = 0x08;
+const PIRQ_ROUTE: u8 = 0x60;
+const PIRQ_DISABLED: u32 = 1 << 7;
 
 const PCI_COMMAND_MEMORY: u32 = 1 << 1;
 const PCI_COMMAND_BUS_MASTER: u32 = 1 << 2;
@@ -950,6 +954,7 @@ impl PciDevice {
 
     fn map_virtio_regs(&self) -> Option<Regs> {
         self.enable_memory_and_bus_mastering();
+        self.route_interrupt_line();
 
         let mut common = core::ptr::null_mut();
         let mut notify = core::ptr::null_mut();
@@ -1005,6 +1010,22 @@ impl PciDevice {
             PCI_COMMAND,
             command | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER,
         );
+    }
+
+    // The chipset keeps the link of an unclaimed device off, thus the line reaches no controller.
+    // Point the link at the interrupt in the config space of the device.
+    fn route_interrupt_line(&self) {
+        let link = ((self.read_config_byte(PCI_INTERRUPT_PIN) - 1) + (self.devfn >> 3) - 1) & 3;
+        let router = PciDevice {
+            bus: 0,
+            devfn: ISA_BRIDGE_DEVFN,
+        };
+
+        let offset = PIRQ_ROUTE + link;
+        let shift = (offset & 3) * 8;
+        let route = (self.irq_line() & !PIRQ_DISABLED) << shift;
+        let others = router.read_config(offset) & !(0xff << shift);
+        router.write_config(offset, others | route);
     }
 
     fn map_bar_region(&self, bar: u8, offset: u32, length: u32) -> *mut u8 {
