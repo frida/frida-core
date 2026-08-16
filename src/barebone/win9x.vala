@@ -113,17 +113,13 @@ namespace Frida.Barebone {
 		return blocks;
 	}
 
+	// VMM is the first VxD in the system arena, thus examine only the start of it.
 	private static async uint64 find_kernel_descriptor_block (Machine machine, Cancellable? cancellable)
 			throws Error, IOError {
-		var arena = new Gee.ArrayList<RangeDetails> ();
-		yield machine.enumerate_ranges (Gum.PageProtection.READ, r => {
-			if (r.base_va >= SYSTEM_ARENA_BASE && r.base_va < SYSTEM_ARENA_LIMIT)
-				arena.add (r.clone ());
-			return true;
-		}, cancellable);
-
-		foreach (RangeDetails r in arena) {
-			foreach (DeviceDescriptorBlock candidate in yield harvest_candidates (machine, r, cancellable)) {
+		foreach (Gum.MemoryRange run in yield find_resident_runs (machine, SYSTEM_ARENA_BASE,
+				VMM_SEARCH_SPAN, cancellable)) {
+			foreach (DeviceDescriptorBlock candidate in yield harvest_candidates (machine, run.base_address,
+					run.size, cancellable)) {
 				if (candidate.name == "VMM" && yield candidate.is_credible (machine, cancellable))
 					return candidate.address;
 			}
@@ -132,14 +128,64 @@ namespace Frida.Barebone {
 		return 0;
 	}
 
-	private static async Gee.List<DeviceDescriptorBlock> harvest_candidates (Machine machine, RangeDetails range,
-			Cancellable? cancellable) throws Error, IOError {
+	// Windows maps the page tables into all contexts, thus one read gives the present pages. The
+	// machine would walk the full address space, which costs more than the sweep.
+	private static async Gee.List<Gum.MemoryRange?> find_resident_runs (Machine machine, uint64 base_va,
+			uint64 span, Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		Buffer entries;
+		try {
+			entries = gdb.make_buffer (yield gdb.read_byte_array (
+				PAGE_TABLES_BASE + (base_va >> 22) * PAGE_SIZE, PAGE_SIZE, cancellable));
+		} catch (Error e) {
+			return yield collect_runs_from_machine (machine, base_va, span, cancellable);
+		}
+
+		var runs = new Gee.ArrayList<Gum.MemoryRange?> ();
+		uint64 run_start = 0;
+		uint64 run_size = 0;
+		for (uint64 offset = 0; offset != span; offset += PAGE_SIZE) {
+			size_t index = (size_t) (((base_va + offset) >> 12) & 0x3ff);
+			bool present = (entries.read_uint32 (index * 4) & 1) != 0;
+
+			if (present) {
+				if (run_size == 0)
+					run_start = base_va + offset;
+				run_size += PAGE_SIZE;
+			} else if (run_size != 0) {
+				runs.add (Gum.MemoryRange () { base_address = run_start, size = (size_t) run_size });
+				run_size = 0;
+			}
+		}
+		if (run_size != 0)
+			runs.add (Gum.MemoryRange () { base_address = run_start, size = (size_t) run_size });
+
+		return runs;
+	}
+
+	private static async Gee.List<Gum.MemoryRange?> collect_runs_from_machine (Machine machine, uint64 base_va,
+			uint64 span, Cancellable? cancellable) throws Error, IOError {
+		uint64 limit = base_va + span;
+
+		var runs = new Gee.ArrayList<Gum.MemoryRange?> ();
+		yield machine.enumerate_ranges (Gum.PageProtection.READ, r => {
+			if (r.base_va >= base_va && r.base_va < limit)
+				runs.add (Gum.MemoryRange () { base_address = r.base_va, size = (size_t) r.size });
+			return true;
+		}, cancellable);
+
+		return runs;
+	}
+
+	private static async Gee.List<DeviceDescriptorBlock> harvest_candidates (Machine machine, uint64 base_va,
+			uint64 size, Cancellable? cancellable) throws Error, IOError {
 		var candidates = new Gee.ArrayList<DeviceDescriptorBlock> ();
 
 		GDB.Client gdb = machine.gdb;
-		for (uint64 offset = 0; offset < range.size; offset += SCAN_CHUNK_SIZE) {
-			uint64 chunk_start = range.base_va + offset;
-			uint64 remaining = range.size - offset;
+		for (uint64 offset = 0; offset < size; offset += SCAN_CHUNK_SIZE) {
+			uint64 chunk_start = base_va + offset;
+			uint64 remaining = size - offset;
 			size_t readable_size = (size_t) uint64.min (SCAN_CHUNK_SIZE + STRADDLE_ALLOWANCE, remaining);
 			size_t claimed_size = (size_t) uint64.min (SCAN_CHUNK_SIZE, remaining);
 
@@ -566,6 +612,9 @@ namespace Frida.Barebone {
 
 	private const uint32 MAX_SERVICES = 0x400;
 
+	// The descriptor block is in the first pages, and the sweep reads one page at a time.
+	private const uint64 VMM_SEARCH_SPAN = 1024 * 1024;
+	private const uint64 PAGE_TABLES_BASE = 0xff800000;
 	private const size_t PAGE_SIZE = 4096;
 	private const size_t SCAN_CHUNK_SIZE = 256 * 1024;
 }
