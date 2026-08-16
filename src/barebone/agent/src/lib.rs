@@ -92,6 +92,7 @@ pub enum FridaCommand {
     PatchCode = 7,
     EnumerateProcesses = 8,
     InjectIntoProcess = 9,
+    AllocateShared = 10,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -109,6 +110,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::PatchCode => write!(f, "PatchCode"),
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
+            FridaCommand::AllocateShared => write!(f, "AllocateShared"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
         }
@@ -228,8 +230,8 @@ mod entrypoint_blob {
             // scheduler. Thus attach the source to that context.
             #[cfg(feature = "win9x")]
             {
-                let source = g_timeout_source_new(INJECTION_POLL_MS);
-                g_source_set_callback(source, Some(poll_injection), ptr::null_mut(), None);
+                let source = g_timeout_source_new(DEFERRED_WORK_POLL_MS);
+                g_source_set_callback(source, Some(poll_deferred_work), ptr::null_mut(), None);
                 g_source_attach(source, context);
                 g_source_unref(source);
             }
@@ -727,6 +729,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
+            #[cfg(feature = "win9x")]
+            FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
             _ => Some(HandlerResponse::error("Unknown command")),
         };
 
@@ -742,9 +746,24 @@ fn process_incoming_message(variant: *mut GVariant) {
 // work is deferred and the answer comes later.
 #[cfg(feature = "win9x")]
 fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
+    use crate::bindings::g_variant_get_child_value;
+
     unsafe {
-        PENDING_INJECTION = (request_id, g_variant_get_uint32(payload));
+        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
+        let entry = g_variant_get_uint32(g_variant_get_child_value(payload, 1));
+        PENDING_INJECTION = (request_id, pid, entry);
         INJECTION_PENDING = true;
+    }
+
+    None
+}
+
+// All processes can read the shared arena, and ring 3 can execute from it.
+#[cfg(feature = "win9x")]
+fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
+    unsafe {
+        PENDING_ALLOCATION = (request_id, g_variant_get_uint32(payload));
+        ALLOCATION_PENDING = true;
     }
 
     None
@@ -753,15 +772,28 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
 // Commands arrive in the interrupt callback of the transport, where VMM makes no threads and
 // gives no heap. Thus that callback only sets a flag, and this source does the work.
 #[cfg(feature = "win9x")]
-unsafe extern "C" fn poll_injection(_data: gpointer) -> gboolean {
+unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
+    if unsafe { ptr::addr_of!(ALLOCATION_PENDING).read() } {
+        unsafe { ALLOCATION_PENDING = false };
+
+        let (request_id, size) = unsafe { PENDING_ALLOCATION };
+        let address = kernel::allocate_shared(size as usize);
+        let response = if address == 0 {
+            HandlerResponse::error("Unable to allocate shared memory")
+        } else {
+            HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
+        };
+        send_command_reply(request_id, response);
+    }
+
     if !unsafe { ptr::addr_of!(INJECTION_PENDING).read() } {
         return 1;
     }
     unsafe { INJECTION_PENDING = false };
 
-    let (request_id, pid) = unsafe { PENDING_INJECTION };
+    let (request_id, pid, entry) = unsafe { PENDING_INJECTION };
 
-    let observed = kernel::inject_agent(pid);
+    let observed = kernel::inject_agent(pid, entry);
     let response = if observed == 0 {
         HandlerResponse::error("Unable to inject into process")
     } else {
@@ -773,13 +805,19 @@ unsafe extern "C" fn poll_injection(_data: gpointer) -> gboolean {
 }
 
 #[cfg(feature = "win9x")]
-const INJECTION_POLL_MS: u32 = 20;
+const DEFERRED_WORK_POLL_MS: u32 = 20;
+
+#[cfg(feature = "win9x")]
+static mut ALLOCATION_PENDING: bool = false;
+
+#[cfg(feature = "win9x")]
+static mut PENDING_ALLOCATION: (u16, u32) = (0, 0);
 
 #[cfg(feature = "win9x")]
 static mut INJECTION_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
-static mut PENDING_INJECTION: (u16, u32) = (0, 0);
+static mut PENDING_INJECTION: (u16, u32, u32) = (0, 0, 0);
 
 #[cfg(feature = "win9x")]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {

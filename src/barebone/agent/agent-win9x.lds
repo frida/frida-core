@@ -64,6 +64,7 @@ VERSION {
   {
     global:
       _start;
+      frida_win9x_user_main;
 
     local:
       *;

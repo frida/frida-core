@@ -272,9 +272,13 @@ pub fn yield_now() {
     }
 }
 
+pub fn allocate_shared(size: usize) -> u32 {
+    alloc_shared(size) as u32
+}
+
 // The payload is a call into this image, not a copy of it. The pages of the agent are
 // available in ring 3, thus the new thread runs the same code as the kernel half.
-pub fn inject_agent(pid: u32) -> u32 {
+pub fn inject_agent(pid: u32, entry: u32) -> u32 {
     let process = process_for_pid(pid);
     if process == 0 {
         return 0;
@@ -286,7 +290,7 @@ pub fn inject_agent(pid: u32) -> u32 {
         0xff, 0xd2,
         0xeb, 0xfe,
     ];
-    payload[5..9].copy_from_slice(&(frida_win9x_user_main as usize as u32).to_le_bytes());
+    payload[5..9].copy_from_slice(&entry.to_le_bytes());
 
     let injection = inject(process, &payload);
     if injection.thread == 0 {
@@ -506,6 +510,10 @@ fn alloc_shared(size: usize) -> *mut u8 {
 
     address as *mut u8
 }
+
+// No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
+#[used]
+static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
 
 // This is the ring 3 half. It has its own copy of the image, thus its data is its own. Only
 // the primitives that need the kernel are different.

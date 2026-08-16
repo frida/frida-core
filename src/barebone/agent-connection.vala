@@ -24,6 +24,8 @@ namespace Frida.Barebone {
 		private Gee.List<SymbolInfo> kernel_symbols;
 
 		private Allocation elf_allocation;
+		private Gee.Map<string, SymbolInfo> resolved_symbols;
+		private uint64 user_entry;
 		private Allocation config_allocation;
 
 		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
@@ -74,6 +76,8 @@ namespace Frida.Barebone {
 
 			return connection;
 		}
+
+		private const size_t USER_IMAGE_SLACK = 64 * 1024;
 
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
@@ -173,6 +177,8 @@ namespace Frida.Barebone {
 				}
 				return true;
 			});
+
+			resolved_symbols = symbols;
 
 			yield flavor.prepare (cancellable);
 
@@ -316,12 +322,79 @@ namespace Frida.Barebone {
 			io_cancellable.cancel ();
 		}
 
-		public async uint inject_into_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+		/**
+		 * Places a second, separately relocated copy of the agent where ring 3 can run it. The
+		 * halves cannot share one image: its globals are one instance, so the user-mode side
+		 * would tear down the state the kernel side is running on.
+		 */
+		public async uint64 place_user_agent (Cancellable? cancellable) throws Error, IOError {
+			if (user_entry != 0)
+				return user_entry;
+
+			Gum.ElfModule elf;
+			try {
+				elf = new Gum.ElfModule.from_file (agent_config.path);
+			} catch (Gum.Error e) {
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+			}
+
+			var raw_elf = machine.gdb.make_buffer (new Bytes (elf.get_file_data ()));
+			elf.enumerate_symbols (s => {
+				unowned Gum.ElfSectionDetails? sect = s.section;
+				if (sect != null && sect.name == ".kernel_addrs") {
+					SymbolInfo? info = resolved_symbols[s.name[1:]];
+					if (info != null) {
+						size_t file_offset = (size_t) (sect.offset + (s.address - sect.address));
+						raw_elf.write_pointer (file_offset, kernel_base + info.offset);
+					}
+				}
+				return true;
+			});
+
+			// The agent reserves the memory while the guest runs. The image is written while the guest
+			// is stopped.
+			size_t page_size = yield machine.query_page_size (cancellable);
+			size_t needed = (size_t) elf.mapped_size + USER_IMAGE_SLACK;
+			uint64 image_base = yield allocate_shared ((uint) needed, cancellable);
+
+			var arena = new FixedAllocator (image_base, needed, page_size);
+			yield machine.gdb.stop (cancellable);
+			yield inject_elf (elf, raw_elf.bytes, page_size, machine, arena, cancellable);
+			yield machine.gdb.continue (cancellable);
+
+			uint64 entry = 0;
+			elf.enumerate_symbols (e => {
+				if (e.name == "frida_win9x_user_main")
+					entry = image_base + e.address;
+				return true;
+			});
+			if (entry == 0)
+				throw new Error.NOT_SUPPORTED ("Agent has no user-mode entry point");
+			user_entry = entry;
+
+			return entry;
+		}
+
+		public async uint allocate_shared (uint size, Cancellable? cancellable) throws Error, IOError {
+			var response = yield execute_command (Command.ALLOCATE_SHARED, new Variant.uint32 (size),
+				cancellable);
+			if (!response.is_of_type (VariantType.UINT32))
+				throw new Error.PROTOCOL ("Invalid allocate_shared response format");
+
+			uint address = response.get_uint32 ();
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Out of shared memory");
+
+			return address;
+		}
+
+		public async uint inject_into_process (uint pid, uint64 entry, Cancellable? cancellable)
+				throws Error, IOError {
 			// The agent cannot answer from the context that does the work. Thus it reports the result at
 			// the next request.
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.INJECT_INTO_PROCESS,
-					new Variant.uint32 (pid), cancellable);
+					new Variant ("(uu)", pid, (uint32) entry), cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
 					throw new Error.PROTOCOL ("Invalid inject_into_process response format");
 
@@ -758,6 +831,7 @@ namespace Frida.Barebone {
 			PATCH_CODE = 7,
 			ENUMERATE_PROCESSES = 8,
 			INJECT_INTO_PROCESS = 9,
+			ALLOCATE_SHARED = 10,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}
