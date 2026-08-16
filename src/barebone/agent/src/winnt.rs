@@ -163,9 +163,58 @@ pub fn wake(token: *const u8) {
     }
 }
 
+// A copy in a different process can use a handle, but it cannot use our memory. Thus the
+// loop waits on an event of the object manager. Install the event before the loop waits the
+// first time, because a token keeps the first event it receives.
+pub fn install_shareable_wake_event(token: *const u8) {
+    let mut created: *mut c_void = core::ptr::null_mut();
+
+    let mut make = || created = create_event_object();
+    on_kernel_stack(&mut make);
+
+    if EVENTS[slot_for(token)]
+        .compare_exchange(0, created as usize, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        unsafe { SHAREABLE_WAKE_EVENT = created };
+    }
+}
+
+fn create_event_object() -> *mut c_void {
+    let mut handle: *mut c_void = core::ptr::null_mut();
+    let mut object: *mut c_void = core::ptr::null_mut();
+
+    unsafe {
+        if (_ZwCreateEvent)(&mut handle, EVENT_ALL_ACCESS, core::ptr::null_mut(),
+                SYNCHRONIZATION_EVENT, 0) < 0 {
+            return core::ptr::null_mut();
+        }
+
+        (_ObReferenceObjectByHandle)(handle, EVENT_ALL_ACCESS, core::ptr::null_mut(),
+            KERNEL_MODE as u8, &mut object, core::ptr::null_mut());
+        (_ZwClose)(handle);
+    }
+
+    object
+}
+
+fn open_event_in_current_process(event: *mut c_void) -> *mut c_void {
+    let mut handle: *mut c_void = core::ptr::null_mut();
+
+    unsafe {
+        let object_type = (_ExEventObjectType as *const *mut c_void).read();
+        (_ObOpenObjectByPointer)(event, 0, core::ptr::null_mut(), EVENT_ALL_ACCESS, object_type,
+            USER_MODE as u32, &mut handle);
+    }
+
+    handle
+}
+
+static mut SHAREABLE_WAKE_EVENT: *mut c_void = core::ptr::null_mut();
+
 // The kernel has no futex. Thus each token uses an event, which the code makes on first use.
 fn event_for(token: *const u8) -> *mut c_void {
-    let slot = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
+    let slot = slot_for(token);
     let existing = EVENTS[slot].load(Ordering::Acquire);
     if existing != 0 {
         return existing as *mut c_void;
@@ -184,11 +233,16 @@ fn event_for(token: *const u8) -> *mut c_void {
     }
 }
 
+fn slot_for(token: *const u8) -> usize {
+    (token as usize / core::mem::align_of::<usize>()) % EVENTS.len()
+}
+
 const NUM_EVENTS: usize = 64;
 static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
 const EVENT_SIZE: usize = 0x10;
 const SYNCHRONIZATION_EVENT: u32 = 1;
+const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
 const EXECUTIVE: u32 = 0;
 const KERNEL_MODE: u32 = 0;
 
@@ -905,6 +959,7 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
     let shared_size = private_offset;
     let private_size = size - private_offset;
 
+    let mut wake: *mut c_void = core::ptr::null_mut();
     let mut work = || unsafe {
         let private = alloc(private_size);
         if private.is_null() {
@@ -960,6 +1015,12 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
                 if !seen.is_null() {
                     placed.arena_seen_by_process = seen as u64;
                     placed.arena_here = arena as u64;
+
+                    wake = create_event_object();
+                    (arena.add(AGENT_WAKE_HANDLE as usize) as *mut u64)
+                        .write(open_event_in_current_process(SHAREABLE_WAKE_EVENT) as u64);
+                    (arena.add(TARGET_WAKE_HANDLE as usize) as *mut u64)
+                        .write(open_event_in_current_process(wake) as u64);
                 }
             }
         }
@@ -970,7 +1031,12 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
     on_kernel_stack(&mut work);
 
     if placed.arena_here != 0 {
-        unsafe { targets().insert(pid, placed.arena_here) };
+        unsafe {
+            targets().insert(pid, Target {
+                arena: placed.arena_here,
+                wake,
+            })
+        };
     }
 
     placed
@@ -1041,6 +1107,10 @@ impl Channel {
     }
 }
 
+// Where each side leaves the other something to be woken by, and what the copy answers with.
+const AGENT_WAKE_HANDLE: u64 = 0x08;
+const TARGET_WAKE_HANDLE: u64 = 0x10;
+
 const TO_TARGET: Channel = Channel {
     length: 0x20,
     sequence: 0x24,
@@ -1056,15 +1126,25 @@ const FROM_TARGET: Channel = Channel {
 };
 
 pub fn arena_for_pid(pid: u32) -> Option<u64> {
-    unsafe { targets().get(&pid).copied() }
+    unsafe { targets().get(&pid).map(|t| t.arena) }
 }
 
 pub fn injected_arenas() -> alloc::vec::Vec<u64> {
-    unsafe { targets().values().copied().collect() }
+    unsafe { targets().values().map(|t| t.arena).collect() }
 }
 
+// The copy waits for an event, thus set the event after you write the frame.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    TO_TARGET.publish(arena, frame)
+    if !TO_TARGET.publish(arena, frame) {
+        return false;
+    }
+
+    let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
+    if let Some(wake) = wake {
+        unsafe { (_KeSetEvent)(wake, 0, 0) };
+    }
+
+    true
 }
 
 pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
@@ -1087,11 +1167,16 @@ pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
     FROM_TARGET.publish(arena, frame)
 }
 
-unsafe fn targets() -> &'static mut BTreeMap<u32, u64> {
+unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
     unsafe { core::ptr::addr_of_mut!(TARGETS).as_mut().unwrap() }
 }
 
-static mut TARGETS: BTreeMap<u32, u64> = BTreeMap::new();
+static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
+
+struct Target {
+    arena: u64,
+    wake: *mut c_void,
+}
 
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
@@ -1576,6 +1661,12 @@ kernel_abi! {
         *const u32,
         => i32);
     static _ZwClose: kernel_fn!(*mut c_void => i32);
+    static _ZwCreateEvent: kernel_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
+    static _ObReferenceObjectByHandle: kernel_fn!(
+        *mut c_void, u32, *mut c_void, u8, *mut *mut c_void, *mut c_void => i32);
+    static _ObOpenObjectByPointer: kernel_fn!(
+        *mut c_void, u32, *mut c_void, u32, *mut c_void, u32, *mut *mut c_void => i32);
+    static _ExEventObjectType: usize;
     static _IoAllocateMdl: kernel_fn!(*mut c_void, u32, u8, u8, *mut c_void => *mut c_void);
     static _MmBuildMdlForNonPagedPool: kernel_fn!(*mut c_void);
     static _MmMapLockedPagesSpecifyCache: kernel_fn!(

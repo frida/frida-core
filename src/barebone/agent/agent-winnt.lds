@@ -36,6 +36,10 @@ SECTIONS {
     _ZwCreateFile = .; . += 4;
     _ZwReadFile = .; . += 4;
     _ZwClose = .; . += 4;
+    _ZwCreateEvent = .; . += 4;
+    _ObReferenceObjectByHandle = .; . += 4;
+    _ObOpenObjectByPointer = .; . += 4;
+    _ExEventObjectType = .; . += 4;
     _IoAllocateMdl = .; . += 4;
     _MmBuildMdlForNonPagedPool = .; . += 4;
     _MmMapLockedPagesSpecifyCache = .; . += 4;

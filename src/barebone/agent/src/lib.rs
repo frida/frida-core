@@ -226,6 +226,10 @@ mod entrypoint_blob {
             OWN_RANGE = own_range;
 
             let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
+            // Install this before the loop waits the first time, thus a copy placed in a process later
+            // can receive a handle to the same event.
+            #[cfg(feature = "winnt")]
+            kernel::install_shareable_wake_event(wake_token);
             let transport = match transport_config {
                 TransportConfig::Virtio { mmio, irq } => Transport::Virtio(
                     hostlink_virtio::Hostlink::init(
