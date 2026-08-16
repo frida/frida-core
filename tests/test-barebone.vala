@@ -60,6 +60,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/IA32/scans-ranges", () => {
+			var h = new Harness ((h) => ia32_scans_ranges.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => agent_runs_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1080,6 +1085,63 @@ namespace Frida.BareboneTest {
 		"CR0=8005003b CR2=00000000 CR3=00001000 CR4=00000010\n";
 
 	// Paging on, PSE on, PAE off: 32-bit entries, one of them a 4 MiB page.
+	private static async void ia32_scans_ranges (Harness h) {
+		var target = new FakeTarget (IA32, arena_page_tables (), LEGACY_MONITOR_DUMP);
+		try {
+			target.map_virtual (ARENA_VA, arena_with_needles ());
+			yield target.open ();
+			var machine = new Barebone.IA32Machine (target.client);
+
+			var ranges = new Gee.ArrayList<Gum.MemoryRange?> ();
+			ranges.add (Gum.MemoryRange () { base_address = ARENA_VA, size = ARENA_SIZE });
+
+			var exact = yield machine.scan_ranges (ranges, new Barebone.MatchPattern.from_string ("1deadbeef1"),
+				10, null);
+			assert_true (exact.size == 1);
+			assert_true (exact[0] == ARENA_VA + FIRST_NEEDLE_OFFSET);
+
+			// The wildcard must match the byte that is different in the two patterns, and the mask must
+			// cover only its high nibble.
+			var wildcard = yield machine.scan_ranges (ranges,
+				new Barebone.MatchPattern.from_string ("1dea??eef1"), 10, null);
+			assert_true (wildcard.size == 2);
+			assert_true (wildcard[0] == ARENA_VA + FIRST_NEEDLE_OFFSET);
+			assert_true (wildcard[1] == ARENA_VA + SECOND_NEEDLE_OFFSET);
+
+			var masked = yield machine.scan_ranges (ranges,
+				new Barebone.MatchPattern.from_string ("1dead0eef1:fffff0ffff"), 10, null);
+			assert_true (masked.size == 2);
+
+			var capped = yield machine.scan_ranges (ranges,
+				new Barebone.MatchPattern.from_string ("1dea??eef1"), 1, null);
+			assert_true (capped.size == 1);
+
+			var missing = yield machine.scan_ranges (ranges,
+				new Barebone.MatchPattern.from_string ("0badc0ffee"), 10, null);
+			assert_true (missing.is_empty);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			target.stop ();
+		}
+
+		h.done ();
+	}
+
+	private static Bytes arena_with_needles () {
+		var arena = new uint8[ARENA_SIZE];
+
+		uint8[] first = { 0x1d, 0xea, 0xdb, 0xee, 0xf1 };
+		uint8[] second = { 0x1d, 0xea, 0xd0, 0xee, 0xf1 };
+		for (uint i = 0; i != first.length; i++) {
+			arena[FIRST_NEEDLE_OFFSET + i] = first[i];
+			arena[SECOND_NEEDLE_OFFSET + i] = second[i];
+		}
+
+		return new Bytes.take ((owned) arena);
+	}
+
 	private static async void services_resolve_from_descriptor_block (Harness h) {
 		var target = new FakeTarget (IA32, arena_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
@@ -1396,6 +1458,8 @@ namespace Frida.BareboneTest {
 		assert_true (symbol.offset == address);
 	}
 
+	private const size_t FIRST_NEEDLE_OFFSET = 0x40;
+	private const size_t SECOND_NEEDLE_OFFSET = 0x1c0;
 	private const uint64 ARENA_VA = 0xc0000000;
 	private const uint64 ARENA_PA = 0x3000;
 	private const size_t ARENA_SIZE = 0x1000;

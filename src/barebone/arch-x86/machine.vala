@@ -59,10 +59,44 @@ namespace Frida.Barebone {
 			yield page_tables.protect (virtual_address, size, prot, cancellable);
 		}
 
+		// Read the memory and do the match here. A script asks about small ranges, thus a scanner in
+		// the guest would cost more round trips than it saves.
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			var matches = new Gee.ArrayList<uint64?> ();
+
+			foreach (Gum.MemoryRange r in ranges) {
+				uint64 end = r.base_address + r.size;
+				uint64 cursor = r.base_address;
+				while (cursor + pattern.size <= end) {
+					size_t chunk_size = (size_t) uint64.min (SCAN_CHUNK_SIZE, end - cursor);
+
+					// A range from a script can include memory that the guest paged out.
+					Bytes chunk;
+					try {
+						chunk = yield gdb.read_byte_array (cursor, chunk_size, cancellable);
+					} catch (Error e) {
+						cursor += chunk_size;
+						continue;
+					}
+
+					uint64 chunk_start = cursor;
+					find_pattern_matches (pattern, chunk.get_data (), max_matches - matches.size, offset => {
+						matches.add (chunk_start + offset);
+					});
+					if (matches.size == max_matches)
+						return matches;
+
+					cursor += chunk_size - (pattern.size - 1);
+				}
+			}
+
+			return matches;
 		}
+
+		// This size is large enough to make the read longer than the round trip, and small enough to
+		// keep the overlap at the boundaries small.
+		private const size_t SCAN_CHUNK_SIZE = 256 * 1024;
 
 		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
 			Gum.ElfIA32Relocation type = (Gum.ElfIA32Relocation) r.type;

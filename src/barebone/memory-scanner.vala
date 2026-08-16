@@ -4,6 +4,17 @@ namespace Frida.Barebone {
 		public size_t size;
 		public Gee.List<MatchToken> tokens = new Gee.ArrayList<MatchToken> ();
 
+		public bool matches (uint8[] data, size_t offset) {
+			size_t cursor = offset;
+			foreach (MatchToken t in tokens) {
+				if (!t.matches (data, cursor))
+					return false;
+				cursor += t.size;
+			}
+
+			return true;
+		}
+
 		public MatchPattern.from_string (string pattern) throws Error {
 			string[] parts = pattern.replace (" ", "").split (":", 2);
 
@@ -119,9 +130,54 @@ namespace Frida.Barebone {
 
 			if (masks == null)
 				masks = new ByteArray ();
-			masks.append ({ val });
+			masks.append ({ mask });
+		}
+
+		public bool matches (uint8[] data, size_t offset) {
+			unowned uint8[]? values = (this.values != null) ? this.values.data : null;
+			unowned uint8[]? masks = (this.masks != null) ? this.masks.data : null;
+
+			for (size_t i = 0; i != size; i++) {
+				switch (kind) {
+					case EXACT:
+						if (data[offset + i] != values[i])
+							return false;
+						break;
+					case WILDCARD:
+						break;
+					case MASK:
+						if (((data[offset + i] ^ values[i]) & masks[i]) != 0)
+							return false;
+						break;
+				}
+			}
+
+			return true;
 		}
 	}
+
+	// Machines with no scanner in the guest match here. This reads the memory instead of running
+	// code in the guest.
+	public void find_pattern_matches (MatchPattern pattern, uint8[] haystack, uint max_matches,
+			FoundPatternFunc func) {
+		if (haystack.length < pattern.size)
+			return;
+
+		uint found = 0;
+		size_t last = haystack.length - pattern.size;
+		for (size_t offset = 0; offset <= last; offset++) {
+			if (!pattern.matches (haystack, offset))
+				continue;
+
+			func (offset);
+
+			found++;
+			if (found == max_matches)
+				return;
+		}
+	}
+
+	public delegate void FoundPatternFunc (size_t offset);
 
 	public void append_memory_scanner_data (BufferBuilder builder, Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern,
 			uint max_matches, out size_t data_size) {
