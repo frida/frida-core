@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import os
 from pathlib import Path
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -14,7 +16,7 @@ import urllib.request
 
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1].split("-", maxsplit=1)[0] in ("check", "boot"):
+    if len(sys.argv) >= 2 and sys.argv[1].split("-", maxsplit=1)[0] in ("check", "boot", "rewind"):
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -40,6 +42,12 @@ def main():
                 win95.add_argument("--boot-seconds", type=int, default=120)
                 win95.add_argument("--qmp", type=Path)
                 win95.add_argument("--debugcon", type=Path)
+                win95.add_argument("--snapshot", default=SNAPSHOT_NAME)
+
+        rewind = subparsers.add_parser("rewind-win95",
+                                       help="restore a Windows 95 snapshot and put a fresh hostlink port on it")
+        rewind.add_argument("--qmp", type=Path, required=True)
+        rewind.add_argument("--snapshot", default=SNAPSHOT_NAME)
 
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
@@ -63,6 +71,8 @@ def main():
         elif target == "win95":
             if action == "check":
                 check_win95_guest(args)
+            elif action == "rewind":
+                rewind_win95_guest(args)
             else:
                 boot_win95_guest(args)
         elif action == "check":
@@ -190,15 +200,112 @@ def boot_win95_guest(args):
     ] + control + diagnostics, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
-        for _ in range(args.boot_seconds):
-            if process.poll() is not None:
-                raise Unavailable("guest exited before it finished booting")
-            time.sleep(1)
+        if args.qmp is None:
+            for _ in range(args.boot_seconds):
+                if process.poll() is not None:
+                    raise Unavailable("guest exited before it finished booting")
+                time.sleep(1)
+        else:
+            settle_win95_desktop(Qmp(args.qmp, process), args.snapshot)
 
         print("ready", flush=True)
         process.wait()
     finally:
         process.kill()
+
+
+# Windows 95 says nothing on the serial line, so readiness is a thing to look at rather than
+# wait out: the mode change out of text is the shell coming up, and the adapter it cannot find
+# leaves a dialog over the desktop that has to go before the machine is worth snapshotting.
+def settle_win95_desktop(qmp, snapshot):
+    deadline = time.monotonic() + WIN95_BOOT_TIMEOUT_SECONDS
+    while qmp.screen_size() == TEXT_MODE_SIZE:
+        if time.monotonic() > deadline:
+            raise Unavailable("guest never left text mode")
+        time.sleep(WIN95_BOOT_POLL_SECONDS)
+
+    time.sleep(WIN95_SHELL_SETTLE_SECONDS)
+    qmp.monitor("sendkey ret")
+    time.sleep(WIN95_DIALOG_SETTLE_SECONDS)
+    qmp.monitor("sendkey alt-f4")
+    time.sleep(WIN95_DIALOG_SETTLE_SECONDS)
+
+    qmp.monitor("stop")
+    qmp.monitor(f"savevm {snapshot}")
+    qmp.monitor("cont")
+
+
+# The snapshot is of a machine that never had a hostlink port, and the port a previous run added
+# goes away asynchronously: restoring before it is gone leaves QEMU unable to load the device's
+# state, and every rewind after that runs a wedged machine.
+def rewind_win95_guest(args):
+    qmp = Qmp(args.qmp)
+
+    qmp.execute("device_del", {"id": PORT_DEVICE_ID})
+    deadline = time.monotonic() + PORT_REMOVAL_TIMEOUT_SECONDS
+    while PORT_DEVICE_ID in qmp.peripherals():
+        if time.monotonic() > deadline:
+            raise Unavailable("hostlink port would not go away")
+        time.sleep(PORT_REMOVAL_POLL_SECONDS)
+
+    # A run leaves its chardev behind, and removing one takes a moment to land. On the first
+    # rewind after a boot there is none, which is why this asks rather than reads the error.
+    while PORT_CHARDEV_ID in qmp.chardevs():
+        qmp.execute("chardev-remove", {"id": PORT_CHARDEV_ID})
+        if time.monotonic() > deadline:
+            raise Unavailable("hostlink chardev would not go away")
+        time.sleep(PORT_REMOVAL_POLL_SECONDS)
+
+    reply = qmp.monitor(f"loadvm {args.snapshot}")
+    if reply:
+        raise Unavailable(f"unable to restore {args.snapshot}: {reply}")
+    qmp.monitor("cont")
+
+
+class Qmp:
+    def __init__(self, path, process=None):
+        deadline = time.monotonic() + QMP_CONNECT_TIMEOUT_SECONDS
+        while True:
+            if process is not None and process.poll() is not None:
+                raise Unavailable("guest exited before it finished booting")
+            try:
+                self._sock = socket.socket(socket.AF_UNIX)
+                self._sock.connect(str(path))
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise Unavailable("guest never opened its QMP socket")
+                time.sleep(QMP_CONNECT_POLL_SECONDS)
+
+        self._conn = self._sock.makefile("rw")
+        self._conn.readline()
+        self.execute("qmp_capabilities")
+
+    def execute(self, command, arguments=None):
+        message = {"execute": command}
+        if arguments is not None:
+            message["arguments"] = arguments
+        self._conn.write(json.dumps(message) + "\n")
+        self._conn.flush()
+        while True:
+            reply = json.loads(self._conn.readline())
+            if "event" not in reply:
+                return reply
+
+    def monitor(self, command):
+        return self.execute("human-monitor-command", {"command-line": command})["return"].strip()
+
+    def peripherals(self):
+        return [entry["name"] for entry in self.execute("qom-list", {"path": "/machine/peripheral"})["return"]]
+
+    def chardevs(self):
+        return [entry["label"] for entry in self.execute("query-chardev")["return"]]
+
+    def screen_size(self):
+        with tempfile.NamedTemporaryFile(suffix=".ppm") as shot:
+            self.execute("screendump", {"filename": shot.name})
+            header = open(shot.name, "rb").read(32).split()
+            return (int(header[1]), int(header[2]))
 
 
 def require_win95(args) -> str:
@@ -409,6 +516,19 @@ GUEST_CPU = "pentium3"
 
 DEBUGCON_ID = "frida-debugcon"
 DEBUGCON_PORT = 0xe9
+
+SNAPSHOT_NAME = "booted"
+TEXT_MODE_SIZE = (720, 400)
+WIN95_BOOT_TIMEOUT_SECONDS = 900
+WIN95_BOOT_POLL_SECONDS = 15
+WIN95_SHELL_SETTLE_SECONDS = 90
+WIN95_DIALOG_SETTLE_SECONDS = 30
+PORT_DEVICE_ID = "hostlink.port"
+PORT_CHARDEV_ID = "vserial0"
+PORT_REMOVAL_TIMEOUT_SECONDS = 20
+PORT_REMOVAL_POLL_SECONDS = 0.1
+QMP_CONNECT_TIMEOUT_SECONDS = 60
+QMP_CONNECT_POLL_SECONDS = 0.5
 
 PORT_NAME = "frida"
 PORT_PATH = "/dev/vport0p1"
