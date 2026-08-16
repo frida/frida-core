@@ -600,6 +600,23 @@ namespace Frida.Barebone {
 			return AgentScriptId (script_handle);
 		}
 
+		// Scripts for an attached process run in the copy injected there, which the host cannot
+		// reach: the kernel half passes the source across and answers once it is up.
+		public async AgentScriptId create_script_in_process (string source, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield execute_command (Command.CREATE_SCRIPT_IN_PROCESS, new Variant ("s", source),
+				cancellable);
+			if (!response.check_format_string ("u", false))
+				throw new Error.PROTOCOL ("Invalid create_script_in_process response format");
+			uint32 script_handle;
+			response.get ("u", out script_handle);
+			return AgentScriptId (script_handle);
+		}
+
+		public async void load_script_in_process (Cancellable? cancellable) throws Error, IOError {
+			yield execute_command (Command.LOAD_SCRIPT_IN_PROCESS, new Variant.uint32 (0), cancellable);
+		}
+
 		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("u", script_id.handle);
 			yield execute_command (Command.LOAD_SCRIPT, payload, cancellable);
@@ -832,6 +849,8 @@ namespace Frida.Barebone {
 			ENUMERATE_PROCESSES = 8,
 			INJECT_INTO_PROCESS = 9,
 			ALLOCATE_SHARED = 10,
+			CREATE_SCRIPT_IN_PROCESS = 11,
+			LOAD_SCRIPT_IN_PROCESS = 12,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

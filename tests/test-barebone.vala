@@ -1183,6 +1183,20 @@ namespace Frida.BareboneTest {
 			var session = yield device.attach (pid, null, null);
 			assert_nonnull (session);
 
+			// The script runs in the target process, thus Process.id gives the id of the target.
+			var script = yield session.create_script ("send(Process.id >>> 0);", null, null);
+
+			string? received = null;
+			script.message.connect ((json, data) => {
+				received = json;
+				injects_into_process_in_live_guest.callback ();
+			});
+			yield script.load (null);
+			if (received == null)
+				yield;
+
+			assert_true (received.contains (pid.to_string ()));
+
 			try {
 				yield device.attach (pid ^ 0x1234, null, null);
 				assert_not_reached ();
