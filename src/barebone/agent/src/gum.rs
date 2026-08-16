@@ -29,6 +29,12 @@ pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
     kernel::current_thread_id() as GumThreadId
 }
 
+#[cfg(feature = "win9x")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_process_get_id() -> guint {
+    kernel::current_process_id() as guint
+}
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_page_size() -> guint {

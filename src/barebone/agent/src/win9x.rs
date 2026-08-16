@@ -300,8 +300,18 @@ pub fn inject_agent(pid: u32, entry: u32) -> u32 {
         return 0;
     }
 
+    unsafe { INJECTED_ARENA = injection.arena };
+
     unsafe { ((injection.arena + OBSERVED_PID) as *const u32).read_volatile() }
 }
+
+// Where the most recently injected copy listens. One target at a time, which is what the host
+// asks for today.
+pub fn injected_arena() -> u32 {
+    unsafe { INJECTED_ARENA }
+}
+
+static mut INJECTED_ARENA: u32 = 0;
 
 
 fn process_for_pid(pid: u32) -> u32 {
@@ -336,6 +346,10 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
         core::ptr::copy_nonoverlapping(payload.as_ptr(), entry as *mut u8, payload.len());
     }
 
+    unsafe {
+        ((arena + MESSAGE_BUFFER) as *mut u32).write_volatile(alloc_shared(MESSAGE_BUFFER_SIZE) as u32)
+    };
+
     let stack = alloc_shared(INJECTION_STACK_SIZE) as u32;
     write_trampoline(arena + TRAMPOLINE_OFFSET, entry, stack + INJECTION_STACK_SIZE as u32 - 0x40);
 
@@ -367,6 +381,59 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
 
     Injection { arena, thread }
+}
+
+// Hands a script to the copy running inside an already-injected process, and waits for it to
+// say whether the script came up.
+pub fn create_script_in_process(arena: u32, source: &str) -> bool {
+    let buffer = alloc_shared(source.len() + 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(source.as_ptr(), buffer, source.len());
+        buffer.add(source.len()).write(0);
+
+        ((arena + SCRIPT_STATUS) as *mut u32).write_volatile(0);
+        ((arena + SCRIPT_SOURCE) as *mut u32).write_volatile(buffer as u32);
+        ((arena + SCRIPT_REQUEST) as *mut u32).write_volatile(1);
+    }
+
+    if !await_flag(arena + SCRIPT_STATUS) {
+        return false;
+    }
+
+    unsafe { ((arena + SCRIPT_STATUS) as *const u32).read_volatile() == SCRIPT_READY }
+}
+
+// The injected copy has no hostlink, so its script messages come back through the arena for
+// the kernel half to forward.
+pub fn load_script_in_process(arena: u32) -> bool {
+    unsafe {
+        ((arena + SCRIPT_LOADED) as *mut u32).write_volatile(0);
+        ((arena + SCRIPT_LOAD) as *mut u32).write_volatile(1);
+    }
+
+    await_flag(arena + SCRIPT_LOADED)
+}
+
+pub fn take_script_message(arena: u32) -> Option<&'static str> {
+    let sequence = unsafe { ((arena + MESSAGE_SEQUENCE) as *const u32).read_volatile() };
+    if sequence == unsafe { ((arena + MESSAGE_ACK) as *const u32).read_volatile() } {
+        return None;
+    }
+
+    let buffer = unsafe { ((arena + MESSAGE_BUFFER) as *const u32).read_volatile() } as *const u8;
+    let mut length = 0;
+    while unsafe { buffer.add(length).read() } != 0 {
+        length += 1;
+    }
+
+    Some(unsafe {
+        core::str::from_utf8_unchecked(core::slice::from_raw_parts(buffer, length))
+    })
+}
+
+pub fn acknowledge_script_message(arena: u32) {
+    let sequence = unsafe { ((arena + MESSAGE_SEQUENCE) as *const u32).read_volatile() };
+    unsafe { ((arena + MESSAGE_ACK) as *mut u32).write_volatile(sequence) };
 }
 
 pub struct Injection {
@@ -543,12 +610,119 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
     let arena = parameter as u32;
     let context = unsafe { crate::adopt_js_context() };
 
-    let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
-        unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
-    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(get_current_process_id()) };
+    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(current_process_id()) };
 
-    crate::run_script_loop(context);
+    loop {
+        poll_script_request(arena);
+        poll_load_request(arena);
+        unsafe { crate::dispatch_pending_work(context) };
+    }
 }
+
+// The kernel half cannot call in here, so requests arrive as a slot in the arena both halves
+// can see, and are picked up on the thread that runs the scripts.
+fn poll_script_request(arena: u32) {
+    if unsafe { ((arena + SCRIPT_REQUEST) as *const u32).read_volatile() } == 0 {
+        return;
+    }
+    unsafe { ((arena + SCRIPT_REQUEST) as *mut u32).write_volatile(0) };
+
+    let source = unsafe { ((arena + SCRIPT_SOURCE) as *const u32).read_volatile() };
+    unsafe { ARENA = arena };
+
+    unsafe {
+        crate::gum_script_backend_create(
+            crate::gum_script_backend_obtain_qjs(),
+            c"agent.js".as_ptr(),
+            source as *const i8,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            Some(on_script_created),
+            core::ptr::null_mut(),
+        )
+    };
+}
+
+unsafe extern "C" fn on_script_created(
+    source_object: *mut crate::GObject,
+    result: *mut crate::GAsyncResult,
+    _user_data: crate::gpointer,
+) {
+    let arena = unsafe { ARENA };
+
+    let mut error: *mut crate::GError = core::ptr::null_mut();
+    let script = unsafe {
+        crate::gum_script_backend_create_finish(
+            source_object as *mut crate::GumScriptBackend,
+            result,
+            &mut error,
+        )
+    };
+    if !error.is_null() {
+        unsafe { ((arena + SCRIPT_STATUS) as *mut u32).write_volatile(SCRIPT_FAILED) };
+        return;
+    }
+
+    unsafe {
+        crate::gum_script_set_message_handler(
+            script,
+            Some(on_script_message),
+            core::ptr::null_mut(),
+            None,
+        );
+        SCRIPT = script;
+        ((arena + SCRIPT_STATUS) as *mut u32).write_volatile(SCRIPT_READY);
+    }
+}
+
+// Loading is a step of its own, because a script that ran the moment it was created would be
+// sending before the host had anywhere to put the messages.
+fn poll_load_request(arena: u32) {
+    if unsafe { ((arena + SCRIPT_LOAD) as *const u32).read_volatile() } == 0 {
+        return;
+    }
+    unsafe { ((arena + SCRIPT_LOAD) as *mut u32).write_volatile(0) };
+
+    unsafe {
+        crate::gum_script_load(SCRIPT, core::ptr::null_mut(), None, core::ptr::null_mut());
+        ((arena + SCRIPT_LOADED) as *mut u32).write_volatile(1);
+    }
+}
+
+// One message is in flight at a time: the kernel half acknowledges each before the next may
+// take the buffer, and anything longer than it holds is dropped rather than truncated.
+unsafe extern "C" fn on_script_message(
+    message: *const i8,
+    _data: *mut crate::GBytes,
+    _user_data: crate::gpointer,
+) {
+    let arena = unsafe { ARENA };
+
+    let sequence = unsafe { ((arena + MESSAGE_SEQUENCE) as *const u32).read_volatile() };
+    while unsafe { ((arena + MESSAGE_ACK) as *const u32).read_volatile() } != sequence {
+        yield_now();
+    }
+
+    let buffer = unsafe { ((arena + MESSAGE_BUFFER) as *const u32).read_volatile() } as *mut u8;
+    let mut length = 0;
+    while unsafe { message.add(length).read() } != 0 {
+        length += 1;
+    }
+    if length + 1 > MESSAGE_BUFFER_SIZE {
+        return;
+    }
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(message as *const u8, buffer, length + 1);
+        ((arena + MESSAGE_SEQUENCE) as *mut u32).write_volatile(sequence + 1);
+    }
+}
+
+// The Gum callbacks carry no state of ours, and the injected copy only ever serves the one
+// arena, and the one script, it was started with.
+static mut ARENA: u32 = 0;
+static mut SCRIPT: *mut crate::GumScript = core::ptr::null_mut();
+
 
 fn resolve_user_api() {
     unsafe {
@@ -761,6 +935,17 @@ const GO_FLAG: u32 = 0x04;
 const OBSERVED_PID: u32 = 0x08;
 const THREAD_DATABASE: u32 = 0x14;
 const RESUMED_FLAG: u32 = 0x18;
+const SCRIPT_SOURCE: u32 = 0x1c;
+const SCRIPT_REQUEST: u32 = 0x20;
+const SCRIPT_STATUS: u32 = 0x24;
+const SCRIPT_READY: u32 = 1;
+const SCRIPT_FAILED: u32 = 2;
+const MESSAGE_BUFFER: u32 = 0x28;
+const MESSAGE_SEQUENCE: u32 = 0x2c;
+const MESSAGE_ACK: u32 = 0x30;
+const SCRIPT_LOAD: u32 = 0x34;
+const SCRIPT_LOADED: u32 = 0x38;
+const MESSAGE_BUFFER_SIZE: usize = 0x4000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;
 const PARKED_SLEEP_MS: u32 = 200;
@@ -795,6 +980,17 @@ pub fn monotonic_micros() -> i64 {
 pub fn wall_clock_micros() -> (u32, u32) {
     let micros = monotonic_micros() as u64;
     ((micros / 1_000_000) as u32, (micros % 1_000_000) as u32)
+}
+
+// Ring 0 is in no process, thus only the injected copy has an answer.
+pub fn current_process_id() -> u32 {
+    if mode() == Mode::User {
+        let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
+            unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
+        return unsafe { get_current_process_id() };
+    }
+
+    0
 }
 
 pub fn current_thread_id() -> u64 {
