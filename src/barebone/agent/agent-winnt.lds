@@ -70,6 +70,7 @@ VERSION {
     global:
       _start;
       frida_winnt_user_main;
+      frida_winnt_user_bootstrap;
 
     local:
       *;

@@ -1082,6 +1082,7 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
         unsafe {
             targets().insert(pid, Target {
                 arena: placed.arena_here,
+                seen: placed.arena_seen_by_process,
                 wake,
                 started: false,
                 text: placed.seen_by_process,
@@ -1110,11 +1111,11 @@ const GUM_PAGE_RWX: u32 = 7;
 // Start the copy on a thread of the target. The system makes the thread, thus ntdll accepts
 // calls from it. The copy cannot answer from that thread, thus this function returns the
 // process id only after the copy writes it.
-pub fn start_agent_in_process(pid: u32, entry: u64, argument: u64) -> u32 {
+pub fn start_agent_in_process(pid: u32, bootstrap: u64, entry: u64) -> u32 {
     let Some(target) = (unsafe { targets().get(&pid) }) else {
         return 0;
     };
-    let arena = target.arena;
+    let (arena, seen) = (target.arena, target.seen);
 
     if !target.started {
         let mut process: *mut c_void = core::ptr::null_mut();
@@ -1128,7 +1129,7 @@ pub fn start_agent_in_process(pid: u32, entry: u64, argument: u64) -> u32 {
         }
 
         let mut work = || {
-            create_user_thread(process, entry, argument);
+            create_user_thread(process, arena, seen, bootstrap, entry);
         };
         on_kernel_stack(&mut work);
 
@@ -1141,14 +1142,88 @@ pub fn start_agent_in_process(pid: u32, entry: u64, argument: u64) -> u32 {
 }
 
 #[cfg(target_arch = "x86")]
-fn create_user_thread(_process: *mut c_void, _entry: u64, _argument: u64) -> bool {
+fn create_user_thread(_process: *mut c_void, _arena_here: u64, _arena_seen: u64,
+        _bootstrap: u64, _entry: u64) -> bool {
     false
 }
+
+// ntdll's stub for this is a syscall, which needs no block, thus the thread that descends can
+// ask for a real thread even though it has none itself. The kernel gives that thread a block.
+#[cfg(target_arch = "x86_64")]
+fn describe_real_thread(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
+        arena_seen: u64, entry: u64, argument: u64) -> bool {
+    let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
+    if stack == 0 {
+        return false;
+    }
+
+    // The loader's list is in the target's address space, thus read it from there.
+    let peb = unsafe { (_PsGetProcessPeb)(process) } as usize;
+    let mut create = 0;
+    let mut terminate = 0;
+    unsafe {
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+
+        let ntdll = module_base(peb, b"ntdll.dll");
+        create = export(ntdll, b"NtCreateThread");
+        terminate = export(ntdll, b"NtTerminateThread");
+
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    }
+    if create == 0 || terminate == 0 {
+        return false;
+    }
+
+    let context = arena_here + CONTEXT_AREA;
+    let teb = arena_here + INITIAL_TEB_AREA;
+
+    unsafe {
+        core::ptr::write_bytes(context as *mut u8, 0, CONTEXT_SIZE);
+        ((context + CONTEXT_FLAGS as u64) as *mut u32).write(CONTEXT_FULL);
+        ((context + CONTEXT_RIP) as *mut u64).write(entry);
+        ((context + CONTEXT_RSP) as *mut u64).write((stack + STACK_SIZE as u64 - 64) & !15);
+        ((context + CONTEXT_RDI) as *mut u64).write(argument);
+        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
+        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
+        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
+
+        core::ptr::write_bytes(teb as *mut u8, 0, INITIAL_TEB_SIZE);
+        ((teb + INITIAL_TEB_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
+        ((teb + INITIAL_TEB_STACK_LIMIT) as *mut u64).write(stack);
+        ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut u64).write(stack);
+
+        ((arena_here + BOOTSTRAP_CREATE_THREAD) as *mut u64).write(create as u64);
+        ((arena_here + BOOTSTRAP_TERMINATE_THREAD) as *mut u64).write(terminate as u64);
+        ((arena_here + BOOTSTRAP_CONTEXT) as *mut u64).write(arena_seen + CONTEXT_AREA);
+        ((arena_here + BOOTSTRAP_INITIAL_TEB) as *mut u64).write(arena_seen + INITIAL_TEB_AREA);
+    }
+
+    true
+}
+
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_RIP: u64 = 0xf8;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_RSP: u64 = 0x98;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_RDI: u64 = 0xb0;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_CS: u64 = 0x38;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_SS: u64 = 0x42;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_EFLAGS: u64 = 0x44;
+const INITIAL_TEB_SIZE: usize = 40;
+const INITIAL_TEB_STACK_BASE: u64 = 0x10;
+const INITIAL_TEB_STACK_LIMIT: u64 = 0x18;
+const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x20;
 
 // This kernel exports no function that makes a user thread. Thus make a system thread in the
 // target, then move that thread to ring 3.
 #[cfg(target_arch = "x86_64")]
-fn create_user_thread(process: *mut c_void, entry: u64, argument: u64) -> bool {
+fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, bootstrap: u64,
+        entry: u64) -> bool {
     unsafe {
         let mut process_handle: *mut c_void = core::ptr::null_mut();
         let process_type = (_PsProcessType as *const *mut c_void).read();
@@ -1166,13 +1241,19 @@ fn create_user_thread(process: *mut c_void, entry: u64, argument: u64) -> bool {
 
         let descent = alloc(core::mem::size_of::<Descent>()) as *mut Descent;
         descent.write(Descent {
-            entry,
-            argument,
+            entry: bootstrap,
+            argument: arena_seen,
             stack: stack + STACK_SIZE as u64,
             block,
         });
 
         describe_block(process, block, stack);
+
+        if !describe_real_thread(process, process_handle, arena_here, arena_seen, entry,
+                arena_seen) {
+            (_ZwClose)(process_handle);
+            return false;
+        }
 
         let mut thread: *mut c_void = core::ptr::null_mut();
         let status = (_PsCreateSystemThread)(
@@ -1413,6 +1494,105 @@ pub(crate) const MEM_RELEASE: u32 = 0x8000;
 pub(crate) const PAGE_READWRITE: u32 = 0x04;
 pub(crate) const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
+// The loader's own list, walked in whichever address space is current: the copy walks its
+// own, and the kernel half walks a target's while it is attached to it.
+pub(crate) fn module_base(peb: usize, wanted: &[u8]) -> usize {
+    unsafe {
+        let head = read_pointer(peb + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
+
+        let mut entry = read_pointer(head);
+        while entry != head {
+            let name = read_pointer(entry + ENTRY_BASE_NAME_OFFSET + UNICODE_STRING_BUFFER_OFFSET);
+            if name_matches(name, wanted) {
+                return read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
+            }
+            entry = read_pointer(entry);
+        }
+    }
+
+    0
+}
+// The loader writes the names as wide characters, and the letter case can be different.
+fn name_matches(name: usize, wanted: &[u8]) -> bool {
+    for (index, expected) in wanted.iter().enumerate() {
+        let actual = unsafe { ((name + index * 2) as *const u16).read() };
+        if actual == 0 || (actual as u8).to_ascii_lowercase() != expected.to_ascii_lowercase() {
+            return false;
+        }
+    }
+
+    unsafe { ((name + wanted.len() * 2) as *const u16).read() == 0 }
+}
+pub(crate) fn export(base: usize, wanted: &[u8]) -> usize {
+    unsafe {
+        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
+        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
+        let directories = headers
+            + OPTIONAL_HEADER_OFFSET
+            + if magic.read() == PE32_PLUS_MAGIC {
+                DATA_DIRECTORIES_OFFSET_64
+            } else {
+                DATA_DIRECTORIES_OFFSET_32
+            };
+
+        let exports = base + read_u32(directories) as usize;
+        let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
+        let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
+        let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
+        let ordinals = base + read_u32(exports + EXPORT_ORDINALS_OFFSET) as usize;
+
+        for index in 0..count {
+            let name = base + read_u32(names + index * 4) as usize;
+            if name_is(name, wanted) {
+                let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
+                return base + read_u32(functions + ordinal * 4) as usize;
+            }
+        }
+    }
+
+    0
+}
+fn name_is(name: usize, wanted: &[u8]) -> bool {
+    for (index, expected) in wanted.iter().enumerate() {
+        if unsafe { ((name + index) as *const u8).read() } != *expected {
+            return false;
+        }
+    }
+
+    unsafe { ((name + wanted.len()) as *const u8).read() == 0 }
+}
+pub(crate) unsafe fn read_pointer(address: usize) -> usize {
+    unsafe { (address as *const usize).read() }
+}
+pub(crate) unsafe fn read_u32(address: usize) -> u32 {
+    unsafe { (address as *const u32).read() }
+}
+
+#[cfg(target_arch = "x86")]
+const PEB_LDR_OFFSET: usize = 0x0c;
+#[cfg(target_arch = "x86_64")]
+const PEB_LDR_OFFSET: usize = 0x18;
+#[cfg(target_arch = "x86")]
+const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
+#[cfg(target_arch = "x86_64")]
+const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
+#[cfg(target_arch = "x86")]
+const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
+#[cfg(target_arch = "x86_64")]
+const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
+#[cfg(target_arch = "x86")]
+const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
+#[cfg(target_arch = "x86_64")]
+const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
+const PE_HEADERS_OFFSET: usize = 0x3c;
+const OPTIONAL_HEADER_OFFSET: usize = 0x18;
+const PE32_PLUS_MAGIC: u16 = 0x20b;
+const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
+const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
+const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
+const EXPORT_FUNCTIONS_OFFSET: usize = 0x1c;
+const EXPORT_NAMES_OFFSET: usize = 0x20;
+const EXPORT_ORDINALS_OFFSET: usize = 0x24;
 // Each copy reads this region at a different address. Thus all values in it are offsets from
 // the start of the region.
 struct Channel {
@@ -1468,6 +1648,17 @@ pub(crate) const STOP_REQUEST: u64 = 0x00;
 pub(crate) const OBSERVED_PID: u64 = 0x04;
 pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
 pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
+
+// Where the kernel half leaves what the bootstrap needs. NtCreateThread reads the context and
+// the stack description from the process itself, thus both live here.
+pub(crate) const BOOTSTRAP_CREATE_THREAD: u64 = 0x100;
+pub(crate) const BOOTSTRAP_TERMINATE_THREAD: u64 = 0x108;
+pub(crate) const BOOTSTRAP_CONTEXT: u64 = 0x110;
+pub(crate) const BOOTSTRAP_INITIAL_TEB: u64 = 0x118;
+pub(crate) const BOOTSTRAP_HANDLE: u64 = 0x120;
+pub(crate) const BOOTSTRAP_CLIENT_ID: u64 = 0x128;
+const CONTEXT_AREA: u64 = 0x200;
+const INITIAL_TEB_AREA: u64 = 0x700;
 
 const TO_TARGET: Channel = Channel {
     length: 0x20,
@@ -1540,6 +1731,7 @@ static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
 
 struct Target {
     arena: u64,
+    seen: u64,
     wake: *mut c_void,
     started: bool,
     text: u64,

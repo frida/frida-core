@@ -5,6 +5,7 @@ namespace Frida.Barebone {
 		public uint64 writable_from_kernel;
 		public uint64 arena_seen_by_process;
 		public uint64 arena_from_kernel;
+		public uint64 bootstrap;
 		public uint64 entry;
 
 		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel,
@@ -420,6 +421,8 @@ namespace Frida.Barebone {
 				data[private_offset:data.length], cancellable);
 			yield machine.gdb.continue (cancellable);
 
+			copy.bootstrap = copy.seen_by_process
+				+ offset_of_symbol (elf, "frida_winnt_user_bootstrap");
 			copy.entry = copy.seen_by_process + offset_of_symbol (elf, "frida_winnt_user_main");
 
 			return copy;
@@ -429,7 +432,7 @@ namespace Frida.Barebone {
 		// process id.
 		private async uint start_winnt_agent_in_process (uint pid, PlacedCopy copy,
 				Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(utt)", pid, copy.entry, copy.arena_seen_by_process);
+			var payload = new Variant ("(utt)", pid, copy.bootstrap, copy.entry);
 
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.START_AGENT_IN_PROCESS, payload,

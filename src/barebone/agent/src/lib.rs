@@ -917,10 +917,10 @@ fn handle_start_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
 
     unsafe {
         let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
-        let entry = g_variant_get_uint64(g_variant_get_child_value(payload, 1));
-        let argument = g_variant_get_uint64(g_variant_get_child_value(payload, 2));
+        let bootstrap = g_variant_get_uint64(g_variant_get_child_value(payload, 1));
+        let entry = g_variant_get_uint64(g_variant_get_child_value(payload, 2));
 
-        let reached = kernel::start_agent_in_process(pid, entry, argument);
+        let reached = kernel::start_agent_in_process(pid, bootstrap, entry);
         HandlerResponse::success(g_variant_new_uint32(reached))
     }
 }

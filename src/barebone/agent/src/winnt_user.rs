@@ -7,7 +7,9 @@ use core::ffi::c_void;
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
     OBSERVED_PID, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives, STOP_REQUEST,
-    TARGET_WAKE_HANDLE, UNICODE_STRING_BUFFER_OFFSET, USER_SHARED_DATA, AGENT_WAKE_HANDLE,
+    BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
+    BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
+    USER_SHARED_DATA, AGENT_WAKE_HANDLE, export, module_base, read_pointer,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
 };
 
@@ -17,6 +19,42 @@ static USER_ENTRY: extern "C" fn(usize) = frida_winnt_user_main;
 
 // This is the half that runs in a process. It has its own copy of the image, thus its data is
 // its own. The ring selects which primitives it uses.
+// The thread that descends has no block of its own, thus it can only make syscalls: ntdll's
+// stubs need none. It asks for a real thread, which the kernel gives a block, and then retires.
+#[used]
+static BOOTSTRAP_ENTRY: extern "C" fn(usize) -> ! = frida_winnt_user_bootstrap;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn frida_winnt_user_bootstrap(arena: usize) -> ! {
+    unsafe {
+        let create: windows_fn!(
+            *mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8, *mut c_void,
+            u8, => i32) = core::mem::transmute(read_pointer(arena + BOOTSTRAP_CREATE_THREAD as usize));
+        let terminate: windows_fn!(*mut c_void, i32 => i32) =
+            core::mem::transmute(read_pointer(arena + BOOTSTRAP_TERMINATE_THREAD as usize));
+
+        let status = create(
+            (arena + BOOTSTRAP_HANDLE as usize) as *mut *mut c_void,
+            THREAD_ALL_ACCESS,
+            core::ptr::null_mut(),
+            CURRENT_PROCESS,
+            (arena + BOOTSTRAP_CLIENT_ID as usize) as *mut c_void,
+            read_pointer(arena + BOOTSTRAP_CONTEXT as usize) as *mut u8,
+            read_pointer(arena + BOOTSTRAP_INITIAL_TEB as usize) as *mut c_void,
+            0,
+        );
+
+        let _ = status;
+
+        terminate(CURRENT_THREAD, 0);
+    }
+
+    loop {}
+}
+
+const THREAD_ALL_ACCESS: u32 = 0x1f_03ff;
+const CURRENT_THREAD: *mut c_void = -2isize as *mut c_void;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn frida_winnt_user_main(arena: usize) {
     select_user();
@@ -65,7 +103,7 @@ pub static USER: Primitives = Primitives {
 };
 
 fn resolve_user_api() {
-    let ntdll = module_base(b"ntdll.dll");
+    let ntdll = module_base(peb(), b"ntdll.dll");
 
     unsafe {
         USER_API = Some(UserApi {
@@ -102,74 +140,9 @@ struct UserApi {
 
 static mut USER_API: Option<UserApi> = None;
 
-fn module_base(wanted: &[u8]) -> usize {
-    unsafe {
-        let head = read_pointer(peb() + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
 
-        let mut entry = read_pointer(head);
-        while entry != head {
-            let name = read_pointer(entry + ENTRY_BASE_NAME_OFFSET + UNICODE_STRING_BUFFER_OFFSET);
-            if name_matches(name, wanted) {
-                return read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
-            }
-            entry = read_pointer(entry);
-        }
-    }
 
-    0
-}
 
-// The loader writes the names as wide characters, and the letter case can be different.
-fn name_matches(name: usize, wanted: &[u8]) -> bool {
-    for (index, expected) in wanted.iter().enumerate() {
-        let actual = unsafe { ((name + index * 2) as *const u16).read() };
-        if actual == 0 || (actual as u8).to_ascii_lowercase() != expected.to_ascii_lowercase() {
-            return false;
-        }
-    }
-
-    unsafe { ((name + wanted.len() * 2) as *const u16).read() == 0 }
-}
-
-fn export(base: usize, wanted: &[u8]) -> usize {
-    unsafe {
-        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
-        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
-        let directories = headers
-            + OPTIONAL_HEADER_OFFSET
-            + if magic.read() == PE32_PLUS_MAGIC {
-                DATA_DIRECTORIES_OFFSET_64
-            } else {
-                DATA_DIRECTORIES_OFFSET_32
-            };
-
-        let exports = base + read_u32(directories) as usize;
-        let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
-        let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
-        let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
-        let ordinals = base + read_u32(exports + EXPORT_ORDINALS_OFFSET) as usize;
-
-        for index in 0..count {
-            let name = base + read_u32(names + index * 4) as usize;
-            if name_is(name, wanted) {
-                let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
-                return base + read_u32(functions + ordinal * 4) as usize;
-            }
-        }
-    }
-
-    0
-}
-
-fn name_is(name: usize, wanted: &[u8]) -> bool {
-    for (index, expected) in wanted.iter().enumerate() {
-        if unsafe { ((name + index) as *const u8).read() } != *expected {
-            return false;
-        }
-    }
-
-    unsafe { ((name + wanted.len()) as *const u8).read() == 0 }
-}
 
 fn process_heap() -> usize {
     unsafe { read_pointer(peb() + PEB_PROCESS_HEAP_OFFSET) }
@@ -185,13 +158,7 @@ fn agent_wake_handle() -> *mut c_void {
 
 static mut ARENA: u64 = 0;
 
-unsafe fn read_pointer(address: usize) -> usize {
-    unsafe { (address as *const usize).read() }
-}
 
-unsafe fn read_u32(address: usize) -> u32 {
-    unsafe { (address as *const u32).read() }
-}
 
 #[cfg(target_arch = "x86")]
 fn current_client_id(offset: u32) -> u32 {
@@ -234,38 +201,13 @@ fn peb() -> usize {
 }
 
 #[cfg(target_arch = "x86")]
-const PEB_LDR_OFFSET: usize = 0x0c;
-#[cfg(target_arch = "x86")]
 const PEB_PROCESS_HEAP_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
-#[cfg(target_arch = "x86")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
 
-#[cfg(target_arch = "x86_64")]
-const PEB_LDR_OFFSET: usize = 0x18;
 #[cfg(target_arch = "x86_64")]
 const PEB_PROCESS_HEAP_OFFSET: usize = 0x30;
-#[cfg(target_arch = "x86_64")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
-#[cfg(target_arch = "x86_64")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
-#[cfg(target_arch = "x86_64")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
 
 
 
-const PE_HEADERS_OFFSET: usize = 0x3c;
-const OPTIONAL_HEADER_OFFSET: usize = 0x18;
-const PE32_PLUS_MAGIC: u16 = 0x20b;
-const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
-const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
-const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
-const EXPORT_FUNCTIONS_OFFSET: usize = 0x1c;
-const EXPORT_NAMES_OFFSET: usize = 0x20;
-const EXPORT_ORDINALS_OFFSET: usize = 0x24;
 
 const MEMORY_BASIC_INFORMATION: u32 = 0;
 const MEMORY_BASE: usize = 0x00;
