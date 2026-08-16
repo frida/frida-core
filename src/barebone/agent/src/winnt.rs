@@ -7,10 +7,10 @@ use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::kernel::{CpuState, Mode, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 #[cfg(target_arch = "x86")]
-macro_rules! kernel_fn {
+macro_rules! windows_fn {
     ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
     ($($argument:ty),* $(,)? => $result:ty) => {
         unsafe extern "stdcall" fn($($argument),*) -> $result
@@ -18,28 +18,21 @@ macro_rules! kernel_fn {
 }
 
 #[cfg(target_arch = "x86_64")]
-macro_rules! kernel_fn {
+macro_rules! windows_fn {
     ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
     ($($argument:ty),* $(,)? => $result:ty) => {
         unsafe extern "win64" fn($($argument),*) -> $result
     };
 }
 
+pub(crate) use windows_fn;
+
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/system32/";
 
 const DEBUG_CONSOLE_PORT: u16 = 0xe9;
 
 pub fn log(msg: &str) {
-    if mode() == Mode::User {
-        return;
-    }
-
-    for byte in msg.bytes() {
-        if byte == 0 {
-            break;
-        }
-        write_debug_byte(byte);
-    }
+    (primitives().log)(msg)
 }
 
 pub fn log_hex(value: usize) {
@@ -70,50 +63,20 @@ pub fn panic(msg: &str) -> ! {
 const MANUALLY_INITIATED_CRASH: u32 = 0xe2;
 
 pub fn alloc(size: usize) -> *mut u8 {
-    if mode() == Mode::User {
-        return unsafe { (user_api().allocate_heap)(process_heap(), 0, size) };
-    }
-
-    unsafe { (_ExAllocatePoolWithTag)(NON_PAGED_POOL, size, POOL_TAG) }
+    (primitives().alloc)(size)
 }
 
-pub fn free(ptr: *mut u8, _size: usize) {
-    if mode() == Mode::User {
-        unsafe { (user_api().free_heap)(process_heap(), 0, ptr) };
-        return;
-    }
-
-    unsafe {
-        (_ExFreePoolWithTag)(ptr, POOL_TAG);
-    }
+pub fn free(ptr: *mut u8, size: usize) {
+    (primitives().free)(ptr, size)
 }
 
 // The non-paged pool is executable, and you can use it at a high IRQL.
 pub fn alloc_code(size: usize) -> *mut u8 {
-    if mode() == Mode::User {
-        let mut address: *mut u8 = core::ptr::null_mut();
-        let mut region = size;
-        unsafe {
-            (user_api().allocate_memory)(CURRENT_PROCESS, &mut address, 0, &mut region,
-                MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-        }
-        return address;
-    }
-
-    alloc(size)
+    (primitives().alloc_code)(size)
 }
 
 pub fn free_code(ptr: *mut u8, size: usize) {
-    if mode() == Mode::User {
-        let mut address = ptr;
-        let mut region = 0usize;
-        unsafe {
-            (user_api().free_memory)(CURRENT_PROCESS, &mut address, &mut region, MEM_RELEASE)
-        };
-        return;
-    }
-
-    free(ptr, size);
+    (primitives().free_code)(ptr, size)
 }
 
 const NON_PAGED_POOL: u32 = 0;
@@ -189,44 +152,11 @@ struct ThreadStart {
 const THREAD_ALL_ACCESS: u32 = 0x1f_03ff;
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    if mode() == Mode::User {
-        if check() {
-            return;
-        }
-
-        let due_time = timeout_us.map(|us| -((us as i64) * 10));
-        unsafe {
-            (user_api().wait_for_object)(target_wake_handle(), 0,
-                due_time.as_ref().map_or(core::ptr::null(), |t| t))
-        };
-        return;
-    }
-
-    let event = event_for(token);
-    if check() {
-        return;
-    }
-
-    unsafe {
-        match timeout_us {
-            None => (_KeWaitForSingleObject)(event, EXECUTIVE, KERNEL_MODE, 0, core::ptr::null()),
-            Some(us) => {
-                let due_time = -((us as i64) * 10);
-                (_KeWaitForSingleObject)(event, EXECUTIVE, KERNEL_MODE, 0, &due_time)
-            }
-        };
-    }
+    (primitives().wait)(token, timeout_us, check)
 }
 
 pub fn wake(token: *const u8) {
-    if mode() == Mode::User {
-        unsafe { (user_api().set_event)(target_wake_handle(), core::ptr::null_mut()) };
-        return;
-    }
-
-    unsafe {
-        (_KeSetEvent)(event_for(token), 0, 0);
-    }
+    (primitives().wake)(token)
 }
 
 // A copy in a different process can use a handle, but it cannot use our memory. Thus the
@@ -321,23 +251,12 @@ const EXECUTIVE: u32 = 0;
 const KERNEL_MODE: u32 = 0;
 
 pub fn yield_now() {
-    if mode() == Mode::User {
-        unsafe { (user_api().yield_execution)() };
-        return;
-    }
-
-    unsafe {
-        (_ZwYieldExecution)();
-    }
+    (primitives().yield_now)()
 }
 
 // The kernel and the applications read the same page at different addresses.
 fn shared_data() -> usize {
-    if mode() == Mode::User {
-        USER_SHARED_DATA
-    } else {
-        SHARED_DATA
-    }
+    (primitives().shared_data)()
 }
 
 pub fn monotonic_micros() -> i64 {
@@ -367,110 +286,33 @@ fn read_system_time(offset: usize) -> i64 {
 const SHARED_DATA: usize = 0xffdf_0000;
 #[cfg(target_arch = "x86_64")]
 const SHARED_DATA: usize = 0xffff_f780_0000_0000;
-const USER_SHARED_DATA: usize = 0x7ffe_0000;
+pub(crate) const USER_SHARED_DATA: usize = 0x7ffe_0000;
 const INTERRUPT_TIME_OFFSET: usize = 0x08;
 const SYSTEM_TIME_OFFSET: usize = 0x14;
 const UNIX_EPOCH_MICROS: i64 = 11_644_473_600_000_000;
 
 // A kernel export is not available in ring 3. Thus the copy reads its own block.
 pub fn current_thread_id() -> u64 {
-    if mode() == Mode::User {
-        return current_client_id(BLOCK_THREAD_ID) as u64;
-    }
-
-    unsafe { (_PsGetCurrentThreadId)() as u64 }
+    (primitives().current_thread_id)()
 }
 
 // Only the kernel half can read the page tables. The copy asks the memory manager.
 pub fn protection_at(address: usize) -> u32 {
-    if mode() == Mode::User {
-        let mut region = [0u8; MEMORY_INFORMATION_SIZE];
-        if !query_region(address as u64, &mut region) {
-            return 0;
-        }
-        return gum_protection_of(&region);
-    }
-
-    crate::winnt_paging::protection_at(address)
+    (primitives().protection_at)(address)
 }
 
 pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
-    if mode() == Mode::User {
-        let mut address = 0u64;
-        let mut region = [0u8; MEMORY_INFORMATION_SIZE];
-        while query_region(address, &mut region) {
-            let size = read_field(&region, MEMORY_REGION_SIZE);
-            if size == 0 {
-                return;
-            }
-
-            let protection = gum_protection_of(&region);
-            if protection != 0 {
-                found(read_field(&region, MEMORY_BASE), size, protection);
-            }
-
-            address = address.wrapping_add(size);
-        }
-        return;
-    }
-
-    crate::winnt_paging::enumerate_ranges(found)
+    (primitives().enumerate_ranges)(found)
 }
 
-fn query_region(address: u64, region: &mut [u8; MEMORY_INFORMATION_SIZE]) -> bool {
-    let mut written = 0usize;
 
-    unsafe {
-        (user_api().query_memory)(CURRENT_PROCESS, address as *mut u8, MEMORY_BASIC_INFORMATION,
-            region.as_mut_ptr(), MEMORY_INFORMATION_SIZE, &mut written) >= 0
-    }
-}
 
-fn gum_protection_of(region: &[u8; MEMORY_INFORMATION_SIZE]) -> u32 {
-    if read_field(region, MEMORY_STATE) as u32 != MEM_COMMIT {
-        return 0;
-    }
-
-    match (read_field(region, MEMORY_PROTECT) as u32) & PAGE_PROTECTION_MASK {
-        PAGE_READONLY => GUM_PAGE_READ,
-        PAGE_READWRITE | PAGE_WRITECOPY => GUM_PAGE_READ | GUM_PAGE_WRITE,
-        PAGE_EXECUTE => GUM_PAGE_EXECUTE,
-        PAGE_EXECUTE_READ => GUM_PAGE_READ | GUM_PAGE_EXECUTE,
-        PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY =>
-            GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
-        _ => 0,
-    }
-}
-
-fn read_field(region: &[u8; MEMORY_INFORMATION_SIZE], offset: usize) -> u64 {
-    let mut value = [0u8; 8];
-    value.copy_from_slice(&region[offset..offset + 8]);
-    u64::from_le_bytes(value)
-}
 
 // The copy must ask the memory manager to do this.
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
-    if mode() == Mode::User {
-        let mut base = address as *mut u8;
-        let mut region = size;
-        let mut previous = 0u32;
-        return unsafe {
-            (user_api().protect_memory)(CURRENT_PROCESS, &mut base, &mut region,
-                page_protection_of(gum_prot), &mut previous) >= 0
-        };
-    }
-
-    crate::winnt_paging::protect(address, size, gum_prot)
+    (primitives().protect)(address, size, gum_prot)
 }
 
-fn page_protection_of(gum_prot: u32) -> u32 {
-    match (gum_prot & GUM_PAGE_WRITE != 0, gum_prot & GUM_PAGE_EXECUTE != 0) {
-        (true, true) => PAGE_EXECUTE_READWRITE,
-        (true, false) => PAGE_READWRITE,
-        (false, true) => PAGE_EXECUTE_READ,
-        (false, false) => PAGE_READONLY,
-    }
-}
 
 // A 32-bit kernel receives the physical address as two halves. A 64-bit kernel receives it
 // as one value.
@@ -1127,7 +969,7 @@ const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x60;
 #[cfg(target_arch = "x86_64")]
 const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x70;
 
-const UNICODE_STRING_BUFFER_OFFSET: usize = POINTER_SIZE;
+pub(crate) const UNICODE_STRING_BUFFER_OFFSET: usize = POINTER_SIZE;
 const MAX_PATH_SIZE: usize = 1024;
 const MAX_COMMAND_LINE_SIZE: usize = 2048;
 
@@ -1431,283 +1273,145 @@ const USER_SS: u64 = 0x2b;
 const INITIAL_EFLAGS: u64 = 0x200;
 const IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
 
-// No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
-#[used]
-static USER_ENTRY: extern "C" fn(usize) = frida_winnt_user_main;
-
-// This is the half that runs in a process. It has its own copy of the image, thus its data is
-// its own. The ring selects which primitives it uses.
-#[unsafe(no_mangle)]
-pub extern "C" fn frida_winnt_user_main(arena: usize) {
-    unsafe {
-        ARENA = arena as u64;
-    }
-    resolve_user_api();
-
-    unsafe { crate::init_gum_without_exceptor() };
-    let context = unsafe { crate::adopt_js_context() };
-
-    unsafe {
-        ((arena + OBSERVED_PID as usize) as *mut u32).write_volatile(current_client_id(BLOCK_PROCESS_ID));
-
-        crate::route_frames_through(arena as u64);
-    }
-
-    while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
-        while let Some(frame) = take_frame_from_host(arena as u64) {
-            crate::on_frame_from_host(frame);
-            acknowledge_frame_from_host(arena as u64);
-        }
-
-        unsafe { crate::dispatch_pending_work(context) };
-    }
-
-    unsafe { (user_api().exit_thread)(0) };
+// The primitives that differ between the two halves. The kernel half runs on KERNEL, and the
+// copy in a process selects USER before it does anything else. The order here is the order of
+// the functions below.
+pub struct Primitives {
+    pub log: fn(&str),
+    pub alloc: fn(usize) -> *mut u8,
+    pub free: fn(*mut u8, usize),
+    pub alloc_code: fn(usize) -> *mut u8,
+    pub free_code: fn(*mut u8, usize),
+    pub protect: fn(u64, usize, u32) -> bool,
+    pub protection_at: fn(usize) -> u32,
+    pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
+    pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
+    pub wake: fn(*const u8),
+    pub yield_now: fn(),
+    pub current_thread_id: fn() -> u64,
+    pub shared_data: fn() -> usize,
 }
 
-fn resolve_user_api() {
-    let ntdll = module_base(b"ntdll.dll");
-
-    unsafe {
-        USER_API = Some(UserApi {
-            allocate_heap: core::mem::transmute(export(ntdll, b"RtlAllocateHeap")),
-            free_heap: core::mem::transmute(export(ntdll, b"RtlFreeHeap")),
-            allocate_memory: core::mem::transmute(export(ntdll, b"NtAllocateVirtualMemory")),
-            free_memory: core::mem::transmute(export(ntdll, b"NtFreeVirtualMemory")),
-            protect_memory: core::mem::transmute(export(ntdll, b"NtProtectVirtualMemory")),
-            query_memory: core::mem::transmute(export(ntdll, b"NtQueryVirtualMemory")),
-            yield_execution: core::mem::transmute(export(ntdll, b"NtYieldExecution")),
-            wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
-            set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
-            exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
-        });
-    }
+pub fn select_user() {
+    unsafe { ACTIVE = &crate::winnt_user::USER };
 }
 
-fn user_api() -> &'static UserApi {
-    unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }
+fn primitives() -> &'static Primitives {
+    unsafe { ACTIVE }
 }
 
-struct UserApi {
-    allocate_heap: kernel_fn!(usize, u32, usize => *mut u8),
-    free_heap: kernel_fn!(usize, u32, *mut u8 => u8),
-    allocate_memory: kernel_fn!(*mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32),
-    free_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32 => i32),
-    protect_memory: kernel_fn!(*mut c_void, *mut *mut u8, *mut usize, u32, *mut u32 => i32),
-    query_memory: kernel_fn!(*mut c_void, *mut u8, u32, *mut u8, usize, *mut usize => i32),
-    yield_execution: kernel_fn!( => i32),
-    wait_for_object: kernel_fn!(*mut c_void, u8, *const i64 => i32),
-    set_event: kernel_fn!(*mut c_void, *mut u32 => i32),
-    exit_thread: kernel_fn!(u32 => !),
-}
+static mut ACTIVE: &Primitives = &KERNEL;
 
-static mut USER_API: Option<UserApi> = None;
+static KERNEL: Primitives = Primitives {
+    log: kernel::log,
+    alloc: kernel::alloc,
+    free: kernel::free,
+    alloc_code: kernel::alloc_code,
+    free_code: kernel::free_code,
+    protect: kernel::protect,
+    protection_at: kernel::protection_at,
+    enumerate_ranges: kernel::enumerate_ranges,
+    wait: kernel::wait,
+    wake: kernel::wake,
+    yield_now: kernel::yield_now,
+    current_thread_id: kernel::current_thread_id,
+    shared_data: kernel::shared_data,
+};
 
-fn module_base(wanted: &[u8]) -> usize {
-    unsafe {
-        let head = read_pointer(peb() + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
+mod kernel {
+    use super::*;
 
-        let mut entry = read_pointer(head);
-        while entry != head {
-            let name = read_pointer(entry + ENTRY_BASE_NAME_OFFSET + UNICODE_STRING_BUFFER_OFFSET);
-            if name_matches(name, wanted) {
-                return read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
+    pub fn log(msg: &str) {
+        for byte in msg.bytes() {
+            if byte == 0 {
+                break;
             }
-            entry = read_pointer(entry);
+            write_debug_byte(byte);
         }
     }
 
-    0
-}
+    pub fn alloc(size: usize) -> *mut u8 {
+        unsafe { (_ExAllocatePoolWithTag)(NON_PAGED_POOL, size, POOL_TAG) }
+    }
 
-// The loader writes the names as wide characters, and the letter case can be different.
-fn name_matches(name: usize, wanted: &[u8]) -> bool {
-    for (index, expected) in wanted.iter().enumerate() {
-        let actual = unsafe { ((name + index * 2) as *const u16).read() };
-        if actual == 0 || (actual as u8).to_ascii_lowercase() != expected.to_ascii_lowercase() {
-            return false;
+    pub fn free(ptr: *mut u8, _size: usize) {
+        unsafe {
+            (_ExFreePoolWithTag)(ptr, POOL_TAG);
         }
     }
 
-    unsafe { ((name + wanted.len() * 2) as *const u16).read() == 0 }
-}
+    pub fn alloc_code(size: usize) -> *mut u8 {
+        alloc(size)
+    }
 
-fn export(base: usize, wanted: &[u8]) -> usize {
-    unsafe {
-        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
-        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
-        let directories = headers
-            + OPTIONAL_HEADER_OFFSET
-            + if magic.read() == PE32_PLUS_MAGIC {
-                DATA_DIRECTORIES_OFFSET_64
-            } else {
-                DATA_DIRECTORIES_OFFSET_32
+    pub fn free_code(ptr: *mut u8, size: usize) {
+        free(ptr, size);
+    }
+
+    pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
+        crate::winnt_paging::protect(address, size, gum_prot)
+    }
+
+    pub fn protection_at(address: usize) -> u32 {
+        crate::winnt_paging::protection_at(address)
+    }
+
+    pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
+        crate::winnt_paging::enumerate_ranges(found)
+    }
+
+    pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+        let event = event_for(token);
+        if check() {
+            return;
+        }
+
+        unsafe {
+            match timeout_us {
+                None => (_KeWaitForSingleObject)(event, EXECUTIVE, KERNEL_MODE, 0, core::ptr::null()),
+                Some(us) => {
+                    let due_time = -((us as i64) * 10);
+                    (_KeWaitForSingleObject)(event, EXECUTIVE, KERNEL_MODE, 0, &due_time)
+                }
             };
-
-        let exports = base + read_u32(directories) as usize;
-        let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
-        let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
-        let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
-        let ordinals = base + read_u32(exports + EXPORT_ORDINALS_OFFSET) as usize;
-
-        for index in 0..count {
-            let name = base + read_u32(names + index * 4) as usize;
-            if name_is(name, wanted) {
-                let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
-                return base + read_u32(functions + ordinal * 4) as usize;
-            }
         }
     }
 
-    0
-}
-
-fn name_is(name: usize, wanted: &[u8]) -> bool {
-    for (index, expected) in wanted.iter().enumerate() {
-        if unsafe { ((name + index) as *const u8).read() } != *expected {
-            return false;
+    pub fn wake(token: *const u8) {
+        unsafe {
+            (_KeSetEvent)(event_for(token), 0, 0);
         }
     }
 
-    unsafe { ((name + wanted.len()) as *const u8).read() == 0 }
-}
-
-fn process_heap() -> usize {
-    unsafe { read_pointer(peb() + PEB_PROCESS_HEAP_OFFSET) }
-}
-
-fn target_wake_handle() -> *mut c_void {
-    unsafe { ((ARENA + TARGET_WAKE_HANDLE) as *const u64).read() as *mut c_void }
-}
-
-fn agent_wake_handle() -> *mut c_void {
-    unsafe { ((ARENA + AGENT_WAKE_HANDLE) as *const u64).read() as *mut c_void }
-}
-
-static mut ARENA: u64 = 0;
-
-unsafe fn read_pointer(address: usize) -> usize {
-    unsafe { (address as *const usize).read() }
-}
-
-unsafe fn read_u32(address: usize) -> u32 {
-    unsafe { (address as *const u32).read() }
-}
-
-#[cfg(target_arch = "x86")]
-fn current_client_id(offset: u32) -> u32 {
-    let id: u32;
-    unsafe {
-        core::arch::asm!("mov {0:e}, fs:[{1:e}]", out(reg) id, in(reg) offset,
-            options(nomem, nostack, preserves_flags));
-    }
-    id
-}
-
-#[cfg(target_arch = "x86_64")]
-fn current_client_id(offset: u32) -> u32 {
-    let id: u64;
-    unsafe {
-        core::arch::asm!("mov {0}, gs:[{1:e}]", out(reg) id, in(reg) offset,
-            options(nomem, nostack, preserves_flags));
-    }
-    id as u32
-}
-
-// The two halves use the same code, thus the address tells you nothing. The ring tells you
-// which half this is.
-pub fn mode() -> Mode {
-    let cs: u16;
-    unsafe {
-        core::arch::asm!("mov {0:x}, cs", out(reg) cs, options(nomem, nostack, preserves_flags));
+    pub fn yield_now() {
+        unsafe {
+            (_ZwYieldExecution)();
+        }
     }
 
-    if cs & 3 != 0 { Mode::User } else { Mode::Kernel }
-}
-
-#[cfg(target_arch = "x86")]
-fn peb() -> usize {
-    let peb: usize;
-    unsafe {
-        core::arch::asm!("mov {0:e}, fs:[0x30]", out(reg) peb,
-            options(nomem, nostack, preserves_flags));
+    pub fn current_thread_id() -> u64 {
+        unsafe { (_PsGetCurrentThreadId)() as u64 }
     }
-    peb
-}
 
-#[cfg(target_arch = "x86_64")]
-fn peb() -> usize {
-    let peb: usize;
-    unsafe {
-        core::arch::asm!("mov {0}, gs:[0x60]", out(reg) peb,
-            options(nomem, nostack, preserves_flags));
+    pub fn shared_data() -> usize {
+        SHARED_DATA
     }
-    peb
 }
 
 #[cfg(target_arch = "x86")]
-const PEB_LDR_OFFSET: usize = 0x0c;
+pub(crate) const BLOCK_PROCESS_ID: u32 = 0x20;
 #[cfg(target_arch = "x86")]
-const PEB_PROCESS_HEAP_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
-#[cfg(target_arch = "x86")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
-
+pub(crate) const BLOCK_THREAD_ID: u32 = 0x24;
 #[cfg(target_arch = "x86_64")]
-const PEB_LDR_OFFSET: usize = 0x18;
+pub(crate) const BLOCK_PROCESS_ID: u32 = 0x40;
 #[cfg(target_arch = "x86_64")]
-const PEB_PROCESS_HEAP_OFFSET: usize = 0x30;
-#[cfg(target_arch = "x86_64")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
-#[cfg(target_arch = "x86_64")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
-#[cfg(target_arch = "x86_64")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
-
-#[cfg(target_arch = "x86")]
-const BLOCK_PROCESS_ID: u32 = 0x20;
-#[cfg(target_arch = "x86")]
-const BLOCK_THREAD_ID: u32 = 0x24;
-
-#[cfg(target_arch = "x86_64")]
-const BLOCK_PROCESS_ID: u32 = 0x40;
-#[cfg(target_arch = "x86_64")]
-const BLOCK_THREAD_ID: u32 = 0x48;
-
-const PE_HEADERS_OFFSET: usize = 0x3c;
-const OPTIONAL_HEADER_OFFSET: usize = 0x18;
-const PE32_PLUS_MAGIC: u16 = 0x20b;
-const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
-const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
-const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
-const EXPORT_FUNCTIONS_OFFSET: usize = 0x1c;
-const EXPORT_NAMES_OFFSET: usize = 0x20;
-const EXPORT_ORDINALS_OFFSET: usize = 0x24;
-
-const CURRENT_PROCESS: *mut c_void = -1isize as *mut c_void;
-const MEM_COMMIT: u32 = 0x1000;
-const MEM_RESERVE: u32 = 0x2000;
-const MEM_RELEASE: u32 = 0x8000;
-const MEMORY_BASIC_INFORMATION: u32 = 0;
-const MEMORY_BASE: usize = 0x00;
-const MEMORY_REGION_SIZE: usize = if core::mem::size_of::<usize>() == 8 { 0x18 } else { 0x0c };
-const MEMORY_STATE: usize = if core::mem::size_of::<usize>() == 8 { 0x20 } else { 0x10 };
-const MEMORY_PROTECT: usize = if core::mem::size_of::<usize>() == 8 { 0x24 } else { 0x14 };
-const MEMORY_INFORMATION_SIZE: usize = if core::mem::size_of::<usize>() == 8 { 0x30 } else { 0x1c };
-const PAGE_PROTECTION_MASK: u32 = 0xff;
-const PAGE_WRITECOPY: u32 = 0x08;
-const PAGE_EXECUTE: u32 = 0x10;
-const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
-const PAGE_READONLY: u32 = 0x02;
-const PAGE_READWRITE: u32 = 0x04;
-const PAGE_EXECUTE_READ: u32 = 0x20;
-const PAGE_EXECUTE_READWRITE: u32 = 0x40;
-const GUM_PAGE_READ: u32 = 0x1;
-const GUM_PAGE_WRITE: u32 = 0x2;
-const GUM_PAGE_EXECUTE: u32 = 0x4;
+pub(crate) const BLOCK_THREAD_ID: u32 = 0x48;
+pub(crate) const CURRENT_PROCESS: *mut c_void = -1isize as *mut c_void;
+pub(crate) const MEM_COMMIT: u32 = 0x1000;
+pub(crate) const MEM_RESERVE: u32 = 0x2000;
+pub(crate) const MEM_RELEASE: u32 = 0x8000;
+pub(crate) const PAGE_READWRITE: u32 = 0x04;
+pub(crate) const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
 // Each copy reads this region at a different address. Thus all values in it are offsets from
 // the start of the region.
@@ -1760,10 +1464,10 @@ impl Channel {
     }
 }
 
-const STOP_REQUEST: u64 = 0x00;
-const OBSERVED_PID: u64 = 0x04;
-const AGENT_WAKE_HANDLE: u64 = 0x08;
-const TARGET_WAKE_HANDLE: u64 = 0x10;
+pub(crate) const STOP_REQUEST: u64 = 0x00;
+pub(crate) const OBSERVED_PID: u64 = 0x04;
+pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
+pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
 
 const TO_TARGET: Channel = Channel {
     length: 0x20,
@@ -1823,7 +1527,7 @@ pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
         return false;
     }
 
-    unsafe { (user_api().set_event)(agent_wake_handle(), core::ptr::null_mut()) };
+    crate::winnt_user::signal_kernel_half();
 
     true
 }
@@ -2302,9 +2006,9 @@ macro_rules! kernel_abi {
 
 
 kernel_abi! {
-    static _ExAllocatePoolWithTag: kernel_fn!(u32, usize, u32 => *mut u8);
-    static _ExFreePoolWithTag: kernel_fn!(*mut u8, u32);
-    static _PsCreateSystemThread: kernel_fn!(
+    static _ExAllocatePoolWithTag: windows_fn!(u32, usize, u32 => *mut u8);
+    static _ExFreePoolWithTag: windows_fn!(*mut u8, u32);
+    static _PsCreateSystemThread: windows_fn!(
         *mut *mut c_void,
         u32,
         *mut c_void,
@@ -2313,27 +2017,27 @@ kernel_abi! {
         ThreadStartRoutine,
         *mut c_void,
         => i32);
-    static _PsTerminateSystemThread: kernel_fn!(i32 => i32);
-    static _PsGetCurrentThreadId: kernel_fn!( => u32);
-    static _KeInitializeEvent: kernel_fn!(*mut c_void, u32, u8);
-    static _KeWaitForSingleObject: kernel_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
-    static _KeSetEvent: kernel_fn!(*mut c_void, u32, u8 => i32);
-    static _ZwYieldExecution: kernel_fn!( => i32);
-    static _KeBugCheckEx: kernel_fn!(u32, usize, usize, usize, usize => !);
-    static _MmGetPhysicalAddress: kernel_fn!(*const c_void => u64);
-    static _HalGetInterruptVector: kernel_fn!(u32, u32, u32, u32, *mut u8, *mut usize => u32);
+    static _PsTerminateSystemThread: windows_fn!(i32 => i32);
+    static _PsGetCurrentThreadId: windows_fn!( => u32);
+    static _KeInitializeEvent: windows_fn!(*mut c_void, u32, u8);
+    static _KeWaitForSingleObject: windows_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
+    static _KeSetEvent: windows_fn!(*mut c_void, u32, u8 => i32);
+    static _ZwYieldExecution: windows_fn!( => i32);
+    static _KeBugCheckEx: windows_fn!(u32, usize, usize, usize, usize => !);
+    static _MmGetPhysicalAddress: windows_fn!(*const c_void => u64);
+    static _HalGetInterruptVector: windows_fn!(u32, u32, u32, u32, *mut u8, *mut usize => u32);
     static _PsActiveProcessHead: usize;
     static _PsInitialSystemProcess: usize;
-    static _PsGetProcessId: kernel_fn!(*mut c_void => u32);
-    static _PsGetProcessImageFileName: kernel_fn!(*mut c_void => *const u8);
-    static _PsGetProcessPeb: kernel_fn!(*mut c_void => *mut c_void);
-    static _PsGetCurrentThread: kernel_fn!( => *mut c_void);
-    static _PsGetThreadProcess: kernel_fn!(*mut c_void => *mut c_void);
-    static _PsGetThreadId: kernel_fn!(*mut c_void => u32);
-    static _PsGetContextThread: kernel_fn!(*mut c_void, *mut u8, u8 => i32);
-    static _KeStackAttachProcess: kernel_fn!(*mut c_void, *mut u8);
-    static _KeUnstackDetachProcess: kernel_fn!(*mut u8);
-    static _ZwCreateFile: kernel_fn!(
+    static _PsGetProcessId: windows_fn!(*mut c_void => u32);
+    static _PsGetProcessImageFileName: windows_fn!(*mut c_void => *const u8);
+    static _PsGetProcessPeb: windows_fn!(*mut c_void => *mut c_void);
+    static _PsGetCurrentThread: windows_fn!( => *mut c_void);
+    static _PsGetThreadProcess: windows_fn!(*mut c_void => *mut c_void);
+    static _PsGetThreadId: windows_fn!(*mut c_void => u32);
+    static _PsGetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
+    static _KeStackAttachProcess: windows_fn!(*mut c_void, *mut u8);
+    static _KeUnstackDetachProcess: windows_fn!(*mut u8);
+    static _ZwCreateFile: windows_fn!(
         *mut *mut c_void,
         u32,
         *const ObjectAttributes,
@@ -2346,7 +2050,7 @@ kernel_abi! {
         *const c_void,
         u32,
         => i32);
-    static _ZwReadFile: kernel_fn!(
+    static _ZwReadFile: windows_fn!(
         *mut c_void,
         *mut c_void,
         *mut c_void,
@@ -2357,22 +2061,22 @@ kernel_abi! {
         *const i64,
         *const u32,
         => i32);
-    static _ZwClose: kernel_fn!(*mut c_void => i32);
-    static _ZwCreateEvent: kernel_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
-    static _ZwAllocateVirtualMemory: kernel_fn!(
+    static _ZwClose: windows_fn!(*mut c_void => i32);
+    static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
+    static _ZwAllocateVirtualMemory: windows_fn!(
         *mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32);
     static _PsProcessType: usize;
-    static _ObReferenceObjectByHandle: kernel_fn!(
+    static _ObReferenceObjectByHandle: windows_fn!(
         *mut c_void, u32, *mut c_void, u8, *mut *mut c_void, *mut c_void => i32);
-    static _ObOpenObjectByPointer: kernel_fn!(
+    static _ObOpenObjectByPointer: windows_fn!(
         *mut c_void, u32, *mut c_void, u32, *mut c_void, u32, *mut *mut c_void => i32);
     static _ExEventObjectType: usize;
-    static _IoAllocateMdl: kernel_fn!(*mut c_void, u32, u8, u8, *mut c_void => *mut c_void);
-    static _MmBuildMdlForNonPagedPool: kernel_fn!(*mut c_void);
-    static _MmMapLockedPagesSpecifyCache: kernel_fn!(
+    static _IoAllocateMdl: windows_fn!(*mut c_void, u32, u8, u8, *mut c_void => *mut c_void);
+    static _MmBuildMdlForNonPagedPool: windows_fn!(*mut c_void);
+    static _MmMapLockedPagesSpecifyCache: windows_fn!(
         *mut c_void, u8, u32, *mut c_void, u32, u32, => *mut c_void);
-    static _MmUnmapLockedPages: kernel_fn!(*mut c_void, *mut c_void);
-    static _IoConnectInterrupt: kernel_fn!(
+    static _MmUnmapLockedPages: windows_fn!(*mut c_void, *mut c_void);
+    static _IoConnectInterrupt: windows_fn!(
         *mut *mut c_void,
         ServiceRoutine,
         *mut c_void,

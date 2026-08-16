@@ -20,15 +20,6 @@ use core::ffi::c_void;
 
 pub type ThreadEntry = unsafe extern "C" fn(parameter: *mut c_void, wait_result: i32);
 
-// Some flavors run this image on both sides of the privilege boundary: one copy in the kernel
-// and one in a target process. Primitives that are different use this, not the flavor. Do not
-// keep the value, because both sides share the image.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Kernel,
-    User,
-}
-
 pub struct ThreadInfo {
     pub id: u32,
     pub cpu_state: Option<CpuState>,

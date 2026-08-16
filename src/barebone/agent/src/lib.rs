@@ -59,10 +59,14 @@ mod gum_windows;
 mod icons;
 #[cfg(feature = "win9x")]
 mod win9x;
+#[cfg(feature = "win9x")]
+mod win9x_user;
 #[cfg(feature = "winnt")]
 mod winnt;
 #[cfg(feature = "winnt")]
 mod winnt_paging;
+#[cfg(feature = "winnt")]
+mod winnt_user;
 
 #[cfg(feature = "xnu")]
 mod gum_xnu;

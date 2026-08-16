@@ -10,7 +10,7 @@ use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::kernel::{CpuState, Mode, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
@@ -24,7 +24,7 @@ const PAGE_ZERO_INIT: u32 = 0x1;
 
 const PAGE_PRESENT: u32 = 0x1;
 const PAGE_WRITEABLE: u32 = 0x2;
-const GUM_PAGE_WRITE: u32 = 0x2;
+pub(crate) const GUM_PAGE_WRITE: u32 = 0x2;
 
 const BLOCK_SVC_INTS: u32 = 1 << 0;
 
@@ -64,105 +64,26 @@ pub fn panic(msg: &str) {
 }
 
 pub fn alloc(size: usize) -> *mut u8 {
-    if mode() == Mode::User {
-        let get_process_heap: unsafe extern "stdcall" fn() -> u32 =
-            unsafe { core::mem::transmute(user_api().get_process_heap as usize) };
-        let heap_alloc: unsafe extern "stdcall" fn(u32, u32, u32) -> *mut u8 =
-            unsafe { core::mem::transmute(user_api().heap_alloc as usize) };
-        return unsafe { heap_alloc(get_process_heap(), 0, size as u32) };
-    }
-
-    unsafe { __HeapAllocate(size as u32, 0) }
+    (primitives().alloc)(size)
 }
 
-pub fn free(ptr: *mut u8, _size: usize) {
-    if mode() == Mode::User {
-        let get_process_heap: unsafe extern "stdcall" fn() -> u32 =
-            unsafe { core::mem::transmute(user_api().get_process_heap as usize) };
-        let heap_free: unsafe extern "stdcall" fn(u32, u32, *mut u8) -> u32 =
-            unsafe { core::mem::transmute(user_api().heap_free as usize) };
-        unsafe { heap_free(get_process_heap(), 0, ptr) };
-        return;
-    }
-
-    unsafe {
-        __HeapFree(ptr, 0);
-    }
+pub fn free(ptr: *mut u8, size: usize) {
+    (primitives().free)(ptr, size)
 }
 
 pub fn alloc_code(size: usize) -> *mut u8 {
-    if mode() == Mode::User {
-        let virtual_alloc: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> *mut u8 =
-            unsafe { core::mem::transmute(user_api().virtual_alloc as usize) };
-        return unsafe {
-            virtual_alloc(0, size as u32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-        };
-    }
-
-    let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
-    unsafe { __PageAllocate(pages, PG_SYS, 0, 0, 0, 0, core::ptr::null_mut(), PAGE_FLAGS_CODE) }
+    (primitives().alloc_code)(size)
 }
 
-pub fn free_code(ptr: *mut u8, _size: usize) {
-    if mode() == Mode::User {
-        let virtual_free: unsafe extern "stdcall" fn(*mut u8, u32, u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().virtual_free as usize) };
-        unsafe { virtual_free(ptr, 0, MEM_RELEASE) };
-        return;
-    }
-
-    unsafe {
-        __PageFree(ptr, 0);
-    }
+pub fn free_code(ptr: *mut u8, size: usize) {
+    (primitives().free_code)(ptr, size)
 }
 
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
-    if mode() == Mode::User {
-        let create_thread: unsafe extern "stdcall" fn(u32, u32, u32, *mut c_void, u32, *mut u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().create_thread as usize) };
-
-        let start = alloc(core::mem::size_of::<UserThreadStart>()) as *mut UserThreadStart;
-        unsafe { start.write(UserThreadStart { entry, parameter }) };
-
-        let thread = unsafe {
-            create_thread(0, USER_THREAD_STACK_SIZE, frida_win9x_user_thread as usize as u32,
-                start as *mut c_void, 0, core::ptr::null_mut())
-        };
-
-        let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().close_handle as usize) };
-        unsafe { close_handle(thread) };
-
-        return thread as isize;
-    }
-
-    unsafe {
-        THREAD_ENTRY = Some(entry);
-        THREAD_PARAMETER = parameter;
-
-        vwin32_create_ring0_thread(
-            THREAD_STACK_SIZE as u32,
-            0,
-            frida_win9x_thread_thunk as u32,
-            0,
-        ) as isize
-    }
+    (primitives().spawn_thread)(entry, parameter)
 }
 
-unsafe extern "stdcall" fn frida_win9x_user_thread(start: *mut c_void) -> u32 {
-    let start = start as *mut UserThreadStart;
-    let UserThreadStart { entry, parameter } = unsafe { start.read() };
-    free(start as *mut u8, core::mem::size_of::<UserThreadStart>());
 
-    unsafe { entry(parameter, 0) };
-
-    0
-}
-
-struct UserThreadStart {
-    entry: ThreadEntry,
-    parameter: *mut c_void,
-}
 
 // VMM refuses to build a thread from the borrowed context the host enters us on, and only
 // says so by never returning, so hand the work to a point where VMM is between jobs.
@@ -199,32 +120,7 @@ const THREAD_STACK_SIZE: usize = 64 * 1024;
 
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    if mode() == Mode::User {
-        let event = event_for(token);
-        if check() {
-            return;
-        }
-
-        let wait_for_single_object: unsafe extern "stdcall" fn(u32, u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().wait_for_single_object as usize) };
-        let timeout = match timeout_us {
-            None => INFINITE,
-            Some(us) => (us / 1000).max(1) as u32,
-        };
-        unsafe { wait_for_single_object(event, timeout) };
-
-        return;
-    }
-
-    let semaphore = semaphore_for(token);
-    if check() {
-        return;
-    }
-
-    match timeout_us {
-        None => unsafe { wait_semaphore(semaphore, BLOCK_SVC_INTS) },
-        Some(us) => block_until_signalled_or_timed_out(semaphore, us),
-    }
+    (primitives().wait)(token, timeout_us, check)
 }
 
 fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
@@ -241,46 +137,12 @@ fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
 }
 
 pub fn wake(token: *const u8) {
-    if mode() == Mode::User {
-        let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().set_event as usize) };
-        unsafe { set_event(event_for(token)) };
-
-        return;
-    }
-
-    unsafe {
-        signal_semaphore(semaphore_for(token));
-    }
+    (primitives().wake)(token)
 }
 
-fn event_for(token: *const u8) -> u32 {
-    let slot = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
-    let existing = EVENTS[slot].load(Ordering::Acquire);
-    if existing != 0 {
-        return existing;
-    }
-
-    let create_event: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().create_event as usize) };
-    let created = unsafe { create_event(0, 0, 0, 0) };
-    match EVENTS[slot].compare_exchange(0, created, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => created,
-        Err(raced) => raced,
-    }
-}
 
 pub fn yield_now() {
-    if mode() == Mode::User {
-        let sleep: unsafe extern "stdcall" fn(u32) =
-            unsafe { core::mem::transmute(user_api().sleep as usize) };
-        unsafe { sleep(10) };
-        return;
-    }
-
-    unsafe {
-        _Release_Time_Slice();
-    }
+    (primitives().yield_now)()
 }
 
 pub fn allocate_shared(size: usize) -> u32 {
@@ -681,138 +543,149 @@ fn alloc_shared(size: usize) -> *mut u8 {
     address as *mut u8
 }
 
-// No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
-#[used]
-static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
-
-// This is the ring 3 half. It has its own copy of the image, thus its data is its own. Only
-// the primitives that need the kernel are different.
-#[unsafe(no_mangle)]
-pub extern "C" fn frida_win9x_user_main(arena: u32) {
-    resolve_user_api();
-    unsafe { crate::init_gum_without_exceptor() };
-
-    let sleep: unsafe extern "stdcall" fn(u32) =
-        unsafe { core::mem::transmute(user_api().sleep as usize) };
-
-    // This thread waits for the host. Do not use yield_now() here, because that rate makes the
-    // guest slow.
-    unsafe { ((arena + RUNNING_FLAG) as *mut u32).write_volatile(1) };
-    while unsafe { ((arena + GO_FLAG) as *const u32).read_volatile() } == 0 {
-        unsafe { sleep(PARKED_SLEEP_MS) };
-    }
-
-    spawn_thread(user_worker, arena as *mut c_void);
-
-    while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
-        unsafe { sleep(PARKED_SLEEP_MS) };
-    }
-
-    // The stub that called this function ends with a loop, thus a return keeps the thread in the
-    // arena.
-    let exit_thread: unsafe extern "stdcall" fn(u32) -> ! =
-        unsafe { core::mem::transmute(user_api().exit_thread as usize) };
-    unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
-    unsafe { exit_thread(0) };
-}
-
-unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
-    let arena = parameter as u32;
-    let context = unsafe { crate::adopt_js_context() };
-
-    unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(current_process_id()) };
-
-    unsafe { crate::route_frames_through(arena as u64) };
-
-    while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
-        if let Some(frame) = take_frame_from_host(arena as u64) {
-            crate::on_frame_from_host(frame);
-            acknowledge_frame_from_host(arena as u64);
-        }
-
-        unsafe { crate::poll_pending_work(context) };
-    }
-
-    unsafe { ((arena + WORKER_STOPPED) as *mut u32).write_volatile(1) };
-}
 
 
 
-fn resolve_user_api() {
-    unsafe {
-        USER_API = UserApi {
-            sleep: kernel32_export(b"Sleep"),
-            get_tick_count: kernel32_export(b"GetTickCount"),
-            get_current_thread_id: kernel32_export(b"GetCurrentThreadId"),
-            get_current_process_id: kernel32_export(b"GetCurrentProcessId"),
-            get_process_heap: kernel32_export(b"GetProcessHeap"),
-            heap_alloc: kernel32_export(b"HeapAlloc"),
-            heap_free: kernel32_export(b"HeapFree"),
-            virtual_alloc: kernel32_export(b"VirtualAlloc"),
-            virtual_free: kernel32_export(b"VirtualFree"),
-            virtual_protect: kernel32_export(b"VirtualProtect"),
-            create_thread: kernel32_export(b"CreateThread"),
-            create_event: kernel32_export(b"CreateEventA"),
-            set_event: kernel32_export(b"SetEvent"),
-            wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
-            exit_thread: kernel32_export(b"ExitThread"),
-            close_handle: kernel32_export(b"CloseHandle"),
-        };
-    }
-}
 
-fn user_api() -> &'static UserApi {
-    unsafe { &*core::ptr::addr_of!(USER_API) }
-}
 
-struct UserApi {
-    sleep: u32,
-    get_tick_count: u32,
-    get_current_thread_id: u32,
-    get_current_process_id: u32,
-    get_process_heap: u32,
-    heap_alloc: u32,
-    heap_free: u32,
-    virtual_alloc: u32,
-    virtual_free: u32,
-    virtual_protect: u32,
-    create_thread: u32,
-    create_event: u32,
-    set_event: u32,
-    wait_for_single_object: u32,
-    exit_thread: u32,
-    close_handle: u32,
-}
 
-static mut USER_API: UserApi = UserApi {
-    sleep: 0,
-    get_tick_count: 0,
-    get_current_thread_id: 0,
-    get_current_process_id: 0,
-    get_process_heap: 0,
-    heap_alloc: 0,
-    heap_free: 0,
-    virtual_alloc: 0,
-    virtual_free: 0,
-    virtual_protect: 0,
-    create_thread: 0,
-    create_event: 0,
-    set_event: 0,
-    wait_for_single_object: 0,
-    exit_thread: 0,
-    close_handle: 0,
-};
 
-// The privilege level gives the half that runs, thus the code keeps no such value.
-pub fn mode() -> Mode {
-    let cs: u16;
-    unsafe { core::arch::asm!("mov {0:x}, cs", out(reg) cs, options(nomem, nostack, preserves_flags)) };
 
-    if cs & 3 != 0 { Mode::User } else { Mode::Kernel }
-}
 
 // KERNEL32 exports neither the creator that receives a process nor the code behind
 // ResumeThread. Thus find them by the shape of the code that calls them. The ring 3 worker
+// The primitives that differ between the two halves. The kernel half runs on KERNEL, and
+// the copy in a process selects USER before it does anything else. The order here is the
+// order of the functions in each group.
+pub struct Primitives {
+    pub alloc: fn(usize) -> *mut u8,
+    pub free: fn(*mut u8, usize),
+    pub alloc_code: fn(usize) -> *mut u8,
+    pub free_code: fn(*mut u8, usize),
+    pub spawn_thread: fn(ThreadEntry, *mut c_void) -> isize,
+    pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
+    pub wake: fn(*const u8),
+    pub yield_now: fn(),
+    pub monotonic_micros: fn() -> i64,
+    pub current_process_id: fn() -> u32,
+    pub current_thread_id: fn() -> u64,
+    pub protect: fn(u64, usize, u32) -> bool,
+}
+
+pub fn select_user() {
+    unsafe { ACTIVE = &crate::win9x_user::USER };
+}
+
+fn primitives() -> &'static Primitives {
+    unsafe { ACTIVE }
+}
+
+static mut ACTIVE: &Primitives = &KERNEL;
+
+static KERNEL: Primitives = Primitives {
+    alloc: kernel::alloc,
+    free: kernel::free,
+    alloc_code: kernel::alloc_code,
+    free_code: kernel::free_code,
+    spawn_thread: kernel::spawn_thread,
+    wait: kernel::wait,
+    wake: kernel::wake,
+    yield_now: kernel::yield_now,
+    monotonic_micros: kernel::monotonic_micros,
+    current_process_id: kernel::current_process_id,
+    current_thread_id: kernel::current_thread_id,
+    protect: kernel::protect,
+};
+
+mod kernel {
+    use super::*;
+
+    pub fn alloc(size: usize) -> *mut u8 {
+        unsafe { __HeapAllocate(size as u32, 0) }
+    }
+
+    pub fn free(ptr: *mut u8, _size: usize) {
+        unsafe {
+            __HeapFree(ptr, 0);
+        }
+    }
+
+    pub fn alloc_code(size: usize) -> *mut u8 {
+        let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+        unsafe { __PageAllocate(pages, PG_SYS, 0, 0, 0, 0, core::ptr::null_mut(), PAGE_FLAGS_CODE) }
+    }
+
+    pub fn free_code(ptr: *mut u8, _size: usize) {
+        unsafe {
+            __PageFree(ptr, 0);
+        }
+    }
+
+    pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+        unsafe {
+            THREAD_ENTRY = Some(entry);
+            THREAD_PARAMETER = parameter;
+
+            vwin32_create_ring0_thread(
+                THREAD_STACK_SIZE as u32,
+                0,
+                frida_win9x_thread_thunk as u32,
+                0,
+            ) as isize
+        }
+    }
+
+    pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+        let semaphore = semaphore_for(token);
+        if check() {
+            return;
+        }
+
+        match timeout_us {
+            None => unsafe { wait_semaphore(semaphore, BLOCK_SVC_INTS) },
+            Some(us) => block_until_signalled_or_timed_out(semaphore, us),
+        }
+    }
+
+    pub fn wake(token: *const u8) {
+        unsafe {
+            signal_semaphore(semaphore_for(token));
+        }
+    }
+
+    pub fn yield_now() {
+        unsafe {
+            _Release_Time_Slice();
+        }
+    }
+
+    pub fn monotonic_micros() -> i64 {
+        unsafe { _Get_System_Time() as i64 * 1000 }
+    }
+
+    pub fn current_process_id() -> u32 {
+        0
+    }
+
+    pub fn current_thread_id() -> u64 {
+        unsafe { get_cur_thread_handle() as u64 }
+    }
+
+    pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
+        let first_page = address / PAGE_SIZE as u64;
+        let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+
+        let mut set = PAGE_PRESENT;
+        if (gum_prot & GUM_PAGE_WRITE) != 0 {
+            set |= PAGE_WRITEABLE;
+        }
+        let clear = PAGE_WRITEABLE & !set;
+
+        unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
+    }
+}
+
+
 // for _VWIN32_CreateRing0Thread calls the creator with the same five arguments.
 fn thread_creator() -> u32 {
     let cached = unsafe { core::ptr::addr_of!(THREAD_CREATOR).read() };
@@ -941,29 +814,29 @@ fn read_u8(address: u32) -> u8 {
 
 const EXPORT_DIRECTORY_OFFSET: u32 = 0x78;
 
-const MEM_COMMIT: u32 = 0x0000_1000;
-const MEM_RESERVE: u32 = 0x0000_2000;
-const MEM_RELEASE: u32 = 0x0000_8000;
-const PAGE_EXECUTE_READ: u32 = 0x20;
-const PAGE_EXECUTE_READWRITE: u32 = 0x40;
-const INFINITE: u32 = 0xffff_ffff;
-const USER_THREAD_STACK_SIZE: u32 = 0x10000;
+pub(crate) const MEM_COMMIT: u32 = 0x0000_1000;
+pub(crate) const MEM_RESERVE: u32 = 0x0000_2000;
+pub(crate) const MEM_RELEASE: u32 = 0x0000_8000;
+pub(crate) const PAGE_EXECUTE_READ: u32 = 0x20;
+pub(crate) const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+pub(crate) const INFINITE: u32 = 0xffff_ffff;
+pub(crate) const USER_THREAD_STACK_SIZE: u32 = 0x10000;
 
 const INJECTION_ARENA_SIZE: usize = 0x1000;
 const HANDSHAKE_SIZE: usize = 0x40;
-const RUNNING_FLAG: u32 = 0x00;
-const GO_FLAG: u32 = 0x04;
-const OBSERVED_PID: u32 = 0x08;
+pub(crate) const RUNNING_FLAG: u32 = 0x00;
+pub(crate) const GO_FLAG: u32 = 0x04;
+pub(crate) const OBSERVED_PID: u32 = 0x08;
 const THREAD_DATABASE: u32 = 0x14;
 const RESUMED_FLAG: u32 = 0x18;
-const STOP_REQUEST: u32 = 0x0c;
-const MAIN_STOPPED: u32 = 0x10;
-const WORKER_STOPPED: u32 = 0x3c;
+pub(crate) const STOP_REQUEST: u32 = 0x0c;
+pub(crate) const MAIN_STOPPED: u32 = 0x10;
+pub(crate) const WORKER_STOPPED: u32 = 0x3c;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 const IDLE_SLEEP_MS: u32 = 1000;
-const PARKED_SLEEP_MS: u32 = 200;
+pub(crate) const PARKED_SLEEP_MS: u32 = 200;
 const STUB_OFFSET: u32 = 0x100;
 const PAYLOAD_OFFSET: u32 = 0x200;
 const INJECTION_ATTEMPTS: u32 = 100;
@@ -983,13 +856,7 @@ const PC_USER: u32 = 0x0004_0000;
 const PC_PRESENT: u32 = 0x8000_0000;
 
 pub fn monotonic_micros() -> i64 {
-    if mode() == Mode::User {
-        let get_tick_count: unsafe extern "stdcall" fn() -> u32 =
-            unsafe { core::mem::transmute(user_api().get_tick_count as usize) };
-        return unsafe { get_tick_count() } as i64 * 1000;
-    }
-
-    unsafe { _Get_System_Time() as i64 * 1000 }
+    (primitives().monotonic_micros)()
 }
 
 pub fn wall_clock_micros() -> (u32, u32) {
@@ -999,50 +866,15 @@ pub fn wall_clock_micros() -> (u32, u32) {
 
 // Ring 0 is in no process, thus only the injected copy has an answer.
 pub fn current_process_id() -> u32 {
-    if mode() == Mode::User {
-        let get_current_process_id: unsafe extern "stdcall" fn() -> u32 =
-            unsafe { core::mem::transmute(user_api().get_current_process_id as usize) };
-        return unsafe { get_current_process_id() };
-    }
-
-    0
+    (primitives().current_process_id)()
 }
 
 pub fn current_thread_id() -> u64 {
-    if mode() == Mode::User {
-        let get_current_thread_id: unsafe extern "stdcall" fn() -> u32 =
-            unsafe { core::mem::transmute(user_api().get_current_thread_id as usize) };
-        return unsafe { get_current_thread_id() } as u64;
-    }
-
-    unsafe { get_cur_thread_handle() as u64 }
+    (primitives().current_thread_id)()
 }
 
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
-    if mode() == Mode::User {
-        let virtual_protect: unsafe extern "stdcall" fn(u32, u32, u32, *mut u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().virtual_protect as usize) };
-        let wanted = if (gum_prot & GUM_PAGE_WRITE) != 0 {
-            PAGE_EXECUTE_READWRITE
-        } else {
-            PAGE_EXECUTE_READ
-        };
-        let mut previous = 0;
-        return unsafe {
-            virtual_protect(address as u32, size as u32, wanted, &mut previous) != 0
-        };
-    }
-
-    let first_page = address / PAGE_SIZE as u64;
-    let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
-
-    let mut set = PAGE_PRESENT;
-    if (gum_prot & GUM_PAGE_WRITE) != 0 {
-        set |= PAGE_WRITEABLE;
-    }
-    let clear = PAGE_WRITEABLE & !set;
-
-    unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
+    (primitives().protect)(address, size, gum_prot)
 }
 
 // This kernel has no self-map, but VMM copies a run of page table entries into a buffer,
@@ -1598,7 +1430,7 @@ fn semaphore_for(token: *const u8) -> u32 {
 
 const NUM_SEMAPHORES: usize = 64;
 static SEMAPHORES: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
-static EVENTS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
+pub(crate) static EVENTS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 
 unsafe extern "C" {
     fn wait_semaphore(semaphore: u32, flags: u32);
