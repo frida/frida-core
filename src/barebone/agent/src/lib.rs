@@ -16,9 +16,12 @@ use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(feature = "win9x")]
 use bindings::{
-    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange, gboolean, g_source_attach, g_source_set_callback, g_source_unref,
-    g_timeout_source_new,
+    gboolean, g_source_attach, g_source_set_callback, g_source_unref, g_timeout_source_new,
+};
+use bindings::{
+    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
     g_variant_get, g_variant_get_boolean, g_variant_get_data, g_variant_get_size, g_variant_get_string,
@@ -259,6 +262,7 @@ mod entrypoint_blob {
             run_main_loop(context);
         }
     }
+
 
     unsafe fn parse_config(
         config: &[u8],
@@ -672,6 +676,9 @@ fn run_main_loop(main_context: *mut GMainContext) {
     unsafe {
         loop {
             transport_get_unchecked().process();
+
+            #[cfg(feature = "winnt")]
+            relay_frames_from_targets();
 
             #[cfg(feature = "linux")]
             if entrypoint_linux::stop_requested() {
