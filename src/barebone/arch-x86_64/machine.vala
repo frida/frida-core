@@ -100,15 +100,20 @@ namespace Frida.Barebone {
 				case NONE:
 					break;
 				case @64:
-				case RELATIVE:
 					// The in-place value is already the link-time target, the image being linked
 					// at zero and loaded as a unit.
 					relocated.write_uint64 ((size_t) r.address,
 						base_va + relocated.read_uint64 ((size_t) r.address));
 					break;
+				case RELATIVE:
+					// A loader applies this kind. It gives the value in the addend and leaves the slot empty.
+					relocated.write_uint64 ((size_t) r.address, base_va + r.addend);
+					break;
 				case PC32:
 				case PLT32:
 				case GOTPCREL:
+				case GOTPCRELX:
+				case REX_GOTPCRELX:
 					// Both ends of the displacement move by the same amount.
 					break;
 				default:

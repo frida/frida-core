@@ -72,11 +72,18 @@ namespace Frida.Barebone {
 				return true;
 			});
 
+			// A position-independent image contains its relocations two times: the relocations from the
+			// build, which --emit-relocs keeps, and the dynamic relocations for a loader. Only the
+			// second set covers the tables that the linker made, thus apply only that set.
+			bool position_independent = elf.etype == Gum.ElfType.DYN;
+
 			var relocated_buf = gdb.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
 			Error? pending_error = null;
 			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
 				if (parent_section.has_prefix (".rela.debug_"))
+					return true;
+				if (position_independent && applied_by_a_loader (parent_section))
 					return true;
 				if (parent_section == ".rela.text" && !relocates_text ())
 					return true;
@@ -99,6 +106,10 @@ namespace Frida.Barebone {
 				.skip ((size_t) (elf.mapped_size - relocated_bytes.get_size ()))
 				.build ();
 			return relocated_image;
+		}
+
+		private static bool applied_by_a_loader (string section) {
+			return section != ".rela.dyn" && section != ".rel.dyn";
 		}
 
 		public abstract void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error;
