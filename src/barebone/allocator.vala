@@ -21,6 +21,59 @@ namespace Frida.Barebone {
 		public abstract async void deallocate (Cancellable? cancellable) throws Error, IOError;
 	}
 
+	// This gives memory that the caller reserved before. Injection stops the guest to write, thus
+	// all work that needs the guest must occur first.
+	public sealed class FixedAllocator : Object, Allocator {
+		public size_t page_size {
+			get {
+				return _page_size;
+			}
+		}
+
+		private uint64 address;
+		private size_t _size;
+		private size_t _page_size;
+
+		public FixedAllocator (uint64 address, size_t size, size_t page_size) {
+			this.address = address;
+			this._size = size;
+			this._page_size = page_size;
+		}
+
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable)
+				throws Error, IOError {
+			if (size > _size)
+				throw new Error.NOT_SUPPORTED ("Reserved region is too small");
+
+			return new FixedAllocation (address, size);
+		}
+	}
+
+	private sealed class FixedAllocation : Object, Allocation {
+		public uint64 virtual_address {
+			get {
+				return _virtual_address;
+			}
+		}
+
+		public size_t size {
+			get {
+				return _size;
+			}
+		}
+
+		private uint64 _virtual_address;
+		private size_t _size;
+
+		public FixedAllocation (uint64 virtual_address, size_t size) {
+			this._virtual_address = virtual_address;
+			this._size = size;
+		}
+
+		public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+		}
+	}
+
 	public sealed class NullAllocator : Object, Allocator {
 		public size_t page_size {
 			get {
