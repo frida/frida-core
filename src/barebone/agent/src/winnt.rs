@@ -3,6 +3,7 @@
 // the code calls the slots directly.
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -887,8 +888,8 @@ const IMAGE_NAME_SIZE: usize = 16;
 
 // The process receives the same code pages as the kernel half, because code is read-only. It
 // also receives its own writable half, thus the two copies do not share data.
-pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> (u64, u64) {
-    let mut placed = (0u64, 0u64);
+pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> Placement {
+    let mut placed = Placement::default();
 
     let mut process: *mut c_void = core::ptr::null_mut();
     enumerate_processes(&mut |p| {
@@ -938,11 +939,29 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> (
                     NORMAL_PAGE_PRIORITY) == wanted {
                 // The mapping gives no permission to execute.
                 protect(text as u64, shared_size, GUM_PAGE_RWX);
-                placed = (text as u64, private as u64);
+                placed.seen_by_process = text as u64;
+                placed.writable_from_here = private as u64;
                 break;
             }
 
             (_MmUnmapLockedPages)(text, shared_mdl);
+        }
+
+        if placed.seen_by_process != 0 {
+            let arena = alloc(ARENA_SIZE);
+            core::ptr::write_bytes(arena, 0, ARENA_SIZE);
+
+            let arena_mdl = (_IoAllocateMdl)(arena as *mut c_void, ARENA_SIZE as u32, 0, 0,
+                core::ptr::null_mut());
+            if !arena_mdl.is_null() {
+                (_MmBuildMdlForNonPagedPool)(arena_mdl);
+                let seen = (_MmMapLockedPagesSpecifyCache)(arena_mdl, USER_MODE, MM_CACHED,
+                    core::ptr::null_mut(), 0, NORMAL_PAGE_PRIORITY);
+                if !seen.is_null() {
+                    placed.arena_seen_by_process = seen as u64;
+                    placed.arena_here = arena as u64;
+                }
+            }
         }
 
         (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
@@ -950,7 +969,19 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> (
 
     on_kernel_stack(&mut work);
 
+    if placed.arena_here != 0 {
+        unsafe { targets().insert(pid, placed.arena_here) };
+    }
+
     placed
+}
+
+#[derive(Default)]
+pub struct Placement {
+    pub seen_by_process: u64,
+    pub writable_from_here: u64,
+    pub arena_seen_by_process: u64,
+    pub arena_here: u64,
 }
 
 const MAX_PLACEMENT_TRIES: usize = 8;
@@ -958,6 +989,112 @@ const USER_MODE: u8 = 1;
 const MM_CACHED: u32 = 1;
 const NORMAL_PAGE_PRIORITY: u32 = 16;
 const GUM_PAGE_RWX: u32 = 7;
+
+// Each copy reads this region at a different address. Thus all values in it are offsets from
+// the start of the region.
+struct Channel {
+    length: u64,
+    sequence: u64,
+    ack: u64,
+    buffer: u64,
+}
+
+impl Channel {
+    fn publish(&self, arena: u64, frame: &[u8]) -> bool {
+        if frame.len() > FRAME_BUFFER_SIZE {
+            return false;
+        }
+
+        unsafe {
+            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
+            while ((arena + self.ack) as *const u32).read_volatile() != sequence {
+                yield_now();
+            }
+
+            core::ptr::copy_nonoverlapping(frame.as_ptr(), (arena + self.buffer) as *mut u8,
+                frame.len());
+            ((arena + self.length) as *mut u32).write_volatile(frame.len() as u32);
+            ((arena + self.sequence) as *mut u32).write_volatile(sequence + 1);
+        }
+
+        true
+    }
+
+    fn take(&self, arena: u64) -> Option<&'static [u8]> {
+        unsafe {
+            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
+            if sequence == ((arena + self.ack) as *const u32).read_volatile() {
+                return None;
+            }
+
+            let length = ((arena + self.length) as *const u32).read_volatile() as usize;
+
+            Some(core::slice::from_raw_parts((arena + self.buffer) as *const u8, length))
+        }
+    }
+
+    fn acknowledge(&self, arena: u64) {
+        unsafe {
+            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
+            ((arena + self.ack) as *mut u32).write_volatile(sequence);
+        }
+    }
+}
+
+const TO_TARGET: Channel = Channel {
+    length: 0x20,
+    sequence: 0x24,
+    ack: 0x28,
+    buffer: 0x1000,
+};
+
+const FROM_TARGET: Channel = Channel {
+    length: 0x30,
+    sequence: 0x34,
+    ack: 0x38,
+    buffer: 0x1000 + FRAME_BUFFER_SIZE as u64,
+};
+
+pub fn arena_for_pid(pid: u32) -> Option<u64> {
+    unsafe { targets().get(&pid).copied() }
+}
+
+pub fn injected_arenas() -> alloc::vec::Vec<u64> {
+    unsafe { targets().values().copied().collect() }
+}
+
+pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
+    TO_TARGET.publish(arena, frame)
+}
+
+pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
+    FROM_TARGET.take(arena)
+}
+
+pub fn acknowledge_frame_from_target(arena: u64) {
+    FROM_TARGET.acknowledge(arena)
+}
+
+pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
+    TO_TARGET.take(arena)
+}
+
+pub fn acknowledge_frame_from_host(arena: u64) {
+    TO_TARGET.acknowledge(arena)
+}
+
+pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
+    FROM_TARGET.publish(arena, frame)
+}
+
+unsafe fn targets() -> &'static mut BTreeMap<u32, u64> {
+    unsafe { core::ptr::addr_of_mut!(TARGETS).as_mut().unwrap() }
+}
+
+static mut TARGETS: BTreeMap<u32, u64> = BTreeMap::new();
+
+pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
+const FRAME_BUFFER_SIZE: usize = 0x4000;
 
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let mut read = || {

@@ -3,10 +3,15 @@ namespace Frida.Barebone {
 	public sealed class PlacedCopy {
 		public uint64 seen_by_process;
 		public uint64 writable_from_kernel;
+		public uint64 arena_seen_by_process;
+		public uint64 arena_from_kernel;
 
-		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel) {
+		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel,
+				uint64 arena_seen_by_process, uint64 arena_from_kernel) {
 			this.seen_by_process = seen_by_process;
 			this.writable_from_kernel = writable_from_kernel;
+			this.arena_seen_by_process = arena_seen_by_process;
+			this.arena_from_kernel = arena_from_kernel;
 		}
 	}
 
@@ -362,15 +367,17 @@ namespace Frida.Barebone {
 				Cancellable? cancellable) throws Error, IOError {
 			var payload = new Variant ("(utt)", pid, private_offset, size);
 			var response = yield execute_command (Command.PLACE_AGENT_IN_PROCESS, payload, cancellable);
-			if (!response.check_format_string ("(tt)", false))
+			if (!response.check_format_string ("(tttt)", false))
 				throw new Error.PROTOCOL ("Invalid place_agent_in_process response format");
 
-			uint64 seen_by_process, writable_from_kernel;
-			response.get ("(tt)", out seen_by_process, out writable_from_kernel);
-			if (seen_by_process == 0)
+			uint64 seen_by_process, writable_from_kernel, arena_seen_by_process, arena_from_kernel;
+			response.get ("(tttt)", out seen_by_process, out writable_from_kernel,
+				out arena_seen_by_process, out arena_from_kernel);
+			if (seen_by_process == 0 || arena_seen_by_process == 0)
 				throw new Error.NOT_SUPPORTED ("Unable to place the agent in the target process");
 
-			return new PlacedCopy (seen_by_process, writable_from_kernel);
+			return new PlacedCopy (seen_by_process, writable_from_kernel, arena_seen_by_process,
+				arena_from_kernel);
 		}
 
 		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {

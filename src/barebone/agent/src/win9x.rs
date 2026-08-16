@@ -359,12 +359,12 @@ struct Target {
 
 static mut TEARDOWN_TOKEN: u8 = 0;
 
-pub fn arena_for_pid(pid: u32) -> Option<u32> {
-    unsafe { targets().get(&pid).map(|t| t.arena) }
+pub fn arena_for_pid(pid: u32) -> Option<u64> {
+    unsafe { targets().get(&pid).map(|t| t.arena as u64) }
 }
 
-pub fn injected_arenas() -> alloc::vec::Vec<u32> {
-    unsafe { targets().values().map(|t| t.arena).collect() }
+pub fn injected_arenas() -> alloc::vec::Vec<u64> {
+    unsafe { targets().values().map(|t| t.arena as u64).collect() }
 }
 
 unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
@@ -448,28 +448,28 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
 // answers as it answers the host, and the kernel half sends these bytes without a change.
-pub fn forward_frame(arena: u32, frame: &[u8]) -> bool {
-    TO_TARGET.publish(arena, frame)
+pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
+    TO_TARGET.publish(arena as u32, frame)
 }
 
-pub fn take_frame_from_target(arena: u32) -> Option<&'static [u8]> {
-    FROM_TARGET.take(arena)
+pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
+    FROM_TARGET.take(arena as u32)
 }
 
-pub fn acknowledge_frame_from_target(arena: u32) {
-    FROM_TARGET.acknowledge(arena)
+pub fn acknowledge_frame_from_target(arena: u64) {
+    FROM_TARGET.acknowledge(arena as u32)
 }
 
-pub fn take_frame_from_host(arena: u32) -> Option<&'static [u8]> {
-    TO_TARGET.take(arena)
+pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
+    TO_TARGET.take(arena as u32)
 }
 
-pub fn acknowledge_frame_from_host(arena: u32) {
-    TO_TARGET.acknowledge(arena)
+pub fn acknowledge_frame_from_host(arena: u64) {
+    TO_TARGET.acknowledge(arena as u32)
 }
 
-pub fn publish_frame_to_host(arena: u32, frame: &[u8]) -> bool {
-    FROM_TARGET.publish(arena, frame)
+pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
+    FROM_TARGET.publish(arena as u32, frame)
 }
 
 // Each direction holds one frame. The reader acknowledges the frame before the writer uses
@@ -722,12 +722,12 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
 
     unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(current_process_id()) };
 
-    unsafe { crate::route_frames_through(arena) };
+    unsafe { crate::route_frames_through(arena as u64) };
 
     while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
-        if let Some(frame) = take_frame_from_host(arena) {
+        if let Some(frame) = take_frame_from_host(arena as u64) {
             crate::on_frame_from_host(frame);
-            acknowledge_frame_from_host(arena);
+            acknowledge_frame_from_host(arena as u64);
         }
 
         unsafe { crate::poll_pending_work(context) };

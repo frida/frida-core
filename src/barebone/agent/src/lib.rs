@@ -554,12 +554,12 @@ fn send_frame(frame: &[u8]) {
 }
 
 #[cfg(feature = "win9x")]
-pub(crate) unsafe fn route_frames_through(arena: u32) {
+pub(crate) unsafe fn route_frames_through(arena: u64) {
     unsafe { ROUTED_ARENA = arena };
 }
 
 #[cfg(feature = "win9x")]
-static mut ROUTED_ARENA: u32 = 0;
+static mut ROUTED_ARENA: u64 = 0;
 
 fn transport_get_unchecked() -> &'static Transport {
     unsafe {
@@ -623,7 +623,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
 
     // A frame for a process that the host attached to belongs to the copy in that process. The
     // copy also runs this code, but it has no targets, thus it continues.
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     if let Some(arena) = kernel::arena_for_pid(destination_of(variant)) {
         unsafe { g_variant_unref(variant) };
         kernel::forward_frame(arena, frame);
@@ -634,7 +634,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
     unsafe { g_variant_unref(variant) };
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn destination_of(variant: *mut GVariant) -> u32 {
     let mut command: u8 = 0;
     let mut request_id: u16 = 0;
@@ -879,11 +879,10 @@ fn handle_place_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
         let private_offset = g_variant_get_uint64(g_variant_get_child_value(payload, 1)) as usize;
         let size = g_variant_get_uint64(g_variant_get_child_value(payload, 2)) as usize;
 
-        let (seen_by_process, writable_from_here) =
-            kernel::place_agent_in_process(pid, private_offset, size);
+        let placed = kernel::place_agent_in_process(pid, private_offset, size);
 
-        HandlerResponse::success(g_variant_new(c"(tt)".as_ptr(), seen_by_process,
-            writable_from_here))
+        HandlerResponse::success(g_variant_new(c"(tttt)".as_ptr(), placed.seen_by_process,
+            placed.writable_from_here, placed.arena_seen_by_process, placed.arena_here))
     }
 }
 
@@ -966,7 +965,7 @@ const DEFERRED_WORK_POLL_MS: u32 = 20;
 
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn relay_frames_from_targets() {
     for arena in kernel::injected_arenas() {
         while let Some(frame) = kernel::take_frame_from_target(arena) {
