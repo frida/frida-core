@@ -46,7 +46,12 @@ SECTIONS {
     _KERNEL32_Base = .; . += 4;
     _KERNEL32_ProcessIdObfuscator = .; . += 4;
     _KERNEL32_ModuleTable = .; . += 4;
+    __PageCommitPhys = .; . += 4;
   }
+  /* Everything above is only ever read, so a process being instrumented can be shown the very
+     same pages; everything below it each copy needs its own of. */
+  . = ALIGN(4096);
+  _agent_private_start = .;
   .data.rel.ro : {
     *(.data.rel.ro*)
   }

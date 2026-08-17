@@ -109,7 +109,6 @@ namespace Frida.Barebone {
 			return connection;
 		}
 
-		private const size_t USER_IMAGE_SLACK = 64 * 1024;
 
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
@@ -493,31 +492,46 @@ namespace Frida.Barebone {
 			return address;
 		}
 
+		/**
+		 * Places the agent where every process can reach it: the code it is already running is
+		 * lent out as it stands, so only the half that gets written to has to be put there.
+		 */
 		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
 			Gum.ElfModule elf;
 			Buffer raw_elf = load_patched_agent (out elf);
 
-			// The agent reserves the memory while the guest runs. The image is written while the guest
-			// is stopped.
-			size_t page_size = yield machine.query_page_size (cancellable);
-			size_t needed = (size_t) elf.mapped_size + USER_IMAGE_SLACK;
-			uint64 image_base = yield allocate_shared ((uint) needed, cancellable);
+			uint64 private_offset = offset_of_symbol (elf, "_agent_private_start");
+			uint64 image_base = yield place_shared_agent (private_offset, elf.mapped_size,
+				cancellable);
 
-			var arena = new FixedAllocator (image_base, needed, page_size);
+			// Relocate for the address that ring 3 uses. The agent reserves the memory while the
+			// guest runs, and the half that gets written to is written while the guest is stopped.
+			Bytes image = machine.relocate (elf, raw_elf.bytes, image_base);
+			unowned uint8[] data = image.get_data ();
+
 			yield machine.gdb.stop (cancellable);
-			yield inject_elf (elf, raw_elf.bytes, page_size, machine, arena, cancellable);
+			yield machine.write_virtual (image_base + private_offset,
+				data[private_offset:data.length], cancellable);
 			yield machine.gdb.continue (cancellable);
 
-			uint64 entry = 0;
-			elf.enumerate_symbols (e => {
-				if (e.name == "frida_win9x_user_main")
-					entry = image_base + e.address;
-				return true;
-			});
-			if (entry == 0)
-				throw new Error.NOT_SUPPORTED ("Agent has no user-mode entry point");
+			uint64 entry = image_base + offset_of_symbol (elf, "frida_win9x_user_main");
 
 			return new PlacedAgent (image_base, entry);
+		}
+
+		private async uint64 place_shared_agent (uint64 private_offset, uint64 size,
+				Cancellable? cancellable) throws Error, IOError {
+			var payload = new Variant ("(uu)", (uint) private_offset, (uint) size);
+
+			var response = yield execute_command (Command.PLACE_SHARED_AGENT, payload, cancellable);
+			if (!response.is_of_type (VariantType.UINT32))
+				throw new Error.PROTOCOL ("Invalid place_shared_agent response format");
+
+			uint address = response.get_uint32 ();
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Out of shared memory");
+
+			return address;
 		}
 
 		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -999,6 +1013,7 @@ namespace Frida.Barebone {
 			DETACH_FROM_PROCESS = 11,
 			PLACE_AGENT_IN_PROCESS = 12,
 			START_AGENT_IN_PROCESS = 13,
+			PLACE_SHARED_AGENT = 14,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

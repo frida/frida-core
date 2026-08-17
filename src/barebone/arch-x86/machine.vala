@@ -113,6 +113,7 @@ namespace Frida.Barebone {
 				case PC32:
 				case PLT32:
 				case GOTPC:
+				case GOTOFF:
 					// Both ends of the displacement move by the same amount.
 					break;
 				default:

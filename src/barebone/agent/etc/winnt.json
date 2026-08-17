@@ -5,7 +5,7 @@
   },
   "kernel": "winnt",
   "agent": {
-    "path": "/home/oleavr/src/frida-core/src/barebone/agent/target-winnt/i686-unknown-none/release/frida-barebone-agent",
+    "path": "/home/oleavr/src/frida-core/src/barebone/agent/target-winnt/i686-unknown-none-pic/release/frida-barebone-agent",
     "transport": {
       "type": "hostlink",
       "qmp": "unix:/tmp/qmp.sock",

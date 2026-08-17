@@ -109,6 +109,7 @@ pub enum FridaCommand {
     DetachFromProcess = 11,
     PlaceAgentInProcess = 12,
     StartAgentInProcess = 13,
+    PlaceSharedAgent = 14,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -128,6 +129,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
             FridaCommand::PlaceAgentInProcess => write!(f, "PlaceAgentInProcess"),
+            FridaCommand::PlaceSharedAgent => write!(f, "PlaceSharedAgent"),
             FridaCommand::StartAgentInProcess => write!(f, "StartAgentInProcess"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
@@ -855,6 +857,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
+            #[cfg(feature = "win9x")]
+            FridaCommand::PlaceSharedAgent => handle_place_shared_agent(payload_variant, request_id),
             #[cfg(feature = "winnt")]
             FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
             #[cfg(feature = "winnt")]
@@ -927,6 +931,21 @@ fn handle_start_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
 
 // All processes can read the shared arena, and ring 3 can execute from it.
 #[cfg(feature = "win9x")]
+#[cfg(feature = "win9x")]
+fn handle_place_shared_agent(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
+    use crate::bindings::g_variant_get_child_value;
+
+    unsafe {
+        let private_offset = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
+        let size = g_variant_get_uint32(g_variant_get_child_value(payload, 1));
+
+        PENDING_PLACEMENT = (request_id, private_offset, size);
+        PLACEMENT_PENDING = true;
+    }
+
+    None
+}
+
 fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
     unsafe {
         PENDING_ALLOCATION = (request_id, g_variant_get_uint32(payload));
@@ -941,6 +960,7 @@ fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<Han
 #[cfg(feature = "win9x")]
 unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
     serve_pending_allocation();
+    serve_pending_placement();
     serve_pending_injection();
     serve_pending_detach();
     relay_frames_from_targets();
@@ -959,6 +979,23 @@ fn serve_pending_allocation() {
     let address = kernel::allocate_shared(size as usize);
     let response = if address == 0 {
         HandlerResponse::error("Unable to allocate shared memory")
+    } else {
+        HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
+    };
+    send_command_reply(request_id, response);
+}
+
+#[cfg(feature = "win9x")]
+fn serve_pending_placement() {
+    if !unsafe { ptr::addr_of!(PLACEMENT_PENDING).read() } {
+        return;
+    }
+    unsafe { PLACEMENT_PENDING = false };
+
+    let (request_id, private_offset, size) = unsafe { PENDING_PLACEMENT };
+    let address = kernel::place_shared_agent(private_offset as usize, size as usize);
+    let response = if address == 0 {
+        HandlerResponse::error("Unable to place the agent")
     } else {
         HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
     };
@@ -1016,9 +1053,13 @@ fn relay_frames_from_targets() {
 
 #[cfg(feature = "win9x")]
 static mut ALLOCATION_PENDING: bool = false;
+#[cfg(feature = "win9x")]
+static mut PLACEMENT_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
 static mut PENDING_ALLOCATION: (u16, u32) = (0, 0);
+#[cfg(feature = "win9x")]
+static mut PENDING_PLACEMENT: (u16, u32, u32) = (0, 0, 0);
 
 #[cfg(feature = "win9x")]
 static mut DETACH_PENDING: bool = false;

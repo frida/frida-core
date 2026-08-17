@@ -145,6 +145,34 @@ pub fn yield_now() {
     (primitives().yield_now)()
 }
 
+// The kernel half is already holding the code, and a page can be shown at a second address.
+// Thus a process gets the same code pages, and only the half that gets written to is new memory.
+pub fn place_shared_agent(private_offset: usize, size: usize) -> u32 {
+    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+    let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+    let base = unsafe { __PageReserve(PR_SHARED, pages, 0) };
+    let first = base / PAGE_SIZE;
+
+    let shared_pages = (private_offset / PAGE_SIZE as usize) as u32;
+    let own_first = own.base_address as u32 / PAGE_SIZE;
+    for page in 0..shared_pages {
+        let mut entry = 0;
+        unsafe {
+            __CopyPageTable(own_first + page, 1, &mut entry, 0);
+            // A second address for a page that the memory manager does not own takes the user
+            // bit only. The service refuses the flags that new pages take.
+            __PageCommitPhys(first + page, 1, entry / PAGE_SIZE, PC_USER);
+        }
+    }
+
+    unsafe {
+        __PageCommit(first + shared_pages, pages - shared_pages, PD_FIXEDZERO, 0,
+            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE);
+    }
+
+    base
+}
+
 pub fn allocate_shared(size: usize) -> u32 {
     alloc_shared(size) as u32
 }
@@ -1347,8 +1375,6 @@ fn faulting_address() -> u32 {
 
 static mut FAULT_CHAIN: [u32; 32] = [0; 32];
 
-#[unsafe(no_mangle)]
-static mut frida_win9x_fault_chain: u32 = 0;
 
 const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;
@@ -1465,6 +1491,23 @@ core::arch::global_asm!(
     r#"
 .intel_syntax noprefix
 
+// A position-independent image cannot name its data in an instruction. Thus the code reads the
+// program counter, from which the offset to the data is known, and adds the offset. The frame
+// pointer holds the result, because no service reads that register.
+frida_win9x_get_pc_ebp:
+    mov ebp, [esp]
+    ret
+
+frida_win9x_get_pc_ebx:
+    mov ebx, [esp]
+    ret
+
+.macro CALL_SERVICE slot
+    call frida_win9x_get_pc_ebp
+    add ebp, offset _GLOBAL_OFFSET_TABLE_
+    call dword ptr [ebp + \slot@GOTOFF]
+.endm
+
 .global wait_semaphore
 wait_semaphore:
     push ebp
@@ -1474,7 +1517,7 @@ wait_semaphore:
     push edi
     mov eax, [ebp + 8]
     mov ecx, [ebp + 12]
-    call dword ptr [_Wait_Semaphore]
+    CALL_SERVICE _Wait_Semaphore
     pop edi
     pop esi
     pop ebx
@@ -1489,7 +1532,7 @@ signal_semaphore:
     push esi
     push edi
     mov eax, [ebp + 8]
-    call dword ptr [_Signal_Semaphore]
+    CALL_SERVICE _Signal_Semaphore
     pop edi
     pop esi
     pop ebx
@@ -1504,7 +1547,7 @@ create_semaphore:
     push esi
     push edi
     mov ecx, [ebp + 8]
-    call dword ptr [_Create_Semaphore]
+    CALL_SERVICE _Create_Semaphore
     cmc
     sbb ecx, ecx
     and eax, ecx
@@ -1521,7 +1564,7 @@ get_cur_thread_handle:
     push ebx
     push esi
     push edi
-    call dword ptr [_Get_Cur_Thread_Handle]
+    CALL_SERVICE _Get_Cur_Thread_Handle
     mov eax, edi
     pop edi
     pop esi
@@ -1538,7 +1581,7 @@ fatal_error_handler:
     push edi
     mov esi, [ebp + 8]
     mov eax, [ebp + 12]
-    call dword ptr [_Fatal_Error_Handler]
+    CALL_SERVICE _Fatal_Error_Handler
     pop edi
     pop esi
     pop ebx
@@ -1553,7 +1596,7 @@ schedule_global_event:
     push esi
     push edi
     mov esi, [ebp + 8]
-    call dword ptr [_Schedule_Global_Event]
+    CALL_SERVICE _Schedule_Global_Event
     mov eax, ebx
     pop edi
     pop esi
@@ -1571,7 +1614,7 @@ frida_win9x_event_thunk:
 .global get_sys_vm_handle
 get_sys_vm_handle:
     push ebx
-    call dword ptr [_Get_Sys_VM_Handle]
+    CALL_SERVICE _Get_Sys_VM_Handle
     mov eax, ebx
     pop ebx
     ret
@@ -1582,7 +1625,7 @@ get_next_vm_handle:
     mov ebp, esp
     push ebx
     mov ebx, [ebp + 8]
-    call dword ptr [_Get_Next_VM_Handle]
+    CALL_SERVICE _Get_Next_VM_Handle
     mov eax, ebx
     pop ebx
     pop ebp
@@ -1595,7 +1638,7 @@ get_initial_thread_handle:
     push ebx
     push edi
     mov ebx, [ebp + 8]
-    call dword ptr [_Get_Initial_Thread_Handle]
+    CALL_SERVICE _Get_Initial_Thread_Handle
     mov eax, edi
     pop edi
     pop ebx
@@ -1609,7 +1652,7 @@ get_next_thread_handle:
     push ebx
     push edi
     mov edi, [ebp + 8]
-    call dword ptr [_Get_Next_Thread_Handle]
+    CALL_SERVICE _Get_Next_Thread_Handle
     mov eax, edi
     pop edi
     pop ebx
@@ -1627,7 +1670,7 @@ vwin32_create_ring0_thread:
     mov edx, [ebp + 12]
     mov ebx, [ebp + 16]
     mov esi, [ebp + 20]
-    call dword ptr [__VWIN32_CreateRing0Thread]
+    CALL_SERVICE __VWIN32_CreateRing0Thread
     pop edi
     pop esi
     pop ebx
@@ -1647,7 +1690,7 @@ ifsmgr_ring0_file_io:
     mov edx, [ebp + 20]
     mov esi, [ebp + 24]
     mov edi, [ebp + 28]
-    call dword ptr [_IFSMgr_Ring0_FileIO]
+    CALL_SERVICE _IFSMgr_Ring0_FileIO
     jnc 1f
     xor eax, eax
 1:
@@ -1660,7 +1703,7 @@ ifsmgr_ring0_file_io:
 .global get_cur_vm_handle
 get_cur_vm_handle:
     push ebx
-    call dword ptr [_Get_Cur_VM_Handle]
+    CALL_SERVICE _Get_Cur_VM_Handle
     mov eax, ebx
     pop ebx
     ret
@@ -1674,7 +1717,7 @@ hook_vmm_fault:
     push edi
     mov eax, [ebp + 8]
     mov esi, [ebp + 12]
-    call dword ptr [_Hook_VMM_Fault]
+    CALL_SERVICE _Hook_VMM_Fault
     mov eax, esi
     pop edi
     pop esi
@@ -1704,22 +1747,26 @@ frida_win9x_fault_common:
     push eax
     call frida_win9x_on_fault
     add esp, 8
-    mov [frida_win9x_fault_chain], eax
+    test eax, eax
+    jz frida_win9x_fault_resume
+    mov [esp + 32], eax
     popad
-    add esp, 4
-    cmp dword ptr [frida_win9x_fault_chain], 0
-    je frida_win9x_fault_resume
-    jmp dword ptr [frida_win9x_fault_chain]
+    ret
 frida_win9x_fault_resume:
-    mov esp, [frida_win9x_resume + 16]
-    mov edi, [frida_win9x_resume + 4]
-    mov esi, [frida_win9x_resume + 8]
-    mov ebp, [frida_win9x_resume + 12]
-    mov ebx, [frida_win9x_resume + 20]
-    mov edx, [frida_win9x_resume + 24]
-    mov ecx, [frida_win9x_resume + 28]
-    mov eax, [frida_win9x_resume + 32]
-    push dword ptr [frida_win9x_resume]
+    call frida_win9x_get_pc_ebx
+    add ebx, offset _GLOBAL_OFFSET_TABLE_
+    lea ebx, [ebx + frida_win9x_resume@GOTOFF]
+    mov esp, [ebx + 16]
+    push dword ptr [ebx]
+    push dword ptr [ebx + 32]
+    push dword ptr [ebx + 20]
+    mov edi, [ebx + 4]
+    mov esi, [ebx + 8]
+    mov ebp, [ebx + 12]
+    mov edx, [ebx + 24]
+    mov ecx, [ebx + 28]
+    pop ebx
+    pop eax
     ret
 
 .global set_global_time_out
@@ -1731,8 +1778,10 @@ set_global_time_out:
     push edi
     mov eax, [ebp + 8]
     mov edx, [ebp + 12]
-    lea esi, [frida_win9x_time_out_thunk]
-    call dword ptr [_Set_Global_Time_Out]
+    call frida_win9x_get_pc_ebp
+    add ebp, offset _GLOBAL_OFFSET_TABLE_
+    lea esi, [ebp + frida_win9x_time_out_thunk@GOTOFF]
+    call dword ptr [ebp + _Set_Global_Time_Out@GOTOFF]
     mov eax, esi
     pop edi
     pop esi
@@ -1748,7 +1797,7 @@ cancel_time_out:
     push esi
     push edi
     mov esi, [ebp + 8]
-    call dword ptr [_Cancel_Time_Out]
+    CALL_SERVICE _Cancel_Time_Out
     pop edi
     pop esi
     pop ebx
@@ -1759,7 +1808,7 @@ cancel_time_out:
 frida_win9x_time_out_thunk:
     pushad
     mov eax, edx
-    call dword ptr [_Signal_Semaphore]
+    CALL_SERVICE _Signal_Semaphore
     popad
     ret
 
@@ -1771,7 +1820,7 @@ vpicd_phys_eoi:
     push esi
     push edi
     mov eax, [ebp + 8]
-    call dword ptr [_VPICD_Phys_EOI]
+    CALL_SERVICE _VPICD_Phys_EOI
     pop edi
     pop esi
     pop ebx
@@ -1786,7 +1835,7 @@ vpicd_physically_unmask:
     push esi
     push edi
     mov eax, [ebp + 8]
-    call dword ptr [_VPICD_Physically_Unmask]
+    CALL_SERVICE _VPICD_Physically_Unmask
     pop edi
     pop esi
     pop ebx
@@ -1800,9 +1849,9 @@ vpicd_virtualize_irq:
     push ebx
     push esi
     push edi
-    call dword ptr [_Get_Cur_VM_Handle]
     mov edi, [ebp + 8]
-    call dword ptr [_VPICD_Virtualize_IRQ]
+    CALL_SERVICE _Get_Cur_VM_Handle
+    CALL_SERVICE _VPICD_Virtualize_IRQ
     cmc
     sbb ecx, ecx
     and eax, ecx
@@ -1851,6 +1900,7 @@ unsafe extern "C" {
     static __MapPhysToLinear: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static __PageReserve: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static __PageCommit: unsafe extern "C" fn(u32, u32, u32, u32, u32) -> u32;
+    static __PageCommitPhys: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
     static __VWIN32_QueueUserApc: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
