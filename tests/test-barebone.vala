@@ -271,36 +271,36 @@ namespace Frida.BareboneTest {
 		});
 
 		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
-			assert_true (parse_config ("{}").kernel == Barebone.KernelKind.AUTO);
-			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == Barebone.KernelKind.BARE);
-			assert_true (parse_config ("{ \"kernel\": \"xnu\" }").kernel == Barebone.KernelKind.XNU);
-			assert_true (parse_config ("{ \"kernel\": \"win9x\" }").kernel == Barebone.KernelKind.WIN9X);
-			assert_true (parse_config ("{ \"kernel\": \"winnt\" }").kernel == Barebone.KernelKind.WINNT);
+			assert_true (parse_config ("{}").kernel == BareboneKernelKind.AUTO);
+			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == BareboneKernelKind.BARE);
+			assert_true (parse_config ("{ \"kernel\": \"xnu\" }").kernel == BareboneKernelKind.XNU);
+			assert_true (parse_config ("{ \"kernel\": \"win9x\" }").kernel == BareboneKernelKind.WIN9X);
+			assert_true (parse_config ("{ \"kernel\": \"winnt\" }").kernel == BareboneKernelKind.WINNT);
 		});
 
 		GLib.Test.add_func ("/Barebone/Config/parses-allocator-arguments", () => {
-			var allocator = (Barebone.TargetFunctionsAllocatorConfig) parse_config (
+			var allocator = (BareboneTargetFunctionsAllocatorConfig) parse_config (
 				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"804e1000\", \"free_function\": \"804e2000\", \"alloc_arguments\": [ \"0\", \"size\", \"64697246\" ], \"free_arguments\": [ \"address\", \"64697246\" ] } }").allocator;
 
 			var alloc = allocator.effective_alloc_arguments ();
 			assert_true (alloc.size == 3);
-			assert_argument (alloc[0], Barebone.CallArgumentRole.LITERAL, 0);
-			assert_argument (alloc[1], Barebone.CallArgumentRole.SIZE, 0);
-			assert_argument (alloc[2], Barebone.CallArgumentRole.LITERAL, 0x64697246);
+			assert_argument (alloc[0], BareboneCallArgumentRole.LITERAL, 0);
+			assert_argument (alloc[1], BareboneCallArgumentRole.SIZE, 0);
+			assert_argument (alloc[2], BareboneCallArgumentRole.LITERAL, 0x64697246);
 
 			var free = allocator.effective_free_arguments ();
 			assert_true (free.size == 2);
-			assert_argument (free[0], Barebone.CallArgumentRole.ADDRESS, 0);
-			assert_argument (free[1], Barebone.CallArgumentRole.LITERAL, 0x64697246);
+			assert_argument (free[0], BareboneCallArgumentRole.ADDRESS, 0);
+			assert_argument (free[1], BareboneCallArgumentRole.LITERAL, 0x64697246);
 
 			// Without a template, the flags still give the argument list.
-			var shorthand = (Barebone.TargetFunctionsAllocatorConfig) parse_config (
+			var shorthand = (BareboneTargetFunctionsAllocatorConfig) parse_config (
 				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"1000\", \"free_function\": \"2000\", \"alloc_flags\": 3 } }").allocator;
 
 			var inferred = shorthand.effective_alloc_arguments ();
 			assert_true (inferred.size == 2);
-			assert_argument (inferred[0], Barebone.CallArgumentRole.SIZE, 0);
-			assert_argument (inferred[1], Barebone.CallArgumentRole.LITERAL, 3);
+			assert_argument (inferred[0], BareboneCallArgumentRole.SIZE, 0);
+			assert_argument (inferred[1], BareboneCallArgumentRole.LITERAL, 3);
 		});
 
 		GLib.Test.add_func ("/Barebone/X64/enumerate-ranges-walks-long-mode-tables", () => {
@@ -379,9 +379,9 @@ namespace Frida.BareboneTest {
 		});
 	}
 
-	private static Barebone.Config parse_config (string json) {
+	private static BareboneConfig parse_config (string json) {
 		try {
-			return (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), json);
+			return (BareboneConfig) Json.gobject_from_data (typeof (BareboneConfig), json);
 		} catch (GLib.Error e) {
 			assert_not_reached ();
 		}
@@ -1095,8 +1095,8 @@ namespace Frida.BareboneTest {
 
 		private static Barebone.Allocator make_scratch_allocator (Barebone.Machine machine,
 				uint mb_below_top = 1) {
-			var config = new Barebone.PhysicalAllocatorConfig ();
-			config.physical_base = new Barebone.NonNullMemoryAddress ("scratch",
+			var config = new BarebonePhysicalAllocatorConfig ();
+			config.physical_base = new BareboneNonNullMemoryAddress ("scratch",
 				((uint64) (QemuGuest.MEMORY_SIZE_IN_MB - mb_below_top)) << 20);
 			return new Barebone.PhysicalAllocator (machine, 4096, config);
 		}
@@ -2238,7 +2238,7 @@ namespace Frida.BareboneTest {
 		""", "\"caught\":\"yes\"");
 	}
 
-	private static Barebone.Config? win9x_config_from_environment (Harness h) {
+	private static BareboneConfig? win9x_config_from_environment (Harness h) {
 		string? agent_path = Environment.get_variable ("FRIDA_TEST_WIN9X_AGENT");
 		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WIN9X_QMP");
 		string? stub_port = Environment.get_variable ("FRIDA_TEST_WIN9X_GDB_PORT");
@@ -2247,13 +2247,13 @@ namespace Frida.BareboneTest {
 			return null;
 		}
 
-		var config = new Barebone.Config ();
+		var config = new BareboneConfig ();
 		config.connection.host = "127.0.0.1";
 		config.connection.port = (uint16) uint.parse (stub_port);
 		config.kernel = WIN9X;
-		config.agent = new Barebone.AgentConfig () {
+		config.agent = new BareboneAgentConfig () {
 			path = agent_path,
-			transport = new Barebone.HostlinkTransportConfig () {
+			transport = new BareboneHostlinkTransportConfig () {
 				qmp = "unix:" + qmp_path,
 				bus = Environment.get_variable ("FRIDA_TEST_WIN9X_BUS"),
 			},
@@ -2264,7 +2264,7 @@ namespace Frida.BareboneTest {
 
 	// The same guest is described the same way whatever its word size, so the two differ only in
 	// which set of variables names it.
-	private static Barebone.Config? winnt_config_from_environment (Harness h, string prefix) {
+	private static BareboneConfig? winnt_config_from_environment (Harness h, string prefix) {
 		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
 		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
 		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
@@ -2273,13 +2273,13 @@ namespace Frida.BareboneTest {
 			return null;
 		}
 
-		var config = new Barebone.Config ();
+		var config = new BareboneConfig ();
 		config.connection.host = "127.0.0.1";
 		config.connection.port = (uint16) uint.parse (stub_port);
 		config.kernel = WINNT;
-		config.agent = new Barebone.AgentConfig () {
+		config.agent = new BareboneAgentConfig () {
 			path = agent_path,
-			transport = new Barebone.HostlinkTransportConfig () {
+			transport = new BareboneHostlinkTransportConfig () {
 				qmp = "unix:" + qmp_path,
 				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
 			},
@@ -2288,7 +2288,7 @@ namespace Frida.BareboneTest {
 		return config;
 	}
 
-	private static async void run_script_in_live_guest (Harness h, Barebone.Config? config, string source,
+	private static async void run_script_in_live_guest (Harness h, BareboneConfig? config, string source,
 			string expected) {
 		if (config == null)
 			return;
@@ -2361,7 +2361,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static void assert_argument (Barebone.CallArgument argument, Barebone.CallArgumentRole role,
+	private static void assert_argument (BareboneCallArgument argument, BareboneCallArgumentRole role,
 			uint64 value) {
 		assert_true (argument.role == role);
 		assert_true (argument.value == value);

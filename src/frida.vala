@@ -381,7 +381,15 @@ namespace Frida {
 			return task.execute (cancellable);
 		}
 
-		public async Device add_barebone_device (Barebone.Config config, Cancellable? cancellable = null)
+		/**
+		 * Adds a device backed by the Barebone backend, which talks to a target
+		 * that has no operating system of its own, or one that Frida reaches
+		 * through a debugger stub or an injected agent.
+		 *
+		 * @param config how to reach the target, and how to allocate memory in it
+		 * @return the newly added device
+		 */
+		public async Device add_barebone_device (BareboneConfig config, Cancellable? cancellable = null)
 				throws Error, IOError {
 #if HAVE_BAREBONE_BACKEND
 			check_open ();
@@ -405,7 +413,7 @@ namespace Frida {
 #endif
 		}
 
-		public Device add_barebone_device_sync (Barebone.Config config, Cancellable? cancellable = null)
+		public Device add_barebone_device_sync (BareboneConfig config, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var task = create<AddBareboneDeviceTask> ();
 			task.config = config;
@@ -413,7 +421,7 @@ namespace Frida {
 		}
 
 		private class AddBareboneDeviceTask : ManagerTask<Device> {
-			public Barebone.Config config;
+			public BareboneConfig config;
 
 			protected override async Device perform_operation () throws Error, IOError {
 				return yield parent.add_barebone_device (config, cancellable);
@@ -2060,6 +2068,692 @@ namespace Frida {
 			get;
 			set;
 			default = -1;
+		}
+	}
+
+	/**
+	 * Barebone backend configuration. This is specified via the FRIDA_BAREBONE_CONFIG environment
+	 * variable, which should point to the filesystem path of a JSON-encoded configuration file.
+	 *
+	 * Example JSON configurations:
+	 *
+	 * 1. Using all defaults:
+	 * {
+	 *   "connection": {
+	 *     "host": "127.0.0.1",
+	 *     "port": 3333
+	 *   }
+	 * }
+	 *
+	 * 2. Using a physical memory allocator:
+	 *  {
+	 *    "connection": {
+	 *      "host": "127.0.0.1",
+	 *      "port": 9000
+	 *    },
+	 *    "allocator": {
+	 *      "mode": "physical",
+	 *      "physical_base": "0x8ec9b4000"
+	 *    }
+	 *  }
+	 *
+	 * 3. Using target-specific allocation functions:
+	 *  {
+	 *    "connection": {
+	 *      "host": "127.0.0.1",
+	 *      "port": 9000
+	 *    },
+	 *    "allocator": {
+	 *      "mode": "target-functions",
+	 *      "alloc_function": "0xfffffff007a3c278",
+	 *      "free_function": "0xfffffff007a3c338"
+	 *    }
+	 *  }
+	 *
+	 * 4. Spelling out the arguments those functions take, for the ones that don't take the
+	 *    size first, such as NT's ExAllocatePoolWithTag(pool_type, size, tag):
+	 *  {
+	 *    "allocator": {
+	 *      "mode": "target-functions",
+	 *      "alloc_function": "0x804e1000",
+	 *      "alloc_arguments": [ "0", "size", "0x64697246" ],
+	 *      "free_function": "0x804e2000",
+	 *      "free_arguments": [ "address", "0x64697246" ]
+	 *    }
+	 *  }
+	 *
+	 * 5. Injecting a remote agent:
+	 *  {
+	 *    "agent": {
+	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent",
+	 *      "transport": {
+	 *        "type": "hostlink",
+	 *        "qmp": "unix:/path/to/qmp.sock"
+	 *      }
+	 *    },
+	 *    "image": {
+	 *      "file": "/path/to/kernelcache.research.iphone12b",
+	 *      "base": "0xfffffff007004000"
+	 *    }
+	 *  }
+	 */
+	public sealed class BareboneConfig : Object, Json.Serializable {
+		public BareboneConnectionConfig connection {
+			get;
+			set;
+			default = new BareboneConnectionConfig ();
+		}
+
+		public BareboneAllocatorConfig? allocator {
+			get;
+			set;
+		}
+
+		public BareboneAgentConfig? agent {
+			get;
+			set;
+		}
+
+		public BareboneImageConfig? image {
+			get;
+			set;
+		}
+
+		public BareboneKernelKind kernel {
+			get;
+			set;
+			default = AUTO;
+		}
+
+		public void check () throws Error {
+			if (allocator != null)
+				allocator.check ();
+			if (agent != null)
+				agent.check ();
+			if (image != null)
+				image.check ();
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "allocator") {
+				BareboneAllocatorConfig? allocator = null;
+				Type t = typeof (BareboneInvalidAllocatorConfig);
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					switch (property_node.get_object ().get_string_member_with_default ("mode", "invalid")) {
+					case "physical":
+						t = typeof (BarebonePhysicalAllocatorConfig);
+						break;
+					case "target-functions":
+						t = typeof (BareboneTargetFunctionsAllocatorConfig);
+						break;
+					default:
+						break;
+					}
+					allocator = (BareboneAllocatorConfig) Json.gobject_deserialize (t, property_node);
+				} else {
+					allocator = new BareboneInvalidAllocatorConfig ();
+				}
+
+				var v = Value (t);
+				v.set_object (allocator);
+				value = v;
+				return true;
+			}
+
+			if (property_name == "kernel") {
+				var v = Value (typeof (BareboneKernelKind));
+				v.set_enum (parse_kernel_kind (property_node.get_string ()));
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		private static BareboneKernelKind parse_kernel_kind (string? name) {
+			switch (name) {
+				case "bare":	return BareboneKernelKind.BARE;
+				case "xnu":	return BareboneKernelKind.XNU;
+				case "win9x":	return BareboneKernelKind.WIN9X;
+				case "winnt":	return BareboneKernelKind.WINNT;
+				default:	return BareboneKernelKind.AUTO;
+			}
+		}
+	}
+
+	/**
+	 * Selects which bring-up dance the target kernel needs before the agent can be
+	 * injected. AUTO infers XNU when an image is configured, and BARE otherwise.
+	 */
+	public enum BareboneKernelKind {
+		AUTO,
+		BARE,
+		XNU,
+		WIN9X,
+		WINNT
+	}
+
+	public sealed class BareboneConnectionConfig : Object, Json.Serializable {
+		public string host {
+			get;
+			set;
+			default = "127.0.0.1";
+		}
+
+		public uint16 port {
+			get;
+			set;
+			default = 3333;
+		}
+
+		public uint pid {
+			get;
+			set;
+			default = 0;
+		}
+
+		public BareboneStubFlavor flavor {
+			get;
+			set;
+			default = GDB_REMOTE;
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "flavor") {
+				var v = Value (typeof (BareboneStubFlavor));
+				v.set_enum (parse_stub_flavor (property_node.get_string ()));
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		private static BareboneStubFlavor parse_stub_flavor (string? name) {
+			switch (name) {
+				case "vz":	return BareboneStubFlavor.VZ;
+				default:	return BareboneStubFlavor.GDB_REMOTE;
+			}
+		}
+	}
+
+	/**
+	 * Selects which GDB-remote dialect to speak. GDB_REMOTE drives the generic client
+	 * (QEMU, Corellium, debugserver); VZ drives the Apple Virtualization.framework kernel
+	 * stub, whose lldb-flavoured quirks the generic client cannot handle.
+	 */
+	public enum BareboneStubFlavor {
+		GDB_REMOTE,
+		VZ
+	}
+
+	public abstract class BareboneAllocatorConfig : Object {
+		public abstract void check () throws Error;
+	}
+
+	public sealed class BareboneInvalidAllocatorConfig : BareboneAllocatorConfig {
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for 'allocator' is invalid");
+		}
+	}
+
+	public sealed class BarebonePhysicalAllocatorConfig : BareboneAllocatorConfig, Json.Serializable {
+		public BareboneMemoryAddress physical_base {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (physical_base == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.physical_base' is missing");
+			physical_base.check ();
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "physical_base") {
+				value = BareboneMemoryAddress.deserialize ("allocator.physical_base", property_node);
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+	}
+
+	public sealed class BareboneTargetFunctionsAllocatorConfig : BareboneAllocatorConfig, Json.Serializable {
+		public BareboneMemoryAddress alloc_function {
+			get;
+			set;
+		}
+
+		public BareboneMemoryAddress free_function {
+			get;
+			set;
+		}
+
+		/** Extra second argument passed to alloc_function. Modern XNU data allocators are
+		 * kalloc_data_external(size, flags); QEMU's kalloc(size) ignores it. Defaults to zero. */
+		public uint64 alloc_flags {
+			get;
+			set;
+			default = 0;
+		}
+
+		/** Full argument list for alloc_function, for allocators that don't take the size first.
+		 * NT's ExAllocatePoolWithTag(pool_type, size, tag) is ["0", "size", "0x64697246"].
+		 * Defaults to ["size", alloc_flags]. */
+		public Gee.List<BareboneCallArgument>? alloc_arguments {
+			get;
+			set;
+		}
+
+		/** Full argument list for free_function. Defaults to ["address", "size"]. */
+		public Gee.List<BareboneCallArgument>? free_arguments {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (alloc_function == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.alloc_function' is missing");
+			alloc_function.check ();
+
+			if (free_function == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'allocator.free_function' is missing");
+			free_function.check ();
+
+			check_arguments ("allocator.alloc_arguments", alloc_arguments, SIZE);
+			check_arguments ("allocator.free_arguments", free_arguments, ADDRESS);
+		}
+
+		public Gee.List<BareboneCallArgument> effective_alloc_arguments () {
+			if (alloc_arguments != null)
+				return alloc_arguments;
+
+			var arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			arguments.add (new BareboneCallArgument (SIZE, 0));
+			arguments.add (new BareboneCallArgument (LITERAL, alloc_flags));
+			return arguments;
+		}
+
+		public Gee.List<BareboneCallArgument> effective_free_arguments () {
+			if (free_arguments != null)
+				return free_arguments;
+
+			var arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			arguments.add (new BareboneCallArgument (ADDRESS, 0));
+			arguments.add (new BareboneCallArgument (SIZE, 0));
+			return arguments;
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "alloc-function") {
+				value = BareboneMemoryAddress.deserialize ("allocator.alloc_function", property_node);
+				return true;
+			}
+
+			if (property_name == "free-function") {
+				value = BareboneMemoryAddress.deserialize ("allocator.free_function", property_node);
+				return true;
+			}
+
+			if (property_name == "alloc-arguments" || property_name == "free-arguments") {
+				value = deserialize_arguments (property_node);
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		private static void check_arguments (string label, Gee.List<BareboneCallArgument>? arguments, BareboneCallArgumentRole required)
+				throws Error {
+			if (arguments == null)
+				return;
+
+			if (arguments.is_empty)
+				throw new Error.NOT_SUPPORTED ("Config for '%s' is invalid", label);
+
+			foreach (BareboneCallArgument a in arguments) {
+				if (a.role == required)
+					return;
+			}
+
+			throw new Error.NOT_SUPPORTED ("Config for '%s' must mention '%s'", label,
+				(required == SIZE) ? "size" : "address");
+		}
+
+		private static Value deserialize_arguments (Json.Node node) {
+			Gee.List<BareboneCallArgument>? arguments = null;
+
+			if (node.get_node_type () == Json.NodeType.ARRAY) {
+				arguments = new Gee.ArrayList<BareboneCallArgument> ();
+
+				node.get_array ().foreach_element ((array, index, element) => {
+					if (arguments == null)
+						return;
+
+					BareboneCallArgument? a = BareboneCallArgument.parse (element);
+					if (a == null)
+						arguments = null;
+					else
+						arguments.add (a);
+				});
+			}
+
+			var v = Value (typeof (Gee.List));
+			v.set_object (arguments);
+			return v;
+		}
+	}
+
+	/**
+	 * One argument in an allocator's argument list: either the requested size, the address being
+	 * freed, or a constant the target function needs in that slot.
+	 */
+	public sealed class BareboneCallArgument : Object {
+		public BareboneCallArgumentRole role {
+			get;
+			construct;
+		}
+
+		public uint64 value {
+			get;
+			construct;
+		}
+
+		public BareboneCallArgument (BareboneCallArgumentRole role, uint64 value) {
+			Object (role: role, value: value);
+		}
+
+		public static BareboneCallArgument? parse (Json.Node node) {
+			if (node.get_value_type () == typeof (string)) {
+				unowned string text = node.get_string ();
+				if (text == "size")
+					return new BareboneCallArgument (SIZE, 0);
+				if (text == "address")
+					return new BareboneCallArgument (ADDRESS, 0);
+			}
+
+			uint64 literal;
+			if (!BareboneMemoryAddress.try_deserialize (node, out literal))
+				return null;
+			return new BareboneCallArgument (LITERAL, literal);
+		}
+	}
+
+	public enum BareboneCallArgumentRole {
+		SIZE,
+		ADDRESS,
+		LITERAL
+	}
+
+	public sealed class BareboneAgentConfig : Object, Json.Serializable {
+		public string path {
+			get;
+			set;
+		}
+
+		public BareboneTransportConfig transport {
+			get;
+			set;
+		}
+
+		public void check () throws Error {
+			if (transport == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
+			transport.check ();
+
+			if (path == null && !(transport is BareboneDeviceTransportConfig)
+					&& !(transport is BareboneSocketTransportConfig))
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "transport") {
+				BareboneTransportConfig transport;
+				Type t = typeof (BareboneInvalidTransportConfig);
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					switch (property_node.get_object ().get_string_member_with_default ("type", "invalid")) {
+					case "hostlink":
+						t = typeof (BareboneHostlinkTransportConfig);
+						break;
+					case "vsock":
+						t = typeof (BareboneVsockTransportConfig);
+						break;
+					case "device":
+						t = typeof (BareboneDeviceTransportConfig);
+						break;
+					case "socket":
+						t = typeof (BareboneSocketTransportConfig);
+						break;
+					default:
+						break;
+					}
+					transport = (BareboneTransportConfig) Json.gobject_deserialize (t, property_node);
+				} else {
+					transport = new BareboneInvalidTransportConfig ();
+				}
+
+				var v = Value (t);
+				v.set_object (transport);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+	}
+
+	public abstract class BareboneTransportConfig : Object {
+		public abstract void check () throws Error;
+	}
+
+	public sealed class BareboneInvalidTransportConfig : BareboneTransportConfig {
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is invalid");
+		}
+	}
+
+	public sealed class BareboneHostlinkTransportConfig : BareboneTransportConfig {
+		public string qmp {
+			get;
+			set;
+		}
+
+		public string? bus {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (qmp == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
+			if (!qmp.has_prefix ("unix:"))
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
+		}
+	}
+
+	/**
+	 * Vsock transport. The agent inside the guest kernel connects out to the host
+	 * over AF_VSOCK on `port`. The host can't speak vsock directly from frida-core
+	 * (the hypervisor proxies it), so a UNIX-socket bridge is provided by the
+	 * embedder (e.g. vphone-cli); frida-core just reads/writes that socket.
+	 */
+	public sealed class BareboneVsockTransportConfig : BareboneTransportConfig {
+		/** Path to a UNIX socket the embedder has bridged to the guest's hostlink endpoint. */
+		public string socket_path {
+			get;
+			set;
+		}
+
+		/** Vsock port the guest agent will connect to (advertised to the agent via its config). */
+		public uint port {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (socket_path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.socket_path' is missing");
+			if (port == 0)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.port' is missing");
+		}
+	}
+
+	/**
+	 * An agent already resident in the target, reached through a device node it
+	 * exposes. Nothing is injected, so there is no image and no stub.
+	 */
+	public sealed class BareboneDeviceTransportConfig : BareboneTransportConfig {
+		public string path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
+		}
+	}
+
+	/**
+	 * An agent already resident in the target, reached over a UNIX socket that the
+	 * hypervisor has bridged to a port the guest kernel holds open. Nothing is
+	 * injected, so there is no image and no stub.
+	 */
+	public sealed class BareboneSocketTransportConfig : BareboneTransportConfig {
+		public string path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
+		}
+	}
+
+	public sealed class BareboneImageConfig : Object, Json.Serializable {
+		public string file {
+			get;
+			set;
+		}
+
+		public BareboneMemoryAddress base {
+			get;
+			set;
+		}
+
+		public Gee.Map<string, uint64?> symbols {
+			get;
+			set;
+			default = new Gee.HashMap<string, uint64?> ();
+		}
+
+		public void check () throws Error {
+			if (file == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.file' is missing");
+
+			if (@base != null)
+				@base.check ();
+
+			if (symbols == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.symbols' is invalid");
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "base") {
+				value = BareboneMemoryAddress.deserialize ("image.base", property_node);
+				return true;
+			}
+
+			if (property_name == "symbols") {
+				Gee.Map<string, uint64?> syms = null;
+
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					syms = new Gee.HashMap<string, uint64?> ();
+
+					property_node.get_object ().foreach_member ((obj, name, node) => {
+						if (syms == null)
+							return;
+
+						uint64 addr;
+						if (!BareboneMemoryAddress.try_deserialize (node, out addr)) {
+							syms = null;
+							return;
+						}
+
+						syms[name] = addr;
+					});
+				}
+
+				value = syms;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+	}
+
+	public abstract class BareboneMemoryAddress : Object {
+		public string label {
+			get;
+			construct;
+		}
+
+		public uint64 address {
+			get;
+			construct;
+		}
+
+		public abstract void check () throws Error;
+
+		internal static BareboneMemoryAddress deserialize (string label, Json.Node node) {
+			uint64 address;
+			if (!try_deserialize (node, out address))
+				return new BareboneInvalidMemoryAddress (label);
+			return new BareboneNonNullMemoryAddress (label, address);
+		}
+
+		internal static bool try_deserialize (Json.Node node, out uint64 address) {
+			Type t = node.get_value_type ();
+
+			if (t == typeof (string))
+				return uint64.try_parse (node.get_string (), out address, null, 16);
+
+			if (t == typeof (int64)) {
+				address = node.get_int ();
+				return true;
+			}
+
+			address = 0;
+			return false;
+		}
+	}
+
+	public sealed class BareboneInvalidMemoryAddress : BareboneMemoryAddress {
+		public BareboneInvalidMemoryAddress (string label) {
+			Object (label: label);
+		}
+
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for '%s' is invalid", label);
+		}
+	}
+
+	public sealed class BareboneNonNullMemoryAddress : BareboneMemoryAddress {
+		public BareboneNonNullMemoryAddress (string label, uint64 address) {
+			Object (label: label, address: address);
+		}
+
+		public override void check () throws Error {
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Config for '%s' cannot be NULL", label);
 		}
 	}
 

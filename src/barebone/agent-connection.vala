@@ -12,10 +12,10 @@ namespace Frida.Barebone {
 		private ByteOrder byte_order;
 		private uint pointer_size;
 
-		private AgentConfig agent_config;
-		private VsockTransportConfig? vsock_transport;
-		private ImageConfig? image_config;
-		private KernelKind kernel_kind;
+		private BareboneAgentConfig agent_config;
+		private BareboneVsockTransportConfig? vsock_transport;
+		private BareboneImageConfig? image_config;
+		private BareboneKernelKind kernel_kind;
 		private KernelRelocation? relocation;
 		private uint64 kernel_base;
 		private Machine machine;
@@ -34,8 +34,8 @@ namespace Frida.Barebone {
 		private const uint INJECT_MAX_ATTEMPTS = 100;
 		private const uint INJECT_POLL_INTERVAL_MS = 100;
 
-		public static async AgentConnection open (AgentConfig agent_config, ImageConfig? image_config,
-				KernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
+		public static async AgentConnection open (BareboneAgentConfig agent_config, BareboneImageConfig? image_config,
+				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
 				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
 				Cancellable? cancellable) throws Error, IOError {
 			var connection = new AgentConnection () {
@@ -131,9 +131,9 @@ namespace Frida.Barebone {
 				}
 			}
 
-			KernelKind kind = kernel_kind;
+			BareboneKernelKind kind = kernel_kind;
 			if (kind == AUTO)
-				kind = (image_config != null) ? KernelKind.XNU : KernelKind.BARE;
+				kind = (image_config != null) ? BareboneKernelKind.XNU : BareboneKernelKind.BARE;
 
 			foreach (var s in kernel_symbols) {
 				symbols[s.name] = s;
@@ -242,10 +242,10 @@ namespace Frida.Barebone {
 		}
 
 		private async Variant resolve_transport (Cancellable? cancellable) throws Error, IOError {
-			if (agent_config.transport is HostlinkTransportConfig)
-				return yield connect_virtio_transport ((HostlinkTransportConfig) agent_config.transport, cancellable);
-			if (agent_config.transport is VsockTransportConfig) {
-				var config = (VsockTransportConfig) agent_config.transport;
+			if (agent_config.transport is BareboneHostlinkTransportConfig)
+				return yield connect_virtio_transport ((BareboneHostlinkTransportConfig) agent_config.transport, cancellable);
+			if (agent_config.transport is BareboneVsockTransportConfig) {
+				var config = (BareboneVsockTransportConfig) agent_config.transport;
 				vsock_transport = config;
 				return new Variant.tuple ({
 					new Variant.byte (TRANSPORT_KIND_VSOCK),
@@ -280,7 +280,7 @@ namespace Frida.Barebone {
 #endif
 		}
 
-		private async Variant connect_virtio_transport (HostlinkTransportConfig config, Cancellable? cancellable)
+		private async Variant connect_virtio_transport (BareboneHostlinkTransportConfig config, Cancellable? cancellable)
 				throws Error, IOError {
 			var qmp = yield QmpClient.open (config.qmp, 0, cancellable);
 			var link = yield qmp.open_hostlink (config.bus, cancellable);

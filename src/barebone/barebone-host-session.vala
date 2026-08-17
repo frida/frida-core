@@ -56,11 +56,11 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
-			Barebone.Config? config = null;
+			BareboneConfig? config = null;
 			if (options != null) {
 				Value? val = options.map["config"];
 				if (val != null) {
-					config = (Barebone.Config) val.get_object ();
+					config = (BareboneConfig) val.get_object ();
 					config.check ();
 				}
 			}
@@ -69,7 +69,7 @@ namespace Frida {
 			if (config == null && config_path != null) {
 				try {
 					var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
-					var cfg = (Barebone.Config) Json.gobject_from_data (typeof (Barebone.Config), config_data);
+					var cfg = (BareboneConfig) Json.gobject_from_data (typeof (BareboneConfig), config_data);
 					cfg.check ();
 					config = cfg;
 				} catch (GLib.Error e) {
@@ -78,11 +78,11 @@ namespace Frida {
 			}
 
 			if (config == null)
-				config = new Barebone.Config ();
+				config = new BareboneConfig ();
 
-			Barebone.AgentConfig? resident_agent = config.agent;
-			if (resident_agent != null && (resident_agent.transport is Barebone.DeviceTransportConfig
-					|| resident_agent.transport is Barebone.SocketTransportConfig)) {
+			BareboneAgentConfig? resident_agent = config.agent;
+			if (resident_agent != null && (resident_agent.transport is BareboneDeviceTransportConfig
+					|| resident_agent.transport is BareboneSocketTransportConfig)) {
 				host_session = yield attach_to_resident_agent (resident_agent.transport, cancellable);
 				host_session.agent_session_detached.connect (on_agent_session_detached);
 
@@ -91,7 +91,7 @@ namespace Frida {
 
 			SocketConnectable connectable;
 			try {
-				Barebone.ConnectionConfig c = config.connection;
+				BareboneConnectionConfig c = config.connection;
 				connectable = NetworkAddress.parse (c.host, c.port);
 			} catch (GLib.Error e) {
 				throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
@@ -110,7 +110,7 @@ namespace Frida {
 			}
 
 			GDB.Client gdb;
-			if (config.connection.flavor == Barebone.StubFlavor.VZ)
+			if (config.connection.flavor == BareboneStubFlavor.VZ)
 				gdb = yield Barebone.VzStubClient.open (stream, cancellable);
 			else
 				gdb = yield GDB.Client.open (stream, cancellable);
@@ -157,7 +157,7 @@ namespace Frida {
 			// SPTM kernel collection the config-supplied addresses are static and must be translated.
 			Barebone.KernelRelocation? relocation = null;
 			uint64 kernel_base = 0;
-			Barebone.ImageConfig? image = config.image;
+			BareboneImageConfig? image = config.image;
 			if (image != null) {
 				if (image.base != null) {
 					kernel_base = image.base.address;
@@ -183,20 +183,20 @@ namespace Frida {
 			}
 
 			Barebone.Allocator allocator;
-			Barebone.AllocatorConfig? ac = config.allocator;
+			BareboneAllocatorConfig? ac = config.allocator;
 			if (ac == null)
 				ac = infer_allocator_config (config.kernel, kernel_symbols);
 			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
-			} else if (ac is Barebone.PhysicalAllocatorConfig) {
+			} else if (ac is BarebonePhysicalAllocatorConfig) {
 				allocator = new Barebone.PhysicalAllocator (machine, page_size,
-					(Barebone.PhysicalAllocatorConfig) ac);
-			} else if (ac is Barebone.TargetFunctionsAllocatorConfig) {
-				var tfa = (Barebone.TargetFunctionsAllocatorConfig) ac;
+					(BarebonePhysicalAllocatorConfig) ac);
+			} else if (ac is BareboneTargetFunctionsAllocatorConfig) {
+				var tfa = (BareboneTargetFunctionsAllocatorConfig) ac;
 				if (relocation != null) {
-					tfa.alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function",
+					tfa.alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function",
 						relocation.translate (tfa.alloc_function.address));
-					tfa.free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function",
+					tfa.free_function = new BareboneNonNullMemoryAddress ("allocator.free_function",
 						relocation.translate (tfa.free_function.address));
 				}
 				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, tfa);
@@ -205,7 +205,7 @@ namespace Frida {
 			}
 
 			Barebone.AgentConnection? agent_connection = null;
-			Barebone.AgentConfig? agent_config = config.agent;
+			BareboneAgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
 				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
 					relocation, kernel_base, machine, allocator, kernel_modules, kernel_symbols,
@@ -222,14 +222,14 @@ namespace Frida {
 			return host_session;
 		}
 
-		private async BareboneHostSession attach_to_resident_agent (Barebone.TransportConfig transport,
+		private async BareboneHostSession attach_to_resident_agent (BareboneTransportConfig transport,
 				Cancellable? cancellable) throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Resident agents are not available on this OS");
 #else
 			IOStream stream;
-			if (transport is Barebone.SocketTransportConfig) {
-				string path = ((Barebone.SocketTransportConfig) transport).path;
+			if (transport is BareboneSocketTransportConfig) {
+				string path = ((BareboneSocketTransportConfig) transport).path;
 				var client = new SocketClient ();
 				try {
 					stream = yield client.connect_async (new UnixSocketAddress (path), cancellable);
@@ -237,7 +237,7 @@ namespace Frida {
 					throw new Error.TRANSPORT ("Unable to connect to %s: %s", path, e.message);
 				}
 			} else {
-				string path = ((Barebone.DeviceTransportConfig) transport).path;
+				string path = ((BareboneDeviceTransportConfig) transport).path;
 				int fd = Posix.open (path, Posix.O_RDWR);
 				if (fd == -1)
 					throw new Error.TRANSPORT ("Unable to open %s: %s", path, Posix.strerror (Posix.errno));
@@ -250,7 +250,7 @@ namespace Frida {
 #endif
 		}
 
-		private static Barebone.AllocatorConfig? infer_allocator_config (Barebone.KernelKind kind,
+		private static BareboneAllocatorConfig? infer_allocator_config (BareboneKernelKind kind,
 				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
 			if (kind == WIN9X)
 				return infer_win9x_allocator_config (kernel_symbols);
@@ -259,40 +259,40 @@ namespace Frida {
 			return null;
 		}
 
-		private static Barebone.AllocatorConfig? infer_win9x_allocator_config (
+		private static BareboneAllocatorConfig? infer_win9x_allocator_config (
 				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
 			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "_HeapAllocate");
 			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "_HeapFree");
 			if (alloc == null || free == null)
 				return null;
 
-			return new Barebone.TargetFunctionsAllocatorConfig () {
-				alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
-				free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function", free.offset),
+			return new BareboneTargetFunctionsAllocatorConfig () {
+				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
+				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", free.offset),
 			};
 		}
 
 		// A driver uses the pool, and on NT the pool is executable. The paged and session allocators
 		// are not.
-		private static Barebone.AllocatorConfig? infer_winnt_allocator_config (
+		private static BareboneAllocatorConfig? infer_winnt_allocator_config (
 				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
 			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "ExAllocatePoolWithTag");
 			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "ExFreePoolWithTag");
 			if (alloc == null || free == null)
 				return null;
 
-			var alloc_arguments = new Gee.ArrayList<Barebone.CallArgument> ();
-			alloc_arguments.add (new Barebone.CallArgument (LITERAL, NON_PAGED_POOL));
-			alloc_arguments.add (new Barebone.CallArgument (SIZE, 0));
-			alloc_arguments.add (new Barebone.CallArgument (LITERAL, POOL_TAG));
+			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			alloc_arguments.add (new BareboneCallArgument (LITERAL, NON_PAGED_POOL));
+			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
+			alloc_arguments.add (new BareboneCallArgument (LITERAL, POOL_TAG));
 
-			var free_arguments = new Gee.ArrayList<Barebone.CallArgument> ();
-			free_arguments.add (new Barebone.CallArgument (ADDRESS, 0));
-			free_arguments.add (new Barebone.CallArgument (LITERAL, POOL_TAG));
+			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			free_arguments.add (new BareboneCallArgument (ADDRESS, 0));
+			free_arguments.add (new BareboneCallArgument (LITERAL, POOL_TAG));
 
-			return new Barebone.TargetFunctionsAllocatorConfig () {
-				alloc_function = new Barebone.NonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
-				free_function = new Barebone.NonNullMemoryAddress ("allocator.free_function", free.offset),
+			return new BareboneTargetFunctionsAllocatorConfig () {
+				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
+				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", free.offset),
 				alloc_arguments = alloc_arguments,
 				free_arguments = free_arguments,
 			};

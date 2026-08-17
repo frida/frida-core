@@ -104,7 +104,7 @@ namespace Frida.Barebone {
 
 		private uint64 cursor;
 
-		public PhysicalAllocator (Machine machine, size_t page_size, PhysicalAllocatorConfig config) {
+		public PhysicalAllocator (Machine machine, size_t page_size, BarebonePhysicalAllocatorConfig config) {
 			this.machine = machine;
 			this._page_size = page_size;
 			this.cursor = config.physical_base.address;
@@ -162,11 +162,11 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private size_t _page_size;
-		private TargetFunctionsAllocatorConfig config;
-		private Gee.List<CallArgument> alloc_arguments;
-		private Gee.List<CallArgument> free_arguments;
+		private BareboneTargetFunctionsAllocatorConfig config;
+		private Gee.List<BareboneCallArgument> alloc_arguments;
+		private Gee.List<BareboneCallArgument> free_arguments;
 
-		public TargetFunctionsAllocator (Machine machine, size_t page_size, TargetFunctionsAllocatorConfig config) {
+		public TargetFunctionsAllocator (Machine machine, size_t page_size, BareboneTargetFunctionsAllocatorConfig config) {
 			this.machine = machine;
 			this._page_size = page_size;
 			this.config = config;
@@ -190,10 +190,10 @@ namespace Frida.Barebone {
 			return new TargetAllocation (address, size, block, padded_size, machine, config, free_arguments);
 		}
 
-		private static uint64[] resolve_arguments (Gee.List<CallArgument> template, size_t size, uint64 address) {
+		private static uint64[] resolve_arguments (Gee.List<BareboneCallArgument> template, size_t size, uint64 address) {
 			var arguments = new uint64[template.size];
 			for (int i = 0; i != arguments.length; i++) {
-				CallArgument a = template[i];
+				BareboneCallArgument a = template[i];
 				switch (a.role) {
 					case SIZE:
 						arguments[i] = size;
@@ -227,11 +227,11 @@ namespace Frida.Barebone {
 			private uint64 block;
 			private size_t block_size;
 			private Machine machine;
-			private TargetFunctionsAllocatorConfig config;
-			private Gee.List<CallArgument> free_arguments;
+			private BareboneTargetFunctionsAllocatorConfig config;
+			private Gee.List<BareboneCallArgument> free_arguments;
 
 			public TargetAllocation (uint64 address, size_t size, uint64 block, size_t block_size, Machine m,
-					TargetFunctionsAllocatorConfig c, Gee.List<CallArgument> free_arguments) {
+					BareboneTargetFunctionsAllocatorConfig c, Gee.List<BareboneCallArgument> free_arguments) {
 				_virtual_address = address;
 				_size = size;
 				this.block = block;
