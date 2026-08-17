@@ -2386,15 +2386,78 @@ namespace Frida {
 		/** Full argument list for alloc_function, for allocators that don't take the size first.
 		 * NT's ExAllocatePoolWithTag(pool_type, size, tag) is ["0", "size", "0x64697246"].
 		 * Defaults to ["size", alloc_flags]. */
-		public Gee.List<BareboneCallArgument>? alloc_arguments {
+		internal Gee.List<BareboneCallArgument>? alloc_arguments {
 			get;
 			set;
 		}
 
 		/** Full argument list for free_function. Defaults to ["address", "size"]. */
-		public Gee.List<BareboneCallArgument>? free_arguments {
+		internal Gee.List<BareboneCallArgument>? free_arguments {
 			get;
 			set;
+		}
+
+		/**
+		 * Removes any configured arguments for alloc_function, restoring the default of
+		 * ["size", alloc_flags].
+		 */
+		public void clear_alloc_arguments () {
+			alloc_arguments = null;
+		}
+
+		/**
+		 * Adds an argument to pass to alloc_function, for allocators that don't take the size
+		 * first. NT's ExAllocatePoolWithTag(pool_type, size, tag) is ["0", "size", "0x64697246"].
+		 *
+		 * @param argument the argument to add
+		 */
+		public void add_alloc_argument (BareboneCallArgument argument) {
+			if (alloc_arguments == null)
+				alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			alloc_arguments.add (argument);
+		}
+
+		/**
+		 * Invokes @func for each configured alloc_function argument.
+		 *
+		 * @param func function called with each argument
+		 */
+		public void enumerate_alloc_arguments (Func<BareboneCallArgument> func) {
+			if (alloc_arguments == null)
+				return;
+			foreach (var argument in alloc_arguments)
+				func (argument);
+		}
+
+		/**
+		 * Removes any configured arguments for free_function, restoring the default of
+		 * ["address", "size"].
+		 */
+		public void clear_free_arguments () {
+			free_arguments = null;
+		}
+
+		/**
+		 * Adds an argument to pass to free_function.
+		 *
+		 * @param argument the argument to add
+		 */
+		public void add_free_argument (BareboneCallArgument argument) {
+			if (free_arguments == null)
+				free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			free_arguments.add (argument);
+		}
+
+		/**
+		 * Invokes @func for each configured free_function argument.
+		 *
+		 * @param func function called with each argument
+		 */
+		public void enumerate_free_arguments (Func<BareboneCallArgument> func) {
+			if (free_arguments == null)
+				return;
+			foreach (var argument in free_arguments)
+				func (argument);
 		}
 
 		public override void check () throws Error {
@@ -2410,7 +2473,7 @@ namespace Frida {
 			check_arguments ("allocator.free_arguments", free_arguments, ADDRESS);
 		}
 
-		public Gee.List<BareboneCallArgument> effective_alloc_arguments () {
+		public Gee.List<BareboneCallArgument> _effective_alloc_arguments () {
 			if (alloc_arguments != null)
 				return alloc_arguments;
 
@@ -2420,7 +2483,7 @@ namespace Frida {
 			return arguments;
 		}
 
-		public Gee.List<BareboneCallArgument> effective_free_arguments () {
+		public Gee.List<BareboneCallArgument> _effective_free_arguments () {
 			if (free_arguments != null)
 				return free_arguments;
 
@@ -2510,7 +2573,7 @@ namespace Frida {
 			Object (role: role, value: value);
 		}
 
-		public static BareboneCallArgument? parse (Json.Node node) {
+		internal static BareboneCallArgument? parse (Json.Node node) {
 			if (node.get_value_type () == typeof (string)) {
 				unowned string text = node.get_string ();
 				if (text == "size")
@@ -2690,10 +2753,41 @@ namespace Frida {
 			set;
 		}
 
-		public Gee.Map<string, uint64?> symbols {
+		internal Gee.Map<string, uint64?> symbols {
 			get;
 			set;
 			default = new Gee.HashMap<string, uint64?> ();
+		}
+
+		/**
+		 * Removes all configured symbols.
+		 */
+		public void clear_symbols () {
+			symbols = new Gee.HashMap<string, uint64?> ();
+		}
+
+		/**
+		 * Adds a symbol that the image itself doesn't provide.
+		 *
+		 * @param name the symbol's name
+		 * @param address the symbol's address, relative to the image's base
+		 */
+		public void add_symbol (string name, uint64 address) {
+			if (symbols == null)
+				symbols = new Gee.HashMap<string, uint64?> ();
+			symbols[name] = address;
+		}
+
+		/**
+		 * Invokes @func for each configured symbol.
+		 *
+		 * @param func function called with each symbol's name and address
+		 */
+		public void enumerate_symbols (HFunc<string, uint64?> func) {
+			if (symbols == null)
+				return;
+			foreach (var e in symbols.entries)
+				func (e.key, e.value);
 		}
 
 		public void check () throws Error {

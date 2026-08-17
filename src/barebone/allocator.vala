@@ -170,8 +170,8 @@ namespace Frida.Barebone {
 			this.machine = machine;
 			this._page_size = page_size;
 			this.config = config;
-			this.alloc_arguments = config.effective_alloc_arguments ();
-			this.free_arguments = config.effective_free_arguments ();
+			this.alloc_arguments = config._effective_alloc_arguments ();
+			this.free_arguments = config._effective_free_arguments ();
 		}
 
 		// A kernel allocator gives blocks with an alignment of less than a page, and the caller can

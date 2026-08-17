@@ -21,6 +21,13 @@ CORE_TAG_FIELD = f"{{{CORE_NAMESPACE}}}field"
 CORE_TAG_CONSTRUCTOR = f"{{{CORE_NAMESPACE}}}constructor"
 CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
 
+INTERNAL_INTERFACES = {
+    "Frida.HostSessionHub",
+    "Frida.AgentMessageSink",
+    "FridaBase.AgentMessageSink",
+    "Json.Serializable",
+}
+
 OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed |abstract )?(class|interface)\s+(\w+)\b")
 
 TOPLEVEL_NAMES = [
@@ -230,8 +237,7 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path, docs:
         for elem in core_elements + base_elements:
             if tag_name == "class":
                 for child in list(elem):
-                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in {"Frida.HostSessionHub", "Frida.AgentMessageSink",
-                                                                                   "FridaBase.AgentMessageSink"}) \
+                    if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in INTERNAL_INTERFACES) \
                             or child.tag == CORE_TAG_FIELD \
                             or child.get("name").startswith("_"):
                         elem.remove(child)
@@ -643,6 +649,19 @@ def emit_vapi(api, output_dir):
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
 
+def strip_internal_interfaces(declaration: str) -> str:
+    head, sep, rest = declaration.partition(" : ")
+    if not sep:
+        return declaration
+
+    bases_part, brace_sep, tail = rest.partition("{")
+
+    kept = [b.strip() for b in bases_part.split(",") if b.strip() not in INTERNAL_INTERFACES]
+    if not kept:
+        return f"{head} {brace_sep}{tail}"
+
+    return f"{head} : {', '.join(kept)} {brace_sep}{tail}"
+
 def emit_symbol_maps_from_source(output_dir: Path):
     with OutputFile(output_dir / 'frida-core.version') as f:
         f.write("{\n")
@@ -820,7 +839,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
                         ignoring = True
                     else:
                         current_object_type = object_type_by_name[name]
-                        current_object_type.vapi_declaration = stripped_line
+                        current_object_type.vapi_declaration = strip_internal_interfaces(stripped_line)
                 elif stripped_line == "}":
                     current_enum = None
                     current_object_type = None

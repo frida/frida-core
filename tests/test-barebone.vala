@@ -282,13 +282,13 @@ namespace Frida.BareboneTest {
 			var allocator = (BareboneTargetFunctionsAllocatorConfig) parse_config (
 				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"804e1000\", \"free_function\": \"804e2000\", \"alloc_arguments\": [ \"0\", \"size\", \"64697246\" ], \"free_arguments\": [ \"address\", \"64697246\" ] } }").allocator;
 
-			var alloc = allocator.effective_alloc_arguments ();
+			var alloc = allocator._effective_alloc_arguments ();
 			assert_true (alloc.size == 3);
 			assert_argument (alloc[0], BareboneCallArgumentRole.LITERAL, 0);
 			assert_argument (alloc[1], BareboneCallArgumentRole.SIZE, 0);
 			assert_argument (alloc[2], BareboneCallArgumentRole.LITERAL, 0x64697246);
 
-			var free = allocator.effective_free_arguments ();
+			var free = allocator._effective_free_arguments ();
 			assert_true (free.size == 2);
 			assert_argument (free[0], BareboneCallArgumentRole.ADDRESS, 0);
 			assert_argument (free[1], BareboneCallArgumentRole.LITERAL, 0x64697246);
@@ -297,7 +297,7 @@ namespace Frida.BareboneTest {
 			var shorthand = (BareboneTargetFunctionsAllocatorConfig) parse_config (
 				"{ \"allocator\": { \"mode\": \"target-functions\", \"alloc_function\": \"1000\", \"free_function\": \"2000\", \"alloc_flags\": 3 } }").allocator;
 
-			var inferred = shorthand.effective_alloc_arguments ();
+			var inferred = shorthand._effective_alloc_arguments ();
 			assert_true (inferred.size == 2);
 			assert_argument (inferred[0], BareboneCallArgumentRole.SIZE, 0);
 			assert_argument (inferred[1], BareboneCallArgumentRole.LITERAL, 3);
