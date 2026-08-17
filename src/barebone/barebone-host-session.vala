@@ -367,6 +367,9 @@ namespace Frida {
 		}
 
 		private Gee.Map<uint, uint> injected_agents = new Gee.HashMap<uint, uint> ();
+		private uint spawn_helper_pid = 0;
+
+		private const string SPAWN_HELPER_NAME = "explorer.exe";
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
@@ -432,8 +435,15 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
-		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
+				throws Error, IOError {
+			if (connection == null)
+				throw_not_supported ();
+
+			uint helper = yield acquire_spawn_helper (cancellable);
+
+			return yield connection.spawn_process (helper, command_line_of (program, options),
+				cancellable);
 		}
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
@@ -441,7 +451,10 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (spawn_helper_pid == 0)
+				throw new Error.INVALID_ARGUMENT ("Process %u was not spawned by us", pid);
+
+			yield connection.resume_process (spawn_helper_pid, pid, cancellable);
 		}
 
 		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -541,6 +554,47 @@ namespace Frida {
 
 		// Each process has one copy for all its sessions, and the copy stays until the last session
 		// ends.
+		// Only ring 3 can make a process. Thus one process holds a copy of the agent, and that copy
+		// makes each new process and holds it.
+		private async uint acquire_spawn_helper (Cancellable? cancellable) throws Error, IOError {
+			if (spawn_helper_pid != 0)
+				return spawn_helper_pid;
+
+			uint pid = 0;
+			var processes = yield connection.enumerate_processes (Scope.MINIMAL, cancellable);
+			foreach (HostProcessInfo p in processes) {
+				if (p.name.down () == SPAWN_HELPER_NAME) {
+					pid = p.pid;
+					break;
+				}
+			}
+			if (pid == 0)
+				throw new Error.NOT_SUPPORTED ("Found no %s to spawn from", SPAWN_HELPER_NAME);
+
+			yield acquire_injected_agent (pid, cancellable);
+			spawn_helper_pid = pid;
+
+			return pid;
+		}
+
+		private static string command_line_of (string program, HostSpawnOptions options) {
+			var line = new StringBuilder ();
+			line.append (quoted (program));
+			if (options.has_argv) {
+				foreach (unowned string argument in options.argv[1:])
+					line.append_c (' ').append (quoted (argument));
+			}
+
+			return line.str;
+		}
+
+		private static string quoted (string token) {
+			if (!token.contains (" "))
+				return token;
+
+			return "\"" + token + "\"";
+		}
+
 		private async void acquire_injected_agent (uint pid, Cancellable? cancellable) throws Error, IOError {
 			uint users = injected_agents[pid];
 			if (users != 0) {

@@ -2,6 +2,7 @@
 // reaches nothing of the kernel's, thus it has primitives of its own, which frida_win9x_user_main
 // selects before it does anything else.
 
+use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::Ordering;
 
@@ -109,6 +110,8 @@ fn resolve_user_api() {
             virtual_free: kernel32_export(b"VirtualFree"),
             virtual_protect: kernel32_export(b"VirtualProtect"),
             create_thread: kernel32_export(b"CreateThread"),
+            create_process: kernel32_export(b"CreateProcessA"),
+            resume_thread: kernel32_export(b"ResumeThread"),
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
@@ -134,6 +137,8 @@ struct UserApi {
     virtual_free: u32,
     virtual_protect: u32,
     create_thread: u32,
+    create_process: u32,
+    resume_thread: u32,
     create_event: u32,
     set_event: u32,
     wait_for_single_object: u32,
@@ -153,6 +158,8 @@ static mut USER_API: UserApi = UserApi {
     virtual_free: 0,
     virtual_protect: 0,
     create_thread: 0,
+    create_process: 0,
+    resume_thread: 0,
     create_event: 0,
     set_event: 0,
     wait_for_single_object: 0,
@@ -175,6 +182,81 @@ fn event_for(token: *const u8) -> u32 {
         Err(raced) => raced,
     }
 }
+
+// A process starts held, thus a caller can attach to it before it runs any of its own code.
+// The wide entry points of this system are stubs that fail, thus the narrow one.
+pub fn spawn_process(command_line: &str) -> u32 {
+    let create_process: unsafe extern "stdcall" fn(u32, *mut u8, u32, u32, u32, u32, u32, u32,
+        *mut u8, *mut u32) -> u32 = unsafe {
+        core::mem::transmute(user_api().create_process as usize)
+    };
+
+    let line = alloc(command_line.len() + 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(command_line.as_ptr(), line, command_line.len());
+        line.add(command_line.len()).write(0);
+    }
+
+    let mut startup = [0u32; STARTUP_INFO_WORDS];
+    startup[0] = (STARTUP_INFO_WORDS * 4) as u32;
+    let mut created = [0u32; PROCESS_INFORMATION_WORDS];
+
+    let ok = unsafe {
+        create_process(0, line, 0, 0, 0, CREATE_SUSPENDED, 0, 0, startup.as_mut_ptr() as *mut u8,
+            created.as_mut_ptr())
+    };
+    free(line, command_line.len() + 1);
+    if ok == 0 {
+        return 0;
+    }
+
+    let pid = created[PROCESS_INFORMATION_PID];
+    unsafe {
+        held().insert(pid, HeldProcess {
+            process: created[PROCESS_INFORMATION_PROCESS],
+            thread: created[PROCESS_INFORMATION_THREAD],
+        })
+    };
+
+    pid
+}
+
+pub fn resume_process(pid: u32) -> bool {
+    let Some(held) = (unsafe { held().remove(&pid) }) else {
+        return false;
+    };
+
+    let resume_thread: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().resume_thread as usize) };
+    let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().close_handle as usize) };
+
+    unsafe {
+        let resumed = resume_thread(held.thread) != u32::MAX;
+        close_handle(held.thread);
+        close_handle(held.process);
+
+        resumed
+    }
+}
+
+fn held() -> &'static mut BTreeMap<u32, HeldProcess> {
+    unsafe { (&raw mut HELD_PROCESSES).as_mut().unwrap() }
+}
+
+struct HeldProcess {
+    process: u32,
+    thread: u32,
+}
+
+static mut HELD_PROCESSES: BTreeMap<u32, HeldProcess> = BTreeMap::new();
+
+const CREATE_SUSPENDED: u32 = 0x4;
+const STARTUP_INFO_WORDS: usize = 17;
+const PROCESS_INFORMATION_WORDS: usize = 4;
+const PROCESS_INFORMATION_PROCESS: usize = 0;
+const PROCESS_INFORMATION_THREAD: usize = 1;
+const PROCESS_INFORMATION_PID: usize = 2;
 
 pub fn alloc(size: usize) -> *mut u8 {
     let get_process_heap: unsafe extern "stdcall" fn() -> u32 =

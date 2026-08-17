@@ -80,6 +80,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/spawns-and-resumes-in-live-guest", () => {
+			var h = new Harness ((h) => win9x_spawns_and_resumes_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/shares-one-agent-between-sessions-in-live-guest", () => {
 			var h = new Harness ((h) => shares_one_agent_between_sessions_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1811,6 +1816,55 @@ namespace Frida.BareboneTest {
 
 	// Two sessions on one process use the same copy. Thus one session can detach and the other
 	// keeps a working agent and its own scripts.
+	private static async void win9x_spawns_and_resumes_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
+			assert_true (pid != 0);
+
+			// The process is held, thus it is there to attach to and has run none of its own code.
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("send(Process.id >>> 0);", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			// The script answers from the process that was spawned, thus it runs there before the
+			// process has run any of its own code.
+			assert_true (messages[0].contains (pid.to_string ()));
+
+			yield device.resume (pid, null);
+
+			// The process is no longer held, thus there is nothing left to resume.
+			try {
+				yield device.resume (pid, null);
+				assert_not_reached ();
+			} catch (GLib.Error e) {
+			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private static async void shares_one_agent_between_sessions_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)

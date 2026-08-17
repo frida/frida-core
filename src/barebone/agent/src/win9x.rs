@@ -12,6 +12,9 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
+// A process is made in ring 3, thus a copy of the agent does this work.
+pub use crate::win9x_user::{resume_process, spawn_process};
+
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
 const PAGE_SIZE: u32 = 4096;

@@ -380,6 +380,22 @@ namespace Frida.Barebone {
 		}
 
 
+		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield execute_command (Command.SPAWN_PROCESS, new Variant.string (command_line),
+				cancellable, helper_pid);
+			if (!response.is_of_type (VariantType.UINT32))
+				throw new Error.PROTOCOL ("Invalid spawn_process response format");
+
+			return response.get_uint32 ();
+		}
+
+		public async void resume_process (uint helper_pid, uint pid, Cancellable? cancellable)
+				throws Error, IOError {
+			yield execute_command (Command.RESUME_PROCESS, new Variant.uint32 (pid), cancellable,
+				helper_pid);
+		}
+
 		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
 			yield execute_command (Command.DETACH_FROM_PROCESS, new Variant.uint32 (pid), cancellable);
 		}
@@ -645,7 +661,7 @@ namespace Frida.Barebone {
 			timeout_source.set_callback (() => {
 				Promise<Variant>? p;
 				if (pending_requests.unset (request_id, out p))
-					p.reject (new Error.TIMED_OUT ("Command timed out"));
+					p.reject (new Error.TIMED_OUT ("%s timed out", command.to_string ()));
 				return Source.REMOVE;
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
@@ -844,6 +860,8 @@ namespace Frida.Barebone {
 			DETACH_FROM_PROCESS = 11,
 			PLACE_AGENT_IN_PROCESS = 12,
 			START_AGENT_IN_PROCESS = 13,
+			SPAWN_PROCESS = 14,
+			RESUME_PROCESS = 15,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

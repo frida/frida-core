@@ -109,6 +109,8 @@ pub enum FridaCommand {
     DetachFromProcess = 11,
     PlaceAgentInProcess = 12,
     StartAgentInProcess = 13,
+    SpawnProcess = 14,
+    ResumeProcess = 15,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -129,6 +131,8 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
             FridaCommand::PlaceAgentInProcess => write!(f, "PlaceAgentInProcess"),
             FridaCommand::StartAgentInProcess => write!(f, "StartAgentInProcess"),
+            FridaCommand::SpawnProcess => write!(f, "SpawnProcess"),
+            FridaCommand::ResumeProcess => write!(f, "ResumeProcess"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
@@ -926,6 +930,10 @@ fn process_incoming_message(variant: *mut GVariant) {
             #[cfg(feature = "winnt")]
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
             #[cfg(feature = "win9x")]
+            FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
+            #[cfg(feature = "win9x")]
+            FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
+            #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
                 unsafe {
                     PENDING_DETACH = (request_id, g_variant_get_uint32(payload_variant));
@@ -1192,6 +1200,30 @@ fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
             .unwrap()
             .remove(&request_id)
     }
+}
+
+#[cfg(feature = "win9x")]
+fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
+    unsafe {
+        let command_line = core::ffi::CStr::from_ptr(g_variant_get_string(payload,
+            core::ptr::null_mut()));
+        let pid = kernel::spawn_process(command_line.to_str().unwrap_or(""));
+        if pid == 0 {
+            return HandlerResponse::error("Unable to spawn");
+        }
+
+        HandlerResponse::success(g_variant_new_uint32(pid))
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn handle_resume_process(payload: *mut GVariant) -> HandlerResponse {
+    let resumed = unsafe { kernel::resume_process(g_variant_get_uint32(payload)) };
+    if !resumed {
+        return HandlerResponse::error("Process is not held");
+    }
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
 fn handle_create_script(payload_variant: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
