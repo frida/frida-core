@@ -79,6 +79,8 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
         crate::route_frames_through(arena as u64);
     }
 
+    crate::gum_windows::watch_the_loader();
+
     while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
         while let Some(frame) = take_frame_from_host(arena as u64) {
             crate::on_frame_from_host(frame);

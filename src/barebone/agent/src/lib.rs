@@ -685,11 +685,6 @@ unsafe fn init_gum() {
 // do. A copy in a process would take it from the half that uses it.
 pub(crate) unsafe fn init_gum_without_exceptor() {
     unsafe { init_gum_with_exceptor(false) };
-
-    #[cfg(feature = "winnt")]
-    if running_in_a_process() {
-        crate::gum_windows::watch_the_loader();
-    }
 }
 
 unsafe fn init_gum_with_exceptor(exceptor: bool) {
