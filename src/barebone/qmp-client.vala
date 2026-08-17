@@ -50,8 +50,12 @@ namespace Frida.Barebone {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			SocketConnectable connectable;
 			if (address.has_prefix ("unix:")) {
+#if WINDOWS
+				throw new Error.NOT_SUPPORTED ("UNIX sockets are not available on this OS");
+#else
 				connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
 					UnixSocketAddressType.PATH);
+#endif
 			} else {
 				connectable = parse_socket_address (address, port, "localhost", 4444);
 			}
