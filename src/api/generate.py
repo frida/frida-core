@@ -614,6 +614,9 @@ def emit_vapi(api, output_dir):
         output_vapi_file.write("\n\tpublic static void deinit ();")
         output_vapi_file.write("\n\tpublic static unowned GLib.MainContext get_main_context ();")
 
+        for delegate in referenced_delegates(api):
+            output_vapi_file.write("\n\t" + delegate)
+
         for object_type in api.object_types:
             output_vapi_file.write("\n\n\t%s" % object_type.vapi_declaration)
             sections = []
@@ -648,6 +651,22 @@ def emit_vapi(api, output_dir):
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
+        output_deps_file.write("json-glib-1.0\n")
+
+def referenced_delegates(api) -> List[str]:
+    members = []
+    for object_type in api.object_types:
+        members.extend(object_type.vapi_properties)
+        members.extend(object_type.vapi_methods)
+        members.extend(object_type.vapi_signals)
+        if object_type.vapi_constructor is not None:
+            members.append(object_type.vapi_constructor)
+    for func in api.functions:
+        members.append(func.vapi_declaration)
+    text = "\n".join(members)
+
+    return [declaration for name, declaration in api.delegates
+            if re.search(r"\bFrida\." + name + r"\b", text) is not None]
 
 def strip_internal_interfaces(declaration: str) -> str:
     head, sep, rest = declaration.partition(" : ")
@@ -873,7 +892,11 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
         m = re.search(r"^[\w\*]+ frida_{}.+?;".format(f.name), all_headers, re.MULTILINE | re.DOTALL)
         f.c_prototype = beautify_cprototype(m.group(0))
 
-    return ApiSpec(frida_version, frida_version_components, api_version, object_types, functions, enum_types, error_types)
+    delegates = [(m.group(1), m.group(0).strip())
+                 for m in re.finditer(r"^\tpublic delegate .+?\b(\w+) \(.*\);$", core_vapi + base_vapi, re.MULTILINE)]
+
+    return ApiSpec(frida_version, frida_version_components, api_version, object_types, functions, enum_types, error_types,
+                   delegates)
 
 def function_is_public(name):
     return not name.startswith("_") and \
@@ -914,6 +937,7 @@ class ApiSpec:
     functions: List[ApiFunction]
     enum_types: List[ApiEnum]
     error_types: List[ApiEnum]
+    delegates: List[tuple]
 
 class ApiEnum:
     def __init__(self, name):
