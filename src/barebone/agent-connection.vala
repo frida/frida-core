@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class AgentConnection : Object, AsyncInitable {
-		public signal void script_message (AgentScriptId id, string json, Bytes? data);
+		public signal void script_message (uint pid, AgentScriptId id, string json, Bytes? data);
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -728,7 +728,7 @@ namespace Frida.Barebone {
 						unowned string json;
 						payload.get ("(u&s)", out script_handle, out json);
 
-						script_message (AgentScriptId (script_handle), json, null);
+						script_message (destination, AgentScriptId (script_handle), json, null);
 					} else if (command_code == Command.REMAP_WRITABLE_PAGES) {
 						Variant result;
 						try {

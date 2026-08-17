@@ -795,7 +795,11 @@ namespace Frida {
 			transmitter.notify_rx_batch_id (batch_id);
 		}
 
-		private void on_message_from_script (AgentScriptId id, string json, Bytes? data) {
+		// Each copy numbers its scripts from one, thus take only what comes from our own process.
+		private void on_message_from_script (uint source, AgentScriptId id, string json, Bytes? data) {
+			if (source != pid)
+				return;
+
 			transmitter.post_message_from_script (id, json, data);
 		}
 	}

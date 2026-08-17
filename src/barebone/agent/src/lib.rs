@@ -1311,7 +1311,7 @@ unsafe extern "C" fn frida_message_handler(
             c"(yquv)".as_ptr(),
             FridaCommand::ScriptMessage as u8 as u32,
             0u32,
-            0u32,
+            source_process_id(),
             g_variant_new(c"(us)".as_ptr(), script_id, message),
         );
 
@@ -1321,6 +1321,17 @@ unsafe extern "C" fn frida_message_handler(
 
         g_variant_unref(message_variant);
     }
+}
+
+// Each copy numbers its scripts from one, thus a message says which process it comes from and
+// the host has no two scripts of the same name.
+fn source_process_id() -> u32 {
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    if unsafe { ROUTED_ARENA } != 0 {
+        return kernel::current_process_id();
+    }
+
+    0
 }
 
 fn handle_load_script(payload_variant: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {

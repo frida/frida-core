@@ -80,6 +80,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/keeps-two-processes-apart-in-live-guest", () => {
+			var h = new Harness ((h) => keeps_two_processes_apart_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => win9x_spawns_and_resumes_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1816,6 +1821,59 @@ namespace Frida.BareboneTest {
 
 	// Two sessions on one process use the same copy. Thus one session can detach and the other
 	// keeps a working agent and its own scripts.
+	private static async void keeps_two_processes_apart_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint first_pid = yield find_explorer (device);
+			uint second_pid = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
+
+			var first = yield device.attach (first_pid, null, null);
+			var second = yield device.attach (second_pid, null, null);
+
+			// Each copy numbers its scripts from one, thus both of these have the same name.
+			var here = yield first.create_script ("send(Process.id >>> 0);", null, null);
+			var there = yield second.create_script ("send(Process.id >>> 0);", null, null);
+
+			var from_here = new Gee.ArrayList<string> ();
+			var from_there = new Gee.ArrayList<string> ();
+			here.message.connect ((json, data) => {
+				from_here.add (json);
+			});
+			there.message.connect ((json, data) => {
+				from_there.add (json);
+			});
+
+			yield here.load (null);
+			yield there.load (null);
+			while (from_here.size < 1 || from_there.size < 1)
+				yield h.process_events ();
+
+			// Each session hears its own process, and only that one.
+			assert_true (from_here.size == 1);
+			assert_true (from_here[0].contains (first_pid.to_string ()));
+			assert_true (from_there.size == 1);
+			assert_true (from_there[0].contains (second_pid.to_string ()));
+
+			yield device.resume (second_pid, null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private static async void win9x_spawns_and_resumes_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
