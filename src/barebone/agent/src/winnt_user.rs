@@ -104,6 +104,7 @@ pub static USER: Primitives = Primitives {
     wait,
     wake,
     yield_now,
+    current_process_id,
     current_thread_id,
     shared_data,
 };
@@ -328,6 +329,10 @@ fn wake(_token: *const u8) {
 
 fn yield_now() {
     unsafe { (user_api().yield_execution)() };
+}
+
+fn current_process_id() -> u32 {
+    current_client_id(BLOCK_PROCESS_ID)
 }
 
 fn current_thread_id() -> u64 {

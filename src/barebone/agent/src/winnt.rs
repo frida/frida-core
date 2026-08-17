@@ -293,6 +293,10 @@ const SYSTEM_TIME_OFFSET: usize = 0x14;
 const UNIX_EPOCH_MICROS: i64 = 11_644_473_600_000_000;
 
 // A kernel export is not available in ring 3. Thus the copy reads its own block.
+pub fn current_process_id() -> u32 {
+    (primitives().current_process_id)()
+}
+
 pub fn current_thread_id() -> u64 {
     (primitives().current_thread_id)()
 }
@@ -1401,6 +1405,7 @@ pub struct Primitives {
     pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
     pub wake: fn(*const u8),
     pub yield_now: fn(),
+    pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub shared_data: fn() -> usize,
 }
@@ -1427,6 +1432,7 @@ static KERNEL: Primitives = Primitives {
     wait: kernel::wait,
     wake: kernel::wake,
     yield_now: kernel::yield_now,
+    current_process_id: kernel::current_process_id,
     current_thread_id: kernel::current_thread_id,
     shared_data: kernel::shared_data,
 };
@@ -1500,6 +1506,10 @@ mod kernel {
         unsafe {
             (_ZwYieldExecution)();
         }
+    }
+
+    pub fn current_process_id() -> u32 {
+        unsafe { (_PsGetProcessId)((_PsGetThreadProcess)((_PsGetCurrentThread)())) }
     }
 
     pub fn current_thread_id() -> u64 {

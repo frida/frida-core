@@ -558,7 +558,7 @@ fn transport_set(driver: Transport) {
 
 #[inline(always)]
 fn send_frame(frame: &[u8]) {
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     if unsafe { ROUTED_ARENA } != 0 {
         kernel::publish_frame_to_host(unsafe { ROUTED_ARENA }, frame);
         return;
