@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
-pub use crate::winnt_user::{resume_process, spawn_process};
+pub use crate::winnt_user::{LoadedModule, enumerate_modules, resume_process, spawn_process};
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
 #[cfg(target_arch = "x86")]
@@ -1646,6 +1646,47 @@ fn name_matches(name: usize, wanted: &[u8]) -> bool {
 
     unsafe { ((name + wanted.len() * 2) as *const u16).read() == 0 }
 }
+// A module says what it exports in its own headers, thus a copy can read them for the modules
+// of the process it runs in.
+pub(crate) fn enumerate_exports(base: usize, found: &mut dyn FnMut(*const u8, u64) -> bool) {
+    unsafe {
+        let exports = export_directory(base);
+        if exports == base {
+            return;
+        }
+
+        let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
+        let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
+        let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
+        let ordinals = base + read_u32(exports + EXPORT_ORDINALS_OFFSET) as usize;
+
+        for index in 0..count {
+            let name = base + read_u32(names + index * 4) as usize;
+            let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
+            let address = base + read_u32(functions + ordinal * 4) as usize;
+            if !found(name as *const u8, address as u64) {
+                break;
+            }
+        }
+    }
+}
+
+unsafe fn export_directory(base: usize) -> usize {
+    unsafe {
+        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
+        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
+        let directories = headers
+            + OPTIONAL_HEADER_OFFSET
+            + if magic.read() == PE32_PLUS_MAGIC {
+                DATA_DIRECTORIES_OFFSET_64
+            } else {
+                DATA_DIRECTORIES_OFFSET_32
+            };
+
+        base + read_u32(directories) as usize
+    }
+}
+
 pub(crate) fn export(base: usize, wanted: &[u8]) -> usize {
     unsafe {
         let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
@@ -1692,21 +1733,29 @@ pub(crate) unsafe fn read_u32(address: usize) -> u32 {
 }
 
 #[cfg(target_arch = "x86")]
-const PEB_LDR_OFFSET: usize = 0x0c;
+pub(crate) const PEB_LDR_OFFSET: usize = 0x0c;
 #[cfg(target_arch = "x86_64")]
-const PEB_LDR_OFFSET: usize = 0x18;
+pub(crate) const PEB_LDR_OFFSET: usize = 0x18;
 #[cfg(target_arch = "x86")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
+pub(crate) const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
 #[cfg(target_arch = "x86_64")]
-const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
+pub(crate) const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
 #[cfg(target_arch = "x86")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
+pub(crate) const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
 #[cfg(target_arch = "x86_64")]
-const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
+pub(crate) const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
 #[cfg(target_arch = "x86")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
+pub(crate) const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
+#[cfg(target_arch = "x86")]
+pub(crate) const ENTRY_SIZE_OF_IMAGE_OFFSET: usize = 0x20;
+#[cfg(target_arch = "x86")]
+pub(crate) const ENTRY_FULL_NAME_OFFSET: usize = 0x24;
 #[cfg(target_arch = "x86_64")]
-const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
+pub(crate) const ENTRY_SIZE_OF_IMAGE_OFFSET: usize = 0x40;
+#[cfg(target_arch = "x86_64")]
+pub(crate) const ENTRY_FULL_NAME_OFFSET: usize = 0x48;
+#[cfg(target_arch = "x86_64")]
+pub(crate) const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
 const PE_HEADERS_OFFSET: usize = 0x3c;
 const OPTIONAL_HEADER_OFFSET: usize = 0x18;
 const PE32_PLUS_MAGIC: u16 = 0x20b;

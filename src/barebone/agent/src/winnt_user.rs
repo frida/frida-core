@@ -3,6 +3,8 @@
 // before it does anything else.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::ffi::c_void;
 
 use crate::winnt::{
@@ -10,8 +12,9 @@ use crate::winnt::{
     OBSERVED_PID, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives, STOP_REQUEST,
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
-    USER_SHARED_DATA, AGENT_WAKE_HANDLE, PEB_PARAMETERS_OFFSET, POINTER_SIZE, export,
-    module_base, read_pointer,
+    USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
+    ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, PEB_LDR_OFFSET,
+    PEB_PARAMETERS_OFFSET, POINTER_SIZE, export, module_base, read_pointer, read_u32,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
 };
 
@@ -138,6 +141,49 @@ fn resolve_user_api() {
             close: core::mem::transmute(export(ntdll, b"NtClose")),
         });
     }
+}
+
+// The loader keeps a list of what this process has mapped, and the copy can read it directly.
+pub fn enumerate_modules() -> Vec<LoadedModule> {
+    let mut modules = Vec::new();
+
+    unsafe {
+        let head = read_pointer(peb() + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
+        let mut entry = read_pointer(head);
+        while entry != head {
+            let base = read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
+            if base != 0 {
+                modules.push(LoadedModule {
+                    path: wide_text_at(entry + ENTRY_FULL_NAME_OFFSET),
+                    base: base as u64,
+                    size: read_u32(entry + ENTRY_SIZE_OF_IMAGE_OFFSET) as u64,
+                });
+            }
+            entry = read_pointer(entry);
+        }
+    }
+
+    modules
+}
+
+fn wide_text_at(record: usize) -> String {
+    unsafe {
+        let characters = (read_pointer(record + UNICODE_STRING_BUFFER) / 1) as *const u16;
+        let length = (record as *const u16).read() as usize / 2;
+
+        let mut text = String::new();
+        for index in 0..length {
+            text.push(char::from_u32(characters.add(index).read() as u32).unwrap_or('?'));
+        }
+
+        text
+    }
+}
+
+pub struct LoadedModule {
+    pub path: String,
+    pub base: u64,
+    pub size: u64,
 }
 
 // Making a process is the work of the loader's own entry points. They ask for wide strings and

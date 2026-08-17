@@ -370,7 +370,7 @@ mod symbolication {
             return 0;
         };
 
-        #[cfg(feature = "win9x")]
+        #[cfg(any(feature = "win9x", feature = "winnt"))]
         if crate::running_in_a_process() {
             return export_of_a_process_module(name);
         }
@@ -385,12 +385,12 @@ mod symbolication {
 
     // A copy runs in a process, thus a name without a module means one of the modules of that
     // process.
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     fn export_of_a_process_module(wanted: &str) -> GumAddress {
         let mut found = 0;
 
         for module in crate::kernel::enumerate_modules() {
-            crate::kernel::enumerate_exports(module.base as u32, &mut |name, address| {
+            crate::kernel::enumerate_exports(module.base as _, &mut |name, address| {
                 if text_of(name as *const gchar) == Some(wanted) {
                     found = address;
                 }

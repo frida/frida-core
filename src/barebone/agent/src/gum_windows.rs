@@ -97,7 +97,7 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     if crate::running_in_a_process() {
         register_the_process_modules(registry);
         return;
@@ -122,7 +122,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
 
 // A copy runs in a process, thus a script asking for modules means the ones that process has
 // mapped, not the ones the kernel has.
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn register_the_process_modules(registry: *mut GumModuleRegistry) {
     for module in kernel::enumerate_modules() {
         let range = GumMemoryRange {
@@ -232,9 +232,9 @@ pub(crate) unsafe fn enumerate_exports_in_range(
     end_address: u64,
     callback: &mut FoundExportCallback,
 ) {
-    #[cfg(feature = "win9x")]
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
     if crate::running_in_a_process() {
-        kernel::enumerate_exports(start_address as u32, &mut |name, address| {
+        kernel::enumerate_exports(start_address as _, &mut |name, address| {
             callback(name as *const crate::bindings::gchar, address)
         });
         return;

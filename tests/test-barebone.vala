@@ -161,6 +161,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-target-modules-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_target_modules_in_live_guest.begin (
+				h as Harness, "WINNT"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_spawns_and_resumes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
@@ -218,6 +224,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_injects_into_process_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-target-modules-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_enumerates_target_modules_in_live_guest.begin (
+				h as Harness, "WINNT64"));
 			h.run ();
 		});
 
@@ -1917,6 +1929,46 @@ namespace Frida.BareboneTest {
 			assert_true (from_there[0].contains (second_pid.to_string ()));
 
 			yield device.resume (second_pid, null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static async void winnt_enumerates_target_modules_in_live_guest (Harness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const names = Process.enumerateModules().map(m => m.name.toLowerCase());
+				const known = Module.getGlobalExportByName('NtQueryInformationProcess');
+				send([names.includes('ntdll.dll'), names.length > 2, known !== null]);
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			// The process has its own modules, thus a script finds them and what they export.
+			assert_true (messages[0].contains ("[true,true,true]"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
