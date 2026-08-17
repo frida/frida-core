@@ -3,6 +3,8 @@
 // selects before it does anything else.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::Ordering;
 
@@ -181,6 +183,46 @@ fn event_for(token: *const u8) -> u32 {
         Ok(_) => created,
         Err(raced) => raced,
     }
+}
+
+// What a process has mapped is written down where only ring 0 can read it. Thus the kernel half
+// hands the list over, and this side only reads it.
+pub fn enumerate_modules() -> Vec<LoadedModule> {
+    let mut modules = Vec::new();
+
+    let list = unsafe { ((crate::routed_arena() as u32 + MODULE_LIST) as *const u32).read() };
+    if list == 0 {
+        return modules;
+    }
+
+    let mut cursor = list + 4;
+    let count = read_word(list);
+    for _ in 0..count {
+        let base = read_word(cursor);
+        let size = read_word(cursor + 4);
+        let length = read_word(cursor + 8) as usize;
+        let path = unsafe {
+            core::slice::from_raw_parts((cursor + 12) as *const u8, length)
+        };
+        modules.push(LoadedModule {
+            path: String::from_utf8_lossy(path).into_owned(),
+            base: base as u64,
+            size: size as u64,
+        });
+        cursor += 12 + length as u32;
+    }
+
+    modules
+}
+
+fn read_word(address: u32) -> u32 {
+    unsafe { (address as *const u32).read() }
+}
+
+pub struct LoadedModule {
+    pub path: String,
+    pub base: u64,
+    pub size: u64,
 }
 
 // A process starts held, thus a caller can attach to it before it runs any of its own code.

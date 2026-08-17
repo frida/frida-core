@@ -80,6 +80,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-target-modules-in-live-guest", () => {
+			var h = new Harness ((h) => enumerates_target_modules_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/keeps-two-processes-apart-in-live-guest", () => {
 			var h = new Harness ((h) => keeps_two_processes_apart_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1821,6 +1826,46 @@ namespace Frida.BareboneTest {
 
 	// Two sessions on one process use the same copy. Thus one session can detach and the other
 	// keeps a working agent and its own scripts.
+	private static async void enumerates_target_modules_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const names = Process.enumerateModules().map(m => m.name.toUpperCase());
+				const kernel32 = Module.getGlobalExportByName('GetProcessHeap');
+				send([names.includes('KERNEL32.DLL'), names.length > 2, kernel32 !== null]);
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			// The process has its own modules, thus a script finds them and what they export.
+			assert_true (messages[0].contains ("[true,true,true]"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private static async void keeps_two_processes_apart_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)

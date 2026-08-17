@@ -192,7 +192,8 @@ pub(crate) fn gum_native_module_new(
         let module =
             g_object_new(gum_native_module_get_type(), ptr::null()) as *mut GumNativeModule;
         (*module).path = g_strdup(path_cstr.as_ptr());
-        (*module).name = (*module).path.add(path.rfind('/').unwrap() + 1);
+        let name_offset = path.rfind(['/', '\\']).map_or(0, |at| at + 1);
+        (*module).name = (*module).path.add(name_offset);
         (*module).version = g_strdup(version_cstr.as_ptr());
         (*module).range = *range;
 
@@ -368,12 +369,39 @@ mod symbolication {
         let Some(name) = text_of(name) else {
             return 0;
         };
+
+        #[cfg(feature = "win9x")]
+        if crate::running_in_a_process() {
+            return export_of_a_process_module(name);
+        }
+
         let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
 
         match table.find_symbol_by_name(name) {
             Some(symbol) => symbol.address(),
             None => 0,
         }
+    }
+
+    // A copy runs in a process, thus a name without a module means one of the modules of that
+    // process.
+    #[cfg(feature = "win9x")]
+    fn export_of_a_process_module(wanted: &str) -> GumAddress {
+        let mut found = 0;
+
+        for module in crate::kernel::enumerate_modules() {
+            crate::kernel::enumerate_exports(module.base as u32, &mut |name, address| {
+                if text_of(name as *const gchar) == Some(wanted) {
+                    found = address;
+                }
+                found == 0
+            });
+            if found != 0 {
+                break;
+            }
+        }
+
+        found
     }
 
     #[unsafe(no_mangle)]

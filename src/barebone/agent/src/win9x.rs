@@ -13,7 +13,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
-pub use crate::win9x_user::{resume_process, spawn_process};
+pub use crate::win9x_user::{LoadedModule, enumerate_modules, resume_process, spawn_process};
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
@@ -174,6 +174,11 @@ pub fn inject_agent(pid: u32) -> u32 {
     if injection.thread == 0 {
         return 0;
     }
+
+    unsafe {
+        ((injection.arena + MODULE_LIST) as *mut u32)
+            .write_volatile(publish_module_list(process))
+    };
     if !await_flag(injection.arena + OBSERVED_PID) {
         return 0;
     }
@@ -783,7 +788,7 @@ fn thread_resumer() -> u32 {
     0
 }
 
-fn image_size(base: u32) -> u32 {
+pub(crate) fn image_size(base: u32) -> u32 {
     read_u32(base + read_u32(base + DOS_HEADERS_OFFSET) + IMAGE_SIZE_OFFSET)
 }
 
@@ -801,6 +806,30 @@ const IMAGE_SIZE_OFFSET: u32 = 0x50;
 
 // The host cannot resolve these, because parts of the export names of KERNEL32 are out of
 // memory. Only the guest can get these pages again.
+// A module says what it exports in its own headers, thus a copy can read them for the modules
+// of the process it runs in.
+pub(crate) fn enumerate_exports(base: u32, found: &mut dyn FnMut(*const u8, u64) -> bool) {
+    let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
+    let directory_rva = read_u32(headers + EXPORT_DIRECTORY_OFFSET);
+    if directory_rva == 0 {
+        return;
+    }
+
+    let directory = base + directory_rva;
+    let count = read_u32(directory + 0x18);
+    let functions = base + read_u32(directory + 0x1c);
+    let names = base + read_u32(directory + 0x20);
+    let ordinals = base + read_u32(directory + 0x24);
+
+    for index in 0..count {
+        let ordinal = read_u16(ordinals + index * 2) as u32;
+        let address = base + read_u32(functions + ordinal * 4);
+        if !found((base + read_u32(names + index * 4)) as *const u8, address as u64) {
+            break;
+        }
+    }
+}
+
 pub fn kernel32_export(wanted: &[u8]) -> u32 {
     let base = unsafe { core::ptr::addr_of!(_KERNEL32_Base).read() };
     let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
@@ -870,6 +899,7 @@ const RESUMED_FLAG: u32 = 0x18;
 pub(crate) const STOP_REQUEST: u32 = 0x0c;
 pub(crate) const MAIN_STOPPED: u32 = 0x10;
 pub(crate) const WORKER_STOPPED: u32 = 0x3c;
+pub(crate) const MODULE_LIST: u32 = 0x40;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
@@ -1115,6 +1145,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
 }
 
 // KERNEL32 hands out its process database pointer XOR a per-boot value, and so must we.
+pub(crate) fn process_database(pid: u32) -> u32 {
+    process_id(pid)
+}
+
 fn process_id(pdb: u32) -> u32 {
     let slot = unsafe { core::ptr::addr_of!(_KERNEL32_ProcessIdObfuscator).read() };
     if slot == 0 {
@@ -1122,6 +1156,102 @@ fn process_id(pdb: u32) -> u32 {
     }
 
     pdb ^ unsafe { (slot as *const u32).read() }
+}
+
+// What a process has mapped is written down in memory that only ring 0 can read. Thus the copy
+// gets the list in memory that its own ring can read.
+fn publish_module_list(pdb: u32) -> u32 {
+    let table = module_table();
+    if table == 0 {
+        return 0;
+    }
+
+    let first = unsafe { (pdb as *const u32).byte_add(PDB_MODREF_OFFSET).read() };
+    if first < ARENA_FLOOR {
+        return 0;
+    }
+
+    // The list runs both ways from the entry that the process keeps, thus follow both. An image
+    // of the process is mapped in the space of that process alone, thus read it from there.
+    let mut modules = alloc::vec::Vec::new();
+    let context = unsafe { (pdb as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
+    let saved = unsafe { __GetCurrentContext() };
+    unsafe { __ContextSwitch(context) };
+    collect_modules(table, first, MODREF_NEXT_OFFSET, &mut modules);
+    let previous = unsafe { (first as *const u32).byte_add(MODREF_PREVIOUS_OFFSET).read() };
+    collect_modules(table, previous, MODREF_PREVIOUS_OFFSET, &mut modules);
+
+    let mut list = alloc::vec::Vec::new();
+    list.extend_from_slice(&(modules.len() as u32).to_le_bytes());
+    for module in modules.iter() {
+        list.extend_from_slice(&module.base.to_le_bytes());
+        list.extend_from_slice(&module.size.to_le_bytes());
+        write_text(&mut list, module.path);
+    }
+    unsafe { __ContextSwitch(saved) };
+
+    let published = alloc_shared(list.len());
+    unsafe { core::ptr::copy_nonoverlapping(list.as_ptr(), published, list.len()) };
+
+    published as u32
+}
+
+fn collect_modules(table: u32, first: u32, step: usize, modules: &mut alloc::vec::Vec<ListedModule>) {
+    let mut entry = first;
+    while entry >= ARENA_FLOOR {
+        let index = unsafe { (entry as *const u16).byte_add(MODREF_MTE_INDEX_OFFSET).read() };
+        let row = unsafe { (table as *const u32).add(index as usize).read() };
+        if row >= ARENA_FLOOR {
+            let base = unsafe { (row as *const u32).byte_add(IMTE_BASE_OFFSET).read() };
+            let path = unsafe { (row as *const u32).byte_add(IMTE_FILE_NAME_OFFSET).read() };
+            if base >= ARENA_FLOOR && path >= ARENA_FLOOR {
+                modules.push(ListedModule {
+                    base,
+                    size: image_size(base),
+                    path: path as *const u8,
+                });
+            }
+        }
+
+        entry = unsafe { (entry as *const u32).byte_add(step).read() };
+    }
+}
+
+fn write_text(list: &mut alloc::vec::Vec<u8>, text: *const u8) {
+    let mut cursor = text;
+    let start = list.len();
+    list.extend_from_slice(&0u32.to_le_bytes());
+    loop {
+        let byte = unsafe { cursor.read() };
+        if byte == 0 {
+            break;
+        }
+        list.push(byte);
+        cursor = unsafe { cursor.add(1) };
+    }
+
+    let length = (list.len() - start - 4) as u32;
+    list[start..start + 4].copy_from_slice(&length.to_le_bytes());
+}
+
+struct ListedModule {
+    base: u32,
+    size: u32,
+    path: *const u8,
+}
+
+pub(crate) fn module_table() -> u32 {
+    let slot = unsafe { core::ptr::addr_of!(_KERNEL32_ModuleTable).read() };
+    if slot == 0 {
+        return 0;
+    }
+
+    let table = unsafe { (slot as *const u32).read() };
+    if table < ARENA_FLOOR {
+        return 0;
+    }
+
+    table
 }
 
 fn command_line(pdb: u32) -> *const u8 {
@@ -1142,14 +1272,13 @@ fn command_line(pdb: u32) -> *const u8 {
 // itself and can carry arguments besides. KERNEL32 names a module the way GetModuleFileName
 // does: the process's own MODREF, indexed into the module table.
 fn image_path(pdb: u32) -> *const u8 {
-    let slot = unsafe { core::ptr::addr_of!(_KERNEL32_ModuleTable).read() };
-    if slot == 0 {
+    let table = module_table();
+    if table == 0 {
         return core::ptr::null();
     }
 
-    let table = unsafe { (slot as *const u32).read() };
     let modref = unsafe { (pdb as *const u32).byte_add(PDB_MODREF_OFFSET).read() };
-    if table < ARENA_FLOOR || modref < ARENA_FLOOR {
+    if modref < ARENA_FLOOR {
         return core::ptr::null();
     }
 
@@ -1168,12 +1297,15 @@ fn image_path(pdb: u32) -> *const u8 {
 }
 
 const WIN32_THREAD: u32 = 0x2a;
-const ARENA_FLOOR: u32 = 0x10000;
-const PDB_MODREF_OFFSET: usize = 0x94;
+pub(crate) const ARENA_FLOOR: u32 = 0x10000;
+pub(crate) const PDB_MODREF_OFFSET: usize = 0x94;
 const PDB_ENVIRONMENT_OFFSET: usize = 0x40;
 const ENVIRONMENT_COMMAND_LINE_OFFSET: usize = 0x08;
-const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
-const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
+pub(crate) const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
+pub(crate) const MODREF_NEXT_OFFSET: usize = 0x00;
+pub(crate) const MODREF_PREVIOUS_OFFSET: usize = 0x04;
+pub(crate) const IMTE_BASE_OFFSET: usize = 0x24;
+pub(crate) const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let Some(file) = File::open(path) else {

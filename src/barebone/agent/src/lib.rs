@@ -1323,11 +1323,21 @@ unsafe extern "C" fn frida_message_handler(
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) fn routed_arena() -> u64 {
+    unsafe { ROUTED_ARENA }
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) fn running_in_a_process() -> bool {
+    unsafe { ROUTED_ARENA != 0 }
+}
+
 // Each copy numbers its scripts from one, thus a message says which process it comes from and
 // the host has no two scripts of the same name.
 fn source_process_id() -> u32 {
     #[cfg(any(feature = "win9x", feature = "winnt"))]
-    if unsafe { ROUTED_ARENA } != 0 {
+    if running_in_a_process() {
         return kernel::current_process_id();
     }
 

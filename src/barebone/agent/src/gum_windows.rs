@@ -97,6 +97,12 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
+    #[cfg(feature = "win9x")]
+    if crate::running_in_a_process() {
+        register_the_process_modules(registry);
+        return;
+    }
+
     unsafe {
         let modules = &*core::ptr::addr_of!(crate::MODULE_INFO);
 
@@ -110,6 +116,24 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             let module = gum::gum_native_module_new(&path, &module_info.version, &range);
             gum_barebone_register_module(registry, module);
             g_object_unref(module as gpointer);
+        }
+    }
+}
+
+// A copy runs in a process, thus a script asking for modules means the ones that process has
+// mapped, not the ones the kernel has.
+#[cfg(feature = "win9x")]
+fn register_the_process_modules(registry: *mut GumModuleRegistry) {
+    for module in kernel::enumerate_modules() {
+        let range = GumMemoryRange {
+            base_address: module.base,
+            size: module.size as gsize,
+        };
+
+        unsafe {
+            let native = gum::gum_native_module_new(&module.path, "", &range);
+            gum_barebone_register_module(registry, native);
+            g_object_unref(native as gpointer);
         }
     }
 }
@@ -208,6 +232,14 @@ pub(crate) unsafe fn enumerate_exports_in_range(
     end_address: u64,
     callback: &mut FoundExportCallback,
 ) {
+    #[cfg(feature = "win9x")]
+    if crate::running_in_a_process() {
+        kernel::enumerate_exports(start_address as u32, &mut |name, address| {
+            callback(name as *const crate::bindings::gchar, address)
+        });
+        return;
+    }
+
     unsafe {
         let symbol_table = &*core::ptr::addr_of!(crate::SYMBOL_TABLE);
 
