@@ -62,17 +62,19 @@ fn main() {
         println!("cargo:rustc-link-lib=static=m");
         println!("cargo:rustc-link-arg=--export-dynamic");
         println!("cargo:rustc-link-arg=--emit-relocs");
-        let script = if env::var("CARGO_FEATURE_WIN9X").is_ok() {
-            "agent-win9x.lds"
+        let flavor = if env::var("CARGO_FEATURE_WIN9X").is_ok() {
+            "win9x"
         } else if env::var("CARGO_FEATURE_WINNT").is_ok() {
-            if target.starts_with("x86_64") {
-                "agent-winnt-x86_64.lds"
-            } else {
-                "agent-winnt.lds"
-            }
+            "winnt"
         } else {
-            "agent.lds"
+            "xnu"
         };
+        let arch = match target.split('-').next().unwrap() {
+            "i686" => "x86",
+            "aarch64" => "arm64",
+            other => other,
+        };
+        let script = format!("agent-{flavor}-{arch}.lds");
         println!("cargo:rustc-link-arg=--script={script}");
         println!("cargo:rustc-link-arg=--gc-sections");
         // All of the agent lives in the library crate, so nothing in the binary
