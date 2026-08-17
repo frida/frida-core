@@ -120,6 +120,83 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     }
 }
 
+// A script can hook a library the moment it arrives, thus stand in front of the loader and say
+// what came and what went.
+#[cfg(feature = "winnt")]
+pub(crate) fn watch_the_loader() {
+    let Some(entries) = kernel::loader_entry_points() else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_replace(interceptor, entries.load as gpointer,
+            kernel::on_module_load as gpointer, &raw mut LOADER_LOAD, ptr::null());
+        if entries.load_with_flags != 0 {
+            crate::bindings::gum_interceptor_replace(interceptor,
+                entries.load_with_flags as gpointer, kernel::on_module_load_with_flags as gpointer,
+                &raw mut LOADER_LOAD_WITH_FLAGS, ptr::null());
+        }
+        crate::bindings::gum_interceptor_replace(interceptor, entries.unload as gpointer,
+            kernel::on_module_unload as gpointer, &raw mut LOADER_UNLOAD, ptr::null());
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn loader_load() -> gpointer {
+    unsafe { LOADER_LOAD }
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn loader_load_with_flags() -> gpointer {
+    unsafe { LOADER_LOAD_WITH_FLAGS }
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn loader_unload() -> gpointer {
+    unsafe { LOADER_UNLOAD }
+}
+
+// A module arrived, thus tell the registry where it is.
+#[cfg(feature = "winnt")]
+pub(crate) fn module_arrived(base: u64) {
+    let Some(module) = kernel::describe_module(base) else {
+        return;
+    };
+
+    let range = GumMemoryRange {
+        base_address: module.base,
+        size: module.size as gsize,
+    };
+
+    unsafe {
+        let registry = crate::bindings::gum_module_registry_obtain();
+        let native = gum::gum_native_module_new(&module.path, "", &range);
+        gum_barebone_register_module(registry, native);
+        g_object_unref(native as gpointer);
+        g_object_unref(registry as gpointer);
+    }
+}
+
+// A module went away, thus take it out of the registry while its name is still known.
+#[cfg(feature = "winnt")]
+pub(crate) fn module_left(base: u64) {
+    unsafe {
+        let registry = crate::bindings::gum_module_registry_obtain();
+        crate::bindings::gum_barebone_unregister_module(registry, base);
+        g_object_unref(registry as gpointer);
+    }
+}
+
+#[cfg(feature = "winnt")]
+static mut LOADER_LOAD: gpointer = ptr::null_mut();
+#[cfg(feature = "winnt")]
+static mut LOADER_LOAD_WITH_FLAGS: gpointer = ptr::null_mut();
+#[cfg(feature = "winnt")]
+static mut LOADER_UNLOAD: gpointer = ptr::null_mut();
+
 // A copy runs in a process, thus a script asking for modules means the ones that process has
 // mapped, not the ones the kernel has.
 #[cfg(any(feature = "win9x", feature = "winnt"))]

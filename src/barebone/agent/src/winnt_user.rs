@@ -143,6 +143,78 @@ fn resolve_user_api() {
     }
 }
 
+// The loader has one way in and one way out for a library, thus a stand-in on each says what
+// the process has mapped now.
+pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
+    let ntdll = module_base(peb(), b"ntdll.dll");
+
+    Some(LoaderEntryPoints {
+        load: export(ntdll, b"LdrLoadDll"),
+        load_with_flags: 0,
+        unload: export(ntdll, b"LdrUnloadDll"),
+    })
+}
+
+pub struct LoaderEntryPoints {
+    pub load: usize,
+    pub load_with_flags: usize,
+    pub unload: usize,
+}
+
+pub unsafe extern "C" fn on_module_load_with_flags() {}
+
+#[cfg(target_arch = "x86")]
+pub unsafe extern "stdcall" fn on_module_load(search_path: *const u16, flags: *mut u32,
+        name: *mut u8, handle: *mut usize) -> i32 {
+    unsafe { load_module(search_path, flags, name, handle) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "win64" fn on_module_load(search_path: *const u16, flags: *mut u32,
+        name: *mut u8, handle: *mut usize) -> i32 {
+    unsafe { load_module(search_path, flags, name, handle) }
+}
+
+unsafe fn load_module(search_path: *const u16, flags: *mut u32, name: *mut u8,
+        handle: *mut usize) -> i32 {
+    let original: windows_fn!(*const u16, *mut u32, *mut u8, *mut usize => i32) =
+        unsafe { core::mem::transmute(crate::gum_windows::loader_load()) };
+
+    let status = unsafe { original(search_path, flags, name, handle) };
+    if status >= 0 {
+        crate::gum_windows::module_arrived(unsafe { handle.read() } as u64);
+    }
+
+    status
+}
+
+#[cfg(target_arch = "x86")]
+pub unsafe extern "stdcall" fn on_module_unload(handle: usize) -> i32 {
+    unsafe { unload_module(handle) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "win64" fn on_module_unload(handle: usize) -> i32 {
+    unsafe { unload_module(handle) }
+}
+
+unsafe fn unload_module(handle: usize) -> i32 {
+    let original: windows_fn!(usize => i32) =
+        unsafe { core::mem::transmute(crate::gum_windows::loader_unload()) };
+
+    let status = unsafe { original(handle) };
+    if status >= 0 {
+        crate::gum_windows::module_left(handle as u64);
+    }
+
+    status
+}
+
+// The loader's list says everything about a module that just arrived.
+pub fn describe_module(base: u64) -> Option<LoadedModule> {
+    enumerate_modules().into_iter().find(|module| module.base == base)
+}
+
 // The loader keeps a list of what this process has mapped, and the copy can read it directly.
 pub fn enumerate_modules() -> Vec<LoadedModule> {
     let mut modules = Vec::new();
