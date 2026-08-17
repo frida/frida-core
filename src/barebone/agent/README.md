@@ -1,27 +1,34 @@
-## Getting the C toolchain
+## Getting the SDK and the devkit
 
-    npm install -g xpm
-    xpm install
-    export PATH=$PWD/xpacks/.bin:$PATH
+The agent is built against the bare soft-float SDK, which carries picolibc and the
+compiler runtime, and against a GumJS devkit built for the same flavor. No prebuilt
+bundles are published for these, so build both:
 
-## How to build Gum
+    releng/deps.py build --bundle=sdk --host=none-arm64-softfloat_nopic
+    mkdir -p ~/sdk-none-arm64-softfloat_nopic
+    tar -C ~/sdk-none-arm64-softfloat_nopic -xf deps/sdk-none-arm64-softfloat_nopic.tar.xz
 
-    ./configure \
-        --host=aarch64-none-elf \
-        --enable-gumjs \
-        --with-devkits=gum,gumjs \
-        --with-devkit-symbol-scope=original
-    make
-    export GUMJS_DEVKIT_DIR=$PWD/build/bindings/gumjs/devkit
+    gum=~/src/frida-gum
+    mkdir -p $gum/build/none-arm64-softfloat_nopic
+    (cd $gum/build/none-arm64-softfloat_nopic \
+        && FRIDA_DEPS=$HOME/src/frida-core/deps CC=clang CXX=clang++ AR=llvm-ar \
+            RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
+            ../../configure --host=none-arm64-softfloat_nopic --enable-gumjs \
+                --with-devkits=gumjs \
+        && python3 ../../releng/meson/meson.py configure -Ddevkit_symbol_scope=original \
+        && ninja)
 
 ## Building
 
-    export PATH=$PWD/xpacks/.bin:$PATH
-    export CC_aarch64_unknown_none=aarch64-none-elf-gcc
-    export AR_aarch64_unknown_none=aarch64-none-elf-ar
-    export RANLIB_aarch64_unknown_none=aarch64-none-elf-ranlib
+    sdk=~/sdk-none-arm64-softfloat_nopic
+    export GUMJS_DEVKIT_DIR=$gum/build/none-arm64-softfloat_nopic/bindings/gumjs/devkit
+    export CC="clang -I$sdk/include -I$sdk/include/glib-2.0 -I$sdk/lib/glib-2.0/include \
+        -I$sdk/include/capstone -I$sdk/include/json-glib-1.0"
+    export RUSTFLAGS="-L native=$sdk/lib"
 
-    cargo build --release --features xnu
+    RUSTC_BOOTSTRAP=1 cargo build --release --features xnu \
+        --target aarch64-unknown-none-softfloat --target-dir target-xnu \
+        -Z build-std=core,alloc,compiler_builtins
 
 ## Targets
 
@@ -40,7 +47,7 @@ half of Gum's platform backend (`gum_xnu.rs` / `gum_linux.rs`).
 ## Development loop
 
     export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.json
-    cargo build --release --features xnu \
+    cargo build --release --features xnu --target aarch64-unknown-none-softfloat \
         && make -C ~/src/frida-python \
         && killall -9 qemu-system-aarch64 && sleep 2 \
         && frida -D barebone -p 0

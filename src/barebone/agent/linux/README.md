@@ -3,7 +3,7 @@
 The same agent that the Barebone backend injects into XNU from the outside, but
 loaded from the inside as an ordinary kernel module.
 
-## How it differs from the XNU flavour
+## How it differs from the XNU flavor
 
 |                   | XNU                                              | Linux                                     |
 |-------------------|--------------------------------------------------|-------------------------------------------|
@@ -21,8 +21,8 @@ is otherwise identical, so the host side sees the same `(yqv)` frames.
 
 ## Building
 
-Four inputs: this repository, a GumJS devkit built for `none-<arch>-softfloat`, the
-soft-float SDK it was built against, and the kernel the module is for. `Makefile`
+Four inputs: this repository, a GumJS devkit built for
+`none-<arch>-softfloat_nopic`, the SDK it was built against, and the kernel the module is for. `Makefile`
 covers x86_64 and arm64, and defaults to the architecture of the machine building.
 
 Building for the running kernel is a good deal shorter than cross-building for a
@@ -47,26 +47,26 @@ out — `git submodule update --init releng` if the clone did not recurse.
 
 ### For the running x86_64 kernel
 
-No prebuilt bundles are published for `none-x86_64-softfloat`, so both inputs are
+No prebuilt bundles are published for `none-x86_64-softfloat_nopic`, so both inputs are
 built locally, against the same SDK:
 
-    releng/deps.py build --bundle=sdk --host=none-x86_64-softfloat
-    mkdir -p ~/sdk-none-x86_64-softfloat
-    tar -C ~/sdk-none-x86_64-softfloat -xf deps/sdk-none-x86_64-softfloat.tar.xz
+    releng/deps.py build --bundle=sdk --host=none-x86_64-softfloat_nopic
+    mkdir -p ~/sdk-none-x86_64-softfloat_nopic
+    tar -C ~/sdk-none-x86_64-softfloat_nopic -xf deps/sdk-none-x86_64-softfloat_nopic.tar.xz
 
     gum=subprojects/frida-gum
-    mkdir -p $gum/build/none-x86_64-softfloat
-    (cd $gum/build/none-x86_64-softfloat \
+    mkdir -p $gum/build/none-x86_64-softfloat_nopic
+    (cd $gum/build/none-x86_64-softfloat_nopic \
         && FRIDA_DEPS=$PWD/../../../../deps ../../configure \
-            --host=none-x86_64-softfloat \
+            --host=none-x86_64-softfloat_nopic \
             --enable-gumjs \
             --with-devkits=gumjs \
             --with-devkit-symbol-scope=original \
         && make)
 
     make -C src/barebone/agent/linux \
-        FRIDA_SDK=$HOME/sdk-none-x86_64-softfloat \
-        GUMJS_DEVKIT_DIR=$PWD/$gum/build/none-x86_64-softfloat/bindings/gumjs/devkit
+        FRIDA_SDK=$HOME/sdk-none-x86_64-softfloat_nopic \
+        GUMJS_DEVKIT_DIR=$PWD/$gum/build/none-x86_64-softfloat_nopic/bindings/gumjs/devkit
 
 Everything else — `KDIR`, the Rust target, the binutils, the kernel's own name for the
 architecture — follows from the running kernel.
@@ -79,11 +79,11 @@ Here there are published bundles to start from, and the kernel has to be assembl
 
     version=17.17.0
     base=https://github.com/frida/frida/releases/download/$version
-    curl -LO $base/frida-gumjs-devkit-$version-none-arm64-softfloat.tar.xz
+    curl -LO $base/frida-gumjs-devkit-$version-none-arm64-softfloat_nopic.tar.xz
     mkdir -p ~/gumjs-devkit
-    tar -C ~/gumjs-devkit -xf frida-gumjs-devkit-$version-none-arm64-softfloat.tar.xz
+    tar -C ~/gumjs-devkit -xf frida-gumjs-devkit-$version-none-arm64-softfloat_nopic.tar.xz
 
-    releng/deps.py sync sdk none-arm64-softfloat ~/sdk-none-arm64-softfloat
+    releng/deps.py sync sdk none-arm64-softfloat_nopic ~/sdk-none-arm64-softfloat_nopic
 
 The SDK carries picolibc and the compiler-rt builtins the devkit expects to be linked
 against, and `releng/deps.toml` pins which one. Mixing a devkit with an SDK built for
@@ -121,7 +121,7 @@ compared verbatim, and it names the exact build.
 #### Build
 
     make -C src/barebone/agent/linux \
-        FRIDA_SDK=$HOME/sdk-none-arm64-softfloat \
+        FRIDA_SDK=$HOME/sdk-none-arm64-softfloat_nopic \
         GUMJS_DEVKIT_DIR=$HOME/gumjs-devkit \
         AGENT_LD=aarch64-linux-gnu-ld \
         AGENT_AR=aarch64-linux-gnu-ar \
@@ -133,8 +133,8 @@ compared verbatim, and it names the exact build.
 
 `make` builds the Rust staticlib itself, prelinks it against the devkit and the SDK,
 then hands the result to kbuild. The `AGENT_*` overrides are only needed because the
-defaults name the `aarch64-none-elf-` toolchain the XNU flavour uses; drop them if
-that is what is installed.
+defaults name an `aarch64-none-elf-` GNU toolchain; drop them if that is what is
+installed.
 
 The prelink half runs anywhere; the kbuild half needs the x86-64 Linux host above.
 Cross-building from macOS means running that step in a container holding the kernel
@@ -210,7 +210,7 @@ its own process.
 - **x86_64 or arm64.** The register-level pieces — the page size, cache maintenance,
   where the syscall ABI leaves prctl()'s arguments, and how a spawned thread's
   registers are set up for its return to userspace — have a half for each. The XNU
-  flavour remains arm64-only.
+  flavor remains arm64-only.
 - **`CONFIG_KPROBES` and `CONFIG_KALLSYMS_ALL`.** A good deal of what the shim
   needs is compiled in but not exported — `kallsyms_lookup_name`,
   `kallsyms_on_each_symbol` and `set_memory_*` all are, and GKI trims its export
@@ -224,9 +224,9 @@ its own process.
 ## Kernel ABI constraints
 
 A hardened kernel imposes an ABI on anything linked into it, and the FP constraint
-below is why this flavour is built against a soft-float SDK
-(`none-arm64-softfloat`, `none-x86_64-softfloat`) rather than an ordinary bare-metal
-one. The remaining constraints are per-architecture.
+below is why this flavor is built against a soft-float SDK
+(`none-arm64-softfloat_nopic`, `none-x86_64-softfloat_nopic`) rather than an ordinary
+bare-metal one. The remaining constraints are per-architecture.
 
 - **FP/SIMD.** JavaScript numbers are doubles, so a hardfloat build would use FP
   for as long as the runtime lives, and neither architecture lets a kernel thread

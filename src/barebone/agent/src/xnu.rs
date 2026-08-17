@@ -17,6 +17,10 @@ pub fn run_when_ready(action: fn()) {
     action();
 }
 
+// The exception vectors of this kernel are not hooked yet. Thus a fault in the agent goes to
+// the kernel as it is.
+pub fn install_fault_reporter() {}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     kernel_thread_start(entry, parameter)
 }
