@@ -3,6 +3,11 @@ SECTIONS {
     *(.text.entrypoint)
     *(.text*)
   }
+  .rel.dyn : {
+    _agent_relocs_start = .;
+    *(.rel.dyn)
+    _agent_relocs_end = .;
+  }
   .rodata : {
     *(.rodata*)
   }

@@ -7,6 +7,11 @@ SECTIONS {
     *(.text*)
     *(.ltext*)
   }
+  .rela.dyn : {
+    _agent_relocs_start = .;
+    *(.rela.dyn)
+    _agent_relocs_end = .;
+  }
   .rodata : {
     *(.rodata*)
     *(.lrodata*)

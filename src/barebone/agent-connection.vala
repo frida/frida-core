@@ -1,38 +1,5 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
-	public sealed class PlacedCopy {
-		public uint64 seen_by_process;
-		public uint64 writable_from_kernel;
-		public uint64 arena_seen_by_process;
-		public uint64 arena_from_kernel;
-		public uint64 bootstrap;
-		public uint64 entry;
-
-		public PlacedCopy (uint64 seen_by_process, uint64 writable_from_kernel,
-				uint64 arena_seen_by_process, uint64 arena_from_kernel) {
-			this.seen_by_process = seen_by_process;
-			this.writable_from_kernel = writable_from_kernel;
-			this.arena_seen_by_process = arena_seen_by_process;
-			this.arena_from_kernel = arena_from_kernel;
-		}
-	}
-
-	public sealed class PlacedAgent : Object {
-		public uint64 base_address {
-			get;
-			construct;
-		}
-
-		public uint64 entry {
-			get;
-			construct;
-		}
-
-		public PlacedAgent (uint64 base_address, uint64 entry) {
-			Object (base_address: base_address, entry: entry);
-		}
-	}
-
 	public sealed class AgentConnection : Object, AsyncInitable {
 		public signal void script_message (AgentScriptId id, string json, Bytes? data);
 
@@ -364,21 +331,14 @@ namespace Frida.Barebone {
 		// Each process needs its own copy, because the copies share the arena and would write the
 		// same data. The process receives the code as it is, thus only the writable half needs a new
 		// location, in memory that both sides can address.
-		public async PlacedCopy place_agent_in_process (uint pid, uint64 private_offset, uint64 size,
-				Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(utt)", pid, private_offset, size);
-			var response = yield execute_command (Command.PLACE_AGENT_IN_PROCESS, payload, cancellable);
-			if (!response.check_format_string ("(tttt)", false))
+		public async void place_winnt_user_agent (uint pid, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield execute_command (Command.PLACE_AGENT_IN_PROCESS,
+				new Variant.uint32 (pid), cancellable);
+			if (!response.is_of_type (VariantType.UINT32))
 				throw new Error.PROTOCOL ("Invalid place_agent_in_process response format");
-
-			uint64 seen_by_process, writable_from_kernel, arena_seen_by_process, arena_from_kernel;
-			response.get ("(tttt)", out seen_by_process, out writable_from_kernel,
-				out arena_seen_by_process, out arena_from_kernel);
-			if (seen_by_process == 0 || arena_seen_by_process == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to place the agent in the target process");
-
-			return new PlacedCopy (seen_by_process, writable_from_kernel, arena_seen_by_process,
-				arena_from_kernel);
+			if (response.get_uint32 () == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to place the agent in the process");
 		}
 
 		/**
@@ -388,54 +348,20 @@ namespace Frida.Barebone {
 		public async uint inject_agent_into_process (uint pid, Cancellable? cancellable)
 				throws Error, IOError {
 			if (kernel_kind == WINNT) {
-				var copy = yield place_winnt_user_agent (pid, cancellable);
-				return yield start_winnt_agent_in_process (pid, copy, cancellable);
+				yield place_winnt_user_agent (pid, cancellable);
+				return yield start_winnt_agent_in_process (pid, cancellable);
 			}
 
-			var agent = yield place_user_agent (cancellable);
-			return yield inject_into_process (pid, agent, cancellable);
-		}
-
-		/**
-		 * Places a copy of the agent inside a process: the code it is already running is lent
-		 * out as it stands, so only the half that gets written to has to be put there, and that
-		 * half is reachable from the kernel alone.
-		 */
-		public async PlacedCopy place_winnt_user_agent (uint pid, Cancellable? cancellable)
-				throws Error, IOError {
-			Gum.ElfModule elf;
-			Buffer raw_elf = load_patched_agent (out elf);
-
-			uint64 private_offset = offset_of_symbol (elf, "_agent_private_start");
-			var copy = yield place_agent_in_process (pid, private_offset, elf.mapped_size,
-				cancellable);
-
-			// Relocate for the address that the process uses. That address is not the address that
-			// receives the data.
-			Bytes image = machine.relocate (elf, raw_elf.bytes, copy.seen_by_process);
-			unowned uint8[] data = image.get_data ();
-
-			yield machine.gdb.stop (cancellable);
-			yield machine.write_virtual (copy.writable_from_kernel,
-				data[private_offset:data.length], cancellable);
-			yield machine.gdb.continue (cancellable);
-
-			copy.bootstrap = copy.seen_by_process
-				+ offset_of_symbol (elf, "frida_winnt_user_bootstrap");
-			copy.entry = copy.seen_by_process + offset_of_symbol (elf, "frida_winnt_user_main");
-
-			return copy;
+			return yield inject_into_process (pid, cancellable);
 		}
 
 		// The copy cannot answer from the thread that starts it. Thus ask again until it reports its
 		// process id.
-		private async uint start_winnt_agent_in_process (uint pid, PlacedCopy copy,
-				Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(utt)", pid, copy.bootstrap, copy.entry);
-
+		private async uint start_winnt_agent_in_process (uint pid, Cancellable? cancellable)
+				throws Error, IOError {
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
-				var response = yield execute_command (Command.START_AGENT_IN_PROCESS, payload,
-					cancellable);
+				var response = yield execute_command (Command.START_AGENT_IN_PROCESS,
+					new Variant.uint32 (pid), cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
 					throw new Error.PROTOCOL ("Invalid start_agent_in_process response format");
 
@@ -453,112 +379,18 @@ namespace Frida.Barebone {
 			throw new Error.TIMED_OUT ("Timed out while starting the agent in the process");
 		}
 
-		private Buffer load_patched_agent (out Gum.ElfModule elf) throws Error {
-			try {
-				elf = new Gum.ElfModule.from_file (agent_config.path);
-			} catch (Gum.Error e) {
-				throw new Error.INVALID_ARGUMENT ("%s", e.message);
-			}
-
-			var raw_elf = machine.gdb.make_buffer (new Bytes (elf.get_file_data ()));
-			unowned Gum.ElfModule module = elf;
-			module.enumerate_symbols (s => {
-				unowned Gum.ElfSectionDetails? sect = s.section;
-				if (sect != null && sect.name == ".kernel_addrs") {
-					SymbolInfo? info = resolved_symbols[s.name[1:]];
-					if (info != null) {
-						size_t file_offset = (size_t) (sect.offset + (s.address - sect.address));
-						raw_elf.write_pointer (file_offset, kernel_base + info.offset);
-					}
-				}
-				return true;
-			});
-
-			return raw_elf;
-		}
-
-		private static uint64 offset_of_symbol (Gum.ElfModule elf, string name) throws Error {
-			uint64 address = 0;
-			elf.enumerate_symbols (s => {
-				if (s.name == name) {
-					address = s.address;
-					return false;
-				}
-				return true;
-			});
-			if (address == 0)
-				throw new Error.NOT_SUPPORTED ("Agent has no %s", name);
-
-			return address;
-		}
-
-		/**
-		 * Places the agent where every process can reach it: the code it is already running is
-		 * lent out as it stands, so only the half that gets written to has to be put there.
-		 */
-		public async PlacedAgent place_user_agent (Cancellable? cancellable) throws Error, IOError {
-			Gum.ElfModule elf;
-			Buffer raw_elf = load_patched_agent (out elf);
-
-			uint64 private_offset = offset_of_symbol (elf, "_agent_private_start");
-			uint64 image_base = yield place_shared_agent (private_offset, elf.mapped_size,
-				cancellable);
-
-			// Relocate for the address that ring 3 uses. The agent reserves the memory while the
-			// guest runs, and the half that gets written to is written while the guest is stopped.
-			Bytes image = machine.relocate (elf, raw_elf.bytes, image_base);
-			unowned uint8[] data = image.get_data ();
-
-			yield machine.gdb.stop (cancellable);
-			yield machine.write_virtual (image_base + private_offset,
-				data[private_offset:data.length], cancellable);
-			yield machine.gdb.continue (cancellable);
-
-			uint64 entry = image_base + offset_of_symbol (elf, "frida_win9x_user_main");
-
-			return new PlacedAgent (image_base, entry);
-		}
-
-		private async uint64 place_shared_agent (uint64 private_offset, uint64 size,
-				Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(uu)", (uint) private_offset, (uint) size);
-
-			var response = yield execute_command (Command.PLACE_SHARED_AGENT, payload, cancellable);
-			if (!response.is_of_type (VariantType.UINT32))
-				throw new Error.PROTOCOL ("Invalid place_shared_agent response format");
-
-			uint address = response.get_uint32 ();
-			if (address == 0)
-				throw new Error.NOT_SUPPORTED ("Out of shared memory");
-
-			return address;
-		}
 
 		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
 			yield execute_command (Command.DETACH_FROM_PROCESS, new Variant.uint32 (pid), cancellable);
 		}
 
-		public async uint allocate_shared (uint size, Cancellable? cancellable) throws Error, IOError {
-			var response = yield execute_command (Command.ALLOCATE_SHARED, new Variant.uint32 (size),
-				cancellable);
-			if (!response.is_of_type (VariantType.UINT32))
-				throw new Error.PROTOCOL ("Invalid allocate_shared response format");
-
-			uint address = response.get_uint32 ();
-			if (address == 0)
-				throw new Error.NOT_SUPPORTED ("Out of shared memory");
-
-			return address;
-		}
-
-		public async uint inject_into_process (uint pid, PlacedAgent agent, Cancellable? cancellable)
+		public async uint inject_into_process (uint pid, Cancellable? cancellable)
 				throws Error, IOError {
 			// The agent cannot answer from the context that does the work. Thus it reports the result at
 			// the next request.
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.INJECT_INTO_PROCESS,
-					new Variant ("(uuu)", pid, (uint32) agent.entry, (uint32) agent.base_address),
-					cancellable);
+					new Variant.uint32 (pid), cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
 					throw new Error.PROTOCOL ("Invalid inject_into_process response format");
 
@@ -1009,11 +841,9 @@ namespace Frida.Barebone {
 			PATCH_CODE = 7,
 			ENUMERATE_PROCESSES = 8,
 			INJECT_INTO_PROCESS = 9,
-			ALLOCATE_SHARED = 10,
 			DETACH_FROM_PROCESS = 11,
 			PLACE_AGENT_IN_PROCESS = 12,
 			START_AGENT_IN_PROCESS = 13,
-			PLACE_SHARED_AGENT = 14,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}

@@ -998,7 +998,7 @@ const IMAGE_NAME_SIZE: usize = 16;
 
 // The process receives the same code pages as the kernel half, because code is read-only. It
 // also receives its own writable half, thus the two copies do not share data.
-pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> Placement {
+pub fn place_agent_in_process(pid: u32) -> bool {
     let mut placed = Placement::default();
 
     let mut process: *mut c_void = core::ptr::null_mut();
@@ -1008,12 +1008,13 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
         }
     });
     if process.is_null() {
-        return placed;
+        return false;
     }
 
     let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+    let private_offset = crate::writable_half_start() - own.base_address as usize;
     let shared_size = private_offset;
-    let private_size = size - private_offset;
+    let private_size = own.size as usize - private_offset;
 
     let mut wake: *mut c_void = core::ptr::null_mut();
     let mut work = || unsafe {
@@ -1050,6 +1051,7 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
                     NORMAL_PAGE_PRIORITY) == wanted {
                 // The mapping gives no permission to execute.
                 protect(text as u64, shared_size, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
+                crate::install_writable_half(text as usize, private as usize);
                 placed.seen_by_process = text as u64;
                 placed.writable_from_here = private as u64;
                 break;
@@ -1094,12 +1096,12 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
                 wake,
                 started: false,
                 text: placed.seen_by_process,
-                size: size as u64,
+                size: own.size as u64,
             })
         };
     }
 
-    placed
+    placed.arena_here != 0
 }
 
 #[derive(Default)]
@@ -1118,11 +1120,15 @@ const NORMAL_PAGE_PRIORITY: u32 = 16;
 // Start the copy on a thread of the target. The system makes the thread, thus ntdll accepts
 // calls from it. The copy cannot answer from that thread, thus this function returns the
 // process id only after the copy writes it.
-pub fn start_agent_in_process(pid: u32, bootstrap: u64, entry: u64) -> u32 {
+pub fn start_agent_in_process(pid: u32) -> u32 {
     let Some(target) = (unsafe { targets().get(&pid) }) else {
         return 0;
     };
     let (arena, seen) = (target.arena, target.seen);
+    let own = unsafe { core::ptr::addr_of!(crate::OWN_RANGE).read() }.base_address as usize;
+    let bootstrap = target.text + (crate::winnt_user::frida_winnt_user_bootstrap as usize
+        - own) as u64;
+    let entry = target.text + (crate::winnt_user::frida_winnt_user_main as usize - own) as u64;
 
     if !target.started {
         let mut process: *mut c_void = core::ptr::null_mut();

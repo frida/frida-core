@@ -145,45 +145,19 @@ pub fn yield_now() {
     (primitives().yield_now)()
 }
 
-// The kernel half is already holding the code, and a page can be shown at a second address.
-// Thus a process gets the same code pages, and only the half that gets written to is new memory.
-pub fn place_shared_agent(private_offset: usize, size: usize) -> u32 {
-    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
-    let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
-    let base = unsafe { __PageReserve(PR_SHARED, pages, 0) };
-    let first = base / PAGE_SIZE;
-
-    let shared_pages = (private_offset / PAGE_SIZE as usize) as u32;
-    let own_first = own.base_address as u32 / PAGE_SIZE;
-    for page in 0..shared_pages {
-        let mut entry = 0;
-        unsafe {
-            __CopyPageTable(own_first + page, 1, &mut entry, 0);
-            // A second address for a page that the memory manager does not own takes the user
-            // bit only. The service refuses the flags that new pages take.
-            __PageCommitPhys(first + page, 1, entry / PAGE_SIZE, PC_USER);
-        }
-    }
-
-    unsafe {
-        __PageCommit(first + shared_pages, pages - shared_pages, PD_FIXEDZERO, 0,
-            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE);
-    }
-
-    base
-}
-
 pub fn allocate_shared(size: usize) -> u32 {
     alloc_shared(size) as u32
 }
 
 // The payload is a call into this image, not a copy of it. The pages of the agent are
 // available in ring 3, thus the new thread runs the same code as the kernel half.
-pub fn inject_agent(pid: u32, entry: u32, image_base: u32) -> u32 {
+pub fn inject_agent(pid: u32) -> u32 {
     let process = process_for_pid(pid);
     if process == 0 {
         return 0;
     }
+
+    let (image_base, entry) = place_shared_agent();
 
     let mut payload = [
         0xff, 0x74, 0x24, 0x04,
@@ -284,6 +258,39 @@ fn process_for_pid(pid: u32) -> u32 {
     }
 
     0
+}
+
+// The kernel half is already holding the code, and a page can be shown at a second address.
+// Thus a process gets the same code pages, and only the half that gets written to is new memory.
+fn place_shared_agent() -> (u32, u32) {
+    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+    let private_offset = crate::writable_half_start() - own.base_address as usize;
+    let pages = (own.size as usize).div_ceil(PAGE_SIZE as usize) as u32;
+    let base = unsafe { __PageReserve(PR_SHARED, pages, 0) };
+    let first = base / PAGE_SIZE;
+
+    let shared_pages = (private_offset / PAGE_SIZE as usize) as u32;
+    let own_first = own.base_address as u32 / PAGE_SIZE;
+    for page in 0..shared_pages {
+        let mut entry = 0;
+        unsafe {
+            __CopyPageTable(own_first + page, 1, &mut entry, 0);
+            // A second address for a page that the memory manager does not own takes the user
+            // bit only. The service refuses the flags that new pages take.
+            __PageCommitPhys(first + page, 1, entry / PAGE_SIZE, PC_USER);
+        }
+    }
+
+    unsafe {
+        __PageCommit(first + shared_pages, pages - shared_pages, PD_FIXEDZERO, 0,
+            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE);
+        crate::install_writable_half(base as usize, (base + private_offset as u32) as usize);
+    }
+
+    let entry = base + (crate::win9x_user::frida_win9x_user_main as usize
+        - own.base_address as usize) as u32;
+
+    (base, entry)
 }
 
 // Ring 3 cannot write to a different process. Thus KERNEL32 makes the thread in the target,

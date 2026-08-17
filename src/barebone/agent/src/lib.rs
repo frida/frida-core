@@ -109,7 +109,6 @@ pub enum FridaCommand {
     DetachFromProcess = 11,
     PlaceAgentInProcess = 12,
     StartAgentInProcess = 13,
-    PlaceSharedAgent = 14,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -129,7 +128,6 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
             FridaCommand::PlaceAgentInProcess => write!(f, "PlaceAgentInProcess"),
-            FridaCommand::PlaceSharedAgent => write!(f, "PlaceSharedAgent"),
             FridaCommand::StartAgentInProcess => write!(f, "StartAgentInProcess"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
@@ -203,6 +201,9 @@ mod entrypoint_blob {
 
     unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            crate::preserve_writable_half();
+
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
 
             kernel::run_when_ready(start_worker);
@@ -594,6 +595,69 @@ fn transport_is_up() -> bool {
 
 static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
+// A copy of the agent runs the same code, but it cannot share what gets written to. Thus keep
+// the writable half as it is before anything writes to it.
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) unsafe fn preserve_writable_half() {
+    let size = writable_half_size();
+    let pristine = kernel::alloc(size);
+    unsafe {
+        ptr::copy_nonoverlapping(writable_half_start() as *const u8, pristine, size);
+        PRISTINE_WRITABLE_HALF = pristine;
+    }
+}
+
+// Give a copy the half it writes to, and move every address in it to where the copy runs. The
+// address that the copy runs at and the address that takes the bytes are two different ones.
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_here: usize) {
+    let own = unsafe { ptr::addr_of!(OWN_RANGE).read() }.base_address as usize;
+    let distance = seen_by_copy.wrapping_sub(own);
+    let private_offset = writable_half_start() - own;
+
+    unsafe {
+        ptr::copy_nonoverlapping(PRISTINE_WRITABLE_HALF, writable_from_here as *mut u8,
+            writable_half_size());
+
+        let mut entry = &raw const _agent_relocs_start as usize;
+        let end = &raw const _agent_relocs_end as usize;
+        while entry != end {
+            let slot = (writable_from_here + (entry as *const usize).read() - private_offset)
+                as *mut usize;
+            slot.write(slot.read().wrapping_add(distance));
+            entry += RELOCATION_SIZE;
+        }
+    }
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) fn writable_half_start() -> usize {
+    &raw const _agent_private_start as usize
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn writable_half_size() -> usize {
+    (&raw const _heap_start as usize) - writable_half_start()
+}
+
+// A relocation names the slot first, and the rest of it says the same thing as the value that
+// the slot already holds.
+#[cfg(target_arch = "x86")]
+const RELOCATION_SIZE: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const RELOCATION_SIZE: usize = 24;
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+static mut PRISTINE_WRITABLE_HALF: *mut u8 = ptr::null_mut();
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+unsafe extern "C" {
+    static _agent_private_start: u8;
+    static _heap_start: u8;
+    static _agent_relocs_start: u8;
+    static _agent_relocs_end: u8;
+}
+
 pub(crate) fn own_range_contains(address: u32) -> bool {
     let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
     let base = range.base_address as u32;
@@ -857,8 +921,6 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
-            #[cfg(feature = "win9x")]
-            FridaCommand::PlaceSharedAgent => handle_place_shared_agent(payload_variant, request_id),
             #[cfg(feature = "winnt")]
             FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
             #[cfg(feature = "winnt")]
@@ -889,10 +951,7 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     use crate::bindings::g_variant_get_child_value;
 
     unsafe {
-        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
-        let entry = g_variant_get_uint32(g_variant_get_child_value(payload, 1));
-        let image_base = g_variant_get_uint32(g_variant_get_child_value(payload, 2));
-        PENDING_INJECTION = (request_id, pid, entry, image_base);
+        PENDING_INJECTION = (request_id, g_variant_get_uint32(payload));
         INJECTION_PENDING = true;
     }
 
@@ -901,51 +960,23 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
 
 #[cfg(feature = "winnt")]
 fn handle_place_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
-    use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64};
-
     unsafe {
-        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
-        let private_offset = g_variant_get_uint64(g_variant_get_child_value(payload, 1)) as usize;
-        let size = g_variant_get_uint64(g_variant_get_child_value(payload, 2)) as usize;
+        let placed = kernel::place_agent_in_process(g_variant_get_uint32(payload));
 
-        let placed = kernel::place_agent_in_process(pid, private_offset, size);
-
-        HandlerResponse::success(g_variant_new(c"(tttt)".as_ptr(), placed.seen_by_process,
-            placed.writable_from_here, placed.arena_seen_by_process, placed.arena_here))
+        HandlerResponse::success(g_variant_new_uint32(placed as u32))
     }
 }
 
 #[cfg(feature = "winnt")]
 fn handle_start_agent_in_process(payload: *mut GVariant) -> HandlerResponse {
-    use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64};
-
     unsafe {
-        let pid = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
-        let bootstrap = g_variant_get_uint64(g_variant_get_child_value(payload, 1));
-        let entry = g_variant_get_uint64(g_variant_get_child_value(payload, 2));
-
-        let reached = kernel::start_agent_in_process(pid, bootstrap, entry);
+        let reached = kernel::start_agent_in_process(g_variant_get_uint32(payload));
         HandlerResponse::success(g_variant_new_uint32(reached))
     }
 }
 
 // All processes can read the shared arena, and ring 3 can execute from it.
 #[cfg(feature = "win9x")]
-#[cfg(feature = "win9x")]
-fn handle_place_shared_agent(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
-    use crate::bindings::g_variant_get_child_value;
-
-    unsafe {
-        let private_offset = g_variant_get_uint32(g_variant_get_child_value(payload, 0));
-        let size = g_variant_get_uint32(g_variant_get_child_value(payload, 1));
-
-        PENDING_PLACEMENT = (request_id, private_offset, size);
-        PLACEMENT_PENDING = true;
-    }
-
-    None
-}
-
 fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
     unsafe {
         PENDING_ALLOCATION = (request_id, g_variant_get_uint32(payload));
@@ -960,7 +991,6 @@ fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<Han
 #[cfg(feature = "win9x")]
 unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
     serve_pending_allocation();
-    serve_pending_placement();
     serve_pending_injection();
     serve_pending_detach();
     relay_frames_from_targets();
@@ -986,31 +1016,14 @@ fn serve_pending_allocation() {
 }
 
 #[cfg(feature = "win9x")]
-fn serve_pending_placement() {
-    if !unsafe { ptr::addr_of!(PLACEMENT_PENDING).read() } {
-        return;
-    }
-    unsafe { PLACEMENT_PENDING = false };
-
-    let (request_id, private_offset, size) = unsafe { PENDING_PLACEMENT };
-    let address = kernel::place_shared_agent(private_offset as usize, size as usize);
-    let response = if address == 0 {
-        HandlerResponse::error("Unable to place the agent")
-    } else {
-        HandlerResponse::success(unsafe { g_variant_new_uint32(address) })
-    };
-    send_command_reply(request_id, response);
-}
-
-#[cfg(feature = "win9x")]
 fn serve_pending_injection() {
     if !unsafe { ptr::addr_of!(INJECTION_PENDING).read() } {
         return;
     }
     unsafe { INJECTION_PENDING = false };
 
-    let (request_id, pid, entry, image_base) = unsafe { PENDING_INJECTION };
-    let observed = kernel::inject_agent(pid, entry, image_base);
+    let (request_id, pid) = unsafe { PENDING_INJECTION };
+    let observed = kernel::inject_agent(pid);
     let response = if observed == 0 {
         HandlerResponse::error("Unable to inject into process")
     } else {
@@ -1053,13 +1066,9 @@ fn relay_frames_from_targets() {
 
 #[cfg(feature = "win9x")]
 static mut ALLOCATION_PENDING: bool = false;
-#[cfg(feature = "win9x")]
-static mut PLACEMENT_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
 static mut PENDING_ALLOCATION: (u16, u32) = (0, 0);
-#[cfg(feature = "win9x")]
-static mut PENDING_PLACEMENT: (u16, u32, u32) = (0, 0, 0);
 
 #[cfg(feature = "win9x")]
 static mut DETACH_PENDING: bool = false;
@@ -1071,7 +1080,7 @@ static mut PENDING_DETACH: (u16, u32) = (0, 0);
 static mut INJECTION_PENDING: bool = false;
 
 #[cfg(feature = "win9x")]
-static mut PENDING_INJECTION: (u16, u32, u32, u32) = (0, 0, 0, 0);
+static mut PENDING_INJECTION: (u16, u32) = (0, 0);
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
