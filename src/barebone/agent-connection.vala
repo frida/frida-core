@@ -411,8 +411,8 @@ namespace Frida.Barebone {
 			var copy = yield place_agent_in_process (pid, private_offset, elf.mapped_size,
 				cancellable);
 
-			// Relocate for the address that the process uses, which is not the address that receives the
-			// writable half.
+			// Relocate for the address that the process uses. That address is not the address that
+			// receives the data.
 			Bytes image = machine.relocate (elf, raw_elf.bytes, copy.seen_by_process);
 			unowned uint8[] data = image.get_data ();
 

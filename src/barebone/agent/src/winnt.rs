@@ -511,7 +511,7 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
     // Gum returns a different stack pointer, but an iret in the same privilege level does not
     // load one. Thus the thunk puts the registers back from a record.
     unsafe {
-        frida_winnt_resume = [
+        RESUME = [
             cpu_context.eip,
             cpu_context.edi,
             cpu_context.esi,
@@ -528,9 +528,15 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
     0
 }
 
+// A thunk cannot name data, the image being position-independent. Thus it asks for the record.
 #[cfg(target_arch = "x86")]
 #[unsafe(no_mangle)]
-static mut frida_winnt_resume: [u32; 10] = [0; 10];
+extern "C" fn frida_winnt_resume_block() -> *mut u32 {
+    &raw mut RESUME as *mut u32
+}
+
+#[cfg(target_arch = "x86")]
+static mut RESUME: [u32; 10] = [0; 10];
 
 // A long-mode frame always contains the stack pointer. Thus write the values from Gum into
 // the frame.
@@ -659,9 +665,6 @@ fn faulting_address() -> usize {
 }
 
 static mut FAULT_CHAIN: [usize; 32] = [0; 32];
-
-#[unsafe(no_mangle)]
-static mut frida_winnt_fault_chain: usize = 0;
 
 const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;
@@ -1046,8 +1049,8 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
             if (_MmMapLockedPagesSpecifyCache)(private_mdl, USER_MODE, MM_CACHED, wanted, 0,
                     NORMAL_PAGE_PRIORITY) == wanted {
                 // The mapping gives no permission to execute.
-                        protect(text as u64, shared_size, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
-                        placed.seen_by_process = text as u64;
+                protect(text as u64, shared_size, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
+                placed.seen_by_process = text as u64;
                 placed.writable_from_here = private as u64;
                 break;
             }
@@ -1145,19 +1148,95 @@ pub fn start_agent_in_process(pid: u32, bootstrap: u64, entry: u64) -> u32 {
     }
 }
 
-#[cfg(target_arch = "x86")]
-fn create_user_thread(_process: *mut c_void, _arena_here: u64, _arena_seen: u64,
-        _bootstrap: u64, _entry: u64) -> bool {
-    false
-}
-
-// This kernel exports no ZwCreateThread, but its Zw stubs are only service numbers: each one
-// builds the frame the dispatcher expects, loads an index and jumps to it. Thus read those two
-// addresses out of an exported stub and write a stub of our own with the index we want. Write
-// the jump as an indirect one, because pool memory is further from the image than a relative
-// jump can reach.
+// What each word size puts where: the frame a service is entered with, the block a thread starts
+// with, and the shape of the stubs on both sides.
 #[cfg(target_arch = "x86_64")]
-fn synthesize_zw_stub(index: u32) -> u64 {
+const CONTEXT_PC: u64 = 0xf8;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_SP: u64 = 0x98;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_RDI: u64 = 0xb0;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_CS: u64 = 0x38;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_SS: u64 = 0x42;
+#[cfg(target_arch = "x86_64")]
+const CONTEXT_EFLAGS: u64 = 0x44;
+#[cfg(target_arch = "x86_64")]
+const INITIAL_TEB_SIZE: usize = 40;
+#[cfg(target_arch = "x86_64")]
+const INITIAL_TEB_STACK_BASE: u64 = 0x10;
+#[cfg(target_arch = "x86_64")]
+const INITIAL_TEB_STACK_LIMIT: u64 = 0x18;
+#[cfg(target_arch = "x86_64")]
+const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x20;
+#[cfg(target_arch = "x86_64")]
+const SERVICE_INDEX_OPCODE: usize = 3;
+#[cfg(target_arch = "x86_64")]
+const USER_CS: u64 = 0x33;
+#[cfg(target_arch = "x86_64")]
+const USER_SS: u64 = 0x2b;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_SIZE: usize = 48;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_PROLOGUE: usize = 12;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_LEA_REL: usize = 15;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_LEA_NEXT: usize = 19;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_JMP_REL: usize = 26;
+#[cfg(target_arch = "x86_64")]
+const ZW_STUB_JMP_NEXT: usize = 30;
+
+#[cfg(target_arch = "x86")]
+const CONTEXT_PC: u64 = 0xb8;
+#[cfg(target_arch = "x86")]
+const CONTEXT_SP: u64 = 0xc4;
+#[cfg(target_arch = "x86")]
+const CONTEXT_CS: u64 = 0xbc;
+#[cfg(target_arch = "x86")]
+const CONTEXT_SS: u64 = 0xc8;
+#[cfg(target_arch = "x86")]
+const CONTEXT_DS: u64 = 0x98;
+#[cfg(target_arch = "x86")]
+const CONTEXT_ES: u64 = 0x94;
+#[cfg(target_arch = "x86")]
+const CONTEXT_FS: u64 = 0x90;
+#[cfg(target_arch = "x86")]
+const CONTEXT_EFLAGS: u64 = 0xc0;
+#[cfg(target_arch = "x86")]
+const INITIAL_TEB_SIZE: usize = 20;
+#[cfg(target_arch = "x86")]
+const INITIAL_TEB_STACK_BASE: u64 = 0x08;
+#[cfg(target_arch = "x86")]
+const INITIAL_TEB_STACK_LIMIT: u64 = 0x0c;
+#[cfg(target_arch = "x86")]
+const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x10;
+#[cfg(target_arch = "x86")]
+const SERVICE_INDEX_OPCODE: usize = 0;
+#[cfg(target_arch = "x86")]
+const USER_CS: u64 = 0x1b;
+#[cfg(target_arch = "x86")]
+const USER_SS: u64 = 0x23;
+#[cfg(target_arch = "x86")]
+const USER_DS: u64 = 0x23;
+#[cfg(target_arch = "x86")]
+const USER_FS: u64 = 0x3b;
+#[cfg(target_arch = "x86")]
+const THREAD_ARGUMENT_BYTES: usize = 32;
+#[cfg(target_arch = "x86")]
+const ZW_STUB_SIZE: usize = 24;
+#[cfg(target_arch = "x86")]
+const ZW_STUB_CALL_REL: usize = 13;
+#[cfg(target_arch = "x86")]
+const ZW_STUB_CALL_NEXT: usize = 17;
+
+// This kernel exports no ZwCreateThread, but a Zw stub is only a service number: it builds the
+// frame the dispatcher expects, loads an index and calls it. Thus read the dispatcher out of an
+// exported stub, take the index from ntdll's own stub for the service, and write a stub of our
+// own.
+fn synthesize_zw_stub(index: u32) -> usize {
     let template = unsafe { _ZwCreateEvent as *const u8 };
     let stub = alloc_code(ZW_STUB_SIZE);
     if stub.is_null() {
@@ -1165,18 +1244,29 @@ fn synthesize_zw_stub(index: u32) -> u64 {
     }
 
     unsafe {
+        let mut at = 0;
+        let mut put = |bytes: &[u8]| {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), stub.add(at), bytes.len());
+            at += bytes.len();
+        };
+        emit_zw_stub(template, stub, index, &mut put);
+    }
+
+    stub as usize
+}
+
+// The image is further from pool memory than a relative jump can reach here, thus the jump to
+// the dispatcher is an indirect one.
+#[cfg(target_arch = "x86_64")]
+unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
+        put: &mut dyn FnMut(&[u8])) {
+    unsafe {
         let linkage = template.add(ZW_STUB_LEA_NEXT) as u64
             + (template.add(ZW_STUB_LEA_REL) as *const i32).read() as u64;
         let dispatcher = template.add(ZW_STUB_JMP_NEXT) as u64
             + (template.add(ZW_STUB_JMP_REL) as *const i32).read() as u64;
 
-        core::ptr::copy_nonoverlapping(template, stub, ZW_STUB_PROLOGUE);
-
-        let mut at = ZW_STUB_PROLOGUE;
-        let mut put = |bytes: &[u8]| {
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), stub.add(at), bytes.len());
-            at += bytes.len();
-        };
+        put(core::slice::from_raw_parts(template, ZW_STUB_PROLOGUE));
         put(&[0x48, 0xb8]);
         put(&linkage.to_le_bytes());
         put(&[0x50]);
@@ -1185,12 +1275,32 @@ fn synthesize_zw_stub(index: u32) -> u64 {
         put(&[0xff, 0x25, 0x00, 0x00, 0x00, 0x00]);
         put(&dispatcher.to_le_bytes());
     }
+}
 
-    stub as u64
+// A relative call reaches anywhere in this kernel's half of the address space, so only its
+// displacement has to be worked out again. How much the service takes off the stack is part of
+// the stub, and differs from the one it was read from.
+#[cfg(target_arch = "x86")]
+unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
+        put: &mut dyn FnMut(&[u8])) {
+    unsafe {
+        let dispatcher = template.add(ZW_STUB_CALL_NEXT) as u32
+            + (template.add(ZW_STUB_CALL_REL) as *const i32).read() as u32;
+
+        put(&[0xb8]);
+        put(&index.to_le_bytes());
+        put(&[0x8d, 0x54, 0x24, 0x04]);
+        put(&[0x9c]);
+        put(&[0x6a, 0x08]);
+        put(&[0xe8]);
+        let next = stub as u32 + ZW_STUB_CALL_NEXT as u32;
+        put(&(dispatcher.wrapping_sub(next) as i32).to_le_bytes());
+        put(&[0xc2]);
+        put(&(THREAD_ARGUMENT_BYTES as u16).to_le_bytes());
+    }
 }
 
 // ntdll's stub for a service begins by loading the same index that the kernel uses.
-#[cfg(target_arch = "x86_64")]
 fn service_index_of(peb: usize, name: &[u8]) -> u32 {
     let ntdll = module_base(peb, b"ntdll.dll");
     let stub = export(ntdll, name);
@@ -1200,42 +1310,13 @@ fn service_index_of(peb: usize, name: &[u8]) -> u32 {
 
     unsafe {
         let bytes = stub as *const u8;
-        if bytes.read() != 0x4c || bytes.add(1).read() != 0x8b || bytes.add(2).read() != 0xd1
-                || bytes.add(3).read() != 0xb8 {
+        if bytes.add(SERVICE_INDEX_OPCODE).read() != 0xb8 {
             return 0;
         }
-        (bytes.add(4) as *const u32).read()
+        (bytes.add(SERVICE_INDEX_OPCODE + 1) as *const u32).read()
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_RIP: u64 = 0xf8;
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_RSP: u64 = 0x98;
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_RDI: u64 = 0xb0;
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_CS: u64 = 0x38;
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_SS: u64 = 0x42;
-#[cfg(target_arch = "x86_64")]
-const CONTEXT_EFLAGS: u64 = 0x44;
-const INITIAL_TEB_SIZE: usize = 40;
-const INITIAL_TEB_STACK_BASE: u64 = 0x10;
-const INITIAL_TEB_STACK_LIMIT: u64 = 0x18;
-const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x20;
-
-const ZW_STUB_SIZE: usize = 48;
-const ZW_STUB_PROLOGUE: usize = 12;
-const ZW_STUB_LEA_REL: usize = 15;
-const ZW_STUB_LEA_NEXT: usize = 19;
-const ZW_STUB_INDEX: usize = 21;
-const ZW_STUB_JMP_REL: usize = 26;
-const ZW_STUB_JMP_NEXT: usize = 30;
-
-// The thread is made the way the system makes them, thus it arrives with a block of its own and
-// ntdll accepts calls from it. Only the service that makes one is missing, and that is built.
-#[cfg(target_arch = "x86_64")]
 fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _bootstrap: u64,
         entry: u64) -> bool {
     unsafe {
@@ -1255,7 +1336,8 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _b
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+// The thread is made the way the system makes them, thus it arrives with a block of its own and
+// ntdll accepts calls from it.
 fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
         arena_seen: u64, entry: u64) -> bool {
     let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
@@ -1265,7 +1347,7 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
 
     // The loader's list is in the target's address space, thus read it from there.
     let peb = unsafe { (_PsGetProcessPeb)(process) } as usize;
-    let mut index = 0;
+    let index;
     unsafe {
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
@@ -1280,23 +1362,27 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
         *mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8, *mut c_void, u8,
         => i32) = unsafe { core::mem::transmute(synthesize_zw_stub(index)) };
 
+    let top = stack + STACK_SIZE as u64;
+    let sp = seed_stack(process, top, arena_seen);
     let context = arena_here + CONTEXT_AREA;
     let teb = arena_here + INITIAL_TEB_AREA;
 
     unsafe {
         core::ptr::write_bytes(context as *mut u8, 0, CONTEXT_SIZE);
         ((context + CONTEXT_FLAGS as u64) as *mut u32).write(CONTEXT_FULL);
-        ((context + CONTEXT_RIP) as *mut u64).write(entry);
-        ((context + CONTEXT_RSP) as *mut u64).write((stack + STACK_SIZE as u64 - 64) & !15);
-        ((context + CONTEXT_RDI) as *mut u64).write(arena_seen);
+        ((context + CONTEXT_PC) as *mut usize).write(entry as usize);
+        ((context + CONTEXT_SP) as *mut usize).write(sp as usize);
         ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
         ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
         ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
+        #[cfg(target_arch = "x86_64")]
+        ((context + CONTEXT_RDI) as *mut u64).write(arena_seen);
+        seed_segments(context);
 
         core::ptr::write_bytes(teb as *mut u8, 0, INITIAL_TEB_SIZE);
-        ((teb + INITIAL_TEB_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
-        ((teb + INITIAL_TEB_STACK_LIMIT) as *mut u64).write(stack);
-        ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut u64).write(stack);
+        ((teb + INITIAL_TEB_STACK_BASE) as *mut usize).write(top as usize);
+        ((teb + INITIAL_TEB_STACK_LIMIT) as *mut usize).write(stack as usize);
+        ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut usize).write(stack as usize);
 
         let mut thread: *mut c_void = core::ptr::null_mut();
         let mut client_id = [0usize; 2];
@@ -1310,7 +1396,43 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
     }
 }
 
+// The kernel takes the data segments of a new thread from the context.
+#[cfg(target_arch = "x86")]
+fn seed_segments(context: u64) {
+    unsafe {
+        ((context + CONTEXT_DS) as *mut u16).write(USER_DS as u16);
+        ((context + CONTEXT_ES) as *mut u16).write(USER_DS as u16);
+        ((context + CONTEXT_FS) as *mut u16).write(USER_FS as u16);
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
+fn seed_segments(_context: u64) {}
+
+// The argument travels in a register here, and the stack only has to be aligned the way a call
+// would have left it.
+#[cfg(target_arch = "x86_64")]
+fn seed_stack(_process: *mut c_void, top: u64, _argument: u64) -> u64 {
+    (top - 64) & !15
+}
+
+// A cdecl entry looks for its argument above the return address, thus the stack is laid out
+// before the thread runs, in the process that will read it.
+#[cfg(target_arch = "x86")]
+fn seed_stack(process: *mut c_void, top: u64, argument: u64) -> u64 {
+    let sp = (top - 32) & !15;
+
+    unsafe {
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+        (sp as *mut u32).write(0);
+        ((sp + 4) as *mut u32).write(argument as u32);
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    }
+
+    sp
+}
+
 fn allocate_in_process(process_handle: *mut c_void, size: usize, protection: u32) -> u64 {
     let mut address: *mut u8 = core::ptr::null_mut();
     let mut region = size;
@@ -1325,70 +1447,13 @@ fn allocate_in_process(process_handle: *mut c_void, size: usize, protection: u32
     address as u64
 }
 
-#[cfg(target_arch = "x86_64")]
-fn describe_block(process: *mut c_void, block: u64, stack: u64) {
-    unsafe {
-        let peb = (_PsGetProcessPeb)(process) as u64;
-
-        let mut apc_state = [0usize; APC_STATE_WORDS];
-        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-
-        ((block + BLOCK_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
-        ((block + BLOCK_STACK_LIMIT) as *mut u64).write(stack);
-        ((block + BLOCK_SELF) as *mut u64).write(block);
-        ((block + BLOCK_PEB) as *mut u64).write(peb);
-
-        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
-    }
-}
-
 // This is a system thread, but it uses the address space of the target. The code after the
 // descent runs in ring 3.
-#[cfg(target_arch = "x86_64")]
-unsafe extern "win64" fn descend_to_user(context: *mut c_void) {
-    let descent = unsafe { (context as *const Descent).read() };
-    free(context as *mut u8, core::mem::size_of::<Descent>());
-
-    // These values are available only after the thread starts, and ring 3 cannot read them.
-    unsafe {
-        let thread = (_PsGetCurrentThread)();
-        ((descent.block + BLOCK_PROCESS_ID as u64) as *mut usize)
-            .write((_PsGetProcessId)((_PsGetThreadProcess)(thread)) as usize);
-        ((descent.block + BLOCK_THREAD_ID as u64) as *mut usize)
-            .write((_PsGetCurrentThreadId)() as usize);
-    }
-
-    unsafe {
-        frida_winnt_descend_to_user(descent.entry, descent.argument, descent.stack, descent.block);
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-struct Descent {
-    entry: u64,
-    argument: u64,
-    stack: u64,
-    block: u64,
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe extern "C" {
-    fn frida_winnt_descend_to_user(entry: u64, argument: u64, stack: u64, block: u64) -> !;
-}
-
 const STACK_SIZE: usize = 256 * 1024;
 const BLOCK_SIZE: usize = 4096;
 const PROCESS_ALL_ACCESS: u32 = 0x1f_0fff;
 
-const BLOCK_STACK_BASE: u64 = 0x08;
-const BLOCK_STACK_LIMIT: u64 = 0x10;
-const BLOCK_SELF: u64 = 0x30;
-const BLOCK_PEB: u64 = 0x60;
-
-const USER_CS: u64 = 0x33;
-const USER_SS: u64 = 0x2b;
 const INITIAL_EFLAGS: u64 = 0x200;
-const IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
 
 // The primitives that differ between the two halves. The kernel half runs on KERNEL, and the
 // copy in a process selects USER before it does anything else. The order here is the order of
@@ -2055,22 +2120,26 @@ frida_winnt_run_on_stack:
     add esp, 8
     test eax, eax
     jnz 1f
-    mov esp, [frida_winnt_resume + 16]
-    push dword ptr [frida_winnt_resume + 36]
+    call frida_winnt_resume_block
+    mov ebx, eax
+    mov esp, [ebx + 16]
+    push dword ptr [ebx + 36]
     popfd
-    mov edi, [frida_winnt_resume + 4]
-    mov esi, [frida_winnt_resume + 8]
-    mov ebp, [frida_winnt_resume + 12]
-    mov ebx, [frida_winnt_resume + 20]
-    mov edx, [frida_winnt_resume + 24]
-    mov ecx, [frida_winnt_resume + 28]
-    mov eax, [frida_winnt_resume + 32]
-    jmp dword ptr [frida_winnt_resume]
+    push dword ptr [ebx]
+    push dword ptr [ebx + 32]
+    push dword ptr [ebx + 20]
+    mov edi, [ebx + 4]
+    mov esi, [ebx + 8]
+    mov ebp, [ebx + 12]
+    mov edx, [ebx + 24]
+    mov ecx, [ebx + 28]
+    pop ebx
+    pop eax
+    ret
 1:
-    mov [frida_winnt_fault_chain], eax
+    mov [esp + 32], eax
     popad
-    add esp, 4
-    jmp dword ptr [frida_winnt_fault_chain]
+    ret
 .endm
 
 FAULT_THUNK frida_winnt_fault_thunk_ud, 6
@@ -2080,53 +2149,6 @@ FAULT_THUNK frida_winnt_fault_thunk_pf, 14
 );
 
 // To go to ring 3, make the frame that an interrupt makes, then do an iret. Set the block
-// that the copy reads through gs before this, with swapgs.
-#[cfg(target_arch = "x86_64")]
-core::arch::global_asm!(
-    r#"
-.intel_syntax noprefix
-
-.global frida_winnt_descend_to_user
-frida_winnt_descend_to_user:
-    mov r10, rdi
-    mov r11, rsi
-    mov r9, rdx
-
-    mov rax, rcx
-    mov rdx, rcx
-    shr rdx, 32
-    mov ecx, {gs_base}
-    wrmsr
-
-    // Between swapgs and iret the processor is in ring 0 with the gs of ring 3. An interrupt here
-    // would use the incorrect gs, thus interrupts stay off. The iret enables them again.
-    cli
-    swapgs
-
-    mov rdi, r11
-    push {ss}
-    push r9
-    push {eflags}
-    push {cs}
-    push r10
-    xor eax, eax
-    xor ebx, ebx
-    xor ecx, ecx
-    xor edx, edx
-    xor esi, esi
-    xor ebp, ebp
-    xor r8, r8
-    xor r9, r9
-    xor r10, r10
-    xor r11, r11
-    iretq
-"#,
-    ss = const USER_SS,
-    cs = const USER_CS,
-    eflags = const INITIAL_EFLAGS,
-    gs_base = const IA32_KERNEL_GS_BASE,
-);
-
 // The code pushes the registers in the order that Gum uses, thus the handler reads them where
 // they are. A long-mode iret loads the stack pointer from the frame, thus the handler changes
 // the frame.
@@ -2143,6 +2165,8 @@ frida_winnt_run_on_stack:
     call rsi
 1:
     jmp 1b
+
+.set GPR_BYTES, 128
 
 .macro PUSH_GPRS
     push rax
@@ -2202,10 +2226,9 @@ frida_winnt_run_on_stack:
     add rsp, 8 + \error_code
     iretq
 1:
-    mov qword ptr [rip + frida_winnt_fault_chain], rax
+    mov [rsp + GPR_BYTES], rax
     POP_GPRS
-    add rsp, 8
-    jmp qword ptr [rip + frida_winnt_fault_chain]
+    ret
 .endm
 
 FAULT_THUNK frida_winnt_fault_thunk_ud, 6, 0
