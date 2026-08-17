@@ -21,7 +21,7 @@ CORE_TAG_FIELD = f"{{{CORE_NAMESPACE}}}field"
 CORE_TAG_CONSTRUCTOR = f"{{{CORE_NAMESPACE}}}constructor"
 CORE_TAG_METHOD = f"{{{CORE_NAMESPACE}}}method"
 
-OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed )?(class|interface)\s+(\w+)\b")
+OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed |abstract )?(class|interface)\s+(\w+)\b")
 
 TOPLEVEL_NAMES = [
     "frida.vala",
@@ -800,8 +800,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
                 if stripped_line == "}":
                     ignoring = False
             else:
-                if stripped_line.startswith("public abstract") \
-                        or stripped_line.startswith("public class Promise") \
+                if stripped_line.startswith("public class Promise") \
                         or stripped_line.startswith("public interface Future") \
                         or stripped_line.startswith("public class CF"):
                     ignoring = True
