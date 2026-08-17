@@ -929,9 +929,9 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
             #[cfg(feature = "winnt")]
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
@@ -1202,7 +1202,7 @@ fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
         let command_line = core::ffi::CStr::from_ptr(g_variant_get_string(payload,
@@ -1216,7 +1216,7 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_resume_process(payload: *mut GVariant) -> HandlerResponse {
     let resumed = unsafe { kernel::resume_process(g_variant_get_uint32(payload)) };
     if !resumed {

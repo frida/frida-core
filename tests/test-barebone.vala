@@ -161,6 +161,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/spawns-and-resumes-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_spawns_and_resumes_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/enumerates-processes-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_enumerates_processes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
@@ -213,6 +218,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_injects_into_process_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/spawns-and-resumes-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_spawns_and_resumes_in_live_guest.begin (h as Harness,
+				"WINNT64"));
 			h.run ();
 		});
 
@@ -1906,6 +1917,48 @@ namespace Frida.BareboneTest {
 			assert_true (from_there[0].contains (second_pid.to_string ()));
 
 			yield device.resume (second_pid, null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private static async void winnt_spawns_and_resumes_in_live_guest (Harness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield device.spawn ("C:\\WINDOWS\\system32\\notepad.exe", null, null);
+			assert_true (pid != 0);
+
+			// The process is held, thus it is there but has run none of its own code.
+			var processes = yield device.enumerate_processes (null, null);
+			bool present = false;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).pid == pid)
+					present = true;
+			}
+			assert_true (present);
+
+			yield device.resume (pid, null);
+
+			// The process is no longer held, thus there is nothing left to resume.
+			try {
+				yield device.resume (pid, null);
+				assert_not_reached ();
+			} catch (GLib.Error e) {
+			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

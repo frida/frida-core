@@ -2,6 +2,7 @@
 // nothing of the kernel's, thus it has primitives of its own, which frida_winnt_user_main selects
 // before it does anything else.
 
+use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 
 use crate::winnt::{
@@ -9,7 +10,8 @@ use crate::winnt::{
     OBSERVED_PID, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives, STOP_REQUEST,
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
-    USER_SHARED_DATA, AGENT_WAKE_HANDLE, export, module_base, read_pointer,
+    USER_SHARED_DATA, AGENT_WAKE_HANDLE, PEB_PARAMETERS_OFFSET, POINTER_SIZE, export,
+    module_base, read_pointer,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
 };
 
@@ -125,8 +127,181 @@ fn resolve_user_api() {
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
         });
+
+        SPAWN_API = Some(SpawnApi {
+            create_process_parameters: core::mem::transmute(
+                export(ntdll, b"RtlCreateProcessParameters")),
+            create_user_process: core::mem::transmute(export(ntdll, b"RtlCreateUserProcess")),
+            destroy_process_parameters: core::mem::transmute(
+                export(ntdll, b"RtlDestroyProcessParameters")),
+            resume_thread: core::mem::transmute(export(ntdll, b"NtResumeThread")),
+            close: core::mem::transmute(export(ntdll, b"NtClose")),
+        });
     }
 }
+
+// Making a process is the work of the loader's own entry points. They ask for wide strings and
+// they leave the first thread of the new process held, which is what a caller wants.
+pub fn spawn_process(command_line: &str) -> u32 {
+    let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
+
+    let mut image = WideText::of(&native_path_of(command_line));
+    let mut line = WideText::of(command_line);
+    let mut desktop = our_desktop();
+
+    let mut parameters: *mut c_void = core::ptr::null_mut();
+    let created = unsafe {
+        (api.create_process_parameters)(&mut parameters, image.text(), core::ptr::null_mut(),
+            core::ptr::null_mut(), line.text(), core::ptr::null_mut(), core::ptr::null_mut(),
+            desktop.as_mut_ptr(), core::ptr::null_mut(), core::ptr::null_mut())
+    };
+    if created < 0 {
+        return 0;
+    }
+
+    let mut information = [0u8; PROCESS_INFORMATION_SIZE];
+    let status = unsafe {
+        (api.create_user_process)(image.text(), OBJ_CASE_INSENSITIVE, parameters,
+            core::ptr::null_mut(), core::ptr::null_mut(), CURRENT_PROCESS, 0,
+            core::ptr::null_mut(), core::ptr::null_mut(), information.as_mut_ptr())
+    };
+    unsafe { (api.destroy_process_parameters)(parameters) };
+    if status < 0 {
+        return 0;
+    }
+
+    let pid = read_handle(&information, PROCESS_INFORMATION_PID) as usize as u32;
+    unsafe {
+        held().insert(pid, HeldProcess {
+            process: read_handle(&information, PROCESS_INFORMATION_PROCESS),
+            thread: read_handle(&information, PROCESS_INFORMATION_THREAD),
+        })
+    };
+
+    pid
+}
+
+pub fn resume_process(pid: u32) -> bool {
+    let Some(held) = (unsafe { held().remove(&pid) }) else {
+        return false;
+    };
+    let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
+
+    unsafe {
+        let resumed = (api.resume_thread)(held.thread, core::ptr::null_mut()) >= 0;
+        (api.close)(held.thread);
+        (api.close)(held.process);
+
+        resumed
+    }
+}
+
+// The loader takes the path the way the object manager spells it.
+fn native_path_of(command_line: &str) -> alloc::string::String {
+    let program = command_line.split(' ').next().unwrap_or(command_line);
+
+    alloc::format!("\\??\\{}", program.trim_matches('"'))
+}
+
+// A new process draws on the desktop that this one draws on.
+fn our_desktop() -> [u8; UNICODE_STRING_SIZE] {
+    let parameters = unsafe { read_pointer(peb() + PEB_PARAMETERS_OFFSET) };
+    let mut desktop = [0u8; UNICODE_STRING_SIZE];
+    unsafe {
+        core::ptr::copy_nonoverlapping((parameters + PARAMETERS_DESKTOP_OFFSET) as *const u8,
+            desktop.as_mut_ptr(), UNICODE_STRING_SIZE);
+    }
+
+    desktop
+}
+
+fn read_handle(information: &[u8; PROCESS_INFORMATION_SIZE], offset: usize) -> *mut c_void {
+    let mut bytes = [0u8; POINTER_SIZE];
+    bytes.copy_from_slice(&information[offset..offset + POINTER_SIZE]);
+
+    usize::from_le_bytes(bytes) as *mut c_void
+}
+
+fn held() -> &'static mut BTreeMap<u32, HeldProcess> {
+    unsafe { (&raw mut HELD_PROCESSES).as_mut().unwrap() }
+}
+
+// A wide string and the record that names it travel together, the record pointing into it.
+struct WideText {
+    characters: alloc::vec::Vec<u16>,
+    record: [u8; UNICODE_STRING_SIZE],
+}
+
+impl WideText {
+    fn of(text: &str) -> WideText {
+        let mut characters: alloc::vec::Vec<u16> = text.encode_utf16().collect();
+        characters.push(0);
+
+        let bytes = ((characters.len() - 1) * 2) as u16;
+        let mut record = [0u8; UNICODE_STRING_SIZE];
+        record[..2].copy_from_slice(&bytes.to_le_bytes());
+        record[2..4].copy_from_slice(&(bytes + 2).to_le_bytes());
+
+        WideText { characters, record }
+    }
+
+    fn text(&mut self) -> *mut u8 {
+        let buffer = self.characters.as_ptr() as usize;
+        self.record[UNICODE_STRING_BUFFER..].copy_from_slice(&buffer.to_le_bytes());
+
+        self.record.as_mut_ptr()
+    }
+}
+
+struct SpawnApi {
+    create_process_parameters: windows_fn!(*mut *mut c_void, *mut u8, *mut u8, *mut u8, *mut u8,
+        *mut u8, *mut u8, *mut u8, *mut u8, *mut u8 => i32),
+    create_user_process: windows_fn!(*mut u8, u32, *mut c_void, *mut c_void, *mut c_void,
+        *mut c_void, u8, *mut c_void, *mut c_void, *mut u8 => i32),
+    destroy_process_parameters: windows_fn!(*mut c_void => i32),
+    resume_thread: windows_fn!(*mut c_void, *mut u32 => i32),
+    close: windows_fn!(*mut c_void => i32),
+}
+
+struct HeldProcess {
+    process: *mut c_void,
+    thread: *mut c_void,
+}
+
+static mut SPAWN_API: Option<SpawnApi> = None;
+static mut HELD_PROCESSES: BTreeMap<u32, HeldProcess> = BTreeMap::new();
+
+const OBJ_CASE_INSENSITIVE: u32 = 0x40;
+
+#[cfg(target_arch = "x86")]
+const UNICODE_STRING_SIZE: usize = 8;
+#[cfg(target_arch = "x86")]
+const UNICODE_STRING_BUFFER: usize = 4;
+#[cfg(target_arch = "x86")]
+const PARAMETERS_DESKTOP_OFFSET: usize = 0x78;
+#[cfg(target_arch = "x86")]
+const PROCESS_INFORMATION_SIZE: usize = 128;
+#[cfg(target_arch = "x86")]
+const PROCESS_INFORMATION_PROCESS: usize = 0x04;
+#[cfg(target_arch = "x86")]
+const PROCESS_INFORMATION_THREAD: usize = 0x08;
+#[cfg(target_arch = "x86")]
+const PROCESS_INFORMATION_PID: usize = 0x0c;
+
+#[cfg(target_arch = "x86_64")]
+const UNICODE_STRING_SIZE: usize = 16;
+#[cfg(target_arch = "x86_64")]
+const UNICODE_STRING_BUFFER: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const PARAMETERS_DESKTOP_OFFSET: usize = 0xc0;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_INFORMATION_SIZE: usize = 192;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_INFORMATION_PROCESS: usize = 0x08;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_INFORMATION_THREAD: usize = 0x10;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_INFORMATION_PID: usize = 0x18;
 
 fn user_api() -> &'static UserApi {
     unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }

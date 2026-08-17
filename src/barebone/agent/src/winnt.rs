@@ -8,6 +8,9 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+
+// A process is made in ring 3, thus a copy of the agent does this work.
+pub use crate::winnt_user::{resume_process, spawn_process};
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
 #[cfg(target_arch = "x86")]
@@ -782,7 +785,7 @@ unsafe fn try_read_pointer(address: usize) -> Option<usize> {
     }
 }
 
-const POINTER_SIZE: usize = core::mem::size_of::<usize>();
+pub(crate) const POINTER_SIZE: usize = core::mem::size_of::<usize>();
 
 #[cfg(target_arch = "x86")]
 const MIN_THREAD_ENTRY_OFFSET: usize = 0x100;
@@ -904,9 +907,10 @@ unsafe fn describe(process: *mut c_void) -> (*const u8, *const u8) {
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
 
+        // A process that has not run yet has pages that nothing has touched, thus read the way
+        // that recovers from a fault.
         let peb = (_PsGetProcessPeb)(process) as usize;
-        if peb != 0 {
-            let parameters = ((peb + PEB_PARAMETERS_OFFSET) as *const usize).read_unaligned();
+        if let Some(parameters) = try_read_pointer(peb + PEB_PARAMETERS_OFFSET) {
             read_user_string(parameters + PARAMETERS_IMAGE_PATH_OFFSET, path);
             read_user_string(parameters + PARAMETERS_COMMAND_LINE_OFFSET, command_line);
         }
@@ -920,11 +924,15 @@ unsafe fn describe(process: *mut c_void) -> (*const u8, *const u8) {
 
 // This read can cause a fault if the page is not in memory. At PASSIVE_LEVEL the pager gets
 // the page again.
+
 unsafe fn read_user_string(address: usize, out: &mut [u8]) {
     unsafe {
-        let string = address as *const u8;
-        let length = (string as *const u16).read_unaligned() as usize;
-        let buffer = (string.add(UNICODE_STRING_BUFFER_OFFSET) as *const usize).read_unaligned();
+        let Some(length) = try_read_pointer(address).map(|word| word as u16 as usize) else {
+            return;
+        };
+        let Some(buffer) = try_read_pointer(address + UNICODE_STRING_BUFFER_OFFSET) else {
+            return;
+        };
         if buffer == 0 {
             return;
         }
@@ -932,8 +940,10 @@ unsafe fn read_user_string(address: usize, out: &mut [u8]) {
         let limit = out.len() - 1;
         let mut written = 0;
         for i in 0..length.min(limit) / 2 {
-            let c = ((buffer as *const u16).add(i)).read_unaligned();
-            written += encode_utf8(c, &mut out[written..limit]);
+            let Some(word) = try_read_pointer(buffer + i * 2) else {
+                break;
+            };
+            written += encode_utf8(word as u16, &mut out[written..limit]);
         }
         out[written] = 0;
     }
@@ -964,14 +974,14 @@ static mut COMMAND_LINE: [u8; MAX_COMMAND_LINE_SIZE] = [0; MAX_COMMAND_LINE_SIZE
 const APC_STATE_WORDS: usize = 8;
 
 #[cfg(target_arch = "x86")]
-const PEB_PARAMETERS_OFFSET: usize = 0x10;
+pub(crate) const PEB_PARAMETERS_OFFSET: usize = 0x10;
 #[cfg(target_arch = "x86")]
 const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x38;
 #[cfg(target_arch = "x86")]
 const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x40;
 
 #[cfg(target_arch = "x86_64")]
-const PEB_PARAMETERS_OFFSET: usize = 0x20;
+pub(crate) const PEB_PARAMETERS_OFFSET: usize = 0x20;
 #[cfg(target_arch = "x86_64")]
 const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x60;
 #[cfg(target_arch = "x86_64")]
