@@ -54,6 +54,7 @@ pub extern "C" fn frida_winnt_user_bootstrap(arena: usize) -> ! {
 
 const THREAD_ALL_ACCESS: u32 = 0x1f_03ff;
 const CURRENT_THREAD: *mut c_void = -2isize as *mut c_void;
+const IDLE_SLICE_US: u64 = 50_000;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn frida_winnt_user_main(arena: usize) {
@@ -79,7 +80,12 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
             acknowledge_frame_from_host(arena as u64);
         }
 
-        unsafe { crate::dispatch_pending_work(context) };
+        unsafe { crate::poll_pending_work(context) };
+
+        // The kernel half sets this on its way in. Nothing else here comes around on a clock,
+        // and the wait ends early whenever a frame arrives.
+        let due_time = -((IDLE_SLICE_US as i64) * 10);
+        unsafe { (user_api().wait_for_object)(target_wake_handle(), 0, &due_time) };
     }
 
     unsafe { (user_api().exit_thread)(0) };

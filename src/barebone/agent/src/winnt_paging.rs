@@ -303,6 +303,6 @@ const PAGE_WRITEABLE: u32 = 0x2;
 const PAGE_LARGE: u32 = 0x80;
 const PAGE_NO_EXECUTE: u64 = 1 << 63;
 
-const GUM_PAGE_READ: u32 = 0x1;
-const GUM_PAGE_WRITE: u32 = 0x2;
-const GUM_PAGE_EXECUTE: u32 = 0x4;
+pub(crate) const GUM_PAGE_READ: u32 = 0x1;
+pub(crate) const GUM_PAGE_WRITE: u32 = 0x2;
+pub(crate) const GUM_PAGE_EXECUTE: u32 = 0x4;

@@ -710,7 +710,7 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
 
 // The copy in a process has no hostlink, because the transport belongs to the kernel half.
 // Nothing there can wake this loop, thus it returns after a short time.
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) unsafe fn poll_pending_work(main_context: *mut GMainContext) {
     unsafe {
         g_main_context_iteration(main_context, 0);
@@ -725,7 +725,7 @@ pub(crate) unsafe fn poll_pending_work(main_context: *mut GMainContext) {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 const IDLE_SLICE_US: u64 = 50_000;
 
 #[cfg(feature = "linux")]

@@ -8,6 +8,7 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
 #[cfg(target_arch = "x86")]
 macro_rules! windows_fn {
@@ -1041,7 +1042,7 @@ pub fn place_agent_in_process(pid: u32, private_offset: usize, size: usize) -> P
             if (_MmMapLockedPagesSpecifyCache)(private_mdl, USER_MODE, MM_CACHED, wanted, 0,
                     NORMAL_PAGE_PRIORITY) == wanted {
                 // The mapping gives no permission to execute.
-                        protect(text as u64, shared_size, GUM_PAGE_RWX);
+                        protect(text as u64, shared_size, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
                         placed.seen_by_process = text as u64;
                 placed.writable_from_here = private as u64;
                 break;
@@ -1106,7 +1107,6 @@ const MAX_PLACEMENT_TRIES: usize = 8;
 const USER_MODE: u8 = 1;
 const MM_CACHED: u32 = 1;
 const NORMAL_PAGE_PRIORITY: u32 = 16;
-const GUM_PAGE_RWX: u32 = 7;
 
 // Start the copy on a thread of the target. The system makes the thread, thus ntdll accepts
 // calls from it. The copy cannot answer from that thread, thus this function returns the
@@ -1147,59 +1147,61 @@ fn create_user_thread(_process: *mut c_void, _arena_here: u64, _arena_seen: u64,
     false
 }
 
-// ntdll's stub for this is a syscall, which needs no block, thus the thread that descends can
-// ask for a real thread even though it has none itself. The kernel gives that thread a block.
+// This kernel exports no ZwCreateThread, but its Zw stubs are only service numbers: each one
+// builds the frame the dispatcher expects, loads an index and jumps to it. Thus read those two
+// addresses out of an exported stub and write a stub of our own with the index we want. Write
+// the jump as an indirect one, because pool memory is further from the image than a relative
+// jump can reach.
 #[cfg(target_arch = "x86_64")]
-fn describe_real_thread(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
-        arena_seen: u64, entry: u64, argument: u64) -> bool {
-    let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
-    if stack == 0 {
-        return false;
+fn synthesize_zw_stub(index: u32) -> u64 {
+    let template = unsafe { _ZwCreateEvent as *const u8 };
+    let stub = alloc_code(ZW_STUB_SIZE);
+    if stub.is_null() {
+        return 0;
     }
-
-    // The loader's list is in the target's address space, thus read it from there.
-    let peb = unsafe { (_PsGetProcessPeb)(process) } as usize;
-    let mut create = 0;
-    let mut terminate = 0;
-    unsafe {
-        let mut apc_state = [0usize; APC_STATE_WORDS];
-        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-
-        let ntdll = module_base(peb, b"ntdll.dll");
-        create = export(ntdll, b"NtCreateThread");
-        terminate = export(ntdll, b"NtTerminateThread");
-
-        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
-    }
-    if create == 0 || terminate == 0 {
-        return false;
-    }
-
-    let context = arena_here + CONTEXT_AREA;
-    let teb = arena_here + INITIAL_TEB_AREA;
 
     unsafe {
-        core::ptr::write_bytes(context as *mut u8, 0, CONTEXT_SIZE);
-        ((context + CONTEXT_FLAGS as u64) as *mut u32).write(CONTEXT_FULL);
-        ((context + CONTEXT_RIP) as *mut u64).write(entry);
-        ((context + CONTEXT_RSP) as *mut u64).write((stack + STACK_SIZE as u64 - 64) & !15);
-        ((context + CONTEXT_RDI) as *mut u64).write(argument);
-        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
-        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
-        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
+        let linkage = template.add(ZW_STUB_LEA_NEXT) as u64
+            + (template.add(ZW_STUB_LEA_REL) as *const i32).read() as u64;
+        let dispatcher = template.add(ZW_STUB_JMP_NEXT) as u64
+            + (template.add(ZW_STUB_JMP_REL) as *const i32).read() as u64;
 
-        core::ptr::write_bytes(teb as *mut u8, 0, INITIAL_TEB_SIZE);
-        ((teb + INITIAL_TEB_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
-        ((teb + INITIAL_TEB_STACK_LIMIT) as *mut u64).write(stack);
-        ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut u64).write(stack);
+        core::ptr::copy_nonoverlapping(template, stub, ZW_STUB_PROLOGUE);
 
-        ((arena_here + BOOTSTRAP_CREATE_THREAD) as *mut u64).write(create as u64);
-        ((arena_here + BOOTSTRAP_TERMINATE_THREAD) as *mut u64).write(terminate as u64);
-        ((arena_here + BOOTSTRAP_CONTEXT) as *mut u64).write(arena_seen + CONTEXT_AREA);
-        ((arena_here + BOOTSTRAP_INITIAL_TEB) as *mut u64).write(arena_seen + INITIAL_TEB_AREA);
+        let mut at = ZW_STUB_PROLOGUE;
+        let mut put = |bytes: &[u8]| {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), stub.add(at), bytes.len());
+            at += bytes.len();
+        };
+        put(&[0x48, 0xb8]);
+        put(&linkage.to_le_bytes());
+        put(&[0x50]);
+        put(&[0xb8]);
+        put(&index.to_le_bytes());
+        put(&[0xff, 0x25, 0x00, 0x00, 0x00, 0x00]);
+        put(&dispatcher.to_le_bytes());
     }
 
-    true
+    stub as u64
+}
+
+// ntdll's stub for a service begins by loading the same index that the kernel uses.
+#[cfg(target_arch = "x86_64")]
+fn service_index_of(peb: usize, name: &[u8]) -> u32 {
+    let ntdll = module_base(peb, b"ntdll.dll");
+    let stub = export(ntdll, name);
+    if stub == 0 {
+        return 0;
+    }
+
+    unsafe {
+        let bytes = stub as *const u8;
+        if bytes.read() != 0x4c || bytes.add(1).read() != 0x8b || bytes.add(2).read() != 0xd1
+                || bytes.add(3).read() != 0xb8 {
+            return 0;
+        }
+        (bytes.add(4) as *const u32).read()
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1219,10 +1221,18 @@ const INITIAL_TEB_STACK_BASE: u64 = 0x10;
 const INITIAL_TEB_STACK_LIMIT: u64 = 0x18;
 const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x20;
 
-// This kernel exports no function that makes a user thread. Thus make a system thread in the
-// target, then move that thread to ring 3.
+const ZW_STUB_SIZE: usize = 48;
+const ZW_STUB_PROLOGUE: usize = 12;
+const ZW_STUB_LEA_REL: usize = 15;
+const ZW_STUB_LEA_NEXT: usize = 19;
+const ZW_STUB_INDEX: usize = 21;
+const ZW_STUB_JMP_REL: usize = 26;
+const ZW_STUB_JMP_NEXT: usize = 30;
+
+// The thread is made the way the system makes them, thus it arrives with a block of its own and
+// ntdll accepts calls from it. Only the service that makes one is missing, and that is built.
 #[cfg(target_arch = "x86_64")]
-fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, bootstrap: u64,
+fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _bootstrap: u64,
         entry: u64) -> bool {
     unsafe {
         let mut process_handle: *mut c_void = core::ptr::null_mut();
@@ -1232,43 +1242,65 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, bo
             return false;
         }
 
-        let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
-        let block = allocate_in_process(process_handle, BLOCK_SIZE, PAGE_READWRITE);
-        if stack == 0 || block == 0 {
-            (_ZwClose)(process_handle);
-            return false;
-        }
+        let created = start_thread_in_process(process, process_handle, arena_here, arena_seen,
+            entry);
 
-        let descent = alloc(core::mem::size_of::<Descent>()) as *mut Descent;
-        descent.write(Descent {
-            entry: bootstrap,
-            argument: arena_seen,
-            stack: stack + STACK_SIZE as u64,
-            block,
-        });
+        (_ZwClose)(process_handle);
 
-        describe_block(process, block, stack);
+        created
+    }
+}
 
-        if !describe_real_thread(process, process_handle, arena_here, arena_seen, entry,
-                arena_seen) {
-            (_ZwClose)(process_handle);
-            return false;
-        }
+#[cfg(target_arch = "x86_64")]
+fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
+        arena_seen: u64, entry: u64) -> bool {
+    let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
+    if stack == 0 {
+        return false;
+    }
+
+    // The loader's list is in the target's address space, thus read it from there.
+    let peb = unsafe { (_PsGetProcessPeb)(process) } as usize;
+    let mut index = 0;
+    unsafe {
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+        index = service_index_of(peb, b"NtCreateThread");
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    }
+    if index == 0 {
+        return false;
+    }
+
+    let create: windows_fn!(
+        *mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8, *mut c_void, u8,
+        => i32) = unsafe { core::mem::transmute(synthesize_zw_stub(index)) };
+
+    let context = arena_here + CONTEXT_AREA;
+    let teb = arena_here + INITIAL_TEB_AREA;
+
+    unsafe {
+        core::ptr::write_bytes(context as *mut u8, 0, CONTEXT_SIZE);
+        ((context + CONTEXT_FLAGS as u64) as *mut u32).write(CONTEXT_FULL);
+        ((context + CONTEXT_RIP) as *mut u64).write(entry);
+        ((context + CONTEXT_RSP) as *mut u64).write((stack + STACK_SIZE as u64 - 64) & !15);
+        ((context + CONTEXT_RDI) as *mut u64).write(arena_seen);
+        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
+        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
+        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
+
+        core::ptr::write_bytes(teb as *mut u8, 0, INITIAL_TEB_SIZE);
+        ((teb + INITIAL_TEB_STACK_BASE) as *mut u64).write(stack + STACK_SIZE as u64);
+        ((teb + INITIAL_TEB_STACK_LIMIT) as *mut u64).write(stack);
+        ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut u64).write(stack);
 
         let mut thread: *mut c_void = core::ptr::null_mut();
-        let status = (_PsCreateSystemThread)(
-            &mut thread,
-            THREAD_ALL_ACCESS,
-            core::ptr::null_mut(),
-            process_handle,
-            core::ptr::null_mut(),
-            descend_to_user,
-            descent as *mut c_void,
-        );
+        let mut client_id = [0usize; 2];
+        let status = create(&mut thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
+            client_id.as_mut_ptr() as *mut c_void, context as *mut u8, teb as *mut c_void, 0);
         if status >= 0 {
             (_ZwClose)(thread);
         }
-        (_ZwClose)(process_handle);
 
         status >= 0
     }
