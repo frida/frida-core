@@ -225,7 +225,7 @@ namespace Frida.Barebone {
 			}
 
 			public X64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_rsp,
-					unowned string[] arg_reg_names, size_t stack_args_offset) {
+					string[] arg_reg_names, size_t stack_args_offset) {
 				this.thread = thread;
 
 				this.regs = regs;
