@@ -132,13 +132,20 @@ if not is_shared
 endif
 core_public_dep = declare_dependency(kwargs: core_public_dep_kwargs)
 
+core_public_reqs = ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'json-glib-1.0']
+if host_os_family == 'windows'
+  core_public_reqs += 'gio-windows-2.0'
+else
+  core_public_reqs += 'gio-unix-2.0'
+endif
+
 pkg = import('pkgconfig')
 pkg_kwargs = {
   'filebase': f'frida-core-@api_version@',
   'name': 'Frida Core Library',
   'version': frida_version,
   'description': 'Instrumentation toolkit for developers, reverse-engineers, and security researchers',
-  'requires': ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'json-glib-1.0'],
+  'requires': core_public_reqs,
   'subdirs': f'frida-@api_version@',
   'extra_cflags': ['-I${frida_includedir}'],
   'variables': installed_variables,
