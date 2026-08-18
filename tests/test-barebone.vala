@@ -90,6 +90,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/sees-a-module-arrive-in-live-guest", () => {
+			var h = new Harness ((h) => win9x_sees_a_module_arrive_in_live_guest.begin (
+				h as Harness));
+			h.run ();
+		});
 		GLib.Test.add_func ("/Barebone/Win9x/hooks-before-resume-in-live-guest", () => {
 			var h = new Harness ((h) => hooks_before_resume_in_live_guest.begin (h as Harness,
 				win9x_config_from_environment (h as Harness), "C:\\WINDOWS\\NOTEPAD.EXE"));
@@ -2023,10 +2028,11 @@ namespace Frida.BareboneTest {
 				});
 
 				const load = new NativeFunction(
-					Module.getGlobalExportByName('LoadLibraryA'), 'pointer', ['pointer']);
+					Module.getGlobalExportByName('LoadLibraryExA'), 'pointer',
+					['pointer', 'pointer', 'uint']);
 				const name = Memory.alloc(16);
-				name.writeUtf8String('winmm.dll');
-				const handle = load(name);
+				name.writeUtf8String('ole32.dll');
+				const handle = load(name, NULL, 0);
 
 				send([handle.isNull(), arrivals.includes('winmm.dll')]);
 			""", null, null);
@@ -2277,6 +2283,16 @@ namespace Frida.BareboneTest {
 
 			var script = yield session.create_script ("""
 				recv('arm', () => {
+					const shapes = {};
+					for (const name of ['LoadLibraryExA', 'LoadLibraryExW', 'LoadLibraryA',
+							'FreeLibrary', 'GetProcAddress']) {
+						const a = Module.findGlobalExportByName(name);
+						shapes[name] = (a !== null)
+							? [a.toString(), Array.from(new Uint8Array(a.readByteArray(12)))
+								.map(b => b.toString(16).padStart(2, '0')).join('')] : null;
+					}
+					send(['shapes', shapes]);
+
 					const image = Process.enumerateModules()[0];
 					const headers = image.base.add(image.base.add(0x3c).readU32());
 					const entry = image.base.add(headers.add(0x28).readU32());
@@ -2310,6 +2326,60 @@ namespace Frida.BareboneTest {
 
 			while (!entered)
 				yield h.process_events ();
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void win9x_sees_a_module_arrive_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const arrivals = [];
+				Process.attachModuleObserver({
+					onAdded(m) { arrivals.push(m.name.toLowerCase()); }
+				});
+
+				const load = new NativeFunction(
+					Module.getGlobalExportByName('LoadLibraryA'), 'pointer', ['pointer']);
+				const name = Memory.alloc(32);
+				name.writeUtf8String('ole32.dll');
+				const handle = load(name);
+
+				send([handle.isNull(), arrivals.some(n => n.indexOf('ole32') !== -1)]);
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			assert_true (messages[0].contains ("[false,true]"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

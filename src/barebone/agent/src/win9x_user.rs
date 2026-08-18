@@ -174,6 +174,51 @@ const GUM_PAGE_READ: u32 = 0x1;
 const GUM_PAGE_WRITE: u32 = 0x2;
 const GUM_PAGE_EXECUTE: u32 = 0x4;
 
+pub unsafe extern "stdcall" fn on_load_library_by_name(name: *const u8) -> u32 {
+    let original: extern "stdcall" fn(*const u8) -> u32 = unsafe {
+        core::mem::transmute(
+            ((crate::routed_arena() as u32 + LOADER_BY_NAME) as *const u32).read())
+    };
+
+    let handle = original(name);
+    note_module(handle, name);
+
+    handle
+}
+
+pub unsafe extern "stdcall" fn on_load_library(name: *const u8, file: u32, flags: u32) -> u32 {
+    let original: extern "stdcall" fn(*const u8, u32, u32) -> u32 = unsafe {
+        core::mem::transmute(
+            ((crate::routed_arena() as u32 + LOADER_EXTENDED) as *const u32).read())
+    };
+
+    let handle = original(name, file, flags);
+    note_module(handle, name);
+
+    handle
+}
+
+fn note_module(handle: u32, name: *const u8) {
+    if handle == 0 {
+        return;
+    }
+
+    crate::gum_windows::module_arrived(handle as u64, &text_at(name));
+}
+
+fn text_at(name: *const u8) -> alloc::string::String {
+    let mut text = alloc::string::String::new();
+    let mut cursor = name;
+    loop {
+        let byte = unsafe { cursor.read() };
+        if byte == 0 {
+            return text;
+        }
+        text.push(byte as char);
+        cursor = unsafe { cursor.add(1) };
+    }
+}
+
 fn resolve_user_api() {
     unsafe {
         USER_API = UserApi {

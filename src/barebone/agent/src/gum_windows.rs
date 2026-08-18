@@ -164,6 +164,30 @@ pub(crate) fn loader_unload() -> gpointer {
     unsafe { LOADER_UNLOAD }
 }
 
+#[cfg(feature = "win9x")]
+pub(crate) fn module_arrived(base: u64, path: &str) {
+    if !known_mut().insert(base) {
+        return;
+    }
+
+    let range = GumMemoryRange {
+        base_address: base,
+        size: kernel::image_size(base as u32) as gsize,
+    };
+
+    unsafe {
+        let registry = crate::bindings::gum_module_registry_obtain();
+        crate::bindings::gum_module_registry_lock(registry);
+
+        let native = gum::gum_native_module_new(path, "", &range);
+        gum_barebone_register_module(registry, native);
+        g_object_unref(native as gpointer);
+
+        crate::bindings::gum_module_registry_unlock(registry);
+        g_object_unref(registry as gpointer);
+    }
+}
+
 // A module arrived, thus tell the registry where it is.
 #[cfg(feature = "winnt")]
 pub(crate) fn module_arrived(base: u64) {
@@ -212,12 +236,12 @@ pub(crate) fn module_left(base: u64) {
     }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn known_mut() -> &'static mut alloc::collections::BTreeSet<u64> {
     unsafe { (&raw mut KNOWN).as_mut().unwrap() }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut KNOWN: alloc::collections::BTreeSet<u64> = alloc::collections::BTreeSet::new();
 
 #[cfg(feature = "winnt")]
@@ -229,6 +253,9 @@ static mut LOADER_UNLOAD: gpointer = ptr::null_mut();
 
 fn register_the_process_modules(registry: *mut GumModuleRegistry) {
     for module in kernel::enumerate_modules() {
+        #[cfg(any(feature = "win9x", feature = "winnt"))]
+        known_mut().insert(module.base);
+
         let range = GumMemoryRange {
             base_address: module.base,
             size: module.size as gsize,
