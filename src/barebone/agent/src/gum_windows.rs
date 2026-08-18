@@ -139,7 +139,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
 
 // A script can hook a library the moment it arrives, thus stand in front of the loader and say
 // what came and what went.
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn watch_the_loader() {
     let Some(entries) = kernel::loader_entry_points() else {
         return;
@@ -162,17 +162,17 @@ pub(crate) fn watch_the_loader() {
     }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn loader_load() -> gpointer {
     unsafe { LOADER_LOAD }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn loader_load_with_flags() -> gpointer {
     unsafe { LOADER_LOAD_WITH_FLAGS }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn loader_unload() -> gpointer {
     unsafe { LOADER_UNLOAD }
 }
@@ -230,7 +230,7 @@ pub(crate) fn module_arrived(base: u64) {
 }
 
 // A module went away, thus take it out of the registry while its name is still known.
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn module_left(base: u64) {
     if !known_mut().remove(&base) {
         return;
@@ -254,11 +254,11 @@ fn known_mut() -> &'static mut alloc::collections::BTreeSet<u64> {
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut KNOWN: alloc::collections::BTreeSet<u64> = alloc::collections::BTreeSet::new();
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut LOADER_LOAD: gpointer = ptr::null_mut();
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut LOADER_LOAD_WITH_FLAGS: gpointer = ptr::null_mut();
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut LOADER_UNLOAD: gpointer = ptr::null_mut();
 
 fn register_the_process_modules(registry: *mut GumModuleRegistry) {

@@ -73,6 +73,8 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
 
     unsafe { crate::route_frames_through(arena as u64) };
 
+    crate::gum_windows::watch_the_loader();
+
     while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
         if let Some(frame) = take_frame_from_host(arena as u64) {
             crate::on_frame_from_host(frame);
@@ -174,11 +176,9 @@ const GUM_PAGE_READ: u32 = 0x1;
 const GUM_PAGE_WRITE: u32 = 0x2;
 const GUM_PAGE_EXECUTE: u32 = 0x4;
 
-pub unsafe extern "stdcall" fn on_load_library_by_name(name: *const u8) -> u32 {
-    let original: extern "stdcall" fn(*const u8) -> u32 = unsafe {
-        core::mem::transmute(
-            ((crate::routed_arena() as u32 + LOADER_BY_NAME) as *const u32).read())
-    };
+pub unsafe extern "stdcall" fn on_module_load(name: *const u8) -> u32 {
+    let original: extern "stdcall" fn(*const u8) -> u32 =
+        unsafe { core::mem::transmute(crate::gum_windows::loader_load()) };
 
     let handle = original(name);
     note_module(handle, name);
@@ -186,16 +186,48 @@ pub unsafe extern "stdcall" fn on_load_library_by_name(name: *const u8) -> u32 {
     handle
 }
 
-pub unsafe extern "stdcall" fn on_load_library(name: *const u8, file: u32, flags: u32) -> u32 {
-    let original: extern "stdcall" fn(*const u8, u32, u32) -> u32 = unsafe {
-        core::mem::transmute(
-            ((crate::routed_arena() as u32 + LOADER_EXTENDED) as *const u32).read())
-    };
+pub unsafe extern "stdcall" fn on_module_load_with_flags(name: *const u8, file: u32,
+        flags: u32) -> u32 {
+    let original: extern "stdcall" fn(*const u8, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(crate::gum_windows::loader_load_with_flags()) };
 
     let handle = original(name, file, flags);
     note_module(handle, name);
 
     handle
+}
+
+pub unsafe extern "stdcall" fn on_module_unload(handle: u32) -> u32 {
+    let original: extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(crate::gum_windows::loader_unload()) };
+
+    let base = handle;
+    let left = original(handle);
+    if left != 0 {
+        crate::gum_windows::module_left(base as u64);
+    }
+
+    left
+}
+
+pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
+    let load = kernel32_export(b"LoadLibraryA") as usize;
+    let unload = kernel32_export(b"FreeLibrary") as usize;
+    if load == 0 || unload == 0 {
+        return None;
+    }
+
+    Some(LoaderEntryPoints {
+        load,
+        load_with_flags: kernel32_export(b"LoadLibraryExA") as usize,
+        unload,
+    })
+}
+
+pub struct LoaderEntryPoints {
+    pub load: usize,
+    pub load_with_flags: usize,
+    pub unload: usize,
 }
 
 fn note_module(handle: u32, name: *const u8) {

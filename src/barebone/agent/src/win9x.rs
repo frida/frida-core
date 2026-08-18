@@ -17,7 +17,10 @@ use crate::bindings::{
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
-pub use crate::win9x_user::{LoadedModule, enumerate_modules, resume_process, spawn_process};
+pub use crate::win9x_user::{
+    LoadedModule, LoaderEntryPoints, enumerate_modules, loader_entry_points, on_module_load,
+    on_module_load_with_flags, on_module_unload, resume_process, spawn_process,
+};
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
@@ -191,52 +194,7 @@ pub fn inject_agent(pid: u32) -> u32 {
         })
     };
 
-    watch_the_loader_for(observed, image_base, injection.arena);
-
     observed
-}
-
-// The loader of this system lives in memory that every process shares, thus a stand-in on it
-// runs in all of them. The one below leads to the copy of the agent that the process has, and
-// straight back to the loader for a process that has none.
-fn watch_the_loader_for(pid: u32, image_base: u32, arena: u32) {
-    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) }.base_address as usize;
-    let by_name = (crate::win9x_user::on_load_library_by_name as usize - own) as u32;
-    let extended = (crate::win9x_user::on_load_library as usize - own) as u32;
-
-    let names = stand_in_front_of(b"LoadLibraryA", LOAD_BY_NAME_PROLOGUE, by_name);
-    let extras = stand_in_front_of(b"LoadLibraryExA", LOAD_EXTENDED_PROLOGUE, extended);
-    if names == 0 || extras == 0 {
-        return;
-    }
-
-    unsafe {
-        ((arena + LOADER_BY_NAME) as *mut u32).write_volatile(names);
-        ((arena + LOADER_EXTENDED) as *mut u32).write_volatile(extras);
-    }
-    remember_watcher(pid, image_base);
-}
-
-fn remember_watcher(pid: u32, image_base: u32) {
-    let table = watchers();
-    let count = read_u32(table);
-    unsafe {
-        ((table + 4 + count * 8) as *mut u32).write_volatile(pid);
-        ((table + 8 + count * 8) as *mut u32).write_volatile(image_base);
-        (table as *mut u32).write_volatile(count + 1);
-    }
-}
-
-fn watchers() -> u32 {
-    let table = unsafe { WATCHERS };
-    if table != 0 {
-        return table;
-    }
-
-    let table = alloc_shared(PAGE_SIZE as usize) as u32;
-    unsafe { WATCHERS = table };
-
-    table
 }
 
 pub fn hook_shared_code(pid: u32, target: u32, patch: &[u8]) -> bool {
@@ -418,92 +376,6 @@ const GUARD_PROCESS: u32 = 0x09;
 const GUARD_NEXT: u32 = 0x17;
 const GUARD_END: u32 = 0x1b;
 const JUMP_SIZE: usize = 5;
-
-fn stand_in_front_of(name: &[u8], prologue: usize, wrapper_offset: u32) -> u32 {
-    let target = kernel32_export(name);
-    let get_pid = kernel32_export(b"GetCurrentProcessId");
-    if target == 0 || get_pid == 0 {
-        return 0;
-    }
-
-    let already = stand_in_for(target);
-    if already != 0 {
-        return already;
-    }
-
-    let page = alloc_shared(PAGE_SIZE as usize) as u32;
-    let stub = page;
-    let tail = page + STUB_SIZE;
-    let table = watchers();
-
-    let mut code = [
-        0x60,
-        0xb8, 0, 0, 0, 0,
-        0xff, 0xd0,
-        0xbf, 0, 0, 0, 0,
-        0x8b, 0x0f,
-        0x83, 0xc7, 0x04,
-        0x85, 0xc9,
-        0x74, 0x0a,
-        0x3b, 0x07,
-        0x74, 0x0e,
-        0x83, 0xc7, 0x08,
-        0x49,
-        0xeb, 0xf2,
-        0x61,
-        0xb8, 0, 0, 0, 0,
-        0xff, 0xe0,
-        0x8b, 0x77, 0x04,
-        0x81, 0xc6, 0, 0, 0, 0,
-        0x89, 0x74, 0x24, 0x04,
-        0x61,
-        0xff, 0xe6,
-    ];
-    code[2..6].copy_from_slice(&get_pid.to_le_bytes());
-    code[9..13].copy_from_slice(&table.to_le_bytes());
-    code[34..38].copy_from_slice(&tail.to_le_bytes());
-    code[45..49].copy_from_slice(&wrapper_offset.to_le_bytes());
-
-    unsafe {
-        core::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len());
-
-        core::ptr::copy_nonoverlapping(target as *const u8, tail as *mut u8, prologue);
-        let back = tail + prologue as u32;
-        (back as *mut u8).write(0xe9);
-        ((back + 1) as *mut u32)
-            .write_unaligned((target + prologue as u32).wrapping_sub(back + 5));
-
-        protect(target as u64, prologue, GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE);
-        (target as *mut u8).write(0xe9);
-        ((target + 1) as *mut u32).write_unaligned(stub.wrapping_sub(target + 5));
-        for filler in 5..prologue {
-            ((target + filler as u32) as *mut u8).write(0x90);
-        }
-    }
-
-    remember_stand_in(target, tail);
-
-    tail
-}
-
-fn stand_in_for(target: u32) -> u32 {
-    unsafe { (&raw const STAND_INS).as_ref().unwrap() }
-        .iter()
-        .find(|(known, _)| *known == target)
-        .map(|(_, tail)| *tail)
-        .unwrap_or(0)
-}
-
-fn remember_stand_in(target: u32, tail: u32) {
-    unsafe { (&raw mut STAND_INS).as_mut().unwrap() }.push((target, tail));
-}
-
-static mut STAND_INS: alloc::vec::Vec<(u32, u32)> = alloc::vec::Vec::new();
-static mut WATCHERS: u32 = 0;
-
-const LOAD_BY_NAME_PROLOGUE: usize = 5;
-const LOAD_EXTENDED_PROLOGUE: usize = 6;
-const STUB_SIZE: u32 = 0x80;
 
 // Only the copy knows when it is safe to stop. It runs on the stack and in the image that
 // this function releases, thus the copy reports when it leaves both.
@@ -1334,8 +1206,6 @@ pub(crate) const STOP_REQUEST: u32 = 0x0c;
 pub(crate) const MAIN_STOPPED: u32 = 0x10;
 pub(crate) const WORKER_STOPPED: u32 = 0x3c;
 pub(crate) const MODULE_LIST: u32 = 0x40;
-pub(crate) const LOADER_BY_NAME: u32 = 0x44;
-pub(crate) const LOADER_EXTENDED: u32 = 0x48;
 pub(crate) const PATCH_PROCESS: u32 = 0x4c;
 pub(crate) const PATCH_ADDRESS: u32 = 0x50;
 pub(crate) const PATCH_BYTES: u32 = 0x54;
