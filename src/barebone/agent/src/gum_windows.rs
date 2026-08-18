@@ -167,7 +167,12 @@ pub(crate) fn loader_unload() -> gpointer {
 // A module arrived, thus tell the registry where it is.
 #[cfg(feature = "winnt")]
 pub(crate) fn module_arrived(base: u64) {
+    if !known_mut().insert(base) {
+        return;
+    }
+
     let Some(module) = kernel::describe_module(base) else {
+        known_mut().remove(&base);
         return;
     };
 
@@ -178,9 +183,13 @@ pub(crate) fn module_arrived(base: u64) {
 
     unsafe {
         let registry = crate::bindings::gum_module_registry_obtain();
+        crate::bindings::gum_module_registry_lock(registry);
+
         let native = gum::gum_native_module_new(&module.path, "", &range);
         gum_barebone_register_module(registry, native);
         g_object_unref(native as gpointer);
+
+        crate::bindings::gum_module_registry_unlock(registry);
         g_object_unref(registry as gpointer);
     }
 }
@@ -188,12 +197,28 @@ pub(crate) fn module_arrived(base: u64) {
 // A module went away, thus take it out of the registry while its name is still known.
 #[cfg(feature = "winnt")]
 pub(crate) fn module_left(base: u64) {
+    if !known_mut().remove(&base) {
+        return;
+    }
+
     unsafe {
         let registry = crate::bindings::gum_module_registry_obtain();
+        crate::bindings::gum_module_registry_lock(registry);
+
         crate::bindings::gum_barebone_unregister_module(registry, base);
+
+        crate::bindings::gum_module_registry_unlock(registry);
         g_object_unref(registry as gpointer);
     }
 }
+
+#[cfg(feature = "winnt")]
+fn known_mut() -> &'static mut alloc::collections::BTreeSet<u64> {
+    unsafe { (&raw mut KNOWN).as_mut().unwrap() }
+}
+
+#[cfg(feature = "winnt")]
+static mut KNOWN: alloc::collections::BTreeSet<u64> = alloc::collections::BTreeSet::new();
 
 #[cfg(feature = "winnt")]
 static mut LOADER_LOAD: gpointer = ptr::null_mut();
@@ -202,9 +227,6 @@ static mut LOADER_LOAD_WITH_FLAGS: gpointer = ptr::null_mut();
 #[cfg(feature = "winnt")]
 static mut LOADER_UNLOAD: gpointer = ptr::null_mut();
 
-// A copy runs in a process, thus a script asking for modules means the ones that process has
-// mapped, not the ones the kernel has.
-#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn register_the_process_modules(registry: *mut GumModuleRegistry) {
     for module in kernel::enumerate_modules() {
         let range = GumMemoryRange {
