@@ -102,7 +102,7 @@ AGENT_CFLAGS += -isystem $(FRIDA_SDK)/include \
 
 # The soft-float SDK, whose libc is picolibc and whose compiler runtime is
 # compiler-rt. GCC's own newlib and libgcc are hard-float and cannot be used here.
-FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-$(SDK_ARCH)-softfloat SDK prefix)
+FRIDA_SDK ?= $(error Set FRIDA_SDK to a none-$(SDK_ARCH)-softfloat_nopic SDK prefix)
 LIBM = $(FRIDA_SDK)/lib/libm.a
 LIBBUILTINS = $(FRIDA_SDK)/lib/libclang_rt.builtins.a
 
