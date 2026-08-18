@@ -406,6 +406,105 @@ fn hold_at_entry_point(pid: u32, thread: u32) -> Option<()> {
     arrived
 }
 
+pub fn take_writes_on(first_page: *mut u8, pages: u32) -> *mut u8 {
+    let span = pages as usize * PAGE_SIZE as usize;
+    if !in_shared_library(first_page as u32) {
+        protect(first_page as u64, span, GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE);
+        return first_page;
+    }
+
+    let scratch = alloc_code(span);
+    if scratch.is_null() {
+        return scratch;
+    }
+    unsafe { core::ptr::copy_nonoverlapping(first_page, scratch, span) };
+
+    let mut before = Vec::with_capacity(span);
+    before.extend_from_slice(unsafe { core::slice::from_raw_parts(first_page, span) });
+    unsafe { (&raw mut REMAPPED).as_mut().unwrap() }.push(Remapped {
+        scratch: scratch as u32,
+        first_page: first_page as u32,
+        before,
+    });
+
+    scratch
+}
+
+pub fn make_the_writes(writable: *mut u8, pages: u32) {
+    let remapped = unsafe { (&raw mut REMAPPED).as_mut().unwrap() };
+    let Some(index) = remapped.iter().position(|known| known.scratch == writable as u32) else {
+        return;
+    };
+    let taken = remapped.remove(index);
+
+    let span = pages as usize * PAGE_SIZE as usize;
+    let written = unsafe { core::slice::from_raw_parts(taken.scratch as *const u8, span) };
+
+    let mut offset = 0;
+    while offset != span {
+        if written[offset] == taken.before[offset] {
+            offset += 1;
+            continue;
+        }
+
+        let start = offset;
+        while offset != span && written[offset] != taken.before[offset] {
+            offset += 1;
+        }
+
+        ask_for_a_guard(taken.first_page + start as u32, &written[start..offset]);
+    }
+
+    free_code(taken.scratch as *mut u8, span);
+}
+
+struct Remapped {
+    scratch: u32,
+    first_page: u32,
+    before: Vec<u8>,
+}
+
+static mut REMAPPED: Vec<Remapped> = Vec::new();
+
+fn in_shared_library(address: u32) -> bool {
+    let address = address as u64;
+
+    enumerate_modules().iter().any(|module| {
+        module.base >= SHARED_ARENA_BASE
+            && address >= module.base
+            && address < module.base + module.size
+    })
+}
+
+fn ask_for_a_guard(address: u32, bytes: &[u8]) {
+    let sleep: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().sleep as usize) };
+    let arena = crate::routed_arena() as u32;
+
+    if bytes.len() > PATCH_CODE_MAX {
+        return;
+    }
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), (arena + PATCH_CODE) as *mut u8,
+            bytes.len());
+        ((arena + PATCH_ADDRESS) as *mut u32).write_volatile(address);
+        ((arena + PATCH_LENGTH) as *mut u32).write_volatile(bytes.len() as u32);
+        ((arena + PATCH_REQUEST) as *mut u32).write_volatile(HOOK_ASKED);
+    }
+
+    for _ in 0..PATCH_ATTEMPTS {
+        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } == PATCH_ANSWERED {
+            unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
+            return;
+        }
+
+        unsafe { sleep(HOLD_SLICE_MS) };
+    }
+}
+
+const SHARED_ARENA_BASE: u64 = 0x8000_0000;
+
 fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
     let sleep: unsafe extern "stdcall" fn(u32) =
         unsafe { core::mem::transmute(user_api().sleep as usize) };

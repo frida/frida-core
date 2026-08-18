@@ -10,6 +10,10 @@ use alloc::collections::BTreeMap;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
+use crate::bindings::{
+    GumAddress, GumX86Writer, cs_insn, gconstpointer, gpointer, gum_x86_writer_flush,
+    gum_x86_writer_new, gum_x86_writer_put_jmp_address, gum_x86_writer_unref,
+};
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
@@ -17,7 +21,7 @@ pub use crate::win9x_user::{LoadedModule, enumerate_modules, resume_process, spa
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
-const PAGE_SIZE: u32 = 4096;
+pub(crate) const PAGE_SIZE: u32 = 4096;
 
 const PG_SYS: u32 = 1;
 const PAGE_FLAGS_CODE: u32 = PAGE_FIXED | PAGE_LOCKED | PAGE_ZERO_INIT;
@@ -235,6 +239,186 @@ fn watchers() -> u32 {
     table
 }
 
+pub fn hook_shared_code(pid: u32, target: u32, patch: &[u8]) -> bool {
+    let Some(index) = shared_hook_for(target) else {
+        return false;
+    };
+    let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
+
+    if patch == &hooks[index].original[..patch.len()] {
+        forget_guard(&mut hooks[index], pid);
+        return true;
+    }
+
+    let destination = destination_of(patch, target);
+    let Some(destination) = destination else {
+        return false;
+    };
+
+    add_guard(&mut hooks[index], pid, destination)
+}
+
+fn shared_hook_for(target: u32) -> Option<usize> {
+    let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
+    if let Some(index) = hooks.iter().position(|hook| hook.target == target) {
+        return Some(index);
+    }
+
+    let page = alloc_shared(PAGE_SIZE as usize) as u32;
+    if page == 0 {
+        return None;
+    }
+
+    let resume = page;
+    let moved = move_code(target, resume, JUMP_SIZE)?;
+
+    let mut original = alloc::vec::Vec::new();
+    for offset in 0..moved {
+        original.push(unsafe { ((target + offset as u32) as *const u8).read() });
+    }
+
+    hooks.push(SharedHook {
+        target,
+        original,
+        head: resume,
+        free: page + GUARDS_OFFSET,
+        guards: alloc::vec::Vec::new(),
+    });
+
+    Some(hooks.len() - 1)
+}
+
+fn add_guard(hook: &mut SharedHook, pid: u32, destination: u32) -> bool {
+    if let Some((_, guard)) = hook.guards.iter().find(|(known, _)| *known == pid).copied() {
+        write_guard(guard, pid, destination, guard_next(guard));
+        return true;
+    }
+
+    let guard = hook.free;
+    if (guard + GUARD_SIZE) % PAGE_SIZE < GUARD_SIZE {
+        return false;
+    }
+    hook.free += GUARD_SIZE;
+
+    write_guard(guard, pid, destination, hook.head);
+    hook.head = guard;
+    hook.guards.push((pid, guard));
+
+    jump_to(hook.target, guard, hook.original.len());
+
+    true
+}
+
+fn forget_guard(hook: &mut SharedHook, pid: u32) {
+    if let Some((_, guard)) = hook.guards.iter().find(|(known, _)| *known == pid).copied() {
+        unsafe { ((guard + GUARD_PROCESS) as *mut u32).write_unaligned(0) };
+    }
+}
+
+fn write_guard(guard: u32, pid: u32, destination: u32, next: u32) {
+    let get_pid = kernel32_export(b"GetCurrentProcessId");
+
+    let mut code = [
+        0x60,
+        0xb8, 0, 0, 0, 0,
+        0xff, 0xd0,
+        0x3d, 0, 0, 0, 0,
+        0x75, 0x06,
+        0x61,
+        0xe9, 0, 0, 0, 0,
+        0x61,
+        0xe9, 0, 0, 0, 0,
+    ];
+    code[2..6].copy_from_slice(&get_pid.to_le_bytes());
+    code[9..13].copy_from_slice(&pid.to_le_bytes());
+    code[17..21].copy_from_slice(&destination.wrapping_sub(guard + 21).to_le_bytes());
+    code[23..27].copy_from_slice(&next.wrapping_sub(guard + 27).to_le_bytes());
+
+    unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), guard as *mut u8, code.len()) };
+}
+
+fn guard_next(guard: u32) -> u32 {
+    let displacement = unsafe { ((guard + GUARD_NEXT) as *const u32).read_unaligned() };
+
+    guard.wrapping_add(GUARD_END).wrapping_add(displacement)
+}
+
+fn move_code(from: u32, to: u32, least: usize) -> Option<usize> {
+    unsafe {
+        let writer = gum_x86_writer_new(to as gpointer);
+        let relocator = gum_x86_relocator_new(from as gconstpointer, writer);
+
+        let mut moved = 0;
+        while moved < least as u32 {
+            let read = gum_x86_relocator_read_one(relocator, core::ptr::null_mut());
+            if read == 0 {
+                break;
+            }
+            moved = read;
+        }
+        gum_x86_relocator_write_all(relocator);
+
+        let landed = moved >= least as u32
+            && gum_x86_writer_put_jmp_address(writer, (from + moved) as GumAddress) != 0
+            && gum_x86_writer_flush(writer) != 0;
+
+        gum_x86_relocator_unref(relocator);
+        gum_x86_writer_unref(writer);
+
+        landed.then_some(moved as usize)
+    }
+}
+
+unsafe extern "C" {
+    fn gum_x86_relocator_new(input_code: gconstpointer, output: *mut GumX86Writer)
+        -> *mut c_void;
+    fn gum_x86_relocator_unref(relocator: *mut c_void);
+    fn gum_x86_relocator_read_one(relocator: *mut c_void, instruction: *mut *const cs_insn)
+        -> u32;
+    fn gum_x86_relocator_write_all(relocator: *mut c_void);
+}
+
+fn destination_of(patch: &[u8], at: u32) -> Option<u32> {
+    match patch {
+        [0xe9, ..] if patch.len() >= JUMP_SIZE => {
+            let mut displacement = [0u8; 4];
+            displacement.copy_from_slice(&patch[1..5]);
+
+            Some(at.wrapping_add(5).wrapping_add(u32::from_le_bytes(displacement)))
+        }
+        [0xeb, step, ..] => Some(at.wrapping_add(2).wrapping_add(*step as i8 as i32 as u32)),
+        _ => None,
+    }
+}
+
+fn jump_to(target: u32, destination: u32, span: usize) {
+    unsafe {
+        protect(target as u64, span, GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE);
+        (target as *mut u8).write(0xe9);
+        ((target + 1) as *mut u32).write_unaligned(destination.wrapping_sub(target + 5));
+        for filler in JUMP_SIZE..span {
+            ((target + filler as u32) as *mut u8).write(0x90);
+        }
+    }
+}
+
+struct SharedHook {
+    target: u32,
+    original: alloc::vec::Vec<u8>,
+    head: u32,
+    free: u32,
+    guards: alloc::vec::Vec<(u32, u32)>,
+}
+
+static mut SHARED_HOOKS: alloc::vec::Vec<SharedHook> = alloc::vec::Vec::new();
+
+const GUARDS_OFFSET: u32 = 0x100;
+const GUARD_SIZE: u32 = 0x20;
+const GUARD_PROCESS: u32 = 0x09;
+const GUARD_NEXT: u32 = 0x17;
+const GUARD_END: u32 = 0x1b;
+const JUMP_SIZE: usize = 5;
+
 fn stand_in_front_of(name: &[u8], prologue: usize, wrapper_offset: u32) -> u32 {
     let target = kernel32_export(name);
     let get_pid = kernel32_export(b"GetCurrentProcessId");
@@ -362,23 +546,45 @@ pub fn arena_for_pid(pid: u32) -> Option<u64> {
 }
 
 pub fn serve_patch_requests() {
-    for arena in injected_arenas() {
-        let arena = arena as u32;
-        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } != PATCH_ASKED {
-            continue;
+
+    let asking: alloc::vec::Vec<(u32, u32)> = unsafe { targets() }
+        .iter()
+        .map(|(pid, target)| (*pid, target.arena))
+        .collect();
+
+    for (owner, arena) in asking {
+        let request = unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() };
+
+        match request {
+            PATCH_ASKED => {
+                let pid = unsafe { ((arena + PATCH_PROCESS) as *const u32).read_volatile() };
+                let mut address =
+                    unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
+                let bytes = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
+
+                let previous = patch_in_process(pid, &mut address, bytes);
+
+                unsafe {
+                    ((arena + PATCH_ADDRESS) as *mut u32).write_volatile(address);
+                    ((arena + PATCH_BYTES) as *mut u32).write_volatile(previous);
+                }
+            }
+            HOOK_ASKED => {
+                let address = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
+                let length =
+                    unsafe { ((arena + PATCH_LENGTH) as *const u32).read_volatile() } as usize;
+                let patch = unsafe {
+                    core::slice::from_raw_parts((arena + PATCH_CODE) as *const u8, length)
+                };
+
+                let hooked = hook_shared_code(owner, address, patch);
+
+                unsafe { ((arena + PATCH_BYTES) as *mut u32).write_volatile(hooked as u32) };
+            }
+            _ => continue,
         }
 
-        let pid = unsafe { ((arena + PATCH_PROCESS) as *const u32).read_volatile() };
-        let mut address = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
-        let bytes = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
-
-        let previous = patch_in_process(pid, &mut address, bytes);
-
-        unsafe {
-            ((arena + PATCH_ADDRESS) as *mut u32).write_volatile(address);
-            ((arena + PATCH_BYTES) as *mut u32).write_volatile(previous);
-            ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ANSWERED);
-        }
+        unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ANSWERED) };
     }
 }
 
@@ -803,6 +1009,10 @@ pub fn select_user() {
     unsafe { ACTIVE = &crate::win9x_user::USER };
 }
 
+pub fn in_copy() -> bool {
+    core::ptr::eq(primitives(), &crate::win9x_user::USER)
+}
+
 fn primitives() -> &'static Primitives {
     unsafe { ACTIVE }
 }
@@ -1131,6 +1341,10 @@ pub(crate) const PATCH_ADDRESS: u32 = 0x50;
 pub(crate) const PATCH_BYTES: u32 = 0x54;
 pub(crate) const PATCH_REQUEST: u32 = 0x58;
 pub(crate) const PATCH_ASKED: u32 = 1;
+pub(crate) const HOOK_ASKED: u32 = 3;
+pub(crate) const PATCH_CODE: u32 = 0x64;
+pub(crate) const PATCH_CODE_MAX: usize = 32;
+pub(crate) const PATCH_LENGTH: u32 = 0x60;
 pub(crate) const PATCH_ANSWERED: u32 = 2;
 const PATCH_SIZE: usize = 2;
 const PE_SIGNATURE_OFFSET: usize = 0x3c;

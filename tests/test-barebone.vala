@@ -100,6 +100,16 @@ namespace Frida.BareboneTest {
 				win9x_config_from_environment (h as Harness), "C:\\WINDOWS\\NOTEPAD.EXE"));
 			h.run ();
 		});
+		GLib.Test.add_func ("/Barebone/Win9x/hooks-its-own-code-in-live-guest", () => {
+			var h = new Harness ((h) => hooks_its_own_code_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Win9x/hooks-only-its-own-process-in-live-guest", () => {
+			var h = new Harness ((h) => hooks_only_its_own_process_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => win9x_spawns_and_resumes_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1457,6 +1467,174 @@ namespace Frida.BareboneTest {
 				assert_false (seen.contains (shape));
 				seen.add (shape);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void hooks_its_own_code_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+			var session = yield device.attach (pid, null, null);
+
+			var script = yield session.create_script ("""
+				const mine = Memory.alloc(Process.pageSize);
+				Memory.patchCode(mine, 16, code => {
+					const cw = new X86Writer(code, { pc: mine });
+					for (let i = 0; i !== 8; i++)
+						cw.putNop();
+					cw.putRet();
+					cw.flush();
+				});
+
+				Interceptor.attach(mine, {
+					onEnter() {
+						send('entered');
+					}
+				});
+				send('hooked');
+
+				recv('call', () => {
+					new NativeFunction(mine, 'void', [])();
+					send('called');
+				});
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			script.post ("""{"type":"call"}""");
+			while (messages.size < 3)
+				yield h.process_events ();
+			assert_true (messages[1].contains ("entered"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void hooks_only_its_own_process_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint spawned = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
+			var watcher = yield device.attach (spawned, null, null);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint other = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					other = processes.get (i).pid;
+			}
+			assert_true (other != 0);
+			var bystander = yield device.attach (other, null, null);
+
+			var hooking = yield watcher.create_script ("""
+				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
+				const named = name => kernel32.enumerateExports()
+					.find(e => e.name === name).address;
+
+				const target = named('GetACP');
+				const seen = Memory.alloc(4);
+				seen.writeU32(0);
+				Interceptor.attach(target, {
+					onEnter() {
+						seen.writeU32(seen.readU32() + 1);
+					}
+				});
+
+				const stub = Memory.alloc(Process.pageSize);
+				Memory.patchCode(stub, 32, code => {
+					const cw = new X86Writer(code, { pc: stub });
+					cw.putCallAddress(target);
+					cw.putRet();
+					cw.flush();
+				});
+				const createThread = new NativeFunction(named('CreateThread'), 'pointer',
+					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+
+				recv('call', () => {
+					createThread(NULL, 0, stub, NULL, 0, NULL);
+				});
+				recv('poll', () => { send(['seen', seen.readU32()]); });
+				send('hooked');
+			""", null, null);
+
+			var hits = new Gee.ArrayList<string> ();
+			hooking.message.connect ((json, data) => {
+				hits.add (json);
+			});
+			yield hooking.load (null);
+			while (hits.size < 1)
+				yield h.process_events ();
+
+			var calling = yield bystander.create_script ("""
+				const call = new NativeFunction(Process.getModuleByName('KERNEL32.DLL')
+					.enumerateExports().find(e => e.name === 'GetACP').address,
+					'uint32', []);
+
+				recv('call', () => {
+					for (let i = 0; i !== 100; i++)
+						call();
+					send('called');
+				});
+			""", null, null);
+
+			var elsewhere = new Gee.ArrayList<string> ();
+			calling.message.connect ((json, data) => {
+				elsewhere.add (json);
+			});
+			yield calling.load (null);
+
+			calling.post ("""{"type":"call"}""");
+			while (elsewhere.size < 1)
+				yield h.process_events ();
+			assert_true (hits.size == 1);
+
+			hooking.post ("""{"type":"call"}""");
+			for (uint i = 0; i != 300; i++)
+				yield h.process_events ();
+			hooking.post ("""{"type":"poll"}""");
+			while (hits.size < 2)
+				yield h.process_events ();
+			assert_true (hits[1].contains ("\"seen\",1"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

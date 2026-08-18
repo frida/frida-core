@@ -22,7 +22,14 @@ pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_can_remap_writable() -> gboolean {
-    0
+    #[cfg(feature = "win9x")]
+    {
+        crate::win9x::in_copy() as gboolean
+    }
+    #[cfg(not(feature = "win9x"))]
+    {
+        0
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -30,11 +37,21 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
     first_page: gpointer,
     _n_pages: guint,
 ) -> gpointer {
+    #[cfg(feature = "win9x")]
+    if crate::win9x::in_copy() {
+        return crate::win9x_user::take_writes_on(first_page as *mut u8, _n_pages) as gpointer;
+    }
+
     first_page
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_memory_dispose_writable_pages(_writable: gpointer, _n_pages: guint) {}
+pub extern "C" fn gum_memory_dispose_writable_pages(_writable: gpointer, _n_pages: guint) {
+    #[cfg(feature = "win9x")]
+    if crate::win9x::in_copy() {
+        crate::win9x_user::make_the_writes(_writable as *mut u8, _n_pages);
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_query_protection(
