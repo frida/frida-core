@@ -26,6 +26,8 @@ SECTIONS {
     _KeInitializeEvent = .; . += 8;
     _KeWaitForSingleObject = .; . += 8;
     _KeSetEvent = .; . += 8;
+    _KeInitializeDpc = .; . += 8;
+    _KeInsertQueueDpc = .; . += 8;
     _ZwYieldExecution = .; . += 8;
     _KeBugCheckEx = .; . += 8;
     _MmMapIoSpace = .; . += 8;

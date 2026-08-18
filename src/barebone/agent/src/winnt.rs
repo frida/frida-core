@@ -381,6 +381,10 @@ pub fn install_interrupt_handler(
         HW_INT_HANDLER = Some(handler);
         HW_INT_TARGET = target;
         HW_INT_REFCON = refcon;
+
+        let dpc = alloc(DPC_SIZE) as *mut c_void;
+        (_KeInitializeDpc)(dpc, deferred_wake, core::ptr::null_mut());
+        WAKE_DPC = dpc;
     }
 
     let mut irql: u8 = 0;
@@ -419,13 +423,41 @@ unsafe extern "win64" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void)
 
 unsafe fn serve_hw_int(_interrupt: *mut c_void, _context: *mut c_void) -> u8 {
     unsafe {
+        IN_INTERRUPT = true;
+    }
+    unsafe {
         if let Some(handler) = HW_INT_HANDLER {
             handler(HW_INT_TARGET, HW_INT_REFCON, core::ptr::null_mut(), 0);
         }
+        IN_INTERRUPT = false;
     }
     1
 }
 
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_void,
+        _first: *mut c_void, _second: *mut c_void) {
+    serve_deferred_wake()
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_void,
+        _first: *mut c_void, _second: *mut c_void) {
+    serve_deferred_wake()
+}
+
+fn serve_deferred_wake() {
+    let token = WAKE_WANTED.swap(0, Ordering::AcqRel);
+    if token != 0 {
+        kernel::wake(token as *const u8);
+    }
+}
+
+static WAKE_WANTED: AtomicUsize = AtomicUsize::new(0);
+static mut WAKE_DPC: *mut c_void = core::ptr::null_mut();
+const DPC_SIZE: usize = 0x40;
+
+static mut IN_INTERRUPT: bool = false;
 static mut INTERRUPT_OBJECT: *mut c_void = core::ptr::null_mut();
 static mut HW_INT_HANDLER: Option<InterruptHandler> = None;
 static mut HW_INT_TARGET: *mut c_void = core::ptr::null_mut();
@@ -1677,6 +1709,16 @@ mod kernel {
     }
 
     pub fn wake(token: *const u8) {
+        if unsafe { super::IN_INTERRUPT } {
+            super::WAKE_WANTED.store(token as usize, Ordering::Release);
+            let dpc = unsafe { super::WAKE_DPC };
+            if !dpc.is_null() {
+                unsafe { (_KeInsertQueueDpc)(dpc, core::ptr::null_mut(), core::ptr::null_mut()) };
+            }
+
+            return;
+        }
+
         let slot = slot_for_token(token);
         let event = event_in(slot);
 
@@ -2421,6 +2463,8 @@ macro_rules! kernel_abi {
 
         type ThreadStartRoutine = unsafe extern "stdcall" fn(*mut c_void);
         type ServiceRoutine = unsafe extern "stdcall" fn(*mut c_void, *mut c_void) -> u8;
+        type DeferredRoutine =
+            unsafe extern "stdcall" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
     };
 }
 
@@ -2433,6 +2477,8 @@ macro_rules! kernel_abi {
 
         type ThreadStartRoutine = unsafe extern "win64" fn(*mut c_void);
         type ServiceRoutine = unsafe extern "win64" fn(*mut c_void, *mut c_void) -> u8;
+        type DeferredRoutine =
+            unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
     };
 }
 
@@ -2454,6 +2500,8 @@ kernel_abi! {
     static _KeInitializeEvent: windows_fn!(*mut c_void, u32, u8);
     static _KeWaitForSingleObject: windows_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
     static _KeSetEvent: windows_fn!(*mut c_void, u32, u8 => i32);
+    static _KeInitializeDpc: windows_fn!(*mut c_void, DeferredRoutine, *mut c_void);
+    static _KeInsertQueueDpc: windows_fn!(*mut c_void, *mut c_void, *mut c_void => u8);
     static _ZwYieldExecution: windows_fn!( => i32);
     static _KeBugCheckEx: windows_fn!(u32, usize, usize, usize, usize => !);
     static _MmGetPhysicalAddress: windows_fn!(*const c_void => u64);
