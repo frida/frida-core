@@ -1066,6 +1066,8 @@ const IMAGE_NAME_SIZE: usize = 16;
 pub fn place_agent_in_process(pid: u32) -> bool {
     put_a_copy_in_the_session_server(pid);
 
+    let library = loader_library();
+
     let mut placed = Placement::default();
 
     let mut process: *mut c_void = core::ptr::null_mut();
@@ -1146,6 +1148,7 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                         .write(open_event_in_current_process(SHAREABLE_WAKE_EVENT) as u64);
                     (arena.add(TARGET_WAKE_HANDLE as usize) as *mut u64)
                         .write(open_event_in_current_process(wake) as u64);
+                    (arena.add(LOADER_LIBRARY as usize) as *mut u64).write(library);
                 }
             }
         }
@@ -1443,8 +1446,7 @@ unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
 }
 
 // ntdll's stub for a service begins by loading the same index that the kernel uses.
-fn service_index_of(peb: usize, name: &[u8]) -> u32 {
-    let ntdll = module_base(peb, b"ntdll.dll");
+fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
     let stub = export(ntdll, name);
     if stub == 0 {
         return 0;
@@ -1487,13 +1489,14 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
         return false;
     }
 
-    // The loader's list is in the target's address space, thus read it from there.
-    let peb = unsafe { (_PsGetProcessPeb)(process) } as usize;
+    // A process that is still held has no list of its libraries, thus take the address of the
+    // loader from a process that is running. The code is in the target's space, so read it there.
+    let ntdll = loader_library() as usize;
     let index;
     unsafe {
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-        index = service_index_of(peb, b"NtCreateThread");
+        index = service_index_of(ntdll, b"NtCreateThread");
         (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
     }
     if index == 0 {
@@ -1764,6 +1767,46 @@ pub(crate) const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
 // The loader's own list, walked in whichever address space is current: the copy walks its
 // own, and the kernel half walks a target's while it is attached to it.
+// A process that is still held has no list of its own yet, and this system puts the library at
+// the same address in every process, thus take it from one that is running.
+fn loader_library() -> u64 {
+    let known = unsafe { LOADER_LIBRARY_SEEN };
+    if known != 0 {
+        return known;
+    }
+
+    let mut found = 0;
+    enumerate_processes(&mut |process| {
+        if found == 0 {
+            found = loader_library_in(process.handle);
+        }
+    });
+    unsafe { LOADER_LIBRARY_SEEN = found };
+
+    found
+}
+
+fn loader_library_in(process: *mut c_void) -> u64 {
+    let mut found = 0;
+
+    let mut look = || unsafe {
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+
+        let peb = (_PsGetProcessPeb)(process) as usize;
+        if peb != 0 && try_read_pointer(peb + PEB_LDR_OFFSET).unwrap_or(0) != 0 {
+            found = module_base(peb, b"ntdll.dll") as u64;
+        }
+
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    };
+    on_kernel_stack(&mut look);
+
+    found
+}
+
+static mut LOADER_LIBRARY_SEEN: u64 = 0;
+
 pub(crate) fn module_base(peb: usize, wanted: &[u8]) -> usize {
     unsafe {
         let head = read_pointer(peb + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
@@ -1967,6 +2010,7 @@ pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
 pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
 
 pub(crate) const OBSERVED_THREAD: u64 = 0x40;
+pub(crate) const LOADER_LIBRARY: u64 = 0x44;
 
 pub(crate) const REGISTER_PROCESS: u64 = 0x18;
 pub(crate) const REGISTER_THREAD: u64 = 0x1c;

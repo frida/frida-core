@@ -15,7 +15,7 @@ use crate::winnt::{
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
     USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
-    ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, PEB_LDR_OFFSET,
+    ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
     PEB_PARAMETERS_OFFSET, POINTER_SIZE, export, module_base, read_pointer, read_u32,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
 };
@@ -122,8 +122,12 @@ pub static USER: Primitives = Primitives {
     shared_data,
 };
 
+pub(crate) fn yield_entry_point() -> usize {
+    unsafe { user_api().yield_execution as usize }
+}
+
 fn resolve_user_api() {
-    let ntdll = module_base(peb(), b"ntdll.dll");
+    let ntdll = loader_library();
 
     unsafe {
         USER_API = Some(UserApi {
@@ -139,6 +143,7 @@ fn resolve_user_api() {
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
+            create_heap: core::mem::transmute(export(ntdll, b"RtlCreateHeap")),
         });
 
         SPAWN_API = Some(SpawnApi {
@@ -204,7 +209,7 @@ struct SessionServer {
 // The loader has one way in and one way out for a library, thus a stand-in on each says what
 // the process has mapped now.
 pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
-    let ntdll = module_base(peb(), b"ntdll.dll");
+    let ntdll = loader_library();
 
     Some(LoaderEntryPoints {
         load: export(ntdll, b"LdrLoadDll"),
@@ -519,6 +524,7 @@ struct UserApi {
     create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
     close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
+    create_heap: windows_fn!(u32, *mut c_void, usize, usize, *mut c_void, *mut c_void => usize),
 }
 
 static mut USER_API: Option<UserApi> = None;
@@ -527,9 +533,40 @@ static mut USER_API: Option<UserApi> = None;
 
 
 
-fn process_heap() -> usize {
-    unsafe { read_pointer(peb() + PEB_PROCESS_HEAP_OFFSET) }
+// A process that is still held has neither a list of its libraries nor a heap of its own: the
+// loader makes both when it runs, and it has not run yet. The kernel half says where the loader
+// library is, and a heap is ours to make.
+fn loader_library() -> usize {
+    let own = peb();
+    if unsafe { read_pointer(own + PEB_LDR_OFFSET) } != 0 {
+        return module_base(own, b"ntdll.dll");
+    }
+
+    unsafe { ((ARENA + LOADER_LIBRARY) as *const u64).read() as usize }
 }
+
+fn process_heap() -> usize {
+    let own = unsafe { read_pointer(peb() + PEB_PROCESS_HEAP_OFFSET) };
+    if own != 0 {
+        return own;
+    }
+
+    let made = unsafe { MADE_HEAP };
+    if made != 0 {
+        return made;
+    }
+
+    let heap = unsafe {
+        (user_api().create_heap)(HEAP_GROWABLE, core::ptr::null_mut(), 0, 0,
+            core::ptr::null_mut(), core::ptr::null_mut())
+    };
+    unsafe { MADE_HEAP = heap };
+
+    heap
+}
+
+static mut MADE_HEAP: usize = 0;
+const HEAP_GROWABLE: u32 = 0x2;
 
 fn target_wake_handle() -> *mut c_void {
     unsafe { ((ARENA + TARGET_WAKE_HANDLE) as *const u64).read() as *mut c_void }
