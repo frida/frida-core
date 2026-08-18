@@ -440,10 +440,11 @@ namespace Frida {
 		 * that has no operating system of its own, or one that Frida reaches
 		 * through a debugger stub or an injected agent.
 		 *
+		 * @param name what to call the resulting device
 		 * @param config how to reach the target, and how to allocate memory in it
 		 * @return the newly added device
 		 */
-		public async Device add_barebone_device (BareboneConfig config, Cancellable? cancellable = null)
+		public async Device add_barebone_device (string name, BareboneConfig config, Cancellable? cancellable = null)
 				throws Error, IOError {
 #if HAVE_BAREBONE_BACKEND
 			check_open ();
@@ -457,7 +458,7 @@ namespace Frida {
 
 			string id = BAREBONE_DEVICE_ID_PREFIX + (next_barebone_device_serial++).to_string ();
 
-			var device = new Device (this, barebone_device.provider, id, barebone_device.provider.name, raw_options);
+			var device = new Device (this, barebone_device.provider, id, name, raw_options);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -468,18 +469,20 @@ namespace Frida {
 #endif
 		}
 
-		public Device add_barebone_device_sync (BareboneConfig config, Cancellable? cancellable = null)
+		public Device add_barebone_device_sync (string name, BareboneConfig config, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var task = create<AddBareboneDeviceTask> ();
+			task.name = name;
 			task.config = config;
 			return task.execute (cancellable);
 		}
 
 		private class AddBareboneDeviceTask : ManagerTask<Device> {
+			public string name;
 			public BareboneConfig config;
 
 			protected override async Device perform_operation () throws Error, IOError {
-				return yield parent.add_barebone_device (config, cancellable);
+				return yield parent.add_barebone_device (name, config, cancellable);
 			}
 		}
 
