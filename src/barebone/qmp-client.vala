@@ -26,6 +26,8 @@ namespace Frida.Barebone {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const int REQUEST_TIMEOUT_MS = 30000;
+		private const uint UNPLUG_MAX_ATTEMPTS = 40;
+		private const uint UNPLUG_INTERVAL_MS = 500;
 
 		public QmpClient (string? address = null, uint16 port = 0) {
 			Object (
@@ -141,9 +143,11 @@ namespace Frida.Barebone {
 			yield getfd (fd_name, fds[1], cancellable);
 
 			string chardev = "vserial0";
-			yield add_chardev_from_fd (chardev, fd_name, cancellable);
+			string device = "hostlink.port";
+			yield unplug_leftover_hostlink (chardev, device, cancellable);
 
-			yield add_serial_port (chardev, bus, "re.frida.hostlink", "hostlink.port", 1, cancellable);
+			yield add_chardev_from_fd (chardev, fd_name, cancellable);
+			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
 
 			return new Hostlink () {
 				connection = SocketConnection.factory_create_connection (local_sock),
@@ -151,6 +155,51 @@ namespace Frida.Barebone {
 				irq = irq,
 			};
 #endif
+		}
+
+		private async void unplug_leftover_hostlink (string chardev, string device,
+				Cancellable? cancellable) throws IOError {
+			try {
+				yield delete_device (device, cancellable);
+			} catch (Error e) {
+				return;
+			}
+
+			for (uint attempt = 0; attempt != UNPLUG_MAX_ATTEMPTS; attempt++) {
+				try {
+					yield remove_chardev (chardev, cancellable);
+					return;
+				} catch (Error e) {
+					if (!("busy" in e.message))
+						return;
+				}
+
+				var timeout = new TimeoutSource (UNPLUG_INTERVAL_MS);
+				timeout.set_callback (unplug_leftover_hostlink.callback);
+				timeout.attach (MainContext.get_thread_default ());
+				yield;
+				timeout.destroy ();
+			}
+		}
+
+		private async void delete_device (string id, Cancellable? cancellable) throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("id")
+					.add_string_value (id)
+				.end_object ();
+			yield execute_command ("device_del", args.get_root (), cancellable);
+		}
+
+		private async void remove_chardev (string id, Cancellable? cancellable) throws Error, IOError {
+			var args = new Json.Builder ();
+			args
+				.begin_object ()
+					.set_member_name ("id")
+					.add_string_value (id)
+				.end_object ();
+			yield execute_command ("chardev-remove", args.get_root (), cancellable);
 		}
 
 		public class Hostlink {
