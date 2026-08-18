@@ -76,7 +76,6 @@ namespace Frida.Barebone {
 			return connection;
 		}
 
-
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 		private const uint8 TRANSPORT_KIND_VIRTIO_PCI = 2;
@@ -378,7 +377,6 @@ namespace Frida.Barebone {
 
 			throw new Error.TIMED_OUT ("Timed out while starting the agent in the process");
 		}
-
 
 		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
 				throws Error, IOError {

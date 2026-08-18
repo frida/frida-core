@@ -16,7 +16,8 @@ use crate::winnt::{
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
     USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
     ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
-    PEB_PARAMETERS_OFFSET, POINTER_SIZE, export, module_base, read_pointer, read_u32,
+    CONTEXT_ALIGNMENT, CONTEXT_FLAGS, CONTEXT_PC, CONTEXT_SIZE, PEB_PARAMETERS_OFFSET,
+    POINTER_SIZE, export, module_base, read_pointer, read_u32,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
 };
 
@@ -147,12 +148,14 @@ fn resolve_user_api() {
         });
 
         SPAWN_API = Some(SpawnApi {
-            create_process_parameters: core::mem::transmute(
-                export(ntdll, b"RtlCreateProcessParameters")),
-            create_user_process: core::mem::transmute(export(ntdll, b"RtlCreateUserProcess")),
-            destroy_process_parameters: core::mem::transmute(
-                export(ntdll, b"RtlDestroyProcessParameters")),
+            query_process: core::mem::transmute(export(ntdll, b"NtQueryInformationProcess")),
+            read_memory: core::mem::transmute(export(ntdll, b"NtReadVirtualMemory")),
+            write_memory: core::mem::transmute(export(ntdll, b"NtWriteVirtualMemory")),
+            protect_memory: core::mem::transmute(export(ntdll, b"NtProtectVirtualMemory")),
+            suspend_thread: core::mem::transmute(export(ntdll, b"NtSuspendThread")),
+            delay: core::mem::transmute(export(ntdll, b"NtDelayExecution")),
             resume_thread: core::mem::transmute(export(ntdll, b"NtResumeThread")),
+            get_context: core::mem::transmute(export(ntdll, b"NtGetContextThread")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
         });
     }
@@ -328,6 +331,10 @@ pub fn spawn_process(command_line: &str) -> u32 {
         return 0;
     };
 
+    if hold_at_entry_point(made.process, made.thread).is_none() {
+        return 0;
+    }
+
     unsafe {
         held().insert(made.pid, HeldProcess {
             process: made.process,
@@ -338,39 +345,149 @@ pub fn spawn_process(command_line: &str) -> u32 {
     made.pid
 }
 
-fn make_process(command_line: &str) -> Option<MadeProcess> {
-    let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
+fn hold_at_entry_point(process: *mut c_void, thread: *mut c_void) -> Option<()> {
+    let api = spawn_api();
+    let entry_point = entry_point_of(process)?;
+    let mut prologue = [0u8; HOLD_SIZE];
+    read_process_memory(process, entry_point, &mut prologue)?;
+    write_process_memory(process, entry_point, &HOLD_INSTRUCTION)?;
+    unsafe { (api.resume_thread)(thread, core::ptr::null_mut()) };
+    let arrived = wait_for_entry_point(thread, entry_point);
 
-    let mut image = WideText::of(&native_path_of(command_line));
-    let mut line = WideText::of(command_line);
-    let mut desktop = our_desktop();
+    write_process_memory(process, entry_point, &prologue)?;
 
-    let mut parameters: *mut c_void = core::ptr::null_mut();
-    let prepared = unsafe {
-        (api.create_process_parameters)(&mut parameters, image.text(), core::ptr::null_mut(),
-            core::ptr::null_mut(), line.text(), core::ptr::null_mut(), core::ptr::null_mut(),
-            desktop.as_mut_ptr(), core::ptr::null_mut(), core::ptr::null_mut())
+    arrived
+}
+
+fn wait_for_entry_point(thread: *mut c_void, entry_point: usize) -> Option<()> {
+    let api = spawn_api();
+
+    for _ in 0..HOLD_ATTEMPTS {
+        if program_counter_of(thread) == Some(entry_point) {
+            unsafe { (api.suspend_thread)(thread, core::ptr::null_mut()) };
+            if program_counter_of(thread) == Some(entry_point) {
+                return Some(());
+            }
+            unsafe { (api.resume_thread)(thread, core::ptr::null_mut()) };
+        }
+
+        let slice = -(HOLD_SLICE_US * 10);
+        unsafe { (api.delay)(0, &slice) };
+    }
+
+    None
+}
+
+fn program_counter_of(thread: *mut c_void) -> Option<usize> {
+    let api = spawn_api();
+
+    let mut context = [0u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT];
+    let base = unsafe {
+        context.as_mut_ptr().add(context.as_ptr().align_offset(CONTEXT_ALIGNMENT))
     };
-    if prepared < 0 {
+    unsafe { (base.add(CONTEXT_FLAGS) as *mut u32).write(CONTEXT_CONTROL) };
+
+    let asked = unsafe { (api.get_context)(thread, base) };
+
+    (asked >= 0).then(|| unsafe { (base.add(CONTEXT_PC as usize) as *const usize).read() })
+}
+
+fn entry_point_of(process: *mut c_void) -> Option<usize> {
+    let api = spawn_api();
+
+    let mut information = [0u8; PROCESS_BASIC_INFORMATION_SIZE];
+    let asked = unsafe {
+        (api.query_process)(process, PROCESS_BASIC_INFORMATION, information.as_mut_ptr(),
+            information.len() as u32, core::ptr::null_mut())
+    };
+    if asked < 0 {
+        return None;
+    }
+    let peb = read_word(&information, PROCESS_BASIC_INFORMATION_PEB);
+
+    let mut base = [0u8; POINTER_SIZE];
+    read_process_memory(process, peb + PEB_IMAGE_BASE_OFFSET, &mut base)?;
+    let image = read_word(&base, 0);
+
+    let mut headers = [0u8; 4];
+    read_process_memory(process, image + PE_SIGNATURE_OFFSET, &mut headers)?;
+    let signature = image + u32::from_le_bytes(headers) as usize;
+
+    let mut rva = [0u8; 4];
+    read_process_memory(process, signature + PE_ENTRY_POINT_OFFSET, &mut rva)?;
+
+    Some(image + u32::from_le_bytes(rva) as usize)
+}
+
+fn read_word(bytes: &[u8], offset: usize) -> usize {
+    let mut word = [0u8; POINTER_SIZE];
+    word.copy_from_slice(&bytes[offset..offset + POINTER_SIZE]);
+
+    usize::from_le_bytes(word)
+}
+
+fn read_process_memory(process: *mut c_void, address: usize, into: &mut [u8]) -> Option<()> {
+    let read = unsafe {
+        (spawn_api().read_memory)(process, address, into.as_mut_ptr(), into.len(),
+            core::ptr::null_mut())
+    };
+
+    (read >= 0).then_some(())
+}
+
+fn write_process_memory(process: *mut c_void, address: usize, from: &[u8]) -> Option<()> {
+    let api = spawn_api();
+
+    let mut base = address;
+    let mut region = from.len();
+    let mut previous = 0u32;
+    let opened = unsafe {
+        (api.protect_memory)(process, &mut base, &mut region, PAGE_EXECUTE_READWRITE,
+            &mut previous)
+    };
+    if opened < 0 {
         return None;
     }
 
-    let mut information = [0u8; PROCESS_INFORMATION_SIZE];
-    let status = unsafe {
-        (api.create_user_process)(image.text(), OBJ_CASE_INSENSITIVE, parameters,
-            core::ptr::null_mut(), core::ptr::null_mut(), CURRENT_PROCESS, 0,
-            core::ptr::null_mut(), core::ptr::null_mut(), information.as_mut_ptr())
+    let written = unsafe {
+        (api.write_memory)(process, address, from.as_ptr(), from.len(), core::ptr::null_mut())
     };
-    unsafe { (api.destroy_process_parameters)(parameters) };
-    if status < 0 {
+
+    let mut base = address;
+    let mut region = from.len();
+    let mut ignored = 0u32;
+    unsafe { (api.protect_memory)(process, &mut base, &mut region, previous, &mut ignored) };
+
+    (written >= 0).then_some(())
+}
+
+fn make_process(command_line: &str) -> Option<MadeProcess> {
+    let create: windows_fn!(*const u16, *mut u16, *mut c_void, *mut c_void, u32, u32, *mut c_void,
+        *const u16, *mut u8, *mut u8 => u32) = unsafe {
+        core::mem::transmute(export(module_base(peb(), b"kernel32.dll"), b"CreateProcessW"))
+    };
+
+    let mut line: Vec<u16> = command_line.encode_utf16().collect();
+    line.push(0);
+
+    let mut startup = [0u8; STARTUP_INFO_SIZE];
+    unsafe { (startup.as_mut_ptr() as *mut u32).write(STARTUP_INFO_SIZE as u32) };
+
+    let mut information = [0u8; PROCESS_INFORMATION_SIZE];
+    let made = unsafe {
+        create(core::ptr::null(), line.as_mut_ptr(), core::ptr::null_mut(),
+            core::ptr::null_mut(), 0, CREATE_SUSPENDED, core::ptr::null_mut(),
+            core::ptr::null(), startup.as_mut_ptr(), information.as_mut_ptr())
+    };
+    if made == 0 {
         return None;
     }
 
     Some(MadeProcess {
         process: read_handle(&information, PROCESS_INFORMATION_PROCESS),
         thread: read_handle(&information, PROCESS_INFORMATION_THREAD),
-        pid: read_handle(&information, PROCESS_INFORMATION_PID) as usize as u32,
-        tid: read_handle(&information, PROCESS_INFORMATION_TID) as usize as u32,
+        pid: unsafe { read_u32(information.as_ptr() as usize + PROCESS_INFORMATION_PID) },
+        tid: unsafe { read_u32(information.as_ptr() as usize + PROCESS_INFORMATION_TID) },
     })
 }
 
@@ -385,7 +502,7 @@ pub fn resume_process(pid: u32) -> bool {
     let Some(held) = (unsafe { held().remove(&pid) }) else {
         return false;
     };
-    let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
+    let api = spawn_api();
 
     unsafe {
         let resumed = (api.resume_thread)(held.thread, core::ptr::null_mut()) >= 0;
@@ -394,25 +511,6 @@ pub fn resume_process(pid: u32) -> bool {
 
         resumed
     }
-}
-
-// The loader takes the path the way the object manager spells it.
-fn native_path_of(command_line: &str) -> alloc::string::String {
-    let program = command_line.split(' ').next().unwrap_or(command_line);
-
-    alloc::format!("\\??\\{}", program.trim_matches('"'))
-}
-
-// A new process draws on the desktop that this one draws on.
-fn our_desktop() -> [u8; UNICODE_STRING_SIZE] {
-    let parameters = unsafe { read_pointer(peb() + PEB_PARAMETERS_OFFSET) };
-    let mut desktop = [0u8; UNICODE_STRING_SIZE];
-    unsafe {
-        core::ptr::copy_nonoverlapping((parameters + PARAMETERS_DESKTOP_OFFSET) as *const u8,
-            desktop.as_mut_ptr(), UNICODE_STRING_SIZE);
-    }
-
-    desktop
 }
 
 fn read_handle(information: &[u8; PROCESS_INFORMATION_SIZE], offset: usize) -> *mut c_void {
@@ -427,39 +525,15 @@ fn held() -> &'static mut BTreeMap<u32, HeldProcess> {
 }
 
 // A wide string and the record that names it travel together, the record pointing into it.
-struct WideText {
-    characters: alloc::vec::Vec<u16>,
-    record: [u8; UNICODE_STRING_SIZE],
-}
-
-impl WideText {
-    fn of(text: &str) -> WideText {
-        let mut characters: alloc::vec::Vec<u16> = text.encode_utf16().collect();
-        characters.push(0);
-
-        let bytes = ((characters.len() - 1) * 2) as u16;
-        let mut record = [0u8; UNICODE_STRING_SIZE];
-        record[..2].copy_from_slice(&bytes.to_le_bytes());
-        record[2..4].copy_from_slice(&(bytes + 2).to_le_bytes());
-
-        WideText { characters, record }
-    }
-
-    fn text(&mut self) -> *mut u8 {
-        let buffer = self.characters.as_ptr() as usize;
-        self.record[UNICODE_STRING_BUFFER..].copy_from_slice(&buffer.to_le_bytes());
-
-        self.record.as_mut_ptr()
-    }
-}
-
 struct SpawnApi {
-    create_process_parameters: windows_fn!(*mut *mut c_void, *mut u8, *mut u8, *mut u8, *mut u8,
-        *mut u8, *mut u8, *mut u8, *mut u8, *mut u8 => i32),
-    create_user_process: windows_fn!(*mut u8, u32, *mut c_void, *mut c_void, *mut c_void,
-        *mut c_void, u8, *mut c_void, *mut c_void, *mut u8 => i32),
-    destroy_process_parameters: windows_fn!(*mut c_void => i32),
+    query_process: windows_fn!(*mut c_void, u32, *mut u8, u32, *mut u32 => i32),
+    read_memory: windows_fn!(*mut c_void, usize, *mut u8, usize, *mut usize => i32),
+    write_memory: windows_fn!(*mut c_void, usize, *const u8, usize, *mut usize => i32),
+    protect_memory: windows_fn!(*mut c_void, *mut usize, *mut usize, u32, *mut u32 => i32),
+    suspend_thread: windows_fn!(*mut c_void, *mut u32 => i32),
+    delay: windows_fn!(u8, *const i64 => i32),
     resume_thread: windows_fn!(*mut c_void, *mut u32 => i32),
+    get_context: windows_fn!(*mut c_void, *mut u8 => i32),
     close: windows_fn!(*mut c_void => i32),
 }
 
@@ -471,7 +545,29 @@ struct HeldProcess {
 static mut SPAWN_API: Option<SpawnApi> = None;
 static mut HELD_PROCESSES: BTreeMap<u32, HeldProcess> = BTreeMap::new();
 
-const OBJ_CASE_INSENSITIVE: u32 = 0x40;
+const CREATE_SUSPENDED: u32 = 0x4;
+const PROCESS_BASIC_INFORMATION: u32 = 0;
+const PE_SIGNATURE_OFFSET: usize = 0x3c;
+const PE_ENTRY_POINT_OFFSET: usize = 0x28;
+const HOLD_SIZE: usize = 2;
+const HOLD_INSTRUCTION: [u8; HOLD_SIZE] = [0xeb, 0xfe];
+const HOLD_ATTEMPTS: u32 = 5000;
+const HOLD_SLICE_US: i64 = 1000;
+const CONTEXT_CONTROL: u32 = 0x0001_0001;
+
+#[cfg(target_arch = "x86")]
+const PROCESS_BASIC_INFORMATION_SIZE: usize = 24;
+#[cfg(target_arch = "x86")]
+const PROCESS_BASIC_INFORMATION_PEB: usize = 0x04;
+#[cfg(target_arch = "x86")]
+const PEB_IMAGE_BASE_OFFSET: usize = 0x08;
+
+#[cfg(target_arch = "x86_64")]
+const PROCESS_BASIC_INFORMATION_SIZE: usize = 48;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_BASIC_INFORMATION_PEB: usize = 0x08;
+#[cfg(target_arch = "x86_64")]
+const PEB_IMAGE_BASE_OFFSET: usize = 0x10;
 
 #[cfg(target_arch = "x86")]
 const UNICODE_STRING_SIZE: usize = 8;
@@ -482,13 +578,15 @@ const PARAMETERS_DESKTOP_OFFSET: usize = 0x78;
 #[cfg(target_arch = "x86")]
 const PROCESS_INFORMATION_SIZE: usize = 128;
 #[cfg(target_arch = "x86")]
-const PROCESS_INFORMATION_PROCESS: usize = 0x04;
+const PROCESS_INFORMATION_PROCESS: usize = 0x00;
 #[cfg(target_arch = "x86")]
-const PROCESS_INFORMATION_THREAD: usize = 0x08;
+const PROCESS_INFORMATION_THREAD: usize = 0x04;
 #[cfg(target_arch = "x86")]
-const PROCESS_INFORMATION_PID: usize = 0x0c;
+const PROCESS_INFORMATION_PID: usize = 0x08;
 #[cfg(target_arch = "x86")]
-const PROCESS_INFORMATION_TID: usize = 0x10;
+const PROCESS_INFORMATION_TID: usize = 0x0c;
+#[cfg(target_arch = "x86")]
+const STARTUP_INFO_SIZE: usize = 0x44;
 
 #[cfg(target_arch = "x86_64")]
 const UNICODE_STRING_SIZE: usize = 16;
@@ -499,13 +597,19 @@ const PARAMETERS_DESKTOP_OFFSET: usize = 0xc0;
 #[cfg(target_arch = "x86_64")]
 const PROCESS_INFORMATION_SIZE: usize = 192;
 #[cfg(target_arch = "x86_64")]
-const PROCESS_INFORMATION_PROCESS: usize = 0x08;
+const PROCESS_INFORMATION_PROCESS: usize = 0x00;
 #[cfg(target_arch = "x86_64")]
-const PROCESS_INFORMATION_THREAD: usize = 0x10;
+const PROCESS_INFORMATION_THREAD: usize = 0x08;
 #[cfg(target_arch = "x86_64")]
-const PROCESS_INFORMATION_PID: usize = 0x18;
+const PROCESS_INFORMATION_PID: usize = 0x10;
+#[cfg(target_arch = "x86_64")]
+const STARTUP_INFO_SIZE: usize = 0x68;
 #[cfg(target_arch = "x86_64")]
 const PROCESS_INFORMATION_TID: usize = 0x20;
+
+fn spawn_api() -> &'static SpawnApi {
+    unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() }
+}
 
 fn user_api() -> &'static UserApi {
     unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }
@@ -528,10 +632,6 @@ struct UserApi {
 }
 
 static mut USER_API: Option<UserApi> = None;
-
-
-
-
 
 // A process that is still held has neither a list of its libraries nor a heap of its own: the
 // loader makes both when it runs, and it has not run yet. The kernel half says where the loader
@@ -578,8 +678,6 @@ fn agent_wake_handle() -> *mut c_void {
 
 static mut ARENA: u64 = 0;
 
-
-
 #[cfg(target_arch = "x86")]
 fn current_client_id(offset: u32) -> u32 {
     let id: u32;
@@ -625,9 +723,6 @@ const PEB_PROCESS_HEAP_OFFSET: usize = 0x18;
 
 #[cfg(target_arch = "x86_64")]
 const PEB_PROCESS_HEAP_OFFSET: usize = 0x30;
-
-
-
 
 const MEMORY_BASIC_INFORMATION: u32 = 0;
 const MEMORY_BASE: usize = 0x00;

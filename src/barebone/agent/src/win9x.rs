@@ -86,8 +86,6 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     (primitives().spawn_thread)(entry, parameter)
 }
 
-
-
 // VMM refuses to build a thread from the borrowed context the host enters us on, and only
 // says so by never returning, so hand the work to a point where VMM is between jobs.
 pub fn run_when_ready(action: fn()) {
@@ -120,8 +118,6 @@ static mut THREAD_PARAMETER: *mut c_void = core::ptr::null_mut();
 
 const THREAD_STACK_SIZE: usize = 64 * 1024;
 
-
-
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     (primitives().wait)(token, timeout_us, check)
 }
@@ -142,7 +138,6 @@ fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
 pub fn wake(token: *const u8) {
     (primitives().wake)(token)
 }
-
 
 pub fn yield_now() {
     (primitives().yield_now)()
@@ -375,7 +370,6 @@ unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
 }
 
 static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
-
 
 fn process_for_pid(pid: u32) -> u32 {
     let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
@@ -638,7 +632,6 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
 
-
 fn mirror_startup_stack(process: u32, esp: u32) {
     let base = esp & !0xffff;
     let first = base / PAGE_SIZE;
@@ -688,7 +681,6 @@ fn page_entry(address: u32) -> u32 {
     entry
 }
 
-
 fn await_flag(address: u32) -> bool {
     static mut TOKEN: u8 = 0;
     for _ in 0..INJECTION_ATTEMPTS {
@@ -716,15 +708,6 @@ fn alloc_shared(size: usize) -> *mut u8 {
 
     address as *mut u8
 }
-
-
-
-
-
-
-
-
-
 
 // KERNEL32 exports neither the creator that receives a process nor the code behind
 // ResumeThread. Thus find them by the shape of the code that calls them. The ring 3 worker
@@ -901,7 +884,6 @@ mod kernel {
         unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
     }
 }
-
 
 // for _VWIN32_CreateRing0Thread calls the creator with the same five arguments.
 fn thread_creator() -> u32 {
@@ -1515,8 +1497,6 @@ const ACCESS_READONLY: u32 = 0x0000;
 const SHARE_DENYNONE: u32 = 0x0040;
 const ACTION_OPENEXISTING: u32 = 0x01;
 
-
-
 pub fn install_fault_reporter() {
     unsafe {
         FAULT_CHAIN[INVALID_OPCODE as usize] = hook_vmm_fault(INVALID_OPCODE, frida_win9x_fault_thunk_ud);
@@ -1664,7 +1644,6 @@ fn faulting_address() -> u32 {
 }
 
 static mut FAULT_CHAIN: [u32; 32] = [0; 32];
-
 
 const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;

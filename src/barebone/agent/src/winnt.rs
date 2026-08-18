@@ -336,14 +336,10 @@ pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     (primitives().enumerate_ranges)(found)
 }
 
-
-
-
 // The copy must ask the memory manager to do this.
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     (primitives().protect)(address, size, gum_prot)
 }
-
 
 // A 32-bit kernel receives the physical address as two halves. A 64-bit kernel receives it
 // as one value.
@@ -898,20 +894,20 @@ unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 }
 
 #[cfg(target_arch = "x86")]
-const CONTEXT_SIZE: usize = 716;
+pub(crate) const CONTEXT_SIZE: usize = 716;
 #[cfg(target_arch = "x86")]
-const CONTEXT_ALIGNMENT: usize = 4;
+pub(crate) const CONTEXT_ALIGNMENT: usize = 4;
 #[cfg(target_arch = "x86")]
-const CONTEXT_FLAGS: usize = 0x00;
+pub(crate) const CONTEXT_FLAGS: usize = 0x00;
 #[cfg(target_arch = "x86")]
 const CONTEXT_FULL: u32 = 0x0001_0007;
 
 #[cfg(target_arch = "x86_64")]
-const CONTEXT_SIZE: usize = 1232;
+pub(crate) const CONTEXT_SIZE: usize = 1232;
 #[cfg(target_arch = "x86_64")]
-const CONTEXT_ALIGNMENT: usize = 16;
+pub(crate) const CONTEXT_ALIGNMENT: usize = 16;
 #[cfg(target_arch = "x86_64")]
-const CONTEXT_FLAGS: usize = 0x30;
+pub(crate) const CONTEXT_FLAGS: usize = 0x30;
 #[cfg(target_arch = "x86_64")]
 const CONTEXT_FULL: u32 = 0x0010_0003;
 
@@ -1296,7 +1292,7 @@ fn path_ends_with(path: *const u8, wanted: &[u8]) -> bool {
 // What each word size puts where: the frame a service is entered with, the block a thread starts
 // with, and the shape of the stubs on both sides.
 #[cfg(target_arch = "x86_64")]
-const CONTEXT_PC: u64 = 0xf8;
+pub(crate) const CONTEXT_PC: u64 = 0xf8;
 #[cfg(target_arch = "x86_64")]
 const CONTEXT_SP: u64 = 0x98;
 #[cfg(target_arch = "x86_64")]
@@ -1335,7 +1331,7 @@ const ZW_STUB_JMP_REL: usize = 26;
 const ZW_STUB_JMP_NEXT: usize = 30;
 
 #[cfg(target_arch = "x86")]
-const CONTEXT_PC: u64 = 0xb8;
+pub(crate) const CONTEXT_PC: u64 = 0xb8;
 #[cfg(target_arch = "x86")]
 const CONTEXT_SP: u64 = 0xc4;
 #[cfg(target_arch = "x86")]
@@ -2524,7 +2520,6 @@ macro_rules! kernel_abi {
             unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
     };
 }
-
 
 kernel_abi! {
     static _ExAllocatePoolWithTag: windows_fn!(u32, usize, u32 => *mut u8);

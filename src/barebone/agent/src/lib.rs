@@ -280,7 +280,6 @@ mod entrypoint_blob {
         }
     }
 
-
     unsafe fn parse_config(
         config: &[u8],
     ) -> (
@@ -1057,7 +1056,6 @@ fn serve_pending_detach() {
     };
     send_command_reply(request_id, response);
 }
-
 
 #[cfg(feature = "win9x")]
 const DEFERRED_WORK_POLL_MS: u32 = 20;

@@ -189,6 +189,13 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/hooks-before-resume-in-live-guest", () => {
+			var h = new Harness ((h) => hooks_before_resume_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT"),
+				"C:\\WINDOWS\\system32\\notepad.exe"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_spawns_and_resumes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
