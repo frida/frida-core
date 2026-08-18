@@ -361,6 +361,74 @@ pub fn arena_for_pid(pid: u32) -> Option<u64> {
     unsafe { targets().get(&pid).map(|t| t.arena as u64) }
 }
 
+pub fn serve_patch_requests() {
+    for arena in injected_arenas() {
+        let arena = arena as u32;
+        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } != PATCH_ASKED {
+            continue;
+        }
+
+        let pid = unsafe { ((arena + PATCH_PROCESS) as *const u32).read_volatile() };
+        let mut address = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
+        let bytes = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
+
+        let previous = patch_in_process(pid, &mut address, bytes);
+
+        unsafe {
+            ((arena + PATCH_ADDRESS) as *mut u32).write_volatile(address);
+            ((arena + PATCH_BYTES) as *mut u32).write_volatile(previous);
+            ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ANSWERED);
+        }
+    }
+}
+
+fn patch_in_process(pid: u32, address: &mut u32, bytes: u32) -> u32 {
+    let pdb = process_for_pid(pid);
+    if pdb == 0 {
+        return 0;
+    }
+
+    let context = unsafe { (pdb as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
+    let saved = unsafe { __GetCurrentContext() };
+    unsafe { __ContextSwitch(context) };
+
+    if *address == 0 {
+        *address = entry_point_of(pdb);
+    }
+
+    let mut previous = 0;
+    if *address != 0 {
+        previous = unsafe { (*address as *const u16).read_unaligned() } as u32;
+        kernel::protect(*address as u64, PATCH_SIZE, GUM_PAGE_WRITE);
+        unsafe { (*address as *mut u16).write_unaligned(bytes as u16) };
+    }
+
+    unsafe { __ContextSwitch(saved) };
+
+    previous
+}
+
+fn entry_point_of(pdb: u32) -> u32 {
+    let table = module_table();
+    let first = unsafe { (pdb as *const u32).byte_add(PDB_MODREF_OFFSET).read() };
+    if table == 0 || first < ARENA_FLOOR {
+        return 0;
+    }
+
+    let mut modules = alloc::vec::Vec::new();
+    collect_modules(table, first, MODREF_NEXT_OFFSET, &mut modules);
+    let previous = unsafe { (first as *const u32).byte_add(MODREF_PREVIOUS_OFFSET).read() };
+    collect_modules(table, previous, MODREF_PREVIOUS_OFFSET, &mut modules);
+
+    let Some(image) = modules.iter().map(|m| m.base).min() else {
+        return 0;
+    };
+
+    let headers = image + unsafe { (image as *const u32).byte_add(PE_SIGNATURE_OFFSET).read() };
+
+    image + unsafe { (headers as *const u32).byte_add(PE_ENTRY_POINT_OFFSET).read() }
+}
+
 pub fn injected_arenas() -> alloc::vec::Vec<u64> {
     unsafe { targets().values().map(|t| t.arena as u64).collect() }
 }
@@ -1058,6 +1126,15 @@ pub(crate) const WORKER_STOPPED: u32 = 0x3c;
 pub(crate) const MODULE_LIST: u32 = 0x40;
 pub(crate) const LOADER_BY_NAME: u32 = 0x44;
 pub(crate) const LOADER_EXTENDED: u32 = 0x48;
+pub(crate) const PATCH_PROCESS: u32 = 0x4c;
+pub(crate) const PATCH_ADDRESS: u32 = 0x50;
+pub(crate) const PATCH_BYTES: u32 = 0x54;
+pub(crate) const PATCH_REQUEST: u32 = 0x58;
+pub(crate) const PATCH_ASKED: u32 = 1;
+pub(crate) const PATCH_ANSWERED: u32 = 2;
+const PATCH_SIZE: usize = 2;
+const PE_SIGNATURE_OFFSET: usize = 0x3c;
+const PE_ENTRY_POINT_OFFSET: usize = 0x28;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;

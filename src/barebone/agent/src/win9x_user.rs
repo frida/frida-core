@@ -235,6 +235,8 @@ fn resolve_user_api() {
             virtual_query: kernel32_export(b"VirtualQuery"),
             create_thread: kernel32_export(b"CreateThread"),
             create_process: kernel32_export(b"CreateProcessA"),
+            get_thread_context: kernel32_export(b"GetThreadContext"),
+            suspend_thread: kernel32_export(b"SuspendThread"),
             resume_thread: kernel32_export(b"ResumeThread"),
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
@@ -263,6 +265,8 @@ struct UserApi {
     virtual_query: u32,
     create_thread: u32,
     create_process: u32,
+    get_thread_context: u32,
+    suspend_thread: u32,
     resume_thread: u32,
     create_event: u32,
     set_event: u32,
@@ -285,6 +289,8 @@ static mut USER_API: UserApi = UserApi {
     virtual_query: 0,
     create_thread: 0,
     create_process: 0,
+    get_thread_context: 0,
+    suspend_thread: 0,
     resume_thread: 0,
     create_event: 0,
     set_event: 0,
@@ -349,8 +355,6 @@ pub struct LoadedModule {
     pub size: u64,
 }
 
-// A process starts held, thus a caller can attach to it before it runs any of its own code.
-// The wide entry points of this system are stubs that fail, thus the narrow one.
 pub fn spawn_process(command_line: &str) -> u32 {
     let create_process: unsafe extern "stdcall" fn(u32, *mut u8, u32, u32, u32, u32, u32, u32,
         *mut u8, *mut u32) -> u32 = unsafe {
@@ -376,15 +380,101 @@ pub fn spawn_process(command_line: &str) -> u32 {
         return 0;
     }
 
+    let process = created[PROCESS_INFORMATION_PROCESS];
+    let thread = created[PROCESS_INFORMATION_THREAD];
     let pid = created[PROCESS_INFORMATION_PID];
-    unsafe {
-        held().insert(pid, HeldProcess {
-            process: created[PROCESS_INFORMATION_PROCESS],
-            thread: created[PROCESS_INFORMATION_THREAD],
-        })
-    };
+    if hold_at_entry_point(pid, thread).is_none() {
+        return 0;
+    }
+
+    unsafe { held().insert(pid, HeldProcess { process, thread }) };
 
     pid
+}
+
+fn hold_at_entry_point(pid: u32, thread: u32) -> Option<()> {
+    let (entry_point, prologue) = patch(pid, 0, HOLD_INSTRUCTION)?;
+    if entry_point == 0 {
+        return None;
+    }
+
+    resume_thread(thread);
+    let arrived = wait_for_entry_point(thread, entry_point);
+
+    patch(pid, entry_point, prologue)?;
+
+    arrived
+}
+
+fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
+    let sleep: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().sleep as usize) };
+    let arena = crate::routed_arena() as u32;
+
+    unsafe {
+        ((arena + PATCH_PROCESS) as *mut u32).write_volatile(pid);
+        ((arena + PATCH_ADDRESS) as *mut u32).write_volatile(address);
+        ((arena + PATCH_BYTES) as *mut u32).write_volatile(code);
+        ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ASKED);
+    }
+
+    for _ in 0..PATCH_ATTEMPTS {
+        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } == PATCH_ANSWERED {
+            let at = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
+            let previous = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
+            unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
+
+            return Some((at, previous));
+        }
+
+        unsafe { sleep(HOLD_SLICE_MS) };
+    }
+
+    None
+}
+
+fn wait_for_entry_point(thread: u32, entry_point: u32) -> Option<()> {
+    let sleep: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().sleep as usize) };
+
+    for _ in 0..HOLD_ATTEMPTS {
+        if register_of(thread, CONTEXT_CONTROL, CONTEXT_EIP) == Some(entry_point) {
+            suspend_thread(thread);
+            if register_of(thread, CONTEXT_CONTROL, CONTEXT_EIP) == Some(entry_point) {
+                return Some(());
+            }
+            resume_thread(thread);
+        }
+
+        unsafe { sleep(HOLD_SLICE_MS) };
+    }
+
+    None
+}
+
+fn register_of(thread: u32, flags: u32, offset: usize) -> Option<u32> {
+    let get_thread_context: unsafe extern "stdcall" fn(u32, *mut u8) -> u32 =
+        unsafe { core::mem::transmute(user_api().get_thread_context as usize) };
+
+    let mut context = [0u32; CONTEXT_WORDS];
+    context[0] = flags;
+    let asked = unsafe { get_thread_context(thread, context.as_mut_ptr() as *mut u8) };
+
+    (asked != 0).then(|| context[offset / 4])
+}
+
+fn suspend_thread(thread: u32) {
+    let suspend: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().suspend_thread as usize) };
+
+    unsafe { suspend(thread) };
+}
+
+fn resume_thread(thread: u32) {
+    let resume: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().resume_thread as usize) };
+
+    unsafe { resume(thread) };
 }
 
 pub fn resume_process(pid: u32) -> bool {
@@ -392,18 +482,16 @@ pub fn resume_process(pid: u32) -> bool {
         return false;
     };
 
-    let resume_thread: unsafe extern "stdcall" fn(u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().resume_thread as usize) };
     let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
         unsafe { core::mem::transmute(user_api().close_handle as usize) };
 
+    resume_thread(held.thread);
     unsafe {
-        let resumed = resume_thread(held.thread) != u32::MAX;
         close_handle(held.thread);
         close_handle(held.process);
-
-        resumed
     }
+
+    true
 }
 
 fn held() -> &'static mut BTreeMap<u32, HeldProcess> {
@@ -418,6 +506,15 @@ struct HeldProcess {
 static mut HELD_PROCESSES: BTreeMap<u32, HeldProcess> = BTreeMap::new();
 
 const CREATE_SUSPENDED: u32 = 0x4;
+const CONTEXT_WORDS: usize = 179;
+const CONTEXT_CONTROL: u32 = 0x0001_0001;
+const CONTEXT_INTEGER: u32 = 0x0001_0002;
+const CONTEXT_EAX: usize = 0xb0;
+const CONTEXT_EIP: usize = 0xb8;
+const HOLD_INSTRUCTION: u32 = 0xfeeb;
+const PATCH_ATTEMPTS: u32 = 5000;
+const HOLD_ATTEMPTS: u32 = 5000;
+const HOLD_SLICE_MS: u32 = 1;
 const STARTUP_INFO_WORDS: usize = 17;
 const PROCESS_INFORMATION_WORDS: usize = 4;
 const PROCESS_INFORMATION_PROCESS: usize = 0;

@@ -1064,6 +1064,9 @@ const DEFERRED_WORK_POLL_MS: u32 = 20;
 // change.
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn relay_frames_from_targets() {
+    #[cfg(feature = "win9x")]
+    kernel::serve_patch_requests();
+
     for arena in kernel::injected_arenas() {
         while let Some(frame) = kernel::take_frame_from_target(arena) {
             send_frame(frame);
