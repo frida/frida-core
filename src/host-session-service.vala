@@ -186,14 +186,7 @@ namespace Frida {
 	private const uint16 PROVIDER_ICON_SIZE = 96;
 
 	internal Variant make_provider_icon (uint8[] png) {
-		var image = new Bytes.static (png);
-		var builder = new VariantBuilder (VariantType.VARDICT);
-		builder.add ("{sv}", "format", new Variant.string ("png"));
-		builder.add ("{sv}", "width", new Variant.uint16 (PROVIDER_ICON_SIZE));
-		builder.add ("{sv}", "height", new Variant.uint16 (PROVIDER_ICON_SIZE));
-		builder.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"),
-			image.get_data (), true, image));
-		return builder.end ();
+		return icon_from_png (png, PROVIDER_ICON_SIZE, PROVIDER_ICON_SIZE);
 	}
 
 	public interface HostSessionConnection : Object {

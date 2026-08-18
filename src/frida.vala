@@ -440,12 +440,12 @@ namespace Frida {
 		 * that has no operating system of its own, or one that Frida reaches
 		 * through a debugger stub or an injected agent.
 		 *
-		 * @param name what to call the resulting device
 		 * @param config how to reach the target, and how to allocate memory in it
+		 * @param options how the device presents itself
 		 * @return the newly added device
 		 */
-		public async Device add_barebone_device (string name, BareboneConfig config, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public async Device add_barebone_device (BareboneConfig config, BareboneDeviceOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 #if HAVE_BAREBONE_BACKEND
 			check_open ();
 
@@ -458,7 +458,7 @@ namespace Frida {
 
 			string id = BAREBONE_DEVICE_ID_PREFIX + (next_barebone_device_serial++).to_string ();
 
-			var device = new Device (this, barebone_device.provider, id, name, raw_options);
+			var device = new Device (this, barebone_device.provider, id, options?.name, raw_options, options?.icon);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -469,20 +469,20 @@ namespace Frida {
 #endif
 		}
 
-		public Device add_barebone_device_sync (string name, BareboneConfig config, Cancellable? cancellable = null)
-				throws Error, IOError {
+		public Device add_barebone_device_sync (BareboneConfig config, BareboneDeviceOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AddBareboneDeviceTask> ();
-			task.name = name;
 			task.config = config;
+			task.options = options;
 			return task.execute (cancellable);
 		}
 
 		private class AddBareboneDeviceTask : ManagerTask<Device> {
-			public string name;
 			public BareboneConfig config;
+			public BareboneDeviceOptions? options;
 
 			protected override async Device perform_operation () throws Error, IOError {
-				return yield parent.add_barebone_device (name, config, cancellable);
+				return yield parent.add_barebone_device (config, options, cancellable);
 			}
 		}
 
@@ -844,8 +844,8 @@ namespace Frida {
 		public delegate bool ProcessPredicate (Process process);
 
 		internal Device (DeviceManager? mgr, HostSessionProvider prov, string? id = null, string? name = null,
-				HostSessionOptions? options = null) {
-			Object (icon: prov.icon);
+				HostSessionOptions? options = null, Variant? icon = null) {
+			Object (icon: icon ?? prov.icon);
 
 			_id = id;
 			_name = name;
@@ -2112,6 +2112,54 @@ namespace Frida {
 			set;
 			default = -1;
 		}
+	}
+
+	/**
+	 * How a Barebone device presents itself. Pass it to
+	 * {@link DeviceManager.add_barebone_device}.
+	 */
+	public sealed class BareboneDeviceOptions : Object {
+		/**
+		 * What to call the device, or null to name it after the backend.
+		 */
+		public string? name {
+			get;
+			set;
+		}
+
+		/**
+		 * Icon to represent the device with, built by {@link icon_from_png} or
+		 * {@link icon_from_rgba}, or null to use the backend's own.
+		 */
+		public Variant? icon {
+			get;
+			set;
+		}
+	}
+
+	/**
+	 * Builds an icon out of a PNG image, in the shape {@link Device.icon} has.
+	 */
+	public Variant icon_from_png (uint8[] png, uint16 width, uint16 height) {
+		return make_icon ("png", png, width, height);
+	}
+
+	/**
+	 * Builds an icon out of premultiplied RGBA pixels, in the shape
+	 * {@link Device.icon} has.
+	 */
+	public Variant icon_from_rgba (uint8[] pixels, uint16 width, uint16 height) {
+		return make_icon ("rgba", pixels, width, height);
+	}
+
+	private Variant make_icon (string format, uint8[] data, uint16 width, uint16 height) {
+		var image = new Bytes (data);
+		var builder = new VariantBuilder (VariantType.VARDICT);
+		builder.add ("{sv}", "format", new Variant.string (format));
+		builder.add ("{sv}", "width", new Variant.uint16 (width));
+		builder.add ("{sv}", "height", new Variant.uint16 (height));
+		builder.add ("{sv}", "image", Variant.new_from_data (new VariantType ("ay"), image.get_data (), true, image));
+		return builder.end ();
 	}
 
 	/**
