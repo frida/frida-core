@@ -1,5 +1,5 @@
 namespace Frida.BareboneTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/Barebone/IA32/enumerate-ranges-walks-legacy-tables", () => {
 			var h = new Harness ((h) => enumerate_ranges_walks_legacy_tables.begin (h as Harness));
 			h.run ();
@@ -391,7 +391,7 @@ namespace Frida.BareboneTest {
 		});
 	}
 
-	private static BareboneConfig parse_config (string json) {
+	private BareboneConfig parse_config (string json) {
 		try {
 			return (BareboneConfig) Json.gobject_from_data (typeof (BareboneConfig), json);
 		} catch (GLib.Error e) {
@@ -399,7 +399,7 @@ namespace Frida.BareboneTest {
 		}
 	}
 
-	private static async void enumerate_ranges_walks_legacy_tables (Harness h) {
+	private async void enumerate_ranges_walks_legacy_tables (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -423,7 +423,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void enumerate_ranges_walks_pae_tables (Harness h) {
+	private async void enumerate_ranges_walks_pae_tables (Harness h) {
 		var target = new FakeTarget (IA32, pae_page_tables (), PAE_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -447,7 +447,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void enumerate_ranges_honors_protection_filter (Harness h) {
+	private async void enumerate_ranges_honors_protection_filter (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -467,7 +467,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void control_registers_read_from_target_description (Harness h) {
+	private async void control_registers_read_from_target_description (Harness h) {
 		// No monitor command here: the machine must prefer the exposed registers.
 		var target = new FakeTarget (IA32, legacy_page_tables (), null, EXPOSE_CONTROL_REGISTERS);
 		try {
@@ -488,7 +488,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void translate_address_resolves_leaf_mappings (Harness h) {
+	private async void translate_address_resolves_leaf_mappings (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -513,7 +513,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void protect_pages_updates_legacy_entries (Harness h) {
+	private async void protect_pages_updates_legacy_entries (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -535,7 +535,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void protect_pages_widens_pae_parents (Harness h) {
+	private async void protect_pages_widens_pae_parents (Harness h) {
 		var target = new FakeTarget (IA32, pae_page_tables (), PAE_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -558,7 +558,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void protect_pages_rejects_large_pages (Harness h) {
+	private async void protect_pages_rejects_large_pages (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -582,7 +582,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void relocations_apply_load_bias (Harness h) {
+	private async void relocations_apply_load_bias (Harness h) {
 		var target = new FakeTarget (IA32, legacy_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -620,7 +620,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void allocate_pages_spans_leaf_tables (Harness h) {
+	private async void allocate_pages_spans_leaf_tables (Harness h) {
 		var target = new FakeTarget (IA32, adjacent_leaf_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -656,7 +656,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void protect_pages_spans_leaf_tables (Harness h) {
+	private async void protect_pages_spans_leaf_tables (Harness h) {
 		var target = new FakeTarget (IA32, adjacent_leaf_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -682,7 +682,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void enumerate_ranges_walks_long_mode_tables (Harness h) {
+	private async void enumerate_ranges_walks_long_mode_tables (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -710,7 +710,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void x64_translate_address_resolves_leaf_mappings (Harness h) {
+	private async void x64_translate_address_resolves_leaf_mappings (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -736,7 +736,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void protect_pages_updates_long_mode_entries (Harness h) {
+	private async void protect_pages_updates_long_mode_entries (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -762,7 +762,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void x64_protect_pages_copes_with_large_pages (Harness h) {
+	private async void x64_protect_pages_copes_with_large_pages (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -792,7 +792,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void x64_relocations_apply_load_bias (Harness h) {
+	private async void x64_relocations_apply_load_bias (Harness h) {
 		var target = new FakeTarget (X64, long_mode_page_tables (), X64_MONITOR_DUMP);
 		try {
 			yield target.open ();
@@ -836,15 +836,15 @@ namespace Frida.BareboneTest {
 	 * 4 MiB pages; PAE and NX remain the fake stub's job.
 	 */
 	namespace QEMU {
-		private static async void walk_matches_x86_guest (SlowHarness h) {
+		private async void walk_matches_x86_guest (SlowHarness h) {
 			yield walk_matches_guest (h, X86);
 		}
 
-		private static async void walk_matches_x86_64_guest (SlowHarness h) {
+		private async void walk_matches_x86_64_guest (SlowHarness h) {
 			yield walk_matches_guest (h, X86_64);
 		}
 
-		private static async void walk_matches_guest (SlowHarness h, GuestArch arch) {
+		private async void walk_matches_guest (SlowHarness h, GuestArch arch) {
 			QemuGuest? guest = null;
 			try {
 				string? unavailable_reason = yield QemuGuest.check_availability (arch);
@@ -904,15 +904,15 @@ namespace Frida.BareboneTest {
 			h.done ();
 		}
 
-		private static async void allocate_pages_maps_into_x86_guest (SlowHarness h) {
+		private async void allocate_pages_maps_into_x86_guest (SlowHarness h) {
 			yield allocate_pages_maps_into_guest (h, X86);
 		}
 
-		private static async void allocate_pages_maps_into_x86_64_guest (SlowHarness h) {
+		private async void allocate_pages_maps_into_x86_64_guest (SlowHarness h) {
 			yield allocate_pages_maps_into_guest (h, X86_64);
 		}
 
-		private static async void allocate_pages_maps_into_guest (SlowHarness h, GuestArch arch) {
+		private async void allocate_pages_maps_into_guest (SlowHarness h, GuestArch arch) {
 			QemuGuest? guest = null;
 			try {
 				string? unavailable_reason = yield QemuGuest.check_availability (arch);
@@ -961,15 +961,15 @@ namespace Frida.BareboneTest {
 			h.done ();
 		}
 
-		private static async void invoke_calls_into_x86_guest (SlowHarness h) {
+		private async void invoke_calls_into_x86_guest (SlowHarness h) {
 			yield invoke_calls_into_guest (h, X86);
 		}
 
-		private static async void invoke_calls_into_x86_64_guest (SlowHarness h) {
+		private async void invoke_calls_into_x86_64_guest (SlowHarness h) {
 			yield invoke_calls_into_guest (h, X86_64);
 		}
 
-		private static async void invoke_calls_into_guest (SlowHarness h, GuestArch arch) {
+		private async void invoke_calls_into_guest (SlowHarness h, GuestArch arch) {
 			QemuGuest? guest = null;
 			try {
 				string? unavailable_reason = yield QemuGuest.check_availability (arch);
@@ -1025,15 +1025,15 @@ namespace Frida.BareboneTest {
 			h.done ();
 		}
 
-		private static async void inline_hook_fires_in_x86_guest (SlowHarness h) {
+		private async void inline_hook_fires_in_x86_guest (SlowHarness h) {
 			yield inline_hook_fires_in_guest (h, X86);
 		}
 
-		private static async void inline_hook_fires_in_x86_64_guest (SlowHarness h) {
+		private async void inline_hook_fires_in_x86_64_guest (SlowHarness h) {
 			yield inline_hook_fires_in_guest (h, X86_64);
 		}
 
-		private static async void inline_hook_fires_in_guest (SlowHarness h, GuestArch arch) {
+		private async void inline_hook_fires_in_guest (SlowHarness h, GuestArch arch) {
 			QemuGuest? guest = null;
 			try {
 				string? unavailable_reason = yield QemuGuest.check_availability (arch);
@@ -1105,7 +1105,7 @@ namespace Frida.BareboneTest {
 
 		private const uint32 MARKER_VALUE = 0xdeadbeefU;
 
-		private static Barebone.Allocator make_scratch_allocator (Barebone.Machine machine,
+		private Barebone.Allocator make_scratch_allocator (Barebone.Machine machine,
 				uint mb_below_top = 1) {
 			var config = new BarebonePhysicalAllocatorConfig ();
 			config.physical_base = new BareboneNonNullMemoryAddress ("scratch",
@@ -1113,15 +1113,15 @@ namespace Frida.BareboneTest {
 			return new Barebone.PhysicalAllocator (machine, 4096, config);
 		}
 
-		private static async void clear_marker (QemuGuest guest, uint64 va) throws Error, IOError {
+		private async void clear_marker (QemuGuest guest, uint64 va) throws Error, IOError {
 			yield guest.client.write_byte_array (va, new Bytes (new uint8[4]), null);
 		}
 
-		private static async uint32 read_marker (QemuGuest guest, uint64 va) throws Error, IOError {
+		private async uint32 read_marker (QemuGuest guest, uint64 va) throws Error, IOError {
 			return (yield guest.client.read_buffer (va, 4, null)).read_uint32 (0);
 		}
 
-		private static async void injected_elf_runs_in_x86_guest (SlowHarness h) {
+		private async void injected_elf_runs_in_x86_guest (SlowHarness h) {
 			QemuGuest? guest = null;
 			try {
 				string? unavailable_reason = yield QemuGuest.check_availability (X86);
@@ -1176,11 +1176,11 @@ namespace Frida.BareboneTest {
 
 		private const uint32 MARKER_ANSWER = 0x1234abcdU;
 
-		private static string marker_path () {
+		private string marker_path () {
 			return Path.build_filename (TESTS_SRCDIR, "..", "src", "barebone", "helpers", "marker-x86.elf");
 		}
 
-		private static async void whole_agent_loads_into_x86_guest (SlowHarness h) {
+		private async void whole_agent_loads_into_x86_guest (SlowHarness h) {
 			string? agent_path = Environment.get_variable ("FRIDA_BAREBONE_AGENT_X86");
 			if (agent_path == null) {
 				stdout.printf ("<skipping: set FRIDA_BAREBONE_AGENT_X86 to an agent blob> ");
@@ -1241,13 +1241,13 @@ namespace Frida.BareboneTest {
 			h.done ();
 		}
 
-		private static Barebone.Machine make_machine (GuestArch arch, QemuGuest guest) {
+		private Barebone.Machine make_machine (GuestArch arch, QemuGuest guest) {
 			if (arch == X86)
 				return new Barebone.IA32Machine (guest.client);
 			return new Barebone.X64Machine (guest.client);
 		}
 
-		private static async void check_protect_pages_takes_effect (Barebone.Machine machine, QemuGuest guest,
+		private async void check_protect_pages_takes_effect (Barebone.Machine machine, QemuGuest guest,
 				Gee.List<GuestPage> pages) throws Error, IOError {
 			GuestPage? victim = null;
 			foreach (GuestPage page in pages) {
@@ -1266,7 +1266,7 @@ namespace Frida.BareboneTest {
 		}
 	}
 
-	private static async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.Machine machine,
+	private async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.Machine machine,
 			Gum.PageProtection prot) throws Error, IOError {
 		var result = new Gee.ArrayList<Barebone.RangeDetails> ();
 		yield machine.enumerate_ranges (prot, r => {
@@ -1276,7 +1276,7 @@ namespace Frida.BareboneTest {
 		return result;
 	}
 
-	private static void assert_range (Barebone.RangeDetails r, uint64 base_va, uint64 base_pa, uint64 size,
+	private void assert_range (Barebone.RangeDetails r, uint64 base_va, uint64 base_pa, uint64 size,
 			Gum.PageProtection prot) {
 		assert_true (r.base_va == base_va);
 		assert_true (r.base_pa == base_pa);
@@ -1284,7 +1284,7 @@ namespace Frida.BareboneTest {
 		assert_true (r.protection == prot);
 	}
 
-	private static Gum.ElfRelocationDetails make_relocation (uint32 type, uint64 address) {
+	private Gum.ElfRelocationDetails make_relocation (uint32 type, uint64 address) {
 		var r = Gum.ElfRelocationDetails ();
 		r.address = address;
 		r.type = type;
@@ -1299,7 +1299,7 @@ namespace Frida.BareboneTest {
 		"CR0=8005003b CR2=00000000 CR3=00001000 CR4=00000010\n";
 
 	// Paging on, PSE on, PAE off: 32-bit entries, one of them a 4 MiB page.
-	private static async void ia32_scans_ranges (Harness h) {
+	private async void ia32_scans_ranges (Harness h) {
 		var target = new FakeTarget (IA32, arena_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			target.map_virtual (ARENA_VA, arena_with_needles ());
@@ -1343,7 +1343,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static Bytes arena_with_needles () {
+	private Bytes arena_with_needles () {
 		var arena = new uint8[ARENA_SIZE];
 
 		uint8[] first = { 0x1d, 0xea, 0xdb, 0xee, 0xf1 };
@@ -1356,7 +1356,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) arena);
 	}
 
-	private static async void services_resolve_from_descriptor_block (Harness h) {
+	private async void services_resolve_from_descriptor_block (Harness h) {
 		var target = new FakeTarget (IA32, arena_page_tables (), LEGACY_MONITOR_DUMP);
 		try {
 			target.map_virtual (ARENA_VA, arena_with_vmm_block ());
@@ -1387,7 +1387,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void enumerates_processes_in_live_guest (Harness h) {
+	private async void enumerates_processes_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -1453,7 +1453,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void injects_into_process_in_live_guest (Harness h) {
+	private async void injects_into_process_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -1514,13 +1514,13 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void agent_runs_in_live_guest (Harness h) {
+	private async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
 	}
 
 	// This test injects nothing. The agent is 32-bit, and the test examines only the host, which
 	// must read a kernel of twice the width.
-	private static async void winnt_maps_out_a_64_bit_kernel_in_live_guest (Harness h) {
+	private async void winnt_maps_out_a_64_bit_kernel_in_live_guest (Harness h) {
 		string? port = Environment.get_variable ("FRIDA_TEST_WINNT64_GDB_PORT");
 		if (port == null) {
 			h.done ();
@@ -1567,11 +1567,11 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_agent_runs_in_live_guest (Harness h, string prefix) {
+	private async void winnt_agent_runs_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), "send(1 + 1);", "\"payload\":2");
 	}
 
-	private static async void winnt_enumerates_modules_in_live_guest (Harness h, string prefix) {
+	private async void winnt_enumerates_modules_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const mods = Process.enumerateModules();
 			const kernel = mods.find(m => m.name === 'ntoskrnl.exe');
@@ -1582,7 +1582,7 @@ namespace Frida.BareboneTest {
 		""", "\"named\":true,\"hal\":true,\"drivers\":true");
 	}
 
-	private static async void winnt_injects_into_process_in_live_guest (Harness h, string prefix) {
+	private async void winnt_injects_into_process_in_live_guest (Harness h, string prefix) {
 		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
@@ -1636,7 +1636,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_enumerates_processes_in_live_guest (Harness h, string prefix) {
+	private async void winnt_enumerates_processes_in_live_guest (Harness h, string prefix) {
 		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
@@ -1719,7 +1719,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_resolves_symbols_in_live_guest (Harness h, string prefix) {
+	private async void winnt_resolves_symbols_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const alloc = Module.getGlobalExportByName('ExAllocatePoolWithTag');
 
@@ -1738,7 +1738,7 @@ namespace Frida.BareboneTest {
 		""", "\"named\":true,\"module\":true,\"closest\":true,\"byName\":true,\"matching\":true");
 	}
 
-	private static async void winnt_enumerates_ranges_in_live_guest (Harness h, string prefix) {
+	private async void winnt_enumerates_ranges_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const ranges = Process.enumerateRanges('r--');
@@ -1759,7 +1759,7 @@ namespace Frida.BareboneTest {
 		""", "\"found\":true,\"covering\":true,\"kernelSpace\":true,\"sorted\":true,\"executable\":true");
 	}
 
-	private static async void winnt_enumerates_threads_in_live_guest (Harness h, string prefix) {
+	private async void winnt_enumerates_threads_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
@@ -1783,7 +1783,7 @@ namespace Frida.BareboneTest {
 			"\"reported\":true,\"quiet\":true,\"somewhere\":true,\"apart\":true");
 	}
 
-	private static async void winnt_reads_and_writes_memory_in_live_guest (Harness h, string prefix) {
+	private async void winnt_reads_and_writes_memory_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const header = new Uint8Array(kernel.base.readByteArray(2));
@@ -1810,7 +1810,7 @@ namespace Frida.BareboneTest {
 
 	// RtlUpperChar has no side effects and the kernel almost never calls it. Thus the hook sees
 	// only the calls from this test.
-	private static async void winnt_hooks_kernel_function_in_live_guest (Harness h, string prefix) {
+	private async void winnt_hooks_kernel_function_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
@@ -1832,7 +1832,7 @@ namespace Frida.BareboneTest {
 
 	// The compiler backend and the kernel must agree about the position of the arguments. This
 	// answer is different for each word size.
-	private static async void winnt_compiles_c_calling_kernel_in_live_guest (Harness h, string prefix) {
+	private async void winnt_compiles_c_calling_kernel_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
 			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
@@ -1853,7 +1853,7 @@ namespace Frida.BareboneTest {
 		""", "\"result\":66");
 	}
 
-	private static async void winnt_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
+	private async void winnt_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			let caught = 'no';
 			try {
@@ -1867,7 +1867,7 @@ namespace Frida.BareboneTest {
 
 	// Two sessions on one process use the same copy. Thus one session can detach and the other
 	// keeps a working agent and its own scripts.
-	private static async void enumerates_target_modules_in_live_guest (Harness h) {
+	private async void enumerates_target_modules_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -1907,7 +1907,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void keeps_two_processes_apart_in_live_guest (Harness h) {
+	private async void keeps_two_processes_apart_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -1960,7 +1960,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_enumerates_target_modules_in_live_guest (Harness h, string prefix) {
+	private async void winnt_enumerates_target_modules_in_live_guest (Harness h, string prefix) {
 		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
@@ -2000,7 +2000,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_sees_a_module_arrive_in_live_guest (Harness h, string prefix) {
+	private async void winnt_sees_a_module_arrive_in_live_guest (Harness h, string prefix) {
 		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
@@ -2117,7 +2117,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void winnt_spawns_and_resumes_in_live_guest (Harness h, string prefix) {
+	private async void winnt_spawns_and_resumes_in_live_guest (Harness h, string prefix) {
 		var config = winnt_config_from_environment (h, prefix);
 		if (config == null)
 			return;
@@ -2159,7 +2159,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void win9x_spawns_and_resumes_in_live_guest (Harness h) {
+	private async void win9x_spawns_and_resumes_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -2208,7 +2208,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void shares_one_agent_between_sessions_in_live_guest (Harness h) {
+	private async void shares_one_agent_between_sessions_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -2258,7 +2258,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async uint find_explorer (Device device) throws GLib.Error {
+	private async uint find_explorer (Device device) throws GLib.Error {
 		var processes = yield device.enumerate_processes (null, null);
 		for (int i = 0; i != processes.size (); i++) {
 			if (processes.get (i).name.down () == "explorer.exe")
@@ -2267,7 +2267,7 @@ namespace Frida.BareboneTest {
 		return 0;
 	}
 
-	private static async void enumerates_threads_in_live_guest (Harness h) {
+	private async void enumerates_threads_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			const threads = Process.enumerateThreads();
 			const mine = Process.getCurrentThreadId();
@@ -2282,7 +2282,7 @@ namespace Frida.BareboneTest {
 		""", "\"several\":true,\"listed\":true,\"contextual\":true,\"distinct\":true");
 	}
 
-	private static async void win9x_enumerates_ranges_in_live_guest (Harness h) {
+	private async void win9x_enumerates_ranges_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			const vmm = Process.enumerateModules().find(m => m.name === 'VMM.VXD');
 			const ranges = Process.enumerateRanges('r--');
@@ -2295,7 +2295,7 @@ namespace Frida.BareboneTest {
 		""", "\"found\":true,\"covering\":true,\"arena\":true");
 	}
 
-	private static async void enumerates_modules_in_live_guest (Harness h) {
+	private async void enumerates_modules_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			const mods = Process.enumerateModules();
 			const vmm = mods.find(m => m.name === 'VMM.VXD');
@@ -2306,7 +2306,7 @@ namespace Frida.BareboneTest {
 		""", "\"named\":true,\"serviceless\":true,\"mixedCase\":true");
 	}
 
-	private static async void agent_recovers_from_exception_in_live_guest (Harness h) {
+	private async void agent_recovers_from_exception_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), """
 			let caught = 'no';
 			try {
@@ -2318,7 +2318,7 @@ namespace Frida.BareboneTest {
 		""", "\"caught\":\"yes\"");
 	}
 
-	private static BareboneConfig? win9x_config_from_environment (Harness h) {
+	private BareboneConfig? win9x_config_from_environment (Harness h) {
 		string? agent_path = Environment.get_variable ("FRIDA_TEST_WIN9X_AGENT");
 		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WIN9X_QMP");
 		string? stub_port = Environment.get_variable ("FRIDA_TEST_WIN9X_GDB_PORT");
@@ -2344,7 +2344,7 @@ namespace Frida.BareboneTest {
 
 	// The same guest is described the same way whatever its word size, so the two differ only in
 	// which set of variables names it.
-	private static BareboneConfig? winnt_config_from_environment (Harness h, string prefix) {
+	private BareboneConfig? winnt_config_from_environment (Harness h, string prefix) {
 		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
 		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
 		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
@@ -2368,7 +2368,7 @@ namespace Frida.BareboneTest {
 		return config;
 	}
 
-	private static async void run_script_in_live_guest (Harness h, BareboneConfig? config, string source,
+	private async void run_script_in_live_guest (Harness h, BareboneConfig? config, string source,
 			string expected) {
 		if (config == null)
 			return;
@@ -2406,7 +2406,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static async void modules_resolve_from_loaded_module_list (Harness h) {
+	private async void modules_resolve_from_loaded_module_list (Harness h) {
 		var target = new FakeTarget (IA32, new Ram ().steal (), LEGACY_MONITOR_DUMP);
 		try {
 			target.map_virtual (PCR_VA, pcr_page ());
@@ -2441,13 +2441,13 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private static void assert_argument (BareboneCallArgument argument, BareboneCallArgumentRole role,
+	private void assert_argument (BareboneCallArgument argument, BareboneCallArgumentRole role,
 			uint64 value) {
 		assert_true (argument.role == role);
 		assert_true (argument.value == value);
 	}
 
-	private static void assert_symbol (Barebone.SymbolInfo symbol, string name, uint32 address) {
+	private void assert_symbol (Barebone.SymbolInfo symbol, string name, uint32 address) {
 		assert_true (symbol.name == name);
 		assert_true (symbol.offset == address);
 	}
@@ -2466,7 +2466,7 @@ namespace Frida.BareboneTest {
 	private const uint32 SERVICE_TABLE_OUTSIDE_ARENA = 0x00001000;
 	private const int IMPLEMENTED_SERVICES = 7;
 
-	private static uint8[] arena_page_tables () {
+	private uint8[] arena_page_tables () {
 		var ram = new Ram ();
 
 		ram.write_uint32 (PD_PA + ((ARENA_VA >> 22) * 4), (uint32) PT_PA | 0x3);
@@ -2475,7 +2475,7 @@ namespace Frida.BareboneTest {
 		return ram.steal ();
 	}
 
-	private static Bytes arena_with_vmm_block () {
+	private Bytes arena_with_vmm_block () {
 		var arena = new uint8[ARENA_SIZE];
 
 		uint32[] services = { (uint32) 0xc0001000, (uint32) 0xc0001010, UNIMPLEMENTED_SERVICE,
@@ -2492,7 +2492,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) arena);
 	}
 
-	private static void put_descriptor_block (uint8[] arena, size_t offset, string name, uint32 service_table,
+	private void put_descriptor_block (uint8[] arena, size_t offset, string name, uint32 service_table,
 			uint service_count) {
 		for (uint i = 0; i != name.length; i++)
 			arena[offset + 0x0c + i] = (uint8) name[i];
@@ -2501,22 +2501,22 @@ namespace Frida.BareboneTest {
 		put_uint32 (arena, offset + 0x34, service_count);
 	}
 
-	private static void put_uint32 (uint8[] buf, size_t offset, uint32 val) {
+	private void put_uint32 (uint8[] buf, size_t offset, uint32 val) {
 		for (uint i = 0; i != 4; i++)
 			buf[offset + i] = (uint8) (val >> (i * 8));
 	}
 
-	private static void put_uint16 (uint8[] buf, size_t offset, uint16 val) {
+	private void put_uint16 (uint8[] buf, size_t offset, uint16 val) {
 		for (uint i = 0; i != 2; i++)
 			buf[offset + i] = (uint8) (val >> (i * 8));
 	}
 
-	private static void put_utf16 (uint8[] buf, size_t offset, string text) {
+	private void put_utf16 (uint8[] buf, size_t offset, string text) {
 		for (uint i = 0; i != text.length; i++)
 			put_uint16 (buf, offset + (i * 2), (uint16) text[i]);
 	}
 
-	private static void put_ascii (uint8[] buf, size_t offset, string text) {
+	private void put_ascii (uint8[] buf, size_t offset, string text) {
 		for (uint i = 0; i != text.length; i++)
 			buf[offset + i] = (uint8) text[i];
 	}
@@ -2546,7 +2546,7 @@ namespace Frida.BareboneTest {
 	private const uint32 WAIT_NAME_RVA = 0x460;
 	private const uint32 FORWARDED_NAME_RVA = 0x480;
 
-	private static Bytes pcr_page () {
+	private Bytes pcr_page () {
 		var page = new uint8[NT_PAGE_SIZE];
 
 		put_uint32 (page, 0x1c, (uint32) PCR_VA);
@@ -2555,7 +2555,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) page);
 	}
 
-	private static Bytes nt_kernel_structs () {
+	private Bytes nt_kernel_structs () {
 		var structs = new uint8[NT_PAGE_SIZE];
 
 		put_uint16 (structs, VERSION_BLOCK_OFFSET + 0x08, 0x014c);
@@ -2575,7 +2575,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) structs);
 	}
 
-	private static void put_table_entry (uint8[] structs, size_t offset, uint64 next, uint64 dll_base, uint32 size,
+	private void put_table_entry (uint8[] structs, size_t offset, uint64 next, uint64 dll_base, uint32 size,
 			uint64 name_buffer, string name) {
 		put_uint32 (structs, offset + 0x00, (uint32) next);
 		put_uint32 (structs, offset + 0x18, (uint32) dll_base);
@@ -2585,7 +2585,7 @@ namespace Frida.BareboneTest {
 		put_uint32 (structs, offset + 0x30, (uint32) name_buffer);
 	}
 
-	private static Bytes nt_kernel_image () {
+	private Bytes nt_kernel_image () {
 		var image = new uint8[NT_PAGE_SIZE];
 
 		put_pe_headers (image, EXPORT_DIRECTORY_RVA, EXPORT_DIRECTORY_SIZE);
@@ -2607,7 +2607,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) image);
 	}
 
-	private static Bytes nt_hal_image () {
+	private Bytes nt_hal_image () {
 		var image = new uint8[NT_PAGE_SIZE];
 
 		put_pe_headers (image, 0, 0);
@@ -2615,7 +2615,7 @@ namespace Frida.BareboneTest {
 		return new Bytes.take ((owned) image);
 	}
 
-	private static void put_pe_headers (uint8[] image, uint32 export_directory_rva, uint32 export_directory_size) {
+	private void put_pe_headers (uint8[] image, uint32 export_directory_rva, uint32 export_directory_size) {
 		put_uint16 (image, 0, 0x5a4d);
 		put_uint32 (image, 0x3c, (uint32) PE_HEADERS_OFFSET);
 		put_uint32 (image, PE_HEADERS_OFFSET, 0x00004550);
@@ -2624,7 +2624,7 @@ namespace Frida.BareboneTest {
 		put_uint32 (image, PE_HEADERS_OFFSET + 0x7c, export_directory_size);
 	}
 
-	private static uint8[] legacy_page_tables () {
+	private uint8[] legacy_page_tables () {
 		var ram = new Ram ();
 
 		ram.write_uint32 (PD_PA + (0 * 4), (uint32) PT_PA | 0x3);
@@ -2644,7 +2644,7 @@ namespace Frida.BareboneTest {
 
 	// Two adjacent leaf tables, the first all but full, so anything longer than what
 	// it has left has to carry on into the second.
-	private static uint8[] adjacent_leaf_tables () {
+	private uint8[] adjacent_leaf_tables () {
 		var ram = new Ram ();
 
 		ram.write_uint32 (PD_PA + (0 * 4), (uint32) SPAN_PT0_PA | 0x7);
@@ -2666,7 +2666,7 @@ namespace Frida.BareboneTest {
 		"EFER=0000000000000800\n";
 
 	// Paging on with PAE and NX: 64-bit entries, one of them a 2 MiB page above the 4 GiB line.
-	private static uint8[] pae_page_tables () {
+	private uint8[] pae_page_tables () {
 		var ram = new Ram ();
 
 		ram.write_uint64 (PAE_PDPT_PA + (0 * 8), PAE_PD_PA | 0x1);
@@ -2691,7 +2691,7 @@ namespace Frida.BareboneTest {
 		"EFER=0000000000000d00\n";
 
 	// Long mode with NX: a four-level walk, one 2 MiB page, and a 1 GiB page in the kernel half.
-	private static uint8[] long_mode_page_tables () {
+	private uint8[] long_mode_page_tables () {
 		var ram = new Ram ();
 
 		ram.write_uint64 (X64_PML4_PA + (0 * 8), X64_PDPT_PA | 0x3);
@@ -3046,7 +3046,7 @@ namespace Frida.BareboneTest {
 		}
 	}
 
-	private static Barebone.RangeDetails? find_range_containing (Gee.List<Barebone.RangeDetails> ranges, uint64 va) {
+	private Barebone.RangeDetails? find_range_containing (Gee.List<Barebone.RangeDetails> ranges, uint64 va) {
 		int lo = 0;
 		int hi = ranges.size - 1;
 		while (lo <= hi) {
@@ -3062,7 +3062,7 @@ namespace Frida.BareboneTest {
 		return null;
 	}
 
-	private static Gee.List<Interval> merge_by_virtual_address (Gee.List<Barebone.RangeDetails> ranges) {
+	private Gee.List<Interval> merge_by_virtual_address (Gee.List<Barebone.RangeDetails> ranges) {
 		var result = new Gee.ArrayList<Interval> ();
 
 		foreach (Barebone.RangeDetails r in ranges) {
@@ -3076,7 +3076,7 @@ namespace Frida.BareboneTest {
 		return result;
 	}
 
-	private static void assert_intervals_equal (Gee.List<Interval> actual, Gee.List<Interval> expected) {
+	private void assert_intervals_equal (Gee.List<Interval> actual, Gee.List<Interval> expected) {
 		assert_true (actual.size == expected.size);
 		for (int i = 0; i != actual.size; i++) {
 			assert_true (actual[i].start == expected[i].start);
