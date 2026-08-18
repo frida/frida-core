@@ -3,7 +3,8 @@
 
 use crate::{
     bindings::{
-        _GInterfaceInfo, _GTypeInfo, GObject, GObjectClass, GPrivate, GType, GumExportDetails,
+        _GInterfaceInfo, _GTypeInfo, GObject, GObjectClass, GPrivate, GType, GumAddress,
+        GumExportDetails,
         GumExportType_GUM_EXPORT_FUNCTION, GumFoundExportFunc, GumMemoryRange, GumModule,
         GumModuleInterface, GumThreadId, GumTlsKey, g_free, g_object_get_type, g_object_new,
         g_once_init_enter, g_once_init_leave, g_strdup, g_type_add_interface_static,
@@ -13,6 +14,7 @@ use crate::{
 };
 use alloc::boxed::Box;
 use alloc::ffi::CString;
+use core::ffi::CStr;
 use alloc::vec::Vec;
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -167,6 +169,7 @@ extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpoin
         (*iface).get_path = Some(gum_native_module_get_path);
         (*iface).get_range = Some(gum_native_module_get_range);
         (*iface).enumerate_exports = Some(gum_native_module_enumerate_exports);
+        (*iface).find_export_by_name = Some(gum_native_module_find_export_by_name);
     }
 }
 
@@ -226,6 +229,34 @@ extern "C" fn gum_native_module_get_range(module: *mut GumModule) -> *const GumM
     unsafe {
         let native_module = module as *mut GumNativeModule;
         &(*native_module).range as *const GumMemoryRange
+    }
+}
+
+unsafe extern "C" fn gum_native_module_find_export_by_name(
+    self_: *mut GumModule,
+    symbol_name: *const gchar,
+) -> GumAddress {
+    unsafe {
+        let module = self_ as *mut GumNativeModule;
+        let range = (*module).range;
+        let wanted = CStr::from_ptr(symbol_name);
+
+        let mut found = 0;
+        let mut on_export = |name: *const gchar, address: u64| {
+            if CStr::from_ptr(name) == wanted {
+                found = address;
+            }
+
+            found == 0
+        };
+
+        enumerate_exports_in_range(
+            range.base_address,
+            range.base_address + range.size as u64,
+            &mut on_export,
+        );
+
+        found
     }
 }
 

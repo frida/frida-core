@@ -1568,8 +1568,7 @@ namespace Frida.BareboneTest {
 
 			var hooking = yield watcher.create_script ("""
 				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
-				const named = name => kernel32.enumerateExports()
-					.find(e => e.name === name).address;
+				const named = name => kernel32.getExportByName(name);
 
 				const target = named('GetACP');
 				const seen = Memory.alloc(4);
@@ -1607,8 +1606,7 @@ namespace Frida.BareboneTest {
 
 			var calling = yield bystander.create_script ("""
 				const call = new NativeFunction(Process.getModuleByName('KERNEL32.DLL')
-					.enumerateExports().find(e => e.name === 'GetACP').address,
-					'uint32', []);
+					.getExportByName('GetACP'), 'uint32', []);
 
 				recv('call', () => {
 					for (let i = 0; i !== 100; i++)
