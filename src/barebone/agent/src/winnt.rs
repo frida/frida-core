@@ -12,7 +12,8 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
     LoadedModule, LoaderEntryPoints, describe_module, enumerate_modules, loader_entry_points,
-    on_module_load, on_module_load_with_flags, on_module_unload, resume_process, spawn_process,
+    ORIGINAL_CREATE_PROCESS, on_create_process, on_module_load, on_module_load_with_flags,
+    on_module_unload, process_maker_entry_point, resume_process, spawn_process,
 };
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
@@ -1012,6 +1013,8 @@ const IMAGE_NAME_SIZE: usize = 16;
 // The process receives the same code pages as the kernel half, because code is read-only. It
 // also receives its own writable half, thus the two copies do not share data.
 pub fn place_agent_in_process(pid: u32) -> bool {
+    put_a_copy_in_the_session_server(pid);
+
     let mut placed = Placement::default();
 
     let mut process: *mut c_void = core::ptr::null_mut();
@@ -1104,6 +1107,7 @@ pub fn place_agent_in_process(pid: u32) -> bool {
     if placed.arena_here != 0 {
         unsafe {
             targets().insert(pid, Target {
+                introduced: false,
                 arena: placed.arena_here,
                 seen: placed.arena_seen_by_process,
                 wake,
@@ -1162,9 +1166,77 @@ pub fn start_agent_in_process(pid: u32) -> u32 {
         unsafe { targets().get_mut(&pid).unwrap().started = true };
     }
 
-    unsafe {
-        ((arena + OBSERVED_PID) as *const u32).read_volatile()
+    let observed = unsafe { ((arena + OBSERVED_PID) as *const u32).read_volatile() };
+    if observed != 0 {
+        introduce_to_session_server(pid);
     }
+
+    observed
+}
+
+fn put_a_copy_in_the_session_server(pid: u32) {
+    let server = session_server_pid();
+    if server == 0 || server == pid || arena_for_pid(server).is_some() {
+        return;
+    }
+
+    place_agent_in_process(server);
+    start_agent_in_process(server);
+}
+
+fn introduce_to_session_server(pid: u32) {
+    if unsafe { targets().get(&pid).map(|t| t.introduced) } != Some(false) {
+        return;
+    }
+
+    let server = session_server_pid();
+    if server == 0 || server == pid {
+        return;
+    }
+
+    let (Some(here), Some(there)) = (arena_for_pid(pid), arena_for_pid(server)) else {
+        return;
+    };
+    let thread = unsafe { ((here + OBSERVED_THREAD) as *const u32).read_volatile() };
+    if thread == 0 {
+        return;
+    }
+
+    unsafe {
+        ((there + REGISTER_PROCESS) as *mut u32).write_volatile(pid);
+        ((there + REGISTER_THREAD) as *mut u32).write_volatile(thread);
+        targets().get_mut(&pid).unwrap().introduced = true;
+
+        if let Some(wake) = targets().get(&server).map(|t| t.wake) {
+            (_KeSetEvent)(wake, 0, 0);
+        }
+    }
+}
+
+fn session_server_pid() -> u32 {
+    let mut found = 0;
+    enumerate_processes(&mut |p| {
+        if found == 0 && path_ends_with(p.path, b"csrss.exe") {
+            found = p.id;
+        }
+    });
+
+    found
+}
+
+fn path_ends_with(path: *const u8, wanted: &[u8]) -> bool {
+    let mut length = 0;
+    while unsafe { path.add(length).read() } != 0 {
+        length += 1;
+    }
+    if length < wanted.len() {
+        return false;
+    }
+
+    wanted.iter().enumerate().all(|(index, expected)| {
+        unsafe { path.add(length - wanted.len() + index).read() }.to_ascii_lowercase()
+            == *expected
+    })
 }
 
 // What each word size puts where: the frame a service is entered with, the block a thread starts
@@ -1824,6 +1896,11 @@ pub(crate) const OBSERVED_PID: u64 = 0x04;
 pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
 pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
 
+pub(crate) const OBSERVED_THREAD: u64 = 0x40;
+
+pub(crate) const REGISTER_PROCESS: u64 = 0x18;
+pub(crate) const REGISTER_THREAD: u64 = 0x1c;
+
 // Where the kernel half leaves what the bootstrap needs. NtCreateThread reads the context and
 // the stack description from the process itself, thus both live here.
 pub(crate) const BOOTSTRAP_CREATE_THREAD: u64 = 0x100;
@@ -1909,6 +1986,7 @@ struct Target {
     seen: u64,
     wake: *mut c_void,
     started: bool,
+    introduced: bool,
     text: u64,
     size: u64,
 }

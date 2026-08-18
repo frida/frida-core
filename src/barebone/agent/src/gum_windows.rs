@@ -140,6 +140,10 @@ pub(crate) fn watch_the_loader() {
         }
         crate::bindings::gum_interceptor_replace(interceptor, entries.unload as gpointer,
             kernel::on_module_unload as gpointer, &raw mut LOADER_UNLOAD, ptr::null());
+        crate::bindings::gum_interceptor_replace(interceptor,
+            kernel::process_maker_entry_point() as gpointer,
+            kernel::on_create_process as gpointer,
+            &raw mut kernel::ORIGINAL_CREATE_PROCESS, ptr::null());
 
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }

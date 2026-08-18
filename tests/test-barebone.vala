@@ -173,6 +173,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/calls-system-functions-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_calls_system_functions_in_live_guest.begin (
+				h as Harness, "WINNT"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_spawns_and_resumes_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
@@ -235,6 +241,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/enumerates-target-modules-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_enumerates_target_modules_in_live_guest.begin (
+				h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/calls-system-functions-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_calls_system_functions_in_live_guest.begin (
 				h as Harness, "WINNT64"));
 			h.run ();
 		});
@@ -2024,6 +2036,74 @@ namespace Frida.BareboneTest {
 
 			// The library arrived while the script watched, thus the script heard about it.
 			assert_true (messages[0].contains ("[false,true]"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void winnt_calls_system_functions_in_live_guest (Harness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+
+			var script = yield session.create_script ("""
+				const createThread = new NativeFunction(
+					Module.getGlobalExportByName('CreateThread'),
+					'pointer', ['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+				const waitFor = new NativeFunction(
+					Module.getGlobalExportByName('WaitForSingleObject'),
+					'uint', ['pointer', 'uint']);
+				const sleep = Module.getGlobalExportByName('Sleep');
+
+				const createProcess = new NativeFunction(
+					Module.getGlobalExportByName('CreateProcessW'), 'int',
+					['pointer', 'pointer', 'pointer', 'pointer', 'int', 'uint', 'pointer',
+						'pointer', 'pointer', 'pointer']);
+				const terminate = new NativeFunction(
+					Module.getGlobalExportByName('TerminateProcess'), 'int', ['pointer', 'uint']);
+
+				recv('go', () => {
+					const thread = createThread(NULL, 0, sleep, ptr(1), 0, NULL);
+					const threadRan = waitFor(thread, 5000);
+
+					const line = Memory.allocUtf16String('C:\\WINDOWS\\system32\\notepad.exe');
+					const startup = Memory.alloc(72);
+					startup.writeU32(72);
+					const created = Memory.alloc(16);
+					const madeProcess = createProcess(NULL, line, NULL, NULL, 0, 0, NULL, NULL,
+						startup, created);
+					if (madeProcess !== 0)
+						terminate(created.readPointer(), 0);
+
+					send([thread.isNull(), threadRan, madeProcess !== 0]);
+				});
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			script.post ("""{"type":"go"}""");
+			while (messages.size < 1)
+				yield h.process_events ();
+
+			assert_true (messages[0].contains ("[false,0,true]"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

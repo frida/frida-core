@@ -2,14 +2,15 @@
 // nothing of the kernel's, thus it has primitives of its own, which frida_winnt_user_main selects
 // before it does anything else.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
 
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
-    OBSERVED_PID, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives, STOP_REQUEST,
+    OBSERVED_PID, OBSERVED_THREAD, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives,
+    REGISTER_PROCESS, REGISTER_THREAD, STOP_REQUEST,
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
     USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
@@ -75,13 +76,18 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
 
     unsafe {
         ((arena + OBSERVED_PID as usize) as *mut u32).write_volatile(current_client_id(BLOCK_PROCESS_ID));
+        ((arena + OBSERVED_THREAD as usize) as *mut u32)
+            .write_volatile(current_client_id(BLOCK_THREAD_ID));
 
         crate::route_frames_through(arena as u64);
     }
 
+    remember_this_thread();
     crate::gum_windows::watch_the_loader();
 
     while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
+        serve_the_session_server(arena);
+
         while let Some(frame) = take_frame_from_host(arena as u64) {
             crate::on_frame_from_host(frame);
             acknowledge_frame_from_host(arena as u64);
@@ -144,6 +150,152 @@ fn resolve_user_api() {
         });
     }
 }
+
+pub fn serve_the_session_server(arena: usize) {
+    let waiting = unsafe { ((arena + REGISTER_THREAD as usize) as *const u32).read_volatile() };
+    if waiting == 0 {
+        return;
+    }
+    let process = unsafe { ((arena + REGISTER_PROCESS as usize) as *const u32).read_volatile() };
+    unsafe { ((arena + REGISTER_THREAD as usize) as *mut u32).write_volatile(0) };
+
+    let Some(server) = session_server_routines() else {
+        return;
+    };
+
+    let mut record: *mut c_void = core::ptr::null_mut();
+    if unsafe { (server.lock)(process as usize as *mut c_void, &mut record) } < 0 {
+        return;
+    }
+
+    let handle = unsafe { (server.open_thread)(THREAD_ALL_ACCESS, 0, waiting) };
+    let id = [process as usize, waiting as usize];
+    unsafe { (server.make_record)(record, handle, id.as_ptr() as *mut c_void, 0) };
+
+    unsafe { (server.unlock)(record) };
+}
+
+fn session_server_routines() -> Option<SessionServer> {
+    let own = peb();
+    let library = module_base(own, b"csrsrv.dll");
+    if library == 0 {
+        return None;
+    }
+
+    Some(SessionServer {
+        lock: unsafe { core::mem::transmute(export(library, b"CsrLockProcessByClientId")) },
+        unlock: unsafe { core::mem::transmute(export(library, b"CsrUnlockProcess")) },
+        make_record: unsafe { core::mem::transmute(export(library, b"CsrCreateThread")) },
+        open_thread: unsafe {
+            core::mem::transmute(export(module_base(own, b"kernel32.dll"), b"OpenThread"))
+        },
+    })
+}
+
+struct SessionServer {
+    lock: windows_fn!(*mut c_void, *mut *mut c_void => i32),
+    unlock: windows_fn!(*mut c_void => i32),
+    make_record: windows_fn!(*mut c_void, *mut c_void, *mut c_void, i32 => i32),
+    open_thread: windows_fn!(u32, i32, u32 => *mut c_void),
+}
+
+pub fn process_maker_entry_point() -> usize {
+    export(module_base(peb(), b"kernel32.dll"), b"CreateProcessW")
+}
+
+fn remember_this_thread() {
+    unsafe { ours_mut().insert(current_client_id(BLOCK_THREAD_ID)) };
+}
+
+fn ours() -> bool {
+    unsafe { ours_mut().contains(&current_client_id(BLOCK_THREAD_ID)) }
+}
+
+fn ours_mut() -> &'static mut BTreeSet<u32> {
+    unsafe { (&raw mut OURS).as_mut().unwrap() }
+}
+
+static mut OURS: BTreeSet<u32> = BTreeSet::new();
+
+#[cfg(target_arch = "x86")]
+pub unsafe extern "stdcall" fn on_create_process(application: *const u16, line: *mut u16,
+        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
+        environment: *mut c_void, directory: *const u16, startup: *mut u8,
+        information: *mut u8) -> i32 {
+    unsafe {
+        create_process(application, line, process_attributes, thread_attributes, inherit, flags,
+            environment, directory, startup, information)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "win64" fn on_create_process(application: *const u16, line: *mut u16,
+        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
+        environment: *mut c_void, directory: *const u16, startup: *mut u8,
+        information: *mut u8) -> i32 {
+    unsafe {
+        create_process(application, line, process_attributes, thread_attributes, inherit, flags,
+            environment, directory, startup, information)
+    }
+}
+
+unsafe fn create_process(application: *const u16, line: *mut u16,
+        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
+        environment: *mut c_void, directory: *const u16, startup: *mut u8,
+        information: *mut u8) -> i32 {
+    if !ours() {
+        let original: windows_fn!(*const u16, *mut u16, *mut c_void, *mut c_void, i32, u32,
+            *mut c_void, *const u16, *mut u8, *mut u8 => i32) =
+            unsafe { core::mem::transmute(ORIGINAL_CREATE_PROCESS) };
+
+        return unsafe {
+            original(application, line, process_attributes, thread_attributes, inherit, flags,
+                environment, directory, startup, information)
+        };
+    }
+
+    let wanted = if line.is_null() { application } else { line as *const u16 };
+    let Some(made) = make_process(&narrow_text(wanted)) else {
+        return 0;
+    };
+
+    if (flags & CREATE_SUSPENDED) == 0 {
+        let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
+        unsafe { (api.resume_thread)(made.thread, core::ptr::null_mut()) };
+    }
+
+    unsafe {
+        write_handle(information, PROCESS_INFORMATION_PROCESS, made.process);
+        write_handle(information, PROCESS_INFORMATION_THREAD, made.thread);
+        (information.add(PROCESS_INFORMATION_PID) as *mut u32).write(made.pid);
+        (information.add(PROCESS_INFORMATION_TID) as *mut u32).write(made.tid);
+    }
+
+    1
+}
+
+fn narrow_text(text: *const u16) -> alloc::string::String {
+    let mut narrow = alloc::string::String::new();
+    let mut cursor = text;
+    loop {
+        let word = unsafe { cursor.read() };
+        if word == 0 {
+            break;
+        }
+        narrow.push(char::from_u32(word as u32).unwrap_or('?'));
+        cursor = unsafe { cursor.add(1) };
+    }
+
+    narrow
+}
+
+unsafe fn write_handle(information: *mut u8, offset: usize, handle: *mut c_void) {
+    unsafe { (information.add(offset) as *mut usize).write(handle as usize) };
+}
+
+pub static mut ORIGINAL_CREATE_PROCESS: *mut c_void = core::ptr::null_mut();
+
+const CREATE_SUSPENDED: u32 = 0x4;
 
 // The loader has one way in and one way out for a library, thus a stand-in on each says what
 // the process has mapped now.
@@ -263,6 +415,21 @@ pub struct LoadedModule {
 // Making a process is the work of the loader's own entry points. They ask for wide strings and
 // they leave the first thread of the new process held, which is what a caller wants.
 pub fn spawn_process(command_line: &str) -> u32 {
+    let Some(made) = make_process(command_line) else {
+        return 0;
+    };
+
+    unsafe {
+        held().insert(made.pid, HeldProcess {
+            process: made.process,
+            thread: made.thread,
+        })
+    };
+
+    made.pid
+}
+
+fn make_process(command_line: &str) -> Option<MadeProcess> {
     let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
 
     let mut image = WideText::of(&native_path_of(command_line));
@@ -270,13 +437,13 @@ pub fn spawn_process(command_line: &str) -> u32 {
     let mut desktop = our_desktop();
 
     let mut parameters: *mut c_void = core::ptr::null_mut();
-    let created = unsafe {
+    let prepared = unsafe {
         (api.create_process_parameters)(&mut parameters, image.text(), core::ptr::null_mut(),
             core::ptr::null_mut(), line.text(), core::ptr::null_mut(), core::ptr::null_mut(),
             desktop.as_mut_ptr(), core::ptr::null_mut(), core::ptr::null_mut())
     };
-    if created < 0 {
-        return 0;
+    if prepared < 0 {
+        return None;
     }
 
     let mut information = [0u8; PROCESS_INFORMATION_SIZE];
@@ -287,18 +454,22 @@ pub fn spawn_process(command_line: &str) -> u32 {
     };
     unsafe { (api.destroy_process_parameters)(parameters) };
     if status < 0 {
-        return 0;
+        return None;
     }
 
-    let pid = read_handle(&information, PROCESS_INFORMATION_PID) as usize as u32;
-    unsafe {
-        held().insert(pid, HeldProcess {
-            process: read_handle(&information, PROCESS_INFORMATION_PROCESS),
-            thread: read_handle(&information, PROCESS_INFORMATION_THREAD),
-        })
-    };
+    Some(MadeProcess {
+        process: read_handle(&information, PROCESS_INFORMATION_PROCESS),
+        thread: read_handle(&information, PROCESS_INFORMATION_THREAD),
+        pid: read_handle(&information, PROCESS_INFORMATION_PID) as usize as u32,
+        tid: read_handle(&information, PROCESS_INFORMATION_TID) as usize as u32,
+    })
+}
 
-    pid
+struct MadeProcess {
+    process: *mut c_void,
+    thread: *mut c_void,
+    pid: u32,
+    tid: u32,
 }
 
 pub fn resume_process(pid: u32) -> bool {
@@ -407,6 +578,8 @@ const PROCESS_INFORMATION_PROCESS: usize = 0x04;
 const PROCESS_INFORMATION_THREAD: usize = 0x08;
 #[cfg(target_arch = "x86")]
 const PROCESS_INFORMATION_PID: usize = 0x0c;
+#[cfg(target_arch = "x86")]
+const PROCESS_INFORMATION_TID: usize = 0x10;
 
 #[cfg(target_arch = "x86_64")]
 const UNICODE_STRING_SIZE: usize = 16;
@@ -422,6 +595,8 @@ const PROCESS_INFORMATION_PROCESS: usize = 0x08;
 const PROCESS_INFORMATION_THREAD: usize = 0x10;
 #[cfg(target_arch = "x86_64")]
 const PROCESS_INFORMATION_PID: usize = 0x18;
+#[cfg(target_arch = "x86_64")]
+const PROCESS_INFORMATION_TID: usize = 0x20;
 
 fn user_api() -> &'static UserApi {
     unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }
