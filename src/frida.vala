@@ -74,7 +74,9 @@ namespace Frida {
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
+#if HAVE_BAREBONE_BACKEND
 		private uint next_barebone_device_serial = 1;
+#endif
 
 		private Cancellable io_cancellable = new Cancellable ();
 
