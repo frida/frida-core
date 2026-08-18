@@ -90,6 +90,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/hooks-before-resume-in-live-guest", () => {
+			var h = new Harness ((h) => hooks_before_resume_in_live_guest.begin (h as Harness,
+				win9x_config_from_environment (h as Harness), "C:\\WINDOWS\\NOTEPAD.EXE"));
+			h.run ();
+		});
 		GLib.Test.add_func ("/Barebone/Win9x/spawns-and-resumes-in-live-guest", () => {
 			var h = new Harness ((h) => win9x_spawns_and_resumes_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -2245,6 +2250,66 @@ namespace Frida.BareboneTest {
 			var again = yield device.attach (pid, null, null);
 			assert_nonnull (again);
 			yield again.detach (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void hooks_before_resume_in_live_guest (Harness h,
+			BareboneConfig? config, string program) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config, null);
+
+			uint pid = yield device.spawn (program, null, null);
+			var session = yield device.attach (pid, null, null);
+
+			var script = yield session.create_script ("""
+				recv('arm', () => {
+					const image = Process.enumerateModules()[0];
+					const headers = image.base.add(image.base.add(0x3c).readU32());
+					const entry = image.base.add(headers.add(0x28).readU32());
+
+					Interceptor.attach(entry, {
+						onEnter() {
+							send(['entered']);
+						}
+					});
+
+					send(['armed', image.name, entry.toString()]);
+				});
+			""", null, null);
+
+			bool armed = false;
+			bool entered = false;
+			script.message.connect ((json, data) => {
+				printerr ("\nHELD: %s\n", json);
+				if (json.contains ("armed"))
+					armed = true;
+				else if (json.contains ("entered"))
+					entered = true;
+			});
+			yield script.load (null);
+
+			script.post ("""{"type":"arm"}""");
+			while (!armed)
+				yield h.process_events ();
+
+			yield device.resume (pid, null);
+
+			while (!entered)
+				yield h.process_events ();
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
