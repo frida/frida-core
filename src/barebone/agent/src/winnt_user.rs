@@ -2,10 +2,11 @@
 // nothing of the kernel's, thus it has primitives of its own, which frida_winnt_user_main selects
 // before it does anything else.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
@@ -136,6 +137,8 @@ fn resolve_user_api() {
             yield_execution: core::mem::transmute(export(ntdll, b"NtYieldExecution")),
             wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
+            create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
+            close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
         });
 
@@ -612,6 +615,8 @@ struct UserApi {
     yield_execution: windows_fn!( => i32),
     wait_for_object: windows_fn!(*mut c_void, u8, *const i64 => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
+    create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
+    close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
 }
 
@@ -781,21 +786,83 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     }
 }
 
-fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    let slot = slot_for_token(token);
+    let event = event_in(slot);
     if check() {
         return;
     }
 
+    SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     let due_time = timeout_us.map(|us| -((us as i64) * 10));
     unsafe {
-        (user_api().wait_for_object)(target_wake_handle(), 0,
+        (user_api().wait_for_object)(event, 0,
             due_time.as_ref().map_or(core::ptr::null(), |t| t))
     };
+    SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
 }
 
-fn wake(_token: *const u8) {
-    unsafe { (user_api().set_event)(target_wake_handle(), core::ptr::null_mut()) };
+fn wake(token: *const u8) {
+    let slot = slot_for_token(token);
+    let event = event_in(slot);
+
+    let mut left = SLEEPERS[slot].load(Ordering::Acquire).max(1);
+    while left != 0 {
+        unsafe { (user_api().set_event)(event, core::ptr::null_mut()) };
+        left -= 1;
+    }
 }
+
+fn slot_for_token(token: *const u8) -> usize {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_EVENTS;
+    for step in 0..NUM_EVENTS {
+        let slot = (start + step) % NUM_EVENTS;
+
+        let owner = OWNERS[slot].load(Ordering::Acquire);
+        if owner == token as usize {
+            return slot;
+        }
+        if owner == 0
+                && OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
+                    Ordering::Acquire).is_ok() {
+            return slot;
+        }
+    }
+
+    0
+}
+
+// The kernel half sets the one event a copy has a handle to, thus the loop keeps waiting on
+// that one and every other token gets an event of its own.
+fn event_in(slot: usize) -> *mut c_void {
+    if OWNERS[slot].load(Ordering::Acquire) == crate::glib::wakeup_token() as usize {
+        return target_wake_handle();
+    }
+
+    loop {
+        let existing = EVENTS[slot].load(Ordering::Acquire);
+        if existing != 0 {
+            return existing as *mut c_void;
+        }
+
+        let mut made: *mut c_void = core::ptr::null_mut();
+        unsafe {
+            (user_api().create_event)(&mut made, EVENT_ALL_ACCESS, core::ptr::null_mut(),
+                SYNCHRONIZATION_EVENT, 0)
+        };
+        if EVENTS[slot].compare_exchange(0, made as usize, Ordering::AcqRel, Ordering::Acquire)
+                .is_err() {
+            unsafe { (user_api().close)(made) };
+        }
+    }
+}
+
+const NUM_EVENTS: usize = 32;
+const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
+const SYNCHRONIZATION_EVENT: u32 = 1;
+static OWNERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
+static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
+static SLEEPERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
 fn yield_now() {
     unsafe { (user_api().yield_execution)() };

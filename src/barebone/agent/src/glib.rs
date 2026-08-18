@@ -8,6 +8,10 @@ const G_WAIT_INFINITE: gint64 = -1;
 
 pub static mut WAKEUP_TOKEN: u64 = 0;
 
+pub fn wakeup_token() -> *const u8 {
+    ptr::addr_of!(WAKEUP_TOKEN) as *const u8
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn g_get_monotonic_time() -> gint64 {
     kernel::monotonic_micros()
