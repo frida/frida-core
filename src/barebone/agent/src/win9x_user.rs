@@ -61,6 +61,8 @@ pub static USER: Primitives = Primitives {
     current_process_id,
     current_thread_id,
     protect,
+    protection_at,
+    enumerate_ranges,
 };
 
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
@@ -98,6 +100,80 @@ struct UserThreadStart {
     parameter: *mut c_void,
 }
 
+fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
+    let mut address = 0usize;
+    loop {
+        let Some(region) = describe_region(address) else {
+            return;
+        };
+
+        if region.protection != 0 {
+            found(region.base as u64, region.size as u64, region.protection);
+        }
+
+        address = region.base + region.size;
+    }
+}
+
+fn protection_at(address: usize) -> u32 {
+    match describe_region(address) {
+        Some(region) => region.protection,
+        None => 0,
+    }
+}
+
+fn describe_region(address: usize) -> Option<Region> {
+    let mut info = [0u32; REGION_WORDS];
+    let query: extern "stdcall" fn(usize, *mut u32, u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().virtual_query) };
+    if query(address, info.as_mut_ptr(), (REGION_WORDS * 4) as u32) == 0 {
+        return None;
+    }
+
+    Some(Region {
+        base: info[REGION_BASE] as usize,
+        size: info[REGION_SIZE] as usize,
+        protection: if info[REGION_STATE] == MEM_COMMIT {
+            gum_protection_of(info[REGION_PROTECTION])
+        } else {
+            0
+        },
+    })
+}
+
+fn gum_protection_of(protection: u32) -> u32 {
+    match protection & 0xff {
+        PAGE_READONLY | PAGE_EXECUTE_READ => GUM_PAGE_READ | GUM_PAGE_EXECUTE,
+        PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY =>
+            GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
+        PAGE_EXECUTE => GUM_PAGE_READ | GUM_PAGE_EXECUTE,
+        _ => 0,
+    }
+}
+
+struct Region {
+    base: usize,
+    size: usize,
+    protection: u32,
+}
+
+const REGION_WORDS: usize = 7;
+const REGION_BASE: usize = 0;
+const REGION_SIZE: usize = 3;
+const REGION_STATE: usize = 4;
+const REGION_PROTECTION: usize = 5;
+const MEM_COMMIT: u32 = 0x1000;
+const PAGE_READONLY: u32 = 0x02;
+const PAGE_READWRITE: u32 = 0x04;
+const PAGE_WRITECOPY: u32 = 0x08;
+const PAGE_EXECUTE: u32 = 0x10;
+const PAGE_EXECUTE_READ: u32 = 0x20;
+const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
+const GUM_PAGE_READ: u32 = 0x1;
+const GUM_PAGE_WRITE: u32 = 0x2;
+const GUM_PAGE_EXECUTE: u32 = 0x4;
+
 fn resolve_user_api() {
     unsafe {
         USER_API = UserApi {
@@ -111,6 +187,7 @@ fn resolve_user_api() {
             virtual_alloc: kernel32_export(b"VirtualAlloc"),
             virtual_free: kernel32_export(b"VirtualFree"),
             virtual_protect: kernel32_export(b"VirtualProtect"),
+            virtual_query: kernel32_export(b"VirtualQuery"),
             create_thread: kernel32_export(b"CreateThread"),
             create_process: kernel32_export(b"CreateProcessA"),
             resume_thread: kernel32_export(b"ResumeThread"),
@@ -138,6 +215,7 @@ struct UserApi {
     virtual_alloc: u32,
     virtual_free: u32,
     virtual_protect: u32,
+    virtual_query: u32,
     create_thread: u32,
     create_process: u32,
     resume_thread: u32,
@@ -159,6 +237,7 @@ static mut USER_API: UserApi = UserApi {
     virtual_alloc: 0,
     virtual_free: 0,
     virtual_protect: 0,
+    virtual_query: 0,
     create_thread: 0,
     create_process: 0,
     resume_thread: 0,
