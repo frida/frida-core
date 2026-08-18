@@ -2764,13 +2764,20 @@ namespace Frida.BareboneTest {
 			var script = yield session.create_script (source, null, null);
 
 			string? received = null;
-			script.message.connect ((json, data) => {
+			bool waiting = false;
+			var handler = script.message.connect ((json, data) => {
 				received = json;
-				run_script_in_live_guest.callback ();
+				if (waiting) {
+					waiting = false;
+					run_script_in_live_guest.callback ();
+				}
 			});
 			yield script.load (null);
-			if (received == null)
+			if (received == null) {
+				waiting = true;
 				yield;
+			}
+			script.disconnect (handler);
 
 			if (!received.contains (expected))
 				printerr ("\nexpected %s in: %s\n", expected, received);
