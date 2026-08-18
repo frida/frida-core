@@ -100,6 +100,11 @@ namespace Frida.BareboneTest {
 				win9x_config_from_environment (h as Harness), "C:\\WINDOWS\\NOTEPAD.EXE"));
 			h.run ();
 		});
+		GLib.Test.add_func ("/Barebone/Win9x/takes-a-snapshot-in-live-guest", () => {
+			var h = new Harness ((h) => takes_a_snapshot_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/hooks-its-own-code-in-live-guest", () => {
 			var h = new Harness ((h) => hooks_its_own_code_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1467,6 +1472,67 @@ namespace Frida.BareboneTest {
 				assert_false (seen.contains (shape));
 				seen.add (shape);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void takes_a_snapshot_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+			var session = yield device.attach (pid, null, null);
+
+			var script = yield session.create_script ("""
+				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
+				const named = (name, ret, args) =>
+					new NativeFunction(kernel32.getExportByName(name), ret, args);
+
+				const snapshot = named('CreateToolhelp32Snapshot', 'pointer', ['uint', 'uint']);
+				const first = named('Process32First', 'int', ['pointer', 'pointer']);
+				const next = named('Process32Next', 'int', ['pointer', 'pointer']);
+				const close = named('CloseHandle', 'int', ['pointer']);
+
+				const snap = snapshot(0x2, 0);
+				const entry = Memory.alloc(556);
+				entry.writeU32(556);
+
+				const names = [];
+				for (let more = first(snap, entry); more !== 0; more = next(snap, entry))
+					names.push(entry.add(36).readUtf8String().toLowerCase());
+				close(snap);
+
+				send(['processes', names.length,
+					names.some(name => name.endsWith('explorer.exe'))]);
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("true"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
