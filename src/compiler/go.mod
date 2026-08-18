@@ -1,6 +1,6 @@
 module github.com/frida/frida-core-compiler
 
-go 1.24.3
+go 1.24.13
 
 require (
 	github.com/evanw/esbuild v0.25.5
