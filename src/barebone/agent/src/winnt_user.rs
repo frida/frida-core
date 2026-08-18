@@ -83,7 +83,6 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
         crate::route_frames_through(arena as u64);
     }
 
-    remember_this_thread();
     crate::gum_windows::watch_the_loader();
 
     while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
@@ -201,104 +200,6 @@ struct SessionServer {
     make_record: windows_fn!(*mut c_void, *mut c_void, *mut c_void, i32 => i32),
     open_thread: windows_fn!(u32, i32, u32 => *mut c_void),
 }
-
-pub fn process_maker_entry_point() -> usize {
-    export(module_base(peb(), b"kernel32.dll"), b"CreateProcessW")
-}
-
-fn remember_this_thread() {
-    unsafe { ours_mut().insert(current_client_id(BLOCK_THREAD_ID)) };
-}
-
-fn ours() -> bool {
-    unsafe { ours_mut().contains(&current_client_id(BLOCK_THREAD_ID)) }
-}
-
-fn ours_mut() -> &'static mut BTreeSet<u32> {
-    unsafe { (&raw mut OURS).as_mut().unwrap() }
-}
-
-static mut OURS: BTreeSet<u32> = BTreeSet::new();
-
-#[cfg(target_arch = "x86")]
-pub unsafe extern "stdcall" fn on_create_process(application: *const u16, line: *mut u16,
-        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
-        environment: *mut c_void, directory: *const u16, startup: *mut u8,
-        information: *mut u8) -> i32 {
-    unsafe {
-        create_process(application, line, process_attributes, thread_attributes, inherit, flags,
-            environment, directory, startup, information)
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-pub unsafe extern "win64" fn on_create_process(application: *const u16, line: *mut u16,
-        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
-        environment: *mut c_void, directory: *const u16, startup: *mut u8,
-        information: *mut u8) -> i32 {
-    unsafe {
-        create_process(application, line, process_attributes, thread_attributes, inherit, flags,
-            environment, directory, startup, information)
-    }
-}
-
-unsafe fn create_process(application: *const u16, line: *mut u16,
-        process_attributes: *mut c_void, thread_attributes: *mut c_void, inherit: i32, flags: u32,
-        environment: *mut c_void, directory: *const u16, startup: *mut u8,
-        information: *mut u8) -> i32 {
-    if !ours() {
-        let original: windows_fn!(*const u16, *mut u16, *mut c_void, *mut c_void, i32, u32,
-            *mut c_void, *const u16, *mut u8, *mut u8 => i32) =
-            unsafe { core::mem::transmute(ORIGINAL_CREATE_PROCESS) };
-
-        return unsafe {
-            original(application, line, process_attributes, thread_attributes, inherit, flags,
-                environment, directory, startup, information)
-        };
-    }
-
-    let wanted = if line.is_null() { application } else { line as *const u16 };
-    let Some(made) = make_process(&narrow_text(wanted)) else {
-        return 0;
-    };
-
-    if (flags & CREATE_SUSPENDED) == 0 {
-        let api = unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() };
-        unsafe { (api.resume_thread)(made.thread, core::ptr::null_mut()) };
-    }
-
-    unsafe {
-        write_handle(information, PROCESS_INFORMATION_PROCESS, made.process);
-        write_handle(information, PROCESS_INFORMATION_THREAD, made.thread);
-        (information.add(PROCESS_INFORMATION_PID) as *mut u32).write(made.pid);
-        (information.add(PROCESS_INFORMATION_TID) as *mut u32).write(made.tid);
-    }
-
-    1
-}
-
-fn narrow_text(text: *const u16) -> alloc::string::String {
-    let mut narrow = alloc::string::String::new();
-    let mut cursor = text;
-    loop {
-        let word = unsafe { cursor.read() };
-        if word == 0 {
-            break;
-        }
-        narrow.push(char::from_u32(word as u32).unwrap_or('?'));
-        cursor = unsafe { cursor.add(1) };
-    }
-
-    narrow
-}
-
-unsafe fn write_handle(information: *mut u8, offset: usize, handle: *mut c_void) {
-    unsafe { (information.add(offset) as *mut usize).write(handle as usize) };
-}
-
-pub static mut ORIGINAL_CREATE_PROCESS: *mut c_void = core::ptr::null_mut();
-
-const CREATE_SUSPENDED: u32 = 0x4;
 
 // The loader has one way in and one way out for a library, thus a stand-in on each says what
 // the process has mapped now.

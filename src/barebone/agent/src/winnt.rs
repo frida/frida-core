@@ -12,8 +12,7 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
     LoadedModule, LoaderEntryPoints, describe_module, enumerate_modules, loader_entry_points,
-    ORIGINAL_CREATE_PROCESS, on_create_process, on_module_load, on_module_load_with_flags,
-    on_module_unload, process_maker_entry_point, resume_process, spawn_process,
+    on_module_load, on_module_load_with_flags, on_module_unload, resume_process, spawn_process,
 };
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
