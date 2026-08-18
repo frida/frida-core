@@ -138,6 +138,7 @@ def emit_header(api, output_dir):
 
         output_header_file.write("\n\n/* Library lifetime */")
         output_header_file.write("\nvoid frida_init (void);")
+        output_header_file.write("\nvoid frida_init_with_runtime (FridaRuntime runtime);")
         output_header_file.write("\nvoid frida_shutdown (void);")
         output_header_file.write("\nvoid frida_deinit (void);")
         output_header_file.write("\nGMainContext * frida_get_main_context (void);")
@@ -246,6 +247,13 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path, docs:
     merge_and_transform_elements("class", object_type_names)
     merge_and_transform_elements("interface", object_type_names)
     merge_and_transform_elements("enumeration", enum_type_names | error_type_names)
+
+    function_names = {func.name for func in api.functions}
+    for source_root in [core_root, base_root]:
+        source_namespace = source_root.find("namespace", GIR_NAMESPACES)
+        for function in source_namespace.findall("function", GIR_NAMESPACES):
+            if function.get("name") in function_names:
+                merged_namespace.append(function)
 
     for source_root in [core_root, base_root]:
         for record in source_root.findall(".//record", GIR_NAMESPACES):
@@ -610,6 +618,7 @@ def emit_vapi(api, output_dir):
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
         output_vapi_file.write("\n\tpublic static void init ();")
+        output_vapi_file.write("\n\tpublic static void init_with_runtime (Frida.Runtime runtime);")
         output_vapi_file.write("\n\tpublic static void shutdown ();")
         output_vapi_file.write("\n\tpublic static void deinit ();")
         output_vapi_file.write("\n\tpublic static unowned GLib.MainContext get_main_context ();")
@@ -887,10 +896,13 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
             enum.vapi_declaration = m.group(1)
             enum.vapi_members.extend([line.lstrip() for line in m.group(2).strip().split("\n")])
 
-    functions = [f for f in parse_vapi_functions(base_vapi) if function_is_public(f.name)]
+    functions = [f for f in parse_vapi_functions(core_vapi + base_vapi) if function_is_public(f.name)]
     for f in functions:
-        m = re.search(r"^[\w\*]+ frida_{}.+?;".format(f.name), all_headers, re.MULTILINE | re.DOTALL)
-        f.c_prototype = beautify_cprototype(m.group(0))
+        m = re.search(r"^(?:VALA_EXTERN )?[\w\*]+ frida_{}.+?;".format(f.name), all_headers, re.MULTILINE | re.DOTALL)
+        prototype = beautify_cprototype(m.group(0))
+        if prototype.startswith("VALA_EXTERN "):
+            prototype = prototype[12:]
+        f.c_prototype = prototype
 
     delegates = [(m.group(1), m.group(0).strip())
                  for m in re.finditer(r"^\tpublic delegate .+?\b(\w+) \(.*\);$", core_vapi + base_vapi, re.MULTILINE)]
@@ -901,7 +913,9 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
 def function_is_public(name):
     return not name.startswith("_") and \
             not name.startswith("throw_") and \
+            name not in MANUALLY_DECLARED_FUNCTIONS and \
             name not in {
+                "on_pending_garbage",
                 "generate_certificate",
                 "get_dbus_context",
                 "invalidate_dbus_context",
@@ -921,6 +935,17 @@ def function_is_public(name):
                 "make_stdio_pipes",
                 "make_stdio_pipe",
             }
+
+MANUALLY_DECLARED_FUNCTIONS = {
+    "init",
+    "init_with_runtime",
+    "shutdown",
+    "deinit",
+    "get_main_context",
+    "unref",
+    "version",
+    "version_string",
+}
 
 def parse_vala_object_types(source) -> List[ApiObjectType]:
     return [ApiObjectType(m.group(3), m.group(2)) for m in OBJECT_TYPE_PATTERN.finditer(source, re.MULTILINE)]
