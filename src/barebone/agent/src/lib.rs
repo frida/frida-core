@@ -753,6 +753,8 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
 }
 
 fn run_main_loop(main_context: *mut GMainContext) {
+    glib::own_the_loop();
+
     unsafe {
         loop {
             transport_get_unchecked().process();

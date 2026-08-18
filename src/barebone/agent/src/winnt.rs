@@ -180,6 +180,8 @@ pub fn install_shareable_wake_event(token: *const u8) {
         SHAREABLE_WAKE_EVENT = created;
         SHAREABLE_TOKEN = token;
     }
+
+    EVENTS[slot_for_token(token)].store(created as usize, Ordering::Release);
 }
 
 fn create_event_object() -> *mut c_void {
@@ -221,28 +223,44 @@ static mut SHAREABLE_TOKEN: *const u8 = core::ptr::null();
 
 // The kernel has no futex. Thus each token uses an event, which the code makes on first use.
 fn event_for(token: *const u8) -> *mut c_void {
-    let shareable = unsafe { SHAREABLE_WAKE_EVENT };
-    if !shareable.is_null() && core::ptr::eq(token, unsafe { SHAREABLE_TOKEN }) {
-        return shareable;
-    }
+    event_in(slot_for_token(token))
+}
 
-    let slot = slot_for(token);
-    let existing = EVENTS[slot].load(Ordering::Acquire);
-    if existing != 0 {
-        return existing as *mut c_void;
-    }
+fn event_in(slot: usize) -> *mut c_void {
+    loop {
+        let existing = EVENTS[slot].load(Ordering::Acquire);
+        if existing != 0 {
+            return existing as *mut c_void;
+        }
 
-    let created = alloc(EVENT_SIZE) as *mut c_void;
-    unsafe {
-        (_KeInitializeEvent)(created, SYNCHRONIZATION_EVENT, 0);
+        let created = alloc(EVENT_SIZE) as *mut c_void;
+        unsafe { (_KeInitializeEvent)(created, SYNCHRONIZATION_EVENT, 0) };
+        if EVENTS[slot].compare_exchange(0, created as usize, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok() {
+            return created;
+        }
+
+        free(created as *mut u8, EVENT_SIZE);
     }
-    match EVENTS[slot].compare_exchange(0, created as usize, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => created,
-        Err(raced) => {
-            free(created as *mut u8, EVENT_SIZE);
-            raced as *mut c_void
+}
+
+fn slot_for_token(token: *const u8) -> usize {
+    let start = slot_for(token);
+    for step in 0..NUM_EVENTS {
+        let slot = (start + step) % NUM_EVENTS;
+
+        let owner = OWNERS[slot].load(Ordering::Acquire);
+        if owner == token as usize {
+            return slot;
+        }
+        if owner == 0
+                && OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
+                    Ordering::Acquire).is_ok() {
+            return slot;
         }
     }
+
+    0
 }
 
 fn slot_for(token: *const u8) -> usize {
@@ -251,6 +269,8 @@ fn slot_for(token: *const u8) -> usize {
 
 const NUM_EVENTS: usize = 64;
 static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
+static OWNERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
+static SLEEPERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
 const EVENT_SIZE: usize = 0x10;
 const SYNCHRONIZATION_EVENT: u32 = 1;
@@ -1636,10 +1656,13 @@ mod kernel {
     }
 
     pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-        let event = event_for(token);
+        let slot = slot_for_token(token);
+        let event = event_in(slot);
         if check() {
             return;
         }
+
+        SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
 
         unsafe {
             match timeout_us {
@@ -1650,11 +1673,17 @@ mod kernel {
                 }
             };
         }
+        SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
     }
 
     pub fn wake(token: *const u8) {
-        unsafe {
-            (_KeSetEvent)(event_for(token), 0, 0);
+        let slot = slot_for_token(token);
+        let event = event_in(slot);
+
+        let mut left = SLEEPERS[slot].load(Ordering::Acquire).max(1);
+        while left != 0 {
+            unsafe { (_KeSetEvent)(event, 0, 0) };
+            left -= 1;
         }
     }
 
