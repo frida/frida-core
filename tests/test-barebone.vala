@@ -1404,7 +1404,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 			var options = new ProcessQueryOptions ();
 			options.scope = FULL;
 			var processes = yield device.enumerate_processes (options, null);
@@ -1470,7 +1470,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			var processes = yield device.enumerate_processes (null, null);
 			uint pid = 0;
@@ -1599,7 +1599,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			var processes = yield device.enumerate_processes (null, null);
 			uint pid = 0;
@@ -1653,7 +1653,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 			var options = new ProcessQueryOptions ();
 			options.scope = FULL;
 			var processes = yield device.enumerate_processes (options, null);
@@ -1884,7 +1884,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield find_explorer (device);
 			var session = yield device.attach (pid, null, null);
@@ -1924,7 +1924,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint first_pid = yield find_explorer (device);
 			uint second_pid = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
@@ -1977,7 +1977,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield find_explorer (device);
 			var session = yield device.attach (pid, null, null);
@@ -2017,7 +2017,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield find_explorer (device);
 			var session = yield device.attach (pid, null, null);
@@ -2067,7 +2067,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield find_explorer (device);
 			var session = yield device.attach (pid, null, null);
@@ -2135,7 +2135,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield device.spawn ("C:\\WINDOWS\\system32\\notepad.exe", null, null);
 			assert_true (pid != 0);
@@ -2177,7 +2177,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
 			assert_true (pid != 0);
@@ -2226,7 +2226,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield find_explorer (device);
 
@@ -2276,7 +2276,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			uint pid = yield device.spawn (program, null, null);
 			var session = yield device.attach (pid, null, null);
@@ -2346,7 +2346,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 
 			var processes = yield device.enumerate_processes (null, null);
 			uint pid = 0;
@@ -2510,7 +2510,7 @@ namespace Frida.BareboneTest {
 
 		var manager = new DeviceManager ();
 		try {
-			var device = yield manager.add_barebone_device ("Guest", config, null);
+			var device = yield manager.add_barebone_device (config);
 			var session = yield device.attach (0, null, null);
 			var script = yield session.create_script (source, null, null);
 
