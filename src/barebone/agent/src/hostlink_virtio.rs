@@ -298,6 +298,7 @@ struct Inner {
 struct TxNode {
     next: *mut TxNode,
     frame: &'static [u8],
+    sent: usize,
 }
 
 pub struct Hostlink {
@@ -433,6 +434,7 @@ impl Hostlink {
         unsafe {
             (*node).next = core::ptr::null_mut();
             (*node).frame = frame;
+            (*node).sent = 0;
         }
 
         if s.tx_tail.is_null() {
@@ -717,30 +719,19 @@ impl Hostlink {
         let Some(txq) = s.tx.as_mut() else {
             return;
         };
-        loop {
-            let node = if s.tx_head.is_null() {
-                core::ptr::null_mut()
-            } else {
-                let n = s.tx_head;
-                s.tx_head = unsafe { (*n).next };
-                if s.tx_head.is_null() {
-                    s.tx_tail = core::ptr::null_mut();
-                }
-                n
-            };
-            if node.is_null() {
-                break;
+        while !s.tx_head.is_null() {
+            if txq.free_cnt == 0 {
+                return;
             }
-            let frame = unsafe { (*node).frame };
 
-            let mut off = 0usize;
+            let node = s.tx_head;
+            let frame = unsafe { (*node).frame };
+            let mut off = unsafe { (*node).sent };
+
             let mut head: Option<u16> = None;
             let mut prev = 0u16;
 
-            while off < frame.len() {
-                if txq.free_cnt == 0 {
-                    break;
-                }
+            while off < frame.len() && txq.free_cnt != 0 {
                 let page = PAGE_SIZE.load(Ordering::Relaxed);
                 let chunk = core::cmp::min(page, frame.len() - off);
                 let pg = dma_page_alloc();
@@ -776,6 +767,16 @@ impl Hostlink {
                 let (sel, notify_off) = (txq.sel, txq.notify_off);
                 txq.push_avail(h);
                 self.kick(sel, notify_off);
+            }
+
+            if off < frame.len() {
+                unsafe { (*node).sent = off };
+                return;
+            }
+
+            s.tx_head = unsafe { (*node).next };
+            if s.tx_head.is_null() {
+                s.tx_tail = core::ptr::null_mut();
             }
 
             kernel::free(frame.as_ptr() as *mut u8, frame.len());
