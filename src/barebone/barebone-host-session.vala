@@ -582,9 +582,10 @@ namespace Frida {
 				return spawn_helper_pid;
 
 			uint pid = 0;
-			var processes = yield connection.enumerate_processes (Scope.MINIMAL, cancellable);
+			var processes = yield connection.enumerate_processes (Scope.METADATA, cancellable);
 			foreach (HostProcessInfo p in processes) {
-				if (p.name.down () == SPAWN_HELPER_NAME) {
+				var path = p.parameters["path"];
+				if (path != null && path.get_string ().down ().has_suffix (SPAWN_HELPER_NAME)) {
 					pid = p.pid;
 					break;
 				}

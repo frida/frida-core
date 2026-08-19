@@ -500,7 +500,7 @@ namespace Frida.Barebone {
 			bool include_icons = scope == FULL;
 			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.boolean (include_icons),
 				cancellable);
-			if (!response.check_format_string ("a(ussaay)", false))
+			if (!response.check_format_string ("a(usssaay)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
 
 			var processes = new HostProcessInfo[response.n_children ()];
@@ -517,10 +517,12 @@ namespace Frida.Barebone {
 						parameters["argv"] = argv_from_command_line (command_line);
 				}
 				if (include_icons)
-					parameters["icons"] = icons_from_resources (entry.get_child_value (3));
+					parameters["icons"] = icons_from_resources (entry.get_child_value (4));
 
-				processes[i] = HostProcessInfo (entry.get_child_value (0).get_uint32 (), basename_of (path),
-					parameters);
+				unowned string description = entry.get_child_value (3).get_string ();
+				string name = (description != "") ? description : basename_of (path);
+
+				processes[i] = HostProcessInfo (entry.get_child_value (0).get_uint32 (), name, parameters);
 			}
 			return processes;
 		}

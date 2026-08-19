@@ -1819,6 +1819,23 @@ pub(crate) const MODREF_PREVIOUS_OFFSET: usize = 0x04;
 pub(crate) const IMTE_BASE_OFFSET: usize = 0x24;
 pub(crate) const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
+pub fn describe_image(path: *const u8) -> *const u8 {
+    let description = unsafe { (&raw mut DESCRIPTION).as_mut().unwrap() };
+    description[0] = 0;
+
+    let Some(file) = File::open(path) else {
+        return description.as_ptr();
+    };
+
+    let written = crate::icons::describe(&file, &mut description[..MAX_DESCRIPTION]);
+    description[written] = 0;
+
+    description.as_ptr()
+}
+
+static mut DESCRIPTION: [u8; MAX_DESCRIPTION + 1] = [0; MAX_DESCRIPTION + 1];
+const MAX_DESCRIPTION: usize = 128;
+
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let Some(file) = File::open(path) else {
         return;

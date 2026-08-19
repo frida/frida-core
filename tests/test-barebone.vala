@@ -1467,7 +1467,8 @@ namespace Frida.BareboneTest {
 
 			Process? shell = null;
 			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
+				var path = processes.get (i).parameters["path"];
+				if (path != null && path.get_string ().down ().has_suffix ("explorer.exe"))
 					shell = processes.get (i);
 			}
 			assert_nonnull (shell);
@@ -1528,12 +1529,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 			var session = yield device.attach (pid, null, null);
 
 			var script = yield session.create_script ("""
@@ -1589,12 +1585,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 			var session = yield device.attach (pid, null, null);
 
 			var script = yield session.create_script ("""
@@ -1657,12 +1648,7 @@ namespace Frida.BareboneTest {
 			uint spawned = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
 			var watcher = yield device.attach (spawned, null, null);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint other = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					other = processes.get (i).pid;
-			}
+			uint other = yield find_program (device, "explorer.exe");
 			assert_true (other != 0);
 			var bystander = yield device.attach (other, null, null);
 
@@ -1758,12 +1744,7 @@ namespace Frida.BareboneTest {
 			uint spawned = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
 			var watcher = yield device.attach (spawned, null, null);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint other = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					other = processes.get (i).pid;
-			}
+			uint other = yield find_program (device, "explorer.exe");
 			assert_true (other != 0);
 			var bystander = yield device.attach (other, null, null);
 
@@ -1839,6 +1820,21 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private static async uint find_program (Device device, string file_name) throws GLib.Error {
+		var options = new ProcessQueryOptions ();
+		options.scope = METADATA;
+
+		var processes = yield device.enumerate_processes (options, null);
+		for (int i = 0; i != processes.size (); i++) {
+			var p = processes.get (i);
+			var path = p.parameters["path"];
+			if (path != null && path.get_string ().down ().has_suffix (file_name))
+				return p.pid;
+		}
+
+		return 0;
+	}
+
 	private async void names_a_16_bit_process_in_live_guest (Harness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
@@ -1848,12 +1844,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint helper = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					helper = processes.get (i).pid;
-			}
+			uint helper = yield find_program (device, "explorer.exe");
 			assert_true (helper != 0);
 
 			var session = yield device.attach (helper, null, null);
@@ -1877,13 +1868,20 @@ namespace Frida.BareboneTest {
 			yield;
 			settle.destroy ();
 
-			bool found = false;
-			var list = yield device.enumerate_processes (null, null);
+			var options = new ProcessQueryOptions ();
+			options.scope = METADATA;
+
+			Process? game = null;
+			var list = yield device.enumerate_processes (options, null);
 			for (int i = 0; i != list.size (); i++) {
-				if (list.get (i).name.down () == "sol.exe")
-					found = true;
+				var path = list.get (i).parameters["path"];
+				if (path != null && path.get_string ().down ().has_suffix ("sol.exe"))
+					game = list.get (i);
 			}
-			assert_true (found);
+			assert_nonnull (game);
+
+			assert_true (game.name.down ().contains ("solitaire"));
+			assert_true (game.parameters["path"].get_string ().down ().has_suffix ("sol.exe"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1905,12 +1903,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 			assert_true (pid != 0);
 			var session = yield device.attach (pid, null, null);
 
@@ -1967,12 +1960,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 			assert_true (pid != 0);
 
 			// Success shows that the injected agent started and reported this process.
@@ -2096,12 +2084,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 			assert_true (pid != 0);
 
 			// Success shows that the placed copy started and reported this process.
@@ -2895,12 +2878,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			var processes = yield device.enumerate_processes (null, null);
-			uint pid = 0;
-			for (int i = 0; i != processes.size (); i++) {
-				if (processes.get (i).name.down () == "explorer.exe")
-					pid = processes.get (i).pid;
-			}
+			uint pid = yield find_program (device, "explorer.exe");
 
 			var session = yield device.attach (pid, null, null);
 			var script = yield session.create_script ("""
@@ -2941,12 +2919,7 @@ namespace Frida.BareboneTest {
 	}
 
 	private async uint find_explorer (Device device) throws GLib.Error {
-		var processes = yield device.enumerate_processes (null, null);
-		for (int i = 0; i != processes.size (); i++) {
-			if (processes.get (i).name.down () == "explorer.exe")
-				return processes.get (i).pid;
-		}
-		return 0;
+		return yield find_program (device, "explorer.exe");
 	}
 
 	private async void enumerates_threads_in_live_guest (Harness h) {

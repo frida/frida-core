@@ -1,6 +1,3 @@
-// The icons of a process are resources in its image on disk, thus the walk is the same on all
-// versions of Windows. The resource directory gives an icon group, and the group gives the
-// icons. Only the file operations are different, and a flavor supplies these.
 
 pub trait Image {
     fn read_at(&self, position: u32, buffer: &mut [u8]) -> u32;
@@ -30,6 +27,65 @@ pub fn enumerate(image: &dyn Image, found: &mut dyn FnMut(&[u8])) {
             }
         }
     }
+}
+
+pub fn describe(image: &dyn Image, into: &mut [u8]) -> usize {
+    if read_u16(image, read_u32(image, DOS_HEADERS_OFFSET)) == NE_SIGNATURE {
+        return describe_ne(image, into);
+    }
+
+    let Some(resources) = resource_directory(image) else {
+        return 0;
+    };
+    let Some(version) = resources.first_leaf(RT_VERSION) else {
+        return 0;
+    };
+
+    let Some(blob) = read_blob(image, version.offset, version.size) else {
+        return 0;
+    };
+
+    // The block the key names follows it, after the padding that puts it on a word of its own.
+    let Some(key) = find(blob, FILE_DESCRIPTION) else {
+        return 0;
+    };
+    let mut at = key + FILE_DESCRIPTION.len();
+    while at % 4 != 0 {
+        at += 1;
+    }
+
+    let mut written = 0;
+    while at + 1 < blob.len() && written < into.len() {
+        let unit = blob[at] as u16 | ((blob[at + 1] as u16) << 8);
+        if unit == 0 {
+            break;
+        }
+        into[written] = if unit < 0x80 { unit as u8 } else { b'?' };
+        written += 1;
+        at += 2;
+    }
+
+    written
+}
+
+fn describe_ne(image: &dyn Image, into: &mut [u8]) -> usize {
+    let headers = read_u32(image, DOS_HEADERS_OFFSET);
+    let table = read_u32(image, headers + NE_NON_RESIDENT_NAMES_OFFSET);
+    if table == 0 {
+        return 0;
+    }
+
+    let mut length = [0u8; 1];
+    if image.read_at(table, &mut length) != 1 {
+        return 0;
+    }
+
+    let wanted = core::cmp::min(length[0] as usize, into.len());
+    image.read_at(table + 1, &mut into[..wanted]) as usize
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|window| window == needle)
 }
 
 fn is_best_of_its_size(image: &dyn Image, group: u32, count: u32, index: u32) -> bool {
@@ -209,6 +265,11 @@ const SECTION_RAW_DATA_OFFSET: u32 = 0x14;
 
 const RT_ICON: u16 = 3;
 const RT_GROUP_ICON: u16 = 14;
+const RT_VERSION: u16 = 16;
+const NE_SIGNATURE: u16 = 0x454e;
+const NE_NON_RESIDENT_NAMES_OFFSET: u32 = 0x2c;
+// "FileDescription", as the version resource holds it.
+const FILE_DESCRIPTION: &[u8] = b"F\0i\0l\0e\0D\0e\0s\0c\0r\0i\0p\0t\0i\0o\0n\0\0\0";
 const NAMED_ENTRY_COUNT_OFFSET: u32 = 0x0c;
 const ID_ENTRY_COUNT_OFFSET: u32 = 0x0e;
 const DIRECTORY_HEADER_SIZE: u32 = 0x10;

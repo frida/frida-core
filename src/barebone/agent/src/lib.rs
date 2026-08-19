@@ -1138,11 +1138,25 @@ static mut INJECTION_PENDING: bool = false;
 #[cfg(feature = "win9x")]
 static mut PENDING_INJECTION: (u16, u32) = (0, 0);
 
+#[cfg(feature = "win9x")]
+fn describe(path: *const u8) -> *const gchar {
+    if path.is_null() {
+        return c"".as_ptr();
+    }
+
+    kernel::describe_image(path) as *const gchar
+}
+
+#[cfg(feature = "winnt")]
+fn describe(_path: *const u8) -> *const gchar {
+    c"".as_ptr()
+}
+
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let list_type = g_variant_type_new(c"a(ussaay)".as_ptr() as *const gchar);
-        let process_type = g_variant_type_new(c"(ussaay)".as_ptr() as *const gchar);
+        let list_type = g_variant_type_new(c"a(usssaay)".as_ptr() as *const gchar);
+        let process_type = g_variant_type_new(c"(usssaay)".as_ptr() as *const gchar);
         let icons_type = g_variant_type_new(c"aay".as_ptr() as *const gchar);
         let byte_type = g_variant_type_new(c"y".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
@@ -1156,6 +1170,7 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
             g_variant_builder_add(builder, c"u".as_ptr(), process.id);
             g_variant_builder_add(builder, c"s".as_ptr(), path);
             g_variant_builder_add(builder, c"s".as_ptr(), text_or_empty(process.command_line));
+            g_variant_builder_add(builder, c"s".as_ptr(), describe(process.path));
 
             g_variant_builder_open(builder, icons_type);
             if include_icons && !process.path.is_null() {
