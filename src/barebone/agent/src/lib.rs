@@ -971,6 +971,10 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::Stop => Some(handle_stop()),
+            #[cfg(feature = "winnt")]
+            FridaCommand::DetachFromProcess => {
+                Some(handle_detach_from_process(payload_variant))
+            }
             #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
                 unsafe {
@@ -1259,6 +1263,16 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_stop() -> HandlerResponse {
     STOP_REQUESTED.store(true, Ordering::Release);
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
+}
+
+#[cfg(feature = "winnt")]
+fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
+    let left = unsafe { kernel::detach_from_process(g_variant_get_uint32(payload)) };
+    if !left {
+        return HandlerResponse::error("Unable to detach from the process");
+    }
 
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }

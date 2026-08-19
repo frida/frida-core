@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
-    OBSERVED_PID, OBSERVED_THREAD, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives,
+    COPY_LEFT, OBSERVED_PID, OBSERVED_THREAD, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives,
     REGISTER_PROCESS, REGISTER_THREAD, STOP_REQUEST,
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
@@ -101,6 +101,10 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
         let due_time = -((IDLE_SLICE_US as i64) * 10);
         unsafe { (user_api().wait_for_object)(target_wake_handle(), 0, &due_time) };
     }
+
+    crate::gum_windows::forget_the_loader();
+
+    unsafe { ((arena + COPY_LEFT as usize) as *mut u32).write_volatile(1) };
 
     unsafe { (user_api().exit_thread)(0) };
 }

@@ -163,6 +163,25 @@ pub(crate) fn watch_the_loader() {
 }
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) fn forget_the_loader() {
+    let Some(entries) = kernel::loader_entry_points() else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_revert(interceptor, entries.load as gpointer);
+        if entries.load_with_flags != 0 {
+            crate::bindings::gum_interceptor_revert(interceptor,
+                entries.load_with_flags as gpointer);
+        }
+        crate::bindings::gum_interceptor_revert(interceptor, entries.unload as gpointer);
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn loader_load() -> gpointer {
     unsafe { LOADER_LOAD }
 }

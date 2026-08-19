@@ -198,6 +198,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/attaches-again-after-detach-in-live-guest", () => {
+			var h = new Harness ((h) => attaches_again_after_detach_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT")));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/calls-system-functions-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_calls_system_functions_in_live_guest.begin (
 				h as Harness, "WINNT"));
@@ -2296,6 +2302,58 @@ namespace Frida.BareboneTest {
 
 			// The library arrived while the script watched, thus the script heard about it.
 			assert_true (messages[0].contains ("[false,true]"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void attaches_again_after_detach_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_explorer (device);
+
+			for (uint round = 0; round != 2; round++) {
+				var session = yield device.attach (pid, null, null);
+				var script = yield session.create_script ("""
+					send(Process.id >>> 0);
+				""", null, null);
+
+				string? received = null;
+				bool waiting = false;
+				var handler = script.message.connect ((json, data) => {
+					received = json;
+					if (waiting) {
+						waiting = false;
+						attaches_again_after_detach_in_live_guest.callback ();
+					}
+				});
+				yield script.load (null);
+				if (received == null) {
+					waiting = true;
+					yield;
+				}
+				script.disconnect (handler);
+
+				assert_true (received.contains (pid.to_string ()));
+
+				yield session.detach (null);
+
+				for (uint i = 0; i != 100; i++)
+					yield h.process_events ();
+			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

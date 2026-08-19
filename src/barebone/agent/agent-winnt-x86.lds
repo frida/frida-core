@@ -46,12 +46,14 @@ SECTIONS {
     _ZwClose = .; . += 4;
     _ZwCreateEvent = .; . += 4;
     _ZwAllocateVirtualMemory = .; . += 4;
+    _ZwFreeVirtualMemory = .; . += 4;
     _ZwCreateThread = .; . += 4;
     _PsProcessType = .; . += 4;
     _ObReferenceObjectByHandle = .; . += 4;
     _ObOpenObjectByPointer = .; . += 4;
     _ExEventObjectType = .; . += 4;
     _IoAllocateMdl = .; . += 4;
+    _IoFreeMdl = .; . += 4;
     _MmBuildMdlForNonPagedPool = .; . += 4;
     _MmMapLockedPagesSpecifyCache = .; . += 4;
     _MmUnmapLockedPages = .; . += 4;

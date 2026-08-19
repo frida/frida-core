@@ -1135,6 +1135,8 @@ pub fn place_agent_in_process(pid: u32) -> bool {
         }
         (_MmBuildMdlForNonPagedPool)(shared_mdl);
         (_MmBuildMdlForNonPagedPool)(private_mdl);
+        placed.shared_mdl = shared_mdl;
+        placed.private_mdl = private_mdl;
 
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
@@ -1169,6 +1171,7 @@ pub fn place_agent_in_process(pid: u32) -> bool {
             let arena_mdl = (_IoAllocateMdl)(arena as *mut c_void, ARENA_SIZE as u32, 0, 0,
                 core::ptr::null_mut());
             if !arena_mdl.is_null() {
+                placed.arena_mdl = arena_mdl;
                 (_MmBuildMdlForNonPagedPool)(arena_mdl);
                 let seen = (_MmMapLockedPagesSpecifyCache)(arena_mdl, USER_MODE, MM_CACHED,
                     core::ptr::null_mut(), 0, NORMAL_PAGE_PRIORITY);
@@ -1201,6 +1204,12 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                 started: false,
                 text: placed.seen_by_process,
                 size: own.size as u64,
+                private: placed.writable_from_here,
+                private_size,
+                stack: 0,
+                shared_mdl: placed.shared_mdl,
+                private_mdl: placed.private_mdl,
+                arena_mdl: placed.arena_mdl,
             })
         };
     }
@@ -1214,6 +1223,9 @@ pub struct Placement {
     pub writable_from_here: u64,
     pub arena_seen_by_process: u64,
     pub arena_here: u64,
+    pub shared_mdl: *mut c_void,
+    pub private_mdl: *mut c_void,
+    pub arena_mdl: *mut c_void,
 }
 
 const MAX_PLACEMENT_TRIES: usize = 8;
@@ -1236,18 +1248,81 @@ pub fn release_interrupt() {
     }
 }
 
-pub fn stop_copies() {
-    let copies: alloc::vec::Vec<(u64, *mut c_void)> =
-        unsafe { targets() }.values().map(|t| (t.arena, t.wake)).collect();
-    for (arena, wake) in copies {
-        unsafe {
-            ((arena + STOP_REQUEST) as *mut u32).write_volatile(1);
-            (_KeSetEvent)(wake, 0, 0);
-        }
+pub fn detach_from_process(pid: u32) -> bool {
+    let Some(target) = (unsafe { targets().remove(&pid) }) else {
+        return false;
+    };
+
+    ask_copy_to_leave(&target);
+    if !copy_has_left(&target) {
+        return false;
     }
 
-    // Each copy leaves on its own thread, thus give them the time to run their last instructions.
-    wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
+    let mut process: *mut c_void = core::ptr::null_mut();
+    enumerate_processes(&mut |p| {
+        if p.id == pid {
+            process = p.handle;
+        }
+    });
+
+    let mut work = || unsafe {
+        if !process.is_null() {
+            let mut apc_state = [0usize; APC_STATE_WORDS];
+            (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+
+            (_MmUnmapLockedPages)(target.text as *mut c_void, target.shared_mdl);
+            (_MmUnmapLockedPages)((target.text + target.private_offset()) as *mut c_void,
+                target.private_mdl);
+            (_MmUnmapLockedPages)(target.seen as *mut c_void, target.arena_mdl);
+
+            (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+        }
+
+        (_IoFreeMdl)(target.shared_mdl);
+        (_IoFreeMdl)(target.private_mdl);
+        (_IoFreeMdl)(target.arena_mdl);
+
+        free(target.private as *mut u8, target.private_size);
+        free(target.arena as *mut u8, ARENA_SIZE);
+
+        if !target.wake.is_null() {
+            (_ZwClose)(target.wake);
+        }
+    };
+    on_kernel_stack(&mut work);
+
+    true
+}
+
+fn ask_copy_to_leave(target: &Target) {
+    unsafe {
+        ((target.arena + STOP_REQUEST) as *mut u32).write_volatile(1);
+        if !target.wake.is_null() {
+            (_KeSetEvent)(target.wake, 0, 0);
+        }
+    }
+}
+
+fn copy_has_left(target: &Target) -> bool {
+    for _ in 0..LEAVE_ATTEMPTS {
+        if unsafe { ((target.arena + COPY_LEFT) as *const u32).read_volatile() } != 0 {
+            return true;
+        }
+
+        wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(LEAVE_SLICE_US), &mut || false);
+    }
+
+    false
+}
+
+const LEAVE_ATTEMPTS: u32 = 40;
+const LEAVE_SLICE_US: u64 = 50_000;
+
+pub fn stop_copies() {
+    let pids: alloc::vec::Vec<u32> = unsafe { targets() }.keys().copied().collect();
+    for pid in pids {
+        detach_from_process(pid);
+    }
 }
 
 static mut TEARDOWN_TOKEN: u8 = 0;
@@ -1275,12 +1350,17 @@ pub fn start_agent_in_process(pid: u32) -> u32 {
             return 0;
         }
 
+        let mut stack = 0u64;
         let mut work = || {
-            create_user_thread(process, arena, seen, bootstrap, entry);
+            create_user_thread(process, arena, seen, bootstrap, entry, &mut stack);
         };
         on_kernel_stack(&mut work);
 
-        unsafe { targets().get_mut(&pid).unwrap().started = true };
+        unsafe {
+            let target = targets().get_mut(&pid).unwrap();
+            target.started = true;
+            target.stack = stack;
+        };
     }
 
     let observed = unsafe { ((arena + OBSERVED_PID) as *const u32).read_volatile() };
@@ -1525,7 +1605,7 @@ fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
 }
 
 fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _bootstrap: u64,
-        entry: u64) -> bool {
+        entry: u64, stack: &mut u64) -> bool {
     unsafe {
         let mut process_handle: *mut c_void = core::ptr::null_mut();
         let process_type = (_PsProcessType as *const *mut c_void).read();
@@ -1535,7 +1615,7 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _b
         }
 
         let created = start_thread_in_process(process, process_handle, arena_here, arena_seen,
-            entry);
+            entry, stack);
 
         (_ZwClose)(process_handle);
 
@@ -1546,11 +1626,12 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _b
 // The thread is made the way the system makes them, thus it arrives with a block of its own and
 // ntdll accepts calls from it.
 fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
-        arena_seen: u64, entry: u64) -> bool {
+        arena_seen: u64, entry: u64, remembered: &mut u64) -> bool {
     let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
     if stack == 0 {
         return false;
     }
+    *remembered = stack;
 
     // A process that is still held has no list of its libraries, thus take the address of the
     // loader from a process that is running. The code is in the target's space, so read it there.
@@ -2072,6 +2153,7 @@ pub(crate) const OBSERVED_PID: u64 = 0x04;
 pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
 pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
 
+pub(crate) const COPY_LEFT: u64 = 0x48;
 pub(crate) const OBSERVED_THREAD: u64 = 0x40;
 pub(crate) const LOADER_LIBRARY: u64 = 0x44;
 
@@ -2166,6 +2248,19 @@ struct Target {
     introduced: bool,
     text: u64,
     size: u64,
+    private: u64,
+    private_size: usize,
+    stack: u64,
+    shared_mdl: *mut c_void,
+    private_mdl: *mut c_void,
+    arena_mdl: *mut c_void,
+}
+
+impl Target {
+    fn private_offset(&self) -> u64 {
+        crate::writable_half_start() as u64
+            - unsafe { core::ptr::addr_of!(crate::OWN_RANGE).read() }.base_address
+    }
 }
 
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
@@ -2656,6 +2751,8 @@ kernel_abi! {
     static _ObOpenObjectByPointer: windows_fn!(
         *mut c_void, u32, *mut c_void, u32, *mut c_void, u32, *mut *mut c_void => i32);
     static _ExEventObjectType: usize;
+    static _IoFreeMdl: windows_fn!(*mut c_void => ());
+    static _ZwFreeVirtualMemory: windows_fn!(*mut c_void, *mut *mut u8, *mut usize, u32 => i32);
     static _IoAllocateMdl: windows_fn!(*mut c_void, u32, u8, u8, *mut c_void => *mut c_void);
     static _MmBuildMdlForNonPagedPool: windows_fn!(*mut c_void);
     static _MmMapLockedPagesSpecifyCache: windows_fn!(

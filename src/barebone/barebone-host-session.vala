@@ -390,6 +390,8 @@ namespace Frida {
 					assert (e is IOError.CANCELLED);
 					throw (IOError) e;
 				}
+
+				yield release_injected_agent (session.pid);
 			}
 
 			if (connection != null)
