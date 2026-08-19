@@ -357,12 +357,14 @@ namespace Frida.Barebone {
 			timeout.destroy ();
 
 			yield machine.gdb.stop (cancellable);
+
 			yield flavor.prepare (cancellable);
 
-			// Win9x reboots a little after its heap is given a block of ours back, even from
-			// here, thus keep the image there until that is understood.
-			if (kernel_kind != WIN9X) {
+			{
 				try {
+					yield machine.protect_pages (elf_allocation.virtual_address,
+						elf_allocation.size, READ | WRITE, cancellable);
+
 					yield elf_allocation.deallocate (cancellable);
 				} catch (GLib.Error e) {
 				}

@@ -114,6 +114,8 @@ static mut READY_ACTION: Option<fn()> = None;
 #[unsafe(no_mangle)]
 // The thunk that VMM enters a thread through spins where the thread would return, thus end it
 // here: VMM gives back the stack it made for the thread once it is told.
+// The thunk that VMM enters a thread through spins where the thread would return, thus end it
+// here: VMM gives back what the thread had once it is told.
 extern "C" fn frida_win9x_thread_start() {
     unsafe {
         if let Some(entry) = THREAD_ENTRY {
@@ -381,18 +383,6 @@ const JUMP_SIZE: usize = 5;
 
 // Only the copy knows when it is safe to stop. It runs on the stack and in the image that
 // this function releases, thus the copy reports when it leaves both.
-// A thread of this system ends by saying so: the thunk that VMM enters it through spins where a
-// thread would return, and VMM frees what the thread had once it is told.
-pub fn terminate_current_thread() -> ! {
-    unsafe {
-        vmm_terminate_thread(get_cur_thread_handle());
-    }
-
-    loop {
-        yield_now();
-    }
-}
-
 pub fn release_interrupt() {
     let handle = unsafe { IRQ_HANDLE };
     if handle == 0 {
@@ -1693,15 +1683,34 @@ const ACTION_OPENEXISTING: u32 = 0x01;
 
 pub fn install_fault_reporter() {
     unsafe {
-        FAULT_CHAIN[INVALID_OPCODE as usize] = hook_vmm_fault(INVALID_OPCODE, frida_win9x_fault_thunk_ud);
-        FAULT_CHAIN[GENERAL_PROTECTION as usize] =
-            hook_vmm_fault(GENERAL_PROTECTION, frida_win9x_fault_thunk_gp);
-        FAULT_CHAIN[PAGE_FAULT as usize] = hook_vmm_fault(PAGE_FAULT, frida_win9x_fault_thunk_pf);
+        for (fault, thunk) in [
+            (INVALID_OPCODE, frida_win9x_fault_thunk_ud as unsafe extern "C" fn()),
+            (GENERAL_PROTECTION, frida_win9x_fault_thunk_gp as unsafe extern "C" fn()),
+            (PAGE_FAULT, frida_win9x_fault_thunk_pf as unsafe extern "C" fn()),
+        ] {
+            FAULT_CHAIN[fault as usize] = fault_handler(fault);
+            (thunk as *mut u32).sub(2).write_volatile(thunk as u32);
+            hook_vmm_fault(fault, thunk);
+        }
     }
 }
 
-// The chain names code in the image of this agent, thus take this agent out of it before the
-// image can go.
+fn fault_table() -> u32 {
+    unsafe {
+        let hook = (core::ptr::addr_of!(_Hook_VMM_Fault) as *const u32).read();
+
+        ((hook + 1) as *const u32).read_unaligned()
+    }
+}
+
+fn fault_handler(fault: u32) -> u32 {
+    unsafe { ((fault_table() + fault * 4) as *const u32).read_volatile() }
+}
+
+fn set_fault_handler(fault: u32, handler: u32) {
+    unsafe { ((fault_table() + fault * 4) as *mut u32).write_volatile(handler) };
+}
+
 pub fn release_fault_reporter() {
     unsafe {
         for (fault, thunk) in [
@@ -1709,13 +1718,26 @@ pub fn release_fault_reporter() {
             (GENERAL_PROTECTION, frida_win9x_fault_thunk_gp as unsafe extern "C" fn()),
             (PAGE_FAULT, frida_win9x_fault_thunk_pf as unsafe extern "C" fn()),
         ] {
-            if FAULT_CHAIN[fault as usize] != 0 {
-                FAULT_CHAIN[fault as usize] = 0;
-                unhook_vmm_fault(fault, thunk);
+            let previous = FAULT_CHAIN[fault as usize];
+            if previous == 0 {
+                continue;
             }
+            FAULT_CHAIN[fault as usize] = 0;
+
+            let slot = thunk as *mut u32;
+            core::arch::asm!("cli");
+            slot.write_volatile(previous);
+            unhook_vmm_fault(fault, thunk as u32);
+            if slot.read_volatile() != 0 {
+                slot.write_volatile(SLOT_JUMPS_OVER_ITSELF);
+                set_fault_handler(fault, previous);
+            }
+            core::arch::asm!("sti");
         }
     }
 }
+
+const SLOT_JUMPS_OVER_ITSELF: u32 = 0x9090_02eb;
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
@@ -1943,16 +1965,15 @@ unsafe extern "C" {
     fn signal_semaphore(semaphore: u32);
     fn create_semaphore(token_count: u32) -> u32;
     fn get_cur_thread_handle() -> u32;
-    fn vmm_terminate_thread(handle: u32);
     fn fatal_error_handler(message: *const u8, flags: u32);
     fn vpicd_virtualize_irq(descriptor: *mut VpicdIrqDescriptor) -> u32;
     fn vpicd_physically_unmask(handle: u32);
     fn vpicd_phys_eoi(handle: u32);
-    fn vpicd_force_default_behavior(handle: u32);
+    fn vpicd_force_default_behavior(handle: u32) -> u32;
     fn set_global_time_out(milliseconds: u32, semaphore: u32) -> u32;
     fn cancel_time_out(timeout: u32);
     fn hook_vmm_fault(fault: u32, handler: unsafe extern "C" fn()) -> u32;
-    fn unhook_vmm_fault(fault: u32, handler: unsafe extern "C" fn());
+    fn unhook_vmm_fault(fault: u32, handler: u32);
     fn frida_win9x_fault_thunk_ud();
     fn frida_win9x_fault_thunk_gp();
     fn frida_win9x_fault_thunk_pf();
@@ -2034,21 +2055,6 @@ create_semaphore:
     cmc
     sbb ecx, ecx
     and eax, ecx
-    pop edi
-    pop esi
-    pop ebx
-    pop ebp
-    ret
-
-.global vmm_terminate_thread
-vmm_terminate_thread:
-    push ebp
-    mov ebp, esp
-    push ebx
-    push esi
-    push edi
-    mov edi, [ebp + 8]
-    CALL_SERVICE _VMMTerminateThread
     pop edi
     pop esi
     pop ebx
@@ -2240,20 +2246,29 @@ hook_vmm_fault:
     pop ebp
     ret
 
-.global frida_win9x_fault_thunk_ud
-frida_win9x_fault_thunk_ud:
-    push 6
+/*
+ * A handler the system can take out again carries a head of twelve bytes and a word of its own:
+ * the head is how Unhook_VMM_Fault knows one of its own, and the word is where Hook_VMM_Fault
+ * writes the handler that was there before. The system enters the handler at that word, thus the
+ * word is a jump over itself while the handler is in the table, and becomes the way back again
+ * for as long as the unhooking takes.
+ */
+.macro FAULT_THUNK name, fault
+.align 4
+    .byte 0xeb, 0x0a
+    .byte 0xff, 0x25
+    .long 0
+    .long 0
+.global \name
+\name:
+    .byte 0xeb, 0x02, 0x90, 0x90
+    push \fault
     jmp frida_win9x_fault_common
+.endm
 
-.global frida_win9x_fault_thunk_gp
-frida_win9x_fault_thunk_gp:
-    push 13
-    jmp frida_win9x_fault_common
-
-.global frida_win9x_fault_thunk_pf
-frida_win9x_fault_thunk_pf:
-    push 14
-    jmp frida_win9x_fault_common
+FAULT_THUNK frida_win9x_fault_thunk_ud, 6
+FAULT_THUNK frida_win9x_fault_thunk_gp, 13
+FAULT_THUNK frida_win9x_fault_thunk_pf, 14
 
 frida_win9x_fault_common:
     pushad
@@ -2336,6 +2351,8 @@ vpicd_force_default_behavior:
     push edi
     mov eax, [ebp + 8]
     CALL_SERVICE _VPICD_Force_Default_Behavior
+    cmc
+    sbb eax, eax
     pop edi
     pop esi
     pop ebx
@@ -2394,8 +2411,7 @@ vpicd_virtualize_irq:
 .global frida_win9x_thread_thunk
 frida_win9x_thread_thunk:
     call frida_win9x_thread_start
-1:
-    jmp 1b
+    ret
 
 .global frida_win9x_hw_int_thunk
 frida_win9x_hw_int_thunk:
@@ -2436,7 +2452,6 @@ unsafe extern "C" {
     static _Unhook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
-    static _VMMTerminateThread: unsafe extern "C" fn();
     static _Get_Initial_Thread_Handle: unsafe extern "C" fn();
     static _Get_Next_Thread_Handle: unsafe extern "C" fn();
     static __Debug_Printf_Service: unsafe extern "C" fn(*const u8, ...);
