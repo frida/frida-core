@@ -1986,6 +1986,59 @@ const ACCESS_READONLY: u32 = 0x0000;
 const SHARE_DENYNONE: u32 = 0x0040;
 const ACTION_OPENEXISTING: u32 = 0x01;
 
+pub fn watches_threads() -> bool {
+    !in_copy()
+}
+
+pub fn watch_threads(appeared: fn(u32), vanished: fn(u32)) {
+    unsafe {
+        THREAD_APPEARED = Some(appeared);
+        THREAD_VANISHED = Some(vanished);
+
+        let ddb = (&raw mut DEVICE).as_mut().unwrap();
+        ddb[DDB_SDK_VERSION / 4] = SDK_VERSION;
+        ddb[DDB_NAME / 4] = u32::from_le_bytes(*b"FRID");
+        ddb[DDB_NAME / 4 + 1] = u32::from_le_bytes(*b"A   ");
+        ddb[DDB_CONTROL_PROC / 4] = frida_win9x_control_thunk as u32;
+
+        vmm_add_ddb(ddb.as_mut_ptr() as u32);
+    }
+}
+
+pub fn forget_threads() {
+    unsafe {
+        let ddb = (&raw mut DEVICE).as_mut().unwrap();
+        vmm_remove_ddb(ddb.as_mut_ptr() as u32);
+        THREAD_APPEARED = None;
+        THREAD_VANISHED = None;
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
+    let told = match message {
+        THREAD_INIT => unsafe { THREAD_APPEARED },
+        DESTROY_THREAD => unsafe { THREAD_VANISHED },
+        _ => return,
+    };
+
+    if let Some(told) = told {
+        told(thread);
+    }
+}
+
+static mut THREAD_APPEARED: Option<fn(u32)> = None;
+static mut THREAD_VANISHED: Option<fn(u32)> = None;
+static mut DEVICE: [u32; DDB_WORDS] = [0; DDB_WORDS];
+
+const DDB_WORDS: usize = 0x14;
+const DDB_SDK_VERSION: usize = 0x04;
+const DDB_NAME: usize = 0x0c;
+const DDB_CONTROL_PROC: usize = 0x18;
+const SDK_VERSION: u32 = 0x0400;
+const THREAD_INIT: u32 = 0x1e;
+const DESTROY_THREAD: u32 = 0x21;
+
 pub fn install_fault_reporter() {
     unsafe {
         for (fault, thunk) in [
@@ -2303,6 +2356,9 @@ unsafe extern "C" {
     fn set_global_time_out(milliseconds: u32, semaphore: u32) -> u32;
     fn cancel_time_out(timeout: u32);
     fn hook_vmm_fault(fault: u32, handler: unsafe extern "C" fn()) -> u32;
+    fn vmm_add_ddb(ddb: u32) -> u32;
+    fn vmm_remove_ddb(ddb: u32);
+    fn frida_win9x_control_thunk();
     fn unhook_vmm_fault(fault: u32, handler: u32);
     fn frida_win9x_fault_thunk_ud();
     fn frida_win9x_fault_thunk_gp();
@@ -2540,6 +2596,47 @@ get_cur_vm_handle:
     CALL_SERVICE _Get_Cur_VM_Handle
     mov eax, ebx
     pop ebx
+    ret
+
+.global vmm_add_ddb
+vmm_add_ddb:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov edi, [ebp + 8]
+    CALL_SERVICE _VMM_Add_DDB
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global vmm_remove_ddb
+vmm_remove_ddb:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov edi, [ebp + 8]
+    CALL_SERVICE _VMM_Remove_DDB
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global frida_win9x_control_thunk
+frida_win9x_control_thunk:
+    pushad
+    push edi
+    push eax
+    call frida_win9x_on_control
+    add esp, 8
+    popad
+    clc
     ret
 
 .global hook_vmm_fault
@@ -2784,6 +2881,8 @@ unsafe extern "C" {
     static __PageCommitPhys: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
     static __VWIN32_QueueUserApc: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
+    static _VMM_Add_DDB: unsafe extern "C" fn();
+    static _VMM_Remove_DDB: unsafe extern "C" fn();
     static _Unhook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();

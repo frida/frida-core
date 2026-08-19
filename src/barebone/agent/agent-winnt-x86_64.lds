@@ -26,6 +26,8 @@ SECTIONS {
     _KeWaitForSingleObject = .; . += 8;
     _KeSetEvent = .; . += 8;
     _KeInitializeDpc = .; . += 8;
+    _PsSetCreateThreadNotifyRoutine = .; . += 8;
+    _PsRemoveCreateThreadNotifyRoutine = .; . += 8;
     _KeInsertQueueDpc = .; . += 8;
     _ZwYieldExecution = .; . += 8;
     _KeBugCheckEx = .; . += 8;

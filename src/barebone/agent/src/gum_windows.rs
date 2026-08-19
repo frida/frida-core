@@ -6,7 +6,7 @@ use crate::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
         gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
-        GumFoundThreadFunc, GumRangeDetails, GumThreadDetails, GumThreadId,
+        GumFoundThreadFunc, GumRangeDetails, GumThreadDetails, GumThreadId, GumThreadRegistry,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -326,6 +326,49 @@ pub extern "C" fn _gum_process_enumerate_ranges(
         unsafe { emit(&details, user_data) };
     });
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
+    unsafe { THREAD_REGISTRY = registry };
+
+    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
+
+    if kernel::watches_threads() {
+        kernel::watch_threads(announce_thread, announce_thread_is_gone);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
+    if kernel::watches_threads() {
+        kernel::forget_threads();
+    }
+
+    unsafe { THREAD_REGISTRY = ptr::null_mut() };
+}
+
+fn announce_thread(id: u32) {
+    let registry = unsafe { THREAD_REGISTRY };
+    if registry.is_null() {
+        return;
+    }
+
+    let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+    details.id = id as GumThreadId;
+
+    unsafe { crate::bindings::gum_barebone_register_thread(registry, &details) };
+}
+
+fn announce_thread_is_gone(id: u32) {
+    let registry = unsafe { THREAD_REGISTRY };
+    if registry.is_null() {
+        return;
+    }
+
+    unsafe { crate::bindings::gum_barebone_unregister_thread(registry, id as GumThreadId) };
+}
+
+static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {

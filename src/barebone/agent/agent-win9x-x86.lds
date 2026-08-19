@@ -30,6 +30,8 @@ SECTIONS {
     __PageFree = .; . += 4;
     __CopyPageTable = .; . += 4;
     __MapPhysToLinear = .; . += 4;
+    _VMM_Add_DDB = .; . += 4;
+    _VMM_Remove_DDB = .; . += 4;
     __RegOpenKey = .; . += 4;
     __RegCloseKey = .; . += 4;
     __RegEnumKey = .; . += 4;

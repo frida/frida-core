@@ -17,6 +17,11 @@ pub use crate::winnt_user::{
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
 #[cfg(target_arch = "x86")]
+#[cfg(target_arch = "x86")]
+type ThreadChangeRoutine = unsafe extern "stdcall" fn(usize, usize, u8);
+#[cfg(target_arch = "x86_64")]
+type ThreadChangeRoutine = unsafe extern "win64" fn(usize, usize, u8);
+
 macro_rules! windows_fn {
     ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
     ($($argument:ty),* $(,)? => $result:ty) => {
@@ -466,6 +471,52 @@ pub type InterruptHandler =
 
 // The kernel has no interface to install a handler, thus the code replaces the gates. Each
 // processor has its own table, and these guests have one processor.
+pub fn watches_threads() -> bool {
+    !in_copy()
+}
+
+pub fn watch_threads(appeared: fn(u32), vanished: fn(u32)) {
+    unsafe {
+        THREAD_APPEARED = Some(appeared);
+        THREAD_VANISHED = Some(vanished);
+
+        (_PsSetCreateThreadNotifyRoutine)(on_thread_change);
+    }
+}
+
+pub fn forget_threads() {
+    unsafe {
+        (_PsRemoveCreateThreadNotifyRoutine)(on_thread_change);
+        THREAD_APPEARED = None;
+        THREAD_VANISHED = None;
+    }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn on_thread_change(process: usize, thread: usize, created: u8) {
+    thread_changed(process, thread, created);
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn on_thread_change(process: usize, thread: usize, created: u8) {
+    thread_changed(process, thread, created);
+}
+
+fn thread_changed(_process: usize, thread: usize, created: u8) {
+    let told = if created != 0 {
+        unsafe { THREAD_APPEARED }
+    } else {
+        unsafe { THREAD_VANISHED }
+    };
+
+    if let Some(told) = told {
+        told(thread as u32);
+    }
+}
+
+static mut THREAD_APPEARED: Option<fn(u32)> = None;
+static mut THREAD_VANISHED: Option<fn(u32)> = None;
+
 pub fn install_fault_reporter() {
     unsafe {
         FAULT_CHAIN[INVALID_OPCODE as usize] = hook_gate(INVALID_OPCODE, frida_winnt_fault_thunk_ud);
@@ -1768,6 +1819,10 @@ pub fn select_user() {
     unsafe { ACTIVE = &crate::winnt_user::USER };
 }
 
+pub fn in_copy() -> bool {
+    core::ptr::eq(primitives(), &crate::winnt_user::USER)
+}
+
 fn primitives() -> &'static Primitives {
     unsafe { ACTIVE }
 }
@@ -2797,6 +2852,8 @@ kernel_abi! {
     static _KeInitializeEvent: windows_fn!(*mut c_void, u32, u8);
     static _KeWaitForSingleObject: windows_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
     static _KeSetEvent: windows_fn!(*mut c_void, u32, u8 => i32);
+    static _PsSetCreateThreadNotifyRoutine: windows_fn!(ThreadChangeRoutine => i32);
+    static _PsRemoveCreateThreadNotifyRoutine: windows_fn!(ThreadChangeRoutine => i32);
     static _KeInitializeDpc: windows_fn!(*mut c_void, DeferredRoutine, *mut c_void);
     static _KeInsertQueueDpc: windows_fn!(*mut c_void, *mut c_void, *mut c_void => u8);
     static _ZwYieldExecution: windows_fn!( => i32);

@@ -85,6 +85,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/watches-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) => watches_threads_in_live_guest.begin (h as SlowHarness,
+				win9x_config_from_environment (h as SlowHarness), "C:\\WINDOWS\\NOTEPAD.EXE"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-applications-in-live-guest", () => {
 			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -236,6 +242,13 @@ namespace Frida.BareboneTest {
 		GLib.Test.add_func ("/Barebone/WinNt/sees-a-module-arrive-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_sees_a_module_arrive_in_live_guest.begin (
 				h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/watches-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) => watches_threads_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT"),
+				"C:\\WINDOWS\\system32\\notepad.exe"));
 			h.run ();
 		});
 
@@ -1917,6 +1930,68 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private async void watches_threads_in_live_guest (SlowHarness h, BareboneConfig? config,
+			string program) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			var session = yield device.attach (0, null, null);
+			var script = yield session.create_script ("""
+				const seen = { added: 0, removed: 0 };
+				const known = new Set(Process.enumerateThreads().map(t => t.id.toString()));
+				Process.attachThreadObserver({
+					onAdded(thread) {
+						seen.added++;
+						const here = Process.getCurrentThreadId();
+						send(['added', thread.id.toString(), here.toString(),
+							here === thread.id]);
+					},
+					onRemoved(thread) {
+						seen.removed++;
+					}
+				});
+				recv('poll', () => { send(['seen', seen.added, seen.removed, known.size]); });
+				send(['ready', known.size]);
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+			printerr ("\nREADY %s\n", said[0]);
+
+			uint pid = yield device.spawn (program, null, null);
+			yield device.resume (pid, null);
+
+			var settle = new TimeoutSource.seconds (5);
+			settle.set_callback (watches_threads_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			script.post ("""{"type":"poll"}""");
+			while (said.size < 2)
+				yield h.process_events ();
+			printerr ("\nSEEN %s\n", said[said.size - 1]);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private async void enumerates_applications_in_live_guest (SlowHarness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
@@ -3359,7 +3434,7 @@ namespace Frida.BareboneTest {
 
 	// The same guest is described the same way whatever its word size, so the two differ only in
 	// which set of variables names it.
-	private BareboneConfig? winnt_config_from_environment (Harness h, string prefix) {
+	private BareboneConfig? winnt_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
 		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
 		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
 		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
