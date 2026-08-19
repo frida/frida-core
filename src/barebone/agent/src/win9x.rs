@@ -18,9 +18,12 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::win9x_user::{
-    LoadedModule, LoaderEntryPoints, enumerate_modules, loader_entry_points, on_module_load,
-    on_module_load_with_flags, on_module_unload, resume_process, spawn_process,
+    LoadedModule, LoaderEntryPoints, ThreadEntryPoints, enumerate_modules, loader_entry_points,
+    on_module_load, on_module_load_with_flags, on_module_unload, on_thread_exit, resume_process,
+    spawn_process, thread_entry_points, thread_exit_slot, thread_start, thread_start_slot,
 };
+
+pub use frida_win9x_thread_start_thunk as on_thread_start;
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/SYSTEM/VMM32/";
 
@@ -2051,6 +2054,13 @@ pub fn forget_threads() {
 }
 
 #[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_thread_start() -> usize {
+    crate::gum_windows::thread_appeared(current_thread_id() as u32);
+
+    thread_start()
+}
+
+#[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
     let told = match message {
         THREAD_INIT => unsafe { THREAD_APPEARED },
@@ -2395,6 +2405,7 @@ unsafe extern "C" {
     fn vmm_add_ddb(ddb: u32) -> u32;
     fn vmm_remove_ddb(ddb: u32);
     fn frida_win9x_control_thunk();
+    pub fn frida_win9x_thread_start_thunk();
     fn unhook_vmm_fault(fault: u32, handler: u32);
     fn frida_win9x_fault_thunk_ud();
     fn frida_win9x_fault_thunk_gp();
@@ -2662,6 +2673,17 @@ vmm_remove_ddb:
     pop esi
     pop ebx
     pop ebp
+    ret
+
+.global frida_win9x_thread_start_thunk
+frida_win9x_thread_start_thunk:
+    push eax
+    pushfd
+    pushad
+    call frida_win9x_on_thread_start
+    mov [esp + 36], eax
+    popad
+    popfd
     ret
 
 .global frida_win9x_control_thunk

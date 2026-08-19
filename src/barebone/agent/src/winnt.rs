@@ -13,7 +13,8 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 pub use crate::winnt_user::{
     LoadedModule, LoaderEntryPoints, describe_module, enumerate_modules, loader_entry_points,
     on_module_load, on_module_load_with_flags, on_module_unload, on_thread_exit, on_thread_start,
-    resume_process, spawn_process, thread_entry_points, ThreadEntryPoints,
+    resume_process, spawn_process, thread_entry_points, thread_exit_slot, thread_start_slot,
+    ThreadEntryPoints,
 };
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 

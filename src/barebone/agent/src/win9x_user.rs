@@ -223,6 +223,78 @@ pub unsafe extern "stdcall" fn on_module_unload(handle: u32) -> u32 {
     left
 }
 
+pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
+    Some(ThreadEntryPoints {
+        start: thread_starter()?,
+        exit: kernel32_export(b"ExitThread") as usize,
+    })
+}
+
+pub struct ThreadEntryPoints {
+    pub start: usize,
+    pub exit: usize,
+}
+
+pub fn thread_start() -> usize {
+    unsafe { THREAD_START as usize }
+}
+
+pub fn thread_start_slot() -> *mut *mut c_void {
+    &raw mut THREAD_START as *mut *mut c_void
+}
+
+pub fn thread_exit_slot() -> *mut *mut c_void {
+    &raw mut THREAD_EXIT as *mut *mut c_void
+}
+
+pub unsafe extern "stdcall" fn on_thread_exit(status: u32) -> ! {
+    crate::gum_windows::thread_vanished(current_thread_id() as u32);
+
+    let original: unsafe extern "stdcall" fn(u32) -> ! =
+        unsafe { core::mem::transmute(THREAD_EXIT) };
+    unsafe { original(status) }
+}
+
+fn thread_starter() -> Option<usize> {
+    let api = user_api();
+    let create_thread: unsafe extern "stdcall" fn(u32, u32, *mut u8, u32, u32, *mut u32) -> u32 =
+        unsafe { core::mem::transmute(api.create_thread as usize) };
+    let get_thread_context: unsafe extern "stdcall" fn(u32, *mut u32) -> u32 =
+        unsafe { core::mem::transmute(api.get_thread_context as usize) };
+    let resume_thread: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(api.resume_thread as usize) };
+    let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(api.close_handle as usize) };
+
+    let body = alloc_code(RETURN_AT_ONCE.len());
+    unsafe { body.copy_from_nonoverlapping(RETURN_AT_ONCE.as_ptr(), RETURN_AT_ONCE.len()) };
+
+    let mut id = 0u32;
+    let mut context = [0u32; CONTEXT_WORDS];
+    context[0] = CONTEXT_CONTROL;
+
+    let start = unsafe {
+        let thread = create_thread(0, 0, body, 0, CREATE_SUSPENDED, &mut id);
+        if thread == 0 {
+            return None;
+        }
+
+        get_thread_context(thread, context.as_mut_ptr());
+        resume_thread(thread);
+        close_handle(thread);
+
+        context[CONTEXT_EIP / 4] as usize
+    };
+
+    Some(start + REGISTERS_BACK)
+}
+
+const RETURN_AT_ONCE: [u8; 5] = [0x33, 0xc0, 0xc2, 0x04, 0x00];
+const REGISTERS_BACK: usize = 8;
+
+static mut THREAD_START: *mut c_void = core::ptr::null_mut();
+static mut THREAD_EXIT: *mut c_void = core::ptr::null_mut();
+
 pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
     let load = kernel32_export(b"LoadLibraryA") as usize;
     let unload = kernel32_export(b"FreeLibrary") as usize;

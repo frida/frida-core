@@ -238,6 +238,17 @@ pub struct ThreadEntryPoints {
     pub exit: usize,
 }
 
+pub fn thread_start_slot() -> *mut *mut c_void {
+    &raw mut THREAD_START as *mut *mut c_void
+}
+
+pub fn thread_exit_slot() -> *mut *mut c_void {
+    &raw mut THREAD_EXIT as *mut *mut c_void
+}
+
+static mut THREAD_START: *mut c_void = core::ptr::null_mut();
+static mut THREAD_EXIT: *mut c_void = core::ptr::null_mut();
+
 #[cfg(target_arch = "x86")]
 pub unsafe extern "stdcall" fn on_thread_start(routine: usize, parameter: usize) -> ! {
     unsafe { start_thread(routine, parameter) }
@@ -252,7 +263,7 @@ unsafe fn start_thread(routine: usize, parameter: usize) -> ! {
     crate::gum_windows::thread_appeared(current_thread_id() as u32);
 
     let original: windows_fn!(usize, usize => !) =
-        unsafe { core::mem::transmute(crate::gum_windows::thread_start()) };
+        unsafe { core::mem::transmute(THREAD_START) };
     unsafe { original(routine, parameter) }
 }
 
@@ -270,7 +281,7 @@ unsafe fn exit_thread(status: u32) -> ! {
     crate::gum_windows::thread_vanished(current_thread_id() as u32);
 
     let original: windows_fn!(u32 => !) =
-        unsafe { core::mem::transmute(crate::gum_windows::thread_exit()) };
+        unsafe { core::mem::transmute(THREAD_EXIT) };
     unsafe { original(status) }
 }
 
