@@ -284,6 +284,8 @@ mod entrypoint_blob {
             {
                 destroy_all_scripts(context);
                 kernel::stop_copies();
+                #[cfg(feature = "win9x")]
+                kernel::release_shared_hooks();
                 transport_get_unchecked().shutdown();
                 kernel::release_interrupt();
                 kernel::release_fault_reporter();

@@ -216,6 +216,25 @@ pub fn hook_shared_code(pid: u32, target: u32, patch: &[u8]) -> bool {
     add_guard(&mut hooks[index], pid, destination)
 }
 
+pub fn release_shared_hooks() {
+    let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
+
+    for hook in hooks.iter() {
+        unsafe {
+            protect(
+                hook.target as u64,
+                hook.original.len(),
+                GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
+            );
+            for (offset, byte) in hook.original.iter().enumerate() {
+                ((hook.target + offset as u32) as *mut u8).write(*byte);
+            }
+        }
+    }
+
+    hooks.clear();
+}
+
 fn shared_hook_for(target: u32) -> Option<usize> {
     let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
     if let Some(index) = hooks.iter().position(|hook| hook.target == target) {
