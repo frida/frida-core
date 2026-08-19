@@ -138,6 +138,7 @@ unsafe fn start_on_own_stack(context: *mut c_void) {
     let stack = alloc(THREAD_STACK_SIZE);
     unsafe {
         frida_winnt_run_on_stack(stack.add(THREAD_STACK_SIZE), run_agent, context);
+        free(stack, THREAD_STACK_SIZE);
     }
 }
 
@@ -145,7 +146,6 @@ unsafe extern "C" fn run_agent(context: *mut c_void) {
     let start = unsafe { Box::from_raw(context as *mut ThreadStart) };
     unsafe {
         (start.entry)(start.parameter, 0);
-        (_PsTerminateSystemThread)(0);
     }
 }
 
@@ -2517,15 +2517,18 @@ core::arch::global_asm!(
 
 .global frida_winnt_run_on_stack
 frida_winnt_run_on_stack:
-    mov ecx, [esp + 4]
-    mov edx, [esp + 8]
-    mov eax, [esp + 12]
+    push ebp
+    mov ebp, esp
+    mov ecx, [ebp + 8]
+    mov edx, [ebp + 12]
+    mov eax, [ebp + 16]
     and ecx, -16
     mov esp, ecx
     push eax
     call edx
-1:
-    jmp 1b
+    mov esp, ebp
+    pop ebp
+    ret
 
 .macro FAULT_THUNK name, vector
 .global \name
@@ -2577,12 +2580,15 @@ core::arch::global_asm!(
 
 .global frida_winnt_run_on_stack
 frida_winnt_run_on_stack:
+    push rbp
+    mov rbp, rsp
     and rdi, -16
     mov rsp, rdi
     mov rdi, rdx
     call rsi
-1:
-    jmp 1b
+    mov rsp, rbp
+    pop rbp
+    ret
 
 .set GPR_BYTES, 128
 
@@ -2695,7 +2701,6 @@ kernel_abi! {
         ThreadStartRoutine,
         *mut c_void,
         => i32);
-    static _PsTerminateSystemThread: windows_fn!(i32 => i32);
     static _PsGetCurrentThreadId: windows_fn!( => u32);
     static _KeInitializeEvent: windows_fn!(*mut c_void, u32, u8);
     static _KeWaitForSingleObject: windows_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);

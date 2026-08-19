@@ -16,7 +16,6 @@ SECTIONS {
     _ExAllocatePoolWithTag = .; . += 4;
     _ExFreePoolWithTag = .; . += 4;
     _PsCreateSystemThread = .; . += 4;
-    _PsTerminateSystemThread = .; . += 4;
     _PsGetCurrentThreadId = .; . += 4;
     _KeInitializeEvent = .; . += 4;
     _KeWaitForSingleObject = .; . += 4;
