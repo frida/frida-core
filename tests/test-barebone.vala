@@ -80,6 +80,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/spawns-a-16-bit-program-in-live-guest", () => {
+			var h = new Harness ((h) => spawns_a_16_bit_program_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/names-a-16-bit-process-in-live-guest", () => {
 			var h = new Harness ((h) => names_a_16_bit_process_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1833,6 +1838,48 @@ namespace Frida.BareboneTest {
 		}
 
 		return 0;
+	}
+
+	private async void spawns_a_16_bit_program_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield device.spawn ("C:\\WINDOWS\\SOL.EXE", null, null);
+			assert_true (pid != 0);
+
+			var settle = new TimeoutSource.seconds (3);
+			settle.set_callback (spawns_a_16_bit_program_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			assert_true ((yield find_program (device, "sol.exe")) == pid);
+
+			yield device.resume (pid, null);
+
+			var running = new TimeoutSource.seconds (2);
+			running.set_callback (spawns_a_16_bit_program_in_live_guest.callback);
+			running.attach (MainContext.get_thread_default ());
+			yield;
+			running.destroy ();
+
+			assert_true ((yield find_program (device, "sol.exe")) == pid);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void names_a_16_bit_process_in_live_guest (Harness h) {

@@ -598,7 +598,7 @@ fn patch_in_process(pid: u32, address: &mut u32, bytes: u32) -> u32 {
     }
 
     let mut previous = 0;
-    if *address != 0 {
+    if *address != 0 && *address != NOTHING_TO_HOLD {
         previous = unsafe { (*address as *const u16).read_unaligned() } as u32;
         kernel::protect(*address as u64, PATCH_SIZE, GUM_PAGE_WRITE);
         unsafe { (*address as *mut u16).write_unaligned(bytes as u16) };
@@ -610,6 +610,12 @@ fn patch_in_process(pid: u32, address: &mut u32, bytes: u32) -> u32 {
 }
 
 fn entry_point_of(pdb: u32) -> u32 {
+    // A 16 bit program runs in the shared machine, and the only module its process record names
+    // is KERNEL32. There is no first instruction of its own to hold it at.
+    if is_win16_task(pdb) {
+        return NOTHING_TO_HOLD;
+    }
+
     let table = module_table();
     let first = unsafe { (pdb as *const u32).byte_add(PDB_MODREF_OFFSET).read() };
     if table == 0 || first < ARENA_FLOOR {
@@ -1809,6 +1815,7 @@ fn image_path(pdb: u32) -> *const u8 {
 const WIN32_THREAD: u32 = 0x2a;
 const PDB_FLAGS_OFFSET: usize = 0x20;
 const WIN16_TASK: u32 = 0x08;
+pub(crate) const NOTHING_TO_HOLD: u32 = 0xffff_ffff;
 pub(crate) const ARENA_FLOOR: u32 = 0x10000;
 pub(crate) const PDB_MODREF_OFFSET: usize = 0x94;
 const PDB_ENVIRONMENT_OFFSET: usize = 0x40;

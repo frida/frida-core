@@ -446,6 +446,9 @@ pub fn spawn_process(command_line: &str) -> u32 {
 
 fn hold_at_entry_point(pid: u32, thread: u32) -> Option<()> {
     let (entry_point, prologue) = patch(pid, 0, HOLD_INSTRUCTION)?;
+    if entry_point == NOTHING_TO_HOLD {
+        return Some(());
+    }
     if entry_point == 0 {
         return None;
     }
