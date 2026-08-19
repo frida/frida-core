@@ -75,6 +75,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/hooks-again-after-letting-go-in-live-guest", () => {
+			var h = new Harness ((h) => hooks_again_after_letting_go_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => injects_into_process_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1697,6 +1702,99 @@ namespace Frida.BareboneTest {
 			while (elsewhere.size < 1)
 				yield h.process_events ();
 			assert_true (hits.size == 1);
+
+			hooking.post ("""{"type":"call"}""");
+			for (uint i = 0; i != 300; i++)
+				yield h.process_events ();
+			hooking.post ("""{"type":"poll"}""");
+			while (hits.size < 2)
+				yield h.process_events ();
+			assert_true (hits[1].contains ("\"seen\",1"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void hooks_again_after_letting_go_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint spawned = yield device.spawn ("C:\\WINDOWS\\NOTEPAD.EXE", null, null);
+			var watcher = yield device.attach (spawned, null, null);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint other = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					other = processes.get (i).pid;
+			}
+			assert_true (other != 0);
+			var bystander = yield device.attach (other, null, null);
+
+			var early = yield bystander.create_script ("""
+				const target = Process.getModuleByName('KERNEL32.DLL').getExportByName('GetACP');
+				Interceptor.attach(target, { onEnter() {} });
+				send('hooked');
+			""", null, null);
+			var announced = new Gee.ArrayList<string> ();
+			early.message.connect ((json, data) => {
+				announced.add (json);
+			});
+			yield early.load (null);
+			while (announced.size < 1)
+				yield h.process_events ();
+			yield early.unload (null);
+
+			var hooking = yield watcher.create_script ("""
+				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
+				const named = name => kernel32.getExportByName(name);
+
+				const target = named('GetACP');
+				const seen = Memory.alloc(4);
+				seen.writeU32(0);
+				Interceptor.attach(target, {
+					onEnter() {
+						seen.writeU32(seen.readU32() + 1);
+					}
+				});
+
+				const stub = Memory.alloc(Process.pageSize);
+				Memory.patchCode(stub, 32, code => {
+					const cw = new X86Writer(code, { pc: stub });
+					cw.putCallAddress(target);
+					cw.putRet();
+					cw.flush();
+				});
+				const createThread = new NativeFunction(named('CreateThread'), 'pointer',
+					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+
+				recv('call', () => {
+					createThread(NULL, 0, stub, NULL, 0, NULL);
+				});
+				recv('poll', () => { send(['seen', seen.readU32()]); });
+				send('hooked');
+			""", null, null);
+
+			var hits = new Gee.ArrayList<string> ();
+			hooking.message.connect ((json, data) => {
+				hits.add (json);
+			});
+			yield hooking.load (null);
+			while (hits.size < 1)
+				yield h.process_events ();
 
 			hooking.post ("""{"type":"call"}""");
 			for (uint i = 0; i != 300; i++)

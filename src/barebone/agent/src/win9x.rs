@@ -219,16 +219,9 @@ pub fn hook_shared_code(pid: u32, target: u32, patch: &[u8]) -> bool {
 pub fn release_shared_hooks() {
     let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
 
-    for hook in hooks.iter() {
-        unsafe {
-            protect(
-                hook.target as u64,
-                hook.original.len(),
-                GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
-            );
-            for (offset, byte) in hook.original.iter().enumerate() {
-                ((hook.target + offset as u32) as *mut u8).write(*byte);
-            }
+    for hook in hooks.iter_mut() {
+        if hook.entered {
+            write_original(hook);
         }
     }
 
@@ -259,6 +252,7 @@ fn shared_hook_for(target: u32) -> Option<usize> {
         original,
         head: resume,
         free: page + GUARDS_OFFSET,
+        entered: false,
         guards: alloc::vec::Vec::new(),
     });
 
@@ -268,6 +262,13 @@ fn shared_hook_for(target: u32) -> Option<usize> {
 fn add_guard(hook: &mut SharedHook, pid: u32, destination: u32) -> bool {
     if let Some((_, guard)) = hook.guards.iter().find(|(known, _)| *known == pid).copied() {
         write_guard(guard, pid, destination, guard_next(guard));
+        return true;
+    }
+
+    if let Some(guard) = unclaimed_guard(hook) {
+        hook.guards.push((pid, guard));
+        write_guard(guard, pid, destination, guard_next(guard));
+        lead_to_the_chain(hook);
         return true;
     }
 
@@ -281,14 +282,60 @@ fn add_guard(hook: &mut SharedHook, pid: u32, destination: u32) -> bool {
     hook.head = guard;
     hook.guards.push((pid, guard));
 
-    jump_to(hook.target, guard, hook.original.len());
+    lead_to_the_chain(hook);
 
     true
 }
 
+fn lead_to_the_chain(hook: &mut SharedHook) {
+    jump_to(hook.target, hook.head, hook.original.len());
+    hook.entered = true;
+}
+
 fn forget_guard(hook: &mut SharedHook, pid: u32) {
-    if let Some((_, guard)) = hook.guards.iter().find(|(known, _)| *known == pid).copied() {
-        unsafe { ((guard + GUARD_PROCESS) as *mut u32).write_unaligned(0) };
+    let Some((_, guard)) = hook.guards.iter().find(|(known, _)| *known == pid).copied() else {
+        return;
+    };
+
+    unsafe { ((guard + GUARD_PROCESS) as *mut u32).write_unaligned(0) };
+    hook.guards.retain(|(known, _)| *known != pid);
+
+    if hook.guards.is_empty() {
+        write_original(hook);
+    }
+}
+
+fn write_original(hook: &mut SharedHook) {
+    unsafe {
+        protect(
+            hook.target as u64,
+            hook.original.len(),
+            GUM_PAGE_READ | GUM_PAGE_WRITE | GUM_PAGE_EXECUTE,
+        );
+        for (offset, byte) in hook.original.iter().enumerate() {
+            ((hook.target + offset as u32) as *mut u8).write(*byte);
+        }
+    }
+
+    hook.entered = false;
+}
+
+fn unclaimed_guard(hook: &SharedHook) -> Option<u32> {
+    let mut guard = hook.head;
+    while guard >= hook.guards_start() && guard < hook.free {
+        if unsafe { ((guard + GUARD_PROCESS) as *const u32).read_unaligned() } == 0 {
+            return Some(guard);
+        }
+        guard = guard_next(guard);
+    }
+
+    None
+}
+
+pub fn forget_guards_of(pid: u32) {
+    let hooks = unsafe { (&raw mut SHARED_HOOKS).as_mut().unwrap() };
+    for hook in hooks.iter_mut() {
+        forget_guard(hook, pid);
     }
 }
 
@@ -379,11 +426,18 @@ fn jump_to(target: u32, destination: u32, span: usize) {
     }
 }
 
+impl SharedHook {
+    fn guards_start(&self) -> u32 {
+        (self.free & !(PAGE_SIZE - 1)) + GUARDS_OFFSET
+    }
+}
+
 struct SharedHook {
     target: u32,
     original: alloc::vec::Vec<u8>,
     head: u32,
     free: u32,
+    entered: bool,
     guards: alloc::vec::Vec<(u32, u32)>,
 }
 
@@ -439,6 +493,8 @@ pub fn detach_from_process(pid: u32) -> bool {
     free_shared(target.stack);
     free_shared(target.image_base);
     free_shared(arena);
+
+    forget_guards_of(pid);
 
     true
 }
