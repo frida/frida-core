@@ -234,6 +234,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/watches-its-own-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) => winnt_watches_its_own_threads_in_live_guest.begin (
+				h as SlowHarness, "WINNT"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_injects_into_process_in_live_guest.begin (h as Harness, "WINNT"));
 			h.run ();
@@ -310,6 +316,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/watches-its-own-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) => winnt_watches_its_own_threads_in_live_guest.begin (
+				h as SlowHarness, "WINNT64"));
 			h.run ();
 		});
 
@@ -2553,6 +2565,93 @@ namespace Frida.BareboneTest {
 			const drivers = mods.some(m => m.name === 'atapi.sys');
 			send({ named, hal, drivers });
 		""", "\"named\":true,\"hal\":true,\"drivers\":true");
+	}
+
+	private async void winnt_watches_its_own_threads_in_live_guest (SlowHarness h, string prefix) {
+		var config = winnt_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_program (device, "explorer.exe");
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const seen = [];
+				Process.attachThreadObserver({
+					onAdded(thread) {
+						seen.push(['added', thread.id.toString(),
+							Process.getCurrentThreadId() === thread.id]);
+					},
+					onRemoved(thread) {
+						seen.push(['removed', thread.id.toString()]);
+					}
+				});
+
+				const k32 = Process.getModuleByName('kernel32.dll');
+				const createThread = new NativeFunction(k32.getExportByName('CreateThread'),
+					'pointer', ['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer'],
+					{ abi: Process.arch === 'ia32' ? 'stdcall' : 'win64' });
+				const closeHandle = new NativeFunction(k32.getExportByName('CloseHandle'),
+					'int', ['pointer'], { abi: Process.arch === 'ia32' ? 'stdcall' : 'win64' });
+
+				const body = Memory.alloc(Process.pageSize);
+				Memory.protect(body, Process.pageSize, 'rwx');
+				Memory.patchCode(body, 16, code => {
+					const w = new X86Writer(code, { pc: body });
+					w.putXorRegReg('eax', 'eax');
+					if (Process.arch === 'ia32')
+						w.putRetImm(4);
+					else
+						w.putRet();
+					w.flush();
+				});
+
+				const out = Memory.alloc(4);
+				const handle = createThread(NULL, 0, body, NULL, 0, out);
+				const made = out.readU32();
+				closeHandle(handle);
+
+				recv('poll', () => {
+					const mine = seen.filter(e => e[1] === made.toString());
+					send(['saw', mine.some(e => e[0] === 'added' && e[2]),
+						mine.some(e => e[0] === 'removed'), seen.length]);
+				});
+				send('ready');
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			var settle = new TimeoutSource.seconds (3);
+			settle.set_callback (winnt_watches_its_own_threads_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			script.post ("""{"type":"poll"}""");
+			while (said.size < 2)
+				yield h.process_events ();
+			printerr ("\nSAW %s\n", said[said.size - 1]);
+
+			assert_true (said[said.size - 1].contains ("\"saw\",true,true,"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void winnt_injects_into_process_in_live_guest (Harness h, string prefix) {

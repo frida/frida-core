@@ -12,7 +12,8 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
     LoadedModule, LoaderEntryPoints, describe_module, enumerate_modules, loader_entry_points,
-    on_module_load, on_module_load_with_flags, on_module_unload, resume_process, spawn_process,
+    on_module_load, on_module_load_with_flags, on_module_unload, on_thread_exit, on_thread_start,
+    resume_process, spawn_process, thread_entry_points, ThreadEntryPoints,
 };
 use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
@@ -809,6 +810,10 @@ const GENERAL_PROTECTION: u32 = 13;
 const PAGE_FAULT: u32 = 14;
 
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+    (primitives().enumerate_threads)(found)
+}
+
+fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
     let Some(layout) = thread_layout() else {
         found(ThreadInfo { id: current_thread_id() as u32, cpu_state: None });
         return;
@@ -1807,6 +1812,7 @@ pub struct Primitives {
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
+    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
     pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
     pub wake: fn(*const u8),
     pub yield_now: fn(),
@@ -1838,6 +1844,7 @@ static KERNEL: Primitives = Primitives {
     protect: kernel::protect,
     protection_at: kernel::protection_at,
     enumerate_ranges: kernel::enumerate_ranges,
+    enumerate_threads: kernel::enumerate_threads,
     wait: kernel::wait,
     wake: kernel::wake,
     yield_now: kernel::yield_now,
@@ -1886,6 +1893,10 @@ mod kernel {
 
     pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
         crate::winnt_paging::enumerate_ranges(found)
+    }
+
+    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+        super::enumerate_ring_zero_threads(found)
     }
 
     pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {

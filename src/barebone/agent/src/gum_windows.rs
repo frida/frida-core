@@ -335,6 +335,8 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
 
     if kernel::watches_threads() {
         kernel::watch_threads(announce_thread, announce_thread_is_gone);
+    } else {
+        watch_the_threads();
     }
 }
 
@@ -342,10 +344,75 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
 pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
     if kernel::watches_threads() {
         kernel::forget_threads();
+    } else {
+        forget_the_threads();
     }
 
     unsafe { THREAD_REGISTRY = ptr::null_mut() };
 }
+
+#[cfg(feature = "winnt")]
+fn watch_the_threads() {
+    let Some(entries) = kernel::thread_entry_points() else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_replace(interceptor, entries.start as gpointer,
+            kernel::on_thread_start as gpointer, &raw mut THREAD_START, ptr::null());
+        crate::bindings::gum_interceptor_replace(interceptor, entries.exit as gpointer,
+            kernel::on_thread_exit as gpointer, &raw mut THREAD_EXIT, ptr::null());
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+#[cfg(not(feature = "winnt"))]
+fn watch_the_threads() {}
+
+#[cfg(feature = "winnt")]
+fn forget_the_threads() {
+    let Some(entries) = kernel::thread_entry_points() else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_revert(interceptor, entries.start as gpointer);
+        crate::bindings::gum_interceptor_revert(interceptor, entries.exit as gpointer);
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+#[cfg(not(feature = "winnt"))]
+fn forget_the_threads() {}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn thread_appeared(id: u32) {
+    announce_thread(id);
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn thread_vanished(id: u32) {
+    announce_thread_is_gone(id);
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn thread_start() -> gpointer {
+    unsafe { THREAD_START }
+}
+
+#[cfg(feature = "winnt")]
+pub(crate) fn thread_exit() -> gpointer {
+    unsafe { THREAD_EXIT }
+}
+
+#[cfg(feature = "winnt")]
+static mut THREAD_START: gpointer = ptr::null_mut();
+#[cfg(feature = "winnt")]
+static mut THREAD_EXIT: gpointer = ptr::null_mut();
 
 fn announce_thread(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };

@@ -119,6 +119,7 @@ pub static USER: Primitives = Primitives {
     protect,
     protection_at,
     enumerate_ranges,
+    enumerate_threads,
     wait,
     wake,
     yield_now,
@@ -224,6 +225,88 @@ pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
         unload: export(ntdll, b"LdrUnloadDll"),
     })
 }
+
+pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
+    Some(ThreadEntryPoints {
+        start: thread_starter()?,
+        exit: export(module_base(peb(), b"kernel32.dll"), b"ExitThread"),
+    })
+}
+
+pub struct ThreadEntryPoints {
+    pub start: usize,
+    pub exit: usize,
+}
+
+#[cfg(target_arch = "x86")]
+pub unsafe extern "stdcall" fn on_thread_start(routine: usize, parameter: usize) -> ! {
+    unsafe { start_thread(routine, parameter) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "win64" fn on_thread_start(routine: usize, parameter: usize) -> ! {
+    unsafe { start_thread(routine, parameter) }
+}
+
+unsafe fn start_thread(routine: usize, parameter: usize) -> ! {
+    crate::gum_windows::thread_appeared(current_thread_id() as u32);
+
+    let original: windows_fn!(usize, usize => !) =
+        unsafe { core::mem::transmute(crate::gum_windows::thread_start()) };
+    unsafe { original(routine, parameter) }
+}
+
+#[cfg(target_arch = "x86")]
+pub unsafe extern "stdcall" fn on_thread_exit(status: u32) -> ! {
+    unsafe { exit_thread(status) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "win64" fn on_thread_exit(status: u32) -> ! {
+    unsafe { exit_thread(status) }
+}
+
+unsafe fn exit_thread(status: u32) -> ! {
+    crate::gum_windows::thread_vanished(current_thread_id() as u32);
+
+    let original: windows_fn!(u32 => !) =
+        unsafe { core::mem::transmute(crate::gum_windows::thread_exit()) };
+    unsafe { original(status) }
+}
+
+// The thread starter of this system is not exported, thus it is found through the thunk that
+// leads to it: xor ebp, ebp; push ebx; push eax; push 0; jmp <starter>.
+#[cfg(target_arch = "x86")]
+fn thread_starter() -> Option<usize> {
+    let library = module_base(peb(), b"kernel32.dll");
+    let text = unsafe {
+        core::slice::from_raw_parts(library as *const u8, image_size(library))
+    };
+
+    let jump = text.windows(THREAD_THUNK.len())
+        .position(|window| window == THREAD_THUNK)
+        .map(|offset| library + offset + THREAD_THUNK.len() - 1)?;
+
+    let displacement = unsafe { ((jump + 1) as *const i32).read_unaligned() };
+
+    Some((jump as isize + 5 + displacement as isize) as usize)
+}
+
+const THREAD_THUNK: [u8; 7] = [0x33, 0xed, 0x53, 0x50, 0x6a, 0x00, 0xe9];
+
+#[cfg(target_arch = "x86_64")]
+fn thread_starter() -> Option<usize> {
+    Some(export(module_base(peb(), b"kernel32.dll"), b"BaseThreadStart"))
+}
+
+fn image_size(base: usize) -> usize {
+    unsafe {
+        let headers = base + ((base + PE_SIGNATURE_OFFSET) as *const u32).read() as usize;
+        ((headers + PE_IMAGE_SIZE_OFFSET) as *const u32).read() as usize
+    }
+}
+
+const PE_IMAGE_SIZE_OFFSET: usize = 0x50;
 
 pub struct LoaderEntryPoints {
     pub load: usize,
@@ -822,6 +905,61 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
         address = address.wrapping_add(size);
     }
 }
+
+fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
+    let api = thread_list_api();
+    unsafe {
+        let snapshot = (api.create_snapshot)(SNAP_THREAD, 0);
+        if snapshot == INVALID_HANDLE {
+            return;
+        }
+
+        let ours = current_process_id();
+        let mut entry = [0u32; THREAD_ENTRY_WORDS];
+        entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+        let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
+        while more != 0 {
+            if entry[THREAD_ENTRY_OWNER] == ours {
+                found(crate::kernel::ThreadInfo { id: entry[THREAD_ENTRY_ID], cpu_state: None });
+            }
+            entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+            more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
+        }
+
+        (api.close)(snapshot);
+    }
+}
+
+fn thread_list_api() -> &'static ThreadListApi {
+    unsafe {
+        if (*core::ptr::addr_of!(THREAD_LIST_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            THREAD_LIST_API = Some(ThreadListApi {
+                create_snapshot: core::mem::transmute(
+                    export(library, b"CreateToolhelp32Snapshot")),
+                first: core::mem::transmute(export(library, b"Thread32First")),
+                next: core::mem::transmute(export(library, b"Thread32Next")),
+                close: core::mem::transmute(export(library, b"CloseHandle")),
+            });
+        }
+        (*core::ptr::addr_of!(THREAD_LIST_API)).as_ref().unwrap()
+    }
+}
+
+struct ThreadListApi {
+    create_snapshot: windows_fn!(u32, u32 => *mut c_void),
+    first: windows_fn!(*mut c_void, *mut u8 => i32),
+    next: windows_fn!(*mut c_void, *mut u8 => i32),
+    close: windows_fn!(*mut c_void => i32),
+}
+
+static mut THREAD_LIST_API: Option<ThreadListApi> = None;
+
+const SNAP_THREAD: u32 = 0x4;
+const INVALID_HANDLE: *mut c_void = usize::MAX as *mut c_void;
+const THREAD_ENTRY_WORDS: usize = 7;
+const THREAD_ENTRY_ID: usize = 2;
+const THREAD_ENTRY_OWNER: usize = 3;
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let slot = slot_for_token(token);
