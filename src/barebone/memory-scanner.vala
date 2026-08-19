@@ -73,8 +73,6 @@ namespace Frida.Barebone {
 
 			if (tokens.is_empty)
 				throw_invalid_pattern ();
-			if (tokens.first ().kind == WILDCARD || tokens.last ().kind == WILDCARD)
-				throw_invalid_pattern ();
 
 			foreach (MatchToken t in tokens)
 				size += t.size;
