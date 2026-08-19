@@ -475,6 +475,39 @@ pub fn install_fault_reporter() {
     }
 }
 
+pub fn release_fault_reporter() {
+    unsafe {
+        for vector in [INVALID_OPCODE, GENERAL_PROTECTION, PAGE_FAULT] {
+            let previous = FAULT_CHAIN[vector as usize];
+            if previous != 0 {
+                FAULT_CHAIN[vector as usize] = 0;
+                restore_gate(vector, previous);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn restore_gate(vector: u32, handler: usize) {
+    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
+
+    unsafe {
+        gate.write(handler as u16);
+        gate.add(3).write((handler >> 16) as u16);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn restore_gate(vector: u32, handler: usize) {
+    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
+
+    unsafe {
+        gate.write(handler as u16);
+        gate.add(3).write((handler >> 16) as u16);
+        (gate.add(4) as *mut u32).write((handler >> 32) as u32);
+    }
+}
+
 #[cfg(target_arch = "x86")]
 unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> usize {
     let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;

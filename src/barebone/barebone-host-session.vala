@@ -266,9 +266,14 @@ namespace Frida {
 			if (alloc == null || free == null)
 				return null;
 
+			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			free_arguments.add (new BareboneCallArgument (ADDRESS, 0));
+			free_arguments.add (new BareboneCallArgument (LITERAL, 0));
+
 			return new BareboneTargetFunctionsAllocatorConfig () {
 				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
 				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", free.offset),
+				free_arguments = free_arguments,
 			};
 		}
 

@@ -87,6 +87,7 @@ const COMMON_DEVFEAT: usize = 0x04;
 const COMMON_DRVFEAT_SEL: usize = 0x08;
 const COMMON_DRVFEAT: usize = 0x0c;
 const COMMON_STATUS: usize = 0x14;
+const RESET_ATTEMPTS: u32 = 1_000_000;
 const COMMON_QSEL: usize = 0x16;
 const COMMON_QNUM: usize = 0x18;
 const COMMON_QREADY: usize = 0x1c;
@@ -830,7 +831,16 @@ impl Regs {
             }
             Regs::Pci(p) => {
                 w8(p.common, COMMON_STATUS, 0);
-                while r8(p.common, COMMON_STATUS) != 0 {}
+                let mut left = RESET_ATTEMPTS;
+                while r8(p.common, COMMON_STATUS) != 0 {
+                    left -= 1;
+                    if left == 0 {
+                        unsafe {
+                            kernel::log("virtio: reset not taken\n");
+                        }
+                        break;
+                    }
+                }
                 w8(p.common, COMMON_STATUS, (ST_ACK | ST_DRV) as u8);
             }
         }

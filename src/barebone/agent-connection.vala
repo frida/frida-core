@@ -366,7 +366,11 @@ namespace Frida.Barebone {
 				// The agent says so from its own code, and has a few instructions left to run
 				// there, thus give it the time before the code is taken away.
 				if (left) {
-					yield elf_allocation.deallocate (cancellable);
+					// Giving the memory back takes the guest down on Win9x, where _HeapFree
+					// is called through the stub in whatever context the machine was stopped
+					// in. Thus keep it there until that is understood.
+					if (kernel_kind != WIN9X)
+						yield elf_allocation.deallocate (cancellable);
 					return;
 				}
 			}

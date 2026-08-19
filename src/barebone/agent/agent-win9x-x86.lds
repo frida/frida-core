@@ -33,6 +33,7 @@ SECTIONS {
     __PageReserve = .; . += 4;
     __PageCommit = .; . += 4;
     _Hook_VMM_Fault = .; . += 4;
+    _Unhook_VMM_Fault = .; . += 4;
     _Fatal_Error_Handler = .; . += 4;
     _Get_Cur_Thread_Handle = .; . += 4;
     _VMMTerminateThread = .; . += 4;

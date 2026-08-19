@@ -1700,6 +1700,23 @@ pub fn install_fault_reporter() {
     }
 }
 
+// The chain names code in the image of this agent, thus take this agent out of it before the
+// image can go.
+pub fn release_fault_reporter() {
+    unsafe {
+        for (fault, thunk) in [
+            (INVALID_OPCODE, frida_win9x_fault_thunk_ud as unsafe extern "C" fn()),
+            (GENERAL_PROTECTION, frida_win9x_fault_thunk_gp as unsafe extern "C" fn()),
+            (PAGE_FAULT, frida_win9x_fault_thunk_pf as unsafe extern "C" fn()),
+        ] {
+            if FAULT_CHAIN[fault as usize] != 0 {
+                FAULT_CHAIN[fault as usize] = 0;
+                unhook_vmm_fault(fault, thunk);
+            }
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
     let mut cpu_context = unsafe {
@@ -1935,6 +1952,7 @@ unsafe extern "C" {
     fn set_global_time_out(milliseconds: u32, semaphore: u32) -> u32;
     fn cancel_time_out(timeout: u32);
     fn hook_vmm_fault(fault: u32, handler: unsafe extern "C" fn()) -> u32;
+    fn unhook_vmm_fault(fault: u32, handler: unsafe extern "C" fn());
     fn frida_win9x_fault_thunk_ud();
     fn frida_win9x_fault_thunk_gp();
     fn frida_win9x_fault_thunk_pf();
@@ -2189,6 +2207,23 @@ get_cur_vm_handle:
     ret
 
 .global hook_vmm_fault
+.global unhook_vmm_fault
+unhook_vmm_fault:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov eax, [ebp + 8]
+    mov esi, [ebp + 12]
+    CALL_SERVICE _Unhook_VMM_Fault
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global hook_vmm_fault
 hook_vmm_fault:
     push ebp
     mov ebp, esp
@@ -2398,6 +2433,7 @@ unsafe extern "C" {
     static __PageCommitPhys: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
     static __VWIN32_QueueUserApc: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
+    static _Unhook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
     static _VMMTerminateThread: unsafe extern "C" fn();
