@@ -25,6 +25,7 @@ namespace Frida.Barebone {
 		private Gee.List<SymbolInfo> kernel_symbols;
 
 		private Allocation elf_allocation;
+		private uint64 left_flag;
 		private Gee.Map<string, SymbolInfo> resolved_symbols;
 		private Allocation config_allocation;
 
@@ -34,6 +35,8 @@ namespace Frida.Barebone {
 		private const int COMMAND_TIMEOUT_MS = 25000;
 		private const uint INJECT_MAX_ATTEMPTS = 100;
 		private const uint INJECT_POLL_INTERVAL_MS = 100;
+		private const uint LEAVE_MAX_ATTEMPTS = 40;
+		private const uint LEAVE_INTERVAL_MS = 50;
 
 		public static async AgentConnection open (BareboneAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
@@ -191,6 +194,8 @@ namespace Frida.Barebone {
 			elf.enumerate_symbols (e => {
 				if (e.name == "_start")
 					start_address = base_va + e.address;
+				else if (e.name == "frida_agent_left")
+					left_flag = base_va + e.address;
 				return true;
 			});
 			if (start_address == 0)
@@ -323,6 +328,7 @@ namespace Frida.Barebone {
 		public async void close (Cancellable? cancellable) throws IOError {
 			try {
 				yield execute_command (Command.STOP, new Variant.boolean (true), cancellable);
+				yield wait_for_agent_to_leave (cancellable);
 			} catch (GLib.Error e) {
 			}
 
@@ -337,6 +343,32 @@ namespace Frida.Barebone {
 				var monitor = qmp;
 				qmp = null;
 				yield monitor.close (cancellable);
+			}
+		}
+
+		private async void wait_for_agent_to_leave (Cancellable? cancellable) throws Error, IOError {
+			if (left_flag == 0)
+				return;
+
+			var gdb = machine.gdb;
+			for (uint attempt = 0; attempt != LEAVE_MAX_ATTEMPTS; attempt++) {
+				yield gdb.stop (cancellable);
+				var flag = gdb.make_buffer (yield gdb.read_byte_array (left_flag, 4, cancellable));
+				bool left = flag.read_uint32 (0) != 0;
+				yield gdb.continue (cancellable);
+
+				var timeout = new TimeoutSource (LEAVE_INTERVAL_MS);
+				timeout.set_callback (wait_for_agent_to_leave.callback);
+				timeout.attach (MainContext.get_thread_default ());
+				yield;
+				timeout.destroy ();
+
+				// The agent says so from its own code, and has a few instructions left to run
+				// there, thus give it the time before the code is taken away.
+				if (left) {
+					yield elf_allocation.deallocate (cancellable);
+					return;
+				}
 			}
 		}
 

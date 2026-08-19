@@ -390,9 +390,16 @@ namespace Frida {
 			if (connection != null)
 				yield connection.close (cancellable);
 
-			// device cannot reach the guest at all.
-			if (services != null)
-				yield services.machine.gdb.close (cancellable);
+			if (services != null) {
+				var gdb = services.machine.gdb;
+				if (gdb.state == STOPPED) {
+					try {
+						yield gdb.continue (cancellable);
+					} catch (GLib.Error e) {
+					}
+				}
+				yield gdb.close (cancellable);
+			}
 		}
 
 		public async void ping (uint interval_seconds, Cancellable? cancellable) throws Error, IOError {

@@ -286,10 +286,9 @@ mod entrypoint_blob {
                 kernel::stop_copies();
                 kernel::release_interrupt();
                 transport_get_unchecked().shutdown();
+                (&raw mut frida_agent_left).write_volatile(1);
             }
 
-            #[cfg(feature = "win9x")]
-            kernel::terminate_current_thread();
         }
     }
 
@@ -777,6 +776,9 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
 
 pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
+
+#[unsafe(no_mangle)]
+pub static mut frida_agent_left: u32 = 0;
 
 pub(crate) fn stop_requested() -> bool {
     STOP_REQUESTED.load(Ordering::Acquire)
