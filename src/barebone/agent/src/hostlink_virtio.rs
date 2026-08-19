@@ -374,8 +374,6 @@ impl Hostlink {
         let ctrl_rx = Vq::new(&regs, Q_CTRL_RX, QSZ);
         let ctrl_tx = Vq::new(&regs, Q_CTRL_TX, QSZ);
 
-        regs.set_status(regs.status() | ST_DRV_OK);
-
         unsafe {
             ISR_REGS = Some(regs);
         }
@@ -385,6 +383,8 @@ impl Hostlink {
             isr_wake,
             core::ptr::null_mut(),
         );
+
+        regs.set_status(regs.status() | ST_DRV_OK);
 
         let inner = Inner {
             regs,

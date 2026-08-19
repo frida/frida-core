@@ -284,9 +284,9 @@ mod entrypoint_blob {
             {
                 destroy_all_scripts(context);
                 kernel::stop_copies();
+                transport_get_unchecked().shutdown();
                 kernel::release_interrupt();
                 kernel::release_fault_reporter();
-                transport_get_unchecked().shutdown();
                 (&raw mut frida_agent_left).write_volatile(1);
             }
 

@@ -112,10 +112,6 @@ extern "C" fn frida_win9x_on_event() {
 static mut READY_ACTION: Option<fn()> = None;
 
 #[unsafe(no_mangle)]
-// The thunk that VMM enters a thread through spins where the thread would return, thus end it
-// here: VMM gives back the stack it made for the thread once it is told.
-// The thunk that VMM enters a thread through spins where the thread would return, thus end it
-// here: VMM gives back what the thread had once it is told.
 extern "C" fn frida_win9x_thread_start() {
     unsafe {
         if let Some(entry) = THREAD_ENTRY {
