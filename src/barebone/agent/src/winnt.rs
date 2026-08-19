@@ -1060,6 +1060,10 @@ const IMAGE_NAME_SIZE: usize = 16;
 // The process receives the same code pages as the kernel half, because code is read-only. It
 // also receives its own writable half, thus the two copies do not share data.
 pub fn place_agent_in_process(pid: u32) -> bool {
+    if unsafe { targets() }.contains_key(&pid) {
+        return true;
+    }
+
     put_a_copy_in_the_session_server(pid);
 
     let library = loader_library();

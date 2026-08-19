@@ -288,12 +288,8 @@ mod entrypoint_blob {
                 transport_get_unchecked().shutdown();
             }
 
-            // The thunk that VMM calls spins where a thread of this system would end, thus block
-            // for good instead: nothing wakes this token again.
             #[cfg(feature = "win9x")]
-            loop {
-                kernel::wait(ptr::addr_of!(PARKED) as *const u8, None, &mut || false);
-            }
+            kernel::terminate_current_thread();
         }
     }
 
@@ -778,9 +774,6 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
         context
     }
 }
-
-#[cfg(feature = "win9x")]
-static PARKED: u8 = 0;
 
 pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);

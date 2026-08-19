@@ -379,6 +379,18 @@ const JUMP_SIZE: usize = 5;
 
 // Only the copy knows when it is safe to stop. It runs on the stack and in the image that
 // this function releases, thus the copy reports when it leaves both.
+// A thread of this system ends by saying so: the thunk that VMM enters it through spins where a
+// thread would return, and VMM frees what the thread had once it is told.
+pub fn terminate_current_thread() -> ! {
+    unsafe {
+        vmm_terminate_thread(get_cur_thread_handle());
+    }
+
+    loop {
+        yield_now();
+    }
+}
+
 pub fn release_interrupt() {
     let handle = unsafe { IRQ_HANDLE };
     if handle == 0 {
@@ -1912,6 +1924,7 @@ unsafe extern "C" {
     fn signal_semaphore(semaphore: u32);
     fn create_semaphore(token_count: u32) -> u32;
     fn get_cur_thread_handle() -> u32;
+    fn vmm_terminate_thread(handle: u32);
     fn fatal_error_handler(message: *const u8, flags: u32);
     fn vpicd_virtualize_irq(descriptor: *mut VpicdIrqDescriptor) -> u32;
     fn vpicd_physically_unmask(handle: u32);
@@ -2001,6 +2014,21 @@ create_semaphore:
     cmc
     sbb ecx, ecx
     and eax, ecx
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global vmm_terminate_thread
+vmm_terminate_thread:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov edi, [ebp + 8]
+    CALL_SERVICE _VMMTerminateThread
     pop edi
     pop esi
     pop ebx
@@ -2370,6 +2398,7 @@ unsafe extern "C" {
     static _Hook_VMM_Fault: unsafe extern "C" fn();
     static _Fatal_Error_Handler: unsafe extern "C" fn();
     static _Get_Cur_Thread_Handle: unsafe extern "C" fn();
+    static _VMMTerminateThread: unsafe extern "C" fn();
     static _Get_Initial_Thread_Handle: unsafe extern "C" fn();
     static _Get_Next_Thread_Handle: unsafe extern "C" fn();
     static __Debug_Printf_Service: unsafe extern "C" fn(*const u8, ...);

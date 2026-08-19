@@ -35,6 +35,7 @@ SECTIONS {
     _Hook_VMM_Fault = .; . += 4;
     _Fatal_Error_Handler = .; . += 4;
     _Get_Cur_Thread_Handle = .; . += 4;
+    _VMMTerminateThread = .; . += 4;
     _Get_Initial_Thread_Handle = .; . += 4;
     _Get_Next_Thread_Handle = .; . += 4;
     __Debug_Printf_Service = .; . += 4;
