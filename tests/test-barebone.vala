@@ -80,6 +80,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/takes-a-big-script-in-live-guest", () => {
+			var h = new Harness ((h) => takes_a_big_script_in_live_guest.begin (h as Harness,
+				win9x_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => injects_into_process_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -203,6 +209,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/takes-a-big-script-in-live-guest", () => {
+			var h = new Harness ((h) => takes_a_big_script_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT")));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/attaches-again-after-detach-in-live-guest", () => {
 			var h = new Harness ((h) => attaches_again_after_detach_in_live_guest.begin (h as Harness,
 				winnt_config_from_environment (h as Harness, "WINNT")));
@@ -274,6 +286,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/hooks-kernel-function-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/takes-a-big-script-in-live-guest", () => {
+			var h = new Harness ((h) => takes_a_big_script_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT64")));
 			h.run ();
 		});
 
@@ -1803,6 +1821,67 @@ namespace Frida.BareboneTest {
 			while (hits.size < 2)
 				yield h.process_events ();
 			assert_true (hits[1].contains ("\"seen\",1"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void takes_a_big_script_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint pid = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					pid = processes.get (i).pid;
+			}
+			assert_true (pid != 0);
+			var session = yield device.attach (pid, null, null);
+
+			var sizes = new uint[] { 4096, 24576, 65536 };
+			foreach (var size in sizes) {
+				var padding = new StringBuilder ();
+				while (padding.len < size)
+					padding.append ("0123456789abcdef");
+
+				var source = "const padding = '" + padding.str + "';\n" +
+					"send(['size', padding.length]);";
+
+				printerr ("\nBIG trying %u\n", size);
+				var script = yield session.create_script (source, null, null);
+
+				string? received = null;
+				bool waiting = false;
+				var handler = script.message.connect ((json, data) => {
+					received = json;
+					if (waiting) {
+						waiting = false;
+						takes_a_big_script_in_live_guest.callback ();
+					}
+				});
+				yield script.load (null);
+				if (received == null) {
+					waiting = true;
+					yield;
+				}
+				script.disconnect (handler);
+				yield script.unload (null);
+
+				printerr ("\nBIG ok %u -> %s\n", size, received);
+			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

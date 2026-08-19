@@ -719,8 +719,54 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
 // answers as it answers the host, and the kernel half sends these bytes without a change.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    TO_TARGET.publish(arena as u32, frame)
+    queue_frame(arena as u32, frame);
+    pump_frames(&TO_TARGET);
+
+    true
 }
+
+pub fn pump_frames_to_targets() {
+    pump_frames(&TO_TARGET);
+}
+
+pub fn pump_frames_to_host() {
+    pump_frames(&FROM_TARGET);
+}
+
+fn queue_frame(arena: u32, frame: &[u8]) {
+    let outbox = unsafe { outboxes() }.entry(arena).or_insert_with(|| Outbox {
+        frames: alloc::collections::VecDeque::new(),
+        lent: 0,
+    });
+    outbox.frames.push_back(frame.to_vec());
+}
+
+fn pump_frames(channel: &Channel) {
+    for (arena, outbox) in unsafe { outboxes() }.iter_mut() {
+        if !channel.taken(*arena) {
+            continue;
+        }
+
+        if outbox.lent != 0 {
+            free_shared(outbox.lent);
+            outbox.lent = 0;
+        }
+
+        let Some(frame) = outbox.frames.pop_front() else {
+            continue;
+        };
+        match channel.put(*arena, &frame) {
+            Some(lent) => outbox.lent = lent,
+            None => outbox.frames.push_front(frame),
+        }
+    }
+}
+
+fn outboxes() -> &'static mut BTreeMap<u32, Outbox> {
+    unsafe { (&raw mut OUTBOXES).as_mut().unwrap() }
+}
+
+static mut OUTBOXES: BTreeMap<u32, Outbox> = BTreeMap::new();
 
 pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
     FROM_TARGET.take(arena as u32)
@@ -739,37 +785,55 @@ pub fn acknowledge_frame_from_host(arena: u64) {
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    FROM_TARGET.publish(arena as u32, frame)
+    queue_frame(arena as u32, frame);
+    pump_frames(&FROM_TARGET);
+
+    true
 }
 
-// Each direction holds one frame. The reader acknowledges the frame before the writer uses
-// the buffer again, thus a slow reader waits and loses no frames.
+struct Outbox {
+    frames: alloc::collections::VecDeque<alloc::vec::Vec<u8>>,
+    lent: u32,
+}
+
 struct Channel {
     buffer: u32,
     length: u32,
     sequence: u32,
     ack: u32,
+    elsewhere: u32,
 }
 
 impl Channel {
-    fn publish(&self, arena: u32, frame: &[u8]) -> bool {
-        if frame.len() > FRAME_BUFFER_SIZE {
-            return false;
-        }
-
+    fn put(&self, arena: u32, frame: &[u8]) -> Option<u32> {
         let sequence = unsafe { ((arena + self.sequence) as *const u32).read_volatile() };
-        while unsafe { ((arena + self.ack) as *const u32).read_volatile() } != sequence {
-            yield_now();
+        if unsafe { ((arena + self.ack) as *const u32).read_volatile() } != sequence {
+            return None;
         }
 
-        let buffer = unsafe { ((arena + self.buffer) as *const u32).read_volatile() } as *mut u8;
+        let mut elsewhere = 0;
+        let destination = if frame.len() <= FRAME_BUFFER_SIZE {
+            unsafe { ((arena + self.buffer) as *const u32).read_volatile() as *mut u8 }
+        } else {
+            elsewhere = alloc_shared(frame.len()) as u32;
+            elsewhere as *mut u8
+        };
+
         unsafe {
-            core::ptr::copy_nonoverlapping(frame.as_ptr(), buffer, frame.len());
+            core::ptr::copy_nonoverlapping(frame.as_ptr(), destination, frame.len());
             ((arena + self.length) as *mut u32).write_volatile(frame.len() as u32);
+            ((arena + self.elsewhere) as *mut u32).write_volatile(elsewhere);
             ((arena + self.sequence) as *mut u32).write_volatile(sequence + 1);
         }
 
-        true
+        Some(elsewhere)
+    }
+
+    fn taken(&self, arena: u32) -> bool {
+        unsafe {
+            ((arena + self.sequence) as *const u32).read_volatile()
+                == ((arena + self.ack) as *const u32).read_volatile()
+        }
     }
 
     fn take(&self, arena: u32) -> Option<&'static [u8]> {
@@ -778,10 +842,15 @@ impl Channel {
             return None;
         }
 
-        let buffer = unsafe { ((arena + self.buffer) as *const u32).read_volatile() } as *const u8;
         let length = unsafe { ((arena + self.length) as *const u32).read_volatile() } as usize;
+        let elsewhere = unsafe { ((arena + self.elsewhere) as *const u32).read_volatile() };
+        let bytes = if elsewhere != 0 {
+            elsewhere as *const u8
+        } else {
+            unsafe { ((arena + self.buffer) as *const u32).read_volatile() as *const u8 }
+        };
 
-        Some(unsafe { core::slice::from_raw_parts(buffer, length) })
+        Some(unsafe { core::slice::from_raw_parts(bytes, length) })
     }
 
     fn acknowledge(&self, arena: u32) {
@@ -795,6 +864,7 @@ const TO_TARGET: Channel = Channel {
     length: 0x20,
     sequence: 0x24,
     ack: 0x28,
+    elsewhere: 0x84,
 };
 
 const FROM_TARGET: Channel = Channel {
@@ -802,6 +872,7 @@ const FROM_TARGET: Channel = Channel {
     length: 0x30,
     sequence: 0x34,
     ack: 0x38,
+    elsewhere: 0x88,
 };
 
 pub struct Injection {

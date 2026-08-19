@@ -1110,6 +1110,8 @@ fn relay_frames_from_targets() {
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
 
+    kernel::pump_frames_to_targets();
+
     for arena in kernel::injected_arenas() {
         while let Some(frame) = kernel::take_frame_from_target(arena) {
             send_frame(frame);

@@ -81,6 +81,8 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
             acknowledge_frame_from_host(arena as u64);
         }
 
+        pump_frames_to_host();
+
         unsafe { crate::poll_pending_work(context) };
     }
 

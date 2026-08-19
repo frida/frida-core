@@ -2103,31 +2103,54 @@ struct Channel {
     length: u64,
     sequence: u64,
     ack: u64,
+    rest: u64,
     buffer: u64,
 }
 
 impl Channel {
-    fn publish(&self, arena: u64, frame: &[u8]) -> bool {
-        if frame.len() > FRAME_BUFFER_SIZE {
-            return false;
-        }
-
+    fn put_piece(&self, arena: u64, frame: &[u8], sent: usize) -> Option<usize> {
         unsafe {
             let sequence = ((arena + self.sequence) as *const u32).read_volatile();
-            while ((arena + self.ack) as *const u32).read_volatile() != sequence {
-                yield_now();
+            if ((arena + self.ack) as *const u32).read_volatile() != sequence {
+                return None;
             }
 
-            core::ptr::copy_nonoverlapping(frame.as_ptr(), (arena + self.buffer) as *mut u8,
-                frame.len());
-            ((arena + self.length) as *mut u32).write_volatile(frame.len() as u32);
+            let piece = core::cmp::min(frame.len() - sent, FRAME_BUFFER_SIZE);
+            core::ptr::copy_nonoverlapping(frame.as_ptr().add(sent),
+                (arena + self.buffer) as *mut u8, piece);
+            ((arena + self.length) as *mut u32).write_volatile(piece as u32);
+            ((arena + self.rest) as *mut u32).write_volatile((frame.len() - sent - piece) as u32);
             ((arena + self.sequence) as *mut u32).write_volatile(sequence + 1);
-        }
 
-        true
+            Some(sent + piece)
+        }
     }
 
-    fn take(&self, arena: u64) -> Option<&'static [u8]> {
+    fn take(&self, arena: u64, into: &mut Reassembly, tell: &mut dyn FnMut()) -> Option<&'static [u8]> {
+        let (piece, rest) = self.piece(arena)?;
+
+        if !into.assembling {
+            if rest == 0 {
+                return Some(piece);
+            }
+            into.hold.clear();
+        }
+
+        into.hold.extend_from_slice(piece);
+
+        if rest != 0 {
+            into.assembling = true;
+            self.acknowledge(arena);
+            tell();
+            return None;
+        }
+
+        into.assembling = false;
+
+        Some(unsafe { core::slice::from_raw_parts(into.hold.as_ptr(), into.hold.len()) })
+    }
+
+    fn piece(&self, arena: u64) -> Option<(&'static [u8], usize)> {
         unsafe {
             let sequence = ((arena + self.sequence) as *const u32).read_volatile();
             if sequence == ((arena + self.ack) as *const u32).read_volatile() {
@@ -2135,8 +2158,9 @@ impl Channel {
             }
 
             let length = ((arena + self.length) as *const u32).read_volatile() as usize;
+            let rest = ((arena + self.rest) as *const u32).read_volatile() as usize;
 
-            Some(core::slice::from_raw_parts((arena + self.buffer) as *const u8, length))
+            Some((core::slice::from_raw_parts((arena + self.buffer) as *const u8, length), rest))
         }
     }
 
@@ -2175,6 +2199,7 @@ const TO_TARGET: Channel = Channel {
     length: 0x20,
     sequence: 0x24,
     ack: 0x28,
+    rest: 0x2c,
     buffer: 0x1000,
 };
 
@@ -2182,6 +2207,7 @@ const FROM_TARGET: Channel = Channel {
     length: 0x30,
     sequence: 0x34,
     ack: 0x38,
+    rest: 0x3c,
     buffer: 0x1000 + FRAME_BUFFER_SIZE as u64,
 };
 
@@ -2195,20 +2221,87 @@ pub fn injected_arenas() -> alloc::vec::Vec<u64> {
 
 // The copy waits for an event, thus set the event after you write the frame.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    if !TO_TARGET.publish(arena, frame) {
-        return false;
-    }
-
-    let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
-    if let Some(wake) = wake {
-        unsafe { (_KeSetEvent)(wake, 0, 0) };
-    }
+    queue_frame(arena, frame);
+    pump_frames_to_targets();
 
     true
 }
 
+pub fn pump_frames_to_targets() {
+    pump_frames(&TO_TARGET, &mut |arena| {
+        let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
+        if let Some(wake) = wake {
+            unsafe { (_KeSetEvent)(wake, 0, 0) };
+        }
+    });
+}
+
+pub fn pump_frames_to_host() {
+    pump_frames(&FROM_TARGET, &mut |_arena| {
+        crate::winnt_user::signal_kernel_half();
+    });
+}
+
+fn queue_frame(arena: u64, frame: &[u8]) {
+    let outbox = unsafe { outboxes() }.entry(arena).or_insert_with(|| Outbox {
+        frames: alloc::collections::VecDeque::new(),
+        sent: 0,
+    });
+    outbox.frames.push_back(frame.to_vec());
+}
+
+fn pump_frames(channel: &Channel, tell: &mut dyn FnMut(u64)) {
+    for (arena, outbox) in unsafe { outboxes() }.iter_mut() {
+        while let Some(frame) = outbox.frames.front() {
+            let Some(sent) = channel.put_piece(*arena, frame, outbox.sent) else {
+                break;
+            };
+
+            if sent == frame.len() {
+                outbox.frames.pop_front();
+                outbox.sent = 0;
+            } else {
+                outbox.sent = sent;
+            }
+
+            tell(*arena);
+        }
+    }
+}
+
+fn outboxes() -> &'static mut alloc::collections::BTreeMap<u64, Outbox> {
+    unsafe { (&raw mut OUTBOXES).as_mut().unwrap() }
+}
+
+static mut OUTBOXES: alloc::collections::BTreeMap<u64, Outbox> =
+    alloc::collections::BTreeMap::new();
+
+struct Outbox {
+    frames: alloc::collections::VecDeque<alloc::vec::Vec<u8>>,
+    sent: usize,
+}
+
+struct Reassembly {
+    hold: alloc::vec::Vec<u8>,
+    assembling: bool,
+}
+
+static mut TO_TARGET_HOLD: Reassembly = Reassembly {
+    hold: alloc::vec::Vec::new(),
+    assembling: false,
+};
+static mut FROM_TARGET_HOLD: Reassembly = Reassembly {
+    hold: alloc::vec::Vec::new(),
+    assembling: false,
+};
+
 pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
-    FROM_TARGET.take(arena)
+    FROM_TARGET.take(arena, unsafe { (&raw mut FROM_TARGET_HOLD).as_mut().unwrap() }, &mut || {
+        let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
+        if let Some(wake) = wake {
+            unsafe { (_KeSetEvent)(wake, 0, 0) };
+        }
+    })
 }
 
 pub fn acknowledge_frame_from_target(arena: u64) {
@@ -2216,7 +2309,9 @@ pub fn acknowledge_frame_from_target(arena: u64) {
 }
 
 pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
-    TO_TARGET.take(arena)
+    TO_TARGET.take(arena, unsafe { (&raw mut TO_TARGET_HOLD).as_mut().unwrap() }, &mut || {
+        crate::winnt_user::signal_kernel_half();
+    })
 }
 
 pub fn acknowledge_frame_from_host(arena: u64) {
@@ -2225,11 +2320,8 @@ pub fn acknowledge_frame_from_host(arena: u64) {
 
 // The kernel half waits for an event, thus set the event after you write the frame.
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    if !FROM_TARGET.publish(arena, frame) {
-        return false;
-    }
-
-    crate::winnt_user::signal_kernel_half();
+    queue_frame(arena, frame);
+    pump_frames_to_host();
 
     true
 }
