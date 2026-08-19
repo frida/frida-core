@@ -109,14 +109,24 @@ namespace Frida.Barebone {
 			GDB.Client gdb = machine.gdb;
 			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
 
-			GDB.Breakpoint? hit = null;
-			do {
+			while (true) {
 				var exception = yield gdb.continue_until_exception (cancellable);
-				hit = exception.breakpoint;
-			} while (hit != bp);
+				if (exception.breakpoint == bp && yield stopped_in_ring_zero (gdb, cancellable))
+					break;
+			}
 
 			yield bp.remove (cancellable);
 		}
+
+		private async bool stopped_in_ring_zero (GDB.Client gdb, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 cs = yield gdb.exception.thread.read_register ("cs", cancellable);
+
+			return (cs & RING_MASK) == 0;
+		}
+
+		private const uint64 RING_MASK = 3;
+
 	}
 
 	internal sealed class WinNtKernelFlavor : Object, KernelFlavor {
@@ -146,13 +156,23 @@ namespace Frida.Barebone {
 			GDB.Client gdb = machine.gdb;
 			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
 
-			GDB.Breakpoint? hit = null;
-			do {
+			while (true) {
 				var exception = yield gdb.continue_until_exception (cancellable);
-				hit = exception.breakpoint;
-			} while (hit != bp);
+				if (exception.breakpoint == bp && yield stopped_in_ring_zero (gdb, cancellable))
+					break;
+			}
 
 			yield bp.remove (cancellable);
 		}
+
+		private async bool stopped_in_ring_zero (GDB.Client gdb, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 cs = yield gdb.exception.thread.read_register ("cs", cancellable);
+
+			return (cs & RING_MASK) == 0;
+		}
+
+		private const uint64 RING_MASK = 3;
+
 	}
 }
