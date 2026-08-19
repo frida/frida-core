@@ -24,6 +24,7 @@ namespace Frida.Barebone {
 		private Gee.List<ModuleInfo> kernel_modules;
 		private Gee.List<SymbolInfo> kernel_symbols;
 
+		private KernelFlavor flavor;
 		private Allocation elf_allocation;
 		private uint64 left_flag;
 		private Gee.Map<string, SymbolInfo> resolved_symbols;
@@ -182,6 +183,8 @@ namespace Frida.Barebone {
 			});
 
 			resolved_symbols = symbols;
+
+			this.flavor = flavor;
 
 			yield flavor.prepare (cancellable);
 
@@ -346,6 +349,28 @@ namespace Frida.Barebone {
 			}
 		}
 
+		private async void give_the_memory_back (Cancellable? cancellable) throws Error, IOError {
+			var timeout = new TimeoutSource (LEAVE_INTERVAL_MS);
+			timeout.set_callback (give_the_memory_back.callback);
+			timeout.attach (MainContext.get_thread_default ());
+			yield;
+			timeout.destroy ();
+
+			yield machine.gdb.stop (cancellable);
+			yield flavor.prepare (cancellable);
+
+			// Win9x reboots a little after its heap is given a block of ours back, even from
+			// here, thus keep the image there until that is understood.
+			if (kernel_kind != WIN9X) {
+				try {
+					yield elf_allocation.deallocate (cancellable);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			yield flavor.settle (cancellable);
+		}
+
 		private async void wait_for_agent_to_leave (Cancellable? cancellable) throws Error, IOError {
 			if (left_flag == 0)
 				return;
@@ -356,23 +381,16 @@ namespace Frida.Barebone {
 				var flag = gdb.make_buffer (yield gdb.read_byte_array (left_flag, 4, cancellable));
 				bool left = flag.read_uint32 (0) != 0;
 				yield gdb.continue (cancellable);
+				if (left) {
+					yield give_the_memory_back (cancellable);
+					return;
+				}
 
 				var timeout = new TimeoutSource (LEAVE_INTERVAL_MS);
 				timeout.set_callback (wait_for_agent_to_leave.callback);
 				timeout.attach (MainContext.get_thread_default ());
 				yield;
 				timeout.destroy ();
-
-				// The agent says so from its own code, and has a few instructions left to run
-				// there, thus give it the time before the code is taken away.
-				if (left) {
-					// Giving the memory back takes the guest down on Win9x, where _HeapFree
-					// is called through the stub in whatever context the machine was stopped
-					// in. Thus keep it there until that is understood.
-					if (kernel_kind != WIN9X)
-						yield elf_allocation.deallocate (cancellable);
-					return;
-				}
 			}
 		}
 
