@@ -331,8 +331,26 @@ static mut USER_API: UserApi = UserApi {
     close_handle: 0,
 };
 
-fn event_for(token: *const u8) -> u32 {
-    let slot = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
+fn slot_for_token(token: *const u8) -> usize {
+    let start = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
+    for step in 0..EVENTS.len() {
+        let slot = (start + step) % EVENTS.len();
+
+        let owner = EVENT_OWNERS[slot].load(Ordering::Acquire);
+        if owner == token as usize {
+            return slot;
+        }
+        if owner == 0
+                && EVENT_OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
+                    Ordering::Acquire).is_ok() {
+            return slot;
+        }
+    }
+
+    0
+}
+
+fn event_in(slot: usize) -> u32 {
     let existing = EVENTS[slot].load(Ordering::Acquire);
     if existing != 0 {
         return existing;
@@ -702,7 +720,8 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 }
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let event = event_for(token);
+    let slot = slot_for_token(token);
+    let event = event_in(slot);
     if check() {
         return;
     }
@@ -713,15 +732,23 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
         None => INFINITE,
         Some(us) => (us / 1000).max(1) as u32,
     };
+    EVENT_SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     unsafe { wait_for_single_object(event, timeout) };
-
+    EVENT_SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
 }
 
 pub fn wake(token: *const u8) {
     let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
         unsafe { core::mem::transmute(user_api().set_event as usize) };
-    unsafe { set_event(event_for(token)) };
 
+    let slot = slot_for_token(token);
+    let event = event_in(slot);
+
+    let mut sleepers = EVENT_SLEEPERS[slot].load(Ordering::Acquire).max(1);
+    while sleepers != 0 {
+        unsafe { set_event(event) };
+        sleepers -= 1;
+    }
 }
 
 pub fn yield_now() {

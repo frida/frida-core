@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::bindings::{
     GumAddress, GumX86Writer, cs_insn, gconstpointer, gpointer, gum_x86_writer_flush,
@@ -1041,20 +1041,38 @@ mod kernel {
     }
 
     pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-        let semaphore = semaphore_for(token);
+        let slot = slot_for_token(token);
+
+        let semaphore = semaphore_in(slot);
+
+        if WOKEN_EARLY[slot].swap(0, Ordering::AcqRel) != 0 {
+            return;
+        }
         if check() {
             return;
         }
 
+        SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
         match timeout_us {
             None => unsafe { wait_semaphore(semaphore, BLOCK_SVC_INTS) },
             Some(us) => block_until_signalled_or_timed_out(semaphore, us),
         }
+        SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
     }
 
     pub fn wake(token: *const u8) {
-        unsafe {
-            signal_semaphore(semaphore_for(token));
+        let slot = slot_for_token(token);
+
+        let semaphore = SEMAPHORES[slot].load(Ordering::Acquire);
+        if semaphore == 0 {
+            WOKEN_EARLY[slot].store(1, Ordering::Release);
+            return;
+        }
+
+        let mut sleepers = SLEEPERS[slot].load(Ordering::Acquire).max(1);
+        while sleepers != 0 {
+            unsafe { signal_semaphore(semaphore) };
+            sleepers -= 1;
         }
     }
 
@@ -2013,8 +2031,26 @@ static KERNEL_BASE: AtomicU32 = AtomicU32::new(0);
 
 // One semaphore per waited-on address, created on first use. VMM has no
 // futex-alike, so the token has to be mapped onto something it does have.
-fn semaphore_for(token: *const u8) -> u32 {
-    let slot = (token as usize / core::mem::align_of::<usize>()) % SEMAPHORES.len();
+fn slot_for_token(token: *const u8) -> usize {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_SEMAPHORES;
+    for step in 0..NUM_SEMAPHORES {
+        let slot = (start + step) % NUM_SEMAPHORES;
+
+        let owner = OWNERS[slot].load(Ordering::Acquire);
+        if owner == token as usize {
+            return slot;
+        }
+        if owner == 0
+                && OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
+                    Ordering::Acquire).is_ok() {
+            return slot;
+        }
+    }
+
+    0
+}
+
+fn semaphore_in(slot: usize) -> u32 {
     let existing = SEMAPHORES[slot].load(Ordering::Acquire);
     if existing != 0 {
         return existing;
@@ -2029,7 +2065,14 @@ fn semaphore_for(token: *const u8) -> u32 {
 
 const NUM_SEMAPHORES: usize = 64;
 static SEMAPHORES: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
+static OWNERS: [AtomicUsize; NUM_SEMAPHORES] = [const { AtomicUsize::new(0) }; NUM_SEMAPHORES];
+static SLEEPERS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
+static WOKEN_EARLY: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 pub(crate) static EVENTS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
+pub(crate) static EVENT_OWNERS: [AtomicUsize; NUM_SEMAPHORES] =
+    [const { AtomicUsize::new(0) }; NUM_SEMAPHORES];
+pub(crate) static EVENT_SLEEPERS: [AtomicU32; NUM_SEMAPHORES] =
+    [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 
 unsafe extern "C" {
     fn wait_semaphore(semaphore: u32, flags: u32);
