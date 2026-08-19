@@ -386,6 +386,13 @@ namespace Frida {
 					throw (IOError) e;
 				}
 			}
+
+			if (connection != null)
+				yield connection.close (cancellable);
+
+			// device cannot reach the guest at all.
+			if (services != null)
+				yield services.machine.gdb.close (cancellable);
 		}
 
 		public async void ping (uint interval_seconds, Cancellable? cancellable) throws Error, IOError {

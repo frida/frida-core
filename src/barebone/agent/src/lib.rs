@@ -111,6 +111,7 @@ pub enum FridaCommand {
     StartAgentInProcess = 13,
     SpawnProcess = 14,
     ResumeProcess = 15,
+    Stop = 16,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -133,6 +134,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::StartAgentInProcess => write!(f, "StartAgentInProcess"),
             FridaCommand::SpawnProcess => write!(f, "SpawnProcess"),
             FridaCommand::ResumeProcess => write!(f, "ResumeProcess"),
+            FridaCommand::Stop => write!(f, "Stop"),
             FridaCommand::DetachFromProcess => write!(f, "DetachFromProcess"),
             FridaCommand::Reply => write!(f, "Reply"),
             FridaCommand::ScriptMessage => write!(f, "ScriptMessage"),
@@ -277,6 +279,21 @@ mod entrypoint_blob {
                 g_source_unref(source);
             }
             run_main_loop(context);
+
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            {
+                destroy_all_scripts(context);
+                kernel::stop_copies();
+                kernel::release_interrupt();
+                transport_get_unchecked().shutdown();
+            }
+
+            // The thunk that VMM calls spins where a thread of this system would end, thus block
+            // for good instead: nothing wakes this token again.
+            #[cfg(feature = "win9x")]
+            loop {
+                kernel::wait(ptr::addr_of!(PARKED) as *const u8, None, &mut || false);
+            }
         }
     }
 
@@ -531,6 +548,17 @@ impl Transport {
         }
     }
 
+    pub fn shutdown(&self) {
+        match self {
+            #[cfg(feature = "blob")]
+            Transport::Virtio(h) => h.shutdown(),
+            #[cfg(feature = "xnu")]
+            Transport::Vsock(_) => {}
+            #[cfg(feature = "linux")]
+            Transport::CharDevice(_) => {}
+        }
+    }
+
     pub fn process(&self) {
         match self {
             #[cfg(feature = "blob")]
@@ -751,6 +779,16 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
     }
 }
 
+#[cfg(feature = "win9x")]
+static PARKED: u8 = 0;
+
+pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn stop_requested() -> bool {
+    STOP_REQUESTED.load(Ordering::Acquire)
+}
+
 fn run_main_loop(main_context: *mut GMainContext) {
     glib::own_the_loop();
 
@@ -763,6 +801,10 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
             #[cfg(feature = "linux")]
             if entrypoint_linux::stop_requested() {
+                return;
+            }
+
+            if stop_requested() {
                 return;
             }
 
@@ -799,7 +841,6 @@ pub(crate) unsafe fn poll_pending_work(main_context: *mut GMainContext) {
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 const IDLE_SLICE_US: u64 = 50_000;
 
-#[cfg(feature = "linux")]
 fn destroy_all_scripts(main_context: *mut GMainContext) {
     unsafe {
         let scripts = core::mem::take(core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap());
@@ -815,7 +856,6 @@ fn destroy_all_scripts(main_context: *mut GMainContext) {
     }
 }
 
-#[cfg(feature = "linux")]
 unsafe extern "C" fn on_script_unloaded(
     source_object: *mut GObject,
     result: *mut GAsyncResult,
@@ -831,7 +871,6 @@ unsafe extern "C" fn on_script_unloaded(
     }
 }
 
-#[cfg(feature = "linux")]
 static UNLOADS_IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(feature = "linux")]
@@ -934,6 +973,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            FridaCommand::Stop => Some(handle_stop()),
             #[cfg(feature = "win9x")]
             FridaCommand::DetachFromProcess => {
                 unsafe {
@@ -1217,6 +1258,13 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
 
         HandlerResponse::success(g_variant_new_uint32(pid))
     }
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn handle_stop() -> HandlerResponse {
+    STOP_REQUESTED.store(true, Ordering::Release);
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]

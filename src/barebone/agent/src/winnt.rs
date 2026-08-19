@@ -1187,6 +1187,36 @@ const NORMAL_PAGE_PRIORITY: u32 = 16;
 // Start the copy on a thread of the target. The system makes the thread, thus ntdll accepts
 // calls from it. The copy cannot answer from that thread, thus this function returns the
 // process id only after the copy writes it.
+pub fn release_interrupt() {
+    let interrupt = unsafe { INTERRUPT_OBJECT };
+    if interrupt.is_null() {
+        return;
+    }
+
+    unsafe {
+        INTERRUPT_OBJECT = core::ptr::null_mut();
+        (_IoDisconnectInterrupt)(interrupt);
+    }
+}
+
+pub fn stop_copies() {
+    let copies: alloc::vec::Vec<(u64, *mut c_void)> =
+        unsafe { targets() }.values().map(|t| (t.arena, t.wake)).collect();
+    for (arena, wake) in copies {
+        unsafe {
+            ((arena + STOP_REQUEST) as *mut u32).write_volatile(1);
+            (_KeSetEvent)(wake, 0, 0);
+        }
+    }
+
+    // Each copy leaves on its own thread, thus give them the time to run their last instructions.
+    wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
+}
+
+static mut TEARDOWN_TOKEN: u8 = 0;
+
+const TEARDOWN_GRACE_US: u64 = 500_000;
+
 pub fn start_agent_in_process(pid: u32) -> u32 {
     let Some(target) = (unsafe { targets().get(&pid) }) else {
         return 0;
@@ -2594,6 +2624,7 @@ kernel_abi! {
     static _MmMapLockedPagesSpecifyCache: windows_fn!(
         *mut c_void, u8, u32, *mut c_void, u32, u32, => *mut c_void);
     static _MmUnmapLockedPages: windows_fn!(*mut c_void, *mut c_void);
+    static _IoDisconnectInterrupt: windows_fn!(*mut c_void => ());
     static _IoConnectInterrupt: windows_fn!(
         *mut *mut c_void,
         ServiceRoutine,

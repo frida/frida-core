@@ -34,6 +34,7 @@ SECTIONS {
     _MmGetPhysicalAddress = .; . += 8;
     _HalGetInterruptVector = .; . += 8;
     _IoConnectInterrupt = .; . += 8;
+    _IoDisconnectInterrupt = .; . += 8;
     _PsActiveProcessHead = .; . += 8;
     _PsInitialSystemProcess = .; . += 8;
     _PsGetProcessId = .; . += 8;

@@ -379,6 +379,25 @@ const JUMP_SIZE: usize = 5;
 
 // Only the copy knows when it is safe to stop. It runs on the stack and in the image that
 // this function releases, thus the copy reports when it leaves both.
+pub fn release_interrupt() {
+    let handle = unsafe { IRQ_HANDLE };
+    if handle == 0 {
+        return;
+    }
+
+    unsafe {
+        IRQ_HANDLE = 0;
+        vpicd_force_default_behavior(handle);
+    }
+}
+
+pub fn stop_copies() {
+    let pids: alloc::vec::Vec<u32> = unsafe { targets() }.keys().copied().collect();
+    for pid in pids {
+        detach_from_process(pid);
+    }
+}
+
 pub fn detach_from_process(pid: u32) -> bool {
     let Some(target) = (unsafe { targets().remove(&pid) }) else {
         return false;
@@ -1897,6 +1916,7 @@ unsafe extern "C" {
     fn vpicd_virtualize_irq(descriptor: *mut VpicdIrqDescriptor) -> u32;
     fn vpicd_physically_unmask(handle: u32);
     fn vpicd_phys_eoi(handle: u32);
+    fn vpicd_force_default_behavior(handle: u32);
     fn set_global_time_out(milliseconds: u32, semaphore: u32) -> u32;
     fn cancel_time_out(timeout: u32);
     fn hook_vmm_fault(fault: u32, handler: unsafe extern "C" fn()) -> u32;
@@ -2243,6 +2263,21 @@ frida_win9x_time_out_thunk:
     ret
 
 .global vpicd_phys_eoi
+vpicd_force_default_behavior:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    push edi
+    mov eax, [ebp + 8]
+    CALL_SERVICE _VPICD_Force_Default_Behavior
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+.global vpicd_phys_eoi
 vpicd_phys_eoi:
     push ebp
     mov ebp, esp
@@ -2344,6 +2379,7 @@ unsafe extern "C" {
     static _VPICD_Virtualize_IRQ: unsafe extern "C" fn();
     static _VPICD_Phys_EOI: unsafe extern "C" fn();
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();
+    static _VPICD_Force_Default_Behavior: unsafe extern "C" fn();
     static __VWIN32_Get_Thread_Context: unsafe extern "C" fn(u32, *mut u8) -> u32;
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();

@@ -308,6 +308,11 @@ pub struct Hostlink {
 unsafe impl Send for Hostlink {}
 
 impl Hostlink {
+    pub fn shutdown(&self) {
+        let inner = unsafe { &mut *self.state.get() };
+        inner.regs.set_status(0);
+    }
+
     pub fn init(mmio_base: u64, irq_line: u32, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let mmio = kernel::map_io(mmio_base, MMIO_SIZE) as *mut u8;
         if mmio.is_null() {

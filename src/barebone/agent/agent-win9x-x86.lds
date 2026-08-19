@@ -42,6 +42,7 @@ SECTIONS {
     __PageModifyPermissions = .; . += 4;
     __GetCurrentContext = .; . += 4;
     _VPICD_Virtualize_IRQ = .; . += 4;
+    _VPICD_Force_Default_Behavior = .; . += 4;
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
     __VWIN32_QueueUserApc = .; . += 4;

@@ -6,6 +6,7 @@ namespace Frida.Barebone {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private IOStream hostlink;
+		private QmpClient? qmp;
 		private BufferedInputStream input;
 		private OutputStream output;
 
@@ -283,6 +284,7 @@ namespace Frida.Barebone {
 				throws Error, IOError {
 			var qmp = yield QmpClient.open (config.qmp, 0, cancellable);
 			var link = yield qmp.open_hostlink (config.bus, cancellable);
+			this.qmp = qmp;
 			adopt_hostlink_streams (link.connection);
 
 			if (config.bus != null) {
@@ -319,7 +321,23 @@ namespace Frida.Barebone {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			try {
+				yield execute_command (Command.STOP, new Variant.boolean (true), cancellable);
+			} catch (GLib.Error e) {
+			}
+
 			io_cancellable.cancel ();
+
+			try {
+				yield hostlink.close_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+			}
+
+			if (qmp != null) {
+				var monitor = qmp;
+				qmp = null;
+				yield monitor.close (cancellable);
+			}
 		}
 
 		/**
@@ -860,6 +878,7 @@ namespace Frida.Barebone {
 			START_AGENT_IN_PROCESS = 13,
 			SPAWN_PROCESS = 14,
 			RESUME_PROCESS = 15,
+			STOP = 16,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129
 		}
