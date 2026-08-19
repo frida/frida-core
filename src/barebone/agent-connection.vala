@@ -472,6 +472,40 @@ namespace Frida.Barebone {
 			return applications;
 		}
 
+		public async Shortcut[] enumerate_shortcuts (uint helper_pid, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield execute_command (Command.ENUMERATE_SHORTCUTS,
+				new Variant.boolean (false), cancellable, helper_pid);
+			if (!response.check_format_string ("a(ssss)", false))
+				throw new Error.PROTOCOL ("Invalid enumerate_shortcuts response format");
+
+			var shortcuts = new Shortcut[response.n_children ()];
+			for (size_t i = 0; i != shortcuts.length; i++) {
+				var entry = response.get_child_value (i);
+				string identifier = entry.get_child_value (0).get_string ();
+				string target = entry.get_child_value (1).get_string ();
+				string name = entry.get_child_value (2).get_string ();
+				string description = entry.get_child_value (3).get_string ();
+
+				shortcuts[i] = new Shortcut (identifier, target, name, description);
+			}
+			return shortcuts;
+		}
+
+		public class Shortcut {
+			public string identifier;
+			public string target;
+			public string name;
+			public string description;
+
+			public Shortcut (string identifier, string target, string name, string description) {
+				this.identifier = identifier;
+				this.target = target;
+				this.name = name;
+				this.description = description;
+			}
+		}
+
 		public class Application {
 			public string identifier;
 			public string path;
@@ -984,6 +1018,7 @@ namespace Frida.Barebone {
 			STOP = 16,
 			GATE_SPAWNS = 17,
 			ENUMERATE_APPLICATIONS = 18,
+			ENUMERATE_SHORTCUTS = 19,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129,
 			SPAWN_ADDED = 130

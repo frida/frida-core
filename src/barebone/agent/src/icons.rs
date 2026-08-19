@@ -34,28 +34,113 @@ pub fn describe(image: &dyn Image, into: &mut [u8]) -> usize {
         return describe_ne(image, into);
     }
 
+    string_in_version(image, FILE_DESCRIPTION, into)
+}
+
+pub fn identify(image: &dyn Image, into: &mut [u8]) -> usize {
+    if read_u16(image, read_u32(image, DOS_HEADERS_OFFSET)) == NE_SIGNATURE {
+        let mut description = [0u8; 128];
+        let taken = describe_ne(image, &mut description);
+        let described = &description[..taken];
+        let Some(space) = described.iter().position(|b| *b == b' ') else {
+            return 0;
+        };
+
+        let program = &described[space + 1..];
+        if program.iter().filter(|b| b.is_ascii_alphanumeric()).count() > MAX_PROGRAM_WORD {
+            return 0;
+        }
+
+        return write_identity(&described[..space], program, into);
+    }
+
+    let mut company = [0u8; 64];
+    let mut taken_company = string_in_version(image, COMPANY_NAME, &mut company);
+    if taken_company == 0 {
+        taken_company = string_in_version(image, PRODUCT_NAME, &mut company);
+    }
+
+    let mut internal = [0u8; 64];
+    let mut taken_internal = string_in_version(image, INTERNAL_NAME, &mut internal);
+    if taken_internal == 0 {
+        taken_internal = string_in_version(image, ORIGINAL_FILENAME, &mut internal);
+    }
+
+    if taken_company == 0 || taken_internal == 0 {
+        return 0;
+    }
+
+    write_identity(&company[..taken_company], without_extension(&internal[..taken_internal]), into)
+}
+
+fn without_extension(name: &[u8]) -> &[u8] {
+    match name.iter().rposition(|b| *b == b'.') {
+        Some(dot) => &name[..dot],
+        None => name,
+    }
+}
+
+fn write_identity(company: &[u8], program: &[u8], into: &mut [u8]) -> usize {
+    let maker = match company.iter().position(|b| *b == b' ') {
+        Some(space) => &company[..space],
+        None => company,
+    };
+
+    let mut written = 0;
+    let mut put = |byte: u8, into: &mut [u8], written: &mut usize| {
+        if *written != into.len() {
+            into[*written] = byte;
+            *written += 1;
+        }
+    };
+    let mut put_word = |word: &[u8], into: &mut [u8], written: &mut usize| {
+        for byte in word {
+            if byte.is_ascii_alphanumeric() {
+                put(byte.to_ascii_lowercase(), into, written);
+            }
+        }
+    };
+
+    put_word(b"com", into, &mut written);
+    put(b'.', into, &mut written);
+    put_word(maker, into, &mut written);
+    put(b'.', into, &mut written);
+    put_word(program, into, &mut written);
+
+    written
+}
+
+fn string_in_version(image: &dyn Image, key: &[u8], into: &mut [u8]) -> usize {
     let Some(resources) = resource_directory(image) else {
         return 0;
     };
     let Some(version) = resources.first_leaf(RT_VERSION) else {
         return 0;
     };
-
     let Some(blob) = read_blob(image, version.offset, version.size) else {
         return 0;
     };
-
-    // The block the key names follows it, after the padding that puts it on a word of its own.
-    let Some(key) = find(blob, FILE_DESCRIPTION) else {
+    let Some(at) = find(blob, key) else {
         return 0;
     };
-    let mut at = key + FILE_DESCRIPTION.len();
+
+    // Each string in the block says how long its value is, in the six bytes before its key. A
+    // value of nothing leaves the next key where the value would be.
+    if at < 6 {
+        return 0;
+    }
+    let value_length = u16::from_le_bytes([blob[at - 4], blob[at - 3]]) as usize;
+    if value_length == 0 {
+        return 0;
+    }
+
+    let mut at = at + key.len();
     while at % 4 != 0 {
         at += 1;
     }
 
     let mut written = 0;
-    while at + 1 < blob.len() && written < into.len() {
+    while at + 1 < blob.len() && written < into.len() && written < value_length {
         let unit = blob[at] as u16 | ((blob[at + 1] as u16) << 8);
         if unit == 0 {
             break;
@@ -267,8 +352,14 @@ const RT_ICON: u16 = 3;
 const RT_GROUP_ICON: u16 = 14;
 const RT_VERSION: u16 = 16;
 const NE_SIGNATURE: u16 = 0x454e;
+const MAX_PROGRAM_WORD: usize = 24;
 const NE_NON_RESIDENT_NAMES_OFFSET: u32 = 0x2c;
-// "FileDescription", as the version resource holds it.
+const COMPANY_NAME: &[u8] = b"C\0o\0m\0p\0a\0n\0y\0N\0a\0m\0e\0\0\0";
+const INTERNAL_NAME: &[u8] = b"I\0n\0t\0e\0r\0n\0a\0l\0N\0a\0m\0e\0\0\0";
+const PRODUCT_NAME: &[u8] = b"P\0r\0o\0d\0u\0c\0t\0N\0a\0m\0e\0\0\0";
+const ORIGINAL_FILENAME: &[u8] =
+    b"O\0r\0i\0g\0i\0n\0a\0l\0F\0i\0l\0e\0n\0a\0m\0e\0\0\0";
+
 const FILE_DESCRIPTION: &[u8] = b"F\0i\0l\0e\0D\0e\0s\0c\0r\0i\0p\0t\0i\0o\0n\0\0\0";
 const NAMED_ENTRY_COUNT_OFFSET: u32 = 0x0c;
 const ID_ENTRY_COUNT_OFFSET: u32 = 0x0e;

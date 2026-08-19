@@ -1945,13 +1945,14 @@ namespace Frida.BareboneTest {
 				assert_true (app.parameters["path"] != null);
 			}
 
-			// A program can be asked for by the name the system registers it under.
 			string? identifier = null;
 			for (int i = 0; i != applications.size (); i++) {
-				if (applications.get (i).identifier.down ().has_prefix ("mspaint"))
-					identifier = applications.get (i).identifier;
+				var app = applications.get (i);
+				if (app.name == "Notepad")
+					identifier = app.identifier;
 			}
 			assert_nonnull (identifier);
+			assert_true (identifier == "com.microsoft.notepad");
 
 			uint pid = yield device.spawn (identifier, null, null);
 			assert_true (pid != 0);

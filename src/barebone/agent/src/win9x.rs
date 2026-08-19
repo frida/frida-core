@@ -1843,6 +1843,23 @@ pub(crate) const MODREF_PREVIOUS_OFFSET: usize = 0x04;
 pub(crate) const IMTE_BASE_OFFSET: usize = 0x24;
 pub(crate) const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
+pub fn identify_image(path: *const u8) -> *const u8 {
+    let identity = unsafe { (&raw mut IDENTITY).as_mut().unwrap() };
+    identity[0] = 0;
+
+    let Some(file) = File::open(path) else {
+        return identity.as_ptr();
+    };
+
+    let written = crate::icons::identify(&file, &mut identity[..MAX_IDENTITY]);
+    identity[written] = 0;
+
+    identity.as_ptr()
+}
+
+static mut IDENTITY: [u8; MAX_IDENTITY + 1] = [0; MAX_IDENTITY + 1];
+const MAX_IDENTITY: usize = 128;
+
 pub fn describe_image(path: *const u8) -> *const u8 {
     let description = unsafe { (&raw mut DESCRIPTION).as_mut().unwrap() };
     description[0] = 0;

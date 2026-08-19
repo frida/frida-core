@@ -114,6 +114,7 @@ pub enum FridaCommand {
     Stop = 16,
     GateSpawns = 17,
     EnumerateApplications = 18,
+    EnumerateShortcuts = 19,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -125,6 +126,7 @@ impl core::fmt::Display for FridaCommand {
         match self {
             FridaCommand::GateSpawns => write!(f, "GateSpawns"),
             FridaCommand::EnumerateApplications => write!(f, "EnumerateApplications"),
+            FridaCommand::EnumerateShortcuts => write!(f, "EnumerateShortcuts"),
             FridaCommand::SpawnAdded => write!(f, "SpawnAdded"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
@@ -967,6 +969,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
+            #[cfg(feature = "win9x")]
+            FridaCommand::EnumerateShortcuts => Some(handle_enumerate_shortcuts()),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
@@ -1175,8 +1179,13 @@ fn handle_enumerate_applications() -> HandlerResponse {
             let identifier = as_text(identifier, &mut identifier_text);
             let path = as_text(path, &mut path_text);
 
+            let identity = kernel::identify_image(path as *const u8);
+            let named = if unsafe { identity.read() } != 0 { identity as *const gchar } else {
+                identifier
+            };
+
             g_variant_builder_open(builder, application_type);
-            g_variant_builder_add(builder, c"s".as_ptr(), identifier);
+            g_variant_builder_add(builder, c"s".as_ptr(), named);
             g_variant_builder_add(builder, c"s".as_ptr(), path);
             g_variant_builder_add(builder, c"s".as_ptr(), describe(path as *const u8));
             g_variant_builder_close(builder);
@@ -1186,6 +1195,40 @@ fn handle_enumerate_applications() -> HandlerResponse {
 
         g_variant_type_free(list_type);
         g_variant_type_free(application_type);
+
+        HandlerResponse::success(list)
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn handle_enumerate_shortcuts() -> HandlerResponse {
+    unsafe {
+        let list_type = g_variant_type_new(c"a(ssss)".as_ptr() as *const gchar);
+        let shortcut_type = g_variant_type_new(c"(ssss)".as_ptr() as *const gchar);
+        let builder = g_variant_builder_new(list_type);
+
+        crate::win9x_user::enumerate_shortcuts(&mut |identity, target, shown, description| {
+            let mut identity_text = [0u8; 128];
+            let mut target_text = [0u8; 260];
+            let mut shown_text = [0u8; 128];
+            let mut description_text = [0u8; 128];
+
+            g_variant_builder_open(builder, shortcut_type);
+            g_variant_builder_add(builder, c"s".as_ptr(),
+                as_text(identity.as_bytes(), &mut identity_text));
+            g_variant_builder_add(builder, c"s".as_ptr(),
+                as_text(target.as_bytes(), &mut target_text));
+            g_variant_builder_add(builder, c"s".as_ptr(),
+                as_text(shown.as_bytes(), &mut shown_text));
+            g_variant_builder_add(builder, c"s".as_ptr(),
+                as_text(description.as_bytes(), &mut description_text));
+            g_variant_builder_close(builder);
+        });
+
+        let list = g_variant_builder_end(builder);
+
+        g_variant_type_free(shortcut_type);
+        g_variant_type_free(list_type);
 
         HandlerResponse::success(list)
     }

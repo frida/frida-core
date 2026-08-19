@@ -447,7 +447,7 @@ namespace Frida {
 			if (connection == null)
 				throw_not_supported ();
 
-			var applications = yield connection.enumerate_applications (cancellable);
+			var applications = yield list_applications (cancellable);
 
 			var running = new Gee.HashMap<string, uint> ();
 			foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA,
@@ -473,6 +473,33 @@ namespace Frida {
 				result[i] = HostApplicationInfo (app.identifier, name, pid, (owned) parameters);
 			}
 			return result;
+		}
+
+		private async Barebone.AgentConnection.Application[] list_applications (
+				Cancellable? cancellable) throws Error, IOError {
+			var listed = new Gee.ArrayList<Barebone.AgentConnection.Application> ();
+			listed.add_all_array (yield connection.enumerate_applications (cancellable));
+
+			var known = new Gee.HashSet<string> ();
+			foreach (var app in listed)
+				known.add (basename_of (app.path).down ());
+
+			try {
+				uint helper = yield acquire_spawn_helper (cancellable);
+				foreach (var shortcut in yield connection.enumerate_shortcuts (helper, cancellable)) {
+					var file = basename_of (shortcut.target);
+					if (file == "" || !known.add (file.down ()))
+						continue;
+
+					var identifier = (shortcut.identifier != "") ? shortcut.identifier : file;
+					var name = (shortcut.name != "") ? shortcut.name : shortcut.description;
+					listed.add (new Barebone.AgentConnection.Application (identifier,
+						shortcut.target, name));
+				}
+			} catch (GLib.Error e) {
+			}
+
+			return listed.to_array ();
 		}
 
 		private static string basename_of (string path) {
@@ -710,7 +737,7 @@ namespace Frida {
 			if (program.contains ("\\") || program.contains (":"))
 				return program;
 
-			foreach (var app in yield connection.enumerate_applications (cancellable)) {
+			foreach (var app in yield list_applications (cancellable)) {
 				if (app.identifier.down () == program.down ())
 					return app.path;
 			}
