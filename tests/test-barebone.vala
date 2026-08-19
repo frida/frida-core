@@ -80,6 +80,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/names-a-16-bit-process-in-live-guest", () => {
+			var h = new Harness ((h) => names_a_16_bit_process_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/takes-a-big-script-in-live-guest", () => {
 			var h = new Harness ((h) => takes_a_big_script_in_live_guest.begin (h as Harness,
 				win9x_config_from_environment (h as Harness)));
@@ -1821,6 +1826,64 @@ namespace Frida.BareboneTest {
 			while (hits.size < 2)
 				yield h.process_events ();
 			assert_true (hits[1].contains ("\"seen\",1"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void names_a_16_bit_process_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var processes = yield device.enumerate_processes (null, null);
+			uint helper = 0;
+			for (int i = 0; i != processes.size (); i++) {
+				if (processes.get (i).name.down () == "explorer.exe")
+					helper = processes.get (i).pid;
+			}
+			assert_true (helper != 0);
+
+			var session = yield device.attach (helper, null, null);
+			var starter = yield session.create_script ("""
+				const winExec = new NativeFunction(Process.getModuleByName('KERNEL32.DLL')
+					.getExportByName('WinExec'), 'uint32', ['pointer', 'uint32']);
+				send(['started', winExec(Memory.allocUtf8String('C:\\WINDOWS\\SOL.EXE'), 1)]);
+			""", null, null);
+
+			var announced = new Gee.ArrayList<string> ();
+			starter.message.connect ((json, data) => {
+				announced.add (json);
+			});
+			yield starter.load (null);
+			while (announced.size < 1)
+				yield h.process_events ();
+
+			var settle = new TimeoutSource.seconds (3);
+			settle.set_callback (names_a_16_bit_process_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			bool found = false;
+			var list = yield device.enumerate_processes (null, null);
+			for (int i = 0; i != list.size (); i++) {
+				if (list.get (i).name.down () == "sol.exe")
+					found = true;
+			}
+			assert_true (found);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

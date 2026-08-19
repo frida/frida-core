@@ -49,7 +49,36 @@ pub fn log(msg: &str) {
     }
 }
 
-pub fn log_hex(value: u32) {
+pub fn is_win16_task(pdb: u32) -> bool {
+    unsafe { (pdb as *const u32).byte_add(PDB_FLAGS_OFFSET).read() & WIN16_TASK != 0 }
+}
+
+fn program_of(line: *const u8) -> *const u8 {
+    if line.is_null() {
+        return line;
+    }
+
+    let program = unsafe { (&raw mut PROGRAM).as_mut().unwrap() };
+    let quoted = unsafe { line.read() } == b'"';
+    let mut read = quoted as usize;
+    let mut written = 0;
+    while written < program.len() - 1 {
+        let byte = unsafe { line.add(read).read() };
+        if byte == 0 || (quoted && byte == b'"') || (!quoted && byte == b' ') {
+            break;
+        }
+        program[written] = byte;
+        read += 1;
+        written += 1;
+    }
+    program[written] = 0;
+
+    program.as_ptr()
+}
+
+static mut PROGRAM: [u8; 260] = [0; 260];
+
+fn log_hex(value: u32) {
     let mut shift = 32;
     while shift != 0 {
         shift -= 4;
@@ -1746,6 +1775,13 @@ fn command_line(pdb: u32) -> *const u8 {
 // itself and can carry arguments besides. KERNEL32 names a module the way GetModuleFileName
 // does: the process's own MODREF, indexed into the module table.
 fn image_path(pdb: u32) -> *const u8 {
+    if is_win16_task(pdb) {
+        let program = program_of(command_line(pdb));
+        if !program.is_null() && unsafe { program.read() } != 0 {
+            return program;
+        }
+    }
+
     let table = module_table();
     if table == 0 {
         return core::ptr::null();
@@ -1771,6 +1807,8 @@ fn image_path(pdb: u32) -> *const u8 {
 }
 
 const WIN32_THREAD: u32 = 0x2a;
+const PDB_FLAGS_OFFSET: usize = 0x20;
+const WIN16_TASK: u32 = 0x08;
 pub(crate) const ARENA_FLOOR: u32 = 0x10000;
 pub(crate) const PDB_MODREF_OFFSET: usize = 0x94;
 const PDB_ENVIRONMENT_OFFSET: usize = 0x40;
