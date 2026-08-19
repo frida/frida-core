@@ -444,7 +444,40 @@ namespace Frida {
 
 		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (connection == null)
+				throw_not_supported ();
+
+			var applications = yield connection.enumerate_applications (cancellable);
+
+			var running = new Gee.HashMap<string, uint> ();
+			foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA,
+					cancellable)) {
+				var path = p.parameters["path"];
+				if (path != null)
+					running[basename_of (path.get_string ()).down ()] = p.pid;
+			}
+
+			var scope = ApplicationQueryOptions._deserialize (options).scope;
+			var result = new HostApplicationInfo[applications.length];
+			for (int i = 0; i != applications.length; i++) {
+				var app = applications[i];
+				var parameters = make_parameters_dict ();
+				if (scope != MINIMAL)
+					parameters["path"] = app.path;
+
+				uint pid;
+				if (!running.unset (basename_of (app.path).down (), out pid))
+					pid = 0;
+
+				var name = (app.description != "") ? app.description : basename_of (app.path);
+				result[i] = HostApplicationInfo (app.identifier, name, pid, (owned) parameters);
+			}
+			return result;
+		}
+
+		private static string basename_of (string path) {
+			int start = path.last_index_of_char ('\\');
+			return (start != -1) ? path[start + 1:] : path;
 		}
 
 		public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
@@ -496,8 +529,8 @@ namespace Frida {
 
 			uint helper = yield acquire_spawn_helper (cancellable);
 
-			return yield connection.spawn_process (helper, command_line_of (program, options),
-				cancellable);
+			return yield connection.spawn_process (helper,
+				command_line_of (yield file_of (program, cancellable), options), cancellable);
 		}
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
@@ -671,6 +704,18 @@ namespace Frida {
 			spawn_helper_pid = pid;
 
 			return pid;
+		}
+
+		private async string file_of (string program, Cancellable? cancellable) throws Error, IOError {
+			if (program.contains ("\\") || program.contains (":"))
+				return program;
+
+			foreach (var app in yield connection.enumerate_applications (cancellable)) {
+				if (app.identifier.down () == program.down ())
+					return app.path;
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Found no program named %s", program);
 		}
 
 		private static string command_line_of (string program, HostSpawnOptions options) {

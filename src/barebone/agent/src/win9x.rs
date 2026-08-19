@@ -1860,6 +1860,55 @@ pub fn describe_image(path: *const u8) -> *const u8 {
 static mut DESCRIPTION: [u8; MAX_DESCRIPTION + 1] = [0; MAX_DESCRIPTION + 1];
 const MAX_DESCRIPTION: usize = 128;
 
+pub fn enumerate_applications(found: &mut dyn FnMut(&[u8], &[u8])) {
+    let mut apps = 0;
+    if unsafe { __RegOpenKey(HKEY_LOCAL_MACHINE, APP_PATHS.as_ptr(), &raw mut apps) } != 0 {
+        return;
+    }
+
+    let mut index = 0;
+    loop {
+        let mut identifier = [0u8; MAX_KEY_NAME];
+        let taken = unsafe {
+            __RegEnumKey(apps, index, identifier.as_mut_ptr(), identifier.len() as u32)
+        };
+        if taken != 0 {
+            break;
+        }
+        index += 1;
+
+        let mut app = 0;
+        if unsafe { __RegOpenKey(apps, identifier.as_ptr(), &raw mut app) } != 0 {
+            continue;
+        }
+
+        let mut path = [0u8; MAX_PATH];
+        let mut length = path.len() as u32;
+        let read = unsafe {
+            __RegQueryValueEx(app, core::ptr::null(), core::ptr::null_mut(),
+                core::ptr::null_mut(), path.as_mut_ptr(), &raw mut length)
+        };
+        unsafe { __RegCloseKey(app) };
+
+        if read == 0 {
+            found(text_of(&identifier), text_of(&path));
+        }
+    }
+
+    unsafe { __RegCloseKey(apps) };
+}
+
+fn text_of(bytes: &[u8]) -> &[u8] {
+    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+
+    &bytes[..end]
+}
+
+const HKEY_LOCAL_MACHINE: u32 = 0x8000_0002;
+const APP_PATHS: &[u8] = b"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\0";
+const MAX_KEY_NAME: usize = 64;
+const MAX_PATH: usize = 260;
+
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let Some(file) = File::open(path) else {
         return;
@@ -2708,6 +2757,11 @@ unsafe extern "C" {
     static __PageFree: unsafe extern "C" fn(*mut u8, u32);
     static __CopyPageTable: unsafe extern "C" fn(u32, u32, *mut u32, u32) -> u32;
     static __MapPhysToLinear: unsafe extern "C" fn(u32, u32, u32) -> u32;
+    static __RegOpenKey: unsafe extern "C" fn(u32, *const u8, *mut u32) -> u32;
+    static __RegCloseKey: unsafe extern "C" fn(u32) -> u32;
+    static __RegEnumKey: unsafe extern "C" fn(u32, u32, *mut u8, u32) -> u32;
+    static __RegQueryValueEx: unsafe extern "C" fn(u32, *const u8, *mut u32, *mut u32, *mut u8,
+        *mut u32) -> u32;
     static __PageReserve: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static __PageCommit: unsafe extern "C" fn(u32, u32, u32, u32, u32) -> u32;
     static __PageCommitPhys: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;

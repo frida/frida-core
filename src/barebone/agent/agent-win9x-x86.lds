@@ -30,6 +30,10 @@ SECTIONS {
     __PageFree = .; . += 4;
     __CopyPageTable = .; . += 4;
     __MapPhysToLinear = .; . += 4;
+    __RegOpenKey = .; . += 4;
+    __RegCloseKey = .; . += 4;
+    __RegEnumKey = .; . += 4;
+    __RegQueryValueEx = .; . += 4;
     __PageReserve = .; . += 4;
     __PageCommit = .; . += 4;
     _Hook_VMM_Fault = .; . += 4;

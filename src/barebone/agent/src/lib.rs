@@ -113,6 +113,7 @@ pub enum FridaCommand {
     ResumeProcess = 15,
     Stop = 16,
     GateSpawns = 17,
+    EnumerateApplications = 18,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -123,6 +124,7 @@ impl core::fmt::Display for FridaCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             FridaCommand::GateSpawns => write!(f, "GateSpawns"),
+            FridaCommand::EnumerateApplications => write!(f, "EnumerateApplications"),
             FridaCommand::SpawnAdded => write!(f, "SpawnAdded"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
@@ -963,6 +965,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
+            #[cfg(feature = "win9x")]
+            FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
@@ -1156,6 +1160,44 @@ fn describe(path: *const u8) -> *const gchar {
 #[cfg(feature = "winnt")]
 fn describe(_path: *const u8) -> *const gchar {
     c"".as_ptr()
+}
+
+#[cfg(feature = "win9x")]
+fn handle_enumerate_applications() -> HandlerResponse {
+    unsafe {
+        let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
+        let application_type = g_variant_type_new(c"(sss)".as_ptr() as *const gchar);
+        let builder = g_variant_builder_new(list_type);
+
+        kernel::enumerate_applications(&mut |identifier, path| {
+            let mut identifier_text = [0u8; 64];
+            let mut path_text = [0u8; 260];
+            let identifier = as_text(identifier, &mut identifier_text);
+            let path = as_text(path, &mut path_text);
+
+            g_variant_builder_open(builder, application_type);
+            g_variant_builder_add(builder, c"s".as_ptr(), identifier);
+            g_variant_builder_add(builder, c"s".as_ptr(), path);
+            g_variant_builder_add(builder, c"s".as_ptr(), describe(path as *const u8));
+            g_variant_builder_close(builder);
+        });
+
+        let list = g_variant_builder_end(builder);
+
+        g_variant_type_free(list_type);
+        g_variant_type_free(application_type);
+
+        HandlerResponse::success(list)
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
+    let taken = core::cmp::min(bytes.len(), into.len() - 1);
+    into[..taken].copy_from_slice(&bytes[..taken]);
+    into[taken] = 0;
+
+    into.as_ptr() as *const gchar
 }
 
 #[cfg(feature = "win9x")]

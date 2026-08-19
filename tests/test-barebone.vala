@@ -85,6 +85,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-applications-in-live-guest", () => {
+			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/gates-two-spawns-at-once-in-live-guest", () => {
 			var h = new SlowHarness ((h) => gates_two_spawns_at_once_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -1899,6 +1904,73 @@ namespace Frida.BareboneTest {
 			}
 			script.disconnect (handler);
 			printerr ("\nDDB %s\n", said);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void enumerates_applications_in_live_guest (SlowHarness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var options = new ApplicationQueryOptions ();
+			options.scope = METADATA;
+			var applications = yield device.enumerate_applications (options, null);
+			var show = new Gee.ArrayList<string> ();
+			for (int i = 0; i != applications.size (); i++) {
+				var app = applications.get (i);
+				var path = app.parameters["path"];
+				show.add ("%s [%s] %s".printf (app.identifier, app.name,
+					(path != null) ? path.get_string () : "?"));
+			}
+			printerr ("\nAPPS %s\n", string.joinv (" | ", show.to_array ()));
+			assert_true (applications.size () > 0);
+
+			for (int i = 0; i != applications.size (); i++) {
+				var app = applications.get (i);
+				assert_true (app.identifier != "");
+				assert_true (app.parameters["path"] != null);
+			}
+
+			// A program can be asked for by the name the system registers it under.
+			string? identifier = null;
+			for (int i = 0; i != applications.size (); i++) {
+				if (applications.get (i).identifier.down ().has_prefix ("mspaint"))
+					identifier = applications.get (i).identifier;
+			}
+			assert_nonnull (identifier);
+
+			uint pid = yield device.spawn (identifier, null, null);
+			assert_true (pid != 0);
+			yield device.resume (pid, null);
+
+			var settle = new TimeoutSource.seconds (3);
+			settle.set_callback (enumerates_applications_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			bool running = false;
+			var again = yield device.enumerate_applications (null, null);
+			for (int i = 0; i != again.size (); i++) {
+				var app = again.get (i);
+				if (app.identifier == identifier && app.pid == pid)
+					running = true;
+			}
+			assert_true (running);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

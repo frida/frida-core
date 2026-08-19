@@ -454,6 +454,36 @@ namespace Frida.Barebone {
 
 		public signal void spawn_added (uint pid, string command_line, uint holder_pid);
 
+		public async Application[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+			var response = yield execute_command (Command.ENUMERATE_APPLICATIONS,
+				new Variant.boolean (false), cancellable);
+			if (!response.check_format_string ("a(sss)", false))
+				throw new Error.PROTOCOL ("Invalid enumerate_applications response format");
+
+			var applications = new Application[response.n_children ()];
+			for (size_t i = 0; i != applications.length; i++) {
+				var entry = response.get_child_value (i);
+				string identifier = entry.get_child_value (0).get_string ();
+				string path = entry.get_child_value (1).get_string ();
+				string description = entry.get_child_value (2).get_string ();
+
+				applications[i] = new Application (identifier, path, description);
+			}
+			return applications;
+		}
+
+		public class Application {
+			public string identifier;
+			public string path;
+			public string description;
+
+			public Application (string identifier, string path, string description) {
+				this.identifier = identifier;
+				this.path = path;
+				this.description = description;
+			}
+		}
+
 		public async void gate_spawns (bool on, Cancellable? cancellable) throws Error, IOError {
 			yield execute_command (Command.GATE_SPAWNS, new Variant.boolean (on), cancellable);
 		}
@@ -953,6 +983,7 @@ namespace Frida.Barebone {
 			RESUME_PROCESS = 15,
 			STOP = 16,
 			GATE_SPAWNS = 17,
+			ENUMERATE_APPLICATIONS = 18,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129,
 			SPAWN_ADDED = 130
