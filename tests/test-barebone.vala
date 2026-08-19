@@ -85,8 +85,13 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/gates-two-spawns-at-once-in-live-guest", () => {
+			var h = new SlowHarness ((h) => gates_two_spawns_at_once_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/gates-spawns-in-live-guest", () => {
-			var h = new Harness ((h) => gates_spawns_in_live_guest.begin (h as Harness));
+			var h = new SlowHarness ((h) => gates_spawns_in_live_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
@@ -1907,7 +1912,112 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private async void gates_spawns_in_live_guest (Harness h) {
+	private async void gates_two_spawns_at_once_in_live_guest (SlowHarness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var held = new Gee.ArrayList<uint> ();
+			device.spawn_added.connect (spawn => {
+				held.add (spawn.pid);
+			});
+			yield device.enable_spawn_gating (null);
+
+			uint helper = yield find_program (device, "explorer.exe");
+			var session = yield device.attach (helper, null, null);
+			var starter = yield session.create_script ("""
+				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
+				const named = n => kernel32.getExportByName(n);
+				const createProcess = new NativeFunction(named('CreateProcessA'), 'uint32',
+					['pointer', 'pointer', 'pointer', 'pointer', 'uint32', 'uint32', 'pointer',
+						'pointer', 'pointer', 'pointer'], { scheduling: 'exclusive' });
+				const createThread = new NativeFunction(named('CreateThread'), 'pointer',
+					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+
+				const start = program => {
+					const startup = Memory.alloc(72);
+					startup.writeU32(72);
+					const information = Memory.alloc(16);
+					createProcess(NULL, Memory.allocUtf8String(program), NULL, NULL, 0, 0, NULL,
+						NULL, startup, information);
+				};
+
+				const gate = Memory.alloc(4);
+				gate.writeU32(0);
+				const second = new NativeCallback(() => {
+					while (gate.readU32() === 0)
+						;
+					start('C:\\WINDOWS\\NOTEPAD.EXE');
+					return 0;
+				}, 'uint32', ['pointer']);
+
+				createThread(NULL, 0, second, NULL, 0, NULL);
+				gate.writeU32(1);
+				start('C:\\WINDOWS\\NOTEPAD.EXE');
+				send('started');
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			starter.message.connect ((json, data) => { said.add (json); });
+			yield starter.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			for (uint i = 0; i != 600 && held.size < 2; i++)
+				yield h.process_events ();
+			printerr ("\nHELD %u programs\n", held.size);
+			assert_true (held.size == 2);
+
+			yield device.resume (held[0], null);
+
+			var pending = yield device.enumerate_pending_spawn (null);
+			assert_true (pending.size () == 1);
+			assert_true (pending.get (0).pid == held[1]);
+
+			var waiting = yield where_it_waits (h, device, held[1]);
+			printerr ("\nSTILL-HELD %s\n", waiting);
+			assert_true (waiting.contains ("true"));
+
+			yield device.resume (held[1], null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async string where_it_waits (Frida.Test.AsyncHarness h, Device device, uint pid)
+			throws GLib.Error {
+		var session = yield device.attach (pid, null, null);
+		var script = yield session.create_script ("""
+			const image = Process.enumerateModules()[0];
+			const headers = image.base.add(image.base.add(0x3c).readU32());
+			const entry = image.base.add(headers.add(0x28).readU32());
+			const waiting = Process.enumerateThreads()
+				.some(t => t.context.pc.equals(entry));
+			send([image.name, entry.toString(), waiting]);
+		""", null, null);
+
+		var said = new Gee.ArrayList<string> ();
+		script.message.connect ((json, data) => { said.add (json); });
+		yield script.load (null);
+		while (said.is_empty)
+			yield h.process_events ();
+
+		return said[0];
+	}
+
+	private async void gates_spawns_in_live_guest (SlowHarness h) {
 		var config = win9x_config_from_environment (h);
 		if (config == null)
 			return;
@@ -3150,7 +3260,7 @@ namespace Frida.BareboneTest {
 		""", "\"caught\":\"yes\"");
 	}
 
-	private BareboneConfig? win9x_config_from_environment (Harness h) {
+	private BareboneConfig? win9x_config_from_environment (Frida.Test.AsyncHarness h) {
 		string? agent_path = Environment.get_variable ("FRIDA_TEST_WIN9X_AGENT");
 		string? qmp_path = Environment.get_variable ("FRIDA_TEST_WIN9X_QMP");
 		string? stub_port = Environment.get_variable ("FRIDA_TEST_WIN9X_GDB_PORT");

@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::kernel::ThreadEntry;
 use crate::win9x::*;
@@ -601,6 +601,8 @@ fn ask_for_a_guard(address: u32, bytes: &[u8]) {
         return;
     }
 
+    take_the_slot();
+
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), (arena + PATCH_CODE) as *mut u8,
             bytes.len());
@@ -612,19 +614,39 @@ fn ask_for_a_guard(address: u32, bytes: &[u8]) {
     for _ in 0..PATCH_ATTEMPTS {
         if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } == PATCH_ANSWERED {
             unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
+            give_the_slot_back();
             return;
         }
 
         unsafe { sleep(HOLD_SLICE_MS) };
     }
+
+    give_the_slot_back();
 }
 
 const SHARED_ARENA_BASE: u64 = 0x8000_0000;
+
+fn take_the_slot() {
+    let sleep: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().sleep as usize) };
+
+    while ASKING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        unsafe { sleep(1) };
+    }
+}
+
+fn give_the_slot_back() {
+    ASKING.store(false, Ordering::Release);
+}
+
+static ASKING: AtomicBool = AtomicBool::new(false);
 
 fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
     let sleep: unsafe extern "stdcall" fn(u32) =
         unsafe { core::mem::transmute(user_api().sleep as usize) };
     let arena = crate::routed_arena() as u32;
+
+    take_the_slot();
 
     unsafe {
         ((arena + PATCH_PROCESS) as *mut u32).write_volatile(pid);
@@ -638,12 +660,15 @@ fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
             let at = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
             let previous = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
             unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
+            give_the_slot_back();
 
             return Some((at, previous));
         }
 
         unsafe { sleep(HOLD_SLICE_MS) };
     }
+
+    give_the_slot_back();
 
     None
 }
