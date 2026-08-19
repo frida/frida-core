@@ -80,6 +80,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/disassembles-add-ddb-in-live-guest", () => {
+			var h = new Harness ((h) => disassembles_add_ddb_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Win9x/gates-spawns-in-live-guest", () => {
+			var h = new Harness ((h) => gates_spawns_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/spawns-a-16-bit-program-in-live-guest", () => {
 			var h = new Harness ((h) => spawns_a_16_bit_program_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -1838,6 +1848,126 @@ namespace Frida.BareboneTest {
 		}
 
 		return 0;
+	}
+
+	private async void disassembles_add_ddb_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			var session = yield device.attach (0, null, null);
+			var script = yield session.create_script ("""
+				const out = {};
+				for (const name of ['VMM_Add_DDB', 'VMM_Remove_DDB', 'Get_DDB']) {
+					const address = DebugSymbol.getFunctionByName(name);
+					const lines = [];
+					let cursor = address;
+					for (let i = 0; i !== 24; i++) {
+						const insn = Instruction.parse(cursor);
+						lines.push(insn.address.sub(address).toInt32() + ' ' + insn.mnemonic +
+							' ' + insn.opStr);
+						cursor = insn.next;
+						if (insn.mnemonic === 'ret')
+							break;
+					}
+					out[name] = address.toString() + ' | ' + lines.join(' ; ');
+				}
+				send(out);
+			""", null, null);
+
+			string? said = null;
+			bool waiting = false;
+			var handler = script.message.connect ((json, data) => {
+				said = json;
+				if (waiting) {
+					waiting = false;
+					disassembles_add_ddb_in_live_guest.callback ();
+				}
+			});
+			yield script.load (null);
+			if (said == null) {
+				waiting = true;
+				yield;
+			}
+			script.disconnect (handler);
+			printerr ("\nDDB %s\n", said);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void gates_spawns_in_live_guest (Harness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var spawned = new Gee.ArrayList<string> ();
+			uint held_pid = 0;
+			device.spawn_added.connect (spawn => {
+				spawned.add (spawn.identifier);
+				held_pid = spawn.pid;
+			});
+			yield device.enable_spawn_gating (null);
+
+			uint helper = yield find_program (device, "explorer.exe");
+			var session = yield device.attach (helper, null, null);
+			var starter = yield session.create_script ("""
+				const kernel32 = Process.getModuleByName('KERNEL32.DLL');
+				const createProcess = new NativeFunction(kernel32.getExportByName('CreateProcessA'),
+					'uint32', ['pointer', 'pointer', 'pointer', 'pointer', 'uint32', 'uint32',
+						'pointer', 'pointer', 'pointer', 'pointer']);
+				const startup = Memory.alloc(72);
+				startup.writeU32(72);
+				const information = Memory.alloc(16);
+				const ok = createProcess(NULL, Memory.allocUtf8String('C:\\WINDOWS\\NOTEPAD.EXE'),
+					NULL, NULL, 0, 0, NULL, NULL, startup, information);
+				send(['started', ok, information.add(8).readU32()]);
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			starter.message.connect ((json, data) => { said.add (json); });
+			yield starter.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			while (spawned.is_empty)
+				yield h.process_events ();
+			assert_true (spawned[0].down ().has_suffix ("notepad.exe"));
+			assert_true (held_pid != 0);
+
+			var pending = yield device.enumerate_pending_spawn (null);
+			assert_true (pending.size () == 1);
+			assert_true (pending.get (0).pid == held_pid);
+
+			yield device.resume (held_pid, null);
+
+			assert_true ((yield device.enumerate_pending_spawn (null)).size () == 0);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void spawns_a_16_bit_program_in_live_guest (Harness h) {

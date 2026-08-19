@@ -452,6 +452,12 @@ namespace Frida.Barebone {
 			throw new Error.TIMED_OUT ("Timed out while starting the agent in the process");
 		}
 
+		public signal void spawn_added (uint pid, string command_line, uint holder_pid);
+
+		public async void gate_spawns (bool on, Cancellable? cancellable) throws Error, IOError {
+			yield execute_command (Command.GATE_SPAWNS, new Variant.boolean (on), cancellable);
+		}
+
 		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
 				throws Error, IOError {
 			var response = yield execute_command (Command.SPAWN_PROCESS, new Variant.string (command_line),
@@ -794,7 +800,16 @@ namespace Frida.Barebone {
 					Variant payload;
 					message.get ("(yquv)", out command_code, out request_id, out destination, out payload);
 
-					if (command_code == Command.SCRIPT_MESSAGE) {
+					if (command_code == Command.SPAWN_ADDED) {
+						if (!payload.check_format_string ("(us)", false))
+							throw new Error.PROTOCOL ("Invalid spawn added payload format");
+
+						uint32 pid;
+						unowned string command_line;
+						payload.get ("(u&s)", out pid, out command_line);
+
+						spawn_added (pid, command_line, destination);
+					} else if (command_code == Command.SCRIPT_MESSAGE) {
 						if (!payload.check_format_string ("(us)", false))
 							throw new Error.PROTOCOL ("Invalid script message payload format");
 
@@ -937,8 +952,10 @@ namespace Frida.Barebone {
 			SPAWN_PROCESS = 14,
 			RESUME_PROCESS = 15,
 			STOP = 16,
+			GATE_SPAWNS = 17,
 			REPLY = 128,
-			SCRIPT_MESSAGE = 129
+			SCRIPT_MESSAGE = 129,
+			SPAWN_ADDED = 130
 		}
 
 		private enum Status {

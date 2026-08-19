@@ -540,8 +540,21 @@ pub fn arena_for_pid(pid: u32) -> Option<u64> {
     unsafe { targets().get(&pid).map(|t| t.arena as u64) }
 }
 
-pub fn serve_patch_requests() {
+pub fn gate_spawns(on: bool) {
+    unsafe { GATING_WANTED = on };
 
+    for target in unsafe { targets() }.values() {
+        unsafe { ((target.arena + GATING) as *mut u32).write_volatile(on as u32) };
+    }
+}
+
+pub fn spawns_are_gated() -> bool {
+    unsafe { GATING_WANTED }
+}
+
+static mut GATING_WANTED: bool = false;
+
+pub fn serve_patch_requests() {
     let asking: alloc::vec::Vec<(u32, u32)> = unsafe { targets() }
         .iter()
         .map(|(pid, target)| (*pid, target.arena))
@@ -746,7 +759,10 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     if !await_flag(arena + RUNNING_FLAG) {
         return Injection { arena, thread: 0, stack };
     }
-    unsafe { ((arena + GO_FLAG) as *mut u32).write_volatile(1) };
+    unsafe {
+        ((arena + GATING) as *mut u32).write_volatile(spawns_are_gated() as u32);
+        ((arena + GO_FLAG) as *mut u32).write_volatile(1);
+    }
 
     Injection { arena, thread, stack }
 }
@@ -1428,6 +1444,7 @@ pub(crate) const PATCH_PROCESS: u32 = 0x4c;
 pub(crate) const PATCH_ADDRESS: u32 = 0x50;
 pub(crate) const PATCH_BYTES: u32 = 0x54;
 pub(crate) const PATCH_REQUEST: u32 = 0x58;
+pub(crate) const GATING: u32 = 0x9c;
 pub(crate) const PATCH_ASKED: u32 = 1;
 pub(crate) const HOOK_ASKED: u32 = 3;
 pub(crate) const PATCH_CODE: u32 = 0x64;

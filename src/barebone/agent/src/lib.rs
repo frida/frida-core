@@ -112,14 +112,18 @@ pub enum FridaCommand {
     SpawnProcess = 14,
     ResumeProcess = 15,
     Stop = 16,
+    GateSpawns = 17,
 
     Reply = 128,
     ScriptMessage = 129,
+    SpawnAdded = 130,
 }
 
 impl core::fmt::Display for FridaCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            FridaCommand::GateSpawns => write!(f, "GateSpawns"),
+            FridaCommand::SpawnAdded => write!(f, "SpawnAdded"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
             FridaCommand::DestroyScript => write!(f, "DestroyScript"),
@@ -957,6 +961,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
+            #[cfg(feature = "win9x")]
+            FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
@@ -1150,6 +1156,32 @@ fn describe(path: *const u8) -> *const gchar {
 #[cfg(feature = "winnt")]
 fn describe(_path: *const u8) -> *const gchar {
     c"".as_ptr()
+}
+
+#[cfg(feature = "win9x")]
+fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
+    kernel::gate_spawns(unsafe { g_variant_get_boolean(payload) } != 0);
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
+}
+
+#[cfg(feature = "win9x")]
+pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
+    unsafe {
+        let message = g_variant_new(
+            c"(yquv)".as_ptr(),
+            FridaCommand::SpawnAdded as u8 as u32,
+            0u32,
+            source_process_id(),
+            g_variant_new(c"(us)".as_ptr(), pid, command_line as *const gchar),
+        );
+
+        if let Some(serialized) = serialize_message(message) {
+            send_frame(&serialized);
+        }
+
+        g_variant_unref(message);
+    }
 }
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]

@@ -373,6 +373,18 @@ namespace Frida {
 
 		private Gee.Map<uint, uint> injected_agents = new Gee.HashMap<uint, uint> ();
 		private uint spawn_helper_pid = 0;
+		private Gee.HashMap<uint, HeldSpawn> pending_spawn = new Gee.HashMap<uint, HeldSpawn> ();
+		private SpawnGatingWatchdog watchdog = new SpawnGatingWatchdog ();
+
+		private class HeldSpawn {
+			public string identifier;
+			public uint holder_pid;
+
+			public HeldSpawn (string identifier, uint holder_pid) {
+				this.identifier = identifier;
+				this.holder_pid = holder_pid;
+			}
+		}
 
 		private const string SPAWN_HELPER_NAME = "explorer.exe";
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
@@ -382,7 +394,15 @@ namespace Frida {
 			Object (connection: connection, services: services);
 		}
 
+		construct {
+			if (connection != null)
+				connection.spawn_added.connect (on_spawn_added);
+			watchdog.expired.connect (on_watchdog_expired);
+		}
+
 		public async void close (Cancellable? cancellable) throws IOError {
+			watchdog.clear ();
+
 			foreach (BareboneAgentSession session in agent_sessions.values.to_array ()) {
 				try {
 					yield session.close (cancellable);
@@ -436,20 +456,33 @@ namespace Frida {
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (connection == null)
+				throw_not_supported ();
+
+			yield acquire_spawn_helper (cancellable);
+			yield connection.gate_spawns (true, cancellable);
 		}
 
 		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			yield enable_spawn_gating (cancellable);
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			if (connection == null)
+				throw_not_supported ();
+
+			yield connection.gate_spawns (false, cancellable);
+			watchdog.clear ();
+			pending_spawn.clear ();
 		}
 
 		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			var result = new HostSpawnInfo[pending_spawn.size];
+			var index = 0;
+			foreach (var entry in pending_spawn.entries)
+				result[index++] = HostSpawnInfo (entry.key, entry.value.identifier);
+			return result;
 		}
 
 		public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
@@ -472,10 +505,19 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			if (spawn_helper_pid == 0)
+			uint holder = spawn_helper_pid;
+
+			HeldSpawn? held = pending_spawn[pid];
+			if (held != null) {
+				holder = held.holder_pid;
+				pending_spawn.unset (pid);
+				watchdog.cancel (pid);
+			}
+
+			if (holder == 0)
 				throw new Error.INVALID_ARGUMENT ("Process %u was not spawned by us", pid);
 
-			yield connection.resume_process (spawn_helper_pid, pid, cancellable);
+			yield connection.resume_process (holder, pid, cancellable);
 		}
 
 		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -577,6 +619,38 @@ namespace Frida {
 		// ends.
 		// Only ring 3 can make a process. Thus one process holds a copy of the agent, and that copy
 		// makes each new process and holds it.
+		private void on_spawn_added (uint pid, string command_line, uint holder_pid) {
+			var identifier = program_of (command_line);
+			pending_spawn[pid] = new HeldSpawn (identifier, holder_pid);
+			watchdog.arm (pid);
+			spawn_added (HostSpawnInfo (pid, identifier));
+		}
+
+		private void on_watchdog_expired () {
+			let_the_held_go.begin ();
+		}
+
+		private async void let_the_held_go () {
+			foreach (uint pid in pending_spawn.keys.to_array ()) {
+				try {
+					yield resume (pid, null);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			try {
+				yield disable_spawn_gating (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private static string program_of (string command_line) {
+			bool quoted = command_line.has_prefix ("\"");
+			var line = quoted ? command_line[1:] : command_line;
+			int end = line.index_of_char (quoted ? '"' : ' ');
+			return (end != -1) ? line[:end] : line;
+		}
+
 		private async uint acquire_spawn_helper (Cancellable? cancellable) throws Error, IOError {
 			if (spawn_helper_pid != 0)
 				return spawn_helper_pid;

@@ -83,6 +83,12 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
 
         pump_frames_to_host();
 
+        let wanted = unsafe { ((arena + GATING) as *const u32).read_volatile() } != 0;
+        if wanted != unsafe { GATING_HERE } {
+            unsafe { GATING_HERE = wanted };
+            gate_spawns(wanted);
+        }
+
         unsafe { crate::poll_pending_work(context) };
     }
 
@@ -443,6 +449,61 @@ pub fn spawn_process(command_line: &str) -> u32 {
 
     pid
 }
+
+fn gate_spawns(on: bool) {
+    let create_process = user_api().create_process as *mut c_void;
+    if create_process.is_null() {
+        return;
+    }
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        if on {
+            crate::bindings::gum_interceptor_replace(interceptor, create_process,
+                on_create_process as *mut c_void, &raw mut ORIGINAL_CREATE_PROCESS,
+                core::ptr::null());
+        } else {
+            crate::bindings::gum_interceptor_revert(interceptor, create_process);
+        }
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+unsafe extern "stdcall" fn on_create_process(application: u32, command_line: *const u8,
+        process_attributes: u32, thread_attributes: u32, inherit: u32, flags: u32,
+        environment: u32, directory: u32, startup: *mut u8, information: *mut u32) -> u32 {
+    let original: unsafe extern "stdcall" fn(u32, *const u8, u32, u32, u32, u32, u32, u32,
+        *mut u8, *mut u32) -> u32 = unsafe {
+        core::mem::transmute((&raw const ORIGINAL_CREATE_PROCESS).read())
+    };
+
+    let ok = unsafe {
+        original(application, command_line, process_attributes, thread_attributes, inherit,
+            flags | CREATE_SUSPENDED, environment, directory, startup, information)
+    };
+    if ok == 0 {
+        return ok;
+    }
+
+    let process = unsafe { information.add(PROCESS_INFORMATION_PROCESS).read() };
+    let thread = unsafe { information.add(PROCESS_INFORMATION_THREAD).read() };
+    let pid = unsafe { information.add(PROCESS_INFORMATION_PID).read() };
+
+    let held_ok = hold_at_entry_point(pid, thread).is_some();
+    unsafe {
+        let arena = crate::routed_arena() as u32;
+        ((arena + 0xa0) as *mut u32).write_volatile(if held_ok { 1 } else { 2 });
+    }
+    unsafe { held().insert(pid, HeldProcess { process, thread }) };
+
+    crate::tell_the_host_of_a_spawn(pid, command_line);
+
+    ok
+}
+
+static mut ORIGINAL_CREATE_PROCESS: *mut c_void = core::ptr::null_mut();
+static mut GATING_HERE: bool = false;
 
 fn hold_at_entry_point(pid: u32, thread: u32) -> Option<()> {
     let (entry_point, prologue) = patch(pid, 0, HOLD_INSTRUCTION)?;
