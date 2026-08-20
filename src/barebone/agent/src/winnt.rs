@@ -2395,7 +2395,8 @@ pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
 }
 
 pub fn acknowledge_frame_from_host(arena: u64) {
-    TO_TARGET.acknowledge(arena)
+    TO_TARGET.acknowledge(arena);
+    crate::winnt_user::signal_kernel_half();
 }
 
 // The kernel half waits for an event, thus set the event after you write the frame.
