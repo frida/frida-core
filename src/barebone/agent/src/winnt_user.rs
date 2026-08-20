@@ -227,6 +227,83 @@ pub fn loader_entry_points() -> Option<LoaderEntryPoints> {
     })
 }
 
+pub fn enumerate_shortcuts(found: &mut dyn FnMut(&str, &str, &str, &str)) {
+    let api = menu_api();
+    let files = crate::start_menu::Api {
+        find_first: api.find_first as usize,
+        find_next: api.find_next as usize,
+        find_close: api.find_close as usize,
+        create_file: api.create_file as usize,
+        read_file: api.read_file as usize,
+        set_file_pointer: api.set_file_pointer as usize,
+        close_handle: api.close as usize,
+    };
+
+    for profile in [b"ALLUSERSPROFILE".as_slice(), b"USERPROFILE".as_slice()] {
+        let mut menu = alloc::vec::Vec::new();
+        menu.extend_from_slice(&folder_named(profile));
+        if menu.is_empty() {
+            continue;
+        }
+        menu.extend_from_slice(b"\\Start Menu");
+
+        crate::start_menu::enumerate(&files, &menu, found);
+    }
+}
+
+fn folder_named(name: &[u8]) -> alloc::vec::Vec<u8> {
+    let api = menu_api();
+
+    let mut asciiz = alloc::vec::Vec::new();
+    asciiz.extend_from_slice(name);
+    asciiz.push(0);
+
+    let mut folder = [0u8; MAX_FOLDER];
+    let length = unsafe {
+        (api.environment_variable)(asciiz.as_ptr(), folder.as_mut_ptr(), folder.len() as u32)
+    } as usize;
+    if length == 0 || length >= folder.len() {
+        return alloc::vec::Vec::new();
+    }
+
+    folder[..length].to_vec()
+}
+
+fn menu_api() -> &'static MenuApi {
+    unsafe {
+        if (*core::ptr::addr_of!(MENU_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            MENU_API = Some(MenuApi {
+                find_first: core::mem::transmute(export(library, b"FindFirstFileA")),
+                find_next: core::mem::transmute(export(library, b"FindNextFileA")),
+                find_close: core::mem::transmute(export(library, b"FindClose")),
+                create_file: core::mem::transmute(export(library, b"CreateFileA")),
+                read_file: core::mem::transmute(export(library, b"ReadFile")),
+                set_file_pointer: core::mem::transmute(export(library, b"SetFilePointer")),
+                environment_variable: core::mem::transmute(
+                    export(library, b"GetEnvironmentVariableA")),
+                close: core::mem::transmute(export(library, b"CloseHandle")),
+            });
+        }
+        (*core::ptr::addr_of!(MENU_API)).as_ref().unwrap()
+    }
+}
+
+struct MenuApi {
+    find_first: windows_fn!(*const u8, *mut u8 => u32),
+    find_next: windows_fn!(u32, *mut u8 => u32),
+    find_close: windows_fn!(u32 => u32),
+    create_file: windows_fn!(*const u8, u32, u32, u32, u32, u32, u32 => u32),
+    read_file: windows_fn!(u32, *mut u8, u32, *mut u32, u32 => u32),
+    set_file_pointer: windows_fn!(u32, u32, u32, u32 => u32),
+    environment_variable: windows_fn!(*const u8, *mut u8, u32 => u32),
+    close: windows_fn!(u32 => u32),
+}
+
+static mut MENU_API: Option<MenuApi> = None;
+
+const MAX_FOLDER: usize = 260;
+
 pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
     Some(ThreadEntryPoints {
         start: thread_starter()?,
@@ -1007,22 +1084,37 @@ const THREAD_ENTRY_OWNER: usize = 3;
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let slot = slot_for_token(token);
+    SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     let event = event_in(slot);
     if check() {
+        release_slot(slot, token);
         return;
     }
 
-    SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     let due_time = timeout_us.map(|us| -((us as i64) * 10));
     unsafe {
         (user_api().wait_for_object)(event, 0,
             due_time.as_ref().map_or(core::ptr::null(), |t| t))
     };
-    SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
+    release_slot(slot, token);
+}
+
+// A token names one wait of one thread, and the next wait has a token of its own. Thus a slot
+// belongs to a token only while somebody waits on it: a table that never let go filled after a
+// few dozen waits, and every token after that shared the first slot, where a wake meant for one
+// thread released another.
+fn release_slot(slot: usize, token: *const u8) {
+    if SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
+        return;
+    }
+
+    let _ = OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel, Ordering::Acquire);
 }
 
 fn wake(token: *const u8) {
-    let slot = slot_for_token(token);
+    let Some(slot) = slot_owned_by(token) else {
+        return;
+    };
     let event = event_in(slot);
 
     let mut left = SLEEPERS[slot].load(Ordering::Acquire).max(1);
@@ -1053,6 +1145,18 @@ fn slot_for_token(token: *const u8) -> usize {
 
 // The kernel half sets the one event a copy has a handle to, thus the loop keeps waiting on
 // that one and every other token gets an event of its own.
+fn slot_owned_by(token: *const u8) -> Option<usize> {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_EVENTS;
+    for step in 0..NUM_EVENTS {
+        let slot = (start + step) % NUM_EVENTS;
+        if OWNERS[slot].load(Ordering::Acquire) == token as usize {
+            return Some(slot);
+        }
+    }
+
+    None
+}
+
 fn event_in(slot: usize) -> *mut c_void {
     if OWNERS[slot].load(Ordering::Acquire) == crate::glib::wakeup_token() as usize {
         return target_wake_handle();

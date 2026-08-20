@@ -453,6 +453,18 @@ fn slot_for_token(token: *const u8) -> usize {
     0
 }
 
+fn slot_owned_by(token: *const u8) -> Option<usize> {
+    let start = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
+    for step in 0..EVENTS.len() {
+        let slot = (start + step) % EVENTS.len();
+        if EVENT_OWNERS[slot].load(Ordering::Acquire) == token as usize {
+            return Some(slot);
+        }
+    }
+
+    None
+}
+
 fn event_in(slot: usize) -> u32 {
     let existing = EVENTS[slot].load(Ordering::Acquire);
     if existing != 0 {
@@ -600,244 +612,23 @@ unsafe extern "stdcall" fn on_create_process(application: u32, command_line: *co
 static mut ORIGINAL_CREATE_PROCESS: *mut c_void = core::ptr::null_mut();
 static mut GATING_HERE: bool = false;
 
-struct Image {
-    handle: u32,
-}
-
-impl crate::icons::Image for Image {
-    fn read_at(&self, position: u32, buffer: &mut [u8]) -> u32 {
-        let set_pointer: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().set_file_pointer as usize) };
-        let read_file: unsafe extern "stdcall" fn(u32, *mut u8, u32, *mut u32, u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().read_file as usize) };
-
-        unsafe { set_pointer(self.handle, position, 0, 0) };
-
-        let mut taken = 0u32;
-        if unsafe { read_file(self.handle, buffer.as_mut_ptr(), buffer.len() as u32,
-                &raw mut taken, 0) } == 0 {
-            return 0;
-        }
-
-        taken
-    }
-}
-
-impl Image {
-    fn open(path: &[u8]) -> Option<Image> {
-        let create_file: unsafe extern "stdcall" fn(*const u8, u32, u32, u32, u32, u32, u32)
-            -> u32 = unsafe { core::mem::transmute(user_api().create_file as usize) };
-
-        let handle = unsafe {
-            create_file(path.as_ptr(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0)
-        };
-        if handle == INVALID_HANDLE {
-            return None;
-        }
-
-        Some(Image { handle })
-    }
-}
-
-impl Drop for Image {
-    fn drop(&mut self) {
-        let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
-            unsafe { core::mem::transmute(user_api().close_handle as usize) };
-        unsafe { close_handle(self.handle) };
-    }
-}
-
-fn identity_of(target: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut asciiz = Vec::new();
-    asciiz.extend_from_slice(target);
-    asciiz.push(0);
-
-    let Some(image) = Image::open(&asciiz) else {
-        return (Vec::new(), Vec::new());
-    };
-
-    let mut identity = [0u8; 128];
-    let mut description = [0u8; 128];
-    let named = crate::icons::identify(&image, &mut identity);
-    let described = crate::icons::describe(&image, &mut description);
-
-    (identity[..named].to_vec(), description[..described].to_vec())
-}
-
 pub fn enumerate_shortcuts(found: &mut dyn FnMut(&str, &str, &str, &str)) {
-    let mut menu = Vec::new();
-    menu.extend_from_slice(windows_directory().as_bytes());
-    menu.extend_from_slice(b"\\Start Menu");
-
-    walk_for_shortcuts(&menu, 0, found);
+    crate::start_menu::enumerate(&files(), b"C:\\WINDOWS\\Start Menu", found);
 }
 
-fn walk_for_shortcuts(directory: &[u8], depth: u32,
-        found: &mut dyn FnMut(&str, &str, &str, &str)) {
-    if depth == MAX_MENU_DEPTH {
-        return;
+fn files() -> crate::start_menu::Api {
+    let api = user_api();
+
+    crate::start_menu::Api {
+        find_first: api.find_first_file as usize,
+        find_next: api.find_next_file as usize,
+        find_close: api.find_close as usize,
+        create_file: api.create_file as usize,
+        read_file: api.read_file as usize,
+        set_file_pointer: api.set_file_pointer as usize,
+        close_handle: api.close_handle as usize,
     }
-
-    let find_first: unsafe extern "stdcall" fn(*const u8, *mut u8) -> u32 =
-        unsafe { core::mem::transmute(user_api().find_first_file as usize) };
-    let find_next: unsafe extern "stdcall" fn(u32, *mut u8) -> u32 =
-        unsafe { core::mem::transmute(user_api().find_next_file as usize) };
-    let find_close: unsafe extern "stdcall" fn(u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().find_close as usize) };
-
-    let mut pattern = Vec::new();
-    pattern.extend_from_slice(directory);
-    pattern.extend_from_slice(b"\\*.*\0");
-
-    let mut entry = [0u8; FIND_DATA_SIZE];
-    let search = unsafe { find_first(pattern.as_ptr(), entry.as_mut_ptr()) };
-    if search == INVALID_HANDLE {
-        return;
-    }
-
-    loop {
-        let attributes = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
-        let name = text_in(&entry[FIND_DATA_NAME..]);
-
-        if name != b"." && name != b".." {
-            let mut path = Vec::new();
-            path.extend_from_slice(directory);
-            path.push(b'\\');
-            path.extend_from_slice(name);
-
-            if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
-                walk_for_shortcuts(&path, depth + 1, found);
-            } else if ends_with_ignoring_case(name, b".lnk") {
-                if let Some(target) = target_of_shortcut(&path)
-                        .filter(|target| ends_with_ignoring_case(target, b".exe")) {
-                    let shown = &name[..name.len() - 4];
-                    let (identity, description) = identity_of(&target);
-                    found(text_as_str(&identity), text_as_str(&target), text_as_str(shown),
-                        text_as_str(&description));
-                }
-            }
-        }
-
-        if unsafe { find_next(search, entry.as_mut_ptr()) } == 0 {
-            break;
-        }
-    }
-
-    unsafe { find_close(search) };
 }
-
-fn target_of_shortcut(path: &[u8]) -> Option<Vec<u8>> {
-    let mut asciiz = Vec::new();
-    asciiz.extend_from_slice(path);
-    asciiz.push(0);
-
-    let blob = read_whole_file(&asciiz)?;
-    if blob.len() < SHELL_LINK_HEADER || blob[0] != SHELL_LINK_HEADER as u8 {
-        return None;
-    }
-
-    let flags = u32::from_le_bytes([blob[0x14], blob[0x15], blob[0x16], blob[0x17]]);
-    let mut at = SHELL_LINK_HEADER;
-
-    if flags & HAS_TARGET_ID_LIST != 0 {
-        if at + 2 > blob.len() {
-            return None;
-        }
-        at += 2 + u16::from_le_bytes([blob[at], blob[at + 1]]) as usize;
-    }
-
-    if flags & HAS_LINK_INFO == 0 || at + 0x1c > blob.len() {
-        return None;
-    }
-
-    let word = |offset: usize| {
-        u32::from_le_bytes([blob[offset], blob[offset + 1], blob[offset + 2], blob[offset + 3]])
-    };
-    if word(at + 8) & VOLUME_ID_AND_LOCAL_BASE_PATH == 0 {
-        return None;
-    }
-
-    let base = at + word(at + 0x10) as usize;
-    let suffix = at + word(at + 0x18) as usize;
-    if base >= blob.len() || suffix >= blob.len() {
-        return None;
-    }
-
-    let mut target = Vec::new();
-    target.extend_from_slice(text_in(&blob[base..]));
-    target.extend_from_slice(text_in(&blob[suffix..]));
-
-    Some(target)
-}
-
-fn read_whole_file(path: &[u8]) -> Option<Vec<u8>> {
-    let create_file: unsafe extern "stdcall" fn(*const u8, u32, u32, u32, u32, u32, u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().create_file as usize) };
-    let read_file: unsafe extern "stdcall" fn(u32, *mut u8, u32, *mut u32, u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().read_file as usize) };
-    let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().close_handle as usize) };
-
-    let file = unsafe {
-        create_file(path.as_ptr(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0)
-    };
-    if file == INVALID_HANDLE {
-        return None;
-    }
-
-    let mut blob = alloc::vec![0u8; MAX_SHORTCUT];
-    let mut taken = 0u32;
-    let ok = unsafe {
-        read_file(file, blob.as_mut_ptr(), blob.len() as u32, &raw mut taken, 0)
-    };
-    unsafe { close_handle(file) };
-
-    if ok == 0 {
-        return None;
-    }
-    blob.truncate(taken as usize);
-
-    Some(blob)
-}
-
-fn windows_directory() -> &'static str {
-    "C:\\WINDOWS"
-}
-
-fn text_in(bytes: &[u8]) -> &[u8] {
-    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-
-    &bytes[..end]
-}
-
-fn text_as_str(bytes: &[u8]) -> &str {
-    core::str::from_utf8(bytes).unwrap_or("")
-}
-
-fn ends_with_ignoring_case(name: &[u8], suffix: &[u8]) -> bool {
-    if name.len() < suffix.len() {
-        return false;
-    }
-
-    name[name.len() - suffix.len()..]
-        .iter()
-        .zip(suffix)
-        .all(|(a, b)| a.to_ascii_lowercase() == *b)
-}
-
-const MAX_MENU_DEPTH: u32 = 4;
-const MAX_SHORTCUT: usize = 4096;
-const FIND_DATA_SIZE: usize = 0x140;
-const FIND_DATA_NAME: usize = 0x2c;
-const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
-const INVALID_HANDLE: u32 = 0xffff_ffff;
-const GENERIC_READ: u32 = 0x8000_0000;
-const FILE_SHARE_READ: u32 = 0x1;
-const OPEN_EXISTING: u32 = 3;
-const SHELL_LINK_HEADER: usize = 0x4c;
-const HAS_TARGET_ID_LIST: u32 = 0x1;
-const HAS_LINK_INFO: u32 = 0x2;
-const VOLUME_ID_AND_LOCAL_BASE_PATH: u32 = 0x1;
 
 fn hold_at_entry_point(pid: u32, thread: u32) -> Option<()> {
     let (entry_point, prologue) = patch(pid, 0, HOLD_INSTRUCTION)?;
@@ -1146,8 +937,10 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let slot = slot_for_token(token);
+    EVENT_SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     let event = event_in(slot);
     if check() {
+        release_slot(slot, token);
         return;
     }
 
@@ -1157,16 +950,31 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
         None => INFINITE,
         Some(us) => (us / 1000).max(1) as u32,
     };
-    EVENT_SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
     unsafe { wait_for_single_object(event, timeout) };
-    EVENT_SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
+    release_slot(slot, token);
+}
+
+// A token names one wait of one thread, and the next wait has a token of its own. Thus a slot
+// belongs to a token only while somebody waits on it: a table that never let go filled after a
+// few dozen waits, and every token after that shared the first slot, where a wake meant for one
+// thread released another.
+fn release_slot(slot: usize, token: *const u8) {
+    if EVENT_SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
+        return;
+    }
+
+    let _ = EVENT_OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel,
+        Ordering::Acquire);
 }
 
 pub fn wake(token: *const u8) {
+    let Some(slot) = slot_owned_by(token) else {
+        return;
+    };
+
     let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
         unsafe { core::mem::transmute(user_api().set_event as usize) };
 
-    let slot = slot_for_token(token);
     let event = event_in(slot);
 
     let mut sleepers = EVENT_SLEEPERS[slot].load(Ordering::Acquire).max(1);
