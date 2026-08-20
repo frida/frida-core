@@ -711,6 +711,7 @@ static mut OWN_RANGE: GumMemoryRange = GumMemoryRange {
 
 static NEXT_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 static mut PENDING_REPLIES: BTreeMap<u16, *mut GVariant> = BTreeMap::new();
+static mut PENDING_WAITERS: BTreeMap<u16, usize> = BTreeMap::new();
 
 unsafe fn init_gum() {
     unsafe { init_gum_with_exceptor(true) };
@@ -958,6 +959,9 @@ fn process_incoming_message(variant: *mut GVariant) {
                     .as_mut()
                     .unwrap()
                     .insert(request_id, payload_variant);
+                if let Some(token) = waiter_of(request_id) {
+                    kernel::wake(token);
+                }
             }
             return;
         }
@@ -1355,18 +1359,63 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
         transport.send(&serialize_message(message).unwrap());
         g_variant_unref(message);
 
-        let wait_event = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
-        loop {
+        let on_loop = glib::is_loop_thread();
+        let wait_event = if on_loop {
+            glib::wakeup_token()
+        } else {
+            ptr::addr_of!(request_id) as *const u8
+        };
+        if !on_loop {
+            note_waiter(request_id, wait_event);
+        }
+
+        let reply = loop {
             let mut reply: Option<*mut GVariant> = None;
             kernel::wait(wait_event, None, &mut || {
-                transport.process();
+                if on_loop {
+                    transport.process();
+                }
                 reply = take_pending_reply(request_id);
                 reply.is_some()
             });
             if let Some(reply) = reply {
-                return reply;
+                break reply;
             }
+        };
+
+        if !on_loop {
+            forget_waiter(request_id);
         }
+
+        reply
+    }
+}
+
+fn note_waiter(request_id: u16, token: *const u8) {
+    unsafe {
+        core::ptr::addr_of_mut!(PENDING_WAITERS)
+            .as_mut()
+            .unwrap()
+            .insert(request_id, token as usize);
+    }
+}
+
+fn waiter_of(request_id: u16) -> Option<*const u8> {
+    unsafe {
+        core::ptr::addr_of!(PENDING_WAITERS)
+            .as_ref()
+            .unwrap()
+            .get(&request_id)
+            .map(|token| *token as *const u8)
+    }
+}
+
+fn forget_waiter(request_id: u16) {
+    unsafe {
+        core::ptr::addr_of_mut!(PENDING_WAITERS)
+            .as_mut()
+            .unwrap()
+            .remove(&request_id);
     }
 }
 

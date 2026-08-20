@@ -25,7 +25,7 @@ pub extern "C" fn g_wait_sleep(token: gpointer, timeout_us: gint64) {
         Some(timeout_us as u64)
     };
 
-    let ours = kernel::current_thread_id() == LOOP_THREAD.load(Ordering::Acquire) as u64;
+    let ours = is_loop_thread();
     let event = if ours {
         LOOP_TOKEN.store(token as usize, Ordering::Release);
         ptr::addr_of_mut!(WAKEUP_TOKEN) as *const u8
@@ -47,6 +47,10 @@ pub extern "C" fn g_wait_wake(token: gpointer) {
     }
 
     kernel::wake(token as *const u8);
+}
+
+pub fn is_loop_thread() -> bool {
+    kernel::current_thread_id() == LOOP_THREAD.load(Ordering::Acquire) as u64
 }
 
 pub fn own_the_loop() {
