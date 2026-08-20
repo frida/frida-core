@@ -141,6 +141,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/answers-at-a-steady-pace-in-live-guest", () => {
+			var h = new Harness ((h) => answers_at_a_steady_pace_in_live_guest.begin (h as Harness,
+				win9x_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-target-modules-in-live-guest", () => {
 			var h = new Harness ((h) => enumerates_target_modules_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -252,6 +258,12 @@ namespace Frida.BareboneTest {
 		GLib.Test.add_func ("/Barebone/WinNt/watches-its-own-threads-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_watches_its_own_threads_in_live_guest.begin (
 				h as SlowHarness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/answers-at-a-steady-pace-in-live-guest", () => {
+			var h = new Harness ((h) => answers_at_a_steady_pace_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT")));
 			h.run ();
 		});
 
@@ -367,6 +379,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/takes-a-big-script-in-live-guest", () => {
 			var h = new Harness ((h) => takes_a_big_script_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT64")));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/answers-at-a-steady-pace-in-live-guest", () => {
+			var h = new Harness ((h) => answers_at_a_steady_pace_in_live_guest.begin (h as Harness,
 				winnt_config_from_environment (h as Harness, "WINNT64")));
 			h.run ();
 		});
@@ -2610,6 +2628,95 @@ namespace Frida.BareboneTest {
 
 		h.done ();
 	}
+
+	private async void answers_at_a_steady_pace_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null) {
+			h.done ();
+			return;
+		}
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			yield measure_the_pace (h, yield device.attach (0, null, null), "kernel");
+
+			uint pid = yield find_program (device, "explorer.exe");
+			assert_true (pid != 0);
+			yield measure_the_pace (h, yield device.attach (pid, null, null), "explorer.exe");
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void measure_the_pace (Harness h, Session session, string where) throws GLib.Error {
+		var script = yield session.create_script ("""
+			function ask () {
+				recv('ask', () => {
+					send(Process.arch);
+					ask();
+				});
+			}
+			ask();
+			send('ready');
+		""", null, null);
+
+		uint received = 0;
+		bool waiting = false;
+		script.message.connect ((json, data) => {
+			received++;
+			if (waiting) {
+				waiting = false;
+				measure_the_pace.callback ();
+			}
+		});
+
+		yield script.load (null);
+		while (received < 1) {
+			waiting = true;
+			yield;
+		}
+
+		var samples = new int64[ROUND_TRIPS];
+		for (uint i = 0; i != ROUND_TRIPS; i++) {
+			uint expected = received + 1;
+			int64 started = get_monotonic_time ();
+			script.post ("""{"type":"ask"}""");
+			while (received < expected) {
+				waiting = true;
+				yield;
+			}
+			samples[i] = get_monotonic_time () - started;
+		}
+
+		var sorted = new Gee.ArrayList<int64?> ();
+		foreach (int64 sample in samples)
+			sorted.add (sample);
+		sorted.sort ((a, b) => (a < b) ? -1 : ((a > b) ? 1 : 0));
+
+		int64 quickest = sorted[0];
+		int64 middle = sorted[sorted.size / 2];
+		int64 slowest = sorted[sorted.size - 1];
+		printerr ("\nPACE in %s over %u round trips: quickest %" + int64.FORMAT + " ms, median %"
+				+ int64.FORMAT + " ms, slowest %" + int64.FORMAT + " ms, jitter %"
+				+ int64.FORMAT + " ms\n\n",
+			where, ROUND_TRIPS, quickest / 1000, middle / 1000, slowest / 1000,
+			(slowest - quickest) / 1000);
+
+		assert_true (middle < PACE_LIMIT_US);
+		assert_true (slowest < PACE_LIMIT_US * 4);
+	}
+
+	private const uint ROUND_TRIPS = 20;
+	private const int64 PACE_LIMIT_US = 250000;
 
 	private async void agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, win9x_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
