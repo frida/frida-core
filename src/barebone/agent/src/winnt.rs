@@ -991,6 +991,8 @@ pub(crate) const CONTEXT_ALIGNMENT: usize = 4;
 pub(crate) const CONTEXT_FLAGS: usize = 0x00;
 #[cfg(target_arch = "x86")]
 const CONTEXT_FULL: u32 = 0x0001_0007;
+#[cfg(target_arch = "x86")]
+pub(crate) const CONTEXT_CONTROL: u32 = 0x0001_0001;
 
 #[cfg(target_arch = "x86_64")]
 pub(crate) const CONTEXT_SIZE: usize = 1232;
@@ -1000,6 +1002,8 @@ pub(crate) const CONTEXT_ALIGNMENT: usize = 16;
 pub(crate) const CONTEXT_FLAGS: usize = 0x30;
 #[cfg(target_arch = "x86_64")]
 const CONTEXT_FULL: u32 = 0x0010_0003;
+#[cfg(target_arch = "x86_64")]
+pub(crate) const CONTEXT_CONTROL: u32 = 0x0010_0001;
 
 pub struct ProcessInfo {
     pub id: u32,
