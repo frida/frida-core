@@ -516,16 +516,20 @@ namespace Frida {
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield start_gating (cancellable);
+		}
+
+		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
+			yield start_gating (cancellable);
+		}
+
+		private async void start_gating (Cancellable? cancellable) throws Error, IOError {
 			if (connection == null)
 				throw_not_supported ();
 
 			yield acquire_spawn_helper (cancellable);
 			yield connection.gate_spawns (true, cancellable);
-		}
-
-		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
-				Cancellable? cancellable) throws Error, IOError {
-			yield enable_spawn_gating (cancellable);
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
