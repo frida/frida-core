@@ -1966,6 +1966,10 @@ namespace Frida.BareboneTest {
 			var session = yield device.attach (pid, null, null);
 			var script = yield session.create_script ("""
 				const seen = [];
+				const others = Process.enumerateThreads()
+					.filter(t => t.id !== Process.getCurrentThreadId());
+				send(['registers', others.length,
+					others.every(t => t.context !== undefined && !t.context.pc.isNull())]);
 				Process.attachThreadObserver({
 					onAdded(thread) {
 						seen.push(['added', thread.id.toString(),
@@ -2020,10 +2024,12 @@ namespace Frida.BareboneTest {
 			settle.destroy ();
 
 			script.post ("""{"type":"poll"}""");
-			while (said.size < 2)
+			while (said.size < 3)
 				yield h.process_events ();
-			printerr ("\nSAW %s\n", said[said.size - 1]);
+			printerr ("\nREGISTERS %s\nSAW %s\n", said[0], said[said.size - 1]);
 
+			assert_true (said[0].contains ("\"registers\","));
+			assert_true (!said[0].contains (",false]"));
 			assert_true (said[said.size - 1].contains ("\"saw\",true,true,"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
@@ -2669,6 +2675,10 @@ namespace Frida.BareboneTest {
 			var session = yield device.attach (pid, null, null);
 			var script = yield session.create_script ("""
 				const seen = [];
+				const others = Process.enumerateThreads()
+					.filter(t => t.id !== Process.getCurrentThreadId());
+				send(['registers', others.length,
+					others.every(t => t.context !== undefined && !t.context.pc.isNull())]);
 				Process.attachThreadObserver({
 					onAdded(thread) {
 						seen.push(['added', thread.id.toString(),
@@ -2730,10 +2740,12 @@ namespace Frida.BareboneTest {
 			settle.destroy ();
 
 			script.post ("""{"type":"poll"}""");
-			while (said.size < 2)
+			while (said.size < 3)
 				yield h.process_events ();
-			printerr ("\nSAW %s\n", said[said.size - 1]);
+			printerr ("\nREGISTERS %s\nSAW %s\n", said[0], said[said.size - 1]);
 
+			assert_true (said[0].contains ("\"registers\","));
+			assert_true (!said[0].contains (",false]"));
 			assert_true (said[said.size - 1].contains ("\"saw\",true,true,"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);

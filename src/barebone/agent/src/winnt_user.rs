@@ -16,7 +16,7 @@ use crate::winnt::{
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
     USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
     ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
-    CONTEXT_ALIGNMENT, CONTEXT_CONTROL, CONTEXT_FLAGS, CONTEXT_PC, CONTEXT_SIZE,
+    CONTEXT_ALIGNMENT, CONTEXT_CONTROL, CONTEXT_FLAGS, CONTEXT_FULL, CONTEXT_PC, CONTEXT_SIZE,
     PEB_PARAMETERS_OFFSET,
     POINTER_SIZE, export, module_base, read_pointer, read_u32,
     acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
@@ -931,7 +931,8 @@ fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
         let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
         while more != 0 {
             if entry[THREAD_ENTRY_OWNER] == ours {
-                found(crate::kernel::ThreadInfo { id: entry[THREAD_ENTRY_ID], cpu_state: None });
+                let id = entry[THREAD_ENTRY_ID];
+                found(crate::kernel::ThreadInfo { id, cpu_state: registers_of(id) });
             }
             entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
             more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
@@ -940,6 +941,33 @@ fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
         (api.close)(snapshot);
     }
 }
+
+// A thread cannot ask the system about itself: what comes back describes the asking, not the
+// thread as a script would want to see it.
+fn registers_of(id: u32) -> Option<crate::kernel::CpuState> {
+    if id == current_thread_id() as u32 {
+        return None;
+    }
+
+    let api = thread_list_api();
+    unsafe {
+        let thread = (api.open)(THREAD_GET_CONTEXT, 0, id);
+        if thread.is_null() {
+            return None;
+        }
+
+        let mut context = [0u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT];
+        let base = context.as_mut_ptr().add(context.as_ptr().align_offset(CONTEXT_ALIGNMENT));
+        (base.add(CONTEXT_FLAGS) as *mut u32).write(CONTEXT_FULL);
+
+        let asked = (api.get_context)(thread, base);
+        (api.close)(thread);
+
+        (asked >= 0).then(|| crate::winnt::cpu_state_of(base))
+    }
+}
+
+const THREAD_GET_CONTEXT: u32 = 0x0008;
 
 fn thread_list_api() -> &'static ThreadListApi {
     unsafe {
@@ -950,6 +978,9 @@ fn thread_list_api() -> &'static ThreadListApi {
                     export(library, b"CreateToolhelp32Snapshot")),
                 first: core::mem::transmute(export(library, b"Thread32First")),
                 next: core::mem::transmute(export(library, b"Thread32Next")),
+                open: core::mem::transmute(export(library, b"OpenThread")),
+                get_context: core::mem::transmute(
+                    export(loader_library(), b"NtGetContextThread")),
                 close: core::mem::transmute(export(library, b"CloseHandle")),
             });
         }
@@ -961,6 +992,8 @@ struct ThreadListApi {
     create_snapshot: windows_fn!(u32, u32 => *mut c_void),
     first: windows_fn!(*mut c_void, *mut u8 => i32),
     next: windows_fn!(*mut c_void, *mut u8 => i32),
+    open: windows_fn!(u32, i32, u32 => *mut c_void),
+    get_context: windows_fn!(*mut c_void, *mut u8 => i32),
     close: windows_fn!(*mut c_void => i32),
 }
 

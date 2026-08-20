@@ -942,7 +942,7 @@ const MAX_THREADS_PER_PROCESS: usize = 1024;
 
 // The layout of a CONTEXT is part of the architecture, thus these offsets are known.
 #[cfg(target_arch = "x86")]
-unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     let field = |offset: usize| unsafe { base.add(offset).cast::<u32>().read_unaligned() };
 
     CpuState {
@@ -959,7 +959,7 @@ unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 }
 
 #[cfg(target_arch = "x86_64")]
-unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     let field = |offset: usize| unsafe { base.add(offset).cast::<u64>().read_unaligned() };
 
     CpuState {
@@ -990,7 +990,7 @@ pub(crate) const CONTEXT_ALIGNMENT: usize = 4;
 #[cfg(target_arch = "x86")]
 pub(crate) const CONTEXT_FLAGS: usize = 0x00;
 #[cfg(target_arch = "x86")]
-const CONTEXT_FULL: u32 = 0x0001_0007;
+pub(crate) const CONTEXT_FULL: u32 = 0x0001_0007;
 #[cfg(target_arch = "x86")]
 pub(crate) const CONTEXT_CONTROL: u32 = 0x0001_0001;
 
@@ -1001,7 +1001,7 @@ pub(crate) const CONTEXT_ALIGNMENT: usize = 16;
 #[cfg(target_arch = "x86_64")]
 pub(crate) const CONTEXT_FLAGS: usize = 0x30;
 #[cfg(target_arch = "x86_64")]
-const CONTEXT_FULL: u32 = 0x0010_0003;
+pub(crate) const CONTEXT_FULL: u32 = 0x0010_0003;
 #[cfg(target_arch = "x86_64")]
 pub(crate) const CONTEXT_CONTROL: u32 = 0x0010_0001;
 
