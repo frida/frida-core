@@ -84,6 +84,59 @@ namespace Frida.Barebone {
 		}
 	}
 
+	internal sealed class LinuxKernelFlavor : Object, KernelFlavor {
+		private Machine machine;
+		private uint64 kernel_base;
+		private SymbolInfo schedule;
+		private SymbolInfo? panic;
+
+		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Gee.Map<string, SymbolInfo> symbols)
+				throws Error {
+			this.machine = machine;
+			this.kernel_base = kernel_base;
+
+			schedule = symbols["schedule"];
+			if (schedule == null)
+				throw new Error.NOT_SUPPORTED ("Missing symbol for schedule");
+
+			panic = symbols["panic"];
+		}
+
+		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+			uint64 schedule_address = kernel_base + schedule.offset;
+
+			var arm64 = machine as Arm64Machine;
+			if (panic != null && arm64 != null)
+				arm64.call_landing_zone = kernel_base + panic.offset;
+
+			yield machine.enter_exception_level (1, 1000, cancellable);
+
+			yield run_until_schedule (schedule_address, cancellable);
+
+			if (arm64 != null)
+				yield arm64.learn_permission_templates (schedule_address, cancellable);
+		}
+
+		public async void settle (Cancellable? cancellable) throws Error, IOError {
+			yield machine.gdb.continue (cancellable);
+		}
+
+		// Every kernel thread passes through the scheduler, which is a context the agent can be
+		// injected from: on a stack of its own, holding nothing.
+		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Error, IOError {
+			GDB.Client gdb = machine.gdb;
+			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+
+			GDB.Breakpoint? hit = null;
+			do {
+				var exception = yield gdb.continue_until_exception (cancellable);
+				hit = exception.breakpoint;
+			} while (hit != bp);
+
+			yield bp.remove (cancellable);
+		}
+	}
+
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {
 		private Machine machine;
 		private uint64 yield_point;

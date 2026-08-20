@@ -2324,9 +2324,10 @@ namespace Frida {
 	public enum BareboneKernelKind {
 		AUTO,
 		BARE,
-		XNU,
 		WIN9X,
-		WINNT
+		WINNT,
+		XNU,
+		LINUX
 	}
 
 	public sealed class BareboneConnectionConfig : Object, Json.Serializable {

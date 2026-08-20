@@ -18,6 +18,7 @@ backend_sources += files(
   'kernel-relocation.vala',
   'kernel-flavor.vala',
   'pe.vala',
+  'linux.vala',
   'win9x.vala',
   'win9x-service-names.vala',
   'winnt.vala',

@@ -158,7 +158,7 @@ namespace Frida {
 			Barebone.KernelRelocation? relocation = null;
 			uint64 kernel_base = 0;
 			BareboneImageConfig? image = config.image;
-			if (image != null) {
+			if (image != null && config.kernel != LINUX) {
 				if (image.base != null) {
 					kernel_base = image.base.address;
 				} else {
@@ -180,6 +180,13 @@ namespace Frida {
 				var winnt_layout = yield Barebone.collect_winnt_layout (machine, cancellable);
 				kernel_modules = winnt_layout.modules;
 				kernel_symbols = winnt_layout.symbols;
+			} else if (config.kernel == LINUX) {
+				if (image == null)
+					throw new Error.INVALID_ARGUMENT ("Missing image.file naming the kernel's System.map");
+				var linux_layout = yield Barebone.collect_linux_layout (machine, image.file, cancellable);
+				kernel_base = linux_layout.base_address;
+				kernel_modules = linux_layout.modules;
+				kernel_symbols = linux_layout.symbols;
 			}
 
 			Barebone.Allocator allocator;
