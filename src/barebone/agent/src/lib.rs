@@ -1,7 +1,15 @@
 #![no_std]
 
-#[cfg(not(any(feature = "xnu", feature = "win9x", feature = "winnt", feature = "linux")))]
-compile_error!("pick a flavor: --features xnu, --features win9x, --features winnt or --features linux");
+#[cfg(not(any(
+    feature = "xnu",
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux",
+    feature = "linux-injected"
+)))]
+compile_error!(
+    "pick a flavor: --features xnu, --features win9x, --features winnt, --features linux or --features linux-injected"
+);
 
 #[cfg(all(feature = "blob", feature = "linux"))]
 compile_error!("pick one flavour, not both");
@@ -50,7 +58,7 @@ pub mod kernel;
 mod gum_linux;
 #[cfg(feature = "linux")]
 mod hostlink_chardev;
-#[cfg(feature = "linux")]
+#[cfg(any(feature = "linux", feature = "linux-injected"))]
 mod linux;
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
@@ -70,8 +78,8 @@ mod winnt_paging;
 #[cfg(feature = "winnt")]
 mod winnt_user;
 
-#[cfg(feature = "xnu")]
-mod gum_xnu;
+#[cfg(any(feature = "xnu", feature = "linux-injected"))]
+mod gum_injected;
 #[cfg(feature = "blob")]
 mod hostlink_virtio;
 #[cfg(feature = "xnu")]
@@ -622,7 +630,7 @@ fn transport_get_unchecked() -> &'static Transport {
 
 // Only the XNU backend has to cope with Gum asking for memory work before the
 // hostlink that performs it exists.
-#[cfg(feature = "xnu")]
+#[cfg(any(feature = "xnu", feature = "linux-injected"))]
 #[inline(always)]
 fn transport_is_up() -> bool {
     unsafe { !TRANSPORT_DRIVER.is_null() }

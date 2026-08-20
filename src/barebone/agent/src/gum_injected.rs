@@ -1,6 +1,8 @@
-// XNU half of Gum's platform backend. Memory permissions and kernel-text writes
-// go out over the hostlink, because the guest CPU cannot perform them itself:
-// the host owns the page tables and the physical-memory bridge.
+// Gum's platform backend for an agent the host injected into a kernel that
+// keeps its page tables and its executable regions to itself. Memory
+// permissions and kernel-text writes go out over the hostlink, because the
+// guest cannot perform them itself: the host owns the page tables and the
+// physical-memory bridge.
 
 use crate::{
     FridaCommand,
@@ -23,6 +25,22 @@ use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::mem::size_of;
 use core::ptr;
+
+// Where the guest's kernel keeps itself and its modules, which is what Gum
+// reports as the path of each one.
+#[cfg(feature = "xnu")]
+const KERNEL_PATH: &str = "/System/Library/Kernels/kernel";
+#[cfg(feature = "xnu")]
+const MODULE_DIRECTORY: &str = "/System/Library/Extensions/";
+#[cfg(feature = "xnu")]
+const MODULE_SUFFIX: &str = ".kext";
+
+#[cfg(feature = "linux-injected")]
+const KERNEL_PATH: &str = "/boot/vmlinux";
+#[cfg(feature = "linux-injected")]
+const MODULE_DIRECTORY: &str = "/lib/modules/";
+#[cfg(feature = "linux-injected")]
+const MODULE_SUFFIX: &str = ".ko";
 
 const SHADOW_MAGIC: u64 = 0x4644_4f48_5341_4853;
 const SHADOW_HEADER: usize = 24;
@@ -169,11 +187,16 @@ pub extern "C" fn gum_try_mprotect(
 // flips a slab page RW then RX in place, so without this the freeze never takes
 // effect and executing the page faults with a permission abort.
 unsafe fn flush_tlb_range(address: u64, size: u64) {
-    unsafe {
-        let page_size = gum_query_page_size() as u64;
-        let start = address & !(page_size - 1);
-        let end = (address + size + page_size - 1) & !(page_size - 1);
+    let page_size = unsafe { gum_query_page_size() } as u64;
+    let start = address & !(page_size - 1);
+    let end = (address + size + page_size - 1) & !(page_size - 1);
 
+    unsafe { flush_pages(start, end, page_size) };
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
+    unsafe {
         core::arch::asm!("dsb ish", options(nostack, preserves_flags));
         let mut va = start;
         while va < end {
@@ -182,6 +205,18 @@ unsafe fn flush_tlb_range(address: u64, size: u64) {
             va += page_size;
         }
         core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
+    unsafe {
+        let mut va = start;
+        while va < end {
+            core::arch::asm!("invlpg [{operand}]", operand = in(reg) va as usize,
+                options(nostack, preserves_flags));
+            va += page_size;
+        }
     }
 }
 
@@ -235,16 +270,16 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             let module_base = kernel_base + module_info.offset as u64;
 
             let module_path = if i == 0 {
-                "/System/Library/Kernels/kernel"
+                KERNEL_PATH
             } else {
                 &format!(
-                    "/System/Library/Extensions/{}.kext/{}",
-                    module_info.name, module_info.name
+                    "{}{}{}",
+                    MODULE_DIRECTORY, module_info.name, MODULE_SUFFIX
                 )
             };
             let module_range = GumMemoryRange {
                 base_address: module_base,
-                size: module_info.size as u64,
+                size: module_info.size as gsize,
             };
 
             let module = gum::gum_native_module_new(&module_path, &module_info.version, &module_range);

@@ -1,5 +1,5 @@
 // Gum's platform backend, without the parts that depend on the kernel. Memory protection,
-// symbols and the module registry are in gum_xnu.rs, gum_linux.rs and gum_windows.rs.
+// symbols and the module registry are in gum_injected.rs, gum_linux.rs and gum_windows.rs.
 
 use crate::{
     bindings::{
@@ -23,8 +23,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::gum_linux::enumerate_exports_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 use crate::gum_windows::enumerate_exports_in_range;
-#[cfg(feature = "xnu")]
-use crate::gum_xnu::enumerate_exports_in_range;
+#[cfg(any(feature = "xnu", feature = "linux-injected"))]
+use crate::gum_injected::enumerate_exports_in_range;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {

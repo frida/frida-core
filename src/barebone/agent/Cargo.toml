@@ -23,6 +23,7 @@ xnu = ["blob"]
 win9x = ["blob"]
 winnt = ["blob"]
 linux = []
+linux-injected = ["blob"]
 
 [profile.release]
 panic = "abort"

@@ -2,12 +2,13 @@
 // expose the same primitives, so the rest of the agent never names a specific
 // kernel.
 //
-// XNU is reached from the outside: a remote stub injects the agent and patches
-// the addresses it needs into .kernel_addrs. Linux is reached from the inside:
-// the agent is a kernel module, so its glue is an ordinary C translation unit
-// (linux/frida-kmod.c) compiled against the target kernel's headers by kbuild.
+// A kernel is reached from the outside -- a remote stub injects the agent and
+// patches the addresses it needs into .kernel_addrs -- or from the inside,
+// where the agent is a kernel module whose glue is an ordinary C translation
+// unit compiled against the target kernel's headers. Linux is reached either
+// way; the others only from the outside.
 
-#[cfg(feature = "linux")]
+#[cfg(any(feature = "linux", feature = "linux-injected"))]
 pub use crate::linux::*;
 #[cfg(feature = "win9x")]
 pub use crate::win9x::*;

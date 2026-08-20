@@ -66,6 +66,8 @@ fn main() {
             "win9x"
         } else if env::var("CARGO_FEATURE_WINNT").is_ok() {
             "winnt"
+        } else if env::var("CARGO_FEATURE_LINUX_INJECTED").is_ok() {
+            "linux"
         } else {
             "xnu"
         };

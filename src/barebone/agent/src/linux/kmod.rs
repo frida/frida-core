@@ -1,15 +1,14 @@
-// Linux backend. Unlike XNU — where a remote stub injects the agent and patches
-// resolved kernel addresses into .kernel_addrs — here the agent is loaded from
-// the inside as a kernel module, so every primitive is an ordinary call into
-// linux/frida-kmod.c. That shim is compiled by kbuild against the target
-// kernel's headers, which is what keeps us out of the business of guessing
-// struct layouts, config-dependent macros and per-version symbol names.
+// The agent as a kernel module: every primitive is an ordinary call into
+// linux/frida-kmod.c, compiled by kbuild against the target kernel's headers,
+// which is what keeps us out of the business of guessing struct layouts,
+// config-dependent macros and per-version symbol names.
 
 use core::ffi::{CStr, c_char, c_int, c_void};
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use super::LoadedModule;
 use crate::kernel::ThreadEntry;
 
 pub fn log(msg: &str) {
@@ -139,14 +138,6 @@ pub fn enumerate_modules() -> Vec<LoadedModule> {
         frida_kmod_enumerate_modules(on_module, &mut modules as *mut _ as *mut c_void);
     }
     modules
-}
-
-#[derive(Debug, Clone)]
-pub struct LoadedModule {
-    pub name: String,
-    pub version: String,
-    pub base: u64,
-    pub size: u64,
 }
 
 pub fn find_symbol(name: &CStr) -> u64 {
