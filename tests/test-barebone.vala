@@ -85,6 +85,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/enumerates-its-own-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) => enumerates_its_own_threads_in_live_guest.begin (
+				h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/watches-threads-in-live-guest", () => {
 			var h = new SlowHarness ((h) => watches_threads_in_live_guest.begin (h as SlowHarness,
 				win9x_config_from_environment (h as SlowHarness), "C:\\WINDOWS\\NOTEPAD.EXE"));
@@ -1917,6 +1923,45 @@ namespace Frida.BareboneTest {
 			}
 			script.disconnect (handler);
 			printerr ("\nDDB %s\n", said);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void enumerates_its_own_threads_in_live_guest (SlowHarness h) {
+		var config = win9x_config_from_environment (h);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_program (device, "explorer.exe");
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const mine = Process.enumerateThreads().map(t => t.id >>> 0);
+				const here = Process.getCurrentThreadId() >>> 0;
+				send(['threads', mine.length, mine.includes(here)]);
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+			printerr ("\nTHREADS %s\n", said[0]);
+
+			assert_true (said[0].contains ("true"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

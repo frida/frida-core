@@ -63,6 +63,7 @@ pub static USER: Primitives = Primitives {
     protect,
     protection_at,
     enumerate_ranges,
+    enumerate_threads,
 };
 
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
@@ -123,6 +124,10 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
 
         address = region.base + region.size;
     }
+}
+
+fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
+    crate::win9x::enumerate_threads_of(current_process_id(), found)
 }
 
 fn protection_at(address: usize) -> u32 {

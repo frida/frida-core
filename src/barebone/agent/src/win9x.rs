@@ -1091,6 +1091,7 @@ pub struct Primitives {
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
+    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
 }
 
 pub fn select_user() {
@@ -1122,6 +1123,7 @@ static KERNEL: Primitives = Primitives {
     protect: kernel::protect,
     protection_at: kernel::protection_at,
     enumerate_ranges: kernel::enumerate_ranges,
+    enumerate_threads: kernel::enumerate_threads,
 };
 
 mod kernel {
@@ -1214,6 +1216,10 @@ mod kernel {
 
     pub fn current_thread_id() -> u64 {
         unsafe { get_cur_thread_handle() as u64 }
+    }
+
+    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+        super::enumerate_ring_zero_threads(found)
     }
 
     pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
@@ -1578,8 +1584,38 @@ pub fn install_interrupt_handler(
     if handle == 0 { -1 } else { 0 }
 }
 
-// VMM schedules only ring 0 threads. The ring 3 part of a Win32 thread is not ours to report.
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+    (primitives().enumerate_threads)(found)
+}
+
+// The threads of one process, as the copy in it sees them. Ring 3 of this system reaches both
+// the services and the memory the kernel keeps, thus the copy walks the same list the kernel
+// half does and keeps what belongs to it, registers and all.
+pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo)) {
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+
+    let mut thread = first;
+    while thread != 0 {
+        if unsafe { (thread as *const u32).add(0x2c / 4).read() } == WIN32_THREAD {
+            let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+            let database = unsafe { (block as *const u32).read() };
+            let process = unsafe { (block as *const u32).add(1).read() };
+            if process_id(process) == pid {
+                found(ThreadInfo {
+                    id: process_id(database),
+                    cpu_state: thread_cpu_state(thread),
+                });
+            }
+        }
+
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+}
+
+fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
@@ -1643,7 +1679,7 @@ pub struct ProcessInfo {
 // process list is the deduplicated set of those, and the image path is where the command
 // line starts.
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
-    let slot = unsafe { (0xc00211ccu32 as *const u32).read() };
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
