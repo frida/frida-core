@@ -2068,12 +2068,22 @@ pub fn forget_threads() {
     }
 }
 
+// What a new thread is to run, and the value to hand it, wait on its own stack: the stub returns
+// to the starter of KERNEL32, which reads them from there. The thunk gives this the frame it made,
+// which is the eight registers, the flags, the room it keeps for the original, and the place the
+// replacement of the Interceptor returns to.
 #[unsafe(no_mangle)]
-extern "C" fn frida_win9x_on_thread_start() -> usize {
-    crate::gum_windows::thread_appeared(current_thread_id() as u32);
+extern "C" fn frida_win9x_on_thread_start(frame: *const u32) -> usize {
+    let routine = unsafe { frame.add(START_ROUTINE).read() } as usize;
+    let parameter = unsafe { frame.add(START_PARAMETER).read() } as usize;
+
+    crate::gum_windows::thread_appeared_at(current_thread_id() as u32, routine, parameter);
 
     thread_start()
 }
+
+const START_ROUTINE: usize = 12;
+const START_PARAMETER: usize = 13;
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
@@ -2695,7 +2705,9 @@ frida_win9x_thread_start_thunk:
     push eax
     pushfd
     pushad
+    push esp
     call frida_win9x_on_thread_start
+    add esp, 4
     mov [esp + 36], eax
     popad
     popfd

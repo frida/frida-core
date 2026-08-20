@@ -1982,7 +1982,11 @@ namespace Frida.BareboneTest {
 				Process.attachThreadObserver({
 					onAdded(thread) {
 						seen.push(['added', thread.id.toString(),
-							Process.getCurrentThreadId() === thread.id]);
+							Process.getCurrentThreadId() === thread.id,
+							thread.entrypoint === undefined
+								? 'nowhere'
+								: thread.entrypoint.routine.toString() + '/' +
+									thread.entrypoint.parameter.toString()]);
 					},
 					onRemoved(thread) {
 						seen.push(['removed', thread.id.toString()]);
@@ -2006,14 +2010,16 @@ namespace Frida.BareboneTest {
 				});
 
 				const out = Memory.alloc(4);
-				const handle = createThread(NULL, 0, body, NULL, 0, out);
+				const handle = createThread(NULL, 0, body, ptr('0xdeadbeef'), 0, out);
 				const made = out.readU32();
 				closeHandle(handle);
 
 				recv('poll', () => {
 					const mine = seen.filter(e => e[1] === made.toString());
 					send(['saw', mine.some(e => e[0] === 'added' && e[2]),
-						mine.some(e => e[0] === 'removed'), seen.length]);
+						mine.some(e => e[0] === 'removed'), seen.length,
+						mine.some(e => e[0] === 'added' &&
+							e[3] === body.toString() + '/0xdeadbeef')]);
 				});
 				send('ready');
 			""", null, null);
@@ -2040,6 +2046,7 @@ namespace Frida.BareboneTest {
 			assert_true (said[0].contains ("\"registers\","));
 			assert_true (!said[0].contains (",false]"));
 			assert_true (said[said.size - 1].contains ("\"saw\",true,true,"));
+			assert_true (said[said.size - 1].has_suffix ("true]}"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -2833,11 +2840,13 @@ namespace Frida.BareboneTest {
 			Process? shell = null;
 			Process? system = null;
 			for (int i = 0; i != processes.size (); i++) {
-				string name = processes.get (i).name.down ();
-				if (name == "explorer.exe")
-					shell = processes.get (i);
-				else if (name == "system")
-					system = processes.get (i);
+				var process = processes.get (i);
+				var path = process.parameters["path"];
+				var file = (path != null) ? path.get_string ().down () : process.name.down ();
+				if (file.has_suffix ("explorer.exe"))
+					shell = process;
+				else if (file == "system")
+					system = process;
 			}
 			assert_nonnull (shell);
 			assert_nonnull (system);
