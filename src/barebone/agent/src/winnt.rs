@@ -1319,6 +1319,8 @@ pub fn detach_from_process(pid: u32) -> bool {
         return false;
     }
 
+    forget_outbox(target.arena);
+
     let mut process: *mut c_void = core::ptr::null_mut();
     enumerate_processes(&mut |p| {
         if p.id == pid {
@@ -2311,6 +2313,12 @@ pub fn pump_frames_to_host() {
     pump_frames(&FROM_TARGET, &mut |_arena| {
         crate::winnt_user::signal_kernel_half();
     });
+}
+
+// The pages of a copy that has left go back to the system, thus what is still addressed to it
+// must go first: a turn of the pump would otherwise write into a page that is nobody's.
+fn forget_outbox(arena: u64) {
+    unsafe { outboxes() }.remove(&arena);
 }
 
 fn queue_frame(arena: u64, frame: &[u8]) {

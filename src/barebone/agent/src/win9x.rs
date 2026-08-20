@@ -518,6 +518,8 @@ pub fn detach_from_process(pid: u32) -> bool {
     // instructions and return into KERNEL32.
     wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
 
+    forget_outbox(arena);
+
     unsafe {
         free_shared(((arena + TO_TARGET.buffer) as *const u32).read_volatile());
         free_shared(((arena + FROM_TARGET.buffer) as *const u32).read_volatile());
@@ -785,6 +787,18 @@ pub fn pump_frames_to_targets() {
 
 pub fn pump_frames_to_host() {
     pump_frames(&FROM_TARGET);
+}
+
+// The pages of a copy that has left go back to the system, thus what is still addressed to it
+// must go first: a turn of the pump would otherwise read and write a page that is nobody's.
+fn forget_outbox(arena: u32) {
+    let Some(outbox) = unsafe { outboxes() }.remove(&arena) else {
+        return;
+    };
+
+    if outbox.lent != 0 {
+        free_shared(outbox.lent);
+    }
 }
 
 fn queue_frame(arena: u32, frame: &[u8]) {
