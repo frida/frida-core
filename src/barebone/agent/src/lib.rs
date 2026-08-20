@@ -57,6 +57,8 @@ mod linux;
 mod gum_windows;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 mod icons;
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+mod start_menu;
 #[cfg(feature = "win9x")]
 mod win9x;
 #[cfg(feature = "win9x")]
@@ -967,9 +969,9 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateShortcuts => Some(handle_enumerate_shortcuts()),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
@@ -1152,7 +1154,7 @@ static mut INJECTION_PENDING: bool = false;
 #[cfg(feature = "win9x")]
 static mut PENDING_INJECTION: (u16, u32) = (0, 0);
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn describe(path: *const u8) -> *const gchar {
     if path.is_null() {
         return c"".as_ptr();
@@ -1161,12 +1163,7 @@ fn describe(path: *const u8) -> *const gchar {
     kernel::describe_image(path) as *const gchar
 }
 
-#[cfg(feature = "winnt")]
-fn describe(_path: *const u8) -> *const gchar {
-    c"".as_ptr()
-}
-
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_applications() -> HandlerResponse {
     unsafe {
         let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
@@ -1200,14 +1197,14 @@ fn handle_enumerate_applications() -> HandlerResponse {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_shortcuts() -> HandlerResponse {
     unsafe {
         let list_type = g_variant_type_new(c"a(ssss)".as_ptr() as *const gchar);
         let shortcut_type = g_variant_type_new(c"(ssss)".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
 
-        crate::win9x_user::enumerate_shortcuts(&mut |identity, target, shown, description| {
+        kernel::enumerate_shortcuts(&mut |identity, target, shown, description| {
             let mut identity_text = [0u8; 128];
             let mut target_text = [0u8; 260];
             let mut shown_text = [0u8; 128];
@@ -1234,7 +1231,7 @@ fn handle_enumerate_shortcuts() -> HandlerResponse {
     }
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
     let taken = core::cmp::min(bytes.len(), into.len() - 1);
     into[..taken].copy_from_slice(&bytes[..taken]);

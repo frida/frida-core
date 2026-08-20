@@ -104,7 +104,9 @@ namespace Frida.BareboneTest {
 		});
 
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-applications-in-live-guest", () => {
-			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (h as SlowHarness));
+			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (
+				h as SlowHarness, win9x_config_from_environment (h as SlowHarness), "Notepad",
+				"com.microsoft.notepad"));
 			h.run ();
 		});
 
@@ -237,6 +239,13 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/hooks-kernel-function-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_hooks_kernel_function_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/enumerates-applications-in-live-guest", () => {
+			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (
+				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT"),
+				"Notepad", "com.microsoft.notepad"));
 			h.run ();
 		});
 
@@ -2145,8 +2154,8 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private async void enumerates_applications_in_live_guest (SlowHarness h) {
-		var config = win9x_config_from_environment (h);
+	private async void enumerates_applications_in_live_guest (SlowHarness h, BareboneConfig? config,
+			string program, string identity) {
 		if (config == null)
 			return;
 
@@ -2176,11 +2185,11 @@ namespace Frida.BareboneTest {
 			string? identifier = null;
 			for (int i = 0; i != applications.size (); i++) {
 				var app = applications.get (i);
-				if (app.name == "Notepad")
+				if (app.name == program)
 					identifier = app.identifier;
 			}
 			assert_nonnull (identifier);
-			assert_true (identifier == "com.microsoft.notepad");
+			assert_true (identifier == identity);
 
 			uint pid = yield device.spawn (identifier, null, null);
 			assert_true (pid != 0);

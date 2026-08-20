@@ -43,6 +43,9 @@ SECTIONS {
     _KeStackAttachProcess = .; . += 4;
     _KeUnstackDetachProcess = .; . += 4;
     _ZwCreateFile = .; . += 4;
+    _ZwOpenKey = .; . += 4;
+    _ZwEnumerateKey = .; . += 4;
+    _ZwQueryValueKey = .; . += 4;
     _ZwReadFile = .; . += 4;
     _ZwClose = .; . += 4;
     _ZwCreateEvent = .; . += 4;

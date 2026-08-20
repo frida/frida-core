@@ -12,7 +12,8 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
     LoadedModule, LoaderEntryPoints, describe_module, enumerate_modules, loader_entry_points,
-    on_module_load, on_module_load_with_flags, on_module_unload, on_thread_exit, on_thread_start,
+    enumerate_shortcuts, on_module_load, on_module_load_with_flags, on_module_unload,
+    on_thread_exit, on_thread_start,
     resume_process, spawn_process, thread_entry_points, thread_exit_slot, thread_start_slot,
     ThreadEntryPoints,
 };
@@ -2437,6 +2438,270 @@ impl Target {
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 
+pub fn enumerate_applications(found: &mut dyn FnMut(&[u8], &[u8])) {
+    let mut walk = || walk_registered_programs(found);
+
+    on_kernel_stack(&mut walk);
+}
+
+fn walk_registered_programs(found: &mut dyn FnMut(&[u8], &[u8])) {
+    let Some(programs) = open_key(core::ptr::null_mut(), APP_PATHS) else {
+        return;
+    };
+
+    let mut index = 0;
+    loop {
+        let mut identifier = [0u8; MAX_KEY_NAME];
+        let Some(named) = name_of_subkey(programs, index, &mut identifier) else {
+            break;
+        };
+        index += 1;
+
+        let Some(program) = open_key(programs, named) else {
+            continue;
+        };
+
+        let mut path = [0u8; MAX_PATH];
+        if let Some(image) = image_of_program(program, &mut path) {
+            found(named, image);
+        }
+
+        unsafe { (_ZwClose)(program) };
+    }
+
+    unsafe { (_ZwClose)(programs) };
+}
+
+fn open_key(root: *mut c_void, name: &[u8]) -> Option<*mut c_void> {
+    let mut wide = [0u16; MAX_PATH];
+    let name = widen(name, &mut wide);
+    let name = UnicodeString {
+        length: (name.len() * 2) as u16,
+        maximum_length: (name.len() * 2) as u16,
+        buffer: name.as_ptr(),
+    };
+    let attributes = ObjectAttributes {
+        length: core::mem::size_of::<ObjectAttributes>() as u32,
+        root_directory: root,
+        object_name: &name,
+        attributes: OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+        security_descriptor: core::ptr::null_mut(),
+        security_quality_of_service: core::ptr::null_mut(),
+    };
+
+    let mut key: *mut c_void = core::ptr::null_mut();
+    if unsafe { (_ZwOpenKey)(&mut key, KEY_READ, &attributes) } < 0 {
+        return None;
+    }
+
+    Some(key)
+}
+
+fn name_of_subkey<'a>(key: *mut c_void, index: u32, into: &'a mut [u8]) -> Option<&'a [u8]> {
+    let mut record = [0u8; KEY_RECORD_SIZE];
+    let mut taken = 0;
+    let status = unsafe {
+        (_ZwEnumerateKey)(key, index, KEY_BASIC_INFORMATION, record.as_mut_ptr(),
+            record.len() as u32, &mut taken)
+    };
+    if status < 0 {
+        return None;
+    }
+
+    let length = unsafe { read_u32(record.as_ptr() as usize + KEY_NAME_LENGTH) } as usize / 2;
+    let name = unsafe {
+        core::slice::from_raw_parts(record.as_ptr().add(KEY_NAME) as *const u16, length)
+    };
+
+    Some(narrow(name, into))
+}
+
+fn image_of_program<'a>(key: *mut c_void, into: &'a mut [u8]) -> Option<&'a [u8]> {
+    let unnamed = UnicodeString {
+        length: 0,
+        maximum_length: 0,
+        buffer: core::ptr::null(),
+    };
+
+    let mut named = [0u8; MAX_PATH];
+    let path = value_of(key, &unnamed, &mut named)?;
+    let length = path.len();
+    named.copy_within(..length, 0);
+
+    Some(expanded(&named[..length], into))
+}
+
+fn value_of<'a>(key: *mut c_void, name: &UnicodeString, into: &'a mut [u8]) -> Option<&'a [u8]> {
+    let mut record = [0u8; VALUE_RECORD_SIZE];
+    let mut taken = 0;
+    let status = unsafe {
+        (_ZwQueryValueKey)(key, name, KEY_VALUE_PARTIAL_INFORMATION, record.as_mut_ptr(),
+            record.len() as u32, &mut taken)
+    };
+    if status < 0 {
+        return None;
+    }
+
+    let length = unsafe { read_u32(record.as_ptr() as usize + VALUE_DATA_LENGTH) } as usize / 2;
+    let text = unsafe {
+        core::slice::from_raw_parts(record.as_ptr().add(VALUE_DATA) as *const u16, length)
+    };
+
+    Some(narrow(text, into))
+}
+
+// The system keeps some of these paths in quotes, and some of them named after a folder it
+// carries in the registry itself.
+fn narrow<'a>(text: &[u16], into: &'a mut [u8]) -> &'a [u8] {
+    let mut length = 0;
+    for c in text.iter().copied() {
+        if c == 0 || length == into.len() {
+            break;
+        }
+        if c == QUOTE {
+            continue;
+        }
+        into[length] = c as u8;
+        length += 1;
+    }
+
+    &into[..length]
+}
+
+fn expanded<'a>(path: &[u8], into: &'a mut [u8]) -> &'a [u8] {
+    for (name, key, value) in KNOWN_FOLDERS {
+        let Some(rest) = starts_with(path, name) else {
+            continue;
+        };
+
+        let mut folder = [0u8; MAX_PATH];
+        let Some(root) = registry_text(key, value, &mut folder) else {
+            return &into[..0];
+        };
+
+        return joined(root, rest, into);
+    }
+
+    joined(path, b"", into)
+}
+
+fn starts_with<'a>(text: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    if text.len() < prefix.len() {
+        return None;
+    }
+
+    let same = text[..prefix.len()]
+        .iter()
+        .zip(prefix.iter())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b));
+
+    same.then(|| &text[prefix.len()..])
+}
+
+fn joined<'a>(head: &[u8], tail: &[u8], into: &'a mut [u8]) -> &'a [u8] {
+    let mut length = 0;
+    for c in head.iter().chain(tail.iter()).copied() {
+        if length == into.len() {
+            break;
+        }
+        into[length] = c;
+        length += 1;
+    }
+
+    &into[..length]
+}
+
+fn registry_text<'a>(key: &[u8], value: &[u8], into: &'a mut [u8]) -> Option<&'a [u8]> {
+    let key = open_key(core::ptr::null_mut(), key)?;
+
+    let mut wide = [0u16; MAX_KEY_NAME];
+    let value = widen(value, &mut wide);
+    let named = UnicodeString {
+        length: (value.len() * 2) as u16,
+        maximum_length: (value.len() * 2) as u16,
+        buffer: value.as_ptr(),
+    };
+
+    let text = value_of(key, &named, into);
+    unsafe { (_ZwClose)(key) };
+
+    text
+}
+
+fn widen<'a>(text: &[u8], into: &'a mut [u16]) -> &'a [u16] {
+    let mut length = 0;
+    for c in text.iter().copied() {
+        if length == into.len() {
+            break;
+        }
+        into[length] = c as u16;
+        length += 1;
+    }
+
+    &into[..length]
+}
+
+const QUOTE: u16 = 0x22;
+const APP_PATHS: &[u8] =
+    br"\Registry\Machine\Software\Microsoft\Windows\CurrentVersion\App Paths";
+const KNOWN_FOLDERS: [(&[u8], &[u8], &[u8]); 2] = [
+    (b"%SystemRoot%", br"\Registry\Machine\Software\Microsoft\Windows NT\CurrentVersion",
+        b"SystemRoot"),
+    (b"%ProgramFiles%", br"\Registry\Machine\Software\Microsoft\Windows\CurrentVersion",
+        b"ProgramFilesDir"),
+];
+const KEY_READ: u32 = 0x0002_0019;
+const KEY_BASIC_INFORMATION: u32 = 0;
+const KEY_VALUE_PARTIAL_INFORMATION: u32 = 2;
+const KEY_RECORD_SIZE: usize = KEY_NAME + 2 * MAX_KEY_NAME;
+const KEY_NAME_LENGTH: usize = 0x0c;
+const KEY_NAME: usize = 0x10;
+const VALUE_RECORD_SIZE: usize = VALUE_DATA + 2 * MAX_PATH;
+const VALUE_DATA_LENGTH: usize = 0x08;
+const VALUE_DATA: usize = 0x0c;
+const MAX_KEY_NAME: usize = 64;
+const MAX_PATH: usize = 260;
+
+pub fn identify_image(path: *const u8) -> *const u8 {
+    let identity = unsafe { (&raw mut IDENTITY).as_mut().unwrap() };
+    identity[0] = 0;
+
+    let mut read = || {
+        let Some(file) = File::open(path) else {
+            return;
+        };
+
+        let written = crate::icons::identify(&file, &mut identity[..MAX_IDENTITY]);
+        identity[written] = 0;
+    };
+    on_kernel_stack(&mut read);
+
+    identity.as_ptr()
+}
+
+static mut IDENTITY: [u8; MAX_IDENTITY + 1] = [0; MAX_IDENTITY + 1];
+const MAX_IDENTITY: usize = 128;
+
+pub fn describe_image(path: *const u8) -> *const u8 {
+    let description = unsafe { (&raw mut DESCRIPTION).as_mut().unwrap() };
+    description[0] = 0;
+
+    let mut read = || {
+        let Some(file) = File::open(path) else {
+            return;
+        };
+
+        let written = crate::icons::describe(&file, &mut description[..MAX_DESCRIPTION]);
+        description[written] = 0;
+    };
+    on_kernel_stack(&mut read);
+
+    description.as_ptr()
+}
+
+static mut DESCRIPTION: [u8; MAX_DESCRIPTION + 1] = [0; MAX_DESCRIPTION + 1];
+const MAX_DESCRIPTION: usize = 128;
+
 pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
     let mut read = || {
         let Some(file) = File::open(path) else {
@@ -2453,6 +2718,11 @@ pub fn enumerate_icons(path: *const u8, found: &mut dyn FnMut(&[u8])) {
 // The agent uses a larger stack for the script runtime. Thus a different thread, which keeps
 // its kernel stack, makes these calls while the caller waits.
 fn on_kernel_stack(work: &mut dyn FnMut()) {
+    if unsafe { ON_READER } {
+        work();
+        return;
+    }
+
     unsafe {
         if READER_RUNNING == 0 {
             READER_RUNNING = 1;
@@ -2508,7 +2778,9 @@ unsafe fn read_for_others(_context: *mut c_void) {
         };
 
         unsafe {
+            ON_READER = true;
             (*work)();
+            ON_READER = false;
             WORK = None;
         }
         wake(done_token());
@@ -2524,6 +2796,7 @@ fn done_token() -> *const u8 {
 }
 
 static mut READER_RUNNING: u8 = 0;
+static mut ON_READER: bool = false;
 static mut WORK: Option<*mut dyn FnMut()> = None;
 
 struct File {
@@ -2895,6 +3168,23 @@ kernel_abi! {
     static _PsGetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _KeStackAttachProcess: windows_fn!(*mut c_void, *mut u8);
     static _KeUnstackDetachProcess: windows_fn!(*mut u8);
+    static _ZwOpenKey: windows_fn!(*mut *mut c_void, u32, *const ObjectAttributes => i32);
+    static _ZwEnumerateKey: windows_fn!(
+        *mut c_void,
+        u32,
+        u32,
+        *mut u8,
+        u32,
+        *mut u32,
+        => i32);
+    static _ZwQueryValueKey: windows_fn!(
+        *mut c_void,
+        *const UnicodeString,
+        u32,
+        *mut u8,
+        u32,
+        *mut u32,
+        => i32);
     static _ZwCreateFile: windows_fn!(
         *mut *mut c_void,
         u32,

@@ -18,7 +18,8 @@ use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::win9x_user::{
-    LoadedModule, LoaderEntryPoints, ThreadEntryPoints, enumerate_modules, loader_entry_points,
+    LoadedModule, LoaderEntryPoints, ThreadEntryPoints, enumerate_modules, enumerate_shortcuts,
+    loader_entry_points,
     on_module_load, on_module_load_with_flags, on_module_unload, on_thread_exit, resume_process,
     spawn_process, thread_entry_points, thread_exit_slot, thread_start, thread_start_slot,
 };
