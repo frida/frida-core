@@ -385,6 +385,22 @@ pub(crate) fn thread_appeared(id: u32) {
     announce_thread(id);
 }
 
+pub(crate) fn thread_appeared_at(id: u32, routine: usize, parameter: usize) {
+    let registry = unsafe { THREAD_REGISTRY };
+    if registry.is_null() {
+        return;
+    }
+
+    let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+    details.id = id as GumThreadId;
+    details.entrypoint.routine = routine as u64;
+    details.entrypoint.parameter = parameter as u64;
+    details.flags = crate::bindings::GumThreadFlags_GUM_THREAD_FLAGS_ENTRYPOINT_ROUTINE
+        | crate::bindings::GumThreadFlags_GUM_THREAD_FLAGS_ENTRYPOINT_PARAMETER;
+
+    unsafe { crate::bindings::gum_barebone_register_thread(registry, &details) };
+}
+
 pub(crate) fn thread_vanished(id: u32) {
     announce_thread_is_gone(id);
 }

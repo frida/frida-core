@@ -260,7 +260,7 @@ pub unsafe extern "win64" fn on_thread_start(routine: usize, parameter: usize) -
 }
 
 unsafe fn start_thread(routine: usize, parameter: usize) -> ! {
-    crate::gum_windows::thread_appeared(current_thread_id() as u32);
+    crate::gum_windows::thread_appeared_at(current_thread_id() as u32, routine, parameter);
 
     let original: windows_fn!(usize, usize => !) =
         unsafe { core::mem::transmute(THREAD_START) };

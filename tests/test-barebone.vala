@@ -2672,7 +2672,10 @@ namespace Frida.BareboneTest {
 				Process.attachThreadObserver({
 					onAdded(thread) {
 						seen.push(['added', thread.id.toString(),
-							Process.getCurrentThreadId() === thread.id]);
+							Process.getCurrentThreadId() === thread.id,
+							thread.entrypoint === undefined
+								? 'nowhere'
+								: thread.entrypoint.routine.toString()]);
 					},
 					onRemoved(thread) {
 						seen.push(['removed', thread.id.toString()]);
@@ -2705,7 +2708,8 @@ namespace Frida.BareboneTest {
 
 				recv('poll', () => {
 					const mine = seen.filter(e => e[1] === made.toString());
-					send(['saw', mine.some(e => e[0] === 'added' && e[2]),
+					send(['saw', mine.some(e => e[0] === 'added' && e[2] &&
+							e[3] === body.toString()),
 						mine.some(e => e[0] === 'removed'), seen.length]);
 				});
 				send('ready');
