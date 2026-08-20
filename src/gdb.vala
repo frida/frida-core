@@ -1784,16 +1784,27 @@ namespace Frida.GDB {
 				return;
 			}
 
+			int n = int.min (regs.size, client.get_registers ().size);
+
+			// A stub that keeps some of its registers out of the group packet -- SVE, on a
+			// QEMU that has them -- is written to one register at a time instead.
+			for (int i = 0; i != n; i++) {
+				if (regs[client.get_register_by_index (i).name] == null) {
+					foreach (var e in regs.entries) {
+						if (e.value.is_of_type (VariantType.UINT64))
+							yield write_register (e.key, e.value.get_uint64 (), cancellable);
+					}
+					return;
+				}
+			}
+
 			var builder = client.make_packet_builder_sized (2048)
 				.append_c ('G');
 
-			int n = int.min (regs.size, client.get_registers ().size);
 			ByteOrder byte_order = client.byte_order;
 			for (int i = 0; i != n; i++) {
 				GDB.Client.Register reg = client.get_register_by_index (i);
-				Variant? val = regs[reg.name];
-				if (val == null)
-					throw new Error.INVALID_ARGUMENT ("Missing %s", reg.name);
+				Variant val = regs[reg.name];
 
 				if (val.is_of_type (VariantType.UINT64)) {
 					builder.append (Protocol.unparse_integer_value (val.get_uint64 (), reg.bitsize / 8,

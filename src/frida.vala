@@ -2309,9 +2309,10 @@ namespace Frida {
 		private static BareboneKernelKind parse_kernel_kind (string? name) {
 			switch (name) {
 				case "bare":	return BareboneKernelKind.BARE;
-				case "xnu":	return BareboneKernelKind.XNU;
 				case "win9x":	return BareboneKernelKind.WIN9X;
 				case "winnt":	return BareboneKernelKind.WINNT;
+				case "xnu":	return BareboneKernelKind.XNU;
+				case "linux":	return BareboneKernelKind.LINUX;
 				default:	return BareboneKernelKind.AUTO;
 			}
 		}

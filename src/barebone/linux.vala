@@ -83,6 +83,10 @@ namespace Frida.Barebone {
 	 * every arm64 image carries turns up.
 	 */
 	private static async uint64 find_running_kernel (Machine machine, Cancellable? cancellable) throws Error, IOError {
+		// A guest idling in a shell is executing userspace, whose addresses say nothing about
+		// where the kernel is and cannot be walked with the kernel's tables.
+		yield machine.enter_exception_level (1, ENTER_KERNEL_TIMEOUT_MS, cancellable);
+
 		GDB.Client gdb = machine.gdb;
 		var thread = gdb.exception.thread;
 		var registers = yield thread.read_registers (cancellable);
@@ -91,10 +95,15 @@ namespace Frida.Barebone {
 		uint64 candidate = pc - (pc % KERNEL_ALIGNMENT);
 
 		for (uint step = 0; step != MAX_STEPS_BACK; step++) {
-			var header = yield gdb.read_byte_array (candidate + IMAGE_MAGIC_OFFSET, IMAGE_MAGIC.length,
-				cancellable);
-			if (Memory.cmp (header.get_data (), IMAGE_MAGIC.data, IMAGE_MAGIC.length) == 0)
-				return candidate;
+			// Most of what is walked past is not mapped at all, and saying so is how the
+			// guest declines to be read.
+			try {
+				var header = yield gdb.read_byte_array (candidate + IMAGE_MAGIC_OFFSET,
+					IMAGE_MAGIC.length, cancellable);
+				if (Memory.cmp (header.get_data (), IMAGE_MAGIC.data, IMAGE_MAGIC.length) == 0)
+					return candidate;
+			} catch (Error e) {
+			}
 
 			candidate -= KERNEL_ALIGNMENT;
 		}
@@ -106,6 +115,7 @@ namespace Frida.Barebone {
 	private const uint64 IMAGE_MAGIC_OFFSET = 0x38;
 	private const uint64 KERNEL_ALIGNMENT = 2 * 1024 * 1024;
 	private const uint MAX_STEPS_BACK = 512;
+	private const uint ENTER_KERNEL_TIMEOUT_MS = 1000;
 
 	public sealed class LinuxLayout : Object {
 		public uint64 base_address {

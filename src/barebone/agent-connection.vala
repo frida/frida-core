@@ -92,9 +92,13 @@ namespace Frida.Barebone {
 			byte_order = gdb.byte_order;
 			pointer_size = gdb.pointer_size;
 
+			// Only a kernel shipped as an image carries its symbols in it; the rest name theirs
+			// elsewhere, and the layout is collected before this.
+			bool image_carries_symbols = image_config != null && kernel_kind != LINUX;
+
 			Layout layout;
 			uint64 preferred_base = 0;
-			if (image_config != null) {
+			if (image_carries_symbols) {
 				var payload = yield Img4.parse_file (File.new_for_path (image_config.file), cancellable);
 				var kernelcache = Layout.parse_kernelcache (payload.data);
 				preferred_base = kernelcache.preferred_address;
@@ -116,7 +120,7 @@ namespace Frida.Barebone {
 				symbols[s.name] = s;
 				hash_builder.add_symbol (s);
 			}
-			if (image_config != null) {
+			if (image_carries_symbols) {
 				foreach (var e in image_config.symbols.entries) {
 					unowned string name = e.key;
 					if (!symbols.has_key (name)) {

@@ -711,10 +711,12 @@ namespace Frida.Barebone {
 			regs["pc"] = impl;
 
 			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["pc"].get_uint64 ();
-			// The VZ stub exposes "lr" and "x30" as distinct registers; the live link register is
-			// "lr", so the return address must be written there for the callee's RET to land here.
+			// The VZ stub exposes "lr" and "x30" as distinct registers, and the live link register
+			// is "lr", so the return address goes there too where the stub has one -- QEMU knows
+			// only x30.
 			regs["x30"] = landing_zone;
-			regs["lr"] = landing_zone;
+			if (saved_regs.has_key ("lr"))
+				regs["lr"] = landing_zone;
 
 			uint64 sp = saved_regs["sp"].get_uint64 ();
 			sp -= RED_ZONE_SIZE;
@@ -1081,7 +1083,9 @@ namespace Frida.Barebone {
 				for (uint i = 0; i != t1sz; i++)
 					parameters.upper_bits |= 1ULL << (63 - i);
 
-				parameters.tt1 = regs.ttbr1 & INT48_MASK;
+				// TTBR1 carries more than the table's address: an ASID above it, and CnP in
+				// the bit below, which the table itself is far too aligned to have set.
+				parameters.tt1 = regs.ttbr1 & INT48_MASK & ~((uint64) parameters.granule - 1);
 				parameters.t1sz = t1sz;
 
 				parameters.sprr_enabled = (regs.sprr_config & 1) != 0;
