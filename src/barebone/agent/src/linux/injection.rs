@@ -6,7 +6,8 @@ use alloc::collections::BTreeMap;
 use super::layout::{field_offset, struct_size};
 use super::native;
 use super::processes::task_with_id;
-use super::user::bootstrap_offset;
+use super::arena::{HOME, REPORTED, TO_COPY, TO_KERNEL};
+use super::user::entry_offset;
 
 pub fn inject_into_process(id: u32) -> u32 {
     if let Some(placed) = unsafe { placements() }.get(&id) {
@@ -20,7 +21,9 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    unsafe { placements() }.insert(id, Placement { task, base });
+    let placed = Placement { task, base };
+    listen_to_the_copy(&placed);
+    unsafe { placements() }.insert(id, placed);
 
     0
 }
@@ -41,7 +44,7 @@ fn pid_reported_by(placed: &Placement) -> u32 {
     unsafe {
         _access_process_vm(
             placed.task as *mut c_void,
-            placed.arena() + ARENA_REPORTED_PID,
+            placed.arena() + REPORTED,
             reported.as_mut_ptr() as *mut c_void,
             reported.len(),
             0,
@@ -73,7 +76,7 @@ fn map_and_start(id: u32) -> Option<usize> {
     let stack = map_a_stack()?;
 
     let arena = base + crate::own_range().1;
-    give(arena + ARENA_HOME, &id as *const u32 as usize, size_of::<u32>())?;
+    give(arena + HOME, &id as *const u32 as usize, size_of::<u32>())?;
 
     start(base, arena, stack);
 
@@ -143,7 +146,7 @@ fn start(base: usize, arena: usize, stack: usize) {
     unsafe {
         entry.write(Entry {
             arena,
-            bootstrap: base + bootstrap_offset(),
+            bootstrap: base + entry_offset(),
             stack,
         });
 
@@ -209,6 +212,83 @@ fn describe_registers() -> Option<Places> {
     })
 }
 
+pub fn tell_the_copy(id: u32) {
+    let Some(placed) = (unsafe { placements() }).get(&id) else {
+        return;
+    };
+
+    let memory = unsafe { _get_task_mm(placed.task as *mut c_void) };
+    if memory.is_null() {
+        return;
+    }
+
+    let told = placed.arena() + TO_COPY;
+    unsafe {
+        _kthread_use_mm(memory);
+        bump(told);
+        _do_futex(told, FUTEX_WAKE, WAKE_EVERY_WAITER, 0, 0, 0, 0);
+        _kthread_unuse_mm(memory);
+
+        _mmput(memory);
+    }
+}
+
+// A thread of the kernel half's own keeps the target's address space and sleeps on the word the
+// copy bumps, so what the copy says arrives the moment it is said.
+fn listen_to_the_copy(placed: &Placement) {
+    let listening = native::alloc(size_of::<Listening>()) as *mut Listening;
+    unsafe {
+        listening.write(Listening {
+            memory: _get_task_mm(placed.task as *mut c_void),
+            told: placed.arena() + TO_KERNEL,
+        });
+    }
+
+    native::spawn_thread(carry_what_the_copy_says, listening as *mut c_void);
+}
+
+#[repr(C)]
+struct Listening {
+    memory: *mut c_void,
+    told: usize,
+}
+
+unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
+    let listening = argument as *mut Listening;
+    let (memory, told) = unsafe { ((*listening).memory, (*listening).told) };
+    native::free(listening as *mut u8, size_of::<Listening>());
+
+    unsafe { _kthread_use_mm(memory) };
+
+    let mut heard = read_word(told);
+    loop {
+        unsafe { _do_futex(told, FUTEX_WAIT, heard, 0, 0, 0, 0) };
+
+        heard = read_word(told);
+        native::wake(told as *const u8);
+    }
+}
+
+fn read_word(address: usize) -> u32 {
+    let mut word = [0u8; 4];
+    unsafe {
+        ___arch_copy_from_user(word.as_mut_ptr() as *mut c_void, address as *const c_void, 4)
+    };
+
+    u32::from_ne_bytes(word)
+}
+
+fn bump(address: usize) {
+    let next = read_word(address).wrapping_add(1);
+    unsafe {
+        ___arch_copy_to_user(
+            address as *mut c_void,
+            &next as *const u32 as *const c_void,
+            size_of::<u32>(),
+        )
+    };
+}
+
 unsafe fn placements() -> &'static mut BTreeMap<u32, Placement> {
     unsafe { (&raw mut PLACEMENTS).as_mut().unwrap() }
 }
@@ -216,8 +296,7 @@ unsafe fn placements() -> &'static mut BTreeMap<u32, Placement> {
 static mut PLACEMENTS: BTreeMap<u32, Placement> = BTreeMap::new();
 
 const ARENA_SIZE: usize = 2 * 1024 * 1024;
-const ARENA_REPORTED_PID: usize = 0;
-const ARENA_HOME: usize = 4;
+
 const STACK_SPAN: usize = 16 * 1024;
 const USER_EXECUTION: usize = 0;
 
@@ -227,6 +306,10 @@ const PROT_EXEC: usize = 4;
 const MAP_PRIVATE: usize = 2;
 const MAP_ANONYMOUS: usize = 0x20;
 const FIRST_ERROR_ADDRESS: usize = usize::MAX - 4095;
+const FUTEX_WAIT: c_int = 128;
+const FUTEX_WAKE: c_int = 129;
+const WAKE_EVERY_WAITER: u32 = i32::MAX as u32;
+
 const CLONE_VM: usize = 0x100;
 const CLONE_FS: usize = 0x200;
 const CLONE_FILES: usize = 0x400;
@@ -242,6 +325,9 @@ unsafe extern "C" {
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _access_process_vm:
         unsafe extern "C" fn(*mut c_void, usize, *mut c_void, usize, c_int) -> c_int;
+    static ___arch_copy_from_user:
+        unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    static _do_futex: unsafe extern "C" fn(usize, c_int, u32, usize, usize, u32, u32) -> isize;
     static _user_mode_thread:
         unsafe extern "C" fn(unsafe extern "C" fn(*mut c_void) -> c_int, *mut c_void, usize) -> c_int;
 }

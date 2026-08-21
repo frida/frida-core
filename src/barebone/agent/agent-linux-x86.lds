@@ -23,6 +23,8 @@ SECTIONS {
     _mmput = .; . += 4;
     _vm_mmap = .; . += 4;
     ___arch_copy_to_user = .; . += 4;
+    ___arch_copy_from_user = .; . += 4;
+    _do_futex = .; . += 4;
     _access_process_vm = .; . += 4;
     _user_mode_thread = .; . += 4;
     ___start_BTF = .; . += 4;
