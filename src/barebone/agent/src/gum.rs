@@ -37,6 +37,12 @@ pub extern "C" fn gum_process_get_id() -> guint {
     kernel::current_process_id() as guint
 }
 
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_process_get_id() -> guint {
+    crate::source_process_id() as guint
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_page_size() -> guint {
     kernel::page_size() as guint

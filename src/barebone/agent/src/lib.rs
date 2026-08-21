@@ -1720,7 +1720,7 @@ pub(crate) fn running_in_a_process() -> bool {
 // the host has no two scripts of the same name.
 // Which session a frame belongs to is the process the copy was placed in, which on a kernel
 // that gives the copy a task of its own is not the same as the process it is.
-fn source_process_id() -> u32 {
+pub(crate) fn source_process_id() -> u32 {
     #[cfg(any(feature = "win9x", feature = "winnt"))]
     if running_in_a_process() {
         return kernel::current_process_id();
