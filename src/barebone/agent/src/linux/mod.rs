@@ -11,11 +11,15 @@ use alloc::string::String;
 mod kmod;
 #[cfg(feature = "linux-injected")]
 mod native;
+#[cfg(feature = "linux-injected")]
+mod processes;
 
 #[cfg(feature = "linux")]
 pub use self::kmod::*;
 #[cfg(feature = "linux-injected")]
 pub use self::native::*;
+#[cfg(feature = "linux-injected")]
+pub use self::processes::*;
 
 #[derive(Debug, Clone)]
 pub struct LoadedModule {

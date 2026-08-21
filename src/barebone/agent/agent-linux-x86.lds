@@ -16,6 +16,14 @@ SECTIONS {
     _printk = .; . += 4;
     _panic = .; . += 4;
     _kthread_create_on_node = .; . += 4;
+    _init_task = .; . += 4;
+    _tasklist_lock = .; . += 4;
+    __raw_read_lock = .; . += 4;
+    __raw_read_unlock = .; . += 4;
+    _get_task_exe_file = .; . += 4;
+    _file_path = .; . += 4;
+    _fput = .; . += 4;
+    _copy_from_kernel_nofault = .; . += 4;
     _wake_up_process = .; . += 4;
     _kmalloc_noprof = .; . += 4;
     _kmalloc = .; . += 4;
