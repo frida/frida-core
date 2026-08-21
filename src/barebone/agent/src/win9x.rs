@@ -2095,8 +2095,8 @@ extern "C" fn frida_win9x_on_thread_start(frame: *const u32) -> usize {
     thread_start()
 }
 
-const START_ROUTINE: usize = 12;
-const START_PARAMETER: usize = 13;
+const START_ROUTINE: usize = 11;
+const START_PARAMETER: usize = 12;
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {

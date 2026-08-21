@@ -336,17 +336,24 @@ fn thread_starter() -> Option<usize> {
         }
 
         get_thread_context(thread, context.as_mut_ptr());
+
+        // A new thread waits in a stub of KERNEL32 until the one that made it lets it go. That
+        // stub first restores a register frame from the thread's own stack, thus the word above
+        // the frame is where the thread goes when it is let go.
+        let frame = context[CONTEXT_ESP / 4] + SAVED_REGISTERS;
+        let start = (frame as *const u32).read_volatile() as usize;
+
         resume_thread(thread);
         close_handle(thread);
 
-        context[CONTEXT_EIP / 4] as usize
+        start
     };
 
-    Some(start + REGISTERS_BACK)
+    Some(start)
 }
 
 const RETURN_AT_ONCE: [u8; 5] = [0x33, 0xc0, 0xc2, 0x04, 0x00];
-const REGISTERS_BACK: usize = 8;
+const SAVED_REGISTERS: u32 = 52;
 
 static mut THREAD_START: *mut c_void = core::ptr::null_mut();
 static mut THREAD_EXIT: *mut c_void = core::ptr::null_mut();
@@ -938,6 +945,7 @@ const CONTEXT_CONTROL: u32 = 0x0001_0001;
 const CONTEXT_INTEGER: u32 = 0x0001_0002;
 const CONTEXT_EAX: usize = 0xb0;
 const CONTEXT_EIP: usize = 0xb8;
+const CONTEXT_ESP: usize = 0xc4;
 const HOLD_INSTRUCTION: u32 = 0xfeeb;
 const PATCH_ATTEMPTS: u32 = 5000;
 const HOLD_ATTEMPTS: u32 = 5000;
