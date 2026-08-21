@@ -2,28 +2,15 @@ use core::ffi::c_void;
 
 pub fn field_offset(container: &str, field: &str) -> Option<usize> {
     let types = described_types()?;
+    let described = types.named(container)?;
 
-    let mut described = types.first()?;
-    loop {
-        if described.kind == KIND_STRUCT && types.name_of(described.name) == container {
-            return described.member(&types, field).map(|bits| bits / 8);
-        }
-
-        described = types.after(&described)?;
-    }
+    types.offset_of(&described, field).map(|bits| bits / 8)
 }
 
 pub fn struct_size(container: &str) -> Option<usize> {
     let types = described_types()?;
 
-    let mut described = types.first()?;
-    loop {
-        if described.kind == KIND_STRUCT && types.name_of(described.name) == container {
-            return Some(described.size as usize);
-        }
-
-        described = types.after(&described)?;
-    }
+    Some(types.named(container)?.size as usize)
 }
 
 struct DescribedTypes {
@@ -32,12 +19,64 @@ struct DescribedTypes {
 }
 
 impl DescribedTypes {
-    fn first(&self) -> Option<Described> {
-        self.at(0)
+    fn named(&self, container: &str) -> Option<Described> {
+        let mut described = self.at(0)?;
+        loop {
+            if described.kind == KIND_STRUCT && self.name_of(described.name) == container {
+                return Some(described);
+            }
+
+            described = self.at(described.body + described.body_size)?;
+        }
     }
 
-    fn after(&self, described: &Described) -> Option<Described> {
-        self.at(described.body + described.body_size)
+    // A structure the kernel lays out itself keeps its fields in a member with no name of its
+    // own, so a field is looked for through those as well, and answers where it sits in the
+    // structure the question was asked about.
+    fn offset_of(&self, described: &Described, field: &str) -> Option<usize> {
+        for index in 0..described.members {
+            let member = described.body + (index * MEMBER_SIZE);
+            let name = self.name_of(word_at(self.types, member));
+            let placement = self.placement_of(described, member);
+
+            if name == field {
+                return Some(placement);
+            }
+
+            if name.is_empty() {
+                let within = self.with_id(word_at(self.types, member + 4))?;
+                if within.kind == KIND_STRUCT || within.kind == KIND_UNION {
+                    if let Some(deeper) = self.offset_of(&within, field) {
+                        return Some(placement + deeper);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn placement_of(&self, described: &Described, member: usize) -> usize {
+        let placement = word_at(self.types, member + 8);
+
+        let bits = if described.members_carry_bitfields {
+            placement & 0x00ff_ffff
+        } else {
+            placement
+        };
+
+        bits as usize
+    }
+
+    fn with_id(&self, wanted: u32) -> Option<Described> {
+        let mut described = self.at(0)?;
+        let mut id = 1;
+        while id != wanted {
+            described = self.at(described.body + described.body_size)?;
+            id += 1;
+        }
+
+        Some(described)
     }
 
     fn at(&self, offset: usize) -> Option<Described> {
@@ -51,14 +90,13 @@ impl DescribedTypes {
 
         let kind = (info >> 24) & 0x1f;
         let members = (info & 0xffff) as usize;
-        let members_carry_bitfields = (info >> 31) != 0;
 
         Some(Described {
             name,
             kind,
             size,
             members,
-            members_carry_bitfields,
+            members_carry_bitfields: (info >> 31) != 0,
             body: offset + DESCRIPTION_SIZE,
             body_size: body_size_of(kind, members),
         })
@@ -84,28 +122,6 @@ struct Described {
     members_carry_bitfields: bool,
     body: usize,
     body_size: usize,
-}
-
-impl Described {
-    fn member(&self, types: &DescribedTypes, field: &str) -> Option<usize> {
-        for index in 0..self.members {
-            let member = self.body + (index * MEMBER_SIZE);
-            if types.name_of(word_at(types.types, member)) != field {
-                continue;
-            }
-
-            let placement = word_at(types.types, member + 8);
-            let bits = if self.members_carry_bitfields {
-                placement & 0x00ff_ffff
-            } else {
-                placement
-            };
-
-            return Some(bits as usize);
-        }
-
-        None
-    }
 }
 
 fn described_types() -> Option<DescribedTypes> {
