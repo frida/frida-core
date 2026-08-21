@@ -2,7 +2,7 @@ use core::ffi::c_void;
 
 use crate::kernel::ThreadEntry;
 
-use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_PC, TO_COPY};
+use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_PC, WOKEN};
 use super::facade::Primitives;
 
 pub fn entry_offset() -> usize {
@@ -19,15 +19,27 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
     install_fault_reporter();
 
 
+    unsafe { crate::init_gum_without_exceptor() };
+    let context = unsafe { crate::adopt_js_context() };
+    unsafe { crate::route_frames_through(begins as u64) };
+
     arena.report_home();
     arena.tell_the_kernel_half();
 
-    let mut served = arena.told_by_the_kernel_half();
-    loop {
-        wait_on(arena.at_offset(TO_COPY), served);
+    crate::watch_for_work(context, a_frame_is_waiting, serve_the_copy);
 
-        served = arena.told_by_the_kernel_half();
-        arena.tell_the_kernel_half();
+    loop {
+        unsafe { crate::dispatch_pending_work(context) };
+    }
+}
+
+fn a_frame_is_waiting() -> bool {
+    super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
+}
+
+fn serve_the_copy() {
+    while let Some(frame) = super::relay::take_frame_from_host(unsafe { ARENA } as u64) {
+        crate::on_frame_from_host(&frame);
     }
 }
 
@@ -47,6 +59,7 @@ pub static USER: Primitives = Primitives {
     yield_now,
     monotonic_micros,
     wall_clock_micros,
+    home_process_id,
     current_process_id,
     current_thread_id,
     install_fault_reporter,
@@ -126,7 +139,7 @@ fn map(size: usize, protection: usize) -> *mut u8 {
 }
 
 fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
-    let stack = map(THREAD_STACK_SIZE, READABLE | WRITABLE);
+    let stack = map_writable(THREAD_STACK_SIZE);
     if stack.is_null() {
         return -1;
     }
@@ -225,6 +238,11 @@ fn read_clock(clock: usize) -> [i64; 2] {
     syscall(CLOCK_GETTIME, clock, now.as_mut_ptr() as usize, 0, 0, 0, 0);
 
     now
+}
+
+// The copy has a task of its own, so which process it belongs to is what it was told.
+fn home_process_id() -> u32 {
+    Arena::at(unsafe { ARENA }).home()
 }
 
 fn current_process_id() -> u32 {
@@ -351,7 +369,6 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
 
 static mut ARENA: usize = 0;
 
-const WOKEN: usize = 16;
 const PANICKED: u32 = 9;
 const FAULTED: u32 = 8;
 
@@ -418,9 +435,3 @@ const GUM_PAGE_READ: u32 = 1;
 const GUM_PAGE_WRITE: u32 = 2;
 const GUM_PAGE_EXECUTE: u32 = 4;
 
-unsafe extern "C" {
-    #[link_name = "malloc"]
-    fn malloc(size: usize) -> *mut u8;
-    #[link_name = "free"]
-    fn free_impl(ptr: *mut u8);
-}

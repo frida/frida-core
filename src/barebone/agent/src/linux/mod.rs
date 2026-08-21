@@ -14,11 +14,15 @@ mod arena;
 #[cfg(feature = "linux-injected")]
 mod facade;
 #[cfg(feature = "linux-injected")]
+mod heap;
+#[cfg(feature = "linux-injected")]
 mod injection;
 #[cfg(feature = "linux-injected")]
 mod layout;
 #[cfg(feature = "linux-injected")]
 mod native;
+#[cfg(feature = "linux-injected")]
+mod relay;
 #[cfg(feature = "linux-injected")]
 mod user;
 #[cfg(feature = "linux-injected")]
@@ -28,6 +32,8 @@ mod processes;
 pub use self::kmod::*;
 #[cfg(feature = "linux-injected")]
 pub use self::injection::*;
+#[cfg(feature = "linux-injected")]
+pub use self::relay::*;
 #[cfg(feature = "linux-injected")]
 pub use self::facade::*;
 #[cfg(feature = "linux-injected")]

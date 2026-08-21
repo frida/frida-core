@@ -625,7 +625,7 @@ fn transport_set(driver: Transport) {
 
 #[inline(always)]
 fn send_frame(frame: &[u8]) {
-    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     if unsafe { ROUTED_ARENA } != 0 {
         kernel::publish_frame_to_host(unsafe { ROUTED_ARENA }, frame);
         return;
@@ -634,12 +634,12 @@ fn send_frame(frame: &[u8]) {
     transport_get_unchecked().send(frame);
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 pub(crate) unsafe fn route_frames_through(arena: u64) {
     unsafe { ROUTED_ARENA = arena };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 static mut ROUTED_ARENA: u64 = 0;
 
 fn transport_get_unchecked() -> &'static Transport {
@@ -802,7 +802,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
 
     // A frame for a process that the host attached to belongs to the copy in that process. The
     // copy also runs this code, but it has no targets, thus it continues.
-    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     if let Some(arena) = kernel::arena_for_pid(destination_of(variant)) {
         unsafe { g_variant_unref(variant) };
         kernel::forward_frame(arena, frame);
@@ -813,7 +813,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
     unsafe { g_variant_unref(variant) };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn destination_of(variant: *mut GVariant) -> u32 {
     let mut command: u8 = 0;
     let mut request_id: u16 = 0;
@@ -862,12 +862,12 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
     glib::own_the_loop();
 
-    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     watch_for_work(main_context, kernel_half_has_work, serve_the_kernel_half);
 
     unsafe {
         loop {
-            #[cfg(not(any(feature = "win9x", feature = "winnt")))]
+            #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
             transport_get_unchecked().process();
 
             #[cfg(feature = "linux")]
@@ -884,7 +884,7 @@ fn run_main_loop(main_context: *mut GMainContext) {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn kernel_half_has_work() -> bool {
 
     if hostlink_virtio::a_turn_is_wanted() {
@@ -905,7 +905,7 @@ fn kernel_half_has_work() -> bool {
         .any(|arena| kernel::holds_a_frame_from_target(*arena))
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn serve_the_kernel_half() {
     unsafe { transport_get_unchecked().process() };
 
@@ -1261,7 +1261,7 @@ fn serve_pending_detach() {
 
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn relay_frames_from_targets() {
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
@@ -1718,10 +1718,17 @@ pub(crate) fn running_in_a_process() -> bool {
 
 // Each copy numbers its scripts from one, thus a message says which process it comes from and
 // the host has no two scripts of the same name.
+// Which session a frame belongs to is the process the copy was placed in, which on a kernel
+// that gives the copy a task of its own is not the same as the process it is.
 fn source_process_id() -> u32 {
     #[cfg(any(feature = "win9x", feature = "winnt"))]
     if running_in_a_process() {
         return kernel::current_process_id();
+    }
+
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        return kernel::home_process_id();
     }
 
     0

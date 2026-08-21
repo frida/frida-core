@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use super::layout::{field_offset, struct_size};
 use super::native;
 use super::processes::task_with_id;
-use super::arena::{HOME, REPORTED, TO_COPY, TO_KERNEL};
+use super::arena::{HOME, REPORTED, TO_KERNEL, WOKEN};
 use super::user::entry_offset;
 
 pub fn inject_into_process(id: u32) -> u32 {
@@ -267,6 +267,29 @@ fn describe_registers() -> Option<Places> {
     })
 }
 
+pub fn arena_for_pid(id: u32) -> Option<u64> {
+    unsafe { placements() }.get(&id).map(|placed| placed.arena as u64)
+}
+
+pub fn arenas() -> alloc::vec::Vec<u64> {
+    unsafe { placements() }
+        .values()
+        .map(|placed| placed.arena as u64)
+        .collect()
+}
+
+pub fn tell_the_copy_at(arena: u64) {
+    let Some(id) = (unsafe { placements() })
+        .iter()
+        .find(|(_, placed)| placed.arena as u64 == arena)
+        .map(|(id, _)| *id)
+    else {
+        return;
+    };
+
+    tell_the_copy(id);
+}
+
 pub fn tell_the_copy(id: u32) {
     let Some(placed) = (unsafe { placements() }).get(&id) else {
         return;
@@ -277,12 +300,12 @@ pub fn tell_the_copy(id: u32) {
         return;
     }
 
-    bump(placed.arena + TO_COPY);
+    bump(placed.arena + WOKEN);
 
     unsafe {
         _kthread_use_mm(memory);
         _do_futex(
-            placed.seen_by_the_copy + TO_COPY,
+            placed.seen_by_the_copy + WOKEN,
             FUTEX_WAKE,
             WAKE_EVERY_WAITER,
             0,

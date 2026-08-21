@@ -40,12 +40,12 @@ impl Arena {
         self.word(PROGRESS).store(step, Ordering::Release);
     }
 
-    pub fn report_home(&self) {
-        self.word(REPORTED).store(self.word(HOME).load(Ordering::Acquire), Ordering::Release);
+    pub fn home(&self) -> u32 {
+        self.word(HOME).load(Ordering::Acquire)
     }
 
-    pub fn told_by_the_kernel_half(&self) -> u32 {
-        self.word(TO_COPY).load(Ordering::Acquire)
+    pub fn report_home(&self) {
+        self.word(REPORTED).store(self.word(HOME).load(Ordering::Acquire), Ordering::Release);
     }
 
     pub fn tell_the_kernel_half(&self) {
@@ -65,7 +65,9 @@ pub const FAULT_ADDRESS: usize = 32;
 pub const FAULT_PC: usize = 40;
 pub const SAID: usize = 64;
 pub const SAID_SIZE: usize = 192;
+
+
 pub const REPORTED: usize = 0;
 pub const HOME: usize = 4;
-pub const TO_COPY: usize = 8;
 pub const TO_KERNEL: usize = 12;
+pub const WOKEN: usize = 16;

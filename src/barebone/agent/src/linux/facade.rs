@@ -62,6 +62,10 @@ pub fn wall_clock_micros() -> (u32, u32) {
     (primitives().wall_clock_micros)()
 }
 
+pub fn home_process_id() -> u32 {
+    (primitives().home_process_id)()
+}
+
 pub fn current_process_id() -> u32 {
     (primitives().current_process_id)()
 }
@@ -104,6 +108,7 @@ static KERNEL: Primitives = Primitives {
     yield_now: super::native::yield_now,
     monotonic_micros: super::native::monotonic_micros,
     wall_clock_micros: super::native::wall_clock_micros,
+    home_process_id: super::native::current_process_id,
     current_process_id: super::native::current_process_id,
     current_thread_id: super::native::current_thread_id,
     install_fault_reporter: super::native::install_fault_reporter,
@@ -125,6 +130,7 @@ pub struct Primitives {
     pub yield_now: fn(),
     pub monotonic_micros: fn() -> i64,
     pub wall_clock_micros: fn() -> (u32, u32),
+    pub home_process_id: fn() -> u32,
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub install_fault_reporter: fn(),
