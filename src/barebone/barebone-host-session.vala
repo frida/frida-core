@@ -211,6 +211,10 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
+			var arm64_machine = machine as Barebone.Arm64Machine;
+			if (arm64_machine != null)
+				arm64_machine.code_allocator = allocator;
+
 			Barebone.AgentConnection? agent_connection = null;
 			BareboneAgentConfig? agent_config = config.agent;
 			if (agent_config != null) {

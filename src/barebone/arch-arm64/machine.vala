@@ -22,7 +22,18 @@ namespace Frida.Barebone {
 		 */
 		public uint64 call_landing_zone = 0;
 
+		public Allocator? code_allocator;
+
 		public PhysicalMemory? physical_memory;
+
+		private Allocation? flush_stub;
+
+		private const uint32[] FLUSH_STUB_CODE = {
+			(uint32) 0xd508831f,
+			(uint32) 0xd5033b9f,
+			(uint32) 0xd5033fdf,
+			(uint32) 0xd65f03c0,
+		};
 
 		// The kernel's MMU registers (TTBR1, TCR) are fixed, so cache them from the first read
 		// (taken while the target is stopped) to serve later page-table work over the bridge
@@ -31,6 +42,8 @@ namespace Frida.Barebone {
 
 		private uint64 code_template_descriptor;
 		private bool code_template_known = false;
+		private uint64 data_template_descriptor;
+		private bool data_template_known = false;
 
 		private const uint NUM_ARGS_IN_REGS = 8;
 
@@ -252,12 +265,16 @@ namespace Frida.Barebone {
 
 		// The VZ kernel GDB stub does not expose the SPRR registers, so we cannot read the
 		// permission-remapping table that turns a descriptor's AP/XN bits into real access rights.
-		// Granting execute is the case that genuinely needs the right SPRR index, so we sample a
-		// known kernel-code page and replay its exact attribute encoding onto agent text; the
-		// read-only/read-write encodings the AP bits already give us continue to work as-is.
+		// A kernel using permission indirection reads an index out of those bits instead, leaving
+		// AP to say nothing at all, so both kinds of page are granted by sampling one the kernel
+		// already made that way and replaying its exact attribute encoding.
 		public async void learn_permission_templates (uint64 code_va, Cancellable? cancellable) throws Error, IOError {
 			code_template_descriptor = yield read_level3_descriptor (code_va, cancellable);
 			code_template_known = true;
+
+			uint64 stack_va = yield gdb.exception.thread.read_register ("sp", cancellable);
+			data_template_descriptor = yield read_level3_descriptor (stack_va, cancellable);
+			data_template_known = true;
 		}
 
 		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
@@ -377,6 +394,24 @@ namespace Frida.Barebone {
 			}
 			yield end_physical_addressing (cancellable);
 			throw_if_failed (failure);
+
+			if (code_allocator != null)
+				yield flush_translations (cancellable);
+		}
+
+		private async void flush_translations (Cancellable? cancellable) throws Error, IOError {
+			if (flush_stub == null) {
+				flush_stub = yield code_allocator.allocate (code_allocator.page_size, code_allocator.page_size,
+					cancellable);
+
+				var code = new Buffer (new Bytes (new uint8[FLUSH_STUB_CODE.length * 4]), LITTLE_ENDIAN, 8);
+				for (uint i = 0; i != FLUSH_STUB_CODE.length; i++)
+					code.write_uint32 (i * 4, FLUSH_STUB_CODE[i]);
+
+				yield write_virtual (flush_stub.virtual_address, code.bytes.get_data (), cancellable);
+			}
+
+			yield invoke (flush_stub.virtual_address, {}, cancellable);
 		}
 
 		// The bridge reads and writes guest physical memory directly, so the stub's
@@ -683,6 +718,9 @@ namespace Frida.Barebone {
 			switch (type) {
 				case ABS64:
 					relocated.write_uint64 ((size_t) r.address, base_va + relocated.read_uint64 ((size_t) r.address));
+					break;
+				case RELATIVE:
+					relocated.write_uint64 ((size_t) r.address, base_va + r.addend);
 					break;
 				case PREL32:
 					var diff = (int64) (base_va + r.symbol.address + r.addend) - (int64) (base_va + r.address);
@@ -1412,6 +1450,10 @@ namespace Frida.Barebone {
 			if (want_exec && code_template_known)
 				return apply_code_template (descriptor, p);
 
+			bool want_write = (prot & Gum.PageProtection.WRITE) != 0;
+			if (want_write && data_template_known)
+				return apply_template (descriptor, data_template_descriptor, p);
+
 			uint64 result = descriptor;
 
 			if (p.sprr_enabled) {
@@ -1424,11 +1466,15 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		// Keep the page's own output address but adopt every attribute bit (the AP/XN SPRR index,
-		// memory type, shareability) from a sampled kernel-code page so the MMU grants EL1 execute.
 		private uint64 apply_code_template (uint64 descriptor, MMUParameters p) {
+			return apply_template (descriptor, code_template_descriptor, p);
+		}
+
+		// Keep the page's own output address but adopt every attribute bit (the AP/XN SPRR index,
+		// memory type, shareability) from the sampled page.
+		private uint64 apply_template (uint64 descriptor, uint64 template_descriptor, MMUParameters p) {
 			uint64 output_address_mask = INT48_MASK & ~((1ULL << inpage_bits_for_granule (p.granule)) - 1);
-			return (descriptor & output_address_mask) | (code_template_descriptor & ~output_address_mask);
+			return (descriptor & output_address_mask) | (template_descriptor & ~output_address_mask);
 		}
 
 		private static uint64 apply_non_sprr_protection_bits (uint64 descriptor, Gum.PageProtection prot) {
