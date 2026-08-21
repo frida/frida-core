@@ -3,7 +3,7 @@
 // the code calls the slots directly.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, VecDeque};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2323,7 +2323,17 @@ pub fn injected_arenas() -> alloc::vec::Vec<u64> {
 }
 
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    write_frame(&TO_TARGET, arena, frame, wake_copy)
+    unsafe { waiting() }.entry(arena).or_default().push_back(frame.to_vec());
+    send_what_waits(arena);
+
+    true
+}
+
+pub fn serve_waiting_frames() {
+    let arenas: alloc::vec::Vec<u64> = unsafe { waiting() }.keys().copied().collect();
+    for arena in arenas {
+        send_what_waits(arena);
+    }
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
@@ -2344,6 +2354,36 @@ pub fn holds_a_frame_from_target(arena: u64) -> bool {
 
 pub fn holds_a_frame_from_host(arena: u64) -> bool {
     TO_TARGET.holds_anything(arena)
+}
+
+pub fn a_frame_waits_for_room() -> bool {
+    unsafe { waiting() }
+        .iter()
+        .any(|(arena, frames)| !frames.is_empty() && TO_TARGET.has_room(*arena))
+}
+
+fn send_what_waits(arena: u64) {
+    let frames = unsafe { waiting() }.get_mut(&arena).unwrap();
+
+    while let Some(frame) = frames.front_mut() {
+        TO_TARGET.take_lock(arena, yield_now);
+        let piece = TO_TARGET.write(arena, buffer_of(&TO_TARGET, arena), frame, 0);
+        if piece.is_none() {
+            TO_TARGET.ask_for_room(arena);
+        }
+        TO_TARGET.let_lock_go(arena);
+
+        let Some(written) = piece else {
+            return;
+        };
+        wake_copy(arena);
+
+        if written == frame.len() {
+            frames.pop_front();
+        } else {
+            frame.drain(..written);
+        }
+    }
 }
 
 fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
@@ -2407,6 +2447,7 @@ fn buffer_of(ring: &Ring, arena: u64) -> u64 {
 
 fn forget_hold(arena: u64) {
     unsafe { holds() }.retain(|(of, _), _| *of != arena);
+    unsafe { waiting() }.remove(&arena);
 }
 
 unsafe fn holds() -> &'static mut alloc::collections::BTreeMap<(u64, u64), alloc::vec::Vec<u8>> {
@@ -2415,6 +2456,12 @@ unsafe fn holds() -> &'static mut alloc::collections::BTreeMap<(u64, u64), alloc
 
 static mut HOLDS: alloc::collections::BTreeMap<(u64, u64), alloc::vec::Vec<u8>> =
     alloc::collections::BTreeMap::new();
+
+unsafe fn waiting() -> &'static mut BTreeMap<u64, VecDeque<alloc::vec::Vec<u8>>> {
+    unsafe { (&raw mut WAITING).as_mut().unwrap() }
+}
+
+static mut WAITING: BTreeMap<u64, VecDeque<alloc::vec::Vec<u8>>> = BTreeMap::new();
 
 unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
     unsafe { core::ptr::addr_of_mut!(TARGETS).as_mut().unwrap() }
