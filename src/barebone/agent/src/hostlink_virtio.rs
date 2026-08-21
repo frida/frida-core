@@ -607,91 +607,125 @@ impl Hostlink {
     }
 
     fn data_rx_complete(&self) {
+        loop {
+            let Some((head, length, page)) = self.take_used_rx_page() else {
+                break;
+            };
+
+            let bytes = unsafe { core::slice::from_raw_parts(page.va, length) };
+            self.feed_rx_stream(bytes);
+            dma_page_free(page);
+
+            self.hand_rx_page_back(head);
+        }
+
         let s = unsafe { &mut *self.state.get() };
         let Some(rxq) = s.rx.as_mut() else {
             return;
         };
-        while let Some(u) = rxq.pop_used() {
-            let h = u.id as u16;
-            let n = u.len as usize;
-
-            if let Some(pg) = s.data_rx_pages[h as usize].take() {
-                {
-                    let bytes = unsafe { core::slice::from_raw_parts(pg.va, n) };
-                    self.feed_rx_stream(bytes);
-                }
-                dma_page_free(pg);
-
-                let pg2 = dma_page_alloc();
-                let d = rxq.desc_va as *mut Desc;
-                unsafe {
-                    (*d.add(h as usize)).addr = pg2.pa;
-                    (*d.add(h as usize)).len = PAGE_SIZE.load(Ordering::Relaxed) as u32;
-                    (*d.add(h as usize)).flags = D_WRITE;
-                    (*d.add(h as usize)).next = 0;
-                }
-                s.data_rx_pages[h as usize] = Some(pg2);
-                rxq.push_avail(h);
-            }
-        }
         let (sel, notify_off) = (rxq.sel, rxq.notify_off);
         self.kick(sel, notify_off);
     }
 
-    fn feed_rx_stream(&self, mut chunk: &[u8]) {
+    fn take_used_rx_page(&self) -> Option<(u16, usize, DmaPage)> {
         let s = unsafe { &mut *self.state.get() };
+        let rxq = s.rx.as_mut()?;
+
+        let used = rxq.pop_used()?;
+        let head = used.id as u16;
+        let length = used.len as usize;
+
+        s.data_rx_pages[head as usize].take().map(|page| (head, length, page))
+    }
+
+    fn hand_rx_page_back(&self, head: u16) {
+        let page = dma_page_alloc();
+
+        let s = unsafe { &mut *self.state.get() };
+        let Some(rxq) = s.rx.as_mut() else {
+            return;
+        };
+
+        let d = rxq.desc_va as *mut Desc;
+        unsafe {
+            (*d.add(head as usize)).addr = page.pa;
+            (*d.add(head as usize)).len = PAGE_SIZE.load(Ordering::Relaxed) as u32;
+            (*d.add(head as usize)).flags = D_WRITE;
+            (*d.add(head as usize)).next = 0;
+        }
+        s.data_rx_pages[head as usize] = Some(page);
+        rxq.push_avail(head);
+    }
+
+    fn feed_rx_stream(&self, mut chunk: &[u8]) {
         while !chunk.is_empty() {
-            if s.rx_lenhave < 4 {
-                let need = 4 - s.rx_lenhave;
-                let take = core::cmp::min(need, chunk.len());
-                s.rx_lenbuf[s.rx_lenhave..s.rx_lenhave + take].copy_from_slice(&chunk[..take]);
-                s.rx_lenhave += take;
-                chunk = &chunk[take..];
-                if s.rx_lenhave < 4 {
-                    return;
-                }
+            let (taken, ready) = self.feed_rx_piece(chunk);
+            chunk = &chunk[taken..];
 
-                let len = (s.rx_lenbuf[0] as usize)
-                    | ((s.rx_lenbuf[1] as usize) << 8)
-                    | ((s.rx_lenbuf[2] as usize) << 16)
-                    | ((s.rx_lenbuf[3] as usize) << 24);
-
-                if s.rx_buf.is_none() && len > 0 {
-                    let buf = kernel::alloc(len);
-                    let slice: &'static mut [u8] =
-                        unsafe { core::slice::from_raw_parts_mut(buf, len) };
-                    s.rx_buf = Some(slice);
-                    s.rx_need = len;
-                    s.rx_have = 0;
-                }
+            if let Some((deliver, frame)) = ready {
+                deliver(frame);
             }
 
-            let need = s.rx_need.saturating_sub(s.rx_have);
+            if taken == 0 {
+                return;
+            }
+        }
+    }
+
+    fn feed_rx_piece(&self, chunk: &[u8]) -> (usize, Option<(fn(&[u8]), &'static mut [u8])>) {
+        let s = unsafe { &mut *self.state.get() };
+        let mut taken = 0;
+
+        if s.rx_lenhave < 4 {
+            let need = 4 - s.rx_lenhave;
             let take = core::cmp::min(need, chunk.len());
-            if let Some(ref mut buf) = s.rx_buf {
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        chunk.as_ptr(),
-                        buf.as_mut_ptr().wrapping_add(s.rx_have),
-                        take,
-                    );
-                }
+            s.rx_lenbuf[s.rx_lenhave..s.rx_lenhave + take].copy_from_slice(&chunk[..take]);
+            s.rx_lenhave += take;
+            taken += take;
+            if s.rx_lenhave < 4 {
+                return (taken, None);
             }
-            s.rx_have += take;
-            chunk = &chunk[take..];
 
-            if s.rx_have == s.rx_need {
-                // Detach the frame and clear the receive state before you dispatch. The callback can call
-                // process() again for a synchronous host RPC, thus it must start with a clean state.
-                let frame = s.rx_buf.take();
-                s.rx_need = 0;
+            let len = (s.rx_lenbuf[0] as usize)
+                | ((s.rx_lenbuf[1] as usize) << 8)
+                | ((s.rx_lenbuf[2] as usize) << 16)
+                | ((s.rx_lenbuf[3] as usize) << 24);
+
+            if s.rx_buf.is_none() && len > 0 {
+                let buf = kernel::alloc(len);
+                let slice: &'static mut [u8] = unsafe { core::slice::from_raw_parts_mut(buf, len) };
+                s.rx_buf = Some(slice);
+                s.rx_need = len;
                 s.rx_have = 0;
-                s.rx_lenhave = 0;
-
-                if let (Some(cb), Some(frame)) = (s.on_rx, frame) {
-                    cb(frame);
-                }
             }
+        }
+
+        let rest = &chunk[taken..];
+        let need = s.rx_need.saturating_sub(s.rx_have);
+        let take = core::cmp::min(need, rest.len());
+        if let Some(ref mut buf) = s.rx_buf {
+            unsafe {
+                core::ptr::copy_nonoverlapping(rest.as_ptr(),
+                    buf.as_mut_ptr().wrapping_add(s.rx_have), take);
+            }
+        }
+        s.rx_have += take;
+        taken += take;
+
+        if s.rx_have != s.rx_need {
+            return (taken, None);
+        }
+
+        // Detach the frame and clear the receive state before you dispatch. The callback can call
+        // process() again for a synchronous host RPC, thus it must start with a clean state.
+        let frame = s.rx_buf.take();
+        s.rx_need = 0;
+        s.rx_have = 0;
+        s.rx_lenhave = 0;
+
+        match (s.on_rx, frame) {
+            (Some(cb), Some(frame)) => (taken, Some((cb, frame))),
+            _ => (taken, None),
         }
     }
 
