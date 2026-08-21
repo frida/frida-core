@@ -74,6 +74,7 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
     }
     resolve_user_api();
 
+    unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
     let context = unsafe { crate::adopt_js_context() };
 

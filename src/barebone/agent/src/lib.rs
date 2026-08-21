@@ -241,6 +241,8 @@ mod entrypoint_blob {
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
             kernel::install_fault_reporter();
+
+            crate::run_constructors();
             init_gum();
 
             let (transport_config, kernel_base, module_info, symbol_table, own_range) =
@@ -498,6 +500,7 @@ mod entrypoint_linux {
         unsafe {
             kernel::log("frida: worker entry\n\0");
 
+            crate::run_constructors();
             init_gum();
 
             kernel::install_hooks();
@@ -669,6 +672,18 @@ pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_he
     }
 }
 
+pub(crate) unsafe fn run_constructors() {
+    unsafe {
+        let mut entry = &raw const _agent_init_start as usize;
+        let end = &raw const _agent_init_end as usize;
+        while entry != end {
+            let start: extern "C" fn() = core::mem::transmute((entry as *const usize).read());
+            start();
+            entry += core::mem::size_of::<usize>();
+        }
+    }
+}
+
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn writable_half_start() -> usize {
     &raw const _agent_private_start as usize
@@ -688,6 +703,11 @@ const RELOCATION_SIZE: usize = 24;
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut PRISTINE_WRITABLE_HALF: *mut u8 = ptr::null_mut();
+
+unsafe extern "C" {
+    static _agent_init_start: u8;
+    static _agent_init_end: u8;
+}
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 unsafe extern "C" {
