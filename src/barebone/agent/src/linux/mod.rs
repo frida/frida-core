@@ -26,6 +26,8 @@ mod native;
 #[cfg(feature = "linux-injected")]
 mod relay;
 #[cfg(feature = "linux-injected")]
+mod threads;
+#[cfg(feature = "linux-injected")]
 mod user;
 #[cfg(feature = "linux-injected")]
 mod processes;
@@ -47,6 +49,8 @@ pub use self::native::{
 pub use self::mapped::*;
 #[cfg(feature = "linux-injected")]
 pub use self::processes::*;
+#[cfg(feature = "linux-injected")]
+pub use self::threads::*;
 
 #[derive(Debug, Clone)]
 pub struct LoadedModule {

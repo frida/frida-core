@@ -1,3 +1,4 @@
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
 
@@ -310,6 +311,35 @@ fn page_size() -> usize {
     Arena::at(unsafe { ARENA }).page_size() as usize
 }
 
+pub fn names_in(directory: &core::ffi::CStr) -> Vec<String> {
+    let listed = syscall(OPENAT, WORKING_DIRECTORY, directory.as_ptr() as usize, READ_ONLY, 0, 0, 0);
+    if listed < 0 {
+        return Vec::new();
+    }
+
+    let mut names = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let read = syscall(GETDENTS, listed as usize, chunk.as_mut_ptr() as usize, chunk.len(),
+            0, 0, 0);
+        if read <= 0 {
+            break;
+        }
+
+        let mut at = 0;
+        while at < read as usize {
+            let entry = unsafe { chunk.as_ptr().add(at) };
+            let length = unsafe { entry.add(16).cast::<u16>().read_unaligned() } as usize;
+            let name = unsafe { core::ffi::CStr::from_ptr(entry.add(19)) };
+            names.push(String::from_utf8_lossy(name.to_bytes()).into_owned());
+            at += length;
+        }
+    }
+    syscall(CLOSE, listed as usize, 0, 0, 0, 0, 0);
+
+    names
+}
+
 pub fn contents_of(path: &core::ffi::CStr) -> Vec<u8> {
     let file = syscall(OPENAT, WORKING_DIRECTORY, path.as_ptr() as usize, READ_ONLY, 0, 0, 0);
     if file < 0 {
@@ -413,6 +443,8 @@ const STATE_PC: usize = 264;
 const OPENAT: usize = 56;
 #[cfg(target_arch = "aarch64")]
 const CLOSE: usize = 57;
+#[cfg(target_arch = "aarch64")]
+const GETDENTS: usize = 61;
 #[cfg(target_arch = "aarch64")]
 const READ: usize = 63;
 #[cfg(target_arch = "aarch64")]

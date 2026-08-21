@@ -9,8 +9,9 @@ use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumPageProtection_GUM_PAGE_READ,
         _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_NONE, GArray,
-        GumDebugSymbolDetails, GumFoundRangeFunc, GumMemoryRange, GumModuleRegistry,
-        GumPageProtection, GumRangeDetails, GumRwxSupport,
+        GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
+        GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport, GumThreadDetails,
+        GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
         g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
         g_variant_type_new, g_variant_unref, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
@@ -312,6 +313,51 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             i += 1;
         }
     }
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
+    unsafe { THREAD_REGISTRY = registry };
+
+    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
+    unsafe { THREAD_REGISTRY = ptr::null_mut() };
+}
+
+#[cfg(feature = "linux-injected")]
+fn announce_thread(id: u32) {
+    let registry = unsafe { THREAD_REGISTRY };
+    if registry.is_null() {
+        return;
+    }
+
+    let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+    details.id = id as GumThreadId;
+
+    unsafe { gum_barebone_register_thread(registry, &details) };
+}
+
+#[cfg(feature = "linux-injected")]
+static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
+    let Some(emit) = func else {
+        return;
+    };
+
+    kernel::enumerate_threads(&mut |thread| {
+        let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+        details.id = thread.id as GumThreadId;
+
+        unsafe { emit(&details, user_data) };
+    });
 }
 
 #[cfg(feature = "linux-injected")]
