@@ -31,6 +31,16 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
     }
 }
 
+pub fn task_with_id(id: u32) -> Option<usize> {
+    let layout = task_layout()?;
+
+    unsafe { __raw_read_lock(_tasklist_lock) };
+    let found = tasks_of(layout.init, layout.list).find(|task| read_id(*task, layout) == id);
+    unsafe { __raw_read_unlock(_tasklist_lock) };
+
+    found
+}
+
 pub fn describe_process(process: &ProcessInfo) -> *const u8 {
     process.name
 }

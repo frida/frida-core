@@ -17,6 +17,13 @@ SECTIONS {
     _panic = .; . += 8;
     _kthread_create_on_node = .; . += 8;
     _init_task = .; . += 8;
+    _get_task_mm = .; . += 8;
+    _kthread_use_mm = .; . += 8;
+    _kthread_unuse_mm = .; . += 8;
+    _mmput = .; . += 8;
+    _vm_mmap = .; . += 8;
+    ___arch_copy_to_user = .; . += 8;
+    _access_process_vm = .; . += 8;
     ___start_BTF = .; . += 8;
     ___stop_BTF = .; . += 8;
     _tasklist_lock = .; . += 8;

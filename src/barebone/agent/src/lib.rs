@@ -225,7 +225,7 @@ mod entrypoint_blob {
 
     unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
-            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             crate::preserve_writable_half();
 
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
@@ -661,7 +661,7 @@ static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 // A copy of the agent runs the same code, but it cannot share what gets written to. Thus keep
 // the writable half as it is before anything writes to it.
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 pub(crate) unsafe fn preserve_writable_half() {
     let size = writable_half_size();
     let pristine = kernel::alloc(size);
@@ -673,7 +673,7 @@ pub(crate) unsafe fn preserve_writable_half() {
 
 // Give a copy the half it writes to, and move every address in it to where the copy runs. The
 // address that the copy runs at and the address that takes the bytes are two different ones.
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_here: usize) {
     let own = unsafe { ptr::addr_of!(OWN_RANGE).read() }.base_address as usize;
     let distance = seen_by_copy.wrapping_sub(own);
@@ -706,12 +706,12 @@ pub(crate) unsafe fn run_constructors() {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 pub(crate) fn writable_half_start() -> usize {
     &raw const _agent_private_start as usize
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn writable_half_size() -> usize {
     (&raw const _heap_start as usize) - writable_half_start()
 }
@@ -720,10 +720,10 @@ fn writable_half_size() -> usize {
 // the slot already holds.
 #[cfg(target_arch = "x86")]
 const RELOCATION_SIZE: usize = 8;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const RELOCATION_SIZE: usize = 24;
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 static mut PRISTINE_WRITABLE_HALF: *mut u8 = ptr::null_mut();
 
 unsafe extern "C" {
@@ -731,7 +731,7 @@ unsafe extern "C" {
     static _agent_init_end: u8;
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 unsafe extern "C" {
     static _agent_private_start: u8;
     static _heap_start: u8;
@@ -748,6 +748,12 @@ pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
             size: size as gsize,
         };
     }
+}
+
+pub(crate) fn own_range() -> (usize, usize) {
+    let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
+
+    (range.base_address as usize, range.size as usize)
 }
 
 pub(crate) fn own_range_contains(address: u32) -> bool {
@@ -1096,6 +1102,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
+            #[cfg(feature = "linux-injected")]
+            FridaCommand::InjectIntoProcess => Some(handle_inject_into_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
             #[cfg(feature = "winnt")]
@@ -1143,6 +1151,15 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     }
 
     None
+}
+
+#[cfg(feature = "linux-injected")]
+fn handle_inject_into_process(payload: *mut GVariant) -> HandlerResponse {
+    unsafe {
+        let reached = kernel::inject_into_process(g_variant_get_uint32(payload));
+
+        HandlerResponse::success(g_variant_new_uint32(reached))
+    }
 }
 
 #[cfg(feature = "winnt")]

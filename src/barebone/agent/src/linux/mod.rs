@@ -10,6 +10,8 @@ use alloc::string::String;
 #[cfg(feature = "linux")]
 mod kmod;
 #[cfg(feature = "linux-injected")]
+mod injection;
+#[cfg(feature = "linux-injected")]
 mod layout;
 #[cfg(feature = "linux-injected")]
 mod native;
@@ -18,6 +20,8 @@ mod processes;
 
 #[cfg(feature = "linux")]
 pub use self::kmod::*;
+#[cfg(feature = "linux-injected")]
+pub use self::injection::*;
 #[cfg(feature = "linux-injected")]
 pub use self::native::*;
 #[cfg(feature = "linux-injected")]
