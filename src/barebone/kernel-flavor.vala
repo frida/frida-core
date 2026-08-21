@@ -127,14 +127,20 @@ namespace Frida.Barebone {
 			GDB.Client gdb = machine.gdb;
 			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
 
-			GDB.Breakpoint? hit = null;
+			GDB.Exception? exception = null;
 			do {
-				var exception = yield gdb.continue_until_exception (cancellable);
-				hit = exception.breakpoint;
-			} while (hit != bp);
+				exception = yield gdb.continue_until_exception (cancellable);
+			} while (exception.breakpoint != bp || (yield interrupts_masked (exception.thread, cancellable)));
 
 			yield bp.remove (cancellable);
 		}
+
+		private async bool interrupts_masked (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
+			uint64 cpsr = yield thread.read_register ("cpsr", cancellable);
+			return (cpsr & INTERRUPT_MASK_BITS) != 0;
+		}
+
+		private const uint64 INTERRUPT_MASK_BITS = (1ULL << 7) | (1ULL << 6);
 	}
 
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {
