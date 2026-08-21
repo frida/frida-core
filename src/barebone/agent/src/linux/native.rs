@@ -91,6 +91,18 @@ pub fn free_code(ptr: *mut u8, _size: usize) {
     }
 }
 
+pub fn page_size() -> usize {
+    crate::gum::page_size_the_kernel_runs_with()
+}
+
+pub fn protect(address: u64, size: usize, protection: u32) -> bool {
+    crate::gum_injected::ask_the_host_to_protect(address, size, protection)
+}
+
+pub fn current_process_id() -> u32 {
+    KERNEL_PROCESS
+}
+
 pub fn alloc_dma(size: usize) -> *mut u8 {
     alloc(size)
 }
@@ -353,6 +365,7 @@ unsafe extern "C" fn enter_thread(data: *mut c_void) -> c_int {
 
 // The thread pointer is exposed to JavaScript as a GumThreadId, so it must fit
 // in a double without losing precision; the low bits keep it unique per thread.
+const KERNEL_PROCESS: u32 = 0;
 const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
 
 const GFP_KERNEL: u32 = 0xcc0;

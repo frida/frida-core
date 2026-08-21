@@ -1,4 +1,9 @@
-use super::arena::{Arena, TO_COPY};
+use core::ffi::c_void;
+
+use crate::kernel::ThreadEntry;
+
+use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_PC, TO_COPY};
+use super::facade::Primitives;
 
 pub fn entry_offset() -> usize {
     (frida_linux_user_entry as usize) - crate::own_range().0
@@ -6,8 +11,13 @@ pub fn entry_offset() -> usize {
 
 // The copy's first word in the address space it was placed in: it says it is up, and from then
 // on it sleeps until the kernel half has something for it. Nothing here looks at a clock.
-pub extern "C" fn frida_linux_user_entry(arena: usize) -> ! {
-    let arena = Arena::at(arena);
+pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
+    let arena = Arena::at(begins);
+
+    super::facade::select_user();
+    unsafe { ARENA = begins };
+    install_fault_reporter();
+
 
     arena.report_home();
     arena.tell_the_kernel_half();
@@ -21,13 +31,290 @@ pub extern "C" fn frida_linux_user_entry(arena: usize) -> ! {
     }
 }
 
-fn wait_on(word: usize, until_it_changes: u32) {
+pub static USER: Primitives = Primitives {
+    log,
+    panic,
+    alloc,
+    free,
+    alloc_heap,
+    alloc_code,
+    free_code,
+    page_size,
+    protect,
+    spawn_thread,
+    wait,
+    wake,
+    yield_now,
+    monotonic_micros,
+    wall_clock_micros,
+    current_process_id,
+    current_thread_id,
+    install_fault_reporter,
+};
+
+// The copy has no file to write to -- what it was given came from a thread of the kernel -- so
+// what it has to say goes where the kernel half can read it.
+fn log(msg: &str) {
+    Arena::at(unsafe { ARENA }).say(msg);
+
+    let said = msg.as_bytes();
+    let length = said.iter().position(|byte| *byte == 0).unwrap_or(said.len());
+    syscall(WRITE, STANDARD_ERROR, said.as_ptr() as usize, length, 0, 0, 0);
+}
+
+fn panic(msg: &str) -> ! {
+    Arena::at(unsafe { ARENA }).say(msg);
+    Arena::at(unsafe { ARENA }).note(PANICKED);
+
+    syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
+
+    loop {}
+}
+
+fn alloc(size: usize) -> *mut u8 {
+    unsafe { malloc(size) }
+}
+
+fn free(ptr: *mut u8, _size: usize) {
+    unsafe { free_impl(ptr) };
+}
+
+// What the C library hands out is served from this, so it cannot come from the C library.
+fn alloc_heap(size: usize) -> *mut u8 {
+    map(size, READABLE | WRITABLE)
+}
+
+fn alloc_code(size: usize) -> *mut u8 {
+    map(size, READABLE | WRITABLE | EXECUTABLE)
+}
+
+fn free_code(ptr: *mut u8, size: usize) {
+    syscall(MUNMAP, ptr as usize, size, 0, 0, 0, 0);
+}
+
+fn protect(address: u64, size: usize, protection: u32) -> bool {
+    let wanted = ((protection & GUM_PAGE_READ) != 0) as usize * READABLE
+        | ((protection & GUM_PAGE_WRITE) != 0) as usize * WRITABLE
+        | ((protection & GUM_PAGE_EXECUTE) != 0) as usize * EXECUTABLE;
+
+    let page = page_size();
+    let first = (address as usize) & !(page - 1);
+    let span = ((address as usize) + size + page - 1 & !(page - 1)) - first;
+
+    syscall(MPROTECT, first, span, wanted, 0, 0, 0) == 0
+}
+
+fn map(size: usize, protection: usize) -> *mut u8 {
+    let mapped = syscall(
+        MMAP,
+        0,
+        size,
+        protection,
+        PRIVATE | ANONYMOUS,
+        NO_FILE,
+        0,
+    );
+    if mapped < 0 {
+        return core::ptr::null_mut();
+    }
+
+    mapped as *mut u8
+}
+
+fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+    let stack = map(THREAD_STACK_SIZE, READABLE | WRITABLE);
+    if stack.is_null() {
+        return -1;
+    }
+
+    let carried = alloc(size_of::<Carried>()) as *mut Carried;
+    unsafe { carried.write(Carried { entry, parameter }) };
+
+    let top = unsafe { stack.add(THREAD_STACK_SIZE) } as usize;
+
+    unsafe { start_thread(top, carried as usize) }
+}
+
+struct Carried {
+    entry: ThreadEntry,
+    parameter: *mut c_void,
+}
+
+unsafe extern "C" fn enter_thread(carried: usize) -> ! {
+    let carried = carried as *mut Carried;
+    unsafe {
+        let Carried { entry, parameter } = carried.read();
+        free(carried as *mut u8, size_of::<Carried>());
+
+        entry(parameter, 0);
+    }
+
+    syscall(EXIT, 0, 0, 0, 0, 0, 0);
+
+    loop {}
+}
+
+// The thread the kernel makes here starts on a stack of its own with nothing on it, so where it
+// goes and what it is given are put in the registers the child keeps across the call.
+#[cfg(target_arch = "aarch64")]
+unsafe fn start_thread(stack: usize, carried: usize) -> isize {
+    let spawned: isize;
+
+    unsafe {
+        core::arch::asm!(
+            "svc #0",
+            "cbnz x0, 2f",
+            "mov x0, x22",
+            "blr x21",
+            "2:",
+            in("x8") CLONE,
+            inlateout("x0") THREAD_FLAGS => spawned,
+            in("x1") stack,
+            in("x2") 0,
+            in("x3") 0,
+            in("x4") 0,
+            in("x21") enter_thread,
+            in("x22") carried,
+            clobber_abi("C"),
+        );
+    }
+
+    spawned
+}
+
+fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    let unchanged = unchanged();
+    if check() {
+        return;
+    }
+
+    wait_on(waited_on(), unchanged, timeout_us);
+}
+
+fn wake(_token: *const u8) {
+    bump_what_is_waited_on();
+    wake_up(waited_on());
+}
+
+fn yield_now() {
+    syscall(SCHED_YIELD, 0, 0, 0, 0, 0, 0);
+}
+
+fn monotonic_micros() -> i64 {
+    micros_of(MONOTONIC)
+}
+
+fn wall_clock_micros() -> (u32, u32) {
+    let now = read_clock(REALTIME);
+
+    (now[0] as u32, (now[1] / 1000) as u32)
+}
+
+fn micros_of(clock: usize) -> i64 {
+    let now = read_clock(clock);
+
+    (now[0] * 1_000_000) + (now[1] / 1000)
+}
+
+fn read_clock(clock: usize) -> [i64; 2] {
+    let mut now = [0i64; 2];
+    syscall(CLOCK_GETTIME, clock, now.as_mut_ptr() as usize, 0, 0, 0, 0);
+
+    now
+}
+
+fn current_process_id() -> u32 {
+    syscall(GETPID, 0, 0, 0, 0, 0, 0) as u32
+}
+
+fn current_thread_id() -> u64 {
+    syscall(GETTID, 0, 0, 0, 0, 0, 0) as u64
+}
+
+// A fault in the copy is nobody else's to report: the kernel kills the task and says nothing,
+// so what it was is written down where the kernel half can read it.
+fn install_fault_reporter() {
+    for signal in [ILLEGAL, ABORTED, BUS, SEGMENT, ARITHMETIC, TRAPPED, BAD_CALL] {
+        let action = Action {
+            handler: report_fault as usize,
+            flags: SIGINFO,
+            restorer: 0,
+            blocked: 0,
+        };
+
+        syscall(
+            RT_SIGACTION,
+            signal,
+            &action as *const Action as usize,
+            0,
+            size_of::<u64>(),
+            0,
+            0,
+        );
+    }
+}
+
+#[repr(C)]
+struct Action {
+    handler: usize,
+    flags: usize,
+    restorer: usize,
+    blocked: u64,
+}
+
+unsafe extern "C" fn report_fault(signal: usize, about: usize, running: usize) {
+    let arena = Arena::at(unsafe { ARENA });
+
+    arena.note(FAULTED);
+    unsafe {
+        arena.leave(
+            FAULT_KIND,
+            (signal as u64) | ((((about + ABOUT_CODE) as *const u32).read() as u64) << 32),
+        );
+        arena.leave(FAULT_ADDRESS, ((about + ABOUT_ADDRESS) as *const usize).read() as u64);
+        arena.leave(
+            FAULT_PC,
+            ((running + RUNNING_STATE + STATE_PC) as *const usize).read() as u64,
+        );
+    }
+
+    syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
+}
+
+// What the kernel was set up with is left in the arena, since asking the register is the
+// kernel's own business.
+fn page_size() -> usize {
+    Arena::at(unsafe { ARENA }).page_size() as usize
+}
+
+fn waited_on() -> usize {
+    unsafe { ARENA + WOKEN }
+}
+
+fn unchanged() -> u32 {
+    unsafe { ((ARENA + WOKEN) as *const u32).read_volatile() }
+}
+
+fn bump_what_is_waited_on() {
+    unsafe {
+        let word = (ARENA + WOKEN) as *mut u32;
+        word.write_volatile(word.read_volatile().wrapping_add(1));
+    }
+}
+
+fn wait_on(word: usize, until_it_changes: u32, micros: Option<u64>) {
+    let until = micros.map(|us| [(us / 1_000_000) as i64, ((us % 1_000_000) * 1000) as i64]);
+    let deadline = match &until {
+        Some(when) => when.as_ptr() as usize,
+        None => 0,
+    };
+
     syscall(
         FUTEX,
         word,
         FUTEX_WAIT_PRIVATE,
         until_it_changes as usize,
-        0,
+        deadline,
         0,
         0,
     );
@@ -58,9 +345,78 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
     answer
 }
 
+static mut ARENA: usize = 0;
+
+const WOKEN: usize = 16;
+const PANICKED: u32 = 9;
+const FAULTED: u32 = 8;
+
+#[cfg(target_arch = "aarch64")]
+const RT_SIGACTION: usize = 134;
+const ILLEGAL: usize = 4;
+const TRAPPED: usize = 5;
+const ABORTED: usize = 6;
+const ARITHMETIC: usize = 8;
+const BAD_CALL: usize = 31;
+const BUS: usize = 7;
+const SEGMENT: usize = 11;
+const SIGINFO: usize = 4;
+const ABOUT_CODE: usize = 8;
+const ABOUT_ADDRESS: usize = 16;
+const RUNNING_STATE: usize = 176;
+const STATE_PC: usize = 264;
+
+#[cfg(target_arch = "aarch64")]
+const WRITE: usize = 64;
+#[cfg(target_arch = "aarch64")]
+const EXIT: usize = 93;
+#[cfg(target_arch = "aarch64")]
+const EXIT_GROUP: usize = 94;
 #[cfg(target_arch = "aarch64")]
 const FUTEX: usize = 98;
+#[cfg(target_arch = "aarch64")]
+#[cfg(target_arch = "aarch64")]
+const CLOCK_GETTIME: usize = 113;
+#[cfg(target_arch = "aarch64")]
+const SCHED_YIELD: usize = 124;
+#[cfg(target_arch = "aarch64")]
+const GETPID: usize = 172;
+#[cfg(target_arch = "aarch64")]
+const GETTID: usize = 178;
+#[cfg(target_arch = "aarch64")]
+const MUNMAP: usize = 215;
+#[cfg(target_arch = "aarch64")]
+const CLONE: usize = 220;
+#[cfg(target_arch = "aarch64")]
+const MMAP: usize = 222;
+#[cfg(target_arch = "aarch64")]
+const MPROTECT: usize = 226;
+
+const STANDARD_ERROR: usize = 2;
+const READABLE: usize = 1;
+const WRITABLE: usize = 2;
+const EXECUTABLE: usize = 4;
+const PRIVATE: usize = 2;
+const ANONYMOUS: usize = 0x20;
+const NO_FILE: usize = usize::MAX;
+
+const MONOTONIC: usize = 1;
+const REALTIME: usize = 0;
+
+const THREAD_STACK_SIZE: usize = 1024 * 1024;
+const THREAD_FLAGS: usize = 0x0000_0100 | 0x0000_0200 | 0x0000_0400 | 0x0000_0800 | 0x0001_0000;
 
 const FUTEX_WAIT_PRIVATE: usize = 128;
 const FUTEX_WAKE_PRIVATE: usize = 129;
 const WAKE_EVERY_WAITER: usize = i32::MAX as usize;
+
+const GUM_PAGE_READ: u32 = 1;
+const GUM_PAGE_WRITE: u32 = 2;
+const GUM_PAGE_EXECUTE: u32 = 4;
+
+unsafe extern "C" {
+    #[link_name = "malloc"]
+    fn malloc(size: usize) -> *mut u8;
+    #[link_name = "free"]
+    fn free_impl(ptr: *mut u8);
+}

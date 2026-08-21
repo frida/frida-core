@@ -74,7 +74,7 @@ fn sbrk_impl(incr: isize) -> *mut u8 {
         gthread::g_mutex_lock(ptr::addr_of_mut!(HEAP_MUTEX));
 
         if HEAP_START.is_null() {
-            HEAP_START = crate::kernel::alloc(HEAP_SIZE);
+            HEAP_START = crate::kernel::alloc_heap(HEAP_SIZE);
             if HEAP_START.is_null() {
                 gthread::g_mutex_unlock(ptr::addr_of_mut!(HEAP_MUTEX));
                 panic!("Failed to allocate 32 MB heap");

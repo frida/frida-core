@@ -16,6 +16,30 @@ impl Arena {
         self.begins + offset
     }
 
+    // Until the frames flow, what the copy has to say is left here for the kernel half to read.
+    pub fn say(&self, msg: &str) {
+        let said = msg.as_bytes();
+        let length = said.iter().position(|byte| *byte == 0).unwrap_or(said.len());
+        let kept = length.min(SAID_SIZE - 1);
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(said.as_ptr(), (self.begins + SAID) as *mut u8, kept);
+            ((self.begins + SAID + kept) as *mut u8).write(0);
+        }
+    }
+
+    pub fn page_size(&self) -> u32 {
+        self.word(PAGE_SIZE).load(Ordering::Acquire)
+    }
+
+    pub fn leave(&self, offset: usize, value: u64) {
+        unsafe { ((self.begins + offset) as *mut u64).write_volatile(value) };
+    }
+
+    pub fn note(&self, step: u32) {
+        self.word(PROGRESS).store(step, Ordering::Release);
+    }
+
     pub fn report_home(&self) {
         self.word(REPORTED).store(self.word(HOME).load(Ordering::Acquire), Ordering::Release);
     }
@@ -34,6 +58,13 @@ impl Arena {
     }
 }
 
+pub const PROGRESS: usize = 20;
+pub const PAGE_SIZE: usize = 48;
+pub const FAULT_KIND: usize = 24;
+pub const FAULT_ADDRESS: usize = 32;
+pub const FAULT_PC: usize = 40;
+pub const SAID: usize = 64;
+pub const SAID_SIZE: usize = 192;
 pub const REPORTED: usize = 0;
 pub const HOME: usize = 4;
 pub const TO_COPY: usize = 8;

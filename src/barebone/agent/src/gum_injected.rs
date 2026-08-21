@@ -164,18 +164,34 @@ pub extern "C" fn gum_try_mprotect(
     size: gsize,
     prot: GumPageProtection,
 ) -> gboolean {
+    protect_here(address as u64, size as usize, prot as u32) as gboolean
+}
+
+// Where the agent has a half that runs in a process of the target, the protection is that
+// half's own business: it has an address space it may change itself.
+#[cfg(feature = "linux-injected")]
+fn protect_here(address: u64, size: usize, prot: u32) -> bool {
+    kernel::protect(address, size, prot)
+}
+
+#[cfg(not(feature = "linux-injected"))]
+fn protect_here(address: u64, size: usize, prot: u32) -> bool {
+    ask_the_host_to_protect(address, size, prot)
+}
+
+pub fn ask_the_host_to_protect(address: u64, size: usize, prot: u32) -> bool {
     if !crate::transport_is_up() {
-        return 1;
+        return true;
     }
     unsafe {
-        let payload = g_variant_new(c"(ttu)".as_ptr(), address as u64, size as u64, prot as u32);
+        let payload = g_variant_new(c"(ttu)".as_ptr(), address, size as u64, prot);
 
         let reply = host_rpc(FridaCommand::MemoryProtect, payload);
-        let success = g_variant_get_boolean(reply);
+        let success = g_variant_get_boolean(reply) != 0;
         g_variant_unref(reply);
 
-        if success != 0 {
-            flush_tlb_range(address as u64, size as u64);
+        if success {
+            flush_tlb_range(address, size as u64);
         }
 
         success

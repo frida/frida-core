@@ -1833,7 +1833,7 @@ unsafe fn get_script_by_id(script_id: u32) -> Option<*mut GumScript> {
     }
 }
 
-unsafe extern "C" fn frida_panic_handler(
+pub(crate) unsafe extern "C" fn frida_panic_handler(
     message: *const core::ffi::c_char,
     _user_data: *mut c_void,
 ) {
@@ -1841,7 +1841,7 @@ unsafe extern "C" fn frida_panic_handler(
     panic!("[Frida] {}", msg);
 }
 
-unsafe extern "C" fn frida_log_handler(
+pub(crate) unsafe extern "C" fn frida_log_handler(
     _log_domain: *const core::ffi::c_char,
     _log_level: i32,
     message: *const core::ffi::c_char,

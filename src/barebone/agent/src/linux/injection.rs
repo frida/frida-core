@@ -77,6 +77,12 @@ fn map_and_start(id: u32) -> Option<Home> {
         &id as *const u32 as usize,
         size_of::<u32>(),
     )?;
+    let page = native::page_size() as u32;
+    give(
+        where_the_copy_sees_it + super::arena::PAGE_SIZE,
+        &page as *const u32 as usize,
+        size_of::<u32>(),
+    )?;
 
     let arena = view_of(where_the_copy_sees_it)?;
 

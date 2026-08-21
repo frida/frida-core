@@ -47,6 +47,14 @@ pub fn free_code(ptr: *mut u8, size: usize) {
     unsafe { frida_kmod_free_code(ptr, size) };
 }
 
+pub fn page_size() -> usize {
+    crate::gum::page_size_the_kernel_runs_with()
+}
+
+pub fn alloc_heap(size: usize) -> *mut u8 {
+    alloc(size)
+}
+
 pub fn alloc_dma(size: usize) -> *mut u8 {
     alloc_code(size)
 }

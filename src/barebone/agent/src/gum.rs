@@ -37,28 +37,30 @@ pub extern "C" fn gum_process_get_id() -> guint {
     kernel::current_process_id() as guint
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_page_size() -> guint {
-    4096
+    kernel::page_size() as guint
 }
 
+// Only the kernel is allowed to ask the translation control register what it was set up with,
+// so a half that runs in a process is told instead.
 #[cfg(target_arch = "aarch64")]
-#[unsafe(no_mangle)]
-pub extern "C" fn gum_barebone_query_page_size() -> guint {
+pub(crate) fn page_size_the_kernel_runs_with() -> usize {
+    let translation_control: u64;
     unsafe {
-        let tcr_el1: u64;
-        core::arch::asm!("mrs {}, tcr_el1", out(reg) tcr_el1, options(nomem, nostack));
-
-        let tg0 = (tcr_el1 >> 14) & 0x3;
-
-        match tg0 {
-            0b00 => 4096,
-            0b01 => 65536,
-            0b10 => 16384,
-            _ => 4096,
-        }
+        core::arch::asm!("mrs {}, tcr_el1", out(reg) translation_control, options(nomem, nostack));
     }
+
+    match (translation_control >> 14) & 0x3 {
+        0b01 => 65536,
+        0b10 => 16384,
+        _ => 4096,
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub(crate) fn page_size_the_kernel_runs_with() -> usize {
+    4096
 }
 
 #[unsafe(no_mangle)]

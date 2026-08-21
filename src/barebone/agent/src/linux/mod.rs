@@ -12,6 +12,8 @@ mod kmod;
 #[cfg(feature = "linux-injected")]
 mod arena;
 #[cfg(feature = "linux-injected")]
+mod facade;
+#[cfg(feature = "linux-injected")]
 mod injection;
 #[cfg(feature = "linux-injected")]
 mod layout;
@@ -27,7 +29,12 @@ pub use self::kmod::*;
 #[cfg(feature = "linux-injected")]
 pub use self::injection::*;
 #[cfg(feature = "linux-injected")]
-pub use self::native::*;
+pub use self::facade::*;
+#[cfg(feature = "linux-injected")]
+pub use self::native::{
+    alloc_dma, free_dma, get_kernel_base, install_interrupt_handler, map_io, map_pages,
+    pci_interrupt, run_when_ready, set_kernel_base, virt_to_phys,
+};
 #[cfg(feature = "linux-injected")]
 pub use self::processes::*;
 
