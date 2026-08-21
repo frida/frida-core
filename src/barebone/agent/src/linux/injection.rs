@@ -17,11 +17,16 @@ pub fn inject_into_process(id: u32) -> u32 {
     let Some(task) = task_with_id(id) else {
         return 0;
     };
-    let Some(base) = give_the_copy_a_home(task, id) else {
+    let Some(home) = give_the_copy_a_home(task, id) else {
         return 0;
     };
 
-    let placed = Placement { task, base };
+    let placed = Placement {
+        task,
+        base: home.base,
+        arena: home.arena,
+        seen_by_the_copy: home.seen_by_the_copy,
+    };
     listen_to_the_copy(&placed);
     unsafe { placements() }.insert(id, placed);
 
@@ -31,32 +36,23 @@ pub fn inject_into_process(id: u32) -> u32 {
 struct Placement {
     task: usize,
     base: usize,
-}
-
-impl Placement {
-    fn arena(&self) -> usize {
-        self.base + crate::own_range().1
-    }
+    arena: usize,
+    seen_by_the_copy: usize,
 }
 
 fn pid_reported_by(placed: &Placement) -> u32 {
-    let mut reported = [0u8; 4];
-    unsafe {
-        _access_process_vm(
-            placed.task as *mut c_void,
-            placed.arena() + REPORTED,
-            reported.as_mut_ptr() as *mut c_void,
-            reported.len(),
-            0,
-        )
-    };
-
-    u32::from_ne_bytes(reported)
+    unsafe { ((placed.arena + REPORTED) as *const u32).read_volatile() }
 }
 
 // The copy is given a task of its own that shares the address space it was mapped into, so
 // nothing of the target is borrowed and a target that never runs is no obstacle.
-fn give_the_copy_a_home(task: usize, id: u32) -> Option<usize> {
+struct Home {
+    base: usize,
+    arena: usize,
+    seen_by_the_copy: usize,
+}
+
+fn give_the_copy_a_home(task: usize, id: u32) -> Option<Home> {
     let memory = unsafe { _get_task_mm(task as *mut c_void) };
     if memory.is_null() {
         return None;
@@ -71,16 +67,69 @@ fn give_the_copy_a_home(task: usize, id: u32) -> Option<usize> {
     placed
 }
 
-fn map_and_start(id: u32) -> Option<usize> {
+fn map_and_start(id: u32) -> Option<Home> {
     let base = map_a_copy()?;
     let stack = map_a_stack()?;
 
-    let arena = base + crate::own_range().1;
-    give(arena + HOME, &id as *const u32 as usize, size_of::<u32>())?;
+    let where_the_copy_sees_it = base + crate::own_range().1;
+    give(
+        where_the_copy_sees_it + HOME,
+        &id as *const u32 as usize,
+        size_of::<u32>(),
+    )?;
 
-    start(base, arena, stack);
+    let arena = view_of(where_the_copy_sees_it)?;
 
-    Some(base)
+    start(base, where_the_copy_sees_it, stack);
+
+    Some(Home {
+        base,
+        arena,
+        seen_by_the_copy: where_the_copy_sees_it,
+    })
+}
+
+// The kernel half reaches the same pages by an address of its own, so what the two leave for
+// each other needs neither the address space borrowed nor a copy made.
+fn borrowed_memory() -> Option<usize> {
+    let at = field_offset("task_struct", "mm")?;
+
+    Some(unsafe { ((native::current_task() as usize + at) as *const usize).read() })
+}
+
+fn view_of(seen_by_the_copy: usize) -> Option<usize> {
+    let memory = borrowed_memory()?;
+    let count = ARENA_SIZE / PAGE_SIZE;
+    let pages = native::alloc(count * size_of::<usize>()) as *mut c_void;
+
+    let reading = memory + field_offset("mm_struct", "mmap_lock")?;
+    let held = unsafe {
+        _down_read(reading as *mut c_void);
+        let held = _get_user_pages_remote(
+            memory as *mut c_void,
+            seen_by_the_copy,
+            count,
+            FOLL_WRITE,
+            pages,
+            ptr::null_mut(),
+        );
+        _up_read(reading as *mut c_void);
+
+        held
+    };
+    if held != count as isize {
+        native::free(pages as *mut u8, count * size_of::<usize>());
+        return None;
+    }
+
+    let view = native::map_pages(pages, count);
+    native::free(pages as *mut u8, count * size_of::<usize>());
+
+    if view.is_null() {
+        return None;
+    }
+
+    Some(view as usize)
 }
 
 fn map_a_stack() -> Option<usize> {
@@ -222,11 +271,19 @@ pub fn tell_the_copy(id: u32) {
         return;
     }
 
-    let told = placed.arena() + TO_COPY;
+    bump(placed.arena + TO_COPY);
+
     unsafe {
         _kthread_use_mm(memory);
-        bump(told);
-        _do_futex(told, FUTEX_WAKE, WAKE_EVERY_WAITER, 0, 0, 0, 0);
+        _do_futex(
+            placed.seen_by_the_copy + TO_COPY,
+            FUTEX_WAKE,
+            WAKE_EVERY_WAITER,
+            0,
+            0,
+            0,
+            0,
+        );
         _kthread_unuse_mm(memory);
 
         _mmput(memory);
@@ -240,7 +297,8 @@ fn listen_to_the_copy(placed: &Placement) {
     unsafe {
         listening.write(Listening {
             memory: _get_task_mm(placed.task as *mut c_void),
-            told: placed.arena() + TO_KERNEL,
+            said: placed.arena + TO_KERNEL,
+            heard_where_the_copy_sees_it: placed.seen_by_the_copy + TO_KERNEL,
         });
     }
 
@@ -250,43 +308,38 @@ fn listen_to_the_copy(placed: &Placement) {
 #[repr(C)]
 struct Listening {
     memory: *mut c_void,
-    told: usize,
+    said: usize,
+    heard_where_the_copy_sees_it: usize,
 }
 
 unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
     let listening = argument as *mut Listening;
-    let (memory, told) = unsafe { ((*listening).memory, (*listening).told) };
+    let (memory, said, waited_on) = unsafe {
+        (
+            (*listening).memory,
+            (*listening).said,
+            (*listening).heard_where_the_copy_sees_it,
+        )
+    };
     native::free(listening as *mut u8, size_of::<Listening>());
 
     unsafe { _kthread_use_mm(memory) };
 
-    let mut heard = read_word(told);
+    let mut heard = read_word(said);
     loop {
-        unsafe { _do_futex(told, FUTEX_WAIT, heard, 0, 0, 0, 0) };
+        unsafe { _do_futex(waited_on, FUTEX_WAIT, heard, 0, 0, 0, 0) };
 
-        heard = read_word(told);
-        native::wake(told as *const u8);
+        heard = read_word(said);
+        native::wake(said as *const u8);
     }
 }
 
 fn read_word(address: usize) -> u32 {
-    let mut word = [0u8; 4];
-    unsafe {
-        ___arch_copy_from_user(word.as_mut_ptr() as *mut c_void, address as *const c_void, 4)
-    };
-
-    u32::from_ne_bytes(word)
+    unsafe { (address as *const u32).read_volatile() }
 }
 
 fn bump(address: usize) {
-    let next = read_word(address).wrapping_add(1);
-    unsafe {
-        ___arch_copy_to_user(
-            address as *mut c_void,
-            &next as *const u32 as *const c_void,
-            size_of::<u32>(),
-        )
-    };
+    unsafe { (address as *mut u32).write_volatile(read_word(address).wrapping_add(1)) };
 }
 
 unsafe fn placements() -> &'static mut BTreeMap<u32, Placement> {
@@ -306,6 +359,8 @@ const PROT_EXEC: usize = 4;
 const MAP_PRIVATE: usize = 2;
 const MAP_ANONYMOUS: usize = 0x20;
 const FIRST_ERROR_ADDRESS: usize = usize::MAX - 4095;
+const PAGE_SIZE: usize = 4096;
+const FOLL_WRITE: c_int = 1;
 const FUTEX_WAIT: c_int = 128;
 const FUTEX_WAKE: c_int = 129;
 const WAKE_EVERY_WAITER: u32 = i32::MAX as u32;
@@ -323,8 +378,16 @@ unsafe extern "C" {
     static _mmput: unsafe extern "C" fn(*mut c_void);
     static _vm_mmap: unsafe extern "C" fn(*mut c_void, usize, usize, usize, usize, usize) -> usize;
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
-    static _access_process_vm:
-        unsafe extern "C" fn(*mut c_void, usize, *mut c_void, usize, c_int) -> c_int;
+    static _down_read: unsafe extern "C" fn(*mut c_void);
+    static _up_read: unsafe extern "C" fn(*mut c_void);
+    static _get_user_pages_remote: unsafe extern "C" fn(
+        *mut c_void,
+        usize,
+        usize,
+        c_int,
+        *mut c_void,
+        *mut c_void,
+    ) -> isize;
     static ___arch_copy_from_user:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _do_futex: unsafe extern "C" fn(usize, c_int, u32, usize, usize, u32, u32) -> isize;
