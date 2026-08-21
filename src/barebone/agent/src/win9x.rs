@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, VecDeque};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -792,7 +792,18 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
 // answers as it answers the host, and the kernel half sends these bytes without a change.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    write_frame(&TO_TARGET, arena as u32, frame, wake_copy)
+    let arena = arena as u32;
+    unsafe { waiting() }.entry(arena).or_default().push_back(frame.to_vec());
+    send_what_waits(arena);
+
+    true
+}
+
+pub fn serve_waiting_frames() {
+    let arenas: alloc::vec::Vec<u32> = unsafe { waiting() }.keys().copied().collect();
+    for arena in arenas {
+        send_what_waits(arena);
+    }
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
@@ -813,6 +824,36 @@ pub fn holds_a_frame_from_target(arena: u64) -> bool {
 
 pub fn holds_a_frame_from_host(arena: u64) -> bool {
     TO_TARGET.holds_anything(arena)
+}
+
+pub fn a_frame_waits_for_room() -> bool {
+    unsafe { waiting() }
+        .iter()
+        .any(|(arena, frames)| !frames.is_empty() && TO_TARGET.has_room(*arena as u64))
+}
+
+fn send_what_waits(arena: u32) {
+    let frames = unsafe { waiting() }.get_mut(&arena).unwrap();
+
+    while let Some(frame) = frames.front_mut() {
+        TO_TARGET.take_lock(arena as u64, yield_now);
+        let piece = TO_TARGET.write(arena as u64, buffer_of(&TO_TARGET, arena), frame, 0);
+        if piece.is_none() {
+            TO_TARGET.ask_for_room(arena as u64);
+        }
+        TO_TARGET.let_lock_go(arena as u64);
+
+        let Some(written) = piece else {
+            return;
+        };
+        wake_copy(arena);
+
+        if written == frame.len() {
+            frames.pop_front();
+        } else {
+            frame.drain(..written);
+        }
+    }
 }
 
 fn write_frame(ring: &Ring, arena: u32, frame: &[u8], tell: fn(u32)) -> bool {
@@ -891,7 +932,14 @@ fn buffer_of(ring: &Ring, arena: u32) -> u64 {
 
 fn forget_hold(arena: u32) {
     unsafe { holds() }.retain(|(of, _), _| *of != arena);
+    unsafe { waiting() }.remove(&arena);
 }
+
+unsafe fn waiting() -> &'static mut BTreeMap<u32, VecDeque<alloc::vec::Vec<u8>>> {
+    unsafe { (&raw mut WAITING).as_mut().unwrap() }
+}
+
+static mut WAITING: BTreeMap<u32, VecDeque<alloc::vec::Vec<u8>>> = BTreeMap::new();
 
 unsafe fn holds() -> &'static mut BTreeMap<(u32, u64), alloc::vec::Vec<u8>> {
     unsafe { (&raw mut HOLDS).as_mut().unwrap() }
