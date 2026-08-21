@@ -64,11 +64,17 @@ pub fn free(ptr: *mut u8, _size: usize) {
 
 pub fn alloc_code(size: usize) -> *mut u8 {
     unsafe {
-        if let Some(f) = _execmem_alloc {
+        let code = if let Some(f) = _execmem_alloc {
             f(EXECMEM_MODULE_TEXT, size)
         } else {
             _module_alloc.unwrap()(size)
+        };
+
+        if let Some(f) = _set_memory_rw {
+            f(code as usize, size.div_ceil(PAGE_SIZE) as c_int);
         }
+
+        code
     }
 }
 
@@ -250,6 +256,7 @@ const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
 const GFP_KERNEL: u32 = 0xcc0;
 const NUMA_NO_NODE: c_int = -1;
 const EXECMEM_MODULE_TEXT: u32 = 1;
+const PAGE_SIZE: usize = 4096;
 #[cfg(target_arch = "aarch64")]
 const TCR_T1SZ_SHIFT: u64 = 16;
 #[cfg(target_arch = "aarch64")]
@@ -301,6 +308,7 @@ unsafe extern "C" {
     static _kfree: unsafe extern "C" fn(*mut u8);
     // Executable memory moved out of the module loader in 6.12.
     static _execmem_alloc: Option<unsafe extern "C" fn(u32, usize) -> *mut u8>;
+    static _set_memory_rw: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
     static _execmem_free: Option<unsafe extern "C" fn(*mut u8)>;
     static _module_alloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     static _module_memfree: Option<unsafe extern "C" fn(*mut u8)>;
