@@ -2248,26 +2248,25 @@ pub fn holds_a_frame_from_host(arena: u64) -> bool {
 }
 
 fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
-    let mut written = 0;
-    loop {
-        ring.take_lock(arena, yield_now);
-        let piece = ring.write(arena, buffer_of(ring, arena), frame, written);
-        if piece.is_none() {
-            ring.ask_for_room(arena);
-        }
-        ring.let_lock_go(arena);
+    ring.take_lock(arena, yield_now);
 
-        match piece {
+    let mut written = 0;
+    while written != frame.len() {
+        match ring.write(arena, buffer_of(ring, arena), frame, written) {
             Some(now) => {
                 written = now;
                 tell(arena);
-                if written == frame.len() {
-                    return true;
-                }
             }
-            None => wait(crate::glib::wakeup_token(), None, &mut || ring.has_room(arena)),
+            None => {
+                ring.ask_for_room(arena);
+                wait(crate::glib::wakeup_token(), None, &mut || ring.has_room(arena));
+            }
         }
     }
+
+    ring.let_lock_go(arena);
+
+    true
 }
 
 fn read_frame(ring: &Ring, arena: u64, tell: fn(u64)) -> Option<alloc::vec::Vec<u8>> {

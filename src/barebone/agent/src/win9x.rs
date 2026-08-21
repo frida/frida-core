@@ -792,7 +792,6 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
 // answers as it answers the host, and the kernel half sends these bytes without a change.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-
     write_frame(&TO_TARGET, arena as u32, frame, wake_copy)
 }
 
@@ -817,27 +816,25 @@ pub fn holds_a_frame_from_host(arena: u64) -> bool {
 }
 
 fn write_frame(ring: &Ring, arena: u32, frame: &[u8], tell: fn(u32)) -> bool {
-    let mut written = 0;
-    loop {
-        ring.take_lock(arena as u64, yield_now);
-        let piece = ring.write(arena as u64, buffer_of(ring, arena), frame, written);
-        if piece.is_none() {
-            ring.ask_for_room(arena as u64);
-        }
-        ring.let_lock_go(arena as u64);
+    ring.take_lock(arena as u64, yield_now);
 
-        match piece {
+    let mut written = 0;
+    while written != frame.len() {
+        match ring.write(arena as u64, buffer_of(ring, arena), frame, written) {
             Some(now) => {
                 written = now;
                 tell(arena);
-                if written == frame.len() {
-                    return true;
-                }
             }
-            None => wait(crate::glib::wakeup_token(), None,
-                &mut || ring.has_room(arena as u64)),
+            None => {
+                ring.ask_for_room(arena as u64);
+                wait(crate::glib::wakeup_token(), None, &mut || ring.has_room(arena as u64));
+            }
         }
     }
+
+    ring.let_lock_go(arena as u64);
+
+    true
 }
 
 fn read_frame(ring: &Ring, arena: u32, tell: fn(u32)) -> Option<alloc::vec::Vec<u8>> {
