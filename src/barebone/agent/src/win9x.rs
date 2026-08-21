@@ -2062,6 +2062,14 @@ pub fn identify_image(path: *const u8) -> *const u8 {
 static mut IDENTITY: [u8; MAX_IDENTITY + 1] = [0; MAX_IDENTITY + 1];
 const MAX_IDENTITY: usize = 128;
 
+pub fn describe_process(process: &ProcessInfo) -> *const u8 {
+    if process.path.is_null() {
+        return c"".as_ptr() as *const u8;
+    }
+
+    describe_image(process.path)
+}
+
 pub fn describe_image(path: *const u8) -> *const u8 {
     let description = unsafe { (&raw mut DESCRIPTION).as_mut().unwrap() };
     description[0] = 0;

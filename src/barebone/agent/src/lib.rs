@@ -1406,7 +1406,11 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
             g_variant_builder_add(builder, c"u".as_ptr(), process.id);
             g_variant_builder_add(builder, c"s".as_ptr(), path);
             g_variant_builder_add(builder, c"s".as_ptr(), text_or_empty(process.command_line));
-            g_variant_builder_add(builder, c"s".as_ptr(), describe(process.path));
+            g_variant_builder_add(
+                builder,
+                c"s".as_ptr(),
+                text_or_empty(kernel::describe_process(&process)),
+            );
 
             g_variant_builder_open(builder, icons_type);
             if include_icons && !process.path.is_null() {
