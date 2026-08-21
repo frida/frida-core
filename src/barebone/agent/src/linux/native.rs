@@ -5,16 +5,23 @@
 // from the host instead, over the hostlink.
 
 use core::ffi::{c_char, c_int, c_void};
+use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::kernel::ThreadEntry;
 
 pub fn log(msg: &str) {
-    unsafe { printk(c"%s".as_ptr(), msg.as_ptr() as *const c_char) };
+    unsafe {
+        if let Some(f) = __printk {
+            f(msg.as_ptr() as *const c_char)
+        } else {
+            _printk.unwrap()(msg.as_ptr() as *const c_char)
+        }
+    };
 }
 
 pub fn panic(msg: &str) -> ! {
-    unsafe { _panic(c"%s".as_ptr(), msg.as_ptr() as *const c_char) }
+    unsafe { _panic(msg.as_ptr() as *const c_char) }
 }
 
 pub fn run_when_ready(action: fn()) {
@@ -43,7 +50,7 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 
 pub fn alloc(size: usize) -> *mut u8 {
     unsafe {
-        if let Some(f) = _kmalloc_noprof {
+        if let Some(f) = ___kmalloc_noprof {
             f(size, GFP_KERNEL)
         } else {
             _kmalloc.unwrap()(size, GFP_KERNEL)
@@ -96,7 +103,7 @@ pub fn yield_now() {
 }
 
 pub fn monotonic_micros() -> i64 {
-    (unsafe { _ktime_get_ns() } / 1000) as i64
+    (unsafe { _ktime_get_mono_fast_ns() } / 1000) as i64
 }
 
 pub fn wall_clock_micros() -> (u32, u32) {
@@ -174,9 +181,26 @@ pub fn install_interrupt_handler(
 }
 
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe { _ioremap(phys_addr, size as usize) }
+    unsafe { _generic_ioremap_prot(phys_addr, size as usize, PROT_DEVICE_NGNRE) }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn virt_to_phys(vaddr: u64) -> u64 {
+    let memstart = unsafe { read_volatile(_memstart_addr) };
+    vaddr - linear_map_base() + memstart
+}
+
+#[cfg(target_arch = "aarch64")]
+fn linear_map_base() -> u64 {
+    let tcr_el1: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, tcr_el1", out(reg) tcr_el1, options(nomem, nostack));
+    }
+    let kernel_address_bits = 64 - ((tcr_el1 >> TCR_T1SZ_SHIFT) & TCR_T1SZ_MASK);
+    u64::MAX << kernel_address_bits
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 pub fn virt_to_phys(vaddr: u64) -> u64 {
     unsafe { _virt_to_phys(vaddr) }
 }
@@ -226,7 +250,26 @@ const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
 const GFP_KERNEL: u32 = 0xcc0;
 const NUMA_NO_NODE: c_int = -1;
 const EXECMEM_MODULE_TEXT: u32 = 1;
+#[cfg(target_arch = "aarch64")]
+const TCR_T1SZ_SHIFT: u64 = 16;
+#[cfg(target_arch = "aarch64")]
+const TCR_T1SZ_MASK: u64 = 0x3f;
 const WAIT_INTERVAL_MS: u32 = 1;
+// Device memory, as the kernel spells it for anything behind a bus.
+const PROT_DEVICE_NGNRE: u64 = PTE_TYPE_PAGE
+    | PTE_AF
+    | PTE_SHARED
+    | PTE_ATTRINDX_DEVICE_NGNRE
+    | PTE_WRITE
+    | PTE_PXN
+    | PTE_UXN;
+const PTE_TYPE_PAGE: u64 = 0x3;
+const PTE_ATTRINDX_DEVICE_NGNRE: u64 = 1 << 2;
+const PTE_SHARED: u64 = 3 << 8;
+const PTE_AF: u64 = 1 << 10;
+const PTE_WRITE: u64 = 1 << 51;
+const PTE_PXN: u64 = 1 << 53;
+const PTE_UXN: u64 = 1 << 54;
 const IRQF_SHARED: u64 = 0x80;
 const IRQ_NONE: c_int = 0;
 const IRQ_HANDLED: c_int = 1;
@@ -245,15 +288,15 @@ type IrqHandlerFn = unsafe extern "C" fn(irq: c_int, cookie: *mut c_void) -> c_i
 unsafe extern "C" {
     // Kernels built before the printk rework export the name without the
     // underscore; the host fills in whichever this one has.
-    #[link_name = "_printk"]
-    static _printk: Option<unsafe extern "C" fn(*const c_char, ...)>;
-    static _panic: unsafe extern "C" fn(*const c_char, ...) -> !;
+    static __printk: Option<unsafe extern "C" fn(*const c_char)>;
+    static _printk: Option<unsafe extern "C" fn(*const c_char)>;
+    static _panic: unsafe extern "C" fn(*const c_char) -> !;
     static _kthread_create_on_node:
         unsafe extern "C" fn(KthreadFn, *mut c_void, c_int, *const c_char) -> *mut c_void;
     static _wake_up_process: unsafe extern "C" fn(*mut c_void) -> c_int;
     // Allocation profiling renamed the entry points in 6.10; before that the
     // size-plus-flags pair went to __kmalloc.
-    static _kmalloc_noprof: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
+    static ___kmalloc_noprof: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
     static _kmalloc: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
     static _kfree: unsafe extern "C" fn(*mut u8);
     // Executable memory moved out of the module loader in 6.12.
@@ -263,7 +306,7 @@ unsafe extern "C" {
     static _module_memfree: Option<unsafe extern "C" fn(*mut u8)>;
     static _msleep: unsafe extern "C" fn(u32);
     static _schedule: unsafe extern "C" fn();
-    static _ktime_get_ns: unsafe extern "C" fn() -> u64;
+    static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
     static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec64);
     static _request_threaded_irq: unsafe extern "C" fn(
         u32,
@@ -273,12 +316,11 @@ unsafe extern "C" {
         *const c_char,
         *mut c_void,
     ) -> c_int;
-    static _ioremap: unsafe extern "C" fn(u64, usize) -> *mut c_void;
+    static _generic_ioremap_prot: unsafe extern "C" fn(u64, usize, u64) -> *mut c_void;
+    #[cfg(target_arch = "aarch64")]
+    static _memstart_addr: *const u64;
+    #[cfg(not(target_arch = "aarch64"))]
     static _virt_to_phys: unsafe extern "C" fn(u64) -> u64;
     #[cfg(not(target_arch = "aarch64"))]
     static _current_task: usize;
-}
-
-unsafe fn printk(format: *const c_char, message: *const c_char) {
-    unsafe { _printk.unwrap()(format, message) };
 }
