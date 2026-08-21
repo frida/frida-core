@@ -18,6 +18,8 @@ SECTIONS {
     _panic = .; . += 8;
     _kthread_create_on_node = .; . += 8;
     _init_task = .; . += 8;
+    ___start_BTF = .; . += 8;
+    ___stop_BTF = .; . += 8;
     _tasklist_lock = .; . += 8;
     __raw_read_lock = .; . += 8;
     __raw_read_unlock = .; . += 8;

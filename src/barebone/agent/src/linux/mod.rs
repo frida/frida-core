@@ -10,6 +10,8 @@ use alloc::string::String;
 #[cfg(feature = "linux")]
 mod kmod;
 #[cfg(feature = "linux-injected")]
+mod layout;
+#[cfg(feature = "linux-injected")]
 mod native;
 #[cfg(feature = "linux-injected")]
 mod processes;

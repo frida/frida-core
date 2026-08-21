@@ -62,14 +62,18 @@ fn read_task(task: usize, layout: &Layout) -> Task {
     let mut name = [0u8; NAME_SIZE + 1];
     read_kernel(task + layout.name, &mut name[..NAME_SIZE]);
 
-    let mut id = [0u8; 4];
-    read_kernel(task + layout.id, &mut id);
-
     Task {
-        id: u32::from_ne_bytes(id),
+        id: read_id(task, layout),
         name,
         executable: unsafe { _get_task_exe_file(task as *mut c_void) },
     }
+}
+
+fn read_id(task: usize, layout: &Layout) -> u32 {
+    let mut id = [0u8; 4];
+    read_kernel(task + layout.id, &mut id);
+
+    u32::from_ne_bytes(id)
 }
 
 fn path_of(executable: *mut c_void, buffer: &mut [u8]) -> *const u8 {
@@ -147,12 +151,27 @@ struct Layout {
 
 fn discover_layout() -> Option<Layout> {
     let init = unsafe { _init_task } as usize;
+
+    if let Some(layout) = described_layout(init) {
+        return Some(layout);
+    }
+
     let image = read_task_image(init);
 
     let name = find(&image, IDLE_TASK_NAME)?;
     let (list, id) = find_task_list(init, &image, name)?;
 
     Some(Layout { init, list, name, id })
+}
+
+fn described_layout(init: usize) -> Option<Layout> {
+
+    Some(Layout {
+        init,
+        list: super::layout::field_offset("task_struct", "tasks")?,
+        name: super::layout::field_offset("task_struct", "comm")?,
+        id: super::layout::field_offset("task_struct", "pid")?,
+    })
 }
 
 fn read_task_image(task: usize) -> Vec<u8> {
