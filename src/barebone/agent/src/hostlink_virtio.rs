@@ -63,6 +63,7 @@ const PCI_CAP_LIST_POINTER: u8 = 0x34;
 const PCI_INTERRUPT_LINE: u8 = 0x3c;
 const PCI_BASE_ADDRESS_0: u8 = 0x10;
 const PCI_INTERRUPT_PIN: u8 = 0x3d;
+const PCI_COMMAND_INTX_DISABLE: u32 = 0x400;
 const ISA_BRIDGE_DEVFN: u8 = 0x08;
 #[cfg(target_arch = "aarch64")]
 const ECAM_DEVFN_SHIFT: usize = 12;
@@ -1109,14 +1110,14 @@ impl PciDevice {
 
     #[cfg(target_arch = "aarch64")]
     fn irq_line(&self) -> Option<u32> {
-        None
+        kernel::pci_interrupt(self.bus, self.devfn)
     }
 
     fn enable_memory_and_bus_mastering(&self) {
         let command = self.read_config(PCI_COMMAND);
         self.write_config(
             PCI_COMMAND,
-            command | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER,
+            (command | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER) & !PCI_COMMAND_INTX_DISABLE,
         );
     }
 

@@ -1450,6 +1450,7 @@ fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
 }
 
 fn send_command_reply(request_id: u16, response: HandlerResponse) {
+
     unsafe {
         let message = g_variant_new(
             c"(yquv)".as_ptr(),

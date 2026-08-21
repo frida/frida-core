@@ -32,8 +32,16 @@ SECTIONS {
     _execmem_free = .; . += 8;
     _module_alloc = .; . += 8;
     _module_memfree = .; . += 8;
-    _msleep = .; . += 8;
     _schedule = .; . += 8;
+    ___init_waitqueue_head = .; . += 8;
+    _prepare_to_wait_event = .; . += 8;
+    _finish_wait = .; . += 8;
+    ___wake_up = .; . += 8;
+    _autoremove_wake_function = .; . += 8;
+    _schedule_hrtimeout_range = .; . += 8;
+    _pci_get_domain_bus_and_slot = .; . += 8;
+    _pci_irq_vector = .; . += 8;
+    _pci_dev_put = .; . += 8;
     _ktime_get_ns = .; . += 8;
     _ktime_get_real_ts64 = .; . += 8;
     _request_threaded_irq = .; . += 8;

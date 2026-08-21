@@ -4,9 +4,10 @@
 // its symbol table, its module list, the right to write to its pages -- comes
 // from the host instead, over the hostlink.
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_void};
+use core::ptr;
 use core::ptr::read_volatile;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::kernel::ThreadEntry;
 
@@ -25,6 +26,8 @@ pub fn panic(msg: &str) -> ! {
 }
 
 pub fn run_when_ready(action: fn()) {
+    waiters();
+
     action();
 }
 
@@ -96,21 +99,83 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
     free(ptr, size);
 }
 
-// The kernel's own wait queues live behind macros and per-version struct
-// layouts, so the wait is spelled out here instead: sleep in short hops, and
-// let the condition itself say when to stop.
 pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let deadline = timeout_us.map(|us| monotonic_micros() + us as i64);
+    let waiters = waiters();
 
-    while !check() {
-        if deadline.is_some_and(|deadline| monotonic_micros() >= deadline) {
-            return;
+    let mut waiter = [0usize; WAIT_ENTRY_WORDS];
+    let waiter = queue_this_thread(&mut waiter);
+
+    unsafe { _prepare_to_wait_event(waiters, waiter, TASK_INTERRUPTIBLE) };
+
+    if !check() {
+        match timeout_us {
+            Some(us) => {
+                let mut until = (us as i64) * 1000;
+                unsafe { _schedule_hrtimeout_range(&mut until, WAKE_SLACK_NS, HRTIMER_MODE_REL) };
+            }
+            None => unsafe { _schedule() },
         }
-        unsafe { _msleep(WAIT_INTERVAL_MS) };
     }
+
+    unsafe { _finish_wait(waiters, waiter) };
 }
 
-pub fn wake(_token: *const u8) {}
+pub fn wake(_token: *const u8) {
+    unsafe { ___wake_up(waiters(), TASK_NORMAL, WAKE_EVERY_WAITER, ptr::null_mut()) };
+}
+
+fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS]) -> *mut c_void {
+    let entry = entry.as_mut_ptr();
+
+    unsafe {
+        entry.add(WAIT_ENTRY_THREAD).write(current_task() as usize);
+        entry.add(WAIT_ENTRY_WAKE).write(_autoremove_wake_function as usize);
+
+        let queued = entry.add(WAIT_ENTRY_QUEUED);
+        queued.write(queued as usize);
+        queued.add(1).write(queued as usize);
+    }
+
+    entry as *mut c_void
+}
+
+fn waiters() -> *mut c_void {
+    let queue = (&raw mut WAITERS) as *mut c_void;
+
+
+    if !WAITERS_CLAIMED.swap(true, Ordering::AcqRel) {
+        unsafe {
+            ___init_waitqueue_head(queue, c"frida".as_ptr(), (&raw mut WAITERS_KEY) as *mut c_void)
+        };
+        WAITERS_READY.store(true, Ordering::Release);
+    }
+    while !WAITERS_READY.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+
+    queue
+}
+
+static mut WAITERS: [usize; WAIT_QUEUE_WORDS] = [0; WAIT_QUEUE_WORDS];
+static mut WAITERS_KEY: [usize; LOCK_KEY_WORDS] = [0; LOCK_KEY_WORDS];
+static WAITERS_CLAIMED: AtomicBool = AtomicBool::new(false);
+static WAITERS_READY: AtomicBool = AtomicBool::new(false);
+
+pub fn pci_interrupt(bus: u8, devfn: u8) -> Option<u32> {
+    let device = unsafe { _pci_get_domain_bus_and_slot(0, bus as c_uint, devfn as c_uint) };
+    if device.is_null() {
+        return None;
+    }
+
+    let line = unsafe { _pci_irq_vector(device, 0) };
+    unsafe { _pci_dev_put(device) };
+
+    if line < 0 {
+        return None;
+    }
+
+    Some(line as u32)
+}
 
 pub fn yield_now() {
     unsafe { _schedule() };
@@ -269,7 +334,17 @@ const PAGE_SIZE: usize = 4096;
 const TCR_T1SZ_SHIFT: u64 = 16;
 #[cfg(target_arch = "aarch64")]
 const TCR_T1SZ_MASK: u64 = 0x3f;
-const WAIT_INTERVAL_MS: u32 = 1;
+const TASK_INTERRUPTIBLE: c_uint = 1;
+const TASK_NORMAL: c_uint = 3;
+const WAKE_EVERY_WAITER: c_int = 0;
+const WAKE_SLACK_NS: u64 = 50_000;
+const HRTIMER_MODE_REL: c_int = 1;
+const WAIT_ENTRY_WORDS: usize = 8;
+const WAIT_ENTRY_THREAD: usize = 1;
+const WAIT_ENTRY_WAKE: usize = 2;
+const WAIT_ENTRY_QUEUED: usize = 3;
+const WAIT_QUEUE_WORDS: usize = 16;
+const LOCK_KEY_WORDS: usize = 8;
 // Device memory, as the kernel spells it for anything behind a bus.
 const PROT_DEVICE_NGNRE: u64 = PTE_TYPE_PAGE
     | PTE_AF
@@ -320,7 +395,15 @@ unsafe extern "C" {
     static _execmem_free: Option<unsafe extern "C" fn(*mut u8)>;
     static _module_alloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     static _module_memfree: Option<unsafe extern "C" fn(*mut u8)>;
-    static _msleep: unsafe extern "C" fn(u32);
+    static ___init_waitqueue_head: unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_void);
+    static _prepare_to_wait_event: unsafe extern "C" fn(*mut c_void, *mut c_void, c_uint) -> c_int;
+    static _finish_wait: unsafe extern "C" fn(*mut c_void, *mut c_void);
+    static ___wake_up: unsafe extern "C" fn(*mut c_void, c_uint, c_int, *mut c_void);
+    static _autoremove_wake_function: *const c_void;
+    static _schedule_hrtimeout_range: unsafe extern "C" fn(*mut i64, u64, c_int) -> c_int;
+    static _pci_get_domain_bus_and_slot: unsafe extern "C" fn(c_int, c_uint, c_uint) -> *mut c_void;
+    static _pci_irq_vector: unsafe extern "C" fn(*mut c_void, c_uint) -> c_int;
+    static _pci_dev_put: unsafe extern "C" fn(*mut c_void);
     static _schedule: unsafe extern "C" fn();
     static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
     static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec64);

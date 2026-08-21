@@ -208,6 +208,10 @@ pub fn virt_to_phys(vaddr: u64) -> u64 {
 pub type IOInterruptHandler =
     extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
+pub fn pci_interrupt(_bus: u8, _devfn: u8) -> Option<u32> {
+    None
+}
+
 pub fn install_interrupt_handler(
     irq: u32,
     target: *mut c_void,
