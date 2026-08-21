@@ -846,8 +846,11 @@ fn kernel_half_has_work() -> bool {
     }
 
     #[cfg(feature = "win9x")]
-    if deferred_work_is_waiting() || kernel::a_patch_is_wanted() || kernel::a_frame_waits_for_room()
-    {
+    if deferred_work_is_waiting() || kernel::a_patch_is_wanted() {
+        return true;
+    }
+
+    if kernel::a_frame_waits_for_room() {
         return true;
     }
 
@@ -1206,7 +1209,6 @@ fn relay_frames_from_targets() {
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
 
-    #[cfg(feature = "win9x")]
     kernel::serve_waiting_frames();
 
     for arena in kernel::injected_arenas() {
