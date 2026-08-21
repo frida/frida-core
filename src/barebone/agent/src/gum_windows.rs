@@ -342,6 +342,7 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
+
     if kernel::watches_threads() {
         kernel::forget_threads();
     } else {

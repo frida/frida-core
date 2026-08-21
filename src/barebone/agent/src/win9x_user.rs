@@ -67,31 +67,78 @@ pub static USER: Primitives = Primitives {
     enumerate_threads,
 };
 
+fn copy_has_work() -> bool {
+    let arena = unsafe { ARENA };
+
+    unsafe {
+        a_thread_is_gone(arena)
+            || crate::win9x::holds_a_frame_from_host(arena as u64)
+            || (((arena + GATING) as *const u32).read_volatile() != 0) != GATING_HERE
+            || ((arena + STOP_REQUEST) as *const u32).read_volatile() != 0
+    }
+}
+
+fn serve_the_copy() {
+    let arena = unsafe { ARENA };
+
+    while let Some(id) = take_a_departed_thread(arena) {
+        crate::gum_windows::thread_vanished(id);
+    }
+
+    while let Some(frame) = take_frame_from_host(arena as u64) {
+        crate::on_frame_from_host(&frame);
+    }
+
+    let wanted = unsafe { ((arena + GATING) as *const u32).read_volatile() } != 0;
+    if wanted != unsafe { GATING_HERE } {
+        unsafe { GATING_HERE = wanted };
+        gate_spawns(wanted);
+    }
+}
+
+fn a_thread_is_gone(arena: u32) -> bool {
+    unsafe {
+        ((arena + GONE_HEAD) as *const u32).read_volatile()
+            != ((arena + GONE_TAIL) as *const u32).read_volatile()
+    }
+}
+
+fn take_a_departed_thread(arena: u32) -> Option<u32> {
+    unsafe {
+        let head = ((arena + GONE_HEAD) as *const u32).read_volatile();
+        let tail = ((arena + GONE_TAIL) as *const u32).read_volatile();
+        if head == tail {
+            return None;
+        }
+
+        let id = ((arena + GONE_SLOTS + (tail % GONE_COUNT) * 4) as *const u32).read_volatile();
+        ((arena + GONE_TAIL) as *mut u32).write_volatile(tail.wrapping_add(1));
+
+        Some(id)
+    }
+}
+
+static mut ARENA: u32 = 0;
+
 unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
     let arena = parameter as u32;
+    unsafe { ARENA = arena };
     let context = unsafe { crate::adopt_js_context() };
 
     unsafe { ((arena + OBSERVED_PID) as *mut u32).write_volatile(current_process_id()) };
 
     unsafe { crate::route_frames_through(arena as u64) };
 
+    unsafe {
+        ((arena + LOOP_THREAD) as *mut u32).write_volatile(crate::win9x::get_cur_thread_handle())
+    };
+
     crate::gum_windows::watch_the_loader();
+    crate::glib::own_the_loop();
+    crate::watch_for_work(context, copy_has_work, serve_the_copy);
 
     while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
-        if let Some(frame) = take_frame_from_host(arena as u64) {
-            crate::on_frame_from_host(frame);
-            acknowledge_frame_from_host(arena as u64);
-        }
-
-        pump_frames_to_host();
-
-        let wanted = unsafe { ((arena + GATING) as *const u32).read_volatile() } != 0;
-        if wanted != unsafe { GATING_HERE } {
-            unsafe { GATING_HERE = wanted };
-            gate_spawns(wanted);
-        }
-
-        unsafe { crate::poll_pending_work(context) };
+        unsafe { crate::dispatch_pending_work(context) };
     }
 
     unsafe { ((arena + WORKER_STOPPED) as *mut u32).write_volatile(1) };
@@ -191,11 +238,19 @@ const GUM_PAGE_WRITE: u32 = 0x2;
 const GUM_PAGE_EXECUTE: u32 = 0x4;
 
 pub unsafe extern "stdcall" fn on_module_load(name: *const u8) -> u32 {
+    unsafe {
+        let n = (ARENA + 0xb0) as *mut u32;
+        n.write_volatile(n.read_volatile() + 1);
+    }
     let original: extern "stdcall" fn(*const u8) -> u32 =
         unsafe { core::mem::transmute(crate::gum_windows::loader_load()) };
 
     let handle = original(name);
     note_module(handle, name);
+    unsafe {
+        let n = (ARENA + 0xb4) as *mut u32;
+        n.write_volatile(n.read_volatile() + 1);
+    }
 
     handle
 }
@@ -359,6 +414,7 @@ fn resolve_user_api() {
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
+            wait_for_single_object_ex: kernel32_export(b"WaitForSingleObjectEx"),
             exit_thread: kernel32_export(b"ExitThread"),
             close_handle: kernel32_export(b"CloseHandle"),
             set_file_pointer: kernel32_export(b"SetFilePointer"),
@@ -395,6 +451,7 @@ struct UserApi {
     create_event: u32,
     set_event: u32,
     wait_for_single_object: u32,
+    wait_for_single_object_ex: u32,
     exit_thread: u32,
     close_handle: u32,
     set_file_pointer: u32,
@@ -425,6 +482,7 @@ static mut USER_API: UserApi = UserApi {
     create_event: 0,
     set_event: 0,
     wait_for_single_object: 0,
+    wait_for_single_object_ex: 0,
     exit_thread: 0,
     close_handle: 0,
     set_file_pointer: 0,
@@ -737,17 +795,24 @@ fn ask_for_a_guard(address: u32, bytes: &[u8]) {
         ((arena + PATCH_REQUEST) as *mut u32).write_volatile(HOOK_ASKED);
     }
 
-    for _ in 0..PATCH_ATTEMPTS {
-        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } == PATCH_ANSWERED {
-            unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
-            give_the_slot_back();
-            return;
-        }
-
-        unsafe { sleep(HOLD_SLICE_MS) };
-    }
-
+    wait_for_the_answer(arena);
+    unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
     give_the_slot_back();
+}
+
+fn wait_for_the_answer(arena: u32) {
+    unsafe {
+        ((arena + PATCH_THREAD) as *mut u32)
+            .write_volatile(crate::win9x::get_cur_thread_handle())
+    };
+    crate::win9x::signal_kernel_half(arena);
+
+    let answered = |_: ()| unsafe {
+        ((arena + PATCH_REQUEST) as *const u32).read_volatile() == PATCH_ANSWERED
+    };
+    while !answered(()) {
+        crate::kernel::wait(crate::glib::wakeup_token(), None, &mut || answered(()));
+    }
 }
 
 const SHARED_ARENA_BASE: u64 = 0x8000_0000;
@@ -781,18 +846,14 @@ fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
         ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ASKED);
     }
 
-    for _ in 0..PATCH_ATTEMPTS {
-        if unsafe { ((arena + PATCH_REQUEST) as *const u32).read_volatile() } == PATCH_ANSWERED {
-            let at = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
-            let previous = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
-            unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
-            give_the_slot_back();
+    wait_for_the_answer(arena);
 
-            return Some((at, previous));
-        }
+    let at = unsafe { ((arena + PATCH_ADDRESS) as *const u32).read_volatile() };
+    let previous = unsafe { ((arena + PATCH_BYTES) as *const u32).read_volatile() };
+    unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
+    give_the_slot_back();
 
-        unsafe { sleep(HOLD_SLICE_MS) };
-    }
+    return Some((at, previous));
 
     give_the_slot_back();
 
@@ -945,13 +1006,13 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
         return;
     }
 
-    let wait_for_single_object: unsafe extern "stdcall" fn(u32, u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().wait_for_single_object as usize) };
+    let wait_for_single_object_ex: unsafe extern "stdcall" fn(u32, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().wait_for_single_object_ex as usize) };
     let timeout = match timeout_us {
         None => INFINITE,
         Some(us) => (us / 1000).max(1) as u32,
     };
-    unsafe { wait_for_single_object(event, timeout) };
+    unsafe { wait_for_single_object_ex(event, timeout, 1) };
     release_slot(slot, token);
 }
 
@@ -961,6 +1022,9 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
 // thread released another.
 fn release_slot(slot: usize, token: *const u8) {
     if EVENT_SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
+        return;
+    }
+    if core::ptr::eq(token, crate::glib::wakeup_token()) {
         return;
     }
 

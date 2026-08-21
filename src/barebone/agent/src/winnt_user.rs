@@ -19,7 +19,7 @@ use crate::winnt::{
     CONTEXT_ALIGNMENT, CONTEXT_CONTROL, CONTEXT_FLAGS, CONTEXT_FULL, CONTEXT_PC, CONTEXT_SIZE,
     PEB_PARAMETERS_OFFSET,
     POINTER_SIZE, export, module_base, read_pointer, read_u32,
-    acknowledge_frame_from_host, select_user, take_frame_from_host, windows_fn,
+    select_user, take_frame_from_host, windows_fn,
 };
 
 // No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
@@ -63,7 +63,6 @@ pub extern "C" fn frida_winnt_user_bootstrap(arena: usize) -> ! {
 
 const THREAD_ALL_ACCESS: u32 = 0x1f_03ff;
 const CURRENT_THREAD: *mut c_void = -2isize as *mut c_void;
-const IDLE_SLICE_US: u64 = 50_000;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn frida_winnt_user_main(arena: usize) {
@@ -88,20 +87,11 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
 
     crate::gum_windows::watch_the_loader();
 
+    crate::glib::own_the_loop();
+    crate::watch_for_work(context, copy_has_work, serve_the_copy);
+
     while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
-        serve_the_session_server(arena);
-
-        while let Some(frame) = take_frame_from_host(arena as u64) {
-            crate::on_frame_from_host(frame);
-            acknowledge_frame_from_host(arena as u64);
-        }
-
-        unsafe { crate::poll_pending_work(context) };
-
-        // The kernel half sets this on its way in. Nothing else here comes around on a clock,
-        // and the wait ends early whenever a frame arrives.
-        let due_time = -((IDLE_SLICE_US as i64) * 10);
-        unsafe { (user_api().wait_for_object)(target_wake_handle(), 0, &due_time) };
+        unsafe { crate::dispatch_pending_work(context) };
     }
 
     crate::gum_windows::forget_the_loader();
@@ -843,6 +833,26 @@ fn process_heap() -> usize {
 
 static mut MADE_HEAP: usize = 0;
 const HEAP_GROWABLE: u32 = 0x2;
+
+fn copy_has_work() -> bool {
+    let arena = unsafe { ARENA };
+
+    unsafe {
+        crate::winnt::holds_a_frame_from_host(arena)
+            || ((arena + REGISTER_THREAD) as *const u32).read_volatile() != 0
+            || ((arena + STOP_REQUEST) as *const u32).read_volatile() != 0
+    }
+}
+
+fn serve_the_copy() {
+    let arena = unsafe { ARENA };
+
+    serve_the_session_server(arena as usize);
+
+    while let Some(frame) = take_frame_from_host(arena) {
+        crate::on_frame_from_host(&frame);
+    }
+}
 
 fn target_wake_handle() -> *mut c_void {
     unsafe { ((ARENA + TARGET_WAKE_HANDLE) as *const u64).read() as *mut c_void }

@@ -15,6 +15,7 @@ use crate::bindings::{
     gum_x86_writer_new, gum_x86_writer_put_jmp_address, gum_x86_writer_unref,
 };
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::ring::{Ring, Taken};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::win9x_user::{
@@ -519,11 +520,11 @@ pub fn detach_from_process(pid: u32) -> bool {
     // instructions and return into KERNEL32.
     wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
 
-    forget_outbox(arena);
+    forget_hold(arena);
 
     unsafe {
-        free_shared(((arena + TO_TARGET.buffer) as *const u32).read_volatile());
-        free_shared(((arena + FROM_TARGET.buffer) as *const u32).read_volatile());
+        free_shared(((arena as u64 + TO_TARGET.buffer) as *const u32).read_volatile());
+        free_shared(((arena as u64 + FROM_TARGET.buffer) as *const u32).read_volatile());
     }
     free_shared(target.stack);
     free_shared(target.image_base);
@@ -551,6 +552,7 @@ pub fn gate_spawns(on: bool) {
 
     for target in unsafe { targets() }.values() {
         unsafe { ((target.arena + GATING) as *mut u32).write_volatile(on as u32) };
+        wake_copy(target.arena);
     }
 }
 
@@ -599,7 +601,16 @@ pub fn serve_patch_requests() {
         }
 
         unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(PATCH_ANSWERED) };
+        wake_asker(arena);
     }
+}
+
+pub fn a_patch_is_wanted() -> bool {
+    unsafe { targets() }.values().any(|target| {
+        let request = unsafe { ((target.arena + PATCH_REQUEST) as *const u32).read_volatile() };
+
+        request == PATCH_ASKED || request == HOOK_ASKED
+    })
 }
 
 fn patch_in_process(pid: u32, address: &mut u32, bytes: u32) -> u32 {
@@ -723,6 +734,8 @@ fn place_shared_agent() -> (u32, u32) {
 // Ring 3 cannot write to a different process. Thus KERNEL32 makes the thread in the target,
 // with the stack and the payload in the shared arena, which all processes can read.
 pub fn inject(process: u32, payload: &[u8]) -> Injection {
+    hear_from_vmm();
+
     let arena = alloc_shared(INJECTION_ARENA_SIZE) as u32;
     let entry = arena + PAYLOAD_OFFSET;
     unsafe {
@@ -731,10 +744,13 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     }
 
     unsafe {
-        ((arena + TO_TARGET.buffer) as *mut u32)
+        ((arena as u64 + TO_TARGET.buffer) as *mut u32)
             .write_volatile(alloc_shared(FRAME_BUFFER_SIZE) as u32);
-        ((arena + FROM_TARGET.buffer) as *mut u32)
+        ((arena as u64 + FROM_TARGET.buffer) as *mut u32)
             .write_volatile(alloc_shared(FRAME_BUFFER_SIZE) as u32);
+        ((arena + KERNEL_SEMAPHORE) as *mut u32).write_volatile(loop_semaphore());
+        ((arena + WAKE_STUB_OFFSET) as *mut u8).write_volatile(0xc2);
+        ((arena + WAKE_STUB_OFFSET + 1) as *mut u16).write_volatile(0x0004);
     };
 
     let stack = alloc_shared(INJECTION_STACK_SIZE) as u32;
@@ -776,172 +792,132 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 // The two halves use the same protocol, thus the arena holds complete frames. The copy
 // answers as it answers the host, and the kernel half sends these bytes without a change.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    queue_frame(arena as u32, frame);
-    pump_frames(&TO_TARGET);
 
-    true
-}
-
-pub fn pump_frames_to_targets() {
-    pump_frames(&TO_TARGET);
-}
-
-pub fn pump_frames_to_host() {
-    pump_frames(&FROM_TARGET);
-}
-
-// The pages of a copy that has left go back to the system, thus what is still addressed to it
-// must go first: a turn of the pump would otherwise read and write a page that is nobody's.
-fn forget_outbox(arena: u32) {
-    let Some(outbox) = unsafe { outboxes() }.remove(&arena) else {
-        return;
-    };
-
-    if outbox.lent != 0 {
-        free_shared(outbox.lent);
-    }
-}
-
-fn queue_frame(arena: u32, frame: &[u8]) {
-    let outbox = unsafe { outboxes() }.entry(arena).or_insert_with(|| Outbox {
-        frames: alloc::collections::VecDeque::new(),
-        lent: 0,
-    });
-    outbox.frames.push_back(frame.to_vec());
-}
-
-fn pump_frames(channel: &Channel) {
-    for (arena, outbox) in unsafe { outboxes() }.iter_mut() {
-        if !channel.taken(*arena) {
-            continue;
-        }
-
-        if outbox.lent != 0 {
-            free_shared(outbox.lent);
-            outbox.lent = 0;
-        }
-
-        let Some(frame) = outbox.frames.pop_front() else {
-            continue;
-        };
-        match channel.put(*arena, &frame) {
-            Some(lent) => outbox.lent = lent,
-            None => outbox.frames.push_front(frame),
-        }
-    }
-}
-
-fn outboxes() -> &'static mut BTreeMap<u32, Outbox> {
-    unsafe { (&raw mut OUTBOXES).as_mut().unwrap() }
-}
-
-static mut OUTBOXES: BTreeMap<u32, Outbox> = BTreeMap::new();
-
-pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
-    FROM_TARGET.take(arena as u32)
-}
-
-pub fn acknowledge_frame_from_target(arena: u64) {
-    FROM_TARGET.acknowledge(arena as u32)
-}
-
-pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
-    TO_TARGET.take(arena as u32)
-}
-
-pub fn acknowledge_frame_from_host(arena: u64) {
-    TO_TARGET.acknowledge(arena as u32)
+    write_frame(&TO_TARGET, arena as u32, frame, wake_copy)
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    queue_frame(arena as u32, frame);
-    pump_frames(&FROM_TARGET);
-
-    true
+    write_frame(&FROM_TARGET, arena as u32, frame, signal_kernel_half)
 }
 
-struct Outbox {
-    frames: alloc::collections::VecDeque<alloc::vec::Vec<u8>>,
-    lent: u32,
+pub fn take_frame_from_target(arena: u64) -> Option<alloc::vec::Vec<u8>> {
+    read_frame(&FROM_TARGET, arena as u32, wake_copy)
 }
 
-struct Channel {
-    buffer: u32,
-    length: u32,
-    sequence: u32,
-    ack: u32,
-    elsewhere: u32,
+pub fn take_frame_from_host(arena: u64) -> Option<alloc::vec::Vec<u8>> {
+    read_frame(&TO_TARGET, arena as u32, signal_kernel_half)
 }
 
-impl Channel {
-    fn put(&self, arena: u32, frame: &[u8]) -> Option<u32> {
-        let sequence = unsafe { ((arena + self.sequence) as *const u32).read_volatile() };
-        if unsafe { ((arena + self.ack) as *const u32).read_volatile() } != sequence {
-            return None;
+pub fn holds_a_frame_from_target(arena: u64) -> bool {
+    FROM_TARGET.holds_anything(arena)
+}
+
+pub fn holds_a_frame_from_host(arena: u64) -> bool {
+    TO_TARGET.holds_anything(arena)
+}
+
+fn write_frame(ring: &Ring, arena: u32, frame: &[u8], tell: fn(u32)) -> bool {
+    let mut written = 0;
+    loop {
+        ring.take_lock(arena as u64, yield_now);
+        let piece = ring.write(arena as u64, buffer_of(ring, arena), frame, written);
+        if piece.is_none() {
+            ring.ask_for_room(arena as u64);
         }
+        ring.let_lock_go(arena as u64);
 
-        let mut elsewhere = 0;
-        let destination = if frame.len() <= FRAME_BUFFER_SIZE {
-            unsafe { ((arena + self.buffer) as *const u32).read_volatile() as *mut u8 }
-        } else {
-            elsewhere = alloc_shared(frame.len()) as u32;
-            elsewhere as *mut u8
-        };
-
-        unsafe {
-            core::ptr::copy_nonoverlapping(frame.as_ptr(), destination, frame.len());
-            ((arena + self.length) as *mut u32).write_volatile(frame.len() as u32);
-            ((arena + self.elsewhere) as *mut u32).write_volatile(elsewhere);
-            ((arena + self.sequence) as *mut u32).write_volatile(sequence + 1);
+        match piece {
+            Some(now) => {
+                written = now;
+                tell(arena);
+                if written == frame.len() {
+                    return true;
+                }
+            }
+            None => wait(crate::glib::wakeup_token(), None,
+                &mut || ring.has_room(arena as u64)),
         }
-
-        Some(elsewhere)
-    }
-
-    fn taken(&self, arena: u32) -> bool {
-        unsafe {
-            ((arena + self.sequence) as *const u32).read_volatile()
-                == ((arena + self.ack) as *const u32).read_volatile()
-        }
-    }
-
-    fn take(&self, arena: u32) -> Option<&'static [u8]> {
-        let sequence = unsafe { ((arena + self.sequence) as *const u32).read_volatile() };
-        if sequence == unsafe { ((arena + self.ack) as *const u32).read_volatile() } {
-            return None;
-        }
-
-        let length = unsafe { ((arena + self.length) as *const u32).read_volatile() } as usize;
-        let elsewhere = unsafe { ((arena + self.elsewhere) as *const u32).read_volatile() };
-        let bytes = if elsewhere != 0 {
-            elsewhere as *const u8
-        } else {
-            unsafe { ((arena + self.buffer) as *const u32).read_volatile() as *const u8 }
-        };
-
-        Some(unsafe { core::slice::from_raw_parts(bytes, length) })
-    }
-
-    fn acknowledge(&self, arena: u32) {
-        let sequence = unsafe { ((arena + self.sequence) as *const u32).read_volatile() };
-        unsafe { ((arena + self.ack) as *mut u32).write_volatile(sequence) };
     }
 }
 
-const TO_TARGET: Channel = Channel {
+fn read_frame(ring: &Ring, arena: u32, tell: fn(u32)) -> Option<alloc::vec::Vec<u8>> {
+    let hold = unsafe { holds() }.entry((arena, ring.head)).or_default();
+
+    loop {
+        match ring.read(arena as u64, buffer_of(ring, arena), hold) {
+            Taken::Nothing => return None,
+            Taken::Piece => {
+                if ring.room_is_wanted(arena as u64) {
+                    tell(arena);
+                }
+            }
+            Taken::Frame => {
+                let frame = core::mem::take(hold);
+                if ring.room_is_wanted(arena as u64) {
+                    tell(arena);
+                }
+                return Some(frame);
+            }
+        }
+    }
+}
+
+fn wake_asker(arena: u32) {
+    let thread = unsafe { ((arena + PATCH_THREAD) as *const u32).read_volatile() };
+    if thread == 0 {
+        return;
+    }
+
+    unsafe { __VWIN32_QueueUserApc(arena + WAKE_STUB_OFFSET, 0, thread) };
+}
+
+
+fn wake_copy(arena: u32) {
+    let thread = unsafe { ((arena + LOOP_THREAD) as *const u32).read_volatile() };
+    if thread == 0 {
+        return;
+    }
+
+    unsafe { __VWIN32_QueueUserApc(arena + WAKE_STUB_OFFSET, 0, thread) };
+}
+
+pub(crate) fn signal_kernel_half(arena: u32) {
+    let semaphore = unsafe { ((arena + KERNEL_SEMAPHORE) as *const u32).read_volatile() };
+    if semaphore != 0 {
+        unsafe { signal_semaphore(semaphore) };
+    }
+}
+
+fn buffer_of(ring: &Ring, arena: u32) -> u64 {
+    unsafe { ((arena as u64 + ring.buffer) as *const u32).read_volatile() as u64 }
+}
+
+fn forget_hold(arena: u32) {
+    unsafe { holds() }.retain(|(of, _), _| *of != arena);
+}
+
+unsafe fn holds() -> &'static mut BTreeMap<(u32, u64), alloc::vec::Vec<u8>> {
+    unsafe { (&raw mut HOLDS).as_mut().unwrap() }
+}
+
+static mut HOLDS: BTreeMap<(u32, u64), alloc::vec::Vec<u8>> = BTreeMap::new();
+
+const TO_TARGET: Ring = Ring {
     buffer: 0x1c,
-    length: 0x20,
-    sequence: 0x24,
-    ack: 0x28,
-    elsewhere: 0x84,
+    head: 0x20,
+    tail: 0x24,
+    lock: 0x28,
+    room: 0x84,
+    size: FRAME_BUFFER_SIZE,
 };
 
-const FROM_TARGET: Channel = Channel {
+const FROM_TARGET: Ring = Ring {
     buffer: 0x2c,
-    length: 0x30,
-    sequence: 0x34,
-    ack: 0x38,
-    elsewhere: 0x88,
+    head: 0x30,
+    tail: 0x34,
+    lock: 0x38,
+    room: 0x88,
+    size: FRAME_BUFFER_SIZE,
 };
 
 pub struct Injection {
@@ -1203,6 +1179,13 @@ mod kernel {
     }
 
     pub fn wake(token: *const u8) {
+        if unsafe { super::IN_INTERRUPT } {
+            super::WAKE_WANTED.store(token as usize, Ordering::Release);
+            unsafe { schedule_global_event(frida_win9x_wake_event_thunk) };
+
+            return;
+        }
+
         let slot = slot_for_token(token);
 
         let semaphore = SEMAPHORES[slot].load(Ordering::Acquire);
@@ -1497,6 +1480,7 @@ const INJECTION_ATTEMPTS: u32 = 100;
 const INJECTION_POLL_US: u64 = 100_000;
 const ANY_THREAD: u32 = 0xffff_ffff;
 const RESUME_STUB_OFFSET: u32 = 0x140;
+const WAKE_STUB_OFFSET: u32 = 0x1c0;
 const TRAMPOLINE_OFFSET: u32 = 0x180;
 
 const INJECTION_STACK_SIZE: usize = 0x4000;
@@ -2056,6 +2040,24 @@ pub fn watch_threads(appeared: fn(u32), vanished: fn(u32)) {
     unsafe {
         THREAD_APPEARED = Some(appeared);
         THREAD_VANISHED = Some(vanished);
+    }
+
+    hear_from_vmm();
+}
+
+pub fn forget_threads() {
+    unsafe {
+        THREAD_APPEARED = None;
+        THREAD_VANISHED = None;
+    }
+}
+
+pub fn hear_from_vmm() {
+    unsafe {
+        if HEARING {
+            return;
+        }
+        HEARING = true;
 
         let ddb = (&raw mut DEVICE).as_mut().unwrap();
         ddb[DDB_SDK_VERSION / 4] = SDK_VERSION;
@@ -2067,14 +2069,20 @@ pub fn watch_threads(appeared: fn(u32), vanished: fn(u32)) {
     }
 }
 
-pub fn forget_threads() {
+pub fn stop_hearing_from_vmm() {
     unsafe {
+        if !HEARING {
+            return;
+        }
+        HEARING = false;
+
         let ddb = (&raw mut DEVICE).as_mut().unwrap();
         vmm_remove_ddb(ddb.as_mut_ptr() as u32);
-        THREAD_APPEARED = None;
-        THREAD_VANISHED = None;
     }
 }
+
+static mut HEARING: bool = false;
+
 
 // What a new thread is to run, and the value to hand it, wait on its own stack: the stub returns
 // to the starter of KERNEL32, which reads them from there. The thunk gives this the frame it made,
@@ -2095,6 +2103,10 @@ const START_PARAMETER: usize = 13;
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
+    if message == TERMINATE_THREAD {
+        tell_the_copy_of_a_departure(thread);
+    }
+
     let told = match message {
         THREAD_INIT => unsafe { THREAD_APPEARED },
         DESTROY_THREAD => unsafe { THREAD_VANISHED },
@@ -2104,6 +2116,39 @@ extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
     if let Some(told) = told {
         told(thread);
     }
+}
+
+fn tell_the_copy_of_a_departure(thread: u32) {
+    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    if unsafe { (thread as *const u32).add(0x2c / 4).read() } != WIN32_THREAD {
+        return;
+    }
+
+    let block = unsafe { (thread as *const u32).byte_add(slot as usize).read() };
+    if block == 0 {
+        return;
+    }
+    let database = unsafe { (block as *const u32).read() };
+    let process = unsafe { (block as *const u32).add(1).read() };
+
+    let Some(arena) = arena_for_pid(process_id(process)) else {
+        return;
+    };
+    let arena = arena as u32;
+
+    unsafe {
+        let head = ((arena + GONE_HEAD) as *const u32).read_volatile();
+        let tail = ((arena + GONE_TAIL) as *const u32).read_volatile();
+        if head.wrapping_sub(tail) == GONE_COUNT {
+            return;
+        }
+
+        ((arena + GONE_SLOTS + (head % GONE_COUNT) * 4) as *mut u32)
+            .write_volatile(process_id(database));
+        ((arena + GONE_HEAD) as *mut u32).write_volatile(head.wrapping_add(1));
+    }
+
+    wake_copy(arena);
 }
 
 static mut THREAD_APPEARED: Option<fn(u32)> = None;
@@ -2116,6 +2161,7 @@ const DDB_NAME: usize = 0x0c;
 const DDB_CONTROL_PROC: usize = 0x18;
 const SDK_VERSION: u32 = 0x0400;
 const THREAD_INIT: u32 = 0x1e;
+const TERMINATE_THREAD: u32 = 0x1f;
 const DESTROY_THREAD: u32 = 0x21;
 
 pub fn install_fault_reporter() {
@@ -2322,12 +2368,25 @@ const PAGE_FAULT: u32 = 14;
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_hw_int(_ref_data: *mut c_void) {
     unsafe {
+        IN_INTERRUPT = true;
         if let Some(handler) = HW_INT_HANDLER {
             handler(HW_INT_TARGET, HW_INT_REFCON, core::ptr::null_mut(), 0);
         }
+        IN_INTERRUPT = false;
         vpicd_phys_eoi(IRQ_HANDLE);
     }
 }
+
+#[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_wake_event() {
+    let token = WAKE_WANTED.swap(0, Ordering::AcqRel);
+    if token != 0 {
+        kernel::wake(token as *const u8);
+    }
+}
+
+static mut IN_INTERRUPT: bool = false;
+static WAKE_WANTED: AtomicUsize = AtomicUsize::new(0);
 
 static mut IRQ_HANDLE: u32 = 0;
 
@@ -2398,6 +2457,33 @@ fn slot_for_token(token: *const u8) -> usize {
     0
 }
 
+fn loop_semaphore() -> u32 {
+    semaphore_in(slot_for_token(crate::glib::wakeup_token()))
+}
+
+fn release_slot(slot: usize, token: *const u8) {
+    if SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
+        return;
+    }
+    if core::ptr::eq(token, crate::glib::wakeup_token()) {
+        return;
+    }
+
+    let _ = OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel, Ordering::Acquire);
+}
+
+fn slot_owned_by(token: *const u8) -> Option<usize> {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_SEMAPHORES;
+    for step in 0..NUM_SEMAPHORES {
+        let slot = (start + step) % NUM_SEMAPHORES;
+        if OWNERS[slot].load(Ordering::Acquire) == token as usize {
+            return Some(slot);
+        }
+    }
+
+    None
+}
+
 fn semaphore_in(slot: usize) -> u32 {
     let existing = SEMAPHORES[slot].load(Ordering::Acquire);
     if existing != 0 {
@@ -2426,7 +2512,7 @@ unsafe extern "C" {
     fn wait_semaphore(semaphore: u32, flags: u32);
     fn signal_semaphore(semaphore: u32);
     fn create_semaphore(token_count: u32) -> u32;
-    fn get_cur_thread_handle() -> u32;
+    pub fn get_cur_thread_handle() -> u32;
     fn fatal_error_handler(message: *const u8, flags: u32);
     fn vpicd_virtualize_irq(descriptor: *mut VpicdIrqDescriptor) -> u32;
     fn vpicd_physically_unmask(handle: u32);
@@ -2448,6 +2534,7 @@ unsafe extern "C" {
     fn get_sys_vm_handle() -> u32;
     fn schedule_global_event(callback: unsafe extern "C" fn()) -> u32;
     fn frida_win9x_event_thunk();
+    fn frida_win9x_wake_event_thunk();
     fn get_next_vm_handle(vm: u32) -> u32;
     fn get_initial_thread_handle(vm: u32) -> u32;
     fn get_next_thread_handle(thread: u32) -> u32;
@@ -2580,6 +2667,13 @@ schedule_global_event:
 frida_win9x_event_thunk:
     pushad
     call frida_win9x_on_event
+    popad
+    ret
+
+.global frida_win9x_wake_event_thunk
+frida_win9x_wake_event_thunk:
+    pushad
+    call frida_win9x_on_wake_event
     popad
     ret
 

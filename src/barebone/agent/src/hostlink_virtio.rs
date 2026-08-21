@@ -453,12 +453,14 @@ impl Hostlink {
             s.tx_tail = node;
         }
 
+        A_TURN_IS_WANTED.store(true, core::sync::atomic::Ordering::Release);
         kernel::wake(s.wake_token);
     }
 
     pub fn process(&self) {
         let s = unsafe { &mut *self.state.get() };
 
+        A_TURN_IS_WANTED.store(false, core::sync::atomic::Ordering::Release);
         s.regs.isr_ack();
 
         self.ctrl_complete();
@@ -837,8 +839,16 @@ extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_vo
             regs.isr_ack();
         }
     }
+    A_TURN_IS_WANTED.store(true, core::sync::atomic::Ordering::Release);
     kernel::wake(token as *const u8);
 }
+
+pub fn a_turn_is_wanted() -> bool {
+    A_TURN_IS_WANTED.load(core::sync::atomic::Ordering::Acquire)
+}
+
+static A_TURN_IS_WANTED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
 
 static mut ISR_REGS: Option<Regs> = None;
 

@@ -8,6 +8,7 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::ring::{Ring, Taken};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
@@ -1320,7 +1321,7 @@ pub fn detach_from_process(pid: u32) -> bool {
         return false;
     }
 
-    forget_outbox(target.arena);
+    forget_hold(target.arena);
 
     let mut process: *mut c_void = core::ptr::null_mut();
     enumerate_processes(&mut |p| {
@@ -2173,79 +2174,6 @@ const EXPORT_NAMES_OFFSET: usize = 0x20;
 const EXPORT_ORDINALS_OFFSET: usize = 0x24;
 // Each copy reads this region at a different address. Thus all values in it are offsets from
 // the start of the region.
-struct Channel {
-    length: u64,
-    sequence: u64,
-    ack: u64,
-    rest: u64,
-    buffer: u64,
-}
-
-impl Channel {
-    fn put_piece(&self, arena: u64, frame: &[u8], sent: usize) -> Option<usize> {
-        unsafe {
-            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
-            if ((arena + self.ack) as *const u32).read_volatile() != sequence {
-                return None;
-            }
-
-            let piece = core::cmp::min(frame.len() - sent, FRAME_BUFFER_SIZE);
-            core::ptr::copy_nonoverlapping(frame.as_ptr().add(sent),
-                (arena + self.buffer) as *mut u8, piece);
-            ((arena + self.length) as *mut u32).write_volatile(piece as u32);
-            ((arena + self.rest) as *mut u32).write_volatile((frame.len() - sent - piece) as u32);
-            ((arena + self.sequence) as *mut u32).write_volatile(sequence + 1);
-
-            Some(sent + piece)
-        }
-    }
-
-    fn take(&self, arena: u64, into: &mut Reassembly, tell: &mut dyn FnMut()) -> Option<&'static [u8]> {
-        let (piece, rest) = self.piece(arena)?;
-
-        if !into.assembling {
-            if rest == 0 {
-                return Some(piece);
-            }
-            into.hold.clear();
-        }
-
-        into.hold.extend_from_slice(piece);
-
-        if rest != 0 {
-            into.assembling = true;
-            self.acknowledge(arena);
-            tell();
-            return None;
-        }
-
-        into.assembling = false;
-
-        Some(unsafe { core::slice::from_raw_parts(into.hold.as_ptr(), into.hold.len()) })
-    }
-
-    fn piece(&self, arena: u64) -> Option<(&'static [u8], usize)> {
-        unsafe {
-            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
-            if sequence == ((arena + self.ack) as *const u32).read_volatile() {
-                return None;
-            }
-
-            let length = ((arena + self.length) as *const u32).read_volatile() as usize;
-            let rest = ((arena + self.rest) as *const u32).read_volatile() as usize;
-
-            Some((core::slice::from_raw_parts((arena + self.buffer) as *const u8, length), rest))
-        }
-    }
-
-    fn acknowledge(&self, arena: u64) {
-        unsafe {
-            let sequence = ((arena + self.sequence) as *const u32).read_volatile();
-            ((arena + self.ack) as *mut u32).write_volatile(sequence);
-        }
-    }
-}
-
 pub(crate) const STOP_REQUEST: u64 = 0x00;
 pub(crate) const OBSERVED_PID: u64 = 0x04;
 pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
@@ -2269,20 +2197,22 @@ pub(crate) const BOOTSTRAP_CLIENT_ID: u64 = 0x128;
 const CONTEXT_AREA: u64 = 0x200;
 const INITIAL_TEB_AREA: u64 = 0x700;
 
-const TO_TARGET: Channel = Channel {
-    length: 0x20,
-    sequence: 0x24,
-    ack: 0x28,
-    rest: 0x2c,
+const TO_TARGET: Ring = Ring {
     buffer: 0x1000,
+    head: 0x20,
+    tail: 0x24,
+    lock: 0x28,
+    room: 0x2c,
+    size: FRAME_BUFFER_SIZE,
 };
 
-const FROM_TARGET: Channel = Channel {
-    length: 0x30,
-    sequence: 0x34,
-    ack: 0x38,
-    rest: 0x3c,
+const FROM_TARGET: Ring = Ring {
     buffer: 0x1000 + FRAME_BUFFER_SIZE as u64,
+    head: 0x30,
+    tail: 0x34,
+    lock: 0x38,
+    room: 0x3c,
+    size: FRAME_BUFFER_SIZE,
 };
 
 pub fn arena_for_pid(pid: u32) -> Option<u64> {
@@ -2293,119 +2223,100 @@ pub fn injected_arenas() -> alloc::vec::Vec<u64> {
     unsafe { targets().values().map(|t| t.arena).collect() }
 }
 
-// The copy waits for an event, thus set the event after you write the frame.
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    queue_frame(arena, frame);
-    pump_frames_to_targets();
-
-    true
+    write_frame(&TO_TARGET, arena, frame, wake_copy)
 }
 
-pub fn pump_frames_to_targets() {
-    pump_frames(&TO_TARGET, &mut |arena| {
-        let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
-        if let Some(wake) = wake {
-            unsafe { (_KeSetEvent)(wake, 0, 0) };
+pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
+    write_frame(&FROM_TARGET, arena, frame, signal_kernel_half)
+}
+
+pub fn take_frame_from_target(arena: u64) -> Option<alloc::vec::Vec<u8>> {
+    read_frame(&FROM_TARGET, arena, wake_copy)
+}
+
+pub fn take_frame_from_host(arena: u64) -> Option<alloc::vec::Vec<u8>> {
+    read_frame(&TO_TARGET, arena, signal_kernel_half)
+}
+
+pub fn holds_a_frame_from_target(arena: u64) -> bool {
+    FROM_TARGET.holds_anything(arena)
+}
+
+pub fn holds_a_frame_from_host(arena: u64) -> bool {
+    TO_TARGET.holds_anything(arena)
+}
+
+fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
+    let mut written = 0;
+    loop {
+        ring.take_lock(arena, yield_now);
+        let piece = ring.write(arena, buffer_of(ring, arena), frame, written);
+        if piece.is_none() {
+            ring.ask_for_room(arena);
         }
-    });
-}
+        ring.let_lock_go(arena);
 
-pub fn pump_frames_to_host() {
-    pump_frames(&FROM_TARGET, &mut |_arena| {
-        crate::winnt_user::signal_kernel_half();
-    });
-}
-
-// The pages of a copy that has left go back to the system, thus what is still addressed to it
-// must go first: a turn of the pump would otherwise write into a page that is nobody's.
-fn forget_outbox(arena: u64) {
-    unsafe { outboxes() }.remove(&arena);
-}
-
-fn queue_frame(arena: u64, frame: &[u8]) {
-    let outbox = unsafe { outboxes() }.entry(arena).or_insert_with(|| Outbox {
-        frames: alloc::collections::VecDeque::new(),
-        sent: 0,
-    });
-    outbox.frames.push_back(frame.to_vec());
-}
-
-fn pump_frames(channel: &Channel, tell: &mut dyn FnMut(u64)) {
-    for (arena, outbox) in unsafe { outboxes() }.iter_mut() {
-        while let Some(frame) = outbox.frames.front() {
-            let Some(sent) = channel.put_piece(*arena, frame, outbox.sent) else {
-                break;
-            };
-
-            if sent == frame.len() {
-                outbox.frames.pop_front();
-                outbox.sent = 0;
-            } else {
-                outbox.sent = sent;
+        match piece {
+            Some(now) => {
+                written = now;
+                tell(arena);
+                if written == frame.len() {
+                    return true;
+                }
             }
-
-            tell(*arena);
+            None => wait(crate::glib::wakeup_token(), None, &mut || ring.has_room(arena)),
         }
     }
 }
 
-fn outboxes() -> &'static mut alloc::collections::BTreeMap<u64, Outbox> {
-    unsafe { (&raw mut OUTBOXES).as_mut().unwrap() }
-}
+fn read_frame(ring: &Ring, arena: u64, tell: fn(u64)) -> Option<alloc::vec::Vec<u8>> {
+    let hold = unsafe { holds() }.entry((arena, ring.head)).or_default();
 
-static mut OUTBOXES: alloc::collections::BTreeMap<u64, Outbox> =
-    alloc::collections::BTreeMap::new();
-
-struct Outbox {
-    frames: alloc::collections::VecDeque<alloc::vec::Vec<u8>>,
-    sent: usize,
-}
-
-struct Reassembly {
-    hold: alloc::vec::Vec<u8>,
-    assembling: bool,
-}
-
-static mut TO_TARGET_HOLD: Reassembly = Reassembly {
-    hold: alloc::vec::Vec::new(),
-    assembling: false,
-};
-static mut FROM_TARGET_HOLD: Reassembly = Reassembly {
-    hold: alloc::vec::Vec::new(),
-    assembling: false,
-};
-
-pub fn take_frame_from_target(arena: u64) -> Option<&'static [u8]> {
-    FROM_TARGET.take(arena, unsafe { (&raw mut FROM_TARGET_HOLD).as_mut().unwrap() }, &mut || {
-        let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
-        if let Some(wake) = wake {
-            unsafe { (_KeSetEvent)(wake, 0, 0) };
+    loop {
+        match ring.read(arena, buffer_of(ring, arena), hold) {
+            Taken::Nothing => return None,
+            Taken::Piece => {
+                if ring.room_is_wanted(arena) {
+                    tell(arena);
+                }
+            }
+            Taken::Frame => {
+                let frame = core::mem::take(hold);
+                if ring.room_is_wanted(arena) {
+                    tell(arena);
+                }
+                return Some(frame);
+            }
         }
-    })
+    }
 }
 
-pub fn acknowledge_frame_from_target(arena: u64) {
-    FROM_TARGET.acknowledge(arena)
-}
-
-pub fn take_frame_from_host(arena: u64) -> Option<&'static [u8]> {
-    TO_TARGET.take(arena, unsafe { (&raw mut TO_TARGET_HOLD).as_mut().unwrap() }, &mut || {
-        crate::winnt_user::signal_kernel_half();
-    })
-}
-
-pub fn acknowledge_frame_from_host(arena: u64) {
-    TO_TARGET.acknowledge(arena);
+fn signal_kernel_half(_arena: u64) {
     crate::winnt_user::signal_kernel_half();
 }
 
-// The kernel half waits for an event, thus set the event after you write the frame.
-pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    queue_frame(arena, frame);
-    pump_frames_to_host();
-
-    true
+fn wake_copy(arena: u64) {
+    let wake = unsafe { targets().values().find(|t| t.arena == arena).map(|t| t.wake) };
+    if let Some(wake) = wake {
+        unsafe { (_KeSetEvent)(wake, 0, 0) };
+    }
 }
+
+fn buffer_of(ring: &Ring, arena: u64) -> u64 {
+    arena + ring.buffer
+}
+
+fn forget_hold(arena: u64) {
+    unsafe { holds() }.retain(|(of, _), _| *of != arena);
+}
+
+unsafe fn holds() -> &'static mut alloc::collections::BTreeMap<(u64, u64), alloc::vec::Vec<u8>> {
+    unsafe { (&raw mut HOLDS).as_mut().unwrap() }
+}
+
+static mut HOLDS: alloc::collections::BTreeMap<(u64, u64), alloc::vec::Vec<u8>> =
+    alloc::collections::BTreeMap::new();
 
 unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
     unsafe { core::ptr::addr_of_mut!(TARGETS).as_mut().unwrap() }

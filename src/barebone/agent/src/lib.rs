@@ -16,12 +16,11 @@ use core::ffi::{CStr, c_void};
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-#[cfg(feature = "win9x")]
 use bindings::{
-    gboolean, g_source_attach, g_source_set_callback, g_source_unref, g_timeout_source_new,
-};
-use bindings::{
-    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange,
+    GAsyncResult, GBytes, GError, GMainContext, GObject, GSource, GSourceFunc, GSourceFuncs,
+    GVariant, GumMemoryRange, gboolean, g_main_context_acquire, g_main_context_check,
+    g_main_context_dispatch, g_main_context_prepare, g_main_context_query, g_main_context_release,
+    g_source_attach, g_source_new, g_source_unref,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
     g_variant_get, g_variant_get_boolean, g_variant_get_data, g_variant_get_size, g_variant_get_string,
@@ -43,6 +42,7 @@ mod glib;
 mod gthread;
 mod gum;
 mod libc;
+mod ring;
 
 pub mod kernel;
 
@@ -281,15 +281,6 @@ mod entrypoint_blob {
             transport_set(transport);
 
             let context = adopt_js_context();
-            // g_timeout_add uses the default context, but the loop below runs the context of the script
-            // scheduler. Thus attach the source to that context.
-            #[cfg(feature = "win9x")]
-            {
-                let source = g_timeout_source_new(DEFERRED_WORK_POLL_MS);
-                g_source_set_callback(source, Some(poll_deferred_work), ptr::null_mut(), None);
-                g_source_attach(source, context);
-                g_source_unref(source);
-            }
             run_main_loop(context);
 
             #[cfg(any(feature = "win9x", feature = "winnt"))]
@@ -298,6 +289,8 @@ mod entrypoint_blob {
                 kernel::stop_copies();
                 #[cfg(feature = "win9x")]
                 kernel::release_shared_hooks();
+                #[cfg(feature = "win9x")]
+                kernel::stop_hearing_from_vmm();
                 transport_get_unchecked().shutdown();
                 kernel::release_interrupt();
                 kernel::release_fault_reporter();
@@ -819,14 +812,17 @@ pub(crate) fn stop_requested() -> bool {
 }
 
 fn run_main_loop(main_context: *mut GMainContext) {
+
+
     glib::own_the_loop();
+
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    watch_for_work(main_context, kernel_half_has_work, serve_the_kernel_half);
 
     unsafe {
         loop {
+            #[cfg(not(any(feature = "win9x", feature = "winnt")))]
             transport_get_unchecked().process();
-
-            #[cfg(feature = "winnt")]
-            relay_frames_from_targets();
 
             #[cfg(feature = "linux")]
             if entrypoint_linux::stop_requested() {
@@ -842,6 +838,81 @@ fn run_main_loop(main_context: *mut GMainContext) {
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn kernel_half_has_work() -> bool {
+
+    if hostlink_virtio::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "win9x")]
+    if deferred_work_is_waiting() || kernel::a_patch_is_wanted() {
+        return true;
+    }
+
+    kernel::injected_arenas()
+        .iter()
+        .any(|arena| kernel::holds_a_frame_from_target(*arena))
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn serve_the_kernel_half() {
+    unsafe { transport_get_unchecked().process() };
+
+
+    #[cfg(feature = "win9x")]
+    serve_deferred_work();
+
+    relay_frames_from_targets();
+}
+
+pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> bool, serve: fn()) {
+    unsafe {
+        WORK_READY = Some(ready);
+        WORK_SERVE = Some(serve);
+
+        let source = g_source_new(&raw mut WORK_FUNCS, core::mem::size_of::<GSource>() as u32);
+        g_source_attach(source, main_context);
+        g_source_unref(source);
+    }
+}
+
+static mut WORK_READY: Option<fn() -> bool> = None;
+static mut WORK_SERVE: Option<fn()> = None;
+
+unsafe extern "C" fn work_prepare(source: *mut GSource, timeout: *mut i32) -> gboolean {
+    unsafe {
+        *timeout = -1;
+        work_check(source)
+    }
+}
+
+unsafe extern "C" fn work_check(_source: *mut GSource) -> gboolean {
+    let Some(ready) = (unsafe { ptr::addr_of!(WORK_READY).read() }) else {
+        return 0;
+    };
+
+    ready() as gboolean
+}
+
+unsafe extern "C" fn work_dispatch(_source: *mut GSource, _callback: GSourceFunc,
+        _data: gpointer) -> gboolean {
+    if let Some(serve) = unsafe { ptr::addr_of!(WORK_SERVE).read() } {
+        serve();
+    }
+
+    1
+}
+
+static mut WORK_FUNCS: GSourceFuncs = GSourceFuncs {
+    prepare: Some(work_prepare),
+    check: Some(work_check),
+    dispatch: Some(work_dispatch),
+    finalize: None,
+    closure_callback: None,
+    closure_marshal: None,
+};
+
 // This call blocks. GLib sleeps until one of its timeouts is due, or until something wakes
 // the loop.
 pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
@@ -849,26 +920,6 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
         g_main_context_iteration(main_context, 1);
     }
 }
-
-// The copy in a process has no hostlink, because the transport belongs to the kernel half.
-// Nothing there can wake this loop, thus it returns after a short time.
-#[cfg(any(feature = "win9x", feature = "winnt"))]
-pub(crate) unsafe fn poll_pending_work(main_context: *mut GMainContext) {
-    unsafe {
-        g_main_context_iteration(main_context, 0);
-
-        kernel::wait(
-            ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
-            Some(IDLE_SLICE_US),
-            &mut || false,
-        );
-
-        kernel::yield_now();
-    }
-}
-
-#[cfg(any(feature = "win9x", feature = "winnt"))]
-const IDLE_SLICE_US: u64 = 50_000;
 
 fn destroy_all_scripts(main_context: *mut GMainContext) {
     unsafe {
@@ -1079,15 +1130,21 @@ fn handle_allocate_shared(payload: *mut GVariant, request_id: u16) -> Option<Han
 }
 
 // Commands arrive in the interrupt callback of the transport, where VMM makes no threads and
-// gives no heap. Thus that callback only sets a flag, and this source does the work.
+// gives no heap. Thus that callback only sets a flag, and the loop does the work.
 #[cfg(feature = "win9x")]
-unsafe extern "C" fn poll_deferred_work(_data: gpointer) -> gboolean {
+fn deferred_work_is_waiting() -> bool {
+    unsafe {
+        ptr::addr_of!(ALLOCATION_PENDING).read()
+            || ptr::addr_of!(INJECTION_PENDING).read()
+            || ptr::addr_of!(DETACH_PENDING).read()
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn serve_deferred_work() {
     serve_pending_allocation();
     serve_pending_injection();
     serve_pending_detach();
-    relay_frames_from_targets();
-
-    1
 }
 
 #[cfg(feature = "win9x")]
@@ -1140,8 +1197,6 @@ fn serve_pending_detach() {
     send_command_reply(request_id, response);
 }
 
-#[cfg(feature = "win9x")]
-const DEFERRED_WORK_POLL_MS: u32 = 20;
 
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
@@ -1150,12 +1205,9 @@ fn relay_frames_from_targets() {
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
 
-    kernel::pump_frames_to_targets();
-
     for arena in kernel::injected_arenas() {
         while let Some(frame) = kernel::take_frame_from_target(arena) {
-            send_frame(frame);
-            kernel::acknowledge_frame_from_target(arena);
+            send_frame(&frame);
         }
     }
 }

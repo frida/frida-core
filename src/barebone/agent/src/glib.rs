@@ -42,10 +42,7 @@ pub extern "C" fn g_wait_sleep(token: gpointer, timeout_us: gint64) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_wait_wake(token: gpointer) {
-    if LOOP_TOKEN.load(Ordering::Acquire) == token as usize {
-        kernel::wake(ptr::addr_of_mut!(WAKEUP_TOKEN) as *const u8);
-    }
-
+    kernel::wake(ptr::addr_of_mut!(WAKEUP_TOKEN) as *const u8);
     kernel::wake(token as *const u8);
 }
 
