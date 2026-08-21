@@ -242,6 +242,8 @@ namespace Frida.Barebone {
 				cancellable);
 
 			yield flavor.settle (cancellable);
+			if (qmp != null)
+				yield qmp.wait_until_hostlink_is_open (cancellable);
 			yield establish_hostlink (cancellable);
 
 			process_incoming_messages.begin ();

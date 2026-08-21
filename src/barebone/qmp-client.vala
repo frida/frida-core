@@ -3,6 +3,10 @@ namespace Frida.Barebone {
 	public sealed class QmpClient : Object, AsyncInitable {
 		public signal void event (string name, Json.Node? data);
 
+		private string? hostlink_port;
+		private bool hostlink_is_open = false;
+		private SourceFunc? hostlink_open_handler;
+
 		public string address {
 			get;
 			construct;
@@ -113,6 +117,32 @@ namespace Frida.Barebone {
 			}
 		}
 
+		public async void wait_until_hostlink_is_open (Cancellable? cancellable) throws Error, IOError {
+			while (!hostlink_is_open) {
+				hostlink_open_handler = wait_until_hostlink_is_open.callback;
+				yield;
+			}
+		}
+
+		private void on_event (string name, Json.Node? data) {
+			if (name != "VSERPORT_CHANGE" || data == null)
+				return;
+
+			var details = data.get_object ();
+			if (details.get_string_member_with_default ("id", "") != hostlink_port)
+				return;
+			if (!details.get_boolean_member_with_default ("open", false))
+				return;
+
+			hostlink_is_open = true;
+
+			if (hostlink_open_handler != null) {
+				var handler = (owned) hostlink_open_handler;
+				hostlink_open_handler = null;
+				handler ();
+			}
+		}
+
 		public async Hostlink open_hostlink (string? preferred_bus = null, Cancellable? cancellable = null)
 				throws Error, IOError {
 #if WINDOWS
@@ -145,6 +175,9 @@ namespace Frida.Barebone {
 			string chardev = "vserial0";
 			string device = "hostlink.port";
 			yield unplug_leftover_hostlink (chardev, device, cancellable);
+
+			hostlink_port = device;
+			event.connect (on_event);
 
 			yield add_chardev_from_fd (chardev, fd_name, cancellable);
 			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
