@@ -935,11 +935,7 @@ fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
     unsafe { ((arena + PATCH_REQUEST) as *mut u32).write_volatile(0) };
     give_the_slot_back();
 
-    return Some((at, previous));
-
-    give_the_slot_back();
-
-    None
+    Some((at, previous))
 }
 
 fn wait_for_entry_point(thread: u32, entry_point: u32) -> Option<()> {
