@@ -9,7 +9,8 @@ use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumPageProtection_GUM_PAGE_READ,
         _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_NONE, GArray,
-        GumDebugSymbolDetails, GumMemoryRange, GumModuleRegistry, GumPageProtection, GumRwxSupport,
+        GumDebugSymbolDetails, GumFoundRangeFunc, GumMemoryRange, GumModuleRegistry,
+        GumPageProtection, GumRangeDetails, GumRwxSupport,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
         g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
         g_variant_type_new, g_variant_unref, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
@@ -275,6 +276,12 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        kernel::register_what_the_copy_lives_among(registry);
+        return;
+    }
+
     let kernel_base = kernel::get_kernel_base();
 
     unsafe {
@@ -305,6 +312,51 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
             i += 1;
         }
     }
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn _gum_process_enumerate_ranges(
+    prot: GumPageProtection,
+    func: GumFoundRangeFunc,
+    user_data: gpointer,
+) {
+    let Some(emit) = func else {
+        return;
+    };
+
+    kernel::enumerate_ranges(&mut |base, size, protection| {
+        if (protection & prot as u32) != prot as u32 {
+            return;
+        }
+
+        let range = GumMemoryRange {
+            base_address: base,
+            size: size as gsize,
+        };
+        let details = GumRangeDetails {
+            range: &range,
+            protection: protection as GumPageProtection,
+            file: ptr::null(),
+        };
+
+        unsafe { emit(&details, user_data) };
+    });
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_query_protection(
+    address: gpointer,
+    prot: *mut GumPageProtection,
+) -> gboolean {
+    let protection = kernel::protection_at(address as u64);
+    if protection == 0 {
+        return 0;
+    }
+
+    unsafe { *prot = protection as GumPageProtection };
+    1
 }
 
 pub(crate) unsafe fn enumerate_exports_in_range(

@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use core::ffi::c_void;
 
 use crate::kernel::ThreadEntry;
@@ -309,6 +310,26 @@ fn page_size() -> usize {
     Arena::at(unsafe { ARENA }).page_size() as usize
 }
 
+pub fn contents_of(path: &core::ffi::CStr) -> Vec<u8> {
+    let file = syscall(OPENAT, WORKING_DIRECTORY, path.as_ptr() as usize, READ_ONLY, 0, 0, 0);
+    if file < 0 {
+        return Vec::new();
+    }
+
+    let mut said = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let read = syscall(READ, file as usize, chunk.as_mut_ptr() as usize, chunk.len(), 0, 0, 0);
+        if read <= 0 {
+            break;
+        }
+        said.extend_from_slice(&chunk[..read as usize]);
+    }
+    syscall(CLOSE, file as usize, 0, 0, 0, 0, 0);
+
+    said
+}
+
 fn waited_on() -> usize {
     unsafe { ARENA + WOKEN }
 }
@@ -388,6 +409,13 @@ const RUNNING_STATE: usize = 176;
 const STATE_PC: usize = 264;
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(target_arch = "aarch64")]
+const OPENAT: usize = 56;
+#[cfg(target_arch = "aarch64")]
+const CLOSE: usize = 57;
+#[cfg(target_arch = "aarch64")]
+const READ: usize = 63;
+#[cfg(target_arch = "aarch64")]
 const WRITE: usize = 64;
 #[cfg(target_arch = "aarch64")]
 const EXIT: usize = 93;
@@ -414,9 +442,11 @@ const MMAP: usize = 222;
 const MPROTECT: usize = 226;
 
 const STANDARD_ERROR: usize = 2;
-const READABLE: usize = 1;
-const WRITABLE: usize = 2;
-const EXECUTABLE: usize = 4;
+const WORKING_DIRECTORY: usize = -100isize as usize;
+const READ_ONLY: usize = 0;
+pub const READABLE: usize = 1;
+pub const WRITABLE: usize = 2;
+pub const EXECUTABLE: usize = 4;
 const PRIVATE: usize = 2;
 const ANONYMOUS: usize = 0x20;
 const NO_FILE: usize = usize::MAX;

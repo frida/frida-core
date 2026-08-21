@@ -20,6 +20,8 @@ mod injection;
 #[cfg(feature = "linux-injected")]
 mod layout;
 #[cfg(feature = "linux-injected")]
+mod mapped;
+#[cfg(feature = "linux-injected")]
 mod native;
 #[cfg(feature = "linux-injected")]
 mod relay;
@@ -41,6 +43,8 @@ pub use self::native::{
     alloc_dma, free_dma, get_kernel_base, install_interrupt_handler, map_io, map_pages,
     pci_interrupt, run_when_ready, set_kernel_base, virt_to_phys,
 };
+#[cfg(feature = "linux-injected")]
+pub use self::mapped::*;
 #[cfg(feature = "linux-injected")]
 pub use self::processes::*;
 
