@@ -13,6 +13,7 @@ SECTIONS {
   }
   .kernel_addrs : ALIGN(4) {
     . = ALIGN(4);
+    __printk = .; . += 4;
     _printk = .; . += 4;
     _panic = .; . += 4;
     _kthread_create_on_node = .; . += 4;
@@ -37,10 +38,11 @@ SECTIONS {
     _fput = .; . += 4;
     _copy_from_kernel_nofault = .; . += 4;
     _wake_up_process = .; . += 4;
-    _kmalloc_noprof = .; . += 4;
+    ___kmalloc_noprof = .; . += 4;
     _kmalloc = .; . += 4;
     _kfree = .; . += 4;
     _execmem_alloc = .; . += 4;
+    _set_memory_rw = .; . += 4;
     _execmem_free = .; . += 4;
     _module_alloc = .; . += 4;
     _module_memfree = .; . += 4;
@@ -54,10 +56,14 @@ SECTIONS {
     _pci_get_domain_bus_and_slot = .; . += 4;
     _pci_irq_vector = .; . += 4;
     _pci_dev_put = .; . += 4;
-    _ktime_get_ns = .; . += 4;
+    _ktime_get_mono_fast_ns = .; . += 4;
     _ktime_get_real_ts64 = .; . += 4;
     _request_threaded_irq = .; . += 4;
-    _ioremap = .; . += 4;
+    _generic_ioremap_prot = .; . += 4;
+    _vmap = .; . += 4;
+    _down_read = .; . += 4;
+    _up_read = .; . += 4;
+    _get_user_pages_remote = .; . += 4;
     _virt_to_phys = .; . += 4;
     _current_task = .; . += 4;
   }

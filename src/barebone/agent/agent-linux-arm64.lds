@@ -60,6 +60,10 @@ SECTIONS {
     _ktime_get_real_ts64 = .; . += 8;
     _request_threaded_irq = .; . += 8;
     _generic_ioremap_prot = .; . += 8;
+    _vmap = .; . += 8;
+    _down_read = .; . += 8;
+    _up_read = .; . += 8;
+    _get_user_pages_remote = .; . += 8;
     _memstart_addr = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very

@@ -260,7 +260,36 @@ pub fn install_interrupt_handler(
 }
 
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe { _generic_ioremap_prot(phys_addr, size as usize, PROT_DEVICE_NGNRE) }
+    unsafe { _generic_ioremap_prot(phys_addr, size as usize, page_of(DEVICE_MEMORY)) }
+}
+
+pub fn map_pages(pages: *mut c_void, count: usize) -> *mut c_void {
+    unsafe { _vmap(pages, count as u32, VM_MAP, page_of(ORDINARY_MEMORY)) }
+}
+
+// Which attribute a page carries is an index into a register the kernel filled in, and what it
+// put where differs between versions, so the register itself is asked.
+#[cfg(target_arch = "aarch64")]
+fn page_of(memory: u64) -> u64 {
+    PTE_TYPE_PAGE | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | (attribute_of(memory) << 2)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn attribute_of(memory: u64) -> u64 {
+    let attributes: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, mair_el1", out(reg) attributes, options(nomem, nostack));
+    }
+
+    let mut index = 0;
+    while index != ATTRIBUTES_KEPT {
+        if (attributes >> (index * 8)) & 0xff == memory {
+            break;
+        }
+        index += 1;
+    }
+
+    index
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -345,16 +374,11 @@ const WAIT_ENTRY_WAKE: usize = 2;
 const WAIT_ENTRY_QUEUED: usize = 3;
 const WAIT_QUEUE_WORDS: usize = 16;
 const LOCK_KEY_WORDS: usize = 8;
-// Device memory, as the kernel spells it for anything behind a bus.
-const PROT_DEVICE_NGNRE: u64 = PTE_TYPE_PAGE
-    | PTE_AF
-    | PTE_SHARED
-    | PTE_ATTRINDX_DEVICE_NGNRE
-    | PTE_WRITE
-    | PTE_PXN
-    | PTE_UXN;
+const DEVICE_MEMORY: u64 = 0x04;
+const ORDINARY_MEMORY: u64 = 0xff;
+const ATTRIBUTES_KEPT: u64 = 8;
+const VM_MAP: u64 = 0x4;
 const PTE_TYPE_PAGE: u64 = 0x3;
-const PTE_ATTRINDX_DEVICE_NGNRE: u64 = 1 << 2;
 const PTE_SHARED: u64 = 3 << 8;
 const PTE_AF: u64 = 1 << 10;
 const PTE_WRITE: u64 = 1 << 51;
@@ -416,6 +440,7 @@ unsafe extern "C" {
         *mut c_void,
     ) -> c_int;
     static _generic_ioremap_prot: unsafe extern "C" fn(u64, usize, u64) -> *mut c_void;
+    static _vmap: unsafe extern "C" fn(*mut c_void, u32, u64, u64) -> *mut c_void;
     #[cfg(target_arch = "aarch64")]
     static _memstart_addr: *const u64;
     #[cfg(not(target_arch = "aarch64"))]
