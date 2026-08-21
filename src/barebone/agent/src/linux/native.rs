@@ -199,7 +199,7 @@ pub fn current_thread_id() -> u64 {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn current_task() -> u64 {
+pub fn current_task() -> u64 {
     let task: u64;
     unsafe {
         core::arch::asm!("mrs {}, sp_el0", out(reg) task, options(nomem, nostack));
@@ -208,7 +208,7 @@ fn current_task() -> u64 {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn current_task() -> u64 {
+pub fn current_task() -> u64 {
     let task: u64;
     unsafe {
         core::arch::asm!("mov {}, gs:[{}]", out(reg) task, in(reg) &_current_task as *const _ as u64, options(nostack));
@@ -217,7 +217,7 @@ fn current_task() -> u64 {
 }
 
 #[cfg(target_arch = "x86")]
-fn current_task() -> u64 {
+pub fn current_task() -> u64 {
     let task: u32;
     unsafe {
         core::arch::asm!("mov {}, fs:[{}]", out(reg) task, in(reg) &_current_task as *const _ as u32, options(nostack));

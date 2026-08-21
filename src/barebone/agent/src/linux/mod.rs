@@ -16,6 +16,8 @@ mod layout;
 #[cfg(feature = "linux-injected")]
 mod native;
 #[cfg(feature = "linux-injected")]
+mod user;
+#[cfg(feature = "linux-injected")]
 mod processes;
 
 #[cfg(feature = "linux")]

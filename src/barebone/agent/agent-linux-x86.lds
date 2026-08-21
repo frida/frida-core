@@ -24,6 +24,7 @@ SECTIONS {
     _vm_mmap = .; . += 4;
     ___arch_copy_to_user = .; . += 4;
     _access_process_vm = .; . += 4;
+    _user_mode_thread = .; . += 4;
     ___start_BTF = .; . += 4;
     ___stop_BTF = .; . += 4;
     _tasklist_lock = .; . += 4;
