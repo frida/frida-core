@@ -10,11 +10,13 @@ namespace Frida.Barebone {
 
 		uint64 text_base = 0;
 		size_t text_size = 0;
+		uint64 data_base = vm_size;
 		elf.enumerate_segments (s => {
-			if ((s.protection & Gum.PageProtection.EXECUTE) != 0) {
+			if ((s.protection & Gum.PageProtection.EXECUTE) != 0 && text_size == 0) {
 				text_base = s.vm_address;
 				text_size = (size_t) s.vm_size;
-				return false;
+			} else if ((s.protection & Gum.PageProtection.WRITE) != 0) {
+				data_base = uint64.min (data_base, s.vm_address);
 			}
 			return true;
 		});
@@ -29,6 +31,8 @@ namespace Frida.Barebone {
 			yield machine.write_virtual (base_va, relocated_image.get_data (), cancellable);
 
 			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);
+			yield machine.protect_pages (base_va + data_base, (num_pages * page_size) - (size_t) data_base, READ | WRITE,
+				cancellable);
 		} catch (GLib.Error e) {
 			yield allocation.deallocate (cancellable);
 			throw_api_error (e);

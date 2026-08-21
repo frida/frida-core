@@ -243,6 +243,9 @@ namespace Frida.Barebone {
 
 			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
 
+			yield machine.protect_pages (config_allocation.virtual_address, config_allocation.size, READ | WRITE,
+				cancellable);
+
 			yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size

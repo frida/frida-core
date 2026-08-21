@@ -192,7 +192,7 @@ namespace Frida {
 			Barebone.Allocator allocator;
 			BareboneAllocatorConfig? ac = config.allocator;
 			if (ac == null)
-				ac = infer_allocator_config (config.kernel, kernel_symbols);
+				ac = infer_allocator_config (config.kernel, kernel_symbols, kernel_base);
 			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
 			} else if (ac is BarebonePhysicalAllocatorConfig) {
@@ -262,37 +262,35 @@ namespace Frida {
 		}
 
 		private static BareboneAllocatorConfig? infer_allocator_config (BareboneKernelKind kind,
-				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
+				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
 			if (kind == WIN9X)
 				return infer_win9x_allocator_config (kernel_symbols);
 			if (kind == WINNT)
 				return infer_winnt_allocator_config (kernel_symbols);
 			if (kind == LINUX)
-				return infer_linux_allocator_config (kernel_symbols);
+				return infer_linux_allocator_config (kernel_symbols, kernel_base);
 			return null;
 		}
 
 		// Allocation profiling renamed the entry point in 6.10, and takes the flags that say the
 		// caller can wait for memory rather than being told there is none right now.
 		private static BareboneAllocatorConfig? infer_linux_allocator_config (
-				Gee.List<Barebone.SymbolInfo> kernel_symbols) {
-			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "__kmalloc_noprof");
-			if (alloc == null)
-				alloc = find_symbol (kernel_symbols, "__kmalloc");
-			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "kfree");
+				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
+			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "execmem_alloc");
+			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "execmem_free");
 			if (alloc == null || free == null)
 				return null;
 
 			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			alloc_arguments.add (new BareboneCallArgument (LITERAL, EXECMEM_MODULE_TEXT));
 			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
-			alloc_arguments.add (new BareboneCallArgument (LITERAL, GFP_KERNEL));
 
 			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
 			free_arguments.add (new BareboneCallArgument (ADDRESS, 0));
 
 			return new BareboneTargetFunctionsAllocatorConfig () {
-				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", alloc.offset),
-				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", free.offset),
+				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", kernel_base + alloc.offset),
+				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", kernel_base + free.offset),
 				alloc_arguments = alloc_arguments,
 				free_arguments = free_arguments,
 			};
@@ -342,7 +340,7 @@ namespace Frida {
 			};
 		}
 
-		private const uint64 GFP_KERNEL = 0xcc0;
+		private const uint64 EXECMEM_MODULE_TEXT = 1;
 
 		private static Barebone.SymbolInfo? find_symbol (Gee.List<Barebone.SymbolInfo> symbols, string name) {
 			foreach (var s in symbols) {
