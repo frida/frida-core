@@ -72,16 +72,16 @@ fn panic(msg: &str) -> ! {
 }
 
 fn alloc(size: usize) -> *mut u8 {
-    unsafe { malloc(size) }
+    super::heap::take(size)
 }
 
 fn free(ptr: *mut u8, _size: usize) {
-    unsafe { free_impl(ptr) };
+    super::heap::give_back(ptr);
 }
 
 // What the C library hands out is served from this, so it cannot come from the C library.
 fn alloc_heap(size: usize) -> *mut u8 {
-    map(size, READABLE | WRITABLE)
+    map_writable(size)
 }
 
 fn alloc_code(size: usize) -> *mut u8 {
@@ -102,6 +102,10 @@ fn protect(address: u64, size: usize, protection: u32) -> bool {
     let span = ((address as usize) + size + page - 1 & !(page - 1)) - first;
 
     syscall(MPROTECT, first, span, wanted, 0, 0, 0) == 0
+}
+
+pub fn map_writable(size: usize) -> *mut u8 {
+    map(size, READABLE | WRITABLE)
 }
 
 fn map(size: usize, protection: usize) -> *mut u8 {
