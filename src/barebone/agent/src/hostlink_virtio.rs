@@ -303,7 +303,7 @@ struct TxNode {
 }
 
 pub struct Hostlink {
-    state: UnsafeCell<Inner>,
+    state: alloc::boxed::Box<UnsafeCell<Inner>>,
 }
 
 unsafe impl Send for Hostlink {}
@@ -408,7 +408,7 @@ impl Hostlink {
         };
 
         let hl = Hostlink {
-            state: UnsafeCell::new(inner),
+            state: alloc::boxed::Box::new(UnsafeCell::new(inner)),
         };
 
         hl.ctrl_prime_rx(8);
