@@ -47,6 +47,14 @@ pub fn free_code(ptr: *mut u8, size: usize) {
     unsafe { frida_kmod_free_code(ptr, size) };
 }
 
+pub fn alloc_dma(size: usize) -> *mut u8 {
+    alloc_code(size)
+}
+
+pub fn free_dma(ptr: *mut u8, size: usize) {
+    free_code(ptr, size);
+}
+
 pub fn own_range() -> (u64, u64) {
     let mut base: u64 = 0;
     let mut size: u64 = 0;

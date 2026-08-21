@@ -88,6 +88,14 @@ pub fn free_code(ptr: *mut u8, _size: usize) {
     }
 }
 
+pub fn alloc_dma(size: usize) -> *mut u8 {
+    alloc(size)
+}
+
+pub fn free_dma(ptr: *mut u8, size: usize) {
+    free(ptr, size);
+}
+
 // The kernel's own wait queues live behind macros and per-version struct
 // layouts, so the wait is spelled out here instead: sleep in short hops, and
 // let the condition itself say when to stop.

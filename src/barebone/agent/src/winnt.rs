@@ -95,6 +95,14 @@ pub fn free_code(ptr: *mut u8, size: usize) {
     (primitives().free_code)(ptr, size)
 }
 
+pub fn alloc_dma(size: usize) -> *mut u8 {
+    alloc_code(size)
+}
+
+pub fn free_dma(ptr: *mut u8, size: usize) {
+    free_code(ptr, size);
+}
+
 const NON_PAGED_POOL: u32 = 0;
 const POOL_TAG: u32 = 0x6469_7246;
 

@@ -39,6 +39,14 @@ pub fn free_code(ptr: *mut u8, size: usize) {
     free(ptr, size);
 }
 
+pub fn alloc_dma(size: usize) -> *mut u8 {
+    alloc_code(size)
+}
+
+pub fn free_dma(ptr: *mut u8, size: usize) {
+    free_code(ptr, size);
+}
+
 // Arms the wait, gives `check` a chance to observe the condition, and only then
 // commits to sleeping — the three-phase Mach protocol, which is race-free
 // because a wakeup landing after assert_wait() cancels the pending block.

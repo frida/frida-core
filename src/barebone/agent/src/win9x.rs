@@ -123,6 +123,14 @@ pub fn free_code(ptr: *mut u8, size: usize) {
     (primitives().free_code)(ptr, size)
 }
 
+pub fn alloc_dma(size: usize) -> *mut u8 {
+    alloc_code(size)
+}
+
+pub fn free_dma(ptr: *mut u8, size: usize) {
+    free_code(ptr, size);
+}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     (primitives().spawn_thread)(entry, parameter)
 }

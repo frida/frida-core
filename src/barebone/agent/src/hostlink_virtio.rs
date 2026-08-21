@@ -152,14 +152,14 @@ struct DmaPage {
 
 fn dma_page_alloc() -> DmaPage {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    let va = kernel::alloc_code(len);
+    let va = kernel::alloc_dma(len);
     let pa = kernel::virt_to_phys(va as u64);
     DmaPage { va, pa }
 }
 
 fn dma_page_free(p: DmaPage) {
     let len = PAGE_SIZE.load(Ordering::Relaxed);
-    kernel::free_code(p.va, len);
+    kernel::free_dma(p.va, len);
 }
 
 struct Vq {
