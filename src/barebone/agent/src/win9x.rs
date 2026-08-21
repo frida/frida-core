@@ -726,7 +726,7 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     let arena = alloc_shared(INJECTION_ARENA_SIZE) as u32;
     let entry = arena + PAYLOAD_OFFSET;
     unsafe {
-        core::ptr::write_bytes(arena as *mut u8, 0, HANDSHAKE_SIZE);
+        core::ptr::write_bytes(arena as *mut u8, 0, INJECTION_ARENA_SIZE);
         core::ptr::copy_nonoverlapping(payload.as_ptr(), entry as *mut u8, payload.len());
     }
 
@@ -1469,6 +1469,14 @@ pub(crate) const PATCH_ADDRESS: u32 = 0x50;
 pub(crate) const PATCH_BYTES: u32 = 0x54;
 pub(crate) const PATCH_REQUEST: u32 = 0x58;
 pub(crate) const GATING: u32 = 0x9c;
+pub(crate) const HOLD_RESULT: u32 = 0xa0;
+pub(crate) const LOOP_THREAD: u32 = 0xa4;
+pub(crate) const KERNEL_SEMAPHORE: u32 = 0xa8;
+pub(crate) const PATCH_THREAD: u32 = 0xac;
+pub(crate) const GONE_HEAD: u32 = 0xb0;
+pub(crate) const GONE_TAIL: u32 = 0xb4;
+pub(crate) const GONE_SLOTS: u32 = 0xb8;
+pub(crate) const GONE_COUNT: u32 = 8;
 pub(crate) const PATCH_ASKED: u32 = 1;
 pub(crate) const HOOK_ASKED: u32 = 3;
 pub(crate) const PATCH_CODE: u32 = 0x64;

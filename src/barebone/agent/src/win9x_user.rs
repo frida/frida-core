@@ -601,7 +601,7 @@ unsafe extern "stdcall" fn on_create_process(application: u32, command_line: *co
     let held_ok = hold_at_entry_point(pid, thread).is_some();
     unsafe {
         let arena = crate::routed_arena() as u32;
-        ((arena + 0xa0) as *mut u32).write_volatile(if held_ok { 1 } else { 2 });
+        ((arena + HOLD_RESULT) as *mut u32).write_volatile(if held_ok { 1 } else { 2 });
     }
     unsafe { held().insert(pid, HeldProcess { process, thread }) };
 
