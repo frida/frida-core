@@ -275,9 +275,9 @@ mod entrypoint_blob {
                     )
                     .unwrap(),
                 ),
-                #[cfg(any(feature = "win9x", feature = "winnt"))]
-                TransportConfig::VirtioPci => Transport::Virtio(
-                    hostlink_virtio::Hostlink::init_pci(Some(on_frame_from_host), wake_token)
+                #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+                TransportConfig::VirtioPci { ecam } => Transport::Virtio(
+                    hostlink_virtio::Hostlink::init_pci(ecam, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
                 #[cfg(feature = "xnu")]
@@ -358,10 +358,11 @@ mod entrypoint_blob {
                     { let _ = host_port; panic!("vsock is XNU's") }
                 }
                 2 => {
-                    #[cfg(any(feature = "win9x", feature = "winnt"))]
-                    { TransportConfig::VirtioPci }
-                    #[cfg(not(any(feature = "win9x", feature = "winnt")))]
-                    { panic!("virtio-pci is Windows'") }
+                    let ecam = where_configuration_space_is_mapped(transport_cfg_inner);
+                    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+                    { TransportConfig::VirtioPci { ecam } }
+                    #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
+                    { let _ = ecam; panic!("virtio-pci is not this kernel's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -583,11 +584,31 @@ impl Transport {
     }
 }
 
+// Configuration space is reached through I/O ports where there are any, and only a machine
+// without them is told where it is mapped instead.
+#[cfg(target_arch = "aarch64")]
+unsafe fn where_configuration_space_is_mapped(transport: *mut GVariant) -> u64 {
+    use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64, g_variant_unref};
+
+    unsafe {
+        let mapped = g_variant_get_child_value(transport, 0);
+        let ecam = g_variant_get_uint64(mapped);
+        g_variant_unref(mapped);
+
+        ecam
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn where_configuration_space_is_mapped(_transport: *mut GVariant) -> u64 {
+    0
+}
+
 #[cfg(feature = "blob")]
 pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
-    #[cfg(any(feature = "win9x", feature = "winnt"))]
-    VirtioPci,
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+    VirtioPci { ecam: u64 },
     #[cfg(feature = "xnu")]
     Vsock { host_port: u32 },
 }

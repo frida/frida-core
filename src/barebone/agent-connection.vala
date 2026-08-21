@@ -309,9 +309,10 @@ namespace Frida.Barebone {
 			adopt_hostlink_streams (link.connection);
 
 			if (config.bus != null) {
+				Variant[] pci_cfg = { new Variant.uint64 (config.ecam) };
 				return new Variant.tuple ({
 					new Variant.byte (TRANSPORT_KIND_VIRTIO_PCI),
-					new Variant.variant (new Variant.tuple ({}))
+					new Variant.variant (new Variant.tuple (pci_cfg))
 				});
 			}
 

@@ -64,6 +64,10 @@ const PCI_INTERRUPT_LINE: u8 = 0x3c;
 const PCI_BASE_ADDRESS_0: u8 = 0x10;
 const PCI_INTERRUPT_PIN: u8 = 0x3d;
 const ISA_BRIDGE_DEVFN: u8 = 0x08;
+#[cfg(target_arch = "aarch64")]
+const ECAM_DEVFN_SHIFT: usize = 12;
+#[cfg(target_arch = "aarch64")]
+const ECAM_BUS_SIZE: u64 = 256 * 4096;
 const PIRQ_ROUTE: u8 = 0x60;
 const PIRQ_DISABLED: u32 = 1 << 7;
 
@@ -331,12 +335,11 @@ impl Hostlink {
             return Err(());
         }
 
-        Self::start(regs, irq_line, on_rx, wake_token)
+        Self::start(regs, Some(irq_line), on_rx, wake_token)
     }
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    pub fn init_pci(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
-        let Some(device) = PciDevice::find_console() else {
+    pub fn init_pci(ecam: u64, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
+        let Some(device) = PciDevice::find_console(ecam) else {
             return Err(());
         };
 
@@ -349,7 +352,7 @@ impl Hostlink {
         Self::start(regs, device.irq_line(), on_rx, wake_token)
     }
 
-    fn start(regs: Regs, irq_line: u32, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
+    fn start(regs: Regs, irq_line: Option<u32>, on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let page_size = gum_barebone_query_page_size();
         PAGE_SIZE.store(page_size as usize, Ordering::Relaxed);
 
@@ -377,12 +380,14 @@ impl Hostlink {
         unsafe {
             ISR_REGS = Some(regs);
         }
-        kernel::install_interrupt_handler(
-            irq_line,
-            wake_token as *mut c_void,
-            isr_wake,
-            core::ptr::null_mut(),
-        );
+        if let Some(irq_line) = irq_line {
+            kernel::install_interrupt_handler(
+                irq_line,
+                wake_token as *mut c_void,
+                isr_wake,
+                core::ptr::null_mut(),
+            );
+        }
 
         regs.set_status(regs.status() | ST_DRV_OK);
 
@@ -984,18 +989,54 @@ impl Regs {
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[derive(Copy, Clone)]
+struct Bus {
+    number: u8,
+    #[cfg(target_arch = "aarch64")]
+    config: *mut u8,
+}
+
+impl Bus {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn first(_ecam: u64) -> Self {
+        Bus { number: 0 }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn first(ecam: u64) -> Self {
+        let config = kernel::map_io(ecam, ECAM_BUS_SIZE) as *mut u8;
+        Bus { number: 0, config }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn function(&self, devfn: u8) -> PciDevice {
+        PciDevice { bus: self.number, devfn }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn function(&self, devfn: u8) -> PciDevice {
+        PciDevice {
+            bus: self.number,
+            devfn,
+            config: unsafe { self.config.add((devfn as usize) << ECAM_DEVFN_SHIFT) },
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 struct PciDevice {
     bus: u8,
     devfn: u8,
+    #[cfg(target_arch = "aarch64")]
+    config: *mut u8,
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 impl PciDevice {
-    fn find_console() -> Option<Self> {
+    fn find_console(ecam: u64) -> Option<Self> {
+        let bus = Bus::first(ecam);
+
         for devfn in 0..=u8::MAX {
-            let device = PciDevice { bus: 0, devfn };
+            let device = bus.function(devfn);
 
             let identity = device.read_config(0);
             let vendor = (identity & 0xffff) as u16;
@@ -1014,6 +1055,7 @@ impl PciDevice {
 
     fn map_virtio_regs(&self) -> Option<Regs> {
         self.enable_memory_and_bus_mastering();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         self.route_interrupt_line();
 
         let mut common = core::ptr::null_mut();
@@ -1060,8 +1102,14 @@ impl PciDevice {
         }))
     }
 
-    fn irq_line(&self) -> u32 {
-        self.read_config_byte(PCI_INTERRUPT_LINE) as u32
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn irq_line(&self) -> Option<u32> {
+        Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn irq_line(&self) -> Option<u32> {
+        None
     }
 
     fn enable_memory_and_bus_mastering(&self) {
@@ -1074,6 +1122,7 @@ impl PciDevice {
 
     // The chipset keeps the link of an unclaimed device off, thus the line reaches no controller.
     // Point the link at the interrupt in the config space of the device.
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn route_interrupt_line(&self) {
         let link = ((self.read_config_byte(PCI_INTERRUPT_PIN) - 1) + (self.devfn >> 3) - 1) & 3;
         let router = PciDevice {
@@ -1083,7 +1132,7 @@ impl PciDevice {
 
         let offset = PIRQ_ROUTE + link;
         let shift = (offset & 3) * 8;
-        let route = (self.irq_line() & !PIRQ_DISABLED) << shift;
+        let route = (self.irq_line().unwrap() & !PIRQ_DISABLED) << shift;
         let others = router.read_config(offset) & !(0xff << shift);
         router.write_config(offset, others | route);
     }
@@ -1106,21 +1155,34 @@ impl PciDevice {
         (self.read_config(offset) >> ((offset & 3) * 8)) as u8
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn read_config(&self, offset: u8) -> u32 {
         outl(PCI_CONFIG_ADDRESS, self.config_address(offset));
         inl(PCI_CONFIG_DATA)
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn write_config(&self, offset: u8, value: u32) {
         outl(PCI_CONFIG_ADDRESS, self.config_address(offset));
         outl(PCI_CONFIG_DATA, value);
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn config_address(&self, offset: u8) -> u32 {
         0x8000_0000
             | ((self.bus as u32) << 16)
             | ((self.devfn as u32) << 8)
             | ((offset as u32) & 0xfc)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn read_config(&self, offset: u8) -> u32 {
+        r32(self.config, (offset & 0xfc) as usize)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn write_config(&self, offset: u8, value: u32) {
+        w32(self.config, (offset & 0xfc) as usize, value);
     }
 }
 
