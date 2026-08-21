@@ -55,6 +55,7 @@ SECTIONS {
     _VPICD_Physically_Unmask = .; . += 4;
     __VWIN32_QueueUserApc = .; . += 4;
     __VWIN32_Get_Thread_Context = .; . += 4;
+    __VWIN32_Set_Thread_Context = .; . += 4;
     __VWIN32_CreateRing0Thread = .; . += 4;
     _IFSMgr_Ring0_FileIO = .; . += 4;
     _KERNEL32_Base = .; . += 4;

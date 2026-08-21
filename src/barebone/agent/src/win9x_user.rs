@@ -65,6 +65,8 @@ pub static USER: Primitives = Primitives {
     protection_at,
     enumerate_ranges,
     enumerate_threads,
+    find_thread,
+    modify_thread,
 };
 
 fn copy_has_work() -> bool {
@@ -176,6 +178,20 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
 
 fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
     crate::win9x::enumerate_threads_of(current_process_id(), found)
+}
+
+fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
+    let thread = crate::win9x::thread_handle_of(current_process_id(), id)?;
+
+    Some(crate::kernel::ThreadInfo { id, cpu_state: crate::win9x::thread_cpu_state(thread) })
+}
+
+fn modify_thread(id: u32, change: &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool {
+    let Some(thread) = crate::win9x::thread_handle_of(current_process_id(), id) else {
+        return false;
+    };
+
+    crate::win9x::modify_thread_at(thread, change)
 }
 
 fn protection_at(address: usize) -> u32 {

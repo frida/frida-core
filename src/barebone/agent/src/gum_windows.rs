@@ -6,7 +6,9 @@ use crate::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
         gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
-        GumFoundThreadFunc, GumRangeDetails, GumThreadDetails, GumThreadId, GumThreadRegistry,
+        GumFoundThreadFunc, GumModifyThreadFlags, GumModifyThreadFunc, GumRangeDetails,
+        GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
+        gum_thread_details_copy,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -442,15 +444,49 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
 
         if let Some(state) = thread.cpu_state {
             details.flags = GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
-            details.cpu_context = cpu_context_from(state);
+            details.cpu_context = cpu_context_from(&state);
         }
 
         unsafe { emit(&details, user_data) };
     });
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_find_thread_by_id(thread_id: GumThreadId, _flags: GumThreadFlags)
+        -> *mut GumThreadDetails {
+    let Some(thread) = kernel::find_thread(thread_id as u32) else {
+        return ptr::null_mut();
+    };
+
+    let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
+    details.id = thread.id as GumThreadId;
+
+    if let Some(state) = thread.cpu_state {
+        details.flags = GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
+        details.cpu_context = cpu_context_from(&state);
+    }
+
+    unsafe { gum_thread_details_copy(&details) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_modify_thread(thread_id: GumThreadId, func: GumModifyThreadFunc,
+        user_data: gpointer, _flags: GumModifyThreadFlags) -> gboolean {
+    let Some(modify) = func else {
+        return 0;
+    };
+
+    let changed = kernel::modify_thread(thread_id as u32, &mut |state| {
+        let mut context = cpu_context_from(state);
+        unsafe { modify(thread_id, &mut context, user_data) };
+        *state = cpu_state_from(&context);
+    });
+
+    changed as gboolean
+}
+
 #[cfg(target_arch = "x86")]
-fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
     GumCpuContext {
         eip: state.eip,
         edi: state.edi,
@@ -465,8 +501,23 @@ fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
     }
 }
 
+#[cfg(target_arch = "x86")]
+fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
+    kernel::CpuState {
+        eip: context.eip,
+        edi: context.edi,
+        esi: context.esi,
+        ebp: context.ebp,
+        esp: context.esp,
+        ebx: context.ebx,
+        edx: context.edx,
+        ecx: context.ecx,
+        eax: context.eax,
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
-fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
     GumCpuContext {
         rip: state.rip,
         r15: state.r15,
@@ -486,6 +537,29 @@ fn cpu_context_from(state: kernel::CpuState) -> GumCpuContext {
         rcx: state.rcx,
         rax: state.rax,
         xmm: ptr::null_mut(),
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
+    kernel::CpuState {
+        rip: context.rip,
+        r15: context.r15,
+        r14: context.r14,
+        r13: context.r13,
+        r12: context.r12,
+        r11: context.r11,
+        r10: context.r10,
+        r9: context.r9,
+        r8: context.r8,
+        rdi: context.rdi,
+        rsi: context.rsi,
+        rbp: context.rbp,
+        rsp: context.rsp,
+        rbx: context.rbx,
+        rdx: context.rdx,
+        rcx: context.rcx,
+        rax: context.rax,
     }
 }
 

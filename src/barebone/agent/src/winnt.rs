@@ -816,6 +816,14 @@ pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
     (primitives().enumerate_threads)(found)
 }
 
+pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+    (primitives().find_thread)(id)
+}
+
+pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+    (primitives().modify_thread)(id, change)
+}
+
 fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
     let Some(layout) = thread_layout() else {
         found(ThreadInfo { id: current_thread_id() as u32, cpu_state: None });
@@ -829,6 +837,41 @@ fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
             cpu_state: capture(thread),
         });
     });
+}
+
+fn modify_ring_zero_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+    let Some(wanted) = ring_zero_thread(id) else {
+        return false;
+    };
+
+    unsafe {
+        let context = &mut *core::ptr::addr_of_mut!(CONTEXT);
+        context.fill(0);
+        let base = context.as_mut_ptr().add(context.as_ptr().align_offset(CONTEXT_ALIGNMENT));
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        if (_PsGetContextThread)(wanted, base, KERNEL_MODE as u8) < 0 {
+            return false;
+        }
+
+        let mut state = cpu_state_of(base);
+        change(&mut state);
+        write_cpu_state(base, &state);
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        (_PsSetContextThread)(wanted, base, KERNEL_MODE as u8) >= 0
+    }
+}
+
+fn ring_zero_thread(id: u32) -> Option<*mut c_void> {
+    let mut wanted = core::ptr::null_mut();
+    enumerate_thread_objects(&mut |thread| unsafe {
+        if (_PsGetThreadId)(thread) == id {
+            wanted = thread;
+        }
+    });
+
+    (!wanted.is_null()).then_some(wanted)
 }
 
 fn enumerate_thread_objects(found: &mut dyn FnMut(*mut c_void)) {
@@ -960,6 +1003,23 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     }
 }
 
+#[cfg(target_arch = "x86")]
+pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
+    let mut field = |offset: usize, value: u32| unsafe {
+        base.add(offset).cast::<u32>().write_unaligned(value)
+    };
+
+    field(0xb8, state.eip);
+    field(0x9c, state.edi);
+    field(0xa0, state.esi);
+    field(0xb4, state.ebp);
+    field(0xc4, state.esp);
+    field(0xa4, state.ebx);
+    field(0xa8, state.edx);
+    field(0xac, state.ecx);
+    field(0xb0, state.eax);
+}
+
 #[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     let field = |offset: usize| unsafe { base.add(offset).cast::<u64>().read_unaligned() };
@@ -983,6 +1043,31 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
         rcx: field(0x80),
         rax: field(0x78),
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
+    let mut field = |offset: usize, value: u64| unsafe {
+        base.add(offset).cast::<u64>().write_unaligned(value)
+    };
+
+    field(0xf8, state.rip);
+    field(0xf0, state.r15);
+    field(0xe8, state.r14);
+    field(0xe0, state.r13);
+    field(0xd8, state.r12);
+    field(0xd0, state.r11);
+    field(0xc8, state.r10);
+    field(0xc0, state.r9);
+    field(0xb8, state.r8);
+    field(0xb0, state.rdi);
+    field(0xa8, state.rsi);
+    field(0xa0, state.rbp);
+    field(0x98, state.rsp);
+    field(0x90, state.rbx);
+    field(0x88, state.rdx);
+    field(0x80, state.rcx);
+    field(0x78, state.rax);
 }
 
 #[cfg(target_arch = "x86")]
@@ -1822,6 +1907,8 @@ pub struct Primitives {
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
     pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
+    pub find_thread: fn(u32) -> Option<ThreadInfo>,
+    pub modify_thread: fn(u32, &mut dyn FnMut(&mut CpuState)) -> bool,
     pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
     pub wake: fn(*const u8),
     pub yield_now: fn(),
@@ -1854,6 +1941,8 @@ static KERNEL: Primitives = Primitives {
     protection_at: kernel::protection_at,
     enumerate_ranges: kernel::enumerate_ranges,
     enumerate_threads: kernel::enumerate_threads,
+    find_thread: kernel::find_thread,
+    modify_thread: kernel::modify_thread,
     wait: kernel::wait,
     wake: kernel::wake,
     yield_now: kernel::yield_now,
@@ -1906,6 +1995,16 @@ mod kernel {
 
     pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
         super::enumerate_ring_zero_threads(found)
+    }
+
+    pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+        let thread = super::ring_zero_thread(id)?;
+
+        Some(ThreadInfo { id, cpu_state: unsafe { super::capture(thread) } })
+    }
+
+    pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+        super::modify_ring_zero_thread(id, change)
     }
 
     pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
@@ -3077,6 +3176,7 @@ kernel_abi! {
     static _PsGetThreadProcess: windows_fn!(*mut c_void => *mut c_void);
     static _PsGetThreadId: windows_fn!(*mut c_void => u32);
     static _PsGetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
+    static _PsSetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _KeStackAttachProcess: windows_fn!(*mut c_void, *mut u8);
     static _KeUnstackDetachProcess: windows_fn!(*mut u8);
     static _ZwOpenKey: windows_fn!(*mut *mut c_void, u32, *const ObjectAttributes => i32);

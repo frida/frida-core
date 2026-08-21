@@ -91,6 +91,18 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/follows-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => follows_a_thread_in_live_guest.begin (h as SlowHarness,
+				win9x_config_from_environment (h as SlowHarness), "KERNEL32.DLL"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Win9x/finds-a-thread-by-id-in-live-guest", () => {
+			var h = new SlowHarness ((h) => finds_a_thread_by_id_in_live_guest.begin (h as SlowHarness,
+				win9x_config_from_environment (h as SlowHarness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/enumerates-its-own-threads-in-live-guest", () => {
 			var h = new SlowHarness ((h) => enumerates_its_own_threads_in_live_guest.begin (
 				h as SlowHarness));
@@ -255,6 +267,18 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/follows-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => follows_a_thread_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT"), "kernel32.dll"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/finds-a-thread-by-id-in-live-guest", () => {
+			var h = new SlowHarness ((h) => finds_a_thread_by_id_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT")));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/watches-its-own-threads-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_watches_its_own_threads_in_live_guest.begin (
 				h as SlowHarness, "WINNT"));
@@ -343,6 +367,18 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/follows-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => follows_a_thread_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT64"), "kernel32.dll"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/finds-a-thread-by-id-in-live-guest", () => {
+			var h = new SlowHarness ((h) => finds_a_thread_by_id_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT64")));
 			h.run ();
 		});
 
@@ -2163,7 +2199,7 @@ namespace Frida.BareboneTest {
 			settle.destroy ();
 
 			script.post ("""{"type":"poll"}""");
-			while (said.size < 2)
+			while (said.size < 3)
 				yield h.process_events ();
 			printerr ("\nSEEN %s\n", said[said.size - 1]);
 		} catch (GLib.Error e) {
@@ -3715,6 +3751,131 @@ namespace Frida.BareboneTest {
 				yield h.process_events ();
 
 			assert_true (messages[0].contains ("[false,true]"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void finds_a_thread_by_id_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			yield expect_thread_lookup (h, device, 0);
+			yield expect_thread_lookup (h, device, yield find_explorer (device));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void expect_thread_lookup (Frida.Test.AsyncHarness h, Device device, uint pid)
+			throws GLib.Error {
+		var session = yield device.attach (pid, null, null);
+		var script = yield session.create_script ("""
+			const mine = Process.getCurrentThreadId();
+			const other = Process.enumerateThreads()
+				.find(t => t.id !== mine && t.context !== undefined);
+			const found = Process.findThreadById(other.id);
+			send([found !== null, found !== null && found.id === other.id,
+				found !== null && !found.context.pc.isNull(),
+				Process.findThreadById(0x7ffffff0) === null]);
+		""", null, null);
+
+		var messages = new Gee.ArrayList<string> ();
+		script.message.connect ((json, data) => {
+			messages.add (json);
+		});
+		yield script.load (null);
+		while (messages.is_empty)
+			yield h.process_events ();
+
+		if (!messages[0].contains ("[true,true,true,true]"))
+			printerr ("\nLOOKUP in %u: %s\n", pid, messages[0]);
+		assert_true (messages[0].contains ("[true,true,true,true]"));
+
+		yield session.detach (null);
+	}
+
+	private async void follows_a_thread_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config, string library) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const lib = Process.getModuleByName('LIBRARY');
+				const fn = (name, ret, args) =>
+					new NativeFunction(lib.getExportByName(name), ret, args,
+						Process.pointerSize === 4 ? { abi: 'stdcall' } : {});
+				const createThread = fn('CreateThread', 'pointer',
+					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+				const terminateThread = fn('TerminateThread', 'int', ['pointer', 'uint']);
+				const closeHandle = fn('CloseHandle', 'int', ['pointer']);
+
+				const body = Memory.alloc(Process.pageSize);
+				Memory.protect(body, Process.pageSize, 'rwx');
+				Memory.patchCode(body, 16, code => {
+					const w = new X86Writer(code, { pc: body });
+					w.putXorRegReg('eax', 'eax');
+					if (Process.pointerSize === 8)
+						w.putRet();
+					else
+						w.putRetImm(4);
+					w.flush();
+				});
+
+				const out = Memory.alloc(4);
+				const handle = createThread(NULL, 0, body, NULL, CREATE_SUSPENDED, out);
+				const id = out.readU32();
+
+				const before = Process.findThreadById(id).context.pc;
+				Stalker.follow(id, { events: { block: true } });
+				const after = Process.findThreadById(id).context.pc;
+				Stalker.unfollow(id);
+
+				terminateThread(handle, 0);
+				closeHandle(handle);
+
+				const elsewhere = after.compare(lib.base) < 0 ||
+					after.compare(lib.base.add(lib.size)) >= 0;
+				send(['followed', !before.equals(after), elsewhere]);
+			""".replace ("LIBRARY", library).replace ("CREATE_SUSPENDED", "4"), null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			if (!said[0].contains ("[\"followed\",true,true]"))
+				printerr ("\nFOLLOWED %s\n", said[0]);
+			assert_true (said[0].contains ("[\"followed\",true,true]"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

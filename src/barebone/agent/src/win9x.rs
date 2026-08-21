@@ -1083,6 +1083,8 @@ pub struct Primitives {
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
     pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
+    pub find_thread: fn(u32) -> Option<ThreadInfo>,
+    pub modify_thread: fn(u32, &mut dyn FnMut(&mut CpuState)) -> bool,
 }
 
 pub fn select_user() {
@@ -1115,6 +1117,8 @@ static KERNEL: Primitives = Primitives {
     protection_at: kernel::protection_at,
     enumerate_ranges: kernel::enumerate_ranges,
     enumerate_threads: kernel::enumerate_threads,
+    find_thread: kernel::find_thread,
+    modify_thread: kernel::modify_thread,
 };
 
 mod kernel {
@@ -1218,6 +1222,20 @@ mod kernel {
 
     pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
         super::enumerate_ring_zero_threads(found)
+    }
+
+    pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+        let thread = super::ring_zero_thread(id)?;
+
+        Some(ThreadInfo { id, cpu_state: super::thread_cpu_state(thread) })
+    }
+
+    pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+        let Some(thread) = super::ring_zero_thread(id) else {
+            return false;
+        };
+
+        super::modify_thread_at(thread, change)
     }
 
     pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
@@ -1595,10 +1613,56 @@ pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
     (primitives().enumerate_threads)(found)
 }
 
+pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+    (primitives().find_thread)(id)
+}
+
+pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+    (primitives().modify_thread)(id, change)
+}
+
+pub fn modify_thread_at(thread: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+    let mut context = [0u8; CONTEXT_SIZE];
+    let base = context.as_mut_ptr();
+
+    unsafe {
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        if __VWIN32_Get_Thread_Context(thread, base) == 0 {
+            return false;
+        }
+
+        let mut state = cpu_state_of(base);
+        change(&mut state);
+        write_cpu_state(base, &state);
+
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+
+        __VWIN32_Set_Thread_Context(thread, base) != 0
+    }
+}
+
+pub fn thread_handle_of(pid: u32, id: u32) -> Option<u32> {
+    let mut found = None;
+    enumerate_thread_handles_of(pid, &mut |thread, thread_id| {
+        if thread_id == id {
+            found = Some(thread);
+        }
+    });
+
+    found
+}
+
 // The threads of one process, as the copy in it sees them. Ring 3 of this system reaches both
 // the services and the memory the kernel keeps, thus the copy walks the same list the kernel
 // half does and keeps what belongs to it, registers and all.
 pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo)) {
+    enumerate_thread_handles_of(pid, &mut |thread, id| {
+        found(ThreadInfo { id, cpu_state: thread_cpu_state(thread) });
+    });
+}
+
+fn enumerate_thread_handles_of(pid: u32, found: &mut dyn FnMut(u32, u32)) {
     let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
@@ -1610,16 +1674,30 @@ pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo)) {
             let database = unsafe { (block as *const u32).read() };
             let process = unsafe { (block as *const u32).add(1).read() };
             if process_id(process) == pid {
-                found(ThreadInfo {
-                    id: process_id(database),
-                    cpu_state: thread_cpu_state(thread),
-                });
+                found(thread, process_id(database));
             }
         }
 
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
+}
+
+fn ring_zero_thread(id: u32) -> Option<u32> {
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+
+    let mut thread = first;
+    while thread != 0 {
+        if thread == id {
+            return Some(thread);
+        }
+
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+
+    None
 }
 
 fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
@@ -1636,7 +1714,7 @@ fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
 }
 
 // VWIN32 gives the registers of Win32 threads only, and it fails for the others.
-fn thread_cpu_state(thread: u32) -> Option<CpuState> {
+pub fn thread_cpu_state(thread: u32) -> Option<CpuState> {
     let mut context = [0u8; CONTEXT_SIZE];
     let base = context.as_mut_ptr();
 
@@ -1647,20 +1725,40 @@ fn thread_cpu_state(thread: u32) -> Option<CpuState> {
             return None;
         }
 
-        let field = |offset: usize| base.add(offset).cast::<u32>().read_unaligned();
-
-        Some(CpuState {
-            eip: field(CONTEXT_EIP),
-            edi: field(CONTEXT_EDI),
-            esi: field(CONTEXT_ESI),
-            ebp: field(CONTEXT_EBP),
-            esp: field(CONTEXT_ESP),
-            ebx: field(CONTEXT_EBX),
-            edx: field(CONTEXT_EDX),
-            ecx: field(CONTEXT_ECX),
-            eax: field(CONTEXT_EAX),
-        })
+        Some(cpu_state_of(base))
     }
+}
+
+unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+    let field = |offset: usize| unsafe { base.add(offset).cast::<u32>().read_unaligned() };
+
+    CpuState {
+        eip: field(CONTEXT_EIP),
+        edi: field(CONTEXT_EDI),
+        esi: field(CONTEXT_ESI),
+        ebp: field(CONTEXT_EBP),
+        esp: field(CONTEXT_ESP),
+        ebx: field(CONTEXT_EBX),
+        edx: field(CONTEXT_EDX),
+        ecx: field(CONTEXT_ECX),
+        eax: field(CONTEXT_EAX),
+    }
+}
+
+unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
+    let mut field = |offset: usize, value: u32| unsafe {
+        base.add(offset).cast::<u32>().write_unaligned(value)
+    };
+
+    field(CONTEXT_EIP, state.eip);
+    field(CONTEXT_EDI, state.edi);
+    field(CONTEXT_ESI, state.esi);
+    field(CONTEXT_EBP, state.ebp);
+    field(CONTEXT_ESP, state.esp);
+    field(CONTEXT_EBX, state.ebx);
+    field(CONTEXT_EDX, state.edx);
+    field(CONTEXT_ECX, state.ecx);
+    field(CONTEXT_EAX, state.eax);
 }
 
 const CONTEXT_SIZE: usize = 0xcc;
@@ -3083,6 +3181,7 @@ unsafe extern "C" {
     static _VPICD_Physically_Unmask: unsafe extern "C" fn();
     static _VPICD_Force_Default_Behavior: unsafe extern "C" fn();
     static __VWIN32_Get_Thread_Context: unsafe extern "C" fn(u32, *mut u8) -> u32;
+    static __VWIN32_Set_Thread_Context: unsafe extern "C" fn(u32, *const u8) -> u32;
     static __VWIN32_CreateRing0Thread: unsafe extern "C" fn();
     static _IFSMgr_Ring0_FileIO: unsafe extern "C" fn();
     static _KERNEL32_Base: u32;

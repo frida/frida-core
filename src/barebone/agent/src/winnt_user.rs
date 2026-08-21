@@ -112,6 +112,8 @@ pub static USER: Primitives = Primitives {
     protection_at,
     enumerate_ranges,
     enumerate_threads,
+    find_thread,
+    modify_thread,
     wait,
     wake,
     yield_now,
@@ -1032,6 +1034,64 @@ fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
 
 // A thread cannot ask the system about itself: what comes back describes the asking, not the
 // thread as a script would want to see it.
+fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
+    let api = thread_list_api();
+    unsafe {
+        let snapshot = (api.create_snapshot)(SNAP_THREAD, 0);
+        if snapshot == INVALID_HANDLE {
+            return None;
+        }
+
+        let ours = current_process_id();
+        let mut found = false;
+        let mut entry = [0u32; THREAD_ENTRY_WORDS];
+        entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+        let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
+        while more != 0 && !found {
+            found = entry[THREAD_ENTRY_OWNER] == ours && entry[THREAD_ENTRY_ID] == id;
+            entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+            more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
+        }
+
+        (api.close)(snapshot);
+
+        found.then(|| crate::kernel::ThreadInfo { id, cpu_state: registers_of(id) })
+    }
+}
+
+fn modify_thread(id: u32, change: &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool {
+    let api = thread_list_api();
+    unsafe {
+        let thread = (api.open)(
+            THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, 0, id);
+        if thread.is_null() {
+            return false;
+        }
+
+        let mut changed = false;
+        if (api.suspend)(thread, core::ptr::null_mut()) >= 0 {
+            let mut context = [0u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT];
+            let base = context.as_mut_ptr().add(context.as_ptr().align_offset(CONTEXT_ALIGNMENT));
+            (base.add(CONTEXT_FLAGS) as *mut u32).write(CONTEXT_FULL);
+
+            if (api.get_context)(thread, base) >= 0 {
+                let mut state = crate::winnt::cpu_state_of(base);
+                change(&mut state);
+                crate::winnt::write_cpu_state(base, &state);
+                (base.add(CONTEXT_FLAGS) as *mut u32).write(CONTEXT_FULL);
+
+                changed = (api.set_context)(thread, base) >= 0;
+            }
+
+            (api.resume)(thread, core::ptr::null_mut());
+        }
+
+        (api.close)(thread);
+
+        changed
+    }
+}
+
 fn registers_of(id: u32) -> Option<crate::kernel::CpuState> {
     if id == current_thread_id() as u32 {
         return None;
@@ -1056,6 +1116,8 @@ fn registers_of(id: u32) -> Option<crate::kernel::CpuState> {
 }
 
 const THREAD_GET_CONTEXT: u32 = 0x0008;
+const THREAD_SET_CONTEXT: u32 = 0x0010;
+const THREAD_SUSPEND_RESUME: u32 = 0x0002;
 
 fn thread_list_api() -> &'static ThreadListApi {
     unsafe {
@@ -1069,6 +1131,10 @@ fn thread_list_api() -> &'static ThreadListApi {
                 open: core::mem::transmute(export(library, b"OpenThread")),
                 get_context: core::mem::transmute(
                     export(loader_library(), b"NtGetContextThread")),
+                set_context: core::mem::transmute(
+                    export(loader_library(), b"NtSetContextThread")),
+                suspend: core::mem::transmute(export(loader_library(), b"NtSuspendThread")),
+                resume: core::mem::transmute(export(loader_library(), b"NtResumeThread")),
                 close: core::mem::transmute(export(library, b"CloseHandle")),
             });
         }
@@ -1082,6 +1148,9 @@ struct ThreadListApi {
     next: windows_fn!(*mut c_void, *mut u8 => i32),
     open: windows_fn!(u32, i32, u32 => *mut c_void),
     get_context: windows_fn!(*mut c_void, *mut u8 => i32),
+    set_context: windows_fn!(*mut c_void, *const u8 => i32),
+    suspend: windows_fn!(*mut c_void, *mut u32 => i32),
+    resume: windows_fn!(*mut c_void, *mut u32 => i32),
     close: windows_fn!(*mut c_void => i32),
 }
 
