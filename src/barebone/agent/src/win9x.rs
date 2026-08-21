@@ -2465,9 +2465,11 @@ frida_win9x_get_pc_ebx:
     ret
 
 .macro CALL_SERVICE slot
+    push ebp
     call frida_win9x_get_pc_ebp
     add ebp, offset _GLOBAL_OFFSET_TABLE_
     call dword ptr [ebp + \slot@GOTOFF]
+    pop ebp
 .endm
 
 .global wait_semaphore
