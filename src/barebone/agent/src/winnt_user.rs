@@ -75,6 +75,7 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
 
     unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
+    hear_about_faults();
     let context = unsafe { crate::adopt_js_context() };
 
     unsafe {
@@ -95,6 +96,7 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
     }
 
     crate::gum_windows::forget_the_loader();
+    stop_hearing_about_faults();
 
     unsafe { ((arena + COPY_LEFT as usize) as *mut u32).write_volatile(1) };
 
@@ -144,6 +146,10 @@ fn resolve_user_api() {
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
             create_heap: core::mem::transmute(export(ntdll, b"RtlCreateHeap")),
+            add_fault_handler: core::mem::transmute(
+                export(ntdll, b"RtlAddVectoredExceptionHandler")),
+            remove_fault_handler: core::mem::transmute(
+                export(ntdll, b"RtlRemoveVectoredExceptionHandler")),
         });
 
         SPAWN_API = Some(SpawnApi {
@@ -796,6 +802,8 @@ struct UserApi {
     create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
     close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
+    add_fault_handler: windows_fn!(u32, *const c_void => *mut c_void),
+    remove_fault_handler: windows_fn!(*mut c_void => u32),
     create_heap: windows_fn!(u32, *mut c_void, usize, usize, *mut c_void, *mut c_void => usize),
 }
 
@@ -835,6 +843,63 @@ fn process_heap() -> usize {
 
 static mut MADE_HEAP: usize = 0;
 const HEAP_GROWABLE: u32 = 0x2;
+
+fn hear_about_faults() {
+    unsafe { FAULT_HANDLER = (user_api().add_fault_handler)(1, on_fault as *const c_void) };
+}
+
+fn stop_hearing_about_faults() {
+    unsafe { (user_api().remove_fault_handler)(FAULT_HANDLER) };
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn on_fault(pointers: *const usize) -> i32 {
+    unsafe { look_at_the_fault(pointers) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn on_fault(pointers: *const usize) -> i32 {
+    unsafe { look_at_the_fault(pointers) }
+}
+
+unsafe fn look_at_the_fault(pointers: *const usize) -> i32 {
+    let record = unsafe { pointers.read() } as *const usize;
+    let context = unsafe { pointers.add(1).read() } as *mut u8;
+
+    let code = unsafe { (record as *const u32).read() };
+    let at = unsafe { record.byte_add(RECORD_ADDRESS).read() };
+    let accessed = unsafe { record.byte_add(RECORD_ACCESSED).read() };
+
+    let state = unsafe { crate::winnt::cpu_state_of(context) };
+    let mut cpu_context = crate::gum_windows::cpu_context_from(&state);
+
+    let handled = unsafe {
+        crate::bindings::gum_barebone_handle_exception(crate::gum_windows::fault_type_of(code),
+            at as *mut c_void, accessed as *mut c_void, &mut cpu_context)
+    };
+    if handled == 0 {
+        return SEARCH_ON;
+    }
+
+    let state = crate::gum_windows::cpu_state_from(&cpu_context);
+    unsafe { crate::winnt::write_cpu_state(context, &state) };
+
+    CARRY_ON
+}
+
+static mut FAULT_HANDLER: *mut c_void = core::ptr::null_mut();
+
+const CARRY_ON: i32 = -1;
+const SEARCH_ON: i32 = 0;
+
+#[cfg(target_arch = "x86")]
+const RECORD_ADDRESS: usize = 0x0c;
+#[cfg(target_arch = "x86")]
+const RECORD_ACCESSED: usize = 0x18;
+#[cfg(target_arch = "x86_64")]
+const RECORD_ADDRESS: usize = 0x10;
+#[cfg(target_arch = "x86_64")]
+const RECORD_ACCESSED: usize = 0x28;
 
 fn copy_has_work() -> bool {
     let arena = unsafe { ARENA };

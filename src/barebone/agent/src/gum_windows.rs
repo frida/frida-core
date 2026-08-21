@@ -486,7 +486,7 @@ pub extern "C" fn gum_barebone_modify_thread(thread_id: GumThreadId, func: GumMo
 }
 
 #[cfg(target_arch = "x86")]
-fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+pub(crate) fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
     GumCpuContext {
         eip: state.eip,
         edi: state.edi,
@@ -502,7 +502,7 @@ fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
 }
 
 #[cfg(target_arch = "x86")]
-fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
+pub(crate) fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
     kernel::CpuState {
         eip: context.eip,
         edi: context.edi,
@@ -517,7 +517,7 @@ fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+pub(crate) fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
     GumCpuContext {
         rip: state.rip,
         r15: state.r15,
@@ -541,7 +541,7 @@ fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
+pub(crate) fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
     kernel::CpuState {
         rip: context.rip,
         r15: context.r15,
@@ -562,6 +562,45 @@ fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
         rax: context.rax,
     }
 }
+
+pub(crate) fn fault_type_of(code: u32) -> crate::bindings::GumExceptionType {
+    use crate::bindings::*;
+
+    match code {
+        ACCESS_VIOLATION | MISALIGNED_DATA | ARRAY_BOUNDS_EXCEEDED =>
+            _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
+        GUARD_PAGE => _GumExceptionType_GUM_EXCEPTION_GUARD_PAGE,
+        ILLEGAL_INSTRUCTION | PRIVILEGED_INSTRUCTION =>
+            _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION,
+        STACK_OVERFLOW => _GumExceptionType_GUM_EXCEPTION_STACK_OVERFLOW,
+        FLOAT_DENORMAL_OPERAND | FLOAT_DIVIDE_BY_ZERO | FLOAT_INEXACT_RESULT
+        | FLOAT_INVALID_OPERATION | FLOAT_OVERFLOW | FLOAT_STACK_CHECK | FLOAT_UNDERFLOW
+        | INTEGER_DIVIDE_BY_ZERO | INTEGER_OVERFLOW =>
+            _GumExceptionType_GUM_EXCEPTION_ARITHMETIC,
+        BREAKPOINT => _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
+        SINGLE_STEP => _GumExceptionType_GUM_EXCEPTION_SINGLE_STEP,
+        _ => _GumExceptionType_GUM_EXCEPTION_SYSTEM,
+    }
+}
+
+const ACCESS_VIOLATION: u32 = 0xc000_0005;
+const MISALIGNED_DATA: u32 = 0x8000_0002;
+const ARRAY_BOUNDS_EXCEEDED: u32 = 0xc000_008c;
+const GUARD_PAGE: u32 = 0x8000_0001;
+const ILLEGAL_INSTRUCTION: u32 = 0xc000_001d;
+const PRIVILEGED_INSTRUCTION: u32 = 0xc000_0096;
+const STACK_OVERFLOW: u32 = 0xc000_00fd;
+const FLOAT_DENORMAL_OPERAND: u32 = 0xc000_008d;
+const FLOAT_DIVIDE_BY_ZERO: u32 = 0xc000_008e;
+const FLOAT_INEXACT_RESULT: u32 = 0xc000_008f;
+const FLOAT_INVALID_OPERATION: u32 = 0xc000_0090;
+const FLOAT_OVERFLOW: u32 = 0xc000_0091;
+const FLOAT_STACK_CHECK: u32 = 0xc000_0092;
+const FLOAT_UNDERFLOW: u32 = 0xc000_0093;
+const INTEGER_DIVIDE_BY_ZERO: u32 = 0xc000_0094;
+const INTEGER_OVERFLOW: u32 = 0xc000_0095;
+const BREAKPOINT: u32 = 0x8000_0003;
+const SINGLE_STEP: u32 = 0x8000_0004;
 
 pub(crate) unsafe fn enumerate_exports_in_range(
     start_address: u64,

@@ -219,6 +219,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/copy-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => copy_recovers_from_exception_in_live_guest.begin (h as Harness,
+				win9x_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/agent-recovers-from-exception-in-live-guest", () => {
 			var h = new Harness ((h) => agent_recovers_from_exception_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -247,6 +253,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/compiles-c-calling-kernel-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_compiles_c_calling_kernel_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/copy-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => copy_recovers_from_exception_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT")));
 			h.run ();
 		});
 
@@ -400,6 +412,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt64/compiles-c-calling-kernel-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_compiles_c_calling_kernel_in_live_guest.begin (h as Harness, "WINNT64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/copy-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => copy_recovers_from_exception_in_live_guest.begin (h as Harness,
+				winnt_config_from_environment (h as Harness, "WINNT64")));
 			h.run ();
 		});
 
@@ -3876,6 +3894,50 @@ namespace Frida.BareboneTest {
 			if (!said[0].contains ("[\"followed\",true,true]"))
 				printerr ("\nFOLLOWED %s\n", said[0]);
 			assert_true (said[0].contains ("[\"followed\",true,true]"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void copy_recovers_from_exception_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				let caught = 'no';
+				try {
+					ptr('0xfffff000').readU32();
+				} catch (e) {
+					caught = 'yes';
+				}
+				send({ caught: caught });
+			""", null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			if (!said[0].contains ("\"caught\":\"yes\""))
+				printerr ("\nCAUGHT %s\n", said[0]);
+			assert_true (said[0].contains ("\"caught\":\"yes\""));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

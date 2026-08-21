@@ -1777,7 +1777,7 @@ pub fn thread_cpu_state(thread: u32) -> Option<CpuState> {
     }
 }
 
-unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     let field = |offset: usize| unsafe { base.add(offset).cast::<u32>().read_unaligned() };
 
     CpuState {
@@ -1793,7 +1793,7 @@ unsafe fn cpu_state_of(base: *const u8) -> CpuState {
     }
 }
 
-unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
+pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
     let mut field = |offset: usize, value: u32| unsafe {
         base.add(offset).cast::<u32>().write_unaligned(value)
     };

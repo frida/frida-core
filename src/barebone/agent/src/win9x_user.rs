@@ -23,6 +23,7 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
     resolve_user_api();
     unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
+    hear_about_faults();
 
     let sleep: unsafe extern "stdcall" fn(u32) =
         unsafe { core::mem::transmute(user_api().sleep as usize) };
@@ -44,6 +45,7 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
     // arena.
     let exit_thread: unsafe extern "stdcall" fn(u32) -> ! =
         unsafe { core::mem::transmute(user_api().exit_thread as usize) };
+    stop_hearing_about_faults();
     unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
     unsafe { exit_thread(0) };
 }
@@ -68,6 +70,60 @@ pub static USER: Primitives = Primitives {
     find_thread,
     modify_thread,
 };
+
+fn hear_about_faults() {
+    let install: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().set_unhandled_exception_filter as usize) };
+
+    unsafe { PREVIOUS_FILTER = install(on_fault as u32) };
+}
+
+fn stop_hearing_about_faults() {
+    let install: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().set_unhandled_exception_filter as usize) };
+
+    unsafe { install(PREVIOUS_FILTER) };
+}
+
+unsafe extern "stdcall" fn on_fault(pointers: *const u32) -> i32 {
+    let record = unsafe { pointers.read() } as *const u32;
+    let context = unsafe { pointers.add(1).read() } as *mut u8;
+
+    let code = unsafe { record.read() };
+    let at = unsafe { record.add(RECORD_ADDRESS).read() };
+    let accessed = unsafe { record.add(RECORD_ACCESSED).read() };
+
+    let state = unsafe { crate::win9x::cpu_state_of(context) };
+    let mut cpu_context = crate::gum_windows::cpu_context_from(&state);
+
+    let handled = unsafe {
+        crate::bindings::gum_barebone_handle_exception(crate::gum_windows::fault_type_of(code),
+            at as *mut c_void, accessed as *mut c_void, &mut cpu_context)
+    };
+    if handled == 0 {
+        let previous = unsafe { PREVIOUS_FILTER };
+        if previous == 0 {
+            return SEARCH_ON;
+        }
+
+        let chain: unsafe extern "stdcall" fn(*const u32) -> i32 =
+            unsafe { core::mem::transmute(previous as usize) };
+
+        return unsafe { chain(pointers) };
+    }
+
+    let state = crate::gum_windows::cpu_state_from(&cpu_context);
+    unsafe { crate::win9x::write_cpu_state(context, &state) };
+
+    CARRY_ON
+}
+
+static mut PREVIOUS_FILTER: u32 = 0;
+
+const CARRY_ON: i32 = -1;
+const SEARCH_ON: i32 = 0;
+const RECORD_ADDRESS: usize = 3;
+const RECORD_ACCESSED: usize = 6;
 
 fn copy_has_work() -> bool {
     let arena = unsafe { ARENA };
@@ -446,6 +502,7 @@ fn resolve_user_api() {
             find_first_file: kernel32_export(b"FindFirstFileA"),
             find_next_file: kernel32_export(b"FindNextFileA"),
             find_close: kernel32_export(b"FindClose"),
+            set_unhandled_exception_filter: kernel32_export(b"SetUnhandledExceptionFilter"),
         };
     }
 }
@@ -483,6 +540,7 @@ struct UserApi {
     find_first_file: u32,
     find_next_file: u32,
     find_close: u32,
+    set_unhandled_exception_filter: u32,
 }
 
 static mut USER_API: UserApi = UserApi {
@@ -514,6 +572,7 @@ static mut USER_API: UserApi = UserApi {
     find_first_file: 0,
     find_next_file: 0,
     find_close: 0,
+    set_unhandled_exception_filter: 0,
 };
 
 fn slot_for_token(token: *const u8) -> usize {
