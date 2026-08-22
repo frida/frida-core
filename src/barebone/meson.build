@@ -20,6 +20,7 @@ backend_sources += files(
   'pe.vala',
   'linux.vala',
   'win9x.vala',
+  'xnu.vala',
   'win9x-service-names.vala',
   'winnt.vala',
   'x86-paging.vala',

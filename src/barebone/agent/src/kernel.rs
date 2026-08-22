@@ -71,3 +71,22 @@ pub struct CpuState {
     pub ecx: u32,
     pub eax: u32,
 }
+
+// What the host looked up before the agent started, for the kernels that say nothing about
+// their own layout and leave nowhere for the agent to read it.
+pub fn take_note_of(what: &str, number: u64) {
+    unsafe { noted_numbers() }.push((alloc::string::String::from(what), number));
+}
+
+pub fn noted(what: &str) -> Option<u64> {
+    unsafe { noted_numbers() }
+        .iter()
+        .find(|(name, _)| name == what)
+        .map(|(_, number)| *number)
+}
+
+unsafe fn noted_numbers() -> &'static mut alloc::vec::Vec<(alloc::string::String, u64)> {
+    unsafe { (&raw mut NOTED).as_mut().unwrap() }
+}
+
+static mut NOTED: alloc::vec::Vec<(alloc::string::String, u64)> = alloc::vec::Vec::new();

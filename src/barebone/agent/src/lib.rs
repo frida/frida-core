@@ -326,7 +326,7 @@ mod entrypoint_blob {
         };
 
         unsafe {
-            let type_string = c"((tt)yvta(sstttt)ay)".as_ptr() as *const gchar;
+            let type_string = c"((tt)yvta(sstttt)aya(st))".as_ptr() as *const gchar;
             let variant_type = g_variant_type_new(type_string);
 
             let root_variant = g_variant_new_from_data(
@@ -417,6 +417,21 @@ mod entrypoint_blob {
                 symbol_data_size,
             ));
 
+            let told_variant = g_variant_get_child_value(root_variant, 6);
+            let mut told: GVariantIter = core::mem::zeroed();
+            g_variant_iter_init(&mut told as *mut GVariantIter, told_variant);
+            let mut what: *mut gchar = ptr::null_mut();
+            let mut number: u64 = 0;
+            while g_variant_iter_next(
+                &mut told as *mut GVariantIter,
+                c"(&st)".as_ptr(),
+                &mut what,
+                &mut number,
+            ) != 0
+            {
+                kernel::take_note_of(core::ffi::CStr::from_ptr(what).to_str().unwrap_or(""), number);
+            }
+
             let own_range_variant = g_variant_get_child_value(root_variant, 0);
             let mut own_base: u64 = 0;
             let mut own_size: u64 = 0;
@@ -432,6 +447,7 @@ mod entrypoint_blob {
             };
 
             g_variant_unref(own_range_variant);
+            g_variant_unref(told_variant);
             g_variant_unref(symbol_array_variant);
             g_variant_unref(module_info_variant);
             g_variant_unref(kernel_base_variant);

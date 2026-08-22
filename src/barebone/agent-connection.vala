@@ -212,7 +212,14 @@ namespace Frida.Barebone {
 			if (start_address == 0)
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
-			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)ay)"));
+			XnuLayout? xnu_layout = null;
+			if (kernel_kind == XNU) {
+				SymbolInfo? iterate = symbols["proc_iterate"];
+				xnu_layout = yield collect_xnu_layout (machine,
+					(iterate != null) ? kernel_base + iterate.offset : 0, allocator, cancellable);
+			}
+
+			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)aya(st))"));
 			config_builder.add ("(tt)", base_va, (uint64) elf_allocation.size);
 			config_builder.add_value (transport_tag.get_child_value (0));
 			config_builder.add_value (transport_tag.get_child_value (1));
@@ -237,6 +244,15 @@ namespace Frida.Barebone {
 
 			config_builder.add_value (Variant.new_from_data (new VariantType ("ay"), symbol_data.get_data (), true,
 				symbol_data));
+
+			// What a kernel does not say about itself and the agent cannot work out from where it
+			// runs: the host looks once and passes on what it found.
+			config_builder.open (new VariantType ("a(st)"));
+			if (xnu_layout != null) {
+				config_builder.add ("(st)", "process.number", xnu_layout.number_offset);
+				config_builder.add ("(st)", "process.name", xnu_layout.name_offset);
+			}
+			config_builder.close ();
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
