@@ -91,6 +91,13 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/stalks-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => stalks_a_thread_in_live_guest.begin (
+				h as SlowHarness, win9x_config_from_environment (h as SlowHarness),
+				"KERNEL32.DLL"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/follows-a-thread-in-live-guest", () => {
 			var h = new SlowHarness ((h) => follows_a_thread_in_live_guest.begin (h as SlowHarness,
 				win9x_config_from_environment (h as SlowHarness), "KERNEL32.DLL"));
@@ -3938,6 +3945,110 @@ namespace Frida.BareboneTest {
 			if (!said[0].contains ("\"caught\":\"yes\""))
 				printerr ("\nCAUGHT %s\n", said[0]);
 			assert_true (said[0].contains ("\"caught\":\"yes\""));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void stalks_a_thread_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config, string library) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const lib = Process.getModuleByName('LIBRARY');
+				const fn = (name, ret, args) =>
+					new NativeFunction(lib.getExportByName(name), ret, args,
+						Process.pointerSize === 4 ? { abi: 'stdcall' } : {});
+				const createThread = fn('CreateThread', 'pointer',
+					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
+				const terminateThread = fn('TerminateThread', 'int', ['pointer', 'uint']);
+				const closeHandle = fn('CloseHandle', 'int', ['pointer']);
+
+				const flag = Memory.alloc(4);
+				const body = Memory.alloc(Process.pageSize);
+				Memory.protect(body, Process.pageSize, 'rwx');
+
+				const little = value => [value & 0xff, (value >>> 8) & 0xff,
+					(value >>> 16) & 0xff, (value >>> 24) & 0xff];
+				Memory.patchCode(body, 32, code => {
+					code.writeByteArray([0xb9, ...little(0x100000), 0x49, 0x75, 0xfd,
+						0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xef,
+						0x33, 0xc0, 0xc2, 0x04, 0x00]);
+				});
+
+				const out = Memory.alloc(4);
+				const handle = createThread(NULL, 0, body, NULL, 0, out);
+				const id = out.readU32();
+				const page = body.and(ptr(Process.pageSize - 1).not());
+
+				recv('follow', () => {
+					Stalker.follow(id);
+					send('followed');
+				});
+
+				recv('poll', () => {
+					const seen = Process.findThreadById(id);
+					const at = (seen === null) ? NULL : seen.context.pc;
+					send(['stalked', seen !== null,
+						at.compare(page) < 0 || at.compare(page.add(Process.pageSize)) >= 0,
+						at.toString()]);
+				});
+
+				recv('stop', () => {
+					Stalker.unfollow(id);
+					flag.writeU32(1);
+					terminateThread(handle, 0);
+					closeHandle(handle);
+					send('stopped');
+				});
+
+				send('ready');
+			""".replace ("LIBRARY", library), null, null);
+
+			var said = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				said.add (json);
+			});
+			yield script.load (null);
+			while (said.is_empty)
+				yield h.process_events ();
+
+			script.post ("""{"type":"follow"}""");
+			while (said.size < 2)
+				yield h.process_events ();
+
+			var settle = new TimeoutSource.seconds (5);
+			settle.set_callback (stalks_a_thread_in_live_guest.callback);
+			settle.attach (MainContext.get_thread_default ());
+			yield;
+			settle.destroy ();
+
+			script.post ("""{"type":"poll"}""");
+			while (said.size < 3)
+				yield h.process_events ();
+
+			script.post ("""{"type":"stop"}""");
+			while (said.size < 4)
+				yield h.process_events ();
+
+			// The thread runs code the Stalker wrote, thus its pc left the page of the body.
+			if (!said[2].contains ("[\"stalked\",true,true,"))
+				printerr ("\nSTALKED %s\n", said[2]);
+			assert_true (said[2].contains ("[\"stalked\",true,true,"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

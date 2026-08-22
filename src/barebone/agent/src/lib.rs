@@ -710,6 +710,17 @@ unsafe extern "C" {
     static _agent_relocs_end: u8;
 }
 
+// A copy runs at a base of its own, thus the half that placed it there says where. The
+// Stalker keeps out of this range: it must not instrument the runtime it runs on.
+pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
+    unsafe {
+        OWN_RANGE = GumMemoryRange {
+            base_address: base,
+            size: size as gsize,
+        };
+    }
+}
+
 pub(crate) fn own_range_contains(address: u32) -> bool {
     let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
     let base = range.base_address as u32;

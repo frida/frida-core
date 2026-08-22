@@ -21,6 +21,10 @@ static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
 pub extern "C" fn frida_win9x_user_main(arena: u32) {
     select_user();
     resolve_user_api();
+    unsafe {
+        crate::set_own_range(((arena + IMAGE_BASE) as *const u32).read_volatile() as u64,
+            ((arena + IMAGE_SIZE) as *const u32).read_volatile() as u64)
+    };
     unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
     hear_about_faults();

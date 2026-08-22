@@ -212,6 +212,9 @@ pub fn inject_agent(pid: u32) -> u32 {
     }
 
     unsafe {
+        ((injection.arena + IMAGE_BASE) as *mut u32).write_volatile(image_base);
+        ((injection.arena + IMAGE_SIZE) as *mut u32)
+            .write_volatile((*core::ptr::addr_of!(crate::OWN_RANGE)).size as u32);
         ((injection.arena + MODULE_LIST) as *mut u32)
             .write_volatile(publish_module_list(process))
     };
@@ -1522,6 +1525,8 @@ pub(crate) const PATCH_THREAD: u32 = 0xac;
 pub(crate) const GONE_HEAD: u32 = 0xb0;
 pub(crate) const GONE_TAIL: u32 = 0xb4;
 pub(crate) const GONE_SLOTS: u32 = 0xb8;
+pub(crate) const IMAGE_BASE: u32 = 0xd8;
+pub(crate) const IMAGE_SIZE: u32 = 0xdc;
 pub(crate) const GONE_COUNT: u32 = 8;
 pub(crate) const PATCH_ASKED: u32 = 1;
 pub(crate) const HOOK_ASKED: u32 = 3;

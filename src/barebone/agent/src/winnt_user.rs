@@ -73,6 +73,12 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
     }
     resolve_user_api();
 
+    unsafe {
+        crate::set_own_range(
+            ((arena + crate::winnt::IMAGE_BASE as usize) as *const u64).read_volatile(),
+            ((arena + crate::winnt::IMAGE_SIZE as usize) as *const u64).read_volatile())
+    };
+
     unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
     hear_about_faults();

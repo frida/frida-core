@@ -1333,6 +1333,10 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                     (arena.add(TARGET_WAKE_HANDLE as usize) as *mut u64)
                         .write(open_event_in_current_process(wake) as u64);
                     (arena.add(LOADER_LIBRARY as usize) as *mut u64).write(library);
+                    (arena.add(IMAGE_BASE as usize) as *mut u64)
+                        .write(placed.seen_by_process);
+                    (arena.add(IMAGE_SIZE as usize) as *mut u64)
+                        .write((*core::ptr::addr_of!(crate::OWN_RANGE)).size as u64);
                 }
             }
         }
@@ -2279,6 +2283,8 @@ pub(crate) const AGENT_WAKE_HANDLE: u64 = 0x08;
 pub(crate) const TARGET_WAKE_HANDLE: u64 = 0x10;
 
 pub(crate) const COPY_LEFT: u64 = 0x48;
+pub(crate) const IMAGE_BASE: u64 = 0x50;
+pub(crate) const IMAGE_SIZE: u64 = 0x58;
 pub(crate) const OBSERVED_THREAD: u64 = 0x40;
 pub(crate) const LOADER_LIBRARY: u64 = 0x44;
 
