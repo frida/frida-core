@@ -2302,7 +2302,7 @@ pub(crate) const COPY_LEFT: u64 = 0x48;
 pub(crate) const IMAGE_BASE: u64 = 0x50;
 pub(crate) const IMAGE_SIZE: u64 = 0x58;
 pub(crate) const OBSERVED_THREAD: u64 = 0x40;
-pub(crate) const LOADER_LIBRARY: u64 = 0x44;
+pub(crate) const LOADER_LIBRARY: u64 = 0x60;
 
 pub(crate) const REGISTER_PROCESS: u64 = 0x18;
 pub(crate) const REGISTER_THREAD: u64 = 0x1c;
