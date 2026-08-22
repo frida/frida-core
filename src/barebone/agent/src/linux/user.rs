@@ -19,6 +19,7 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 
     super::facade::select_user();
     unsafe { ARENA = begins };
+    stand_on_a_thread_pointer();
     install_fault_reporter();
 
     unsafe { crate::init_gum_without_exceptor() };
@@ -158,12 +159,30 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     unsafe { start_thread(top, carried as usize) }
 }
 
+// A task the kernel half makes has no thread pointer, and code of the process reads what it
+// keeps there: musl's errno lives below it, and reading that at zero is what kills the copy the
+// moment it calls into the C library it was placed beside.
+#[cfg(target_arch = "aarch64")]
+fn stand_on_a_thread_pointer() {
+    let block = map_writable(THREAD_POINTER_BLOCK);
+    if block.is_null() {
+        return;
+    }
+
+    let pointer = unsafe { block.add(THREAD_POINTER_BLOCK / 2) } as usize;
+    unsafe { core::arch::asm!("msr tpidr_el0, {}", in(reg) pointer, options(nomem, nostack)) };
+}
+
+const THREAD_POINTER_BLOCK: usize = 8192;
+
 struct Carried {
     entry: ThreadEntry,
     parameter: *mut c_void,
 }
 
 unsafe extern "C" fn enter_thread(carried: usize) -> ! {
+    stand_on_a_thread_pointer();
+
     let carried = carried as *mut Carried;
     unsafe {
         let Carried { entry, parameter } = carried.read();
@@ -353,6 +372,7 @@ unsafe extern "C" fn report_fault(signal: usize, about: usize, running: usize) {
             FAULT_LR,
             ((running + RUNNING_STATE + STATE_LR) as *const usize).read() as u64,
         );
+
     }
     arena.tell_the_kernel_half();
 

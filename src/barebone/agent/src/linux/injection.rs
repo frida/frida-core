@@ -336,14 +336,15 @@ pub fn report_what_the_copies_hit() {
         } else {
             let kind = read_address(placed.arena + super::arena::FAULT_KIND);
             native::log(&alloc::format!(
-                "copy in {} died on signal {} ({}) at {:#x}, pc {:#x}, lr {:#x}, image at {:#x}\n",
+                "copy in {} died on signal {} ({}) at {:#x}, pc {:#x}, lr {:#x}, image at {:#x}, {}\n",
                 pid_reported_by(placed),
                 kind as u32,
                 (kind >> 32) as u32,
                 read_address(placed.arena + super::arena::FAULT_ADDRESS),
                 read_address(placed.arena + super::arena::FAULT_PC),
                 read_address(placed.arena + super::arena::FAULT_LR),
-                placed.base
+                placed.base,
+                said
             ));
         }
     }
