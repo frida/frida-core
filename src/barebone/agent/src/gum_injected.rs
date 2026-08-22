@@ -292,6 +292,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     #[cfg(feature = "linux-injected")]
     if kernel::in_copy() {
         kernel::register_what_the_copy_lives_among(registry);
+        kernel::watch_the_loader();
         return;
     }
 
