@@ -811,8 +811,8 @@ namespace Frida.Barebone {
 
 		public async void post_script_message (AgentScriptId script_id, string message, Bytes? data, uint destination,
 				Cancellable? cancellable) throws Error, IOError {
-			var payload = new Variant ("(us)", script_id.handle, message);
-			// TODO: Include data.
+			var payload = new Variant ("(us@ay)", script_id.handle, message,
+				new Variant.from_bytes (new VariantType ("ay"), data ?? new Bytes (new uint8[0]), true));
 			yield execute_command (Command.POST_SCRIPT_MESSAGE, payload, cancellable, destination);
 		}
 
@@ -906,14 +906,19 @@ namespace Frida.Barebone {
 
 						spawn_added (pid, command_line, destination);
 					} else if (command_code == Command.SCRIPT_MESSAGE) {
-						if (!payload.check_format_string ("(us)", false))
+						if (!payload.check_format_string ("(usay)", false))
 							throw new Error.PROTOCOL ("Invalid script message payload format");
 
 						uint32 script_handle;
 						unowned string json;
-						payload.get ("(u&s)", out script_handle, out json);
+						Variant blob;
+						payload.get ("(u&s@ay)", out script_handle, out json, out blob);
 
-						script_message (destination, AgentScriptId (script_handle), json, null);
+						Bytes? data = null;
+						if (blob.get_size () != 0)
+							data = blob.get_data_as_bytes ();
+
+						script_message (destination, AgentScriptId (script_handle), json, data);
 					} else if (command_code == Command.REMAP_WRITABLE_PAGES) {
 						Variant result;
 						try {

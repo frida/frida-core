@@ -36,7 +36,8 @@ use bindings::{
     g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
     g_variant_builder_add, g_variant_builder_add_value, g_variant_builder_close,
     g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
-    g_variant_new_fixed_array,
+    g_variant_new_fixed_array, g_variant_get_fixed_array, g_bytes_new, g_bytes_get_data,
+    g_bytes_unref, GVariantType,
     g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create,
     gum_script_backend_create_finish, gum_script_backend_get_scheduler,
     gum_script_backend_obtain_qjs, gum_script_get_stalker, gum_script_load,
@@ -1717,20 +1718,34 @@ unsafe fn exclude_own_range_from_stalker(script: *mut GumScript) {
     }
 }
 
+const BYTE_TYPE: *const GVariantType = c"y".as_ptr() as *const GVariantType;
+
 unsafe extern "C" fn frida_message_handler(
     message: *const gchar,
-    _data: *mut GBytes,
+    data: *mut GBytes,
     user_data: gpointer,
 ) {
     unsafe {
         let script_id = *(user_data as *const u32);
+
+        let mut size: gsize = 0;
+        let bytes = if data.is_null() {
+            ptr::null()
+        } else {
+            g_bytes_get_data(data, &mut size)
+        };
 
         let message_variant = g_variant_new(
             c"(yquv)".as_ptr(),
             FridaCommand::ScriptMessage as u8 as u32,
             0u32,
             source_process_id(),
-            g_variant_new(c"(us)".as_ptr(), script_id, message),
+            g_variant_new(
+                c"(us@ay)".as_ptr(),
+                script_id,
+                message,
+                g_variant_new_fixed_array(BYTE_TYPE, bytes as *const c_void, size, 1),
+            ),
         );
 
         if let Some(serialized) = serialize_message(message_variant) {
@@ -1846,23 +1861,40 @@ unsafe extern "C" fn on_script_destroyed(
 
 fn handle_post_script_message(payload_variant: *mut GVariant) -> HandlerResponse {
     unsafe {
-        if g_variant_check_format_string(payload_variant, c"(us)".as_ptr(), 0) == 0 {
-            return HandlerResponse::error("Invalid payload format: expected (uint32, string)");
+        if g_variant_check_format_string(payload_variant, c"(usay)".as_ptr(), 0) == 0 {
+            return HandlerResponse::error(
+                "Invalid payload format: expected (uint32, string, byte array)");
         }
         let mut script_id: u32 = 0;
         let mut message: *const gchar = ptr::null();
+        let mut blob: *mut GVariant = ptr::null_mut();
         g_variant_get(
             payload_variant,
-            c"(u&s)".as_ptr(),
+            c"(u&s@ay)".as_ptr(),
             &mut script_id,
             &mut message,
+            &mut blob,
         );
 
         let Some(script) = get_script_by_id(script_id) else {
+            g_variant_unref(blob);
             return HandlerResponse::error(&format!("Script with ID {} not found", script_id));
         };
 
-        gum_script_post(script, message, ptr::null_mut());
+        let mut size: gsize = 0;
+        let bytes = g_variant_get_fixed_array(blob, &mut size, 1) as *const u8;
+        let data = if size != 0 {
+            g_bytes_new(bytes as *const c_void, size)
+        } else {
+            ptr::null_mut()
+        };
+
+        gum_script_post(script, message, data);
+
+        if !data.is_null() {
+            g_bytes_unref(data);
+        }
+        g_variant_unref(blob);
 
         HandlerResponse::success_empty()
     }

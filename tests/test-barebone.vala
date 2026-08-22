@@ -91,6 +91,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/moves-a-lot-of-data-in-live-guest", () => {
+			var h = new SlowHarness ((h) => moves_a_lot_of_data_in_live_guest.begin (
+				h as SlowHarness, win9x_config_from_environment (h as SlowHarness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/reports-the-platform-in-live-guest", () => {
 			var h = new SlowHarness ((h) => reports_the_platform_in_live_guest.begin (
 				h as SlowHarness, win9x_config_from_environment (h as SlowHarness), "windows"));
@@ -292,6 +298,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/moves-a-lot-of-data-in-live-guest", () => {
+			var h = new SlowHarness ((h) => moves_a_lot_of_data_in_live_guest.begin (
+				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT")));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/reports-the-platform-in-live-guest", () => {
 			var h = new SlowHarness ((h) => reports_the_platform_in_live_guest.begin (
 				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT"), "windows"));
@@ -404,6 +416,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/moves-a-lot-of-data-in-live-guest", () => {
+			var h = new SlowHarness ((h) => moves_a_lot_of_data_in_live_guest.begin (
+				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT64")));
 			h.run ();
 		});
 
@@ -4151,6 +4169,91 @@ namespace Frida.BareboneTest {
 		assert_true (said[0].contains ("\"" + platform + "\""));
 
 		yield session.detach (null);
+	}
+
+	private async void moves_a_lot_of_data_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			uint pid = yield find_explorer (device);
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				rpc.exports = {
+					take(expected, data) {
+						if (data === null || data === undefined)
+							return [-1, 0, 0, 0];
+						const bytes = new Uint8Array(data);
+						const last = bytes.length - 1;
+						return [bytes.length, bytes[0], bytes[last], bytes[last >> 1]];
+					}
+				};
+			""", null, null);
+
+			var peer = new ScriptPeer (script);
+			script.message.connect ((json, data) => {
+				peer.client.try_handle_message (json);
+			});
+			yield script.load (null);
+
+			uint chunk_size = CHUNK_SIZE;
+			string? wanted = Environment.get_variable ("FRIDA_TEST_CHUNK_SIZE");
+			if (wanted != null)
+				chunk_size = uint.parse (wanted);
+			var chunk = new uint8[chunk_size];
+			for (uint i = 0; i != chunk.length; i++)
+				chunk[i] = (uint8) i;
+			var bytes = new Bytes (chunk);
+
+			var size = new Json.Node.alloc ().init_int (chunk_size);
+			var timer = new Timer ();
+			for (uint round = 0; round != CHUNK_COUNT; round++) {
+				var answer = yield peer.client.call ("take", new Json.Node[] { size }, bytes, null);
+
+				var seen = answer.get_array ();
+				assert_true (seen.get_int_element (0) == chunk_size);
+				assert_true (seen.get_int_element (1) == chunk[0]);
+				assert_true (seen.get_int_element (2) == chunk[chunk_size - 1]);
+				assert_true (seen.get_int_element (3) == chunk[(chunk_size - 1) >> 1]);
+			}
+			double spent = timer.elapsed ();
+
+			printerr ("\n%s: %u chunks of %u KiB in %.1f s, %.2f MiB/s\n", config.kernel.to_string (),
+				CHUNK_COUNT, chunk_size / 1024, spent,
+				(CHUNK_COUNT * (double) chunk_size) / (1024.0 * 1024.0) / spent);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private const uint CHUNK_SIZE = 4 * 1024 * 1024;
+	private const uint CHUNK_COUNT = 4;
+
+	private sealed class ScriptPeer : Object, RpcPeer {
+		public RpcClient client;
+
+		private weak Script script;
+
+		public ScriptPeer (Script script) {
+			this.script = script;
+			client = new RpcClient (this);
+		}
+
+		public async void post_rpc_message (string json, Bytes? data, Cancellable? cancellable)
+				throws Error, IOError {
+			script.post (json, data);
+		}
 	}
 
 	private async uint find_explorer (Device device) throws GLib.Error {
