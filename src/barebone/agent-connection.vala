@@ -532,14 +532,32 @@ namespace Frida.Barebone {
 			}
 		}
 
+		public bool spawns_by_itself {
+			get {
+				return kernel_kind == LINUX;
+			}
+		}
+
 		public async void gate_spawns (bool on, Cancellable? cancellable) throws Error, IOError {
 			yield execute_command (Command.GATE_SPAWNS, new Variant.boolean (on), cancellable);
 		}
 
 		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
 				throws Error, IOError {
-			var response = yield execute_command (Command.SPAWN_PROCESS, new Variant.string (command_line),
-				cancellable, helper_pid);
+			return yield ask_for_a_spawn (helper_pid, new Variant.string (command_line), cancellable);
+		}
+
+		// A kernel that starts programs itself takes the words as they are, since a line to be
+		// split again is what Windows asks for and nothing else does.
+		public async uint spawn_program (string[] words, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield ask_for_a_spawn (0, new Variant.strv (words), cancellable);
+		}
+
+		private async uint ask_for_a_spawn (uint helper_pid, Variant payload, Cancellable? cancellable)
+				throws Error, IOError {
+			var response = yield execute_command (Command.SPAWN_PROCESS, payload, cancellable,
+				helper_pid);
 			if (!response.is_of_type (VariantType.UINT32))
 				throw new Error.PROTOCOL ("Invalid spawn_process response format");
 

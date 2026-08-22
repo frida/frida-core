@@ -37,6 +37,10 @@ pub fn install_fault_reporter() {}
 
 pub fn release_fault_reporter() {}
 
+pub fn send_signal(signal: c_int, task: usize) {
+    unsafe { _send_sig(signal, task as *mut c_void, 1) };
+}
+
 pub fn release_interrupt() {
     let Some(interrupt) = (unsafe { (&raw mut INTERRUPT).as_mut().unwrap().take() }) else {
         return;
@@ -480,6 +484,7 @@ unsafe extern "C" {
     static _schedule: unsafe extern "C" fn();
     static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
     static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec64);
+    static _send_sig: unsafe extern "C" fn(c_int, *mut c_void, c_int) -> c_int;
     static _free_irq: unsafe extern "C" fn(u32, *mut c_void) -> *mut c_void;
     static _request_threaded_irq: unsafe extern "C" fn(
         u32,

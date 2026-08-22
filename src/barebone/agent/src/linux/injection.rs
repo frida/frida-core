@@ -384,6 +384,30 @@ fn watch_the_threads() {
     }
 }
 
+pub fn hold_what_is_spawned() {
+    if HOLDING.swap(true, core::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+
+    unsafe {
+        _tracepoint_probe_register(___tracepoint_sched_process_exec,
+            a_process_execed as *mut c_void, ptr::null_mut());
+    }
+}
+
+unsafe extern "C" fn a_process_execed(_data: *mut c_void, task: *mut c_void, _was: c_int,
+        _program: *mut c_void) {
+    if !super::spawn::holds_this_one(task as usize) {
+        return;
+    }
+
+    native::send_signal(STOP, task as usize);
+}
+
+static HOLDING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+const STOP: c_int = 19;
+
 unsafe extern "C" fn a_thread_appeared(_data: *mut c_void, _parent: *mut c_void,
         child: *mut c_void) {
     note_a_thread(child as usize, false);
@@ -417,7 +441,7 @@ fn group_of(task: usize) -> Option<u32> {
     Some(unsafe { ((task + at) as *const u32).read() })
 }
 
-fn id_of(task: usize) -> Option<u32> {
+pub fn id_of(task: usize) -> Option<u32> {
     let at = field_offset("task_struct", "pid")?;
 
     Some(unsafe { ((task + at) as *const u32).read() })
@@ -562,6 +586,7 @@ unsafe extern "C" {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
     static ___tracepoint_sched_process_fork: *mut c_void;
     static ___tracepoint_sched_process_exit: *mut c_void;
+    static ___tracepoint_sched_process_exec: *mut c_void;
     static _vunmap: unsafe extern "C" fn(*mut c_void);
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _down_read: unsafe extern "C" fn(*mut c_void);

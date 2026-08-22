@@ -597,6 +597,9 @@ namespace Frida {
 			if (connection == null)
 				throw_not_supported ();
 
+			if (connection.spawns_by_itself)
+				return yield connection.spawn_program (words_of (program, options), cancellable);
+
 			uint helper = yield acquire_spawn_helper (cancellable);
 
 			return yield connection.spawn_process (helper,
@@ -608,6 +611,15 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			if (connection.spawns_by_itself) {
+				pending_spawn.unset (pid);
+				watchdog.cancel (pid);
+
+				yield connection.resume_process (0, pid, cancellable);
+
+				return;
+			}
+
 			uint holder = spawn_helper_pid;
 
 			HeldSpawn? held = pending_spawn[pid];
@@ -777,7 +789,7 @@ namespace Frida {
 		}
 
 		private async string file_of (string program, Cancellable? cancellable) throws Error, IOError {
-			if (program.contains ("\\") || program.contains (":"))
+			if (connection.spawns_by_itself || program.contains ("\\") || program.contains (":"))
 				return program;
 
 			foreach (var app in yield list_applications (cancellable)) {
@@ -786,6 +798,18 @@ namespace Frida {
 			}
 
 			throw new Error.INVALID_ARGUMENT ("Found no program named %s", program);
+		}
+
+		private static string[] words_of (string program, HostSpawnOptions options) {
+			if (!options.has_argv)
+				return new string[] { program };
+
+			var words = new string[options.argv.length];
+			words[0] = program;
+			for (int i = 1; i != options.argv.length; i++)
+				words[i] = options.argv[i];
+
+			return words;
 		}
 
 		private static string command_line_of (string program, HostSpawnOptions options) {

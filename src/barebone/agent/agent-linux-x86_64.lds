@@ -27,8 +27,12 @@ SECTIONS {
     _tracepoint_probe_register = .; . += 8;
     _tracepoint_probe_unregister = .; . += 8;
     _free_irq = .; . += 8;
+    _send_sig = .; . += 8;
+    _call_usermodehelper_setup = .; . += 8;
+    _call_usermodehelper_exec = .; . += 8;
     ___tracepoint_sched_process_fork = .; . += 8;
     ___tracepoint_sched_process_exit = .; . += 8;
+    ___tracepoint_sched_process_exec = .; . += 8;
     _vunmap = .; . += 8;
     ___arch_copy_to_user = .; . += 8;
     ___arch_copy_from_user = .; . += 8;

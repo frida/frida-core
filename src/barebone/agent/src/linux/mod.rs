@@ -26,6 +26,8 @@ mod native;
 #[cfg(feature = "linux-injected")]
 mod relay;
 #[cfg(feature = "linux-injected")]
+mod spawn;
+#[cfg(feature = "linux-injected")]
 mod symbols;
 #[cfg(feature = "linux-injected")]
 mod threads;
@@ -52,6 +54,8 @@ pub use self::native::{
 pub use self::mapped::*;
 #[cfg(feature = "linux-injected")]
 pub use self::processes::*;
+#[cfg(feature = "linux-injected")]
+pub use self::spawn::*;
 #[cfg(feature = "linux-injected")]
 pub use self::symbols::*;
 #[cfg(feature = "linux-injected")]

@@ -1117,9 +1117,9 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PlaceAgentInProcess => Some(handle_place_agent_in_process(payload_variant)),
             #[cfg(feature = "winnt")]
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::Stop => Some(handle_stop()),
@@ -1575,6 +1575,26 @@ fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
     }
 }
 
+#[cfg(feature = "linux-injected")]
+fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
+    unsafe {
+        let mut words: Vec<&str> = Vec::new();
+        for index in 0..crate::bindings::g_variant_n_children(payload) {
+            let word = crate::bindings::g_variant_get_child_value(payload, index);
+            let said = core::ffi::CStr::from_ptr(g_variant_get_string(word, ptr::null_mut()));
+            words.push(said.to_str().unwrap_or(""));
+            g_variant_unref(word);
+        }
+
+        let pid = kernel::spawn_process(&words);
+        if pid == 0 {
+            return HandlerResponse::error("Unable to spawn");
+        }
+
+        HandlerResponse::success(g_variant_new_uint32(pid))
+    }
+}
+
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
@@ -1606,7 +1626,7 @@ fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn handle_resume_process(payload: *mut GVariant) -> HandlerResponse {
     let resumed = unsafe { kernel::resume_process(g_variant_get_uint32(payload)) };
     if !resumed {
