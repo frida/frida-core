@@ -19,6 +19,11 @@ use core::ffi::CStr;
 use core::ptr;
 
 #[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
+    c"linux".as_ptr() as *const crate::bindings::gchar
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     _GumRwxSupport_GUM_RWX_NONE
 }

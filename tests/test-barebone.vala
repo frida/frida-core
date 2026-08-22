@@ -91,6 +91,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Win9x/reports-the-platform-in-live-guest", () => {
+			var h = new SlowHarness ((h) => reports_the_platform_in_live_guest.begin (
+				h as SlowHarness, win9x_config_from_environment (h as SlowHarness), "windows"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Win9x/stalks-a-thread-in-live-guest", () => {
 			var h = new SlowHarness ((h) => stalks_a_thread_in_live_guest.begin (
 				h as SlowHarness, win9x_config_from_environment (h as SlowHarness),
@@ -286,6 +292,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/reports-the-platform-in-live-guest", () => {
+			var h = new SlowHarness ((h) => reports_the_platform_in_live_guest.begin (
+				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT"), "windows"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/stalks-a-thread-in-live-guest", () => {
 			var h = new SlowHarness ((h) => stalks_a_thread_in_live_guest.begin (h as SlowHarness,
 				winnt_config_from_environment (h as SlowHarness, "WINNT"), "kernel32.dll"));
@@ -392,6 +404,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/reports-the-platform-in-live-guest", () => {
+			var h = new SlowHarness ((h) => reports_the_platform_in_live_guest.begin (
+				h as SlowHarness, winnt_config_from_environment (h as SlowHarness, "WINNT64"), "windows"));
 			h.run ();
 		});
 
@@ -4089,6 +4107,50 @@ namespace Frida.BareboneTest {
 		}
 
 		h.done ();
+	}
+
+	private async void reports_the_platform_in_live_guest (Frida.Test.AsyncHarness h,
+			BareboneConfig? config, string platform) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			yield expect_platform (h, device, 0, platform);
+			yield expect_platform (h, device, yield find_explorer (device), platform);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void expect_platform (Frida.Test.AsyncHarness h, Device device, uint pid,
+			string platform) throws GLib.Error {
+		var session = yield device.attach (pid, null, null);
+		var script = yield session.create_script ("send(Process.platform);", null, null);
+
+		var said = new Gee.ArrayList<string> ();
+		script.message.connect ((json, data) => {
+			said.add (json);
+		});
+		yield script.load (null);
+		while (said.is_empty)
+			yield h.process_events ();
+
+		if (!said[0].contains ("\"" + platform + "\""))
+			printerr ("\nPLATFORM in %u: %s\n", pid, said[0]);
+		assert_true (said[0].contains ("\"" + platform + "\""));
+
+		yield session.detach (null);
 	}
 
 	private async uint find_explorer (Device device) throws GLib.Error {

@@ -50,6 +50,18 @@ const SHADOW_MAGIC: u64 = 0x4644_4f48_5341_4853;
 const SHADOW_HEADER: usize = 24;
 const SHADOW_MIN_ADDRESS: u64 = 0xffff_f000_0000_0000;
 
+#[cfg(feature = "xnu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
+    c"darwin".as_ptr() as *const crate::bindings::gchar
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
+    c"linux".as_ptr() as *const crate::bindings::gchar
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     #[cfg(feature = "linux-injected")]
