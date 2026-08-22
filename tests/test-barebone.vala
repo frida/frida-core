@@ -286,6 +286,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/stalks-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => stalks_a_thread_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT"), "kernel32.dll"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/follows-a-thread-in-live-guest", () => {
 			var h = new SlowHarness ((h) => follows_a_thread_in_live_guest.begin (h as SlowHarness,
 				winnt_config_from_environment (h as SlowHarness, "WINNT"), "kernel32.dll"));
@@ -386,6 +392,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/WinNt/resolves-symbols-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_resolves_symbols_in_live_guest.begin (h as Harness, "WINNT"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt64/stalks-a-thread-in-live-guest", () => {
+			var h = new SlowHarness ((h) => stalks_a_thread_in_live_guest.begin (h as SlowHarness,
+				winnt_config_from_environment (h as SlowHarness, "WINNT64"), "kernel32.dll"));
 			h.run ();
 		});
 
@@ -3983,13 +3995,24 @@ namespace Frida.BareboneTest {
 				Memory.protect(body, Process.pageSize, 'rwx');
 
 				const sleep = lib.getExportByName('Sleep');
-				const call = sleep.sub(body.add(7)).toInt32();
 				const little = value => [value & 0xff, (value >>> 8) & 0xff,
 					(value >>> 16) & 0xff, (value >>> 24) & 0xff];
-				Memory.patchCode(body, 32, code => {
-					code.writeByteArray([0x6a, 0x64, 0xe8, ...little(call),
-						0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xf0,
-						0x33, 0xc0, 0xc2, 0x04, 0x00]);
+				const wide = value => {
+					const bytes = [];
+					for (let i = 0; i !== 8; i++)
+						bytes.push(value.shr(i * 8).and(0xff).toUInt32());
+					return bytes;
+				};
+				Memory.patchCode(body, 64, code => {
+					code.writeByteArray((Process.pointerSize === 4)
+						? [0x6a, 0x64, 0xe8, ...little(sleep.sub(body.add(7)).toInt32()),
+							0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xf0,
+							0x33, 0xc0, 0xc2, 0x04, 0x00]
+						: [0x48, 0x83, 0xec, 0x28, 0xb9, 0x64, 0x00, 0x00, 0x00,
+							0x48, 0xb8, ...wide(sleep), 0xff, 0xd0,
+							0x48, 0x83, 0xc4, 0x28,
+							0x48, 0xb8, ...wide(flag), 0x8b, 0x00, 0x85, 0xc0, 0x74, 0xd7,
+							0x33, 0xc0, 0xc3]);
 				});
 
 				const out = Memory.alloc(4);
