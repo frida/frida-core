@@ -900,7 +900,7 @@ fn kernel_half_has_work() -> bool {
     }
 
     #[cfg(feature = "linux-injected")]
-    if kernel::a_copy_has_something_to_say() {
+    if kernel::a_copy_has_something_to_say() || kernel::a_spawn_is_held() {
         return true;
     }
 
@@ -911,6 +911,12 @@ fn kernel_half_has_work() -> bool {
 
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn serve_the_kernel_half() {
+    #[cfg(feature = "linux-injected")]
+    kernel::tell_of_held_spawns(&mut |id, program| {
+        let said = alloc::ffi::CString::new(program).unwrap();
+        tell_the_host_of_a_spawn(id, said.as_ptr() as *const u8);
+    });
+
     unsafe { transport_get_unchecked().process() };
 
 
@@ -1099,7 +1105,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
-            #[cfg(feature = "win9x")]
+            #[cfg(any(feature = "win9x", feature = "linux-injected"))]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
@@ -1386,14 +1392,16 @@ fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
     into.as_ptr() as *const gchar
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "linux-injected"))]
 fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     kernel::gate_spawns(unsafe { g_variant_get_boolean(payload) } != 0);
+
+
 
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(feature = "win9x")]
+#[cfg(any(feature = "win9x", feature = "linux-injected"))]
 pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     unsafe {
         let message = g_variant_new(

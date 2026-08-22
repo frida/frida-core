@@ -396,12 +396,24 @@ pub fn hold_what_is_spawned() {
 }
 
 unsafe extern "C" fn a_process_execed(_data: *mut c_void, task: *mut c_void, _was: c_int,
-        _program: *mut c_void) {
+        program: *mut c_void) {
     if !super::spawn::holds_this_one(task as usize) {
         return;
     }
 
     native::send_signal(STOP, task as usize);
+
+    let Some(id) = id_of(task as usize) else {
+        return;
+    };
+    let Some(at) = field_offset("linux_binprm", "filename") else {
+        return;
+    };
+    super::spawn::note_a_held_spawn(id, unsafe {
+        ((program as usize + at) as *const *const u8).read()
+    });
+
+    native::wake(task as *const u8);
 }
 
 static HOLDING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

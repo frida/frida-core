@@ -567,7 +567,8 @@ namespace Frida {
 			if (connection == null)
 				throw_not_supported ();
 
-			yield acquire_spawn_helper (cancellable);
+			if (!connection.spawns_by_itself)
+				yield acquire_spawn_helper (cancellable);
 			yield connection.gate_spawns (true, cancellable);
 		}
 

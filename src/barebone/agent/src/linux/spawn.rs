@@ -56,7 +56,18 @@ pub fn resume_process(id: u32) -> bool {
     true
 }
 
+pub fn gate_spawns(on: bool) {
+    GATING.store(on, core::sync::atomic::Ordering::Release);
+    if on {
+        super::injection::hold_what_is_spawned();
+    }
+}
+
 pub fn holds_this_one(task: usize) -> bool {
+    if GATING.load(core::sync::atomic::Ordering::Acquire) {
+        return true;
+    }
+
     let Some(id) = super::injection::id_of(task) else {
         return false;
     };
@@ -65,6 +76,30 @@ pub fn holds_this_one(task: usize) -> bool {
 
     held != 0 && held == id
 }
+
+// A spawn is held in the kernel's own exec path, where telling the host is not this thread's
+// to do; the loop says it once it is back where sending a frame belongs.
+pub fn note_a_held_spawn(id: u32, program: *const u8) {
+    let said = unsafe { core::ffi::CStr::from_ptr(program) };
+    unsafe { held_spawns() }.push((id, said.to_bytes().to_vec()));
+}
+
+pub fn a_spawn_is_held() -> bool {
+    !unsafe { held_spawns() }.is_empty()
+}
+
+pub fn tell_of_held_spawns(say: &mut dyn FnMut(u32, &[u8])) {
+    for (id, program) in core::mem::take(unsafe { held_spawns() }) {
+        say(id, &program);
+    }
+}
+
+unsafe fn held_spawns() -> &'static mut Vec<(u32, Vec<u8>)> {
+    unsafe { (&raw mut HELD_SPAWNS).as_mut().unwrap() }
+}
+
+static mut HELD_SPAWNS: Vec<(u32, Vec<u8>)> = Vec::new();
+static GATING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 unsafe extern "C" fn hold_this_one(info: *mut c_void, _credentials: *mut c_void) -> c_int {
     let Some(at) = field_offset("subprocess_info", "data") else {
