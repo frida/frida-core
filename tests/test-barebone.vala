@@ -3982,30 +3982,34 @@ namespace Frida.BareboneTest {
 				const body = Memory.alloc(Process.pageSize);
 				Memory.protect(body, Process.pageSize, 'rwx');
 
+				const sleep = lib.getExportByName('Sleep');
+				const call = sleep.sub(body.add(7)).toInt32();
 				const little = value => [value & 0xff, (value >>> 8) & 0xff,
 					(value >>> 16) & 0xff, (value >>> 24) & 0xff];
 				Memory.patchCode(body, 32, code => {
-					code.writeByteArray([0xb9, ...little(0x100000), 0x49, 0x75, 0xfd,
-						0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xef,
+					code.writeByteArray([0x6a, 0x64, 0xe8, ...little(call),
+						0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xf0,
 						0x33, 0xc0, 0xc2, 0x04, 0x00]);
 				});
 
 				const out = Memory.alloc(4);
 				const handle = createThread(NULL, 0, body, NULL, 0, out);
 				const id = out.readU32();
-				const page = body.and(ptr(Process.pageSize - 1).not());
 
+				let blocks = 0;
 				recv('follow', () => {
-					Stalker.follow(id);
+					Stalker.exclude(lib);
+					Stalker.follow(id, {
+						events: { block: true },
+						onReceive(events) {
+							blocks += Stalker.parse(events, { annotate: false }).length;
+						}
+					});
 					send('followed');
 				});
 
 				recv('poll', () => {
-					const seen = Process.findThreadById(id);
-					const at = (seen === null) ? NULL : seen.context.pc;
-					send(['stalked', seen !== null,
-						at.compare(page) < 0 || at.compare(page.add(Process.pageSize)) >= 0,
-						at.toString()]);
+					send(['stalked', blocks, Process.findThreadById(id) !== null]);
 				});
 
 				recv('stop', () => {
@@ -4045,10 +4049,10 @@ namespace Frida.BareboneTest {
 			while (said.size < 4)
 				yield h.process_events ();
 
-			// The thread runs code the Stalker wrote, thus its pc left the page of the body.
-			if (!said[2].contains ("[\"stalked\",true,true,"))
+			if (said[2].contains ("[\"stalked\",0,") || !said[2].contains (",true]"))
 				printerr ("\nSTALKED %s\n", said[2]);
-			assert_true (said[2].contains ("[\"stalked\",true,true,"));
+			assert_true (!said[2].contains ("[\"stalked\",0,"));
+			assert_true (said[2].contains (",true]"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
