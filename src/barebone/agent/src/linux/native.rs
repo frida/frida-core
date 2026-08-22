@@ -35,6 +35,28 @@ pub fn run_when_ready(action: fn()) {
 // dump and the backtrace this would otherwise have to reproduce.
 pub fn install_fault_reporter() {}
 
+pub fn take_the_file(descriptor: u32) -> *mut c_void {
+    unsafe { _fget(descriptor) }
+}
+
+pub fn let_the_file_go(file: *mut c_void) {
+    unsafe { super::processes::let_go_of(file) };
+}
+
+pub fn wait_for_a_word(file: *mut c_void) -> bool {
+    let mut byte = 0u8;
+    let mut at = 0i64;
+
+    unsafe { _kernel_read(file, &mut byte, 1, &mut at) == 1 }
+}
+
+pub fn leave_a_word(file: *mut c_void) {
+    let byte = 0u8;
+    let mut at = 0i64;
+
+    unsafe { _kernel_write(file, &byte, 1, &mut at) };
+}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     let trampoline = alloc(size_of::<Trampoline>()) as *mut Trampoline;
     unsafe {
@@ -421,6 +443,9 @@ unsafe extern "C" {
     static _kthread_create_on_node:
         unsafe extern "C" fn(KthreadFn, *mut c_void, c_int, *const c_char) -> *mut c_void;
     static _wake_up_process: unsafe extern "C" fn(*mut c_void) -> c_int;
+    static _fget: unsafe extern "C" fn(c_uint) -> *mut c_void;
+    static _kernel_read: unsafe extern "C" fn(*mut c_void, *mut u8, usize, *mut i64) -> isize;
+    static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize;
     // Allocation profiling renamed the entry points in 6.10; before that the
     // size-plus-flags pair went to __kmalloc.
     static ___kmalloc_noprof: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;

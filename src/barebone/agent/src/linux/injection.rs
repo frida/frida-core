@@ -6,12 +6,17 @@ use alloc::collections::BTreeMap;
 use super::layout::{field_offset, struct_size};
 use super::native;
 use super::processes::task_with_id;
-use super::arena::{HOME, REPORTED, TO_KERNEL, WOKEN};
+use super::arena::{Arena, HOME, REPORTED, WOKEN};
 use super::user::entry_offset;
 
 pub fn inject_into_process(id: u32) -> u32 {
-    if let Some(placed) = unsafe { placements() }.get(&id) {
-        return pid_reported_by(placed);
+    if let Some(placed) = unsafe { placements() }.get_mut(&id) {
+        let home = pid_reported_by(placed);
+        if home != 0 && placed.says.is_null() {
+            take_what_the_copy_opened(placed);
+        }
+
+        return home;
     }
 
     let Some(task) = task_with_id(id) else {
@@ -26,11 +31,30 @@ pub fn inject_into_process(id: u32) -> u32 {
         base: home.base,
         arena: home.arena,
         seen_by_the_copy: home.seen_by_the_copy,
+        says: ptr::null_mut(),
+        hears: ptr::null_mut(),
     };
-    listen_to_the_copy(&placed);
     unsafe { placements() }.insert(id, placed);
 
     0
+}
+
+fn take_what_the_copy_opened(placed: &mut Placement) {
+    let arena = Arena::at(placed.arena);
+
+    placed.says = native::take_the_file(arena.says_through());
+    placed.hears = native::take_the_file(arena.hears_through());
+    listen_to_the_copy(placed.says);
+}
+
+fn listen_to_the_copy(says: *mut c_void) {
+    native::spawn_thread(carry_what_the_copy_says, says);
+}
+
+unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
+    while native::wait_for_a_word(argument) {
+        native::wake(argument as *const u8);
+    }
 }
 
 struct Placement {
@@ -38,6 +62,8 @@ struct Placement {
     base: usize,
     arena: usize,
     seen_by_the_copy: usize,
+    says: *mut c_void,
+    hears: *mut c_void,
 }
 
 fn pid_reported_by(placed: &Placement) -> u32 {
@@ -290,77 +316,70 @@ pub fn tell_the_copy_at(arena: u64) {
     tell_the_copy(id);
 }
 
+pub fn a_copy_has_something_to_say() -> bool {
+    unsafe { placements() }.values().any(|placed| what_it_says(placed).is_some())
+}
+
+pub fn report_what_the_copies_hit() {
+    for placed in unsafe { placements() }.values() {
+        let Some(hit) = what_it_says(placed) else {
+            continue;
+        };
+        bump_to(placed.arena + super::arena::PROGRESS, NOTHING_MORE);
+
+        let arena = Arena::at(placed.arena);
+        let said = arena.said();
+        if hit == super::user::SPOKE {
+            native::log(&alloc::format!("copy in {}: {}\n", pid_reported_by(placed), said));
+        } else if hit == super::user::PANICKED {
+            native::log(&alloc::format!("copy in {} gave up: {}\n", pid_reported_by(placed), said));
+        } else {
+            let kind = read_address(placed.arena + super::arena::FAULT_KIND);
+            native::log(&alloc::format!(
+                "copy in {} died on signal {} ({}) at {:#x}, pc {:#x}, lr {:#x}, image at {:#x}\n",
+                pid_reported_by(placed),
+                kind as u32,
+                (kind >> 32) as u32,
+                read_address(placed.arena + super::arena::FAULT_ADDRESS),
+                read_address(placed.arena + super::arena::FAULT_PC),
+                read_address(placed.arena + super::arena::FAULT_LR),
+                placed.base
+            ));
+        }
+    }
+}
+
+// A copy notes where it is on its way up as well, and those steps are not for reporting.
+fn what_it_says(placed: &Placement) -> Option<u32> {
+    let said = read_word(placed.arena + super::arena::PROGRESS);
+    if said != super::user::FAULTED && said != super::user::PANICKED && said != super::user::SPOKE {
+        return None;
+    }
+
+    Some(said)
+}
+
+fn bump_to(address: usize, value: u32) {
+    unsafe { (address as *mut u32).write_volatile(value) };
+}
+
+const NOTHING_MORE: u32 = 0;
+
 pub fn tell_the_copy(id: u32) {
-    let Some(placed) = (unsafe { placements() }).get(&id) else {
+    let Some(placed) = (unsafe { placements() }).get_mut(&id) else {
         return;
     };
-
-    let memory = unsafe { _get_task_mm(placed.task as *mut c_void) };
-    if memory.is_null() {
-        return;
-    }
 
     bump(placed.arena + WOKEN);
-
-    unsafe {
-        _kthread_use_mm(memory);
-        _do_futex(
-            placed.seen_by_the_copy + WOKEN,
-            FUTEX_WAKE,
-            WAKE_EVERY_WAITER,
-            0,
-            0,
-            0,
-            0,
-        );
-        _kthread_unuse_mm(memory);
-
-        _mmput(memory);
-    }
-}
-
-// A thread of the kernel half's own keeps the target's address space and sleeps on the word the
-// copy bumps, so what the copy says arrives the moment it is said.
-fn listen_to_the_copy(placed: &Placement) {
-    let listening = native::alloc(size_of::<Listening>()) as *mut Listening;
-    unsafe {
-        listening.write(Listening {
-            memory: _get_task_mm(placed.task as *mut c_void),
-            said: placed.arena + TO_KERNEL,
-            heard_where_the_copy_sees_it: placed.seen_by_the_copy + TO_KERNEL,
-        });
+    if placed.hears.is_null() {
+        return;
     }
 
-    native::spawn_thread(carry_what_the_copy_says, listening as *mut c_void);
+    native::leave_a_word(placed.hears);
 }
 
-#[repr(C)]
-struct Listening {
-    memory: *mut c_void,
-    said: usize,
-    heard_where_the_copy_sees_it: usize,
-}
-
-unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
-    let listening = argument as *mut Listening;
-    let (memory, said, waited_on) = unsafe {
-        (
-            (*listening).memory,
-            (*listening).said,
-            (*listening).heard_where_the_copy_sees_it,
-        )
-    };
-    native::free(listening as *mut u8, size_of::<Listening>());
-
-    unsafe { _kthread_use_mm(memory) };
-
-    let mut heard = read_word(said);
-    loop {
-        unsafe { _do_futex(waited_on, FUTEX_WAIT, heard, 0, 0, 0, 0) };
-
-        heard = read_word(said);
-        native::wake(said as *const u8);
-    }
+fn read_address(address: usize) -> u64 {
+    unsafe { (address as *const u64).read_volatile() }
 }
 
 fn read_word(address: usize) -> u32 {

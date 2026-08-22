@@ -886,7 +886,6 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn kernel_half_has_work() -> bool {
-
     if hostlink_virtio::a_turn_is_wanted() {
         return true;
     }
@@ -897,6 +896,11 @@ fn kernel_half_has_work() -> bool {
     }
 
     if kernel::a_frame_waits_for_room() {
+        return true;
+    }
+
+    #[cfg(feature = "linux-injected")]
+    if kernel::a_copy_has_something_to_say() {
         return true;
     }
 
@@ -912,6 +916,9 @@ fn serve_the_kernel_half() {
 
     #[cfg(feature = "win9x")]
     serve_deferred_work();
+
+    #[cfg(feature = "linux-injected")]
+    kernel::report_what_the_copies_hit();
 
     relay_frames_from_targets();
 }

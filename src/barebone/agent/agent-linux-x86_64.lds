@@ -38,6 +38,9 @@ SECTIONS {
     _fput = .; . += 8;
     _copy_from_kernel_nofault = .; . += 8;
     _wake_up_process = .; . += 8;
+    _fget = .; . += 8;
+    _kernel_read = .; . += 8;
+    _kernel_write = .; . += 8;
     ___kmalloc_noprof = .; . += 8;
     _kmalloc = .; . += 8;
     _kfree = .; . += 8;

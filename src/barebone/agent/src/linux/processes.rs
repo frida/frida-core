@@ -31,6 +31,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
     }
 }
 
+pub unsafe fn let_go_of(file: *mut c_void) {
+    unsafe { _fput(file) };
+}
+
 pub fn task_with_id(id: u32) -> Option<usize> {
     let layout = task_layout()?;
 

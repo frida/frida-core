@@ -1,10 +1,11 @@
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
 
 use crate::kernel::ThreadEntry;
 
-use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_PC, WOKEN};
+use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_LR, FAULT_PC, WOKEN};
 use super::facade::Primitives;
 
 pub fn entry_offset() -> usize {
@@ -20,10 +21,12 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
     unsafe { ARENA = begins };
     install_fault_reporter();
 
-
     unsafe { crate::init_gum_without_exceptor() };
     let context = unsafe { crate::adopt_js_context() };
     unsafe { crate::route_frames_through(begins as u64) };
+
+    open_the_pipes(arena);
+    hear_what_the_kernel_half_says();
 
     arena.report_home();
     arena.tell_the_kernel_half();
@@ -70,16 +73,17 @@ pub static USER: Primitives = Primitives {
 // The copy has no file to write to -- what it was given came from a thread of the kernel -- so
 // what it has to say goes where the kernel half can read it.
 fn log(msg: &str) {
-    Arena::at(unsafe { ARENA }).say(msg);
-
-    let said = msg.as_bytes();
-    let length = said.iter().position(|byte| *byte == 0).unwrap_or(said.len());
-    syscall(WRITE, STANDARD_ERROR, said.as_ptr() as usize, length, 0, 0, 0);
+    let arena = Arena::at(unsafe { ARENA });
+    arena.say(msg);
+    arena.note(SPOKE);
+    arena.tell_the_kernel_half();
 }
 
 fn panic(msg: &str) -> ! {
-    Arena::at(unsafe { ARENA }).say(msg);
-    Arena::at(unsafe { ARENA }).note(PANICKED);
+    let arena = Arena::at(unsafe { ARENA });
+    arena.say(msg);
+    arena.note(PANICKED);
+    arena.tell_the_kernel_half();
 
     syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
 
@@ -201,13 +205,58 @@ unsafe fn start_thread(stack: usize, carried: usize) -> isize {
     spawned
 }
 
+fn open_the_pipes(arena: Arena) {
+    let mut says = [0u32; 2];
+    let mut hears = [0u32; 2];
+    syscall(PIPE, says.as_mut_ptr() as usize, 0, 0, 0, 0, 0);
+    syscall(PIPE, hears.as_mut_ptr() as usize, 0, 0, 0, 0, 0);
+
+    unsafe {
+        SAYING = says[1];
+        HEARING = hears[0];
+    }
+
+    arena.reachable_at(says[0], hears[1]);
+}
+
+pub fn say_something() {
+    let byte = 0u8;
+    syscall(WRITE, unsafe { SAYING } as usize, &byte as *const u8 as usize, 1, 0, 0, 0);
+}
+
+fn hear_what_the_kernel_half_says() {
+    spawn_thread(listen_to_the_kernel_half, core::ptr::null_mut());
+}
+
+unsafe extern "C" fn listen_to_the_kernel_half(_parameter: *mut c_void, _reason: i32) {
+    let mut heard = [0u8; 64];
+    loop {
+        let read = syscall(READ, unsafe { HEARING } as usize, heard.as_mut_ptr() as usize,
+            heard.len(), 0, 0, 0);
+        if read <= 0 {
+            return;
+        }
+
+        wake(crate::glib::wakeup_token());
+    }
+}
+
+static mut SAYING: u32 = 0;
+static mut HEARING: u32 = 0;
+
 fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let unchanged = unchanged();
     if check() {
         return;
     }
 
-    wait_on(waited_on(), unchanged, timeout_us);
+    match timeout_us {
+        Some(us) => {
+            let until = [(us / 1_000_000) as i64, ((us % 1_000_000) * 1000) as i64];
+            syscall(NANOSLEEP, until.as_ptr() as usize, 0, 0, 0, 0, 0);
+        }
+        None => wait_on(waited_on(), unchanged, None),
+    }
 }
 
 fn wake(_token: *const u8) {
@@ -300,7 +349,12 @@ unsafe extern "C" fn report_fault(signal: usize, about: usize, running: usize) {
             FAULT_PC,
             ((running + RUNNING_STATE + STATE_PC) as *const usize).read() as u64,
         );
+        arena.leave(
+            FAULT_LR,
+            ((running + RUNNING_STATE + STATE_LR) as *const usize).read() as u64,
+        );
     }
+    arena.tell_the_kernel_half();
 
     syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
 }
@@ -420,8 +474,9 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
 
 static mut ARENA: usize = 0;
 
-const PANICKED: u32 = 9;
-const FAULTED: u32 = 8;
+pub const PANICKED: u32 = 9;
+pub const SPOKE: u32 = 10;
+pub const FAULTED: u32 = 8;
 
 #[cfg(target_arch = "aarch64")]
 const RT_SIGACTION: usize = 134;
@@ -437,6 +492,7 @@ const ABOUT_CODE: usize = 8;
 const ABOUT_ADDRESS: usize = 16;
 const RUNNING_STATE: usize = 176;
 const STATE_PC: usize = 264;
+const STATE_LR: usize = 248;
 
 #[cfg(target_arch = "aarch64")]
 #[cfg(target_arch = "aarch64")]
@@ -444,7 +500,13 @@ const OPENAT: usize = 56;
 #[cfg(target_arch = "aarch64")]
 const CLOSE: usize = 57;
 #[cfg(target_arch = "aarch64")]
+const NANOSLEEP: usize = 101;
+#[cfg(target_arch = "aarch64")]
+const PIPE: usize = 59;
+#[cfg(target_arch = "aarch64")]
 const GETDENTS: usize = 61;
+#[cfg(target_arch = "aarch64")]
+const POLL: usize = 73;
 #[cfg(target_arch = "aarch64")]
 const READ: usize = 63;
 #[cfg(target_arch = "aarch64")]
@@ -476,6 +538,7 @@ const MPROTECT: usize = 226;
 const STANDARD_ERROR: usize = 2;
 const WORKING_DIRECTORY: usize = -100isize as usize;
 const READ_ONLY: usize = 0;
+const POLL_IN: i32 = 1;
 pub const READABLE: usize = 1;
 pub const WRITABLE: usize = 2;
 pub const EXECUTABLE: usize = 4;
