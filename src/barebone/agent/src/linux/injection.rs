@@ -36,6 +36,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         hears: ptr::null_mut(),
     };
     unsafe { placements() }.insert(id, placed);
+    watch_the_threads();
 
     0
 }
@@ -370,6 +371,60 @@ fn bump_to(address: usize, value: u32) {
 
 const NOTHING_MORE: u32 = 0;
 
+fn watch_the_threads() {
+    if WATCHING.swap(true, core::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+
+    unsafe {
+        _tracepoint_probe_register(___tracepoint_sched_process_fork,
+            a_thread_appeared as *mut c_void, ptr::null_mut());
+        _tracepoint_probe_register(___tracepoint_sched_process_exit,
+            a_thread_left as *mut c_void, ptr::null_mut());
+    }
+}
+
+unsafe extern "C" fn a_thread_appeared(_data: *mut c_void, _parent: *mut c_void,
+        child: *mut c_void) {
+    note_a_thread(child as usize, false);
+}
+
+unsafe extern "C" fn a_thread_left(_data: *mut c_void, task: *mut c_void, _group_dead: bool) {
+    note_a_thread(task as usize, true);
+}
+
+fn note_a_thread(task: usize, is_gone: bool) {
+    let Some(home) = group_of(task) else {
+        return;
+    };
+    let Some(thread) = id_of(task) else {
+        return;
+    };
+
+    let Some(placed) = (unsafe { placements() }).get(&home) else {
+        return;
+    };
+
+    Arena::at(placed.arena).note_a_thread(thread, is_gone);
+    if !placed.hears.is_null() {
+        native::leave_a_word(placed.hears);
+    }
+}
+
+fn group_of(task: usize) -> Option<u32> {
+    let at = field_offset("task_struct", "tgid")?;
+
+    Some(unsafe { ((task + at) as *const u32).read() })
+}
+
+fn id_of(task: usize) -> Option<u32> {
+    let at = field_offset("task_struct", "pid")?;
+
+    Some(unsafe { ((task + at) as *const u32).read() })
+}
+
+static WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 pub fn detach_from_process(id: u32) -> bool {
     let Some(placed) = (unsafe { placements() }.remove(&id)) else {
         return false;
@@ -483,6 +538,10 @@ unsafe extern "C" {
     static _mmput: unsafe extern "C" fn(*mut c_void);
     static _vm_mmap: unsafe extern "C" fn(*mut c_void, usize, usize, usize, usize, usize) -> usize;
     static _vm_munmap: unsafe extern "C" fn(usize, usize) -> c_int;
+    static _tracepoint_probe_register:
+        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
+    static ___tracepoint_sched_process_fork: *mut c_void;
+    static ___tracepoint_sched_process_exit: *mut c_void;
     static _vunmap: unsafe extern "C" fn(*mut c_void);
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _down_read: unsafe extern "C" fn(*mut c_void);

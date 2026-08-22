@@ -24,6 +24,9 @@ SECTIONS {
     _mmput = .; . += 8;
     _vm_mmap = .; . += 8;
     _vm_munmap = .; . += 8;
+    _tracepoint_probe_register = .; . += 8;
+    ___tracepoint_sched_process_fork = .; . += 8;
+    ___tracepoint_sched_process_exit = .; . += 8;
     _vunmap = .; . += 8;
     ___arch_copy_to_user = .; . += 8;
     ___arch_copy_from_user = .; . += 8;

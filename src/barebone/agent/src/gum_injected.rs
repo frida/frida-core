@@ -13,6 +13,7 @@ use crate::{
         GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport, GumThreadDetails,
         GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
+        gum_barebone_unregister_thread,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
         g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
         g_variant_type_new, g_variant_unref, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
@@ -338,6 +339,21 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = ptr::null_mut() };
+}
+
+#[cfg(feature = "linux-injected")]
+pub(crate) fn thread_appeared(id: u32) {
+    announce_thread(id);
+}
+
+#[cfg(feature = "linux-injected")]
+pub(crate) fn thread_vanished(id: u32) {
+    let registry = unsafe { THREAD_REGISTRY };
+    if registry.is_null() {
+        return;
+    }
+
+    unsafe { gum_barebone_unregister_thread(registry, id as GumThreadId) };
 }
 
 #[cfg(feature = "linux-injected")]

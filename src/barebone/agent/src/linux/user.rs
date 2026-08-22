@@ -42,15 +42,27 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 fn a_frame_is_waiting() -> bool {
     let arena = Arena::at(unsafe { ARENA });
 
-    arena.was_told_to_go() || super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
+    arena.was_told_to_go()
+        || arena.holds_a_thread()
+        || super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
 }
 
 fn serve_the_copy() {
+    let arena = Arena::at(unsafe { ARENA });
+
+    while let Some((thread, is_gone)) = arena.take_a_thread() {
+        if is_gone {
+            crate::gum_injected::thread_vanished(thread);
+        } else {
+            crate::gum_injected::thread_appeared(thread);
+        }
+    }
+
     while let Some(frame) = super::relay::take_frame_from_host(unsafe { ARENA } as u64) {
         crate::on_frame_from_host(&frame);
     }
 
-    if Arena::at(unsafe { ARENA }).was_told_to_go() {
+    if arena.was_told_to_go() {
         leave();
     }
 }

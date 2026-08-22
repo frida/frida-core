@@ -65,6 +65,37 @@ impl Arena {
         self.word(HEARS).store(hears, Ordering::Release);
     }
 
+    pub fn note_a_thread(&self, thread: u32, is_gone: bool) {
+        let head = self.word(THREADS_HEAD).load(Ordering::Relaxed);
+        let tail = self.word(THREADS_TAIL).load(Ordering::Acquire);
+        if head.wrapping_sub(tail) == THREAD_SLOTS {
+            return;
+        }
+
+        let slot = (head % THREAD_SLOTS) as usize;
+        self.word(THREADS + (slot * 4)).store((thread << 1) | is_gone as u32, Ordering::Relaxed);
+        self.word(THREADS_HEAD).store(head.wrapping_add(1), Ordering::Release);
+    }
+
+    pub fn take_a_thread(&self) -> Option<(u32, bool)> {
+        let head = self.word(THREADS_HEAD).load(Ordering::Acquire);
+        let tail = self.word(THREADS_TAIL).load(Ordering::Relaxed);
+        if head == tail {
+            return None;
+        }
+
+        let slot = (tail % THREAD_SLOTS) as usize;
+        let noted = self.word(THREADS + (slot * 4)).load(Ordering::Relaxed);
+        self.word(THREADS_TAIL).store(tail.wrapping_add(1), Ordering::Release);
+
+        Some((noted >> 1, noted & 1 != 0))
+    }
+
+    pub fn holds_a_thread(&self) -> bool {
+        self.word(THREADS_HEAD).load(Ordering::Acquire)
+            != self.word(THREADS_TAIL).load(Ordering::Relaxed)
+    }
+
     pub fn tell_it_to_go(&self) {
         self.word(GO).store(1, Ordering::Release);
     }
@@ -108,6 +139,10 @@ pub const FAULT_LR: usize = 56;
 pub const SAID: usize = 64;
 pub const GO: usize = 288;
 pub const GONE: usize = 292;
+const THREADS_HEAD: usize = 296;
+const THREADS_TAIL: usize = 300;
+const THREADS: usize = 304;
+const THREAD_SLOTS: u32 = 32;
 pub const SAID_SIZE: usize = 192;
 
 
