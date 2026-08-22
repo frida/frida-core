@@ -93,6 +93,8 @@ mod symbols;
 mod xnu;
 #[cfg(feature = "xnu")]
 mod xnu_processes;
+#[cfg(feature = "xnu")]
+mod xnu_ranges;
 
 mod bindings {
     #![allow(

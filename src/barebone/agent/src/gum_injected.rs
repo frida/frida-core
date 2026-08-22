@@ -400,7 +400,7 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
     });
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn _gum_process_enumerate_ranges(
     prot: GumPageProtection,
@@ -430,7 +430,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
     });
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_query_protection(
     address: gpointer,
