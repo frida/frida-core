@@ -296,19 +296,26 @@ mod entrypoint_blob {
             let context = adopt_js_context();
             run_main_loop(context);
 
+            destroy_all_scripts(context);
+
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             {
-                destroy_all_scripts(context);
                 kernel::stop_copies();
                 #[cfg(feature = "win9x")]
                 kernel::release_shared_hooks();
                 #[cfg(feature = "win9x")]
                 kernel::stop_hearing_from_vmm();
-                transport_get_unchecked().shutdown();
+            }
+
+            transport_get_unchecked().shutdown();
+
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            {
                 kernel::release_interrupt();
                 kernel::release_fault_reporter();
-                (&raw mut frida_agent_left).write_volatile(1);
             }
+
+            (&raw mut frida_agent_left).write_volatile(1);
 
         }
     }
@@ -1153,7 +1160,12 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(
+                feature = "win9x",
+                feature = "winnt",
+                feature = "linux-injected",
+                feature = "xnu"
+            ))]
             FridaCommand::Stop => Some(handle_stop()),
             #[cfg(any(feature = "winnt", feature = "linux-injected"))]
             FridaCommand::DetachFromProcess => {
@@ -1653,7 +1665,7 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn handle_stop() -> HandlerResponse {
     STOP_REQUESTED.store(true, Ordering::Release);
 
