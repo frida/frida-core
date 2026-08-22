@@ -11,6 +11,9 @@ SECTIONS {
     _panic = .; . += 8;
     _IOLog = .; . += 8;
     _kalloc = .; . += 8;
+    _proc_iterate = .; . += 8;
+    _proc_pid = .; . += 8;
+    _proc_best_name = .; . += 8;
     _kfree = .; . += 8;
     _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;

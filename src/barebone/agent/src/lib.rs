@@ -91,6 +91,8 @@ mod pac;
 mod symbols;
 #[cfg(feature = "xnu")]
 mod xnu;
+#[cfg(feature = "xnu")]
+mod xnu_processes;
 
 mod bindings {
     #![allow(
@@ -1112,7 +1114,12 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateShortcuts => Some(handle_enumerate_shortcuts()),
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(
+                feature = "win9x",
+                feature = "winnt",
+                feature = "linux-injected",
+                feature = "xnu"
+            ))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
@@ -1421,7 +1428,12 @@ pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux-injected",
+    feature = "xnu"
+))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
         let list_type = g_variant_type_new(c"a(usssaay)".as_ptr() as *const gchar);
@@ -1473,7 +1485,12 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux-injected",
+    feature = "xnu"
+))]
 fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
     if text.is_null() {
         c"".as_ptr()

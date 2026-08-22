@@ -16,6 +16,8 @@ pub use crate::win9x::*;
 pub use crate::winnt::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu::*;
+#[cfg(feature = "xnu")]
+pub use crate::xnu_processes::*;
 
 use core::ffi::c_void;
 
