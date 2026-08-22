@@ -25,6 +25,8 @@ SECTIONS {
     _vm_mmap = .; . += 8;
     _vm_munmap = .; . += 8;
     _tracepoint_probe_register = .; . += 8;
+    _tracepoint_probe_unregister = .; . += 8;
+    _free_irq = .; . += 8;
     ___tracepoint_sched_process_fork = .; . += 8;
     ___tracepoint_sched_process_exit = .; . += 8;
     _vunmap = .; . += 8;

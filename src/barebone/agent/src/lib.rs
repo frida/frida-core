@@ -291,7 +291,7 @@ mod entrypoint_blob {
             let context = adopt_js_context();
             run_main_loop(context);
 
-            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             {
                 destroy_all_scripts(context);
                 kernel::stop_copies();
@@ -1121,7 +1121,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "winnt"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::Stop => Some(handle_stop()),
             #[cfg(any(feature = "winnt", feature = "linux-injected"))]
             FridaCommand::DetachFromProcess => {
@@ -1589,7 +1589,7 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 fn handle_stop() -> HandlerResponse {
     STOP_REQUESTED.store(true, Ordering::Release);
 

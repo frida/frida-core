@@ -439,6 +439,24 @@ pub fn detach_from_process(id: u32) -> bool {
     true
 }
 
+pub fn stop_copies() {
+    let homes: alloc::vec::Vec<u32> = unsafe { placements() }.keys().copied().collect();
+    for home in homes {
+        detach_from_process(home);
+    }
+
+    if !WATCHING.swap(false, core::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+
+    unsafe {
+        _tracepoint_probe_unregister(___tracepoint_sched_process_fork,
+            a_thread_appeared as *mut c_void, ptr::null_mut());
+        _tracepoint_probe_unregister(___tracepoint_sched_process_exit,
+            a_thread_left as *mut c_void, ptr::null_mut());
+    }
+}
+
 fn ask_it_to_leave(placed: &Placement) {
     let arena = Arena::at(placed.arena);
     arena.tell_it_to_go();
@@ -539,6 +557,8 @@ unsafe extern "C" {
     static _vm_mmap: unsafe extern "C" fn(*mut c_void, usize, usize, usize, usize, usize) -> usize;
     static _vm_munmap: unsafe extern "C" fn(usize, usize) -> c_int;
     static _tracepoint_probe_register:
+        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
+    static _tracepoint_probe_unregister:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
     static ___tracepoint_sched_process_fork: *mut c_void;
     static ___tracepoint_sched_process_exit: *mut c_void;

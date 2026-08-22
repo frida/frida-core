@@ -35,6 +35,16 @@ pub fn run_when_ready(action: fn()) {
 // dump and the backtrace this would otherwise have to reproduce.
 pub fn install_fault_reporter() {}
 
+pub fn release_fault_reporter() {}
+
+pub fn release_interrupt() {
+    let Some(interrupt) = (unsafe { (&raw mut INTERRUPT).as_mut().unwrap().take() }) else {
+        return;
+    };
+
+    unsafe { _free_irq(interrupt.irq, interrupt.target) };
+}
+
 pub fn take_the_file(descriptor: u32) -> *mut c_void {
     unsafe { _fget(descriptor) }
 }
@@ -280,7 +290,7 @@ pub fn install_interrupt_handler(
     refcon: *mut c_void,
 ) -> i32 {
     unsafe {
-        INTERRUPT = Some(Interrupt { target, handler, refcon });
+        INTERRUPT = Some(Interrupt { irq, target, handler, refcon });
 
         _request_threaded_irq(
             irq,
@@ -353,6 +363,7 @@ struct Trampoline {
 }
 
 struct Interrupt {
+    irq: u32,
     target: *mut c_void,
     handler: IOInterruptHandler,
     refcon: *mut c_void,
@@ -469,6 +480,7 @@ unsafe extern "C" {
     static _schedule: unsafe extern "C" fn();
     static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
     static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec64);
+    static _free_irq: unsafe extern "C" fn(u32, *mut c_void) -> *mut c_void;
     static _request_threaded_irq: unsafe extern "C" fn(
         u32,
         IrqHandlerFn,
