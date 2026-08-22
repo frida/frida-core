@@ -50,7 +50,7 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(feature = "linux-injected")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
     unsafe {
@@ -61,6 +61,40 @@ pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
             options(nomem, nostack),
         );
     }
+}
+
+// Invalidating the whole instruction cache is the kernel's to do, and the copy runs where that
+// instruction is not allowed. Line by line is what both halves may ask for.
+#[cfg(all(target_arch = "aarch64", feature = "linux-injected"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+    let told: u64;
+    unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) told, options(nomem, nostack)) };
+
+    let data_line = 4usize << ((told >> 16) & 0xf);
+    let code_line = 4usize << (told & 0xf);
+    let data_is_coherent = (told >> 28) & 1 != 0;
+    let code_is_coherent = (told >> 29) & 1 != 0;
+
+    if !data_is_coherent {
+        let mut at = start as usize & !(data_line - 1);
+        while at < end as usize {
+            unsafe { core::arch::asm!("dc cvau, {}", in(reg) at, options(nostack)) };
+            at += data_line;
+        }
+    }
+    unsafe { core::arch::asm!("dsb ish", options(nomem, nostack)) };
+
+    if !code_is_coherent {
+        let mut at = start as usize & !(code_line - 1);
+        while at < end as usize {
+            unsafe { core::arch::asm!("ic ivau, {}", in(reg) at, options(nostack)) };
+            at += code_line;
+        }
+        unsafe { core::arch::asm!("dsb ish", options(nomem, nostack)) };
+    }
+
+    unsafe { core::arch::asm!("isb", options(nomem, nostack)) };
 }
 
 fn sbrk_impl(incr: isize) -> *mut u8 {

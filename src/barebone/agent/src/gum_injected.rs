@@ -8,7 +8,8 @@ use crate::{
     FridaCommand,
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumPageProtection_GUM_PAGE_READ,
-        _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_NONE, GArray,
+        _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_FULL,
+        _GumRwxSupport_GUM_RWX_NONE, GArray,
         GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport, GumThreadDetails,
         GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
@@ -50,11 +51,21 @@ const SHADOW_MIN_ADDRESS: u64 = 0xffff_f000_0000_0000;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        return _GumRwxSupport_GUM_RWX_FULL;
+    }
+
     _GumRwxSupport_GUM_RWX_NONE
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_can_remap_writable() -> gboolean {
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        return 0;
+    }
+
     1
 }
 
@@ -410,6 +421,12 @@ pub(crate) unsafe fn enumerate_exports_in_range(
     end_address: u64,
     callback: &mut FoundExportCallback<'_>,
 ) {
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        kernel::enumerate_exports_in_range(start_address, end_address, callback);
+        return;
+    }
+
     unsafe {
         let symbol_table = core::ptr::addr_of!(crate::SYMBOL_TABLE);
         let symbol_table = &*symbol_table;
