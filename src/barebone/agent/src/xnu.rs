@@ -153,6 +153,7 @@ pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut 
 
 const THREAD_INTERRUPTIBLE: u32 = 1;
 const THREAD_WAITING: i32 = -1;
+const THREAD_AWAKENED: i32 = 0;
 
 pub fn assert_wait(event: *const u8, interruptible: u32) -> i32 {
     unsafe { _assert_wait(event, interruptible) }
@@ -175,6 +176,8 @@ pub fn thread_wakeup(event: *const u8) -> i32 {
     unsafe {
         if let Some(f) = _thread_wakeup {
             f(event)
+        } else if let Some(f) = _thread_wakeup_prim {
+            f(event, 0, THREAD_AWAKENED)
         } else if let Some(f) = _wakeup {
             f(event);
             0
@@ -210,7 +213,12 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
 }
 
 pub fn virt_to_phys(vaddr: u64) -> u64 {
-    unsafe { _ml_vtophys(vaddr) }
+    unsafe {
+        if let Some(ask) = _ml_vtophys {
+            return ask(vaddr);
+        }
+        _ml_static_vtop.unwrap()(vaddr)
+    }
 }
 
 pub type IOInterruptHandler =
@@ -351,12 +359,14 @@ unsafe extern "C" {
     static _thread_block: unsafe extern "C" fn(Option<ContinuationFn>) -> i32;
     // QEMU XNU exports thread_wakeup; iOS XNU exports the BSD-style wakeup wrapper.
     static _thread_wakeup: Option<unsafe extern "C" fn(*const u8) -> i32>;
+    static _thread_wakeup_prim: Option<unsafe extern "C" fn(*const u8, i32, i32) -> i32>;
     static _wakeup: Option<unsafe extern "C" fn(*const u8)>;
     static _mach_absolute_time: unsafe extern "C" fn() -> u64;
     static _absolutetime_to_nanoseconds: unsafe extern "C" fn(u64, *mut u64);
     static _clock_get_calendar_microtime: unsafe extern "C" fn(*mut u32, *mut u32);
     static _ml_io_map: unsafe extern "C" fn(u64, u64) -> *mut c_void;
-    static _ml_vtophys: unsafe extern "C" fn(u64) -> u64;
+    static _ml_vtophys: Option<unsafe extern "C" fn(u64) -> u64>;
+    static _ml_static_vtop: Option<unsafe extern "C" fn(u64) -> u64>;
     static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
     static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
     static __ZN8OSSymbol17withCStringNoCopyEPKc:

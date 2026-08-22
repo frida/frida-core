@@ -213,10 +213,14 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
 			XnuLayout? xnu_layout = null;
-			if (kernel_kind == XNU) {
-				SymbolInfo? iterate = symbols["proc_iterate"];
+			bool xnu_reads_its_own_processes = symbols.has_key ("proc_pid")
+				&& symbols.has_key ("proc_best_name");
+			if (kernel_kind == XNU && !xnu_reads_its_own_processes) {
 				xnu_layout = yield collect_xnu_layout (machine,
-					(iterate != null) ? kernel_base + iterate.offset : 0, allocator, cancellable);
+					address_of (symbols, kernel_base, "proc_iterate"),
+					address_of (symbols, kernel_base, "proc_find"),
+					address_of (symbols, kernel_base, "proc_rele"),
+					allocator, cancellable);
 			}
 
 			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)aya(st))"));
@@ -643,6 +647,12 @@ namespace Frida.Barebone {
 				processes[i] = HostProcessInfo (entry.get_child_value (0).get_uint32 (), name, parameters);
 			}
 			return processes;
+		}
+
+		private static uint64 address_of (Gee.Map<string, SymbolInfo?> symbols, uint64 kernel_base,
+				string name) {
+			SymbolInfo? info = symbols[name];
+			return (info != null) ? kernel_base + info.offset : 0;
 		}
 
 		private static string basename_of (string path) {

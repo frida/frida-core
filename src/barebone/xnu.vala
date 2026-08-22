@@ -9,11 +9,11 @@ namespace Frida.Barebone {
 	}
 
 	public static async XnuLayout? collect_xnu_layout (Machine machine, uint64 iterate_processes,
-			Allocator allocator, Cancellable? cancellable) throws Error, IOError {
-		if (iterate_processes == 0)
-			return null;
-
-		var processes = yield each_process (machine, iterate_processes, allocator, cancellable);
+			uint64 find_process, uint64 release_process, Allocator allocator,
+			Cancellable? cancellable) throws Error, IOError {
+		var processes = (iterate_processes != 0)
+			? yield each_process (machine, iterate_processes, allocator, cancellable)
+			: yield each_numbered_process (machine, find_process, release_process, cancellable);
 		if (processes.size < 2)
 			return null;
 
@@ -104,6 +104,26 @@ namespace Frida.Barebone {
 		return found;
 	}
 
+	private static async Gee.List<uint64?> each_numbered_process (Machine machine, uint64 find_process,
+			uint64 release_process, Cancellable? cancellable) throws Error, IOError {
+		var found = new Gee.ArrayList<uint64?> ();
+		if (find_process == 0 || release_process == 0)
+			return found;
+
+		for (uint64 number = 1; number != FIRST_PROCESS_NUMBERS && found.size != ENOUGH_PROCESSES;
+				number++) {
+			uint64 process = yield machine.invoke (find_process, { number }, cancellable);
+			if (process == 0)
+				continue;
+
+			found.add (process);
+
+			yield machine.invoke (release_process, { process }, cancellable);
+		}
+
+		return found;
+	}
+
 	private sealed class ProcessNoted : Object, CallbackHandler {
 		public uint arity {
 			get { return 2; }
@@ -150,4 +170,5 @@ namespace Frida.Barebone {
 	private const string LAUNCHD_NAME = "launchd";
 	private const uint HIGHEST_PROCESS_NUMBER = 200000;
 	private const int ENOUGH_PROCESSES = 24;
+	private const uint64 FIRST_PROCESS_NUMBERS = 512;
 }

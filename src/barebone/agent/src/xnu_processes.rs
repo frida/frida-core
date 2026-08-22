@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::ffi::{c_int, c_void};
+use core::ffi::{c_char, c_int, c_void};
 
 pub struct ProcessInfo {
     pub id: u32,
@@ -11,28 +11,21 @@ pub struct ProcessInfo {
 // The kernel walks its own list, and where a process keeps its number and its name is what the
 // host looked up before any of this started.
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
-    let (Some(number), Some(name)) = (
-        crate::kernel::noted("process.number"),
-        crate::kernel::noted("process.name"),
-    ) else {
-        return;
-    };
-    unsafe {
-        WHERE_THE_NUMBER_IS = number as usize;
-        WHERE_THE_NAME_IS = name as usize;
-    }
-
     let mut listed: Vec<(u32, [u8; NAME_SIZE])> = Vec::new();
 
-    unsafe {
-        _proc_iterate(
-            ALL_PROCESSES,
-            note_a_process,
-            &mut listed as *mut Vec<(u32, [u8; NAME_SIZE])> as *mut c_void,
-            core::ptr::null_mut(),
-            core::ptr::null_mut(),
-        )
-    };
+    if let Some(iterate) = unsafe { _proc_iterate } {
+        unsafe {
+            iterate(
+                ALL_PROCESSES,
+                note_a_process,
+                &mut listed as *mut Vec<(u32, [u8; NAME_SIZE])> as *mut c_void,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        };
+    } else {
+        walk_every_number(&mut listed);
+    }
 
     for (id, name) in &listed {
         found(ProcessInfo {
@@ -50,12 +43,55 @@ pub fn describe_process(process: &ProcessInfo) -> *const u8 {
 
 pub fn enumerate_icons(_path: *const u8, _found: &mut dyn FnMut(&[u8])) {}
 
+fn walk_every_number(listed: &mut Vec<(u32, [u8; NAME_SIZE])>) {
+    let Some(find) = (unsafe { _proc_find }) else {
+        return;
+    };
+    let release = unsafe { _proc_rele }.unwrap();
+
+    for number in 0..=HIGHEST_NUMBER {
+        let process = unsafe { find(number as c_int) };
+        if process.is_null() {
+            continue;
+        }
+
+        unsafe {
+            note_a_process(process, listed as *mut Vec<(u32, [u8; NAME_SIZE])> as *mut c_void);
+            release(process);
+        }
+    }
+}
+
 unsafe extern "C" fn note_a_process(process: *mut c_void, listed: *mut c_void) -> c_int {
     let listed = listed as *mut Vec<(u32, [u8; NAME_SIZE])>;
 
-    let mut name = [0u8; NAME_SIZE];
+    unsafe { (*listed).push((number_of(process), name_of(process))) };
+
+    KEEP_GOING
+}
+
+unsafe fn number_of(process: *mut c_void) -> u32 {
     unsafe {
-        let said = (process as *const u8).add(WHERE_THE_NAME_IS);
+        if let Some(ask) = _proc_pid {
+            return ask(process) as u32;
+        }
+
+        let where_it_is = crate::kernel::noted("process.number").unwrap() as usize;
+        ((process as *const u8).add(where_it_is) as *const u32).read()
+    }
+}
+
+unsafe fn name_of(process: *mut c_void) -> [u8; NAME_SIZE] {
+    unsafe {
+        let said = match _proc_best_name {
+            Some(ask) => ask(process) as *const u8,
+            None => {
+                let where_it_is = crate::kernel::noted("process.name").unwrap() as usize;
+                (process as *const u8).add(where_it_is)
+            }
+        };
+
+        let mut name = [0u8; NAME_SIZE];
         for (at, letter) in name.iter_mut().enumerate().take(NAME_SIZE - 1) {
             let byte = said.add(at).read();
             if byte == 0 {
@@ -64,26 +100,27 @@ unsafe extern "C" fn note_a_process(process: *mut c_void, listed: *mut c_void) -
             *letter = byte;
         }
 
-        let number = (process as *const u8).add(WHERE_THE_NUMBER_IS) as *const u32;
-        (*listed).push((number.read(), name));
+        name
     }
-
-    KEEP_GOING
 }
 
 const NAME_SIZE: usize = 33;
 const ALL_PROCESSES: c_int = 1;
 const KEEP_GOING: c_int = 0;
-
-static mut WHERE_THE_NUMBER_IS: usize = 0;
-static mut WHERE_THE_NAME_IS: usize = 0;
+const HIGHEST_NUMBER: u32 = 99999;
 
 unsafe extern "C" {
-    static _proc_iterate: unsafe extern "C" fn(
-        c_int,
-        unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
-        *mut c_void,
-        *mut c_void,
-        *mut c_void,
-    );
+    static _proc_iterate: Option<
+        unsafe extern "C" fn(
+            c_int,
+            unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
+            *mut c_void,
+            *mut c_void,
+            *mut c_void,
+        ),
+    >;
+    static _proc_find: Option<unsafe extern "C" fn(c_int) -> *mut c_void>;
+    static _proc_rele: Option<unsafe extern "C" fn(*mut c_void)>;
+    static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+    static _proc_best_name: Option<unsafe extern "C" fn(*mut c_void) -> *const c_char>;
 }
