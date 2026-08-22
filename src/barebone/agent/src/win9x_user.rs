@@ -21,6 +21,7 @@ static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
 pub extern "C" fn frida_win9x_user_main(arena: u32) {
     select_user();
     resolve_user_api();
+    crate::gthread::use_thread_slots(&SLOTS);
     unsafe {
         crate::set_own_range(((arena + IMAGE_BASE) as *const u32).read_volatile() as u64,
             ((arena + IMAGE_SIZE) as *const u32).read_volatile() as u64)
@@ -74,6 +75,33 @@ pub static USER: Primitives = Primitives {
     find_thread,
     modify_thread,
 };
+
+static SLOTS: crate::gthread::ThreadSlots = crate::gthread::ThreadSlots {
+    take: take_thread_slot,
+    get: read_thread_slot,
+    set: write_thread_slot,
+};
+
+fn take_thread_slot() -> u32 {
+    let take: unsafe extern "stdcall" fn() -> u32 =
+        unsafe { core::mem::transmute(user_api().tls_alloc as usize) };
+
+    unsafe { take() }
+}
+
+fn read_thread_slot(slot: u32) -> *mut c_void {
+    let read: unsafe extern "stdcall" fn(u32) -> *mut c_void =
+        unsafe { core::mem::transmute(user_api().tls_get_value as usize) };
+
+    unsafe { read(slot) }
+}
+
+fn write_thread_slot(slot: u32, value: *mut c_void) {
+    let write: unsafe extern "stdcall" fn(u32, *mut c_void) -> u32 =
+        unsafe { core::mem::transmute(user_api().tls_set_value as usize) };
+
+    unsafe { write(slot, value) };
+}
 
 fn hear_about_faults() {
     let install: unsafe extern "stdcall" fn(u32) -> u32 =
@@ -507,6 +535,9 @@ fn resolve_user_api() {
             find_next_file: kernel32_export(b"FindNextFileA"),
             find_close: kernel32_export(b"FindClose"),
             set_unhandled_exception_filter: kernel32_export(b"SetUnhandledExceptionFilter"),
+            tls_alloc: kernel32_export(b"TlsAlloc"),
+            tls_get_value: kernel32_export(b"TlsGetValue"),
+            tls_set_value: kernel32_export(b"TlsSetValue"),
         };
     }
 }
@@ -545,6 +576,9 @@ struct UserApi {
     find_next_file: u32,
     find_close: u32,
     set_unhandled_exception_filter: u32,
+    tls_alloc: u32,
+    tls_get_value: u32,
+    tls_set_value: u32,
 }
 
 static mut USER_API: UserApi = UserApi {
@@ -577,6 +611,9 @@ static mut USER_API: UserApi = UserApi {
     find_next_file: 0,
     find_close: 0,
     set_unhandled_exception_filter: 0,
+    tls_alloc: 0,
+    tls_get_value: 0,
+    tls_set_value: 0,
 };
 
 fn slot_for_token(token: *const u8) -> usize {

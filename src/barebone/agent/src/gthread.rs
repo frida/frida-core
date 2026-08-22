@@ -444,8 +444,52 @@ pub extern "C" fn g_cond_wait_until(cond: *mut GCond, mutex: *mut GMutex, end_ti
     }
 }
 
+// A half that runs on a system with slots of its own says so, and every GPrivate takes one. The
+// map below is what the kernel halves use, and it costs a lock and a lookup per call, which is
+// what code the Stalker writes does on every block it leaves.
+pub struct ThreadSlots {
+    pub take: fn() -> u32,
+    pub get: fn(u32) -> *mut c_void,
+    pub set: fn(u32, *mut c_void),
+}
+
+pub fn use_thread_slots(slots: &'static ThreadSlots) {
+    unsafe { SLOTS = Some(slots) };
+}
+
+fn slot_of(key: *mut GPrivate, slots: &ThreadSlots) -> u32 {
+    let taken = unsafe { (*key).p } as usize;
+    if taken != 0 {
+        return (taken - 1) as u32;
+    }
+
+    unsafe {
+        lock_acquire(&TLS_LOCK);
+
+        let mut taken = (*key).p as usize;
+        if taken == 0 {
+            taken = ((slots.take)() + 1) as usize;
+            (*key).p = taken as *mut c_void;
+        }
+
+        lock_release(&TLS_LOCK);
+
+        (taken - 1) as u32
+    }
+}
+
+fn slots() -> Option<&'static ThreadSlots> {
+    unsafe { SLOTS }
+}
+
+static mut SLOTS: Option<&'static ThreadSlots> = None;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn g_private_get(key: *mut GPrivate) -> *mut c_void {
+    if let Some(slots) = slots() {
+        return (slots.get)(slot_of(key, slots));
+    }
+
     unsafe {
         let thread_id = crate::kernel::current_thread_id();
         lock_acquire(&TLS_LOCK);
@@ -466,6 +510,11 @@ pub extern "C" fn g_private_get(key: *mut GPrivate) -> *mut c_void {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn g_private_set(key: *mut GPrivate, value: *mut c_void) {
+    if let Some(slots) = slots() {
+        (slots.set)(slot_of(key, slots), value);
+        return;
+    }
+
     unsafe {
         let thread_id = crate::kernel::current_thread_id();
         lock_acquire(&TLS_LOCK);

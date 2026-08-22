@@ -79,6 +79,8 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
             ((arena + crate::winnt::IMAGE_SIZE as usize) as *const u64).read_volatile())
     };
 
+    crate::gthread::use_thread_slots(&SLOTS);
+
     unsafe { crate::run_constructors() };
     unsafe { crate::init_gum_without_exceptor() };
     hear_about_faults();
@@ -849,6 +851,46 @@ fn process_heap() -> usize {
 
 static mut MADE_HEAP: usize = 0;
 const HEAP_GROWABLE: u32 = 0x2;
+
+static SLOTS: crate::gthread::ThreadSlots = crate::gthread::ThreadSlots {
+    take: take_thread_slot,
+    get: read_thread_slot,
+    set: write_thread_slot,
+};
+
+fn take_thread_slot() -> u32 {
+    unsafe { (thread_slot_api().take)() }
+}
+
+fn read_thread_slot(slot: u32) -> *mut c_void {
+    unsafe { (thread_slot_api().read)(slot) }
+}
+
+fn write_thread_slot(slot: u32, value: *mut c_void) {
+    unsafe { (thread_slot_api().write)(slot, value) };
+}
+
+fn thread_slot_api() -> &'static ThreadSlotApi {
+    unsafe {
+        if (*core::ptr::addr_of!(THREAD_SLOT_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            THREAD_SLOT_API = Some(ThreadSlotApi {
+                take: core::mem::transmute(export(library, b"TlsAlloc")),
+                read: core::mem::transmute(export(library, b"TlsGetValue")),
+                write: core::mem::transmute(export(library, b"TlsSetValue")),
+            });
+        }
+        (*core::ptr::addr_of!(THREAD_SLOT_API)).as_ref().unwrap()
+    }
+}
+
+struct ThreadSlotApi {
+    take: windows_fn!(=> u32),
+    read: windows_fn!(u32 => *mut c_void),
+    write: windows_fn!(u32, *mut c_void => i32),
+}
+
+static mut THREAD_SLOT_API: Option<ThreadSlotApi> = None;
 
 fn hear_about_faults() {
     unsafe { FAULT_HANDLER = (user_api().add_fault_handler)(1, on_fault as *const c_void) };
