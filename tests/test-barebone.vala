@@ -3998,6 +3998,8 @@ namespace Frida.BareboneTest {
 
 				let blocks = 0;
 				recv('follow', () => {
+					// A service of this system is reached by a call through a gate, which the
+					// Stalker cannot follow. Thus leave the library that holds them alone.
 					Stalker.exclude(lib);
 					Stalker.follow(id, {
 						events: { block: true },
