@@ -23,6 +23,8 @@ SECTIONS {
     _kthread_unuse_mm = .; . += 8;
     _mmput = .; . += 8;
     _vm_mmap = .; . += 8;
+    _vm_munmap = .; . += 8;
+    _vunmap = .; . += 8;
     ___arch_copy_to_user = .; . += 8;
     ___arch_copy_from_user = .; . += 8;
     _do_futex = .; . += 8;

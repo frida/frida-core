@@ -65,6 +65,22 @@ impl Arena {
         self.word(HEARS).store(hears, Ordering::Release);
     }
 
+    pub fn tell_it_to_go(&self) {
+        self.word(GO).store(1, Ordering::Release);
+    }
+
+    pub fn was_told_to_go(&self) -> bool {
+        self.word(GO).load(Ordering::Acquire) != 0
+    }
+
+    pub fn gone(&self) {
+        self.word(GONE).store(1, Ordering::Release);
+    }
+
+    pub fn has_gone(&self) -> bool {
+        self.word(GONE).load(Ordering::Acquire) != 0
+    }
+
     pub fn says_through(&self) -> u32 {
         self.word(SAYS).load(Ordering::Acquire)
     }
@@ -90,6 +106,8 @@ pub const FAULT_ADDRESS: usize = 32;
 pub const FAULT_PC: usize = 40;
 pub const FAULT_LR: usize = 56;
 pub const SAID: usize = 64;
+pub const GO: usize = 288;
+pub const GONE: usize = 292;
 pub const SAID_SIZE: usize = 192;
 
 

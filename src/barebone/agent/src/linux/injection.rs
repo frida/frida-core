@@ -31,6 +31,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         base: home.base,
         arena: home.arena,
         seen_by_the_copy: home.seen_by_the_copy,
+        stack: home.stack,
         says: ptr::null_mut(),
         hears: ptr::null_mut(),
     };
@@ -62,6 +63,7 @@ struct Placement {
     base: usize,
     arena: usize,
     seen_by_the_copy: usize,
+    stack: usize,
     says: *mut c_void,
     hears: *mut c_void,
 }
@@ -76,6 +78,7 @@ struct Home {
     base: usize,
     arena: usize,
     seen_by_the_copy: usize,
+    stack: usize,
 }
 
 fn give_the_copy_a_home(task: usize, id: u32) -> Option<Home> {
@@ -118,6 +121,7 @@ fn map_and_start(id: u32) -> Option<Home> {
         base,
         arena,
         seen_by_the_copy: where_the_copy_sees_it,
+        stack,
     })
 }
 
@@ -366,6 +370,58 @@ fn bump_to(address: usize, value: u32) {
 
 const NOTHING_MORE: u32 = 0;
 
+pub fn detach_from_process(id: u32) -> bool {
+    let Some(placed) = (unsafe { placements() }.remove(&id)) else {
+        return false;
+    };
+
+    let memory = unsafe { _get_task_mm(placed.task as *mut c_void) };
+    ask_it_to_leave(&placed);
+    take_back_what_it_was_given(&placed, memory);
+
+    super::relay::forget(placed.arena as u64);
+
+    true
+}
+
+fn ask_it_to_leave(placed: &Placement) {
+    let arena = Arena::at(placed.arena);
+    arena.tell_it_to_go();
+    if !placed.hears.is_null() {
+        native::leave_a_word(placed.hears);
+    }
+
+    let waited_on = &placed.arena as *const usize as *const u8;
+    while !arena.has_gone() {
+        native::wait(waited_on, Some(LEAVING_GRACE_US), &mut || arena.has_gone());
+    }
+}
+
+fn take_back_what_it_was_given(placed: &Placement, memory: *mut c_void) {
+    if !placed.says.is_null() {
+        native::let_the_file_go(placed.says);
+        native::let_the_file_go(placed.hears);
+    }
+
+    unsafe { _vunmap(placed.arena as *mut c_void) };
+
+    if memory.is_null() {
+        return;
+    }
+
+    let (_, image) = crate::own_range();
+    unsafe {
+        _kthread_use_mm(memory);
+        _vm_munmap(placed.base, image + ARENA_SIZE);
+        _vm_munmap(placed.stack + STACK_HEADROOM - STACK_SIZE, STACK_SIZE);
+        _kthread_unuse_mm(memory);
+
+        _mmput(memory);
+    }
+}
+
+const LEAVING_GRACE_US: u64 = 100_000;
+
 pub fn tell_the_copy(id: u32) {
     let Some(placed) = (unsafe { placements() }).get_mut(&id) else {
         return;
@@ -426,6 +482,8 @@ unsafe extern "C" {
     static _kthread_unuse_mm: unsafe extern "C" fn(*mut c_void);
     static _mmput: unsafe extern "C" fn(*mut c_void);
     static _vm_mmap: unsafe extern "C" fn(*mut c_void, usize, usize, usize, usize, usize) -> usize;
+    static _vm_munmap: unsafe extern "C" fn(usize, usize) -> c_int;
+    static _vunmap: unsafe extern "C" fn(*mut c_void);
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _down_read: unsafe extern "C" fn(*mut c_void);
     static _up_read: unsafe extern "C" fn(*mut c_void);

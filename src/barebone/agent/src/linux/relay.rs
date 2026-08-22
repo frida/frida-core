@@ -121,6 +121,11 @@ fn read_frame(ring: &Ring, arena: u64, tell: fn(u64)) -> Option<Vec<u8>> {
     }
 }
 
+pub fn forget(arena: u64) {
+    unsafe { holds() }.retain(|(of, _), _| *of != arena);
+    unsafe { waiting() }.remove(&arena);
+}
+
 fn wake_the_copy(arena: u64) {
     super::injection::tell_the_copy_at(arena);
 }

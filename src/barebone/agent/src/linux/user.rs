@@ -1,4 +1,3 @@
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
@@ -32,6 +31,7 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
     arena.report_home();
     arena.tell_the_kernel_half();
 
+    unsafe { CONTEXT = context };
     crate::watch_for_work(context, a_frame_is_waiting, serve_the_copy);
 
     loop {
@@ -40,13 +40,32 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 }
 
 fn a_frame_is_waiting() -> bool {
-    super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
+    let arena = Arena::at(unsafe { ARENA });
+
+    arena.was_told_to_go() || super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
 }
 
 fn serve_the_copy() {
     while let Some(frame) = super::relay::take_frame_from_host(unsafe { ARENA } as u64) {
         crate::on_frame_from_host(&frame);
     }
+
+    if Arena::at(unsafe { ARENA }).was_told_to_go() {
+        leave();
+    }
+}
+
+fn leave() -> ! {
+    unsafe { crate::destroy_all_scripts(CONTEXT) };
+
+    for descriptor in unsafe { [SAYING, SAYS_THROUGH, HEARING, HEARD_FROM] } {
+        syscall(CLOSE, descriptor as usize, 0, 0, 0, 0, 0);
+    }
+
+    Arena::at(unsafe { ARENA }).gone();
+    syscall(EXIT_GROUP, 0, 0, 0, 0, 0, 0);
+
+    loop {}
 }
 
 pub static USER: Primitives = Primitives {
@@ -232,7 +251,9 @@ fn open_the_pipes(arena: Arena) {
 
     unsafe {
         SAYING = says[1];
+        SAYS_THROUGH = says[0];
         HEARING = hears[0];
+        HEARD_FROM = hears[1];
     }
 
     arena.reachable_at(says[0], hears[1]);
@@ -261,7 +282,9 @@ unsafe extern "C" fn listen_to_the_kernel_half(_parameter: *mut c_void, _reason:
 }
 
 static mut SAYING: u32 = 0;
+static mut SAYS_THROUGH: u32 = 0;
 static mut HEARING: u32 = 0;
+static mut HEARD_FROM: u32 = 0;
 
 fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let unchanged = unchanged();
@@ -493,6 +516,7 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
 }
 
 static mut ARENA: usize = 0;
+static mut CONTEXT: *mut crate::bindings::GMainContext = core::ptr::null_mut();
 
 pub const PANICKED: u32 = 9;
 pub const SPOKE: u32 = 10;

@@ -978,7 +978,7 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
     }
 }
 
-fn destroy_all_scripts(main_context: *mut GMainContext) {
+pub(crate) fn destroy_all_scripts(main_context: *mut GMainContext) {
     unsafe {
         let scripts = core::mem::take(core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap());
         for (_, script) in scripts {
@@ -1123,7 +1123,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::Stop => Some(handle_stop()),
-            #[cfg(feature = "winnt")]
+            #[cfg(any(feature = "winnt", feature = "linux-injected"))]
             FridaCommand::DetachFromProcess => {
                 Some(handle_detach_from_process(payload_variant))
             }
@@ -1596,7 +1596,7 @@ fn handle_stop() -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(any(feature = "winnt", feature = "linux-injected"))]
 fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     let left = unsafe { kernel::detach_from_process(g_variant_get_uint32(payload)) };
     if !left {
