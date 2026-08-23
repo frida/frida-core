@@ -93,6 +93,8 @@ mod symbols;
 mod xnu;
 #[cfg(feature = "xnu")]
 mod xnu_processes;
+#[cfg(feature = "xnu")]
+mod xnu_ranges;
 
 mod bindings {
     #![allow(
@@ -333,7 +335,7 @@ mod entrypoint_blob {
         };
 
         unsafe {
-            let type_string = c"((tt)yvta(sstttt)aya(st))".as_ptr() as *const gchar;
+            let type_string = c"((tt)yvta(sstttt)aya(st)a(ttu))".as_ptr() as *const gchar;
             let variant_type = g_variant_type_new(type_string);
 
             let root_variant = g_variant_new_from_data(
@@ -438,6 +440,24 @@ mod entrypoint_blob {
             {
                 kernel::take_note_of(core::ffi::CStr::from_ptr(what).to_str().unwrap_or(""), number);
             }
+
+            let mapped_variant = g_variant_get_child_value(root_variant, 7);
+            let mut mapped: GVariantIter = core::mem::zeroed();
+            g_variant_iter_init(&mut mapped as *mut GVariantIter, mapped_variant);
+            let mut address: u64 = 0;
+            let mut size: u64 = 0;
+            let mut protection: u32 = 0;
+            while g_variant_iter_next(
+                &mut mapped as *mut GVariantIter,
+                c"(ttu)".as_ptr(),
+                &mut address,
+                &mut size,
+                &mut protection,
+            ) != 0
+            {
+                kernel::take_note_of_mapping(address, size as usize, protection);
+            }
+            g_variant_unref(mapped_variant);
 
             let own_range_variant = g_variant_get_child_value(root_variant, 0);
             let mut own_base: u64 = 0;

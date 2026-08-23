@@ -18,6 +18,8 @@ pub use crate::winnt::*;
 pub use crate::xnu::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_processes::*;
+#[cfg(feature = "xnu")]
+pub use crate::xnu_ranges::*;
 
 use core::ffi::c_void;
 
@@ -84,6 +86,20 @@ pub fn noted(what: &str) -> Option<u64> {
         .find(|(name, _)| name == what)
         .map(|(_, number)| *number)
 }
+
+pub fn take_note_of_mapping(address: u64, size: usize, protection: u32) {
+    unsafe { mappings() }.push((address, size, protection));
+}
+
+pub fn noted_mappings() -> &'static [(u64, usize, u32)] {
+    unsafe { mappings() }.as_slice()
+}
+
+unsafe fn mappings() -> &'static mut alloc::vec::Vec<(u64, usize, u32)> {
+    unsafe { (&raw mut MAPPINGS).as_mut().unwrap() }
+}
+
+static mut MAPPINGS: alloc::vec::Vec<(u64, usize, u32)> = alloc::vec::Vec::new();
 
 unsafe fn noted_numbers() -> &'static mut alloc::vec::Vec<(alloc::string::String, u64)> {
     unsafe { (&raw mut NOTED).as_mut().unwrap() }

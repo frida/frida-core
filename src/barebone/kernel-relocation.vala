@@ -10,6 +10,11 @@ namespace Frida.Barebone {
 	 * (same header, same order) to translate any static address, kernel or kext.
 	 */
 	public sealed class KernelRelocation : Object {
+		public Gee.List<Segment> segments {
+			get;
+			default = new Gee.ArrayList<Segment> ();
+		}
+
 		public uint64 reference_base {
 			get;
 			private set;
@@ -85,7 +90,17 @@ namespace Frida.Barebone {
 		private static async void add_fileset_entry (KernelRelocation reloc, GDB.Client gdb, Buffer image,
 				FilesetEntry entry, uint64 runtime_header, Cancellable? cancellable) throws Error, IOError {
 			Buffer runtime_image = yield read_mach_header (gdb, runtime_header, cancellable);
-			pair_segments (reloc, parse_segments (image, (size_t) entry.fileoff), parse_segments (runtime_image, 0));
+			var static_segments = parse_segments (image, (size_t) entry.fileoff);
+			var runtime_segments = parse_segments (runtime_image, 0);
+			pair_segments (reloc, static_segments, runtime_segments);
+
+			for (int i = 0; i != int.min (static_segments.size, runtime_segments.size); i++) {
+				reloc.segments.add (new Segment () {
+					address = runtime_segments[i].vmaddr,
+					size = static_segments[i].vmsize,
+					protection = static_segments[i].protection
+				});
+			}
 		}
 
 		/**
@@ -217,7 +232,8 @@ namespace Frida.Barebone {
 				if (cmd == LC_SEGMENT_64) {
 					result.add (new SegmentInfo () {
 						vmaddr = image.read_uint64 (off + 24),
-						vmsize = image.read_uint64 (off + 32)
+						vmsize = image.read_uint64 (off + 32),
+						protection = image.read_uint32 (off + 60)
 					});
 				}
 				off += cmdsize;
@@ -245,6 +261,13 @@ namespace Frida.Barebone {
 		private class SegmentInfo {
 			public uint64 vmaddr;
 			public uint64 vmsize;
+			public uint32 protection;
+		}
+
+		public class Segment : Object {
+			public uint64 address;
+			public uint64 size;
+			public uint32 protection;
 		}
 
 		private class Entry {

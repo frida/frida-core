@@ -223,7 +223,7 @@ namespace Frida.Barebone {
 					allocator, cancellable);
 			}
 
-			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)aya(st))"));
+			var config_builder = new VariantBuilder (new VariantType ("((tt)yvta(sstttt)aya(st)a(ttu))"));
 			config_builder.add ("(tt)", base_va, (uint64) elf_allocation.size);
 			config_builder.add_value (transport_tag.get_child_value (0));
 			config_builder.add_value (transport_tag.get_child_value (1));
@@ -255,6 +255,13 @@ namespace Frida.Barebone {
 			if (xnu_layout != null) {
 				config_builder.add ("(st)", "process.number", xnu_layout.number_offset);
 				config_builder.add ("(st)", "process.name", xnu_layout.name_offset);
+			}
+			config_builder.close ();
+
+			config_builder.open (new VariantType ("a(ttu)"));
+			if (relocation != null) {
+				foreach (var segment in relocation.segments)
+					config_builder.add ("(ttu)", segment.address, segment.size, segment.protection);
 			}
 			config_builder.close ();
 

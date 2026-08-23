@@ -1166,12 +1166,33 @@ namespace Frida.GDB {
 			return (string) buf;
 		}
 
+		private static bool tracing = Environment.get_variable ("FRIDA_GDB_TRACE") != null;
+
+		private static string printable (Bytes bytes) {
+			var text = new StringBuilder ();
+			foreach (uint8 byte in bytes.get_data ()) {
+				if (byte >= 0x20 && byte <= 0x7e)
+					text.append_c ((char) byte);
+				else
+					text.append_printf ("\\x%02x", byte);
+				if (text.len > 120) {
+					text.append ("...");
+					break;
+				}
+			}
+
+			return text.str;
+		}
+
 		private void write_string (string str) {
 			unowned uint8[] buf = (uint8[]) str;
 			write_bytes (new Bytes (buf[0:str.length]));
 		}
 
 		private void write_bytes (Bytes bytes) {
+			if (tracing)
+				printerr ("[gdb] > %s\n", printable (bytes));
+
 			pending_writes.offer (bytes);
 			if (pending_writes.size == 1)
 				process_pending_writes.begin ();
