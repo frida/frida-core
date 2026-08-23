@@ -22,6 +22,11 @@ namespace Frida.Barebone {
 
 		public abstract async size_t query_page_size (Cancellable? cancellable) throws Error, IOError;
 
+		public virtual async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield gdb.read_byte_array (va, size, cancellable);
+		}
+
 		public virtual async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			yield gdb.write_byte_array (va, new Bytes (data), cancellable);
 		}

@@ -18,6 +18,7 @@ namespace Frida.Barebone {
 		private Gee.List<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		private const uint64 COLLECTION_WINDOW = 0x8000000;
+		private const uint64 CHUNK_SIZE = 1024 * 1024;
 		private const uint64 SUMMARY_HEADER_SIZE = 0x10;
 		private const uint64 SUMMARY_SIZE = 0x88;
 		private const size_t SUMMARY_LOAD_ADDRESS = 0x50;
@@ -38,8 +39,9 @@ namespace Frida.Barebone {
 
 			uint64 collection_header = yield find_collection_header (machine, cancellable);
 			Buffer collection = yield read_mach_header (gdb, collection_header, cancellable);
+			var runtime_segments = parse_segments (collection, 0);
 			var header_locator = new KernelRelocation ();
-			pair_segments (header_locator, static_segments, parse_segments (collection, 0));
+			pair_segments (header_locator, static_segments, runtime_segments);
 
 			var reloc = new KernelRelocation ();
 			FilesetEntry kernel = find_entry (static_entries, "com.apple.kernel");
@@ -55,6 +57,9 @@ namespace Frida.Barebone {
 						yield add_fileset_entry (reloc, gdb, image, entry, runtime_header, cancellable);
 				}
 			}
+
+			pair_segments (reloc, static_segments, runtime_segments);
+
 			return reloc;
 		}
 
@@ -146,16 +151,41 @@ namespace Frida.Barebone {
 				return true;
 			}, cancellable);
 
+			size_t page_size = yield machine.query_page_size (cancellable);
+
 			for (int i = 0; i != range_bases.size; i++) {
-				uint64 range_base = range_bases[i];
-				if (range_sizes[i] < 16)
-					continue;
-				Buffer head = yield gdb.read_buffer (range_base, 16, cancellable);
-				if (head.read_uint32 (0) == MH_MAGIC_64 && head.read_uint32 (4) == CPU_TYPE_ARM64
-						&& head.read_uint32 (12) == MH_FILESET)
-					return range_base;
+				uint64 found = yield find_header_in (machine, range_bases[i], range_sizes[i], page_size,
+					cancellable);
+				if (found != 0)
+					return found;
 			}
+
 			throw new Error.NOT_SUPPORTED ("Unable to locate the runtime kernel collection header");
+		}
+
+		private static async uint64 find_header_in (Machine machine, uint64 base_va, uint64 size,
+				size_t page_size, Cancellable? cancellable) throws Error, IOError {
+			var gdb = machine.gdb;
+
+			for (uint64 offset = 0; offset + 16 <= size; offset += CHUNK_SIZE) {
+				size_t chunk = (size_t) uint64.min (CHUNK_SIZE, size - offset);
+
+				Bytes taken;
+				try {
+					taken = yield machine.read_virtual (base_va + offset, chunk, cancellable);
+				} catch (Error e) {
+					continue;
+				}
+
+				Buffer pages = gdb.make_buffer (taken);
+				for (size_t at = 0; at + 16 <= chunk; at += page_size) {
+					if (pages.read_uint32 (at) == MH_MAGIC_64 && pages.read_uint32 (at + 4) == CPU_TYPE_ARM64
+							&& pages.read_uint32 (at + 12) == MH_FILESET)
+						return base_va + offset + at;
+				}
+			}
+
+			return 0;
 		}
 
 		private static Gee.List<FilesetEntry> parse_fileset_entries (Buffer image) throws Error {

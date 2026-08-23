@@ -284,6 +284,27 @@ namespace Frida.Barebone {
 			return (descriptor & INT48_MASK & ~page_mask) | (va & page_mask);
 		}
 
+		public override async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
+				throws Error, IOError {
+			if (physical_memory == null)
+				return yield gdb.read_byte_array (va, size, cancellable);
+
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			var taken = new ByteArray ();
+			size_t offset = 0;
+			while (offset < size) {
+				uint64 cur_va = va + offset;
+				uint64 pa = yield translate_address (cur_va, cancellable);
+				if (!physical_memory.contains (pa))
+					throw new Error.NOT_SUPPORTED ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is a device, not memory", cur_va);
+				size_t chunk = size_t.min ((size_t) (p.granule - (cur_va & (p.granule - 1))), size - offset);
+				taken.append (physical_memory.read (pa, chunk));
+				offset += chunk;
+			}
+
+			return ByteArray.free_to_bytes ((owned) taken);
+		}
+
 		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			if (physical_memory == null) {
 				yield gdb.write_byte_array (va, new Bytes (data), cancellable);
