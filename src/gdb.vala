@@ -674,7 +674,7 @@ namespace Frida.GDB {
 			}, cancellable);
 			if (response.payload == "")
 				throw new Error.NOT_SUPPORTED ("Command not supported by the remote stub");
-			check_execute_response (response);
+			check_execute_response (response, new Bytes (command.data));
 
 			var result = new StringBuilder ();
 			foreach (Packet p in output)
@@ -832,7 +832,7 @@ namespace Frida.GDB {
 
 		public async void execute (Bytes command, Cancellable? cancellable) throws Error, IOError {
 			Packet response = yield query (command, cancellable);
-			check_execute_response (response);
+			check_execute_response (response, command);
 		}
 
 		public async void perform_execute (Bytes command, Cancellable? cancellable, Promise<bool> request) throws Error, IOError {
@@ -844,18 +844,29 @@ namespace Frida.GDB {
 			}
 		}
 
-		private static void check_execute_response (Packet packet) throws Error {
+		private static void check_execute_response (Packet packet, Bytes command) throws Error {
 			unowned string response = packet.payload;
 			if (response[0] == 'E') {
 				string reason = response[1:response.length];
 				if (reason == "Locked")
 					throw new Error.INVALID_OPERATION ("Device is locked");
 				else
-					throw new Error.NOT_SUPPORTED ("%s", reason);
+					throw new Error.NOT_SUPPORTED ("Stub rejected %s: %s", name_of (command), reason);
 			}
 
 			if (response != "OK")
 				throw new Error.PROTOCOL ("Unexpected response: %s", response);
+		}
+
+		private static string name_of (Bytes command) {
+			var text = new StringBuilder ();
+			foreach (uint8 byte in command.get_data ()) {
+				if (byte < 0x20 || byte > 0x7e || text.len == 24)
+					break;
+				text.append_c ((char) byte);
+			}
+
+			return text.str;
 		}
 
 		public async Packet query_simple (string request, Cancellable? cancellable) throws Error, IOError {
