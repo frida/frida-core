@@ -4476,6 +4476,16 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
+			private static string read_script (string path) {
+				try {
+					uint8[] contents;
+					FileUtils.get_data (path, out contents);
+					return (string) contents;
+				} catch (FileError e) {
+					assert_not_reached ();
+				}
+			}
+
 			private static async void inject (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with FRIDA_BAREBONE_CONFIG set> ");
@@ -4503,11 +4513,22 @@ namespace Frida.HostSessionTest {
 					var handler = h.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						printerr ("[*] Message: %s\n", message);
-						if (waiting && "allowed=" in message)
+						if (waiting && ("allowed=" in message || "done" in message))
 							inject.callback ();
 					});
 
-					var script_id = yield session.create_script ("""
+					if (Environment.get_variable ("FRIDA_BAREBONE_LIST") != null) {
+						var processes = yield host_session.enumerate_processes (make_parameters_dict (),
+							cancellable);
+						printerr ("[*] %u processes\n", processes.length);
+						foreach (var process in processes[0:uint.min (processes.length, 5)])
+							printerr ("[*]   %u %s\n", process.pid, process.name);
+					}
+
+					string? own_script = Environment.get_variable ("FRIDA_BAREBONE_SCRIPT");
+					string source = (own_script != null)
+						? read_script (own_script)
+						: """
 						const TARGET_PID = 1;
 						const evaluate = DebugSymbol.getFunctionByName('sb_evaluate_internal');
 						const procPid = new NativeFunction(
@@ -4528,15 +4549,16 @@ namespace Frida.HostSessionTest {
 						Interceptor.flush();
 						send('hook live');
 						setTimeout(() => { l.detach(); Interceptor.flush(); send('allowed=' + allowed); }, 3000);
-						""",
-						make_parameters_dict (), cancellable);
+						""";
+
+					var script_id = yield session.create_script (source, make_parameters_dict (), cancellable);
 					yield session.load_script (script_id, cancellable);
 
 					waiting = true;
 					yield;
 					waiting = false;
 					h.disconnect (handler);
-					assert_true ("allowed=" in received_message);
+					assert_true ("allowed=" in received_message || "done" in received_message);
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
