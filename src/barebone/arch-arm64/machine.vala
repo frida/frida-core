@@ -430,9 +430,31 @@ namespace Frida.Barebone {
 					code.write_uint32 (i * 4, FLUSH_STUB_CODE[i]);
 
 				yield write_virtual (flush_stub.virtual_address, code.bytes.get_data (), cancellable);
+
+				yield grant_execution (flush_stub.virtual_address, flush_stub.size, cancellable);
 			}
 
 			yield invoke (flush_stub.virtual_address, {}, cancellable);
+		}
+
+		private async void grant_execution (uint64 virtual_address, size_t size, Cancellable? cancellable)
+				throws Error, IOError {
+			MMUParameters p = yield load_mmu_parameters (cancellable);
+
+			yield begin_physical_addressing (cancellable);
+			GLib.Error? failure = null;
+			try {
+				uint64 page_mask = p.granule - 1;
+				uint64 aligned_va = virtual_address & ~page_mask;
+				uint64 aligned_end = (virtual_address + size + page_mask) & ~page_mask;
+				uint num_pages = (uint) ((aligned_end - aligned_va) / p.granule);
+
+				yield perform_protect_pages (aligned_va, num_pages, READ | EXECUTE, p, cancellable);
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield end_physical_addressing (cancellable);
+			throw_if_failed (failure);
 		}
 
 		// The bridge reads and writes guest physical memory directly, so the stub's
