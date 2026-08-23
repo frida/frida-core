@@ -49,11 +49,17 @@ fn walk_every_number(listed: &mut Vec<(u32, [u8; NAME_SIZE])>) {
     };
     let release = unsafe { _proc_rele }.unwrap();
 
+    let mut last_seen = 0;
     for number in 0..=HIGHEST_NUMBER {
+        if number - last_seen > LONGEST_GAP {
+            break;
+        }
+
         let process = unsafe { find(number as c_int) };
         if process.is_null() {
             continue;
         }
+        last_seen = number;
 
         unsafe {
             note_a_process(process, listed as *mut Vec<(u32, [u8; NAME_SIZE])> as *mut c_void);
@@ -108,6 +114,7 @@ const NAME_SIZE: usize = 33;
 const ALL_PROCESSES: c_int = 1;
 const KEEP_GOING: c_int = 0;
 const HIGHEST_NUMBER: u32 = 99999;
+const LONGEST_GAP: u32 = 4096;
 
 unsafe extern "C" {
     static _proc_iterate: Option<

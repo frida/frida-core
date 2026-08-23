@@ -18,8 +18,6 @@ pub use crate::winnt::*;
 pub use crate::xnu::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_processes::*;
-#[cfg(feature = "xnu")]
-pub use crate::xnu_ranges::*;
 
 use core::ffi::c_void;
 
