@@ -22,8 +22,6 @@ pub use crate::xnu_injection::*;
 pub use crate::xnu_processes::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_relay::*;
-#[cfg(feature = "xnu")]
-pub use crate::xnu_ranges::*;
 
 use core::ffi::c_void;
 

@@ -20,8 +20,19 @@ fn answer(arena: u64, asked: &[u8]) {
     match asked {
         b"pid" => say(arena, &crate::xnu_user_calls::process_id().to_le_bytes()),
         b"tid" => say(arena, &crate::xnu_user_calls::thread_id().to_le_bytes()),
+        b"mem" => say(arena, &(took_a_page() as u64).to_le_bytes()),
         said => say(arena, said),
     }
+}
+
+fn took_a_page() -> bool {
+    let Some(page) = crate::xnu_user_calls::take_memory(0x4000) else {
+        return false;
+    };
+    unsafe { (page as *mut u8).write_volatile(1) };
+    crate::xnu_user_calls::give_memory_back(page, 0x4000);
+
+    true
 }
 
 fn hear(arena: u64, into: &mut [u8]) -> Option<usize> {

@@ -56,6 +56,11 @@ pub fn process_id_according_to_copy(id: u32) -> u32 {
     u32::from_le_bytes(said)
 }
 
+pub fn copy_can_take_memory(id: u32) -> bool {
+    let mut said = [0u8; 8];
+    echo_through_copy(id, b"mem", &mut said) == said.len() && said[0] == 1
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { arenas() }.get(&id).copied()
 }

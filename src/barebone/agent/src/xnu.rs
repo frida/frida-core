@@ -3,6 +3,119 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::kernel::ThreadEntry;
 
+
+pub struct Primitives {
+    pub alloc: fn(usize) -> *mut u8,
+    pub free: fn(*mut u8, usize),
+    pub alloc_code: fn(usize) -> *mut u8,
+    pub free_code: fn(*mut u8, usize),
+    pub spawn_thread: fn(ThreadEntry, *mut c_void) -> isize,
+    pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
+    pub wake: fn(*const u8),
+    pub yield_now: fn(),
+    pub monotonic_micros: fn() -> i64,
+    pub current_process_id: fn() -> u32,
+    pub current_thread_id: fn() -> u64,
+    pub protect: fn(u64, usize, u32) -> bool,
+    pub protection_at: fn(u64) -> u32,
+    pub enumerate_ranges: fn(&mut dyn FnMut(u64, usize, u32)),
+}
+
+pub fn select_user() {
+    unsafe { ACTIVE = &crate::xnu_user_calls::USER };
+}
+
+pub fn in_copy() -> bool {
+    core::ptr::eq(primitives(), &crate::xnu_user_calls::USER)
+}
+
+fn primitives() -> &'static Primitives {
+    unsafe { ACTIVE }
+}
+
+static mut ACTIVE: &Primitives = &KERNEL;
+
+static KERNEL: Primitives = Primitives {
+    alloc: kernel_alloc,
+    free: kernel_free,
+    alloc_code: kernel_alloc_code,
+    free_code: kernel_free_code,
+    spawn_thread: kernel_spawn_thread,
+    wait: kernel_wait,
+    wake: kernel_wake,
+    yield_now: kernel_yield_now,
+    monotonic_micros: kernel_monotonic_micros,
+    current_process_id: kernel_current_process_id,
+    current_thread_id: kernel_current_thread_id,
+    protect: kernel_protect,
+    protection_at: crate::xnu_ranges::protection_at,
+    enumerate_ranges: crate::xnu_ranges::enumerate_ranges,
+};
+
+pub fn alloc(size: usize) -> *mut u8 {
+    (primitives().alloc)(size)
+}
+
+pub fn free(ptr: *mut u8, size: usize) {
+    (primitives().free)(ptr, size);
+}
+
+pub fn alloc_code(size: usize) -> *mut u8 {
+    (primitives().alloc_code)(size)
+}
+
+pub fn free_code(ptr: *mut u8, size: usize) {
+    (primitives().free_code)(ptr, size);
+}
+
+pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+    (primitives().spawn_thread)(entry, parameter)
+}
+
+pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    (primitives().wait)(token, timeout_us, check);
+}
+
+pub fn wake(token: *const u8) {
+    (primitives().wake)(token);
+}
+
+pub fn yield_now() {
+    (primitives().yield_now)();
+}
+
+pub fn monotonic_micros() -> i64 {
+    (primitives().monotonic_micros)()
+}
+
+pub fn current_process_id() -> u32 {
+    (primitives().current_process_id)()
+}
+
+pub fn current_thread_id() -> u64 {
+    (primitives().current_thread_id)()
+}
+
+pub fn protect(address: u64, size: usize, may: u32) -> bool {
+    (primitives().protect)(address, size, may)
+}
+
+pub fn protection_at(address: u64) -> u32 {
+    (primitives().protection_at)(address)
+}
+
+pub fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
+    (primitives().enumerate_ranges)(found);
+}
+
+fn kernel_current_process_id() -> u32 {
+    0
+}
+
+fn kernel_protect(_address: u64, _size: usize, _may: u32) -> bool {
+    false
+}
+
 pub fn log(msg: &str) {
     unsafe {
         _IOLog(msg.as_ptr());
@@ -21,22 +134,22 @@ pub fn run_when_ready(action: fn()) {
 // the kernel as it is.
 pub fn install_fault_reporter() {}
 
-pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+fn kernel_spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     kernel_thread_start(entry, parameter)
 }
 
-pub fn alloc(size: usize) -> *mut u8 {
+fn kernel_alloc(size: usize) -> *mut u8 {
     kalloc(size)
 }
 
 // Executable slabs come out of the same allocator; the host flips their page
 // permissions for us through its physical-memory bridge.
-pub fn alloc_code(size: usize) -> *mut u8 {
+fn kernel_alloc_code(size: usize) -> *mut u8 {
     kalloc(size)
 }
 
-pub fn free_code(ptr: *mut u8, size: usize) {
-    free(ptr, size);
+fn kernel_free_code(ptr: *mut u8, size: usize) {
+    kernel_free(ptr, size);
 }
 
 pub fn page_size() -> usize {
@@ -58,7 +171,7 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
 // Arms the wait, gives `check` a chance to observe the condition, and only then
 // commits to sleeping — the three-phase Mach protocol, which is race-free
 // because a wakeup landing after assert_wait() cancels the pending block.
-pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+fn kernel_wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let wait_result = match timeout_us {
         None => assert_wait(token, THREAD_INTERRUPTIBLE),
         Some(us) => assert_wait_timeout(token, THREAD_INTERRUPTIBLE, (us * 1000) as u32, 1),
@@ -75,15 +188,15 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
     thread_block(None);
 }
 
-pub fn wake(token: *const u8) {
+fn kernel_wake(token: *const u8) {
     thread_wakeup(token);
 }
 
 // XNU reschedules a kernel thread that stays runnable, so there is nothing this has
 // to do here. It exists because Linux does not forgive a loop that never yields.
-pub fn yield_now() {}
+fn kernel_yield_now() {}
 
-pub fn monotonic_micros() -> i64 {
+fn kernel_monotonic_micros() -> i64 {
     (absolutetime_to_nanoseconds(mach_absolute_time()) / 1000) as i64
 }
 
@@ -95,7 +208,7 @@ pub fn wall_clock_micros() -> (u32, u32) {
 // in a double without losing precision; the low bits keep it unique per thread.
 const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
 
-pub fn current_thread_id() -> u64 {
+fn kernel_current_thread_id() -> u64 {
     let thread_ptr: u64;
     unsafe {
         core::arch::asm!("mrs {}, tpidr_el1", out(reg) thread_ptr, options(nomem, nostack));
@@ -128,7 +241,7 @@ pub fn kalloc(size: usize) -> *mut u8 {
     }
 }
 
-pub fn free(ptr: *mut u8, size: usize) {
+fn kernel_free(ptr: *mut u8, size: usize) {
     unsafe {
         if let Some(f) = _kfree_data {
             f(ptr, size);

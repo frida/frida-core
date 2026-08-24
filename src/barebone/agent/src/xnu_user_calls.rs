@@ -1,5 +1,99 @@
 
 use core::arch::asm;
+use core::ffi::c_void;
+
+use crate::kernel::ThreadEntry;
+use crate::xnu::Primitives;
+
+pub static USER: Primitives = Primitives {
+    alloc,
+    free,
+    alloc_code,
+    free_code,
+    spawn_thread,
+    wait,
+    wake,
+    yield_now,
+    monotonic_micros,
+    current_process_id,
+    current_thread_id,
+    protect,
+    protection_at,
+    enumerate_ranges,
+};
+
+fn alloc(size: usize) -> *mut u8 {
+    take_memory(size).unwrap_or(0) as *mut u8
+}
+
+fn free(ptr: *mut u8, size: usize) {
+    give_memory_back(ptr as u64, size);
+}
+
+fn alloc_code(size: usize) -> *mut u8 {
+    let Some(address) = take_memory(size) else {
+        return core::ptr::null_mut();
+    };
+
+    if !set_protection(address, size, READ | EXECUTE) {
+        give_memory_back(address, size);
+        return core::ptr::null_mut();
+    }
+
+    address as *mut u8
+}
+
+fn free_code(ptr: *mut u8, size: usize) {
+    give_memory_back(ptr as u64, size);
+}
+
+fn protect(address: u64, size: usize, may: u32) -> bool {
+    set_protection(address, size, may as u64)
+}
+
+fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    if check() {
+        return;
+    }
+
+    let value = unsafe { (token as *const u32).read_volatile() };
+    unsafe {
+        ask(ULOCK_WAIT, [COMPARE_AND_WAIT, token as u64, value as u64,
+            timeout_us.unwrap_or(0)])
+    };
+}
+
+fn wake(token: *const u8) {
+    unsafe { ask(ULOCK_WAKE, [COMPARE_AND_WAIT | WAKE_ALL, token as u64, 0, 0]) };
+}
+
+fn yield_now() {
+    give_up_the_processor();
+}
+
+fn monotonic_micros() -> i64 {
+    micros() as i64
+}
+
+fn current_process_id() -> u32 {
+    process_id()
+}
+
+fn current_thread_id() -> u64 {
+    thread_id()
+}
+
+fn protection_at(address: u64) -> u32 {
+    crate::xnu_ranges::protection_at(address)
+}
+
+fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
+    crate::xnu_ranges::enumerate_ranges(found);
+}
+
+fn spawn_thread(_entry: ThreadEntry, _parameter: *mut c_void) -> isize {
+    0
+}
 
 pub fn process_id() -> u32 {
     unsafe { ask(GET_PID, [0; 4]) as u32 }
@@ -36,7 +130,7 @@ pub fn give_memory_back(address: u64, size: usize) {
     unsafe { trap(MACH_VM_DEALLOCATE, [task(), address, size as u64, 0]) };
 }
 
-pub fn protect(address: u64, size: usize, may: u64) -> bool {
+fn set_protection(address: u64, size: usize, may: u64) -> bool {
     unsafe { trap(MACH_VM_PROTECT, [task(), address, size as u64, may]) == KERN_SUCCESS }
 }
 
@@ -84,6 +178,13 @@ const MACH_VM_DEALLOCATE: i64 = -12;
 const MACH_VM_PROTECT: i64 = -14;
 const TASK_SELF: i64 = -28;
 
+const READ: u64 = 1;
+const EXECUTE: u64 = 4;
+const COMPARE_AND_WAIT: u64 = 1;
+const WAKE_ALL: u64 = 0x100;
+
 const GET_PID: i64 = 20;
+const ULOCK_WAIT: i64 = 515;
+const ULOCK_WAKE: i64 = 516;
 const SCHED_YIELD: i64 = 331;
 const THREAD_SELF_ID: i64 = 372;
