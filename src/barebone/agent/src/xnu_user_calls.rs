@@ -170,12 +170,55 @@ fn current_thread_id() -> u64 {
     thread_id()
 }
 
-fn protection_at(address: u64) -> u32 {
-    crate::xnu_ranges::protection_at(address)
+fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
+    let mut at = 0u64;
+    while let Some(region) = region_from(at) {
+        found(region.address, region.size as usize, region.protection);
+        at = region.address + region.size;
+    }
 }
 
-fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
-    crate::xnu_ranges::enumerate_ranges(found);
+fn protection_at(address: u64) -> u32 {
+    match region_from(address) {
+        Some(region) if region.address <= address => region.protection,
+        _ => 0,
+    }
+}
+
+fn region_from(address: u64) -> Option<Region> {
+    let mut region = Region::default();
+    let told = unsafe {
+        svc7(PROC_INFO, [ABOUT_A_PROCESS, process_id() as u64, ABOUT_A_REGION, address,
+            &mut region as *mut Region as u64, core::mem::size_of::<Region>() as u64, 0])
+    };
+
+    (told == core::mem::size_of::<Region>() as i64).then_some(region)
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct Region {
+    protection: u32,
+    most_it_may_be: u32,
+    inheritance: u32,
+    flags: u32,
+    offset: u64,
+    behavior: u32,
+    wired: u32,
+    tag: u32,
+    resident: u32,
+    now_private: u32,
+    swapped_out: u32,
+    dirtied: u32,
+    references: u32,
+    shadow_depth: u32,
+    share_mode: u32,
+    private_resident: u32,
+    shared_resident: u32,
+    object: u32,
+    depth: u32,
+    address: u64,
+    size: u64,
 }
 
 fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
@@ -256,7 +299,6 @@ unsafe fn ask(number: i64, args: [u64; 4]) -> i64 {
     answer
 }
 
-#[allow(dead_code)]
 pub(crate) unsafe fn svc7(number: i64, args: [u64; 7]) -> i64 {
     let answer: i64;
     unsafe {
@@ -324,6 +366,9 @@ const WAKE_ALL: u64 = 0x100;
 
 const GET_PID: i64 = 20;
 const GET_TIME_OF_DAY: i64 = 116;
+const PROC_INFO: i64 = 336;
+const ABOUT_A_PROCESS: u64 = 2;
+const ABOUT_A_REGION: u64 = 7;
 const ULOCK_WAIT: i64 = 515;
 const ULOCK_WAKE: i64 = 516;
 const SCHED_YIELD: i64 = 331;
