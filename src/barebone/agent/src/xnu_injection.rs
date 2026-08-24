@@ -13,7 +13,8 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    let arena_here = home.arena_here;
+    let arena = home.arena_here;
+    let arena_here = arena;
     if !start(process.task, home) {
         return 0;
     }
@@ -22,8 +23,51 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     }
 
+    unsafe { arenas() }.insert(id, arena_here);
+
+    let mut heard = [0u8; 16];
+    let length = echo_through_copy(id, b"frida", &mut heard);
+    if length == 5 && &heard[..5] == b"frida" {
+        crate::kernel::log("the copy answered what it was sent");
+    } else {
+        crate::kernel::log("the copy said nothing back");
+    }
+
     id
 }
+
+pub fn echo_through_copy(id: u32, frame: &[u8], into: &mut [u8]) -> usize {
+    let Some(arena) = arena_for_pid(id) else {
+        return 0;
+    };
+
+    crate::xnu_relay::forward_frame(arena, frame);
+
+    for _ in 0..LONG_ENOUGH {
+        if let Some(said) = crate::xnu_relay::take_frame_from_target(arena) {
+            let length = said.len().min(into.len());
+            into[..length].copy_from_slice(&said[..length]);
+            return length;
+        }
+        crate::kernel::yield_now();
+    }
+
+    0
+}
+
+pub fn arena_for_pid(id: u32) -> Option<u64> {
+    unsafe { arenas() }.get(&id).copied()
+}
+
+pub fn injected_arenas() -> alloc::vec::Vec<u64> {
+    unsafe { arenas() }.values().copied().collect()
+}
+
+unsafe fn arenas() -> &'static mut alloc::collections::BTreeMap<u32, u64> {
+    unsafe { (&raw mut ARENAS).as_mut().unwrap() }
+}
+
+static mut ARENAS: alloc::collections::BTreeMap<u32, u64> = alloc::collections::BTreeMap::new();
 
 fn woke_up(arena: u64) -> bool {
     for _ in 0..LONG_ENOUGH {
@@ -70,9 +114,9 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
     let seen_from_here = share(map, code, size as u64)?;
     unsafe { core::ptr::copy_nonoverlapping(base as *const u8, seen_from_here as *mut u8, size) };
 
-    let arena = take_memory(map, PAGE)?;
-    let arena_here = share(map, arena, PAGE)?;
-    unsafe { core::ptr::write_bytes(arena_here as *mut u8, 0, PAGE as usize) };
+    let arena = take_memory(map, crate::xnu_relay::ARENA_SIZE)?;
+    let arena_here = share(map, arena, crate::xnu_relay::ARENA_SIZE)?;
+    unsafe { core::ptr::write_bytes(arena_here as *mut u8, 0, crate::xnu_relay::ARENA_SIZE as usize) };
 
     let stack = take_memory(map, STACK)?;
 

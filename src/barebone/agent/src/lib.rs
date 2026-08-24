@@ -98,6 +98,8 @@ mod xnu_processes;
 #[cfg(feature = "xnu")]
 mod xnu_ranges;
 #[cfg(feature = "xnu")]
+mod xnu_relay;
+#[cfg(feature = "xnu")]
 mod xnu_user;
 
 mod bindings {
