@@ -350,7 +350,7 @@ mod exports {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn getpid() -> i32 {
-        0
+        crate::kernel::current_process_id() as i32
     }
 
     #[unsafe(no_mangle)]

@@ -939,6 +939,9 @@ fn run_main_loop(main_context: *mut GMainContext) {
                 return;
             }
 
+            #[cfg(feature = "xnu")]
+            g_main_context_iteration(main_context, 0);
+            #[cfg(not(feature = "xnu"))]
             dispatch_pending_work(main_context);
         }
     }
@@ -1873,6 +1876,11 @@ pub(crate) fn source_process_id() -> u32 {
     #[cfg(feature = "linux-injected")]
     if kernel::in_copy() {
         return kernel::home_process_id();
+    }
+
+    #[cfg(feature = "xnu")]
+    if crate::xnu::in_copy() {
+        return kernel::current_process_id();
     }
 
     0

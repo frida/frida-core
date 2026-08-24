@@ -31,7 +31,7 @@ pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
     kernel::current_thread_id() as GumThreadId
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_id() -> guint {
     kernel::current_process_id() as guint

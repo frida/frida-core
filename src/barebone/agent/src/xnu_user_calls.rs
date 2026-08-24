@@ -80,6 +80,7 @@ pub static USER: Primitives = Primitives {
     wake,
     yield_now,
     monotonic_micros,
+    wall_clock_micros,
     current_process_id,
     current_thread_id,
     protect,
@@ -146,6 +147,19 @@ fn yield_now() {
 
 fn monotonic_micros() -> i64 {
     micros() as i64
+}
+
+fn wall_clock_micros() -> (u32, u32) {
+    let mut when = WhatTimeItIs { seconds: 0, micros: 0 };
+    unsafe { ask(GET_TIME_OF_DAY, [&mut when as *mut WhatTimeItIs as u64, 0, 0, 0]) };
+
+    (when.seconds as u32, when.micros as u32)
+}
+
+#[repr(C)]
+struct WhatTimeItIs {
+    seconds: i64,
+    micros: i64,
 }
 
 fn current_process_id() -> u32 {
@@ -309,6 +323,7 @@ const COMPARE_AND_WAIT: u64 = 1;
 const WAKE_ALL: u64 = 0x100;
 
 const GET_PID: i64 = 20;
+const GET_TIME_OF_DAY: i64 = 116;
 const ULOCK_WAIT: i64 = 515;
 const ULOCK_WAKE: i64 = 516;
 const SCHED_YIELD: i64 = 331;

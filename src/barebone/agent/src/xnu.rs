@@ -14,6 +14,7 @@ pub struct Primitives {
     pub wake: fn(*const u8),
     pub yield_now: fn(),
     pub monotonic_micros: fn() -> i64,
+    pub wall_clock_micros: fn() -> (u32, u32),
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub protect: fn(u64, usize, u32) -> bool,
@@ -46,6 +47,7 @@ static KERNEL: Primitives = Primitives {
     wake: kernel_wake,
     yield_now: kernel_yield_now,
     monotonic_micros: kernel_monotonic_micros,
+    wall_clock_micros: kernel_wall_clock_micros,
     current_process_id: kernel_current_process_id,
     current_thread_id: kernel_current_thread_id,
     protect: kernel_protect,
@@ -209,6 +211,10 @@ fn kernel_monotonic_micros() -> i64 {
 }
 
 pub fn wall_clock_micros() -> (u32, u32) {
+    (primitives().wall_clock_micros)()
+}
+
+fn kernel_wall_clock_micros() -> (u32, u32) {
     clock_get_calendar_microtime()
 }
 
