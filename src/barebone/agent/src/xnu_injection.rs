@@ -13,11 +13,27 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
+    let arena_here = home.arena_here;
     if !start(process.task, home) {
         return 0;
     }
 
+    if !woke_up(arena_here) {
+        return 0;
+    }
+
     id
+}
+
+fn woke_up(arena: u64) -> bool {
+    for _ in 0..LONG_ENOUGH {
+        if unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE {
+            return true;
+        }
+        crate::kernel::yield_now();
+    }
+
+    false
 }
 
 struct Process {
@@ -28,6 +44,8 @@ struct Process {
 
 struct Home {
     code: u64,
+    arena: u64,
+    arena_here: u64,
     stack: u64,
 }
 
@@ -46,15 +64,42 @@ fn process_with_id(id: u32) -> Option<Process> {
 }
 
 fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
-    let code = put(map, bootstrap())?;
+    let (base, size) = crate::own_range();
+
+    let code = take_memory(map, size as u64)?;
+    let seen_from_here = share(map, code, size as u64)?;
+    unsafe { core::ptr::copy_nonoverlapping(base as *const u8, seen_from_here as *mut u8, size) };
+
+    let arena = take_memory(map, PAGE)?;
+    let arena_here = share(map, arena, PAGE)?;
+    unsafe { core::ptr::write_bytes(arena_here as *mut u8, 0, PAGE as usize) };
+
     let stack = take_memory(map, STACK)?;
 
     let protect = unsafe { _mach_vm_protect }?;
-    if unsafe { protect(map, code, PAGE, 0, READ | EXECUTE) } != KERN_SUCCESS {
+    if unsafe { protect(map, code, size as u64, 0, READ | EXECUTE) } != KERN_SUCCESS {
         return None;
     }
 
-    Some(Home { code, stack })
+    Some(Home { code: code + crate::xnu_user::entry_offset() as u64, arena, arena_here, stack })
+}
+
+fn share(map: *mut c_void, address: u64, size: u64) -> Option<u64> {
+    let remap = unsafe { _mach_vm_remap }?;
+    let ours = ourselves()?;
+
+    let mut here: u64 = 0;
+    let mut may: u32 = 0;
+    let mut most: u32 = 0;
+    let told = unsafe {
+        remap(ours, &mut here as *mut u64, size, 0, ANYWHERE, map, address, SHARED,
+            &mut may as *mut u32, &mut most as *mut u32, INHERIT_NONE)
+    };
+    if told != KERN_SUCCESS {
+        return None;
+    }
+
+    Some(here)
 }
 
 fn take_memory(map: *mut c_void, size: u64) -> Option<u64> {
@@ -68,6 +113,7 @@ fn take_memory(map: *mut c_void, size: u64) -> Option<u64> {
     Some(address)
 }
 
+#[allow(dead_code)]
 fn put(map: *mut c_void, bytes: &[u8]) -> Option<u64> {
     let copy_in = unsafe { _vm_map_copyin }?;
     let copy_out = unsafe { _vm_map_copyout }?;
@@ -101,10 +147,6 @@ fn ourselves() -> Option<*mut c_void> {
     Some(unsafe { map_of(task_of()) })
 }
 
-fn bootstrap() -> &'static [u8] {
-    &[0x00, 0x00, 0x00, 0x14]
-}
-
 fn start(task: *mut c_void, home: Home) -> bool {
     let create = unsafe { _thread_create };
     let set_state = unsafe { _thread_set_state };
@@ -123,6 +165,7 @@ fn start(task: *mut c_void, home: Home) -> bool {
     unsafe {
         (places.add(STACK_POINTER) as *mut u64).write(home.stack + STACK - 0x100);
         (places.add(PROGRAM_COUNTER) as *mut u64).write(home.code);
+        (places as *mut u64).write(home.arena);   // what the copy is told first
         (places.add(FLAGS) as *mut u32).write(PLAIN_ADDRESSES);
     }
 
@@ -142,6 +185,9 @@ const ANYWHERE: c_int = 1;
 const READ: c_int = 1;
 const EXECUTE: c_int = 4;
 const ARM_THREAD_STATE64: c_int = 6;
+const SHARED: c_int = 0;
+const LONG_ENOUGH: u32 = 100_000;
+const INHERIT_NONE: c_int = 2;
 const STATE_WORDS: usize = 68;
 const STACK_POINTER: usize = 29 * 8 + 16;
 const PROGRAM_COUNTER: usize = 29 * 8 + 24;
@@ -162,6 +208,10 @@ unsafe extern "C" {
     static _get_task_map: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
     static _mach_vm_allocate: Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, c_int) -> c_int>;
     static _mach_vm_protect: Option<unsafe extern "C" fn(*mut c_void, u64, u64, c_int, c_int) -> c_int>;
+    static _mach_vm_remap: Option<
+        unsafe extern "C" fn(*mut c_void, *mut u64, u64, u64, c_int, *mut c_void, u64, c_int,
+            *mut u32, *mut u32, c_int) -> c_int,
+    >;
     static _vm_map_copyin: Option<unsafe extern "C" fn(*mut c_void, u64, u64, c_int, *mut *mut c_void) -> c_int>;
     static _vm_map_copyout: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut c_void) -> c_int>;
     static _thread_create: Option<unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> c_int>;
