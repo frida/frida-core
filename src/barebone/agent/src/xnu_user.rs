@@ -22,6 +22,13 @@ fn answer(arena: u64, asked: &[u8]) {
         b"pid" => say(arena, &crate::xnu_user_calls::process_id().to_le_bytes()),
         b"tid" => say(arena, &crate::xnu_user_calls::thread_id().to_le_bytes()),
         b"mem" => say(arena, &(took_a_page() as u64).to_le_bytes()),
+        b"st" => say(arena, &(a_thread_is_running_somewhere() as u64).to_le_bytes()),
+        b"chg" => say(arena, &(a_thread_takes_a_change() as u64).to_le_bytes()),
+        b"new" => say(arena, &(a_new_thread_appears() as u64).to_le_bytes()),
+        b"thr" => {
+            let mut ports = [0u32; 64];
+            say(arena, &(crate::xnu_mig::threads_here(&mut ports) as u32).to_le_bytes())
+        }
         said => say(arena, said),
     }
 }
@@ -35,6 +42,70 @@ fn took_a_page() -> bool {
     crate::kernel::free(page, 0x4000);
 
     true
+}
+
+fn a_thread_is_running_somewhere() -> bool {
+    let mut counted = 0;
+    let mut plausible = 0;
+    crate::kernel::enumerate_threads(&mut |thread| {
+        counted += 1;
+        if let Some(state) = thread.cpu_state {
+            if state.pc != 0 && state.pc < HIGHEST_A_PROCESS_SEES && state.sp != 0 {
+                plausible += 1;
+            }
+        }
+    });
+
+    counted != 0 && counted == plausible
+}
+
+const HIGHEST_A_PROCESS_SEES: u64 = 1 << 47;
+
+fn a_new_thread_appears() -> bool {
+    let before = how_many_threads();
+    if crate::kernel::spawn_thread(waits_forever, core::ptr::null_mut()) == 0 {
+        return false;
+    }
+
+    for _ in 0..LONG_ENOUGH {
+        if how_many_threads() > before {
+            return true;
+        }
+        crate::kernel::yield_now();
+    }
+
+    false
+}
+
+unsafe extern "C" fn waits_forever(_parameter: *mut core::ffi::c_void, _wait_result: i32) {
+    loop {
+        crate::kernel::yield_now();
+    }
+}
+
+fn how_many_threads() -> usize {
+    let mut counted = 0;
+    crate::kernel::enumerate_threads(&mut |_| counted += 1);
+
+    counted
+}
+
+const LONG_ENOUGH: u32 = 10_000;
+
+fn a_thread_takes_a_change() -> bool {
+    let mine = crate::xnu_user_calls::own_thread();
+    let mut someone_else = None;
+    crate::kernel::enumerate_threads(&mut |thread| {
+        if thread.id != mine && someone_else.is_none() {
+            someone_else = Some(thread.id);
+        }
+    });
+
+    let Some(thread) = someone_else else {
+        return false;
+    };
+
+    crate::kernel::modify_thread(thread, &mut |_state| {})
 }
 
 fn hear(arena: u64, into: &mut [u8]) -> Option<usize> {

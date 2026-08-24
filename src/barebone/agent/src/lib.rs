@@ -103,6 +103,8 @@ mod xnu_relay;
 mod xnu_user;
 #[cfg(feature = "xnu")]
 mod xnu_user_calls;
+#[cfg(feature = "xnu")]
+mod xnu_mig;
 
 mod bindings {
     #![allow(

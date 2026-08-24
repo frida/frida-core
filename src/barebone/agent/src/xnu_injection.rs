@@ -62,6 +62,15 @@ pub fn copy_can_take_memory(id: u32) -> bool {
     echo_through_copy(id, b"mem", &mut said) == said.len() && said[0] == 1
 }
 
+pub fn threads_according_to_copy(id: u32) -> u32 {
+    let mut said = [0u8; 4];
+    if echo_through_copy(id, b"thr", &mut said) != said.len() {
+        return 0;
+    }
+
+    u32::from_le_bytes(said)
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { arenas() }.get(&id).copied()
 }
