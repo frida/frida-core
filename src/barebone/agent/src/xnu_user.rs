@@ -10,9 +10,17 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
     let mut said = [0u8; MOST_AT_ONCE];
     loop {
         if let Some(length) = hear(arena, &mut said) {
-            say(arena, &said[..length]);
+            answer(arena, &said[..length]);
         }
         core::hint::spin_loop();
+    }
+}
+
+fn answer(arena: u64, asked: &[u8]) {
+    match asked {
+        b"pid" => say(arena, &crate::xnu_user_calls::process_id().to_le_bytes()),
+        b"tid" => say(arena, &crate::xnu_user_calls::thread_id().to_le_bytes()),
+        said => say(arena, said),
     }
 }
 

@@ -101,6 +101,8 @@ mod xnu_ranges;
 mod xnu_relay;
 #[cfg(feature = "xnu")]
 mod xnu_user;
+#[cfg(feature = "xnu")]
+mod xnu_user_calls;
 
 mod bindings {
     #![allow(

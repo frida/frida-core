@@ -25,14 +25,6 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     unsafe { arenas() }.insert(id, arena_here);
 
-    let mut heard = [0u8; 16];
-    let length = echo_through_copy(id, b"frida", &mut heard);
-    if length == 5 && &heard[..5] == b"frida" {
-        crate::kernel::log("the copy answered what it was sent");
-    } else {
-        crate::kernel::log("the copy said nothing back");
-    }
-
     id
 }
 
@@ -53,6 +45,15 @@ pub fn echo_through_copy(id: u32, frame: &[u8], into: &mut [u8]) -> usize {
     }
 
     0
+}
+
+pub fn process_id_according_to_copy(id: u32) -> u32 {
+    let mut said = [0u8; 4];
+    if echo_through_copy(id, b"pid", &mut said) != said.len() {
+        return 0;
+    }
+
+    u32::from_le_bytes(said)
 }
 
 pub fn arena_for_pid(id: u32) -> Option<u64> {
