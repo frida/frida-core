@@ -85,6 +85,7 @@ pub static USER: Primitives = Primitives {
     current_thread_id,
     protect,
     page_size,
+    cache_shape,
     protection_at,
     enumerate_ranges,
 };
@@ -101,6 +102,16 @@ fn page_size() -> usize {
     unsafe { PAGE_SIZE }
 }
 
+fn cache_shape() -> u64 {
+    unsafe { CACHE_SHAPE }
+}
+
+pub fn told_the_cache_shape(shape: u64) {
+    unsafe { CACHE_SHAPE = shape };
+}
+
+static mut CACHE_SHAPE: u64 = 0;
+
 pub fn told_the_page_size(size: usize) {
     unsafe { PAGE_SIZE = size };
 }
@@ -111,6 +122,8 @@ pub fn map_writable(size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
 
+
+
 fn alloc_code(size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
@@ -120,7 +133,7 @@ fn free_code(ptr: *mut u8, size: usize) {
 }
 
 fn protect(address: u64, size: usize, may: u32) -> bool {
-    set_protection(address, size, may as u64)
+    crate::xnu_user::ask_for_protection(address, size, may)
 }
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
@@ -300,10 +313,16 @@ unsafe fn ask(number: i64, args: [u64; 4]) -> i64 {
 }
 
 pub(crate) unsafe fn svc7(number: i64, args: [u64; 7]) -> i64 {
+    unsafe { ask7(number, args).0 }
+}
+
+pub(crate) unsafe fn ask7(number: i64, args: [u64; 7]) -> (i64, bool) {
     let answer: i64;
+    let went_wrong: u64;
     unsafe {
         asm!(
             "svc #0x80",
+            "cset x7, cs",
             inlateout("x16") number => _,
             inlateout("x0") args[0] => answer,
             inlateout("x1") args[1] => _,
@@ -312,11 +331,12 @@ pub(crate) unsafe fn svc7(number: i64, args: [u64; 7]) -> i64 {
             inlateout("x4") args[4] => _,
             inlateout("x5") args[5] => _,
             inlateout("x6") args[6] => _,
+            lateout("x7") went_wrong,
             clobber_abi("C"),
         );
     }
 
-    answer
+    (answer, went_wrong != 0)
 }
 
 pub(crate) fn own_task() -> u32 {
@@ -367,6 +387,7 @@ const WAKE_ALL: u64 = 0x100;
 const GET_PID: i64 = 20;
 const GET_TIME_OF_DAY: i64 = 116;
 const PROC_INFO: i64 = 336;
+
 const ABOUT_A_PROCESS: u64 = 2;
 const ABOUT_A_REGION: u64 = 7;
 const ULOCK_WAIT: i64 = 515;

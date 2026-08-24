@@ -20,6 +20,7 @@ pub struct Primitives {
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(u64) -> u32,
     pub page_size: fn() -> usize,
+    pub cache_shape: fn() -> u64,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, usize, u32)),
 }
 
@@ -53,6 +54,7 @@ static KERNEL: Primitives = Primitives {
     protect: kernel_protect,
     protection_at: crate::xnu_ranges::protection_at,
     page_size: kernel_page_size,
+    cache_shape: kernel_cache_shape,
     enumerate_ranges: crate::xnu_ranges::enumerate_ranges,
 };
 
@@ -164,6 +166,17 @@ pub fn page_size() -> usize {
 
 fn kernel_page_size() -> usize {
     crate::gum::page_size_the_kernel_runs_with()
+}
+
+pub fn cache_shape() -> u64 {
+    (primitives().cache_shape)()
+}
+
+pub fn kernel_cache_shape() -> u64 {
+    let told: u64;
+    unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) told, options(nomem, nostack)) };
+
+    told
 }
 
 pub fn alloc_heap(size: usize) -> *mut u8 {

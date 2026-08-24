@@ -121,16 +121,23 @@ pub const IMAGE_BASE: u64 = 8;
 pub const IMAGE_SIZE: u64 = 16;
 pub const STOP_REQUEST: u64 = 24;
 pub const WORKER_STOPPED: u64 = 28;
+
 pub const PAGE_SIZE: u64 = 40;
+pub const CACHE_SHAPE: u64 = 48;
 
 pub const THREAD_WANTED: u64 = 512;
 pub const THREAD_STACK: u64 = 520;
 pub const THREAD_ARGUMENT: u64 = 528;
 pub const THREAD_ANSWER: u64 = 536;
 
+pub const PROTECT_WANTED: u64 = 544;
+pub const PROTECT_SIZE: u64 = 552;
+pub const PROTECT_TO: u64 = 560;
+pub const PROTECT_ANSWER: u64 = 568;
+
 pub const NOTHING_WANTED: u64 = 0;
-pub const THREAD_STARTED: u64 = 1;
-pub const THREAD_REFUSED: u64 = 2;
+pub const DONE: u64 = 1;
+pub const REFUSED: u64 = 2;
 
 pub const TO_COPY: Ring = Ring {
     buffer: 0x1000,

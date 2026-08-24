@@ -1356,7 +1356,7 @@ fn serve_pending_detach() {
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn relay_frames_from_targets() {
     #[cfg(feature = "xnu")]
-    kernel::serve_thread_requests();
+    kernel::serve_what_the_copies_ask();
 
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();

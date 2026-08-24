@@ -153,9 +153,12 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
         ((arena_here + crate::xnu_relay::IMAGE_SIZE) as *mut u64).write(size as u64);
         ((arena_here + crate::xnu_relay::PAGE_SIZE) as *mut u64)
             .write(crate::gum::page_size_the_kernel_runs_with() as u64);
+        ((arena_here + crate::xnu_relay::CACHE_SHAPE) as *mut u64)
+            .write(crate::xnu::kernel_cache_shape());
     }
 
     let stack = take_memory(map, STACK)?;
+
 
     let protect = unsafe { _mach_vm_protect }?;
     let shared = (crate::writable_half_start() - base) as u64;
@@ -253,30 +256,51 @@ fn start(task: *mut c_void, home: Home) -> bool {
     start_a_thread(task, home.code, home.stack + STACK - 0x100, home.arena)
 }
 
-pub fn serve_thread_requests() {
+pub fn serve_what_the_copies_ask() {
     for (id, arena) in unsafe { arenas() }.clone() {
         let asked = |at: u64| unsafe { ((arena + at) as *const u64).read_volatile() };
-        if asked(crate::xnu_relay::THREAD_WANTED) == crate::xnu_relay::NOTHING_WANTED {
+        let wants_a_thread = asked(crate::xnu_relay::THREAD_WANTED);
+        let wants_protection = asked(crate::xnu_relay::PROTECT_WANTED);
+        if wants_a_thread == crate::xnu_relay::NOTHING_WANTED
+            && wants_protection == crate::xnu_relay::NOTHING_WANTED
+        {
             continue;
         }
 
-        let started = match process_with_id(id) {
-            Some(process) => {
-                let made = start_a_thread(process.task, asked(crate::xnu_relay::THREAD_WANTED),
-                    asked(crate::xnu_relay::THREAD_STACK),
-                    asked(crate::xnu_relay::THREAD_ARGUMENT));
-                unsafe { release_process(process.handle) };
-                made
-            }
-            None => false,
+        let Some(process) = process_with_id(id) else {
+            continue;
         };
 
-        unsafe {
-            ((arena + crate::xnu_relay::THREAD_WANTED) as *mut u64)
-                .write_volatile(crate::xnu_relay::NOTHING_WANTED);
-            ((arena + crate::xnu_relay::THREAD_ANSWER) as *mut u64).write_volatile(
-                if started { crate::xnu_relay::THREAD_STARTED } else { crate::xnu_relay::THREAD_REFUSED });
+        if wants_a_thread != crate::xnu_relay::NOTHING_WANTED {
+            let started = start_a_thread(process.task, wants_a_thread,
+                asked(crate::xnu_relay::THREAD_STACK),
+                asked(crate::xnu_relay::THREAD_ARGUMENT));
+            answer(arena, crate::xnu_relay::THREAD_WANTED, crate::xnu_relay::THREAD_ANSWER, started);
         }
+
+        if wants_protection != crate::xnu_relay::NOTHING_WANTED {
+            let done = set_protection(process.map, wants_protection,
+                asked(crate::xnu_relay::PROTECT_SIZE), asked(crate::xnu_relay::PROTECT_TO) as c_int);
+            answer(arena, crate::xnu_relay::PROTECT_WANTED, crate::xnu_relay::PROTECT_ANSWER, done);
+        }
+
+        unsafe { release_process(process.handle) };
+    }
+}
+
+fn set_protection(map: *mut c_void, address: u64, size: u64, may: c_int) -> bool {
+    let Some(protect) = (unsafe { _mach_vm_protect }) else {
+        return false;
+    };
+
+    unsafe { protect(map, address, size, 0, may) == KERN_SUCCESS }
+}
+
+fn answer(arena: u64, asked_at: u64, answer_at: u64, went_well: bool) {
+    unsafe {
+        ((arena + asked_at) as *mut u64).write_volatile(crate::xnu_relay::NOTHING_WANTED);
+        ((arena + answer_at) as *mut u64).write_volatile(
+            if went_well { crate::xnu_relay::DONE } else { crate::xnu_relay::REFUSED });
     }
 }
 

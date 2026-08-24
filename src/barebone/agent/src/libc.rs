@@ -68,8 +68,14 @@ pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
 #[cfg(all(target_arch = "aarch64", any(feature = "linux-injected", feature = "xnu")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
-    let told: u64;
-    unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) told, options(nomem, nostack)) };
+    #[cfg(feature = "xnu")]
+    let told = crate::kernel::cache_shape();
+    #[cfg(not(feature = "xnu"))]
+    let told: u64 = {
+        let read: u64;
+        unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) read, options(nomem, nostack)) };
+        read
+    };
 
     let data_line = 4usize << ((told >> 16) & 0xf);
     let code_line = 4usize << (told & 0xf);

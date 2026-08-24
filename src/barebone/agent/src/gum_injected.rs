@@ -79,6 +79,11 @@ pub extern "C" fn gum_memory_can_remap_writable() -> gboolean {
         return 0;
     }
 
+    #[cfg(feature = "xnu")]
+    if crate::xnu::in_copy() {
+        return 0;
+    }
+
     1
 }
 
