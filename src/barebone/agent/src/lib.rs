@@ -59,6 +59,8 @@ pub mod kernel;
 mod gum_linux;
 #[cfg(feature = "linux")]
 mod hostlink_chardev;
+#[cfg(any(feature = "linux", feature = "linux-injected", feature = "xnu"))]
+mod heap;
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 mod linux;
 
@@ -103,8 +105,6 @@ mod xnu_relay;
 mod xnu_user;
 #[cfg(feature = "xnu")]
 mod xnu_user_calls;
-#[cfg(feature = "xnu")]
-mod xnu_mig;
 
 mod bindings {
     #![allow(
@@ -681,7 +681,7 @@ fn transport_set(driver: Transport) {
 
 #[inline(always)]
 fn send_frame(frame: &[u8]) {
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
     if unsafe { ROUTED_ARENA } != 0 {
         kernel::publish_frame_to_host(unsafe { ROUTED_ARENA }, frame);
         return;
@@ -690,12 +690,12 @@ fn send_frame(frame: &[u8]) {
     transport_get_unchecked().send(frame);
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 pub(crate) unsafe fn route_frames_through(arena: u64) {
     unsafe { ROUTED_ARENA = arena };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 static mut ROUTED_ARENA: u64 = 0;
 
 fn transport_get_unchecked() -> &'static Transport {
@@ -858,8 +858,9 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
 
     // A frame for a process that the host attached to belongs to the copy in that process. The
     // copy also runs this code, but it has no targets, thus it continues.
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
-    if let Some(arena) = kernel::arena_for_pid(destination_of(variant)) {
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+    let destination = destination_of(variant);
+    if let Some(arena) = kernel::arena_for_pid(destination) {
         unsafe { g_variant_unref(variant) };
         kernel::forward_frame(arena, frame);
         return;
@@ -869,7 +870,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
     unsafe { g_variant_unref(variant) };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn destination_of(variant: *mut GVariant) -> u32 {
     let mut command: u8 = 0;
     let mut request_id: u16 = 0;
@@ -925,6 +926,9 @@ fn run_main_loop(main_context: *mut GMainContext) {
         loop {
             #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
             transport_get_unchecked().process();
+
+            #[cfg(feature = "xnu")]
+            relay_frames_from_targets();
 
             #[cfg(feature = "linux")]
             if entrypoint_linux::stop_requested() {
@@ -1001,7 +1005,13 @@ static mut WORK_SERVE: Option<fn()> = None;
 
 unsafe extern "C" fn work_prepare(source: *mut GSource, timeout: *mut i32) -> gboolean {
     unsafe {
-        *timeout = -1;
+        #[cfg(feature = "xnu")]
+        {
+        }
+        #[cfg(not(feature = "xnu"))]
+        {
+        }
+
         work_check(source)
     }
 }
@@ -1340,8 +1350,11 @@ fn serve_pending_detach() {
 
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn relay_frames_from_targets() {
+    #[cfg(feature = "xnu")]
+    kernel::serve_thread_requests();
+
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
 
@@ -1756,6 +1769,12 @@ unsafe extern "C" fn on_script_created(
             &mut error,
         );
 
+        script_is_ready(script, error, request_id);
+    }
+}
+
+unsafe fn script_is_ready(script: *mut GumScript, error: *mut GError, request_id: u16) {
+    unsafe {
         if !error.is_null() {
             let message = String::from(CStr::from_ptr((*error).message).to_str().unwrap());
             g_error_free(error);

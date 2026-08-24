@@ -14,7 +14,6 @@ mod arena;
 #[cfg(feature = "linux-injected")]
 mod facade;
 #[cfg(feature = "linux-injected")]
-mod heap;
 #[cfg(feature = "linux-injected")]
 mod injection;
 #[cfg(feature = "linux-injected")]
@@ -32,7 +31,7 @@ mod symbols;
 #[cfg(feature = "linux-injected")]
 mod threads;
 #[cfg(feature = "linux-injected")]
-mod user;
+pub(crate) mod user;
 #[cfg(feature = "linux-injected")]
 mod processes;
 

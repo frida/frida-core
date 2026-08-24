@@ -71,6 +71,16 @@ pub fn threads_according_to_copy(id: u32) -> u32 {
     u32::from_le_bytes(said)
 }
 
+pub fn process_is_alive(id: u32) -> bool {
+    match process_with_id(id) {
+        Some(process) => {
+            unsafe { release_process(process.handle) };
+            true
+        }
+        None => false,
+    }
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { arenas() }.get(&id).copied()
 }
@@ -86,15 +96,20 @@ unsafe fn arenas() -> &'static mut alloc::collections::BTreeMap<u32, u64> {
 static mut ARENAS: alloc::collections::BTreeMap<u32, u64> = alloc::collections::BTreeMap::new();
 
 fn woke_up(arena: u64) -> bool {
-    for _ in 0..LONG_ENOUGH {
-        if unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE {
+    let is_up = &mut || unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE;
+
+    for _ in 0..MOMENTS_TO_WAIT {
+        if is_up() {
             return true;
         }
-        crate::kernel::yield_now();
+        crate::kernel::wait(arena as *const u8, Some(A_MOMENT), is_up);
     }
 
     false
 }
+
+const A_MOMENT: u64 = 1000;
+const MOMENTS_TO_WAIT: u32 = 30_000;
 
 struct Process {
     handle: *mut c_void,
@@ -132,12 +147,24 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
 
     let arena = take_memory(map, crate::xnu_relay::ARENA_SIZE)?;
     let arena_here = share(map, arena, crate::xnu_relay::ARENA_SIZE)?;
-    unsafe { core::ptr::write_bytes(arena_here as *mut u8, 0, crate::xnu_relay::ARENA_SIZE as usize) };
+    unsafe {
+        core::ptr::write_bytes(arena_here as *mut u8, 0, crate::xnu_relay::ARENA_SIZE as usize);
+        ((arena_here + crate::xnu_relay::IMAGE_BASE) as *mut u64).write(code);
+        ((arena_here + crate::xnu_relay::IMAGE_SIZE) as *mut u64).write(size as u64);
+        ((arena_here + crate::xnu_relay::PAGE_SIZE) as *mut u64)
+            .write(crate::gum::page_size_the_kernel_runs_with() as u64);
+    }
 
     let stack = take_memory(map, STACK)?;
 
     let protect = unsafe { _mach_vm_protect }?;
-    if unsafe { protect(map, code, size as u64, 0, READ | EXECUTE) } != KERN_SUCCESS {
+    let shared = (crate::writable_half_start() - base) as u64;
+    if unsafe { protect(map, code, shared, 0, READ | EXECUTE) } != KERN_SUCCESS {
+        return None;
+    }
+    if unsafe { protect(map, code + shared, size as u64 - shared, 0, READ | WRITE) }
+        != KERN_SUCCESS
+    {
         return None;
     }
 
@@ -223,6 +250,37 @@ fn ourselves() -> Option<*mut c_void> {
 }
 
 fn start(task: *mut c_void, home: Home) -> bool {
+    start_a_thread(task, home.code, home.stack + STACK - 0x100, home.arena)
+}
+
+pub fn serve_thread_requests() {
+    for (id, arena) in unsafe { arenas() }.clone() {
+        let asked = |at: u64| unsafe { ((arena + at) as *const u64).read_volatile() };
+        if asked(crate::xnu_relay::THREAD_WANTED) == crate::xnu_relay::NOTHING_WANTED {
+            continue;
+        }
+
+        let started = match process_with_id(id) {
+            Some(process) => {
+                let made = start_a_thread(process.task, asked(crate::xnu_relay::THREAD_WANTED),
+                    asked(crate::xnu_relay::THREAD_STACK),
+                    asked(crate::xnu_relay::THREAD_ARGUMENT));
+                unsafe { release_process(process.handle) };
+                made
+            }
+            None => false,
+        };
+
+        unsafe {
+            ((arena + crate::xnu_relay::THREAD_WANTED) as *mut u64)
+                .write_volatile(crate::xnu_relay::NOTHING_WANTED);
+            ((arena + crate::xnu_relay::THREAD_ANSWER) as *mut u64).write_volatile(
+                if started { crate::xnu_relay::THREAD_STARTED } else { crate::xnu_relay::THREAD_REFUSED });
+        }
+    }
+}
+
+fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> bool {
     let create = unsafe { _thread_create };
     let set_state = unsafe { _thread_set_state };
     let resume = unsafe { _thread_resume };
@@ -238,9 +296,9 @@ fn start(task: *mut c_void, home: Home) -> bool {
     let mut state = [0u32; STATE_WORDS];
     let places = state.as_mut_ptr() as *mut u8;
     unsafe {
-        (places.add(STACK_POINTER) as *mut u64).write(home.stack + STACK - 0x100);
-        (places.add(PROGRAM_COUNTER) as *mut u64).write(home.code);
-        (places as *mut u64).write(home.arena);   // what the copy is told first
+        (places.add(STACK_POINTER) as *mut u64).write(stack);
+        (places.add(PROGRAM_COUNTER) as *mut u64).write(code);
+        (places as *mut u64).write(argument);
         (places.add(FLAGS) as *mut u32).write(PLAIN_ADDRESSES);
     }
 
@@ -254,10 +312,11 @@ fn start(task: *mut c_void, home: Home) -> bool {
 }
 
 const PAGE: u64 = 0x4000;
-const STACK: u64 = 0x4000;
+const STACK: u64 = 8 * 1024 * 1024;
 const KERN_SUCCESS: c_int = 0;
 const ANYWHERE: c_int = 1;
 const READ: c_int = 1;
+const WRITE: c_int = 2;
 const EXECUTE: c_int = 4;
 const ARM_THREAD_STATE64: c_int = 6;
 const SHARED: c_int = 0;

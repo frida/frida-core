@@ -200,7 +200,16 @@ fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     kernel::protect(address, size, prot)
 }
 
-#[cfg(not(feature = "linux-injected"))]
+#[cfg(feature = "xnu")]
+fn protect_here(address: u64, size: usize, prot: u32) -> bool {
+    if crate::xnu::in_copy() {
+        return kernel::protect(address, size, prot);
+    }
+
+    ask_the_host_to_protect(address, size, prot)
+}
+
+#[cfg(not(any(feature = "linux-injected", feature = "xnu")))]
 fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     ask_the_host_to_protect(address, size, prot)
 }

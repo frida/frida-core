@@ -1,9 +1,74 @@
 
 use core::arch::asm;
 use core::ffi::c_void;
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::kernel::ThreadEntry;
 use crate::xnu::Primitives;
+
+pub static SLOTS: crate::gthread::ThreadSlots = crate::gthread::ThreadSlots {
+    take: take_thread_slot,
+    get: read_thread_slot,
+    set: write_thread_slot,
+};
+
+fn take_thread_slot() -> u32 {
+    unsafe { TAKEN += 1; TAKEN }
+}
+
+fn read_thread_slot(slot: u32) -> *mut c_void {
+    if slot as usize >= SLOTS_PER_THREAD {
+        return null_mut();
+    }
+
+    held(|| unsafe { row_for(thread_id()) }.map(|row| row[slot as usize]).unwrap_or(null_mut()))
+}
+
+fn write_thread_slot(slot: u32, value: *mut c_void) {
+    if slot as usize >= SLOTS_PER_THREAD {
+        return;
+    }
+
+    held(|| {
+        let id = thread_id();
+        let rows = unsafe { (&raw mut ROWS).as_mut().unwrap() };
+        if unsafe { row_for(id) }.is_none() {
+            let free = rows.iter().position(|row| row.0 == 0);
+            match free {
+                Some(at) => rows[at].0 = id,
+                None => return,
+            }
+        }
+        if let Some(row) = unsafe { row_for(id) } {
+            row[slot as usize] = value;
+        }
+    });
+}
+
+unsafe fn row_for(id: u64) -> Option<&'static mut [*mut c_void; SLOTS_PER_THREAD]> {
+    let rows = unsafe { (&raw mut ROWS).as_mut().unwrap() };
+
+    rows.iter_mut().find(|row| row.0 == id).map(|row| &mut row.1)
+}
+
+fn held<T>(what: impl FnOnce() -> T) -> T {
+    while LOCK.swap(true, Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    let answer = what();
+    LOCK.store(false, Ordering::Release);
+
+    answer
+}
+
+static LOCK: AtomicBool = AtomicBool::new(false);
+static mut TAKEN: u32 = 0;
+static mut ROWS: [(u64, [*mut c_void; SLOTS_PER_THREAD]); MOST_THREADS] =
+    [(0, [null_mut(); SLOTS_PER_THREAD]); MOST_THREADS];
+
+const SLOTS_PER_THREAD: usize = 256;
+const MOST_THREADS: usize = 128;
 
 pub static USER: Primitives = Primitives {
     alloc,
@@ -18,32 +83,35 @@ pub static USER: Primitives = Primitives {
     current_process_id,
     current_thread_id,
     protect,
+    page_size,
     protection_at,
     enumerate_ranges,
-    enumerate_threads,
-    find_thread,
-    modify_thread,
 };
 
 fn alloc(size: usize) -> *mut u8 {
+    crate::heap::take(size)
+}
+
+fn free(ptr: *mut u8, _size: usize) {
+    crate::heap::give_back(ptr);
+}
+
+fn page_size() -> usize {
+    unsafe { PAGE_SIZE }
+}
+
+pub fn told_the_page_size(size: usize) {
+    unsafe { PAGE_SIZE = size };
+}
+
+static mut PAGE_SIZE: usize = 16384;
+
+pub fn map_writable(size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
 
-fn free(ptr: *mut u8, size: usize) {
-    give_memory_back(ptr as u64, size);
-}
-
 fn alloc_code(size: usize) -> *mut u8 {
-    let Some(address) = take_memory(size) else {
-        return core::ptr::null_mut();
-    };
-
-    if !set_protection(address, size, READ | EXECUTE) {
-        give_memory_back(address, size);
-        return core::ptr::null_mut();
-    }
-
-    address as *mut u8
+    take_memory(size).unwrap_or(0) as *mut u8
 }
 
 fn free_code(ptr: *mut u8, size: usize) {
@@ -62,9 +130,11 @@ fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bo
     let value = unsafe { (token as *const u32).read_volatile() };
     unsafe {
         ask(ULOCK_WAIT, [COMPARE_AND_WAIT, token as u64, value as u64,
-            timeout_us.unwrap_or(0)])
+            timeout_us.unwrap_or(A_NAP)])
     };
 }
+
+const A_NAP: u64 = 1000;
 
 fn wake(token: *const u8) {
     unsafe { ask(ULOCK_WAKE, [COMPARE_AND_WAIT | WAKE_ALL, token as u64, 0, 0]) };
@@ -99,97 +169,22 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
         return 0;
     };
 
-    let mut state = [0u32; crate::xnu_mig::STATE_WORDS];
-    put(&mut state, 0, parameter as u64);
-    put(&mut state, SP, stack + STACK as u64 - STACK_HEADROOM);
-    put(&mut state, PC, entry as usize as u64);
-    state[FLAGS + 1] = PLAIN_ADDRESSES;
-
-    if !crate::xnu_mig::start_a_thread(&state) {
-        give_memory_back(stack, STACK);
-        return 0;
+    match crate::xnu_user::ask_for_a_thread(entry as usize as u64,
+        stack + STACK as u64 - STACK_HEADROOM, parameter as u64)
+    {
+        true => 1,
+        false => {
+            give_memory_back(stack, STACK);
+            0
+        }
     }
-
-    1
 }
 
-const STACK: usize = 0x20000;
+const STACK: usize = 1024 * 1024;
 const STACK_HEADROOM: u64 = 0x100;
 const PLAIN_ADDRESSES: u32 = 1;
 
-fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-    let mut threads = [0u32; MOST_THREADS];
-    let counted = crate::xnu_mig::threads_here(&mut threads);
-    for thread in &threads[..counted] {
-        found(ThreadInfo { id: *thread, cpu_state: state_of(*thread) });
-    }
-}
 
-fn find_thread(id: u32) -> Option<ThreadInfo> {
-    let mut threads = [0u32; MOST_THREADS];
-    let counted = crate::xnu_mig::threads_here(&mut threads);
-    threads[..counted].contains(&id).then(|| ThreadInfo { id, cpu_state: state_of(id) })
-}
-
-fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
-    if !crate::xnu_mig::hold_still(id) {
-        return false;
-    }
-
-    let mut state = [0u32; crate::xnu_mig::STATE_WORDS];
-    let changed = crate::xnu_mig::state_of(id, &mut state) && {
-        let mut cpu = as_cpu_state(&state);
-        change(&mut cpu);
-        write_cpu_state(&cpu, &mut state);
-        crate::xnu_mig::set_state_of(id, &state)
-    };
-
-    crate::xnu_mig::let_go(id);
-
-    changed
-}
-
-fn state_of(thread: u32) -> Option<CpuState> {
-    let mut state = [0u32; crate::xnu_mig::STATE_WORDS];
-    crate::xnu_mig::state_of(thread, &mut state).then(|| as_cpu_state(&state))
-}
-
-fn as_cpu_state(state: &[u32; crate::xnu_mig::STATE_WORDS]) -> CpuState {
-    let mut cpu = CpuState { pc: word(state, PC), sp: word(state, SP), nzcv: state[FLAGS] as u64,
-        x: [0; 29], fp: word(state, FP), lr: word(state, LR) };
-    for (index, register) in cpu.x.iter_mut().enumerate() {
-        *register = word(state, index);
-    }
-
-    cpu
-}
-
-fn write_cpu_state(cpu: &CpuState, state: &mut [u32; crate::xnu_mig::STATE_WORDS]) {
-    for (index, register) in cpu.x.iter().enumerate() {
-        put(state, index, *register);
-    }
-    put(state, FP, cpu.fp);
-    put(state, LR, cpu.lr);
-    put(state, SP, cpu.sp);
-    put(state, PC, cpu.pc);
-    state[FLAGS] = cpu.nzcv as u32;
-}
-
-fn word(state: &[u32; crate::xnu_mig::STATE_WORDS], index: usize) -> u64 {
-    (state[index * 2] as u64) | ((state[index * 2 + 1] as u64) << 32)
-}
-
-fn put(state: &mut [u32; crate::xnu_mig::STATE_WORDS], index: usize, value: u64) {
-    state[index * 2] = value as u32;
-    state[index * 2 + 1] = (value >> 32) as u32;
-}
-
-const MOST_THREADS: usize = 128;
-const FP: usize = 29;
-const LR: usize = 30;
-const SP: usize = 31;
-const PC: usize = 32;
-const FLAGS: usize = 66;
 
 pub fn process_id() -> u32 {
     unsafe { ask(GET_PID, [0; 4]) as u32 }
@@ -247,6 +242,7 @@ unsafe fn ask(number: i64, args: [u64; 4]) -> i64 {
     answer
 }
 
+#[allow(dead_code)]
 pub(crate) unsafe fn svc7(number: i64, args: [u64; 7]) -> i64 {
     let answer: i64;
     unsafe {
@@ -309,8 +305,6 @@ const REPLY_PORT: i64 = -26;
 const THREAD_SELF: i64 = -27;
 pub(crate) const MACH_MSG: i64 = -31;
 
-const READ: u64 = 1;
-const EXECUTE: u64 = 4;
 const COMPARE_AND_WAIT: u64 = 1;
 const WAKE_ALL: u64 = 0x100;
 

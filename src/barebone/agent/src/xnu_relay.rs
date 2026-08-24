@@ -116,6 +116,22 @@ static mut WAITING: BTreeMap<u64, VecDeque<Vec<u8>>> = BTreeMap::new();
 
 pub const ARENA_SIZE: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64);
 
+pub const AWAKE_AT: u64 = 0;
+pub const IMAGE_BASE: u64 = 8;
+pub const IMAGE_SIZE: u64 = 16;
+pub const STOP_REQUEST: u64 = 24;
+pub const WORKER_STOPPED: u64 = 28;
+pub const PAGE_SIZE: u64 = 40;
+
+pub const THREAD_WANTED: u64 = 512;
+pub const THREAD_STACK: u64 = 520;
+pub const THREAD_ARGUMENT: u64 = 528;
+pub const THREAD_ANSWER: u64 = 536;
+
+pub const NOTHING_WANTED: u64 = 0;
+pub const THREAD_STARTED: u64 = 1;
+pub const THREAD_REFUSED: u64 = 2;
+
 pub const TO_COPY: Ring = Ring {
     buffer: 0x1000,
     head: 256,

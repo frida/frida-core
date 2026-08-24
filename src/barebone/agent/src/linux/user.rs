@@ -123,11 +123,11 @@ fn panic(msg: &str) -> ! {
 }
 
 fn alloc(size: usize) -> *mut u8 {
-    super::heap::take(size)
+    crate::heap::take(size)
 }
 
 fn free(ptr: *mut u8, _size: usize) {
-    super::heap::give_back(ptr);
+    crate::heap::give_back(ptr);
 }
 
 // What the C library hands out is served from this, so it cannot come from the C library.

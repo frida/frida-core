@@ -26,6 +26,17 @@ pub fn give_back(piece: *mut u8) {
     held(|| push(class, piece));
 }
 
+fn pages_for(size: usize) -> *mut u8 {
+    #[cfg(any(feature = "linux", feature = "linux-injected"))]
+    {
+        crate::linux::user::map_writable(size)
+    }
+    #[cfg(feature = "xnu")]
+    {
+        crate::xnu_user_calls::map_writable(size)
+    }
+}
+
 fn pop(class: usize) -> Option<*mut u8> {
     let free = unsafe { (&raw mut FREE).as_mut().unwrap() };
 
@@ -52,7 +63,7 @@ fn carve(class: usize) -> *mut u8 {
     let mut left = unsafe { LEFT };
     if left < wanted {
         let asked = if wanted > CHUNK { wanted } else { CHUNK };
-        edge = super::user::map_writable(asked) as usize;
+        edge = pages_for(asked) as usize;
         if edge == 0 {
             return core::ptr::null_mut();
         }

@@ -18,10 +18,8 @@ pub struct Primitives {
     pub current_thread_id: fn() -> u64,
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(u64) -> u32,
+    pub page_size: fn() -> usize,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, usize, u32)),
-    pub enumerate_threads: fn(&mut dyn FnMut(crate::kernel::ThreadInfo)),
-    pub find_thread: fn(u32) -> Option<crate::kernel::ThreadInfo>,
-    pub modify_thread: fn(u32, &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool,
 }
 
 pub fn select_user() {
@@ -52,10 +50,8 @@ static KERNEL: Primitives = Primitives {
     current_thread_id: kernel_current_thread_id,
     protect: kernel_protect,
     protection_at: crate::xnu_ranges::protection_at,
+    page_size: kernel_page_size,
     enumerate_ranges: crate::xnu_ranges::enumerate_ranges,
-    enumerate_threads: kernel_enumerate_threads,
-    find_thread: kernel_find_thread,
-    modify_thread: kernel_modify_thread,
 };
 
 pub fn alloc(size: usize) -> *mut u8 {
@@ -114,33 +110,11 @@ pub fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
     (primitives().enumerate_ranges)(found);
 }
 
-pub fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
-    (primitives().enumerate_threads)(found);
-}
-
-pub fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
-    (primitives().find_thread)(id)
-}
-
-pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool {
-    (primitives().modify_thread)(id, change)
-}
-
 fn kernel_current_process_id() -> u32 {
     0
 }
 
 fn kernel_protect(_address: u64, _size: usize, _may: u32) -> bool {
-    false
-}
-
-fn kernel_enumerate_threads(_found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {}
-
-fn kernel_find_thread(_id: u32) -> Option<crate::kernel::ThreadInfo> {
-    None
-}
-
-fn kernel_modify_thread(_id: u32, _change: &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool {
     false
 }
 
@@ -183,6 +157,10 @@ fn kernel_free_code(ptr: *mut u8, size: usize) {
 }
 
 pub fn page_size() -> usize {
+    (primitives().page_size)()
+}
+
+fn kernel_page_size() -> usize {
     crate::gum::page_size_the_kernel_runs_with()
 }
 

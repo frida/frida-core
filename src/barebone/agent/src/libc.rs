@@ -50,7 +50,7 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(all(target_arch = "aarch64", not(feature = "linux-injected")))]
+#[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu"))))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
     unsafe {
@@ -65,7 +65,7 @@ pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
 
 // Invalidating the whole instruction cache is the kernel's to do, and the copy runs where that
 // instruction is not allowed. Line by line is what both halves may ask for.
-#[cfg(all(target_arch = "aarch64", feature = "linux-injected"))]
+#[cfg(all(target_arch = "aarch64", any(feature = "linux-injected", feature = "xnu")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     let told: u64;
