@@ -4,6 +4,7 @@ pub fn entry_offset() -> usize {
 }
 
 pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
+    crate::xnu::select_user();
     unsafe { (arena as *mut u64).write_volatile(AWAKE) };
 
     let arena = arena as u64;
@@ -26,11 +27,12 @@ fn answer(arena: u64, asked: &[u8]) {
 }
 
 fn took_a_page() -> bool {
-    let Some(page) = crate::xnu_user_calls::take_memory(0x4000) else {
+    let page = crate::kernel::alloc(0x4000);
+    if page.is_null() {
         return false;
-    };
-    unsafe { (page as *mut u8).write_volatile(1) };
-    crate::xnu_user_calls::give_memory_back(page, 0x4000);
+    }
+    unsafe { page.write_volatile(1) };
+    crate::kernel::free(page, 0x4000);
 
     true
 }

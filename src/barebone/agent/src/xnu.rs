@@ -117,9 +117,11 @@ fn kernel_protect(_address: u64, _size: usize, _may: u32) -> bool {
 }
 
 pub fn log(msg: &str) {
-    unsafe {
-        _IOLog(msg.as_ptr());
-    }
+    let mut line = [0u8; 256];
+    let length = msg.len().min(line.len() - 1);
+    line[..length].copy_from_slice(&msg.as_bytes()[..length]);
+
+    unsafe { _IOLog(line.as_ptr()) };
 }
 
 pub fn panic(msg: &str) {

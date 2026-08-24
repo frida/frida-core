@@ -3,6 +3,11 @@ SECTIONS {
     *(.text.entrypoint)
     *(.text*)
   }
+  .rela.dyn : {
+    _agent_relocs_start = .;
+    *(.rela.dyn)
+    _agent_relocs_end = .;
+  }
   .rodata : {
     *(.rodata*)
   }
@@ -54,6 +59,9 @@ SECTIONS {
     _sock_receive = .; . += 8;
     _sock_close = .; . += 8;
   }
+     same pages; everything below it each copy needs its own of. */
+  . = ALIGN(4096);
+  _agent_private_start = .;
   .data.rel.ro : {
     *(.data.rel.ro*)
   }
@@ -64,6 +72,9 @@ SECTIONS {
     _agent_init_start = .;
     *(.init_array*)
     _agent_init_end = .;
+  }
+  .data : {
+    *(.data*)
   }
   .bss : {
     *(.bss*)

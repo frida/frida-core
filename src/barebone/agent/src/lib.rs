@@ -238,7 +238,7 @@ mod entrypoint_blob {
 
     unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
             crate::preserve_writable_half();
 
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
@@ -715,7 +715,7 @@ static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 // A copy of the agent runs the same code, but it cannot share what gets written to. Thus keep
 // the writable half as it is before anything writes to it.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 pub(crate) unsafe fn preserve_writable_half() {
     let size = writable_half_size();
     let pristine = kernel::alloc(size);
@@ -727,7 +727,7 @@ pub(crate) unsafe fn preserve_writable_half() {
 
 // Give a copy the half it writes to, and move every address in it to where the copy runs. The
 // address that the copy runs at and the address that takes the bytes are two different ones.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_here: usize) {
     let own = unsafe { ptr::addr_of!(OWN_RANGE).read() }.base_address as usize;
     let distance = seen_by_copy.wrapping_sub(own);
@@ -760,12 +760,12 @@ pub(crate) unsafe fn run_constructors() {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 pub(crate) fn writable_half_start() -> usize {
     &raw const _agent_private_start as usize
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn writable_half_size() -> usize {
     (&raw const _heap_start as usize) - writable_half_start()
 }
@@ -777,7 +777,7 @@ const RELOCATION_SIZE: usize = 8;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const RELOCATION_SIZE: usize = 24;
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 static mut PRISTINE_WRITABLE_HALF: *mut u8 = ptr::null_mut();
 
 unsafe extern "C" {
@@ -785,7 +785,7 @@ unsafe extern "C" {
     static _agent_init_end: u8;
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 unsafe extern "C" {
     static _agent_private_start: u8;
     static _heap_start: u8;

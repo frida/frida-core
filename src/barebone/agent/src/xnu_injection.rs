@@ -25,6 +25,7 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     unsafe { arenas() }.insert(id, arena_here);
 
+
     id
 }
 
@@ -118,7 +119,7 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
 
     let code = take_memory(map, size as u64)?;
     let seen_from_here = share(map, code, size as u64)?;
-    unsafe { core::ptr::copy_nonoverlapping(base as *const u8, seen_from_here as *mut u8, size) };
+    lay_out_the_image(base, size, code, seen_from_here);
 
     let arena = take_memory(map, crate::xnu_relay::ARENA_SIZE)?;
     let arena_here = share(map, arena, crate::xnu_relay::ARENA_SIZE)?;
@@ -132,6 +133,21 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
     }
 
     Some(Home { code: code + crate::xnu_user::entry_offset() as u64, arena, arena_here, stack })
+}
+
+fn lay_out_the_image(base: usize, size: usize, code: u64, seen_from_here: u64) {
+    let shared = crate::writable_half_start() - base;
+    let private = crate::writable_half_size();
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(base as *const u8, seen_from_here as *mut u8, shared);
+        crate::install_writable_half(code as usize, (seen_from_here as usize) + shared);
+        core::ptr::write_bytes(
+            (seen_from_here as usize + shared + private) as *mut u8,
+            0,
+            size - shared - private,
+        );
+    }
 }
 
 fn share(map: *mut c_void, address: u64, size: u64) -> Option<u64> {
