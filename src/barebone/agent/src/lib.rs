@@ -92,6 +92,8 @@ mod symbols;
 #[cfg(feature = "xnu")]
 mod xnu;
 #[cfg(feature = "xnu")]
+mod xnu_injection;
+#[cfg(feature = "xnu")]
 mod xnu_processes;
 #[cfg(feature = "xnu")]
 mod xnu_ranges;
@@ -1166,7 +1168,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
-            #[cfg(feature = "linux-injected")]
+            #[cfg(any(feature = "linux-injected", feature = "xnu"))]
             FridaCommand::InjectIntoProcess => Some(handle_inject_into_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
@@ -1222,7 +1224,7 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     None
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 fn handle_inject_into_process(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
         let reached = kernel::inject_into_process(g_variant_get_uint32(payload));

@@ -4505,7 +4505,10 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
 					printerr ("[*] Injected in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
-					var session_id = yield host_session.attach (0, make_parameters_dict (), cancellable);
+					unowned string? into = Environment.get_variable ("FRIDA_BAREBONE_ATTACH");
+					uint target = (into != null) ? uint.parse (into) : 0;
+					printerr ("[*] attaching to %u\n", target);
+					var session_id = yield host_session.attach (target, make_parameters_dict (), cancellable);
 					var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 					string received_message = null;

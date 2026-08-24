@@ -16,6 +16,17 @@ SECTIONS {
     _proc_rele = .; . += 8;
     _proc_pid = .; . += 8;
     _proc_best_name = .; . += 8;
+    _proc_task = .; . += 8;
+    _current_task = .; . += 8;
+    _get_task_map = .; . += 8;
+    _mach_vm_allocate = .; . += 8;
+    _mach_vm_deallocate = .; . += 8;
+    _mach_vm_protect = .; . += 8;
+    _vm_map_copyin = .; . += 8;
+    _vm_map_copyout = .; . += 8;
+    _thread_create = .; . += 8;
+    _thread_set_state = .; . += 8;
+    _thread_resume = .; . += 8;
     _kfree = .; . += 8;
     _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;
