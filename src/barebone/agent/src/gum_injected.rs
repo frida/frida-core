@@ -278,12 +278,21 @@ unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_allocate(
-    _address: gpointer,
+    address: gpointer,
     size: gsize,
     _alignment: gsize,
     prot: GumPageProtection,
 ) -> gpointer {
+    #[cfg(feature = "xnu")]
+    let ptr = if crate::xnu::in_copy() {
+        crate::xnu_user_calls::code_memory_near(address as u64, size as usize)
+    } else {
+        kernel::alloc_code(size as usize)
+    };
+    #[cfg(not(feature = "xnu"))]
     let ptr = kernel::alloc_code(size as usize);
+    #[cfg(not(feature = "xnu"))]
+    let _ = address;
     unsafe {
         core::ptr::write_bytes(ptr, 0, size as usize);
         if (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0 {
@@ -319,6 +328,12 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     if kernel::in_copy() {
         kernel::register_what_the_copy_lives_among(registry);
         kernel::watch_the_loader();
+        return;
+    }
+
+    #[cfg(feature = "xnu")]
+    if crate::xnu::in_copy() {
+        crate::xnu_mapped::register_what_the_copy_lives_among(registry);
         return;
     }
 
@@ -467,6 +482,12 @@ pub(crate) unsafe fn enumerate_exports_in_range(
     #[cfg(feature = "linux-injected")]
     if kernel::in_copy() {
         kernel::enumerate_exports_in_range(start_address, end_address, callback);
+        return;
+    }
+
+    #[cfg(feature = "xnu")]
+    if crate::xnu::in_copy() {
+        crate::xnu_mapped::enumerate_exports_in_range(start_address, end_address, callback);
         return;
     }
 

@@ -281,7 +281,14 @@ fn set_protection(map: *mut c_void, address: u64, size: u64, may: c_int) -> bool
         return false;
     };
 
-    unsafe { protect(map, address, size, 0, may) == KERN_SUCCESS }
+    let asking = if (may & WRITE) != 0 { may | A_COPY_OF_ITS_OWN } else { may };
+    if unsafe { protect(map, address, size, 0, asking) } == KERN_SUCCESS {
+        return true;
+    }
+
+    unsafe { protect(map, address, size, AS_HIGH_AS_IT_GOES, READ | WRITE | EXECUTE) };
+
+    unsafe { protect(map, address, size, 0, asking) == KERN_SUCCESS }
 }
 
 fn answer(arena: u64, asked_at: u64, answer_at: u64, went_well: bool) {
@@ -327,6 +334,8 @@ const PAGE: u64 = 0x4000;
 const STACK: u64 = 8 * 1024 * 1024;
 const KERN_SUCCESS: c_int = 0;
 const ANYWHERE: c_int = 1;
+const AS_HIGH_AS_IT_GOES: c_int = 1;
+const A_COPY_OF_ITS_OWN: c_int = 0x10;
 const READ: c_int = 1;
 const WRITE: c_int = 2;
 const EXECUTE: c_int = 4;

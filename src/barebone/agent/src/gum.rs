@@ -414,6 +414,11 @@ mod symbolication {
             return export_of_a_process_module(name);
         }
 
+        #[cfg(feature = "xnu")]
+        if crate::xnu::in_copy() {
+            return crate::xnu_mapped::export_named(name);
+        }
+
         let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
 
         match table.find_symbol_by_name(name) {

@@ -402,6 +402,23 @@ pub fn where_the_shared_code_is() -> Option<u64> {
 
 const WHERE_IS_THE_SHARED_CODE: i64 = 294;
 
+pub fn code_memory_near(wanted: u64, size: usize) -> *mut u8 {
+    let mut address = wanted;
+    let told = unsafe {
+        trap(MACH_VM_ALLOCATE, [own_task_map(), &mut address as *mut u64 as u64, size as u64,
+            ANYWHERE])
+    };
+    if told == KERN_SUCCESS {
+        return address as *mut u8;
+    }
+
+    take_memory(size).unwrap_or(0) as *mut u8
+}
+
+fn own_task_map() -> u64 {
+    own_task() as u64
+}
+
 pub fn take_memory(size: usize) -> Option<u64> {
     let mut address: u64 = 0;
     let told = unsafe {

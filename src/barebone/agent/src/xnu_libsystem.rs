@@ -96,12 +96,54 @@ pub fn image_named(wanted: &[u8]) -> Option<u64> {
     None
 }
 
+pub fn each_export(image: u64, found: &mut dyn FnMut(&str, u64)) {
+    let Some((trie, size)) = what_the_image_offers(image) else {
+        return;
+    };
+
+    let mut still_to_look_at = alloc::vec![(trie, alloc::string::String::new())];
+    while let Some((at, so_far)) = still_to_look_at.pop() {
+        if at >= trie + size {
+            continue;
+        }
+
+        let (said, after) = a_number_at(at);
+        if said != 0 {
+            let (how_it_is_offered, past_flags) = a_number_at(after);
+            if (how_it_is_offered & FROM_SOMEWHERE_ELSE) == 0 {
+                let (offset, _) = a_number_at(past_flags);
+                found(so_far.strip_prefix('_').unwrap_or(&so_far), image + offset);
+            }
+        }
+
+        let children = after + said;
+        let (count, mut step) = (byte_at(children), children + 1);
+        for _ in 0..count {
+            let began = step;
+            let mut length = 0;
+            while length < LONGEST_NAME as u64 && byte_at(began + length) != 0 {
+                length += 1;
+            }
+
+            let mut name = so_far.clone();
+            for index in 0..length {
+                name.push(byte_at(began + index) as char);
+            }
+
+            let (next, after_next) = a_number_at(began + length + 1);
+            still_to_look_at.push((trie + next, name));
+            step = after_next;
+        }
+    }
+
+}
+
 pub fn function_in(image: u64, wanted: &[u8]) -> Option<u64> {
     let (trie, size) = what_the_image_offers(image)?;
 
     let mut at = trie;
     let mut spent = 0;
-    loop {
+    for _ in 0..wanted.len() + 1 {
         if at >= trie + size {
             return None;
         }
@@ -119,7 +161,7 @@ pub fn function_in(image: u64, wanted: &[u8]) -> Option<u64> {
         for _ in 0..count {
             let began = step;
             let mut length = 0;
-            while byte_at(began + length) != 0 {
+            while length < LONGEST_NAME as u64 && byte_at(began + length) != 0 {
                 length += 1;
             }
 
@@ -137,6 +179,8 @@ pub fn function_in(image: u64, wanted: &[u8]) -> Option<u64> {
         at = there;
         spent = now_spent;
     }
+
+    None
 }
 
 fn what_the_image_offers(image: u64) -> Option<(u64, u64)> {
@@ -185,18 +229,20 @@ fn byte_at(at: u64) -> u8 {
 
 fn a_number_at(at: u64) -> (u64, u64) {
     let mut said = 0u64;
-    let mut shift = 0;
     let mut step = at;
-    loop {
+    for shift in (0..MOST_BYTES_TO_A_NUMBER * 7).step_by(7) {
         let byte = byte_at(step);
         step += 1;
         said |= ((byte & 0x7f) as u64) << shift;
         if (byte & 0x80) == 0 {
-            return (said, step);
+            break;
         }
-        shift += 7;
     }
+
+    (said, step)
 }
+
+const MOST_BYTES_TO_A_NUMBER: usize = 10;
 
 const HOW_MANY_COMMANDS: u64 = 16;
 const PAST_THE_HEADER: u64 = 32;
@@ -230,4 +276,5 @@ const IMAGES_ARE_AT: u64 = 0x1c0;
 const HOW_MANY_IMAGES: u64 = 0x1c4;
 const AN_IMAGE: u64 = 32;
 const WHAT_IT_IS_CALLED: u64 = 24;
+const FROM_SOMEWHERE_ELSE: u64 = 0x08;
 const LONGEST_NAME: usize = 256;
