@@ -17,6 +17,8 @@ pub use crate::winnt::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu::*;
 #[cfg(feature = "xnu")]
+pub use crate::xnu_applications::*;
+#[cfg(feature = "xnu")]
 pub use crate::xnu_injection::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_processes::*;

@@ -94,6 +94,8 @@ mod symbols;
 #[cfg(feature = "xnu")]
 mod xnu;
 #[cfg(feature = "xnu")]
+mod xnu_applications;
+#[cfg(feature = "xnu")]
 mod xnu_injection;
 #[cfg(feature = "xnu")]
 mod xnu_libsystem;
@@ -1185,6 +1187,11 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
+            #[cfg(feature = "xnu")]
+            FridaCommand::EnumerateApplications => {
+                kernel::list_applications_when_the_loop_can(request_id);
+                None
+            }
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateShortcuts => Some(handle_enumerate_shortcuts()),
             #[cfg(any(
@@ -1379,6 +1386,9 @@ fn relay_frames_from_targets() {
             let said = alloc::ffi::CString::new(program).unwrap();
             tell_the_host_of_a_spawn(id, said.as_ptr() as *const u8);
         });
+        if let Some(request_id) = kernel::asked_for_applications() {
+            send_command_reply(request_id, what_is_installed());
+        }
         kernel::start_what_was_asked_for(&mut |request_id, id| {
             let response = if id != 0 {
                 HandlerResponse::success(unsafe { g_variant_new_uint32(id) })
@@ -1426,6 +1436,33 @@ fn describe(path: *const u8) -> *const gchar {
     }
 
     kernel::describe_image(path) as *const gchar
+}
+
+#[cfg(feature = "xnu")]
+fn what_is_installed() -> HandlerResponse {
+    unsafe {
+        let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
+        let application_type = g_variant_type_new(c"(sss)".as_ptr() as *const gchar);
+        let builder = g_variant_builder_new(list_type);
+
+        kernel::each_application(&mut |identifier, program, shown| {
+            let said = |bytes: &[u8]| alloc::ffi::CString::new(bytes).unwrap();
+            let (identifier, program, shown) = (said(identifier), said(program), said(shown));
+
+            g_variant_builder_open(builder, application_type);
+            g_variant_builder_add(builder, c"s".as_ptr(), identifier.as_ptr());
+            g_variant_builder_add(builder, c"s".as_ptr(), program.as_ptr());
+            g_variant_builder_add(builder, c"s".as_ptr(), shown.as_ptr());
+            g_variant_builder_close(builder);
+        });
+
+        let list = g_variant_builder_end(builder);
+
+        g_variant_type_free(list_type);
+        g_variant_type_free(application_type);
+
+        HandlerResponse::success(list)
+    }
 }
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]

@@ -37,6 +37,60 @@ pub fn inject_into_process(id: u32) -> u32 {
     id
 }
 
+pub fn a_copy_that_can_start_a_program() -> Option<u64> {
+    a_copy_in(THE_ONE_THAT_STARTS_THINGS)
+}
+
+pub fn a_copy_that_can_ask_the_system() -> Option<u64> {
+    let mut asked = unsafe { ASKED };
+    if asked == 0 || !process_is_alive(asked) {
+        asked = the_one_that_shows_applications();
+        unsafe { ASKED = asked };
+    }
+
+    a_copy_in(asked)
+}
+
+fn the_one_that_shows_applications() -> u32 {
+    let mut found = 0;
+    for wanted in [b"backboardd".as_slice(), b"SpringBoard"] {
+        crate::xnu_processes::enumerate_processes(&mut |process| {
+            if found == 0 && called(process.name, wanted) {
+                found = process.id;
+            }
+        });
+        if found != 0 {
+            return found;
+        }
+    }
+
+    found
+}
+
+fn called(name: *const u8, wanted: &[u8]) -> bool {
+    for (step, byte) in wanted.iter().enumerate() {
+        if unsafe { name.add(step).read() } != *byte {
+            return false;
+        }
+    }
+
+    unsafe { name.add(wanted.len()).read() == 0 }
+}
+
+fn a_copy_in(id: u32) -> Option<u64> {
+    if let Some(arena) = arena_for_pid(id) {
+        return Some(arena);
+    }
+
+    inject_into_process(id);
+
+    arena_for_pid(id)
+}
+
+static mut ASKED: u32 = 0;
+
+const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
+
 pub fn stop_copies() {
     let everywhere: alloc::vec::Vec<u32> = unsafe { arenas() }.keys().copied().collect();
     for id in everywhere {

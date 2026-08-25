@@ -103,6 +103,7 @@ fn copy_has_work() -> bool {
 
     crate::xnu_relay::holds_a_frame_from_host(arena)
         || word_at(arena + crate::xnu_relay::SPAWN_WANTED) != crate::xnu_relay::NOTHING_WANTED
+        || word_at(arena + crate::xnu_relay::APPS_WANTED) != crate::xnu_relay::NOTHING_WANTED
         || word_at(arena + crate::xnu_relay::STOP_REQUEST) != 0
 }
 
@@ -115,6 +116,10 @@ fn serve_the_copy() {
 
     if word_at(arena + crate::xnu_relay::SPAWN_WANTED) != crate::xnu_relay::NOTHING_WANTED {
         start_what_the_other_half_asked_for(arena);
+    }
+
+    if word_at(arena + crate::xnu_relay::APPS_WANTED) != crate::xnu_relay::NOTHING_WANTED {
+        crate::xnu_applications::say_what_is_installed(arena);
     }
 }
 

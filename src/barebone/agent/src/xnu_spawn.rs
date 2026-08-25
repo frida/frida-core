@@ -81,7 +81,7 @@ fn start_a_program() -> u32 {
     gate_spawns(true);
     look_for_new_processes();
 
-    let Some(arena) = a_process_that_can_start_one() else {
+    let Some(arena) = crate::xnu_injection::a_copy_that_can_start_a_program() else {
         return 0;
     };
 
@@ -118,16 +118,6 @@ fn start_a_program() -> u32 {
     0
 }
 
-fn a_process_that_can_start_one() -> Option<u64> {
-    if let Some(arena) = crate::xnu_injection::arena_for_pid(THE_ONE_THAT_STARTS_THINGS) {
-        return Some(arena);
-    }
-
-    crate::xnu_injection::inject_into_process(THE_ONE_THAT_STARTS_THINGS);
-
-    crate::xnu_injection::arena_for_pid(THE_ONE_THAT_STARTS_THINGS)
-}
-
 fn each_word_asked_for() -> &'static mut [u8; WORD_ROOM] {
     unsafe { (&raw mut ASKED_WORDS).as_mut().unwrap() }
 }
@@ -137,7 +127,6 @@ static mut ASKED_BY: u16 = 0;
 static mut ASKED_WORDS: [u8; WORD_ROOM] = [0; WORD_ROOM];
 
 const WORD_ROOM: usize = crate::xnu_relay::SPAWN_WORDS_ROOM as usize;
-const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
 const LONG_ENOUGH_TO_START: usize = 20_000_000;
 
 pub fn gate_spawns(on: bool) {

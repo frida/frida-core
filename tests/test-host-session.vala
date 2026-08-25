@@ -4581,7 +4581,19 @@ namespace Frida.HostSessionTest {
 					}
 
 					unowned string? into = Environment.get_variable ("FRIDA_BAREBONE_ATTACH");
-					uint target = (into != null) ? uint.parse (into) : 0;
+					uint target = 0;
+					if (into != null) {
+						target = uint.parse (into);
+						if (target == 0) {
+							foreach (var p in yield host_session.enumerate_processes (
+									make_parameters_dict (), cancellable)) {
+								if (p.name == into) {
+									target = p.pid;
+									break;
+								}
+							}
+						}
+					}
 					printerr ("[*] attaching to %u\n", target);
 					var session_id = yield host_session.attach (target, make_parameters_dict (), cancellable);
 					var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
@@ -4594,6 +4606,18 @@ namespace Frida.HostSessionTest {
 						if (waiting && ("allowed=" in message || "done" in message))
 							inject.callback ();
 					});
+
+					if (Environment.get_variable ("FRIDA_BAREBONE_APPS") != null) {
+						var query = new ApplicationQueryOptions ();
+						query.scope = FULL;
+						var applications = yield host_session.enumerate_applications (
+							query._serialize (), cancellable);
+						printerr ("[*] %u applications\n", applications.length);
+						foreach (var app in applications[0:uint.min (applications.length, 8)])
+							printerr ("[*]   %s %s (pid %u) %s\n", app.identifier, app.name, app.pid,
+								(app.parameters["path"] != null)
+									? app.parameters["path"].get_string () : "");
+					}
 
 					if (Environment.get_variable ("FRIDA_BAREBONE_LIST") != null) {
 						var processes = yield host_session.enumerate_processes (make_parameters_dict (),
