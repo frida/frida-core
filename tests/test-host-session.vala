@@ -4476,6 +4476,22 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
+			private static async void instrument_the_spawn (Harness h, HostSessionProvider prov,
+					HostSession host_session, HostSpawnInfo info, Cancellable? cancellable) {
+				try {
+					var id = yield host_session.attach (info.pid, make_parameters_dict (), cancellable);
+					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
+
+					var script = yield session.create_script (
+						"send(`first breath: pid ${Process.id}, " +
+						"${Process.enumerateModules().length} modules`);",
+						make_parameters_dict (), cancellable);
+					yield session.load_script (script, cancellable);
+				} catch (GLib.Error e) {
+					printerr ("[*] could not get into %u: %s\n", info.pid, e.message);
+				}
+			}
+
 			private static string read_script (string path) {
 				try {
 					uint8[] contents;
@@ -4507,9 +4523,21 @@ namespace Frida.HostSessionTest {
 
 					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
 						uint seen = 0;
+						uint instrumented = 0;
+						unowned string? wanted = Environment.get_variable ("FRIDA_BAREBONE_GATE");
 						host_session.spawn_added.connect ((info) => {
 							printerr ("[*] Spawned: %u %s\n", info.pid, info.identifier);
 							seen++;
+
+							if (wanted != "1" && info.identifier.contains (wanted)) {
+								instrument_the_spawn.begin (h, prov, host_session, info,
+									cancellable, (obj, res) => {
+										instrumented++;
+										host_session.resume.begin (info.pid, cancellable);
+									});
+								return;
+							}
+
 							host_session.resume.begin (info.pid, cancellable);
 						});
 
@@ -4519,7 +4547,7 @@ namespace Frida.HostSessionTest {
 						var waited = new Timer ();
 						while (waited.elapsed () < 20.0)
 							yield h.process_events ();
-						printerr ("[*] saw %u spawns\n", seen);
+						printerr ("[*] saw %u spawns, got into %u of them\n", seen, instrumented);
 
 						yield host_session.disable_spawn_gating (cancellable);
 					}
