@@ -561,7 +561,7 @@ namespace Frida.Barebone {
 
 		public bool spawns_by_itself {
 			get {
-				return kernel_kind == LINUX;
+				return kernel_kind == LINUX || kernel_kind == XNU;
 			}
 		}
 

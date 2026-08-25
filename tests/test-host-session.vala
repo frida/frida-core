@@ -4505,6 +4505,25 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
 					printerr ("[*] Injected in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
+					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
+						uint seen = 0;
+						host_session.spawn_added.connect ((info) => {
+							printerr ("[*] Spawned: %u %s\n", info.pid, info.identifier);
+							seen++;
+							host_session.resume.begin (info.pid, cancellable);
+						});
+
+						yield host_session.enable_spawn_gating (cancellable);
+						printerr ("[*] gating spawns\n");
+
+						var waited = new Timer ();
+						while (waited.elapsed () < 20.0)
+							yield h.process_events ();
+						printerr ("[*] saw %u spawns\n", seen);
+
+						yield host_session.disable_spawn_gating (cancellable);
+					}
+
 					unowned string? into = Environment.get_variable ("FRIDA_BAREBONE_ATTACH");
 					uint target = (into != null) ? uint.parse (into) : 0;
 					printerr ("[*] attaching to %u\n", target);
