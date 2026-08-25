@@ -96,6 +96,8 @@ mod xnu;
 #[cfg(feature = "xnu")]
 mod xnu_injection;
 #[cfg(feature = "xnu")]
+mod xnu_libsystem;
+#[cfg(feature = "xnu")]
 mod xnu_processes;
 #[cfg(feature = "xnu")]
 mod xnu_ranges;

@@ -20,13 +20,65 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
         crate::init_gum_without_exceptor();
     }
 
+    let served = become_a_thread_the_system_knows(arena);
+
     unsafe { ((arena + crate::xnu_relay::AWAKE_AT) as *mut u64).write_volatile(AWAKE) };
 
-    unsafe { user_worker(arena as *mut core::ffi::c_void, 0) };
+    if !served {
+        unsafe { user_worker(arena as *mut core::ffi::c_void, 0) };
+    }
+
+    wait_for_something_that_never_comes();
+}
+
+fn wait_for_something_that_never_comes() -> ! {
+    if let Some(wait) = crate::xnu_libsystem::function_named(b"/libsystem_kernel.dylib",
+        b"_mach_msg")
+    {
+        type Wait = unsafe extern "C" fn(*mut u8, i32, u32, u32, u32, u32, u32) -> i32;
+        let wait: Wait = unsafe { core::mem::transmute(wait) };
+
+        let listening_on = crate::xnu_user_calls::a_port_to_answer_on();
+        let mut nothing = [0u8; 1024];
+        loop {
+            unsafe {
+                wait(nothing.as_mut_ptr(), ONLY_LISTEN, 0, nothing.len() as u32, listening_on,
+                    NO_TIMEOUT, NO_ONE_TO_TELL)
+            };
+        }
+    }
 
     loop {
         crate::kernel::yield_now();
     }
+}
+
+const ONLY_LISTEN: i32 = 2;
+const NO_TIMEOUT: u32 = 0;
+const NO_ONE_TO_TELL: u32 = 0;
+
+fn become_a_thread_the_system_knows(arena: u64) -> bool {
+    let Some(making) = crate::xnu_libsystem::making_threads() else {
+        return false;
+    };
+    let Some(out_of_a_bare_one) = making.out_of_a_bare_one else {
+        return false;
+    };
+
+    let start = crate::xnu_libsystem::signed_to_begin_at(serve_from_a_proper_thread);
+    let mut made = 0u64;
+
+    unsafe {
+        out_of_a_bare_one(&mut made, core::ptr::null(), start, arena as *mut core::ffi::c_void) == 0
+    }
+}
+
+unsafe extern "C" fn serve_from_a_proper_thread(arena: *mut core::ffi::c_void)
+    -> *mut core::ffi::c_void
+{
+    unsafe { user_worker(arena, 0) };
+
+    core::ptr::null_mut()
 }
 
 unsafe extern "C" fn user_worker(parameter: *mut core::ffi::c_void, _wait_result: i32) {
@@ -58,12 +110,6 @@ fn serve_the_copy() {
     while let Some(frame) = crate::xnu_relay::take_frame_from_host(arena) {
         crate::on_frame_from_host(&frame);
     }
-}
-
-pub fn ask_for_a_thread(code: u64, stack: u64, argument: u64) -> bool {
-    ask_the_other_half(&[(crate::xnu_relay::THREAD_STACK, stack),
-        (crate::xnu_relay::THREAD_ARGUMENT, argument)],
-        crate::xnu_relay::THREAD_WANTED, code, crate::xnu_relay::THREAD_ANSWER)
 }
 
 pub fn ask_for_protection(address: u64, size: usize, may: u32) -> bool {

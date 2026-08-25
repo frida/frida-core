@@ -4,7 +4,7 @@ use core::ffi::c_void;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::kernel::ThreadEntry;
+use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
 use crate::xnu::Primitives;
 
 pub static SLOTS: crate::gthread::ThreadSlots = crate::gthread::ThreadSlots {
@@ -88,6 +88,9 @@ pub static USER: Primitives = Primitives {
     cache_shape,
     protection_at,
     enumerate_ranges,
+    enumerate_threads,
+    find_thread,
+    modify_thread,
 };
 
 fn alloc(size: usize) -> *mut u8 {
@@ -180,7 +183,10 @@ fn current_process_id() -> u32 {
 }
 
 fn current_thread_id() -> u64 {
-    thread_id()
+    match crate::xnu_libsystem::asking_about_threads() {
+        Some(asking) => unsafe { (asking.which_one_is_this)() as u64 },
+        None => thread_id(),
+    }
 }
 
 fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
@@ -234,20 +240,129 @@ struct Region {
     size: u64,
 }
 
+fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+    let Some(asking) = crate::xnu_libsystem::asking_about_threads() else {
+        return;
+    };
+
+    let mut threads: *mut u32 = core::ptr::null_mut();
+    let mut counted: u32 = 0;
+    let task = unsafe { (asking.this_task as *const u32).read_volatile() };
+    let told = unsafe { (asking.which_ones)(task, &mut threads, &mut counted) };
+
+    if told != WELL_ENOUGH {
+        return;
+    }
+
+    for step in 0..counted as usize {
+        let thread = unsafe { threads.add(step).read() };
+        found(ThreadInfo { id: thread, cpu_state: state_of(thread) });
+    }
+
+    unsafe { (asking.give_back)(task, threads as u64, (counted as u64) * 4) };
+}
+
+fn find_thread(id: u32) -> Option<ThreadInfo> {
+    let mut found = None;
+    enumerate_threads(&mut |thread| {
+        if thread.id == id {
+            found = Some(thread);
+        }
+    });
+
+    found
+}
+
+fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+    let Some(asking) = crate::xnu_libsystem::asking_about_threads() else {
+        return false;
+    };
+    if unsafe { (asking.hold_it_still)(id) } != WELL_ENOUGH {
+        return false;
+    }
+
+    let mut state = [0u32; STATE_WORDS];
+    let changed = read_state(id, &mut state) && {
+        let mut cpu = as_cpu_state(&state);
+        change(&mut cpu);
+        write_cpu_state(&cpu, &mut state);
+        unsafe { (asking.set_what_it_does)(id, ARM_THREAD_STATE64, state.as_ptr(),
+            STATE_WORDS as u32) == WELL_ENOUGH }
+    };
+
+    unsafe { (asking.let_it_go)(id) };
+
+    changed
+}
+
+fn state_of(thread: u32) -> Option<CpuState> {
+    let mut state = [0u32; STATE_WORDS];
+    read_state(thread, &mut state).then(|| as_cpu_state(&state))
+}
+
+fn read_state(thread: u32, state: &mut [u32; STATE_WORDS]) -> bool {
+    let Some(asking) = crate::xnu_libsystem::asking_about_threads() else {
+        return false;
+    };
+
+    let mut counted = STATE_WORDS as u32;
+    unsafe {
+        (asking.what_it_is_doing)(thread, ARM_THREAD_STATE64, state.as_mut_ptr(), &mut counted)
+            == WELL_ENOUGH
+    }
+}
+
+fn as_cpu_state(state: &[u32; STATE_WORDS]) -> CpuState {
+    let mut cpu = CpuState { pc: word(state, PC), sp: word(state, SP), nzcv: state[FLAGS] as u64,
+        x: [0; 29], fp: word(state, FP), lr: word(state, LR) };
+    for (index, register) in cpu.x.iter_mut().enumerate() {
+        *register = word(state, index);
+    }
+
+    cpu
+}
+
+fn write_cpu_state(cpu: &CpuState, state: &mut [u32; STATE_WORDS]) {
+    for (index, register) in cpu.x.iter().enumerate() {
+        put(state, index, *register);
+    }
+    put(state, FP, cpu.fp);
+    put(state, LR, cpu.lr);
+    put(state, SP, cpu.sp);
+    put(state, PC, cpu.pc);
+    state[FLAGS] = cpu.nzcv as u32;
+}
+
+fn word(state: &[u32; STATE_WORDS], index: usize) -> u64 {
+    (state[index * 2] as u64) | ((state[index * 2 + 1] as u64) << 32)
+}
+
+fn put(state: &mut [u32; STATE_WORDS], index: usize, value: u64) {
+    state[index * 2] = value as u32;
+    state[index * 2 + 1] = (value >> 32) as u32;
+}
+
+const WELL_ENOUGH: i32 = 0;
+const ARM_THREAD_STATE64: i32 = 6;
+const STATE_WORDS: usize = 68;
+const FP: usize = 29;
+const LR: usize = 30;
+const SP: usize = 31;
+const PC: usize = 32;
+const FLAGS: usize = 66;
+
 fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
-    let Some(stack) = take_memory(STACK) else {
+    let Some(making) = crate::xnu_libsystem::making_threads() else {
         return 0;
     };
 
-    match crate::xnu_user::ask_for_a_thread(entry as usize as u64,
-        stack + STACK as u64 - STACK_HEADROOM, parameter as u64)
-    {
-        true => 1,
-        false => {
-            give_memory_back(stack, STACK);
-            0
-        }
-    }
+    let mut made = 0u64;
+    let told = unsafe {
+        (making.the_usual_way)(&mut made, core::ptr::null(),
+            crate::xnu_libsystem::signed_to_begin_at(core::mem::transmute(entry)), parameter)
+    };
+
+    (told == 0) as isize
 }
 
 const STACK: usize = 1024 * 1024;
@@ -277,6 +392,15 @@ pub fn micros() -> u64 {
 
     ticks / (rate / 1_000_000)
 }
+
+pub fn where_the_shared_code_is() -> Option<u64> {
+    let mut base = 0u64;
+    let told = unsafe { ask(WHERE_IS_THE_SHARED_CODE, [&mut base as *mut u64 as u64, 0, 0, 0]) };
+
+    (told == 0 && base != 0).then_some(base)
+}
+
+const WHERE_IS_THE_SHARED_CODE: i64 = 294;
 
 pub fn take_memory(size: usize) -> Option<u64> {
     let mut address: u64 = 0;

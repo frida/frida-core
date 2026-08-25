@@ -354,7 +354,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     }
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = registry };
@@ -362,18 +362,18 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
     kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = ptr::null_mut() };
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 pub(crate) fn thread_appeared(id: u32) {
     announce_thread(id);
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 pub(crate) fn thread_vanished(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };
     if registry.is_null() {
@@ -383,7 +383,7 @@ pub(crate) fn thread_vanished(id: u32) {
     unsafe { gum_barebone_unregister_thread(registry, id as GumThreadId) };
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 fn announce_thread(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };
     if registry.is_null() {
@@ -396,10 +396,10 @@ fn announce_thread(id: u32) {
     unsafe { gum_barebone_register_thread(registry, &details) };
 }
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 
-#[cfg(feature = "linux-injected")]
+#[cfg(any(feature = "linux-injected", feature = "xnu"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
     let Some(emit) = func else {

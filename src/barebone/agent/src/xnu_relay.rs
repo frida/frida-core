@@ -125,10 +125,6 @@ pub const WORKER_STOPPED: u64 = 28;
 pub const PAGE_SIZE: u64 = 40;
 pub const CACHE_SHAPE: u64 = 48;
 
-pub const THREAD_WANTED: u64 = 512;
-pub const THREAD_STACK: u64 = 520;
-pub const THREAD_ARGUMENT: u64 = 528;
-pub const THREAD_ANSWER: u64 = 536;
 
 pub const PROTECT_WANTED: u64 = 544;
 pub const PROTECT_SIZE: u64 = 552;

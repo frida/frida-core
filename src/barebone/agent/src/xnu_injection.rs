@@ -259,11 +259,8 @@ fn start(task: *mut c_void, home: Home) -> bool {
 pub fn serve_what_the_copies_ask() {
     for (id, arena) in unsafe { arenas() }.clone() {
         let asked = |at: u64| unsafe { ((arena + at) as *const u64).read_volatile() };
-        let wants_a_thread = asked(crate::xnu_relay::THREAD_WANTED);
         let wants_protection = asked(crate::xnu_relay::PROTECT_WANTED);
-        if wants_a_thread == crate::xnu_relay::NOTHING_WANTED
-            && wants_protection == crate::xnu_relay::NOTHING_WANTED
-        {
+        if wants_protection == crate::xnu_relay::NOTHING_WANTED {
             continue;
         }
 
@@ -271,18 +268,9 @@ pub fn serve_what_the_copies_ask() {
             continue;
         };
 
-        if wants_a_thread != crate::xnu_relay::NOTHING_WANTED {
-            let started = start_a_thread(process.task, wants_a_thread,
-                asked(crate::xnu_relay::THREAD_STACK),
-                asked(crate::xnu_relay::THREAD_ARGUMENT));
-            answer(arena, crate::xnu_relay::THREAD_WANTED, crate::xnu_relay::THREAD_ANSWER, started);
-        }
-
-        if wants_protection != crate::xnu_relay::NOTHING_WANTED {
-            let done = set_protection(process.map, wants_protection,
-                asked(crate::xnu_relay::PROTECT_SIZE), asked(crate::xnu_relay::PROTECT_TO) as c_int);
-            answer(arena, crate::xnu_relay::PROTECT_WANTED, crate::xnu_relay::PROTECT_ANSWER, done);
-        }
+        let done = set_protection(process.map, wants_protection,
+            asked(crate::xnu_relay::PROTECT_SIZE), asked(crate::xnu_relay::PROTECT_TO) as c_int);
+        answer(arena, crate::xnu_relay::PROTECT_WANTED, crate::xnu_relay::PROTECT_ANSWER, done);
 
         unsafe { release_process(process.handle) };
     }
