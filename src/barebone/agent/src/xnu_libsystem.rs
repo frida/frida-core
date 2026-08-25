@@ -96,48 +96,6 @@ pub fn image_named(wanted: &[u8]) -> Option<u64> {
     None
 }
 
-pub fn each_export(image: u64, found: &mut dyn FnMut(&str, u64)) {
-    let Some((trie, size)) = what_the_image_offers(image) else {
-        return;
-    };
-
-    let mut still_to_look_at = alloc::vec![(trie, alloc::string::String::new())];
-    while let Some((at, so_far)) = still_to_look_at.pop() {
-        if at >= trie + size {
-            continue;
-        }
-
-        let (said, after) = a_number_at(at);
-        if said != 0 {
-            let (how_it_is_offered, past_flags) = a_number_at(after);
-            if (how_it_is_offered & FROM_SOMEWHERE_ELSE) == 0 {
-                let (offset, _) = a_number_at(past_flags);
-                found(so_far.strip_prefix('_').unwrap_or(&so_far), image + offset);
-            }
-        }
-
-        let children = after + said;
-        let (count, mut step) = (byte_at(children), children + 1);
-        for _ in 0..count {
-            let began = step;
-            let mut length = 0;
-            while length < LONGEST_NAME as u64 && byte_at(began + length) != 0 {
-                length += 1;
-            }
-
-            let mut name = so_far.clone();
-            for index in 0..length {
-                name.push(byte_at(began + index) as char);
-            }
-
-            let (next, after_next) = a_number_at(began + length + 1);
-            still_to_look_at.push((trie + next, name));
-            step = after_next;
-        }
-    }
-
-}
-
 pub fn function_in(image: u64, wanted: &[u8]) -> Option<u64> {
     let (trie, size) = what_the_image_offers(image)?;
 

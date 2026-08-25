@@ -17,6 +17,7 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
         crate::set_own_range(word_at(arena + crate::xnu_relay::IMAGE_BASE),
             word_at(arena + crate::xnu_relay::IMAGE_SIZE));
         crate::run_constructors();
+
         crate::init_gum_without_exceptor();
     }
 

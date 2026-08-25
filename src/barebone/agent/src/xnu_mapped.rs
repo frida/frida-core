@@ -2,7 +2,10 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::bindings::{GumMemoryRange, GumModuleRegistry, g_object_unref, gpointer, gsize};
+use crate::bindings::{
+    GumDarwinExportDetails, GumDarwinModule, GumMemoryRange, GumModuleRegistry, GumAddress,
+    gboolean, g_object_unref, gpointer, gsize,
+};
 use crate::gum;
 
 pub fn register_what_the_copy_lives_among(registry: *mut GumModuleRegistry) {
@@ -24,10 +27,34 @@ pub fn enumerate_exports_in_range(from: u64, to: u64,
         return;
     };
 
-    crate::xnu_libsystem::each_export(image.base, &mut |name, address| {
-        let said = alloc::ffi::CString::new(name).unwrap();
-        found(said.as_ptr(), address);
-    });
+    let Some(module) = read_the_image(image.base, &image.path) else {
+        return;
+    };
+
+    let mut asking = Asking { found, base: image.base };
+    unsafe {
+        crate::bindings::gum_darwin_module_enumerate_exports(module, Some(note_an_export),
+            &mut asking as *mut Asking<'_, '_> as gpointer);
+        g_object_unref(module as gpointer);
+    }
+}
+
+struct Asking<'a, 'b> {
+    found: &'a mut crate::gum::FoundExportCallback<'b>,
+    base: u64,
+}
+
+unsafe extern "C" fn note_an_export(details: *const GumDarwinExportDetails, asking: gpointer)
+    -> gboolean
+{
+    let asking = unsafe { &mut *(asking as *mut Asking<'_, '_>) };
+    let details = unsafe { &*details };
+
+    let offset = unsafe { details.__bindgen_anon_1.__bindgen_anon_1.offset };
+    let named = unsafe { details.name.add(1) };
+    (asking.found)(named, asking.base + offset);
+
+    1
 }
 
 pub fn export_named(wanted: &str) -> u64 {
@@ -72,7 +99,12 @@ fn what_is_loaded() -> Vec<Image> {
             continue;
         }
 
-        found.push(Image { base, size: how_much_of_it_there_is(base), path: text_at(path) });
+        let path = text_at(path);
+        let size = how_much_of_it_there_is(base, &path);
+        if size == 0 {
+            continue;
+        }
+        found.push(Image { base, size, path });
     }
 
     found
@@ -97,20 +129,35 @@ fn where_the_loader_keeps_its_list() -> Option<u64> {
     (list != 0).then_some(list)
 }
 
-fn how_much_of_it_there_is(image: u64) -> u64 {
-    let commands = read_word(image + HOW_MANY_COMMANDS);
-    let mut at = image + PAST_THE_HEADER;
+fn read_the_image(base: u64, name: &str) -> Option<*mut GumDarwinModule> {
+    let named = alloc::ffi::CString::new(name).ok()?;
+    let module = unsafe {
+        crate::bindings::gum_darwin_module_new_from_memory(named.as_ptr(), NO_TASK_TO_ASK,
+            base as GumAddress, 0, core::ptr::null_mut())
+    };
 
-    for _ in 0..commands {
-        let kind = read_word(at);
-        let length = read_word(at + 4) as u64;
-        if kind == A_SEGMENT && name_is(at + 8, b"__TEXT") {
-            return read_long(at + HOW_BIG_A_SEGMENT_IS);
+    (!module.is_null()).then_some(module)
+}
+
+fn how_much_of_it_there_is(base: u64, name: &str) -> u64 {
+    let Some(module) = read_the_image(base, name) else {
+        return 0;
+    };
+
+    let mut size = 0;
+    for step in 0.. {
+        let segment = unsafe { crate::bindings::gum_darwin_module_get_nth_segment(module, step) };
+        if segment.is_null() {
+            break;
         }
-        at += length;
+        if name_is(unsafe { &raw const (*segment).name } as u64, b"__TEXT") {
+            size = unsafe { (*segment).vm_size };
+            break;
+        }
     }
+    unsafe { g_object_unref(module as gpointer) };
 
-    0
+    size
 }
 
 fn name_is(at: u64, wanted: &[u8]) -> bool {
@@ -146,6 +193,8 @@ fn read_long(at: u64) -> u64 {
     unsafe { (at as *const u64).read_volatile() }
 }
 
+const NO_TASK_TO_ASK: u32 = 0;
+
 const ABOUT_THE_LOADER: u32 = 17;
 const ABOUT_THE_LOADER_WORDS: usize = 8;
 const HOW_MANY_IMAGES: u64 = 4;
@@ -154,7 +203,10 @@ const AN_IMAGE: usize = 24;
 const WHAT_IT_CAME_FROM: u64 = 8;
 const MOST_IMAGES: usize = 4096;
 
+const WHAT_AN_IMAGE_BEGINS_WITH: u32 = 0xfeed_facf;
 const HOW_MANY_COMMANDS: u64 = 16;
+const HOW_LONG_THE_COMMANDS_ARE: u64 = 20;
+const A_PART_AT_LEAST: u64 = 8;
 const PAST_THE_HEADER: u64 = 32;
 const A_SEGMENT: u32 = 0x19;
 const WHERE_A_SEGMENT_GOES: u64 = 24;
