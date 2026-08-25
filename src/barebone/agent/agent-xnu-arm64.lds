@@ -37,6 +37,7 @@ SECTIONS {
     _task_suspend = .; . += 8;
     _task_resume = .; . += 8;
     _task_clear_return_wait = .; . += 8;
+    _get_bsdtask_info = .; . += 8;
     _kfree = .; . += 8;
     _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;
