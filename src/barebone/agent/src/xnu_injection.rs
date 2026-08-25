@@ -36,17 +36,22 @@ pub fn inject_into_process(id: u32) -> u32 {
 }
 
 pub fn stop_copies() {
-    let placed: alloc::vec::Vec<(u32, Placed)> = unsafe { arenas() }
-        .iter()
-        .map(|(id, placed)| (*id, placed.clone()))
-        .collect();
-
-    for (id, placed) in placed {
-        tell_it_to_go(&placed);
-        take_back_what_it_was_given(id, &placed);
-        crate::xnu_relay::forget(placed.arena);
-        unsafe { arenas() }.remove(&id);
+    let everywhere: alloc::vec::Vec<u32> = unsafe { arenas() }.keys().copied().collect();
+    for id in everywhere {
+        detach_from_process(id);
     }
+}
+
+pub fn detach_from_process(id: u32) -> bool {
+    let Some(placed) = unsafe { arenas() }.remove(&id) else {
+        return false;
+    };
+
+    tell_it_to_go(&placed);
+    take_back_what_it_was_given(id, &placed);
+    crate::xnu_relay::forget(placed.arena);
+
+    true
 }
 
 fn tell_it_to_go(placed: &Placed) {

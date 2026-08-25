@@ -1721,7 +1721,7 @@ fn handle_stop() -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     let left = unsafe { kernel::detach_from_process(g_variant_get_uint32(payload)) };
     if !left {
