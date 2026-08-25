@@ -102,6 +102,7 @@ fn copy_has_work() -> bool {
     let arena = unsafe { ARENA };
 
     crate::xnu_relay::holds_a_frame_from_host(arena)
+        || word_at(arena + crate::xnu_relay::SPAWN_WANTED) != crate::xnu_relay::NOTHING_WANTED
         || word_at(arena + crate::xnu_relay::STOP_REQUEST) != 0
 }
 
@@ -111,7 +112,66 @@ fn serve_the_copy() {
     while let Some(frame) = crate::xnu_relay::take_frame_from_host(arena) {
         crate::on_frame_from_host(&frame);
     }
+
+    if word_at(arena + crate::xnu_relay::SPAWN_WANTED) != crate::xnu_relay::NOTHING_WANTED {
+        start_what_the_other_half_asked_for(arena);
+    }
 }
+
+fn start_what_the_other_half_asked_for(arena: u64) {
+    let mut said = [core::ptr::null(); MOST_WORDS];
+    let mut how_many = 0;
+    let mut at = arena + crate::xnu_relay::SPAWN_WORDS;
+    let past = at + crate::xnu_relay::SPAWN_WORDS_ROOM;
+    while at < past && unsafe { (at as *const u8).read_volatile() } != 0
+        && how_many < MOST_WORDS - 1
+    {
+        said[how_many] = at as *const u8;
+        how_many += 1;
+        while at < past && unsafe { (at as *const u8).read_volatile() } != 0 {
+            at += 1;
+        }
+        at += 1;
+    }
+
+    let id = if how_many == 0 { 0 } else { start_a_program(said[0], &said) };
+
+    unsafe {
+        ((arena + crate::xnu_relay::SPAWN_ID) as *mut u64).write_volatile(id as u64);
+        ((arena + crate::xnu_relay::SPAWN_ANSWER) as *mut u64).write_volatile(
+            if id != 0 { crate::xnu_relay::DONE } else { crate::xnu_relay::REFUSED });
+    }
+}
+
+fn start_a_program(program: *const u8, words: &[*const u8]) -> u32 {
+    let Some(start) = crate::xnu_libsystem::function_named(b"/libsystem_kernel.dylib",
+        b"_posix_spawn")
+    else {
+        return 0;
+    };
+
+    type Start = unsafe extern "C" fn(*mut i32, *const u8, *const core::ffi::c_void,
+        *const core::ffi::c_void, *const *const u8, *const *const u8) -> i32;
+    let start: Start = unsafe { core::mem::transmute(start) };
+
+    let mut id = 0i32;
+    let went = unsafe {
+        start(&mut id, program, core::ptr::null(), core::ptr::null(), words.as_ptr(),
+            what_this_process_was_given())
+    };
+
+    if went == 0 { id as u32 } else { 0 }
+}
+
+fn what_this_process_was_given() -> *const *const u8 {
+    let Some(held) = crate::xnu_libsystem::function_named(b"/libsystem_c.dylib", b"_environ") else {
+        return core::ptr::null();
+    };
+
+    unsafe { (held as *const *const *const u8).read() }
+}
+
+const MOST_WORDS: usize = 32;
 
 pub fn ask_for_protection(address: u64, size: usize, may: u32) -> bool {
     ask_the_other_half(&[(crate::xnu_relay::PROTECT_SIZE, size as u64),

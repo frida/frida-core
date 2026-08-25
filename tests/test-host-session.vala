@@ -4525,6 +4525,22 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
 					printerr ("[*] Injected in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
+					unowned string? program = Environment.get_variable ("FRIDA_BAREBONE_SPAWN");
+					if (program != null) {
+						h.message_from_script.connect ((script_id, message, data) => {
+							printerr ("[*] Message: %s\n", message);
+						});
+
+						var options = HostSpawnOptions ();
+						uint spawned = yield host_session.spawn (program, options, cancellable);
+						printerr ("[*] spawned %u\n", spawned);
+
+						var born = HostSpawnInfo (spawned, program);
+						yield instrument_the_spawn (h, prov, host_session, born, cancellable);
+
+						yield host_session.resume (spawned, cancellable);
+					}
+
 					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
 						uint seen = 0;
 						uint instrumented = 0;

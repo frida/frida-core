@@ -1206,6 +1206,11 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
+            #[cfg(feature = "xnu")]
+            FridaCommand::SpawnProcess => {
+                kernel::spawn_when_the_loop_can(request_id, &words_run_together(payload_variant));
+                None
+            }
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
                 feature = "xnu"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
@@ -1373,6 +1378,14 @@ fn relay_frames_from_targets() {
         kernel::tell_of_held_spawns(&mut |id, program| {
             let said = alloc::ffi::CString::new(program).unwrap();
             tell_the_host_of_a_spawn(id, said.as_ptr() as *const u8);
+        });
+        kernel::start_what_was_asked_for(&mut |request_id, id| {
+            let response = if id != 0 {
+                HandlerResponse::success(unsafe { g_variant_new_uint32(id) })
+            } else {
+                HandlerResponse::error("Unable to spawn")
+            };
+            send_command_reply(request_id, response);
         });
     }
 
@@ -1691,6 +1704,23 @@ fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
             .unwrap()
             .remove(&request_id)
     }
+}
+
+#[cfg(feature = "xnu")]
+fn words_run_together(payload: *mut GVariant) -> alloc::vec::Vec<u8> {
+    let mut said = alloc::vec::Vec::new();
+    unsafe {
+        for index in 0..crate::bindings::g_variant_n_children(payload) {
+            let word = crate::bindings::g_variant_get_child_value(payload, index);
+            said.extend_from_slice(
+                core::ffi::CStr::from_ptr(g_variant_get_string(word, ptr::null_mut())).to_bytes());
+            said.push(0);
+            g_variant_unref(word);
+        }
+    }
+    said.push(0);
+
+    said
 }
 
 #[cfg(feature = "linux-injected")]

@@ -54,6 +54,92 @@ const HOW_FAR_INTO_A_TASK: usize = 0x800;
 const HOW_FAR_INTO_A_THREAD: usize = 0x800;
 const MOST_THREADS_TO_FOLLOW: usize = 64;
 
+pub fn spawn_when_the_loop_can(request_id: u16, words: &[u8]) {
+    let asked = each_word_asked_for();
+    if words.len() > asked.len() {
+        return;
+    }
+    asked.fill(0);
+    asked[..words.len()].copy_from_slice(words);
+
+    unsafe {
+        ASKED_BY = request_id;
+        ASKED_FOR = true;
+    }
+}
+
+pub fn start_what_was_asked_for(say: &mut dyn FnMut(u16, u32)) {
+    if !unsafe { ASKED_FOR } {
+        return;
+    }
+    unsafe { ASKED_FOR = false };
+
+    say(unsafe { ASKED_BY }, start_a_program());
+}
+
+fn start_a_program() -> u32 {
+    gate_spawns(true);
+    look_for_new_processes();
+
+    let Some(arena) = a_process_that_can_start_one() else {
+        return 0;
+    };
+
+    let words = each_word_asked_for();
+    for (at, byte) in words.iter().enumerate() {
+        unsafe { ((arena + crate::xnu_relay::SPAWN_WORDS + at as u64) as *mut u8)
+            .write_volatile(*byte) };
+    }
+
+    let put = |at: u64, value: u64| unsafe {
+        ((arena + at) as *mut u64).write_volatile(value)
+    };
+    put(crate::xnu_relay::SPAWN_ANSWER, crate::xnu_relay::NOTHING_WANTED);
+    put(crate::xnu_relay::SPAWN_WANTED, 1);
+
+    for _ in 0..LONG_ENOUGH_TO_START {
+        let said = unsafe {
+            ((arena + crate::xnu_relay::SPAWN_ANSWER) as *const u64).read_volatile()
+        };
+        if said == crate::xnu_relay::NOTHING_WANTED {
+            crate::kernel::yield_now();
+            continue;
+        }
+
+        put(crate::xnu_relay::SPAWN_WANTED, crate::xnu_relay::NOTHING_WANTED);
+        if said != crate::xnu_relay::DONE {
+            return 0;
+        }
+        return unsafe {
+            ((arena + crate::xnu_relay::SPAWN_ID) as *const u64).read_volatile()
+        } as u32;
+    }
+
+    0
+}
+
+fn a_process_that_can_start_one() -> Option<u64> {
+    if let Some(arena) = crate::xnu_injection::arena_for_pid(THE_ONE_THAT_STARTS_THINGS) {
+        return Some(arena);
+    }
+
+    crate::xnu_injection::inject_into_process(THE_ONE_THAT_STARTS_THINGS);
+
+    crate::xnu_injection::arena_for_pid(THE_ONE_THAT_STARTS_THINGS)
+}
+
+fn each_word_asked_for() -> &'static mut [u8; WORD_ROOM] {
+    unsafe { (&raw mut ASKED_WORDS).as_mut().unwrap() }
+}
+
+static mut ASKED_FOR: bool = false;
+static mut ASKED_BY: u16 = 0;
+static mut ASKED_WORDS: [u8; WORD_ROOM] = [0; WORD_ROOM];
+
+const WORD_ROOM: usize = crate::xnu_relay::SPAWN_WORDS_ROOM as usize;
+const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
+const LONG_ENOUGH_TO_START: usize = 20_000_000;
+
 pub fn gate_spawns(on: bool) {
     unsafe { GATING = on };
 }

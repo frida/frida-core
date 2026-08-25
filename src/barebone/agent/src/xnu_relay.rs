@@ -132,6 +132,12 @@ pub const PROTECT_SIZE: u64 = 552;
 pub const PROTECT_TO: u64 = 560;
 pub const PROTECT_ANSWER: u64 = 568;
 
+pub const SPAWN_WANTED: u64 = 576;
+pub const SPAWN_ANSWER: u64 = 584;
+pub const SPAWN_ID: u64 = 592;
+pub const SPAWN_WORDS: u64 = 0x800;
+pub const SPAWN_WORDS_ROOM: u64 = 0x800;
+
 pub const NOTHING_WANTED: u64 = 0;
 pub const DONE: u64 = 1;
 pub const REFUSED: u64 = 2;
