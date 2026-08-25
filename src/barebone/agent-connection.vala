@@ -1026,7 +1026,8 @@ namespace Frida.Barebone {
 			uint32 prot;
 			payload.get ("(ttu)", out address, out size, out prot);
 
-			yield machine.protect_pages (address, (size_t) size, (Gum.PageProtection) prot, cancellable);
+			yield machine.protect_pages_leaving_the_flush (address, (size_t) size, (Gum.PageProtection) prot,
+				cancellable);
 
 			return new Variant.boolean (true);
 		}

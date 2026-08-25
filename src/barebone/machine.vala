@@ -60,6 +60,11 @@ namespace Frida.Barebone {
 		public abstract async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 			throws Error, IOError;
 
+		public virtual async void protect_pages_leaving_the_flush (uint64 virtual_address, size_t size,
+				Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+			yield protect_pages (virtual_address, size, prot, cancellable);
+		}
+
 		public abstract async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
 			Cancellable? cancellable) throws Error, IOError;
 

@@ -223,6 +223,18 @@ pub fn ask_the_host_to_protect(address: u64, size: usize, prot: u32) -> bool {
     if !crate::transport_is_up() {
         return true;
     }
+
+    let granted = the_host_grants_it(address, size, prot);
+
+    #[cfg(feature = "xnu")]
+    if granted {
+        crate::kernel::make_the_machine_agree();
+    }
+
+    granted
+}
+
+fn the_host_grants_it(address: u64, size: usize, prot: u32) -> bool {
     unsafe {
         let payload = g_variant_new(c"(ttu)".as_ptr(), address, size as u64, prot);
 

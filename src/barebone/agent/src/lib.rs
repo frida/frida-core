@@ -1362,6 +1362,9 @@ fn serve_pending_detach() {
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(feature = "xnu")]
+pub static mut ASKED_THE_HOST: u32 = 0;
+
 fn relay_frames_from_targets() {
     #[cfg(feature = "xnu")]
     {

@@ -23,6 +23,8 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     }
 
+
+
     unsafe { arenas() }.insert(id, Placed {
         arena: arena_here,
         image_here: seen_from_here,

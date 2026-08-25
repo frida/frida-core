@@ -188,6 +188,17 @@ fn kernel_free_code(ptr: *mut u8, size: usize) {
     kernel_free(ptr, size);
 }
 
+pub fn make_the_machine_agree() {
+    unsafe {
+        core::arch::asm!(
+            "tlbi vmalle1is",
+            "dsb ish",
+            "isb",
+            options(nostack),
+        );
+    }
+}
+
 pub fn page_size() -> usize {
     (primitives().page_size)()
 }
@@ -227,7 +238,7 @@ fn kernel_wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut(
     let wait_result =
         assert_wait_timeout(token, THREAD_INTERRUPTIBLE, (waiting_for * 1000) as u32, 1);
     if wait_result != THREAD_WAITING {
-        panic!("assert_wait failed: {}", wait_result);
+        return;
     }
 
     if check() {

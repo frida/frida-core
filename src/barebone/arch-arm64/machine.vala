@@ -397,8 +397,21 @@ namespace Frida.Barebone {
 			return descriptor;
 		}
 
+		public override async void protect_pages_leaving_the_flush (uint64 virtual_address, size_t size,
+				Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+			yield write_page_protection (virtual_address, size, prot, cancellable);
+		}
+
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
 				throws Error, IOError {
+			yield write_page_protection (virtual_address, size, prot, cancellable);
+
+			if (code_allocator != null)
+				yield flush_translations (cancellable);
+		}
+
+		private async void write_page_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			yield begin_physical_addressing (cancellable);
@@ -415,9 +428,6 @@ namespace Frida.Barebone {
 			}
 			yield end_physical_addressing (cancellable);
 			throw_if_failed (failure);
-
-			if (code_allocator != null)
-				yield flush_translations (cancellable);
 		}
 
 		private async void flush_translations (Cancellable? cancellable) throws Error, IOError {

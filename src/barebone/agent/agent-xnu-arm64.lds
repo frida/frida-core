@@ -36,6 +36,7 @@ SECTIONS {
     _thread_terminate = .; . += 8;
     _task_suspend = .; . += 8;
     _task_resume = .; . += 8;
+    _task_clear_return_wait = .; . += 8;
     _kfree = .; . += 8;
     _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;
