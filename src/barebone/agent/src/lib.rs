@@ -312,7 +312,8 @@ mod entrypoint_blob {
 
             destroy_all_scripts(context);
 
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+                feature = "xnu"))]
             {
                 kernel::stop_copies();
                 #[cfg(feature = "win9x")]

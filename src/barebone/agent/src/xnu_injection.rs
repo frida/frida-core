@@ -13,20 +13,84 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    let arena = home.arena_here;
-    let arena_here = arena;
-    if !start(process.task, home) {
+    let arena_here = home.arena_here;
+    let seen_from_here = home.image_here;
+    let Some(bare_thread) = start(process.task, &home) else {
         return 0;
-    }
+    };
 
     if !woke_up(arena_here) {
         return 0;
     }
 
-    unsafe { arenas() }.insert(id, arena_here);
-
+    unsafe { arenas() }.insert(id, Placed {
+        arena: arena_here,
+        image_here: seen_from_here,
+        code: home.image,
+        in_the_process: home.arena,
+        stack: home.stack,
+        bare_thread,
+    });
 
     id
+}
+
+pub fn stop_copies() {
+    let placed: alloc::vec::Vec<(u32, Placed)> = unsafe { arenas() }
+        .iter()
+        .map(|(id, placed)| (*id, placed.clone()))
+        .collect();
+
+    for (id, placed) in placed {
+        tell_it_to_go(&placed);
+        take_back_what_it_was_given(id, &placed);
+        crate::xnu_relay::forget(placed.arena);
+        unsafe { arenas() }.remove(&id);
+    }
+}
+
+fn tell_it_to_go(placed: &Placed) {
+    unsafe {
+        ((placed.arena + crate::xnu_relay::STOP_REQUEST) as *mut u32).write_volatile(1)
+    };
+
+    for _ in 0..MOMENTS_TO_WAIT {
+        let stopped = unsafe {
+            ((placed.arena + crate::xnu_relay::WORKER_STOPPED) as *const u32).read_volatile()
+        };
+        if stopped != 0 {
+            return;
+        }
+        crate::kernel::wait(placed.arena as *const u8, Some(A_MOMENT), &mut || false);
+    }
+}
+
+fn take_back_what_it_was_given(id: u32, placed: &Placed) {
+    if let Some(terminate) = unsafe { _thread_terminate } {
+        unsafe { terminate(placed.bare_thread) };
+    }
+
+    unsafe { give_memory_back(ourselves(), placed.image_here, crate::own_range().1 as u64) };
+    unsafe { give_memory_back(ourselves(), placed.arena, crate::xnu_relay::ARENA_SIZE) };
+
+    let Some(process) = process_with_id(id) else {
+        return;
+    };
+    let map = Some(process.map);
+    unsafe {
+        give_memory_back(map, placed.code, crate::own_range().1 as u64);
+        give_memory_back(map, placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
+        give_memory_back(map, placed.stack, STACK);
+        release_process(process.handle);
+    }
+}
+
+unsafe fn give_memory_back(map: Option<*mut c_void>, address: u64, size: u64) {
+    let (Some(map), Some(deallocate)) = (map, unsafe { _mach_vm_deallocate }) else {
+        return;
+    };
+
+    unsafe { deallocate(map, address, size) };
 }
 
 pub fn echo_through_copy(id: u32, frame: &[u8], into: &mut [u8]) -> usize {
@@ -82,18 +146,18 @@ pub fn process_is_alive(id: u32) -> bool {
 }
 
 pub fn arena_for_pid(id: u32) -> Option<u64> {
-    unsafe { arenas() }.get(&id).copied()
+    unsafe { arenas() }.get(&id).map(|placed| placed.arena)
 }
 
 pub fn injected_arenas() -> alloc::vec::Vec<u64> {
-    unsafe { arenas() }.values().copied().collect()
+    unsafe { arenas() }.values().map(|placed| placed.arena).collect()
 }
 
-unsafe fn arenas() -> &'static mut alloc::collections::BTreeMap<u32, u64> {
+unsafe fn arenas() -> &'static mut alloc::collections::BTreeMap<u32, Placed> {
     unsafe { (&raw mut ARENAS).as_mut().unwrap() }
 }
 
-static mut ARENAS: alloc::collections::BTreeMap<u32, u64> = alloc::collections::BTreeMap::new();
+static mut ARENAS: alloc::collections::BTreeMap<u32, Placed> = alloc::collections::BTreeMap::new();
 
 fn woke_up(arena: u64) -> bool {
     let is_up = &mut || unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE;
@@ -117,7 +181,19 @@ struct Process {
     map: *mut c_void,
 }
 
+#[derive(Clone)]
+struct Placed {
+    arena: u64,
+    image_here: u64,
+    code: u64,
+    in_the_process: u64,
+    stack: u64,
+    bare_thread: *mut c_void,
+}
+
 struct Home {
+    image: u64,
+    image_here: u64,
     code: u64,
     arena: u64,
     arena_here: u64,
@@ -171,7 +247,14 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
         return None;
     }
 
-    Some(Home { code: code + crate::xnu_user::entry_offset() as u64, arena, arena_here, stack })
+    Some(Home {
+        image: code,
+        image_here: seen_from_here,
+        code: code + crate::xnu_user::entry_offset() as u64,
+        arena,
+        arena_here,
+        stack,
+    })
 }
 
 fn lay_out_the_image(base: usize, size: usize, code: u64, seen_from_here: u64) {
@@ -252,12 +335,16 @@ fn ourselves() -> Option<*mut c_void> {
     Some(unsafe { map_of(task_of()) })
 }
 
-fn start(task: *mut c_void, home: Home) -> bool {
+fn start(task: *mut c_void, home: &Home) -> Option<*mut c_void> {
     start_a_thread(task, home.code, home.stack + STACK - 0x100, home.arena)
 }
 
 pub fn serve_what_the_copies_ask() {
-    for (id, arena) in unsafe { arenas() }.clone() {
+    let asked: alloc::vec::Vec<(u32, u64)> = unsafe { arenas() }
+        .iter()
+        .map(|(id, placed)| (*id, placed.arena))
+        .collect();
+    for (id, arena) in asked {
         let asked = |at: u64| unsafe { ((arena + at) as *const u64).read_volatile() };
         let wants_protection = asked(crate::xnu_relay::PROTECT_WANTED);
         if wants_protection == crate::xnu_relay::NOTHING_WANTED {
@@ -299,17 +386,17 @@ fn answer(arena: u64, asked_at: u64, answer_at: u64, went_well: bool) {
     }
 }
 
-fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> bool {
+fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> Option<*mut c_void> {
     let create = unsafe { _thread_create };
     let set_state = unsafe { _thread_set_state };
     let resume = unsafe { _thread_resume };
     let (Some(create), Some(set_state), Some(resume)) = (create, set_state, resume) else {
-        return false;
+        return None;
     };
 
     let mut thread: *mut c_void = core::ptr::null_mut();
     if unsafe { create(task, &mut thread as *mut *mut c_void) } != KERN_SUCCESS {
-        return false;
+        return None;
     }
 
     let mut state = [0u32; STATE_WORDS];
@@ -324,10 +411,10 @@ fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> bo
     if unsafe { set_state(thread, ARM_THREAD_STATE64, state.as_ptr(), STATE_WORDS as c_int) }
         != KERN_SUCCESS
     {
-        return false;
+        return None;
     }
 
-    unsafe { resume(thread) == KERN_SUCCESS }
+    (unsafe { resume(thread) } == KERN_SUCCESS).then_some(thread)
 }
 
 const PAGE: u64 = 0x4000;
@@ -362,6 +449,7 @@ unsafe extern "C" {
     static _current_task: Option<unsafe extern "C" fn() -> *mut c_void>;
     static _get_task_map: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
     static _mach_vm_allocate: Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, c_int) -> c_int>;
+    static _mach_vm_deallocate: Option<unsafe extern "C" fn(*mut c_void, u64, u64) -> c_int>;
     static _mach_vm_protect: Option<unsafe extern "C" fn(*mut c_void, u64, u64, c_int, c_int) -> c_int>;
     static _mach_vm_remap: Option<
         unsafe extern "C" fn(*mut c_void, *mut u64, u64, u64, c_int, *mut c_void, u64, c_int,
@@ -372,4 +460,5 @@ unsafe extern "C" {
     static _thread_create: Option<unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> c_int>;
     static _thread_set_state: Option<unsafe extern "C" fn(*mut c_void, c_int, *const u32, c_int) -> c_int>;
     static _thread_resume: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+    static _thread_terminate: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
 }
