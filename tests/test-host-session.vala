@@ -4491,6 +4491,8 @@ namespace Frida.HostSessionTest {
 					var waited = new Timer ();
 					while (waited.elapsed () < 2.0)
 						yield h.process_events ();
+
+					yield session.close (cancellable);
 				} catch (GLib.Error e) {
 					printerr ("[*] could not get into %u: %s\n", info.pid, e.message);
 				}
@@ -4543,6 +4545,7 @@ namespace Frida.HostSessionTest {
 
 					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
 						uint seen = 0;
+						uint attempted = 0;
 						uint instrumented = 0;
 						h.message_from_script.connect ((script_id, message, data) => {
 							printerr ("[*] Message: %s\n", message);
@@ -4553,6 +4556,7 @@ namespace Frida.HostSessionTest {
 							seen++;
 
 							if (wanted != "1" && info.identifier.contains (wanted)) {
+								attempted++;
 								instrument_the_spawn.begin (h, prov, host_session, info,
 									cancellable, (obj, res) => {
 										instrumented++;
@@ -4570,7 +4574,8 @@ namespace Frida.HostSessionTest {
 						var waited = new Timer ();
 						while (waited.elapsed () < 20.0)
 							yield h.process_events ();
-						printerr ("[*] saw %u spawns, got into %u of them\n", seen, instrumented);
+						printerr ("[*] saw %u spawns, tried %u, got into %u of them\n", seen, attempted,
+							instrumented);
 
 						yield host_session.disable_spawn_gating (cancellable);
 					}

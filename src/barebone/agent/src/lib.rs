@@ -1221,7 +1221,7 @@ fn process_incoming_message(variant: *mut GVariant) {
                 feature = "xnu"
             ))]
             FridaCommand::Stop => Some(handle_stop()),
-            #[cfg(any(feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu"))]
             FridaCommand::DetachFromProcess => {
                 Some(handle_detach_from_process(payload_variant))
             }
