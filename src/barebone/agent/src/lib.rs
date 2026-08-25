@@ -106,6 +106,8 @@ mod xnu_ranges;
 #[cfg(feature = "xnu")]
 mod xnu_relay;
 #[cfg(feature = "xnu")]
+mod xnu_spawn;
+#[cfg(feature = "xnu")]
 mod xnu_user;
 #[cfg(feature = "xnu")]
 mod xnu_user_calls;
@@ -1179,7 +1181,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "linux-injected"))]
+            #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
@@ -1204,7 +1206,8 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+                feature = "xnu"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(any(
                 feature = "win9x",
@@ -1361,7 +1364,14 @@ fn serve_pending_detach() {
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn relay_frames_from_targets() {
     #[cfg(feature = "xnu")]
-    kernel::serve_what_the_copies_ask();
+    {
+        kernel::serve_what_the_copies_ask();
+        kernel::look_for_new_processes();
+        kernel::tell_of_held_spawns(&mut |id, program| {
+            let said = alloc::ffi::CString::new(program).unwrap();
+            tell_the_host_of_a_spawn(id, said.as_ptr() as *const u8);
+        });
+    }
 
     #[cfg(feature = "win9x")]
     kernel::serve_patch_requests();
@@ -1479,7 +1489,7 @@ fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
     into.as_ptr() as *const gchar
 }
 
-#[cfg(any(feature = "win9x", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
 fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     kernel::gate_spawns(unsafe { g_variant_get_boolean(payload) } != 0);
 
@@ -1488,7 +1498,7 @@ fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "win9x", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
 pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     unsafe {
         let message = g_variant_new(
@@ -1731,7 +1741,7 @@ fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn handle_resume_process(payload: *mut GVariant) -> HandlerResponse {
     let resumed = unsafe { kernel::resume_process(g_variant_get_uint32(payload)) };
     if !resumed {

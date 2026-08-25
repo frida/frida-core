@@ -180,10 +180,10 @@ fn woke_up(arena: u64) -> bool {
 const A_MOMENT: u64 = 1000;
 const MOMENTS_TO_WAIT: u32 = 30_000;
 
-struct Process {
-    handle: *mut c_void,
-    task: *mut c_void,
-    map: *mut c_void,
+pub struct Process {
+    pub handle: *mut c_void,
+    pub task: *mut c_void,
+    pub map: *mut c_void,
 }
 
 #[derive(Clone)]
@@ -205,7 +205,7 @@ struct Home {
     stack: u64,
 }
 
-fn process_with_id(id: u32) -> Option<Process> {
+pub fn process_with_id(id: u32) -> Option<Process> {
     let find = unsafe { _proc_find }?;
     let task_of = unsafe { _proc_task }?;
     let map_of = unsafe { _get_task_map }?;
@@ -441,7 +441,7 @@ const PROGRAM_COUNTER: usize = 29 * 8 + 24;
 const FLAGS: usize = 29 * 8 + 36;
 const PLAIN_ADDRESSES: u32 = 1;
 
-unsafe fn release_process(handle: *mut c_void) {
+pub unsafe fn release_process(handle: *mut c_void) {
     if let Some(release) = unsafe { _proc_rele } {
         unsafe { release(handle) };
     }
