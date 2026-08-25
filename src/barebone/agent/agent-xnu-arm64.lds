@@ -65,6 +65,8 @@ SECTIONS {
     _sock_send = .; . += 8;
     _sock_receive = .; . += 8;
     _sock_close = .; . += 8;
+    _sysent = .; . += 8;
+    _ulock_wake = .; . += 8;
   }
      same pages; everything below it each copy needs its own of. */
   . = ALIGN(4096);

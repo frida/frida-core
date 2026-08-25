@@ -203,12 +203,4 @@ const AN_IMAGE: usize = 24;
 const WHAT_IT_CAME_FROM: u64 = 8;
 const MOST_IMAGES: usize = 4096;
 
-const WHAT_AN_IMAGE_BEGINS_WITH: u32 = 0xfeed_facf;
-const HOW_MANY_COMMANDS: u64 = 16;
-const HOW_LONG_THE_COMMANDS_ARE: u64 = 20;
-const A_PART_AT_LEAST: u64 = 8;
-const PAST_THE_HEADER: u64 = 32;
-const A_SEGMENT: u32 = 0x19;
-const WHERE_A_SEGMENT_GOES: u64 = 24;
-const HOW_BIG_A_SEGMENT_IS: u64 = 32;
 const LONGEST_NAME: usize = 1024;

@@ -79,6 +79,10 @@ unsafe extern "C" {
 
 static UPCALL_PENDING: AtomicU32 = AtomicU32::new(0);
 
+pub fn a_turn_is_wanted() -> bool {
+    UPCALL_PENDING.load(Ordering::Acquire) != 0
+}
+
 struct Inner {
     so: SocketT,
     rx_lenbuf: [u8; 4],
@@ -186,6 +190,8 @@ impl Hostlink {
     }
 
     pub fn process(&self) {
+        UPCALL_PENDING.store(0, Ordering::Release);
+
         let s = unsafe { &mut *self.state.get() };
         loop {
             if s.rx_lenhave < 4 {

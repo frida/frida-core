@@ -8,6 +8,10 @@ pub fn list_applications_when_the_loop_can(request_id: u16) {
     }
 }
 
+pub fn applications_are_asked_for() -> bool {
+    unsafe { ASKED_FOR }
+}
+
 pub fn asked_for_applications() -> Option<u16> {
     if !unsafe { ASKED_FOR } {
         return None;
@@ -26,24 +30,18 @@ pub fn each_application(found: &mut dyn FnMut(&[u8], &[u8], &[u8])) {
     put(crate::xnu_relay::APPS_ANSWER, crate::xnu_relay::NOTHING_WANTED);
     put(crate::xnu_relay::APPS_WANTED, 1);
 
+    let answered = &mut || unsafe {
+        ((arena + crate::xnu_relay::APPS_ANSWER) as *const u64).read_volatile()
+    } != crate::xnu_relay::NOTHING_WANTED;
     let began = crate::xnu::absolutetime_to_nanoseconds(crate::xnu::mach_absolute_time());
-    let said;
-    loop {
-        let answer = unsafe {
-            ((arena + crate::xnu_relay::APPS_ANSWER) as *const u64).read_volatile()
-        };
-        if answer != crate::xnu_relay::NOTHING_WANTED {
-            said = answer;
-            break;
-        }
-
+    while !answered() {
         let now = crate::xnu::absolutetime_to_nanoseconds(crate::xnu::mach_absolute_time());
         if now - began > LONG_ENOUGH_TO_LOOK {
-            said = crate::xnu_relay::NOTHING_WANTED;
             break;
         }
-        crate::kernel::yield_now();
+        crate::kernel::wait(crate::glib::wakeup_token(), None, answered);
     }
+    let said = unsafe { ((arena + crate::xnu_relay::APPS_ANSWER) as *const u64).read_volatile() };
     put(crate::xnu_relay::APPS_WANTED, crate::xnu_relay::NOTHING_WANTED);
     if said != crate::xnu_relay::DONE {
         return;

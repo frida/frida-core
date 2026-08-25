@@ -25,6 +25,7 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
     let served = has_run != 0 && become_a_thread_the_system_knows(arena);
 
     unsafe { ((arena + crate::xnu_relay::AWAKE_AT) as *mut u64).write_volatile(AWAKE) };
+    crate::xnu_bell::ring_the_bell();
 
     if !served {
         unsafe { user_worker(arena as *mut core::ffi::c_void, 0) };
@@ -117,10 +118,12 @@ fn serve_the_copy() {
 
     if word_at(arena + crate::xnu_relay::SPAWN_WANTED) != crate::xnu_relay::NOTHING_WANTED {
         start_what_the_other_half_asked_for(arena);
+        crate::xnu_bell::ring_the_bell();
     }
 
     if word_at(arena + crate::xnu_relay::APPS_WANTED) != crate::xnu_relay::NOTHING_WANTED {
         crate::xnu_applications::say_what_is_installed(arena);
+        crate::xnu_bell::ring_the_bell();
     }
 }
 
@@ -200,13 +203,20 @@ fn ask_the_other_half(along_with: &[(u64, u64)], asked_at: u64, asking: u64, ans
     }
     put(asked_at, asking);
 
-    loop {
-        let said = unsafe { ((arena + answer_at) as *const u64).read_volatile() };
-        if said != crate::xnu_relay::NOTHING_WANTED {
-            return said == crate::xnu_relay::DONE;
-        }
-        crate::kernel::yield_now();
+    crate::xnu_bell::ring_the_bell();
+
+    let answered = &mut || unsafe {
+        ((arena + answer_at) as *const u64).read_volatile()
+    } != crate::xnu_relay::NOTHING_WANTED;
+    while !answered() {
+        crate::kernel::wait(crate::glib::wakeup_token(), None, answered);
     }
+
+    unsafe { ((arena + answer_at) as *const u64).read_volatile() == crate::xnu_relay::DONE }
+}
+
+pub fn arena() -> u64 {
+    unsafe { ARENA }
 }
 
 fn word_at(at: u64) -> u64 {

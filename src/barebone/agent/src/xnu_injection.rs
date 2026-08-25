@@ -2,6 +2,8 @@
 use core::ffi::{c_int, c_void};
 
 pub fn inject_into_process(id: u32) -> u32 {
+    crate::xnu_bell::hang_the_bell();
+
     let Some(process) = process_with_id(id) else {
         return 0;
     };
@@ -115,16 +117,24 @@ fn tell_it_to_go(placed: &Placed) {
         ((placed.arena + crate::xnu_relay::STOP_REQUEST) as *mut u32).write_volatile(1)
     };
 
-    for _ in 0..MOMENTS_TO_WAIT {
-        let stopped = unsafe {
-            ((placed.arena + crate::xnu_relay::WORKER_STOPPED) as *const u32).read_volatile()
-        };
-        if stopped != 0 {
+    wake_the_copy_at(placed.arena);
+
+    let has_stopped = &mut || unsafe {
+        ((placed.arena + crate::xnu_relay::WORKER_STOPPED) as *const u32).read_volatile()
+    } != 0;
+
+    let began = crate::kernel::monotonic_micros();
+    while !has_stopped() {
+        let waited = (crate::kernel::monotonic_micros() - began) as u64;
+        if waited >= LONG_ENOUGH_TO_LEAVE {
             return;
         }
-        crate::kernel::wait(placed.arena as *const u8, Some(A_MOMENT), &mut || false);
+        crate::kernel::wait(crate::glib::wakeup_token(), Some(LONG_ENOUGH_TO_LEAVE - waited),
+            has_stopped);
     }
 }
+
+const LONG_ENOUGH_TO_LEAVE: u64 = 30_000_000;
 
 fn take_back_what_it_was_given(id: u32, placed: &Placed) {
     if let Some(terminate) = unsafe { _thread_terminate } {
@@ -161,13 +171,14 @@ pub fn echo_through_copy(id: u32, frame: &[u8], into: &mut [u8]) -> usize {
 
     crate::xnu_relay::forward_frame(arena, frame);
 
+    let answered = &mut || crate::xnu_relay::holds_a_frame_from_target(arena);
     for _ in 0..LONG_ENOUGH {
         if let Some(said) = crate::xnu_relay::take_frame_from_target(arena) {
             let length = said.len().min(into.len());
             into[..length].copy_from_slice(&said[..length]);
             return length;
         }
-        crate::kernel::yield_now();
+        crate::kernel::wait(crate::glib::wakeup_token(), None, answered);
     }
 
     0
@@ -206,8 +217,31 @@ pub fn process_is_alive(id: u32) -> bool {
     }
 }
 
+pub fn wake_the_copy_at(arena: u64) {
+    let Some((id, theirs)) = unsafe { arenas() }.iter()
+        .find(|(_, placed)| placed.arena == arena)
+        .map(|(id, placed)| (*id, placed.in_the_process))
+    else {
+        return;
+    };
+
+    let Some(process) = process_with_id(id) else {
+        return;
+    };
+    if let Some(process_of) = unsafe { crate::xnu_spawn::_get_bsdtask_info } {
+        crate::xnu_bell::wake_the_copy(unsafe { process_of(process.task) }, arena, theirs);
+    }
+    unsafe { release_process(process.handle) };
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { arenas() }.get(&id).map(|placed| placed.arena)
+}
+
+pub fn a_copy_is_asking_for_something() -> bool {
+    unsafe { arenas() }.values().any(|placed| unsafe {
+        ((placed.arena + crate::xnu_relay::PROTECT_WANTED) as *const u64).read_volatile()
+    } != crate::xnu_relay::NOTHING_WANTED)
 }
 
 pub fn injected_arenas() -> alloc::vec::Vec<u64> {
@@ -223,18 +257,20 @@ static mut ARENAS: alloc::collections::BTreeMap<u32, Placed> = alloc::collection
 fn woke_up(arena: u64) -> bool {
     let is_up = &mut || unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE;
 
-    for _ in 0..MOMENTS_TO_WAIT {
-        if is_up() {
-            return true;
+    let began = crate::kernel::monotonic_micros();
+    while !is_up() {
+        let waited = (crate::kernel::monotonic_micros() - began) as u64;
+        if waited >= LONG_ENOUGH_TO_COME_UP {
+            return false;
         }
-        crate::kernel::wait(arena as *const u8, Some(A_MOMENT), is_up);
+        crate::kernel::wait(crate::glib::wakeup_token(),
+            Some(LONG_ENOUGH_TO_COME_UP - waited), is_up);
     }
 
-    false
+    true
 }
 
-const A_MOMENT: u64 = 1000;
-const MOMENTS_TO_WAIT: u32 = 30_000;
+const LONG_ENOUGH_TO_COME_UP: u64 = 30_000_000;
 
 pub struct Process {
     pub handle: *mut c_void,
@@ -421,6 +457,7 @@ pub fn serve_what_the_copies_ask() {
         let done = set_protection(process.map, wants_protection,
             asked(crate::xnu_relay::PROTECT_SIZE), asked(crate::xnu_relay::PROTECT_TO) as c_int);
         answer(arena, crate::xnu_relay::PROTECT_WANTED, crate::xnu_relay::PROTECT_ANSWER, done);
+        wake_the_copy_at(arena);
 
         unsafe { release_process(process.handle) };
     }

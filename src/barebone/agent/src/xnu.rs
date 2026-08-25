@@ -234,9 +234,12 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
 // commits to sleeping — the three-phase Mach protocol, which is race-free
 // because a wakeup landing after assert_wait() cancels the pending block.
 fn kernel_wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let waiting_for = timeout_us.unwrap_or(A_NAP);
-    let wait_result =
-        assert_wait_timeout(token, THREAD_INTERRUPTIBLE, (waiting_for * 1000) as u32, 1);
+    let wait_result = match timeout_us {
+        Some(waiting_for) => {
+            assert_wait_timeout(token, THREAD_INTERRUPTIBLE, (waiting_for * 1000) as u32, 1)
+        }
+        None => assert_wait(token, THREAD_INTERRUPTIBLE),
+    };
     if wait_result != THREAD_WAITING {
         return;
     }
@@ -329,7 +332,6 @@ pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut 
     };
 }
 
-const A_NAP: u64 = 1000;
 const THREAD_INTERRUPTIBLE: u32 = 1;
 const THREAD_WAITING: i32 = -1;
 const THREAD_AWAKENED: i32 = 0;

@@ -68,6 +68,10 @@ pub fn spawn_when_the_loop_can(request_id: u16, words: &[u8]) {
     }
 }
 
+pub fn a_program_is_wanted() -> bool {
+    unsafe { ASKED_FOR }
+}
+
 pub fn start_what_was_asked_for(say: &mut dyn FnMut(u16, u32)) {
     if !unsafe { ASKED_FOR } {
         return;
@@ -97,12 +101,15 @@ fn start_a_program() -> u32 {
     put(crate::xnu_relay::SPAWN_ANSWER, crate::xnu_relay::NOTHING_WANTED);
     put(crate::xnu_relay::SPAWN_WANTED, 1);
 
+    let answered = &mut || unsafe {
+        ((arena + crate::xnu_relay::SPAWN_ANSWER) as *const u64).read_volatile()
+    } != crate::xnu_relay::NOTHING_WANTED;
     for _ in 0..LONG_ENOUGH_TO_START {
         let said = unsafe {
             ((arena + crate::xnu_relay::SPAWN_ANSWER) as *const u64).read_volatile()
         };
         if said == crate::xnu_relay::NOTHING_WANTED {
-            crate::kernel::yield_now();
+            crate::kernel::wait(crate::glib::wakeup_token(), None, answered);
             continue;
         }
 
@@ -268,6 +275,8 @@ fn note_it(task: *mut c_void, flags: u32) -> Option<&'static Held> {
 
     held.waiting = true;
 
+    crate::kernel::wake(crate::glib::wakeup_token());
+
     Some(held)
 }
 
@@ -309,7 +318,7 @@ const THE_LAST_WORD: u32 = 0x2;
 
 unsafe extern "C" {
     static _task_clear_return_wait: Option<unsafe extern "C" fn(*mut c_void, u32)>;
-    static _get_bsdtask_info: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
+    pub static _get_bsdtask_info: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
     static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     static _proc_best_name: Option<unsafe extern "C" fn(*mut c_void) -> *const c_char>;
     static _current_task: Option<unsafe extern "C" fn() -> *mut c_void>;

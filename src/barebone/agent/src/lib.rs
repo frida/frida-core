@@ -96,6 +96,8 @@ mod xnu;
 #[cfg(feature = "xnu")]
 mod xnu_applications;
 #[cfg(feature = "xnu")]
+mod xnu_bell;
+#[cfg(feature = "xnu")]
 mod xnu_injection;
 #[cfg(feature = "xnu")]
 mod xnu_libsystem;
@@ -928,16 +930,15 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
     glib::own_the_loop();
 
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+        feature = "xnu"))]
     watch_for_work(main_context, kernel_half_has_work, serve_the_kernel_half);
 
     unsafe {
         loop {
-            #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
+            #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+                feature = "xnu")))]
             transport_get_unchecked().process();
-
-            #[cfg(feature = "xnu")]
-            relay_frames_from_targets();
 
             #[cfg(feature = "linux")]
             if entrypoint_linux::stop_requested() {
@@ -948,17 +949,23 @@ fn run_main_loop(main_context: *mut GMainContext) {
                 return;
             }
 
-            #[cfg(feature = "xnu")]
-            g_main_context_iteration(main_context, 0);
-            #[cfg(not(feature = "xnu"))]
             dispatch_pending_work(main_context);
         }
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn kernel_half_has_work() -> bool {
+    #[cfg(not(feature = "xnu"))]
     if hostlink_virtio::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "xnu")]
+    if hostlink_vsock::a_turn_is_wanted() || kernel::a_spawn_is_held()
+        || kernel::a_copy_is_asking_for_something()
+        || kernel::a_program_is_wanted() || kernel::applications_are_asked_for()
+    {
         return true;
     }
 
@@ -981,8 +988,11 @@ fn kernel_half_has_work() -> bool {
         .any(|arena| kernel::holds_a_frame_from_target(*arena))
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 fn serve_the_kernel_half() {
+    #[cfg(feature = "xnu")]
+    relay_frames_from_targets();
+
     #[cfg(feature = "linux-injected")]
     kernel::tell_of_held_spawns(&mut |id, program| {
         let said = alloc::ffi::CString::new(program).unwrap();
@@ -1017,12 +1027,7 @@ static mut WORK_SERVE: Option<fn()> = None;
 
 unsafe extern "C" fn work_prepare(source: *mut GSource, timeout: *mut i32) -> gboolean {
     unsafe {
-        #[cfg(feature = "xnu")]
-        {
-        }
-        #[cfg(not(feature = "xnu"))]
-        {
-        }
+        *timeout = -1;
 
         work_check(source)
     }
@@ -1684,6 +1689,21 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
             note_waiter(request_id, wait_event);
         }
 
+        #[cfg(feature = "xnu")]
+        let reply = loop {
+            if on_loop {
+                transport.process();
+            }
+            if let Some(reply) = take_pending_reply(request_id) {
+                break reply;
+            }
+
+            kernel::wait(wait_event, None, &mut || {
+                hostlink_vsock::a_turn_is_wanted() || pending_reply_arrived(request_id)
+            });
+        };
+
+        #[cfg(not(feature = "xnu"))]
         let reply = loop {
             let mut reply: Option<*mut GVariant> = None;
             kernel::wait(wait_event, None, &mut || {
@@ -1731,6 +1751,16 @@ fn forget_waiter(request_id: u16) {
             .as_mut()
             .unwrap()
             .remove(&request_id);
+    }
+}
+
+#[cfg(feature = "xnu")]
+fn pending_reply_arrived(request_id: u16) -> bool {
+    unsafe {
+        core::ptr::addr_of!(PENDING_REPLIES)
+            .as_ref()
+            .unwrap()
+            .contains_key(&request_id)
     }
 }
 

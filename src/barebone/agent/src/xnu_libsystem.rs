@@ -234,5 +234,4 @@ const IMAGES_ARE_AT: u64 = 0x1c0;
 const HOW_MANY_IMAGES: u64 = 0x1c4;
 const AN_IMAGE: u64 = 32;
 const WHAT_IT_IS_CALLED: u64 = 24;
-const FROM_SOMEWHERE_ELSE: u64 = 0x08;
 const LONGEST_NAME: usize = 256;

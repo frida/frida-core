@@ -33,7 +33,10 @@ pub fn a_frame_waits_for_room() -> bool {
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    write_frame(&TO_KERNEL, arena, frame)
+    let written = write_frame(&TO_KERNEL, arena, frame);
+    crate::xnu_bell::ring_the_bell();
+
+    written
 }
 
 pub fn take_frame_from_host(arena: u64) -> Option<Vec<u8>> {
@@ -52,11 +55,17 @@ pub fn forget(arena: u64) {
 fn send_what_waits(arena: u64) {
     let frames = unsafe { waiting() }.get_mut(&arena).unwrap();
 
+    let mut sent = false;
     while let Some(frame) = frames.front_mut() {
         if !write_frame(&TO_COPY, arena, frame) {
             break;
         }
         frames.pop_front();
+        sent = true;
+    }
+
+    if sent {
+        crate::xnu_injection::wake_the_copy_at(arena);
     }
 }
 
@@ -138,6 +147,10 @@ pub const PROTECT_ANSWER: u64 = 568;
 pub const SPAWN_WANTED: u64 = 576;
 pub const SPAWN_ANSWER: u64 = 584;
 pub const SPAWN_ID: u64 = 592;
+pub const WAKE_WORD: u64 = 616;
+
+pub const BELL_WORD: u64 = 624;
+
 pub const APPS_WANTED: u64 = 600;
 pub const APPS_ANSWER: u64 = 608;
 

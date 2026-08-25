@@ -144,17 +144,29 @@ fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bo
         return;
     }
 
+    let token = where_the_other_half_can_reach(token);
     let value = unsafe { (token as *const u32).read_volatile() };
     unsafe {
         ask(ULOCK_WAIT, [COMPARE_AND_WAIT, token as u64, value as u64,
-            timeout_us.unwrap_or(A_NAP)])
+            timeout_us.unwrap_or(UNTIL_IT_IS_WOKEN)])
     };
 }
 
-const A_NAP: u64 = 1000;
+const UNTIL_IT_IS_WOKEN: u64 = 0;
 
 fn wake(token: *const u8) {
+    let token = where_the_other_half_can_reach(token);
+
     unsafe { ask(ULOCK_WAKE, [COMPARE_AND_WAIT | WAKE_ALL, token as u64, 0, 0]) };
+}
+
+fn where_the_other_half_can_reach(token: *const u8) -> *const u8 {
+    let arena = crate::xnu_user::arena();
+    if arena == 0 || token != crate::glib::wakeup_token() {
+        return token;
+    }
+
+    (arena + crate::xnu_relay::WAKE_WORD) as *const u8
 }
 
 fn yield_now() {
@@ -444,7 +456,7 @@ unsafe fn trap(number: i64, args: [u64; 4]) -> i64 {
     unsafe { svc(number, args).0 }
 }
 
-unsafe fn ask(number: i64, args: [u64; 4]) -> i64 {
+pub(crate) unsafe fn ask(number: i64, args: [u64; 4]) -> i64 {
     let (answer, went_wrong) = unsafe { svc(number, args) };
     if went_wrong {
         return -answer;
