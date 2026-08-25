@@ -6,7 +6,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    let placed = give_the_copy_a_home(process.map);
+    let placed = give_the_copy_a_home(id, process.map);
     unsafe { release_process(process.handle) };
 
     let Some(home) = placed else {
@@ -221,7 +221,7 @@ pub fn process_with_id(id: u32) -> Option<Process> {
     Some(Process { handle, task, map: unsafe { map_of(task) } })
 }
 
-fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
+fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
     let (base, size) = crate::own_range();
 
     let code = take_memory(map, size as u64)?;
@@ -238,6 +238,8 @@ fn give_the_copy_a_home(map: *mut c_void) -> Option<Home> {
             .write(crate::gum::page_size_the_kernel_runs_with() as u64);
         ((arena_here + crate::xnu_relay::CACHE_SHAPE) as *mut u64)
             .write(crate::xnu::kernel_cache_shape());
+        ((arena_here + crate::xnu_relay::HAS_RUN) as *mut u32)
+            .write(!crate::xnu_spawn::is_held(id) as u32);
     }
 
     let stack = take_memory(map, STACK)?;

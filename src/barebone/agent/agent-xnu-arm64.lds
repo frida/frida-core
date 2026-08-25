@@ -23,6 +23,7 @@ SECTIONS {
     _proc_best_name = .; . += 8;
     _proc_task = .; . += 8;
     _current_task = .; . += 8;
+    _current_thread = .; . += 8;
     _get_task_map = .; . += 8;
     _mach_vm_allocate = .; . += 8;
     _mach_vm_deallocate = .; . += 8;
@@ -38,6 +39,7 @@ SECTIONS {
     _task_resume = .; . += 8;
     _task_clear_return_wait = .; . += 8;
     _get_bsdtask_info = .; . += 8;
+    _thread_suspend = .; . += 8;
     _kfree = .; . += 8;
     _kernel_thread_start = .; . += 8;
     _assert_wait = .; . += 8;

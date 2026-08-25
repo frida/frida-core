@@ -20,7 +20,8 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
         crate::init_gum_without_exceptor();
     }
 
-    let served = become_a_thread_the_system_knows(arena);
+    let has_run = unsafe { ((arena + crate::xnu_relay::HAS_RUN) as *const u32).read_volatile() };
+    let served = has_run != 0 && become_a_thread_the_system_knows(arena);
 
     unsafe { ((arena + crate::xnu_relay::AWAKE_AT) as *mut u64).write_volatile(AWAKE) };
 

@@ -4483,10 +4483,14 @@ namespace Frida.HostSessionTest {
 					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
 
 					var script = yield session.create_script (
-						"send(`first breath: pid ${Process.id}, " +
-						"${Process.enumerateModules().length} modules`);",
+						"send(`first breath: pid ${Process.id} on ${Process.arch}, " +
+						"page ${Process.pageSize}`);",
 						make_parameters_dict (), cancellable);
 					yield session.load_script (script, cancellable);
+
+					var waited = new Timer ();
+					while (waited.elapsed () < 2.0)
+						yield h.process_events ();
 				} catch (GLib.Error e) {
 					printerr ("[*] could not get into %u: %s\n", info.pid, e.message);
 				}
@@ -4524,6 +4528,9 @@ namespace Frida.HostSessionTest {
 					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
 						uint seen = 0;
 						uint instrumented = 0;
+						h.message_from_script.connect ((script_id, message, data) => {
+							printerr ("[*] Message: %s\n", message);
+						});
 						unowned string? wanted = Environment.get_variable ("FRIDA_BAREBONE_GATE");
 						host_session.spawn_added.connect ((info) => {
 							printerr ("[*] Spawned: %u %s\n", info.pid, info.identifier);

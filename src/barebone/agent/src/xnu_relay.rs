@@ -121,6 +121,7 @@ pub const IMAGE_BASE: u64 = 8;
 pub const IMAGE_SIZE: u64 = 16;
 pub const STOP_REQUEST: u64 = 24;
 pub const WORKER_STOPPED: u64 = 28;
+pub const HAS_RUN: u64 = 36;
 
 pub const PAGE_SIZE: u64 = 40;
 pub const CACHE_SHAPE: u64 = 48;
