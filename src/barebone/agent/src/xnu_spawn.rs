@@ -360,6 +360,6 @@ unsafe extern "C" {
     static _task_restartable_ranges_register:
         Option<unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> c_int>;
     pub static _get_bsdtask_info: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
-    static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+    pub static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     static _proc_best_name: Option<unsafe extern "C" fn(*mut c_void) -> *const c_char>;
 }

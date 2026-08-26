@@ -73,6 +73,7 @@ SECTIONS {
     _copyin = .; . += 8;
     _copyout = .; . += 8;
     _ulock_wake = .; . += 8;
+    _task_info = .; . += 8;
     _convert_port_to_thread = .; . += 8;
     _convert_port_to_thread_read = .; . += 8;
     _convert_port_to_thread_inspect = .; . += 8;

@@ -35,6 +35,7 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     unsafe { arenas() }.insert(id, Placed {
         map: process.map,
+        task: process.task,
         arena: arena_here,
         image_here: seen_from_here,
         code: home.image,
@@ -255,6 +256,36 @@ fn wake_the_copy_in(id: u32, ours: u64, theirs: u64) {
     unsafe { release_process(process.handle) };
 }
 
+pub fn whose_task_does_this_port_name(port: *mut c_void) -> Option<u32> {
+    if port.is_null() {
+        return None;
+    }
+
+    let holds = |at: usize| {
+        let held = unsafe { ((port as usize + at) as *const u64).read_volatile() };
+        let held = unsafe { crate::pac::ptrauth_strip_pointer(held as *const u8) } as *mut c_void;
+        unsafe { arenas() }.iter().find(|(_, placed)| placed.task == held).map(|(id, _)| *id)
+    };
+
+    let at = unsafe { WHERE_A_PORT_HOLDS_ITS_TASK };
+    if at != 0 {
+        return holds(at);
+    }
+
+    for word in 1..HOW_FAR_IN_TO_LOOK_FOR_THE_TASK {
+        if let Some(id) = holds(word * 8) {
+            unsafe { WHERE_A_PORT_HOLDS_ITS_TASK = word * 8 };
+            return Some(id);
+        }
+    }
+
+    None
+}
+
+static mut WHERE_A_PORT_HOLDS_ITS_TASK: usize = 0;
+
+const HOW_FAR_IN_TO_LOOK_FOR_THE_TASK: usize = 32;
+
 pub fn what_we_have_in_process(id: u32, found: &mut dyn FnMut(u64, u64)) {
     let Some(placed) = (unsafe { arenas() }).get(&id) else {
         return;
@@ -340,6 +371,7 @@ pub struct Process {
 #[derive(Clone)]
 struct Placed {
     map: *mut c_void,
+    task: *mut c_void,
     arena: u64,
     image_here: u64,
     code: u64,

@@ -5,6 +5,7 @@ use core::ffi::c_void;
 pub fn hide_our_threads() {
     hide_us_from_the_thread_list();
     say_no_port_names_one_of_ours();
+    say_less_of_what_a_task_holds();
     hide_what_we_have_in_a_process();
 
 
@@ -89,6 +90,97 @@ fn hide_us_from_the_thread_list() {
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
 }
+
+fn say_less_of_what_a_task_holds() {
+    if unsafe { LESS_IS_SAID } {
+        return;
+    }
+    unsafe { LESS_IS_SAID = true };
+
+    let Some(asking) = (unsafe { _task_info }) else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
+            say_what_the_task_holds as *mut c_void, (&raw mut WHAT_IT_HOLDS) as *mut *mut c_void,
+            core::ptr::null_mut());
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+unsafe extern "C" fn say_what_the_task_holds(port: *mut c_void, what: u32, said: *mut u8,
+    how_much: *mut u32) -> c_int
+{
+    let went = match unsafe { WHAT_IT_HOLDS } {
+        Some(ask_it) => unsafe { ask_it(port, what, said, how_much) },
+        None => 0,
+    };
+    if went != 0 || said.is_null() || asked_by_one_of_ours() {
+        return went;
+    }
+
+    let (Some(id), room) = (crate::xnu_injection::whose_task_does_this_port_name(port),
+        unsafe { *how_much } as usize * 4)
+    else {
+        return went;
+    };
+
+    let (mut ours_of_it, mut ranges) = (0u64, 0u32);
+    crate::xnu_injection::what_we_have_in_process(id, &mut |_, size| {
+        ours_of_it += size;
+        ranges += 1;
+    });
+    if ours_of_it == 0 {
+        return went;
+    }
+
+    let take_from = |at: usize, less: u64| {
+        if at + 8 > room {
+            return;
+        }
+        let word = unsafe { (said.add(at) as *const u64).read_unaligned() };
+        unsafe { (said.add(at) as *mut u64).write_unaligned(word.saturating_sub(less)) };
+    };
+    let take_from_a_count = |at: usize, less: u32| {
+        if at + 4 > room {
+            return;
+        }
+        let count = unsafe { (said.add(at) as *const u32).read_unaligned() };
+        unsafe { (said.add(at) as *mut u32).write_unaligned(count.saturating_sub(less)) };
+    };
+
+    match what {
+        HOW_THE_TASK_IS => {
+            take_from(WHAT_A_TASK_HAS_MAPPED, ours_of_it);
+            take_from(WHAT_OF_IT_IS_THERE, ours_of_it);
+        }
+        WHAT_THE_TASK_HAS_MAPPED | WHAT_THE_TASK_HAS_MAPPED_AND_MAY_LOSE => {
+            take_from(WHAT_A_MAP_HAS_IN_IT, ours_of_it);
+            take_from_a_count(HOW_MANY_RANGES_IT_TOOK, ranges);
+            take_from(WHAT_OF_A_MAP_IS_THERE, ours_of_it);
+        }
+        _ => {}
+    }
+
+    went
+}
+
+static mut LESS_IS_SAID: bool = false;
+static mut WHAT_IT_HOLDS:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8, *mut u32) -> c_int> = None;
+
+const HOW_THE_TASK_IS: u32 = 5;
+const WHAT_A_TASK_HAS_MAPPED: usize = 8;
+const WHAT_OF_IT_IS_THERE: usize = 16;
+
+const WHAT_THE_TASK_HAS_MAPPED: u32 = 22;
+const WHAT_THE_TASK_HAS_MAPPED_AND_MAY_LOSE: u32 = 23;
+const WHAT_A_MAP_HAS_IN_IT: usize = 0;
+const HOW_MANY_RANGES_IT_TOOK: usize = 8;
+const WHAT_OF_A_MAP_IS_THERE: usize = 16;
 
 fn say_no_port_names_one_of_ours() {
     if unsafe { NOTHING_IS_NAMED } {
@@ -402,6 +494,10 @@ pub fn take_note_of_what_a_copy_says(arena: u64) {
 
 fn take_ours_out_of_the_count(asked: &Asked, went: c_int) -> c_int {
     let ours_there = crate::xnu_injection::how_many_of_ours_are_in(asked.id as u32);
+    let mut ours_of_it = 0u64;
+    crate::xnu_injection::what_we_have_in_process(asked.id as u32, &mut |_, room| {
+        ours_of_it += room;
+    });
     if ours_there == 0 || asked.into == 0 {
         return went;
     }
@@ -419,6 +515,11 @@ fn take_ours_out_of_the_count(asked: &Asked, went: c_int) -> c_int {
         .try_into().unwrap());
     said[HOW_MANY_THREADS..HOW_MANY_THREADS + 4]
         .copy_from_slice(&counted.saturating_sub(ours_there).to_le_bytes());
+
+    for at in [HOW_MUCH_IS_MAPPED, HOW_MUCH_OF_IT_IS_THERE] {
+        let said_to_be = u64::from_le_bytes(said[at..at + 8].try_into().unwrap());
+        said[at..at + 8].copy_from_slice(&said_to_be.saturating_sub(ours_of_it).to_le_bytes());
+    }
 
     unsafe { put_back(said.as_ptr() as *const c_void, asked.into, room) };
 
@@ -578,6 +679,8 @@ const A_REGION_AND_WHERE_IT_CAME_FROM: u64 = 8;
 
 const HOW_THE_TASK_IS_SAID_TO_BE_DOING: usize = 96;
 const HOW_MANY_THREADS: usize = 84;
+const HOW_MUCH_IS_MAPPED: usize = 0;
+const HOW_MUCH_OF_IT_IS_THERE: usize = 8;
 
 const WHAT_A_REGION_IS_SAID_TO_BE: usize = 96;
 const WHERE_A_REGION_IS: usize = 80;
@@ -592,6 +695,7 @@ unsafe extern "C" {
     static _copyin: Option<unsafe extern "C" fn(u64, *mut c_void, u64) -> c_int>;
     static _copyout: Option<unsafe extern "C" fn(*const c_void, u64, u64) -> c_int>;
     static _current_thread: Option<unsafe extern "C" fn() -> *mut c_void>;
+    static _task_info: Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8, *mut u32) -> c_int>;
     static _convert_port_to_thread: Option<TurnAPortIntoAThread>;
     static _convert_port_to_thread_read: Option<TurnAPortIntoAThread>;
     static _convert_port_to_thread_inspect: Option<TurnAPortIntoAThread>;
