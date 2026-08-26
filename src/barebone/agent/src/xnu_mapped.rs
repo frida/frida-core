@@ -112,6 +112,15 @@ fn what_is_loaded() -> Vec<Image> {
         found.push(Image { base, size, path });
     }
 
+    let loader = read_long(list + WHERE_THE_LOADER_IS);
+    if loader != 0 {
+        let size = how_much_of_it_there_is(loader, WHAT_THE_LOADER_IS_CALLED);
+        if size != 0 {
+            found.push(Image { base: loader, size,
+                path: WHAT_THE_LOADER_IS_CALLED.to_string() });
+        }
+    }
+
     found
 }
 
@@ -203,6 +212,8 @@ const NO_TASK_TO_ASK: u32 = 0;
 const ABOUT_THE_LOADER: u32 = 17;
 const ABOUT_THE_LOADER_WORDS: usize = 8;
 const HOW_MANY_IMAGES: u64 = 4;
+const WHERE_THE_LOADER_IS: u64 = 32;
+const WHAT_THE_LOADER_IS_CALLED: &str = "/usr/lib/dyld";
 const WHERE_THE_IMAGES_ARE: u64 = 8;
 const AN_IMAGE: usize = 24;
 const WHAT_IT_CAME_FROM: u64 = 8;

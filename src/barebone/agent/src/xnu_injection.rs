@@ -4,10 +4,6 @@ use core::ffi::{c_int, c_void};
 pub fn inject_into_process(id: u32) -> u32 {
     crate::xnu_bell::hang_the_bell();
 
-    if !wait_until_it_can_take_one(id) {
-        return 0;
-    }
-
     let Some(process) = process_with_id(id) else {
         return 0;
     };
@@ -21,9 +17,12 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     let arena_here = home.arena_here;
     let seen_from_here = home.image_here;
+
+    let before = look_at_the_task(process.task);
     let Some(bare_thread) = start(process.task, &home) else {
         return 0;
     };
+    learn_where_the_threads_are_counted(&before, &look_at_the_task(process.task));
 
     if !woke_up(id, arena_here) {
         return 0;
@@ -97,23 +96,6 @@ static mut ASKED: u32 = 0;
 
 const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
 
-fn wait_until_it_can_take_one(id: u32) -> bool {
-    let ready = &mut || crate::xnu_spawn::ready_for_a_copy(id);
-
-    let began = crate::kernel::monotonic_micros();
-    while !ready() {
-        let waited = (crate::kernel::monotonic_micros() - began) as u64;
-        if waited >= LONG_ENOUGH_TO_GET_THERE || !process_is_alive(id) {
-            return false;
-        }
-        crate::kernel::wait(crate::glib::wakeup_token(), Some(LONG_ENOUGH_TO_GET_THERE - waited),
-            ready);
-    }
-
-    true
-}
-
-const LONG_ENOUGH_TO_GET_THERE: u64 = 5_000_000;
 
 pub fn stop_copies() {
     let everywhere: alloc::vec::Vec<u32> = unsafe { arenas() }.keys().copied().collect();
@@ -464,6 +446,72 @@ fn ourselves() -> Option<*mut c_void> {
 
     Some(unsafe { map_of(task_of()) })
 }
+
+fn look_at_the_task(task: *mut c_void) -> alloc::vec::Vec<u32> {
+    (0..HOW_FAR_INTO_A_TASK)
+        .map(|step| unsafe { ((task as *const u32).add(step)).read_volatile() })
+        .collect()
+}
+
+fn learn_where_the_threads_are_counted(before: &[u32], after: &[u32]) {
+    if unsafe { WHERE_THEY_ARE_COUNTED } != 0 {
+        return;
+    }
+
+    for step in 0..before.len() - 1 {
+        let went_up = |at: usize| after[at] == before[at].wrapping_add(1);
+        if before[step] == before[step + 1] && went_up(step) && went_up(step + 1) {
+            unsafe { WHERE_THEY_ARE_COUNTED = step * 4 };
+            return;
+        }
+    }
+}
+
+pub fn count_only_what_the_process_made(task: *mut c_void) -> Option<(u32, u32)> {
+    let at = unsafe { WHERE_THEY_ARE_COUNTED };
+    if at == 0 || !any_copy_is_in(task) {
+        return None;
+    }
+
+    let counted = ((task as usize) + at) as *mut u32;
+    let kept = unsafe { (counted.read_volatile(), counted.add(1).read_volatile()) };
+    unsafe {
+        counted.write_volatile(1);
+        counted.add(1).write_volatile(1);
+    }
+
+    Some(kept)
+}
+
+pub fn count_them_all_again(task: *mut c_void, kept: (u32, u32)) {
+    let at = unsafe { WHERE_THEY_ARE_COUNTED };
+    if at == 0 {
+        return;
+    }
+
+    let counted = ((task as usize) + at) as *mut u32;
+    unsafe {
+        counted.write_volatile(kept.0);
+        counted.add(1).write_volatile(kept.1);
+    }
+}
+
+fn any_copy_is_in(task: *mut c_void) -> bool {
+    unsafe { arenas() }.keys().any(|id| {
+        match process_with_id(*id) {
+            Some(process) => {
+                let ours = process.task == task;
+                unsafe { release_process(process.handle) };
+                ours
+            }
+            None => false,
+        }
+    })
+}
+
+static mut WHERE_THEY_ARE_COUNTED: usize = 0;
+
+const HOW_FAR_INTO_A_TASK: usize = 0x400;
 
 fn start(task: *mut c_void, home: &Home) -> Option<*mut c_void> {
     start_a_thread(task, home.code, home.stack + STACK - 0x100, home.arena)

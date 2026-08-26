@@ -145,33 +145,6 @@ pub fn look_for_new_processes() {
     }
 }
 
-pub fn ready_for_a_copy(id: u32) -> bool {
-    if each_held().iter().any(|held| held.id == id && held.waiting
-        && held.how_far == READY_FOR_A_COPY)
-    {
-        for held in each_held().iter_mut().filter(|held| held.id == id
-            && held.how_far == ON_ITS_WAY)
-        {
-            held.how_far = 0;
-        }
-        return true;
-    }
-
-    let mut on_its_way = false;
-    for held in each_held().iter_mut().filter(|held| held.id == id) {
-        if held.waiting && held.how_far == TOO_EARLY_TO_BE_GIVEN_ANYTHING {
-            held.waiting = false;
-            held.how_far = ON_ITS_WAY;
-            crate::kernel::wake(held as *const Held as *const u8);
-        }
-        if held.how_far == ON_ITS_WAY {
-            on_its_way = true;
-        }
-    }
-
-    !on_its_way
-}
-
 pub fn is_held(id: u32) -> bool {
     each_held().iter().any(|held| held.waiting && held.id == id)
 }
@@ -192,12 +165,6 @@ pub fn tell_of_held_spawns(say: &mut dyn FnMut(u32, &[u8])) {
 }
 
 pub fn resume_process(id: u32) -> bool {
-    for held in each_held().iter_mut().filter(|held| held.id == id
-        && held.how_far == ON_ITS_WAY)
-    {
-        held.how_far = 0;
-    }
-
     for held in each_held().iter_mut().filter(|held| held.waiting && held.id == id) {
         held.waiting = false;
         crate::kernel::wake(held as *const Held as *const u8);
@@ -213,10 +180,11 @@ fn take_over_the_first_word_a_process_says() {
     unsafe { TAKEN_OVER = true };
 
     let (Some(word), Some(work)) = (the_call_that_says_it(SAYING_HOW_THREADS_ARE_MADE),
-        the_call_that_says_it(ASKING_FOR_SOMEWHERE_TO_RUN_WORK))
+        unsafe { _task_restartable_ranges_register })
     else {
         return;
     };
+    let work = work as u64;
 
     unsafe {
         WHERE_IT_IS_SAID = word as *mut c_void;
@@ -227,7 +195,7 @@ fn take_over_the_first_word_a_process_says() {
             hold_it_early as *mut c_void, (&raw mut THE_WORD) as *mut *mut c_void,
             core::ptr::null_mut());
         crate::bindings::gum_interceptor_replace(interceptor, work as *mut c_void,
-            hold_it_there as *mut c_void, (&raw mut THE_ASKING) as *mut *mut c_void,
+            hold_it_there as *mut c_void, (&raw mut THE_CLAIM) as *mut *mut c_void,
             core::ptr::null_mut());
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
@@ -253,7 +221,7 @@ pub fn give_the_word_back() {
         }
         crate::bindings::gum_interceptor_end_transaction(interceptor);
         THE_WORD = None;
-        THE_ASKING = None;
+        THE_CLAIM = None;
         WHERE_IT_IS_SAID = core::ptr::null_mut();
         WHERE_IT_IS_ASKED = core::ptr::null_mut();
     }
@@ -278,25 +246,29 @@ unsafe extern "C" fn hold_it_early(process: *mut c_void, asked: *mut c_void, ans
         None => 0,
     };
 
-    hold_it(process, TOO_EARLY_TO_BE_GIVEN_ANYTHING);
+    hold_it(process);
 
     went
 }
 
-unsafe extern "C" fn hold_it_there(process: *mut c_void, asked: *mut c_void, answer: *mut i32)
+unsafe extern "C" fn hold_it_there(task: *mut c_void, ranges: *mut c_void, how_many: u32)
     -> c_int
 {
-    let went = match unsafe { THE_ASKING } {
-        Some(ask_it) => unsafe { ask_it(process, asked, answer) },
+    let kept = crate::xnu_injection::count_only_what_the_process_made(task);
+
+    let went = match unsafe { THE_CLAIM } {
+        Some(claim_it) => unsafe { claim_it(task, ranges, how_many) },
         None => 0,
     };
 
-    hold_it(process, READY_FOR_A_COPY);
+    if let Some(kept) = kept {
+        crate::xnu_injection::count_them_all_again(task, kept);
+    }
 
     went
 }
 
-fn hold_it(process: *mut c_void, how_far: u32) {
+fn hold_it(process: *mut c_void) {
     if !unsafe { GATING } {
         return;
     }
@@ -304,7 +276,6 @@ fn hold_it(process: *mut c_void, how_far: u32) {
     let Some(held) = note_it(process) else {
         return;
     };
-    held.how_far = how_far;
 
     let waiting = &mut || held.waiting;
     while held.waiting {
@@ -318,8 +289,7 @@ fn note_it(process: *mut c_void) -> Option<&'static mut Held> {
         return None;
     };
 
-    let held = each_held().iter_mut()
-        .find(|held| !held.waiting && held.how_far != ON_ITS_WAY)?;
+    let held = each_held().iter_mut().find(|held| !held.waiting)?;
 
     held.id = unsafe { number_of(process) } as u32;
     held.told_of = false;
@@ -360,7 +330,6 @@ struct Held {
     id: u32,
     seen_at: u64,
     name: [u8; NAME_ROOM],
-    how_far: u32,
     waiting: bool,
     told_of: bool,
 }
@@ -370,7 +339,7 @@ static mut TAKEN_OVER: bool = false;
 type ACall = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int;
 
 static mut THE_WORD: Option<ACall> = None;
-static mut THE_ASKING: Option<ACall> = None;
+static mut THE_CLAIM: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> c_int> = None;
 static mut WHERE_IT_IS_SAID: *mut c_void = core::ptr::null_mut();
 static mut WHERE_IT_IS_ASKED: *mut c_void = core::ptr::null_mut();
 static mut HOW_MANY_HELD: u64 = 0;
@@ -378,21 +347,18 @@ static mut HELD: [Held; HOW_MANY_AT_ONCE] = [Held {
     id: 0,
     seen_at: 0,
     name: [0; NAME_ROOM],
-    how_far: 0,
     waiting: false,
     told_of: false,
 }; HOW_MANY_AT_ONCE];
 
 const HOW_MANY_AT_ONCE: usize = 64;
 const NAME_ROOM: usize = 64;
-const TOO_EARLY_TO_BE_GIVEN_ANYTHING: u32 = 1;
-const READY_FOR_A_COPY: u32 = 2;
-const ON_ITS_WAY: u32 = 3;
 const SAYING_HOW_THREADS_ARE_MADE: usize = 366;
-const ASKING_FOR_SOMEWHERE_TO_RUN_WORK: usize = 367;
 const AN_ENTRY: usize = 24;
 
 unsafe extern "C" {
+    static _task_restartable_ranges_register:
+        Option<unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> c_int>;
     pub static _get_bsdtask_info: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
     static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     static _proc_best_name: Option<unsafe extern "C" fn(*mut c_void) -> *const c_char>;
