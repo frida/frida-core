@@ -570,6 +570,30 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/enumerates-target-ranges-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_enumerates_target_ranges_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/keeps-two-processes-apart-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_keeps_two_processes_apart_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/hooks-its-own-process-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_hooks_its_own_process_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/leaves-nothing-behind-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_leaves_nothing_behind_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/answers-at-a-steady-pace-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_answers_at_a_steady_pace_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -972,6 +996,233 @@ namespace Frida.BareboneTest {
 
 		h.done ();
 	}
+
+	private async void xnu_enumerates_target_ranges_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const ranges = Process.enumerateRanges('r--');
+				const image = Process.mainModule;
+				const holdingIt = ranges.find(r => r.base.compare(image.base) <= 0
+					&& r.base.add(r.size).compare(image.base) > 0);
+				const ordered = ranges.every((r, i) =>
+					i === 0 || ranges[i - 1].base.compare(r.base) < 0);
+				send([ranges.length, holdingIt !== undefined, ordered,
+					image.base.readU32() === 0xfeedfacf]);
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			assert_true (said.contains ("true,true,true"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_keeps_two_processes_apart_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint board = yield find_program (device, "backboardd");
+			uint watcher = yield find_program (device, "fseventsd");
+			assert_true (board != 0 && watcher != 0 && board != watcher);
+
+			string? said_here = null, said_there = null;
+			var here = yield device.attach (board, null, null);
+			var there = yield device.attach (watcher, null, null);
+
+			var one = yield here.create_script (
+				"send([Process.id, Process.mainModule.name]);", null, null);
+			one.message.connect ((json, data) => {
+				said_here = json;
+			});
+			yield one.load (null);
+
+			var other = yield there.create_script (
+				"send([Process.id, Process.mainModule.name]);", null, null);
+			other.message.connect ((json, data) => {
+				said_there = json;
+			});
+			yield other.load (null);
+
+			while (said_here == null || said_there == null)
+				yield h.process_events ();
+
+			assert_true (said_here.contains (board.to_string ()));
+			assert_true (said_here.contains ("backboardd"));
+			assert_true (said_there.contains (watcher.to_string ()));
+			assert_true (said_there.contains ("fseventsd"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_hooks_its_own_process_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const open = Module.getGlobalExportByName('open');
+				let caught = 0;
+				Interceptor.attach(open, {
+					onEnter(args) {
+						if (caught === 0)
+							send(['caught', args[0].readUtf8String()]);
+						caught++;
+					}
+				});
+
+				const openIt = new NativeFunction(open, 'int', ['pointer', 'int']);
+				const close = new NativeFunction(Module.getGlobalExportByName('close'), 'int',
+					['int']);
+				const path = Memory.allocUtf8String('/dev/null');
+				const fd = openIt(path, 0);
+				if (fd !== -1)
+					close(fd);
+				send(['done', caught !== 0, fd !== -1]);
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				if (json.contains ("done"))
+					said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			assert_true (said.contains ("true,true"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_leaves_nothing_behind_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		DeviceManager? manager = null;
+		try {
+			manager = new DeviceManager ();
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			uint64 first = 0, last = 0;
+			for (uint round = 0; round != 4; round++) {
+				var session = yield device.attach (pid, null, null);
+				var script = yield session.create_script ("""
+					const p = (n) => Module.getGlobalExportByName(n);
+					const procPidinfo = new NativeFunction(p('proc_pidinfo'), 'int',
+						['int', 'int', 'uint64', 'pointer', 'int']);
+					const getpid = new NativeFunction(p('getpid'), 'int', []);
+					const info = Memory.alloc(256);
+					procPidinfo(getpid(), 4, 0, info, 256);
+					send({ mapped: info.readU64().toNumber(), threads: info.add(84).readU32() });
+				""", null, null);
+
+				string? said = null;
+				script.message.connect ((json, data) => {
+					said = json;
+				});
+				yield script.load (null);
+
+				while (said == null)
+					yield h.process_events ();
+
+				var digits = said.substring (said.index_of ("\"mapped\":") + 9);
+				uint64 mapped = uint64.parse (digits.substring (0, digits.index_of (",")));
+				printerr ("\nMAPPED after round %u: %s\n", round, said);
+				if (round == 0)
+					first = mapped;
+				last = mapped;
+
+				yield session.detach (null);
+			}
+
+			printerr ("\nGREW by %" + uint64.FORMAT + " over three rounds\n", last - first);
+			assert_true (last - first < 3 * WHAT_AN_IMAGE_COSTS);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			if (manager != null) {
+				try {
+					yield manager.close (null);
+				} catch (GLib.Error e) {
+				}
+			}
+		}
+
+		h.done ();
+	}
+
+	private const uint64 WHAT_AN_IMAGE_COSTS = 4456448 + (1024 * 1024);
 
 	private async void xnu_answers_at_a_steady_pace_in_live_guest (Harness h,
 			BareboneConfig? config) {
