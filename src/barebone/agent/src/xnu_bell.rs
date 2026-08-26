@@ -16,6 +16,7 @@ pub fn hang_the_bell() {
         ((calls + ENDING_A_WAIT * AN_ENTRY) as *const u64).read_volatile()
     };
     let ending_a_wait = unsafe { crate::pac::ptrauth_strip_data(signed as *const u8) };
+    unsafe { WHERE_IT_HANGS = ending_a_wait as *mut c_void };
     unsafe {
         let interceptor = crate::bindings::gum_interceptor_obtain();
         crate::bindings::gum_interceptor_begin_transaction(interceptor);
@@ -38,6 +39,27 @@ unsafe extern "C" fn answer_the_bell(process: *mut c_void, asked: *mut c_void,
     match unsafe { ENDS_A_WAIT } {
         Some(end_it) => unsafe { end_it(process, asked, answer) },
         None => 0,
+    }
+}
+
+pub fn take_the_bell_down() {
+    if !unsafe { HUNG } {
+        return;
+    }
+    unsafe { HUNG = false };
+
+    let hangs_on = unsafe { WHERE_IT_HANGS };
+    if hangs_on.is_null() {
+        return;
+    }
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_revert(interceptor, hangs_on);
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        ENDS_A_WAIT = None;
+        WHERE_IT_HANGS = core::ptr::null_mut();
     }
 }
 
@@ -82,6 +104,7 @@ type EndsAWait = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_i
 static mut HUNG: bool = false;
 static RUNG: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 static mut ENDS_A_WAIT: Option<EndsAWait> = None;
+static mut WHERE_IT_HANGS: *mut c_void = core::ptr::null_mut();
 
 const ENDING_A_WAIT: usize = 516;
 const AN_ENTRY: usize = 24;

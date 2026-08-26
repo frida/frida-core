@@ -105,19 +105,19 @@ pub fn detach_from_process(id: u32) -> bool {
         return false;
     };
 
-    tell_it_to_go(&placed);
+    tell_it_to_go(id, &placed);
     take_back_what_it_was_given(id, &placed);
     crate::xnu_relay::forget(placed.arena);
 
     true
 }
 
-fn tell_it_to_go(placed: &Placed) {
+fn tell_it_to_go(id: u32, placed: &Placed) {
     unsafe {
         ((placed.arena + crate::xnu_relay::STOP_REQUEST) as *mut u32).write_volatile(1)
     };
 
-    wake_the_copy_at(placed.arena);
+    wake_the_copy_in(id, placed.arena, placed.in_the_process);
 
     let has_stopped = &mut || unsafe {
         ((placed.arena + crate::xnu_relay::WORKER_STOPPED) as *const u32).read_volatile()
@@ -225,12 +225,18 @@ pub fn wake_the_copy_at(arena: u64) {
         return;
     };
 
+    wake_the_copy_in(id, arena, theirs);
+}
+
+fn wake_the_copy_in(id: u32, ours: u64, theirs: u64) {
     let Some(process) = process_with_id(id) else {
         return;
     };
+
     if let Some(process_of) = unsafe { crate::xnu_spawn::_get_bsdtask_info } {
-        crate::xnu_bell::wake_the_copy(unsafe { process_of(process.task) }, arena, theirs);
+        crate::xnu_bell::wake_the_copy(unsafe { process_of(process.task) }, ours, theirs);
     }
+
     unsafe { release_process(process.handle) };
 }
 

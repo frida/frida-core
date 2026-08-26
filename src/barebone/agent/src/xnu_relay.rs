@@ -19,7 +19,12 @@ pub fn serve_waiting_frames() {
 }
 
 pub fn take_frame_from_target(arena: u64) -> Option<Vec<u8>> {
-    read_frame(&TO_KERNEL, arena)
+    let frame = read_frame(&TO_KERNEL, arena);
+    if frame.is_some() {
+        crate::xnu_injection::wake_the_copy_at(arena);
+    }
+
+    frame
 }
 
 pub fn holds_a_frame_from_target(arena: u64) -> bool {
@@ -33,14 +38,16 @@ pub fn a_frame_waits_for_room() -> bool {
 }
 
 pub fn publish_frame_to_host(arena: u64, frame: &[u8]) -> bool {
-    let written = write_frame(&TO_KERNEL, arena, frame);
-    crate::xnu_bell::ring_the_bell();
-
-    written
+    write_frame(&TO_KERNEL, arena, frame, tell_the_kernel_half)
 }
 
 pub fn take_frame_from_host(arena: u64) -> Option<Vec<u8>> {
-    read_frame(&TO_COPY, arena)
+    let frame = read_frame(&TO_COPY, arena);
+    if frame.is_some() {
+        tell_the_kernel_half(arena);
+    }
+
+    frame
 }
 
 pub fn holds_a_frame_from_host(arena: u64) -> bool {
@@ -55,39 +62,38 @@ pub fn forget(arena: u64) {
 fn send_what_waits(arena: u64) {
     let frames = unsafe { waiting() }.get_mut(&arena).unwrap();
 
-    let mut sent = false;
     while let Some(frame) = frames.front_mut() {
-        if !write_frame(&TO_COPY, arena, frame) {
-            break;
-        }
+        write_frame(&TO_COPY, arena, frame, crate::xnu_injection::wake_the_copy_at);
         frames.pop_front();
-        sent = true;
-    }
-
-    if sent {
-        crate::xnu_injection::wake_the_copy_at(arena);
     }
 }
 
-fn write_frame(ring: &Ring, arena: u64, frame: &[u8]) -> bool {
+fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
     ring.take_lock(arena, rest);
 
     let mut written = 0;
     while written < frame.len() {
         match ring.write(arena, arena + ring.buffer, frame, written) {
-            Some(now) => written = now,
-            None => break,
+            Some(now) => {
+                written = now;
+                tell(arena);
+            }
+            None => {
+                ring.ask_for_room(arena);
+                tell(arena);
+                crate::kernel::wait(crate::glib::wakeup_token(), None,
+                    &mut || ring.has_room(arena));
+            }
         }
     }
 
     ring.let_lock_go(arena);
 
-    if written != frame.len() {
-        ring.ask_for_room(arena);
-        return false;
-    }
-
     true
+}
+
+fn tell_the_kernel_half(_arena: u64) {
+    crate::xnu_bell::ring_the_bell();
 }
 
 fn read_frame(ring: &Ring, arena: u64) -> Option<Vec<u8>> {

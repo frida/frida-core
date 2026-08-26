@@ -212,6 +212,25 @@ fn take_over_the_word_to_go() {
     }
 }
 
+pub fn give_the_word_back() {
+    if !unsafe { TAKEN_OVER } {
+        return;
+    }
+    unsafe { TAKEN_OVER = false };
+
+    let Some(word) = (unsafe { _task_clear_return_wait }) else {
+        return;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_revert(interceptor, word as *mut c_void);
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        THE_WORD_TO_GO = None;
+    }
+}
+
 unsafe extern "C" fn hold_or_let_run(task: *mut c_void, flags: u32) {
     if !unsafe { GATING } || (flags & THE_LAST_WORD) == 0 {
         say_the_word(task, flags);

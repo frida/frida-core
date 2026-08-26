@@ -157,35 +157,11 @@ impl Hostlink {
 
     pub fn send(&self, payload: &[u8]) {
         let s = unsafe { &*self.state.get() };
+        let length = (payload.len() as u32).to_le_bytes();
+
         unsafe {
-            let len = payload.len() as u32;
-            let mut hdr = [
-                (len & 0xff) as u8,
-                ((len >> 8) & 0xff) as u8,
-                ((len >> 16) & 0xff) as u8,
-                ((len >> 24) & 0xff) as u8,
-            ];
-            let mut iov = [
-                Iovec {
-                    iov_base: hdr.as_mut_ptr() as *mut c_void,
-                    iov_len: 4,
-                },
-                Iovec {
-                    iov_base: payload.as_ptr() as *mut c_void,
-                    iov_len: payload.len(),
-                },
-            ];
-            let msg = Msghdr {
-                msg_name: ptr::null_mut(),
-                msg_namelen: 0,
-                msg_iov: iov.as_mut_ptr(),
-                msg_iovlen: 2,
-                msg_control: ptr::null_mut(),
-                msg_controllen: 0,
-                msg_flags: 0,
-            };
-            let mut sent: usize = 0;
-            let _ = _sock_send(s.so, &msg, 0, &mut sent);
+            send_all(s.so, &length);
+            send_all(s.so, payload);
         }
     }
 
@@ -262,6 +238,31 @@ unsafe fn recv_nonblocking(so: SocketT, dst: &mut [u8]) -> usize {
         let mut got: usize = 0;
         let _ = _sock_receive(so, &mut msg, MSG_DONTWAIT, &mut got);
         got
+    }
+}
+
+unsafe fn send_all(so: SocketT, bytes: &[u8]) {
+    let mut gone = 0;
+    while gone < bytes.len() {
+        let mut iov = [Iovec {
+            iov_base: unsafe { bytes.as_ptr().add(gone) } as *mut c_void,
+            iov_len: bytes.len() - gone,
+        }];
+        let msg = Msghdr {
+            msg_name: ptr::null_mut(),
+            msg_namelen: 0,
+            msg_iov: iov.as_mut_ptr(),
+            msg_iovlen: 1,
+            msg_control: ptr::null_mut(),
+            msg_controllen: 0,
+            msg_flags: 0,
+        };
+
+        let mut sent: usize = 0;
+        if unsafe { _sock_send(so, &msg, 0, &mut sent) } != 0 || sent == 0 {
+            return;
+        }
+        gone += sent;
     }
 }
 
