@@ -4484,7 +4484,7 @@ namespace Frida.HostSessionTest {
 
 					var script = yield session.create_script (
 						"send(`first breath: pid ${Process.id} on ${Process.arch}, " +
-						"page ${Process.pageSize}`);",
+						"${Process.enumerateModules().length} modules loaded so far`);",
 						make_parameters_dict (), cancellable);
 					yield session.load_script (script, cancellable);
 

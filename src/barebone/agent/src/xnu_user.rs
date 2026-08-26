@@ -23,6 +23,7 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
 
     let has_run = unsafe { ((arena + crate::xnu_relay::HAS_RUN) as *const u32).read_volatile() };
     let served = has_run != 0 && become_a_thread_the_system_knows(arena);
+    unsafe { ON_A_THREAD_THE_SYSTEM_KNOWS = served };
 
     unsafe { ((arena + crate::xnu_relay::AWAKE_AT) as *mut u64).write_volatile(AWAKE) };
     crate::xnu_bell::ring_the_bell();
@@ -84,6 +85,12 @@ unsafe extern "C" fn serve_from_a_proper_thread(arena: *mut core::ffi::c_void)
     core::ptr::null_mut()
 }
 
+pub fn on_a_thread_the_system_knows() -> bool {
+    unsafe { ON_A_THREAD_THE_SYSTEM_KNOWS }
+}
+
+static mut ON_A_THREAD_THE_SYSTEM_KNOWS: bool = false;
+
 unsafe extern "C" fn user_worker(parameter: *mut core::ffi::c_void, _wait_result: i32) {
     let arena = parameter as u64;
     unsafe { ARENA = arena };
@@ -95,6 +102,7 @@ unsafe extern "C" fn user_worker(parameter: *mut core::ffi::c_void, _wait_result
 
     while word_at(arena + crate::xnu_relay::STOP_REQUEST) == 0 {
         unsafe { crate::dispatch_pending_work(context) };
+
     }
 
     unsafe { ((arena + crate::xnu_relay::WORKER_STOPPED) as *mut u32).write_volatile(1) };

@@ -85,6 +85,11 @@ struct Image {
 
 fn what_is_loaded() -> Vec<Image> {
     let mut found = Vec::new();
+
+    if !crate::xnu_user::on_a_thread_the_system_knows() {
+        return found;
+    }
+
     let Some(list) = where_the_loader_keeps_its_list() else {
         return found;
     };
