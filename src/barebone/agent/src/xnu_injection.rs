@@ -34,6 +34,7 @@ pub fn inject_into_process(id: u32) -> u32 {
 
 
     unsafe { arenas() }.insert(id, Placed {
+        map: process.map,
         arena: arena_here,
         image_here: seen_from_here,
         code: home.image,
@@ -254,6 +255,25 @@ fn wake_the_copy_in(id: u32, ours: u64, theirs: u64) {
     unsafe { release_process(process.handle) };
 }
 
+pub fn what_we_have_in(map: *mut c_void, found: &mut dyn FnMut(u64, u64)) {
+    for placed in unsafe { arenas() }.values().filter(|placed| placed.map == map) {
+        found(placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
+        found(placed.code, crate::own_range().1 as u64);
+        found(placed.stack, STACK);
+
+        let taken = (placed.arena + crate::xnu_relay::WHAT_WE_TOOK) as *const u64;
+        let how_many = (unsafe { taken.read_volatile() } as usize)
+            .min(crate::xnu_relay::MOST_WE_TAKE);
+        for step in 0..how_many {
+            let at = unsafe { taken.add(1 + step * 2).read_volatile() };
+            if at == 0 {
+                continue;
+            }
+            found(at, unsafe { taken.add(2 + step * 2).read_volatile() });
+        }
+    }
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { arenas() }.get(&id).map(|placed| placed.arena)
 }
@@ -300,6 +320,7 @@ pub struct Process {
 
 #[derive(Clone)]
 struct Placed {
+    map: *mut c_void,
     arena: u64,
     image_here: u64,
     code: u64,

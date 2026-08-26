@@ -68,6 +68,8 @@ SECTIONS {
     _sysent = .; . += 8;
     _task_restartable_ranges_register = .; . += 8;
     _task_threads = .; . += 8;
+    _mach_vm_region = .; . += 8;
+    _mach_vm_region_recurse = .; . += 8;
     _copyin = .; . += 8;
     _copyout = .; . += 8;
     _ulock_wake = .; . += 8;

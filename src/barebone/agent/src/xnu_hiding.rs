@@ -4,6 +4,7 @@ use core::ffi::c_void;
 
 pub fn hide_our_threads() {
     hide_us_from_the_thread_list();
+    hide_what_we_have_in_a_process();
 
 
     if unsafe { HIDDEN } {
@@ -47,9 +48,20 @@ pub fn show_our_threads_again() {
         if !WHERE_THE_LIST_IS_ASKED.is_null() {
             crate::bindings::gum_interceptor_revert(interceptor, WHERE_THE_LIST_IS_ASKED);
         }
+        if !WHERE_A_RANGE_IS_ASKED.is_null() {
+            crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_RANGE_IS_ASKED);
+        }
+        if !WHERE_A_DEEPER_RANGE_IS_ASKED.is_null() {
+            crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_DEEPER_RANGE_IS_ASKED);
+        }
         crate::bindings::gum_interceptor_end_transaction(interceptor);
         THE_ANSWER = None;
         THE_LIST = None;
+        THE_RANGE = None;
+        THE_DEEPER_RANGE = None;
+        WHERE_A_RANGE_IS_ASKED = core::ptr::null_mut();
+        WHERE_A_DEEPER_RANGE_IS_ASKED = core::ptr::null_mut();
+        HIDDEN_FROM_THE_MAP = false;
         WHERE_IT_IS_ASKED = core::ptr::null_mut();
         WHERE_THE_LIST_IS_ASKED = core::ptr::null_mut();
         HIDDEN_FROM_THE_LIST = false;
@@ -185,6 +197,96 @@ fn asked_by_one_of_ours() -> bool {
     our_threads().contains(&(unsafe { this_thread() } as u64))
 }
 
+fn hide_what_we_have_in_a_process() {
+    if unsafe { HIDDEN_FROM_THE_MAP } {
+        return;
+    }
+    unsafe { HIDDEN_FROM_THE_MAP = true };
+
+    let (Some(one_range), Some(one_range_deeper)) = (unsafe { _mach_vm_region },
+        unsafe { _mach_vm_region_recurse })
+    else {
+        return;
+    };
+
+    unsafe {
+        WHERE_A_RANGE_IS_ASKED = one_range as *mut c_void;
+        WHERE_A_DEEPER_RANGE_IS_ASKED = one_range_deeper as *mut c_void;
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        crate::bindings::gum_interceptor_replace(interceptor, one_range as *mut c_void,
+            say_what_is_there as *mut c_void, (&raw mut THE_RANGE) as *mut *mut c_void,
+            core::ptr::null_mut());
+        crate::bindings::gum_interceptor_replace(interceptor, one_range_deeper as *mut c_void,
+            say_what_is_there_deeper as *mut c_void, (&raw mut THE_DEEPER_RANGE) as *mut *mut c_void,
+            core::ptr::null_mut());
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+unsafe extern "C" fn say_what_is_there(map: *mut c_void, address: *mut u64, size: *mut u64,
+    flavour: c_int, into: *mut c_void, count: *mut u32, named: *mut u32) -> c_int
+{
+    let Some(ask_it) = (unsafe { THE_RANGE }) else {
+        return 0;
+    };
+
+    let mut went = unsafe { ask_it(map, address, size, flavour, into, count, named) };
+    if asked_by_one_of_ours() {
+        return went;
+    }
+
+    for _ in 0..HOW_MANY_OF_OURS_IN_A_ROW {
+        if went != 0 {
+            break;
+        }
+        let Some(past) = ours_is_there(map, unsafe { *address }, unsafe { *size }) else {
+            break;
+        };
+        unsafe { *address = past };
+        went = unsafe { ask_it(map, address, size, flavour, into, count, named) };
+    }
+
+    went
+}
+
+unsafe extern "C" fn say_what_is_there_deeper(map: *mut c_void, address: *mut u64, size: *mut u64,
+    depth: *mut u32, into: *mut c_void, count: *mut u32) -> c_int
+{
+    let Some(ask_it) = (unsafe { THE_DEEPER_RANGE }) else {
+        return 0;
+    };
+
+    let mut went = unsafe { ask_it(map, address, size, depth, into, count) };
+    if asked_by_one_of_ours() {
+        return went;
+    }
+
+    for _ in 0..HOW_MANY_OF_OURS_IN_A_ROW {
+        if went != 0 {
+            break;
+        }
+        let Some(past) = ours_is_there(map, unsafe { *address }, unsafe { *size }) else {
+            break;
+        };
+        unsafe { *address = past };
+        went = unsafe { ask_it(map, address, size, depth, into, count) };
+    }
+
+    went
+}
+
+fn ours_is_there(map: *mut c_void, address: u64, size: u64) -> Option<u64> {
+    let mut past = None;
+    crate::xnu_injection::what_we_have_in(map, &mut |at, how_much| {
+        if past.is_none() && address < at + how_much && at < address + size {
+            past = Some(at + how_much);
+        }
+    });
+
+    past
+}
+
 pub fn one_of_ours(number: u64) {
     if number == 0 || ours().contains(&number) {
         return;
@@ -285,6 +387,13 @@ fn ours() -> &'static mut [u64; MOST_OF_OURS] {
 
 static mut HIDDEN: bool = false;
 static mut HIDDEN_FROM_THE_LIST: bool = false;
+static mut HIDDEN_FROM_THE_MAP: bool = false;
+static mut THE_RANGE: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64, c_int,
+    *mut c_void, *mut u32, *mut u32) -> c_int> = None;
+static mut THE_DEEPER_RANGE: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64,
+    *mut u32, *mut c_void, *mut u32) -> c_int> = None;
+static mut WHERE_A_RANGE_IS_ASKED: *mut c_void = core::ptr::null_mut();
+static mut WHERE_A_DEEPER_RANGE_IS_ASKED: *mut c_void = core::ptr::null_mut();
 static mut THE_LIST: Option<unsafe extern "C" fn(*mut c_void, *mut *mut u64, *mut u32) -> c_int> =
     None;
 static mut WHERE_THE_LIST_IS_ASKED: *mut c_void = core::ptr::null_mut();
@@ -300,11 +409,16 @@ const MOST_OF_OURS: usize = 128;
 const HOW_FAR_INTO_A_PORT: usize = 32;
 const WHERE_THE_KERNEL_BEGINS: u64 = 0xffff_fe00_0000_0000;
 const MOST_THREADS_IN_ONE: usize = 64;
+const HOW_MANY_OF_OURS_IN_A_ROW: usize = 8;
 const ASKING_ABOUT_A_PROCESS: usize = 336;
 const AN_ENTRY: usize = 24;
 const LISTING_ITS_THREADS: u64 = 6;
 
 unsafe extern "C" {
+    static _mach_vm_region: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64, c_int,
+        *mut c_void, *mut u32, *mut u32) -> c_int>;
+    static _mach_vm_region_recurse: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64,
+        *mut u32, *mut c_void, *mut u32) -> c_int>;
     static _copyin: Option<unsafe extern "C" fn(u64, *mut c_void, u64) -> c_int>;
     static _copyout: Option<unsafe extern "C" fn(*const c_void, u64, u64) -> c_int>;
     static _current_thread: Option<unsafe extern "C" fn() -> *mut c_void>;

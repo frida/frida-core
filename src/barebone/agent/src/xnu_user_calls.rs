@@ -445,6 +445,7 @@ pub fn code_memory_near(wanted: u64, size: usize) -> *mut u8 {
             ANYWHERE])
     };
     if told == KERN_SUCCESS {
+        write_down_what_we_took(address, size);
         return address as *mut u8;
     }
 
@@ -461,10 +462,58 @@ pub fn take_memory(size: usize) -> Option<u64> {
         trap(MACH_VM_ALLOCATE, [task(), &mut address as *mut u64 as u64, size as u64, ANYWHERE])
     };
 
-    (told == KERN_SUCCESS).then_some(address)
+    if told != KERN_SUCCESS {
+        return None;
+    }
+    write_down_what_we_took(address, size);
+
+    Some(address)
+}
+
+fn write_down_what_we_took(address: u64, size: usize) {
+    let Some(taken) = what_we_took() else {
+        return;
+    };
+
+    for step in 0..crate::xnu_relay::MOST_WE_TAKE {
+        let at = unsafe { taken.add(1 + step * 2) };
+        if unsafe { at.read_volatile() } != 0 {
+            continue;
+        }
+        unsafe {
+            at.add(1).write_volatile(size as u64);
+            at.write_volatile(address);
+            if taken.read_volatile() < (step + 1) as u64 {
+                taken.write_volatile((step + 1) as u64);
+            }
+        }
+        return;
+    }
+}
+
+fn cross_out_what_we_gave_back(address: u64) {
+    let Some(taken) = what_we_took() else {
+        return;
+    };
+
+    let how_many = unsafe { taken.read_volatile() } as usize;
+    for step in 0..how_many.min(crate::xnu_relay::MOST_WE_TAKE) {
+        let at = unsafe { taken.add(1 + step * 2) };
+        if unsafe { at.read_volatile() } == address {
+            unsafe { at.write_volatile(0) };
+            return;
+        }
+    }
+}
+
+fn what_we_took() -> Option<*mut u64> {
+    let arena = crate::xnu_user::arena();
+
+    (arena != 0).then(|| (arena + crate::xnu_relay::WHAT_WE_TOOK) as *mut u64)
 }
 
 pub fn give_memory_back(address: u64, size: usize) {
+    cross_out_what_we_gave_back(address);
     unsafe { trap(MACH_VM_DEALLOCATE, [task(), address, size as u64, 0]) };
 }
 

@@ -155,7 +155,11 @@ unsafe fn waiting() -> &'static mut BTreeMap<u64, VecDeque<Going>> {
 
 static mut WAITING: BTreeMap<u64, VecDeque<Going>> = BTreeMap::new();
 
-pub const ARENA_SIZE: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64) + SAYING_ROOM;
+pub const ARENA_SIZE: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64) + SAYING_ROOM + TAKEN_ROOM;
+
+pub const WHAT_WE_TOOK: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64) + SAYING_ROOM;
+pub const TAKEN_ROOM: u64 = 0x1000;
+pub const MOST_WE_TAKE: usize = 255;
 
 pub const SAYING: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64);
 pub const SAYING_ROOM: u64 = 0x10000;
