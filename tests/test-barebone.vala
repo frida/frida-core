@@ -546,6 +546,18 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/answers-at-a-steady-pace-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_answers_at_a_steady_pace_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/moves-frames-at-a-good-rate-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_moves_frames_at_a_good_rate_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Config/parses-kernel-kind", () => {
 			assert_true (parse_config ("{}").kernel == BareboneKernelKind.AUTO);
 			assert_true (parse_config ("{ \"kernel\": \"bare\" }").kernel == BareboneKernelKind.BARE);
@@ -654,6 +666,187 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 	}
+
+	private BareboneConfig? xnu_config_from_environment (Frida.Test.AsyncHarness h) {
+		string? config_path = Environment.get_variable ("FRIDA_BAREBONE_CONFIG");
+		if (config_path == null) {
+			h.done ();
+			return null;
+		}
+
+		string contents;
+		try {
+			FileUtils.get_contents (config_path, out contents);
+		} catch (FileError e) {
+			h.done ();
+			return null;
+		}
+
+		var config = parse_config (contents);
+		if (config.kernel != BareboneKernelKind.XNU) {
+			h.done ();
+			return null;
+		}
+
+		return config;
+	}
+
+	private async void xnu_answers_at_a_steady_pace_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			yield measure_the_pace (h, yield device.attach (0, null, null), "kernel");
+
+			uint pid = yield find_program (device, "fseventsd");
+			assert_true (pid != 0);
+			yield measure_the_pace (h, yield device.attach (pid, null, null), "fseventsd");
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_moves_frames_at_a_good_rate_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			yield measure_the_flow (h, yield device.attach (0, null, null), "kernel");
+
+			uint pid = yield find_program (device, "fseventsd");
+			assert_true (pid != 0);
+			yield measure_the_flow (h, yield device.attach (pid, null, null), "fseventsd");
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void measure_the_flow (Harness h, Session session, string where)
+			throws GLib.Error {
+		var script = yield session.create_script ("""
+			const chunk = 'x'.repeat(%u);
+			let taken = 0;
+			recv('go', function onGo () {
+				for (let i = 0; i !== %u; i++)
+					send(chunk);
+				send('sent');
+				recv(function onChunk (message) {
+					taken++;
+					send('taken ' + taken);
+					recv(onChunk);
+				});
+			});
+			send('ready');
+		""".printf (A_FRAME, FRAMES), null, null);
+
+		string? said = null;
+		uint received = 0;
+		bool waiting = false;
+		script.message.connect ((json, data) => {
+			received++;
+			said = json;
+			if (waiting) {
+				waiting = false;
+				measure_the_flow.callback ();
+			}
+		});
+
+		yield script.load (null);
+		while (received < 1) {
+			waiting = true;
+			yield;
+		}
+		uint before = received;
+		int64 started = get_monotonic_time ();
+		script.post ("""{"type":"go"}""");
+		while (received < before + FRAMES + 1) {
+			waiting = true;
+			yield;
+		}
+		int64 out_of_it = get_monotonic_time () - started;
+
+		var chunk = new StringBuilder ();
+		while (chunk.len < A_FRAME)
+			chunk.append_c ('x');
+		var message = """{"type":"chunk","payload":"""" + chunk.str + """"}""";
+
+		before = received;
+		started = get_monotonic_time ();
+		for (uint i = 0; i != FRAMES; i++)
+			script.post (message);
+
+		uint gave_up_at = 0;
+		var deadline = new TimeoutSource (LONG_ENOUGH_TO_ARRIVE_MS);
+		deadline.set_callback (() => {
+			gave_up_at = received;
+			if (waiting) {
+				waiting = false;
+				measure_the_flow.callback ();
+			}
+			return Source.REMOVE;
+		});
+		deadline.attach (MainContext.get_thread_default ());
+
+		while (received < before + FRAMES && gave_up_at == 0) {
+			waiting = true;
+			yield;
+		}
+		int64 into_it = get_monotonic_time () - started;
+		deadline.destroy ();
+
+		uint arrived = received - before;
+
+		printerr ("\nFLOW in %s over %u frames of %u bytes: out %.1f MB/s (%.0f frames/s), " +
+				"in %.1f MB/s (%.0f frames/s)\n\n",
+			where, FRAMES, A_FRAME,
+			rate_of (FRAMES * A_FRAME, out_of_it), (double) FRAMES / seconds_of (out_of_it),
+			rate_of (arrived * A_FRAME, into_it), (double) arrived / seconds_of (into_it));
+
+		assert_true (arrived == FRAMES);
+		assert_true ("taken %u".printf (FRAMES) in said);
+
+		yield script.unload (null);
+	}
+
+	private double seconds_of (int64 microseconds) {
+		return (double) microseconds / 1000000.0;
+	}
+
+	private double rate_of (uint bytes, int64 microseconds) {
+		return ((double) bytes / (1024.0 * 1024.0)) / seconds_of (microseconds);
+	}
+
+	private const uint LONG_ENOUGH_TO_ARRIVE_MS = 10000;
+	private const uint A_FRAME = 8192;
+	private const uint FRAMES = 64;
 
 	private BareboneConfig parse_config (string json) {
 		try {
@@ -2814,11 +3007,10 @@ namespace Frida.BareboneTest {
 		int64 quickest = sorted[0];
 		int64 middle = sorted[sorted.size / 2];
 		int64 slowest = sorted[sorted.size - 1];
-		printerr ("\nPACE in %s over %u round trips: quickest %" + int64.FORMAT + " ms, median %"
-				+ int64.FORMAT + " ms, slowest %" + int64.FORMAT + " ms, jitter %"
-				+ int64.FORMAT + " ms\n\n",
-			where, ROUND_TRIPS, quickest / 1000, middle / 1000, slowest / 1000,
-			(slowest - quickest) / 1000);
+		printerr ("\nPACE in %s over %u round trips: quickest %" + int64.FORMAT + " us, median %"
+				+ int64.FORMAT + " us, slowest %" + int64.FORMAT + " us, jitter %"
+				+ int64.FORMAT + " us\n\n",
+			where, ROUND_TRIPS, quickest, middle, slowest, slowest - quickest);
 
 		assert_true (middle < PACE_LIMIT_US);
 		assert_true (slowest < PACE_LIMIT_US * 4);
