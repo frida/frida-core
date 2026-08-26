@@ -67,7 +67,9 @@ SECTIONS {
     _sock_close = .; . += 8;
     _sysent = .; . += 8;
     _task_restartable_ranges_register = .; . += 8;
-    _task_info = .; . += 8;
+    _task_threads = .; . += 8;
+    _copyin = .; . += 8;
+    _copyout = .; . += 8;
     _ulock_wake = .; . += 8;
   }
      same pages; everything below it each copy needs its own of. */

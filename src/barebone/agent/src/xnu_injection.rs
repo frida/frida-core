@@ -3,6 +3,7 @@ use core::ffi::{c_int, c_void};
 
 pub fn inject_into_process(id: u32) -> u32 {
     crate::xnu_bell::hang_the_bell();
+    crate::xnu_hiding::hide_our_threads();
 
     let Some(process) = process_with_id(id) else {
         return 0;
@@ -23,6 +24,8 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
     learn_where_the_threads_are_counted(&before, &look_at_the_task(process.task));
+    crate::xnu_hiding::a_thread_of_ours(bare_thread);
+
 
     if !woke_up(id, arena_here) {
         return 0;
@@ -145,6 +148,9 @@ fn tell_it_to_go(id: u32, placed: &Placed) {
 const LONG_ENOUGH_TO_LEAVE: u64 = 2_000_000;
 
 fn take_back_what_it_was_given(id: u32, placed: &Placed) {
+    crate::xnu_hiding::forget_the_threads_of(placed.arena);
+    crate::xnu_hiding::no_longer_a_thread_of_ours(placed.bare_thread);
+
     if let Some(terminate) = unsafe { _thread_terminate } {
         unsafe { terminate(placed.bare_thread) };
     }
@@ -518,6 +524,10 @@ fn start(task: *mut c_void, home: &Home) -> Option<*mut c_void> {
 }
 
 pub fn serve_what_the_copies_ask() {
+    for placed in unsafe { arenas() }.values() {
+        crate::xnu_hiding::take_note_of_what_a_copy_says(placed.arena);
+    }
+
     let asked: alloc::vec::Vec<(u32, u64)> = unsafe { arenas() }
         .iter()
         .map(|(id, placed)| (*id, placed.arena))

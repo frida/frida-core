@@ -32,6 +32,12 @@ unsafe extern "C" fn answer_the_bell(process: *mut c_void, asked: *mut c_void,
 {
     if unsafe { (*(asked as *const Asked)).value } == WHAT_ONLY_A_COPY_SAYS {
         RUNG.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+        if let Some(this_thread) = unsafe { _current_thread } {
+            crate::xnu_hiding::a_thread_of_ours(unsafe { this_thread() });
+        }
+
+
         crate::kernel::wake(crate::glib::wakeup_token());
         return 0;
     }
@@ -115,6 +121,7 @@ const WAITING_ON_AN_ADDRESS: u32 = 1;
 const EVERY_WAITER: u32 = 0x100;
 
 unsafe extern "C" {
+    static _current_thread: Option<unsafe extern "C" fn() -> *mut c_void>;
     pub static _sysent: usize;
     static _ulock_wake: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int>;
 }

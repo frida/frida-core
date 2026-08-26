@@ -183,6 +183,8 @@ pub const WAKE_WORD: u64 = 616;
 
 pub const BELL_WORD: u64 = 624;
 
+pub const OUR_THREADS: u64 = 656;
+
 pub const APPS_WANTED: u64 = 600;
 pub const APPS_ANSWER: u64 = 608;
 

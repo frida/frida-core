@@ -98,6 +98,8 @@ mod xnu_applications;
 #[cfg(feature = "xnu")]
 mod xnu_bell;
 #[cfg(feature = "xnu")]
+mod xnu_hiding;
+#[cfg(feature = "xnu")]
 mod xnu_injection;
 #[cfg(feature = "xnu")]
 mod xnu_libsystem;
@@ -1830,6 +1832,7 @@ fn handle_stop() -> HandlerResponse {
     {
         kernel::give_the_word_back();
         kernel::take_the_bell_down();
+        kernel::show_our_threads_again();
     }
 
     STOP_REQUESTED.store(true, Ordering::Release);

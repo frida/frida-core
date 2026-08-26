@@ -22,6 +22,7 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
     }
 
     let has_run = unsafe { ((arena + crate::xnu_relay::HAS_RUN) as *const u32).read_volatile() };
+    say_which_thread_this_is(arena);
     let served = has_run != 0 && become_a_thread_the_system_knows(arena);
     unsafe { ON_A_THREAD_THE_SYSTEM_KNOWS = served };
 
@@ -91,9 +92,31 @@ pub fn on_a_thread_the_system_knows() -> bool {
 
 static mut ON_A_THREAD_THE_SYSTEM_KNOWS: bool = false;
 
+pub fn say_which_thread_this_is(arena: u64) {
+    let number = crate::xnu_user_calls::this_thread_is();
+    if number == 0 {
+        return;
+    }
+
+    let said = (arena + crate::xnu_relay::OUR_THREADS) as *mut u64;
+    for step in 0..crate::xnu_hiding::MOST_OF_OURS_IN_ONE {
+        let at = unsafe { said.add(step) };
+        let held = unsafe { at.read_volatile() };
+        if held == number {
+            return;
+        }
+        if held == 0 {
+            unsafe { at.write_volatile(number) };
+            crate::xnu_bell::ring_the_bell();
+            return;
+        }
+    }
+}
+
 unsafe extern "C" fn user_worker(parameter: *mut core::ffi::c_void, _wait_result: i32) {
     let arena = parameter as u64;
     unsafe { ARENA = arena };
+    say_which_thread_this_is(arena);
 
     let context = unsafe { crate::adopt_js_context() };
     unsafe { crate::route_frames_through(arena) };

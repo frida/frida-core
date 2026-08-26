@@ -169,6 +169,10 @@ fn where_the_other_half_can_reach(token: *const u8) -> *const u8 {
     (arena + crate::xnu_relay::WAKE_WORD) as *const u8
 }
 
+pub fn this_thread_is() -> u64 {
+    unsafe { ask(WHICH_THREAD_THIS_IS, [0, 0, 0, 0]) as u64 }
+}
+
 fn yield_now() {
     give_up_the_processor();
 }
@@ -368,13 +372,33 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
         return 0;
     };
 
+    let errand = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Errand { entry, parameter }));
+
     let mut made = 0u64;
     let told = unsafe {
         (making.the_usual_way)(&mut made, core::ptr::null(),
-            crate::xnu_libsystem::signed_to_begin_at(core::mem::transmute(entry)), parameter)
+            crate::xnu_libsystem::signed_to_begin_at(say_which_one_first),
+            errand as *mut c_void)
     };
+    if told != 0 {
+        drop(unsafe { alloc::boxed::Box::from_raw(errand) });
+    }
 
     (told == 0) as isize
+}
+
+struct Errand {
+    entry: ThreadEntry,
+    parameter: *mut c_void,
+}
+
+unsafe extern "C" fn say_which_one_first(errand: *mut c_void) -> *mut c_void {
+    let errand = unsafe { alloc::boxed::Box::from_raw(errand as *mut Errand) };
+
+    crate::xnu_user::say_which_thread_this_is(crate::xnu_user::arena());
+    unsafe { (errand.entry)(errand.parameter, 0) };
+
+    core::ptr::null_mut()
 }
 
 const STACK: usize = 1024 * 1024;
@@ -543,6 +567,7 @@ const PROC_INFO: i64 = 336;
 
 const ABOUT_A_PROCESS: u64 = 2;
 const ABOUT_A_REGION: u64 = 7;
+const WHICH_THREAD_THIS_IS: i64 = 372;
 const ULOCK_WAIT: i64 = 515;
 const ULOCK_WAKE: i64 = 516;
 const SCHED_YIELD: i64 = 331;

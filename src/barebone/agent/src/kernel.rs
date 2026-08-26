@@ -21,6 +21,8 @@ pub use crate::xnu_applications::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_bell::*;
 #[cfg(feature = "xnu")]
+pub use crate::xnu_hiding::*;
+#[cfg(feature = "xnu")]
 pub use crate::xnu_injection::*;
 #[cfg(feature = "xnu")]
 pub use crate::xnu_processes::*;
