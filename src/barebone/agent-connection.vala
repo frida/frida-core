@@ -372,11 +372,19 @@ namespace Frida.Barebone {
 		public async void close (Cancellable? cancellable) throws IOError {
 			try {
 				yield execute_command (Command.STOP, new Variant.boolean (true), cancellable);
-				yield wait_for_agent_to_leave (cancellable);
+				if (flavor == null || flavor.stays_attached)
+					yield wait_for_agent_to_leave (cancellable);
 			} catch (GLib.Error e) {
 			}
 
 			io_cancellable.cancel ();
+
+			if (reading != null) {
+				try {
+					yield reading.future.wait_async (null);
+				} catch (GLib.Error e) {
+				}
+			}
 
 			try {
 				yield hostlink.close_async (Priority.DEFAULT, cancellable);
@@ -860,7 +868,7 @@ namespace Frida.Barebone {
 			pending_requests[request_id] = promise;
 
 			try {
-				yield output.write_all_async (frame.get_data (), Priority.DEFAULT, cancellable, null);
+				yield write_frame (frame, cancellable);
 			} catch (GLib.Error e) {
 				pending_requests.unset (request_id);
 				throw new Error.TRANSPORT ("%s", e.message);
@@ -894,6 +902,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void process_incoming_messages () {
+			reading = new Promise<bool> ();
 			try {
 				while (true) {
 					size_t header_size = 4;
@@ -984,7 +993,11 @@ namespace Frida.Barebone {
 				}
 			} catch (GLib.Error e) {
 			}
+
+			reading.resolve (true);
 		}
+
+		private Promise<bool>? reading;
 
 		private async void fill_until_n_bytes_available (size_t minimum) throws Error, IOError {
 			size_t available = input.get_available ();
@@ -1056,9 +1069,32 @@ namespace Frida.Barebone {
 		}
 
 		private async void send_reply (uint16 request_id, Variant payload) throws GLib.Error {
-			Bytes frame = frame_message (Command.REPLY, request_id, 0, payload);
-			yield output.write_all_async (frame.get_data (), Priority.DEFAULT, io_cancellable, null);
+			yield write_frame (frame_message (Command.REPLY, request_id, 0, payload), io_cancellable);
 		}
+
+		private async void write_frame (Bytes frame, Cancellable? cancellable) throws GLib.Error {
+			var ours = new Promise<bool> ();
+			var theirs = write_turn;
+			write_turn = ours;
+
+			if (theirs != null) {
+				try {
+					yield theirs.future.wait_async (null);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			try {
+				yield output.write_all_async (frame.get_data (), Priority.DEFAULT, cancellable,
+					null);
+			} finally {
+				ours.resolve (true);
+				if (write_turn == ours)
+					write_turn = null;
+			}
+		}
+
+		private Promise<bool>? write_turn;
 
 		private Bytes frame_message (Command command, uint16 request_id, uint destination, Variant payload) {
 			var message = new Variant ("(yquv)", (uint8) command, request_id, destination, payload);

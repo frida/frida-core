@@ -7,9 +7,15 @@ namespace Frida.Barebone {
 	internal interface KernelFlavor : Object {
 		public abstract async void prepare (Cancellable? cancellable) throws Error, IOError;
 		public abstract async void settle (Cancellable? cancellable) throws Error, IOError;
+
+		public abstract bool stays_attached { get; }
 	}
 
 	internal sealed class BareKernelFlavor : Object, KernelFlavor {
+		public bool stays_attached {
+			get { return true; }
+		}
+
 		private Machine machine;
 
 		public BareKernelFlavor (Machine machine) {
@@ -25,6 +31,11 @@ namespace Frida.Barebone {
 	}
 
 	internal sealed class XnuKernelFlavor : Object, KernelFlavor {
+		public bool stays_attached {
+			get { return !has_left; }
+		}
+
+		private bool has_left = false;
 		private Machine machine;
 		private uint64 kernel_base;
 		private SymbolInfo thread_block;
@@ -65,10 +76,12 @@ namespace Frida.Barebone {
 			var arm64 = machine as Arm64Machine;
 			bool leaving_is_safe = arm64 != null && arm64.physical_memory != null
 				&& Environment.get_variable ("FRIDA_BAREBONE_STAY") == null;
-			if (leaving_is_safe)
+			if (leaving_is_safe) {
 				yield gdb.detach (cancellable);
-			else
+				has_left = true;
+			} else {
 				yield gdb.continue (cancellable);
+			}
 		}
 
 		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Error, IOError {
@@ -86,6 +99,10 @@ namespace Frida.Barebone {
 	}
 
 	internal sealed class LinuxKernelFlavor : Object, KernelFlavor {
+		public bool stays_attached {
+			get { return true; }
+		}
+
 		private Machine machine;
 		private uint64 kernel_base;
 		private SymbolInfo schedule;
@@ -145,6 +162,10 @@ namespace Frida.Barebone {
 	}
 
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {
+		public bool stays_attached {
+			get { return true; }
+		}
+
 		private Machine machine;
 		private uint64 yield_point;
 
@@ -190,6 +211,10 @@ namespace Frida.Barebone {
 	}
 
 	internal sealed class WinNtKernelFlavor : Object, KernelFlavor {
+		public bool stays_attached {
+			get { return true; }
+		}
+
 		private Machine machine;
 		private uint64 yield_point;
 
