@@ -57,16 +57,23 @@ fn start_a_program() -> u32 {
     };
     put(crate::xnu_relay::SPAWN_ANSWER, crate::xnu_relay::NOTHING_WANTED);
     put(crate::xnu_relay::SPAWN_WANTED, 1);
+    crate::xnu_injection::wake_the_copy_at(arena);
 
     let answered = &mut || unsafe {
         ((arena + crate::xnu_relay::SPAWN_ANSWER) as *const u64).read_volatile()
     } != crate::xnu_relay::NOTHING_WANTED;
-    for _ in 0..LONG_ENOUGH_TO_START {
+    let began = crate::kernel::monotonic_micros();
+    loop {
         let said = unsafe {
             ((arena + crate::xnu_relay::SPAWN_ANSWER) as *const u64).read_volatile()
         };
         if said == crate::xnu_relay::NOTHING_WANTED {
-            crate::kernel::wait(crate::glib::wakeup_token(), None, answered);
+            let waited = (crate::kernel::monotonic_micros() - began) as u64;
+            if waited >= LONG_ENOUGH_TO_START {
+                break;
+            }
+            crate::kernel::wait(crate::glib::wakeup_token(),
+                Some(LONG_ENOUGH_TO_START - waited), answered);
             continue;
         }
 
@@ -115,7 +122,7 @@ fn the_one_about_to_run(arena: u64, since: u64) -> u32 {
     }
 }
 
-const LONG_ENOUGH_TO_COME_UP: u64 = 10_000_000;
+const LONG_ENOUGH_TO_COME_UP: u64 = 8_000_000;
 
 fn each_word_asked_for() -> &'static mut [u8; WORD_ROOM] {
     unsafe { (&raw mut ASKED_WORDS).as_mut().unwrap() }
@@ -126,7 +133,7 @@ static mut ASKED_BY: u16 = 0;
 static mut ASKED_WORDS: [u8; WORD_ROOM] = [0; WORD_ROOM];
 
 const WORD_ROOM: usize = crate::xnu_relay::SPAWN_WORDS_ROOM as usize;
-const LONG_ENOUGH_TO_START: usize = 20_000_000;
+const LONG_ENOUGH_TO_START: u64 = 8_000_000;
 
 pub fn gate_spawns(on: bool) {
     unsafe { GATING = on };

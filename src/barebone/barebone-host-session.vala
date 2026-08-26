@@ -542,7 +542,7 @@ namespace Frida {
 		}
 
 		private static string basename_of (string path) {
-			int start = path.last_index_of_char ('\\');
+			int start = int.max (path.last_index_of_char ('\\'), path.last_index_of_char ('/'));
 			return (start != -1) ? path[start + 1:] : path;
 		}
 

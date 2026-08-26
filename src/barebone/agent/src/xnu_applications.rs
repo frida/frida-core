@@ -29,6 +29,7 @@ pub fn each_application(found: &mut dyn FnMut(&[u8], &[u8], &[u8])) {
     let put = |at: u64, value: u64| unsafe { ((arena + at) as *mut u64).write_volatile(value) };
     put(crate::xnu_relay::APPS_ANSWER, crate::xnu_relay::NOTHING_WANTED);
     put(crate::xnu_relay::APPS_WANTED, 1);
+    crate::xnu_injection::wake_the_copy_at(arena);
 
     let answered = &mut || unsafe {
         ((arena + crate::xnu_relay::APPS_ANSWER) as *const u64).read_volatile()

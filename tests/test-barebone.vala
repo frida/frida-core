@@ -552,6 +552,20 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/enumerates-applications-in-live-guest", () => {
+			var h = new SlowHarness ((h) => enumerates_applications_in_live_guest.begin (
+				h as SlowHarness, xnu_config_from_environment (h as SlowHarness), "Magnifier",
+				"com.apple.Magnifier"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/hooks-before-resume-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_hooks_before_resume_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness),
+				"com.apple.Preferences"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/moves-frames-at-a-good-rate-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_moves_frames_at_a_good_rate_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -736,6 +750,71 @@ namespace Frida.BareboneTest {
 			uint pid = yield find_program (device, "fseventsd");
 			assert_true (pid != 0);
 			yield measure_the_flow (h, yield device.attach (pid, null, null), "fseventsd");
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_hooks_before_resume_in_live_guest (Harness h, BareboneConfig? config,
+			string program) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield device.spawn (program, null, null);
+			var session = yield device.attach (pid, null, null);
+
+			var script = yield session.create_script ("""
+				const image = Process.enumerateModules()[0];
+				let at = image.base.add(32);
+				let entry = null;
+				const howMany = image.base.add(16).readU32();
+				for (let i = 0; i !== howMany && entry === null; i++) {
+					const kind = at.readU32();
+					const length = at.add(4).readU32();
+					if (kind === 0x80000028)
+						entry = image.base.add(at.add(8).readU64());
+					at = at.add(length);
+				}
+				Interceptor.attach(entry, {
+					onEnter() {
+						send(['entered', image.name]);
+					}
+				});
+				send(['armed', image.name, entry.toString(), Process.enumerateModules().length]);
+			""", null, null);
+
+			bool armed = false;
+			bool entered = false;
+			script.message.connect ((json, data) => {
+				printerr ("\nHELD: %s\n", json);
+				if (json.contains ("armed"))
+					armed = true;
+				else if (json.contains ("entered"))
+					entered = true;
+			});
+			yield script.load (null);
+
+			while (!armed)
+				yield h.process_events ();
+
+			yield device.resume (pid, null);
+
+			while (!entered)
+				yield h.process_events ();
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
