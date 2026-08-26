@@ -546,6 +546,30 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_enumerates_processes_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_injects_into_process_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/enumerates-target-modules-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_enumerates_target_modules_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/hides-itself-from-the-process-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_hides_itself_from_the_process_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/answers-at-a-steady-pace-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_answers_at_a_steady_pace_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -703,6 +727,250 @@ namespace Frida.BareboneTest {
 		}
 
 		return config;
+	}
+
+	private async void xnu_enumerates_processes_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			var options = new ProcessQueryOptions ();
+			options.scope = FULL;
+			var processes = yield device.enumerate_processes (options, null);
+
+			assert_true (processes.size () > 10);
+
+			Process? first = null;
+			Process? board = null;
+			for (int i = 0; i != processes.size (); i++) {
+				var one = processes.get (i);
+				assert_true (one.name != "");
+				if (one.pid == 1)
+					first = one;
+				if (one.name == "backboardd")
+					board = one;
+			}
+
+			assert_nonnull (first);
+			assert_true (first.name == "launchd");
+			assert_nonnull (board);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_injects_into_process_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				send([Process.id, Process.platform, Process.arch, Process.pointerSize]);
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			assert_true (said.contains ("darwin"));
+			assert_true (said.contains ("arm64"));
+			assert_true (said.contains (pid.to_string ()));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_enumerates_target_modules_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const modules = Process.enumerateModules();
+				const first = modules[0];
+				const dyld = modules.find(m => m.name === 'dyld');
+				const system = modules.find(m => m.name.startsWith('libsystem_kernel'));
+				send([modules.length, first.name, dyld !== undefined, system !== undefined,
+					Module.getGlobalExportByName('mach_task_self') !== null]);
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			assert_true (said.contains ("backboardd"));
+			assert_true (said.contains ("true,true,true"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_hides_itself_from_the_process_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const p = (n) => Module.getGlobalExportByName(n);
+				const taskSelf = new NativeFunction(p('mach_task_self'), 'uint', []);
+				const threadSelf = new NativeFunction(p('mach_thread_self'), 'uint', []);
+				const taskThreads = new NativeFunction(p('task_threads'), 'int',
+					['uint', 'pointer', 'pointer']);
+				const suspend = new NativeFunction(p('thread_suspend'), 'int', ['uint']);
+				const resume = new NativeFunction(p('thread_resume'), 'int', ['uint']);
+				const procPidinfo = new NativeFunction(p('proc_pidinfo'), 'int',
+					['int', 'int', 'uint64', 'pointer', 'int']);
+				const getpid = new NativeFunction(p('getpid'), 'int', []);
+				const fromPort = new NativeFunction(p('pthread_from_mach_thread_np'), 'pointer',
+					['uint']);
+				const threadId = new NativeFunction(p('pthread_threadid_np'), 'int',
+					['pointer', 'pointer']);
+				const portNames = new NativeFunction(p('mach_port_names'), 'int',
+					['uint', 'pointer', 'pointer', 'pointer', 'pointer']);
+
+				const ours = threadSelf();
+				const ourId = Memory.alloc(8);
+				threadId(ptr(0), ourId);
+
+				let asked = false;
+				Interceptor.attach(p('mach_msg'), function () {
+					if (asked)
+						return;
+					asked = true;
+
+					const list = Memory.alloc(8), count = Memory.alloc(4);
+					taskThreads(taskSelf(), list, count);
+					const listed = count.readU32();
+
+					const info = Memory.alloc(256);
+					procPidinfo(getpid(), 4, 0, info, 256);
+					const counted = info.add(84).readU32();
+
+					const here = threadSelf();
+					let theirs = 0;
+					for (let i = 0; i !== listed; i++) {
+						const name = list.readPointer().add(i * 4).readU32();
+						if (name !== here && name !== ours)
+							theirs = name;
+					}
+					const refused = suspend(ours);
+					const allowed = suspend(theirs);
+					resume(theirs);
+
+					const names = Memory.alloc(8), nameCount = Memory.alloc(4);
+					const types = Memory.alloc(8), typeCount = Memory.alloc(4);
+					portNames(taskSelf(), names, nameCount, types, typeCount);
+					let onTheList = false;
+					const at = names.readPointer();
+					for (let i = 0; i !== nameCount.readU32(); i++) {
+						const thread = fromPort(at.add(i * 4).readU32());
+						if (thread.isNull())
+							continue;
+						const id = Memory.alloc(8);
+						threadId(thread, id);
+						if (id.readU64().equals(ourId.readU64()))
+							onTheList = true;
+					}
+
+					send([listed, counted, refused, allowed, onTheList]);
+				});
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			var payload = said.substring (said.index_of ("[") + 1);
+			var parts = payload.substring (0, payload.index_of ("]")).split (",");
+			assert_true (parts.length == 5);
+
+			assert_true (parts[0] == parts[1]);
+			assert_true (parts[2] != "0");
+			assert_true (parts[3] == "0");
+			assert_true (parts[4] == "false");
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void xnu_answers_at_a_steady_pace_in_live_guest (Harness h,

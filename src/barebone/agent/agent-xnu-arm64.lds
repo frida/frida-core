@@ -78,7 +78,6 @@ SECTIONS {
     _convert_port_to_thread_read = .; . += 8;
     _convert_port_to_thread_inspect = .; . += 8;
   }
-     same pages; everything below it each copy needs its own of. */
   . = ALIGN(4096);
   _agent_private_start = .;
   .data.rel.ro : {

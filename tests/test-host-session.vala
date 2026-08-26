@@ -4483,8 +4483,16 @@ namespace Frida.HostSessionTest {
 					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
 
 					var script = yield session.create_script (
-						"send(`first breath: pid ${Process.id} on ${Process.arch}, " +
-						"${Process.enumerateModules().length} modules loaded so far`);\n" +
+						"const p = (n) => Module.getGlobalExportByName(n);\n" +
+						"const info = new NativeFunction(p('task_info'), 'int',\n" +
+						"  ['uint','int','pointer','pointer']);\n" +
+						"const out = Memory.alloc(64), n = Memory.alloc(4);\n" +
+						"n.writeU32(8);\n" +
+						"info(new NativeFunction(p('mach_task_self'), 'uint', [])(), 17, out, n);\n" +
+						"const all = out.readPointer();\n" +
+						"send(`first breath: pid ${Process.id}, " +
+						"${Process.enumerateModules().length} modules, " +
+						"libSystemInitialized=${all.add(25).readU8()}`);\n" +
 						"setTimeout(() => send(`still here, now ` +\n" +
 						"  `${Process.enumerateModules().length} modules`), 3000);",
 						make_parameters_dict (), cancellable);
