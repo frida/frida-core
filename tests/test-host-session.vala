@@ -4541,6 +4541,19 @@ namespace Frida.HostSessionTest {
 						yield instrument_the_spawn (h, prov, host_session, born, cancellable);
 
 						yield host_session.resume (spawned, cancellable);
+
+						var settling = new Timer ();
+						while (settling.elapsed () < 4.0)
+							yield h.process_events ();
+
+						bool alive = false;
+						foreach (var p in yield host_session.enumerate_processes (
+								make_parameters_dict (), cancellable)) {
+							if (p.pid == spawned)
+								alive = true;
+						}
+						printerr ("[*] %u is %s after being let go\n", spawned,
+							alive ? "still there" : "gone");
 					}
 
 					if (Environment.get_variable ("FRIDA_BAREBONE_GATE") != null) {
@@ -4551,12 +4564,16 @@ namespace Frida.HostSessionTest {
 							printerr ("[*] Message: %s\n", message);
 						});
 						unowned string? wanted = Environment.get_variable ("FRIDA_BAREBONE_GATE");
+						var touched = new Gee.ArrayList<uint> ();
+						var untouched = new Gee.ArrayList<uint> ();
 						host_session.spawn_added.connect ((info) => {
 							printerr ("[*] Spawned: %u %s\n", info.pid, info.identifier);
 							seen++;
 
-							if (wanted != "1" && info.identifier.contains (wanted)) {
+							bool ours = (seen % 2) == 1;
+							if (wanted != "1" && info.identifier.contains (wanted) && ours) {
 								attempted++;
+								touched.add (info.pid);
 								instrument_the_spawn.begin (h, prov, host_session, info,
 									cancellable, (obj, res) => {
 										instrumented++;
@@ -4565,6 +4582,8 @@ namespace Frida.HostSessionTest {
 								return;
 							}
 
+							if (wanted != "1" && info.identifier.contains (wanted))
+								untouched.add (info.pid);
 							host_session.resume.begin (info.pid, cancellable);
 						});
 
@@ -4576,6 +4595,23 @@ namespace Frida.HostSessionTest {
 							yield h.process_events ();
 						printerr ("[*] saw %u spawns, tried %u, got into %u of them\n", seen, attempted,
 							instrumented);
+
+						var alive = new Gee.HashSet<uint> ();
+						foreach (var p in yield host_session.enumerate_processes (
+								make_parameters_dict (), cancellable))
+							alive.add (p.pid);
+
+						uint ours_left = 0, theirs_left = 0;
+						foreach (var pid in touched) {
+							if (alive.contains (pid))
+								ours_left++;
+						}
+						foreach (var pid in untouched) {
+							if (alive.contains (pid))
+								theirs_left++;
+						}
+						printerr ("[*] still there: %u of %u we were in, %u of %u we were not\n",
+							ours_left, touched.size, theirs_left, untouched.size);
 
 						yield host_session.disable_spawn_gating (cancellable);
 					}
