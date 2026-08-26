@@ -85,11 +85,21 @@ fn start_a_program() -> u32 {
     gate_spawns(true);
     look_for_new_processes();
 
-    let Some(arena) = crate::xnu_injection::a_copy_that_can_start_a_program() else {
+    let words = each_word_asked_for();
+    let asked_for_an_application = !words[..words.iter().position(|byte| *byte == 0).unwrap_or(0)]
+        .contains(&b'/');
+    let helper = if asked_for_an_application {
+        crate::xnu_injection::a_copy_that_can_ask_the_system()
+    } else {
+        crate::xnu_injection::a_copy_that_can_start_a_program()
+    };
+
+    let Some(arena) = helper else {
         return 0;
     };
 
-    let words = each_word_asked_for();
+    let since = unsafe { HOW_MANY_HELD };
+
     for (at, byte) in words.iter().enumerate() {
         unsafe { ((arena + crate::xnu_relay::SPAWN_WORDS + at as u64) as *mut u8)
             .write_volatile(*byte) };
@@ -114,6 +124,9 @@ fn start_a_program() -> u32 {
         }
 
         put(crate::xnu_relay::SPAWN_WANTED, crate::xnu_relay::NOTHING_WANTED);
+        if said == crate::xnu_relay::THE_SYSTEM_IS_STARTING_IT {
+            return the_one_about_to_run(arena, since);
+        }
         if said != crate::xnu_relay::DONE {
             return 0;
         }
@@ -124,6 +137,38 @@ fn start_a_program() -> u32 {
 
     0
 }
+
+fn the_one_about_to_run(arena: u64, since: u64) -> u32 {
+    let mut called = [0u8; NAME_ROOM];
+    for (step, byte) in called.iter_mut().enumerate() {
+        *byte = unsafe {
+            ((arena + crate::xnu_relay::SPAWN_WORDS + step as u64) as *const u8).read_volatile()
+        };
+    }
+    let called = &called[..called.iter().position(|byte| *byte == 0).unwrap_or(0)];
+    if called.is_empty() {
+        return 0;
+    }
+
+    let began = crate::kernel::monotonic_micros();
+    loop {
+        let newest = each_held().iter()
+            .filter(|held| held.waiting && held.seen_at > since && held.is_called(called))
+            .max_by_key(|held| held.seen_at);
+        if let Some(held) = newest {
+            return held.id;
+        }
+
+        let waited = (crate::kernel::monotonic_micros() - began) as u64;
+        if waited >= LONG_ENOUGH_TO_COME_UP {
+            return 0;
+        }
+        crate::kernel::wait(crate::glib::wakeup_token(), Some(LONG_ENOUGH_TO_COME_UP - waited),
+            &mut || false);
+    }
+}
+
+const LONG_ENOUGH_TO_COME_UP: u64 = 10_000_000;
 
 fn each_word_asked_for() -> &'static mut [u8; WORD_ROOM] {
     unsafe { (&raw mut ASKED_WORDS).as_mut().unwrap() }
@@ -167,21 +212,20 @@ pub fn tell_of_held_spawns(say: &mut dyn FnMut(u32, &[u8])) {
 }
 
 pub fn resume_process(id: u32) -> bool {
-    let Some(held) = each_held().iter_mut().find(|held| held.waiting && held.id == id) else {
-        return false;
-    };
-    held.waiting = false;
+    for held in each_held().iter_mut().filter(|held| held.waiting && held.id == id) {
+        held.waiting = false;
 
-    if held.holding_its_threads {
-        if let Some(start) = unsafe { _thread_resume } {
-            for thread in held.threads.iter().take_while(|thread| !thread.is_null()) {
-                unsafe { start(*thread) };
+        if held.holding_its_threads {
+            if let Some(start) = unsafe { _thread_resume } {
+                for thread in held.threads.iter().take_while(|thread| !thread.is_null()) {
+                    unsafe { start(*thread) };
+                }
             }
+            continue;
         }
-        return true;
-    }
 
-    say_the_word(held.task, held.flags);
+        say_the_word(held.task, held.flags);
+    }
 
     true
 }
@@ -293,6 +337,8 @@ fn note_it(task: *mut c_void, flags: u32) -> Option<&'static Held> {
     }
 
     held.waiting = true;
+    unsafe { HOW_MANY_HELD += 1 };
+    held.seen_at = unsafe { HOW_MANY_HELD };
 
     crate::kernel::wake(crate::glib::wakeup_token());
 
@@ -303,9 +349,18 @@ fn each_held() -> &'static mut [Held; HOW_MANY_AT_ONCE] {
     unsafe { (&raw mut HELD).as_mut().unwrap() }
 }
 
+impl Held {
+    fn is_called(&self, called: &[u8]) -> bool {
+        let length = self.name.iter().position(|byte| *byte == 0).unwrap_or(self.name.len());
+
+        self.name[..length] == called[..length.min(called.len())]
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Held {
     id: u32,
+    seen_at: u64,
     name: [u8; NAME_ROOM],
     task: *mut c_void,
     threads: [*mut c_void; MOST_THREADS_HELD],
@@ -318,8 +373,10 @@ struct Held {
 static mut GATING: bool = false;
 static mut TAKEN_OVER: bool = false;
 static mut THE_WORD_TO_GO: Option<unsafe extern "C" fn(*mut c_void, u32)> = None;
+static mut HOW_MANY_HELD: u64 = 0;
 static mut HELD: [Held; HOW_MANY_AT_ONCE] = [Held {
     id: 0,
+    seen_at: 0,
     name: [0; NAME_ROOM],
     task: core::ptr::null_mut(),
     threads: [core::ptr::null_mut(); MOST_THREADS_HELD],

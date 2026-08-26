@@ -167,6 +167,8 @@ pub const NOTHING_WANTED: u64 = 0;
 pub const DONE: u64 = 1;
 pub const REFUSED: u64 = 2;
 
+pub const THE_SYSTEM_IS_STARTING_IT: u64 = 3;
+
 pub const TO_COPY: Ring = Ring {
     buffer: 0x1000,
     head: 256,

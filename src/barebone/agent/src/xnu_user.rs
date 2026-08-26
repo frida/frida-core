@@ -143,14 +143,59 @@ fn start_what_the_other_half_asked_for(arena: u64) {
         at += 1;
     }
 
-    let id = if how_many == 0 { 0 } else { start_a_program(said[0], &said) };
+    if how_many == 0 {
+        answer_what_was_started(arena, 0);
+        return;
+    }
 
+    let asked_for = unsafe {
+        core::slice::from_raw_parts(said[0], length_of(said[0]))
+    };
+    if !asked_for.contains(&b'/') {
+        started_by_the_system(arena, asked_for);
+        return;
+    }
+
+    answer_what_was_started(arena, start_a_program(said[0], &said));
+}
+
+fn started_by_the_system(arena: u64, identifier: &[u8]) {
+    let mut runs = [0u8; MOST_A_NAME_IS];
+    if !crate::xnu_applications::start_the_one_called(identifier, &mut runs) {
+        answer_what_was_started(arena, 0);
+        return;
+    }
+
+    let at = arena + crate::xnu_relay::SPAWN_WORDS;
+    for (step, byte) in runs.iter().enumerate() {
+        unsafe { ((at + step as u64) as *mut u8).write_volatile(*byte) };
+    }
+
+    unsafe {
+        ((arena + crate::xnu_relay::SPAWN_ID) as *mut u64).write_volatile(0);
+        ((arena + crate::xnu_relay::SPAWN_ANSWER) as *mut u64)
+            .write_volatile(crate::xnu_relay::THE_SYSTEM_IS_STARTING_IT);
+    }
+}
+
+fn answer_what_was_started(arena: u64, id: u32) {
     unsafe {
         ((arena + crate::xnu_relay::SPAWN_ID) as *mut u64).write_volatile(id as u64);
         ((arena + crate::xnu_relay::SPAWN_ANSWER) as *mut u64).write_volatile(
             if id != 0 { crate::xnu_relay::DONE } else { crate::xnu_relay::REFUSED });
     }
 }
+
+fn length_of(said: *const u8) -> usize {
+    let mut length = 0;
+    while unsafe { said.add(length).read_volatile() } != 0 {
+        length += 1;
+    }
+
+    length
+}
+
+const MOST_A_NAME_IS: usize = 256;
 
 fn start_a_program(program: *const u8, words: &[*const u8]) -> u32 {
     let Some(start) = crate::xnu_libsystem::function_named(b"/libsystem_kernel.dylib",

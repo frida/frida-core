@@ -73,6 +73,18 @@ static mut ASKED_BY: u16 = 0;
 
 const LONG_ENOUGH_TO_LOOK: u64 = 20_000_000_000;
 
+pub fn start_the_one_called(identifier: &[u8], runs: &mut [u8; MOST_ONE_SAYS]) -> bool {
+    let Some(asking) = AskingTheSystem::found() else {
+        return false;
+    };
+
+    if !asking.what_it_runs(identifier, runs) {
+        return false;
+    }
+
+    asking.start_it(identifier)
+}
+
 pub fn say_what_is_installed(arena: u64) {
     let mut at = arena + crate::xnu_relay::SAYING;
     let past = at + crate::xnu_relay::SAYING_ROOM - (3 * MOST_ONE_SAYS) as u64;
@@ -107,6 +119,8 @@ struct AskingTheSystem {
     how_many: unsafe extern "C" fn(*const c_void) -> isize,
     the_one_at: unsafe extern "C" fn(*const c_void, isize) -> *const c_void,
     text_into: unsafe extern "C" fn(*const c_void, *mut u8, isize, i32) -> i32,
+    text_of: unsafe extern "C" fn(*const c_void, *const u8, i32) -> *const c_void,
+    let_go: unsafe extern "C" fn(*const c_void),
 }
 
 impl AskingTheSystem {
@@ -135,6 +149,8 @@ impl AskingTheSystem {
             how_many: unsafe { core::mem::transmute(foundation(b"_CFArrayGetCount")?) },
             the_one_at: unsafe { core::mem::transmute(foundation(b"_CFArrayGetValueAtIndex")?) },
             text_into: unsafe { core::mem::transmute(foundation(b"_CFStringGetCString")?) },
+            text_of: unsafe { core::mem::transmute(foundation(b"_CFStringCreateWithCString")?) },
+            let_go: unsafe { core::mem::transmute(foundation(b"_CFRelease")?) },
         };
 
         unsafe { ASKING = Some(found) };
@@ -168,6 +184,75 @@ impl AskingTheSystem {
         }
     }
 
+    fn what_it_runs(&self, identifier: &[u8], runs: &mut [u8; MOST_ONE_SAYS]) -> bool {
+        let mut found = false;
+        self.each_one(&mut |named, program, _shown| {
+            if found || named != identifier {
+                return;
+            }
+
+            let from = program.iter().rposition(|byte| *byte == b'/').map_or(0, |at| at + 1);
+            let name = &program[from..];
+            runs[..name.len().min(MOST_ONE_SAYS)]
+                .copy_from_slice(&name[..name.len().min(MOST_ONE_SAYS)]);
+            found = true;
+        });
+
+        found
+    }
+
+    fn start_it(&self, identifier: &[u8]) -> bool {
+        let Some(start) = what_starts_applications() else {
+            return false;
+        };
+
+        type Start = unsafe extern "C" fn(*const c_void, *const c_void, i32) -> u32;
+        let start: Start = unsafe { core::mem::transmute(start) };
+
+        let named = unsafe {
+            (self.text_of)(core::ptr::null(), identifier.as_ptr(), WHAT_TEXT_IS_KEPT_AS)
+        };
+        if named.is_null() {
+            return false;
+        }
+
+        let asked = self.asking_it_to_unlock_first();
+        let went = unsafe { start(named, asked, NOT_HELD_BY_THE_SYSTEM) };
+        unsafe { (self.let_go)(named) };
+        if !asked.is_null() {
+            unsafe { (self.let_go)(asked) };
+        }
+
+        went == WENT_WELL
+    }
+
+    fn asking_it_to_unlock_first(&self) -> *const c_void {
+        let (Some(unlock), Some(yes), Some(dictionary_of), Some(keys), Some(values)) = (
+            crate::xnu_libsystem::function_named(b"/SpringBoardServices",
+                b"_SBSApplicationLaunchOptionUnlockDeviceKey"),
+            crate::xnu_libsystem::function_named(b"/CoreFoundation", b"_kCFBooleanTrue"),
+            crate::xnu_libsystem::function_named(b"/CoreFoundation", b"_CFDictionaryCreate"),
+            crate::xnu_libsystem::function_named(b"/CoreFoundation",
+                b"_kCFTypeDictionaryKeyCallBacks"),
+            crate::xnu_libsystem::function_named(b"/CoreFoundation",
+                b"_kCFTypeDictionaryValueCallBacks"),
+        ) else {
+            return core::ptr::null();
+        };
+
+        type DictionaryOf = unsafe extern "C" fn(*const c_void, *const *const c_void,
+            *const *const c_void, isize, *const c_void, *const c_void) -> *const c_void;
+        let dictionary_of: DictionaryOf = unsafe { core::mem::transmute(dictionary_of) };
+
+        let key = [unsafe { (unlock as *const *const c_void).read() }];
+        let value = [unsafe { (yes as *const *const c_void).read() }];
+
+        unsafe {
+            dictionary_of(core::ptr::null(), key.as_ptr(), value.as_ptr(), 1,
+                keys as *const c_void, values as *const c_void)
+        }
+    }
+
     fn class(&self, named: &[u8]) -> *const c_void {
         unsafe { (self.class_named)(named.as_ptr()) }
     }
@@ -191,6 +276,15 @@ impl AskingTheSystem {
     }
 }
 
+fn what_starts_applications() -> Option<u64> {
+    open_the_framework(
+        c"/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices"
+            .as_ptr() as *const u8);
+
+    crate::xnu_libsystem::function_named(b"/SpringBoardServices",
+        b"_SBSLaunchApplicationWithIdentifierAndLaunchOptions")
+}
+
 fn open_the_framework(path: *const u8) {
     let Some(open) = crate::xnu_libsystem::function_named(b"/libdyld.dylib", b"_dlopen") else {
         return;
@@ -210,3 +304,5 @@ static mut ASKING: Option<AskingTheSystem> = None;
 const WHEN_IT_IS_ASKED_FOR: i32 = 2;
 const WHAT_TEXT_IS_KEPT_AS: i32 = 0x0800_0100;
 const MOST_ONE_SAYS: usize = 256;
+const NOT_HELD_BY_THE_SYSTEM: i32 = 0;
+const WENT_WELL: u32 = 0;
