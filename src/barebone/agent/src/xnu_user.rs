@@ -81,7 +81,9 @@ fn become_a_thread_the_system_knows(arena: u64) -> bool {
 unsafe extern "C" fn serve_from_a_proper_thread(arena: *mut core::ffi::c_void)
     -> *mut core::ffi::c_void
 {
+    crate::xnu_unlisted::leave_the_list();
     unsafe { user_worker(arena, 0) };
+    crate::xnu_unlisted::join_the_list_again();
 
     core::ptr::null_mut()
 }

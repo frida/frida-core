@@ -103,6 +103,7 @@ mod xnu_hiding;
 mod xnu_injection;
 #[cfg(feature = "xnu")]
 mod xnu_libsystem;
+mod xnu_unlisted;
 #[cfg(feature = "xnu")]
 mod xnu_mapped;
 #[cfg(feature = "xnu")]

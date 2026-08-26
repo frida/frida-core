@@ -396,7 +396,9 @@ unsafe extern "C" fn say_which_one_first(errand: *mut c_void) -> *mut c_void {
     let errand = unsafe { alloc::boxed::Box::from_raw(errand as *mut Errand) };
 
     crate::xnu_user::say_which_thread_this_is(crate::xnu_user::arena());
+    crate::xnu_unlisted::leave_the_list();
     unsafe { (errand.entry)(errand.parameter, 0) };
+    crate::xnu_unlisted::join_the_list_again();
 
     core::ptr::null_mut()
 }
