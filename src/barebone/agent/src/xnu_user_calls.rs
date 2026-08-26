@@ -474,8 +474,39 @@ pub fn take_memory(size: usize) -> Option<u64> {
 
 fn write_down_what_we_took(address: u64, size: usize) {
     let Some(taken) = what_we_took() else {
+        hold_it_until_there_is_somewhere_to_say_it(address, size);
         return;
     };
+
+    for (at, size) in unsafe { held_until_there_was() } {
+        if *at != 0 {
+            say_it(taken, *at, *size);
+            *at = 0;
+        }
+    }
+
+    say_it(taken, address, size as u64);
+}
+
+fn hold_it_until_there_is_somewhere_to_say_it(address: u64, size: usize) {
+    for (at, room) in unsafe { held_until_there_was() } {
+        if *at == 0 {
+            *room = size as u64;
+            *at = address;
+            return;
+        }
+    }
+}
+
+unsafe fn held_until_there_was() -> &'static mut [(u64, u64); BEFORE_WE_KNEW] {
+    unsafe { (&raw mut HELD).as_mut().unwrap() }
+}
+
+static mut HELD: [(u64, u64); BEFORE_WE_KNEW] = [(0, 0); BEFORE_WE_KNEW];
+
+const BEFORE_WE_KNEW: usize = 32;
+
+fn say_it(taken: *mut u64, address: u64, size: u64) {
 
     for step in 0..crate::xnu_relay::MOST_WE_TAKE {
         let at = unsafe { taken.add(1 + step * 2) };
@@ -483,7 +514,7 @@ fn write_down_what_we_took(address: u64, size: usize) {
             continue;
         }
         unsafe {
-            at.add(1).write_volatile(size as u64);
+            at.add(1).write_volatile(size);
             at.write_volatile(address);
             if taken.read_volatile() < (step + 1) as u64 {
                 taken.write_volatile((step + 1) as u64);
@@ -494,6 +525,13 @@ fn write_down_what_we_took(address: u64, size: usize) {
 }
 
 fn cross_out_what_we_gave_back(address: u64) {
+    for (at, _) in unsafe { held_until_there_was() } {
+        if *at == address {
+            *at = 0;
+            return;
+        }
+    }
+
     let Some(taken) = what_we_took() else {
         return;
     };

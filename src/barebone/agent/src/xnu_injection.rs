@@ -157,19 +157,53 @@ fn take_back_what_it_was_given(id: u32, placed: &Placed) {
         unsafe { terminate(placed.bare_thread) };
     }
 
+    let process = process_with_id(id);
+    let map = process.as_ref().map(|process| process.map);
+
+    what_the_copy_took(placed, &mut |at, size| unsafe { give_memory_back(map, at, size) });
+
     unsafe { give_memory_back(ourselves(), placed.image_here, crate::own_range().1 as u64) };
     unsafe { give_memory_back(ourselves(), placed.arena, crate::xnu_relay::ARENA_SIZE) };
 
-    let Some(process) = process_with_id(id) else {
+    let Some(process) = process else {
         return;
     };
-    let map = Some(process.map);
     unsafe {
         give_memory_back(map, placed.code, crate::own_range().1 as u64);
         give_memory_back(map, placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
         give_memory_back(map, placed.stack, STACK);
         release_process(process.handle);
     }
+}
+
+fn what_the_copy_took(placed: &Placed, found: &mut dyn FnMut(u64, u64)) {
+    let taken = (placed.arena + crate::xnu_relay::WHAT_WE_TOOK) as *const u64;
+    let how_many = (unsafe { taken.read_volatile() } as usize)
+        .min(crate::xnu_relay::MOST_WE_TAKE);
+
+    for step in 0..how_many {
+        let at = unsafe { taken.add(1 + step * 2).read_volatile() };
+        if at != 0 {
+            found(at, unsafe { taken.add(2 + step * 2).read_volatile() });
+        }
+    }
+}
+
+struct Kept {
+    code: u64,
+    map: *mut c_void,
+}
+
+unsafe fn kept_images() -> &'static mut alloc::collections::BTreeMap<u32, Kept> {
+    unsafe { (&raw mut KEPT).as_mut().unwrap() }
+}
+
+static mut KEPT: alloc::collections::BTreeMap<u32, Kept> = alloc::collections::BTreeMap::new();
+
+fn where_a_copy_has_been(id: u32, map: *mut c_void) -> Option<u64> {
+    let kept = unsafe { kept_images() }.get(&id)?;
+
+    (kept.map == map).then_some(kept.code)
 }
 
 unsafe fn give_memory_back(map: Option<*mut c_void>, address: u64, size: u64) {
@@ -311,16 +345,7 @@ pub fn what_we_have_in(map: *mut c_void, found: &mut dyn FnMut(u64, u64)) {
         found(placed.code, crate::own_range().1 as u64);
         found(placed.stack, STACK);
 
-        let taken = (placed.arena + crate::xnu_relay::WHAT_WE_TOOK) as *const u64;
-        let how_many = (unsafe { taken.read_volatile() } as usize)
-            .min(crate::xnu_relay::MOST_WE_TAKE);
-        for step in 0..how_many {
-            let at = unsafe { taken.add(1 + step * 2).read_volatile() };
-            if at == 0 {
-                continue;
-            }
-            found(at, unsafe { taken.add(2 + step * 2).read_volatile() });
-        }
+        what_the_copy_took(placed, found);
     }
 }
 
