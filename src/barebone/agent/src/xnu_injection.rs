@@ -4,6 +4,10 @@ use core::ffi::{c_int, c_void};
 pub fn inject_into_process(id: u32) -> u32 {
     crate::xnu_bell::hang_the_bell();
 
+    if !wait_until_it_can_take_one(id) {
+        return 0;
+    }
+
     let Some(process) = process_with_id(id) else {
         return 0;
     };
@@ -21,7 +25,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    if !woke_up(arena_here) {
+    if !woke_up(id, arena_here) {
         return 0;
     }
 
@@ -93,6 +97,24 @@ static mut ASKED: u32 = 0;
 
 const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
 
+fn wait_until_it_can_take_one(id: u32) -> bool {
+    let ready = &mut || crate::xnu_spawn::ready_for_a_copy(id);
+
+    let began = crate::kernel::monotonic_micros();
+    while !ready() {
+        let waited = (crate::kernel::monotonic_micros() - began) as u64;
+        if waited >= LONG_ENOUGH_TO_GET_THERE || !process_is_alive(id) {
+            return false;
+        }
+        crate::kernel::wait(crate::glib::wakeup_token(), Some(LONG_ENOUGH_TO_GET_THERE - waited),
+            ready);
+    }
+
+    true
+}
+
+const LONG_ENOUGH_TO_GET_THERE: u64 = 5_000_000;
+
 pub fn stop_copies() {
     let everywhere: alloc::vec::Vec<u32> = unsafe { arenas() }.keys().copied().collect();
     for id in everywhere {
@@ -113,6 +135,10 @@ pub fn detach_from_process(id: u32) -> bool {
 }
 
 fn tell_it_to_go(id: u32, placed: &Placed) {
+    if !process_is_alive(id) {
+        return;
+    }
+
     unsafe {
         ((placed.arena + crate::xnu_relay::STOP_REQUEST) as *mut u32).write_volatile(1)
     };
@@ -126,7 +152,7 @@ fn tell_it_to_go(id: u32, placed: &Placed) {
     let began = crate::kernel::monotonic_micros();
     while !has_stopped() {
         let waited = (crate::kernel::monotonic_micros() - began) as u64;
-        if waited >= LONG_ENOUGH_TO_LEAVE {
+        if waited >= LONG_ENOUGH_TO_LEAVE || !process_is_alive(id) {
             return;
         }
         crate::kernel::wait(crate::glib::wakeup_token(), Some(LONG_ENOUGH_TO_LEAVE - waited),
@@ -134,7 +160,7 @@ fn tell_it_to_go(id: u32, placed: &Placed) {
     }
 }
 
-const LONG_ENOUGH_TO_LEAVE: u64 = 30_000_000;
+const LONG_ENOUGH_TO_LEAVE: u64 = 2_000_000;
 
 fn take_back_what_it_was_given(id: u32, placed: &Placed) {
     if let Some(terminate) = unsafe { _thread_terminate } {
@@ -260,13 +286,13 @@ unsafe fn arenas() -> &'static mut alloc::collections::BTreeMap<u32, Placed> {
 
 static mut ARENAS: alloc::collections::BTreeMap<u32, Placed> = alloc::collections::BTreeMap::new();
 
-fn woke_up(arena: u64) -> bool {
+fn woke_up(id: u32, arena: u64) -> bool {
     let is_up = &mut || unsafe { (arena as *const u64).read_volatile() } == crate::xnu_user::AWAKE;
 
     let began = crate::kernel::monotonic_micros();
     while !is_up() {
         let waited = (crate::kernel::monotonic_micros() - began) as u64;
-        if waited >= LONG_ENOUGH_TO_COME_UP {
+        if waited >= LONG_ENOUGH_TO_COME_UP || !process_is_alive(id) {
             return false;
         }
         crate::kernel::wait(crate::glib::wakeup_token(),
@@ -276,7 +302,7 @@ fn woke_up(arena: u64) -> bool {
     true
 }
 
-const LONG_ENOUGH_TO_COME_UP: u64 = 30_000_000;
+const LONG_ENOUGH_TO_COME_UP: u64 = 10_000_000;
 
 pub struct Process {
     pub handle: *mut c_void,

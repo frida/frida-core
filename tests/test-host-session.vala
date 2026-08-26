@@ -4484,12 +4484,18 @@ namespace Frida.HostSessionTest {
 
 					var script = yield session.create_script (
 						"send(`first breath: pid ${Process.id} on ${Process.arch}, " +
-						"${Process.enumerateModules().length} modules loaded so far`);",
+						"${Process.enumerateModules().length} modules loaded so far`);\n" +
+						"setTimeout(() => send(`still here, now ` +\n" +
+						"  `${Process.enumerateModules().length} modules`), 3000);",
 						make_parameters_dict (), cancellable);
 					yield session.load_script (script, cancellable);
 
 					var waited = new Timer ();
 					while (waited.elapsed () < 2.0)
+						yield h.process_events ();
+
+					yield host_session.resume (info.pid, cancellable);
+					while (waited.elapsed () < 6.0)
 						yield h.process_events ();
 
 					if (Environment.get_variable ("FRIDA_BAREBONE_STAY_IN") == null)

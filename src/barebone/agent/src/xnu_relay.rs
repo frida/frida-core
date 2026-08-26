@@ -5,10 +5,16 @@ use alloc::vec::Vec;
 use crate::ring::{Ring, Taken};
 
 pub fn forward_frame(arena: u64, frame: &[u8]) -> bool {
-    unsafe { waiting() }.entry(arena).or_default().push_back(frame.to_vec());
+    unsafe { waiting() }.entry(arena).or_default().push_back(Going { frame: frame.to_vec(),
+        written: 0 });
     send_what_waits(arena);
 
     true
+}
+
+struct Going {
+    frame: Vec<u8>,
+    written: usize,
 }
 
 pub fn serve_waiting_frames() {
@@ -62,10 +68,30 @@ pub fn forget(arena: u64) {
 fn send_what_waits(arena: u64) {
     let frames = unsafe { waiting() }.get_mut(&arena).unwrap();
 
-    while let Some(frame) = frames.front_mut() {
-        write_frame(&TO_COPY, arena, frame, crate::xnu_injection::wake_the_copy_at);
+    while let Some(going) = frames.front_mut() {
+        if !write_what_fits(&TO_COPY, arena, going) {
+            crate::xnu_injection::wake_the_copy_at(arena);
+            TO_COPY.ask_for_room(arena);
+            return;
+        }
         frames.pop_front();
+        crate::xnu_injection::wake_the_copy_at(arena);
     }
+}
+
+fn write_what_fits(ring: &Ring, arena: u64, going: &mut Going) -> bool {
+    ring.take_lock(arena, rest);
+
+    while going.written < going.frame.len() {
+        match ring.write(arena, arena + ring.buffer, &going.frame, going.written) {
+            Some(now) => going.written = now,
+            None => break,
+        }
+    }
+
+    ring.let_lock_go(arena);
+
+    going.written == going.frame.len()
 }
 
 fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
@@ -123,11 +149,11 @@ unsafe fn holds() -> &'static mut BTreeMap<(u64, u64), Vec<u8>> {
 
 static mut HOLDS: BTreeMap<(u64, u64), Vec<u8>> = BTreeMap::new();
 
-unsafe fn waiting() -> &'static mut BTreeMap<u64, VecDeque<Vec<u8>>> {
+unsafe fn waiting() -> &'static mut BTreeMap<u64, VecDeque<Going>> {
     unsafe { (&raw mut WAITING).as_mut().unwrap() }
 }
 
-static mut WAITING: BTreeMap<u64, VecDeque<Vec<u8>>> = BTreeMap::new();
+static mut WAITING: BTreeMap<u64, VecDeque<Going>> = BTreeMap::new();
 
 pub const ARENA_SIZE: u64 = 0x1000 + (2 * FRAME_BUFFER_SIZE as u64) + SAYING_ROOM;
 
