@@ -4,6 +4,7 @@ use core::ffi::c_void;
 
 pub fn hide_our_threads() {
     hide_us_from_the_thread_list();
+    say_no_port_names_one_of_ours();
     hide_what_we_have_in_a_process();
 
 
@@ -88,6 +89,90 @@ fn hide_us_from_the_thread_list() {
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
 }
+
+fn say_no_port_names_one_of_ours() {
+    if unsafe { NOTHING_IS_NAMED } {
+        return;
+    }
+    unsafe { NOTHING_IS_NAMED = true };
+
+    let turning = [
+        (unsafe { _convert_port_to_thread }, (&raw mut A_THREAD) as *mut *mut c_void,
+            say_it_names_nothing as *mut c_void),
+        (unsafe { _convert_port_to_thread_read }, (&raw mut A_THREAD_TO_READ) as *mut *mut c_void,
+            say_it_names_nothing_to_read as *mut c_void),
+        (unsafe { _convert_port_to_thread_inspect },
+            (&raw mut A_THREAD_TO_LOOK_AT) as *mut *mut c_void,
+            say_it_names_nothing_to_look_at as *mut c_void),
+    ];
+
+    let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
+    unsafe { crate::bindings::gum_interceptor_begin_transaction(interceptor) };
+    for (asking, held, ours) in turning {
+        let Some(asking) = asking else {
+            continue;
+        };
+        unsafe {
+            crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void, ours,
+                held, core::ptr::null_mut());
+        }
+    }
+    unsafe { crate::bindings::gum_interceptor_end_transaction(interceptor) };
+}
+
+unsafe extern "C" fn say_it_names_nothing(port: *mut c_void) -> *mut c_void {
+    turn_it_into_a_thread(port, unsafe { A_THREAD })
+}
+
+unsafe extern "C" fn say_it_names_nothing_to_read(port: *mut c_void) -> *mut c_void {
+    turn_it_into_a_thread(port, unsafe { A_THREAD_TO_READ })
+}
+
+unsafe extern "C" fn say_it_names_nothing_to_look_at(port: *mut c_void) -> *mut c_void {
+    turn_it_into_a_thread(port, unsafe { A_THREAD_TO_LOOK_AT })
+}
+
+fn turn_it_into_a_thread(port: *mut c_void, turning: Option<TurnAPortIntoAThread>)
+    -> *mut c_void
+{
+    if !asked_by_one_of_ours() && names_one_of_our_threads(port as u64) {
+        return core::ptr::null_mut();
+    }
+
+    match turning {
+        Some(turn_it) => unsafe { turn_it(port) },
+        None => core::ptr::null_mut(),
+    }
+}
+
+fn names_one_of_our_threads(port: u64) -> bool {
+    if !looks_like_the_kernel(port) {
+        return false;
+    }
+
+    let at = unsafe { WHERE_A_PORT_HOLDS_ITS_THREAD };
+    if at != 0 {
+        return ours_is_held_at(port, at);
+    }
+
+    for word in 1..HOW_FAR_INTO_A_PORT {
+        if ours_is_held_at(port, word * 8) {
+            unsafe { WHERE_A_PORT_HOLDS_ITS_THREAD = word * 8 };
+            return true;
+        }
+    }
+
+    false
+}
+
+static mut WHERE_A_PORT_HOLDS_ITS_THREAD: usize = 0;
+
+type TurnAPortIntoAThread = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+
+static mut NOTHING_IS_NAMED: bool = false;
+static mut A_THREAD: Option<TurnAPortIntoAThread> = None;
+static mut A_THREAD_TO_READ: Option<TurnAPortIntoAThread> = None;
+static mut A_THREAD_TO_LOOK_AT: Option<TurnAPortIntoAThread> = None;
 
 unsafe extern "C" fn say_which_threads(task: *mut c_void, threads: *mut *mut u64,
     how_many: *mut u32) -> c_int
@@ -422,6 +507,9 @@ unsafe extern "C" {
     static _copyin: Option<unsafe extern "C" fn(u64, *mut c_void, u64) -> c_int>;
     static _copyout: Option<unsafe extern "C" fn(*const c_void, u64, u64) -> c_int>;
     static _current_thread: Option<unsafe extern "C" fn() -> *mut c_void>;
+    static _convert_port_to_thread: Option<TurnAPortIntoAThread>;
+    static _convert_port_to_thread_read: Option<TurnAPortIntoAThread>;
+    static _convert_port_to_thread_inspect: Option<TurnAPortIntoAThread>;
     static _task_threads:
         Option<unsafe extern "C" fn(*mut c_void, *mut *mut u64, *mut u32) -> c_int>;
 }
