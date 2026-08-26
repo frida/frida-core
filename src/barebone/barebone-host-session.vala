@@ -200,13 +200,14 @@ namespace Frida {
 					(BarebonePhysicalAllocatorConfig) ac);
 			} else if (ac is BareboneTargetFunctionsAllocatorConfig) {
 				var tfa = (BareboneTargetFunctionsAllocatorConfig) ac;
+				uint64 alloc_function = tfa.alloc_function.address;
+				uint64 free_function = tfa.free_function.address;
 				if (relocation != null) {
-					tfa.alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function",
-						relocation.translate (tfa.alloc_function.address));
-					tfa.free_function = new BareboneNonNullMemoryAddress ("allocator.free_function",
-						relocation.translate (tfa.free_function.address));
+					alloc_function = relocation.translate (alloc_function);
+					free_function = relocation.translate (free_function);
 				}
-				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, tfa);
+				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, tfa,
+					alloc_function, free_function);
 			} else {
 				assert_not_reached ();
 			}

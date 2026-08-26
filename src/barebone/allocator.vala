@@ -162,14 +162,17 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private size_t _page_size;
-		private BareboneTargetFunctionsAllocatorConfig config;
+		private uint64 alloc_function;
+		private uint64 free_function;
 		private Gee.List<BareboneCallArgument> alloc_arguments;
 		private Gee.List<BareboneCallArgument> free_arguments;
 
-		public TargetFunctionsAllocator (Machine machine, size_t page_size, BareboneTargetFunctionsAllocatorConfig config) {
+		public TargetFunctionsAllocator (Machine machine, size_t page_size,
+				BareboneTargetFunctionsAllocatorConfig config, uint64 alloc_function, uint64 free_function) {
 			this.machine = machine;
 			this._page_size = page_size;
-			this.config = config;
+			this.alloc_function = alloc_function;
+			this.free_function = free_function;
 			this.alloc_arguments = config._effective_alloc_arguments ();
 			this.free_arguments = config._effective_free_arguments ();
 		}
@@ -180,14 +183,15 @@ namespace Frida.Barebone {
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
 			size_t padded_size = size + alignment - 1;
 
-			uint64 block = yield machine.invoke (config.alloc_function.address,
+			uint64 block = yield machine.invoke (alloc_function,
 				resolve_arguments (alloc_arguments, padded_size, 0), cancellable);
 			if (block == 0)
 				throw new Error.NOT_SUPPORTED ("Unable to allocate %zu bytes in the target", padded_size);
 
 			uint64 address = (block + alignment - 1) & ~((uint64) alignment - 1);
 
-			return new TargetAllocation (address, size, block, padded_size, machine, config, free_arguments);
+			return new TargetAllocation (address, size, block, padded_size, machine, free_function,
+				free_arguments);
 		}
 
 		private static uint64[] resolve_arguments (Gee.List<BareboneCallArgument> template, size_t size, uint64 address) {
@@ -227,22 +231,22 @@ namespace Frida.Barebone {
 			private uint64 block;
 			private size_t block_size;
 			private Machine machine;
-			private BareboneTargetFunctionsAllocatorConfig config;
+			private uint64 free_function;
 			private Gee.List<BareboneCallArgument> free_arguments;
 
 			public TargetAllocation (uint64 address, size_t size, uint64 block, size_t block_size, Machine m,
-					BareboneTargetFunctionsAllocatorConfig c, Gee.List<BareboneCallArgument> free_arguments) {
+					uint64 free_function, Gee.List<BareboneCallArgument> free_arguments) {
 				_virtual_address = address;
 				_size = size;
 				this.block = block;
 				this.block_size = block_size;
 				machine = m;
-				config = c;
+				this.free_function = free_function;
 				this.free_arguments = free_arguments;
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
-				yield machine.invoke (config.free_function.address,
+				yield machine.invoke (free_function,
 					resolve_arguments (free_arguments, block_size, block), cancellable);
 			}
 		}
