@@ -400,6 +400,72 @@ pub fn take_note_of_what_a_copy_says(arena: u64) {
 
 }
 
+fn take_ours_out_of_the_count(asked: &Asked, went: c_int) -> c_int {
+    let ours_there = crate::xnu_injection::how_many_of_ours_are_in(asked.id as u32);
+    if ours_there == 0 || asked.into == 0 {
+        return went;
+    }
+    let (Some(fetch), Some(put_back)) = (unsafe { _copyin }, unsafe { _copyout }) else {
+        return went;
+    };
+
+    let mut said = [0u8; HOW_THE_TASK_IS_SAID_TO_BE_DOING];
+    let room = said.len() as u64;
+    if unsafe { fetch(asked.into, said.as_mut_ptr() as *mut c_void, room) } != 0 {
+        return went;
+    }
+
+    let counted = u32::from_le_bytes(said[HOW_MANY_THREADS..HOW_MANY_THREADS + 4]
+        .try_into().unwrap());
+    said[HOW_MANY_THREADS..HOW_MANY_THREADS + 4]
+        .copy_from_slice(&counted.saturating_sub(ours_there).to_le_bytes());
+
+    unsafe { put_back(said.as_ptr() as *const c_void, asked.into, room) };
+
+    went
+}
+
+fn say_what_the_process_has_there(process: *mut c_void, asked: &mut Asked, answer: *mut i32,
+    went: c_int) -> c_int
+{
+    let Some(ask_it) = (unsafe { THE_ANSWER }) else {
+        return went;
+    };
+    let Some(fetch) = (unsafe { _copyin }) else {
+        return went;
+    };
+    if asked.into == 0 {
+        return went;
+    }
+
+    let mut answered = went;
+    for _ in 0..MOST_RANGES_OF_OURS_IN_A_ROW {
+        if answered != 0 {
+            return answered;
+        }
+
+        let mut said = [0u8; WHAT_A_REGION_IS_SAID_TO_BE];
+        if unsafe { fetch(asked.into, said.as_mut_ptr() as *mut c_void, said.len() as u64) } != 0 {
+            return answered;
+        }
+        let word = |at: usize| u64::from_le_bytes(said[at..at + 8].try_into().unwrap());
+        let (there, size) = (word(WHERE_A_REGION_IS), word(HOW_BIG_A_REGION_IS));
+
+        let mut is_ours = false;
+        crate::xnu_injection::what_we_have_in_process(asked.id as u32, &mut |at, room| {
+            is_ours |= there >= at && there < at + room;
+        });
+        if !is_ours {
+            return answered;
+        }
+
+        asked.about = there + size;
+        answered = unsafe { ask_it(process, asked as *mut Asked as *mut c_void, answer) };
+    }
+
+    answered
+}
+
 unsafe extern "C" fn say_what_it_has(process: *mut c_void, asked: *mut c_void, answer: *mut i32)
     -> c_int
 {
@@ -413,15 +479,23 @@ unsafe extern "C" fn say_what_it_has(process: *mut c_void, asked: *mut c_void, a
     }
 
 
-    let asked = unsafe { &*(asked as *const Asked) };
-    if went != 0 || asked.what != LISTING_ITS_THREADS {
+    let asked = unsafe { &mut *(asked as *mut Asked) };
+    if went != 0 || asked_by_one_of_ours() {
         return went;
     }
-    let only_counting = asked_by_one_of_ours();
 
+    if asked.what == HOW_THE_TASK_IS_DOING {
+        return take_ours_out_of_the_count(asked, went);
+    }
+    if asked.what == A_REGION || asked.what == A_REGION_AND_WHERE_IT_CAME_FROM {
+        return say_what_the_process_has_there(process, asked, answer, went);
+    }
+    if asked.what != LISTING_ITS_THREADS {
+        return went;
+    }
     let said = unsafe { *answer } as usize;
     let how_many = said / core::mem::size_of::<u64>();
-    if how_many == 0 || how_many > MOST_THREADS_IN_ONE || asked.into == 0 || only_counting {
+    if how_many == 0 || how_many > MOST_THREADS_IN_ONE || asked.into == 0 {
         return went;
     }
 
@@ -498,6 +572,17 @@ const HOW_MANY_OF_OURS_IN_A_ROW: usize = 8;
 const ASKING_ABOUT_A_PROCESS: usize = 336;
 const AN_ENTRY: usize = 24;
 const LISTING_ITS_THREADS: u64 = 6;
+const HOW_THE_TASK_IS_DOING: u64 = 4;
+const A_REGION: u64 = 7;
+const A_REGION_AND_WHERE_IT_CAME_FROM: u64 = 8;
+
+const HOW_THE_TASK_IS_SAID_TO_BE_DOING: usize = 96;
+const HOW_MANY_THREADS: usize = 84;
+
+const WHAT_A_REGION_IS_SAID_TO_BE: usize = 96;
+const WHERE_A_REGION_IS: usize = 80;
+const HOW_BIG_A_REGION_IS: usize = 88;
+const MOST_RANGES_OF_OURS_IN_A_ROW: usize = 32;
 
 unsafe extern "C" {
     static _mach_vm_region: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64, c_int,

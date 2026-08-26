@@ -255,6 +255,25 @@ fn wake_the_copy_in(id: u32, ours: u64, theirs: u64) {
     unsafe { release_process(process.handle) };
 }
 
+pub fn what_we_have_in_process(id: u32, found: &mut dyn FnMut(u64, u64)) {
+    let Some(placed) = (unsafe { arenas() }).get(&id) else {
+        return;
+    };
+
+    what_we_have_in(placed.map, found);
+}
+
+pub fn how_many_of_ours_are_in(id: u32) -> u32 {
+    let Some(placed) = (unsafe { arenas() }).get(&id) else {
+        return 0;
+    };
+
+    let said = (placed.arena + crate::xnu_relay::OUR_THREADS) as *const u64;
+    (0..crate::xnu_hiding::MOST_OF_OURS_IN_ONE)
+        .filter(|step| unsafe { said.add(*step).read_volatile() } != 0)
+        .count() as u32
+}
+
 pub fn what_we_have_in(map: *mut c_void, found: &mut dyn FnMut(u64, u64)) {
     for placed in unsafe { arenas() }.values().filter(|placed| placed.map == map) {
         found(placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
