@@ -334,8 +334,7 @@ fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
             .write(crate::gum::page_size_the_kernel_runs_with() as u64);
         ((arena_here + crate::xnu_relay::CACHE_SHAPE) as *mut u64)
             .write(crate::xnu::kernel_cache_shape());
-        ((arena_here + crate::xnu_relay::HAS_RUN) as *mut u32)
-            .write(!crate::xnu_spawn::is_held(id) as u32);
+        ((arena_here + crate::xnu_relay::HAS_RUN) as *mut u32).write(1);
     }
 
     let stack = take_memory(map, STACK)?;

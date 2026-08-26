@@ -115,6 +115,6 @@ const WAITING_ON_AN_ADDRESS: u32 = 1;
 const EVERY_WAITER: u32 = 0x100;
 
 unsafe extern "C" {
-    static _sysent: usize;
+    pub static _sysent: usize;
     static _ulock_wake: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int>;
 }

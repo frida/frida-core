@@ -4492,7 +4492,8 @@ namespace Frida.HostSessionTest {
 					while (waited.elapsed () < 2.0)
 						yield h.process_events ();
 
-					yield session.close (cancellable);
+					if (Environment.get_variable ("FRIDA_BAREBONE_STAY_IN") == null)
+						yield session.close (cancellable);
 				} catch (GLib.Error e) {
 					printerr ("[*] could not get into %u: %s\n", info.pid, e.message);
 				}

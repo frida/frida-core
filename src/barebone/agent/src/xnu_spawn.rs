@@ -1,59 +1,6 @@
 
 use core::ffi::{c_char, c_int, c_void};
 
-pub fn learn_where_the_threads_are() {
-    if unsafe { THREADS_AT } != 0 {
-        return;
-    }
-
-    let (Some(this_task), Some(this_thread)) = (unsafe { _current_task }, unsafe { _current_thread })
-    else {
-        return;
-    };
-    let (task, thread) = (unsafe { this_task() }, unsafe { this_thread() });
-    if task.is_null() || thread.is_null() {
-        return;
-    }
-
-    let thread = thread as usize;
-    for step in 0..(HOW_FAR_INTO_A_TASK / 8) {
-        let held = unsafe { ((task as *const usize).add(step)).read_volatile() };
-        if held < thread || held >= thread + HOW_FAR_INTO_A_THREAD {
-            continue;
-        }
-
-        unsafe {
-            THREADS_AT = step * 8;
-            LINKED_AT = held - thread;
-        }
-        return;
-    }
-}
-
-fn each_thread_of(task: *mut c_void, found: &mut dyn FnMut(*mut c_void)) {
-    let at = unsafe { THREADS_AT };
-    if at == 0 {
-        return;
-    }
-
-    let list = (task as usize) + at;
-    let mut link = unsafe { (list as *const usize).read_volatile() };
-    for _ in 0..MOST_THREADS_TO_FOLLOW {
-        if link == list || link == 0 {
-            return;
-        }
-        found((link - unsafe { LINKED_AT }) as *mut c_void);
-        link = unsafe { (link as *const usize).read_volatile() };
-    }
-}
-
-static mut THREADS_AT: usize = 0;
-static mut LINKED_AT: usize = 0;
-
-const HOW_FAR_INTO_A_TASK: usize = 0x800;
-const HOW_FAR_INTO_A_THREAD: usize = 0x800;
-const MOST_THREADS_TO_FOLLOW: usize = 64;
-
 pub fn spawn_when_the_loop_can(request_id: u16, words: &[u8]) {
     let asked = each_word_asked_for();
     if words.len() > asked.len() {
@@ -187,8 +134,7 @@ pub fn gate_spawns(on: bool) {
 
 pub fn look_for_new_processes() {
     if unsafe { GATING } {
-        learn_where_the_threads_are();
-        take_over_the_word_to_go();
+        take_over_the_first_word_a_process_says();
     }
 }
 
@@ -214,43 +160,28 @@ pub fn tell_of_held_spawns(say: &mut dyn FnMut(u32, &[u8])) {
 pub fn resume_process(id: u32) -> bool {
     for held in each_held().iter_mut().filter(|held| held.waiting && held.id == id) {
         held.waiting = false;
-
-        if held.holding_its_threads {
-            if let Some(start) = unsafe { _thread_resume } {
-                for thread in held.threads.iter().take_while(|thread| !thread.is_null()) {
-                    unsafe { start(*thread) };
-                }
-            }
-            continue;
-        }
-
-        say_the_word(held.task, held.flags);
+        crate::kernel::wake(held as *const Held as *const u8);
     }
 
     true
 }
 
-fn say_the_word(task: *mut c_void, flags: u32) {
-    if let Some(let_it_go) = unsafe { THE_WORD_TO_GO } {
-        unsafe { let_it_go(task, flags) };
-    }
-}
-
-fn take_over_the_word_to_go() {
+fn take_over_the_first_word_a_process_says() {
     if unsafe { TAKEN_OVER } {
         return;
     }
     unsafe { TAKEN_OVER = true };
 
-    let Some(word) = (unsafe { _task_clear_return_wait }) else {
+    let Some(word) = the_call_that_says_it() else {
         return;
     };
 
     unsafe {
+        WHERE_IT_IS_SAID = word as *mut c_void;
         let interceptor = crate::bindings::gum_interceptor_obtain();
         crate::bindings::gum_interceptor_begin_transaction(interceptor);
         crate::bindings::gum_interceptor_replace(interceptor, word as *mut c_void,
-            hold_or_let_run as *mut c_void, (&raw mut THE_WORD_TO_GO) as *mut *mut c_void,
+            hold_it_there as *mut c_void, (&raw mut THE_WORD) as *mut *mut c_void,
             core::ptr::null_mut());
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
@@ -262,54 +193,67 @@ pub fn give_the_word_back() {
     }
     unsafe { TAKEN_OVER = false };
 
-    let Some(word) = (unsafe { _task_clear_return_wait }) else {
+    let where_it_is_said = unsafe { WHERE_IT_IS_SAID };
+    if where_it_is_said.is_null() {
         return;
-    };
+    }
 
     unsafe {
         let interceptor = crate::bindings::gum_interceptor_obtain();
         crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_revert(interceptor, word as *mut c_void);
+        crate::bindings::gum_interceptor_revert(interceptor, where_it_is_said);
         crate::bindings::gum_interceptor_end_transaction(interceptor);
-        THE_WORD_TO_GO = None;
+        THE_WORD = None;
+        WHERE_IT_IS_SAID = core::ptr::null_mut();
     }
 }
 
-unsafe extern "C" fn hold_or_let_run(task: *mut c_void, flags: u32) {
-    if !unsafe { GATING } || (flags & THE_LAST_WORD) == 0 {
-        say_the_word(task, flags);
-        return;
+fn the_call_that_says_it() -> Option<u64> {
+    let calls = unsafe { crate::xnu_bell::_sysent };
+    if calls == 0 {
+        return None;
     }
 
-    let Some(held) = note_it(task, flags) else {
-        say_the_word(task, flags);
-        return;
+    let signed = unsafe {
+        ((calls + SAYING_HOW_THREADS_ARE_MADE * AN_ENTRY) as *const u64).read_volatile()
     };
 
-    if held.holding_its_threads {
-        say_the_word(task, flags);
-    }
+    Some(unsafe { crate::pac::ptrauth_strip_data(signed as *const u8) } as u64)
 }
 
-fn note_it(task: *mut c_void, flags: u32) -> Option<&'static Held> {
-    let (Some(process_of), Some(number_of), Some(name_of)) =
-        (unsafe { _get_bsdtask_info }, unsafe { _proc_pid }, unsafe { _proc_best_name })
+unsafe extern "C" fn hold_it_there(process: *mut c_void, asked: *mut c_void, answer: *mut i32)
+    -> c_int
+{
+    let went = match unsafe { THE_WORD } {
+        Some(say_it) => unsafe { say_it(process, asked, answer) },
+        None => 0,
+    };
+
+    if !unsafe { GATING } {
+        return went;
+    }
+
+    let Some(held) = note_it(process) else {
+        return went;
+    };
+
+    let waiting = &mut || held.waiting;
+    while held.waiting {
+        crate::kernel::wait(held as *const Held as *const u8, None, waiting);
+    }
+
+    went
+}
+
+fn note_it(process: *mut c_void) -> Option<&'static mut Held> {
+    let (Some(number_of), Some(name_of)) = (unsafe { _proc_pid }, unsafe { _proc_best_name })
     else {
         return None;
     };
 
-    let process = unsafe { process_of(task) };
-    if process.is_null() {
-        return None;
-    }
-
-    let Some(held) = each_held().iter_mut().find(|held| !held.waiting) else {
-        return None;
-    };
+    let held = each_held().iter_mut().find(|held| !held.waiting)?;
 
     held.id = unsafe { number_of(process) } as u32;
-    held.task = task;
-    held.flags = flags;
     held.told_of = false;
     held.name = [0; NAME_ROOM];
 
@@ -320,20 +264,6 @@ fn note_it(task: *mut c_void, flags: u32) -> Option<&'static Held> {
             break;
         }
         *letter = byte;
-    }
-
-    held.threads = [core::ptr::null_mut(); MOST_THREADS_HELD];
-    held.holding_its_threads = false;
-
-    if let Some(stop) = unsafe { _thread_suspend } {
-        let mut how_many = 0;
-        each_thread_of(task, &mut |thread| {
-            if how_many < MOST_THREADS_HELD && unsafe { stop(thread) } == KERN_SUCCESS {
-                held.threads[how_many] = thread;
-                how_many += 1;
-            }
-        });
-        held.holding_its_threads = how_many != 0;
     }
 
     held.waiting = true;
@@ -362,43 +292,31 @@ struct Held {
     id: u32,
     seen_at: u64,
     name: [u8; NAME_ROOM],
-    task: *mut c_void,
-    threads: [*mut c_void; MOST_THREADS_HELD],
-    flags: u32,
     waiting: bool,
     told_of: bool,
-    holding_its_threads: bool,
 }
 
 static mut GATING: bool = false;
 static mut TAKEN_OVER: bool = false;
-static mut THE_WORD_TO_GO: Option<unsafe extern "C" fn(*mut c_void, u32)> = None;
+static mut THE_WORD: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int> =
+    None;
+static mut WHERE_IT_IS_SAID: *mut c_void = core::ptr::null_mut();
 static mut HOW_MANY_HELD: u64 = 0;
 static mut HELD: [Held; HOW_MANY_AT_ONCE] = [Held {
     id: 0,
     seen_at: 0,
     name: [0; NAME_ROOM],
-    task: core::ptr::null_mut(),
-    threads: [core::ptr::null_mut(); MOST_THREADS_HELD],
-    flags: 0,
     waiting: false,
     told_of: false,
-    holding_its_threads: false,
 }; HOW_MANY_AT_ONCE];
 
 const HOW_MANY_AT_ONCE: usize = 64;
-const MOST_THREADS_HELD: usize = 8;
-const KERN_SUCCESS: c_int = 0;
 const NAME_ROOM: usize = 64;
-const THE_LAST_WORD: u32 = 0x2;
+const SAYING_HOW_THREADS_ARE_MADE: usize = 366;
+const AN_ENTRY: usize = 24;
 
 unsafe extern "C" {
-    static _task_clear_return_wait: Option<unsafe extern "C" fn(*mut c_void, u32)>;
     pub static _get_bsdtask_info: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
     static _proc_pid: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     static _proc_best_name: Option<unsafe extern "C" fn(*mut c_void) -> *const c_char>;
-    static _current_task: Option<unsafe extern "C" fn() -> *mut c_void>;
-    static _current_thread: Option<unsafe extern "C" fn() -> *mut c_void>;
-    static _thread_suspend: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
-    static _thread_resume: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
 }
