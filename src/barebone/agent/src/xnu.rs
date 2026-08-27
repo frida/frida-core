@@ -319,10 +319,37 @@ fn kernel_free(ptr: *mut u8, size: usize) {
     }
 }
 
+#[cfg(feature = "xnu-kext")]
+fn what_a_thread_entry_is_signed_with() -> usize {
+    unsafe { frida_agent_disc_thread_continue as usize }
+}
+
+#[cfg(not(feature = "xnu-kext"))]
+fn what_a_thread_entry_is_signed_with() -> usize {
+    0xd507
+}
+
+#[cfg(feature = "xnu-kext")]
+fn what_a_handler_is_signed_with() -> usize {
+    unsafe { frida_agent_disc_interrupt_handler as usize }
+}
+
+#[cfg(not(feature = "xnu-kext"))]
+fn what_a_handler_is_signed_with() -> usize {
+    0xd36
+}
+
+#[cfg(feature = "xnu-kext")]
+unsafe extern "C" {
+    static frida_agent_disc_thread_continue: u32;
+    static frida_agent_disc_interrupt_handler: u32;
+}
+
 pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut c_void) -> isize {
     let mut new_thread: *mut c_void = core::ptr::null_mut();
     return unsafe {
-        let ptr = crate::pac::ptrauth_sign(continuation as *const u8, 0xd507);
+        let ptr = crate::pac::ptrauth_sign(continuation as *const u8,
+            what_a_thread_entry_is_signed_with());
         _kernel_thread_start(
             core::mem::transmute(ptr),
             thread_parameter,
@@ -464,7 +491,8 @@ pub fn install_interrupt_handler(
     ) -> i32 = vf(ic as _, VT_REGISTER_INT);
 
     let signed_handler = unsafe {
-        let handler_ptr = crate::pac::ptrauth_sign(handler as *const u8, 0xd36);
+        let handler_ptr = crate::pac::ptrauth_sign(handler as *const u8,
+            what_a_handler_is_signed_with());
         core::mem::transmute::<*const u8, IOInterruptHandler>(handler_ptr)
     };
 

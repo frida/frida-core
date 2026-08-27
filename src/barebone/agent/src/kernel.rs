@@ -14,21 +14,21 @@ pub use crate::linux::*;
 pub use crate::win9x::*;
 #[cfg(feature = "winnt")]
 pub use crate::winnt::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_applications::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_bell::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_hiding::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_injection::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_processes::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_relay::*;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 pub use crate::xnu_spawn::*;
 
 use core::ffi::c_void;

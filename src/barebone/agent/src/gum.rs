@@ -23,7 +23,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::gum_linux::enumerate_exports_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 use crate::gum_windows::enumerate_exports_in_range;
-#[cfg(any(feature = "xnu", feature = "linux-injected"))]
+#[cfg(any(feature = "xnu-core", feature = "linux-injected"))]
 use crate::gum_injected::enumerate_exports_in_range;
 
 #[unsafe(no_mangle)]
@@ -31,7 +31,7 @@ pub extern "C" fn gum_process_get_current_thread_id() -> GumThreadId {
     kernel::current_thread_id() as GumThreadId
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_process_get_id() -> guint {
     kernel::current_process_id() as guint
@@ -414,7 +414,7 @@ mod symbolication {
             return export_of_a_process_module(name);
         }
 
-        #[cfg(feature = "xnu")]
+        #[cfg(feature = "xnu-core")]
         if crate::xnu::in_copy() {
             return crate::xnu_mapped::export_named(name);
         }

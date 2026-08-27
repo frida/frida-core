@@ -1,7 +1,7 @@
 #![no_std]
 
 #[cfg(not(any(
-    feature = "xnu",
+    feature = "xnu-core",
     feature = "win9x",
     feature = "winnt",
     feature = "linux",
@@ -57,9 +57,9 @@ pub mod kernel;
 
 #[cfg(feature = "linux")]
 mod gum_linux;
-#[cfg(feature = "linux")]
+#[cfg(any(feature = "linux", feature = "xnu-kext"))]
 mod hostlink_chardev;
-#[cfg(any(feature = "linux", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux", feature = "linux-injected", feature = "xnu-core"))]
 mod heap;
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 mod linux;
@@ -81,42 +81,42 @@ mod winnt_paging;
 #[cfg(feature = "winnt")]
 mod winnt_user;
 
-#[cfg(any(feature = "xnu", feature = "linux-injected"))]
+#[cfg(any(feature = "xnu-core", feature = "linux-injected"))]
 mod gum_injected;
 #[cfg(feature = "blob")]
 mod hostlink_virtio;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod hostlink_vsock;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod pac;
-#[cfg(feature = "blob")]
+#[cfg(any(feature = "blob", feature = "xnu-kext"))]
 mod symbols;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_applications;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_bell;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_hiding;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_injection;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_libsystem;
 mod xnu_unlisted;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_mapped;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_processes;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_ranges;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_relay;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_spawn;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_user;
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 mod xnu_user_calls;
 
 mod bindings {
@@ -220,24 +220,25 @@ impl HandlerResponse {
     }
 }
 
+pub static mut MODULE_INFO: Vec<ModuleInfo> = Vec::new();
+pub static mut SYMBOL_TABLE: crate::symbols::SymbolTable = crate::symbols::SymbolTable::empty();
+
+#[derive(Debug, Clone)]
+pub struct ModuleInfo {
+    pub name: String,
+    pub version: String,
+    pub offset: u64,
+    pub size: u64,
+    pub start_func_offset: u64,
+    pub stop_func_offset: u64,
+}
+
 #[cfg(feature = "blob")]
 mod entrypoint_blob {
     use super::*;
     use crate::symbols::SymbolTable;
 
     static mut CONFIG_DATA: &'static [u8] = &[];
-    pub static mut MODULE_INFO: Vec<ModuleInfo> = Vec::new();
-    pub static mut SYMBOL_TABLE: SymbolTable = SymbolTable::empty();
-
-    #[derive(Debug, Clone)]
-    pub struct ModuleInfo {
-        pub name: String,
-        pub version: String,
-        pub offset: u64,
-        pub size: u64,
-        pub start_func_offset: u64,
-        pub stop_func_offset: u64,
-    }
 
     #[cfg(all(feature = "winnt", target_arch = "x86_64"))]
     #[unsafe(no_mangle)]
@@ -253,7 +254,7 @@ mod entrypoint_blob {
 
     unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
-            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+            #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
             crate::preserve_writable_half();
 
             CONFIG_DATA = core::slice::from_raw_parts(config_data, config_size);
@@ -308,7 +309,7 @@ mod entrypoint_blob {
                     hostlink_virtio::Hostlink::init_pci(ecam, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
-                #[cfg(feature = "xnu")]
+                #[cfg(feature = "xnu-core")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
                         .unwrap(),
@@ -322,7 +323,7 @@ mod entrypoint_blob {
             destroy_all_scripts(context);
 
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-                feature = "xnu"))]
+                feature = "xnu-core"))]
             {
                 kernel::stop_copies();
                 #[cfg(feature = "win9x")]
@@ -388,9 +389,9 @@ mod entrypoint_blob {
                 }
                 1 => {
                     let host_port = g_variant_get_uint32(transport_cfg_inner);
-                    #[cfg(feature = "xnu")]
+                    #[cfg(feature = "xnu-core")]
                     { TransportConfig::Vsock { host_port } }
-                    #[cfg(not(feature = "xnu"))]
+                    #[cfg(not(feature = "xnu-core"))]
                     { let _ = host_port; panic!("vsock is XNU's") }
                 }
                 2 => {
@@ -516,6 +517,78 @@ mod entrypoint_blob {
     }
 }
 
+#[cfg(feature = "xnu-kext")]
+mod entrypoint_xnu_kext {
+    use super::*;
+    use core::ffi::c_int;
+    use core::sync::atomic::AtomicBool;
+
+    static WORKER_EXITED: AtomicBool = AtomicBool::new(false);
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frida_agent_start(own_base: u64, own_size: u64) -> c_int {
+        kernel::log("frida: agent starting\n\0");
+
+        unsafe {
+            OWN_RANGE = GumMemoryRange {
+                base_address: own_base,
+                size: own_size as gsize,
+            };
+        }
+
+        if kernel::spawn_thread(worker, ptr::null_mut()) != 0 {
+            kernel::log("frida: failed to spawn worker\n\0");
+            return -1;
+        }
+
+        0
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frida_agent_stop() {
+        kernel::log("frida: agent stopping\n\0");
+
+        STOP_REQUESTED.store(true, Ordering::Release);
+
+        while !WORKER_EXITED.load(Ordering::Acquire) {
+            kernel::wake(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
+            kernel::wait(
+                ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
+                Some(10_000),
+                &mut || WORKER_EXITED.load(Ordering::Acquire),
+            );
+        }
+
+        kernel::log("frida: agent stopped\n\0");
+    }
+
+    unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
+        unsafe {
+            crate::run_constructors();
+            init_gum();
+
+            match hostlink_chardev::Hostlink::init(Some(on_frame_from_host)) {
+                Ok(hostlink) => transport_set(Transport::CharDevice(hostlink)),
+                Err(_) => {
+                    kernel::log("frida: no one to answer\n\0");
+                    WORKER_EXITED.store(true, Ordering::Release);
+                    return;
+                }
+            }
+
+            let main_context = adopt_js_context();
+            run_main_loop(main_context);
+
+            destroy_all_scripts(main_context);
+            kernel::stop_copies();
+            transport_teardown();
+
+            WORKER_EXITED.store(true, Ordering::Release);
+            kernel::wake(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
+        }
+    }
+}
+
 #[cfg(feature = "linux")]
 mod entrypoint_linux {
     use super::*;
@@ -529,8 +602,15 @@ mod entrypoint_linux {
     /// own kernel thread: `insmod` runs with the module mutex held, and bringing
     /// up Gum plus connecting to the host both block.
     #[unsafe(no_mangle)]
-    pub extern "C" fn frida_agent_start() -> c_int {
+    pub extern "C" fn frida_agent_start(own_base: u64, own_size: u64) -> c_int {
         kernel::log("frida: agent starting\n\0");
+
+        unsafe {
+            OWN_RANGE = GumMemoryRange {
+                base_address: own_base,
+                size: own_size as gsize,
+            };
+        }
 
         if kernel::spawn_thread(worker, ptr::null_mut()) != 0 {
             kernel::log("frida: failed to spawn worker\n\0");
@@ -577,12 +657,6 @@ mod entrypoint_linux {
 
             kernel::install_hooks();
 
-            let (own_base, own_size) = kernel::own_range();
-            OWN_RANGE = GumMemoryRange {
-                base_address: own_base,
-                size: own_size as gsize,
-            };
-
             match hostlink_chardev::Hostlink::init(Some(on_frame_from_host)) {
                 Ok(hostlink) => transport_set(Transport::CharDevice(hostlink)),
                 Err(_) => {
@@ -607,15 +681,17 @@ mod entrypoint_linux {
 
 #[cfg(feature = "linux")]
 pub use entrypoint_linux::{frida_agent_start, frida_agent_stop};
+#[cfg(feature = "xnu-kext")]
+pub use entrypoint_xnu_kext::{frida_agent_start, frida_agent_stop};
 #[cfg(feature = "blob")]
-pub use entrypoint_blob::{MODULE_INFO, ModuleInfo, SYMBOL_TABLE, _start};
+pub use entrypoint_blob::_start;
 
 pub enum Transport {
     #[cfg(feature = "blob")]
     Virtio(hostlink_virtio::Hostlink),
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     Vsock(hostlink_vsock::Hostlink),
-    #[cfg(feature = "linux")]
+    #[cfg(any(feature = "linux", feature = "xnu-kext"))]
     CharDevice(hostlink_chardev::Hostlink),
 }
 
@@ -624,9 +700,9 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.send(payload),
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.send(payload),
-            #[cfg(feature = "linux")]
+            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.send(payload),
         }
     }
@@ -635,9 +711,9 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.shutdown(),
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "xnu-core")]
             Transport::Vsock(_) => {}
-            #[cfg(feature = "linux")]
+            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(_) => {}
         }
     }
@@ -646,9 +722,9 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.process(),
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.process(),
-            #[cfg(feature = "linux")]
+            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.process(),
         }
     }
@@ -679,7 +755,7 @@ pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
     #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     VirtioPci { ecam: u64 },
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     Vsock { host_port: u32 },
 }
 
@@ -695,7 +771,7 @@ fn transport_set(driver: Transport) {
 
 #[inline(always)]
 fn send_frame(frame: &[u8]) {
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
     if unsafe { ROUTED_ARENA } != 0 {
         kernel::publish_frame_to_host(unsafe { ROUTED_ARENA }, frame);
         return;
@@ -704,12 +780,12 @@ fn send_frame(frame: &[u8]) {
     transport_get_unchecked().send(frame);
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) unsafe fn route_frames_through(arena: u64) {
     unsafe { ROUTED_ARENA = arena };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 static mut ROUTED_ARENA: u64 = 0;
 
 fn transport_get_unchecked() -> &'static Transport {
@@ -721,7 +797,7 @@ fn transport_get_unchecked() -> &'static Transport {
 
 // Only the XNU backend has to cope with Gum asking for memory work before the
 // hostlink that performs it exists.
-#[cfg(any(feature = "xnu", feature = "linux-injected"))]
+#[cfg(any(feature = "xnu-core", feature = "linux-injected"))]
 #[inline(always)]
 fn transport_is_up() -> bool {
     unsafe { !TRANSPORT_DRIVER.is_null() }
@@ -731,7 +807,7 @@ static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 // A copy of the agent runs the same code, but it cannot share what gets written to. Thus keep
 // the writable half as it is before anything writes to it.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) unsafe fn preserve_writable_half() {
     let size = writable_half_size();
     let pristine = kernel::alloc(size);
@@ -743,7 +819,7 @@ pub(crate) unsafe fn preserve_writable_half() {
 
 // Give a copy the half it writes to, and move every address in it to where the copy runs. The
 // address that the copy runs at and the address that takes the bytes are two different ones.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_here: usize) {
     let own = unsafe { ptr::addr_of!(OWN_RANGE).read() }.base_address as usize;
     let distance = seen_by_copy.wrapping_sub(own);
@@ -753,8 +829,11 @@ pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_he
         ptr::copy_nonoverlapping(PRISTINE_WRITABLE_HALF, writable_from_here as *mut u8,
             writable_half_size());
 
-        let mut entry = &raw const _agent_relocs_start as usize;
-        let end = &raw const _agent_relocs_end as usize;
+        #[cfg(feature = "xnu-kext")]
+        let (mut entry, end) = (frida_agent_relocs_start, frida_agent_relocs_end);
+        #[cfg(not(feature = "xnu-kext"))]
+        let (mut entry, end) = (&raw const _agent_relocs_start as usize,
+            &raw const _agent_relocs_end as usize);
         while entry != end {
             let slot = (writable_from_here + (entry as *const usize).read() - private_offset)
                 as *mut usize;
@@ -764,6 +843,19 @@ pub(crate) unsafe fn install_writable_half(seen_by_copy: usize, writable_from_he
     }
 }
 
+#[cfg(feature = "xnu-kext")]
+pub(crate) unsafe fn run_constructors() {
+    unsafe {
+        let mut entry = frida_agent_init_start;
+        while entry != frida_agent_init_end {
+            let start: extern "C" fn() = core::mem::transmute((entry as *const usize).read());
+            start();
+            entry += core::mem::size_of::<usize>();
+        }
+    }
+}
+
+#[cfg(not(feature = "xnu-kext"))]
 pub(crate) unsafe fn run_constructors() {
     unsafe {
         let mut entry = &raw const _agent_init_start as usize;
@@ -776,12 +868,25 @@ pub(crate) unsafe fn run_constructors() {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(feature = "xnu-kext")]
+pub(crate) fn writable_half_start() -> usize {
+    unsafe { frida_agent_private_start }
+}
+
+
+#[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+    feature = "xnu-core"), not(feature = "xnu-kext")))]
 pub(crate) fn writable_half_start() -> usize {
     &raw const _agent_private_start as usize
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(feature = "xnu-kext")]
+fn writable_half_size() -> usize {
+    unsafe { frida_agent_heap_start - writable_half_start() }
+}
+
+#[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+    feature = "xnu-core"), not(feature = "xnu-kext")))]
 fn writable_half_size() -> usize {
     (&raw const _heap_start as usize) - writable_half_start()
 }
@@ -793,20 +898,32 @@ const RELOCATION_SIZE: usize = 8;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const RELOCATION_SIZE: usize = 24;
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 static mut PRISTINE_WRITABLE_HALF: *mut u8 = ptr::null_mut();
 
+#[cfg(not(feature = "xnu-kext"))]
 unsafe extern "C" {
     static _agent_init_start: u8;
     static _agent_init_end: u8;
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+    feature = "xnu-core"), not(feature = "xnu-kext")))]
 unsafe extern "C" {
     static _agent_private_start: u8;
     static _heap_start: u8;
     static _agent_relocs_start: u8;
     static _agent_relocs_end: u8;
+}
+
+#[cfg(feature = "xnu-kext")]
+unsafe extern "C" {
+    static frida_agent_init_start: usize;
+    static frida_agent_init_end: usize;
+    static frida_agent_private_start: usize;
+    static frida_agent_heap_start: usize;
+    static frida_agent_relocs_start: usize;
+    static frida_agent_relocs_end: usize;
 }
 
 // A copy runs at a base of its own, thus the half that placed it there says where. The
@@ -872,7 +989,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
 
     // A frame for a process that the host attached to belongs to the copy in that process. The
     // copy also runs this code, but it has no targets, thus it continues.
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
     let destination = destination_of(variant);
     if let Some(arena) = kernel::arena_for_pid(destination) {
         unsafe { g_variant_unref(variant) };
@@ -884,7 +1001,7 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
     unsafe { g_variant_unref(variant) };
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn destination_of(variant: *mut GVariant) -> u32 {
     let mut command: u8 = 0;
     let mut request_id: u16 = 0;
@@ -934,13 +1051,13 @@ fn run_main_loop(main_context: *mut GMainContext) {
     glib::own_the_loop();
 
     #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-        feature = "xnu"))]
+        feature = "xnu-core"))]
     watch_for_work(main_context, kernel_half_has_work, serve_the_kernel_half);
 
     unsafe {
         loop {
             #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-                feature = "xnu")))]
+                feature = "xnu-core")))]
             transport_get_unchecked().process();
 
             #[cfg(feature = "linux")]
@@ -957,14 +1074,14 @@ fn run_main_loop(main_context: *mut GMainContext) {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn kernel_half_has_work() -> bool {
-    #[cfg(not(feature = "xnu"))]
+    #[cfg(not(feature = "xnu-core"))]
     if hostlink_virtio::a_turn_is_wanted() {
         return true;
     }
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if hostlink_vsock::a_turn_is_wanted() || kernel::a_spawn_is_held()
         || kernel::a_copy_is_asking_for_something()
         || kernel::a_program_is_wanted() || kernel::applications_are_asked_for()
@@ -991,9 +1108,9 @@ fn kernel_half_has_work() -> bool {
         .any(|arena| kernel::holds_a_frame_from_target(*arena))
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn serve_the_kernel_half() {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     relay_frames_from_targets();
 
     #[cfg(feature = "linux-injected")]
@@ -1102,7 +1219,7 @@ unsafe extern "C" fn on_script_unloaded(
 
 static UNLOADS_IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
 
-#[cfg(feature = "linux")]
+#[cfg(any(feature = "linux", feature = "xnu-kext"))]
 fn transport_teardown() {
     unsafe {
         let driver = TRANSPORT_DRIVER;
@@ -1191,11 +1308,11 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::LoadScript => handle_load_script(payload_variant, request_id),
             FridaCommand::DestroyScript => handle_destroy_script(payload_variant, request_id),
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
-            #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
+            #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "xnu-core")]
             FridaCommand::EnumerateApplications => {
                 kernel::list_applications_when_the_loop_can(request_id);
                 None
@@ -1206,12 +1323,12 @@ fn process_incoming_message(variant: *mut GVariant) {
                 feature = "win9x",
                 feature = "winnt",
                 feature = "linux-injected",
-                feature = "xnu"
+                feature = "xnu-core"
             ))]
             FridaCommand::EnumerateProcesses => Some(handle_enumerate_processes(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::InjectIntoProcess => handle_inject_into_process(payload_variant, request_id),
-            #[cfg(any(feature = "linux-injected", feature = "xnu"))]
+            #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
             FridaCommand::InjectIntoProcess => Some(handle_inject_into_process(payload_variant)),
             #[cfg(feature = "win9x")]
             FridaCommand::AllocateShared => handle_allocate_shared(payload_variant, request_id),
@@ -1221,22 +1338,22 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::StartAgentInProcess => Some(handle_start_agent_in_process(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             FridaCommand::SpawnProcess => Some(handle_spawn_process(payload_variant)),
-            #[cfg(feature = "xnu")]
+            #[cfg(feature = "xnu-core")]
             FridaCommand::SpawnProcess => {
                 kernel::spawn_when_the_loop_can(request_id, &words_run_together(payload_variant));
                 None
             }
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-                feature = "xnu"))]
+                feature = "xnu-core"))]
             FridaCommand::ResumeProcess => Some(handle_resume_process(payload_variant)),
             #[cfg(any(
                 feature = "win9x",
                 feature = "winnt",
                 feature = "linux-injected",
-                feature = "xnu"
+                feature = "xnu-core"
             ))]
             FridaCommand::Stop => Some(handle_stop()),
-            #[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+            #[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
             FridaCommand::DetachFromProcess => {
                 Some(handle_detach_from_process(payload_variant))
             }
@@ -1273,7 +1390,7 @@ fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option
     None
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 fn handle_inject_into_process(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
         let reached = kernel::inject_into_process(g_variant_get_uint32(payload));
@@ -1381,12 +1498,12 @@ fn serve_pending_detach() {
 
 // The copy sends complete frames, thus the half with the hostlink sends the bytes without a
 // change.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
-#[cfg(feature = "xnu")]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
+#[cfg(feature = "xnu-core")]
 pub static mut ASKED_THE_HOST: u32 = 0;
 
 fn relay_frames_from_targets() {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     {
         kernel::serve_what_the_copies_ask();
         kernel::look_for_new_processes();
@@ -1446,7 +1563,7 @@ fn describe(path: *const u8) -> *const gchar {
     kernel::describe_image(path) as *const gchar
 }
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 fn what_is_installed() -> HandlerResponse {
     unsafe {
         let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
@@ -1550,7 +1667,7 @@ fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
     into.as_ptr() as *const gchar
 }
 
-#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     kernel::gate_spawns(unsafe { g_variant_get_boolean(payload) } != 0);
 
@@ -1559,7 +1676,7 @@ fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     unsafe {
         let message = g_variant_new(
@@ -1582,7 +1699,7 @@ pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     feature = "win9x",
     feature = "winnt",
     feature = "linux-injected",
-    feature = "xnu"
+    feature = "xnu-core"
 ))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
@@ -1639,7 +1756,7 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     feature = "win9x",
     feature = "winnt",
     feature = "linux-injected",
-    feature = "xnu"
+    feature = "xnu-core"
 ))]
 fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
     if text.is_null() {
@@ -1692,7 +1809,7 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
             note_waiter(request_id, wait_event);
         }
 
-        #[cfg(feature = "xnu")]
+        #[cfg(feature = "xnu-core")]
         let reply = loop {
             if on_loop {
                 transport.process();
@@ -1706,7 +1823,7 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
             });
         };
 
-        #[cfg(not(feature = "xnu"))]
+        #[cfg(not(feature = "xnu-core"))]
         let reply = loop {
             let mut reply: Option<*mut GVariant> = None;
             kernel::wait(wait_event, None, &mut || {
@@ -1757,7 +1874,7 @@ fn forget_waiter(request_id: u16) {
     }
 }
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 fn pending_reply_arrived(request_id: u16) -> bool {
     unsafe {
         core::ptr::addr_of!(PENDING_REPLIES)
@@ -1776,7 +1893,7 @@ fn take_pending_reply(request_id: u16) -> Option<*mut GVariant> {
     }
 }
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 fn words_run_together(payload: *mut GVariant) -> alloc::vec::Vec<u8> {
     let mut said = alloc::vec::Vec::new();
     unsafe {
@@ -1827,9 +1944,9 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_stop() -> HandlerResponse {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     {
         kernel::give_the_word_back();
         kernel::take_the_bell_down();
@@ -1841,7 +1958,7 @@ fn handle_stop() -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     let left = unsafe { kernel::detach_from_process(g_variant_get_uint32(payload)) };
     if !left {
@@ -1851,7 +1968,7 @@ fn handle_detach_from_process(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_resume_process(payload: *mut GVariant) -> HandlerResponse {
     let resumed = unsafe { kernel::resume_process(g_variant_get_uint32(payload)) };
     if !resumed {
@@ -2003,7 +2120,7 @@ pub(crate) fn source_process_id() -> u32 {
         return kernel::home_process_id();
     }
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if crate::xnu::in_copy() {
         return kernel::current_process_id();
     }

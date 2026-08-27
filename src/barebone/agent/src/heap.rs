@@ -31,7 +31,7 @@ fn pages_for(size: usize) -> *mut u8 {
     {
         crate::linux::user::map_writable(size)
     }
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     {
         crate::xnu_user_calls::map_writable(size)
     }

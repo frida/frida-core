@@ -50,7 +50,7 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu"))))]
+#[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu-core"))))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
     unsafe {
@@ -65,12 +65,12 @@ pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
 
 // Invalidating the whole instruction cache is the kernel's to do, and the copy runs where that
 // instruction is not allowed. Line by line is what both halves may ask for.
-#[cfg(all(target_arch = "aarch64", any(feature = "linux-injected", feature = "xnu")))]
+#[cfg(all(target_arch = "aarch64", any(feature = "linux-injected", feature = "xnu-core")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     let told = crate::kernel::cache_shape();
-    #[cfg(not(feature = "xnu"))]
+    #[cfg(not(feature = "xnu-core"))]
     let told: u64 = {
         let read: u64;
         unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) read, options(nomem, nostack)) };

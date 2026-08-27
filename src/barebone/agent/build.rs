@@ -86,6 +86,8 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=GUMJS_DEVKIT_DIR");
+    println!("cargo:rerun-if-changed={}", devkit_dir.join("frida-gumjs.h").display());
 }
 
 pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {

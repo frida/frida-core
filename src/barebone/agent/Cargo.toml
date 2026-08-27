@@ -19,7 +19,11 @@ required-features = ["blob"]
 [features]
 # Flavors the host injects and calls into, as opposed to the module Linux loads.
 blob = []
-xnu = ["blob"]
+# The XNU flavour itself, and the two ways it is packaged: a blob the host injects
+# into a running kernel, and a kext that kernel loads.
+xnu-core = []
+xnu = ["xnu-core", "blob"]
+xnu-kext = ["xnu-core"]
 win9x = ["blob"]
 winnt = ["blob"]
 linux = []

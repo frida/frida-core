@@ -32,11 +32,11 @@ use core::ptr;
 
 // Where the guest's kernel keeps itself and its modules, which is what Gum
 // reports as the path of each one.
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 const KERNEL_PATH: &str = "/System/Library/Kernels/kernel";
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 const MODULE_DIRECTORY: &str = "/System/Library/Extensions/";
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 const MODULE_SUFFIX: &str = ".kext";
 
 #[cfg(feature = "linux-injected")]
@@ -50,7 +50,7 @@ const SHADOW_MAGIC: u64 = 0x4644_4f48_5341_4853;
 const SHADOW_HEADER: usize = 24;
 const SHADOW_MIN_ADDRESS: u64 = 0xffff_f000_0000_0000;
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
     c"darwin".as_ptr() as *const crate::bindings::gchar
@@ -79,7 +79,7 @@ pub extern "C" fn gum_memory_can_remap_writable() -> gboolean {
         return 0;
     }
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if crate::xnu::in_copy() {
         return 0;
     }
@@ -205,7 +205,7 @@ fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     kernel::protect(address, size, prot)
 }
 
-#[cfg(feature = "xnu")]
+#[cfg(feature = "xnu-core")]
 fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     if crate::xnu::in_copy() {
         return kernel::protect(address, size, prot);
@@ -214,7 +214,7 @@ fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     ask_the_host_to_protect(address, size, prot)
 }
 
-#[cfg(not(any(feature = "linux-injected", feature = "xnu")))]
+#[cfg(not(any(feature = "linux-injected", feature = "xnu-core")))]
 fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     ask_the_host_to_protect(address, size, prot)
 }
@@ -226,7 +226,7 @@ pub fn ask_the_host_to_protect(address: u64, size: usize, prot: u32) -> bool {
 
     let granted = the_host_grants_it(address, size, prot);
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if granted {
         crate::kernel::make_the_machine_agree();
     }
@@ -295,15 +295,15 @@ pub extern "C" fn gum_memory_allocate(
     _alignment: gsize,
     prot: GumPageProtection,
 ) -> gpointer {
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     let ptr = if crate::xnu::in_copy() {
         crate::xnu_user_calls::code_memory_near(address as u64, size as usize)
     } else {
         kernel::alloc_code(size as usize)
     };
-    #[cfg(not(feature = "xnu"))]
+    #[cfg(not(feature = "xnu-core"))]
     let ptr = kernel::alloc_code(size as usize);
-    #[cfg(not(feature = "xnu"))]
+    #[cfg(not(feature = "xnu-core"))]
     let _ = address;
     unsafe {
         core::ptr::write_bytes(ptr, 0, size as usize);
@@ -343,7 +343,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
         return;
     }
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if crate::xnu::in_copy() {
         crate::xnu_mapped::register_what_the_copy_lives_among(registry);
         return;
@@ -381,7 +381,7 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
     }
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = registry };
@@ -389,18 +389,18 @@ pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumT
     kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = ptr::null_mut() };
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) fn thread_appeared(id: u32) {
     announce_thread(id);
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) fn thread_vanished(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };
     if registry.is_null() {
@@ -410,7 +410,7 @@ pub(crate) fn thread_vanished(id: u32) {
     unsafe { gum_barebone_unregister_thread(registry, id as GumThreadId) };
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 fn announce_thread(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };
     if registry.is_null() {
@@ -423,10 +423,10 @@ fn announce_thread(id: u32) {
     unsafe { gum_barebone_register_thread(registry, &details) };
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
     let Some(emit) = func else {
@@ -441,7 +441,7 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
     });
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn _gum_process_enumerate_ranges(
     prot: GumPageProtection,
@@ -471,7 +471,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
     });
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_query_protection(
     address: gpointer,
@@ -497,7 +497,7 @@ pub(crate) unsafe fn enumerate_exports_in_range(
         return;
     }
 
-    #[cfg(feature = "xnu")]
+    #[cfg(feature = "xnu-core")]
     if crate::xnu::in_copy() {
         crate::xnu_mapped::enumerate_exports_in_range(start_address, end_address, callback);
         return;
