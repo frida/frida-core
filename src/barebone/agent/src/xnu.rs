@@ -329,12 +329,7 @@ fn what_a_thread_entry_is_signed_with() -> usize {
     0xd507
 }
 
-#[cfg(feature = "xnu-kext")]
-fn what_a_handler_is_signed_with() -> usize {
-    unsafe { frida_agent_disc_interrupt_handler as usize }
-}
-
-#[cfg(not(feature = "xnu-kext"))]
+#[cfg(feature = "blob")]
 fn what_a_handler_is_signed_with() -> usize {
     0xd36
 }
@@ -342,7 +337,6 @@ fn what_a_handler_is_signed_with() -> usize {
 #[cfg(feature = "xnu-kext")]
 unsafe extern "C" {
     static frida_agent_disc_thread_continue: u32;
-    static frida_agent_disc_interrupt_handler: u32;
 }
 
 pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut c_void) -> isize {
@@ -429,13 +423,16 @@ pub fn virt_to_phys(vaddr: u64) -> u64 {
     }
 }
 
+#[cfg(feature = "blob")]
 pub type IOInterruptHandler =
     extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
+#[cfg(feature = "blob")]
 pub fn pci_interrupt(_bus: u8, _devfn: u8) -> Option<u32> {
     None
 }
 
+#[cfg(feature = "blob")]
 pub fn install_interrupt_handler(
     irq: u32,
     target: *mut c_void,
@@ -505,26 +502,31 @@ pub fn install_interrupt_handler(
     en(ic, nub as *mut c_void, 0)
 }
 
+#[cfg(feature = "blob")]
 #[repr(C)]
 struct IOPlatformExpert {
     _p: [u8; 0],
 }
 
+#[cfg(feature = "blob")]
 #[repr(C)]
 struct IOInterruptController {
     _p: [u8; 0],
 }
 
+#[cfg(feature = "blob")]
 #[repr(C)]
 struct OSSymbol {
     _p: [u8; 0],
 }
 
+#[cfg(feature = "blob")]
 #[repr(C)]
 struct OSData {
     _p: [u8; 0],
 }
 
+#[cfg(feature = "blob")]
 #[repr(C)]
 struct IOInterruptSource {
     interrupt_controller: *mut IOInterruptController,
@@ -532,6 +534,7 @@ struct IOInterruptSource {
 }
 
 #[inline(always)]
+#[cfg(feature = "blob")]
 fn vf<T>(obj: *mut c_void, slot: isize) -> T
 where
     T: Copy,
@@ -543,10 +546,14 @@ where
     unsafe { core::mem::transmute_copy::<*const u8, T>(&entry_ptr) }
 }
 
+#[cfg(feature = "blob")]
 const IO_SERVICE_VTABLE_LENGTH: isize = 168;
 
+#[cfg(feature = "blob")]
 const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
+#[cfg(feature = "blob")]
 const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
+#[cfg(feature = "blob")]
 const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
 
 type ContinuationFn = ThreadEntry;
@@ -576,6 +583,10 @@ unsafe extern "C" {
     static _ml_io_map: unsafe extern "C" fn(u64, u64) -> *mut c_void;
     static _ml_vtophys: Option<unsafe extern "C" fn(u64) -> u64>;
     static _ml_static_vtop: Option<unsafe extern "C" fn(u64) -> u64>;
+}
+
+#[cfg(feature = "blob")]
+unsafe extern "C" {
     static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
     static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
     static __ZN8OSSymbol17withCStringNoCopyEPKc:
