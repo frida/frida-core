@@ -576,6 +576,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/enumerates-target-threads-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_enumerates_target_threads_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/keeps-two-processes-apart-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_keeps_two_processes_apart_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -1033,6 +1039,52 @@ namespace Frida.BareboneTest {
 				yield h.process_events ();
 
 			assert_true (said.contains ("true,true,true"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void xnu_enumerates_target_threads_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const threads = Process.enumerateThreads();
+				const here = Process.getCurrentThreadId();
+				const holdingIt = threads.find(t => t.id === here);
+				send([threads.length, holdingIt !== undefined,
+					threads.every(t => t.id !== 0)]);
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			assert_true (said.contains ("true,true"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

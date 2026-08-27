@@ -335,11 +335,27 @@ fn is_one_of_our_threads(signed: u64) -> bool {
 }
 
 fn ours_is_held_at(port: u64, at: usize) -> bool {
-    let held = unsafe { ((port as usize + at) as *const u64).read_volatile() };
+    let Some(held) = a_word_of(port, at) else {
+        return false;
+    };
     let held = unsafe { crate::pac::ptrauth_strip_pointer(held as *const u8) } as u64;
 
     looks_like_the_kernel(held) && our_threads().contains(&held)
 }
+
+pub fn a_word_of(at: u64, step: usize) -> Option<u64> {
+    if step + 8 > how_far_a_page_goes(at) {
+        return None;
+    }
+
+    Some(unsafe { ((at as usize + step) as *const u64).read_volatile() })
+}
+
+fn how_far_a_page_goes(at: u64) -> usize {
+    A_PAGE - (at as usize & (A_PAGE - 1))
+}
+
+const A_PAGE: usize = 0x1000;
 
 fn looks_like_the_kernel(at: u64) -> bool {
     at >= WHERE_THE_KERNEL_BEGINS && (at & 7) == 0

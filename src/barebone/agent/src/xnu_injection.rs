@@ -296,7 +296,7 @@ pub fn whose_task_does_this_port_name(port: *mut c_void) -> Option<u32> {
     }
 
     let holds = |at: usize| {
-        let held = unsafe { ((port as usize + at) as *const u64).read_volatile() };
+        let held = crate::xnu_hiding::a_word_of(port as u64, at)?;
         let held = unsafe { crate::pac::ptrauth_strip_pointer(held as *const u8) } as *mut c_void;
         unsafe { arenas() }.iter().find(|(_, placed)| placed.task == held).map(|(id, _)| *id)
     };
