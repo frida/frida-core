@@ -1,5 +1,6 @@
 
 #include <libkern/libkern.h>
+#include <mach/kmod.h>
 #include <mach/mach_types.h>
 #include <miscfs/devfs/devfs.h>
 #include <sys/conf.h>
@@ -68,7 +69,6 @@ const uintptr_t frida_agent_relocs_end = 0;
 
 const unsigned frida_agent_disc_thread_continue =
     ptrauth_type_discriminator (thread_continue_t);
-const unsigned frida_agent_disc_interrupt_handler = 0xd36;
 
 _Static_assert (ptrauth_type_discriminator (thread_continue_t) == 0xd507,
     "the agent signs a thread's entry with 0xd507");
@@ -197,6 +197,8 @@ frida_kext_stop (kmod_info_t * ki, void * d)
 
   return KERN_SUCCESS;
 }
+
+KMOD_EXPLICIT_DECL (re.frida.agent, "1.0", frida_kext_start, frida_kext_stop)
 
 static int
 frida_dev_open (dev_t dev, int flags, int devtype, struct proc * p)
