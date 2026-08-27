@@ -38,6 +38,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         task: process.task,
         arena: arena_here,
         image_here: seen_from_here,
+        seen_size: home.seen_size,
         code: home.image,
         in_the_process: home.arena,
         stack: home.stack,
@@ -149,46 +150,6 @@ fn tell_it_to_go(id: u32, placed: &Placed) {
 
 const LONG_ENOUGH_TO_LEAVE: u64 = 2_000_000;
 
-fn take_back_what_it_was_given(id: u32, placed: &Placed) {
-    crate::xnu_hiding::forget_the_threads_of(placed.arena);
-    crate::xnu_hiding::no_longer_a_thread_of_ours(placed.bare_thread);
-
-    if let Some(terminate) = unsafe { _thread_terminate } {
-        unsafe { terminate(placed.bare_thread) };
-    }
-
-    let process = process_with_id(id);
-    let map = process.as_ref().map(|process| process.map);
-
-    what_the_copy_took(placed, &mut |at, size| unsafe { give_memory_back(map, at, size) });
-
-    unsafe { give_memory_back(ourselves(), placed.image_here, crate::own_range().1 as u64) };
-    unsafe { give_memory_back(ourselves(), placed.arena, crate::xnu_relay::ARENA_SIZE) };
-
-    let Some(process) = process else {
-        return;
-    };
-    unsafe {
-        give_memory_back(map, placed.code, crate::own_range().1 as u64);
-        give_memory_back(map, placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
-        give_memory_back(map, placed.stack, STACK);
-        release_process(process.handle);
-    }
-}
-
-fn what_the_copy_took(placed: &Placed, found: &mut dyn FnMut(u64, u64)) {
-    let taken = (placed.arena + crate::xnu_relay::WHAT_WE_TOOK) as *const u64;
-    let how_many = (unsafe { taken.read_volatile() } as usize)
-        .min(crate::xnu_relay::MOST_WE_TAKE);
-
-    for step in 0..how_many {
-        let at = unsafe { taken.add(1 + step * 2).read_volatile() };
-        if at != 0 {
-            found(at, unsafe { taken.add(2 + step * 2).read_volatile() });
-        }
-    }
-}
-
 struct Kept {
     code: u64,
     map: *mut c_void,
@@ -204,6 +165,115 @@ fn where_a_copy_has_been(id: u32, map: *mut c_void) -> Option<u64> {
     let kept = unsafe { kept_images() }.get(&id)?;
 
     (kept.map == map).then_some(kept.code)
+}
+
+fn what_an_agent_before_this_one_left(map: *mut c_void, shared: usize, size: usize)
+    -> Option<u64>
+{
+    let ask = unsafe { _mach_vm_region }?;
+    let mut at = 0u64;
+    for _ in 0..MOST_RANGES_TO_LOOK_THROUGH {
+        let mut here = at;
+        let mut room = 0u64;
+        let mut about = [0u32; WHAT_A_RANGE_IS_SAID_TO_BE as usize];
+        let mut words = WHAT_A_RANGE_IS_SAID_TO_BE;
+        let mut named = 0u32;
+        if unsafe {
+            ask(map, &mut here, &mut room, A_RANGE_AS_IT_IS, about.as_mut_ptr() as *mut c_void,
+                &mut words, &mut named)
+        } != KERN_SUCCESS
+        {
+            return None;
+        }
+
+        if room == shared as u64 && about[WHAT_MAY_BE_DONE_WITH_IT] == (READ | EXECUTE) as u32
+            && says_a_copy_was_here(map, here + shared as u64, here)
+        {
+            return Some(here);
+        }
+
+        at = here + room;
+        if room == 0 {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn says_a_copy_was_here(map: *mut c_void, statics: u64, code: u64) -> bool {
+    let Some(seen) = share(map, statics, A_PAGE) else {
+        return false;
+    };
+
+    let said = unsafe { (seen as *const u64).read_volatile() };
+    let began = unsafe { ((seen + 8) as *const u64).read_volatile() };
+    unsafe { give_memory_back(ourselves(), seen, A_PAGE) };
+
+    said == A_COPY_WAS_HERE && began == code
+}
+
+const A_COPY_WAS_HERE: u64 = 0x4672_6964_6100_0003;
+const A_PAGE: u64 = 0x4000;
+const MOST_RANGES_TO_LOOK_THROUGH: usize = 4096;
+const A_RANGE_AS_IT_IS: c_int = 9;
+const WHAT_A_RANGE_IS_SAID_TO_BE: u32 = 9;
+const WHAT_MAY_BE_DONE_WITH_IT: usize = 0;
+
+fn take_back_what_it_was_given(id: u32, placed: &Placed) {
+    crate::xnu_hiding::forget_the_threads_of(placed.arena);
+    crate::xnu_hiding::no_longer_a_thread_of_ours(placed.bare_thread);
+
+    if let Some(terminate) = unsafe { _thread_terminate } {
+        unsafe { terminate(placed.bare_thread) };
+    }
+
+    let process = process_with_id(id);
+    let map = process.as_ref().map(|process| process.map);
+
+    what_the_copy_took(placed, &mut |at, size| unsafe { give_memory_back(map, at, size) });
+
+    unsafe { kept_images() }.insert(id, Kept { code: placed.code, map: placed.map });
+    say_a_copy_was_here(placed);
+
+    unsafe { give_memory_back(ourselves(), placed.image_here, placed.seen_size) };
+    unsafe { give_memory_back(ourselves(), placed.arena, crate::xnu_relay::ARENA_SIZE) };
+
+    let Some(process) = process else {
+        return;
+    };
+
+    unsafe {
+        give_memory_back(map, placed.in_the_process, crate::xnu_relay::ARENA_SIZE);
+        give_memory_back(map, placed.stack, STACK);
+        release_process(process.handle);
+    }
+}
+
+fn say_a_copy_was_here(placed: &Placed) {
+    let shared = (crate::writable_half_start() - crate::own_range().0) as u64;
+    let statics = match placed.seen_size == crate::own_range().1 as u64 {
+        true => placed.image_here + shared,
+        false => placed.image_here,
+    };
+
+    unsafe {
+        (statics as *mut u64).write_volatile(A_COPY_WAS_HERE);
+        ((statics + 8) as *mut u64).write_volatile(placed.code);
+    }
+}
+
+fn what_the_copy_took(placed: &Placed, found: &mut dyn FnMut(u64, u64)) {
+    let taken = (placed.arena + crate::xnu_relay::WHAT_WE_TOOK) as *const u64;
+    let how_many = (unsafe { taken.read_volatile() } as usize)
+        .min(crate::xnu_relay::MOST_WE_TAKE);
+
+    for step in 0..how_many {
+        let at = unsafe { taken.add(1 + step * 2).read_volatile() };
+        if at != 0 {
+            found(at, unsafe { taken.add(2 + step * 2).read_volatile() });
+        }
+    }
 }
 
 unsafe fn give_memory_back(map: Option<*mut c_void>, address: u64, size: u64) {
@@ -399,6 +469,7 @@ struct Placed {
     task: *mut c_void,
     arena: u64,
     image_here: u64,
+    seen_size: u64,
     code: u64,
     in_the_process: u64,
     stack: u64,
@@ -408,6 +479,7 @@ struct Placed {
 struct Home {
     image: u64,
     image_here: u64,
+    seen_size: u64,
     code: u64,
     arena: u64,
     arena_here: u64,
@@ -430,10 +502,30 @@ pub fn process_with_id(id: u32) -> Option<Process> {
 
 fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
     let (base, size) = crate::own_range();
+    let shared = crate::writable_half_start() - base;
 
-    let code = take_memory(map, size as u64)?;
-    let seen_from_here = share(map, code, size as u64)?;
-    lay_out_the_image(base, size, code, seen_from_here);
+    let (code, seen_from_here, seen_size) = match where_a_copy_has_been(id, map)
+        .or_else(|| what_an_agent_before_this_one_left(map, shared, size))
+    {
+        Some(code) => {
+            let private = (size - shared) as u64;
+            let seen = share(map, code + shared as u64, private)?;
+            unsafe {
+                crate::install_writable_half(code as usize, seen as usize);
+                core::ptr::write_bytes((seen as usize + crate::writable_half_size()) as *mut u8, 0,
+                    size - shared - crate::writable_half_size());
+            }
+
+            (code, seen, private)
+        }
+        None => {
+            let code = take_memory(map, size as u64)?;
+            let seen = share(map, code, size as u64)?;
+            lay_out_the_image(base, size, code, seen);
+
+            (code, seen, size as u64)
+        }
+    };
 
     let arena = take_memory(map, crate::xnu_relay::ARENA_SIZE)?;
     let arena_here = share(map, arena, crate::xnu_relay::ARENA_SIZE)?;
@@ -451,20 +543,23 @@ fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
     let stack = take_memory(map, STACK)?;
 
 
-    let protect = unsafe { _mach_vm_protect }?;
-    let shared = (crate::writable_half_start() - base) as u64;
-    if unsafe { protect(map, code, shared, 0, READ | EXECUTE) } != KERN_SUCCESS {
-        return None;
-    }
-    if unsafe { protect(map, code + shared, size as u64 - shared, 0, READ | WRITE) }
-        != KERN_SUCCESS
-    {
-        return None;
+    if seen_size == size as u64 {
+        let protect = unsafe { _mach_vm_protect }?;
+        let shared = shared as u64;
+        if unsafe { protect(map, code, shared, 0, READ | EXECUTE) } != KERN_SUCCESS {
+            return None;
+        }
+        if unsafe { protect(map, code + shared, size as u64 - shared, 0, READ | WRITE) }
+            != KERN_SUCCESS
+        {
+            return None;
+        }
     }
 
     Some(Home {
         image: code,
         image_here: seen_from_here,
+        seen_size,
         code: code + crate::xnu_user::entry_offset() as u64,
         arena,
         arena_here,
@@ -551,7 +646,10 @@ fn ourselves() -> Option<*mut c_void> {
 }
 
 fn look_at_the_task(task: *mut c_void) -> alloc::vec::Vec<u32> {
-    (0..HOW_FAR_INTO_A_TASK)
+    let how_far = HOW_FAR_INTO_A_TASK
+        .min(crate::xnu_hiding::room_in_the_page(task as u64) / 4);
+
+    (0..how_far)
         .map(|step| unsafe { ((task as *const u32).add(step)).read_volatile() })
         .collect()
 }
@@ -737,6 +835,8 @@ unsafe extern "C" {
     static _mach_vm_allocate: Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, c_int) -> c_int>;
     static _mach_vm_deallocate: Option<unsafe extern "C" fn(*mut c_void, u64, u64) -> c_int>;
     static _mach_vm_protect: Option<unsafe extern "C" fn(*mut c_void, u64, u64, c_int, c_int) -> c_int>;
+    static _mach_vm_region: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64, c_int,
+        *mut c_void, *mut u32, *mut u32) -> c_int>;
     static _mach_vm_remap: Option<
         unsafe extern "C" fn(*mut c_void, *mut u64, u64, u64, c_int, *mut c_void, u64, c_int,
             *mut u32, *mut u32, c_int) -> c_int,

@@ -344,14 +344,14 @@ fn ours_is_held_at(port: u64, at: usize) -> bool {
 }
 
 pub fn a_word_of(at: u64, step: usize) -> Option<u64> {
-    if step + 8 > how_far_a_page_goes(at) {
+    if step + 8 > room_in_the_page(at) {
         return None;
     }
 
     Some(unsafe { ((at as usize + step) as *const u64).read_volatile() })
 }
 
-fn how_far_a_page_goes(at: u64) -> usize {
+pub fn room_in_the_page(at: u64) -> usize {
     A_PAGE - (at as usize & (A_PAGE - 1))
 }
 

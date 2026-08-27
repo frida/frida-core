@@ -594,6 +594,18 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/leaves-one-image-in-a-process-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_leaves_one_image_in_a_process_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/Xnu/finds-the-image-the-last-agent-left-in-live-guest", () => {
+			var h = new Harness ((h) => xnu_leaves_one_image_in_a_process_in_live_guest.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/leaves-nothing-behind-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_leaves_nothing_behind_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -1211,6 +1223,56 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
+	private async void xnu_leaves_one_image_in_a_process_in_live_guest (Harness h,
+			BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "backboardd");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				const loose = Process.enumerateRanges('r-x').filter(r => r.file === undefined
+					&& r.protection === 'r-x');
+				const biggest = loose.reduce((most, r) => Math.max(most, r.size), 0);
+				send({ images: loose.filter(r => r.size === biggest).length,
+					biggest: biggest.toString(16), of: loose.length });
+			""", null, null);
+
+			string? said = null;
+			script.message.connect ((json, data) => {
+				said = json;
+			});
+			yield script.load (null);
+
+			while (said == null)
+				yield h.process_events ();
+
+			printerr ("\nIMAGES: %s\n", said);
+
+			var counted = said.substring (said.index_of ("\"images\":") + 9);
+			uint64 images = uint64.parse (counted.substring (0, counted.index_of (",")));
+			assert_true (images == 1);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
 	private async void xnu_leaves_nothing_behind_in_live_guest (Harness h, BareboneConfig? config) {
 		if (config == null)
 			return;
@@ -1225,7 +1287,7 @@ namespace Frida.BareboneTest {
 			uint pid = yield find_program (device, "backboardd");
 			assert_true (pid != 0);
 
-			uint64 first = 0, last = 0;
+			uint64 first = 0, last = 0, images_left = 0;
 			for (uint round = 0; round != 4; round++) {
 				var session = yield device.attach (pid, null, null);
 				var script = yield session.create_script ("""
@@ -1235,7 +1297,9 @@ namespace Frida.BareboneTest {
 					const getpid = new NativeFunction(p('getpid'), 'int', []);
 					const info = Memory.alloc(256);
 					procPidinfo(getpid(), 4, 0, info, 256);
-					send({ mapped: info.readU64().toNumber(), threads: info.add(84).readU32() });
+					const left = Process.enumerateRanges('---').filter(r =>
+						r.file === undefined && r.protection === '---' && r.size >= 0x100000);
+					send({ mapped: info.readU64().toNumber(), left: left.length });
 				""", null, null);
 
 				string? said = null;
@@ -1249,6 +1313,11 @@ namespace Frida.BareboneTest {
 
 				var digits = said.substring (said.index_of ("\"mapped\":") + 9);
 				uint64 mapped = uint64.parse (digits.substring (0, digits.index_of (",")));
+				var counted = said.substring (said.index_of ("\"left\":") + 7);
+				uint64 left = uint64.parse (counted.substring (0, counted.index_of ("}")));
+				if (round == 0)
+					images_left = left;
+				assert_true (left <= images_left);
 				printerr ("\nMAPPED after round %u: %s\n", round, said);
 				if (round == 0)
 					first = mapped;
@@ -1257,8 +1326,9 @@ namespace Frida.BareboneTest {
 				yield session.detach (null);
 			}
 
-			printerr ("\nGREW by %" + uint64.FORMAT + " over three rounds\n", last - first);
-			assert_true (last - first < 3 * WHAT_AN_IMAGE_COSTS);
+			printerr ("\nGREW by %" + uint64.FORMAT + " over three rounds, %" + uint64.FORMAT
+				+ " images left\n", last - first, images_left);
+			assert_true (last - first < ROOM_FOR_WHAT_THE_PROCESS_DOES);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1274,7 +1344,7 @@ namespace Frida.BareboneTest {
 		h.done ();
 	}
 
-	private const uint64 WHAT_AN_IMAGE_COSTS = 4456448 + (1024 * 1024);
+	private const uint64 ROOM_FOR_WHAT_THE_PROCESS_DOES = 3 * 1024 * 1024;
 
 	private async void xnu_answers_at_a_steady_pace_in_live_guest (Harness h,
 			BareboneConfig? config) {
