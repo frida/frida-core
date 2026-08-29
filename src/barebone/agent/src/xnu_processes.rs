@@ -17,7 +17,7 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
         unsafe {
             iterate(
                 ALL_PROCESSES,
-                note_a_process,
+                signed_to_be_called_back(note_a_process),
                 &mut listed as *mut Vec<(u32, [u8; NAME_SIZE])> as *mut c_void,
                 core::ptr::null_mut(),
                 core::ptr::null_mut(),
@@ -68,6 +68,13 @@ fn walk_every_number(listed: &mut Vec<(u32, [u8; NAME_SIZE])>) {
     }
 }
 
+fn signed_to_be_called_back(callout: ProcCallout) -> ProcCallout {
+    unsafe {
+        core::mem::transmute(crate::pac::ptrauth_sign(callout as *const u8,
+            crate::xnu::what_a_proc_callout_is_signed_with()))
+    }
+}
+
 unsafe extern "C" fn note_a_process(process: *mut c_void, listed: *mut c_void) -> c_int {
     let listed = listed as *mut Vec<(u32, [u8; NAME_SIZE])>;
 
@@ -110,6 +117,8 @@ unsafe fn name_of(process: *mut c_void) -> [u8; NAME_SIZE] {
     }
 }
 
+type ProcCallout = unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int;
+
 const NAME_SIZE: usize = 33;
 const ALL_PROCESSES: c_int = 1;
 const KEEP_GOING: c_int = 0;
@@ -120,7 +129,7 @@ unsafe extern "C" {
     static _proc_iterate: Option<
         unsafe extern "C" fn(
             c_int,
-            unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
+            ProcCallout,
             *mut c_void,
             *mut c_void,
             *mut c_void,

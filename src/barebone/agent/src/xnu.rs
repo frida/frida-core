@@ -320,6 +320,16 @@ fn kernel_free(ptr: *mut u8, size: usize) {
 }
 
 #[cfg(feature = "xnu-kext")]
+pub fn what_a_proc_callout_is_signed_with() -> usize {
+    unsafe { frida_agent_disc_proc_callout as usize }
+}
+
+#[cfg(not(feature = "xnu-kext"))]
+pub fn what_a_proc_callout_is_signed_with() -> usize {
+    0
+}
+
+#[cfg(feature = "xnu-kext")]
 fn what_a_thread_entry_is_signed_with() -> usize {
     unsafe { frida_agent_disc_thread_continue as usize }
 }
@@ -337,6 +347,7 @@ fn what_a_handler_is_signed_with() -> usize {
 #[cfg(feature = "xnu-kext")]
 unsafe extern "C" {
     static frida_agent_disc_thread_continue: u32;
+    static frida_agent_disc_proc_callout: u32;
 }
 
 pub fn kernel_thread_start(continuation: ContinuationFn, thread_parameter: *mut c_void) -> isize {

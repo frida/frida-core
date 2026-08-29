@@ -68,8 +68,12 @@ const uintptr_t frida_agent_heap_start = 0;
 const uintptr_t frida_agent_relocs_start = 0;
 const uintptr_t frida_agent_relocs_end = 0;
 
+typedef int (* FridaProcCallout) (proc_t process, void * argument);
+
 const unsigned frida_agent_disc_thread_continue =
     ptrauth_type_discriminator (thread_continue_t);
+const unsigned frida_agent_disc_proc_callout =
+    ptrauth_type_discriminator (FridaProcCallout);
 
 _Static_assert (ptrauth_type_discriminator (thread_continue_t) == 0xd507,
     "the agent signs a thread's entry with 0xd507");
