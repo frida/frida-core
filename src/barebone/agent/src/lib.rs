@@ -1951,13 +1951,14 @@ fn handle_spawn_process(payload: *mut GVariant) -> HandlerResponse {
 
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_stop() -> HandlerResponse {
-    #[cfg(feature = "xnu-core")]
+    #[cfg(feature = "xnu")]
     {
         kernel::give_the_word_back();
         kernel::take_the_bell_down();
         kernel::show_our_threads_again();
     }
 
+    #[cfg(feature = "blob")]
     STOP_REQUESTED.store(true, Ordering::Release);
 
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
