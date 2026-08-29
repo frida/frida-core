@@ -848,7 +848,9 @@ pub(crate) unsafe fn run_constructors() {
     unsafe {
         let mut entry = frida_agent_init_start;
         while entry != frida_agent_init_end {
-            let start: extern "C" fn() = core::mem::transmute((entry as *const usize).read());
+            let signed = (entry as *const usize).read() as *const u8;
+            let start: extern "C" fn() =
+                core::mem::transmute(crate::pac::ptrauth_strip_data(signed));
             start();
             entry += core::mem::size_of::<usize>();
         }
