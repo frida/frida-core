@@ -1052,14 +1052,12 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
     glib::own_the_loop();
 
-    #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-        feature = "xnu-core"))]
+    #[cfg(any(feature = "blob", feature = "xnu-core"))]
     watch_for_work(main_context, kernel_half_has_work, serve_the_kernel_half);
 
     unsafe {
         loop {
-            #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
-                feature = "xnu-core")))]
+            #[cfg(not(feature = "blob"))]
             transport_get_unchecked().process();
 
             #[cfg(feature = "linux")]
