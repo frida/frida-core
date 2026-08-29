@@ -562,6 +562,11 @@ mod entrypoint_xnu_kext {
         kernel::log("frida: agent stopped\n\0");
     }
 
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frida_agent_wake() {
+        kernel::wake(glib::wakeup_token());
+    }
+
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
             crate::run_constructors();
@@ -682,7 +687,7 @@ mod entrypoint_linux {
 #[cfg(feature = "linux")]
 pub use entrypoint_linux::{frida_agent_start, frida_agent_stop};
 #[cfg(feature = "xnu-kext")]
-pub use entrypoint_xnu_kext::{frida_agent_start, frida_agent_stop};
+pub use entrypoint_xnu_kext::{frida_agent_start, frida_agent_stop, frida_agent_wake};
 #[cfg(feature = "blob")]
 pub use entrypoint_blob::_start;
 

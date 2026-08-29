@@ -16,6 +16,7 @@
 
 extern int frida_agent_start (uint64_t own_base, uint64_t own_size);
 extern void frida_agent_stop (void);
+extern void frida_agent_wake (void);
 
 #define FRIDA_KERNEL_ADDRS(X) \
   X (panic) \
@@ -317,6 +318,9 @@ frida_dev_write (dev_t dev, struct uio * uio, int ioflag)
     frida_link.from_host_len += n;
 
   lck_mtx_unlock (frida_link.lock);
+
+  if (result == 0 && frida_running)
+    frida_agent_wake ();
 
   return result;
 }
