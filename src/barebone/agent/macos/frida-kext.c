@@ -90,13 +90,21 @@ sys_icache_invalidate (void * start, size_t size)
 
 #define FRIDA_IOC_SET_ADDR _IOW ('F', 1, FridaAddrRequest)
 #define FRIDA_IOC_START _IO ('F', 2)
+#define FRIDA_IOC_GET_IMAGE _IOR ('F', 3, FridaImageInfo)
 
 typedef struct _FridaAddrRequest FridaAddrRequest;
+typedef struct _FridaImageInfo FridaImageInfo;
 
 struct _FridaAddrRequest
 {
   char name[64];
   uint64_t address;
+};
+
+struct _FridaImageInfo
+{
+  uint64_t base;
+  uint64_t size;
 };
 
 #define FRIDA_LINK_ROOM (1024 * 1024)
@@ -387,6 +395,15 @@ frida_dev_ioctl (dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc * p
       }
 
       return ENOENT;
+    }
+    case FRIDA_IOC_GET_IMAGE:
+    {
+      FridaImageInfo * info = (FridaImageInfo *) data;
+
+      info->base = frida_own_base;
+      info->size = frida_own_size;
+
+      return 0;
     }
     case FRIDA_IOC_START:
     {
