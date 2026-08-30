@@ -425,6 +425,77 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe { _ml_io_map(phys_addr, size) }
 }
 
+#[cfg(feature = "xnu-kext")]
+pub fn write_through_a_writable_alias(address: u64, data: *const u8, len: usize) -> bool {
+    let page = page_size();
+    let mut written = 0;
+
+    while written < len {
+        let at = address + written as u64;
+        let base = at & !(page as u64 - 1);
+        let offset = (at - base) as usize;
+        let chunk = core::cmp::min(len - written, page - offset);
+
+        let physical = virt_to_phys(base);
+        if physical == 0 {
+            return false;
+        }
+
+        let alias = alias_of(physical, page);
+        if alias.is_null() {
+            return false;
+        }
+
+        let to = (alias as u64 + offset as u64) as *mut u8;
+        let from = unsafe { data.add(written) };
+        if !copy_as_words(from, to, chunk) {
+            return false;
+        }
+
+        written += chunk;
+    }
+
+    true
+}
+
+#[cfg(feature = "xnu-kext")]
+fn alias_of(physical: u64, page: usize) -> *mut c_void {
+    let held = unsafe { aliases() };
+    if let Some(known) = held.get(&physical) {
+        return *known as *mut c_void;
+    }
+
+    let made = map_io(physical, page as u64);
+    if !made.is_null() {
+        held.insert(physical, made as u64);
+    }
+
+    made
+}
+
+#[cfg(feature = "xnu-kext")]
+unsafe fn aliases() -> &'static mut alloc::collections::BTreeMap<u64, u64> {
+    unsafe { (&raw mut ALIASES).as_mut().unwrap() }
+}
+
+#[cfg(feature = "xnu-kext")]
+static mut ALIASES: alloc::collections::BTreeMap<u64, u64> =
+    alloc::collections::BTreeMap::new();
+
+#[cfg(feature = "xnu-kext")]
+fn copy_as_words(from: *const u8, to: *mut u8, len: usize) -> bool {
+    if (to as usize) % 4 != 0 || len % 4 != 0 {
+        return false;
+    }
+
+    for step in (0..len).step_by(4) {
+        let word = unsafe { (from.add(step) as *const u32).read_unaligned() };
+        unsafe { (to.add(step) as *mut u32).write_volatile(word) };
+    }
+
+    true
+}
+
 pub fn virt_to_phys(vaddr: u64) -> u64 {
     unsafe {
         if let Some(ask) = _ml_vtophys {
