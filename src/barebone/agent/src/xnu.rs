@@ -181,12 +181,27 @@ fn kernel_alloc(size: usize) -> *mut u8 {
 // Executable slabs come out of the same allocator; the host flips their page
 // permissions for us through its physical-memory bridge.
 fn kernel_alloc_code(size: usize) -> *mut u8 {
-    kalloc(size)
+    let page = page_size();
+    let held = kalloc(size + page);
+    if held.is_null() {
+        return held;
+    }
+
+    let aligned = ((held as usize + page) & !(page - 1)) as *mut u8;
+    unsafe { (aligned.sub(HELD_BY_ALIGNED) as *mut u64).write(held as u64) };
+
+    aligned
 }
 
 fn kernel_free_code(ptr: *mut u8, size: usize) {
-    kernel_free(ptr, size);
+    let page = page_size();
+    let held = unsafe { (ptr.sub(HELD_BY_ALIGNED) as *const u64).read() } as *mut u8;
+    kernel_free(held, size + page);
 }
+
+const HELD_BY_ALIGNED: usize = 8;
+
+
 
 pub fn make_the_machine_agree() {
     unsafe {
