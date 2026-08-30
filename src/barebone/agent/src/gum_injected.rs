@@ -95,9 +95,16 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
     if gum::is_agent_slab(first_page as u64) {
         return remap_agent_pages(first_page, n_pages);
     }
+
     shadow_kernel_pages(first_page, n_pages)
 }
 
+#[cfg(feature = "xnu-kext")]
+fn remap_agent_pages(first_page: gpointer, _n_pages: guint) -> gpointer {
+    first_page
+}
+
+#[cfg(not(feature = "xnu-kext"))]
 fn remap_agent_pages(first_page: gpointer, n_pages: guint) -> gpointer {
     unsafe {
         let page_size = gum_query_page_size() as usize;
@@ -151,6 +158,12 @@ pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages
     }
 }
 
+#[cfg(feature = "xnu-kext")]
+unsafe fn commit_kernel_patch(address: u64, data: *const u8, len: usize) {
+    crate::xnu::write_through_a_writable_alias(address, data, len);
+}
+
+#[cfg(not(feature = "xnu-kext"))]
 unsafe fn commit_kernel_patch(address: u64, data: *const u8, len: usize) {
     unsafe {
         let element_type = g_variant_type_new(c"y".as_ptr());
@@ -205,7 +218,16 @@ fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     kernel::protect(address, size, prot)
 }
 
-#[cfg(feature = "xnu-core")]
+#[cfg(feature = "xnu-kext")]
+fn protect_here(address: u64, size: usize, prot: u32) -> bool {
+    if crate::xnu::in_copy() {
+        return kernel::protect(address, size, prot);
+    }
+
+    true
+}
+
+#[cfg(all(feature = "xnu-core", not(feature = "xnu-kext")))]
 fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     if crate::xnu::in_copy() {
         return kernel::protect(address, size, prot);
