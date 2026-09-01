@@ -3,7 +3,7 @@ project('frida-core', 'vala', 'c', 'cpp',
     capture: true,
     check: true).stdout().strip(),
   meson_version: '>=1.1.0',
-  default_options: ['c_std=gnu99,c99', 'cpp_std=c++17'],
+  default_options: ['c_std=gnu99,c99', 'cpp_std=c++17', 'sqlite:default_library=static'],
 )
 
 fs = import('fs')
@@ -402,7 +402,6 @@ json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
 ])
 libsoup_dep = dependency('libsoup-3.0', default_options: [
   'default_library=static',
-  'sqlite:default_library=static',
   'gssapi=disabled',
   'ntlm=disabled',
   'brotli=disabled',
