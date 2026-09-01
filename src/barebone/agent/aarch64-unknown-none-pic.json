@@ -13,6 +13,7 @@
   "plt-by-default": false,
   "position-independent-executables": true,
   "relocation-model": "pic",
+  "rustc-abi": "softfloat",
   "stack-probes": {
     "kind": "inline"
   },
