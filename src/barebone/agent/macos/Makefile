@@ -52,9 +52,10 @@ $(BUNDLE): frida-agent Info.plist
 	cp Info.plist $(BUNDLE)/Contents/Info.plist
 	cp frida-agent $(BINARY)
 
-frida-agent: frida-kext.o agent
+frida-agent: frida-kext.o frida-signing.o agent
 	$(shell xcrun --find ld) -kext -arch $(ARCH) -o $@ \
 		frida-kext.o \
+		frida-signing.o \
 		$(AGENT_LIB) \
 		$(GUMJS_DEVKIT_DIR)/libfrida-gumjs.a \
 		$(FRIDA_SDK)/lib/libc.a \
@@ -63,6 +64,9 @@ frida-agent: frida-kext.o agent
 
 frida-kext.o: frida-kext.c
 	$(shell xcrun --find clang) $(GLUE_CFLAGS) -c $< -o $@
+
+frida-signing.o: frida-signing.c
+	$(AGENT_CC) -I$(GUMJS_DEVKIT_DIR) -c $< -o $@
 
 agent:
 	cd $(AGENT_DIR) && RUSTC_BOOTSTRAP=1 RUSTFLAGS="$(AGENT_RUSTFLAGS)" \
@@ -73,6 +77,6 @@ agent:
 		--target-dir $(AGENT_TARGET_DIR) $(AGENT_BUILD_STD)
 
 clean:
-	rm -rf $(BUNDLE) frida-agent frida-kext.o
+	rm -rf $(BUNDLE) frida-agent frida-kext.o frida-signing.o
 
 .PHONY: all agent clean skeleton

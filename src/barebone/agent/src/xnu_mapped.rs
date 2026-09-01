@@ -33,7 +33,8 @@ pub fn enumerate_exports_in_range(from: u64, to: u64,
 
     let mut asking = Asking { found, base: image.base };
     unsafe {
-        crate::bindings::gum_darwin_module_enumerate_exports(module, Some(note_an_export),
+        crate::bindings::gum_darwin_module_enumerate_exports(module,
+            Some(crate::signed_to_be_called_back(note_an_export, 0)),
             &mut asking as *mut Asking<'_, '_> as gpointer);
         g_object_unref(module as gpointer);
     }
@@ -220,3 +221,4 @@ const WHAT_IT_CAME_FROM: u64 = 8;
 const MOST_IMAGES: usize = 4096;
 
 const LONGEST_NAME: usize = 1024;
+

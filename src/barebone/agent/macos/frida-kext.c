@@ -79,6 +79,7 @@ const unsigned frida_agent_disc_proc_callout =
 _Static_assert (ptrauth_type_discriminator (thread_continue_t) == 0xd507,
     "the agent signs a thread's entry with 0xd507");
 
+
 int
 getentropy (void * buffer, size_t size)
 {

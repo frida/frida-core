@@ -130,7 +130,7 @@ fn gum_native_module_get_type() -> GType {
                 class_size: core::mem::size_of::<GObjectClass>() as u16,
                 base_init: None,
                 base_finalize: None,
-                class_init: Some(gum_native_module_class_init),
+                class_init: Some(crate::signed_to_be_called_back(gum_native_module_class_init, 0)),
                 class_finalize: None,
                 class_data: core::ptr::null(),
                 instance_size: core::mem::size_of::<GumNativeModule>() as u16,
@@ -142,7 +142,7 @@ fn gum_native_module_get_type() -> GType {
             let new_type = g_type_register_static(g_object_get_type(), type_name, &type_info, 0);
 
             let interface_info = _GInterfaceInfo {
-                interface_init: Some(gum_native_module_iface_init),
+                interface_init: Some(crate::signed_to_be_called_back(gum_native_module_iface_init, 0)),
                 interface_finalize: None,
                 interface_data: core::ptr::null_mut(),
             };
@@ -165,19 +165,19 @@ unsafe extern "C" fn gum_native_module_class_init(klass: gpointer, _class_data: 
 
         GUM_NATIVE_MODULE_PARENT_CLASS = g_type_class_peek_parent(klass) as *mut GObjectClass;
 
-        (*object_class).finalize = Some(gum_native_module_finalize);
+        (*object_class).finalize = Some(crate::signed_to_be_called_back(gum_native_module_finalize, 0));
     }
 }
 
 extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpointer) {
     unsafe {
         let iface = g_iface as *mut GumModuleInterface;
-        (*iface).get_name = Some(gum_native_module_get_name);
-        (*iface).get_version = Some(gum_native_module_get_version);
-        (*iface).get_path = Some(gum_native_module_get_path);
-        (*iface).get_range = Some(gum_native_module_get_range);
-        (*iface).enumerate_exports = Some(gum_native_module_enumerate_exports);
-        (*iface).find_export_by_name = Some(gum_native_module_find_export_by_name);
+        (*iface).get_name = Some(crate::signed_to_be_called_back(gum_native_module_get_name, 0));
+        (*iface).get_version = Some(crate::signed_to_be_called_back(gum_native_module_get_version, 0));
+        (*iface).get_path = Some(crate::signed_to_be_called_back(gum_native_module_get_path, 0));
+        (*iface).get_range = Some(crate::signed_to_be_called_back(gum_native_module_get_range, 0));
+        (*iface).enumerate_exports = Some(crate::signed_to_be_called_back(gum_native_module_enumerate_exports, 0));
+        (*iface).find_export_by_name = Some(crate::signed_to_be_called_back(gum_native_module_find_export_by_name, 0));
     }
 }
 
@@ -528,3 +528,4 @@ mod symbolication {
         out[text.len().min(limit)] = 0;
     }
 }
+

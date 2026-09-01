@@ -990,12 +990,12 @@ pub(crate) unsafe fn init_gum_without_exceptor() {
 
 unsafe fn init_gum_with_exceptor(exceptor: bool) {
     unsafe {
-        bindings::g_set_panic_handler(Some(frida_panic_handler), ptr::null_mut());
+        bindings::g_set_panic_handler(Some(signed_to_be_called_back(frida_panic_handler, 0)), ptr::null_mut());
         bindings::gum_init_embedded();
         if exceptor {
             bindings::gum_exceptor_obtain();
         }
-        bindings::g_log_set_default_handler(Some(frida_log_handler), ptr::null_mut());
+        bindings::g_log_set_default_handler(Some(signed_to_be_called_back(frida_log_handler, 0)), ptr::null_mut());
 
         gum_script_scheduler_disable_background_thread(gum_script_backend_get_scheduler());
     }
@@ -1158,9 +1158,35 @@ pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> boo
         WORK_READY = Some(ready);
         WORK_SERVE = Some(serve);
 
+        #[cfg(feature = "xnu-kext")]
+        sign_what_the_loop_calls_back();
+
         let source = g_source_new(&raw mut WORK_FUNCS, core::mem::size_of::<GSource>() as u32);
         g_source_attach(source, main_context);
         g_source_unref(source);
+    }
+}
+
+#[cfg(feature = "xnu-kext")]
+pub(crate) unsafe fn signed_to_be_called_back<T>(callback: T, discriminator: core::ffi::c_uint) -> T {
+    unsafe {
+        core::mem::transmute_copy(&crate::pac::ptrauth_sign(
+            core::mem::transmute_copy::<T, *const u8>(&callback), discriminator as usize))
+    }
+}
+
+#[cfg(not(feature = "xnu-kext"))]
+pub(crate) unsafe fn signed_to_be_called_back<T>(callback: T, _discriminator: core::ffi::c_uint) -> T {
+    callback
+}
+
+#[cfg(feature = "xnu-kext")]
+unsafe fn sign_what_the_loop_calls_back() {
+    unsafe {
+        let funcs = &raw mut WORK_FUNCS;
+        (*funcs).prepare = Some(signed_to_be_called_back(work_prepare, 0));
+        (*funcs).check = Some(signed_to_be_called_back(work_check, 0));
+        (*funcs).dispatch = Some(signed_to_be_called_back(work_dispatch, 0));
     }
 }
 
@@ -1214,7 +1240,9 @@ pub(crate) fn destroy_all_scripts(main_context: *mut GMainContext) {
         let scripts = core::mem::take(core::ptr::addr_of_mut!(SCRIPTS).as_mut().unwrap());
         for (_, script) in scripts {
             UNLOADS_IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
-            gum_script_unload(script, ptr::null_mut(), Some(on_script_unloaded), ptr::null_mut());
+            gum_script_unload(script, ptr::null_mut(),
+                Some(signed_to_be_called_back(on_script_unloaded, 0)),
+                ptr::null_mut());
         }
 
         while UNLOADS_IN_FLIGHT.load(Ordering::Relaxed) != 0 {
@@ -1279,7 +1307,7 @@ fn deserialize_message(data: &[u8]) -> Option<*mut GVariant> {
             data_copy,
             data.len() as gsize,
             0,
-            Some(g_free),
+            Some(signed_to_be_called_back(g_free, 0)),
             data_copy,
         );
         g_variant_type_free(variant_type);
@@ -2014,7 +2042,7 @@ fn handle_create_script(payload_variant: *mut GVariant, request_id: u16) -> Opti
             source,
             ptr::null_mut(),
             ptr::null_mut(),
-            Some(on_script_created),
+            Some(signed_to_be_called_back(on_script_created, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
 
@@ -2056,7 +2084,7 @@ unsafe fn script_is_ready(script: *mut GumScript, error: *mut GError, request_id
 
         gum_script_set_message_handler(
             script,
-            Some(frida_message_handler),
+            Some(signed_to_be_called_back(frida_message_handler, 0)),
             Box::into_raw(Box::new(script_id)) as *mut c_void,
             None,
         );
@@ -2165,7 +2193,7 @@ fn handle_load_script(payload_variant: *mut GVariant, request_id: u16) -> Option
         gum_script_load(
             script,
             ptr::null_mut(),
-            Some(on_script_loaded),
+            Some(signed_to_be_called_back(on_script_loaded, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
 
@@ -2202,7 +2230,7 @@ fn handle_destroy_script(payload_variant: *mut GVariant, request_id: u16) -> Opt
         gum_script_unload(
             script,
             ptr::null_mut(),
-            Some(on_script_destroyed),
+            Some(signed_to_be_called_back(on_script_destroyed, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
 
