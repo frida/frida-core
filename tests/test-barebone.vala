@@ -588,6 +588,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/Xnu/probe", () => {
+			var h = new Harness ((h) => xnu_probe.begin (
+				h as Harness, xnu_config_from_environment (h as Harness)));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/hooks-its-own-process-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_hooks_its_own_process_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
@@ -1160,6 +1166,47 @@ namespace Frida.BareboneTest {
 			}
 		}
 
+		h.done ();
+	}
+
+	private async void xnu_probe (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		string? path = Environment.get_variable ("FRIDA_PROBE_JS");
+		if (path == null)
+			return;
+
+		string source;
+		try {
+			FileUtils.get_contents (path, out source);
+		} catch (GLib.Error e) {
+			return;
+		}
+
+		h.disable_timeout ();
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			var session = yield device.attach (0, null, null);
+			var script = yield session.create_script (source, null, null);
+
+			bool finished = false;
+			script.message.connect ((json, data) => {
+				printerr ("\nPROBE %s\n", json);
+				if (json.contains ("done"))
+					finished = true;
+			});
+			yield script.load (null);
+
+			while (!finished)
+				yield h.process_events ();
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+		}
+
+		yield h.process_events ();
 		h.done ();
 	}
 
