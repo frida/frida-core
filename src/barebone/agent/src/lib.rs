@@ -28,6 +28,7 @@ use bindings::{
     GAsyncResult, GBytes, GError, GMainContext, GObject, GSource, GSourceFunc, GSourceFuncs,
     GVariant, GumMemoryRange, gboolean, g_main_context_acquire, g_main_context_check,
     g_main_context_dispatch, g_main_context_prepare, g_main_context_query, g_main_context_release,
+    g_main_context_wakeup,
     g_source_attach, g_source_new, g_source_unref,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
@@ -564,8 +565,16 @@ mod entrypoint_xnu_kext {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn frida_agent_wake() {
-        kernel::wake(glib::wakeup_token());
+        let context = LOOP_CONTEXT.load(Ordering::Acquire) as *mut GMainContext;
+        if context.is_null() {
+            return;
+        }
+
+        unsafe { g_main_context_wakeup(context) };
     }
+
+    static LOOP_CONTEXT: core::sync::atomic::AtomicUsize =
+        core::sync::atomic::AtomicUsize::new(0);
 
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
@@ -582,7 +591,9 @@ mod entrypoint_xnu_kext {
             }
 
             let main_context = adopt_js_context();
+            LOOP_CONTEXT.store(main_context as usize, Ordering::Release);
             run_main_loop(main_context);
+            LOOP_CONTEXT.store(0, Ordering::Release);
 
             destroy_all_scripts(main_context);
             kernel::stop_copies();
@@ -1062,7 +1073,7 @@ fn run_main_loop(main_context: *mut GMainContext) {
 
     unsafe {
         loop {
-            #[cfg(not(feature = "blob"))]
+            #[cfg(not(any(feature = "blob", feature = "xnu-core")))]
             transport_get_unchecked().process();
 
             #[cfg(feature = "linux")]
@@ -1083,6 +1094,11 @@ fn run_main_loop(main_context: *mut GMainContext) {
 fn kernel_half_has_work() -> bool {
     #[cfg(not(feature = "xnu-core"))]
     if hostlink_virtio::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "xnu-kext")]
+    if hostlink_chardev::a_turn_is_wanted() {
         return true;
     }
 

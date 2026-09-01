@@ -362,6 +362,20 @@ frida_kmod_link_send (const void * data, size_t size)
   return 0;
 }
 
+bool
+frida_kmod_link_pending (void)
+{
+  bool pending;
+
+  lck_mtx_lock (frida_link.lock);
+
+  pending = frida_link.from_host_len != 0;
+
+  lck_mtx_unlock (frida_link.lock);
+
+  return pending;
+}
+
 ssize_t
 frida_kmod_link_recv (void * data, size_t size)
 {

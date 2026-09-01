@@ -101,6 +101,10 @@ impl Drop for Hostlink {
     }
 }
 
+pub fn a_turn_is_wanted() -> bool {
+    unsafe { frida_kmod_link_pending() }
+}
+
 fn recv_nonblocking(dst: &mut [u8]) -> usize {
     let n = unsafe { frida_kmod_link_recv(dst.as_mut_ptr() as *mut c_void, dst.len()) };
     if n <= 0 { 0 } else { n as usize }
@@ -111,4 +115,5 @@ unsafe extern "C" {
     fn frida_kmod_link_close();
     fn frida_kmod_link_send(data: *const c_void, size: usize) -> c_int;
     fn frida_kmod_link_recv(data: *mut c_void, size: usize) -> isize;
+    fn frida_kmod_link_pending() -> bool;
 }
