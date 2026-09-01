@@ -24,6 +24,7 @@ extern void frida_agent_wake (void);
   X (proc_iterate) X (proc_find) X (proc_rele) X (proc_pid) X (proc_best_name) X (proc_task) \
   X (current_task) X (current_thread) X (get_task_map) X (get_bsdtask_info) \
   X (mach_vm_allocate) X (mach_vm_deallocate) X (mach_vm_protect) X (mach_vm_remap) \
+  X (kernel_map) X (kernel_pmap) X (pmap_find_phys) X (ml_static_ptovirt) \
   X (mach_vm_region) X (mach_vm_region_recurse) \
   X (vm_map_copyin) X (vm_map_copyout) \
   X (thread_create) X (thread_set_state) X (thread_resume) X (thread_suspend) \

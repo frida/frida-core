@@ -92,6 +92,12 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
     first_page: gpointer,
     n_pages: guint,
 ) -> gpointer {
+    #[cfg(feature = "xnu-kext")]
+    if crate::xnu::we_took(first_page as u64).is_some() {
+        return remap_agent_pages(first_page, n_pages);
+    }
+
+    #[cfg(not(feature = "xnu-kext"))]
     if gum::is_agent_slab(first_page as u64) {
         return remap_agent_pages(first_page, n_pages);
     }
@@ -101,7 +107,7 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
 
 #[cfg(feature = "xnu-kext")]
 fn remap_agent_pages(first_page: gpointer, _n_pages: guint) -> gpointer {
-    first_page
+    crate::xnu::the_writable_view_of(first_page as u64) as gpointer
 }
 
 #[cfg(not(feature = "xnu-kext"))]
@@ -139,6 +145,13 @@ fn shadow_kernel_pages(first_page: gpointer, n_pages: guint) -> gpointer {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages: guint) {
+    #[cfg(feature = "xnu-kext")]
+    if crate::xnu::is_a_writable_view(writable as u64) {
+        let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
+        crate::xnu::forget_what_the_cache_holds(writable as u64, size);
+        return;
+    }
+
     if (writable as u64) < SHADOW_MIN_ADDRESS {
         return;
     }
@@ -310,6 +323,17 @@ unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
     }
 }
 
+#[cfg(feature = "xnu-kext")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_allocate_near(
+    _spec: gconstpointer,
+    size: gsize,
+    alignment: gsize,
+    prot: GumPageProtection,
+) -> gpointer {
+    gum_memory_allocate(ptr::null_mut(), size, alignment, prot)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_allocate(
     address: gpointer,
@@ -327,13 +351,24 @@ pub extern "C" fn gum_memory_allocate(
     let ptr = kernel::alloc_code(size as usize);
     #[cfg(not(feature = "xnu-core"))]
     let _ = address;
+    let may_run = (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0;
     unsafe {
+        #[cfg(not(feature = "xnu-kext"))]
         core::ptr::write_bytes(ptr, 0, size as usize);
-        if (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0 {
+
+        if may_run {
             gum::register_slab(ptr as u64, size as usize);
-            gum_mprotect(ptr as gpointer, size, prot);
         }
     }
+
+    #[cfg(not(feature = "xnu-kext"))]
+    if may_run {
+        unsafe { gum_mprotect(ptr as gpointer, size, prot) };
+    }
+
+    #[cfg(feature = "xnu-kext")]
+    crate::xnu::remember_what_we_took(ptr as u64, size as usize, may_run);
+
     ptr as gpointer
 }
 
@@ -352,6 +387,9 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
         }
         gum::unregister_slab(address as u64);
     }
+    #[cfg(feature = "xnu-kext")]
+    crate::xnu::forget_what_we_took(address as u64);
+
     kernel::free_code(address as *mut u8, size as usize);
     1
 }
