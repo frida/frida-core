@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/frida-gum.git
-revision = 1908f00cfb6a6e757ce9549d41f37e8346777af1
+revision = 692c332ccdd6e3318743977706892804984bdbef
 depth = 1
 
 [provide]
