@@ -216,6 +216,13 @@ namespace Frida {
 			if (arm64_machine != null)
 				arm64_machine.code_allocator = allocator;
 
+			var arm_machine = machine as Barebone.ArmMachine;
+			if (arm_machine != null) {
+				Barebone.SymbolInfo? swapper = find_symbol (kernel_symbols, "swapper_pg_dir");
+				if (swapper != null)
+					arm_machine.kernel_page_table = kernel_base + swapper.offset;
+			}
+
 			Barebone.AgentConnection? agent_connection = null;
 			BareboneAgentConfig? agent_config = config.agent;
 			if (agent_config != null) {
