@@ -50,7 +50,6 @@ pub fn inject_into_process(id: u32) -> u32 {
 
 fn take_what_the_copy_opened(placed: &mut Placement) {
     let arena = Arena::at(placed.arena);
-
     placed.says = native::take_the_file(arena.says_through());
     placed.hears = native::take_the_file(arena.hears_through());
     listen_to_the_copy(placed.says);
@@ -142,25 +141,10 @@ fn borrowed_memory() -> Option<usize> {
 }
 
 fn view_of(seen_by_the_copy: usize) -> Option<usize> {
-    let memory = borrowed_memory()?;
     let count = ARENA_SIZE / PAGE_SIZE;
     let pages = native::alloc(count * size_of::<usize>()) as *mut c_void;
 
-    let reading = memory + field_offset("mm_struct", "mmap_lock")?;
-    let held = unsafe {
-        _down_read(reading as *mut c_void);
-        let held = _get_user_pages_remote(
-            memory as *mut c_void,
-            seen_by_the_copy,
-            count,
-            FOLL_WRITE,
-            pages,
-            ptr::null_mut(),
-        );
-        _up_read(reading as *mut c_void);
-
-        held
-    };
+    let held = unsafe { _get_user_pages_unlocked(seen_by_the_copy, count, pages, FOLL_WRITE) };
     if held != count as isize {
         native::free(pages as *mut u8, count * size_of::<usize>());
         return None;
@@ -225,14 +209,53 @@ fn map_a_copy() -> Option<usize> {
 }
 
 fn give(destination: usize, source: usize, size: usize) -> Option<()> {
+    let opened = unsafe { open_user_access() };
     let left =
         unsafe { copy_to_user(destination as *mut c_void, source as *const c_void, size) };
+    unsafe { close_user_access(opened) };
     if left != 0 {
+        if left == size {
+        } else if left < size {
+        } else {
+        }
         return None;
     }
 
     Some(())
 }
+
+#[cfg(target_arch = "arm")]
+unsafe fn open_user_access() -> usize {
+    let domains: usize;
+    unsafe {
+        core::arch::asm!("mrc p15, 0, {}, c3, c0, 0", out(reg) domains, options(nostack));
+        let opened = (domains & !USER_DOMAIN_MASK) | USER_DOMAIN_CLIENT;
+        core::arch::asm!("mcr p15, 0, {}, c3, c0, 0", "isb", in(reg) opened, options(nostack));
+    }
+
+    domains
+}
+
+#[cfg(target_arch = "arm")]
+unsafe fn close_user_access(domains: usize) {
+    unsafe {
+        core::arch::asm!("mcr p15, 0, {}, c3, c0, 0", "isb", in(reg) domains, options(nostack));
+    }
+}
+
+#[cfg(target_arch = "arm")]
+const USER_DOMAIN_MASK: usize = 0b11 << 2;
+
+#[cfg(target_arch = "arm")]
+const USER_DOMAIN_CLIENT: usize = 0b01 << 2;
+
+#[cfg(not(target_arch = "arm"))]
+unsafe fn open_user_access() -> usize {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe fn close_user_access(_domains: usize) {}
 
 fn start(base: usize, arena: usize, stack: usize) {
     let entry = native::alloc(size_of::<Entry>()) as *mut Entry;
@@ -243,7 +266,7 @@ fn start(base: usize, arena: usize, stack: usize) {
             stack,
         });
 
-        _user_mode_thread(enter_user, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES);
+        _user_mode_thread(USER_ENTRY, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES);
     }
 }
 
@@ -256,7 +279,8 @@ struct Entry {
 
 // Runs on the new task before the kernel lets it out, which is where what it starts with in
 // userland is written down.
-unsafe extern "C" fn enter_user(argument: *mut c_void) -> c_int {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_user(argument: *mut c_void) -> c_int {
     let entry = argument as *mut Entry;
     let (arena, bootstrap, stack) = unsafe { ((*entry).arena, (*entry).bootstrap, (*entry).stack) };
     native::free(entry as *mut u8, size_of::<Entry>());
@@ -266,23 +290,79 @@ unsafe extern "C" fn enter_user(argument: *mut c_void) -> c_int {
     };
     let registers = registers_of_this_task(&places);
 
+    let stack = hand_over_argument(stack, arena);
+
     unsafe {
-        ((registers + places.pc) as *mut usize).write(bootstrap);
+        ((registers + places.pc) as *mut usize).write(bootstrap & !THUMB_BIT);
         ((registers + places.stack) as *mut usize).write(stack);
-        ((registers + places.flags) as *mut usize).write(USER_EXECUTION);
+        ((registers + places.flags) as *mut usize).write(
+            USER_EXECUTION | (bootstrap & THUMB_BIT) * THUMB_STATE);
         ((registers + places.first) as *mut usize).write(arena);
+        write_selectors(registers, &places);
     }
 
     0
 }
 
 // What a task starts with in userland is at the top of the kernel stack it was given.
+#[cfg(target_arch = "aarch64")]
 fn registers_of_this_task(places: &Places) -> usize {
     let stack = unsafe {
         ((native::current_task() as usize + places.stack_of_task) as *const usize).read()
     };
 
     stack + STACK_SPAN - places.size
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn registers_of_this_task(places: &Places) -> usize {
+    let here = &places as *const _ as usize;
+    let top = (here & !(STACK_SPAN - 1)) + STACK_SPAN;
+
+    top - TOP_OF_STACK_PADDING - places.size
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "arm"))]
+const TOP_OF_STACK_PADDING: usize = 8;
+
+#[cfg(not(any(target_arch = "x86", target_arch = "arm")))]
+const TOP_OF_STACK_PADDING: usize = 0;
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn write_selectors(registers: usize, _places: &Places) {
+    unsafe {
+        ((registers + 136) as *mut usize).write(0x33);
+        ((registers + 160) as *mut usize).write(0x2b);
+    }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn write_selectors(registers: usize, _places: &Places) {
+    unsafe {
+        ((registers + 52) as *mut usize).write(0x73);
+        ((registers + 64) as *mut usize).write(0x7b);
+        ((registers + 28) as *mut usize).write(0x7b);
+        ((registers + 32) as *mut usize).write(0x7b);
+    }
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+unsafe fn write_selectors(_registers: usize, _places: &Places) {}
+
+#[cfg(target_arch = "x86")]
+fn hand_over_argument(stack: usize, arena: usize) -> usize {
+    let frame = [0usize, arena];
+    let sp = stack - size_of::<[usize; 2]>();
+
+    match give(sp, frame.as_ptr() as usize, size_of::<[usize; 2]>()) {
+        Some(()) => sp,
+        None => stack,
+    }
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn hand_over_argument(stack: usize, _arena: usize) -> usize {
+    stack
 }
 
 struct Places {
@@ -294,6 +374,7 @@ struct Places {
     stack_of_task: usize,
 }
 
+#[cfg(target_arch = "aarch64")]
 fn describe_registers() -> Option<Places> {
     Some(Places {
         size: struct_size("pt_regs")?,
@@ -302,6 +383,42 @@ fn describe_registers() -> Option<Places> {
         pc: field_offset("user_pt_regs", "pc")?,
         flags: field_offset("user_pt_regs", "pstate")?,
         stack_of_task: field_offset("task_struct", "stack")?,
+    })
+}
+
+#[cfg(target_arch = "arm")]
+fn describe_registers() -> Option<Places> {
+    Some(Places {
+        size: 72,
+        first: 0,
+        stack: 13 * 4,
+        pc: 15 * 4,
+        flags: 16 * 4,
+        stack_of_task: 0,
+    })
+}
+
+#[cfg(target_arch = "x86")]
+fn describe_registers() -> Option<Places> {
+    Some(Places {
+        size: 68,
+        first: 24,
+        stack: 60,
+        pc: 48,
+        flags: 56,
+        stack_of_task: 0,
+    })
+}
+
+#[cfg(target_arch = "x86_64")]
+fn describe_registers() -> Option<Places> {
+    Some(Places {
+        size: 168,
+        first: 112,
+        stack: 152,
+        pc: 128,
+        flags: 144,
+        stack_of_task: 0,
     })
 }
 
@@ -385,9 +502,9 @@ fn watch_the_threads() {
 
     unsafe {
         _tracepoint_probe_register(___tracepoint_sched_process_fork,
-            a_thread_appeared as *mut c_void, ptr::null_mut());
+            THREAD_APPEARED_PROBE as *mut c_void, ptr::null_mut());
         _tracepoint_probe_register(___tracepoint_sched_process_exit,
-            a_thread_left as *mut c_void, ptr::null_mut());
+            THREAD_LEFT_PROBE as *mut c_void, ptr::null_mut());
     }
 }
 
@@ -398,11 +515,12 @@ pub fn hold_what_is_spawned() {
 
     unsafe {
         _tracepoint_probe_register(___tracepoint_sched_process_exec,
-            a_process_execed as *mut c_void, ptr::null_mut());
+            EXEC_PROBE as *mut c_void, ptr::null_mut());
     }
 }
 
-unsafe extern "C" fn a_process_execed(_data: *mut c_void, task: *mut c_void, _was: c_int,
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_exec(_data: *mut c_void, task: *mut c_void, _was: c_int,
         program: *mut c_void) {
     if !super::spawn::holds_this_one(task as usize) {
         return;
@@ -427,12 +545,14 @@ static HOLDING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool:
 
 const STOP: c_int = 19;
 
-unsafe extern "C" fn a_thread_appeared(_data: *mut c_void, _parent: *mut c_void,
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_thread_appeared(_data: *mut c_void, _parent: *mut c_void,
         child: *mut c_void) {
     note_a_thread(child as usize, false);
 }
 
-unsafe extern "C" fn a_thread_left(_data: *mut c_void, task: *mut c_void, _group_dead: bool) {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_thread_left(_data: *mut c_void, task: *mut c_void, _group_dead: bool) {
     note_a_thread(task as usize, true);
 }
 
@@ -494,9 +614,9 @@ pub fn stop_copies() {
 
     unsafe {
         _tracepoint_probe_unregister(___tracepoint_sched_process_fork,
-            a_thread_appeared as *mut c_void, ptr::null_mut());
+            THREAD_APPEARED_PROBE as *mut c_void, ptr::null_mut());
         _tracepoint_probe_unregister(___tracepoint_sched_process_exit,
-            a_thread_left as *mut c_void, ptr::null_mut());
+            THREAD_LEFT_PROBE as *mut c_void, ptr::null_mut());
     }
 }
 
@@ -571,8 +691,31 @@ static mut PLACEMENTS: BTreeMap<u32, Placement> = BTreeMap::new();
 
 const ARENA_SIZE: usize = 2 * 1024 * 1024;
 
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const STACK_SPAN: usize = 16 * 1024;
+
+#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+const STACK_SPAN: usize = 8 * 1024;
+#[cfg(target_arch = "arm")]
+const THUMB_BIT: usize = 1;
+
+#[cfg(not(target_arch = "arm"))]
+const THUMB_BIT: usize = 0;
+
+#[cfg(target_arch = "arm")]
+const THUMB_STATE: usize = 0x20;
+
+#[cfg(not(target_arch = "arm"))]
+const THUMB_STATE: usize = 0;
+
+#[cfg(target_arch = "aarch64")]
 const USER_EXECUTION: usize = 0;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const USER_EXECUTION: usize = 0x202;
+
+#[cfg(target_arch = "arm")]
+const USER_EXECUTION: usize = 0x10;
 
 const PROT_READ: usize = 1;
 const PROT_WRITE: usize = 2;
@@ -593,19 +736,28 @@ const STACK_SIZE: usize = 1024 * 1024;
 const STACK_HEADROOM: usize = 16;
 
 unsafe extern "C" {
+    #[cfg(not(target_arch = "x86"))]
     static _get_task_mm: unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
     static _kthread_use_mm: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
     static _kthread_unuse_mm: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
     static _mmput: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
     static _vm_mmap: unsafe extern "C" fn(*mut c_void, usize, usize, usize, usize, usize) -> usize;
+    #[cfg(not(target_arch = "x86"))]
     static _vm_munmap: unsafe extern "C" fn(usize, usize) -> c_int;
+    #[cfg(not(target_arch = "x86"))]
     static _tracepoint_probe_register:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
+    #[cfg(not(target_arch = "x86"))]
     static _tracepoint_probe_unregister:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> c_int;
     static ___tracepoint_sched_process_fork: *mut c_void;
     static ___tracepoint_sched_process_exit: *mut c_void;
     static ___tracepoint_sched_process_exec: *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
     static _vunmap: unsafe extern "C" fn(*mut c_void);
     #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
@@ -613,8 +765,14 @@ unsafe extern "C" {
     static __copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     #[cfg(target_arch = "arm")]
     static _arm_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    #[cfg(not(target_arch = "x86"))]
     static _down_read: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
     static _up_read: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
+    static _get_user_pages_unlocked:
+        unsafe extern "C" fn(usize, usize, *mut c_void, c_int) -> isize;
+    #[cfg(not(target_arch = "x86"))]
     static _get_user_pages_remote: unsafe extern "C" fn(
         *mut c_void,
         usize,
@@ -625,13 +783,80 @@ unsafe extern "C" {
     ) -> isize;
     static ___arch_copy_from_user:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    #[cfg(not(target_arch = "x86"))]
     static _do_futex: unsafe extern "C" fn(usize, c_int, u32, usize, usize, u32, u32) -> isize;
+    #[cfg(not(target_arch = "x86"))]
     static _user_mode_thread:
         unsafe extern "C" fn(unsafe extern "C" fn(*mut c_void) -> c_int, *mut c_void, usize) -> c_int;
 }
 
 #[cfg(target_arch = "x86")]
 unsafe extern "C" {
+    #[link_name = "frida_k_get_task_mm"]
+    fn _get_task_mm(a0: *mut c_void) -> *mut c_void;
+    #[link_name = "frida_k_kthread_use_mm"]
+    fn _kthread_use_mm(a0: *mut c_void);
+    #[link_name = "frida_k_kthread_unuse_mm"]
+    fn _kthread_unuse_mm(a0: *mut c_void);
+    #[link_name = "frida_k_mmput"]
+    fn _mmput(a0: *mut c_void);
+    #[link_name = "frida_k_vm_mmap"]
+    fn _vm_mmap(a0: *mut c_void, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize;
+    #[link_name = "frida_k_vm_munmap"]
+    fn _vm_munmap(a0: usize, a1: usize) -> c_int;
+    #[link_name = "frida_k_vunmap"]
+    fn _vunmap(a0: *mut c_void);
     #[link_name = "frida_k__copy_to_user"]
     fn __copy_to_user(a0: *mut c_void, a1: *const c_void, a2: usize) -> usize;
+    #[link_name = "frida_k_down_read"]
+    fn _down_read(a0: *mut c_void);
+    #[link_name = "frida_k_up_read"]
+    fn _up_read(a0: *mut c_void);
+    #[link_name = "frida_k_get_user_pages_remote"]
+    fn _get_user_pages_remote(a0: *mut c_void, a1: usize, a2: usize, a3: c_int, a4: *mut c_void, a5: *mut c_void) -> isize;
+    #[link_name = "frida_k_do_futex"]
+    fn _do_futex(a0: usize, a1: c_int, a2: u32, a3: usize, a4: usize, a5: u32, a6: u32) -> isize;
 }
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k_get_user_pages_unlocked"]
+    fn _get_user_pages_unlocked(a0: usize, a1: usize, a2: *mut c_void, a3: c_int) -> isize;
+    #[link_name = "frida_k_tracepoint_probe_register"]
+    fn _tracepoint_probe_register(a0: *mut c_void, a1: *mut c_void, a2: *mut c_void) -> c_int;
+    #[link_name = "frida_k_tracepoint_probe_unregister"]
+    fn _tracepoint_probe_unregister(a0: *mut c_void, a1: *mut c_void, a2: *mut c_void) -> c_int;
+    #[link_name = "frida_k_user_mode_thread"]
+    fn _user_mode_thread(a0: unsafe extern "C" fn(*mut c_void) -> c_int, a1: *mut c_void,
+        a2: usize) -> c_int;
+    fn frida_kcb_user(argument: *mut c_void) -> c_int;
+    fn frida_kcb_exec(data: *mut c_void, task: *mut c_void, was: c_int, program: *mut c_void);
+    fn frida_kcb_thread_appeared(data: *mut c_void, parent: *mut c_void, child: *mut c_void);
+    fn frida_kcb_thread_left(data: *mut c_void, task: *mut c_void, group_dead: bool);
+}
+
+#[cfg(target_arch = "x86")]
+const USER_ENTRY: unsafe extern "C" fn(*mut c_void) -> c_int = frida_kcb_user;
+#[cfg(not(target_arch = "x86"))]
+const USER_ENTRY: unsafe extern "C" fn(*mut c_void) -> c_int = frida_cb_user;
+
+#[cfg(target_arch = "x86")]
+const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_void) =
+    frida_kcb_exec;
+#[cfg(not(target_arch = "x86"))]
+const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_void) =
+    frida_cb_exec;
+
+#[cfg(target_arch = "x86")]
+const THREAD_APPEARED_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
+    frida_kcb_thread_appeared;
+#[cfg(not(target_arch = "x86"))]
+const THREAD_APPEARED_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
+    frida_cb_thread_appeared;
+
+#[cfg(target_arch = "x86")]
+const THREAD_LEFT_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) =
+    frida_kcb_thread_left;
+#[cfg(not(target_arch = "x86"))]
+const THREAD_LEFT_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) =
+    frida_cb_thread_left;
