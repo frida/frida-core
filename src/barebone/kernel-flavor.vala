@@ -59,6 +59,9 @@ namespace Frida.Barebone {
 			var arm64 = machine as Arm64Machine;
 			if (panic != null && arm64 != null)
 				arm64.call_landing_zone = kernel_base + panic.offset;
+			var arm = machine as ArmMachine;
+			if (panic != null && arm != null)
+				arm.call_landing_zone = kernel_base + panic.offset;
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
@@ -126,6 +129,9 @@ namespace Frida.Barebone {
 			var arm64 = machine as Arm64Machine;
 			if (panic != null && arm64 != null)
 				arm64.call_landing_zone = kernel_base + panic.offset;
+			var arm = machine as ArmMachine;
+			if (panic != null && arm != null)
+				arm.call_landing_zone = kernel_base + panic.offset;
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
