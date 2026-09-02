@@ -76,6 +76,10 @@ const PCI_COMMAND_MEMORY: u32 = 1 << 1;
 const PCI_COMMAND_BUS_MASTER: u32 = 1 << 2;
 
 const PCI_CAP_ID_VENDOR: u8 = 0x09;
+const PCI_CAP_ID_MSI: u8 = 0x05;
+const PCI_CAP_ID_MSIX: u8 = 0x11;
+const PCI_MSI_ENABLE: u32 = 1 << 16;
+const PCI_MSIX_ENABLE: u32 = 1 << 31;
 
 const VIRTIO_CAP_CFG_TYPE: u8 = 3;
 const VIRTIO_CAP_BAR: u8 = 4;
@@ -976,16 +980,15 @@ impl Regs {
         }
     }
 
-    fn isr_ack(&self) {
+    fn isr_ack(&self) -> u8 {
         match self {
             Regs::Mmio(base) => {
                 if (r32(*base, ISR) & INT_VRING) != 0 {
                     w32(*base, ISR_ACK, INT_VRING);
                 }
+                0
             }
-            Regs::Pci(p) => {
-                r8(p.isr, 0);
-            }
+            Regs::Pci(p) => r8(p.isr, 0),
         }
     }
 }
@@ -1055,6 +1058,7 @@ impl PciDevice {
     }
 
     fn map_virtio_regs(&self) -> Option<Regs> {
+        self.silence_message_interrupts();
         self.enable_memory_and_bus_mastering();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         self.route_interrupt_line();
@@ -1111,6 +1115,22 @@ impl PciDevice {
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn irq_line(&self) -> Option<u32> {
         kernel::pci_interrupt(self.bus, self.devfn)
+    }
+
+    fn silence_message_interrupts(&self) {
+        let mut cap = (self.read_config(PCI_CAP_LIST_POINTER) & 0xfc) as u8;
+        while cap != 0 {
+            let header = self.read_config(cap);
+            let cleared = match (header & 0xff) as u8 {
+                PCI_CAP_ID_MSIX => header & !PCI_MSIX_ENABLE,
+                PCI_CAP_ID_MSI => header & !PCI_MSI_ENABLE,
+                _ => header,
+            };
+            if cleared != header {
+                self.write_config(cap, cleared);
+            }
+            cap = ((header >> 8) & 0xfc) as u8;
+        }
     }
 
     fn enable_memory_and_bus_mastering(&self) {
