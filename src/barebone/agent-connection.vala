@@ -336,6 +336,9 @@ namespace Frida.Barebone {
 			this.qmp = qmp;
 			adopt_hostlink_streams (link.connection);
 
+			if (config.mmio != 0)
+				return describe_virtio (config.mmio, config.irq);
+
 			if (config.bus != null) {
 				Variant[] pci_cfg = { new Variant.uint64 (config.ecam) };
 				return new Variant.tuple ({
@@ -344,7 +347,11 @@ namespace Frida.Barebone {
 				});
 			}
 
-			Variant[] virtio_cfg = { new Variant.uint64 (link.mmio), new Variant.uint32 (link.irq) };
+			return describe_virtio (link.mmio, link.irq);
+		}
+
+		private Variant describe_virtio (uint64 mmio, uint irq) {
+			Variant[] virtio_cfg = { new Variant.uint64 (mmio), new Variant.uint32 (irq) };
 			return new Variant.tuple ({
 				new Variant.byte (TRANSPORT_KIND_VIRTIO),
 				new Variant.variant (new Variant.tuple (virtio_cfg))

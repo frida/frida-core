@@ -2223,7 +2223,10 @@ namespace Frida {
 	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent",
 	 *      "transport": {
 	 *        "type": "hostlink",
-	 *        "qmp": "unix:/path/to/qmp.sock"
+	 *        "qmp": "unix:/path/to/qmp.sock",
+	 *        "bus": "frida-vserial.0",
+	 *        "mmio": "0xa003e00",
+	 *        "irq": 47
 	 *      }
 	 *    },
 	 *    "image": {
@@ -2734,9 +2737,21 @@ namespace Frida {
 			set;
 		}
 
+		public uint64 mmio {
+			get;
+			set;
+		}
+
+		public uint irq {
+			get;
+			set;
+		}
+
 		public override void check () throws Error {
 			if (qmp == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
+			if (mmio != 0 && bus == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.bus' is missing");
 			if (!qmp.has_prefix ("unix:"))
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
 		}
