@@ -12,7 +12,7 @@ namespace Frida.Barebone {
 			throw new Error.INVALID_ARGUMENT ("System.map names no symbols");
 
 		uint64 linked_base = base_of (symbols);
-		uint64 running_base = yield find_running_kernel (machine, cancellable);
+		uint64 running_base = yield find_running_kernel (machine, linked_base, cancellable);
 
 		var modules = new Gee.ArrayList<ModuleInfo> ();
 		modules.add (new ModuleInfo () {
@@ -81,11 +81,18 @@ namespace Frida.Barebone {
 	 * The kernel keeps its own header where it was loaded, so where the guest is executing
 	 * says which way to walk: back through memory, a segment at a time, until the magic that
 	 * every arm64 image carries turns up.
+	 *
+	 * A 32-bit ARM kernel carries no such header, and needs none: nothing relocates it, so it
+	 * is running at the address its symbols were linked for.
 	 */
-	private static async uint64 find_running_kernel (Machine machine, Cancellable? cancellable) throws Error, IOError {
+	private static async uint64 find_running_kernel (Machine machine, uint64 linked_base, Cancellable? cancellable)
+			throws Error, IOError {
 		// A guest idling in a shell is executing userspace, whose addresses say nothing about
 		// where the kernel is and cannot be walked with the kernel's tables.
 		yield machine.enter_exception_level (1, ENTER_KERNEL_TIMEOUT_MS, cancellable);
+
+		if (machine is ArmMachine)
+			return linked_base;
 
 		GDB.Client gdb = machine.gdb;
 		var thread = gdb.exception.thread;
