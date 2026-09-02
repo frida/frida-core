@@ -130,11 +130,18 @@ def boot_guest(arch: str, args):
     qemu = require_qemu(guest)
     kernel = fetch_kernel(guest)
 
+    machine_arguments = []
+    if guest.machine != "":
+        machine_arguments += ["-machine", guest.machine]
+    if guest.cpu != "":
+        machine_arguments += ["-cpu", guest.cpu]
+
     process = subprocess.Popen([
         qemu,
         "-m", str(args.memory),
+    ] + machine_arguments + [
         "-kernel", str(kernel),
-        "-append", "console=ttyS0 panic=0",
+        "-append", f"console={guest.console} panic=0",
         "-display", "none",
         "-serial", "stdio",
         "-monitor", "none",
@@ -507,6 +514,9 @@ class Guest(NamedTuple):
     arch: str
     qemu_binary: str
     kernel_url: str
+    machine: str = ""
+    cpu: str = ""
+    console: str = "ttyS0"
 
 # Paging comes up long before this, so the panic that follows the missing root filesystem is a
 # safely late — and unmistakable — sign that the kernel has finished with its page tables.
@@ -522,6 +532,8 @@ GUESTS = {
     for guest in [
         Guest("x86", "qemu-system-i386", ALPINE_NETBOOT_URL.format("x86")),
         Guest("x86_64", "qemu-system-x86_64", ALPINE_NETBOOT_URL.format("x86_64")),
+        Guest("arm", "qemu-system-arm", ALPINE_NETBOOT_URL.format("armv7"),
+              machine="virt", cpu="cortex-a7", console="ttyAMA0"),
     ]
 }
 
