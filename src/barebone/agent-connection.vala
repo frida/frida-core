@@ -1022,7 +1022,9 @@ namespace Frida.Barebone {
 		}
 
 		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Error, IOError {
-			var arm64 = (Arm64Machine) machine;
+			var arm64 = machine as Arm64Machine;
+			if (arm64 == null)
+				throw new Error.NOT_SUPPORTED ("Remapping writable pages is only implemented for arm64");
 			var physical_addresses = new Gee.ArrayList<uint64?> ();
 			for (size_t i = 0; i != payload.n_children (); i++) {
 				uint64 va = payload.get_child_value (i).get_uint64 ();
@@ -1050,7 +1052,9 @@ namespace Frida.Barebone {
 		// even through a writable alias. The physical-memory bridge writes the backing store directly,
 		// which the lock does not cover, letting us land hooks in kernel and kext text.
 		private async Variant patch_code (Variant payload, Cancellable? cancellable) throws Error, IOError {
-			var arm64 = (Arm64Machine) machine;
+			var arm64 = machine as Arm64Machine;
+			if (arm64 == null)
+				throw new Error.NOT_SUPPORTED ("Patching code through physical memory is only implemented for arm64");
 			uint64 va;
 			Variant bytes_value;
 			payload.get ("(t@ay)", out va, out bytes_value);
