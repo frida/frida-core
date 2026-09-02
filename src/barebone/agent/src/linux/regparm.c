@@ -411,6 +411,10 @@ void frida_k_unlock_tasklist (unsigned long flags)
 
 extern int frida_cb_thread (void * data);
 extern int frida_cb_interrupt (int irq, void * cookie);
+extern int frida_cb_user (void * argument);
+extern void frida_cb_exec (void * data, void * task, int was, void * program);
+extern void frida_cb_thread_appeared (void * data, void * parent, void * child);
+extern void frida_cb_thread_left (void * data, void * task, _Bool group_dead);
 
 __attribute__ ((regparm (3))) int
 frida_kcb_thread (void * data)
@@ -422,6 +426,30 @@ __attribute__ ((regparm (3))) int
 frida_kcb_interrupt (int irq, void * cookie)
 {
   return frida_cb_interrupt (irq, cookie);
+}
+
+__attribute__ ((regparm (3))) int
+frida_kcb_user (void * argument)
+{
+  return frida_cb_user (argument);
+}
+
+__attribute__ ((regparm (3))) void
+frida_kcb_exec (void * data, void * task, int was, void * program)
+{
+  frida_cb_exec (data, task, was, program);
+}
+
+__attribute__ ((regparm (3))) void
+frida_kcb_thread_appeared (void * data, void * parent, void * child)
+{
+  frida_cb_thread_appeared (data, parent, child);
+}
+
+__attribute__ ((regparm (3))) void
+frida_kcb_thread_left (void * data, void * task, _Bool group_dead)
+{
+  frida_cb_thread_left (data, task, group_dead);
 }
 
 extern void *_request_threaded_irq;
@@ -446,7 +474,34 @@ frida_k_copy_from_kernel_nofault (void * a0, const void * a1, unsigned int a2)
   return ((fn_t) _copy_from_kernel_nofault) (a0, a1, a2);
 }
 
+extern void *_tracepoint_probe_register;
+extern void *_tracepoint_probe_unregister;
+extern void *_user_mode_thread;
 extern void *_call_usermodehelper_setup;
+
+int
+frida_k_tracepoint_probe_register (void * a0, void * a1, void * a2)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *, void *, void *);
+
+  return ((fn_t) _tracepoint_probe_register) (a0, a1, a2);
+}
+
+int
+frida_k_tracepoint_probe_unregister (void * a0, void * a1, void * a2)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *, void *, void *);
+
+  return ((fn_t) _tracepoint_probe_unregister) (a0, a1, a2);
+}
+
+void *
+frida_k_user_mode_thread (void * a0, void * a1, unsigned long a2)
+{
+  typedef void * (__attribute__ ((regparm (3))) * fn_t) (void *, void *, unsigned long);
+
+  return ((fn_t) _user_mode_thread) (a0, a1, a2);
+}
 
 void *
 frida_k_call_usermodehelper_setup (const void * a0, const void * a1, const void * a2,
@@ -471,4 +526,15 @@ __attribute__ ((regparm (3))) void
 frida_kcb_release_words (void * info)
 {
   frida_cb_release_words (info);
+}
+
+extern void *_get_user_pages_unlocked;
+
+long
+frida_k_get_user_pages_unlocked (unsigned long a0, unsigned long a1, void * a2, int a3)
+{
+  typedef long (__attribute__ ((regparm (3))) * fn_t) (unsigned long, unsigned long, void *,
+      unsigned int);
+
+  return ((fn_t) _get_user_pages_unlocked) (a0, a1, a2, a3);
 }
