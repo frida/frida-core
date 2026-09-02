@@ -370,7 +370,7 @@ pub extern "C" fn gum_memory_allocate_near(
         return close;
     }
     if !close.is_null() {
-        gum_memory_free(close, size);
+        release_pages_now(close, size);
     }
 
     let got = gum_memory_allocate(ptr::null_mut(), size, alignment, prot);
@@ -378,10 +378,17 @@ pub extern "C" fn gum_memory_allocate_near(
         return got;
     }
     if !got.is_null() {
-        gum_memory_free(got, size);
+        release_pages_now(got, size);
     }
 
     ptr::null_mut()
+}
+
+#[cfg(feature = "xnu-kext")]
+fn release_pages_now(at: gpointer, size: gsize) {
+    gum::unregister_slab(at as u64);
+    crate::xnu::forget_what_we_took(at as u64);
+    kernel::free_code(at as *mut u8, size as usize);
 }
 
 #[cfg(feature = "xnu-kext")]
@@ -417,8 +424,6 @@ pub extern "C" fn gum_memory_allocate(
 ) -> gpointer {
     let may_run = (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0;
 
-    // Permissions can only be taken away once a page is in place, so every page the agent hands
-    // out is made to run at birth, whatever the caller asks for now.
     #[cfg(feature = "xnu-kext")]
     let ptr = kernel::alloc_code(size as usize);
     #[cfg(feature = "xnu-kext")]
@@ -456,6 +461,11 @@ pub extern "C" fn gum_memory_allocate(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
+    #[cfg(feature = "xnu-kext")]
+    if gum::is_agent_slab(address as u64) {
+        return 1;
+    }
+
     // Executable slabs were flipped to RX in the page tables; restore RW before returning them to
     // the allocator, otherwise the reclaimed pages stay non-writable and the next consumer faults.
     if gum::is_agent_slab(address as u64) {

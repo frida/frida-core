@@ -208,6 +208,7 @@ fn kernel_alloc_code(size: usize) -> *mut u8 {
 #[cfg(feature = "xnu-kext")]
 fn dress_pages_for_code(map: *mut c_void, at: u64, wanted: u64) -> *mut u8 {
     if !protect_in_kernel_map(at, wanted as usize, VM_PROT_READ | VM_PROT_EXECUTE)
+        || !keep_pages_in_memory(map, at, wanted, VM_PROT_READ | VM_PROT_EXECUTE)
         || !give_each_page_a_second_name(at, wanted as usize)
     {
         unsafe { _mach_vm_deallocate.unwrap()(map, at, wanted) };
@@ -222,15 +223,27 @@ pub fn kernel_alloc_pages(size: usize) -> *mut u8 {
     let page = page_size();
     let wanted = ((size + page - 1) & !(page - 1)) as u64;
 
-    let at = take_pages_from_the_kernel_map(the_kernel_map(), wanted);
-    if at != 0 {
-        let_every_page_be_present(at, wanted);
+    let map = the_kernel_map();
+    let at = take_pages_from_the_kernel_map(map, wanted);
+    if at == 0 {
+        return core::ptr::null_mut();
+    }
+
+    if !keep_pages_in_memory(map, at, wanted, VM_PROT_READ | VM_PROT_WRITE) {
+        unsafe { _mach_vm_deallocate.unwrap()(map, at, wanted) };
+        return core::ptr::null_mut();
     }
 
     at as *mut u8
 }
 
-// Cache maintenance and the writer both fault on a page the kernel map has not backed yet.
+#[cfg(feature = "xnu-kext")]
+fn keep_pages_in_memory(map: *mut c_void, at: u64, size: u64, reached_by: core::ffi::c_int)
+    -> bool
+{
+    unsafe { _vm_map_wire_external.unwrap()(map, at, at + size, reached_by, 0) == KERN_SUCCESS }
+}
+
 #[cfg(feature = "xnu-kext")]
 fn let_every_page_be_present(address: u64, size: u64) {
     let page = page_size() as u64;
@@ -556,6 +569,10 @@ unsafe extern "C" {
         Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, core::ffi::c_int) -> core::ffi::c_int>;
     static _mach_vm_deallocate:
         Option<unsafe extern "C" fn(*mut c_void, u64, u64) -> core::ffi::c_int>;
+    static _vm_map_wire_external: Option<
+        unsafe extern "C" fn(*mut c_void, u64, u64, core::ffi::c_int, core::ffi::c_int)
+            -> core::ffi::c_int,
+    >;
     static _mach_vm_protect: Option<
         unsafe extern "C" fn(*mut c_void, u64, u64, core::ffi::c_int, core::ffi::c_int)
             -> core::ffi::c_int,
