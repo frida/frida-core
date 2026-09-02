@@ -222,22 +222,22 @@ def boot_live_guest(arch: str, args):
     ] + machine_arguments + [
         "-kernel", str(kernel),
         "-initrd", str(ramdisk),
-        "-append", f"console={guest.console} panic=-1",
+        "-append", f"console={guest.console} panic=-1 {guest.live_cmdline}".rstrip(),
         "-display", "none",
         "-serial", "stdio",
         "-monitor", "none",
         "-no-reboot",
         "-qmp", f"unix:{args.qmp},server=on,wait=off",
-        "-global", "virtio-mmio.force-legacy=false",
-        "-device", f"virtio-serial-device,id={VIRTIO_SERIAL_ID}",
         "-gdb", f"tcp::{args.gdb_port}",
-    ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    ] + hostlink_arguments(guest),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     if args.console_commands is not None:
         threading.Thread(target=feed_console, args=(args.console_commands, process), daemon=True).start()
 
     asked = False
     ready = False
+    where_it_is = []
     try:
         for raw_line in process.stdout:
             line = raw_line.decode(errors="replace").rstrip()
@@ -245,19 +245,25 @@ def boot_live_guest(arch: str, args):
 
             if not asked and LIVE_READY_MARKER in line:
                 asked = True
-                process.stdin.write((WHERE_THE_LINK_IS + "\n").encode())
+                if guest.hostlink == "mmio":
+                    process.stdin.write((WHERE_THE_LINK_IS + "\n").encode())
+                else:
+                    process.stdin.write((LET_THE_LINK_GO + "\n").encode())
                 process.stdin.flush()
 
-            if not ready and LINK_ANSWER_MARKER in line:
-                ready = True
+            if not ready and LINK_ANSWER_MARKER in line and LINK_GONE_MARKER not in line:
                 fields = line.split(LINK_ANSWER_MARKER, maxsplit=1)[1].split()
+                where_it_is = [f"mmio 0x{fields[0]}", f"irq {fields[1]}"]
 
                 process.stdin.write((LET_THE_LINK_GO + "\n").encode())
                 process.stdin.flush()
 
+            if not ready and LINK_GONE_MARKER in line:
+                ready = True
+
                 print(f"system-map {system_map}", flush=True)
-                print(f"mmio 0x{fields[0]}", flush=True)
-                print(f"irq {fields[1]}", flush=True)
+                for detail in where_it_is:
+                    print(detail, flush=True)
                 print(f"bus {VIRTIO_SERIAL_ID}.0", flush=True)
                 print("ready", flush=True)
 
@@ -265,6 +271,15 @@ def boot_live_guest(arch: str, args):
             raise Unavailable("guest exited before it said where the link is")
     finally:
         process.kill()
+
+
+def hostlink_arguments(guest: "Guest") -> [str]:
+    if guest.hostlink == "mmio":
+        return [
+            "-global", "virtio-mmio.force-legacy=false",
+            "-device", f"virtio-serial-device,id={VIRTIO_SERIAL_ID}",
+        ]
+    return ["-device", f"virtio-serial-pci,id={VIRTIO_SERIAL_ID}"]
 
 
 def feed_console(path: Path, process):
@@ -677,6 +692,8 @@ class Guest(NamedTuple):
     ramdisk_url: str = ""
     live_machine: str = ""
     ecam: int = 0
+    hostlink: str = "pci"
+    live_cmdline: str = ""
 
 # Paging comes up long before this, so the panic that follows the missing root filesystem is a
 # safely late — and unmistakable — sign that the kernel has finished with its page tables.
@@ -691,11 +708,15 @@ ALPINE_RAMDISK_URL = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/{0}/n
 GUESTS = {
     guest.arch: guest
     for guest in [
-        Guest("x86", "qemu-system-i386", ALPINE_NETBOOT_URL.format("x86")),
-        Guest("x86_64", "qemu-system-x86_64", ALPINE_NETBOOT_URL.format("x86_64")),
+        Guest("x86", "qemu-system-i386", ALPINE_NETBOOT_URL.format("x86"),
+              ramdisk_url=ALPINE_RAMDISK_URL.format("x86"), live_machine="pc",
+              live_cmdline="nokaslr"),
+        Guest("x86_64", "qemu-system-x86_64", ALPINE_NETBOOT_URL.format("x86_64"),
+              ramdisk_url=ALPINE_RAMDISK_URL.format("x86_64"), live_machine="pc",
+              live_cmdline="nokaslr"),
         Guest("arm", "qemu-system-arm", ALPINE_NETBOOT_URL.format("armv7"),
               machine="virt", cpu="cortex-a7", console="ttyAMA0",
-              ramdisk_url=ALPINE_RAMDISK_URL.format("armv7"),
+              ramdisk_url=ALPINE_RAMDISK_URL.format("armv7"), hostlink="mmio",
               # Left where it lands by default, the configuration space is above what a
               # kernel without LPAE can address.
               live_machine="virt,highmem=off", ecam=0x3f000000),
@@ -761,7 +782,12 @@ LIVE_READY_MARKER = "recovery shell launched"
 
 LINK_ANSWER_MARKER = "frida-link "
 
-LET_THE_LINK_GO = "echo virtio0 > /sys/bus/virtio/drivers/virtio_console/unbind"
+LET_THE_LINK_GO = (
+    "tag=frida; echo virtio0 > /sys/bus/virtio/drivers/virtio_console/unbind; "
+    "echo $tag-link-gone"
+)
+
+LINK_GONE_MARKER = "frida-link-gone"
 
 WHERE_THE_LINK_IS = (
     "tag=frida; echo $tag-link "
