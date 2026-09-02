@@ -11,7 +11,9 @@ use super::user::entry_offset;
 
 #[cfg(target_arch = "arm")]
 use _arm_copy_to_user as copy_to_user;
-#[cfg(not(target_arch = "arm"))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use __copy_to_user as copy_to_user;
+#[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
 use ___arch_copy_to_user as copy_to_user;
 
 pub fn inject_into_process(id: u32) -> u32 {
@@ -605,8 +607,10 @@ unsafe extern "C" {
     static ___tracepoint_sched_process_exit: *mut c_void;
     static ___tracepoint_sched_process_exec: *mut c_void;
     static _vunmap: unsafe extern "C" fn(*mut c_void);
-    #[cfg(not(target_arch = "arm"))]
+    #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    #[cfg(target_arch = "x86_64")]
+    static __copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     #[cfg(target_arch = "arm")]
     static _arm_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _down_read: unsafe extern "C" fn(*mut c_void);
@@ -624,4 +628,10 @@ unsafe extern "C" {
     static _do_futex: unsafe extern "C" fn(usize, c_int, u32, usize, usize, u32, u32) -> isize;
     static _user_mode_thread:
         unsafe extern "C" fn(unsafe extern "C" fn(*mut c_void) -> c_int, *mut c_void, usize) -> c_int;
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k__copy_to_user"]
+    fn __copy_to_user(a0: *mut c_void, a1: *const c_void, a2: usize) -> usize;
 }

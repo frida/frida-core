@@ -355,6 +355,12 @@ fn kernel_space_holding(address: usize) -> usize {
 
 const SPLIT_GRANULARITY: usize = 1 << 30;
 
+#[cfg(target_arch = "x86")]
+fn lock_tasklist() -> usize {
+    unsafe { frida_k_lock_tasklist() }
+}
+
+#[cfg(not(target_arch = "x86"))]
 fn lock_tasklist() -> usize {
     unsafe {
         match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
@@ -367,6 +373,12 @@ fn lock_tasklist() -> usize {
     }
 }
 
+#[cfg(target_arch = "x86")]
+fn unlock_tasklist(flags: usize) {
+    unsafe { frida_k_unlock_tasklist(flags) };
+}
+
+#[cfg(not(target_arch = "x86"))]
 fn unlock_tasklist(flags: usize) {
     unsafe {
         match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
@@ -401,9 +413,32 @@ unsafe extern "C" {
     static __raw_read_unlock: Option<unsafe extern "C" fn(*mut c_void)>;
     static __raw_read_lock_irqsave: Option<unsafe extern "C" fn(*mut c_void) -> usize>;
     static __raw_read_unlock_irqrestore: Option<unsafe extern "C" fn(*mut c_void, usize)>;
+    #[cfg(not(target_arch = "x86"))]
     static _get_task_exe_file: unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
     static _file_path: unsafe extern "C" fn(*mut c_void, *mut c_char, c_int) -> *const c_char;
+    #[cfg(not(target_arch = "x86"))]
     static _fput: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "x86"))]
     static _copy_from_kernel_nofault:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> c_long;
+}
+
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k_copy_from_kernel_nofault"]
+    fn _copy_from_kernel_nofault(a0: *mut c_void, a1: *const c_void, a2: usize) -> c_long;
+    fn frida_k_lock_tasklist() -> usize;
+    fn frida_k_unlock_tasklist(flags: usize);
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k_get_task_exe_file"]
+    fn _get_task_exe_file(a0: *mut c_void) -> *mut c_void;
+    #[link_name = "frida_k_file_path"]
+    fn _file_path(a0: *mut c_void, a1: *mut c_char, a2: c_int) -> *const c_char;
+    #[link_name = "frida_k_fput"]
+    fn _fput(a0: *mut c_void);
 }

@@ -35,8 +35,22 @@ namespace Frida.Barebone {
 			return 4096;
 		}
 
+		public uint arguments_in_registers = 0;
+
+		private const string[] ARGUMENT_REGISTERS = { "eax", "edx", "ecx" };
+
+		private const uint64 CODE_SELECTOR_PRIVILEGE = 3;
+		private const uint64 USER_PRIVILEGE = 3;
+
 		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			GDB.Exception? exception = gdb.exception;
+			if (exception == null)
+				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+			GDB.Thread thread = exception.thread;
+
+			var cs = yield thread.read_register ("cs", cancellable);
+
+			return ((cs & CODE_SELECTOR_PRIVILEGE) == USER_PRIVILEGE) ? 0 : 1;
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
@@ -135,15 +149,20 @@ namespace Frida.Barebone {
 
 			uint64 landing_zone = saved_regs["eip"].get_uint64 ();
 
-			uint64 sp = saved_regs["esp"].get_uint64 () - ((1 + args.length) * 4);
+			uint in_registers = uint.min (arguments_in_registers, args.length);
+			uint on_stack = args.length - in_registers;
+
+			uint64 sp = saved_regs["esp"].get_uint64 () - ((1 + on_stack) * 4);
 			sp = (sp & ~15ULL) - 4;
 
 			var builder = gdb.make_buffer_builder ();
 			builder.append_uint32 ((uint32) landing_zone);
-			foreach (uint64 arg in args)
-				builder.append_uint32 ((uint32) arg);
+			for (uint i = in_registers; i != args.length; i++)
+				builder.append_uint32 ((uint32) args[i]);
 			yield gdb.write_byte_array (sp, builder.build (), cancellable);
 
+			for (uint i = 0; i != in_registers; i++)
+				regs[ARGUMENT_REGISTERS[i]] = args[i];
 			regs["eip"] = impl;
 			regs["esp"] = sp;
 			yield thread.write_registers (regs, cancellable);

@@ -83,7 +83,8 @@ namespace Frida.Barebone {
 	 * every arm64 image carries turns up.
 	 *
 	 * A 32-bit ARM kernel carries no such header, and needs none: nothing relocates it, so it
-	 * is running at the address its symbols were linked for.
+	 * is running at the address its symbols were linked for. The same is taken of x86, which
+	 * has to be asked not to relocate itself.
 	 */
 	private static async uint64 find_running_kernel (Machine machine, uint64 linked_base, Cancellable? cancellable)
 			throws Error, IOError {
@@ -91,7 +92,7 @@ namespace Frida.Barebone {
 		// where the kernel is and cannot be walked with the kernel's tables.
 		yield machine.enter_exception_level (1, ENTER_KERNEL_TIMEOUT_MS, cancellable);
 
-		if (machine is ArmMachine)
+		if (machine is ArmMachine || machine is IA32Machine || machine is X64Machine)
 			return linked_base;
 
 		GDB.Client gdb = machine.gdb;

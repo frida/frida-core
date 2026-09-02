@@ -86,6 +86,21 @@ fn main() {
         println!("cargo:rustc-link-arg=--undefined=_start");
     }
 
+    if target.starts_with("i686") && env::var("CARGO_FEATURE_LINUX_INJECTED").is_ok() {
+        let shim = out_dir.join("regparm.o");
+        let status = Command::new(cc)
+            .args(&cc_args)
+            .args(["-m32", "-c", "-O2", "-fPIC", "-ffreestanding", "-o"])
+            .arg(&shim)
+            .arg("src/linux/regparm.c")
+            .status()
+            .expect("Couldn't run the compiler");
+        assert!(status.success(), "Couldn't compile the kernel-call shim");
+
+        println!("cargo:rustc-link-arg={}", shim.to_string_lossy());
+        println!("cargo:rerun-if-changed=src/linux/regparm.c");
+    }
+
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=GUMJS_DEVKIT_DIR");
     println!("cargo:rerun-if-changed={}", devkit_dir.join("frida-gumjs.h").display());
