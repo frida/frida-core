@@ -768,12 +768,53 @@ namespace Frida.BareboneTest {
 		});
 
 		GLib.Test.add_func ("/Barebone/ARM/agent-runs-in-live-guest", () => {
-			var h = new Harness ((h) => arm_agent_runs_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_ARM"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/ARM/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
+				"LINUX_ARM"));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Barebone/ARM/enumerates-processes-in-live-guest", () => {
-			var h = new Harness ((h) => arm_enumerates_processes_in_live_guest.begin (h as Harness));
+			var h = new Harness ((h) => linux_enumerates_processes_in_live_guest.begin (h as Harness,
+				"LINUX_ARM"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
+				"LINUX_X86"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => linux_enumerates_processes_in_live_guest.begin (h as Harness,
+				"LINUX_X86"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86_64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/injects-into-process-in-live-guest", () => {
+			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
+				"LINUX_X86_64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/enumerates-processes-in-live-guest", () => {
+			var h = new Harness ((h) => linux_enumerates_processes_in_live_guest.begin (h as Harness,
+				"LINUX_X86_64"));
 			h.run ();
 		});
 
@@ -4229,12 +4270,13 @@ FAIL: %s
 		h.done ();
 	}
 
-	private async void arm_agent_runs_in_live_guest (Harness h) {
-		yield run_script_in_live_guest (h, linux_config_from_environment (h), "send(1 + 1);", "\"payload\":2");
+	private async void linux_agent_runs_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), "send(1 + 1);",
+			"\"payload\":2");
 	}
 
-	private async void arm_enumerates_processes_in_live_guest (Harness h) {
-		var config = linux_config_from_environment (h);
+	private async void linux_enumerates_processes_in_live_guest (Harness h, string prefix) {
+		var config = linux_config_from_environment (h, prefix);
 		if (config == null)
 			return;
 
@@ -4260,6 +4302,62 @@ FAIL: %s
 FAIL: %s
 
 ", e.message);
+			assert_not_reached ();
+		}
+
+		yield manager.close (null);
+
+		h.done ();
+	}
+
+	private async void linux_injects_into_process_in_live_guest (Harness h, string prefix) {
+		var config = linux_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "busybox");
+			if (pid == 0) {
+				var options = new ProcessQueryOptions ();
+				options.scope = METADATA;
+				var processes = yield device.enumerate_processes (options, null);
+				var seen = new StringBuilder ();
+				for (int i = 0; i != processes.size (); i++) {
+					var p = processes.get (i);
+					var path = p.parameters["path"];
+					seen.append_printf ("\n  %u %s %s", p.pid, p.name,
+						(path != null) ? path.get_string () : "(no path)");
+				}
+				printerr ("\nNo busybox among:%s\n\n", seen.str);
+			}
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			assert_nonnull (session);
+
+			var script = yield session.create_script ("""
+				recv('ping', () => { send(Process.id >>> 0); });
+				send('ready');
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("ready"));
+
+			script.post ("""{"type":"ping"}""");
+			while (messages.size < 2)
+				yield h.process_events ();
+			assert_true (messages[1].contains (pid.to_string ()));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
 		}
 
@@ -5723,11 +5821,11 @@ FAIL: %s
 		return config;
 	}
 
-	private BareboneConfig? linux_config_from_environment (Frida.Test.AsyncHarness h) {
-		string? agent_path = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_AGENT");
-		string? qmp_path = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_QMP");
-		string? stub_port = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_GDB_PORT");
-		string? system_map = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_SYSTEM_MAP");
+	private BareboneConfig? linux_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
+		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
+		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
+		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
+		string? system_map = Environment.get_variable (@"FRIDA_TEST_$(prefix)_SYSTEM_MAP");
 		if (agent_path == null || qmp_path == null || stub_port == null || system_map == null) {
 			h.done ();
 			return null;
@@ -5740,14 +5838,14 @@ FAIL: %s
 		config.image = new BareboneImageConfig () {
 			file = system_map,
 		};
-		string? ecam = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_ECAM");
-		string? mmio = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_MMIO");
-		string? irq = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_IRQ");
+		string? ecam = Environment.get_variable (@"FRIDA_TEST_$(prefix)_ECAM");
+		string? mmio = Environment.get_variable (@"FRIDA_TEST_$(prefix)_MMIO");
+		string? irq = Environment.get_variable (@"FRIDA_TEST_$(prefix)_IRQ");
 		config.agent = new BareboneAgentConfig () {
 			path = agent_path,
 			transport = new BareboneHostlinkTransportConfig () {
 				qmp = "unix:" + qmp_path,
-				bus = Environment.get_variable ("FRIDA_TEST_LINUX_ARM_BUS"),
+				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
 				ecam = (ecam != null) ? uint64.parse (ecam) : 0,
 				mmio = (mmio != null) ? uint64.parse (mmio) : 0,
 				irq = (irq != null) ? (uint) uint64.parse (irq) : 0,
