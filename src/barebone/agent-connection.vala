@@ -268,7 +268,8 @@ namespace Frida.Barebone {
 			var config_blob = config_builder.end ().get_data_as_bytes ();
 			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
 
-			yield gdb.write_byte_array (config_allocation.virtual_address, config_blob, cancellable);
+			yield machine.write_virtual (config_allocation.virtual_address, config_blob.get_data (),
+				cancellable);
 
 			yield machine.protect_pages (config_allocation.virtual_address, config_allocation.size, READ | WRITE,
 				cancellable);
