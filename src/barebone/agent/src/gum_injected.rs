@@ -93,7 +93,7 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
     n_pages: guint,
 ) -> gpointer {
     #[cfg(feature = "xnu-kext")]
-    if crate::xnu::we_took(first_page as u64).is_some() {
+    if crate::xnu::the_writable_view_of(first_page as u64) != 0 {
         return remap_agent_pages(first_page, n_pages);
     }
 
@@ -146,9 +146,11 @@ fn shadow_kernel_pages(first_page: gpointer, n_pages: guint) -> gpointer {
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages: guint) {
     #[cfg(feature = "xnu-kext")]
-    if crate::xnu::is_a_writable_view(writable as u64) {
+    if let Some(base) = crate::xnu::the_page_behind(writable as u64) {
         let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
-        crate::xnu::forget_what_the_cache_holds(writable as u64, size);
+        unsafe {
+            libc::__clear_cache(base as *const u8, (base + size as u64) as *const u8);
+        }
         return;
     }
 
@@ -340,12 +342,70 @@ unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
 #[cfg(feature = "xnu-kext")]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_allocate_near(
-    _spec: gconstpointer,
+    spec: gconstpointer,
     size: gsize,
     alignment: gsize,
     prot: GumPageProtection,
 ) -> gpointer {
-    gum_memory_allocate(ptr::null_mut(), size, alignment, prot)
+    if spec.is_null() {
+        return gum_memory_allocate(ptr::null_mut(), size, alignment, prot);
+    }
+
+    let (wanted, reach) = unsafe {
+        (
+            (*(spec as *const GumAddressSpec)).near_address as u64,
+            (*(spec as *const GumAddressSpec)).max_distance as u64,
+        )
+    };
+
+    let within_reach = |at: gpointer| {
+        !at.is_null()
+            && (at as u64).abs_diff(wanted).max((at as u64 + size - 1).abs_diff(wanted)) <= reach
+    };
+
+    let close = crate::xnu::kernel_alloc_code_above(wanted.saturating_sub(reach), size as usize)
+        as gpointer;
+    if within_reach(close) {
+        remember_slab_of(close, size);
+        return close;
+    }
+    if !close.is_null() {
+        gum_memory_free(close, size);
+    }
+
+    let got = gum_memory_allocate(ptr::null_mut(), size, alignment, prot);
+    if within_reach(got) {
+        return got;
+    }
+    if !got.is_null() {
+        gum_memory_free(got, size);
+    }
+
+    ptr::null_mut()
+}
+
+#[cfg(feature = "xnu-kext")]
+fn remember_slab_of(at: gpointer, size: gsize) {
+    unsafe { gum::register_slab(at as u64, size as usize) };
+    crate::xnu::remember_what_we_took(at as u64, size as usize, true);
+}
+
+#[cfg(feature = "xnu-kext")]
+#[repr(C)]
+struct GumAddressSpec {
+    near_address: gpointer,
+    max_distance: gsize,
+}
+
+#[cfg(feature = "xnu-kext")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_memory_allocate_bookkeeping(size: gsize, _alignment: gsize) -> gpointer {
+    let ptr = crate::xnu::kernel_alloc_pages(size as usize);
+    if !ptr.is_null() {
+        unsafe { core::ptr::write_bytes(ptr, 0, size as usize) };
+    }
+
+    ptr as gpointer
 }
 
 #[unsafe(no_mangle)]
@@ -355,7 +415,16 @@ pub extern "C" fn gum_memory_allocate(
     _alignment: gsize,
     prot: GumPageProtection,
 ) -> gpointer {
-    #[cfg(feature = "xnu-core")]
+    let may_run = (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0;
+
+    // Permissions can only be taken away once a page is in place, so every page the agent hands
+    // out is made to run at birth, whatever the caller asks for now.
+    #[cfg(feature = "xnu-kext")]
+    let ptr = kernel::alloc_code(size as usize);
+    #[cfg(feature = "xnu-kext")]
+    let _ = address;
+
+    #[cfg(all(feature = "xnu-core", not(feature = "xnu-kext")))]
     let ptr = if crate::xnu::in_copy() {
         crate::xnu_user_calls::code_memory_near(address as u64, size as usize)
     } else {
@@ -365,7 +434,6 @@ pub extern "C" fn gum_memory_allocate(
     let ptr = kernel::alloc_code(size as usize);
     #[cfg(not(feature = "xnu-core"))]
     let _ = address;
-    let may_run = (prot & _GumPageProtection_GUM_PAGE_EXECUTE) != 0;
     unsafe {
         #[cfg(not(feature = "xnu-kext"))]
         core::ptr::write_bytes(ptr, 0, size as usize);
