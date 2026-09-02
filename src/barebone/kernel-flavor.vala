@@ -133,6 +133,10 @@ namespace Frida.Barebone {
 			if (panic != null && arm != null)
 				arm.call_landing_zone = kernel_base + panic.offset;
 
+			var ia32 = machine as IA32Machine;
+			if (ia32 != null)
+				ia32.arguments_in_registers = LINUX_REGISTER_ARGUMENTS;
+
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
 			yield run_until_schedule (schedule_address, cancellable);
@@ -160,11 +164,18 @@ namespace Frida.Barebone {
 		}
 
 		private async bool interrupts_masked (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
+			if (machine is IA32Machine || machine is X64Machine) {
+				uint64 eflags = yield thread.read_register ("eflags", cancellable);
+				return (eflags & INTERRUPT_ENABLE_BIT) == 0;
+			}
+
 			uint64 cpsr = yield thread.read_register ("cpsr", cancellable);
 			return (cpsr & INTERRUPT_MASK_BITS) != 0;
 		}
 
 		private const uint64 INTERRUPT_MASK_BITS = (1ULL << 7) | (1ULL << 6);
+		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
+		private const uint LINUX_REGISTER_ARGUMENTS = 3;
 	}
 
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {

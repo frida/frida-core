@@ -169,12 +169,18 @@ fn map(size: usize, protection: usize) -> *mut u8 {
         NO_FILE,
         0,
     );
-    if mapped < 0 {
+    if is_error(mapped) {
         return core::ptr::null_mut();
     }
 
     mapped as *mut u8
 }
+
+fn is_error(answer: isize) -> bool {
+    (answer as usize) >= LAST_ERROR_ANSWER
+}
+
+const LAST_ERROR_ANSWER: usize = usize::MAX - 4095;
 
 fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     let stack = map_writable(THREAD_STACK_SIZE);
@@ -204,6 +210,53 @@ fn stand_on_a_thread_pointer() {
     unsafe { core::arch::asm!("mcr p15, 0, {}, c13, c0, 2", in(reg) pointer, options(nomem, nostack)) };
 }
 
+#[cfg(target_arch = "x86")]
+fn stand_on_a_thread_pointer() {
+    let block = map_writable(THREAD_POINTER_BLOCK);
+    if block.is_null() {
+        return;
+    }
+
+    let pointer = unsafe { block.add(THREAD_POINTER_BLOCK / 2) } as usize;
+    unsafe { (pointer as *mut usize).write(pointer) };
+
+    let mut area = UserDesc {
+        entry_number: u32::MAX,
+        base_address: pointer as u32,
+        limit: 0xfffff,
+        flags: SEGMENT_FLAGS,
+    };
+    if syscall(SET_THREAD_AREA, &raw mut area as usize, 0, 0, 0, 0, 0) != 0 {
+        return;
+    }
+
+    let selector = (area.entry_number << 3) | 3;
+    unsafe { core::arch::asm!("mov gs, {:e}", in(reg) selector, options(nomem, nostack)) };
+}
+
+#[repr(C)]
+struct UserDesc {
+    entry_number: u32,
+    base_address: u32,
+    limit: u32,
+    flags: u32,
+}
+
+#[cfg(target_arch = "x86")]
+const SEGMENT_FLAGS: u32 = 0x51;
+
+#[cfg(target_arch = "x86_64")]
+fn stand_on_a_thread_pointer() {
+    let block = map_writable(THREAD_POINTER_BLOCK);
+    if block.is_null() {
+        return;
+    }
+
+    let pointer = unsafe { block.add(THREAD_POINTER_BLOCK / 2) } as usize;
+    unsafe { (pointer as *mut usize).write(pointer) };
+    syscall(ARCH_PRCTL, ARCH_SET_FS, pointer, 0, 0, 0, 0);
+}
+
 #[cfg(target_arch = "aarch64")]
 fn stand_on_a_thread_pointer() {
     let block = map_writable(THREAD_POINTER_BLOCK);
@@ -216,6 +269,14 @@ fn stand_on_a_thread_pointer() {
 }
 
 const THREAD_POINTER_BLOCK: usize = 8192;
+
+#[cfg(target_arch = "x86")]
+const SET_THREAD_AREA: usize = 243;
+
+#[cfg(target_arch = "x86_64")]
+const ARCH_PRCTL: usize = 158;
+#[cfg(target_arch = "x86_64")]
+const ARCH_SET_FS: usize = 0x1002;
 
 struct Carried {
     entry: ThreadEntry,
@@ -264,6 +325,79 @@ unsafe fn start_thread(stack: usize, carried: usize) -> isize {
             in("r5") carried,
             lateout("r12") _,
             lateout("lr") _,
+        );
+    }
+
+    spawned
+}
+
+#[cfg(target_arch = "x86")]
+core::arch::global_asm!(
+    ".globl frida_start_thread",
+    ".hidden frida_start_thread",
+    "frida_start_thread:",
+    "push ebp",
+    "push ebx",
+    "push esi",
+    "push edi",
+    "mov eax, [esp + 20]",
+    "mov ebx, [esp + 24]",
+    "mov ecx, [esp + 28]",
+    "xor edx, edx",
+    "xor esi, esi",
+    "xor edi, edi",
+    "int 0x80",
+    "test eax, eax",
+    "jnz 2f",
+    "pop ecx",
+    "call ecx",
+    "ud2",
+    "2:",
+    "pop edi",
+    "pop esi",
+    "pop ebx",
+    "pop ebp",
+    "ret",
+);
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    fn frida_start_thread(number: usize, flags: usize, launch: usize) -> isize;
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn start_thread(stack: usize, carried: usize) -> isize {
+    let launch = stack - 8;
+    unsafe {
+        (launch as *mut usize).write(enter_thread as usize);
+        ((launch + 4) as *mut usize).write(carried);
+
+        frida_start_thread(CLONE, THREAD_FLAGS, launch)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn start_thread(stack: usize, carried: usize) -> isize {
+    let spawned: isize;
+
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            "test rax, rax",
+            "jnz 2f",
+            "mov rdi, r13",
+            "call r12",
+            "2:",
+            inlateout("rax") CLONE => spawned,
+            in("rdi") THREAD_FLAGS,
+            in("rsi") stack,
+            in("rdx") 0,
+            in("r10") 0,
+            in("r8") 0,
+            in("r12") enter_thread,
+            in("r13") carried,
+            lateout("rcx") _,
+            lateout("r11") _,
         );
     }
 
@@ -480,7 +614,7 @@ pub fn names_in(directory: &core::ffi::CStr) -> Vec<String> {
         while at < read as usize {
             let entry = unsafe { chunk.as_ptr().add(at) };
             let length = unsafe { entry.add(16).cast::<u16>().read_unaligned() } as usize;
-            let name = unsafe { core::ffi::CStr::from_ptr(entry.add(19)) };
+            let name = unsafe { core::ffi::CStr::from_ptr(entry.add(19).cast()) };
             names.push(String::from_utf8_lossy(name.to_bytes()).into_owned());
             at += length;
         }
@@ -571,6 +705,63 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
     answer
 }
 
+#[cfg(target_arch = "x86")]
+core::arch::global_asm!(
+    ".globl frida_syscall",
+    ".hidden frida_syscall",
+    "frida_syscall:",
+    "push ebp",
+    "push ebx",
+    "push esi",
+    "push edi",
+    "mov eax, [esp + 20]",
+    "mov ebx, [esp + 24]",
+    "mov ecx, [esp + 28]",
+    "mov edx, [esp + 32]",
+    "mov esi, [esp + 36]",
+    "mov edi, [esp + 40]",
+    "mov ebp, [esp + 44]",
+    "int 0x80",
+    "pop edi",
+    "pop esi",
+    "pop ebx",
+    "pop ebp",
+    "ret",
+);
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    fn frida_syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize;
+}
+
+#[cfg(target_arch = "x86")]
+fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+    unsafe { frida_syscall(number, a, b, c, d, e, f) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+    let answer: isize;
+
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") number => answer,
+            in("rdi") a,
+            in("rsi") b,
+            in("rdx") c,
+            in("r10") d,
+            in("r8") e,
+            in("r9") f,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack)
+        );
+    }
+
+    answer
+}
+
 #[cfg(target_arch = "aarch64")]
 fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     let answer: isize;
@@ -601,6 +792,10 @@ pub const FAULTED: u32 = 8;
 
 #[cfg(target_arch = "arm")]
 const RT_SIGACTION: usize = 174;
+#[cfg(target_arch = "x86")]
+const RT_SIGACTION: usize = 174;
+#[cfg(target_arch = "x86_64")]
+const RT_SIGACTION: usize = 13;
 #[cfg(target_arch = "aarch64")]
 const RT_SIGACTION: usize = 134;
 const ILLEGAL: usize = 4;
@@ -613,82 +808,173 @@ const SEGMENT: usize = 11;
 const SIGINFO: usize = 4;
 const ABOUT_CODE: usize = 8;
 const ABOUT_ADDRESS: usize = 16;
+#[cfg(target_arch = "x86")]
+const RUNNING_STATE: usize = 20;
+#[cfg(target_arch = "x86_64")]
+const RUNNING_STATE: usize = 40;
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 const RUNNING_STATE: usize = 176;
+#[cfg(target_arch = "x86")]
+const STATE_PC: usize = 56;
+#[cfg(target_arch = "x86_64")]
+const STATE_PC: usize = 128;
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 const STATE_PC: usize = 264;
+#[cfg(target_arch = "x86")]
+const STATE_LR: usize = 28;
+#[cfg(target_arch = "x86_64")]
+const STATE_LR: usize = 120;
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 const STATE_LR: usize = 248;
 
 #[cfg(target_arch = "arm")]
 const OPENAT: usize = 322;
+#[cfg(target_arch = "x86")]
+const OPENAT: usize = 295;
+#[cfg(target_arch = "x86_64")]
+const OPENAT: usize = 257;
 #[cfg(target_arch = "aarch64")]
 const OPENAT: usize = 56;
 #[cfg(target_arch = "arm")]
 const CLOSE: usize = 6;
+#[cfg(target_arch = "x86")]
+const CLOSE: usize = 6;
+#[cfg(target_arch = "x86_64")]
+const CLOSE: usize = 3;
 #[cfg(target_arch = "aarch64")]
 const CLOSE: usize = 57;
 #[cfg(target_arch = "arm")]
 const NANOSLEEP: usize = 162;
+#[cfg(target_arch = "x86")]
+const NANOSLEEP: usize = 162;
+#[cfg(target_arch = "x86_64")]
+const NANOSLEEP: usize = 35;
 #[cfg(target_arch = "aarch64")]
 const NANOSLEEP: usize = 101;
 #[cfg(target_arch = "arm")]
 const PIPE: usize = 42;
+#[cfg(target_arch = "x86")]
+const PIPE: usize = 42;
+#[cfg(target_arch = "x86_64")]
+const PIPE: usize = 22;
 #[cfg(target_arch = "aarch64")]
 const PIPE: usize = 59;
 #[cfg(target_arch = "arm")]
 const GETDENTS: usize = 217;
+#[cfg(target_arch = "x86")]
+const GETDENTS: usize = 220;
+#[cfg(target_arch = "x86_64")]
+const GETDENTS: usize = 217;
 #[cfg(target_arch = "aarch64")]
 const GETDENTS: usize = 61;
+#[cfg(target_arch = "x86")]
+const POLL: usize = 168;
+#[cfg(target_arch = "x86_64")]
+const POLL: usize = 7;
 #[cfg(target_arch = "aarch64")]
 const POLL: usize = 73;
 #[cfg(target_arch = "arm")]
 const READ: usize = 3;
+#[cfg(target_arch = "x86")]
+const READ: usize = 3;
+#[cfg(target_arch = "x86_64")]
+const READ: usize = 0;
 #[cfg(target_arch = "aarch64")]
 const READ: usize = 63;
 #[cfg(target_arch = "arm")]
 const WRITE: usize = 4;
+#[cfg(target_arch = "x86")]
+const WRITE: usize = 4;
+#[cfg(target_arch = "x86_64")]
+const WRITE: usize = 1;
 #[cfg(target_arch = "aarch64")]
 const WRITE: usize = 64;
 #[cfg(target_arch = "arm")]
 const EXIT: usize = 1;
+#[cfg(target_arch = "x86")]
+const EXIT: usize = 1;
+#[cfg(target_arch = "x86_64")]
+const EXIT: usize = 60;
 #[cfg(target_arch = "aarch64")]
 const EXIT: usize = 93;
 #[cfg(target_arch = "arm")]
 const EXIT_GROUP: usize = 248;
+#[cfg(target_arch = "x86")]
+const EXIT_GROUP: usize = 252;
+#[cfg(target_arch = "x86_64")]
+const EXIT_GROUP: usize = 231;
 #[cfg(target_arch = "aarch64")]
 const EXIT_GROUP: usize = 94;
 #[cfg(target_arch = "arm")]
 const FUTEX: usize = 240;
+#[cfg(target_arch = "x86")]
+const FUTEX: usize = 240;
+#[cfg(target_arch = "x86_64")]
+const FUTEX: usize = 202;
 #[cfg(target_arch = "aarch64")]
 const FUTEX: usize = 98;
 #[cfg(target_arch = "arm")]
 const CLOCK_GETTIME: usize = 263;
+#[cfg(target_arch = "x86")]
+const CLOCK_GETTIME: usize = 265;
+#[cfg(target_arch = "x86_64")]
+const CLOCK_GETTIME: usize = 228;
 #[cfg(target_arch = "aarch64")]
 const CLOCK_GETTIME: usize = 113;
 #[cfg(target_arch = "arm")]
 const SCHED_YIELD: usize = 158;
+#[cfg(target_arch = "x86")]
+const SCHED_YIELD: usize = 158;
+#[cfg(target_arch = "x86_64")]
+const SCHED_YIELD: usize = 24;
 #[cfg(target_arch = "aarch64")]
 const SCHED_YIELD: usize = 124;
 #[cfg(target_arch = "arm")]
 const GETPID: usize = 20;
+#[cfg(target_arch = "x86")]
+const GETPID: usize = 20;
+#[cfg(target_arch = "x86_64")]
+const GETPID: usize = 39;
 #[cfg(target_arch = "aarch64")]
 const GETPID: usize = 172;
 #[cfg(target_arch = "arm")]
 const GETTID: usize = 224;
+#[cfg(target_arch = "x86")]
+const GETTID: usize = 224;
+#[cfg(target_arch = "x86_64")]
+const GETTID: usize = 186;
 #[cfg(target_arch = "aarch64")]
 const GETTID: usize = 178;
 #[cfg(target_arch = "arm")]
 const MUNMAP: usize = 91;
+#[cfg(target_arch = "x86")]
+const MUNMAP: usize = 91;
+#[cfg(target_arch = "x86_64")]
+const MUNMAP: usize = 11;
 #[cfg(target_arch = "aarch64")]
 const MUNMAP: usize = 215;
 #[cfg(target_arch = "arm")]
 const CLONE: usize = 120;
+#[cfg(target_arch = "x86")]
+const CLONE: usize = 120;
+#[cfg(target_arch = "x86_64")]
+const CLONE: usize = 56;
 #[cfg(target_arch = "aarch64")]
 const CLONE: usize = 220;
 #[cfg(target_arch = "arm")]
 const MMAP: usize = 192;
+#[cfg(target_arch = "x86")]
+const MMAP: usize = 192;
+#[cfg(target_arch = "x86_64")]
+const MMAP: usize = 9;
 #[cfg(target_arch = "aarch64")]
 const MMAP: usize = 222;
 #[cfg(target_arch = "arm")]
 const MPROTECT: usize = 125;
+#[cfg(target_arch = "x86")]
+const MPROTECT: usize = 125;
+#[cfg(target_arch = "x86_64")]
+const MPROTECT: usize = 10;
 #[cfg(target_arch = "aarch64")]
 const MPROTECT: usize = 226;
 
@@ -716,4 +1002,5 @@ const WAKE_EVERY_WAITER: usize = i32::MAX as usize;
 const GUM_PAGE_READ: u32 = 1;
 const GUM_PAGE_WRITE: u32 = 2;
 const GUM_PAGE_EXECUTE: u32 = 4;
+
 

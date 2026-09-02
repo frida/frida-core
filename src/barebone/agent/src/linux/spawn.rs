@@ -30,8 +30,8 @@ pub fn spawn_process(words: &[&str]) -> u32 {
             (*held).words.as_argv(),
             (*held).environment.as_argv(),
             GFP_KERNEL,
-            hold_this_one,
-            let_go_of_the_words,
+            HOLD_SPAWN,
+            RELEASE_WORDS,
             held as *mut c_void,
         )
     };
@@ -80,7 +80,7 @@ pub fn holds_this_one(task: usize) -> bool {
 // A spawn is held in the kernel's own exec path, where telling the host is not this thread's
 // to do; the loop says it once it is back where sending a frame belongs.
 pub fn note_a_held_spawn(id: u32, program: *const u8) {
-    let said = unsafe { core::ffi::CStr::from_ptr(program) };
+    let said = unsafe { core::ffi::CStr::from_ptr(program.cast()) };
     unsafe { held_spawns() }.push((id, said.to_bytes().to_vec()));
 }
 
@@ -101,7 +101,8 @@ unsafe fn held_spawns() -> &'static mut Vec<(u32, Vec<u8>)> {
 static mut HELD_SPAWNS: Vec<(u32, Vec<u8>)> = Vec::new();
 static GATING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-unsafe extern "C" fn hold_this_one(info: *mut c_void, _credentials: *mut c_void) -> c_int {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_hold_spawn(info: *mut c_void, _credentials: *mut c_void) -> c_int {
     let Some(at) = field_offset("subprocess_info", "data") else {
         return 0;
     };
@@ -116,7 +117,8 @@ unsafe extern "C" fn hold_this_one(info: *mut c_void, _credentials: *mut c_void)
     0
 }
 
-unsafe extern "C" fn let_go_of_the_words(info: *mut c_void) {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn frida_cb_release_words(info: *mut c_void) {
     let Some(at) = field_offset("subprocess_info", "data") else {
         return;
     };
@@ -170,6 +172,7 @@ const UMH_WAIT_EXEC: c_int = 1;
 const CONTINUE: c_int = 18;
 
 unsafe extern "C" {
+    #[cfg(not(target_arch = "x86"))]
     static _call_usermodehelper_setup: unsafe extern "C" fn(
         *const u8,
         *const *const u8,
@@ -179,5 +182,38 @@ unsafe extern "C" {
         unsafe extern "C" fn(*mut c_void),
         *mut c_void,
     ) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
     static _call_usermodehelper_exec: unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
 }
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k_call_usermodehelper_exec"]
+    fn _call_usermodehelper_exec(a0: *mut c_void, a1: c_int) -> c_int;
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    #[link_name = "frida_k_call_usermodehelper_setup"]
+    fn _call_usermodehelper_setup(
+        a0: *const u8,
+        a1: *const *const u8,
+        a2: *const *const u8,
+        a3: u32,
+        a4: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
+        a5: unsafe extern "C" fn(*mut c_void),
+        a6: *mut c_void,
+    ) -> *mut c_void;
+    fn frida_kcb_hold_spawn(info: *mut c_void, credentials: *mut c_void) -> c_int;
+    fn frida_kcb_release_words(info: *mut c_void);
+}
+
+#[cfg(target_arch = "x86")]
+const HOLD_SPAWN: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int = frida_kcb_hold_spawn;
+#[cfg(not(target_arch = "x86"))]
+const HOLD_SPAWN: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int = frida_cb_hold_spawn;
+
+#[cfg(target_arch = "x86")]
+const RELEASE_WORDS: unsafe extern "C" fn(*mut c_void) = frida_kcb_release_words;
+#[cfg(not(target_arch = "x86"))]
+const RELEASE_WORDS: unsafe extern "C" fn(*mut c_void) = frida_cb_release_words;

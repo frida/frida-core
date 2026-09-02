@@ -274,11 +274,19 @@ namespace Frida.Barebone {
 			yield machine.protect_pages (config_allocation.virtual_address, config_allocation.size, READ | WRITE,
 				cancellable);
 
+			var ia32 = machine as IA32Machine;
+			uint kernel_arguments = (ia32 != null) ? ia32.arguments_in_registers : 0;
+			if (ia32 != null)
+				ia32.arguments_in_registers = 0;
+
 			yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size
 				},
 				cancellable);
+
+			if (ia32 != null)
+				ia32.arguments_in_registers = kernel_arguments;
 
 			yield flavor.settle (cancellable);
 			if (qmp != null)

@@ -65,8 +65,18 @@ namespace Frida.Barebone {
 			return 4096;
 		}
 
+		private const uint64 CODE_SELECTOR_PRIVILEGE = 3;
+		private const uint64 USER_PRIVILEGE = 3;
+
 		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+			GDB.Exception? exception = gdb.exception;
+			if (exception == null)
+				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+			GDB.Thread thread = exception.thread;
+
+			var cs = yield thread.read_register ("cs", cancellable);
+
+			return ((cs & CODE_SELECTOR_PRIVILEGE) == USER_PRIVILEGE) ? 0 : 1;
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
