@@ -73,6 +73,7 @@ fn main() {
         };
         let arch = match target.split('-').next().unwrap() {
             "i686" => "x86",
+            "armv7a" => "arm",
             "aarch64" => "arm64",
             other => other,
         };
