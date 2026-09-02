@@ -246,6 +246,15 @@ pub fn current_thread_id() -> u64 {
     current_task() & JS_SAFE_THREAD_ID_MASK
 }
 
+#[cfg(target_arch = "arm")]
+pub fn current_task() -> u64 {
+    let task: u32;
+    unsafe {
+        core::arch::asm!("mrc p15, 0, {}, c13, c0, 3", out(reg) task, options(nomem, nostack));
+    }
+    task as u64
+}
+
 #[cfg(target_arch = "aarch64")]
 pub fn current_task() -> u64 {
     let task: u64;
@@ -307,16 +316,27 @@ pub fn install_interrupt_handler(
     }
 }
 
+#[cfg(target_arch = "arm")]
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe { _generic_ioremap_prot(phys_addr, size as usize, page_of(DEVICE_MEMORY)) }
+    unsafe { _ioremap(phys_addr as u32, size as usize) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
+    unsafe { _generic_ioremap_prot(phys_addr, size as usize, page_of(DEVICE_MEMORY) as usize) }
 }
 
 pub fn map_pages(pages: *mut c_void, count: usize) -> *mut c_void {
-    unsafe { _vmap(pages, count as u32, VM_MAP, page_of(ORDINARY_MEMORY)) }
+    unsafe { _vmap(pages, count as u32, VM_MAP as usize, page_of(ORDINARY_MEMORY) as usize) }
 }
 
 // Which attribute a page carries is an index into a register the kernel filled in, and what it
 // put where differs between versions, so the register itself is asked.
+#[cfg(target_arch = "arm")]
+fn page_of(_memory: u64) -> u64 {
+    unsafe { read_volatile(_pgprot_kernel) as u64 }
+}
+
 #[cfg(target_arch = "aarch64")]
 fn page_of(memory: u64) -> u64 {
     PTE_TYPE_PAGE | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | (attribute_of(memory) << 2)
@@ -356,7 +376,12 @@ fn linear_map_base() -> u64 {
     u64::MAX << kernel_address_bits
 }
 
-#[cfg(not(target_arch = "aarch64"))]
+#[cfg(target_arch = "arm")]
+pub fn virt_to_phys(vaddr: u64) -> u64 {
+    vaddr.wrapping_add(unsafe { read_volatile(___pv_offset) })
+}
+
+#[cfg(not(any(target_arch = "aarch64", target_arch = "arm")))]
 pub fn virt_to_phys(vaddr: u64) -> u64 {
     unsafe { _virt_to_phys(vaddr) }
 }
@@ -434,7 +459,7 @@ const PTE_AF: u64 = 1 << 10;
 const PTE_WRITE: u64 = 1 << 51;
 const PTE_PXN: u64 = 1 << 53;
 const PTE_UXN: u64 = 1 << 54;
-const IRQF_SHARED: u64 = 0x80;
+const IRQF_SHARED: usize = 0x80;
 const IRQ_NONE: c_int = 0;
 const IRQ_HANDLED: c_int = 1;
 
@@ -490,16 +515,22 @@ unsafe extern "C" {
         u32,
         IrqHandlerFn,
         Option<IrqHandlerFn>,
-        u64,
+        usize,
         *const c_char,
         *mut c_void,
     ) -> c_int;
-    static _generic_ioremap_prot: unsafe extern "C" fn(u64, usize, u64) -> *mut c_void;
-    static _vmap: unsafe extern "C" fn(*mut c_void, u32, u64, u64) -> *mut c_void;
+    static _generic_ioremap_prot: unsafe extern "C" fn(u64, usize, usize) -> *mut c_void;
+    static _vmap: unsafe extern "C" fn(*mut c_void, u32, usize, usize) -> *mut c_void;
     #[cfg(target_arch = "aarch64")]
     static _memstart_addr: *const u64;
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "arm")))]
     static _virt_to_phys: unsafe extern "C" fn(u64) -> u64;
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "arm")))]
     static _current_task: usize;
+    #[cfg(target_arch = "arm")]
+    static ___pv_offset: *const u64;
+    #[cfg(target_arch = "arm")]
+    static _pgprot_kernel: *const u32;
+    #[cfg(target_arch = "arm")]
+    static _ioremap: unsafe extern "C" fn(u32, usize) -> *mut c_void;
 }

@@ -38,9 +38,9 @@ pub unsafe fn let_go_of(file: *mut c_void) {
 pub fn task_with_id(id: u32) -> Option<usize> {
     let layout = task_layout()?;
 
-    unsafe { __raw_read_lock(_tasklist_lock) };
+    let flags = lock_tasklist();
     let found = tasks_of(layout.init, layout.list).find(|task| read_id(*task, layout) == id);
-    unsafe { __raw_read_unlock(_tasklist_lock) };
+    unlock_tasklist(flags);
 
     found
 }
@@ -60,14 +60,14 @@ struct Task {
 fn take_task_snapshot(layout: &Layout) -> Vec<Task> {
     let mut snapshot = Vec::with_capacity(tasks_of(layout.init, layout.list).count() + SNAPSHOT_HEADROOM);
 
-    unsafe { __raw_read_lock(_tasklist_lock) };
+    let flags = lock_tasklist();
     for task in tasks_of(layout.init, layout.list) {
         if snapshot.len() == snapshot.capacity() {
             break;
         }
         snapshot.push(read_task(task, layout));
     }
-    unsafe { __raw_read_unlock(_tasklist_lock) };
+    unlock_tasklist(flags);
 
     snapshot
 }
@@ -240,7 +240,8 @@ fn heads_a_circular_list(init: usize, image: &[u8], list: usize) -> bool {
     let next = word_in(image, list);
     let previous = word_in(image, list + WORD_SIZE);
 
-    if !is_kernel_address(next) || !is_kernel_address(previous) || next == head {
+    let kernel_space = kernel_space_holding(init);
+    if !is_kernel_address(next, kernel_space) || !is_kernel_address(previous, kernel_space) || next == head {
         return false;
     }
 
@@ -344,8 +345,35 @@ fn word_in(image: &[u8], offset: usize) -> usize {
     usize::from_ne_bytes(image[offset..offset + WORD_SIZE].try_into().unwrap())
 }
 
-fn is_kernel_address(address: usize) -> bool {
-    address >= KERNEL_SPACE_START && address % WORD_SIZE == 0
+fn is_kernel_address(address: usize, kernel_space: usize) -> bool {
+    address >= kernel_space && address % WORD_SIZE == 0
+}
+
+fn kernel_space_holding(address: usize) -> usize {
+    address & !(SPLIT_GRANULARITY - 1)
+}
+
+const SPLIT_GRANULARITY: usize = 1 << 30;
+
+fn lock_tasklist() -> usize {
+    unsafe {
+        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
+            (Some(lock), Some(_)) => lock(_tasklist_lock),
+            _ => {
+                __raw_read_lock.unwrap()(_tasklist_lock);
+                0
+            }
+        }
+    }
+}
+
+fn unlock_tasklist(flags: usize) {
+    unsafe {
+        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
+            (Some(_), Some(unlock)) => unlock(_tasklist_lock, flags),
+            _ => __raw_read_unlock.unwrap()(_tasklist_lock),
+        }
+    }
 }
 
 const IDLE_TASK_NAME: &[u8] = b"swapper";
@@ -365,16 +393,14 @@ const MAX_IDENTIFIER: u32 = 4 * 1024 * 1024;
 
 const ERROR_POINTER_START: usize = usize::MAX - 4095;
 
-#[cfg(target_pointer_width = "64")]
-const KERNEL_SPACE_START: usize = 0xffff_0000_0000_0000;
-#[cfg(target_pointer_width = "32")]
-const KERNEL_SPACE_START: usize = 0xc000_0000;
 
 unsafe extern "C" {
     static _init_task: *const c_void;
     static _tasklist_lock: *mut c_void;
-    static __raw_read_lock: unsafe extern "C" fn(*mut c_void);
-    static __raw_read_unlock: unsafe extern "C" fn(*mut c_void);
+    static __raw_read_lock: Option<unsafe extern "C" fn(*mut c_void)>;
+    static __raw_read_unlock: Option<unsafe extern "C" fn(*mut c_void)>;
+    static __raw_read_lock_irqsave: Option<unsafe extern "C" fn(*mut c_void) -> usize>;
+    static __raw_read_unlock_irqrestore: Option<unsafe extern "C" fn(*mut c_void, usize)>;
     static _get_task_exe_file: unsafe extern "C" fn(*mut c_void) -> *mut c_void;
     static _file_path: unsafe extern "C" fn(*mut c_void, *mut c_char, c_int) -> *const c_char;
     static _fput: unsafe extern "C" fn(*mut c_void);

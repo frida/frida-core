@@ -297,6 +297,20 @@ unsafe fn flush_tlb_range(address: u64, size: u64) {
     unsafe { flush_pages(start, end, page_size) };
 }
 
+#[cfg(target_arch = "arm")]
+unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
+    unsafe {
+        core::arch::asm!("dsb ish", options(nostack, preserves_flags));
+        let mut va = start;
+        while va < end {
+            core::arch::asm!("mcr p15, 0, {operand}, c8, c3, 3", operand = in(reg) va as u32,
+                options(nostack, preserves_flags));
+            va += page_size;
+        }
+        core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
+    }
+}
+
 #[cfg(target_arch = "aarch64")]
 unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
     unsafe {

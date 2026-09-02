@@ -104,6 +104,7 @@ mod xnu_hiding;
 mod xnu_injection;
 #[cfg(feature = "xnu-core")]
 mod xnu_libsystem;
+#[cfg(feature = "xnu-core")]
 mod xnu_unlisted;
 #[cfg(feature = "xnu-core")]
 mod xnu_mapped;
@@ -748,7 +749,7 @@ impl Transport {
 
 // Configuration space is reached through I/O ports where there are any, and only a machine
 // without them is told where it is mapped instead.
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 unsafe fn where_configuration_space_is_mapped(transport: *mut GVariant) -> u64 {
     use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64, g_variant_unref};
 
@@ -911,7 +912,7 @@ fn writable_half_size() -> usize {
 
 // A relocation names the slot first, and the rest of it says the same thing as the value that
 // the slot already holds.
-#[cfg(target_arch = "x86")]
+#[cfg(any(target_arch = "x86", target_arch = "arm"))]
 const RELOCATION_SIZE: usize = 8;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const RELOCATION_SIZE: usize = 24;

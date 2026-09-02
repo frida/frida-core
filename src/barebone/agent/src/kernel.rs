@@ -61,6 +61,20 @@ pub struct CpuState {
     pub rax: u64,
 }
 
+#[cfg(target_arch = "arm")]
+pub struct CpuState {
+    pub pc: u32,
+    pub sp: u32,
+    pub cpsr: u32,
+    pub r: [u32; 8],
+    pub r8: u32,
+    pub r9: u32,
+    pub r10: u32,
+    pub r11: u32,
+    pub r12: u32,
+    pub lr: u32,
+}
+
 #[cfg(target_arch = "aarch64")]
 pub struct CpuState {
     pub pc: u64,

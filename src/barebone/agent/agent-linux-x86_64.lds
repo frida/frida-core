@@ -44,6 +44,8 @@ SECTIONS {
     _tasklist_lock = .; . += 8;
     __raw_read_lock = .; . += 8;
     __raw_read_unlock = .; . += 8;
+    __raw_read_lock_irqsave = .; . += 8;
+    __raw_read_unlock_irqrestore = .; . += 8;
     _get_task_exe_file = .; . += 8;
     _file_path = .; . += 8;
     _fput = .; . += 8;

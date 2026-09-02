@@ -50,6 +50,24 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
+#[cfg(target_arch = "arm")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+    unsafe {
+        core::arch::asm!(
+            "push {{r7}}",
+            "mov r7, {number}",
+            "svc #0",
+            "pop {{r7}}",
+            number = in(reg) 0xf0002usize,
+            in("r0") start,
+            in("r1") end,
+            in("r2") 0,
+            options(nostack),
+        );
+    }
+}
+
 #[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu-core"))))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {

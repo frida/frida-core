@@ -193,6 +193,17 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 // A task the kernel half makes has no thread pointer, and code of the process reads what it
 // keeps there: musl's errno lives below it, and reading that at zero is what kills the copy the
 // moment it calls into the C library it was placed beside.
+#[cfg(target_arch = "arm")]
+fn stand_on_a_thread_pointer() {
+    let block = map_writable(THREAD_POINTER_BLOCK);
+    if block.is_null() {
+        return;
+    }
+
+    let pointer = unsafe { block.add(THREAD_POINTER_BLOCK / 2) } as usize;
+    unsafe { core::arch::asm!("mcr p15, 0, {}, c13, c0, 2", in(reg) pointer, options(nomem, nostack)) };
+}
+
 #[cfg(target_arch = "aarch64")]
 fn stand_on_a_thread_pointer() {
     let block = map_writable(THREAD_POINTER_BLOCK);
@@ -229,6 +240,36 @@ unsafe extern "C" fn enter_thread(carried: usize) -> ! {
 
 // The thread the kernel makes here starts on a stack of its own with nothing on it, so where it
 // goes and what it is given are put in the registers the child keeps across the call.
+#[cfg(target_arch = "arm")]
+unsafe fn start_thread(stack: usize, carried: usize) -> isize {
+    let spawned: isize;
+
+    unsafe {
+        core::arch::asm!(
+            "push {{r7}}",
+            "mov r7, {number}",
+            "svc #0",
+            "pop {{r7}}",
+            "cmp r0, #0",
+            "bne 2f",
+            "mov r0, r5",
+            "blx r4",
+            "2:",
+            number = const CLONE,
+            inlateout("r0") THREAD_FLAGS => spawned,
+            inlateout("r1") stack => _,
+            inlateout("r2") 0 => _,
+            inlateout("r3") 0 => _,
+            in("r4") enter_thread,
+            in("r5") carried,
+            lateout("r12") _,
+            lateout("lr") _,
+        );
+    }
+
+    spawned
+}
+
 #[cfg(target_arch = "aarch64")]
 unsafe fn start_thread(stack: usize, carried: usize) -> isize {
     let spawned: isize;
@@ -506,6 +547,30 @@ pub fn wake_up(word: usize) {
     syscall(FUTEX, word, FUTEX_WAKE_PRIVATE, WAKE_EVERY_WAITER, 0, 0, 0);
 }
 
+#[cfg(target_arch = "arm")]
+fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+    let answer: isize;
+
+    unsafe {
+        core::arch::asm!(
+            "push {{r7}}",
+            "mov r7, {number}",
+            "svc #0",
+            "pop {{r7}}",
+            number = in(reg) number,
+            inlateout("r0") a => answer,
+            in("r1") b,
+            in("r2") c,
+            in("r3") d,
+            in("r4") e,
+            in("r5") f,
+            options(nostack)
+        );
+    }
+
+    answer
+}
+
 #[cfg(target_arch = "aarch64")]
 fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     let answer: isize;
@@ -534,6 +599,8 @@ pub const PANICKED: u32 = 9;
 pub const SPOKE: u32 = 10;
 pub const FAULTED: u32 = 8;
 
+#[cfg(target_arch = "arm")]
+const RT_SIGACTION: usize = 174;
 #[cfg(target_arch = "aarch64")]
 const RT_SIGACTION: usize = 134;
 const ILLEGAL: usize = 4;
@@ -550,44 +617,78 @@ const RUNNING_STATE: usize = 176;
 const STATE_PC: usize = 264;
 const STATE_LR: usize = 248;
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(target_arch = "arm")]
+const OPENAT: usize = 322;
 #[cfg(target_arch = "aarch64")]
 const OPENAT: usize = 56;
+#[cfg(target_arch = "arm")]
+const CLOSE: usize = 6;
 #[cfg(target_arch = "aarch64")]
 const CLOSE: usize = 57;
+#[cfg(target_arch = "arm")]
+const NANOSLEEP: usize = 162;
 #[cfg(target_arch = "aarch64")]
 const NANOSLEEP: usize = 101;
+#[cfg(target_arch = "arm")]
+const PIPE: usize = 42;
 #[cfg(target_arch = "aarch64")]
 const PIPE: usize = 59;
+#[cfg(target_arch = "arm")]
+const GETDENTS: usize = 217;
 #[cfg(target_arch = "aarch64")]
 const GETDENTS: usize = 61;
 #[cfg(target_arch = "aarch64")]
 const POLL: usize = 73;
+#[cfg(target_arch = "arm")]
+const READ: usize = 3;
 #[cfg(target_arch = "aarch64")]
 const READ: usize = 63;
+#[cfg(target_arch = "arm")]
+const WRITE: usize = 4;
 #[cfg(target_arch = "aarch64")]
 const WRITE: usize = 64;
+#[cfg(target_arch = "arm")]
+const EXIT: usize = 1;
 #[cfg(target_arch = "aarch64")]
 const EXIT: usize = 93;
+#[cfg(target_arch = "arm")]
+const EXIT_GROUP: usize = 248;
 #[cfg(target_arch = "aarch64")]
 const EXIT_GROUP: usize = 94;
+#[cfg(target_arch = "arm")]
+const FUTEX: usize = 240;
 #[cfg(target_arch = "aarch64")]
 const FUTEX: usize = 98;
-#[cfg(target_arch = "aarch64")]
+#[cfg(target_arch = "arm")]
+const CLOCK_GETTIME: usize = 263;
 #[cfg(target_arch = "aarch64")]
 const CLOCK_GETTIME: usize = 113;
+#[cfg(target_arch = "arm")]
+const SCHED_YIELD: usize = 158;
 #[cfg(target_arch = "aarch64")]
 const SCHED_YIELD: usize = 124;
+#[cfg(target_arch = "arm")]
+const GETPID: usize = 20;
 #[cfg(target_arch = "aarch64")]
 const GETPID: usize = 172;
+#[cfg(target_arch = "arm")]
+const GETTID: usize = 224;
 #[cfg(target_arch = "aarch64")]
 const GETTID: usize = 178;
+#[cfg(target_arch = "arm")]
+const MUNMAP: usize = 91;
 #[cfg(target_arch = "aarch64")]
 const MUNMAP: usize = 215;
+#[cfg(target_arch = "arm")]
+const CLONE: usize = 120;
 #[cfg(target_arch = "aarch64")]
 const CLONE: usize = 220;
+#[cfg(target_arch = "arm")]
+const MMAP: usize = 192;
 #[cfg(target_arch = "aarch64")]
 const MMAP: usize = 222;
+#[cfg(target_arch = "arm")]
+const MPROTECT: usize = 125;
 #[cfg(target_arch = "aarch64")]
 const MPROTECT: usize = 226;
 

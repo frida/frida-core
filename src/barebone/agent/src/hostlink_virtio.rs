@@ -65,9 +65,9 @@ const PCI_BASE_ADDRESS_0: u8 = 0x10;
 const PCI_INTERRUPT_PIN: u8 = 0x3d;
 const PCI_COMMAND_INTX_DISABLE: u32 = 0x400;
 const ISA_BRIDGE_DEVFN: u8 = 0x08;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 const ECAM_DEVFN_SHIFT: usize = 12;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 const ECAM_BUS_SIZE: u64 = 256 * 4096;
 const PIRQ_ROUTE: u8 = 0x60;
 const PIRQ_DISABLED: u32 = 1 << 7;
@@ -993,7 +993,7 @@ impl Regs {
 #[derive(Copy, Clone)]
 struct Bus {
     number: u8,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     config: *mut u8,
 }
 
@@ -1003,7 +1003,7 @@ impl Bus {
         Bus { number: 0 }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn first(ecam: u64) -> Self {
         let config = kernel::map_io(ecam, ECAM_BUS_SIZE) as *mut u8;
         Bus { number: 0, config }
@@ -1014,7 +1014,7 @@ impl Bus {
         PciDevice { bus: self.number, devfn }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn function(&self, devfn: u8) -> PciDevice {
         PciDevice {
             bus: self.number,
@@ -1028,7 +1028,7 @@ impl Bus {
 struct PciDevice {
     bus: u8,
     devfn: u8,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     config: *mut u8,
 }
 
@@ -1108,7 +1108,7 @@ impl PciDevice {
         Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn irq_line(&self) -> Option<u32> {
         kernel::pci_interrupt(self.bus, self.devfn)
     }
@@ -1176,12 +1176,12 @@ impl PciDevice {
             | ((offset as u32) & 0xfc)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn read_config(&self, offset: u8) -> u32 {
         r32(self.config, (offset & 0xfc) as usize)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn write_config(&self, offset: u8, value: u32) {
         w32(self.config, (offset & 0xfc) as usize, value);
     }
@@ -1239,7 +1239,7 @@ fn wmb() {
     unsafe { core::arch::asm!("sfence", options(nostack, preserves_flags)) }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 fn wmb() {
     unsafe { core::arch::asm!("dmb ishst", options(nostack, preserves_flags)) }
 }

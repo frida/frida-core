@@ -9,6 +9,11 @@ use super::processes::task_with_id;
 use super::arena::{Arena, HOME, REPORTED, WOKEN};
 use super::user::entry_offset;
 
+#[cfg(target_arch = "arm")]
+use _arm_copy_to_user as copy_to_user;
+#[cfg(not(target_arch = "arm"))]
+use ___arch_copy_to_user as copy_to_user;
+
 pub fn inject_into_process(id: u32) -> u32 {
     if let Some(placed) = unsafe { placements() }.get_mut(&id) {
         let home = pid_reported_by(placed);
@@ -219,7 +224,7 @@ fn map_a_copy() -> Option<usize> {
 
 fn give(destination: usize, source: usize, size: usize) -> Option<()> {
     let left =
-        unsafe { ___arch_copy_to_user(destination as *mut c_void, source as *const c_void, size) };
+        unsafe { copy_to_user(destination as *mut c_void, source as *const c_void, size) };
     if left != 0 {
         return None;
     }
@@ -600,7 +605,10 @@ unsafe extern "C" {
     static ___tracepoint_sched_process_exit: *mut c_void;
     static ___tracepoint_sched_process_exec: *mut c_void;
     static _vunmap: unsafe extern "C" fn(*mut c_void);
+    #[cfg(not(target_arch = "arm"))]
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    #[cfg(target_arch = "arm")]
+    static _arm_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
     static _down_read: unsafe extern "C" fn(*mut c_void);
     static _up_read: unsafe extern "C" fn(*mut c_void);
     static _get_user_pages_remote: unsafe extern "C" fn(
