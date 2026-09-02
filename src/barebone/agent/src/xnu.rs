@@ -178,22 +178,35 @@ fn kernel_alloc(size: usize) -> *mut u8 {
 }
 
 #[cfg(feature = "xnu-kext")]
+pub fn kernel_alloc_code_above(lowest: u64, size: usize) -> *mut u8 {
+    let page = page_size();
+    let wanted = ((size + page - 1) & !(page - 1)) as u64;
+
+    let map = the_kernel_map();
+    let at = take_pages_from_the_kernel_map_above(map, wanted, lowest & !(page as u64 - 1));
+    if at == 0 {
+        return core::ptr::null_mut();
+    }
+
+    dress_pages_for_code(map, at, wanted)
+}
+
+#[cfg(feature = "xnu-kext")]
 fn kernel_alloc_code(size: usize) -> *mut u8 {
     let page = page_size();
     let wanted = ((size + page - 1) & !(page - 1)) as u64;
 
     let map = the_kernel_map();
-    if map.is_null() {
+    let at = take_pages_from_the_kernel_map(map, wanted);
+    if at == 0 {
         return core::ptr::null_mut();
     }
 
-    let mut at = 0u64;
-    if unsafe { _mach_vm_allocate.unwrap()(map, &mut at, wanted, VM_FLAGS_ANYWHERE) }
-        != KERN_SUCCESS
-    {
-        return core::ptr::null_mut();
-    }
+    dress_pages_for_code(map, at, wanted)
+}
 
+#[cfg(feature = "xnu-kext")]
+fn dress_pages_for_code(map: *mut c_void, at: u64, wanted: u64) -> *mut u8 {
     if !protect_in_kernel_map(at, wanted as usize, VM_PROT_READ | VM_PROT_EXECUTE)
         || !give_each_page_a_second_name(at, wanted as usize)
     {
@@ -202,6 +215,51 @@ fn kernel_alloc_code(size: usize) -> *mut u8 {
     }
 
     at as *mut u8
+}
+
+#[cfg(feature = "xnu-kext")]
+pub fn kernel_alloc_pages(size: usize) -> *mut u8 {
+    let page = page_size();
+    let wanted = ((size + page - 1) & !(page - 1)) as u64;
+
+    let at = take_pages_from_the_kernel_map(the_kernel_map(), wanted);
+    if at != 0 {
+        let_every_page_be_present(at, wanted);
+    }
+
+    at as *mut u8
+}
+
+// Cache maintenance and the writer both fault on a page the kernel map has not backed yet.
+#[cfg(feature = "xnu-kext")]
+fn let_every_page_be_present(address: u64, size: u64) {
+    let page = page_size() as u64;
+    let mut at = address;
+    while at < address + size {
+        unsafe { (at as *const u8).read_volatile() };
+        at += page;
+    }
+}
+
+#[cfg(feature = "xnu-kext")]
+fn take_pages_from_the_kernel_map(map: *mut c_void, wanted: u64) -> u64 {
+    take_pages_from_the_kernel_map_above(map, wanted, 0)
+}
+
+#[cfg(feature = "xnu-kext")]
+fn take_pages_from_the_kernel_map_above(map: *mut c_void, wanted: u64, lowest: u64) -> u64 {
+    if map.is_null() {
+        return 0;
+    }
+
+    let mut at = lowest;
+    if unsafe { _mach_vm_allocate.unwrap()(map, &mut at, wanted, VM_FLAGS_ANYWHERE) }
+        != KERN_SUCCESS
+    {
+        return 0;
+    }
+
+    at
 }
 
 #[cfg(feature = "xnu-kext")]
@@ -214,35 +272,61 @@ fn kernel_free_code(ptr: *mut u8, size: usize) {
         return;
     }
 
+    if let Some((alias, held)) = forget_the_second_name(ptr as u64, size) {
+        unsafe { _mach_vm_deallocate.unwrap()(map, alias, held as u64) };
+    }
+
     unsafe { _mach_vm_deallocate.unwrap()(map, ptr as u64, wanted) };
 }
 
 #[cfg(feature = "xnu-kext")]
 fn give_each_page_a_second_name(address: u64, size: usize) -> bool {
     let page = page_size();
-    let mut at = address;
 
-    while at < address + size as u64 {
-        unsafe { (at as *const u8).read_volatile() };
+    let_every_page_be_present(address, size as u64);
 
-        let lives = where_a_page_lives(at);
-        if lives == 0 {
-            return false;
-        }
-
-        let alias = map_io(lives, page as u64);
-        if alias.is_null() {
-            return false;
-        }
-
-        hold_the_books();
-        unsafe { views() }.insert(at, alias as u64);
-        let_the_books_go();
-
-        at += page as u64;
+    let alias = a_writable_name_for(address, size as u64);
+    if alias == 0 {
+        return false;
     }
 
+    hold_the_books();
+    let mut at = address;
+    while at < address + size as u64 {
+        unsafe { views() }.insert(at, alias + (at - address));
+        at += page as u64;
+    }
+    let_the_books_go();
+
     true
+}
+
+#[cfg(feature = "xnu-kext")]
+fn a_writable_name_for(address: u64, size: u64) -> u64 {
+    let map = the_kernel_map();
+    if map.is_null() {
+        return 0;
+    }
+
+    let mut at = 0u64;
+    let mut may_now: core::ffi::c_int = 0;
+    let mut may_ever: core::ffi::c_int = 0;
+    if unsafe {
+        _mach_vm_remap.unwrap()(map, &mut at, size, 0, VM_FLAGS_ANYWHERE, map, address, 0,
+            &mut may_now, &mut may_ever, VM_INHERIT_NONE)
+    } != KERN_SUCCESS
+    {
+        return 0;
+    }
+
+    if !protect_in_kernel_map(at, size as usize, VM_PROT_READ | VM_PROT_WRITE) {
+        unsafe { _mach_vm_deallocate.unwrap()(map, at, size) };
+        return 0;
+    }
+
+    let_every_page_be_present(at, size);
+
+    at
 }
 
 #[cfg(feature = "xnu-kext")]
@@ -336,6 +420,22 @@ pub fn remember_what_we_took(base: u64, size: usize, may_run: bool) {
 }
 
 #[cfg(feature = "xnu-kext")]
+fn forget_the_second_name(base: u64, size: usize) -> Option<(u64, usize)> {
+    let page = page_size();
+
+    hold_the_books();
+    let alias = unsafe { views() }.remove(&base);
+    let mut at = base + page as u64;
+    while at < base + size as u64 {
+        unsafe { views() }.remove(&at);
+        at += page as u64;
+    }
+    let_the_books_go();
+
+    alias.map(|found| (found, size))
+}
+
+#[cfg(feature = "xnu-kext")]
 pub fn forget_what_we_took(base: u64) {
     hold_the_books();
     unsafe { ours() }.remove(&base);
@@ -362,6 +462,21 @@ unsafe fn ours() -> &'static mut alloc::collections::BTreeMap<u64, (usize, bool)
 #[cfg(feature = "xnu-kext")]
 static mut OURS: alloc::collections::BTreeMap<u64, (usize, bool)> =
     alloc::collections::BTreeMap::new();
+
+#[cfg(feature = "xnu-kext")]
+pub fn the_page_behind(alias: u64) -> Option<u64> {
+    let page = page_size();
+    let base = alias & !(page as u64 - 1);
+
+    hold_the_books();
+    let found = unsafe { views() }
+        .iter()
+        .find(|(_, named)| **named == base)
+        .map(|(page, _)| *page);
+    let_the_books_go();
+
+    found
+}
 
 #[cfg(feature = "xnu-kext")]
 pub fn the_writable_view_of(address: u64) -> u64 {
@@ -399,6 +514,15 @@ unsafe fn views() -> &'static mut alloc::collections::BTreeMap<u64, u64> {
 static mut VIEWS: alloc::collections::BTreeMap<u64, u64> = alloc::collections::BTreeMap::new();
 
 #[cfg(feature = "xnu-kext")]
+unsafe fn device_views() -> &'static mut alloc::collections::BTreeMap<u64, u64> {
+    unsafe { (&raw mut DEVICE_VIEWS).as_mut().unwrap() }
+}
+
+#[cfg(feature = "xnu-kext")]
+static mut DEVICE_VIEWS: alloc::collections::BTreeMap<u64, u64> =
+    alloc::collections::BTreeMap::new();
+
+#[cfg(feature = "xnu-kext")]
 const VM_FLAGS_ANYWHERE: core::ffi::c_int = 1;
 #[cfg(feature = "xnu-kext")]
 const VM_PROT_WRITE: core::ffi::c_int = 2;
@@ -408,6 +532,11 @@ unsafe extern "C" {
     static _kernel_map: *mut c_void;
     static _kernel_pmap: *mut c_void;
     static _pmap_find_phys: Option<unsafe extern "C" fn(*mut c_void, u64) -> u32>;
+    static _mach_vm_remap: Option<
+        unsafe extern "C" fn(*mut c_void, *mut u64, u64, u64, core::ffi::c_int, *mut c_void, u64,
+            core::ffi::c_int, *mut core::ffi::c_int, *mut core::ffi::c_int, core::ffi::c_int)
+            -> core::ffi::c_int,
+    >;
     static _ml_static_ptovirt: Option<unsafe extern "C" fn(u64) -> u64>;
 }
 
@@ -695,7 +824,10 @@ pub fn write_through_a_writable_alias(address: u64, data: *const u8, len: usize)
         }
 
         hold_the_books();
-        let known_alias = unsafe { views() }.get(&base).copied();
+        let known_alias = unsafe { views() }
+            .get(&base)
+            .or_else(|| unsafe { device_views() }.get(&base))
+            .copied();
         let_the_books_go();
 
         let alias = match known_alias {
@@ -710,7 +842,7 @@ pub fn write_through_a_writable_alias(address: u64, data: *const u8, len: usize)
                     return false;
                 }
                 hold_the_books();
-                unsafe { views() }.insert(base, made as u64);
+                unsafe { device_views() }.insert(base, made as u64);
                 let_the_books_go();
                 made as u64
             }
