@@ -2553,9 +2553,8 @@ extern "C" fn frida_win9x_on_hw_int(_ref_data: *mut c_void) {
 extern "C" fn frida_win9x_on_wake_event() {
     let token = WAKE_WANTED.swap(0, Ordering::AcqRel);
     if token != 0 {
-        kernel::wake(token as *const u8);
+        crate::nudge_the_loop(token as *const u8);
     }
-    crate::nudge_the_loop();
 }
 
 static mut IN_INTERRUPT: bool = false;

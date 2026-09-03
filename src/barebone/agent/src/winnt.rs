@@ -469,9 +469,8 @@ unsafe extern "win64" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_void,
 fn serve_deferred_wake() {
     let token = WAKE_WANTED.swap(0, Ordering::AcqRel);
     if token != 0 {
-        kernel::wake(token as *const u8);
+        crate::nudge_the_loop(token as *const u8);
     }
-    crate::nudge_the_loop();
 }
 
 static WAKE_WANTED: AtomicUsize = AtomicUsize::new(0);

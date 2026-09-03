@@ -268,8 +268,5 @@ unsafe fn send_all(so: SocketT, bytes: &[u8]) {
 
 unsafe extern "C" fn upcall(_so: SocketT, cookie: *mut c_void, _waitf: c_int) {
     UPCALL_PENDING.fetch_add(1, Ordering::Release);
-    if !cookie.is_null() {
-        kernel::wake(cookie as *const u8);
-    }
-    crate::nudge_the_loop();
+    crate::nudge_the_loop(cookie as *const u8);
 }

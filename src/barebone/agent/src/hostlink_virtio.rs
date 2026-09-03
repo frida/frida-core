@@ -466,8 +466,7 @@ impl Hostlink {
         }
 
         A_TURN_IS_WANTED.store(true, core::sync::atomic::Ordering::Release);
-        kernel::wake(s.wake_token);
-        crate::nudge_the_loop();
+        crate::nudge_the_loop(s.wake_token);
     }
 
     pub fn process(&self) {
@@ -853,8 +852,7 @@ extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_vo
         }
     }
     A_TURN_IS_WANTED.store(true, core::sync::atomic::Ordering::Release);
-    kernel::wake(token as *const u8);
-    crate::nudge_the_loop();
+    crate::nudge_the_loop(token as *const u8);
 }
 
 pub fn a_turn_is_wanted() -> bool {

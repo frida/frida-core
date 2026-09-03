@@ -1238,11 +1238,12 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
 static SERVICE_CONTEXT: core::sync::atomic::AtomicUsize =
     core::sync::atomic::AtomicUsize::new(0);
 
-pub(crate) fn nudge_the_loop() {
+pub(crate) fn nudge_the_loop(token: *const u8) {
     let context = SERVICE_CONTEXT.load(Ordering::Acquire) as *mut GMainContext;
     if !context.is_null() {
         unsafe { g_main_context_wakeup(context) };
     }
+    kernel::wake(token);
 }
 
 pub(crate) fn destroy_all_scripts(main_context: *mut GMainContext) {
