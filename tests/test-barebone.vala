@@ -1787,6 +1787,9 @@ namespace Frida.BareboneTest {
 			} catch (GLib.Error e) {
 				assert_true (e is Error.NOT_SUPPORTED);
 			}
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n", e.message);
+			assert_not_reached ();
 		} finally {
 			target.stop ();
 		}
@@ -4359,9 +4362,12 @@ FAIL: %s
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
 		}
-
-		yield manager.close (null);
 
 		h.done ();
 	}
