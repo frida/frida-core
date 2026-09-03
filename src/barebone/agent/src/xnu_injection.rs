@@ -802,7 +802,7 @@ fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> Op
 }
 
 const PAGE: u64 = 0x4000;
-const STACK: u64 = 8 * 1024 * 1024;
+const STACK: u64 = 512 * 1024;
 const KERN_SUCCESS: c_int = 0;
 const ANYWHERE: c_int = 1;
 const AS_HIGH_AS_IT_GOES: c_int = 1;
