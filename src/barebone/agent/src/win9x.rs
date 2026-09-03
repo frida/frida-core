@@ -2555,6 +2555,7 @@ extern "C" fn frida_win9x_on_wake_event() {
     if token != 0 {
         kernel::wake(token as *const u8);
     }
+    crate::nudge_the_loop();
 }
 
 static mut IN_INTERRUPT: bool = false;

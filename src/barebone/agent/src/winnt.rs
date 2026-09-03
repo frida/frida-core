@@ -471,6 +471,7 @@ fn serve_deferred_wake() {
     if token != 0 {
         kernel::wake(token as *const u8);
     }
+    crate::nudge_the_loop();
 }
 
 static WAKE_WANTED: AtomicUsize = AtomicUsize::new(0);
