@@ -271,4 +271,5 @@ unsafe extern "C" fn upcall(_so: SocketT, cookie: *mut c_void, _waitf: c_int) {
     if !cookie.is_null() {
         kernel::wake(cookie as *const u8);
     }
+    crate::nudge_the_loop();
 }
