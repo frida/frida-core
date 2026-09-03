@@ -174,7 +174,7 @@ unsafe extern "C" fn run_agent(context: *mut c_void) {
     }
 }
 
-const THREAD_STACK_SIZE: usize = 64 * 1024;
+pub(crate) const THREAD_STACK_SIZE: usize = 64 * 1024;
 
 struct ThreadStart {
     entry: ThreadEntry,

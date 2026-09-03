@@ -1043,6 +1043,8 @@ fn destination_of(variant: *mut GVariant) -> u32 {
 
 pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
     unsafe {
+        JS_THREAD_ID = kernel::current_thread_id();
+
         let context = gum_script_scheduler_get_js_context(gum_script_backend_get_scheduler());
 
         // Acquires the context as well, which is what lets this thread run the jobs the
@@ -1052,6 +1054,13 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
 
         context
     }
+}
+
+static mut JS_THREAD_ID: u64 = 0;
+
+pub(crate) fn on_js_thread() -> bool {
+    let id = unsafe { JS_THREAD_ID };
+    id != 0 && kernel::current_thread_id() == id
 }
 
 pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =

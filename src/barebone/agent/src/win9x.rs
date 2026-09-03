@@ -173,7 +173,7 @@ extern "C" fn frida_win9x_thread_start() {
 static mut THREAD_ENTRY: Option<ThreadEntry> = None;
 static mut THREAD_PARAMETER: *mut c_void = core::ptr::null_mut();
 
-const THREAD_STACK_SIZE: usize = 64 * 1024;
+pub(crate) const THREAD_STACK_SIZE: usize = 64 * 1024;
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     (primitives().wait)(token, timeout_us, check)

@@ -23,6 +23,15 @@ pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
+    if crate::on_js_thread() {
+        kernel::THREAD_STACK_SIZE as crate::bindings::gsize
+    } else {
+        0
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     _GumRwxSupport_GUM_RWX_FULL
 }
