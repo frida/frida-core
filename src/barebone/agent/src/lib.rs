@@ -1065,7 +1065,7 @@ pub(crate) fn stop_requested() -> bool {
 }
 
 fn run_main_loop(main_context: *mut GMainContext) {
-
+    SERVICE_CONTEXT.store(main_context as usize, Ordering::Release);
 
     glib::own_the_loop();
 
@@ -1232,6 +1232,16 @@ static mut WORK_FUNCS: GSourceFuncs = GSourceFuncs {
 pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
     unsafe {
         g_main_context_iteration(main_context, 1);
+    }
+}
+
+static SERVICE_CONTEXT: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+pub(crate) fn nudge_the_loop() {
+    let context = SERVICE_CONTEXT.load(Ordering::Acquire) as *mut GMainContext;
+    if !context.is_null() {
+        unsafe { g_main_context_wakeup(context) };
     }
 }
 
