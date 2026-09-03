@@ -115,6 +115,28 @@ namespace Frida {
 			else
 				gdb = yield GDB.Client.open (stream, cancellable);
 
+			try {
+				host_session = yield establish (config, gdb, cancellable);
+			} catch (GLib.Error e) {
+				if (gdb.state == STOPPED) {
+					try {
+						yield gdb.continue (cancellable);
+					} catch (GLib.Error ee) {
+					}
+				}
+				try {
+					yield gdb.close (cancellable);
+				} catch (IOError ee) {
+				}
+				throw_api_error (e);
+			}
+			host_session.agent_session_detached.connect (on_agent_session_detached);
+
+			return host_session;
+		}
+
+		private async BareboneHostSession establish (BareboneConfig config, GDB.Client gdb, Cancellable? cancellable)
+				throws Error, IOError {
 			Barebone.Machine machine;
 			switch (gdb.arch) {
 				case IA32:
@@ -235,10 +257,7 @@ namespace Frida {
 
 			var services = new Barebone.Services (machine, allocator, interceptor);
 
-			host_session = new BareboneHostSession (agent_connection, services);
-			host_session.agent_session_detached.connect (on_agent_session_detached);
-
-			return host_session;
+			return new BareboneHostSession (agent_connection, services);
 		}
 
 		private async BareboneHostSession attach_to_resident_agent (BareboneTransportConfig transport,
