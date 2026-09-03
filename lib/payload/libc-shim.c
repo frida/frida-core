@@ -59,6 +59,9 @@
 #ifdef HAVE_MUSL
 # define FRIDA_STDIO_OPAQUE_FILE 1
 #endif
+#ifdef HAVE_ANDROID
+# define FRIDA_STDIO_OPAQUE_FILE 1
+#endif
 
 static gboolean frida_deinit_expected = FALSE;
 
@@ -254,9 +257,11 @@ static off_t frida_lseek_nointr (int fd, off_t offset, int whence);
 #ifndef FRIDA_STDIO_OPAQUE_FILE
 G_GNUC_INTERNAL FILE __sF[3];
 
+# ifndef __ANDROID__
 G_GNUC_INTERNAL FILE * stdin = &__sF[0];
 G_GNUC_INTERNAL FILE * stdout = &__sF[1];
 G_GNUC_INTERNAL FILE * stderr = &__sF[2];
+# endif
 
 # ifdef HAVE_DARWIN
 G_GNUC_INTERNAL FILE * __stdinp = &__sF[0];
@@ -266,9 +271,11 @@ G_GNUC_INTERNAL FILE * __stderrp = &__sF[2];
 #else
 static FridaFileHandle frida_stdio[3];
 
+# ifndef __ANDROID__
 G_GNUC_INTERNAL FILE * const stdin = (FILE *) &frida_stdio[0];
 G_GNUC_INTERNAL FILE * const stdout = (FILE *) &frida_stdio[1];
 G_GNUC_INTERNAL FILE * const stderr = (FILE *) &frida_stdio[2];
+# endif
 #endif
 
 static gboolean frida_libc_shim_initialized = FALSE;
@@ -1512,6 +1519,7 @@ getline (char ** lineptr, size_t * n, FILE * stream)
   return getdelim (lineptr, n, '\n', stream);
 }
 
+#ifndef FRIDA_STDIO_OPAQUE_FILE
 G_GNUC_INTERNAL FILE *
 tmpfile (void)
 {
@@ -1535,6 +1543,8 @@ tmpfile (void)
 
   return result;
 }
+
+#endif
 
 G_GNUC_INTERNAL int
 putchar (int c)
