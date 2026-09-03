@@ -233,6 +233,7 @@ impl Vq {
 
     fn free_chain(&mut self, mut idx: u16) {
         let dp = self.desc_va as *mut Desc;
+        let head = idx;
         loop {
             self.free_cnt += 1;
             let (flags, next) = unsafe {
@@ -247,7 +248,7 @@ impl Vq {
         unsafe {
             (*dp.add(idx as usize)).next = self.free_head;
         }
-        self.free_head = idx;
+        self.free_head = head;
     }
 
     fn push_avail(&mut self, head: u16) {
@@ -255,22 +256,23 @@ impl Vq {
         let ring = unsafe { (ap as *mut u8).add(size_of::<Avail>()) as *mut u16 };
         let slot = (self.avail_idx % self.size) as usize;
         unsafe {
-            *ring.add(slot) = head;
+            ring.add(slot).write_volatile(head);
         }
         wmb();
         self.avail_idx = self.avail_idx.wrapping_add(1);
         unsafe {
-            (*ap).idx = self.avail_idx;
+            (&raw mut (*ap).idx).write_volatile(self.avail_idx);
         }
     }
 
     fn pop_used(&mut self) -> Option<UsedElem> {
         let up = self.used_va as *mut Used;
-        if unsafe { (*up).idx } == self.used_idx {
+        if unsafe { (&raw const (*up).idx).read_volatile() } == self.used_idx {
             return None;
         }
+        rmb();
         let ring = unsafe { (up as *mut u8).add(size_of::<Used>()) as *mut UsedElem };
-        let elem = unsafe { *ring.add((self.used_idx % self.size) as usize) };
+        let elem = unsafe { ring.add((self.used_idx % self.size) as usize).read_volatile() };
         self.used_idx = self.used_idx.wrapping_add(1);
         Some(elem)
     }
@@ -1262,4 +1264,14 @@ fn wmb() {
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 fn wmb() {
     unsafe { core::arch::asm!("dmb ishst", options(nostack, preserves_flags)) }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn rmb() {
+    unsafe { core::arch::asm!("lfence", options(nostack, preserves_flags)) }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+fn rmb() {
+    unsafe { core::arch::asm!("dmb ish", options(nostack, preserves_flags)) }
 }
