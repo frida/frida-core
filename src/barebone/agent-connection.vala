@@ -519,9 +519,12 @@ namespace Frida.Barebone {
 
 		public signal void spawn_added (uint pid, string command_line, uint holder_pid);
 
-		public async Application[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
-			var response = yield execute_command (Command.ENUMERATE_APPLICATIONS,
-				new Variant.boolean (false), cancellable);
+		public async Application[] enumerate_applications (string[] identifiers, Cancellable? cancellable)
+				throws Error, IOError {
+			var selected = new VariantBuilder (new VariantType ("as"));
+			foreach (unowned string identifier in identifiers)
+				selected.add ("s", identifier);
+			var response = yield execute_command (Command.ENUMERATE_APPLICATIONS, selected.end (), cancellable);
 			if (!response.check_format_string ("a(sss)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_applications response format");
 
@@ -649,10 +652,14 @@ namespace Frida.Barebone {
 			throw new Error.TIMED_OUT ("Timed out while injecting into process");
 		}
 
-		public async HostProcessInfo[] enumerate_processes (Scope scope, Cancellable? cancellable) throws Error, IOError {
+		public async HostProcessInfo[] enumerate_processes (Scope scope, uint[] pids, Cancellable? cancellable)
+				throws Error, IOError {
 			bool include_icons = scope == FULL;
-			var response = yield execute_command (Command.ENUMERATE_PROCESSES, new Variant.boolean (include_icons),
-				cancellable);
+			var selected = new VariantBuilder (new VariantType ("au"));
+			foreach (uint pid in pids)
+				selected.add ("u", pid);
+			var request = new Variant.tuple ({ new Variant.boolean (include_icons), selected.end () });
+			var response = yield execute_command (Command.ENUMERATE_PROCESSES, request, cancellable);
 			if (!response.check_format_string ("a(usssaay)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
 

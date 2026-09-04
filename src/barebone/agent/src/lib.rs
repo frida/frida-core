@@ -32,9 +32,10 @@ use bindings::{
     g_source_attach, g_source_new, g_source_unref,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
-    g_variant_get, g_variant_get_boolean, g_variant_get_data, g_variant_get_size, g_variant_get_string,
+    g_variant_get, g_variant_get_boolean, g_variant_get_child_value, g_variant_get_data,
+    g_variant_get_size, g_variant_get_string,
     g_variant_get_uint32, g_variant_new, g_variant_new_from_data, g_variant_new_string,
-    g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
+    g_variant_new_tuple, g_variant_new_uint32, g_variant_n_children, g_variant_type_free, g_variant_type_new,
     g_variant_builder_add, g_variant_builder_add_value, g_variant_builder_close,
     g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
     g_variant_new_fixed_array, g_variant_get_fixed_array, g_bytes_new, g_bytes_get_data,
@@ -1381,7 +1382,7 @@ fn process_incoming_message(variant: *mut GVariant) {
             #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
-            FridaCommand::EnumerateApplications => Some(handle_enumerate_applications()),
+            FridaCommand::EnumerateApplications => Some(handle_enumerate_applications(payload_variant)),
             #[cfg(feature = "xnu-core")]
             FridaCommand::EnumerateApplications => {
                 kernel::list_applications_when_the_loop_can(request_id);
@@ -1450,8 +1451,6 @@ fn process_incoming_message(variant: *mut GVariant) {
 // work is deferred and the answer comes later.
 #[cfg(feature = "win9x")]
 fn handle_inject_into_process(payload: *mut GVariant, request_id: u16) -> Option<HandlerResponse> {
-    use crate::bindings::g_variant_get_child_value;
-
     unsafe {
         PENDING_INJECTION = (request_id, g_variant_get_uint32(payload));
         INJECTION_PENDING = true;
@@ -1661,8 +1660,10 @@ fn what_is_installed() -> HandlerResponse {
 }
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
-fn handle_enumerate_applications() -> HandlerResponse {
+fn handle_enumerate_applications(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
+        let wanted = SelectedIdentifiers { variant: payload };
+
         let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
         let application_type = g_variant_type_new(c"(sss)".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
@@ -1678,6 +1679,10 @@ fn handle_enumerate_applications() -> HandlerResponse {
                 identifier
             };
 
+            if !wanted.contains(named) {
+                return;
+            }
+
             g_variant_builder_open(builder, application_type);
             g_variant_builder_add(builder, c"s".as_ptr(), named);
             g_variant_builder_add(builder, c"s".as_ptr(), path);
@@ -1691,6 +1696,48 @@ fn handle_enumerate_applications() -> HandlerResponse {
         g_variant_type_free(application_type);
 
         HandlerResponse::success(list)
+    }
+}
+
+struct SelectedIdentifiers {
+    variant: *mut GVariant,
+}
+
+impl SelectedIdentifiers {
+    unsafe fn contains(&self, name: *const gchar) -> bool {
+        unsafe {
+            let count = g_variant_n_children(self.variant);
+            if count == 0 {
+                return true;
+            }
+            for index in 0..count {
+                let child = g_variant_get_child_value(self.variant, index);
+                let selected = g_variant_get_string(child, core::ptr::null_mut());
+                let matches = c_string_equal(selected, name);
+                g_variant_unref(child);
+                if matches {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+}
+
+unsafe fn c_string_equal(a: *const gchar, b: *const gchar) -> bool {
+    unsafe {
+        let mut offset = 0;
+        loop {
+            let left = a.add(offset).read();
+            let right = b.add(offset).read();
+            if left != right {
+                return false;
+            }
+            if left == 0 {
+                return true;
+            }
+            offset += 1;
+        }
     }
 }
 
@@ -1773,15 +1820,35 @@ pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
 ))]
 fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
+        let flags = g_variant_get_child_value(payload, 0);
+        let include_icons = g_variant_get_boolean(flags) != 0;
+        g_variant_unref(flags);
+
+        let selection = g_variant_get_child_value(payload, 1);
+        let wanted = SelectedPids::from(selection);
+
         let list_type = g_variant_type_new(c"a(usssaay)".as_ptr() as *const gchar);
         let process_type = g_variant_type_new(c"(usssaay)".as_ptr() as *const gchar);
         let icons_type = g_variant_type_new(c"aay".as_ptr() as *const gchar);
         let byte_type = g_variant_type_new(c"y".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
 
-        let include_icons = g_variant_get_boolean(payload) != 0;
+        if wanted.contains(KERNEL_PID) {
+            g_variant_builder_open(builder, process_type);
+            g_variant_builder_add(builder, c"u".as_ptr(), KERNEL_PID);
+            g_variant_builder_add(builder, c"s".as_ptr(), c"".as_ptr());
+            g_variant_builder_add(builder, c"s".as_ptr(), c"".as_ptr());
+            g_variant_builder_add(builder, c"s".as_ptr(), kernel_name());
+            g_variant_builder_open(builder, icons_type);
+            g_variant_builder_close(builder);
+            g_variant_builder_close(builder);
+        }
 
         kernel::enumerate_processes(&mut |process| {
+            if !wanted.contains(process.id) {
+                return;
+            }
+
             let path = text_or_empty(process.path);
 
             g_variant_builder_open(builder, process_type);
@@ -1817,10 +1884,54 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
         g_variant_type_free(icons_type);
         g_variant_type_free(process_type);
         g_variant_type_free(list_type);
+        g_variant_unref(selection);
 
         HandlerResponse::success(processes)
     }
 }
+
+struct SelectedPids {
+    pids: *const u32,
+    count: usize,
+}
+
+impl SelectedPids {
+    unsafe fn from(variant: *mut GVariant) -> Self {
+        let mut count: gsize = 0;
+        let pids = unsafe { g_variant_get_fixed_array(variant, &mut count, 4) } as *const u32;
+        SelectedPids { pids, count: count as usize }
+    }
+
+    fn contains(&self, pid: u32) -> bool {
+        if self.count == 0 {
+            return true;
+        }
+        let selected = unsafe { core::slice::from_raw_parts(self.pids, self.count) };
+        selected.contains(&pid)
+    }
+}
+
+#[cfg(feature = "win9x")]
+fn kernel_name() -> *const gchar {
+    c"VMM".as_ptr() as *const gchar
+}
+
+#[cfg(feature = "winnt")]
+fn kernel_name() -> *const gchar {
+    c"ntoskrnl.exe".as_ptr() as *const gchar
+}
+
+#[cfg(any(feature = "linux", feature = "linux-injected"))]
+fn kernel_name() -> *const gchar {
+    c"kernel".as_ptr() as *const gchar
+}
+
+#[cfg(feature = "xnu-core")]
+fn kernel_name() -> *const gchar {
+    c"kernel".as_ptr() as *const gchar
+}
+
+const KERNEL_PID: u32 = 0;
 
 #[cfg(any(
     feature = "win9x",

@@ -513,17 +513,23 @@ namespace Frida {
 			if (connection == null)
 				throw_not_supported ();
 
-			var applications = yield list_applications (cancellable);
+			var query = ApplicationQueryOptions._deserialize (options);
+			var selected = new Gee.HashSet<string> ();
+			query.enumerate_selected_identifiers (identifier => {
+				selected.add (identifier);
+			});
+
+			var applications = yield list_applications (selected.to_array (), cancellable);
 
 			var running = new Gee.HashMap<string, uint> ();
-			foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA,
+			foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA, {},
 					cancellable)) {
 				var path = p.parameters["path"];
 				if (path != null)
 					running[basename_of (path.get_string ()).down ()] = p.pid;
 			}
 
-			var scope = ApplicationQueryOptions._deserialize (options).scope;
+			var scope = query.scope;
 			var result = new HostApplicationInfo[applications.length];
 			for (int i = 0; i != applications.length; i++) {
 				var app = applications[i];
@@ -542,13 +548,17 @@ namespace Frida {
 		}
 
 		private async Barebone.AgentConnection.Application[] list_applications (
-				Cancellable? cancellable) throws Error, IOError {
+				string[] identifiers, Cancellable? cancellable) throws Error, IOError {
 			var listed = new Gee.ArrayList<Barebone.AgentConnection.Application> ();
-			listed.add_all_array (yield connection.enumerate_applications (cancellable));
+			listed.add_all_array (yield connection.enumerate_applications (identifiers, cancellable));
 
 			var known = new Gee.HashSet<string> ();
 			foreach (var app in listed)
 				known.add (basename_of (app.path).down ());
+
+			var wanted = new Gee.HashSet<string> ();
+			foreach (unowned string identifier in identifiers)
+				wanted.add (identifier);
 
 			try {
 				uint helper = yield acquire_spawn_helper (cancellable);
@@ -558,6 +568,9 @@ namespace Frida {
 						continue;
 
 					var identifier = (shortcut.identifier != "") ? shortcut.identifier : file;
+					if (!wanted.is_empty && !wanted.contains (identifier))
+						continue;
+
 					var name = (shortcut.name != "") ? shortcut.name : shortcut.description;
 					listed.add (new Barebone.AgentConnection.Application (identifier,
 						shortcut.target, name));
@@ -577,8 +590,12 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			if (connection == null)
 				throw_not_supported ();
-			return yield connection.enumerate_processes (ProcessQueryOptions._deserialize (options).scope,
-				cancellable);
+			var query = ProcessQueryOptions._deserialize (options);
+			uint[] pids = {};
+			query.enumerate_selected_pids (pid => {
+				pids += pid;
+			});
+			return yield connection.enumerate_processes (query.scope, pids, cancellable);
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -799,7 +816,7 @@ namespace Frida {
 				return spawn_helper_pid;
 
 			uint pid = 0;
-			var processes = yield connection.enumerate_processes (Scope.METADATA, cancellable);
+			var processes = yield connection.enumerate_processes (Scope.METADATA, {}, cancellable);
 			foreach (HostProcessInfo p in processes) {
 				var path = p.parameters["path"];
 				if (path != null && path.get_string ().down ().has_suffix (SPAWN_HELPER_NAME)) {
@@ -820,7 +837,7 @@ namespace Frida {
 			if (connection.spawns_by_itself || program.contains ("\\") || program.contains (":"))
 				return program;
 
-			foreach (var app in yield list_applications (cancellable)) {
+			foreach (var app in yield list_applications ({}, cancellable)) {
 				if (app.identifier.down () == program.down ())
 					return app.path;
 			}
