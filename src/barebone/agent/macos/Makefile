@@ -20,7 +20,7 @@ AGENT_LIB := $(AGENT_TARGET_DIR)/$(RUST_TARGET)/$(PROFILE)/libfrida_barebone_age
 SDK ?= $(shell xcrun --sdk macosx --show-sdk-path)
 KERNEL_HEADERS := $(SDK)/System/Library/Frameworks/Kernel.framework/Headers
 
-FRIDA_VERSION ?= 0.0.0
+FRIDA_VERSION := $(or $(FRIDA_VERSION),0.0.0)
 BUNDLE_VERSION := $(firstword $(subst -, ,$(FRIDA_VERSION)))
 
 FRIDA_SDK ?= $(error Set FRIDA_SDK to a macos-$(ARCH)-kernel SDK prefix)

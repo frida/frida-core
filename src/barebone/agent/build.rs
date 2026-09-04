@@ -111,7 +111,10 @@ fn main() {
 }
 
 fn compile_version_note(out_dir: &Path, cc: &Path, cc_args: &[&str], arch: &str) -> PathBuf {
-    let version = env::var("FRIDA_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let version = env::var("FRIDA_VERSION")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "0.0.0".to_string());
     let payload = format!(
         "{{\"type\":\"frida\",\"name\":\"frida-barebone-agent\",\
          \"version\":\"{version}\",\"architecture\":\"{arch}\"}}"
