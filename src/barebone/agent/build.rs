@@ -84,6 +84,9 @@ fn main() {
         // references the entrypoint the host calls; keep the linker from
         // dropping it along with the rest of the unreferenced archive members.
         println!("cargo:rustc-link-arg=--undefined=_start");
+
+        let note = compile_version_note(&out_dir, cc, &cc_args, arch);
+        println!("cargo:rustc-link-arg={}", note.to_string_lossy());
     }
 
     if target.starts_with("i686") && env::var("CARGO_FEATURE_LINUX_INJECTED").is_ok() {
@@ -103,7 +106,45 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=GUMJS_DEVKIT_DIR");
+    println!("cargo:rerun-if-env-changed=FRIDA_VERSION");
     println!("cargo:rerun-if-changed={}", devkit_dir.join("frida-gumjs.h").display());
+}
+
+fn compile_version_note(out_dir: &Path, cc: &Path, cc_args: &[&str], arch: &str) -> PathBuf {
+    let version = env::var("FRIDA_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let payload = format!(
+        "{{\"type\":\"frida\",\"name\":\"frida-barebone-agent\",\
+         \"version\":\"{version}\",\"architecture\":\"{arch}\"}}"
+    );
+
+    let source = out_dir.join("version-note.S");
+    fs::write(
+        &source,
+        format!(
+            ".section .note.package,\"\",%note\n\
+             .balign 4\n\
+             .long 2f - 1f\n\
+             .long 4f - 3f\n\
+             .long 0xcafe1a7e\n\
+             1: .asciz \"FDO\"\n\
+             2: .balign 4\n\
+             3: .asciz {payload:?}\n\
+             4: .balign 4\n"
+        ),
+    )
+    .expect("Couldn't write the version note");
+
+    let object = out_dir.join("version-note.o");
+    let status = Command::new(cc)
+        .args(cc_args)
+        .args(["-c", "-o"])
+        .arg(&object)
+        .arg(&source)
+        .status()
+        .expect("Couldn't run the compiler");
+    assert!(status.success(), "Couldn't assemble the version note");
+
+    object
 }
 
 pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
