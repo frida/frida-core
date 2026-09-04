@@ -732,7 +732,7 @@ const WAKE_EVERY_WAITER: u32 = i32::MAX as u32;
 const CLONE_VM: usize = 0x100;
 const CLONE_FS: usize = 0x200;
 const CLONE_FILES: usize = 0x400;
-const STACK_SIZE: usize = 1024 * 1024;
+pub const STACK_SIZE: usize = 1024 * 1024;
 const STACK_HEADROOM: usize = 16;
 
 unsafe extern "C" {

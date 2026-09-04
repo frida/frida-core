@@ -62,6 +62,26 @@ pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar
     c"linux".as_ptr() as *const crate::bindings::gchar
 }
 
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
+    if crate::on_js_thread() {
+        crate::linux::STACK_SIZE as crate::bindings::gsize
+    } else {
+        0
+    }
+}
+
+#[cfg(feature = "xnu-core")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
+    if crate::on_js_thread() {
+        crate::xnu_injection::STACK as crate::bindings::gsize
+    } else {
+        0
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     #[cfg(feature = "linux-injected")]
