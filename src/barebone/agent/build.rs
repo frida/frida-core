@@ -137,7 +137,7 @@ fn compile_version_note(out_dir: &Path, cc: &Path, cc_args: &[&str], arch: &str)
     let object = out_dir.join("version-note.o");
     let status = Command::new(cc)
         .args(cc_args)
-        .args(["-c", "-o"])
+        .args(["-target", &llvm_target(), "-c", "-o"])
         .arg(&object)
         .arg(&source)
         .status()
@@ -145,6 +145,20 @@ fn compile_version_note(out_dir: &Path, cc: &Path, cc_args: &[&str], arch: &str)
     assert!(status.success(), "Couldn't assemble the version note");
 
     object
+}
+
+fn llvm_target() -> String {
+    let target = env::var("TARGET").unwrap();
+    let spec = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join(format!("{target}.json"));
+    let text = fs::read_to_string(&spec).expect("Couldn't read the target specification");
+
+    let key = "\"llvm-target\"";
+    let at = text.find(key).expect("Target specification names no LLVM target");
+    let rest = &text[at + key.len()..];
+    let open = rest.find('"').unwrap() + 1;
+    let close = open + rest[open..].find('"').unwrap();
+
+    rest[open..close].to_string()
 }
 
 pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
