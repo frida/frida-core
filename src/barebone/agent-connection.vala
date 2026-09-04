@@ -894,7 +894,7 @@ namespace Frida.Barebone {
 			timeout_source.set_callback (() => {
 				Promise<Variant>? p;
 				if (pending_requests.unset (request_id, out p))
-					p.reject (new Error.TIMED_OUT ("%s timed out", command.to_string ()));
+					p.reject (new Error.TIMED_OUT ("The %s command timed out", command.to_nick ()));
 				return Source.REMOVE;
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
@@ -1148,7 +1148,11 @@ namespace Frida.Barebone {
 			ENUMERATE_SHORTCUTS = 19,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129,
-			SPAWN_ADDED = 130
+			SPAWN_ADDED = 130;
+
+			public string to_nick () {
+				return Marshal.enum_to_nick<Command> (this);
+			}
 		}
 
 		private enum Status {
