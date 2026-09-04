@@ -33,9 +33,9 @@ use bindings::{
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
     g_variant_get, g_variant_get_boolean, g_variant_get_child_value, g_variant_get_data,
-    g_variant_get_size, g_variant_get_string,
+    g_variant_get_size, g_variant_get_string, g_variant_get_strv,
     g_variant_get_uint32, g_variant_new, g_variant_new_from_data, g_variant_new_string,
-    g_variant_new_tuple, g_variant_new_uint32, g_variant_n_children, g_variant_type_free, g_variant_type_new,
+    g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
     g_variant_builder_add, g_variant_builder_add_value, g_variant_builder_close,
     g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
     g_variant_new_fixed_array, g_variant_get_fixed_array, g_bytes_new, g_bytes_get_data,
@@ -1662,7 +1662,7 @@ fn what_is_installed() -> HandlerResponse {
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 fn handle_enumerate_applications(payload: *mut GVariant) -> HandlerResponse {
     unsafe {
-        let wanted = SelectedIdentifiers { variant: payload };
+        let wanted = SelectedIdentifiers::from(payload);
 
         let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
         let application_type = g_variant_type_new(c"(sss)".as_ptr() as *const gchar);
@@ -1700,27 +1700,29 @@ fn handle_enumerate_applications(payload: *mut GVariant) -> HandlerResponse {
 }
 
 struct SelectedIdentifiers {
-    variant: *mut GVariant,
+    names: *mut *const gchar,
+    count: usize,
 }
 
 impl SelectedIdentifiers {
+    unsafe fn from(variant: *mut GVariant) -> Self {
+        let mut count: gsize = 0;
+        let names = unsafe { g_variant_get_strv(variant, &mut count) };
+        SelectedIdentifiers { names, count: count as usize }
+    }
+
     unsafe fn contains(&self, name: *const gchar) -> bool {
-        unsafe {
-            let count = g_variant_n_children(self.variant);
-            if count == 0 {
-                return true;
-            }
-            for index in 0..count {
-                let child = g_variant_get_child_value(self.variant, index);
-                let selected = g_variant_get_string(child, core::ptr::null_mut());
-                let matches = c_string_equal(selected, name);
-                g_variant_unref(child);
-                if matches {
-                    return true;
-                }
-            }
-            false
+        if self.count == 0 {
+            return true;
         }
+        let selected = unsafe { core::slice::from_raw_parts(self.names, self.count) };
+        selected.iter().any(|&candidate| unsafe { c_string_equal(candidate, name) })
+    }
+}
+
+impl Drop for SelectedIdentifiers {
+    fn drop(&mut self) {
+        unsafe { g_free(self.names as gpointer) };
     }
 }
 
