@@ -780,21 +780,9 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
         return Injection { arena, thread: 0, stack };
     }
 
-    // KERNEL32 writes the first frame on a stack in the process that calls it. Thus the target
-    // needs these bytes at the same address before the thread runs.
     let database = unsafe { ((arena + THREAD_DATABASE) as *const u32).read_volatile() };
     let thread = unsafe { (database as *const u32).byte_add(TDB_CONTROL_BLOCK).read() };
-    // TCB+0x1c gets its value only after the thread runs. Thus ask VWIN32 for the frame.
-    let mut state = [0u8; CONTEXT_SIZE];
-    state[..4].copy_from_slice(&CONTEXT_FULL.to_le_bytes());
-    unsafe { __VWIN32_Get_Thread_Context(thread, state.as_mut_ptr()) };
-    let esp = u32::from_le_bytes([
-        state[CONTEXT_ESP],
-        state[CONTEXT_ESP + 1],
-        state[CONTEXT_ESP + 2],
-        state[CONTEXT_ESP + 3],
-    ]);
-    mirror_startup_stack(process, esp);
+    redirect_to_trampoline(arena, thread);
 
     resume_thread(arena + RESUME_STUB_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
@@ -1052,53 +1040,30 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
 
-fn mirror_startup_stack(process: u32, esp: u32) {
-    let base = esp & !0xffff;
-    let first = base / PAGE_SIZE;
-    let pages = 0x10000 / PAGE_SIZE;
-
-    let carrier = alloc_code(0x10000);
-    let mut present = [false; 0x10];
-    for page in 0..pages {
-        let address = base + page * PAGE_SIZE;
-        present[page as usize] = page_entry(address) & PAGE_PRESENT != 0;
-        if present[page as usize] {
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    address as *const u8,
-                    carrier.byte_add((page * PAGE_SIZE) as usize),
-                    PAGE_SIZE as usize,
-                )
-            };
-        }
-    }
-
-    let context = unsafe { (process as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
-    let saved = unsafe { __GetCurrentContext() };
+fn redirect_to_trampoline(arena: u32, thread: u32) {
+    let mut context = [0u8; CONTEXT_SIZE];
+    let base = context.as_mut_ptr();
     unsafe {
-        __ContextSwitch(context);
-        __PageReserve(first, pages, 0);
-        __PageCommit(first, pages, PD_FIXEDZERO, 0,
-            PC_FIXED | PC_PRESENT | PC_USER | PC_WRITEABLE);
-        for page in 0..pages {
-            if present[page as usize] {
-                core::ptr::copy_nonoverlapping(
-                    carrier.byte_add((page * PAGE_SIZE) as usize),
-                    (base + page * PAGE_SIZE) as *mut u8,
-                    PAGE_SIZE as usize,
-                );
-            }
-        }
-        __ContextSwitch(saved);
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+        __VWIN32_Get_Thread_Context(thread, base);
     }
+    let esp = unsafe { base.add(CONTEXT_ESP).cast::<u32>().read_unaligned() };
+    let selector = |slot: u32| unsafe { ((esp + slot) as *const u32).read_volatile() };
 
-    free_code(carrier, 0x10000);
-}
+    let stack = alloc_shared(PAGE_SIZE as usize) as u32;
+    let top = stack + PAGE_SIZE - 0x40;
+    unsafe { ((top + 4) as *mut u32).write_volatile(arena) };
 
-fn page_entry(address: u32) -> u32 {
-    let mut entry = 0u32;
-    unsafe { __CopyPageTable(address / PAGE_SIZE, 1, &mut entry, 0) };
-    entry
+    unsafe {
+        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
+        base.add(CONTEXT_DS).cast::<u32>().write_unaligned(selector(0));
+        base.add(CONTEXT_ES).cast::<u32>().write_unaligned(selector(4));
+        base.add(CONTEXT_FS).cast::<u32>().write_unaligned(selector(8));
+        base.add(CONTEXT_GS).cast::<u32>().write_unaligned(selector(12));
+        base.add(CONTEXT_EIP).cast::<u32>().write_unaligned(arena + TRAMPOLINE_OFFSET);
+        base.add(CONTEXT_ESP).cast::<u32>().write_unaligned(top);
+        __VWIN32_Set_Thread_Context(thread, base);
+    }
 }
 
 fn await_flag(address: u32) -> bool {
@@ -1833,6 +1798,10 @@ pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
 const CONTEXT_SIZE: usize = 0xcc;
 const CONTEXT_FULL: u32 = 0x0001_0007;
 const CONTEXT_FLAGS: usize = 0x00;
+const CONTEXT_GS: usize = 0x8c;
+const CONTEXT_FS: usize = 0x90;
+const CONTEXT_ES: usize = 0x94;
+const CONTEXT_DS: usize = 0x98;
 const CONTEXT_EDI: usize = 0x9c;
 const CONTEXT_ESI: usize = 0xa0;
 const CONTEXT_EBX: usize = 0xa4;

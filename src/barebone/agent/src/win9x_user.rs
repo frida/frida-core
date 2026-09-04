@@ -46,13 +46,11 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
         unsafe { sleep(PARKED_SLEEP_MS) };
     }
 
-    // The stub that called this function ends with a loop, thus a return keeps the thread in the
-    // arena.
-    let exit_thread: unsafe extern "stdcall" fn(u32) -> ! =
-        unsafe { core::mem::transmute(user_api().exit_thread as usize) };
     stop_hearing_about_faults();
     unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
-    unsafe { exit_thread(0) };
+    loop {
+        unsafe { sleep(PARKED_SLEEP_MS) };
+    }
 }
 
 // The group that the user-mode half runs on. The order is the order in Primitives.
