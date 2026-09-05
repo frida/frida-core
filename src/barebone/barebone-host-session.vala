@@ -299,8 +299,6 @@ namespace Frida {
 			return null;
 		}
 
-		// Allocation profiling renamed the entry point in 6.10, and takes the flags that say the
-		// caller can wait for memory rather than being told there is none right now.
 		private static BareboneAllocatorConfig? infer_linux_allocator_config (
 				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
 			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "execmem_alloc");
@@ -309,7 +307,7 @@ namespace Frida {
 				return null;
 
 			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
-			alloc_arguments.add (new BareboneCallArgument (LITERAL, EXECMEM_MODULE_TEXT));
+			alloc_arguments.add (new BareboneCallArgument (LITERAL, EXECMEM_MODULE_DATA));
 			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
 
 			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
@@ -367,7 +365,7 @@ namespace Frida {
 			};
 		}
 
-		private const uint64 EXECMEM_MODULE_TEXT = 1;
+		private const uint64 EXECMEM_MODULE_DATA = 4;
 
 		private static Barebone.SymbolInfo? find_symbol (Gee.List<Barebone.SymbolInfo> symbols, string name) {
 			foreach (var s in symbols) {
