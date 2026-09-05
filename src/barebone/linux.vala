@@ -12,7 +12,7 @@ namespace Frida.Barebone {
 			throw new Error.INVALID_ARGUMENT ("System.map names no symbols");
 
 		uint64 linked_base = base_of (symbols);
-		uint64 running_base = yield find_running_kernel (machine, linked_base, cancellable);
+		uint64 running_base = yield find_running_kernel (machine, linked_base, symbols, cancellable);
 
 		var modules = new Gee.ArrayList<ModuleInfo> ();
 		modules.add (new ModuleInfo () {
@@ -78,26 +78,30 @@ namespace Frida.Barebone {
 	}
 
 	/**
-	 * The kernel keeps its own header where it was loaded, so where the guest is executing
-	 * says which way to walk: back through memory, a segment at a time, until the magic that
-	 * every arm64 image carries turns up.
+	 * Where the guest is executing says which way to look for the kernel it was linked apart
+	 * from. arm64 walks back through memory, a segment at a time, until the magic every image
+	 * carries turns up. x86 slides the whole image by a random aligned amount instead of
+	 * heading it, so the pc caught in the kernel bounds where its text can be and the banner
+	 * every build carries confirms the landing.
 	 *
-	 * A 32-bit ARM kernel carries no such header, and needs none: nothing relocates it, so it
-	 * is running at the address its symbols were linked for. The same is taken of x86, which
-	 * has to be asked not to relocate itself.
+	 * A 32-bit ARM kernel carries no header and nothing relocates it, so it runs at the
+	 * address its symbols were linked for.
 	 */
-	private static async uint64 find_running_kernel (Machine machine, uint64 linked_base, Cancellable? cancellable)
-			throws Error, IOError {
+	private static async uint64 find_running_kernel (Machine machine, uint64 linked_base,
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
 		// A guest idling in a shell is executing userspace, whose addresses say nothing about
 		// where the kernel is and cannot be walked with the kernel's tables.
 		yield machine.enter_exception_level (1, ENTER_KERNEL_TIMEOUT_MS, cancellable);
 
-		if (machine is ArmMachine || machine is IA32Machine || machine is X64Machine)
+		if (machine is ArmMachine)
 			return linked_base;
 
 		GDB.Client gdb = machine.gdb;
 		var thread = gdb.exception.thread;
 		var registers = yield thread.read_registers (cancellable);
+
+		if (machine is IA32Machine || machine is X64Machine)
+			return yield find_relocated_kernel (gdb, registers, linked_base, symbols, cancellable);
 
 		uint64 pc = registers["pc"].get_uint64 ();
 		uint64 candidate = pc - (pc % KERNEL_ALIGNMENT);
@@ -119,8 +123,45 @@ namespace Frida.Barebone {
 		throw new Error.NOT_SUPPORTED ("Unable to find the running kernel; is the guest in kernel mode?");
 	}
 
+	private static async uint64 find_relocated_kernel (GDB.Client gdb, Gee.Map<string, Variant> registers,
+			uint64 linked_base, Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+		uint64 pc = registers.has_key ("rip")
+			? registers["rip"].get_uint64 ()
+			: registers["eip"].get_uint64 ();
+
+		uint64 banner = address_of (symbols, KERNEL_BANNER_SYMBOL);
+		if (banner == 0)
+			throw new Error.NOT_SUPPORTED ("System.map names no %s to anchor relocation", KERNEL_BANNER_SYMBOL);
+		uint64 banner_offset = banner - linked_base;
+
+		uint64 span = span_of (symbols, linked_base);
+		uint64 lowest = (pc - span) & ~(KERNEL_ALIGNMENT - 1);
+		uint64 highest = (pc + KERNEL_ALIGNMENT) & ~(KERNEL_ALIGNMENT - 1);
+
+		for (uint64 landing = lowest; landing <= highest; landing += KERNEL_ALIGNMENT) {
+			try {
+				var head = yield gdb.read_byte_array (landing + banner_offset, KERNEL_BANNER.length, cancellable);
+				if (Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0)
+					return landing;
+			} catch (Error e) {
+			}
+		}
+
+		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
+	}
+
+	private static uint64 address_of (Gee.List<SymbolInfo> symbols, string name) {
+		foreach (var symbol in symbols) {
+			if (symbol.name == name)
+				return symbol.offset;
+		}
+		return 0;
+	}
+
 	private const string IMAGE_MAGIC = "ARM\x64";
 	private const uint64 IMAGE_MAGIC_OFFSET = 0x38;
+	private const string KERNEL_BANNER_SYMBOL = "linux_banner";
+	private const string KERNEL_BANNER = "Linux version ";
 	private const uint64 KERNEL_ALIGNMENT = 2 * 1024 * 1024;
 	private const uint MAX_STEPS_BACK = 512;
 	private const uint ENTER_KERNEL_TIMEOUT_MS = 1000;
