@@ -315,7 +315,12 @@ fn registers_of_this_task(places: &Places) -> usize {
     stack + STACK_SPAN - places.size
 }
 
-#[cfg(not(target_arch = "aarch64"))]
+#[cfg(target_arch = "x86_64")]
+fn registers_of_this_task(places: &Places) -> usize {
+    native::top_of_stack() - places.size
+}
+
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 fn registers_of_this_task(places: &Places) -> usize {
     let here = &places as *const _ as usize;
     let top = (here & !(STACK_SPAN - 1)) + STACK_SPAN;

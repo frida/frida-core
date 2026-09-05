@@ -299,6 +299,15 @@ pub fn current_task() -> u64 {
     task
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn top_of_stack() -> usize {
+    let top: usize;
+    unsafe {
+        core::arch::asm!("mov {}, gs:[{}]", out(reg) top, in(reg) _cpu_current_top_of_stack, options(nostack));
+    }
+    top
+}
+
 #[cfg(target_arch = "x86")]
 pub fn current_task() -> u64 {
     let task: u32;
@@ -603,6 +612,8 @@ unsafe extern "C" {
     static _page_offset_base: *const u64;
     #[cfg(not(any(target_arch = "aarch64", target_arch = "arm")))]
     static _current_task: usize;
+    #[cfg(target_arch = "x86_64")]
+    static _cpu_current_top_of_stack: usize;
     #[cfg(target_arch = "arm")]
     static ___pv_offset: *const u64;
     #[cfg(target_arch = "arm")]
