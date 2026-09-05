@@ -2,6 +2,7 @@ use core::ffi::{c_int, c_void};
 use core::ptr;
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 
 use super::layout::{field_offset, struct_size};
 use super::native;
@@ -465,13 +466,13 @@ pub fn report_what_the_copies_hit() {
         } else {
             let kind = read_address(placed.arena + super::arena::FAULT_KIND);
             native::log(&alloc::format!(
-                "copy in {} died on signal {} ({}) at {:#x}, pc {:#x}, lr {:#x}, image at {:#x}, {}\n",
+                "copy in {} died on signal {} ({}) at {:#x}, pc {}, lr {}, image at {:#x}, {}\n",
                 pid_reported_by(placed),
                 kind as u32,
                 (kind >> 32) as u32,
                 read_address(placed.arena + super::arena::FAULT_ADDRESS),
-                read_address(placed.arena + super::arena::FAULT_PC),
-                read_address(placed.arena + super::arena::FAULT_LR),
+                relative_to_image(read_address(placed.arena + super::arena::FAULT_PC), placed),
+                relative_to_image(read_address(placed.arena + super::arena::FAULT_LR), placed),
                 placed.base,
                 said
             ));
@@ -491,6 +492,16 @@ fn what_it_says(placed: &Placement) -> Option<u32> {
 
 fn bump_to(address: usize, value: u32) {
     unsafe { (address as *mut u32).write_volatile(value) };
+}
+
+fn relative_to_image(address: u64, placed: &Placement) -> String {
+    let base = placed.base as u64;
+    let size = crate::own_range().1 as u64;
+    if address >= base && address - base < size {
+        alloc::format!("image+{:#x}", address - base)
+    } else {
+        alloc::format!("{:#x}", address)
+    }
 }
 
 const NOTHING_MORE: u32 = 0;
