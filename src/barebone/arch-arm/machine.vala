@@ -313,7 +313,12 @@ namespace Frida.Barebone {
 				if ((ttbcr & TTBCR_EAE) != 0)
 					throw new Error.NOT_SUPPORTED ("LPAE translation tables are not supported; please open a PR");
 
-				uint64 sctlr = yield thread.read_register ("sctlr", cancellable);
+				uint64 sctlr;
+				try {
+					sctlr = yield thread.read_register ("sctlr", cancellable);
+				} catch (GLib.Error e) {
+					sctlr = yield thread.read_register ("sctlr_el1", cancellable);
+				}
 				if ((sctlr & SCTLR_M) == 0)
 					throw new Error.NOT_SUPPORTED ("The MMU is off");
 
