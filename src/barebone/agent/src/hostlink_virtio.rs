@@ -1109,14 +1109,14 @@ impl PciDevice {
         }))
     }
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    fn irq_line(&self) -> Option<u32> {
-        Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
-    }
-
-    #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+    #[cfg(feature = "linux-injected")]
     fn irq_line(&self) -> Option<u32> {
         kernel::pci_interrupt(self.bus, self.devfn)
+    }
+
+    #[cfg(not(feature = "linux-injected"))]
+    fn irq_line(&self) -> Option<u32> {
+        Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
     }
 
     fn silence_message_interrupts(&self) {
