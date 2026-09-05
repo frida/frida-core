@@ -48,6 +48,9 @@ SECTIONS {
     ___pv_offset = .; . += 4;
     _pgprot_kernel = .; . += 4;
     _ioremap = .; . += 4;
+    _of_find_node_opts_by_path = .; . += 4;
+    _of_irq_get = .; . += 4;
+    _of_node_put = .; . += 4;
     _init_task = .; . += 4;
     _tasklist_lock = .; . += 4;
     __raw_read_lock = .; . += 4;

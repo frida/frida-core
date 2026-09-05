@@ -46,8 +46,8 @@ pub use self::facade::*;
 #[cfg(feature = "linux-injected")]
 pub use self::native::{
     alloc_dma, free_dma, get_kernel_base, install_interrupt_handler, map_io, map_pages,
-    pci_interrupt, release_fault_reporter, release_interrupt, run_when_ready, set_kernel_base,
-    virt_to_phys,
+    mmio_interrupt, pci_interrupt, release_fault_reporter, release_interrupt, run_when_ready,
+    set_kernel_base, virt_to_phys,
 };
 #[cfg(feature = "linux-injected")]
 pub use self::mapped::*;

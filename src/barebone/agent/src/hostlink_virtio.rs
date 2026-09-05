@@ -342,6 +342,7 @@ impl Hostlink {
             return Err(());
         }
 
+        let irq_line = kernel::mmio_interrupt(mmio_base).unwrap_or(irq_line);
         Self::start(regs, Some(irq_line), on_rx, wake_token)
     }
 

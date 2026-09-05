@@ -251,6 +251,29 @@ pub fn pci_interrupt(bus: u8, devfn: u8) -> Option<u32> {
     Some(line as u32)
 }
 
+#[cfg(target_arch = "arm")]
+pub fn mmio_interrupt(mmio_base: u64) -> Option<u32> {
+    let path = alloc::format!("/virtio_mmio@{:x}\0", mmio_base);
+    let node = unsafe { _of_find_node_opts_by_path(path.as_ptr() as *const c_char, ptr::null_mut()) };
+    if node.is_null() {
+        return None;
+    }
+
+    let line = unsafe { _of_irq_get(node, 0) };
+    unsafe { _of_node_put(node) };
+
+    if line <= 0 {
+        return None;
+    }
+
+    Some(line as u32)
+}
+
+#[cfg(not(target_arch = "arm"))]
+pub fn mmio_interrupt(_mmio_base: u64) -> Option<u32> {
+    None
+}
+
 pub fn yield_now() {
     unsafe { _schedule() };
 }
@@ -620,6 +643,13 @@ unsafe extern "C" {
     static _pgprot_kernel: *const u32;
     #[cfg(target_arch = "arm")]
     static _ioremap: unsafe extern "C" fn(u32, usize) -> *mut c_void;
+    #[cfg(target_arch = "arm")]
+    static _of_find_node_opts_by_path:
+        unsafe extern "C" fn(*const c_char, *mut *const c_char) -> *mut c_void;
+    #[cfg(target_arch = "arm")]
+    static _of_irq_get: unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
+    #[cfg(target_arch = "arm")]
+    static _of_node_put: unsafe extern "C" fn(*mut c_void);
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[cfg(not(target_arch = "x86"))]
     static _ioremap: unsafe extern "C" fn(usize, usize) -> *mut c_void;
