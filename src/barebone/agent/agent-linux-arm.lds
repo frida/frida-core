@@ -84,6 +84,8 @@ SECTIONS {
     _call_usermodehelper_setup = .; . += 4;
     _call_usermodehelper_exec = .; . += 4;
     _arm_copy_from_user = .; . += 4;
+    _fixup_exception = .; . += 4;
+    _patch_text = .; . += 4;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */

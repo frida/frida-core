@@ -21,6 +21,8 @@ mod layout;
 #[cfg(feature = "linux-injected")]
 mod mapped;
 #[cfg(feature = "linux-injected")]
+mod kfault;
+#[cfg(feature = "linux-injected")]
 mod native;
 #[cfg(feature = "linux-injected")]
 mod relay;

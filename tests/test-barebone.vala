@@ -772,6 +772,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/ARM/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_recovers_from_exception_in_live_guest.begin (h as Harness,
+				"LINUX_ARM"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/ARM/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
 				"LINUX_ARM"));
@@ -786,6 +792,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/IA32/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_recovers_from_exception_in_live_guest.begin (h as Harness,
+				"LINUX_X86"));
 			h.run ();
 		});
 
@@ -814,6 +826,12 @@ namespace Frida.BareboneTest {
 
 		GLib.Test.add_func ("/Barebone/X64/enumerates-processes-in-live-guest", () => {
 			var h = new Harness ((h) => linux_enumerates_processes_in_live_guest.begin (h as Harness,
+				"LINUX_X86_64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/X64/agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_recovers_from_exception_in_live_guest.begin (h as Harness,
 				"LINUX_X86_64"));
 			h.run ();
 		});
@@ -4276,6 +4294,18 @@ FAIL: %s
 	private async void linux_agent_runs_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), "send(1 + 1);",
 			"\"payload\":2");
+	}
+
+	private async void linux_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
+		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), """
+			let caught = 'no';
+			try {
+				ptr('0x1000').readU32();
+			} catch (e) {
+				caught = 'yes';
+			}
+			send({ caught: caught });
+		""", "\"caught\":\"yes\"");
 	}
 
 	private async void linux_enumerates_processes_in_live_guest (Harness h, string prefix) {

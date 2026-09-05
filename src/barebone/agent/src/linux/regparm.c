@@ -538,3 +538,29 @@ frida_k_get_user_pages_unlocked (unsigned long a0, unsigned long a1, void * a2, 
 
   return ((fn_t) _get_user_pages_unlocked) (a0, a1, a2, a3);
 }
+
+extern void *_register_die_notifier;
+
+int frida_k_register_die_notifier (void * a0)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  return ((fn_t) _register_die_notifier) (a0);
+}
+
+extern void *_unregister_die_notifier;
+
+int frida_k_unregister_die_notifier (void * a0)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  return ((fn_t) _unregister_die_notifier) (a0);
+}
+
+extern int frida_cb_die (void * nb, unsigned long action, void * data);
+
+__attribute__ ((regparm (3))) int
+frida_kcb_die (void * nb, unsigned long action, void * data)
+{
+  return frida_cb_die (nb, action, data);
+}

@@ -280,8 +280,6 @@ mod entrypoint_blob {
 
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
-            kernel::install_fault_reporter();
-
             crate::run_constructors();
             init_gum();
 
@@ -291,6 +289,8 @@ mod entrypoint_blob {
             MODULE_INFO = module_info;
             SYMBOL_TABLE = symbol_table;
             OWN_RANGE = own_range;
+
+            kernel::install_fault_reporter();
 
             let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
             // Install this before the loop waits the first time, thus a copy placed in a process later

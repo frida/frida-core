@@ -37,11 +37,13 @@ pub fn run_when_ready(action: fn()) {
     action();
 }
 
-// A fault in the agent goes to the kernel as it is, which prints the register
-// dump and the backtrace this would otherwise have to reproduce.
-pub fn install_fault_reporter() {}
+pub fn install_fault_reporter() {
+    super::kfault::install();
+}
 
-pub fn release_fault_reporter() {}
+pub fn release_fault_reporter() {
+    super::kfault::uninstall();
+}
 
 pub fn send_signal(signal: c_int, task: usize) {
     unsafe { _send_sig(signal, task as *mut c_void, 1) };

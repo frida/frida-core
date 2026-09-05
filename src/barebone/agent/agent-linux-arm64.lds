@@ -82,6 +82,8 @@ SECTIONS {
     _call_usermodehelper_setup = .; . += 8;
     _call_usermodehelper_exec = .; . += 8;
     _access_process_vm = .; . += 8;
+    _fixup_exception = .; . += 8;
+    _aarch64_insn_patch_text_nosync = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */
