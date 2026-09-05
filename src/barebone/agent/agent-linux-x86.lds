@@ -45,7 +45,7 @@ SECTIONS {
     _free_irq = .; . += 4;
     _request_threaded_irq = .; . += 4;
     _vmap = .; . += 4;
-    _pcpu_hot = .; . += 4;
+    _current_task = .; . += 4;
     _ioremap = .; . += 4;
     ___default_kernel_pte_mask = .; . += 4;
     _init_task = .; . += 4;

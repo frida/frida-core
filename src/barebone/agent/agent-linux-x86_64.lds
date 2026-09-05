@@ -46,7 +46,7 @@ SECTIONS {
     _request_threaded_irq = .; . += 8;
     _vmap = .; . += 8;
     _page_offset_base = .; . += 8;
-    _pcpu_hot = .; . += 8;
+    _current_task = .; . += 8;
     _ioremap = .; . += 8;
     ___default_kernel_pte_mask = .; . += 8;
     _init_task = .; . += 8;

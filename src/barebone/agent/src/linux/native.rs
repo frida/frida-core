@@ -294,7 +294,7 @@ pub fn current_task() -> u64 {
 pub fn current_task() -> u64 {
     let task: u64;
     unsafe {
-        core::arch::asm!("mov {}, gs:[{}]", out(reg) task, in(reg) _pcpu_hot, options(nostack));
+        core::arch::asm!("mov {}, gs:[{}]", out(reg) task, in(reg) _current_task, options(nostack));
     }
     task
 }
@@ -303,7 +303,7 @@ pub fn current_task() -> u64 {
 pub fn current_task() -> u64 {
     let task: u32;
     unsafe {
-        core::arch::asm!("mov {}, fs:[{}]", out(reg) task, in(reg) _pcpu_hot as u32, options(nostack));
+        core::arch::asm!("mov {}, fs:[{}]", out(reg) task, in(reg) _current_task as u32, options(nostack));
     }
     task as u64
 }
@@ -602,7 +602,7 @@ unsafe extern "C" {
     #[cfg(target_arch = "x86_64")]
     static _page_offset_base: *const u64;
     #[cfg(not(any(target_arch = "aarch64", target_arch = "arm")))]
-    static _pcpu_hot: usize;
+    static _current_task: usize;
     #[cfg(target_arch = "arm")]
     static ___pv_offset: *const u64;
     #[cfg(target_arch = "arm")]
