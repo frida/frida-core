@@ -539,23 +539,27 @@ fn install_fault_reporter() {
     for signal in [ILLEGAL, ABORTED, BUS, SEGMENT, ARITHMETIC, TRAPPED, BAD_CALL] {
         let action = Action {
             handler: report_fault as usize,
-            flags: SIGINFO,
-            restorer: 0,
+            flags: SIGINFO | RESTORER_FLAG,
+            restorer: restorer(),
             blocked: 0,
         };
+        let mut previous = Action { handler: 0, flags: 0, restorer: 0, blocked: 0 };
 
         syscall(
             RT_SIGACTION,
             signal,
             &action as *const Action as usize,
-            0,
+            &mut previous as *mut Action as usize,
             size_of::<u64>(),
             0,
             0,
         );
+
+        unsafe { PREVIOUS[signal] = previous };
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct Action {
     handler: usize,
@@ -564,7 +568,17 @@ struct Action {
     blocked: u64,
 }
 
+static mut PREVIOUS: [Action; 32] = [Action { handler: 0, flags: 0, restorer: 0, blocked: 0 }; 32];
+
 unsafe extern "C" fn report_fault(signal: usize, about: usize, running: usize) {
+    if unsafe { recovered(signal, about, running) } {
+        return;
+    }
+
+    if unsafe { chained_to_previous(signal, about, running) } {
+        return;
+    }
+
     let arena = Arena::at(unsafe { ARENA });
 
     arena.note(FAULTED);
@@ -582,11 +596,390 @@ unsafe extern "C" fn report_fault(signal: usize, about: usize, running: usize) {
             FAULT_LR,
             ((running + RUNNING_STATE + STATE_LR) as *const usize).read() as u64,
         );
-
     }
     arena.tell_the_kernel_half();
 
     syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
+}
+
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+))]
+unsafe fn recovered(signal: usize, about: usize, running: usize) -> bool {
+    let mut context = unsafe { cpu_context_at(running) };
+    let faulted_at = unsafe { ((running + RUNNING_STATE + STATE_PC) as *const usize).read() };
+    let accessed = unsafe { ((about + ABOUT_ADDRESS) as *const usize).read() };
+
+    let handled = unsafe {
+        crate::bindings::gum_barebone_handle_exception(
+            fault_type_of(signal),
+            faulted_at as *mut c_void,
+            accessed as *mut c_void,
+            &mut context,
+        )
+    };
+    if handled == 0 {
+        return false;
+    }
+
+    unsafe { restore_cpu_context(running, &context) };
+    true
+}
+
+#[cfg(not(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+)))]
+unsafe fn recovered(_signal: usize, _about: usize, _running: usize) -> bool {
+    false
+}
+
+unsafe fn chained_to_previous(signal: usize, about: usize, running: usize) -> bool {
+    let previous = unsafe { PREVIOUS[signal] };
+    if previous.handler <= SIG_IGN {
+        return false;
+    }
+
+    let deliver: unsafe extern "C" fn(usize, usize, usize) =
+        unsafe { core::mem::transmute(previous.handler) };
+    unsafe { deliver(signal, about, running) };
+    true
+}
+
+const SIG_IGN: usize = 1;
+
+fn fault_type_of(signal: usize) -> crate::bindings::GumExceptionType {
+    use crate::bindings::{
+        _GumExceptionType_GUM_EXCEPTION_ABORT, _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
+        _GumExceptionType_GUM_EXCEPTION_ARITHMETIC, _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
+        _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION, _GumExceptionType_GUM_EXCEPTION_SYSTEM,
+    };
+
+    match signal {
+        SEGMENT | BUS => _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
+        ILLEGAL | BAD_CALL => _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION,
+        ARITHMETIC => _GumExceptionType_GUM_EXCEPTION_ARITHMETIC,
+        TRAPPED => _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
+        ABORTED => _GumExceptionType_GUM_EXCEPTION_ABORT,
+        _ => _GumExceptionType_GUM_EXCEPTION_SYSTEM,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn cpu_context_at(running: usize) -> crate::bindings::GumCpuContext {
+    let regs = (running + RUNNING_STATE + REGS) as *const u64;
+    let mut x = [0u64; 29];
+    for slot in 0..29 {
+        x[slot] = unsafe { regs.add(slot).read() };
+    }
+    crate::bindings::GumCpuContext {
+        pc: unsafe { ((running + RUNNING_STATE + STATE_PC) as *const u64).read() },
+        sp: unsafe { ((running + RUNNING_STATE + STATE_SP) as *const u64).read() },
+        nzcv: unsafe { ((running + RUNNING_STATE + STATE_PSTATE) as *const u64).read() },
+        x,
+        fp: unsafe { regs.add(29).read() },
+        lr: unsafe { regs.add(30).read() },
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn restore_cpu_context(running: usize, context: &crate::bindings::GumCpuContext) {
+    let regs = (running + RUNNING_STATE + REGS) as *mut u64;
+    for slot in 0..29 {
+        unsafe { regs.add(slot).write(context.x[slot]) };
+    }
+    unsafe {
+        regs.add(29).write(context.fp);
+        regs.add(30).write(context.lr);
+        ((running + RUNNING_STATE + STATE_SP) as *mut u64).write(context.sp);
+        ((running + RUNNING_STATE + STATE_PC) as *mut u64).write(context.pc);
+        ((running + RUNNING_STATE + STATE_PSTATE) as *mut u64).write(context.nzcv);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+const REGS: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const STATE_SP: usize = 256;
+#[cfg(target_arch = "aarch64")]
+const STATE_PSTATE: usize = 272;
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn cpu_context_at(running: usize) -> crate::bindings::GumCpuContext {
+    let gregs = (running + RUNNING_STATE) as *const u64;
+    let mut context: crate::bindings::GumCpuContext = unsafe { core::mem::zeroed() };
+    unsafe {
+        context.rip = gregs.add(RIP).read();
+        context.r15 = gregs.add(R15).read();
+        context.r14 = gregs.add(R14).read();
+        context.r13 = gregs.add(R13).read();
+        context.r12 = gregs.add(R12).read();
+        context.r11 = gregs.add(R11).read();
+        context.r10 = gregs.add(R10).read();
+        context.r9 = gregs.add(R9).read();
+        context.r8 = gregs.add(R8).read();
+        context.rdi = gregs.add(RDI).read();
+        context.rsi = gregs.add(RSI).read();
+        context.rbp = gregs.add(RBP).read();
+        context.rsp = gregs.add(RSP).read();
+        context.rbx = gregs.add(RBX).read();
+        context.rdx = gregs.add(RDX).read();
+        context.rcx = gregs.add(RCX).read();
+        context.rax = gregs.add(RAX).read();
+    }
+    context
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn restore_cpu_context(running: usize, context: &crate::bindings::GumCpuContext) {
+    let gregs = (running + RUNNING_STATE) as *mut u64;
+    unsafe {
+        gregs.add(RIP).write(context.rip);
+        gregs.add(R15).write(context.r15);
+        gregs.add(R14).write(context.r14);
+        gregs.add(R13).write(context.r13);
+        gregs.add(R12).write(context.r12);
+        gregs.add(R11).write(context.r11);
+        gregs.add(R10).write(context.r10);
+        gregs.add(R9).write(context.r9);
+        gregs.add(R8).write(context.r8);
+        gregs.add(RDI).write(context.rdi);
+        gregs.add(RSI).write(context.rsi);
+        gregs.add(RBP).write(context.rbp);
+        gregs.add(RSP).write(context.rsp);
+        gregs.add(RBX).write(context.rbx);
+        gregs.add(RDX).write(context.rdx);
+        gregs.add(RCX).write(context.rcx);
+        gregs.add(RAX).write(context.rax);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const R8: usize = 0;
+#[cfg(target_arch = "x86_64")]
+const R9: usize = 1;
+#[cfg(target_arch = "x86_64")]
+const R10: usize = 2;
+#[cfg(target_arch = "x86_64")]
+const R11: usize = 3;
+#[cfg(target_arch = "x86_64")]
+const R12: usize = 4;
+#[cfg(target_arch = "x86_64")]
+const R13: usize = 5;
+#[cfg(target_arch = "x86_64")]
+const R14: usize = 6;
+#[cfg(target_arch = "x86_64")]
+const R15: usize = 7;
+#[cfg(target_arch = "x86_64")]
+const RDI: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const RSI: usize = 9;
+#[cfg(target_arch = "x86_64")]
+const RBP: usize = 10;
+#[cfg(target_arch = "x86_64")]
+const RBX: usize = 11;
+#[cfg(target_arch = "x86_64")]
+const RDX: usize = 12;
+#[cfg(target_arch = "x86_64")]
+const RAX: usize = 13;
+#[cfg(target_arch = "x86_64")]
+const RCX: usize = 14;
+#[cfg(target_arch = "x86_64")]
+const RSP: usize = 15;
+#[cfg(target_arch = "x86_64")]
+const RIP: usize = 16;
+
+#[cfg(target_arch = "x86")]
+unsafe fn cpu_context_at(running: usize) -> crate::bindings::GumCpuContext {
+    let gregs = (running + RUNNING_STATE) as *const u32;
+    let mut context: crate::bindings::GumCpuContext = unsafe { core::mem::zeroed() };
+    unsafe {
+        context.eip = gregs.add(EIP).read();
+        context.edi = gregs.add(EDI).read();
+        context.esi = gregs.add(ESI).read();
+        context.ebp = gregs.add(EBP).read();
+        context.esp = gregs.add(ESP).read();
+        context.ebx = gregs.add(EBX).read();
+        context.edx = gregs.add(EDX).read();
+        context.ecx = gregs.add(ECX).read();
+        context.eax = gregs.add(EAX).read();
+    }
+    context
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn restore_cpu_context(running: usize, context: &crate::bindings::GumCpuContext) {
+    let gregs = (running + RUNNING_STATE) as *mut u32;
+    unsafe {
+        gregs.add(EIP).write(context.eip);
+        gregs.add(EDI).write(context.edi);
+        gregs.add(ESI).write(context.esi);
+        gregs.add(EBP).write(context.ebp);
+        gregs.add(ESP).write(context.esp);
+        gregs.add(EBX).write(context.ebx);
+        gregs.add(EDX).write(context.edx);
+        gregs.add(ECX).write(context.ecx);
+        gregs.add(EAX).write(context.eax);
+    }
+}
+
+#[cfg(target_arch = "x86")]
+const EDI: usize = 4;
+#[cfg(target_arch = "x86")]
+const ESI: usize = 5;
+#[cfg(target_arch = "x86")]
+const EBP: usize = 6;
+#[cfg(target_arch = "x86")]
+const ESP: usize = 7;
+#[cfg(target_arch = "x86")]
+const EBX: usize = 8;
+#[cfg(target_arch = "x86")]
+const EDX: usize = 9;
+#[cfg(target_arch = "x86")]
+const ECX: usize = 10;
+#[cfg(target_arch = "x86")]
+const EAX: usize = 11;
+#[cfg(target_arch = "x86")]
+const EIP: usize = 14;
+
+#[cfg(target_arch = "arm")]
+unsafe fn cpu_context_at(running: usize) -> crate::bindings::GumCpuContext {
+    let regs = (running + RUNNING_STATE + ARM_R0) as *const u32;
+    let mut context: crate::bindings::GumCpuContext = unsafe { core::mem::zeroed() };
+    unsafe {
+        for slot in 0..8 {
+            context.r[slot] = regs.add(slot).read();
+        }
+        context.r8 = regs.add(8).read();
+        context.r9 = regs.add(9).read();
+        context.r10 = regs.add(10).read();
+        context.r11 = regs.add(11).read();
+        context.r12 = regs.add(12).read();
+        context.sp = regs.add(13).read();
+        context.lr = regs.add(14).read();
+        context.pc = regs.add(15).read();
+        context.cpsr = regs.add(16).read();
+    }
+    context
+}
+
+#[cfg(target_arch = "arm")]
+unsafe fn restore_cpu_context(running: usize, context: &crate::bindings::GumCpuContext) {
+    let regs = (running + RUNNING_STATE + ARM_R0) as *mut u32;
+    unsafe {
+        for slot in 0..8 {
+            regs.add(slot).write(context.r[slot]);
+        }
+        regs.add(8).write(context.r8);
+        regs.add(9).write(context.r9);
+        regs.add(10).write(context.r10);
+        regs.add(11).write(context.r11);
+        regs.add(12).write(context.r12);
+        regs.add(13).write(context.sp);
+        regs.add(14).write(context.lr);
+        regs.add(15).write(context.pc);
+        regs.add(16).write(context.cpsr);
+    }
+}
+
+#[cfg(target_arch = "arm")]
+const ARM_R0: usize = 12;
+
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+))]
+const RESTORER_FLAG: usize = 0x0400_0000;
+#[cfg(not(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+)))]
+const RESTORER_FLAG: usize = 0;
+
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+))]
+fn restorer() -> usize {
+    sigreturn_trampoline as usize
+}
+#[cfg(not(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+)))]
+fn restorer() -> usize {
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    ".globl sigreturn_trampoline",
+    ".hidden sigreturn_trampoline",
+    "sigreturn_trampoline:",
+    "mov x8, {sysno}",
+    "svc #0",
+    sysno = const RT_SIGRETURN,
+);
+#[cfg(target_arch = "aarch64")]
+const RT_SIGRETURN: usize = 139;
+
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(
+    ".globl sigreturn_trampoline",
+    ".hidden sigreturn_trampoline",
+    "sigreturn_trampoline:",
+    "mov rax, {sysno}",
+    "syscall",
+    sysno = const RT_SIGRETURN,
+);
+#[cfg(target_arch = "x86_64")]
+const RT_SIGRETURN: usize = 15;
+
+#[cfg(target_arch = "x86")]
+core::arch::global_asm!(
+    ".globl sigreturn_trampoline",
+    ".hidden sigreturn_trampoline",
+    "sigreturn_trampoline:",
+    "mov eax, {sysno}",
+    "int 0x80",
+    sysno = const RT_SIGRETURN,
+);
+#[cfg(target_arch = "x86")]
+const RT_SIGRETURN: usize = 173;
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    ".globl sigreturn_trampoline",
+    ".hidden sigreturn_trampoline",
+    "sigreturn_trampoline:",
+    "mov r7, {sysno}",
+    "svc #0",
+    sysno = const RT_SIGRETURN,
+);
+#[cfg(target_arch = "arm")]
+const RT_SIGRETURN: usize = 173;
+
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "x86_64",
+    target_arch = "x86",
+    target_arch = "arm"
+))]
+unsafe extern "C" {
+    fn sigreturn_trampoline();
 }
 
 // What the kernel was set up with is left in the arena, since asking the register is the
@@ -812,20 +1205,26 @@ const ABOUT_ADDRESS: usize = 16;
 const RUNNING_STATE: usize = 20;
 #[cfg(target_arch = "x86_64")]
 const RUNNING_STATE: usize = 40;
-#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_arch = "aarch64")]
 const RUNNING_STATE: usize = 176;
+#[cfg(target_arch = "arm")]
+const RUNNING_STATE: usize = 20;
 #[cfg(target_arch = "x86")]
 const STATE_PC: usize = 56;
 #[cfg(target_arch = "x86_64")]
 const STATE_PC: usize = 128;
-#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_arch = "aarch64")]
 const STATE_PC: usize = 264;
+#[cfg(target_arch = "arm")]
+const STATE_PC: usize = 72;
 #[cfg(target_arch = "x86")]
 const STATE_LR: usize = 28;
 #[cfg(target_arch = "x86_64")]
 const STATE_LR: usize = 120;
-#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_arch = "aarch64")]
 const STATE_LR: usize = 248;
+#[cfg(target_arch = "arm")]
+const STATE_LR: usize = 68;
 
 #[cfg(target_arch = "arm")]
 const OPENAT: usize = 322;
