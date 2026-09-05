@@ -68,6 +68,46 @@ pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     }
 }
 
+#[cfg(target_arch = "arm")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __aeabi_uread4(address: *const u8) -> u32 {
+    let mut bytes = [0u8; 4];
+    for i in 0..4 {
+        bytes[i] = unsafe { address.add(i).read_volatile() };
+    }
+    u32::from_ne_bytes(bytes)
+}
+
+#[cfg(target_arch = "arm")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __aeabi_uread8(address: *const u8) -> u64 {
+    let mut bytes = [0u8; 8];
+    for i in 0..8 {
+        bytes[i] = unsafe { address.add(i).read_volatile() };
+    }
+    u64::from_ne_bytes(bytes)
+}
+
+#[cfg(target_arch = "arm")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __aeabi_uwrite4(value: u32, address: *mut u8) -> u32 {
+    let bytes = value.to_ne_bytes();
+    for i in 0..4 {
+        unsafe { address.add(i).write_volatile(bytes[i]) };
+    }
+    value
+}
+
+#[cfg(target_arch = "arm")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __aeabi_uwrite8(value: u64, address: *mut u8) -> u64 {
+    let bytes = value.to_ne_bytes();
+    for i in 0..8 {
+        unsafe { address.add(i).write_volatile(bytes[i]) };
+    }
+    value
+}
+
 #[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu-core"))))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
