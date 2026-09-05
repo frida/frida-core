@@ -280,6 +280,9 @@ mod entrypoint_blob {
 
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
+            #[cfg(not(feature = "linux-injected"))]
+            kernel::install_fault_reporter();
+
             crate::run_constructors();
             init_gum();
 
@@ -290,6 +293,7 @@ mod entrypoint_blob {
             SYMBOL_TABLE = symbol_table;
             OWN_RANGE = own_range;
 
+            #[cfg(feature = "linux-injected")]
             kernel::install_fault_reporter();
 
             let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
