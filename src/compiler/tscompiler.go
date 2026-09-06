@@ -18,6 +18,7 @@ import (
 	"github.com/frida/TypeScript/tsc/pkg/bundled"
 	"github.com/frida/TypeScript/tsc/pkg/compiler"
 	"github.com/frida/TypeScript/tsc/pkg/core"
+	"github.com/frida/TypeScript/tsc/pkg/project"
 	"github.com/frida/TypeScript/tsc/pkg/tsoptions"
 	"github.com/frida/TypeScript/tsc/pkg/tspath"
 	"github.com/frida/TypeScript/tsc/pkg/vfs"
@@ -29,6 +30,8 @@ import (
 //go:embed node_modules/@types/*/*.d.ts
 //go:embed node_modules/@types/*/*/*.d.ts
 var embeddedTypes embed.FS
+
+var parseCache = project.NewParseCache(project.RefCountCacheOptions{})
 
 type TSCompiler struct {
 	projectRoot         string
@@ -61,9 +64,16 @@ func newProjectFS(projectRoot string) vfs.FS {
 	return newTypesFS(bundled.WrapFS(osvfs.FS()), projectRoot)
 }
 
+func (c *TSCompiler) Dispose() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.adoptProgram(nil)
+}
+
 func (c *TSCompiler) resetProgramState() {
 	c.options = nil
-	c.program = nil
+	c.adoptProgram(nil)
 	c.programErr = nil
 	c.forceFreshProgram = false
 	c.mtimes = nil
@@ -87,7 +97,7 @@ func (c *TSCompiler) EnsureProgramUpToDate() error {
 		prog, progErr = c.updateProgram(c.program, opts)
 	}
 
-	c.program = prog
+	c.adoptProgram(prog)
 	c.programErr = progErr
 	c.options = opts
 
@@ -96,8 +106,15 @@ func (c *TSCompiler) EnsureProgramUpToDate() error {
 	return progErr
 }
 
+func (c *TSCompiler) adoptProgram(prog *compiler.Program) {
+	if c.program != nil && c.program != prog {
+		releaseProgramFiles(c.program)
+	}
+	c.program = prog
+}
+
 func (c *TSCompiler) createProgram(options *core.CompilerOptions) (*compiler.Program, error) {
-	host := compiler.NewCompilerHost(c.projectRoot, c.fs, bundled.LibPath(), nil, nil, nil)
+	host := parseCachingHost{compiler.NewCompilerHost(c.projectRoot, c.fs, bundled.LibPath(), nil, nil, nil)}
 
 	config := tsoptions.NewParsedCommandLine(options, []string{c.entrypoint}, nil, tspath.ComparePathsOptions{
 		UseCaseSensitiveFileNames: c.fs.UseCaseSensitiveFileNames(),
@@ -120,19 +137,56 @@ func (c *TSCompiler) updateProgram(old *compiler.Program, options *core.Compiler
 		return c.createProgram(options)
 	}
 
-	newProg := old
+	prog := old
 	for path, mtime := range newMtimes {
-		if !mtime.Equal(c.mtimes[path]) {
-			var reused bool
-			newProg, _, reused = newProg.UpdateProgram(path, newProg.Host(), nil)
-			if !reused {
-				c.updateMtimes(newProg)
-				return newProg, nil
-			}
+		if mtime.Equal(c.mtimes[path]) {
+			continue
+		}
+		next, changedFile, reused := prog.UpdateProgram(path, prog.Host(), nil)
+		if reused {
+			retainFilesSharedWith(next, changedFile)
+		} else if changedFile != nil {
+			parseCache.Deref(parseCacheKeyFor(changedFile))
+		}
+		if prog != old {
+			releaseProgramFiles(prog)
+		}
+		prog = next
+		if !reused {
+			c.updateMtimes(prog)
+			return prog, nil
 		}
 	}
 	c.mtimes = newMtimes
-	return newProg, nil
+	return prog, nil
+}
+
+func retainFilesSharedWith(prog *compiler.Program, changedFile *ast.SourceFile) {
+	for _, file := range prog.SourceFiles() {
+		if file != changedFile {
+			parseCache.Ref(parseCacheKeyFor(file))
+		}
+	}
+	for _, file := range prog.DuplicateSourceFiles() {
+		parseCache.Ref(duplicateParseCacheKeyFor(file))
+	}
+}
+
+func releaseProgramFiles(prog *compiler.Program) {
+	for _, file := range prog.SourceFiles() {
+		parseCache.Deref(parseCacheKeyFor(file))
+	}
+	for _, file := range prog.DuplicateSourceFiles() {
+		parseCache.Deref(duplicateParseCacheKeyFor(file))
+	}
+}
+
+func parseCacheKeyFor(file *ast.SourceFile) project.ParseCacheKey {
+	return project.NewParseCacheKey(file.ParseOptions(), file.Hash, file.ScriptKind)
+}
+
+func duplicateParseCacheKeyFor(file *compiler.DuplicateSourceFile) project.ParseCacheKey {
+	return project.NewParseCacheKey(file.ParseOptions, file.Hash, file.ScriptKind)
 }
 
 func (c *TSCompiler) updateMtimes(p *compiler.Program) {
@@ -298,6 +352,19 @@ func (c *TSCompiler) FS() vfs.FS {
 // GetCurrentDirectory implements ParseConfigHost.
 func (c *TSCompiler) GetCurrentDirectory() string {
 	return c.projectRoot
+}
+
+type parseCachingHost struct {
+	compiler.CompilerHost
+}
+
+func (h parseCachingHost) GetSourceFile(opts ast.SourceFileParseOptions) *ast.SourceFile {
+	text, ok := h.FS().ReadFile(opts.FileName)
+	if !ok {
+		return nil
+	}
+	file := project.NewDiskFile(opts.FileName, text)
+	return parseCache.Acquire(project.NewParseCacheKey(opts, file.Hash(), file.Kind()), file)
 }
 
 type typesFS struct {

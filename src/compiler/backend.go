@@ -72,7 +72,7 @@ type WatchSession struct {
 	mu        sync.Mutex
 	options   BuildOptions
 	callbacks BuildEventCallbacks
-	ctx       esbuild.BuildContext
+	ctx       *buildContext
 	onDispose SessionDisposeHandler
 }
 
@@ -140,7 +140,7 @@ func (s *WatchSession) onConfigChange() {
 	}()
 }
 
-func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbuild.BuildContext, err error) {
+func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buildContext, err error) {
 	var e error
 
 	var projectRoot string
@@ -247,7 +247,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 	}
 
 	if buildCtx, ctxErr := esbuild.Context(buildOpts); ctxErr == nil {
-		ctx = buildCtx
+		ctx = &buildContext{buildCtx, tsCompiler}
 	} else {
 		for _, e := range ctxErr.Errors {
 			emitDiagnostic("error", e, callbacks.OnDiagnostic)
@@ -255,6 +255,18 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx esbui
 		err = fmt.Errorf("Failed to create ESBuild context")
 	}
 	return
+}
+
+type buildContext struct {
+	esbuild.BuildContext
+	compiler *TSCompiler
+}
+
+func (c *buildContext) Dispose() {
+	c.BuildContext.Dispose()
+	if c.compiler != nil {
+		c.compiler.Dispose()
+	}
 }
 
 func emitDiagnostic(category string, message esbuild.Message, onDiagnostic BuildDiagnosticCallback) {

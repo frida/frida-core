@@ -2,8 +2,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/evanw/esbuild v0.25.5 h1:E+JpeY5S/1LFmnX1vtuZqUKT7qDVcfXdhzMhM3uIKFs=
 github.com/evanw/esbuild v0.25.5/go.mod h1:D2vIQZqV/vIf/VRHtViaUtViZmG7o+kKmlBfVQuRi48=
-github.com/frida/TypeScript/tsc v0.0.0-20260906184120-147fb6dd53bd h1:amrz8T/saIkjmtSUCWsm2Firm+q2RMIkfH9X+rLdrEQ=
-github.com/frida/TypeScript/tsc v0.0.0-20260906184120-147fb6dd53bd/go.mod h1:9hA3Ya6t5A63j35EU3W3SmKMSdk+E0oLBUbvwCOZ3S8=
+github.com/frida/TypeScript/tsc v0.0.0-20260906185614-e00a6a37c16e h1:78BFgtMGOTP1A1/N1aoGpRO6C2kfjiPO2dk+G+ZPcI4=
+github.com/frida/TypeScript/tsc v0.0.0-20260906185614-e00a6a37c16e/go.mod h1:9hA3Ya6t5A63j35EU3W3SmKMSdk+E0oLBUbvwCOZ3S8=
 github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 h1:KZaTBSyshWX3MP5jukJcNSuXDQTO+rNpt0J564dX/eg=
 github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68/go.mod h1:tphK2c80bpPhMOI4v6bIc2xWywPfbqi1Z06+RcrMkDg=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

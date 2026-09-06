@@ -43,6 +43,7 @@ func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCa
 		Cwd:                projectRoot,
 		FS:                 fs,
 		DefaultLibraryPath: bundled.LibPath(),
+		ParseCache:         parseCache,
 		NpmInstall:         npmUnavailable,
 	})
 

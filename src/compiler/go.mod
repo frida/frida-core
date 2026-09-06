@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/evanw/esbuild v0.25.5
-	github.com/frida/TypeScript/tsc v0.0.0-20260906184120-147fb6dd53bd
+	github.com/frida/TypeScript/tsc v0.0.0-20260906185614-e00a6a37c16e
 )
 
 require (
