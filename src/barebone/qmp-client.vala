@@ -157,6 +157,9 @@ namespace Frida.Barebone {
 				bus = yield get_qom_property_string ("/machine", "hostlink-bus", cancellable);
 			}
 
+			if (bus != null && mmio == 0)
+				mmio = yield resolve_mmio_base (bus, cancellable);
+
 			int fds[2];
 			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
 				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
@@ -189,6 +192,27 @@ namespace Frida.Barebone {
 			};
 #endif
 		}
+
+		private async uint64 resolve_mmio_base (string bus, Cancellable? cancellable) throws IOError {
+			var controller = bus[:bus.last_index_of (".")];
+
+			string parent;
+			try {
+				parent = yield get_qom_property_string ("/machine/peripheral/" + controller, "parent_bus", cancellable);
+			} catch (Error e) {
+				return 0;
+			}
+
+			var marker = "virtio-mmio-bus.";
+			var at = parent.index_of (marker);
+			if (at == -1)
+				return 0;
+
+			return VIRT_MMIO_BASE + (uint64) int.parse (parent[at + marker.length:]) * VIRT_MMIO_STRIDE;
+		}
+
+		private const uint64 VIRT_MMIO_BASE = 0x0a000000;
+		private const uint64 VIRT_MMIO_STRIDE = 0x200;
 
 		private async void unplug_leftover_hostlink (string chardev, string device,
 				Cancellable? cancellable) throws IOError {
