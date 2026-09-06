@@ -240,7 +240,8 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path, docs:
                 for child in list(elem):
                     if (child.tag == CORE_TAG_IMPLEMENTS and child.get("name") in INTERNAL_INTERFACES) \
                             or child.tag == CORE_TAG_FIELD \
-                            or child.get("name").startswith("_"):
+                            or child.get("name").startswith("_") \
+                            or (child.tag == CORE_TAG_CONSTRUCTOR and is_async_constructor(child)):
                         elem.remove(child)
             merged_namespace.append(elem)
 
@@ -290,6 +291,12 @@ def emit_gir(api: ApiSpec, core_gir: str, base_gir: str, output_dir: Path, docs:
 
 def filter_elements(elements: List[ET.Element], spec_set: Set[str]):
     return [elem for elem in elements if elem.get("name") in spec_set]
+
+def is_async_constructor(constructor: ET.Element) -> bool:
+    for type_elem in constructor.iter(f"{{{CORE_NAMESPACE}}}type"):
+        if type_elem.get("name") == "Gio.Cancellable":
+            return True
+    return False
 
 @dataclass
 class DocComment:
