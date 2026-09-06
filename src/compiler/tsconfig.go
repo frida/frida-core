@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
-	tscore "github.com/frida/typescript-go/pkg/core"
-	"github.com/frida/typescript-go/pkg/tsoptions"
-	"github.com/frida/typescript-go/pkg/tspath"
+	tscore "github.com/frida/TypeScript/tsc/pkg/core"
+	"github.com/frida/TypeScript/tsc/pkg/locale"
+	"github.com/frida/TypeScript/tsc/pkg/tsoptions"
+	"github.com/frida/TypeScript/tsc/pkg/tspath"
 )
 
 type TSConfigCache struct {
@@ -85,14 +86,16 @@ func (c *TSConfigCache) GetCompilerOptions(
 		host,
 		c.projectRoot,
 		nil,
+		nil,
 		c.tsconfigPath,
-		nil, nil, nil,
+		nil,
+		nil,
 	)
 
 	if len(parsedCommandLine.Errors) > 0 {
 		var msgs []string
 		for _, diag := range parsedCommandLine.Errors {
-			msgs = append(msgs, diag.Message())
+			msgs = append(msgs, diag.Localize(locale.Default))
 		}
 		return nil, "", fmt.Errorf(
 			"Failed to parse %s: %s",
@@ -106,15 +109,16 @@ func (c *TSConfigCache) GetCompilerOptions(
 	newOpts.ModuleResolution = tscore.ModuleResolutionKindNode16
 	newOpts.NoEmit = tscore.TSFalse
 
-	sourceMapOptVal := boolToTristate(c.sourceMap)
-	newOpts.SourceMap = sourceMapOptVal
-	newOpts.InlineSourceMap = sourceMapOptVal
+	newOpts.InlineSourceMap = boolToTristate(c.sourceMap)
 
 	if newOpts.Target == tscore.ScriptTargetNone {
 		newOpts.Target = tscore.ScriptTargetES2022
 	}
 	if newOpts.Lib == nil {
 		newOpts.Lib = []string{"lib.es2022.d.ts"}
+	}
+	if newOpts.Types == nil {
+		newOpts.Types = []string{"*"}
 	}
 	if newOpts.SkipLibCheck == tscore.TSUnknown {
 		newOpts.SkipLibCheck = tscore.TSTrue

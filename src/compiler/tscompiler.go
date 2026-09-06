@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -13,15 +14,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/frida/typescript-go/pkg/ast"
-	"github.com/frida/typescript-go/pkg/bundled"
-	"github.com/frida/typescript-go/pkg/compiler"
-	"github.com/frida/typescript-go/pkg/core"
-	"github.com/frida/typescript-go/pkg/tsoptions"
-	"github.com/frida/typescript-go/pkg/tspath"
-	"github.com/frida/typescript-go/pkg/vfs"
-	"github.com/frida/typescript-go/pkg/vfs/iovfs"
-	"github.com/frida/typescript-go/pkg/vfs/osvfs"
+	"github.com/frida/TypeScript/tsc/pkg/ast"
+	"github.com/frida/TypeScript/tsc/pkg/bundled"
+	"github.com/frida/TypeScript/tsc/pkg/compiler"
+	"github.com/frida/TypeScript/tsc/pkg/core"
+	"github.com/frida/TypeScript/tsc/pkg/tsoptions"
+	"github.com/frida/TypeScript/tsc/pkg/tspath"
+	"github.com/frida/TypeScript/tsc/pkg/vfs"
+	"github.com/frida/TypeScript/tsc/pkg/vfs/iovfs"
+	"github.com/frida/TypeScript/tsc/pkg/vfs/osvfs"
 )
 
 //go:embed node_modules/@types/*/package.json
@@ -34,7 +35,6 @@ type TSCompiler struct {
 	entrypoint          string
 	loadCompilerOptions LoadCompilerOptionsHandler
 	fs                  vfs.FS
-	captureFs           *captureFS
 
 	mu                        sync.Mutex
 	options                   *core.CompilerOptions
@@ -49,16 +49,16 @@ type TSCompiler struct {
 type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost) (*core.CompilerOptions, string, error)
 
 func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompilerOptionsHandler) *TSCompiler {
-	captureFs := newCaptureFS(osvfs.FS())
-	fs := newTypesFS(bundled.WrapFS(captureFs), projectRoot)
-
 	return &TSCompiler{
 		projectRoot:         projectRoot,
 		entrypoint:          tspath.NormalizePath(entrypoint),
 		loadCompilerOptions: loadCompilerOptions,
-		fs:                  fs,
-		captureFs:           captureFs,
+		fs:                  newProjectFS(projectRoot),
 	}
+}
+
+func newProjectFS(projectRoot string) vfs.FS {
+	return newTypesFS(bundled.WrapFS(osvfs.FS()), projectRoot)
 }
 
 func (c *TSCompiler) resetProgramState() {
@@ -97,12 +97,16 @@ func (c *TSCompiler) EnsureProgramUpToDate() error {
 }
 
 func (c *TSCompiler) createProgram(options *core.CompilerOptions) (*compiler.Program, error) {
-	host := compiler.NewCompilerHost(options, c.projectRoot, c.fs, bundled.LibPath())
+	host := compiler.NewCompilerHost(c.projectRoot, c.fs, bundled.LibPath(), nil, nil, nil)
+
+	config := tsoptions.NewParsedCommandLine(options, []string{c.entrypoint}, nil, tspath.ComparePathsOptions{
+		UseCaseSensitiveFileNames: c.fs.UseCaseSensitiveFileNames(),
+		CurrentDirectory:          c.projectRoot,
+	})
 
 	program := compiler.NewProgram(compiler.ProgramOptions{
-		RootFiles: []string{c.entrypoint},
-		Host:      host,
-		Options:   options,
+		Host:   host,
+		Config: config,
 	})
 
 	c.updateMtimes(program)
@@ -116,13 +120,11 @@ func (c *TSCompiler) updateProgram(old *compiler.Program, options *core.Compiler
 		return c.createProgram(options)
 	}
 
-	updated := []tspath.Path{}
 	newProg := old
 	for path, mtime := range newMtimes {
 		if !mtime.Equal(c.mtimes[path]) {
 			var reused bool
-			newProg, reused = newProg.UpdateProgram(path)
-			updated = append(updated, path)
+			newProg, _, reused = newProg.UpdateProgram(path, newProg.Host(), nil)
 			if !reused {
 				c.updateMtimes(newProg)
 				return newProg, nil
@@ -143,7 +145,7 @@ func (c *TSCompiler) collectMtimes(p *compiler.Program) (map[tspath.Path]time.Ti
 
 	for _, sf := range p.SourceFiles() {
 		name := sf.FileName()
-		if isBundled(name) {
+		if bundled.IsBundled(name) {
 			continue
 		}
 		info := c.fs.Stat(name)
@@ -154,10 +156,6 @@ func (c *TSCompiler) collectMtimes(p *compiler.Program) (map[tspath.Path]time.Ti
 	}
 
 	return mt, nil
-}
-
-func isBundled(name string) bool {
-	return strings.HasPrefix(name, "bundled://")
 }
 
 func (c *TSCompiler) WatchDirs() []string {
@@ -196,7 +194,7 @@ func (c *TSCompiler) recomputeInputs() {
 	if c.program != nil {
 		for _, sf := range c.program.GetSourceFiles() {
 			name := sf.FileName()
-			if !isBundled(name) {
+			if !bundled.IsBundled(name) {
 				files = append(files, name)
 			}
 		}
@@ -216,32 +214,32 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnosti
 	}
 	program := c.program
 
-	var targetSourceFile *ast.SourceFile
-	normalizedFilePathToCompile := tspath.NormalizePath(filePathToCompile)
-	for _, sf := range program.GetSourceFiles() {
-		if sf.FileName() == normalizedFilePathToCompile {
-			targetSourceFile = sf
-			break
-		}
-	}
+	targetSourceFile := program.GetSourceFile(tspath.NormalizePath(filePathToCompile))
 	if targetSourceFile == nil {
 		return "", nil, fmt.Errorf("TypeScript source file not found in program: %s", filePathToCompile)
 	}
 
-	c.captureFs.ClearOutputs()
-
-	res := program.Emit(compiler.EmitOptions{
-		TargetSourceFile: targetSourceFile,
-	})
-
 	ctx := context.Background()
+
+	var compiledJS string
+	var foundJSOutput bool
+	res := program.Emit(ctx, compiler.EmitOptions{
+		TargetSourceFiles: []*ast.SourceFile{targetSourceFile},
+		WriteFile: func(fileName string, text string, data *compiler.WriteFileData) error {
+			if filepath.Ext(fileName) == ".js" {
+				compiledJS = text
+				foundJSOutput = true
+			}
+			return nil
+		},
+	})
 
 	diagnostics := program.GetSyntacticDiagnostics(ctx, targetSourceFile)
 	if len(diagnostics) == 0 {
 		diagnostics = append(diagnostics, program.GetBindDiagnostics(ctx, targetSourceFile)...)
 	}
 	if len(diagnostics) == 0 {
-		diagnostics = append(diagnostics, program.GetOptionsDiagnostics(ctx)...)
+		diagnostics = append(diagnostics, program.GetProgramDiagnostics()...)
 	}
 	if len(diagnostics) == 0 {
 		diagnostics = append(diagnostics, program.GetGlobalDiagnostics(ctx)...)
@@ -265,24 +263,14 @@ func (c *TSCompiler) Compile(filePathToCompile string) (string, []*ast.Diagnosti
 		if len(diagnostics) == 0 {
 			errMsg = fmt.Sprintf("TypeScript compilation failed and was skipped for %s, but no diagnostics reported", filePathToCompile)
 		}
-		return "", diagnostics, fmt.Errorf(errMsg)
+		return "", diagnostics, errors.New(errMsg)
 	}
 
-	var compiledJS string
-	var foundJSOutput bool
-	for path, content := range c.captureFs.GetOutputs() {
-		ext := filepath.Ext(path)
-		if ext == ".js" {
-			compiledJS = content
-			foundJSOutput = true
-			break
-		}
-	}
 	if !foundJSOutput {
 		if len(diagnostics) == 0 {
-			return "", nil, fmt.Errorf("TypeScript compilation for %s seemed to succeed (emit not skipped, no diagnostics) but no .js output file was captured. Captured outputs: %v", filePathToCompile, c.captureFs.GetOutputs())
+			return "", nil, fmt.Errorf("TypeScript compilation for %s seemed to succeed (emit not skipped, no diagnostics) but no .js output file was emitted", filePathToCompile)
 		}
-		return "", diagnostics, fmt.Errorf("No .js output file was captured for %s. Captured outputs: %v", filePathToCompile, c.captureFs.GetOutputs())
+		return "", diagnostics, fmt.Errorf("No .js output file was emitted for %s", filePathToCompile)
 	}
 
 	return compiledJS, diagnostics, nil
@@ -310,52 +298,6 @@ func (c *TSCompiler) FS() vfs.FS {
 // GetCurrentDirectory implements ParseConfigHost.
 func (c *TSCompiler) GetCurrentDirectory() string {
 	return c.projectRoot
-}
-
-type captureFS struct {
-	vfs.FS
-	outputs map[string]string
-	mutex   sync.Mutex
-}
-
-var _ vfs.FS = (*captureFS)(nil)
-
-func newCaptureFS(inner vfs.FS) *captureFS {
-	return &captureFS{
-		FS:      inner,
-		outputs: make(map[string]string),
-	}
-}
-
-func (c *captureFS) ClearOutputs() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.outputs = make(map[string]string)
-}
-
-func (c *captureFS) GetOutputs() map[string]string {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	snap := make(map[string]string, len(c.outputs))
-	for k, v := range c.outputs {
-		snap[k] = v
-	}
-	return snap
-}
-
-func (c *captureFS) WriteFile(path string, data string, writeByteOrderMark bool) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.outputs[path] = data
-	return nil
-}
-
-func (c *captureFS) Remove(path string) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	delete(c.outputs, path)
-	return nil
 }
 
 type typesFS struct {

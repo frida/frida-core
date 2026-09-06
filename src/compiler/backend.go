@@ -8,7 +8,9 @@ import (
 	"sync"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
-	tsscanner "github.com/frida/typescript-go/pkg/scanner"
+	"github.com/frida/TypeScript/tsc/pkg/ast"
+	"github.com/frida/TypeScript/tsc/pkg/locale"
+	tsscanner "github.com/frida/TypeScript/tsc/pkg/scanner"
 )
 
 type BuildOptions struct {
@@ -541,19 +543,9 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 
 				var esbuildMessages []esbuild.Message
 				for _, d := range tsDiagnostics {
-					f := d.File()
-					pos := d.Pos()
-					line, column := tsscanner.GetLineAndCharacterOfPosition(f, pos)
-
 					esbuildMessages = append(esbuildMessages, esbuild.Message{
-						Text: d.Message(),
-						Location: &esbuild.Location{
-							File:     f.FileName(),
-							Line:     line,
-							Column:   column,
-							Length:   d.Len(),
-							LineText: f.Text()[pos:d.End()],
-						},
+						Text:     d.Localize(locale.Default),
+						Location: diagnosticLocation(d),
 						Notes: []esbuild.Note{
 							{Text: d.Category().Name()},
 							{Text: fmt.Sprintf("%d", d.Code())},
@@ -577,5 +569,23 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 				return result, nil
 			})
 		},
+	}
+}
+
+func diagnosticLocation(d *ast.Diagnostic) *esbuild.Location {
+	f := d.File()
+	if f == nil {
+		return nil
+	}
+
+	pos := d.Pos()
+	line, column := tsscanner.GetECMALineAndUTF16CharacterOfPosition(f, pos)
+
+	return &esbuild.Location{
+		File:     f.FileName(),
+		Line:     line,
+		Column:   int(column),
+		Length:   d.Len(),
+		LineText: f.Text()[pos:d.End()],
 	}
 }

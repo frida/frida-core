@@ -1,14 +1,19 @@
 module github.com/frida/frida-core-compiler
 
-go 1.24.13
+go 1.26
 
 require (
 	github.com/evanw/esbuild v0.25.5
-	github.com/frida/typescript-go v0.0.0-20250601212135-a4721f45f19c
+	github.com/frida/TypeScript/tsc v0.0.0-20260906184120-147fb6dd53bd
 )
 
 require (
-	github.com/dlclark/regexp2 v1.11.5 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250517221953-25912455fbc8 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	github.com/zeebo/xxh3 v1.1.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 )
