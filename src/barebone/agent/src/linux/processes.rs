@@ -31,6 +31,20 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
     }
 }
 
+pub fn running_task_ids() -> Vec<u32> {
+    let Some(layout) = task_layout() else {
+        return Vec::new();
+    };
+
+    let flags = lock_tasklist();
+    let ids = tasks_of(layout.init, layout.list)
+        .map(|task| read_id(task, layout))
+        .collect();
+    unlock_tasklist(flags);
+
+    ids
+}
+
 pub unsafe fn let_go_of(file: *mut c_void) {
     unsafe { _fput(file) };
 }

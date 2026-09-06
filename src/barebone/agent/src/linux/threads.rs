@@ -4,11 +4,13 @@ use alloc::vec::Vec;
 
 use crate::kernel::ThreadInfo;
 
-use super::facade::home_process_id;
+use super::facade::{home_process_id, in_copy};
+use super::processes::running_task_ids;
 use super::user::names_in;
 
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-    for id in running_threads() {
+    let ids = if in_copy() { running_threads() } else { running_task_ids() };
+    for id in ids {
         found(ThreadInfo { id, cpu_state: None });
     }
 }

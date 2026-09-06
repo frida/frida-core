@@ -624,7 +624,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
         return;
     };
 
-    kernel::enumerate_ranges(&mut |base, size, protection| {
+    let mut report = |base: u64, size: u64, protection: u32| {
         if (protection & prot as u32) != prot as u32 {
             return;
         }
@@ -640,7 +640,27 @@ pub extern "C" fn _gum_process_enumerate_ranges(
         };
 
         unsafe { emit(&details, user_data) };
-    });
+    };
+
+    #[cfg(feature = "linux-injected")]
+    if !kernel::in_copy() {
+        each_kernel_module_range(|base, size| report(base, size, KERNEL_RANGE_PROTECTION));
+        return;
+    }
+
+    kernel::enumerate_ranges(&mut |base, size, protection| report(base, size, protection));
+}
+
+#[cfg(feature = "linux-injected")]
+const KERNEL_RANGE_PROTECTION: u32 = 1 | 2 | 4;
+
+#[cfg(feature = "linux-injected")]
+fn each_kernel_module_range(mut visit: impl FnMut(u64, u64)) {
+    let kernel_base = kernel::get_kernel_base();
+    let module_infos = unsafe { &*core::ptr::addr_of!(crate::MODULE_INFO) };
+    for module_info in module_infos.iter() {
+        visit(kernel_base + module_info.offset, module_info.size);
+    }
 }
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
@@ -649,6 +669,21 @@ pub extern "C" fn gum_memory_query_protection(
     address: gpointer,
     prot: *mut GumPageProtection,
 ) -> gboolean {
+    #[cfg(feature = "linux-injected")]
+    if !kernel::in_copy() {
+        let mut protection = 0u32;
+        each_kernel_module_range(|base, size| {
+            if address as u64 >= base && (address as u64) < base + size {
+                protection = KERNEL_RANGE_PROTECTION;
+            }
+        });
+        if protection == 0 {
+            return 0;
+        }
+        unsafe { *prot = protection as GumPageProtection };
+        return 1;
+    }
+
     let protection = kernel::protection_at(address as u64);
     if protection == 0 {
         return 0;

@@ -634,6 +634,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/probe", () => {
+			var h = new Harness ((h) => xnu_probe.begin (
+				h as Harness, linux_config_from_environment (h as Harness, "LINUX_X86_64")));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/Xnu/hooks-its-own-process-in-live-guest", () => {
 			var h = new Harness ((h) => xnu_hooks_its_own_process_in_live_guest.begin (
 				h as Harness, xnu_config_from_environment (h as Harness)));
