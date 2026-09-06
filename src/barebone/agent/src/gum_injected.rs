@@ -648,7 +648,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
         return;
     }
 
-    kernel::enumerate_ranges(&mut |base, size, protection| report(base, size, protection));
+    kernel::enumerate_ranges(&mut |base, size, protection| report(base, size as u64, protection));
 }
 
 #[cfg(feature = "linux-injected")]
