@@ -117,12 +117,19 @@ pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
         let Some(mapping) = mapping_in(line) else {
             continue;
         };
+        if super::user::range_is_ours(mapping.start) {
+            continue;
+        }
 
         found(mapping.start, mapping.end - mapping.start, mapping.protection);
     }
 }
 
 pub fn protection_at(address: u64) -> u32 {
+    if super::user::range_is_ours(address) {
+        return 0;
+    }
+
     let listed = contents_of(c"/proc/self/maps");
 
     for line in listed.split(|byte| *byte == b'\n') {
@@ -146,7 +153,7 @@ fn mapped_images() -> Vec<Image> {
         let Some(mapping) = mapping_in(line) else {
             continue;
         };
-        if mapping.path.is_empty() {
+        if mapping.path.is_empty() || super::user::range_is_ours(mapping.start) {
             continue;
         }
 

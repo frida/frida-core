@@ -18,6 +18,9 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 
     super::facade::select_user();
     unsafe { ARENA = begins };
+    conceal_thread(current_thread_id() as u32);
+    let (image_base, image_size) = crate::own_range();
+    conceal_range(image_base as u64, (image_size + super::injection::ARENA_SIZE) as u64);
     stand_on_a_thread_pointer();
     install_fault_reporter();
 
@@ -45,6 +48,58 @@ fn a_frame_is_waiting() -> bool {
     arena.was_told_to_go()
         || arena.holds_a_thread()
         || super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
+}
+
+const CLOAK_MAX: usize = 32;
+static mut CLOAK_RANGES: [(u64, u64); CLOAK_MAX] = [(0, 0); CLOAK_MAX];
+static mut CLOAK_THREADS: [u32; CLOAK_MAX] = [0; CLOAK_MAX];
+static mut CLOAK_FDS: [u32; CLOAK_MAX] = [0; CLOAK_MAX];
+
+pub fn conceal_range(base: u64, size: u64) {
+    if base == 0 || size == 0 {
+        return;
+    }
+    let ranges = unsafe { (&raw mut CLOAK_RANGES).as_mut().unwrap() };
+    for slot in ranges.iter_mut() {
+        if slot.1 == 0 {
+            *slot = (base, size);
+            return;
+        }
+    }
+}
+
+pub fn conceal_thread(id: u32) {
+    remember(unsafe { (&raw mut CLOAK_THREADS).as_mut().unwrap() }, id);
+}
+
+pub fn conceal_fd(fd: u32) {
+    remember(unsafe { (&raw mut CLOAK_FDS).as_mut().unwrap() }, fd);
+}
+
+fn remember(kept: &mut [u32; CLOAK_MAX], value: u32) {
+    if value == 0 {
+        return;
+    }
+    for slot in kept.iter_mut() {
+        if *slot == 0 {
+            *slot = value;
+            return;
+        }
+    }
+}
+
+pub fn range_is_ours(address: u64) -> bool {
+    unsafe { CLOAK_RANGES }
+        .iter()
+        .any(|&(base, size)| size != 0 && address >= base && address < base + size)
+}
+
+pub fn thread_is_ours(id: u32) -> bool {
+    id != 0 && unsafe { CLOAK_THREADS }.contains(&id)
+}
+
+pub fn fd_is_ours(fd: u32) -> bool {
+    fd != 0 && unsafe { CLOAK_FDS }.contains(&fd)
 }
 
 fn serve_the_copy() {
@@ -187,13 +242,18 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     if stack.is_null() {
         return -1;
     }
+    conceal_range(stack as u64, THREAD_STACK_SIZE as u64);
 
     let carried = alloc(size_of::<Carried>()) as *mut Carried;
     unsafe { carried.write(Carried { entry, parameter }) };
 
     let top = unsafe { stack.add(THREAD_STACK_SIZE) } as usize;
 
-    unsafe { start_thread(top, carried as usize) }
+    let id = unsafe { start_thread(top, carried as usize) };
+    if id > 0 {
+        conceal_thread(id as u32);
+    }
+    id
 }
 
 // A task the kernel half makes has no thread pointer, and code of the process reads what it
@@ -441,6 +501,9 @@ fn open_the_pipes(arena: Arena) {
         SAYS_THROUGH = says[0];
         HEARING = hears[0];
         HEARD_FROM = hears[1];
+    }
+    for fd in [says[0], says[1], hears[0], hears[1]] {
+        conceal_fd(fd);
     }
 
     arena.reachable_at(says[0], hears[1]);

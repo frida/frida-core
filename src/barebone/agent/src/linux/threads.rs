@@ -9,8 +9,12 @@ use super::processes::running_task_ids;
 use super::user::names_in;
 
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-    let ids = if in_copy() { running_threads() } else { running_task_ids() };
+    let copy = in_copy();
+    let ids = if copy { running_threads() } else { running_task_ids() };
     for id in ids {
+        if copy && super::user::thread_is_ours(id) {
+            continue;
+        }
         found(ThreadInfo { id, cpu_state: None });
     }
 }

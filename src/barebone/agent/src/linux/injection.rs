@@ -705,7 +705,7 @@ unsafe fn placements() -> &'static mut BTreeMap<u32, Placement> {
 
 static mut PLACEMENTS: BTreeMap<u32, Placement> = BTreeMap::new();
 
-const ARENA_SIZE: usize = 2 * 1024 * 1024;
+pub(crate) const ARENA_SIZE: usize = 2 * 1024 * 1024;
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const STACK_SPAN: usize = 16 * 1024;
