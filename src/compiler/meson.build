@@ -32,6 +32,7 @@ if have_compiler_backend
       'backend.symbols',
       'tscompiler.go',
       'tsconfig.go',
+      'langserver.go',
       'shims.go',
       'package.json',
       'package-lock.json',

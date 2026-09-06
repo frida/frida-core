@@ -75,7 +75,10 @@ def build_backend(
     if mode == "c-shared":
         if config["os_family"] == "darwin":
             symbols_list = priv_dir / "backend.symbols"
-            extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,-exported_symbols_list,{symbols_list}")
+            linker_args = [f"-exported_symbols_list,{symbols_list}"]
+            if config["os"] == "macos":
+                linker_args.append("-framework,CoreServices")
+            extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,{','.join(linker_args)}")
         elif config["os_family"] != "windows":
             version_script = priv_dir / "backend.version"
             extra_go_args.append(f"-ldflags=-linkmode=external -extldflags=-Wl,--version-script={version_script}")

@@ -24,6 +24,8 @@ typedef void (* FridaFinishedFunc) (void * user_data);
 typedef void (* FridaOutputFunc) (char * bundle, void * user_data);
 typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, int line, int character, char * text,
     void * user_data);
+typedef void (* FridaLanguageServerReadyFunc) (uintptr_t handle, char * error_message, void * user_data);
+typedef void (* FridaLanguageServerMessageFunc) (char * text, void * user_data);
 typedef void (* FridaDestroyFunc) (void * user_data);
 
 static inline void
@@ -77,6 +79,23 @@ invoke_diagnostic_func (FridaDiagnosticFunc fn,
                         void * user_data)
 {
   fn (category, code, path, line, character, text, user_data);
+}
+
+static inline void
+invoke_language_server_ready_func (FridaLanguageServerReadyFunc fn,
+                                   uintptr_t handle,
+                                   char * error_message,
+                                   void * user_data)
+{
+  fn (handle, error_message, user_data);
+}
+
+static inline void
+invoke_language_server_message_func (FridaLanguageServerMessageFunc fn,
+                                     char * text,
+                                     void * user_data)
+{
+  fn (text, user_data);
 }
 
 static inline void
@@ -202,6 +221,59 @@ func _frida_compiler_backend_watch_session_dispose(h uintptr) {
 	session := handle.Value().(*WatchSession)
 	session.Dispose()
 	handle.Delete()
+}
+
+//export _frida_compiler_backend_language_server_open
+func _frida_compiler_backend_language_server_open(cProjectRoot *C.char,
+	onMessageFn C.FridaLanguageServerMessageFunc, onMessageData unsafe.Pointer,
+	onReadyFn C.FridaLanguageServerReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc) {
+	projectRoot := C.GoString(cProjectRoot)
+	onMessage := NewCDelegate(onMessageFn, onMessageData, nil)
+	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
+
+	go func() {
+		defer onReady.Dispose()
+
+		server, err := NewLanguageServer(projectRoot, func(text string) {
+			cText := C.CString(text)
+			C.invoke_language_server_message_func(onMessage.Func, cText, onMessage.Data)
+			C.free(unsafe.Pointer(cText))
+		})
+
+		var cHandle C.uintptr_t
+		var cErrorMessage *C.char
+		if err == nil {
+			cHandle = C.uintptr_t(cgo.NewHandle(&languageServerHandle{server, onMessage}))
+		} else {
+			onMessage.Dispose()
+			cErrorMessage = C.CString(err.Error())
+		}
+		C.invoke_language_server_ready_func(onReady.Func, cHandle, cErrorMessage, onReady.Data)
+		C.free(unsafe.Pointer(cErrorMessage))
+	}()
+}
+
+//export _frida_compiler_backend_language_server_close
+func _frida_compiler_backend_language_server_close(h uintptr) {
+	handle := cgo.Handle(h)
+	entry := handle.Value().(*languageServerHandle)
+	entry.server.Dispose()
+	entry.onMessage.Dispose()
+	handle.Delete()
+}
+
+//export _frida_compiler_backend_language_server_post
+func _frida_compiler_backend_language_server_post(h uintptr, cText *C.char) *C.char {
+	handle := cgo.Handle(h).Value().(*languageServerHandle)
+	if err := handle.server.Post(C.GoString(cText)); err != nil {
+		return C.CString(err.Error())
+	}
+	return nil
+}
+
+type languageServerHandle struct {
+	server    *LanguageServer
+	onMessage *CDelegate[C.FridaLanguageServerMessageFunc]
 }
 
 func parseCExternals(cExternals **C.char, numExternals C.int) []string {

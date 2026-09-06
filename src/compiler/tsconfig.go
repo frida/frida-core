@@ -29,6 +29,8 @@ type TSConfigCache struct {
 
 type ConfigChangeCallback func()
 
+const noInputsWereFound = 18003
+
 func NewTSConfigCache(
 	projectRoot string,
 	sourceMap bool,
@@ -92,11 +94,14 @@ func (c *TSConfigCache) GetCompilerOptions(
 		nil,
 	)
 
-	if len(parsedCommandLine.Errors) > 0 {
-		var msgs []string
-		for _, diag := range parsedCommandLine.Errors {
-			msgs = append(msgs, diag.Localize(locale.Default))
+	var msgs []string
+	for _, diag := range parsedCommandLine.Errors {
+		if diag.Code() == noInputsWereFound {
+			continue
 		}
+		msgs = append(msgs, diag.Localize(locale.Default))
+	}
+	if len(msgs) > 0 {
 		return nil, "", fmt.Errorf(
 			"Failed to parse %s: %s",
 			c.tsconfigPath,

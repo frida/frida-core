@@ -272,6 +272,136 @@ namespace Frida {
 		}
 	}
 
+	/**
+	 * Speaks the Language Server Protocol for a TypeScript or JavaScript
+	 * project, powered by the same compiler as {@link Compiler}.
+	 */
+	public sealed class LanguageServer : Object {
+		/**
+		 * Emitted with each message from the server, as JSON-RPC.
+		 *
+		 * @param json the message
+		 */
+		public signal void message (string json);
+
+		/**
+		 * The project root directory.
+		 */
+		public string project_root {
+			get;
+			construct;
+		}
+
+		private size_t handle = 0;
+
+		private MainContext main_context;
+
+		/**
+		 * Creates a language server for the project rooted at @project_root.
+		 *
+		 * @param project_root path to the project root directory
+		 */
+		public LanguageServer (string project_root) {
+			Object (project_root: project_root);
+		}
+
+		static construct {
+			CompilerBackend.init ();
+		}
+
+		construct {
+			main_context = Frida.get_main_context ();
+		}
+
+		~LanguageServer () {
+			stop ();
+		}
+
+		/**
+		 * Starts the server, after which messages may be posted to it.
+		 */
+		public async void start (Cancellable? cancellable = null) throws Error, IOError {
+			CompilerBackend.check_available ();
+
+			size_t h = 0;
+			string? error_message = null;
+			CompilerBackend.LanguageServerReadyFunc on_ready = (handle, e) => {
+				h = handle;
+				error_message = e;
+				schedule_on_frida_thread (start.callback);
+			};
+
+			CompilerBackend.LanguageServer.open (project_root, on_message, (owned) on_ready);
+			yield;
+
+			if (error_message != null)
+				throw new Error.INVALID_ARGUMENT ("%s", error_message);
+
+			handle = h;
+		}
+
+		public void start_sync (Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<StartTask> ();
+			task.execute (cancellable);
+		}
+
+		private class StartTask : LanguageServerTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.start (cancellable);
+			}
+		}
+
+		/**
+		 * Stops the server. Send it the LSP shutdown and exit messages first
+		 * to let it wind down its projects.
+		 */
+		public void stop () {
+			if (handle == 0)
+				return;
+			CompilerBackend.LanguageServer.close (handle);
+			handle = 0;
+		}
+
+		/**
+		 * Posts a message to the server.
+		 *
+		 * @param json the JSON-RPC message
+		 */
+		public void post (string json) throws Error {
+			if (handle == 0)
+				throw new Error.INVALID_OPERATION ("Language server not started");
+
+			string? error_message = CompilerBackend.LanguageServer.post (handle, json);
+			if (error_message != null)
+				throw new Error.PROTOCOL ("%s", error_message);
+		}
+
+		private void on_message (string json) {
+			string json_copy = json;
+			schedule_on_frida_thread (() => {
+				message (json_copy);
+				return Source.REMOVE;
+			});
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
+		}
+
+		private abstract class LanguageServerTask<T> : AsyncTask<T> {
+			public weak LanguageServer parent {
+				get;
+				construct;
+			}
+		}
+	}
+
 	namespace CompilerBackend {
 		private void init () {
 #if HAVE_COMPILER_BACKEND
@@ -280,6 +410,9 @@ namespace Frida {
 			build = (BuildFunc) _build;
 			watch = (WatchFunc) _watch;
 			WatchSession.dispose = (WatchSession.DisposeFunc) WatchSession._dispose;
+			LanguageServer.open = (LanguageServer.OpenFunc) LanguageServer._open;
+			LanguageServer.close = (LanguageServer.CloseFunc) LanguageServer._close;
+			LanguageServer.post = (LanguageServer.PostFunc) LanguageServer._post;
 #elif COMPILER_BACKEND_INSTALLED_LIBRARY
 			Module? backend = null;
 			try {
@@ -292,6 +425,9 @@ namespace Frida {
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
+			LanguageServer.open = resolve_symbol (backend, "_frida_compiler_backend_language_server_open");
+			LanguageServer.close = resolve_symbol (backend, "_frida_compiler_backend_language_server_close");
+			LanguageServer.post = resolve_symbol (backend, "_frida_compiler_backend_language_server_post");
 #elif COMPILER_BACKEND_EMBEDDED_LIBRARY
 			unowned uint8[] backend_so = Frida.Data.Compiler.get_frida_compiler_backend_so_blob ().data;
 
@@ -329,12 +465,18 @@ namespace Frida {
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
+			LanguageServer.open = resolve_symbol (backend, "_frida_compiler_backend_language_server_open");
+			LanguageServer.close = resolve_symbol (backend, "_frida_compiler_backend_language_server_close");
+			LanguageServer.post = resolve_symbol (backend, "_frida_compiler_backend_language_server_post");
 #elif COMPILER_BACKEND_EMBEDDED_EXECUTABLE || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 			backend_process = new BackendProcess ();
 
 			build = executable_build;
 			watch = executable_watch;
 			WatchSession.dispose = executable_watch_session_dispose;
+			LanguageServer.open = executable_language_server_open;
+			LanguageServer.close = executable_language_server_close;
+			LanguageServer.post = executable_language_server_post;
 #endif
 #endif
 		}
@@ -382,6 +524,28 @@ namespace Frida {
 #endif
 		}
 
+		namespace LanguageServer {
+			[CCode (has_target = false)]
+			private delegate void OpenFunc (string project_root, LanguageServerMessageFunc on_message,
+				owned LanguageServerReadyFunc on_ready);
+
+			[CCode (has_target = false)]
+			private delegate void CloseFunc (size_t handle);
+
+			[CCode (has_target = false)]
+			private delegate string? PostFunc (size_t handle, string json);
+
+			private OpenFunc? open;
+			private CloseFunc? close;
+			private PostFunc? post;
+
+#if COMPILER_BACKEND_LINKED
+			private extern void _open ();
+			private extern void _close ();
+			private extern void _post ();
+#endif
+		}
+
 		private delegate void BuildCompleteFunc (string? bundle, string? error_message);
 		private delegate void WatchReadyFunc (size_t session_handle, string? error_message);
 		private delegate void StartingFunc ();
@@ -389,6 +553,8 @@ namespace Frida {
 		private delegate void OutputFunc (string bundle);
 		private delegate void DiagnosticFunc (string category, int code, string? path, int line, int character,
 			string text);
+		private delegate void LanguageServerReadyFunc (size_t handle, string? error_message);
+		private delegate void LanguageServerMessageFunc (string json);
 
 #if HAVE_COMPILER_BACKEND && (COMPILER_BACKEND_EMBEDDED_LIBRARY || COMPILER_BACKEND_INSTALLED_LIBRARY)
 		private T resolve_symbol<T> (Module m, string name) {
@@ -421,6 +587,19 @@ namespace Frida {
 			backend_process.dispose_watch_session (handle);
 		}
 
+		private static void executable_language_server_open (string project_root, LanguageServerMessageFunc on_message,
+				owned LanguageServerReadyFunc on_ready) {
+			backend_process.open_language_server (project_root, on_message, (owned) on_ready);
+		}
+
+		private static void executable_language_server_close (size_t handle) {
+			backend_process.close_language_server (handle);
+		}
+
+		private static string? executable_language_server_post (size_t handle, string json) {
+			return backend_process.post_to_language_server (handle, json);
+		}
+
 		private class BackendProcess : Object {
 			private Subprocess? process;
 			private BufferedInputStream? input;
@@ -435,6 +614,7 @@ namespace Frida {
 
 			private Gee.Map<uint, PendingBuild> pending_builds = new Gee.HashMap<uint, PendingBuild> ();
 			private Gee.Map<uint, WatchEntry> watches = new Gee.HashMap<uint, WatchEntry> ();
+			private Gee.Map<uint, LanguageServerEntry> language_servers = new Gee.HashMap<uint, LanguageServerEntry> ();
 
 			private Cancellable io_cancellable = new Cancellable ();
 
@@ -519,6 +699,13 @@ namespace Frida {
 						entry.on_ready (0, message);
 				}
 				watches.clear ();
+
+				foreach (var e in language_servers.entries) {
+					var entry = e.value;
+					if (entry.on_ready != null)
+						entry.on_ready (0, message);
+				}
+				language_servers.clear ();
 
 				pending_output = new ByteArray ();
 				writing = false;
@@ -619,6 +806,54 @@ namespace Frida {
 					post_message (make_dispose_request (session_id));
 			}
 
+			public void open_language_server (string project_root, LanguageServerMessageFunc on_message,
+					owned LanguageServerReadyFunc on_ready) {
+				try {
+					ensure_started ();
+				} catch (GLib.Error e) {
+					on_ready (0, e.message);
+					return;
+				}
+
+				uint session_id = allocate_session_id ();
+
+				language_servers[session_id] = new LanguageServerEntry ((owned) on_ready, on_message);
+
+				post_message (make_language_server_open_request (session_id, project_root));
+			}
+
+			private class LanguageServerEntry {
+				public LanguageServerReadyFunc? on_ready;
+				public unowned LanguageServerMessageFunc on_message;
+
+				public LanguageServerEntry (owned LanguageServerReadyFunc on_ready, LanguageServerMessageFunc on_message) {
+					this.on_ready = (owned) on_ready;
+					this.on_message = on_message;
+				}
+			}
+
+			public void close_language_server (size_t handle) {
+				uint session_id = (uint) handle;
+
+				LanguageServerEntry entry;
+				if (!language_servers.unset (session_id, out entry))
+					return;
+
+				if (process != null)
+					post_message (make_language_server_close_request (session_id));
+			}
+
+			public string? post_to_language_server (size_t handle, string json) {
+				uint session_id = (uint) handle;
+
+				if (!language_servers.has_key (session_id) || process == null)
+					return "Language server not running";
+
+				post_message (make_language_server_post_request (session_id, json));
+
+				return null;
+			}
+
 			private static string make_build_request (uint id, string project_root, string entrypoint,
 					OutputFormat output_format, BundleFormat bundle_format, bool disable_type_check,
 					bool source_map, bool compress, string platform, string[] externals) {
@@ -673,6 +908,52 @@ namespace Frida {
 				return Json.to_string (builder.get_root (), false);
 			}
 
+			private static string make_language_server_open_request (uint session_id, string project_root) {
+				var builder = new Json.Builder ();
+
+				builder
+					.begin_object ()
+						.set_member_name ("type")
+						.add_string_value ("language-server:open")
+						.set_member_name ("session_id")
+						.add_int_value (session_id)
+						.set_member_name ("project_root")
+						.add_string_value (project_root)
+					.end_object ();
+
+				return Json.to_string (builder.get_root (), false);
+			}
+
+			private static string make_language_server_close_request (uint session_id) {
+				var builder = new Json.Builder ();
+
+				builder
+					.begin_object ()
+						.set_member_name ("type")
+						.add_string_value ("language-server:close")
+						.set_member_name ("session_id")
+						.add_int_value (session_id)
+					.end_object ();
+
+				return Json.to_string (builder.get_root (), false);
+			}
+
+			private static string make_language_server_post_request (uint session_id, string json) {
+				var builder = new Json.Builder ();
+
+				builder
+					.begin_object ()
+						.set_member_name ("type")
+						.add_string_value ("language-server:post")
+						.set_member_name ("session_id")
+						.add_int_value (session_id)
+						.set_member_name ("text")
+						.add_string_value (json)
+					.end_object ();
+
+				return Json.to_string (builder.get_root (), false);
+			}
+
 			private static string make_dispose_request (uint session_id) {
 				var builder = new Json.Builder ();
 
@@ -710,7 +991,7 @@ namespace Frida {
 					if (next_session_id == 0)
 						next_session_id = 1;
 
-					if (!watches.has_key (id))
+					if (!watches.has_key (id) && !language_servers.has_key (id))
 						return id;
 				} while (next_session_id != start);
 
@@ -807,6 +1088,8 @@ namespace Frida {
 					handle_build_message (subtype, reader);
 				else if (scope == "watch")
 					handle_watch_message (subtype, reader);
+				else if (scope == "language-server")
+					handle_language_server_message (subtype, reader);
 				else
 					throw new Error.PROTOCOL ("Unknown 'type' scope");
 			}
@@ -827,6 +1110,62 @@ namespace Frida {
 					handle_watch_event_message (reader, type);
 				else
 					throw new Error.PROTOCOL ("Unknown watch message type: %s", type);
+			}
+
+			private void handle_language_server_message (string type, Json.Reader reader) throws Error {
+				reader.read_member ("session_id");
+				uint session_id = (uint) reader.get_int_value ();
+				reader.end_member ();
+
+				var server = language_servers[session_id];
+				if (server == null)
+					throw new Error.PROTOCOL ("Invalid language server session ID: %u", session_id);
+
+				if (type == "ready") {
+					if (reader.read_member ("error")) {
+						unowned string? error = reader.get_string_value ();
+						if (error == null)
+							throw new Error.PROTOCOL ("Missing or invalid 'error' value");
+						reader.end_member ();
+
+						language_servers.unset (session_id);
+						server.on_ready (0, error);
+						return;
+					}
+					reader.end_member ();
+
+					var on_ready = (owned) server.on_ready;
+					if (on_ready == null)
+						throw new Error.PROTOCOL ("Duplicate language-server:ready for session ID: %u", session_id);
+
+					server.on_ready = null;
+					on_ready (session_id, null);
+					return;
+				}
+
+				if (type == "message") {
+					reader.read_member ("text");
+					unowned string? text = reader.get_string_value ();
+					if (text == null)
+						throw new Error.PROTOCOL ("Missing or invalid 'text' value");
+					reader.end_member ();
+
+					server.on_message (text);
+					return;
+				}
+
+				if (type == "error") {
+					reader.read_member ("error");
+					unowned string? error = reader.get_string_value ();
+					if (error == null)
+						throw new Error.PROTOCOL ("Missing or invalid 'error' value");
+					reader.end_member ();
+
+					printerr ("[frida-compiler-backend] Language server: %s\n", error);
+					return;
+				}
+
+				throw new Error.PROTOCOL ("Unknown language-server message type: %s", type);
 			}
 
 			private void handle_build_complete_message (Json.Reader reader) throws Error {
