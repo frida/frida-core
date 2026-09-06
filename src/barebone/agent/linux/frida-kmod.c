@@ -110,7 +110,8 @@ typedef unsigned long (* FridaVmMmapFunc) (struct file * file, unsigned long add
     unsigned long prot, unsigned long flag, unsigned long offset);
 typedef int (* FridaVmMunmapFunc) (unsigned long start, size_t len);
 typedef pid_t (* FridaUserModeThreadFunc) (int (* fn) (void *), void * arg, unsigned long flags);
-typedef void (* FridaDetachPidFunc) (struct task_struct * task, enum pid_type type);
+typedef void (* FridaDetachPidFunc) (struct pid ** pids, struct task_struct * task, enum pid_type type);
+typedef void (* FridaFreePidsFunc) (struct pid ** pids);
 typedef void (* FridaTaskJoinGroupStopFunc) (struct task_struct * task);
 typedef void (* FridaCleanupSighandFunc) (struct sighand_struct * sighand);
 typedef void (* FridaKmemCacheFreeFunc) (struct kmem_cache * cache, void * object);
@@ -385,6 +386,7 @@ static FridaVmMmapFunc frida_vm_mmap_impl;
 static FridaVmMunmapFunc frida_vm_munmap_impl;
 static FridaUserModeThreadFunc frida_user_mode_thread_impl;
 static FridaDetachPidFunc frida_detach_pid_impl;
+static FridaFreePidsFunc frida_free_pids_impl;
 static FridaTaskJoinGroupStopFunc frida_task_join_group_stop_impl;
 static FridaCleanupSighandFunc frida_cleanup_sighand_impl;
 static FridaKmemCacheFreeFunc frida_kmem_cache_free_impl;
@@ -534,6 +536,7 @@ frida_resolve_process_ops (void)
   frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_function ("vm_munmap");
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
   frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
+  frida_free_pids_impl = (FridaFreePidsFunc) frida_kmod_find_function ("free_pids");
   frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
   frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
   frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_function ("kmem_cache_free");
@@ -1059,12 +1062,13 @@ frida_reparent_into_group (struct task_struct * leader)
   struct task_struct * child = current;
   struct signal_struct * old_signal = child->signal;
   struct sighand_struct * old_sighand = child->sighand;
+  struct pid * freed[PIDTYPE_MAX] = { NULL };
 
   write_lock_irq (frida_tasklist_lock);
 
-  frida_detach_pid_impl (child, PIDTYPE_SID);
-  frida_detach_pid_impl (child, PIDTYPE_PGID);
-  frida_detach_pid_impl (child, PIDTYPE_TGID);
+  frida_detach_pid_impl (freed, child, PIDTYPE_SID);
+  frida_detach_pid_impl (freed, child, PIDTYPE_PGID);
+  frida_detach_pid_impl (freed, child, PIDTYPE_TGID);
 
   list_del_rcu (&child->tasks);
   list_del_init (&child->sibling);
@@ -1097,6 +1101,8 @@ frida_reparent_into_group (struct task_struct * leader)
   spin_unlock (&leader->sighand->siglock);
 
   write_unlock_irq (frida_tasklist_lock);
+
+  frida_free_pids_impl (freed);
 
   frida_cleanup_sighand_impl (old_sighand);
   if (refcount_dec_and_test (&old_signal->sigcnt))
