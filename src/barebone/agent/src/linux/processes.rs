@@ -402,6 +402,96 @@ fn unlock_tasklist(flags: usize) {
     }
 }
 
+const PIDTYPE_TGID: c_int = 1;
+const PIDTYPE_MAX: usize = 4;
+
+pub fn cloak_task(task: *mut c_void) {
+    let (Some(tasks), Some(sibling), Some(thread_node)) = (
+        super::layout::field_offset("task_struct", "tasks"),
+        super::layout::field_offset("task_struct", "sibling"),
+        super::layout::field_offset("task_struct", "thread_node"),
+    ) else {
+        return;
+    };
+
+    let mut freed: [*mut c_void; PIDTYPE_MAX] = [ptr::null_mut(); PIDTYPE_MAX];
+
+    let flags = write_lock_tasklist();
+    unsafe {
+        detach_pid(freed.as_mut_ptr(), task, PIDTYPE_TGID);
+        unlink(task as usize + tasks);
+        unlink(task as usize + sibling);
+        unlink(task as usize + thread_node);
+    }
+    write_unlock_tasklist(flags);
+
+    unsafe { free_pids(freed.as_mut_ptr()) };
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int) {
+    unsafe { frida_k_detach_pid(pids, task, kind) };
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe fn detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int) {
+    unsafe { _detach_pid(pids, task, kind) };
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn free_pids(pids: *mut *mut c_void) {
+    unsafe { frida_k_free_pids(pids) };
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe fn free_pids(pids: *mut *mut c_void) {
+    unsafe { _free_pids(pids) };
+}
+
+unsafe fn unlink(node: usize) {
+    let next = unsafe { (node as *const usize).read() };
+    let prev = unsafe { ((node + WORD_SIZE) as *const usize).read() };
+    unsafe {
+        (prev as *mut usize).write(next);
+        ((next + WORD_SIZE) as *mut usize).write(prev);
+        (node as *mut usize).write(node);
+        ((node + WORD_SIZE) as *mut usize).write(node);
+    }
+}
+
+#[cfg(target_arch = "x86")]
+fn write_lock_tasklist() -> usize {
+    unsafe { frida_k_write_lock_tasklist() }
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn write_lock_tasklist() -> usize {
+    unsafe {
+        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore) {
+            (Some(lock), Some(_)) => lock(_tasklist_lock),
+            _ => {
+                __raw_write_lock.unwrap()(_tasklist_lock);
+                0
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86")]
+fn write_unlock_tasklist(flags: usize) {
+    unsafe { frida_k_write_unlock_tasklist(flags) };
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn write_unlock_tasklist(flags: usize) {
+    unsafe {
+        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore) {
+            (Some(_), Some(unlock)) => unlock(_tasklist_lock, flags),
+            _ => __raw_write_unlock.unwrap()(_tasklist_lock),
+        }
+    }
+}
+
 const IDLE_TASK_NAME: &[u8] = b"swapper";
 const NAME_SIZE: usize = 16;
 const PATH_MAX: usize = 4096;
@@ -428,6 +518,18 @@ unsafe extern "C" {
     static __raw_read_lock_irqsave: Option<unsafe extern "C" fn(*mut c_void) -> usize>;
     static __raw_read_unlock_irqrestore: Option<unsafe extern "C" fn(*mut c_void, usize)>;
     #[cfg(not(target_arch = "x86"))]
+    static _detach_pid: unsafe extern "C" fn(*mut *mut c_void, *mut c_void, c_int);
+    #[cfg(not(target_arch = "x86"))]
+    static _free_pids: unsafe extern "C" fn(*mut *mut c_void);
+    #[cfg(not(target_arch = "x86"))]
+    static __raw_write_lock: Option<unsafe extern "C" fn(*mut c_void)>;
+    #[cfg(not(target_arch = "x86"))]
+    static __raw_write_unlock: Option<unsafe extern "C" fn(*mut c_void)>;
+    #[cfg(not(target_arch = "x86"))]
+    static __raw_write_lock_irqsave: Option<unsafe extern "C" fn(*mut c_void) -> usize>;
+    #[cfg(not(target_arch = "x86"))]
+    static __raw_write_unlock_irqrestore: Option<unsafe extern "C" fn(*mut c_void, usize)>;
+    #[cfg(not(target_arch = "x86"))]
     static _get_task_exe_file: unsafe extern "C" fn(*mut c_void) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
     static _file_path: unsafe extern "C" fn(*mut c_void, *mut c_char, c_int) -> *const c_char;
@@ -445,6 +547,10 @@ unsafe extern "C" {
     fn _copy_from_kernel_nofault(a0: *mut c_void, a1: *const c_void, a2: usize) -> c_long;
     fn frida_k_lock_tasklist() -> usize;
     fn frida_k_unlock_tasklist(flags: usize);
+    fn frida_k_write_lock_tasklist() -> usize;
+    fn frida_k_write_unlock_tasklist(flags: usize);
+    fn frida_k_detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int);
+    fn frida_k_free_pids(pids: *mut *mut c_void);
 }
 
 #[cfg(target_arch = "x86")]

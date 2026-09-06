@@ -91,6 +91,8 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
             c"frida".as_ptr(),
         );
         _wake_up_process(task);
+
+        super::processes::cloak_task(task);
     }
     0
 }

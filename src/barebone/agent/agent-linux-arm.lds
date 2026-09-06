@@ -57,6 +57,12 @@ SECTIONS {
     __raw_read_unlock = .; . += 4;
     __raw_read_lock_irqsave = .; . += 4;
     __raw_read_unlock_irqrestore = .; . += 4;
+    __raw_write_lock = .; . += 4;
+    __raw_write_unlock = .; . += 4;
+    __raw_write_lock_irqsave = .; . += 4;
+    __raw_write_unlock_irqrestore = .; . += 4;
+    _detach_pid = .; . += 4;
+    _free_pids = .; . += 4;
     _get_task_exe_file = .; . += 4;
     _file_path = .; . += 4;
     _fput = .; . += 4;

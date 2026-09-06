@@ -344,6 +344,12 @@ extern void *__raw_read_lock;
 extern void *__raw_read_unlock;
 extern void *__raw_read_lock_irqsave;
 extern void *__raw_read_unlock_irqrestore;
+extern void *__raw_write_lock;
+extern void *__raw_write_unlock;
+extern void *__raw_write_lock_irqsave;
+extern void *__raw_write_unlock_irqrestore;
+extern void *_detach_pid;
+extern void *_free_pids;
 extern void *_tasklist_lock;
 
 typedef void (* frida_say_t) (const char *, ...);
@@ -407,6 +413,38 @@ void frida_k_unlock_tasklist (unsigned long flags)
     ((frida_release_flags_t) __raw_read_unlock_irqrestore) (_tasklist_lock, flags);
   else
     ((frida_hold_t) __raw_read_unlock) (_tasklist_lock);
+}
+
+unsigned long frida_k_write_lock_tasklist (void)
+{
+  if (__raw_write_lock_irqsave && __raw_write_unlock_irqrestore)
+    return ((frida_hold_flags_t) __raw_write_lock_irqsave) (_tasklist_lock);
+
+  ((frida_hold_t) __raw_write_lock) (_tasklist_lock);
+
+  return 0;
+}
+
+void frida_k_write_unlock_tasklist (unsigned long flags)
+{
+  if (__raw_write_lock_irqsave && __raw_write_unlock_irqrestore)
+    ((frida_release_flags_t) __raw_write_unlock_irqrestore) (_tasklist_lock, flags);
+  else
+    ((frida_hold_t) __raw_write_unlock) (_tasklist_lock);
+}
+
+void frida_k_detach_pid (void * pids, void * task, int type)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void *, void *, int);
+
+  ((fn_t) _detach_pid) (pids, task, type);
+}
+
+void frida_k_free_pids (void * pids)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  ((fn_t) _free_pids) (pids);
 }
 
 extern int frida_cb_thread (void * data);
