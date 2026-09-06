@@ -368,6 +368,19 @@ func (t *typesFS) ReadFile(path string) (contents string, ok bool) {
 	return contents, ok
 }
 
+func (t *typesFS) Stat(path string) vfs.FileInfo {
+	if info := t.FS.Stat(path); info != nil {
+		return info
+	}
+
+	embeddedPath := t.resolveEmbeddedPath(path)
+	if embeddedPath != "" {
+		return t.types.Stat(embeddedPath)
+	}
+
+	return nil
+}
+
 func (c *typesFS) resolveEmbeddedPath(path string) string {
 	rel, err := filepath.Rel(c.projectRoot, path)
 	if err != nil {
