@@ -2312,6 +2312,28 @@ namespace Frida {
 				return true;
 			}
 
+			if (property_name == "agent") {
+				BareboneAgentConfig agent = new BareboneInvalidAgentConfig ();
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					Type t = typeof (BareboneInvalidAgentConfig);
+					switch (property_node.get_object ().get_string_member_with_default ("type", "invalid")) {
+					case "injected":
+						t = typeof (BareboneInjectedAgentConfig);
+						break;
+					case "resident":
+						t = typeof (BareboneResidentAgentConfig);
+						break;
+					default:
+						break;
+					}
+					agent = (BareboneAgentConfig) Json.gobject_deserialize (t, property_node);
+				}
+				var v = Value (typeof (BareboneAgentConfig));
+				v.set_object (agent);
+				value = v;
+				return true;
+			}
+
 			if (property_name == "kernel") {
 				var v = Value (typeof (BareboneKernelKind));
 				v.set_enum (parse_kernel_kind (property_node.get_string ()));
@@ -2667,39 +2689,116 @@ namespace Frida {
 		LITERAL
 	}
 
-	public sealed class BareboneAgentConfig : Object, Json.Serializable {
-		public string path {
+	public abstract class BareboneAgentConfig : Object {
+		public abstract void check () throws Error;
+	}
+
+	public sealed class BareboneInvalidAgentConfig : BareboneAgentConfig {
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("Config for 'agent' is invalid");
+		}
+	}
+
+	public sealed class BareboneInjectedAgentConfig : BareboneAgentConfig, Json.Serializable {
+		public Bytes image {
 			get;
 			set;
 		}
 
-		public BareboneTransportConfig transport {
+		public BareboneInjectingTransportConfig transport {
 			get;
 			set;
 		}
 
-		public void check () throws Error {
+		public BareboneInjectedAgentConfig.from_bytes (Bytes image, BareboneInjectingTransportConfig transport) {
+			Object (image: image, transport: transport);
+		}
+
+		public BareboneInjectedAgentConfig.from_file (string path, BareboneInjectingTransportConfig transport) throws Error {
+			Object (image: map_agent_file (path), transport: transport);
+		}
+
+		public override void check () throws Error {
+			if (image == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.image' is missing");
 			if (transport == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
 			transport.check ();
-
-			if (path == null && !(transport is BareboneDeviceTransportConfig)
-					&& !(transport is BareboneSocketTransportConfig))
-				throw new Error.NOT_SUPPORTED ("Config for 'agent.path' is missing");
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "image") {
+				Bytes? image = null;
+				if (property_node.get_node_type () == Json.NodeType.VALUE) {
+					try {
+						image = map_agent_file (property_node.get_string ());
+					} catch (Error e) {
+					}
+				}
+				var v = Value (typeof (Bytes));
+				v.set_boxed (image);
+				value = v;
+				return true;
+			}
+
 			if (property_name == "transport") {
-				BareboneTransportConfig transport;
-				Type t = typeof (BareboneInvalidTransportConfig);
+				BareboneInjectingTransportConfig? transport = null;
 				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
-					switch (property_node.get_object ().get_string_member_with_default ("type", "invalid")) {
+					Type t = Type.INVALID;
+					switch (property_node.get_object ().get_string_member_with_default ("type", "")) {
 					case "hostlink":
 						t = typeof (BareboneHostlinkTransportConfig);
 						break;
 					case "vsock":
 						t = typeof (BareboneVsockTransportConfig);
 						break;
+					default:
+						break;
+					}
+					if (t != Type.INVALID)
+						transport = (BareboneInjectingTransportConfig) Json.gobject_deserialize (t, property_node);
+				}
+				var v = Value (typeof (BareboneInjectingTransportConfig));
+				v.set_object (transport);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		private static Bytes map_agent_file (string path) throws Error {
+			try {
+				return new MappedFile (path, false).get_bytes ();
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+			}
+		}
+	}
+
+	public sealed class BareboneResidentAgentConfig : BareboneAgentConfig, Json.Serializable {
+		public BareboneResidentTransportConfig transport {
+			get;
+			set;
+		}
+
+		public BareboneResidentAgentConfig (BareboneResidentTransportConfig transport) {
+			Object (transport: transport);
+		}
+
+		public override void check () throws Error {
+			if (transport == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is missing");
+			transport.check ();
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "transport") {
+				BareboneResidentTransportConfig? transport = null;
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					Type t = Type.INVALID;
+					switch (property_node.get_object ().get_string_member_with_default ("type", "")) {
 					case "device":
 						t = typeof (BareboneDeviceTransportConfig);
 						break;
@@ -2709,12 +2808,10 @@ namespace Frida {
 					default:
 						break;
 					}
-					transport = (BareboneTransportConfig) Json.gobject_deserialize (t, property_node);
-				} else {
-					transport = new BareboneInvalidTransportConfig ();
+					if (t != Type.INVALID)
+						transport = (BareboneResidentTransportConfig) Json.gobject_deserialize (t, property_node);
 				}
-
-				var v = Value (t);
+				var v = Value (typeof (BareboneResidentTransportConfig));
 				v.set_object (transport);
 				value = v;
 				return true;
@@ -2729,13 +2826,13 @@ namespace Frida {
 		public abstract void check () throws Error;
 	}
 
-	public sealed class BareboneInvalidTransportConfig : BareboneTransportConfig {
-		public override void check () throws Error {
-			throw new Error.NOT_SUPPORTED ("Config for 'agent.transport' is invalid");
-		}
+	public abstract class BareboneInjectingTransportConfig : BareboneTransportConfig {
 	}
 
-	public sealed class BareboneHostlinkTransportConfig : BareboneTransportConfig {
+	public abstract class BareboneResidentTransportConfig : BareboneTransportConfig {
+	}
+
+	public sealed class BareboneHostlinkTransportConfig : BareboneInjectingTransportConfig, Json.Serializable {
 		public string qmp {
 			get;
 			set;
@@ -2746,29 +2843,65 @@ namespace Frida {
 			set;
 		}
 
-		public uint64 ecam {
+		public BareboneHostlinkFabric fabric {
 			get;
 			set;
-		}
-
-		public uint64 mmio {
-			get;
-			set;
-		}
-
-		public uint irq {
-			get;
-			set;
+			default = new BareboneHostlinkPortsFabric ();
 		}
 
 		public override void check () throws Error {
 			if (qmp == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
-			if (mmio != 0 && bus == null)
-				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.bus' is missing");
 			if (!qmp.has_prefix ("unix:"))
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
 		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "fabric") {
+				BareboneHostlinkFabric fabric = new BareboneHostlinkPortsFabric ();
+				if (property_node.get_node_type () == Json.NodeType.OBJECT) {
+					Type t = typeof (BareboneHostlinkPortsFabric);
+					switch (property_node.get_object ().get_string_member_with_default ("type", "ports")) {
+					case "ecam":
+						t = typeof (BareboneHostlinkEcamFabric);
+						break;
+					case "mmio":
+						t = typeof (BareboneHostlinkMmioFabric);
+						break;
+					default:
+						break;
+					}
+					fabric = (BareboneHostlinkFabric) Json.gobject_deserialize (t, property_node);
+				}
+				var v = Value (typeof (BareboneHostlinkFabric));
+				v.set_object (fabric);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+	}
+
+	public abstract class BareboneHostlinkFabric : Object {
+	}
+
+	public sealed class BareboneHostlinkEcamFabric : BareboneHostlinkFabric {
+		public uint64 ecam {
+			get;
+			set;
+		}
+
+		public BareboneHostlinkEcamFabric (uint64 ecam) {
+			Object (ecam: ecam);
+		}
+	}
+
+	public sealed class BareboneHostlinkPortsFabric : BareboneHostlinkFabric {
+	}
+
+	public sealed class BareboneHostlinkMmioFabric : BareboneHostlinkFabric {
 	}
 
 	/**
@@ -2777,7 +2910,7 @@ namespace Frida {
 	 * (the hypervisor proxies it), so a UNIX-socket bridge is provided by the
 	 * embedder (e.g. vphone-cli); frida-core just reads/writes that socket.
 	 */
-	public sealed class BareboneVsockTransportConfig : BareboneTransportConfig {
+	public sealed class BareboneVsockTransportConfig : BareboneInjectingTransportConfig {
 		/** Path to a UNIX socket the embedder has bridged to the guest's hostlink endpoint. */
 		public string socket_path {
 			get;
@@ -2802,7 +2935,7 @@ namespace Frida {
 	 * An agent already resident in the target, reached through a device node it
 	 * exposes. Nothing is injected, so there is no image and no stub.
 	 */
-	public sealed class BareboneDeviceTransportConfig : BareboneTransportConfig {
+	public sealed class BareboneDeviceTransportConfig : BareboneResidentTransportConfig {
 		public string path {
 			get;
 			set;
@@ -2819,7 +2952,7 @@ namespace Frida {
 	 * hypervisor has bridged to a port the guest kernel holds open. Nothing is
 	 * injected, so there is no image and no stub.
 	 */
-	public sealed class BareboneSocketTransportConfig : BareboneTransportConfig {
+	public sealed class BareboneSocketTransportConfig : BareboneResidentTransportConfig {
 		public string path {
 			get;
 			set;

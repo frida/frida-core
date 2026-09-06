@@ -13,7 +13,7 @@ namespace Frida.Barebone {
 		private ByteOrder byte_order;
 		private uint pointer_size;
 
-		private BareboneAgentConfig agent_config;
+		private BareboneInjectedAgentConfig agent_config;
 		private BareboneVsockTransportConfig? vsock_transport;
 		private BareboneImageConfig? image_config;
 		private BareboneKernelKind kernel_kind;
@@ -39,7 +39,7 @@ namespace Frida.Barebone {
 		private const uint LEAVE_MAX_ATTEMPTS = 40;
 		private const uint LEAVE_INTERVAL_MS = 50;
 
-		public static async AgentConnection open (BareboneAgentConfig agent_config, BareboneImageConfig? image_config,
+		public static async AgentConnection open (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
 				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
 				Cancellable? cancellable) throws Error, IOError {
@@ -169,7 +169,7 @@ namespace Frida.Barebone {
 
 			Gum.ElfModule elf;
 			try {
-				elf = new Gum.ElfModule.from_file (agent_config.path);
+				elf = new Gum.ElfModule.from_blob (agent_config.image);
 			} catch (Gum.Error e) {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
@@ -344,18 +344,19 @@ namespace Frida.Barebone {
 			this.qmp = qmp;
 			adopt_hostlink_streams (link.connection);
 
-			if (config.mmio != 0)
-				return describe_virtio (config.mmio, config.irq);
+			if (config.fabric is BareboneHostlinkMmioFabric)
+				return describe_virtio (link.mmio, link.irq);
 
-			if (config.bus != null) {
-				Variant[] pci_cfg = { new Variant.uint64 (config.ecam) };
-				return new Variant.tuple ({
-					new Variant.byte (TRANSPORT_KIND_VIRTIO_PCI),
-					new Variant.variant (new Variant.tuple (pci_cfg))
-				});
-			}
+			uint64 ecam = 0;
+			var ecam_fabric = config.fabric as BareboneHostlinkEcamFabric;
+			if (ecam_fabric != null)
+				ecam = ecam_fabric.ecam;
 
-			return describe_virtio (link.mmio, link.irq);
+			Variant[] pci_cfg = { new Variant.uint64 (ecam) };
+			return new Variant.tuple ({
+				new Variant.byte (TRANSPORT_KIND_VIRTIO_PCI),
+				new Variant.variant (new Variant.tuple (pci_cfg))
+			});
 		}
 
 		private Variant describe_virtio (uint64 mmio, uint irq) {

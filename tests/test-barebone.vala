@@ -5846,13 +5846,16 @@ FAIL: %s
 		config.connection.host = "127.0.0.1";
 		config.connection.port = (uint16) uint.parse (stub_port);
 		config.kernel = WIN9X;
-		config.agent = new BareboneAgentConfig () {
-			path = agent_path,
-			transport = new BareboneHostlinkTransportConfig () {
-				qmp = "unix:" + qmp_path,
-				bus = Environment.get_variable ("FRIDA_TEST_WIN9X_BUS"),
-			},
+		var transport = new BareboneHostlinkTransportConfig () {
+			qmp = "unix:" + qmp_path,
+			bus = Environment.get_variable ("FRIDA_TEST_WIN9X_BUS"),
 		};
+		try {
+			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
 
 		return config;
 	}
@@ -5876,23 +5879,29 @@ FAIL: %s
 		};
 		string? ecam = Environment.get_variable (@"FRIDA_TEST_$(prefix)_ECAM");
 		string? mmio = Environment.get_variable (@"FRIDA_TEST_$(prefix)_MMIO");
-		string? irq = Environment.get_variable (@"FRIDA_TEST_$(prefix)_IRQ");
-		config.agent = new BareboneAgentConfig () {
-			path = agent_path,
-			transport = new BareboneHostlinkTransportConfig () {
-				qmp = "unix:" + qmp_path,
-				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
-				ecam = (ecam != null) ? uint64.parse (ecam) : 0,
-				mmio = (mmio != null) ? uint64.parse (mmio) : 0,
-				irq = (irq != null) ? (uint) uint64.parse (irq) : 0,
-			},
+		var transport = new BareboneHostlinkTransportConfig () {
+			qmp = "unix:" + qmp_path,
+			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
+			fabric = hostlink_fabric_from_environment (ecam, mmio),
 		};
+		try {
+			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
 
 		return config;
 	}
 
-	// The same guest is described the same way whatever its word size, so the two differ only in
-	// which set of variables names it.
+	private BareboneHostlinkFabric hostlink_fabric_from_environment (string? ecam, string? mmio) {
+		if (ecam != null)
+			return new BareboneHostlinkEcamFabric (uint64.parse (ecam));
+		if (mmio != null)
+			return new BareboneHostlinkMmioFabric ();
+		return new BareboneHostlinkPortsFabric ();
+	}
+
 	private BareboneConfig? winnt_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
 		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
 		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
@@ -5906,13 +5915,16 @@ FAIL: %s
 		config.connection.host = "127.0.0.1";
 		config.connection.port = (uint16) uint.parse (stub_port);
 		config.kernel = WINNT;
-		config.agent = new BareboneAgentConfig () {
-			path = agent_path,
-			transport = new BareboneHostlinkTransportConfig () {
-				qmp = "unix:" + qmp_path,
-				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
-			},
+		var transport = new BareboneHostlinkTransportConfig () {
+			qmp = "unix:" + qmp_path,
+			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
 		};
+		try {
+			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
 
 		return config;
 	}

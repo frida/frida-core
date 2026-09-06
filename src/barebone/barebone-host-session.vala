@@ -80,9 +80,8 @@ namespace Frida {
 			if (config == null)
 				config = new BareboneConfig ();
 
-			BareboneAgentConfig? resident_agent = config.agent;
-			if (resident_agent != null && (resident_agent.transport is BareboneDeviceTransportConfig
-					|| resident_agent.transport is BareboneSocketTransportConfig)) {
+			var resident_agent = config.agent as BareboneResidentAgentConfig;
+			if (resident_agent != null) {
 				host_session = yield attach_to_resident_agent (resident_agent.transport, cancellable);
 				host_session.agent_session_detached.connect (on_agent_session_detached);
 
@@ -246,7 +245,7 @@ namespace Frida {
 			}
 
 			Barebone.AgentConnection? agent_connection = null;
-			BareboneAgentConfig? agent_config = config.agent;
+			var agent_config = config.agent as BareboneInjectedAgentConfig;
 			if (agent_config != null) {
 				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
 					relocation, kernel_base, machine, allocator, kernel_modules, kernel_symbols,
@@ -260,7 +259,7 @@ namespace Frida {
 			return new BareboneHostSession (agent_connection, services);
 		}
 
-		private async BareboneHostSession attach_to_resident_agent (BareboneTransportConfig transport,
+		private async BareboneHostSession attach_to_resident_agent (BareboneResidentTransportConfig transport,
 				Cancellable? cancellable) throws Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Resident agents are not available on this OS");
