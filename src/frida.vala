@@ -496,6 +496,7 @@ namespace Frida {
 		 * @param device the device that was added
 		 */
 		public async void remove_barebone_device (Device device, Cancellable? cancellable = null) throws Error, IOError {
+#if HAVE_BAREBONE_BACKEND
 			check_open ();
 
 			yield ensure_service (cancellable);
@@ -506,6 +507,9 @@ namespace Frida {
 			yield device._do_close (APPLICATION_REQUESTED, true, cancellable);
 			removed (device);
 			changed ();
+#else
+			throw new Error.NOT_SUPPORTED ("Barebone backend not available");
+#endif
 		}
 
 		public void remove_barebone_device_sync (Device device, Cancellable? cancellable = null) throws Error, IOError {

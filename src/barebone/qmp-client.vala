@@ -193,6 +193,7 @@ namespace Frida.Barebone {
 #endif
 		}
 
+#if !WINDOWS
 		private async uint64 resolve_mmio_base (string bus, Cancellable? cancellable) throws IOError {
 			var controller = bus[:bus.last_index_of (".")];
 
@@ -213,6 +214,7 @@ namespace Frida.Barebone {
 
 		private const uint64 VIRT_MMIO_BASE = 0x0a000000;
 		private const uint64 VIRT_MMIO_STRIDE = 0x200;
+#endif
 
 		private async void unplug_leftover_hostlink (string chardev, string device,
 				Cancellable? cancellable) throws IOError {
