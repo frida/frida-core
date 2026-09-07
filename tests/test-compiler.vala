@@ -71,8 +71,8 @@ namespace Frida.CompilerTest {
 			h.done ();
 		}
 
-		private static string file_uri (string path) {
-			return "file://" + path;
+		private static string file_uri (string path) throws ConvertError {
+			return Filename.to_uri (path);
 		}
 
 		private class Client : Object {
