@@ -404,6 +404,10 @@ namespace Frida {
 
 	namespace CompilerBackend {
 		private void init () {
+			if (initialized)
+				return;
+			initialized = true;
+
 #if HAVE_COMPILER_BACKEND
 #if COMPILER_BACKEND_LINKED
 			_init_go_runtime ();
@@ -493,6 +497,7 @@ namespace Frida {
 			}
 		}
 
+		private bool initialized = false;
 		private BuildFunc? build;
 		private WatchFunc? watch;
 
