@@ -43,7 +43,6 @@ type BackendEvent struct {
 	Path      string `json:"path,omitempty"`
 	Line      int    `json:"line,omitempty"`
 	Character int    `json:"character,omitempty"`
-	Text      string `json:"text,omitempty"`
 }
 
 func main() {
