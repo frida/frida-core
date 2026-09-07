@@ -20,7 +20,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - { id: windows-arm64,  runner: '"windows-11-arm"', sys: CLANGARM64, pkg: 'mingw-w64-clang-aarch64-clang' }
+          - { id: windows-arm64,  runner: '"windows-11-arm"', sys: CLANGARM64, pkg: 'mingw-w64-clang-aarch64-clang', opts: "'-Dfrida-gum:v8=disabled'" }
           - { id: windows-x86_64, runner: '"windows-latest"', sys: MINGW64,    pkg: 'mingw-w64-x86_64-gcc'          }
           - { id: windows-x86,    runner: '"windows-latest"', sys: MINGW32,    pkg: 'mingw-w64-i686-gcc'            }
           - { id: macos-x86_64,   runner: '"macos-latest"'                                                          }
@@ -71,7 +71,7 @@ jobs:
               --host=${{ matrix.id }} `
               --enable-compiler-backend `
               ${{ env.FRIDA_CORE_OPTIONS }} `
-              -- --force-fallback-for=openssl
+              -- --force-fallback-for=openssl ${{ matrix.opts }}
           .\make
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
@@ -658,7 +658,7 @@ jobs:
       matrix:
         include:
           - { arch: x86_64, runner: windows-latest, msvc-arch: amd64, vcpkg-triplet: x64-windows-release }
-          - { arch: arm64, runner: windows-11-arm, msvc-arch: arm64, vcpkg-triplet: arm64-windows-release }
+          - { arch: arm64, runner: windows-11-arm, msvc-arch: arm64, vcpkg-triplet: arm64-windows-release, opts: "'-Dfrida-gum:v8=disabled'" }
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -721,7 +721,7 @@ jobs:
               --enable-shared `
               --without-prebuilds=sdk `
               "--prefix=$env:RUNNER_TEMP\frida-prefix" `
-              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled -Dtests=disabled
+              -- --force-fallback-for=openssl,libnghttp2 -Dcompiler_backend=disabled -Dtests=disabled ${{ matrix.opts }}
 
       - name: Compile
         run: python releng/meson/meson.py compile -C build
