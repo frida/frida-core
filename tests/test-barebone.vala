@@ -2432,7 +2432,7 @@ FAIL: %s
 			image.write_uint32 (16, 0x11223344);
 
 			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.@64, 0), base_va, image);
-			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.RELATIVE, 8), base_va, image);
+			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.RELATIVE, 8, 0x80), base_va, image);
 			machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.PC32, 16), base_va, image);
 
 			assert_true (image.read_uint64 (0) == 0xffffffff81000040);
@@ -3016,10 +3016,11 @@ FAIL: %s
 		assert_true (r.protection == prot);
 	}
 
-	private Gum.ElfRelocationDetails make_relocation (uint32 type, uint64 address) {
+	private Gum.ElfRelocationDetails make_relocation (uint32 type, uint64 address, int64 addend = 0) {
 		var r = Gum.ElfRelocationDetails ();
 		r.address = address;
 		r.type = type;
+		r.addend = addend;
 		return r;
 	}
 
