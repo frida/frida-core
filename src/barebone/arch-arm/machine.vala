@@ -32,7 +32,7 @@ namespace Frida.Barebone {
 		private const uint L1_ENTRY_SIZE = 4;
 		private const uint L1_SHIFT = 20;
 		private const uint L1_ALIGN_BITS = 14;
-		private const uint KERNEL_FIRST_L1_INDEX = L1_NUM_ENTRIES / 4 * 3;
+		private const uint KERNEL_FIRST_L1_INDEX = L1_NUM_ENTRIES / 2;
 		private const uint32 L1_KIND_MASK = 3;
 		private const uint32 L1_KIND_FAULT = 0;
 		private const uint32 L1_KIND_TABLE = 1;
