@@ -224,10 +224,15 @@ pub extern "C" fn gum_barebone_try_remap_writable_pages(
         return ptr::null_mut();
     }
     unsafe {
+        let mut wide = Vec::with_capacity(n_addrs as usize);
+        for i in 0..n_addrs as usize {
+            wide.push(*addrs.add(i) as u64);
+        }
+
         let element_type = g_variant_type_new(c"t".as_ptr());
         let payload = g_variant_new_fixed_array(
             element_type,
-            addrs as gconstpointer,
+            wide.as_ptr() as gconstpointer,
             n_addrs as gsize,
             size_of::<u64>() as gsize,
         );
