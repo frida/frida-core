@@ -24,6 +24,7 @@ use crate::{
     gum::{self, FoundExportCallback},
     host_rpc, kernel, libc,
 };
+use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::vec::Vec;
 use core::ffi::CStr;
@@ -46,9 +47,7 @@ const MODULE_DIRECTORY: &str = "/lib/modules/";
 #[cfg(feature = "linux-injected")]
 const MODULE_SUFFIX: &str = ".ko";
 
-const SHADOW_MAGIC: u64 = 0x4644_4f48_5341_4853;
 const SHADOW_HEADER: usize = 24;
-const SHADOW_MIN_ADDRESS: u64 = 0xffff_f000_0000_0000;
 
 #[cfg(feature = "xnu-core")]
 #[unsafe(no_mangle)]
@@ -157,15 +156,23 @@ fn shadow_kernel_pages(first_page: gpointer, n_pages: guint) -> gpointer {
     unsafe {
         let total = n_pages as usize * gum_query_page_size() as usize;
         let buffer = kernel::alloc(SHADOW_HEADER + total);
-        *(buffer as *mut u64) = SHADOW_MAGIC;
         *(buffer.add(8) as *mut u64) = first_page as u64;
         *(buffer.add(16) as *mut u32) = n_pages;
 
         let body = buffer.add(SHADOW_HEADER);
         core::ptr::copy_nonoverlapping(first_page as *const u8, body, total);
+
+        shadows().insert(body as u64);
+
         body as gpointer
     }
 }
+
+fn shadows() -> &'static mut BTreeSet<u64> {
+    unsafe { core::ptr::addr_of_mut!(SHADOWS).as_mut().unwrap() }
+}
+
+static mut SHADOWS: BTreeSet<u64> = BTreeSet::new();
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages: guint) {
@@ -178,14 +185,11 @@ pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages
         return;
     }
 
-    if (writable as u64) < SHADOW_MIN_ADDRESS {
+    if !shadows().remove(&(writable as u64)) {
         return;
     }
     unsafe {
         let buffer = (writable as *mut u8).sub(SHADOW_HEADER);
-        if *(buffer as *const u64) != SHADOW_MAGIC {
-            return;
-        }
         let first_page = *(buffer.add(8) as *const u64);
         let n_pages = *(buffer.add(16) as *const u32);
         let total = n_pages as usize * gum_query_page_size() as usize;
