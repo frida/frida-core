@@ -57,6 +57,10 @@ namespace Frida.Barebone {
 		public abstract async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 			throws Error, IOError;
 
+		public virtual async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Address translation is not implemented for this architecture");
+		}
+
 		public abstract async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
 			throws Error, IOError;
 
@@ -231,6 +235,36 @@ namespace Frida.Barebone {
 	// arrives while the next command is pending, and that command consumes it instead — leaving
 	// its caller with an empty response and the stub still in the old mode. Vala rejects a yield
 	// inside a finally block, so callers hold on to any failure across the restore.
+	internal static async bool halt_guest (GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
+		bool was_running = gdb.state != STOPPED;
+		if (was_running)
+			yield gdb.stop (cancellable);
+
+		return was_running;
+	}
+
+	internal static async void resume_guest (GDB.Client gdb, bool was_running, Cancellable? cancellable)
+			throws Error, IOError {
+		if (was_running)
+			yield gdb.continue (cancellable);
+	}
+
+	internal static async bool enter_physical_addressing (GDB.Client gdb, Cancellable? cancellable)
+			throws Error, IOError {
+		bool was_running = yield halt_guest (gdb, cancellable);
+
+		yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+
+		return was_running;
+	}
+
+	internal static async void leave_physical_addressing (GDB.Client gdb, bool was_running, Cancellable? cancellable)
+			throws Error, IOError {
+		yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+
+		yield resume_guest (gdb, was_running, cancellable);
+	}
+
 	internal static async void set_addressing_mode (GDB.Client gdb, AddressingMode mode, Cancellable? cancellable)
 			throws Error, IOError {
 		Gee.Set<string> features = gdb.features;

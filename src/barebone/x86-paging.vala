@@ -44,14 +44,14 @@ namespace Frida.Barebone {
 				return result;
 			}
 
-			yield begin_access (cancellable);
+			bool was_running = yield begin_access (cancellable);
 			GLib.Error? failure = null;
 			try {
 				yield collect_ranges_in_table (p.root_table, 0, 0, READ | WRITE | EXECUTE, p, result, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield end_access (cancellable);
+			yield end_access (was_running, cancellable);
 			throw_if_failed (failure);
 
 			return result;
@@ -87,7 +87,7 @@ namespace Frida.Barebone {
 			if (!p.paging_enabled)
 				return va;
 
-			yield begin_access (cancellable);
+			bool was_running = yield begin_access (cancellable);
 			uint64 pa = 0;
 			GLib.Error? failure = null;
 			try {
@@ -98,7 +98,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield end_access (cancellable);
+			yield end_access (was_running, cancellable);
 			throw_if_failed (failure);
 
 			return pa;
@@ -113,7 +113,7 @@ namespace Frida.Barebone {
 			uint64 start_va = page_start (va, PAGE_SIZE);
 			uint64 end_va = round_address_up (va + size, PAGE_SIZE);
 
-			yield begin_access (cancellable);
+			bool was_running = yield begin_access (cancellable);
 			GLib.Error? failure = null;
 			try {
 				var relaxed_slots = new Gee.HashSet<uint64?> (Numeric.uint64_hash, Numeric.uint64_equal);
@@ -157,7 +157,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield end_access (cancellable);
+			yield end_access (was_running, cancellable);
 			throw_if_failed (failure);
 		}
 
@@ -241,7 +241,7 @@ namespace Frida.Barebone {
 
 			var run = new Run (physical_addresses.size);
 
-			yield begin_access (cancellable);
+			bool was_running = yield begin_access (cancellable);
 			Allocation? allocation = null;
 			GLib.Error? failure = null;
 			try {
@@ -250,7 +250,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield end_access (cancellable);
+			yield end_access (was_running, cancellable);
 			throw_if_failed (failure);
 
 			if (allocation == null)
@@ -333,7 +333,7 @@ namespace Frida.Barebone {
 
 		private async void restore_entries (Gee.List<DisplacedEntries> displaced, Cancellable? cancellable)
 				throws Error, IOError {
-			yield begin_access (cancellable);
+			bool was_running = yield begin_access (cancellable);
 			GLib.Error? failure = null;
 			try {
 				foreach (DisplacedEntries d in displaced)
@@ -341,7 +341,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield end_access (cancellable);
+			yield end_access (was_running, cancellable);
 			throw_if_failed (failure);
 		}
 
@@ -525,14 +525,18 @@ namespace Frida.Barebone {
 			return (p.entry_size == 8) ? entries.read_uint64 (offset) : entries.read_uint32 (offset);
 		}
 
-		private async void begin_access (Cancellable? cancellable) throws Error, IOError {
-			if (physical_memory == null)
-				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+		private async bool begin_access (Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null)
+				return false;
+
+			return yield enter_physical_addressing (gdb, cancellable);
 		}
 
-		private async void end_access (Cancellable? cancellable) throws Error, IOError {
-			if (physical_memory == null)
-				yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+		private async void end_access (bool was_running, Cancellable? cancellable) throws Error, IOError {
+			if (physical_memory != null)
+				return;
+
+			yield leave_physical_addressing (gdb, was_running, cancellable);
 		}
 
 		private async Buffer read_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
