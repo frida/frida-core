@@ -7,6 +7,19 @@
 
 use alloc::string::String;
 
+pub fn stack_headroom() -> usize {
+    let marker = 0usize;
+    let here = &marker as *const usize as usize;
+
+    here - (here & !(STACK_SPAN - 1))
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+pub(crate) const STACK_SPAN: usize = 16 * 1024;
+
+#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+pub(crate) const STACK_SPAN: usize = 8 * 1024;
+
 #[cfg(feature = "linux")]
 mod kmod;
 #[cfg(feature = "linux-injected")]

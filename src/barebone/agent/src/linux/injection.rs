@@ -5,6 +5,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 use super::layout::{field_offset, struct_size};
+use super::STACK_SPAN;
 use super::native;
 use super::processes::task_with_id;
 use super::arena::{Arena, HOME, REPORTED, WOKEN};
@@ -428,13 +429,6 @@ fn describe_registers() -> Option<Places> {
     })
 }
 
-pub fn stack_headroom() -> usize {
-    let marker = 0usize;
-    let here = &marker as *const usize as usize;
-
-    here - (here & !(STACK_SPAN - 1))
-}
-
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { placements() }.get(&id).map(|placed| placed.arena as u64)
 }
@@ -714,11 +708,6 @@ static mut PLACEMENTS: BTreeMap<u32, Placement> = BTreeMap::new();
 
 pub(crate) const ARENA_SIZE: usize = 2 * 1024 * 1024;
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-const STACK_SPAN: usize = 16 * 1024;
-
-#[cfg(any(target_arch = "arm", target_arch = "x86"))]
-const STACK_SPAN: usize = 8 * 1024;
 #[cfg(target_arch = "arm")]
 const THUMB_BIT: usize = 1;
 

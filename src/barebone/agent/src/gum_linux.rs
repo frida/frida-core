@@ -24,6 +24,11 @@ pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stack_size() -> gsize {
+    crate::linux::stack_headroom() as gsize
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     _GumRwxSupport_GUM_RWX_NONE
 }

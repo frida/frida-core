@@ -840,6 +840,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/X64/rpc-replies-in-live-guest", () => {
+			var h = new Harness ((h) => linux_rpc_replies_in_live_guest.begin (h as Harness, "LINUX_X86_64"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/X64/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
 				"LINUX_X86_64"));
