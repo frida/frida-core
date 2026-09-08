@@ -790,6 +790,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/ARM/rpc-replies-in-live-guest", () => {
+			var h = new Harness ((h) => linux_rpc_replies_in_live_guest.begin (h as Harness, "LINUX_ARM"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/ARM/injects-into-process-in-live-guest", () => {
 			var h = new Harness ((h) => linux_injects_into_process_in_live_guest.begin (h as Harness,
 				"LINUX_ARM"));
@@ -820,6 +825,11 @@ namespace Frida.BareboneTest {
 		GLib.Test.add_func ("/Barebone/IA32/agent-recovers-from-exception-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_recovers_from_exception_in_live_guest.begin (h as Harness,
 				"LINUX_X86"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/IA32/rpc-replies-in-live-guest", () => {
+			var h = new Harness ((h) => linux_rpc_replies_in_live_guest.begin (h as Harness, "LINUX_X86"));
 			h.run ();
 		});
 

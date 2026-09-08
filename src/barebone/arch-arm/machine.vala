@@ -32,6 +32,7 @@ namespace Frida.Barebone {
 		private const uint L1_ENTRY_SIZE = 4;
 		private const uint L1_SHIFT = 20;
 		private const uint L1_ALIGN_BITS = 14;
+		private const uint KERNEL_FIRST_L1_INDEX = L1_NUM_ENTRIES / 4 * 3;
 		private const uint32 L1_KIND_MASK = 3;
 		private const uint32 L1_KIND_FAULT = 0;
 		private const uint32 L1_KIND_TABLE = 1;
@@ -255,6 +256,28 @@ namespace Frida.Barebone {
 				kernel_page_table_pa = table;
 		}
 
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+
+			bool was_running = yield enter_physical_addressing (gdb, cancellable);
+			uint64? pa = null;
+			GLib.Error? failure = null;
+			try {
+				yield locate_kernel_page_table (p, cancellable);
+
+				pa = yield translate_in_table (yield table_describing (va, p, cancellable), va, cancellable);
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield leave_physical_addressing (gdb, was_running, cancellable);
+			throw_if_failed (failure);
+
+			if (pa == null)
+				throw new Error.INVALID_ARGUMENT ("Address 0x%x is not mapped", (uint) va);
+
+			return pa;
+		}
+
 		private async uint64 table_describing (uint64 va, MMUParameters p, Cancellable? cancellable)
 				throws Error, IOError {
 			if (kernel_page_table_pa != 0) {
@@ -370,11 +393,19 @@ namespace Frida.Barebone {
 
 		private async bool scan_for_run (Run run, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
 			uint boundary = p.split_index;
-			if (yield scan_for_run_in_l1 (run, p.tt0, 0, boundary, p, cancellable))
-				return true;
-			if (boundary != L1_NUM_ENTRIES)
-				return yield scan_for_run_in_l1 (run, p.tt1, boundary, L1_NUM_ENTRIES, p, cancellable);
-			return false;
+
+			if (boundary != L1_NUM_ENTRIES) {
+				if (yield scan_for_run_in_l1 (run, p.tt1, boundary, L1_NUM_ENTRIES, p, cancellable))
+					return true;
+			} else {
+				if (yield scan_for_run_in_l1 (run, p.tt0, KERNEL_FIRST_L1_INDEX, L1_NUM_ENTRIES, p,
+						cancellable))
+					return true;
+			}
+
+			run.reset ();
+
+			return yield scan_for_run_in_l1 (run, p.tt0, 0, boundary, p, cancellable);
 		}
 
 		private async bool scan_for_run_in_l1 (Run run, uint64 table_address, uint first_index, uint end_index,
