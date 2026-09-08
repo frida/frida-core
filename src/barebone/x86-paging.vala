@@ -266,10 +266,18 @@ namespace Frida.Barebone {
 				MMUParameters p, Cancellable? cancellable) throws Error, IOError {
 			Level l = p.levels[level];
 			bool at_leaf_level = level == p.leaf_level;
+			bool at_root = level == 0;
 
 			Buffer entries = yield read_buffer (table_pa, l.num_entries * p.entry_size, cancellable);
 
-			for (uint i = 0; i != l.num_entries; i++) {
+			for (uint n = 0; n != l.num_entries; n++) {
+				uint i = at_root ? l.num_entries - 1 - n : n;
+				if (at_root) {
+					if (i < l.num_entries / 2)
+						break;
+					run.reset ();
+				}
+
 				uint64 entry = read_entry (entries, i * p.entry_size, p);
 				uint64 prefix = upper_bits | ((uint64) i << l.shift);
 
