@@ -802,6 +802,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/ARM64/agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_ARM64"));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/ARM64/rpc-replies-in-live-guest", () => {
+			var h = new Harness ((h) => linux_rpc_replies_in_live_guest.begin (h as Harness, "LINUX_ARM64"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86"));
 			h.run ();
@@ -4353,6 +4363,10 @@ FAIL: %s
 			"\"payload\":2");
 	}
 
+	private async void linux_rpc_replies_in_live_guest (Harness h, string prefix) {
+		yield call_rpc_in_live_guest (h, linux_config_from_environment (h, prefix));
+	}
+
 	private async void linux_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), """
 			let caught = 'no';
@@ -5984,6 +5998,57 @@ FAIL: %s
 		}
 
 		return config;
+	}
+
+	private async void call_rpc_in_live_guest (Harness h, BareboneConfig? config) {
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+			var session = yield device.attach (0, null, null);
+			var script = yield session.create_script ("""
+				rpc.exports.evaluate = code => eval(code);
+			""", null, null);
+
+			string? received = null;
+			bool waiting = false;
+			var handler = script.message.connect ((json, data) => {
+				if (!json.contains ("frida:rpc"))
+					return;
+				received = json;
+				if (waiting) {
+					waiting = false;
+					call_rpc_in_live_guest.callback ();
+				}
+			});
+			yield script.load (null);
+
+			script.post ("""["frida:rpc",1,"call","evaluate",["1 + 1"]]""");
+
+			if (received == null) {
+				waiting = true;
+				yield;
+			}
+			script.disconnect (handler);
+
+			if (!received.contains ("\"ok\""))
+				printerr ("\nexpected an ok reply in: %s\n", received);
+			assert_true (received.contains ("\"ok\""));
+
+			yield session.detach (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void run_script_in_live_guest (Harness h, BareboneConfig? config, string source,
