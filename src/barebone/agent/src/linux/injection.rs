@@ -428,6 +428,13 @@ fn describe_registers() -> Option<Places> {
     })
 }
 
+pub fn stack_headroom() -> usize {
+    let marker = 0usize;
+    let here = &marker as *const usize as usize;
+
+    here - (here & !(STACK_SPAN - 1))
+}
+
 pub fn arena_for_pid(id: u32) -> Option<u64> {
     unsafe { placements() }.get(&id).map(|placed| placed.arena as u64)
 }

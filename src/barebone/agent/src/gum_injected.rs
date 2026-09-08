@@ -65,11 +65,15 @@ pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar
 #[cfg(feature = "linux-injected")]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
-    if crate::on_js_thread() {
-        crate::linux::STACK_SIZE as crate::bindings::gsize
-    } else {
-        0
+    if !crate::on_js_thread() {
+        return 0;
     }
+
+    if kernel::in_copy() {
+        return crate::linux::STACK_SIZE as crate::bindings::gsize;
+    }
+
+    crate::linux::stack_headroom() as crate::bindings::gsize
 }
 
 #[cfg(feature = "xnu-core")]
