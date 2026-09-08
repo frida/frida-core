@@ -164,8 +164,9 @@ modules: $(PRELINKED)
 	$(MAKE) -C $(KDIR) $(if $(KOUT),O=$(KOUT)) M=$(CURDIR) ARCH=$(ARCH) \
 		FRIDA_KMOD_DEFS="$(FRIDA_KMOD_DEFS)" MODULE_NAME=$(MODULE_NAME) modules
 
-$(PRELINKED): $(AGENT_LIB_SOFTFLOAT) $(LIBC)
-	$(AGENT_LD) -r $(if $(AGENT_LD_EMULATION),-m $(AGENT_LD_EMULATION)) -o $@.tmp \
+$(PRELINKED): $(AGENT_LIB_SOFTFLOAT) $(LIBC) prelink.lds
+	$(AGENT_LD) -r $(if $(AGENT_LD_EMULATION),-m $(AGENT_LD_EMULATION)) \
+		-T prelink.lds -o $@.tmp \
 		--whole-archive $(AGENT_LIB_SOFTFLOAT) --no-whole-archive \
 		--start-group \
 			$(GUMJS_DEVKIT_DIR)/libfrida-gumjs.a \
