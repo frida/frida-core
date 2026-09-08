@@ -110,8 +110,9 @@ func (c *TSConfigCache) GetCompilerOptions(
 	}
 
 	newOpts := parsedCommandLine.CompilerOptions()
-	newOpts.Module = tscore.ModuleKindNode16
-	newOpts.ModuleResolution = tscore.ModuleResolutionKindNode16
+	newOpts.Module = tscore.ModuleKindESNext
+	newOpts.ModuleResolution = tscore.ModuleResolutionKindBundler
+	newOpts.RewriteRelativeImportExtensions = tscore.TSTrue
 	newOpts.NoEmit = tscore.TSFalse
 
 	newOpts.InlineSourceMap = boolToTristate(c.sourceMap)
