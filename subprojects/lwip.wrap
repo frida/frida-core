@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/lwip.git
-revision = 971a7d05b7c60a5bdfb94f25ace27fdcaaee42eb
+revision = 9122f0d0006b7990c0f9d0c58506cc454f6a1f49
 depth = 1
 
 [provide]
