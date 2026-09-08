@@ -26,6 +26,9 @@ SECTIONS {
     _kfree = .; . += 8;
     _execmem_alloc = .; . += 8;
     _set_memory_rw = .; . += 8;
+    _set_memory_ro = .; . += 8;
+    _set_memory_x = .; . += 8;
+    _set_memory_nx = .; . += 8;
     _execmem_free = .; . += 8;
     _module_alloc = .; . += 8;
     _module_memfree = .; . += 8;
@@ -90,6 +93,7 @@ SECTIONS {
     _access_process_vm = .; . += 8;
     _fixup_exception = .; . += 8;
     _aarch64_insn_patch_text_nosync = .; . += 8;
+    _aarch64_insn_patch_text = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */

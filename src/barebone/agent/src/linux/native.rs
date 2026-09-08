@@ -162,8 +162,94 @@ pub fn page_size() -> usize {
 }
 
 pub fn protect(address: u64, size: usize, protection: u32) -> bool {
+    #[cfg(not(target_arch = "arm"))]
+    if set_protection(address, size, protection) {
+        return true;
+    }
+
     crate::gum_injected::ask_the_host_to_protect(address, size, protection)
 }
+
+#[cfg(target_arch = "x86")]
+pub fn set_protection(_address: u64, _size: usize, _protection: u32) -> bool {
+    false
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn patch_text(address: u64, data: *const u8, len: usize) -> bool {
+    if address % 4 != 0 || len % 4 != 0 {
+        return false;
+    }
+
+    let count = len / 4;
+
+    let mut addrs = alloc::vec::Vec::with_capacity(count);
+    let mut insns = alloc::vec::Vec::with_capacity(count);
+    for i in 0..count {
+        addrs.push((address as usize + (i * 4)) as *mut c_void);
+        insns.push(unsafe { (data as *const u32).add(i).read_unaligned() });
+    }
+
+    unsafe { _aarch64_insn_patch_text(addrs.as_mut_ptr(), insns.as_ptr(), count as c_int) == 0 }
+}
+
+#[cfg(target_arch = "arm")]
+pub fn patch_text(address: u64, data: *const u8, len: usize) -> bool {
+    if address % 2 != 0 || len % 2 != 0 {
+        return false;
+    }
+
+    unsafe {
+        for i in 0..len / 4 {
+            let insn = (data as *const u32).add(i).read_unaligned();
+            _patch_text((address as usize + (i * 4)) as *mut c_void, insn);
+        }
+    }
+
+    true
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn patch_text(address: u64, data: *const u8, len: usize) -> bool {
+    unsafe {
+        let Some(poke) = _text_poke_kgdb else {
+            return false;
+        };
+
+        !poke(address as *mut c_void, data as *const c_void, len).is_null()
+    }
+}
+
+#[cfg(target_arch = "x86")]
+pub fn patch_text(address: u64, data: *const u8, len: usize) -> bool {
+    unsafe { !frida_k_text_poke(address as *mut c_void, data as *const c_void, len).is_null() }
+}
+
+#[cfg(not(target_arch = "x86"))]
+pub fn set_protection(address: u64, size: usize, protection: u32) -> bool {
+    let pages = size.div_ceil(PAGE_SIZE) as c_int;
+
+    unsafe {
+        let write = if protection & GUM_PAGE_WRITE != 0 { _set_memory_rw } else { _set_memory_ro };
+        let Some(write) = write else {
+            return false;
+        };
+        if write(address as usize, pages) != 0 {
+            return false;
+        }
+
+        if protection & GUM_PAGE_EXECUTE != 0 {
+            if let Some(execute) = _set_memory_x {
+                execute(address as usize, pages);
+            }
+        }
+    }
+
+    true
+}
+
+const GUM_PAGE_WRITE: u32 = 2;
+const GUM_PAGE_EXECUTE: u32 = 4;
 
 pub fn current_process_id() -> u32 {
     KERNEL_PROCESS
@@ -592,6 +678,17 @@ unsafe extern "C" {
     // Executable memory moved out of the module loader in 6.12.
     static _execmem_alloc: Option<unsafe extern "C" fn(u32, usize) -> *mut u8>;
     static _set_memory_rw: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
+    static _set_memory_ro: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
+    static _set_memory_x: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
+    static _set_memory_nx: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
+    #[cfg(target_arch = "aarch64")]
+    static _aarch64_insn_patch_text:
+        unsafe extern "C" fn(*mut *mut c_void, *const u32, c_int) -> c_int;
+    #[cfg(target_arch = "arm")]
+    static _patch_text: unsafe extern "C" fn(*mut c_void, u32);
+    #[cfg(target_arch = "x86_64")]
+    static _text_poke_kgdb:
+        Option<unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> *mut c_void>;
     static _execmem_free: Option<unsafe extern "C" fn(*mut u8)>;
     static _module_alloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     static _module_memfree: Option<unsafe extern "C" fn(*mut u8)>;
@@ -666,6 +763,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn frida_k_log(message: *const c_char);
     fn frida_k_alloc(size: usize, flags: usize) -> *mut u8;
+    fn frida_k_text_poke(addr: *mut c_void, opcode: *const c_void, len: usize) -> *mut c_void;
     fn frida_k_alloc_code(kind: usize, size: usize, pages: usize) -> *mut u8;
     fn frida_k_free_code(code: *mut u8);
 }

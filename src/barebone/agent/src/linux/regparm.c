@@ -577,6 +577,18 @@ frida_k_get_user_pages_unlocked (unsigned long a0, unsigned long a1, void * a2, 
   return ((fn_t) _get_user_pages_unlocked) (a0, a1, a2, a3);
 }
 
+extern void *_text_poke_kgdb;
+
+void * frida_k_text_poke (void * addr, const void * opcode, unsigned long len)
+{
+  typedef void * (__attribute__((regparm(3))) * fn_t) (void *, const void *, unsigned long);
+
+  if (!_text_poke_kgdb)
+    return 0;
+
+  return ((fn_t) _text_poke_kgdb) (addr, opcode, len);
+}
+
 extern void *_register_die_notifier;
 
 int frida_k_register_die_notifier (void * a0)
