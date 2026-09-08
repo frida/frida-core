@@ -985,29 +985,27 @@ namespace Frida.Barebone {
 							data = blob.get_data_as_bytes ();
 
 						script_message (destination, AgentScriptId (script_handle), json, data);
-					} else if (command_code == Command.REMAP_WRITABLE_PAGES) {
+					} else if (command_code == Command.REMAP_WRITABLE_PAGES ||
+							command_code == Command.MEMORY_PROTECT ||
+							command_code == Command.PATCH_CODE) {
+						bool was_running = yield halt_guest (machine.gdb, io_cancellable);
+
 						Variant result;
 						try {
-							result = yield remap_writable_pages (payload, io_cancellable);
+							if (command_code == Command.REMAP_WRITABLE_PAGES)
+								result = yield remap_writable_pages (payload, io_cancellable);
+							else if (command_code == Command.MEMORY_PROTECT)
+								result = yield protect_memory (payload, io_cancellable);
+							else
+								result = yield patch_code (payload, io_cancellable);
 						} catch (Error e) {
-							result = new Variant.uint64 (0);
+							result = (command_code == Command.REMAP_WRITABLE_PAGES)
+								? new Variant.uint64 (0)
+								: new Variant.boolean (false);
 						}
-						yield send_reply (request_id, result);
-					} else if (command_code == Command.MEMORY_PROTECT) {
-						Variant result;
-						try {
-							result = yield protect_memory (payload, io_cancellable);
-						} catch (Error e) {
-							result = new Variant.boolean (false);
-						}
-						yield send_reply (request_id, result);
-					} else if (command_code == Command.PATCH_CODE) {
-						Variant result;
-						try {
-							result = yield patch_code (payload, io_cancellable);
-						} catch (Error e) {
-							result = new Variant.boolean (false);
-						}
+
+						yield resume_guest (machine.gdb, was_running, io_cancellable);
+
 						yield send_reply (request_id, result);
 					} else if (command_code == Command.REPLY) {
 						Promise<Variant>? promise;
@@ -1045,13 +1043,10 @@ namespace Frida.Barebone {
 		}
 
 		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Error, IOError {
-			var arm64 = machine as Arm64Machine;
-			if (arm64 == null)
-				throw new Error.NOT_SUPPORTED ("Remapping writable pages is only implemented for arm64");
 			var physical_addresses = new Gee.ArrayList<uint64?> ();
 			for (size_t i = 0; i != payload.n_children (); i++) {
 				uint64 va = payload.get_child_value (i).get_uint64 ();
-				physical_addresses.add (yield arm64.translate_address (va, cancellable));
+				physical_addresses.add (yield machine.translate_address (va, cancellable));
 			}
 
 			Allocation allocation = yield machine.allocate_pages (physical_addresses, cancellable);
@@ -1075,13 +1070,16 @@ namespace Frida.Barebone {
 		// even through a writable alias. The physical-memory bridge writes the backing store directly,
 		// which the lock does not cover, letting us land hooks in kernel and kext text.
 		private async Variant patch_code (Variant payload, Cancellable? cancellable) throws Error, IOError {
-			var arm64 = machine as Arm64Machine;
-			if (arm64 == null)
-				throw new Error.NOT_SUPPORTED ("Patching code through physical memory is only implemented for arm64");
 			uint64 va;
 			Variant bytes_value;
 			payload.get ("(t@ay)", out va, out bytes_value);
 			var data = (uint8[]) bytes_value.get_data_as_bytes ().get_data ();
+
+			var arm64 = machine as Arm64Machine;
+			if (arm64 == null) {
+				yield machine.write_virtual (va, data, cancellable);
+				return new Variant.boolean (true);
+			}
 
 			size_t page_size = yield machine.query_page_size (cancellable);
 			size_t offset = 0;

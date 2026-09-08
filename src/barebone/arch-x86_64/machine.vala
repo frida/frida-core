@@ -341,7 +341,7 @@ namespace Frida.Barebone {
 			return yield X86InlineHook.create (target, handler, AMD64, allocator, gdb, cancellable);
 		}
 
-		public async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
 			return yield page_tables.translate (va, cancellable);
 		}
 	}
