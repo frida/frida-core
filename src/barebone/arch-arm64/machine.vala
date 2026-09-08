@@ -97,14 +97,14 @@ namespace Frida.Barebone {
 
 			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
 
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield enter_physical_mode (cancellable);
 			GLib.Error? failure = null;
 			try {
 				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p, result, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			yield leave_physical_mode (cancellable);
 			throw_if_failed (failure);
 
 			return result;
@@ -347,19 +347,19 @@ namespace Frida.Barebone {
 				physical_memory.write (pa, data);
 				return;
 			}
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield enter_physical_mode (cancellable);
 			GLib.Error? failure = null;
 			try {
 				yield gdb.write_byte_array (pa, new Bytes (data), cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			yield leave_physical_mode (cancellable);
 			throw_if_failed (failure);
 		}
 
 		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
-			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			yield enter_physical_mode (cancellable);
 			uint8[]? data = null;
 			GLib.Error? failure = null;
 			try {
@@ -367,7 +367,7 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			yield leave_physical_mode (cancellable);
 			throw_if_failed (failure);
 
 			return data;
@@ -470,14 +470,37 @@ namespace Frida.Barebone {
 		// The bridge reads and writes guest physical memory directly, so the stub's
 		// physical-addressing mode, which requires a halted target, is unnecessary.
 		private async void begin_physical_addressing (Cancellable? cancellable) throws Error, IOError {
-			if (physical_memory == null)
-				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+			if (physical_memory != null)
+				return;
+
+			yield enter_physical_mode (cancellable);
 		}
 
 		private async void end_physical_addressing (Cancellable? cancellable) throws Error, IOError {
-			if (physical_memory == null)
-				yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+			if (physical_memory != null)
+				return;
+
+			yield leave_physical_mode (cancellable);
 		}
+
+		private async void enter_physical_mode (Cancellable? cancellable) throws Error, IOError {
+			guest_was_running = gdb.state != STOPPED;
+			if (guest_was_running)
+				yield gdb.stop (cancellable);
+
+			yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+		}
+
+		private async void leave_physical_mode (Cancellable? cancellable) throws Error, IOError {
+			yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+
+			if (guest_was_running) {
+				guest_was_running = false;
+				yield gdb.continue (cancellable);
+			}
+		}
+
+		private bool guest_was_running = false;
 
 		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
 			if (cached_mmu_parameters == null)
@@ -1357,6 +1380,9 @@ namespace Frida.Barebone {
 					throw new Error.INVALID_OPERATION ("Already deallocated");
 				Bytes d = old_descriptors;
 				old_descriptors = null;
+				bool was_running = gdb.state != STOPPED;
+				if (was_running)
+					yield gdb.stop (cancellable);
 				yield set_addressing_mode (gdb, PHYSICAL, cancellable);
 				GLib.Error? failure = null;
 				try {
@@ -1365,6 +1391,8 @@ namespace Frida.Barebone {
 					failure = e;
 				}
 				yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+				if (was_running)
+					yield gdb.continue (cancellable);
 				throw_if_failed (failure);
 			}
 		}
