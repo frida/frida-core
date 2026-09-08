@@ -84,10 +84,9 @@ pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     #[cfg(feature = "linux-injected")]
-    if kernel::in_copy() {
-        return _GumRwxSupport_GUM_RWX_FULL;
-    }
+    return _GumRwxSupport_GUM_RWX_FULL;
 
+    #[cfg(not(feature = "linux-injected"))]
     _GumRwxSupport_GUM_RWX_NONE
 }
 
