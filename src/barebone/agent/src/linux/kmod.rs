@@ -103,6 +103,10 @@ pub fn wall_clock_micros() -> (u32, u32) {
     (secs, micros)
 }
 
+pub fn current_process_id() -> u32 {
+    KERNEL_PROCESS
+}
+
 pub fn current_thread_id() -> u64 {
     unsafe { frida_kmod_current_thread_id() }
 }
@@ -205,6 +209,8 @@ pub fn enumerate_symbols(callback: &mut dyn FnMut(&CStr, u64) -> bool) -> bool {
     let mut boxed: &mut dyn FnMut(&CStr, u64) -> bool = callback;
     unsafe { frida_kmod_enumerate_symbols(on_symbol, &mut boxed as *mut _ as *mut c_void) != 0 }
 }
+
+const KERNEL_PROCESS: u32 = 0;
 
 type FoundSymbolFunc =
     unsafe extern "C" fn(name: *const c_char, address: u64, user_data: *mut c_void) -> c_int;

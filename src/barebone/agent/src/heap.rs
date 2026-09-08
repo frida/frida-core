@@ -27,7 +27,7 @@ pub fn give_back(piece: *mut u8) {
 }
 
 fn pages_for(size: usize) -> *mut u8 {
-    #[cfg(any(feature = "linux", feature = "linux-injected"))]
+    #[cfg(feature = "linux-injected")]
     {
         crate::linux::user::map_writable(size)
     }

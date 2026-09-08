@@ -61,7 +61,7 @@ pub mod kernel;
 mod gum_linux;
 #[cfg(any(feature = "linux", feature = "xnu-kext"))]
 mod hostlink_chardev;
-#[cfg(any(feature = "linux", feature = "linux-injected", feature = "xnu-core"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 mod heap;
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 mod linux;
@@ -224,6 +224,7 @@ impl HandlerResponse {
 }
 
 pub static mut MODULE_INFO: Vec<ModuleInfo> = Vec::new();
+#[cfg(any(feature = "blob", feature = "xnu-kext"))]
 pub static mut SYMBOL_TABLE: crate::symbols::SymbolTable = crate::symbols::SymbolTable::empty();
 
 #[derive(Debug, Clone)]
@@ -1014,11 +1015,13 @@ pub(crate) fn on_frame_from_host(frame: &[u8]) {
     // A frame for a process that the host attached to belongs to the copy in that process. The
     // copy also runs this code, but it has no targets, thus it continues.
     #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
-    let destination = destination_of(variant);
-    if let Some(arena) = kernel::arena_for_pid(destination) {
-        unsafe { g_variant_unref(variant) };
-        kernel::forward_frame(arena, frame);
-        return;
+    {
+        let destination = destination_of(variant);
+        if let Some(arena) = kernel::arena_for_pid(destination) {
+            unsafe { g_variant_unref(variant) };
+            kernel::forward_frame(arena, frame);
+            return;
+        }
     }
 
     process_incoming_message(variant);
@@ -1569,12 +1572,12 @@ fn serve_pending_detach() {
 }
 
 
-// The copy sends complete frames, thus the half with the hostlink sends the bytes without a
-// change.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 #[cfg(feature = "xnu-core")]
 pub static mut ASKED_THE_HOST: u32 = 0;
 
+// The copy sends complete frames, thus the half with the hostlink sends the bytes without a
+// change.
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 fn relay_frames_from_targets() {
     #[cfg(feature = "xnu-core")]
     {
