@@ -50,7 +50,7 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(target_arch = "arm")]
+#[cfg(all(target_arch = "arm", not(any(feature = "linux", feature = "linux-injected"))))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     unsafe {
@@ -65,6 +65,32 @@ pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
             in("r2") 0,
             options(nostack),
         );
+    }
+}
+
+#[cfg(all(target_arch = "arm", any(feature = "linux", feature = "linux-injected")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+    unsafe {
+        let told: u32;
+        core::arch::asm!("mrc p15, 0, {}, c0, c0, 1", out(reg) told, options(nomem, nostack));
+
+        let data_line = 4usize << ((told >> 16) & 0xf);
+        let code_line = 4usize << (told & 0xf);
+
+        let mut at = (start as usize) & !(data_line - 1);
+        while at < end as usize {
+            core::arch::asm!("mcr p15, 0, {}, c7, c11, 1", in(reg) at, options(nostack));
+            at += data_line;
+        }
+        core::arch::asm!("dsb ish", options(nostack));
+
+        let mut at = (start as usize) & !(code_line - 1);
+        while at < end as usize {
+            core::arch::asm!("mcr p15, 0, {}, c7, c5, 1", in(reg) at, options(nostack));
+            at += code_line;
+        }
+        core::arch::asm!("dsb ish", "isb", options(nostack));
     }
 }
 
