@@ -30,7 +30,7 @@ mod facade;
 #[cfg(feature = "linux-injected")]
 mod injection;
 #[cfg(feature = "linux-injected")]
-mod layout;
+pub(crate) mod layout;
 #[cfg(feature = "linux-injected")]
 mod mapped;
 #[cfg(feature = "linux-injected")]
