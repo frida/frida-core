@@ -5,11 +5,15 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::bindings::{
-    GumMemoryRange, GumModuleRegistry, g_object_unref, gpointer, gsize, gum_barebone_register_module,
-    gum_barebone_unregister_module, gum_interceptor_begin_transaction,
+    GError, GumElfModule, GumExportDetails, GumMemoryRange, GumModuleRegistry, gboolean,
+    g_bytes_new, g_bytes_unref, g_clear_error, g_object_unref, gconstpointer, gpointer, gsize,
+    gum_barebone_register_module, gum_barebone_unregister_module,
+    gum_elf_module_enumerate_exports, gum_elf_module_get_preferred_address,
+    gum_elf_module_new_from_blob, gum_interceptor_begin_transaction,
     gum_interceptor_end_transaction, gum_interceptor_obtain, gum_interceptor_replace,
 };
-use crate::gum;
+use crate::gum::{self, FoundExportCallback};
+use alloc::ffi::CString;
 
 use super::user::{EXECUTABLE, READABLE, WRITABLE, contents_of};
 
@@ -82,6 +86,76 @@ fn announce(image: &Image) {
     }
 }
 
+pub fn enumerate_exports_in_range(from: u64, to: u64, found: &mut FoundExportCallback<'_>) {
+    let Some(image) = mapped_images().into_iter().find(|image| image.base == from) else {
+        return;
+    };
+    let Some(module) = read_the_image(&image) else {
+        return;
+    };
+
+    let slide = image
+        .base
+        .wrapping_sub(unsafe { gum_elf_module_get_preferred_address(module) });
+
+    let mut asking = Asking {
+        found,
+        slide,
+        from,
+        to,
+    };
+    unsafe {
+        gum_elf_module_enumerate_exports(
+            module,
+            Some(crate::signed_to_be_called_back(note_an_export, 0)),
+            &mut asking as *mut Asking<'_, '_> as gpointer,
+        );
+        g_object_unref(module as gpointer);
+    }
+}
+
+fn read_the_image(image: &Image) -> Option<*mut GumElfModule> {
+    let path = CString::new(image.path.as_str()).ok()?;
+    let data = contents_of(&path);
+    if data.is_empty() {
+        return None;
+    }
+
+    unsafe {
+        let blob = g_bytes_new(data.as_ptr() as gconstpointer, data.len() as gsize);
+
+        let mut error: *mut GError = ptr::null_mut();
+        let module = gum_elf_module_new_from_blob(blob, &mut error);
+        g_bytes_unref(blob);
+
+        if module.is_null() {
+            g_clear_error(&mut error);
+            return None;
+        }
+
+        Some(module)
+    }
+}
+
+struct Asking<'a, 'b> {
+    found: &'a mut FoundExportCallback<'b>,
+    slide: u64,
+    from: u64,
+    to: u64,
+}
+
+unsafe extern "C" fn note_an_export(details: *const GumExportDetails, asking: gpointer) -> gboolean {
+    let asking = unsafe { &mut *(asking as *mut Asking<'_, '_>) };
+    let details = unsafe { &*details };
+
+    let address = details.address.wrapping_add(asking.slide);
+    if address < asking.from || address >= asking.to {
+        return 1;
+    }
+
+    (asking.found)(details.name, address) as gboolean
+}
+
 fn where_the_loader_says_so() -> Option<u64> {
     let mut found = 0u64;
     for image in mapped_images() {
@@ -92,8 +166,7 @@ fn where_the_loader_says_so() -> Option<u64> {
 
             found == 0
         };
-        super::symbols::enumerate_exports_in_range(image.base, image.base + image.size,
-            &mut on_export);
+        enumerate_exports_in_range(image.base, image.base + image.size, &mut on_export);
         if found != 0 {
             return Some(found);
         }
