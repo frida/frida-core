@@ -207,18 +207,27 @@ pub(crate) fn gum_native_module_new(
 ) -> *mut GumModule {
     unsafe {
         let path_cstr = CString::new(path).unwrap();
-        let version_cstr = CString::new(version).unwrap();
 
         let module =
             g_object_new(gum_native_module_get_type(), ptr::null()) as *mut GumNativeModule;
         (*module).path = g_strdup(path_cstr.as_ptr());
         let name_offset = path.rfind(['/', '\\']).map_or(0, |at| at + 1);
         (*module).name = (*module).path.add(name_offset);
-        (*module).version = g_strdup(version_cstr.as_ptr());
+        (*module).version = version_copied(version);
         (*module).range = *range;
 
         module as *mut GumModule
     }
+}
+
+fn version_copied(version: &str) -> *mut gchar {
+    if version.is_empty() {
+        return ptr::null_mut();
+    }
+
+    let copy = CString::new(version).unwrap();
+
+    unsafe { g_strdup(copy.as_ptr()) }
 }
 
 extern "C" fn gum_native_module_get_name(module: *mut GumModule) -> *const gchar {
