@@ -71,6 +71,10 @@ namespace Frida.Barebone {
 	}
 
 	private static uint64 span_of (Gee.List<SymbolInfo> symbols, uint64 base_address) {
+		uint64 end = address_of (symbols, KERNEL_END_SYMBOL);
+		if (end != 0)
+			return end - base_address;
+
 		uint64 highest = base_address;
 		foreach (var symbol in symbols)
 			highest = uint64.max (highest, symbol.offset);
@@ -160,6 +164,7 @@ namespace Frida.Barebone {
 
 	private const string IMAGE_MAGIC = "ARM\x64";
 	private const uint64 IMAGE_MAGIC_OFFSET = 0x38;
+	private const string KERNEL_END_SYMBOL = "_end";
 	private const string KERNEL_BANNER_SYMBOL = "linux_banner";
 	private const string KERNEL_BANNER = "Linux version ";
 	private const uint64 KERNEL_ALIGNMENT = 2 * 1024 * 1024;
