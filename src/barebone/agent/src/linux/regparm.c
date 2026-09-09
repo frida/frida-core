@@ -589,6 +589,32 @@ void * frida_k_text_poke (void * addr, const void * opcode, unsigned long len)
   return ((fn_t) _text_poke_kgdb) (addr, opcode, len);
 }
 
+extern void *_register_module_notifier;
+
+int frida_k_register_module_notifier (void * a0)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  return ((fn_t) _register_module_notifier) (a0);
+}
+
+extern void *_unregister_module_notifier;
+
+int frida_k_unregister_module_notifier (void * a0)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  return ((fn_t) _unregister_module_notifier) (a0);
+}
+
+extern int frida_cb_module_state (void * nb, unsigned long action, void * data);
+
+__attribute__ ((regparm (3))) int
+frida_kcb_module_state (void * nb, unsigned long action, void * data)
+{
+  return frida_cb_module_state (nb, action, data);
+}
+
 extern void *_register_die_notifier;
 
 int frida_k_register_die_notifier (void * a0)

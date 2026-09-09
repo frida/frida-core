@@ -99,6 +99,8 @@
 typedef int (* FridaFoundSymbolFunc) (const char * name, u64 address, void * user_data);
 typedef int (* FridaFoundModuleFunc) (const char * name, const char * version, u64 base, u64 size,
     void * user_data);
+typedef void (* FridaModuleEventFunc) (int loaded, const char * name, const char * version, u64 base,
+    u64 size, void * user_data);
 typedef void (* FridaThreadEntry) (void * parameter, int wait_result);
 
 typedef struct task_struct * (* FridaFindTaskByVpidFunc) (pid_t nr);
@@ -326,6 +328,9 @@ static void * frida_resolve_unexported (const char * name);
 static void * frida_rewind_to_function_entry (void * address);
 static void * frida_unseal_landing_pad (void * address);
 static int frida_thread_trampoline (void * data);
+static void frida_kmod_module_range (struct module * mod, u64 * base, u64 * size);
+static int frida_kmod_on_module_state (struct notifier_block * nb, unsigned long action,
+    void * data);
 static int frida_dev_open (struct inode * inode, struct file * file);
 static int frida_dev_release (struct inode * inode, struct file * file);
 static ssize_t frida_dev_read (struct file * file, char __user * buffer, size_t size,
@@ -371,6 +376,11 @@ static u64 frida_kernel_size;
 static typeof (&kallsyms_lookup_name) frida_kallsyms_lookup_name_impl;
 static typeof (&kallsyms_on_each_symbol) frida_kallsyms_on_each_symbol_impl;
 static struct list_head * frida_modules;
+static FridaModuleEventFunc frida_kmod_module_event_func;
+static void * frida_kmod_module_event_data;
+static struct notifier_block frida_kmod_module_notifier = {
+  .notifier_call = frida_kmod_on_module_state,
+};
 static struct mutex * frida_module_mutex;
 static typeof (&set_memory_ro) frida_set_memory_ro_impl;
 static typeof (&set_memory_rw) frida_set_memory_rw_impl;
@@ -2365,19 +2375,72 @@ frida_kmod_enumerate_modules (FridaFoundModuleFunc func,
       if (mod->state != MODULE_STATE_LIVE)
         continue;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 4, 0)
-      base = (u64) (uintptr_t) mod->mem[MOD_TEXT].base;
-      size = mod->mem[MOD_TEXT].size;
-#else
-      base = (u64) (uintptr_t) mod->core_layout.base;
-      size = mod->core_layout.size;
-#endif
+      frida_kmod_module_range (mod, &base, &size);
 
       if (!func (mod->name, "", base, size, user_data))
         break;
     }
 
   mutex_unlock (frida_module_mutex);
+}
+
+void
+frida_kmod_watch_modules (FridaModuleEventFunc func,
+                          void * user_data)
+{
+  frida_kmod_module_event_func = func;
+  frida_kmod_module_event_data = user_data;
+
+  register_module_notifier (&frida_kmod_module_notifier);
+}
+
+void
+frida_kmod_unwatch_modules (void)
+{
+  if (frida_kmod_module_event_func == NULL)
+    return;
+
+  unregister_module_notifier (&frida_kmod_module_notifier);
+
+  frida_kmod_module_event_func = NULL;
+  frida_kmod_module_event_data = NULL;
+}
+
+static void
+frida_kmod_module_range (struct module * mod, u64 * base, u64 * size)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 4, 0)
+  *base = (u64) (uintptr_t) mod->mem[MOD_TEXT].base;
+  *size = mod->mem[MOD_TEXT].size;
+#else
+  *base = (u64) (uintptr_t) mod->core_layout.base;
+  *size = mod->core_layout.size;
+#endif
+}
+
+static int
+frida_kmod_on_module_state (struct notifier_block * nb, unsigned long action, void * data)
+{
+  struct module * mod = data;
+  u64 base, size;
+  int loaded;
+
+  if (frida_kmod_module_event_func == NULL)
+    return NOTIFY_DONE;
+
+  if (action == MODULE_STATE_LIVE)
+    loaded = 1;
+  else if (action == MODULE_STATE_GOING)
+    loaded = 0;
+  else
+    return NOTIFY_DONE;
+
+  frida_kmod_module_range (mod, &base, &size);
+
+  frida_kmod_module_event_func (loaded, mod->name, "", base, size,
+      frida_kmod_module_event_data);
+
+  return NOTIFY_DONE;
 }
 
 u64

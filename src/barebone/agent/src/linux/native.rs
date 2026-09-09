@@ -434,6 +434,12 @@ pub fn get_kernel_base() -> u64 {
     KERNEL_BASE.load(Ordering::Relaxed)
 }
 
+pub fn get_kernel_size() -> u64 {
+    let described = unsafe { &*core::ptr::addr_of!(crate::MODULE_INFO) };
+
+    described.first().map(|kernel| kernel.size as u64).unwrap_or(0)
+}
+
 pub fn set_kernel_base(base: u64) {
     KERNEL_BASE.store(base, Ordering::Relaxed);
 }

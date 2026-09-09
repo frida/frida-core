@@ -59,6 +59,8 @@ pub mod kernel;
 
 #[cfg(feature = "linux")]
 mod gum_linux;
+#[cfg(any(feature = "linux", feature = "linux-injected"))]
+mod gum_modules;
 #[cfg(any(feature = "linux", feature = "xnu-kext"))]
 mod hostlink_chardev;
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
@@ -341,6 +343,9 @@ mod entrypoint_blob {
             }
 
             transport_get_unchecked().shutdown();
+
+            #[cfg(feature = "linux-injected")]
+            crate::gum_modules::unpublish();
 
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
             {

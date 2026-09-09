@@ -611,36 +611,49 @@ pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRe
         return;
     }
 
-    let kernel_base = kernel::get_kernel_base();
+    #[cfg(feature = "linux-injected")]
+    {
+        crate::gum_modules::publish(registry);
+        return;
+    }
 
-    unsafe {
-        let module_infos = core::ptr::addr_of!(crate::MODULE_INFO);
-        let module_infos = &*module_infos;
+    #[cfg(not(feature = "linux-injected"))]
+    {
+        let kernel_base = kernel::get_kernel_base();
 
-        let mut i = 0;
-        for module_info in module_infos.iter() {
-            let module_base = kernel_base + module_info.offset as u64;
+        unsafe {
+            let module_infos = core::ptr::addr_of!(crate::MODULE_INFO);
+            let module_infos = &*module_infos;
 
-            let module_path = if i == 0 {
-                KERNEL_PATH
-            } else {
-                &format!(
-                    "{}{}{}",
-                    MODULE_DIRECTORY, module_info.name, MODULE_SUFFIX
-                )
-            };
-            let module_range = GumMemoryRange {
-                base_address: module_base,
-                size: module_info.size as gsize,
-            };
+            let mut i = 0;
+            for module_info in module_infos.iter() {
+                let module_base = kernel_base + module_info.offset as u64;
 
-            let module = gum::gum_native_module_new(&module_path, &module_info.version, &module_range);
-            gum_barebone_register_module(registry, module);
-            g_object_unref(module as gpointer);
+                let module_path = if i == 0 {
+                    KERNEL_PATH
+                } else {
+                    &format!("{}{}{}", MODULE_DIRECTORY, module_info.name, MODULE_SUFFIX)
+                };
+                let module_range = GumMemoryRange {
+                    base_address: module_base,
+                    size: module_info.size as gsize,
+                };
 
-            i += 1;
+                let module =
+                    gum::gum_native_module_new(&module_path, &module_info.version, &module_range);
+                gum_barebone_register_module(registry, module);
+                g_object_unref(module as gpointer);
+
+                i += 1;
+            }
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_on_registry_deactivating(_registry: *mut GumModuleRegistry) {
+    #[cfg(feature = "linux-injected")]
+    crate::gum_modules::unpublish();
 }
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
