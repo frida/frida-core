@@ -298,7 +298,7 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
         let mut on_export = |name: *const gchar, address: u64| {
             let export_details = GumExportDetails {
                 type_: GumExportType_GUM_EXPORT_FUNCTION,
-                name: g_strdup(name),
+                name,
                 address,
                 size: -1,
             };
