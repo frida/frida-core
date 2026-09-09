@@ -8,11 +8,12 @@ use crate::bindings::{
     GError, GumElfModule, GumExportDetails, GumMemoryRange, GumModuleRegistry, gboolean,
     g_bytes_new, g_bytes_unref, g_clear_error, g_object_unref, gconstpointer, gpointer, gsize,
     gum_barebone_register_module, gum_barebone_unregister_module,
-    gum_elf_module_enumerate_exports, gum_elf_module_get_preferred_address,
-    gum_elf_module_new_from_blob, gum_interceptor_begin_transaction,
+    gum_elf_module_enumerate_exports, gum_elf_module_enumerate_symbols,
+    gum_elf_module_get_preferred_address, gum_elf_module_new_from_blob, gum_interceptor_begin_transaction,
     gum_interceptor_end_transaction, gum_interceptor_obtain, gum_interceptor_replace,
 };
-use crate::gum::{self, FoundExportCallback};
+use crate::bindings::{GumElfSymbolBind_GUM_ELF_BIND_LOCAL, GumElfSymbolDetails};
+use crate::gum::{self, FoundExportCallback, FoundSymbolCallback};
 use alloc::ffi::CString;
 
 use super::user::{EXECUTABLE, READABLE, WRITABLE, contents_of};
@@ -94,13 +95,9 @@ pub fn enumerate_exports_in_range(from: u64, to: u64, found: &mut FoundExportCal
         return;
     };
 
-    let slide = image
-        .base
-        .wrapping_sub(unsafe { gum_elf_module_get_preferred_address(module) });
-
     let mut asking = Asking {
         found,
-        slide,
+        slide: slide_of(&image, module),
         from,
         to,
     };
@@ -112,6 +109,68 @@ pub fn enumerate_exports_in_range(from: u64, to: u64, found: &mut FoundExportCal
         );
         g_object_unref(module as gpointer);
     }
+}
+
+pub fn enumerate_symbols_in_range(from: u64, to: u64, found: &mut FoundSymbolCallback<'_>) {
+    let Some(image) = mapped_images().into_iter().find(|image| image.base == from) else {
+        return;
+    };
+    let Some(module) = read_the_image(&image) else {
+        return;
+    };
+
+    let mut asking = AskingForSymbols {
+        found,
+        slide: slide_of(&image, module),
+        from,
+        to,
+    };
+    unsafe {
+        gum_elf_module_enumerate_symbols(
+            module,
+            Some(crate::signed_to_be_called_back(note_a_symbol, 0)),
+            &mut asking as *mut AskingForSymbols<'_, '_> as gpointer,
+        );
+        g_object_unref(module as gpointer);
+    }
+}
+
+struct AskingForSymbols<'a, 'b> {
+    found: &'a mut FoundSymbolCallback<'b>,
+    slide: u64,
+    from: u64,
+    to: u64,
+}
+
+unsafe extern "C" fn note_a_symbol(
+    details: *const GumElfSymbolDetails,
+    asking: gpointer,
+) -> gboolean {
+    let asking = unsafe { &mut *(asking as *mut AskingForSymbols<'_, '_>) };
+    let details = unsafe { &*details };
+
+    if details.address == 0 {
+        return 1;
+    }
+
+    let address = details.address.wrapping_add(asking.slide);
+    if address < asking.from || address >= asking.to {
+        return 1;
+    }
+
+    (asking.found)(
+        details.name,
+        address,
+        details.size as u64,
+        details.type_ as u8,
+        details.bind != GumElfSymbolBind_GUM_ELF_BIND_LOCAL,
+    ) as gboolean
+}
+
+fn slide_of(image: &Image, module: *mut GumElfModule) -> u64 {
+    image
+        .base
+        .wrapping_sub(unsafe { gum_elf_module_get_preferred_address(module) })
 }
 
 fn read_the_image(image: &Image) -> Option<*mut GumElfModule> {

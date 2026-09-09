@@ -27,6 +27,12 @@ pub fn enumerate_symbols_in_range(
     end_address: u64,
     callback: &mut FoundSymbolCallback<'_>,
 ) {
+    #[cfg(feature = "linux-injected")]
+    if kernel::in_copy() {
+        kernel::enumerate_symbols_in_range(start_address, end_address, callback);
+        return;
+    }
+
     kernel::enumerate_module_symbols(start_address, &mut |name, address, size, kind, global| {
         if address < start_address || address >= end_address {
             return true;
