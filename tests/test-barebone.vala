@@ -2284,7 +2284,8 @@ FAIL: %s
 			var allocation = yield machine.allocate_pages (physical_addresses, null);
 
 			// The last two of the first table, then the first of the second.
-			uint64 first_free = (uint64) (SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST) * 4096;
+			uint64 first_free = SPAN_BASE_VA
+				+ ((uint64) (SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST) * 4096);
 			assert_true (allocation.virtual_address == first_free);
 			assert_true (allocation.size == 3 * 4096);
 
@@ -2315,7 +2316,7 @@ FAIL: %s
 
 			// The last mapped page of the first table, and the first page of the second.
 			uint last_slot = SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST - 1;
-			uint64 start_va = (uint64) last_slot * 4096;
+			uint64 start_va = SPAN_BASE_VA + ((uint64) last_slot * 4096);
 			yield machine.protect_pages (start_va, 4096, READ, null);
 
 			uint32 entry = target.read_uint32 (SPAN_PT0_PA + (last_slot * 4));
@@ -6391,18 +6392,24 @@ FAIL: %s
 	private const uint64 SPAN_PT1_PA = 0x5000;
 	private const uint SPAN_ENTRIES_PER_TABLE = 1024;
 	private const uint SPAN_FREE_IN_FIRST = 2;
+	private const uint SPAN_FREE_IN_SECOND = 1;
+	private const uint SPAN_PD_SLOT = 1022;
+	private const uint64 SPAN_BASE_VA = (uint64) SPAN_PD_SLOT << 22;
 
-	// Two adjacent leaf tables, the first all but full, so anything longer than what
-	// it has left has to carry on into the second.
+	// The two topmost leaf tables, each all but full, so a run longer than what the
+	// first has left has to carry on into the second.
 	private uint8[] adjacent_leaf_tables () {
 		var ram = new Ram ();
 
-		ram.write_uint32 (PD_PA + (0 * 4), (uint32) SPAN_PT0_PA | 0x7);
-		ram.write_uint32 (PD_PA + (1 * 4), (uint32) SPAN_PT1_PA | 0x7);
+		ram.write_uint32 (PD_PA + (SPAN_PD_SLOT * 4), (uint32) SPAN_PT0_PA | 0x7);
+		ram.write_uint32 (PD_PA + ((SPAN_PD_SLOT + 1) * 4), (uint32) SPAN_PT1_PA | 0x7);
 
 		uint occupied = SPAN_ENTRIES_PER_TABLE - SPAN_FREE_IN_FIRST;
 		for (uint i = 0; i != occupied; i++)
 			ram.write_uint32 (SPAN_PT0_PA + (i * 4), (uint32) (0x00100000 + (i * 0x1000)) | 0x3);
+
+		for (uint i = SPAN_FREE_IN_SECOND; i != SPAN_ENTRIES_PER_TABLE; i++)
+			ram.write_uint32 (SPAN_PT1_PA + (i * 4), (uint32) (0x00300000 + (i * 0x1000)) | 0x3);
 
 		return ram.steal ();
 	}

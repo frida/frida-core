@@ -245,7 +245,7 @@ namespace Frida.Barebone {
 			Allocation? allocation = null;
 			GLib.Error? failure = null;
 			try {
-				if (yield scan_for_run (run, p.root_table, 0, 0, p, cancellable))
+				if (yield scan_from_the_top (run, p, cancellable))
 					allocation = yield occupy (run, physical_addresses, p, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
@@ -259,25 +259,31 @@ namespace Frida.Barebone {
 			return allocation;
 		}
 
+		private async bool scan_from_the_top (Run run, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint num_entries = p.levels[0].num_entries;
+
+			for (uint first = num_entries - 1; first >= num_entries / 2; first--) {
+				run.reset ();
+
+				if (yield scan_for_run (run, p.root_table, 0, 0, first, p, cancellable))
+					return true;
+			}
+
+			return false;
+		}
+
 		// A run has to be contiguous in virtual address space but not in the tables
 		// describing it, so anything longer than a table holds is gathered a segment
 		// at a time and a gap anywhere above the leaves starts the search over.
 		private async bool scan_for_run (Run run, uint64 table_pa, uint level, uint64 upper_bits,
-				MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+				uint first, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
 			Level l = p.levels[level];
 			bool at_leaf_level = level == p.leaf_level;
-			bool at_root = level == 0;
 
 			Buffer entries = yield read_buffer (table_pa, l.num_entries * p.entry_size, cancellable);
 
-			for (uint n = 0; n != l.num_entries; n++) {
-				uint i = at_root ? l.num_entries - 1 - n : n;
-				if (at_root) {
-					if (i < l.num_entries / 2)
-						break;
-					run.reset ();
-				}
-
+			for (uint i = first; i != l.num_entries; i++) {
 				uint64 entry = read_entry (entries, i * p.entry_size, p);
 				uint64 prefix = upper_bits | ((uint64) i << l.shift);
 
@@ -291,7 +297,7 @@ namespace Frida.Barebone {
 						continue;
 					}
 
-					if (yield scan_for_run (run, table_address (entry, p), level + 1, prefix, p,
+					if (yield scan_for_run (run, table_address (entry, p), level + 1, prefix, 0, p,
 							cancellable))
 						return true;
 					continue;
