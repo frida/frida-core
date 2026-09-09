@@ -117,6 +117,10 @@ pub(crate) unsafe fn enumerate_exports_in_range(
     end_address: u64,
     callback: &mut FoundExportCallback<'_>,
 ) {
+    if crate::gum_modules::enumerate_exports_in_module(start_address, callback) {
+        return;
+    }
+
     kernel::enumerate_symbols(&mut |name, address| {
         if address < start_address || address >= end_address {
             return true;

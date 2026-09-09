@@ -101,6 +101,9 @@ typedef int (* FridaFoundModuleFunc) (const char * name, const char * version, u
     void * user_data);
 typedef void (* FridaModuleEventFunc) (int loaded, const char * name, const char * version, u64 base,
     u64 size, void * user_data);
+typedef int (* FridaFoundModuleSymbolFunc) (const char * name, u64 address, u64 size, u8 kind,
+    int is_global, void * user_data);
+typedef int (* FridaFoundModuleExportFunc) (const char * name, u64 address, void * user_data);
 typedef void (* FridaThreadEntry) (void * parameter, int wait_result);
 
 typedef struct task_struct * (* FridaFindTaskByVpidFunc) (pid_t nr);
@@ -329,6 +332,9 @@ static void * frida_rewind_to_function_entry (void * address);
 static void * frida_unseal_landing_pad (void * address);
 static int frida_thread_trampoline (void * data);
 static void frida_kmod_module_range (struct module * mod, u64 * base, u64 * size);
+static struct module * frida_kmod_module_at (u64 base);
+static const char * frida_kmod_symbol_name (const struct kernel_symbol * sym);
+static u64 frida_kmod_symbol_value (const struct kernel_symbol * sym);
 static int frida_kmod_on_module_state (struct notifier_block * nb, unsigned long action,
     void * data);
 static int frida_dev_open (struct inode * inode, struct file * file);
@@ -2384,6 +2390,77 @@ frida_kmod_enumerate_modules (FridaFoundModuleFunc func,
   mutex_unlock (frida_module_mutex);
 }
 
+int __nocfi
+frida_kmod_enumerate_module_symbols (u64 base,
+                                     FridaFoundModuleSymbolFunc func,
+                                     void * user_data)
+{
+#ifdef CONFIG_KALLSYMS
+  struct module * mod;
+  struct mod_kallsyms * ks;
+  unsigned int i;
+  int carry_on = 1;
+
+  if (frida_module_mutex == NULL)
+    return 0;
+
+  mutex_lock (frida_module_mutex);
+
+  mod = frida_kmod_module_at (base);
+  ks = (mod != NULL) ? rcu_dereference_sched (mod->kallsyms) : NULL;
+
+  if (ks != NULL)
+    {
+      for (i = 0; i != ks->num_symtab && carry_on; i++)
+        {
+          const Elf_Sym * sym = &ks->symtab[i];
+
+          if (sym->st_value == 0)
+            continue;
+
+          carry_on = func (ks->strtab + sym->st_name, sym->st_value, sym->st_size,
+              ELF_ST_TYPE (sym->st_info), ELF_ST_BIND (sym->st_info) != STB_LOCAL, user_data);
+        }
+    }
+
+  mutex_unlock (frida_module_mutex);
+
+  return ks != NULL;
+#else
+  return 0;
+#endif
+}
+
+int __nocfi
+frida_kmod_enumerate_module_exports (u64 base,
+                                     FridaFoundModuleExportFunc func,
+                                     void * user_data)
+{
+  struct module * mod;
+  unsigned int i;
+
+  if (frida_module_mutex == NULL)
+    return 0;
+
+  mutex_lock (frida_module_mutex);
+
+  mod = frida_kmod_module_at (base);
+  if (mod != NULL)
+    {
+      for (i = 0; i != mod->num_syms; i++)
+        {
+          const struct kernel_symbol * sym = &mod->syms[i];
+
+          if (!func (frida_kmod_symbol_name (sym), frida_kmod_symbol_value (sym), user_data))
+            break;
+        }
+    }
+
+  mutex_unlock (frida_module_mutex);
+
+  return mod != NULL;
+}
+
 void
 frida_kmod_watch_modules (FridaModuleEventFunc func,
                           void * user_data)
@@ -2404,6 +2481,46 @@ frida_kmod_unwatch_modules (void)
 
   frida_kmod_module_event_func = NULL;
   frida_kmod_module_event_data = NULL;
+}
+
+static struct module *
+frida_kmod_module_at (u64 base)
+{
+  struct module * mod;
+
+  if (frida_modules == NULL)
+    return NULL;
+
+  list_for_each_entry (mod, frida_modules, list)
+    {
+      u64 start, size;
+
+      frida_kmod_module_range (mod, &start, &size);
+      if (start == base)
+        return mod;
+    }
+
+  return NULL;
+}
+
+static const char *
+frida_kmod_symbol_name (const struct kernel_symbol * sym)
+{
+#ifdef CONFIG_HAVE_ARCH_PREL32_RELOCATIONS
+  return offset_to_ptr (&sym->name_offset);
+#else
+  return sym->name;
+#endif
+}
+
+static u64
+frida_kmod_symbol_value (const struct kernel_symbol * sym)
+{
+#ifdef CONFIG_HAVE_ARCH_PREL32_RELOCATIONS
+  return (u64) (uintptr_t) offset_to_ptr (&sym->value_offset);
+#else
+  return sym->value;
+#endif
 }
 
 static void

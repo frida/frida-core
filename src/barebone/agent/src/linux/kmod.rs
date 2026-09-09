@@ -196,6 +196,52 @@ pub fn unwatch_modules() {
     unsafe { frida_kmod_unwatch_modules() };
 }
 
+pub fn enumerate_module_symbols(
+    base: u64,
+    on_symbol: &mut dyn FnMut(*const c_char, u64, u64, u8, bool) -> bool,
+) -> bool {
+    unsafe extern "C" fn on_module_symbol(
+        name: *const c_char,
+        address: u64,
+        size: u64,
+        kind: u8,
+        is_global: c_int,
+        user_data: *mut c_void,
+    ) -> c_int {
+        unsafe {
+            let callback =
+                &mut *(user_data as *mut &mut dyn FnMut(*const c_char, u64, u64, u8, bool) -> bool);
+            if callback(name, address, size, kind, is_global != 0) { 1 } else { 0 }
+        }
+    }
+
+    let mut boxed: &mut dyn FnMut(*const c_char, u64, u64, u8, bool) -> bool = on_symbol;
+    unsafe {
+        frida_kmod_enumerate_module_symbols(base, on_module_symbol, &mut boxed as *mut _ as *mut c_void) != 0
+    }
+}
+
+pub fn enumerate_module_exports(
+    base: u64,
+    on_export: &mut dyn FnMut(*const c_char, u64) -> bool,
+) -> bool {
+    unsafe extern "C" fn on_module_export(
+        name: *const c_char,
+        address: u64,
+        user_data: *mut c_void,
+    ) -> c_int {
+        unsafe {
+            let callback = &mut *(user_data as *mut &mut dyn FnMut(*const c_char, u64) -> bool);
+            if callback(name, address) { 1 } else { 0 }
+        }
+    }
+
+    let mut boxed: &mut dyn FnMut(*const c_char, u64) -> bool = on_export;
+    unsafe {
+        frida_kmod_enumerate_module_exports(base, on_module_export, &mut boxed as *mut _ as *mut c_void) != 0
+    }
+}
+
 pub fn find_symbol(name: &CStr) -> u64 {
     unsafe { frida_kmod_find_symbol(name.as_ptr()) }
 }
@@ -251,6 +297,9 @@ const KERNEL_PROCESS: u32 = 0;
 type FoundSymbolFunc =
     unsafe extern "C" fn(name: *const c_char, address: u64, user_data: *mut c_void) -> c_int;
 type ModuleEventFunc = unsafe extern "C" fn(c_int, *const c_char, *const c_char, u64, u64, *mut c_void);
+type FoundModuleSymbolFunc =
+    unsafe extern "C" fn(*const c_char, u64, u64, u8, c_int, *mut c_void) -> c_int;
+type FoundModuleExportFunc = unsafe extern "C" fn(*const c_char, u64, *mut c_void) -> c_int;
 type FoundModuleFunc = unsafe extern "C" fn(
     name: *const c_char,
     version: *const c_char,
@@ -284,6 +333,16 @@ unsafe extern "C" {
     fn frida_kmod_enumerate_modules(func: FoundModuleFunc, user_data: *mut c_void);
     fn frida_kmod_watch_modules(func: ModuleEventFunc, user_data: *mut c_void);
     fn frida_kmod_unwatch_modules();
+    fn frida_kmod_enumerate_module_symbols(
+        base: u64,
+        func: FoundModuleSymbolFunc,
+        user_data: *mut c_void,
+    ) -> c_int;
+    fn frida_kmod_enumerate_module_exports(
+        base: u64,
+        func: FoundModuleExportFunc,
+        user_data: *mut c_void,
+    ) -> c_int;
     fn frida_kmod_find_symbol(name: *const c_char) -> u64;
     fn frida_kmod_find_function(name: *const c_char) -> u64;
     fn frida_kmod_symbol_name_from_address(

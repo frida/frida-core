@@ -807,6 +807,11 @@ pub(crate) unsafe fn enumerate_exports_in_range(
         return;
     }
 
+    #[cfg(feature = "linux-injected")]
+    if crate::gum_modules::enumerate_exports_in_module(start_address, callback) {
+        return;
+    }
+
     #[cfg(feature = "xnu-core")]
     if crate::xnu::in_copy() {
         crate::xnu_mapped::enumerate_exports_in_range(start_address, end_address, callback);

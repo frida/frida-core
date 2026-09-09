@@ -3,7 +3,7 @@ use crate::bindings::{
     GumMemoryRange, GumModuleRegistry, g_object_unref, gpointer, gsize,
     gum_barebone_register_module, gum_barebone_unregister_module,
 };
-use crate::gum;
+use crate::gum::{self, FoundExportCallback, FoundSymbolCallback};
 use crate::kernel;
 use crate::linux::{LoadedModule, ModuleEvent};
 
@@ -20,6 +20,28 @@ pub fn publish(registry: *mut GumModuleRegistry) {
     }
 
     kernel::watch_modules(on_module_event);
+}
+
+pub fn enumerate_symbols_in_range(
+    start_address: u64,
+    end_address: u64,
+    callback: &mut FoundSymbolCallback<'_>,
+) {
+    kernel::enumerate_module_symbols(start_address, &mut |name, address, size, kind, global| {
+        if address < start_address || address >= end_address {
+            return true;
+        }
+        callback(name as *const _, address, size, kind, global)
+    });
+}
+
+pub fn enumerate_exports_in_module(
+    start_address: u64,
+    callback: &mut FoundExportCallback<'_>,
+) -> bool {
+    kernel::enumerate_module_exports(start_address, &mut |name, address| {
+        callback(name as *const _, address)
+    })
 }
 
 pub fn unpublish() {
