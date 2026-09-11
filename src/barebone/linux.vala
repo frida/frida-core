@@ -108,6 +108,30 @@ namespace Frida.Barebone {
 			return yield find_relocated_kernel (gdb, registers, linked_base, symbols, cancellable);
 
 		uint64 pc = registers["pc"].get_uint64 ();
+
+		// A boot that keeps the Image header can be placed by its magic, but a loader that
+		// zeroes it (as the Android emulator does) leaves nothing there to match. The banner
+		// every build carries is placed the same way and survives, so it anchors the search,
+		// exactly as the x86 path relies on it.
+		uint64 banner = address_of (symbols, KERNEL_BANNER_SYMBOL);
+		if (banner != 0) {
+			// A kernel that was not slid at all -- no VA randomization, as the emulator boots it --
+			// carries its banner at the linked address, so confirm that before hunting, since the
+			// hijacked pc may be off in a module the sweep below would never reach back from.
+			if (yield banner_present_at (gdb, banner, cancellable))
+				return linked_base;
+
+			uint64 banner_offset = banner - linked_base;
+			uint64 span = span_of (symbols, linked_base);
+			uint64 lowest = (pc - span) & ~(KERNEL_ALIGNMENT - 1);
+			uint64 highest = (pc + KERNEL_ALIGNMENT) & ~(KERNEL_ALIGNMENT - 1);
+
+			for (uint64 landing = lowest; landing <= highest; landing += KERNEL_ALIGNMENT) {
+				if (yield banner_present_at (gdb, landing + banner_offset, cancellable))
+					return landing;
+			}
+		}
+
 		uint64 candidate = pc - (pc % KERNEL_ALIGNMENT);
 
 		for (uint step = 0; step != MAX_STEPS_BACK; step++) {
@@ -152,6 +176,16 @@ namespace Frida.Barebone {
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
+	}
+
+	private static async bool banner_present_at (GDB.Client gdb, uint64 address, Cancellable? cancellable)
+			throws Error, IOError {
+		try {
+			var head = yield gdb.read_byte_array (address, KERNEL_BANNER.length, cancellable);
+			return Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0;
+		} catch (Error e) {
+			return false;
+		}
 	}
 
 	private static uint64 address_of (Gee.List<SymbolInfo> symbols, string name) {
