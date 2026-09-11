@@ -27,6 +27,8 @@ namespace Frida.Barebone {
 		private KernelFlavor flavor;
 		private Allocation elf_allocation;
 		private uint64 left_flag;
+		private uint64 fault_record;
+		private Gee.List<AgentSymbol> agent_symbols = new Gee.ArrayList<AgentSymbol> ();
 		private Gee.Map<string, SymbolInfo> resolved_symbols;
 		private Allocation config_allocation;
 
@@ -38,6 +40,7 @@ namespace Frida.Barebone {
 		private const uint INJECT_POLL_INTERVAL_MS = 100;
 		private const uint LEAVE_MAX_ATTEMPTS = 40;
 		private const uint LEAVE_INTERVAL_MS = 50;
+		private const size_t FAULT_RECORD_SIZE = 32;
 
 		public static async AgentConnection open (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
@@ -207,6 +210,10 @@ namespace Frida.Barebone {
 					start_address = base_va + e.address;
 				else if (e.name == "frida_agent_left")
 					left_flag = base_va + e.address;
+				else if (e.name == "frida_agent_fault")
+					fault_record = base_va + e.address;
+				if (e.type == FUNC && e.size != 0)
+					agent_symbols.add (new AgentSymbol (e.name, base_va + e.address, e.size));
 				return true;
 			});
 			if (start_address == 0)
@@ -910,6 +917,13 @@ namespace Frida.Barebone {
 			Variant response = null;
 			try {
 				response = yield promise.future.wait_async (cancellable);
+			} catch (Error e) {
+				if (!(e is Error.TIMED_OUT))
+					throw e;
+				string? fault = yield describe_agent_fault (cancellable);
+				if (fault == null)
+					throw e;
+				throw new Error.TIMED_OUT ("%s; %s", e.message, fault);
 			} finally {
 				timeout_source.destroy ();
 			}
@@ -923,6 +937,52 @@ namespace Frida.Barebone {
 				throw new Error.NOT_SUPPORTED ("%s", detail.get_string ());
 
 			return detail;
+		}
+
+		private async string? describe_agent_fault (Cancellable? cancellable) throws Error, IOError {
+			if (fault_record == 0)
+				return null;
+
+			var gdb = machine.gdb;
+			Buffer record;
+			try {
+				yield gdb.stop (cancellable);
+				record = gdb.make_buffer (yield gdb.read_byte_array (fault_record, FAULT_RECORD_SIZE,
+					cancellable));
+				yield gdb.continue (cancellable);
+			} catch (GLib.Error e) {
+				return null;
+			}
+
+			if (record.read_uint64 (0) == 0)
+				return null;
+
+			return ("the agent took an unhandled fault: vector 0x%" + uint64.FORMAT_MODIFIER
+				+ "x at %s, accessing 0x%" + uint64.FORMAT_MODIFIER + "x").printf (
+					record.read_uint64 (8), describe_program_counter (record.read_uint64 (16)),
+					record.read_uint64 (24));
+		}
+
+		private string describe_program_counter (uint64 pc) {
+			foreach (var symbol in agent_symbols) {
+				if (pc >= symbol.address && pc - symbol.address < symbol.size) {
+					return ("%s+0x%" + uint64.FORMAT_MODIFIER + "x").printf (symbol.name,
+						pc - symbol.address);
+				}
+			}
+			return ("pc 0x%" + uint64.FORMAT_MODIFIER + "x").printf (pc);
+		}
+
+		private class AgentSymbol {
+			public string name;
+			public uint64 address;
+			public uint64 size;
+
+			public AgentSymbol (string name, uint64 address, uint64 size) {
+				this.name = name;
+				this.address = address;
+				this.size = size;
+			}
 		}
 
 		private async void process_incoming_messages () {

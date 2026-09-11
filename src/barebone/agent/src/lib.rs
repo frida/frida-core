@@ -1087,6 +1087,32 @@ pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
 #[unsafe(no_mangle)]
 pub static mut frida_agent_left: u32 = 0;
 
+pub(crate) fn note_unhandled_fault(vector: u64, pc: u64, address: u64) {
+    unsafe {
+        let fault = &raw mut frida_agent_fault;
+        (*fault).count += 1;
+        (*fault).vector = vector;
+        (*fault).pc = pc;
+        (*fault).address = address;
+    }
+}
+
+#[unsafe(no_mangle)]
+pub static mut frida_agent_fault: AgentFault = AgentFault {
+    count: 0,
+    vector: 0,
+    pc: 0,
+    address: 0,
+};
+
+#[repr(C)]
+pub struct AgentFault {
+    pub count: u64,
+    pub vector: u64,
+    pub pc: u64,
+    pub address: u64,
+}
+
 pub(crate) fn stop_requested() -> bool {
     STOP_REQUESTED.load(Ordering::Acquire)
 }

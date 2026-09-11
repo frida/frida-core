@@ -2393,13 +2393,6 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
         )
     };
     if handled == 0 {
-        // Windows corrects most faults, and a page fault on an absent page is normal. Thus send those
-        // to Windows. An invalid opcode is different: Windows runs the instruction again and the
-        // machine stops. Thus stop the thread here, which keeps the guest available.
-        if fault != INVALID_OPCODE {
-            return unsafe { FAULT_CHAIN[fault as usize] };
-        }
-
         report_unhandled_fault(fault, cpu_context.eip);
         cpu_context.eip = frida_win9x_park as u32;
     }
@@ -2437,13 +2430,17 @@ fn recovery_stack(frame: *mut u32) -> u32 {
 }
 
 fn report_unhandled_fault(fault: u32, eip: u32) {
+    let address = faulting_address();
+
+    crate::note_unhandled_fault(fault as u64, eip as u64, address as u64);
+
     log("frida: unhandled fault in the agent\n");
     log("frida:   vector ");
     log_hex(fault);
     log("frida:   eip ");
     log_hex(eip);
     log("frida:   address ");
-    log_hex(faulting_address());
+    log_hex(address);
 }
 
 // Nothing can recover from this, thus the thread stops here.
