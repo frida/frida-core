@@ -2375,7 +2375,7 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
             edi: registers.read(),
             esi: registers.add(1).read(),
             ebp: registers.add(2).read(),
-            esp: registers.byte_add(FAULT_FRAME_END) as usize as u32,
+            esp: recovery_stack(frame),
             ebx: registers.add(4).read(),
             edx: registers.add(5).read(),
             ecx: registers.add(6).read(),
@@ -2432,6 +2432,10 @@ fn our_fault_frame(frame: *mut u32) -> Option<*const u32> {
     (cs & 3 == 0 && crate::own_range_contains(eip)).then_some(registers)
 }
 
+fn recovery_stack(frame: *mut u32) -> u32 {
+    unsafe { frame.add(THUNK_FRAME_ESP).read() }
+}
+
 fn report_unhandled_fault(fault: u32, eip: u32) {
     log("frida: unhandled fault in the agent\n");
     log("frida:   vector ");
@@ -2479,9 +2483,9 @@ const X87_FLOATING_POINT: u32 = 16;
 const SIMD_FLOATING_POINT: u32 = 19;
 
 const THUNK_FRAME_EBP: usize = 2;
+const THUNK_FRAME_ESP: usize = 3;
 const FAULT_FRAME_EIP: usize = 0x24;
 const FAULT_FRAME_CS: usize = 0x28;
-const FAULT_FRAME_END: usize = 0x30;
 const PARK_SLICE_US: u64 = 1_000_000;
 
 fn faulting_address() -> u32 {
