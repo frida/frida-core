@@ -152,7 +152,9 @@ namespace Frida {
 					machine = new Barebone.ArmMachine (gdb);
 					break;
 				case ARM64:
-					machine = new Barebone.Arm64Machine (gdb);
+					machine = new Barebone.Arm64Machine (gdb) {
+						software_return_detection = !config.connection.supports_breakpoints,
+					};
 					break;
 				default:
 					machine = new Barebone.UnknownMachine (gdb);

@@ -2399,6 +2399,18 @@ namespace Frida {
 			default = GDB_REMOTE;
 		}
 
+		/**
+		 * Whether the stub's breakpoints can be used. A few GDB-remote stubs -- notably the
+		 * Android emulator's, whose HVF-backed gdbstub crashes on breakpoint insertion -- cannot,
+		 * so set this to false to have calls into the guest detect their return by spinning and
+		 * sampling instead.
+		 */
+		public bool supports_breakpoints {
+			get;
+			set;
+			default = true;
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "flavor") {
 				var v = Value (typeof (BareboneStubFlavor));

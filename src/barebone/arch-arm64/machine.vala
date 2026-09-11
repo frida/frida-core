@@ -22,6 +22,15 @@ namespace Frida.Barebone {
 		 */
 		public uint64 call_landing_zone = 0;
 
+		// Set by the host when the stub's breakpoints are unusable (the Android emulator's, whose
+		// HVF-backed gdbstub crashes on breakpoint insertion), so calls into the guest detect their
+		// return by spinning and sampling rather than by a breakpoint.
+		public bool software_return_detection { get; set; default = false; }
+
+		// "b ." -- a branch to itself, little-endian.
+		private static Bytes SPIN_HERE = new Bytes ({ 0x00, 0x00, 0x00, 0x14 });
+		private const uint RETURN_POLL_INTERVAL_MS = 10;
+
 		public Allocator? code_allocator;
 
 		public PhysicalMemory? physical_memory;
@@ -824,18 +833,7 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			// The callee may reschedule (e.g. kernel_thread_start) onto another core, and the
-			// stub identifies threads by core; matching the original core's id would strand the
-			// call and clobber that core's now-unrelated thread. Nothing else reaches the landing
-			// zone, so any thread stopping there is ours.
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 4, cancellable);
-			GDB.Exception ex = null;
-			do {
-				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp);
-			yield bp.remove (cancellable);
-
-			GDB.Thread landed = ex.thread;
+			GDB.Thread landed = yield run_until_pc (landing_zone, cancellable);
 			uint64 retval = yield landed.read_register ("x0", cancellable);
 
 			yield landed.write_registers (saved_regs, cancellable);
@@ -861,20 +859,65 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			// As in invoke(): the executed code may migrate our thread to another core,
-			// so match on the end breakpoint alone and finish on the core it landed on.
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, end, 4, cancellable);
-			GDB.Exception ex = null;
-			do {
-				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp);
-			yield bp.remove (cancellable);
+			GDB.Thread landed = yield run_until_pc (end, cancellable);
 
-			yield ex.thread.write_registers (saved_regs, cancellable);
+			yield landed.write_registers (saved_regs, cancellable);
 
 			if (was_running)
 				yield gdb.continue (cancellable);
 		}
+
+		// Runs the guest until a thread stops at the given address in an acceptable state, and
+		// returns it. The callee may reschedule onto another core, and the stub identifies threads
+		// by core; nothing else reaches these addresses (a cold landing zone, or the scheduler with
+		// a predicate), so whichever thread stops there is ours. A stub whose breakpoints work
+		// catches it with one; a stub whose debug traps are inert (the Android emulator's, under
+		// HVF) instead has the address turned into a spin and the guest run in slices until a
+		// thread parks on it.
+		public async GDB.Thread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
+			if (!software_return_detection) {
+				GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+				GDB.Exception ex = null;
+				do {
+					ex = yield gdb.continue_until_exception (cancellable);
+				} while (ex.breakpoint != bp);
+				yield bp.remove (cancellable);
+				return ex.thread;
+			}
+
+			var original = yield gdb.read_byte_array (address, 4, cancellable);
+			yield gdb.write_byte_array (address, SPIN_HERE, cancellable);
+
+			GDB.Thread? landed = null;
+			GLib.Error? failure = null;
+			try {
+				while (landed == null) {
+					yield gdb.continue (cancellable);
+					yield settle_for (RETURN_POLL_INTERVAL_MS);
+					yield gdb.stop (cancellable);
+
+					GDB.Thread thread = gdb.exception.thread;
+					if ((yield thread.read_register ("pc", cancellable)) == address)
+						landed = thread;
+				}
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+
+			yield gdb.write_byte_array (address, original, cancellable);
+
+			throw_if_failed (failure);
+
+			return landed;
+		}
+
+		private async void settle_for (uint milliseconds) {
+			var source = new TimeoutSource (milliseconds);
+			source.set_callback (settle_for.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+		}
+
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
