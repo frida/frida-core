@@ -865,18 +865,7 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			// The callee may reschedule (e.g. kernel_thread_start) onto another core, and the
-			// stub identifies threads by core; matching the original core's id would strand the
-			// call and clobber that core's now-unrelated thread. Nothing else reaches the landing
-			// zone, so any thread stopping there is ours.
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 4, cancellable);
-			GDB.Exception ex = null;
-			do {
-				ex = yield gdb.continue_until_exception (cancellable);
-			} while (ex.breakpoint != bp);
-			yield bp.remove (cancellable);
-
-			GDB.Thread landed = ex.thread;
+			GDB.Thread landed = yield run_until_pc (landing_zone, cancellable);
 			uint64 retval = yield landed.read_register ("x0", cancellable);
 
 			yield restore_registers (thread, landed, saved_regs, cancellable);
@@ -902,19 +891,26 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			// As in invoke(): the executed code may migrate our thread to another core,
-			// so match on the end breakpoint alone and finish on the core it landed on.
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, end, 4, cancellable);
+			GDB.Thread landed = yield run_until_pc (end, cancellable);
+
+			yield restore_registers (thread, landed, saved_regs, cancellable);
+
+			if (was_running)
+				yield gdb.continue (cancellable);
+		}
+
+		// Runs the guest until a thread stops at the given address, and returns it. The callee may
+		// reschedule onto another core, and the stub identifies threads by core; nothing else reaches
+		// these addresses (a cold landing zone, or the scheduler with a predicate), so whichever
+		// thread stops there is ours.
+		public async GDB.Thread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
 			GDB.Exception ex = null;
 			do {
 				ex = yield gdb.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);
-
-			yield restore_registers (thread, ex.thread, saved_regs, cancellable);
-
-			if (was_running)
-				yield gdb.continue (cancellable);
+			return ex.thread;
 		}
 
 		// A core that the run migrated to keeps its own platform register, which on some kernels
@@ -931,6 +927,7 @@ namespace Frida.Barebone {
 
 			yield landed.write_registers (restored, cancellable);
 		}
+
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
