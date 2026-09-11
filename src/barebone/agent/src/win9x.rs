@@ -2365,17 +2365,21 @@ const SLOT_JUMPS_OVER_ITSELF: u32 = 0x9090_02eb;
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
+    let Some(registers) = our_fault_frame(frame) else {
+        return unsafe { FAULT_CHAIN[fault as usize] };
+    };
+
     let mut cpu_context = unsafe {
         crate::bindings::_GumIA32CpuContext {
-            eip: frame.add(fault_frame_eip_slot(fault)).read(),
-            edi: frame.read(),
-            esi: frame.add(1).read(),
-            ebp: frame.add(2).read(),
-            esp: frame.add(3).read(),
-            ebx: frame.add(4).read(),
-            edx: frame.add(5).read(),
-            ecx: frame.add(6).read(),
-            eax: frame.add(7).read(),
+            eip: registers.byte_add(FAULT_FRAME_EIP).read(),
+            edi: registers.read(),
+            esi: registers.add(1).read(),
+            ebp: registers.add(2).read(),
+            esp: registers.byte_add(FAULT_FRAME_END) as usize as u32,
+            ebx: registers.add(4).read(),
+            edx: registers.add(5).read(),
+            ecx: registers.add(6).read(),
+            eax: registers.add(7).read(),
             xmm: core::ptr::null_mut(),
         }
     };
@@ -2392,14 +2396,11 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
         // Windows corrects most faults, and a page fault on an absent page is normal. Thus send those
         // to Windows. An invalid opcode is different: Windows runs the instruction again and the
         // machine stops. Thus stop the thread here, which keeps the guest available.
-        let Some(faulted_at) = our_faulting_eip(frame) else {
-            return unsafe { FAULT_CHAIN[fault as usize] };
-        };
         if fault != INVALID_OPCODE {
             return unsafe { FAULT_CHAIN[fault as usize] };
         }
 
-        report_unhandled_fault(fault, faulted_at);
+        report_unhandled_fault(fault, cpu_context.eip);
         cpu_context.eip = frida_win9x_park as u32;
     }
 
@@ -2421,14 +2422,14 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
 }
 
 // VMM enters a fault hook with EBP at the frame that the processor and its dispatcher made:
-// the registers from pushad, then the error code, EIP, CS and the flags. Use that EIP. The
+// the registers from pushad, then the error code, EIP, CS and the flags. Use that frame. The
 // frame of the thunk holds the address that VMM returns to.
-fn our_faulting_eip(frame: *mut u32) -> Option<u32> {
+fn our_fault_frame(frame: *mut u32) -> Option<*const u32> {
     let registers = unsafe { frame.add(THUNK_FRAME_EBP).read() } as *const u32;
     let eip = unsafe { registers.byte_add(FAULT_FRAME_EIP).read() };
     let cs = unsafe { registers.byte_add(FAULT_FRAME_CS).read() };
 
-    (cs & 3 == 0 && crate::own_range_contains(eip)).then_some(eip)
+    (cs & 3 == 0 && crate::own_range_contains(eip)).then_some(registers)
 }
 
 fn report_unhandled_fault(fault: u32, eip: u32) {
@@ -2477,21 +2478,10 @@ const STACK_SEGMENT_FAULT: u32 = 12;
 const X87_FLOATING_POINT: u32 = 16;
 const SIMD_FLOATING_POINT: u32 = 19;
 
-fn fault_frame_eip_slot(fault: u32) -> usize {
-    const PUSHED_REGISTERS: usize = 8;
-    const VECTOR: usize = 1;
-
-    let error_code = match fault {
-        8 | 10 | 11 | 12 | 13 | 14 | 17 | 21 => 1,
-        _ => 0,
-    };
-
-    PUSHED_REGISTERS + VECTOR + error_code
-}
-
 const THUNK_FRAME_EBP: usize = 2;
 const FAULT_FRAME_EIP: usize = 0x24;
 const FAULT_FRAME_CS: usize = 0x28;
+const FAULT_FRAME_END: usize = 0x30;
 const PARK_SLICE_US: u64 = 1_000_000;
 
 fn faulting_address() -> u32 {
