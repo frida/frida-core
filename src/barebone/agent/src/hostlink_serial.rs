@@ -287,50 +287,42 @@ fn open_device(path: &[u8]) -> Result<*mut c_void, ()> {
         return Err(());
     }
 
-    if !configure_port(handle) {
-        unsafe {
-            (_ZwClose)(handle);
-        }
-        return Err(());
-    }
+    configure_port(handle);
 
     Ok(handle)
 }
 
-fn configure_port(port: *mut c_void) -> bool {
-    let mut settled = true;
+fn configure_port(port: *mut c_void) {
     let mut baud_rate = [0u32; 1];
     baud_rate[0] = BAUD_RATE;
-    settled &= control_port(port, SET_BAUD_RATE, baud_rate.as_ptr() as *const u8,
+    control_port(port, SET_BAUD_RATE, baud_rate.as_ptr() as *const u8,
         core::mem::size_of_val(&baud_rate) as u32);
 
     let line_control = [ONE_STOP_BIT, NO_PARITY, DATA_BITS];
-    settled &= control_port(port, SET_LINE_CONTROL, line_control.as_ptr(),
+    control_port(port, SET_LINE_CONTROL, line_control.as_ptr(),
         core::mem::size_of_val(&line_control) as u32);
 
     let hand_flow = [0u32; HAND_FLOW_WORDS];
-    settled &= control_port(port, SET_HAND_FLOW, hand_flow.as_ptr() as *const u8,
+    control_port(port, SET_HAND_FLOW, hand_flow.as_ptr() as *const u8,
         core::mem::size_of_val(&hand_flow) as u32);
 
-    settled &= control_port(port, SET_DTR, core::ptr::null(), 0);
-    settled &= control_port(port, SET_RTS, core::ptr::null(), 0);
+    control_port(port, SET_DTR, core::ptr::null(), 0);
+    control_port(port, SET_RTS, core::ptr::null(), 0);
 
     let mut timeouts = [0u32; TIMEOUT_WORDS];
     timeouts[READ_INTERVAL_TIMEOUT] = FOREVER;
     timeouts[READ_TOTAL_TIMEOUT_MULTIPLIER] = FOREVER;
     timeouts[READ_TOTAL_TIMEOUT_CONSTANT] = ALMOST_FOREVER;
-    settled &= control_port(port, SET_TIMEOUTS, timeouts.as_ptr() as *const u8,
+    control_port(port, SET_TIMEOUTS, timeouts.as_ptr() as *const u8,
         core::mem::size_of_val(&timeouts) as u32);
-
-    settled
 }
 
-fn control_port(port: *mut c_void, code: u32, input: *const u8, length: u32) -> bool {
+fn control_port(port: *mut c_void, code: u32, input: *const u8, length: u32) {
     let Some(event) = create_event() else {
-        return false;
+        return;
     };
 
-    let settled = issue(event, |event, status_block| unsafe {
+    issue(event, |event, status_block| unsafe {
         (_ZwDeviceIoControlFile)(
             port,
             event,
@@ -343,14 +335,11 @@ fn control_port(port: *mut c_void, code: u32, input: *const u8, length: u32) -> 
             ptr::null_mut(),
             0,
         )
-    })
-    .is_some();
+    });
 
     unsafe {
         (_ZwClose)(event);
     }
-
-    settled
 }
 
 #[repr(C)]
