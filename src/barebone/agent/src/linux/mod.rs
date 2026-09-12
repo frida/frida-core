@@ -1,3 +1,4 @@
+pub mod hostlink_pipe_vsock;
 // Linux backend. The agent reaches the kernel in one of two ways, and the rest
 // of the agent cannot tell which: loaded from the inside as a kernel module,
 // where every primitive is a call into a shim kbuild compiled against the
