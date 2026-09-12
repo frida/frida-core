@@ -299,6 +299,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-arm64-kernel-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_maps_out_an_arm64_kernel_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-agent-runs-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_arm64_agent_runs_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		// One suite for each word size. Each suite uses its own set of variables and its own guest.
 		GLib.Test.add_func ("/Barebone/WinNt/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness, "WINNT"));
@@ -4374,6 +4384,58 @@ FAIL: %s
 		h.done ();
 	}
 
+	private async void winnt_maps_out_an_arm64_kernel_in_live_guest (Harness h) {
+		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_ARM64_GDB_PORT");
+		if (port == null) {
+			h.done ();
+			return;
+		}
+
+		try {
+			var client = new SocketClient ();
+			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
+			var gdb = yield Barebone.ParallelsStubClient.open (connection, null);
+			assert_true (gdb.arch == GDB.TargetArch.ARM64);
+			assert_true (gdb.pointer_size == 8);
+
+			var machine = new Barebone.Arm64Machine (gdb);
+			var layout = yield Barebone.collect_winnt_layout (machine, null);
+
+			Barebone.ModuleInfo? kernel = null;
+			foreach (var m in layout.modules) {
+				if (m.name.down () == "ntoskrnl.exe")
+					kernel = m;
+			}
+			assert_nonnull (kernel);
+
+			assert_true (kernel.offset > uint32.MAX);
+			assert_true (layout.modules.size > 20);
+
+			bool named = false;
+			bool process_list = false;
+			foreach (var sym in layout.symbols) {
+				if (sym.name == "KeBugCheckEx")
+					named = true;
+				if (sym.name == Barebone.PROCESS_LIST_HEAD)
+					process_list = true;
+			}
+			assert_true (named);
+			assert_true (process_list);
+
+			yield gdb.close (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
+	}
+
+	private async void winnt_arm64_agent_runs_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"),
+			"send(1 + 1);", "\"payload\":2");
+	}
+
 	private async void linux_agent_runs_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), "send(1 + 1);",
 			"\"payload\":2");
@@ -6005,6 +6067,33 @@ FAIL: %s
 		var transport = new BareboneHostlinkTransportConfig () {
 			qmp = "unix:" + qmp_path,
 			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
+		};
+		try {
+			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
+
+		return config;
+	}
+
+	private BareboneConfig? parallels_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
+		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
+		string? serial_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_SERIAL");
+		string? stub_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_GDB_PORT");
+		if (agent_path == null || serial_path == null || stub_port == null) {
+			h.done ();
+			return null;
+		}
+
+		var config = new BareboneConfig ();
+		config.connection.host = "127.0.0.1";
+		config.connection.port = (uint16) uint.parse (stub_port);
+		config.connection.flavor = PARALLELS;
+		config.kernel = WINNT;
+		var transport = new BareboneSerialTransportConfig () {
+			path = serial_path,
 		};
 		try {
 			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
