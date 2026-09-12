@@ -187,10 +187,73 @@ unsafe extern "C" fn thread_start(context: *mut c_void) {
 unsafe fn start_on_own_stack(context: *mut c_void) {
     let stack = alloc(THREAD_STACK_SIZE);
     unsafe {
-        frida_winnt_run_on_stack(stack.add(THREAD_STACK_SIZE), run_agent, context);
+        let bottom = (stack as usize + STACK_GRANULE - 1) & !(STACK_GRANULE - 1);
+        let top = (stack as usize + THREAD_STACK_SIZE) & !(STACK_GRANULE - 1);
+
+        let adopted = adopt_stack(bottom, top);
+
+        frida_winnt_run_on_stack(top as *mut u8, run_agent, context);
+
+        if let Some(a) = adopted {
+            a.limit.write_volatile(a.saved_limit);
+            a.base.write_volatile(a.saved_base);
+        }
+
         free(stack, THREAD_STACK_SIZE);
     }
 }
+
+struct AdoptedStack {
+    limit: *mut u64,
+    base: *mut u64,
+    saved_limit: u64,
+    saved_base: u64,
+}
+
+unsafe fn adopt_stack(bottom: usize, top: usize) -> Option<AdoptedStack> {
+    let sp: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
+    }
+    let thread = unsafe { (_PsGetCurrentThread)() as *mut u64 };
+
+    let mut limit: Option<(*mut u64, u64)> = None;
+    let mut base: Option<(*mut u64, u64)> = None;
+    for index in 0..KTHREAD_WORDS_SEARCHED {
+        let at = unsafe { thread.add(index) };
+        let value = unsafe { at.read_volatile() };
+        if value % STACK_GRANULE as u64 != 0 {
+            continue;
+        }
+        let distance = value as i64 - sp as i64;
+        if distance < 0 && distance > -(LARGEST_KERNEL_STACK as i64) {
+            if limit.is_none_or(|(_, seen)| value > seen) {
+                limit = Some((at, value));
+            }
+        } else if distance > 0 && distance < LARGEST_KERNEL_STACK as i64 {
+            if base.is_none_or(|(_, seen)| value < seen) {
+                base = Some((at, value));
+            }
+        }
+    }
+
+    let (limit, saved_limit) = limit?;
+    let (base, saved_base) = base?;
+    if saved_base - saved_limit > LARGEST_KERNEL_STACK as u64 {
+        return None;
+    }
+
+    unsafe {
+        limit.write_volatile(bottom as u64);
+        base.write_volatile(top as u64);
+    }
+
+    Some(AdoptedStack { limit, base, saved_limit, saved_base })
+}
+
+const KTHREAD_WORDS_SEARCHED: usize = 40;
+const STACK_GRANULE: usize = 4096;
+const LARGEST_KERNEL_STACK: usize = 256 * 1024;
 
 unsafe extern "C" fn run_agent(context: *mut c_void) {
     let start = unsafe { Box::from_raw(context as *mut ThreadStart) };
