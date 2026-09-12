@@ -25,6 +25,7 @@ SECTIONS {
     _PsRemoveCreateThreadNotifyRoutine = .; . += 8;
     _KeInsertQueueDpc = .; . += 8;
     _ZwYieldExecution = .; . += 8;
+    _KeExpandKernelStackAndCalloutEx = .; . += 8;
     _KeBugCheckEx = .; . += 8;
     _DbgPrint = .; . += 8;
     _MmGetVirtualForPhysical = .; . += 8;

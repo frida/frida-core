@@ -185,77 +185,31 @@ unsafe extern "C" fn thread_start(context: *mut c_void) {
 }
 
 unsafe fn start_on_own_stack(context: *mut c_void) {
-    let stack = alloc(THREAD_STACK_SIZE);
-    unsafe {
-        let bottom = (stack as usize + STACK_GRANULE - 1) & !(STACK_GRANULE - 1);
-        let top = (stack as usize + THREAD_STACK_SIZE) & !(STACK_GRANULE - 1);
-
-        let adopted = adopt_stack(bottom, top);
-
-        frida_winnt_run_on_stack(top as *mut u8, run_agent, context);
-
-        if let Some(a) = adopted {
-            a.limit.write_volatile(a.saved_limit);
-            a.base.write_volatile(a.saved_base);
-        }
-
-        free(stack, THREAD_STACK_SIZE);
+    let status = unsafe {
+        (_KeExpandKernelStackAndCalloutEx)(run_agent, context, THREAD_STACK_SIZE, 1,
+            core::ptr::null_mut())
+    };
+    if status < 0 {
+        panic!("Unable to expand the kernel stack: {:#x}", status);
     }
 }
 
-struct AdoptedStack {
-    limit: *mut u64,
-    base: *mut u64,
-    saved_limit: u64,
-    saved_base: u64,
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn run_agent(context: *mut c_void) {
+    unsafe { run_agent_body(context) }
 }
 
-unsafe fn adopt_stack(bottom: usize, top: usize) -> Option<AdoptedStack> {
-    let sp: usize;
-    unsafe {
-        core::arch::asm!("mov {0}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
-    }
-    let thread = unsafe { (_PsGetCurrentThread)() as *mut u64 };
-
-    let mut limit: Option<(*mut u64, u64)> = None;
-    let mut base: Option<(*mut u64, u64)> = None;
-    for index in 0..KTHREAD_WORDS_SEARCHED {
-        let at = unsafe { thread.add(index) };
-        let value = unsafe { at.read_volatile() };
-        if value % STACK_GRANULE as u64 != 0 {
-            continue;
-        }
-        let distance = value as i64 - sp as i64;
-        if distance < 0 && distance > -(LARGEST_KERNEL_STACK as i64) {
-            if limit.is_none_or(|(_, seen)| value > seen) {
-                limit = Some((at, value));
-            }
-        } else if distance > 0 && distance < LARGEST_KERNEL_STACK as i64 {
-            if base.is_none_or(|(_, seen)| value < seen) {
-                base = Some((at, value));
-            }
-        }
-    }
-
-    let (limit, saved_limit) = limit?;
-    let (base, saved_base) = base?;
-    if saved_base - saved_limit > LARGEST_KERNEL_STACK as u64 {
-        return None;
-    }
-
-    unsafe {
-        limit.write_volatile(bottom as u64);
-        base.write_volatile(top as u64);
-    }
-
-    Some(AdoptedStack { limit, base, saved_limit, saved_base })
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn run_agent(context: *mut c_void) {
+    unsafe { run_agent_body(context) }
 }
 
-const KTHREAD_WORDS_SEARCHED: usize = 40;
-const STACK_GRANULE: usize = 4096;
-const LARGEST_KERNEL_STACK: usize = 256 * 1024;
-
+#[cfg(target_arch = "aarch64")]
 unsafe extern "C" fn run_agent(context: *mut c_void) {
+    unsafe { run_agent_body(context) }
+}
+
+unsafe fn run_agent_body(context: *mut c_void) {
     let start = unsafe { Box::from_raw(context as *mut ThreadStart) };
     unsafe {
         (start.entry)(start.parameter, 0);
@@ -3843,6 +3797,7 @@ macro_rules! kernel_abi {
         type ServiceRoutine = unsafe extern "stdcall" fn(*mut c_void, *mut c_void) -> u8;
         type DeferredRoutine =
             unsafe extern "stdcall" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
+        type StackCallout = unsafe extern "stdcall" fn(*mut c_void);
     };
 }
 
@@ -3857,6 +3812,7 @@ macro_rules! kernel_abi {
         type ServiceRoutine = unsafe extern "win64" fn(*mut c_void, *mut c_void) -> u8;
         type DeferredRoutine =
             unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
+        type StackCallout = unsafe extern "win64" fn(*mut c_void);
     };
 }
 
@@ -3871,6 +3827,7 @@ macro_rules! kernel_abi {
         type ServiceRoutine = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u8;
         type DeferredRoutine =
             unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
+        type StackCallout = unsafe extern "C" fn(*mut c_void);
     };
 }
 
@@ -3895,6 +3852,13 @@ kernel_abi! {
     static _KeInitializeDpc: windows_fn!(*mut c_void, DeferredRoutine, *mut c_void);
     static _KeInsertQueueDpc: windows_fn!(*mut c_void, *mut c_void, *mut c_void => u8);
     static _ZwYieldExecution: windows_fn!( => i32);
+    static _KeExpandKernelStackAndCalloutEx: windows_fn!(
+        StackCallout,
+        *mut c_void,
+        usize,
+        u8,
+        *mut c_void
+        => i32);
     static _KeBugCheckEx: windows_fn!(u32, usize, usize, usize, usize => !);
     static _MmGetPhysicalAddress: windows_fn!(*const c_void => u64);
     static _HalGetInterruptVector: windows_fn!(u32, u32, u32, u32, *mut u8, *mut usize => u32);
