@@ -2413,8 +2413,9 @@ namespace Frida {
 
 		private static BareboneStubFlavor parse_stub_flavor (string? name) {
 			switch (name) {
-				case "vz":	return BareboneStubFlavor.VZ;
-				default:	return BareboneStubFlavor.GDB_REMOTE;
+				case "vz":		return BareboneStubFlavor.VZ;
+				case "parallels":	return BareboneStubFlavor.PARALLELS;
+				default:		return BareboneStubFlavor.GDB_REMOTE;
 			}
 		}
 	}
@@ -2422,11 +2423,13 @@ namespace Frida {
 	/**
 	 * Selects which GDB-remote dialect to speak. GDB_REMOTE drives the generic client
 	 * (QEMU, Corellium, debugserver); VZ drives the Apple Virtualization.framework kernel
-	 * stub, whose lldb-flavoured quirks the generic client cannot handle.
+	 * stub, whose lldb-flavoured quirks the generic client cannot handle; PARALLELS drives
+	 * the debug server of Parallels Desktop.
 	 */
 	public enum BareboneStubFlavor {
 		GDB_REMOTE,
-		VZ
+		VZ,
+		PARALLELS
 	}
 
 	public abstract class BareboneAllocatorConfig : Object {
