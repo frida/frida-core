@@ -30,6 +30,9 @@ namespace Frida.Barebone {
 			Bytes relocated_image = machine.relocate (elf, raw_elf, base_va);
 			yield machine.write_virtual (base_va, relocated_image.get_data (), cancellable);
 
+			yield clear_tail_beyond_file (machine, base_va, relocated_image.get_size (),
+				num_pages * page_size, cancellable);
+
 			yield protect_unless_already (machine, allocator, base_va + text_base, text_size,
 				READ | EXECUTE, cancellable);
 			yield protect_unless_already (machine, allocator, base_va + data_base,
@@ -40,5 +43,14 @@ namespace Frida.Barebone {
 		}
 
 		return allocation;
+	}
+
+	private async void clear_tail_beyond_file (Machine machine, uint64 base_va, size_t written,
+			size_t mapped, Cancellable? cancellable) throws Error, IOError {
+		if (written >= mapped)
+			return;
+
+		var blank = new uint8[mapped - written];
+		yield machine.write_virtual (base_va + written, blank, cancellable);
 	}
 }
