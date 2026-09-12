@@ -14,7 +14,7 @@ namespace Frida.Barebone {
 		private uint pointer_size;
 
 		private BareboneInjectedAgentConfig agent_config;
-		private BareboneVsockTransportConfig? vsock_transport;
+		private string? hostlink_socket_path;
 		private BareboneImageConfig? image_config;
 		private BareboneKernelKind kernel_kind;
 		private KernelRelocation? relocation;
@@ -84,6 +84,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 		private const uint8 TRANSPORT_KIND_VIRTIO_PCI = 2;
+		private const uint8 TRANSPORT_KIND_SERIAL = 3;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var transport_tag = yield resolve_transport (cancellable);
@@ -271,8 +272,8 @@ namespace Frida.Barebone {
 			yield machine.write_virtual (config_allocation.virtual_address, config_blob.get_data (),
 				cancellable);
 
-			yield machine.protect_pages (config_allocation.virtual_address, config_allocation.size, READ | WRITE,
-				cancellable);
+			yield protect_unless_already (machine, allocator, config_allocation.virtual_address,
+				config_allocation.size, READ | WRITE, cancellable);
 
 			var ia32 = machine as IA32Machine;
 			uint kernel_arguments = (ia32 != null) ? ia32.arguments_in_registers : 0;
@@ -303,23 +304,46 @@ namespace Frida.Barebone {
 				return yield connect_virtio_transport ((BareboneHostlinkTransportConfig) agent_config.transport, cancellable);
 			if (agent_config.transport is BareboneVsockTransportConfig) {
 				var config = (BareboneVsockTransportConfig) agent_config.transport;
-				vsock_transport = config;
+				hostlink_socket_path = config.socket_path;
 				return new Variant.tuple ({
 					new Variant.byte (TRANSPORT_KIND_VSOCK),
 					new Variant.variant (new Variant.uint32 (config.port))
 				});
 			}
+			if (agent_config.transport is BareboneSerialTransportConfig) {
+				yield connect_serial_transport ((BareboneSerialTransportConfig) agent_config.transport,
+					cancellable);
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_SERIAL),
+					new Variant.variant (new Variant.uint32 (0))
+				});
+			}
 			throw new Error.NOT_SUPPORTED ("Unsupported transport config");
 		}
 
+		private async void connect_serial_transport (BareboneSerialTransportConfig config,
+				Cancellable? cancellable) throws Error, IOError {
+#if WINDOWS
+			throw new Error.NOT_SUPPORTED ("Serial transport is not available on this OS");
+#else
+			var client = new SocketClient ();
+			try {
+				adopt_hostlink_streams (yield client.connect_async (new UnixSocketAddress (config.path),
+					cancellable));
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to reach the serial port of the guest: %s", e.message);
+			}
+#endif
+		}
+
 		private async void establish_hostlink (Cancellable? cancellable) throws Error, IOError {
-			if (vsock_transport == null)
+			if (hostlink_socket_path == null)
 				return;
 
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Hostlink transport is not available on this OS");
 #else
-			var address = new UnixSocketAddress (vsock_transport.socket_path);
+			var address = new UnixSocketAddress (hostlink_socket_path);
 			var client = new SocketClient ();
 			while (true) {
 				try {
@@ -428,7 +452,7 @@ namespace Frida.Barebone {
 
 			{
 				try {
-					yield machine.protect_pages (elf_allocation.virtual_address,
+					yield protect_unless_already (machine, allocator, elf_allocation.virtual_address,
 						elf_allocation.size, READ | WRITE, cancellable);
 
 					yield elf_allocation.deallocate (cancellable);

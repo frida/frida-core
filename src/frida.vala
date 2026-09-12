@@ -2759,6 +2759,9 @@ namespace Frida {
 					case "vsock":
 						t = typeof (BareboneVsockTransportConfig);
 						break;
+					case "serial":
+						t = typeof (BareboneSerialTransportConfig);
+						break;
 					default:
 						break;
 					}
@@ -2935,6 +2938,28 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.socket_path' is missing");
 			if (port == 0)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.port' is missing");
+		}
+	}
+
+	/**
+	 * Serial transport. The guest kernel holds a serial port open, and the hypervisor
+	 * backs that port with a UNIX socket on the host: Parallels Desktop does this for
+	 * `prlctl set <vm> --device-add serial --socket <path>`, once the device has also
+	 * been connected with `--device-connect`. Both ends block, so neither polls.
+	 *
+	 * Note that bytes written while nothing is attached to the socket are dropped
+	 * rather than buffered, so the host attaches before the agent is let go.
+	 */
+	public sealed class BareboneSerialTransportConfig : BareboneInjectingTransportConfig {
+		/** Path to the UNIX socket the hypervisor has bridged to the guest's serial port. */
+		public string path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
 		}
 	}
 

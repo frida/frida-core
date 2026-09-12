@@ -91,6 +91,8 @@ mod winnt_user;
 mod gum_injected;
 #[cfg(feature = "blob")]
 mod hostlink_virtio;
+#[cfg(feature = "winnt")]
+mod hostlink_serial;
 #[cfg(feature = "xnu-core")]
 mod hostlink_vsock;
 #[cfg(feature = "xnu-core")]
@@ -329,6 +331,10 @@ mod entrypoint_blob {
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
+                #[cfg(feature = "winnt")]
+                TransportConfig::Serial => Transport::Serial(
+                    hostlink_serial::Hostlink::init(Some(on_frame_from_host), wake_token).unwrap(),
+                ),
             };
             transport_set(transport);
 
@@ -418,6 +424,12 @@ mod entrypoint_blob {
                     { TransportConfig::VirtioPci { ecam } }
                     #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
                     { let _ = ecam; panic!("virtio-pci is not this kernel's") }
+                }
+                3 => {
+                    #[cfg(feature = "winnt")]
+                    { TransportConfig::Serial }
+                    #[cfg(not(feature = "winnt"))]
+                    { panic!("serial is NT's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -722,6 +734,8 @@ pub use entrypoint_blob::_start;
 pub enum Transport {
     #[cfg(feature = "blob")]
     Virtio(hostlink_virtio::Hostlink),
+    #[cfg(feature = "winnt")]
+    Serial(hostlink_serial::Hostlink),
     #[cfg(feature = "xnu-core")]
     Vsock(hostlink_vsock::Hostlink),
     #[cfg(any(feature = "linux", feature = "xnu-kext"))]
@@ -733,6 +747,8 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.send(payload),
+            #[cfg(feature = "winnt")]
+            Transport::Serial(h) => h.send(payload),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.send(payload),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
@@ -744,6 +760,8 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.shutdown(),
+            #[cfg(feature = "winnt")]
+            Transport::Serial(h) => h.shutdown(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(_) => {}
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
@@ -755,6 +773,8 @@ impl Transport {
         match self {
             #[cfg(feature = "blob")]
             Transport::Virtio(h) => h.process(),
+            #[cfg(feature = "winnt")]
+            Transport::Serial(h) => h.process(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.process(),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
@@ -786,6 +806,8 @@ unsafe fn where_configuration_space_is_mapped(_transport: *mut GVariant) -> u64 
 #[cfg(feature = "blob")]
 pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
+    #[cfg(feature = "winnt")]
+    Serial,
     #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     VirtioPci { ecam: u64 },
     #[cfg(feature = "xnu-core")]
