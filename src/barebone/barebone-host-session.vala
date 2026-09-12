@@ -154,6 +154,7 @@ namespace Frida {
 				case ARM64:
 					machine = new Barebone.Arm64Machine (gdb) {
 						software_return_detection = !config.connection.supports_breakpoints,
+						mmu_registers_available = config.connection.mmu_registers_available,
 					};
 					break;
 				default:
@@ -215,7 +216,8 @@ namespace Frida {
 			Barebone.Allocator allocator;
 			BareboneAllocatorConfig? ac = config.allocator;
 			if (ac == null)
-				ac = infer_allocator_config (config.kernel, kernel_symbols, kernel_base);
+				ac = infer_allocator_config (config.kernel, kernel_symbols, kernel_base,
+					config.connection.mmu_registers_available);
 			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
 			} else if (ac is BarebonePhysicalAllocatorConfig) {
@@ -290,25 +292,26 @@ namespace Frida {
 		}
 
 		private static BareboneAllocatorConfig? infer_allocator_config (BareboneKernelKind kind,
-				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
+				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base, bool mmu_registers_available) {
 			if (kind == WIN9X)
 				return infer_win9x_allocator_config (kernel_symbols);
 			if (kind == WINNT)
 				return infer_winnt_allocator_config (kernel_symbols);
 			if (kind == LINUX)
-				return infer_linux_allocator_config (kernel_symbols, kernel_base);
+				return infer_linux_allocator_config (kernel_symbols, kernel_base, mmu_registers_available);
 			return null;
 		}
 
 		private static BareboneAllocatorConfig? infer_linux_allocator_config (
-				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
+				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base, bool mmu_registers_available) {
 			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "execmem_alloc");
 			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "execmem_free");
 			if (alloc == null || free == null)
 				return null;
 
 			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
-			alloc_arguments.add (new BareboneCallArgument (LITERAL, EXECMEM_MODULE_DATA));
+			uint64 execmem_type = mmu_registers_available ? EXECMEM_MODULE_DATA : EXECMEM_MODULE_TEXT;
+			alloc_arguments.add (new BareboneCallArgument (LITERAL, execmem_type));
 			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
 
 			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
@@ -366,6 +369,7 @@ namespace Frida {
 			};
 		}
 
+		private const uint64 EXECMEM_MODULE_TEXT = 0;
 		private const uint64 EXECMEM_MODULE_DATA = 4;
 
 		private static Barebone.SymbolInfo? find_symbol (Gee.List<Barebone.SymbolInfo> symbols, string name) {

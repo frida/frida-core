@@ -110,11 +110,13 @@ namespace Frida.Barebone {
 		private uint64 kernel_base;
 		private SymbolInfo schedule;
 		private SymbolInfo? panic;
+		private Gee.Map<string, SymbolInfo> symbols;
 
 		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Gee.Map<string, SymbolInfo> symbols)
 				throws Error {
 			this.machine = machine;
 			this.kernel_base = kernel_base;
+			this.symbols = symbols;
 
 			schedule = symbols["schedule"];
 			if (schedule == null)
@@ -137,12 +139,28 @@ namespace Frida.Barebone {
 			if (ia32 != null)
 				ia32.arguments_in_registers = LINUX_REGISTER_ARGUMENTS;
 
+			if (arm64 != null && !arm64.mmu_registers_available) {
+				arm64.set_memory_ro = symbol_address ("set_memory_ro");
+				arm64.set_memory_rw = symbol_address ("set_memory_rw");
+				arm64.set_memory_x = symbol_address ("set_memory_x");
+				arm64.set_memory_nx = symbol_address ("set_memory_nx");
+				if (arm64.set_memory_x == 0)
+					throw new Error.NOT_SUPPORTED ("Missing set_memory_* symbols for kernel-API page protection");
+			}
+
 			yield machine.enter_exception_level (1, 1000, cancellable);
 
 			yield run_until_schedule (schedule_address, cancellable);
 
-			if (arm64 != null)
+			// learn_permission_templates walks the page tables, which needs the MMU registers; the
+			// kernel-API protection path does not use permission templates.
+			if (arm64 != null && arm64.mmu_registers_available)
 				yield arm64.learn_permission_templates (schedule_address, cancellable);
+		}
+
+		private uint64 symbol_address (string name) {
+			var sym = symbols[name];
+			return (sym != null) ? kernel_base + sym.offset : 0;
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {

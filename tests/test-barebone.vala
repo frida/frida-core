@@ -5960,6 +5960,8 @@ FAIL: %s
 		var config = new BareboneConfig ();
 		config.connection.host = "127.0.0.1";
 		config.connection.port = (uint16) uint.parse (stub_port);
+		if (Environment.get_variable (@"FRIDA_TEST_$(prefix)_NO_MMU_REGS") != null)
+			config.connection.mmu_registers_available = false;
 		config.kernel = LINUX;
 		config.image = new BareboneImageConfig () {
 			file = system_map,

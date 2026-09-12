@@ -27,6 +27,15 @@ namespace Frida.Barebone {
 		// return by spinning and sampling rather than by a breakpoint.
 		public bool software_return_detection { get; set; default = false; }
 
+		// When the stub does not expose the MMU system registers, page protection is changed by
+		// calling the kernel's set_memory_* helpers (addresses supplied by the flavor) rather than
+		// by walking the page tables from the host.
+		public bool mmu_registers_available { get; set; default = true; }
+		public uint64 set_memory_ro = 0;
+		public uint64 set_memory_rw = 0;
+		public uint64 set_memory_x = 0;
+		public uint64 set_memory_nx = 0;
+
 		// "b ." -- a branch to itself, little-endian.
 		private static Bytes SPIN_HERE = new Bytes ({ 0x00, 0x00, 0x00, 0x14 });
 		private const uint RETURN_POLL_INTERVAL_MS = 10;
@@ -72,6 +81,9 @@ namespace Frida.Barebone {
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+			if (!mmu_registers_available)
+				return 4096;
+
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			return p.granule;
@@ -413,10 +425,36 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
 				throws Error, IOError {
+			if (!mmu_registers_available) {
+				yield set_pages_protection (virtual_address, size, prot, cancellable);
+				return;
+			}
+
 			yield write_page_protection (virtual_address, size, prot, cancellable);
 
 			if (code_allocator != null)
 				yield flush_translations (cancellable);
+		}
+
+		// Change protection through the kernel's own set_memory_* helpers. W^X is honoured by
+		// clearing write before adding execute; the helpers take a page-aligned base and a page
+		// count, and handle the TLB and cache maintenance themselves.
+		private async void set_pages_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
+			if (set_memory_x == 0)
+				throw new Error.NOT_SUPPORTED ("Kernel set_memory_* helpers are unavailable");
+
+			uint64 aligned = virtual_address & ~(uint64) 0xfff;
+			uint num_pages = (uint) (((virtual_address + size + 0xfff) & ~(uint64) 0xfff) - aligned) / 4096;
+
+			if ((prot & Gum.PageProtection.EXECUTE) != 0) {
+				yield invoke (set_memory_ro, { aligned, num_pages }, cancellable);
+				yield invoke (set_memory_x, { aligned, num_pages }, cancellable);
+			} else {
+				yield invoke ((prot & Gum.PageProtection.WRITE) != 0 ? set_memory_rw : set_memory_ro,
+					{ aligned, num_pages }, cancellable);
+				yield invoke (set_memory_nx, { aligned, num_pages }, cancellable);
+			}
 		}
 
 		private async void write_page_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
