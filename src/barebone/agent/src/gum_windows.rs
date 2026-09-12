@@ -577,6 +577,30 @@ pub(crate) fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        pc: state.pc,
+        sp: state.sp,
+        nzcv: state.nzcv,
+        x: state.x,
+        fp: state.fp,
+        lr: state.lr,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn cpu_state_from(context: &GumCpuContext) -> kernel::CpuState {
+    kernel::CpuState {
+        pc: context.pc,
+        sp: context.sp,
+        nzcv: context.nzcv,
+        x: context.x,
+        fp: context.fp,
+        lr: context.lr,
+    }
+}
+
 pub(crate) fn fault_type_of(code: u32) -> crate::bindings::GumExceptionType {
     use crate::bindings::*;
 

@@ -344,6 +344,11 @@ pub unsafe extern "win64" fn on_thread_start(routine: usize, parameter: usize) -
     unsafe { start_thread(routine, parameter) }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub unsafe extern "C" fn on_thread_start(routine: usize, parameter: usize) -> ! {
+    unsafe { start_thread(routine, parameter) }
+}
+
 unsafe fn start_thread(routine: usize, parameter: usize) -> ! {
     crate::gum_windows::thread_appeared_at(current_thread_id() as u32, routine, parameter);
 
@@ -359,6 +364,11 @@ pub unsafe extern "stdcall" fn on_thread_exit(status: u32) -> ! {
 
 #[cfg(target_arch = "x86_64")]
 pub unsafe extern "win64" fn on_thread_exit(status: u32) -> ! {
+    unsafe { exit_thread(status) }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub unsafe extern "C" fn on_thread_exit(status: u32) -> ! {
     unsafe { exit_thread(status) }
 }
 
@@ -390,7 +400,7 @@ fn thread_starter() -> Option<usize> {
 
 const THREAD_THUNK: [u8; 7] = [0x33, 0xed, 0x53, 0x50, 0x6a, 0x00, 0xe9];
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn thread_starter() -> Option<usize> {
     Some(export(module_base(peb(), b"kernel32.dll"), b"BaseThreadStart"))
 }
@@ -424,6 +434,12 @@ pub unsafe extern "win64" fn on_module_load(search_path: *const u16, flags: *mut
     unsafe { load_module(search_path, flags, name, handle) }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub unsafe extern "C" fn on_module_load(search_path: *const u16, flags: *mut u32,
+        name: *mut u8, handle: *mut usize) -> i32 {
+    unsafe { load_module(search_path, flags, name, handle) }
+}
+
 unsafe fn load_module(search_path: *const u16, flags: *mut u32, name: *mut u8,
         handle: *mut usize) -> i32 {
     let original: windows_fn!(*const u16, *mut u32, *mut u8, *mut usize => i32) =
@@ -444,6 +460,11 @@ pub unsafe extern "stdcall" fn on_module_unload(handle: usize) -> i32 {
 
 #[cfg(target_arch = "x86_64")]
 pub unsafe extern "win64" fn on_module_unload(handle: usize) -> i32 {
+    unsafe { unload_module(handle) }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub unsafe extern "C" fn on_module_unload(handle: usize) -> i32 {
     unsafe { unload_module(handle) }
 }
 
@@ -737,56 +758,56 @@ const HOLD_INSTRUCTION: [u8; HOLD_SIZE] = [0xeb, 0xfe];
 const HOLD_ATTEMPTS: u32 = 5000;
 const HOLD_SLICE_US: i64 = 1000;
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_BASIC_INFORMATION_SIZE: usize = 24;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_BASIC_INFORMATION_PEB: usize = 0x04;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PEB_IMAGE_BASE_OFFSET: usize = 0x08;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_BASIC_INFORMATION_SIZE: usize = 48;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_BASIC_INFORMATION_PEB: usize = 0x08;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PEB_IMAGE_BASE_OFFSET: usize = 0x10;
 
 #[cfg(target_arch = "x86")]
 const UNICODE_STRING_SIZE: usize = 8;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const UNICODE_STRING_BUFFER: usize = 4;
 #[cfg(target_arch = "x86")]
 const PARAMETERS_DESKTOP_OFFSET: usize = 0x78;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_SIZE: usize = 128;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_PROCESS: usize = 0x00;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_THREAD: usize = 0x04;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_PID: usize = 0x08;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_TID: usize = 0x0c;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const STARTUP_INFO_SIZE: usize = 0x44;
 
 #[cfg(target_arch = "x86_64")]
 const UNICODE_STRING_SIZE: usize = 16;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const UNICODE_STRING_BUFFER: usize = 8;
 #[cfg(target_arch = "x86_64")]
 const PARAMETERS_DESKTOP_OFFSET: usize = 0xc0;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_SIZE: usize = 192;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_PROCESS: usize = 0x00;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_THREAD: usize = 0x08;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_PID: usize = 0x10;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const STARTUP_INFO_SIZE: usize = 0x68;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_TID: usize = 0x20;
 
 fn spawn_api() -> &'static SpawnApi {
@@ -910,6 +931,11 @@ unsafe extern "win64" fn on_fault(pointers: *const usize) -> i32 {
     unsafe { look_at_the_fault(pointers) }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn on_fault(pointers: *const usize) -> i32 {
+    unsafe { look_at_the_fault(pointers) }
+}
+
 unsafe fn look_at_the_fault(pointers: *const usize) -> i32 {
     let record = unsafe { pointers.read() } as *const usize;
     let context = unsafe { pointers.add(1).read() } as *mut u8;
@@ -940,13 +966,13 @@ static mut FAULT_HANDLER: *mut c_void = core::ptr::null_mut();
 const CARRY_ON: i32 = -1;
 const SEARCH_ON: i32 = 0;
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const RECORD_ADDRESS: usize = 0x0c;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const RECORD_ACCESSED: usize = 0x18;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const RECORD_ADDRESS: usize = 0x10;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const RECORD_ACCESSED: usize = 0x28;
 
 fn copy_has_work() -> bool {
@@ -1019,10 +1045,33 @@ fn peb() -> usize {
     peb
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_arch = "aarch64")]
+fn current_client_id(offset: u32) -> u32 {
+    unsafe { ((thread_block() + offset as usize) as *const u64).read() as u32 }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn peb() -> usize {
+    unsafe { ((thread_block() + BLOCK_PEB_OFFSET) as *const usize).read() }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn thread_block() -> usize {
+    let block: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, x18", out(reg) block,
+            options(nomem, nostack, preserves_flags));
+    }
+    block
+}
+
+#[cfg(target_arch = "aarch64")]
+const BLOCK_PEB_OFFSET: usize = 0x60;
+
+#[cfg(target_pointer_width = "32")]
 const PEB_PROCESS_HEAP_OFFSET: usize = 0x18;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PEB_PROCESS_HEAP_OFFSET: usize = 0x30;
 
 const MEMORY_BASIC_INFORMATION: u32 = 0;

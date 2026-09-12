@@ -15,6 +15,13 @@ macro_rules! windows_fn {
     };
 }
 
+#[cfg(target_arch = "aarch64")]
+macro_rules! windows_fn {
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "C" fn($($argument),*) -> $result
+    };
+}
+
 pub struct Api {
     pub find_first: usize,
     pub find_next: usize,
