@@ -30,9 +30,10 @@ namespace Frida.Barebone {
 			Bytes relocated_image = machine.relocate (elf, raw_elf, base_va);
 			yield machine.write_virtual (base_va, relocated_image.get_data (), cancellable);
 
-			yield machine.protect_pages (base_va + text_base, text_size, READ | EXECUTE, cancellable);
-			yield machine.protect_pages (base_va + data_base, (num_pages * page_size) - (size_t) data_base, READ | WRITE,
-				cancellable);
+			yield protect_unless_already (machine, allocator, base_va + text_base, text_size,
+				READ | EXECUTE, cancellable);
+			yield protect_unless_already (machine, allocator, base_va + data_base,
+				(num_pages * page_size) - (size_t) data_base, READ | WRITE, cancellable);
 		} catch (GLib.Error e) {
 			yield allocation.deallocate (cancellable);
 			throw_api_error (e);

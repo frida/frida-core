@@ -5,6 +5,8 @@ namespace Frida.Barebone {
 			get;
 		}
 
+		public abstract Gum.PageProtection granted_protection ();
+
 		public abstract async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable)
 			throws Error, IOError;
 	}
@@ -21,9 +23,21 @@ namespace Frida.Barebone {
 		public abstract async void deallocate (Cancellable? cancellable) throws Error, IOError;
 	}
 
+	internal async void protect_unless_already (Machine machine, Allocator allocator, uint64 address, size_t size,
+			Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+		if ((allocator.granted_protection () & prot) == prot)
+			return;
+
+		yield machine.protect_pages (address, size, prot, cancellable);
+	}
+
 	// This gives memory that the caller reserved before. Injection stops the guest to write, thus
 	// all work that needs the guest must occur first.
 	public sealed class FixedAllocator : Object, Allocator {
+		public Gum.PageProtection granted_protection () {
+			return READ | WRITE;
+		}
+
 		public size_t page_size {
 			get {
 				return _page_size;
@@ -75,6 +89,10 @@ namespace Frida.Barebone {
 	}
 
 	public sealed class NullAllocator : Object, Allocator {
+		public Gum.PageProtection granted_protection () {
+			return READ | WRITE;
+		}
+
 		public size_t page_size {
 			get {
 				return _page_size;
@@ -93,6 +111,10 @@ namespace Frida.Barebone {
 	}
 
 	public sealed class PhysicalAllocator : Object, Allocator {
+		public Gum.PageProtection granted_protection () {
+			return READ | WRITE;
+		}
+
 		public size_t page_size {
 			get {
 				return _page_size;
@@ -154,6 +176,10 @@ namespace Frida.Barebone {
 	}
 
 	public sealed class TargetFunctionsAllocator : Object, Allocator {
+		public Gum.PageProtection granted_protection () {
+			return _protection;
+		}
+
 		public size_t page_size {
 			get {
 				return _page_size;
@@ -162,15 +188,17 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private size_t _page_size;
+		private Gum.PageProtection _protection;
 		private uint64 alloc_function;
 		private uint64 free_function;
 		private Gee.List<BareboneCallArgument> alloc_arguments;
 		private Gee.List<BareboneCallArgument> free_arguments;
 
-		public TargetFunctionsAllocator (Machine machine, size_t page_size,
+		public TargetFunctionsAllocator (Machine machine, size_t page_size, Gum.PageProtection protection,
 				BareboneTargetFunctionsAllocatorConfig config, uint64 alloc_function, uint64 free_function) {
 			this.machine = machine;
 			this._page_size = page_size;
+			this._protection = protection;
 			this.alloc_function = alloc_function;
 			this.free_function = free_function;
 			this.alloc_arguments = config._effective_alloc_arguments ();
