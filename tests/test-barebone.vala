@@ -309,6 +309,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-agent-recovers-from-exception-in-live-guest", () => {
+			var h = new Harness ((h) =>
+				winnt_arm64_agent_recovers_from_exception_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		// One suite for each word size. Each suite uses its own set of variables and its own guest.
 		GLib.Test.add_func ("/Barebone/WinNt/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness, "WINNT"));
@@ -4434,6 +4440,18 @@ FAIL: %s
 	private async void winnt_arm64_agent_runs_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"),
 			"send(1 + 1);", "\"payload\":2");
+	}
+
+	private async void winnt_arm64_agent_recovers_from_exception_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
+			let caught = 'no';
+			try {
+				ptr('0xfffff000').readU32();
+			} catch (e) {
+				caught = 'yes';
+			}
+			send({ caught: caught });
+		""", "\"caught\":\"yes\"");
 	}
 
 	private async void linux_agent_runs_in_live_guest (Harness h, string prefix) {

@@ -620,110 +620,235 @@ pub fn release_fault_reporter() {
 
 #[cfg(target_arch = "aarch64")]
 pub fn install_fault_reporter() {
-    let entry = synchronous_entry();
-
     unsafe {
-        if ORIGINAL_ENTRY != 0 {
+        if SHADOW_VECTORS != 0 {
             return;
         }
-        ORIGINAL_ENTRY = (entry as *const u32).read();
+
+        let slot = vectors_in_use();
+        if slot.is_null() {
+            return;
+        }
+        let live = slot.read() as usize;
+
+        let memory = alloc_vectors();
+        if memory == 0 {
+            return;
+        }
+        let shadow = (memory + VECTOR_TABLE_SIZE - 1) & !(VECTOR_TABLE_SIZE - 1);
+
+        // Forward every entry to the kernel's own rather than copying it: the entries are full
+        // of pc-relative branches, which a copy this far away would send into nothing. The veneer
+        // needs a register, and only x18 is ever free. Coming from EL1 the kernel overwrites it
+        // before reading it; coming from EL0 it holds the user's TEB and the entry's second
+        // instruction saves it, so there the two saving instructions are copied and the veneer
+        // resumes just past them.
+        for index in 0..VECTOR_ENTRIES {
+            let entry = (shadow + index * VECTOR_ENTRY_SIZE) as *mut u8;
+            let live_entry = live + index * VECTOR_ENTRY_SIZE;
+            let taken_over = if index < VECTOR_ENTRIES_FROM_EL1 {
+                0
+            } else {
+                core::ptr::copy_nonoverlapping(live_entry as *const u8, entry, ENTRY_PROLOGUE_SIZE);
+                ENTRY_PROLOGUE_SIZE
+            };
+
+            let veneer = entry.byte_add(taken_over);
+            veneer.cast::<u32>().write(LOAD_X18);
+            veneer.byte_add(4).cast::<u32>().write(BRANCH_X18);
+            veneer.byte_add(8).cast::<u64>().write((live_entry + taken_over) as u64);
+        }
 
         let (base, size) = crate::own_code();
+        let entry = (shadow + SYNCHRONOUS_ENTRY_OFFSET) as *mut u8;
         FAULT_CONTROL = FaultControl {
             thunk: frida_winnt_fault_thunk as usize as u64,
-            chain: (entry + TEMPLATE_OFFSET + chain_offset()) as u64,
+            chain: entry.byte_add(chain_offset()) as u64,
             base: base as u64,
             size: size as u64,
         };
 
-        write_entry(entry, |copy| {
-            let control = copy.byte_add(control_offset()) as *mut u64;
-            control.write(&raw const FAULT_CONTROL as u64);
+        core::ptr::copy_nonoverlapping(&raw const frida_winnt_fault_vector as *const u8, entry,
+            template_size());
+        entry.byte_add(control_offset()).cast::<u64>().write(&raw const FAULT_CONTROL as u64);
+        entry.byte_add(onward_offset()).cast::<u64>()
+            .write((live + SYNCHRONOUS_ENTRY_OFFSET) as u64);
 
-            let onward = onward_branch(entry, ORIGINAL_ENTRY);
-            copy.byte_add(chain_offset() + ONWARD_BRANCH_OFFSET).cast::<u32>().write(onward);
-        });
+        publish(shadow, VECTOR_TABLE_SIZE);
+        slot.write(shadow as u64);
+        adopt_everywhere(shadow);
+
+        SHADOW_VECTORS = shadow;
+        LIVE_VECTORS = live;
+        VECTORS_SLOT = slot;
     }
 }
 
 #[cfg(target_arch = "aarch64")]
 pub fn release_fault_reporter() {
-    let entry = synchronous_entry();
-
     unsafe {
-        if ORIGINAL_ENTRY == 0 {
+        if SHADOW_VECTORS == 0 {
             return;
         }
 
-        let restored = ORIGINAL_ENTRY;
-        ORIGINAL_ENTRY = 0;
-        edit_entry(entry, |at| at.cast::<u32>().write(restored));
+        VECTORS_SLOT.write(LIVE_VECTORS as u64);
+        adopt_everywhere(LIVE_VECTORS);
+        SHADOW_VECTORS = 0;
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-fn synchronous_entry() -> usize {
+fn adopt_everywhere(vectors: usize) {
+    unsafe {
+        (_KeIpiGenericCall)(adopt_vectors, vectors);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn adopt_vectors(vectors: usize) -> usize {
+    unsafe {
+        core::arch::asm!("msr vbar_el1, {0}", "isb", in(reg) vectors,
+            options(nomem, nostack, preserves_flags));
+    }
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+fn current_vectors() -> usize {
     let vectors: usize;
     unsafe {
         core::arch::asm!("mrs {0}, vbar_el1", out(reg) vectors,
             options(nomem, nostack, preserves_flags));
     }
-    vectors + SYNCHRONOUS_ENTRY_OFFSET
+    vectors
+}
+
+// Take the first slot of the array rather than whichever one VBAR_EL1 names. They are not the
+// same: a processor boots on the slot its mitigations pick, while KiPreflightReturnToUserMode
+// reloads VBAR_EL1 from the first. Writing the slot in use is quietly undone.
+#[cfg(target_arch = "aarch64")]
+fn vectors_in_use() -> *mut u64 {
+    let Some(image) = image_containing(current_vectors()) else {
+        return core::ptr::null_mut();
+    };
+    let Some((start, size)) = section_named(image, b"CFGRO\0\0\0") else {
+        return core::ptr::null_mut();
+    };
+    let Some(limit) = image_size(image) else {
+        return core::ptr::null_mut();
+    };
+
+    let table = |value: usize| {
+        value & (VECTOR_TABLE_SIZE - 1) == 0
+            && value >= image
+            && value - image < limit
+    };
+
+    'candidate: for offset in (0..size).step_by(core::mem::size_of::<u64>()) {
+        let first = (start + offset) as *mut u64;
+        for index in 0..VECTOR_TABLE_RUN {
+            if !table(unsafe { first.add(index).read() } as usize) {
+                continue 'candidate;
+            }
+        }
+        return first;
+    }
+
+    core::ptr::null_mut()
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn write_entry(entry: usize, patch: impl FnOnce(*mut u8)) {
+fn image_size(image: usize) -> Option<usize> {
     unsafe {
-        edit_entry(entry, |at| {
-            let body = at.byte_add(TEMPLATE_OFFSET);
-            core::ptr::copy_nonoverlapping(&raw const frida_winnt_fault_vector as *const u8, body,
-                template_size());
-            patch(body);
-
-            publish(at as usize);
-
-            at.cast::<u32>().write(BRANCH | (TEMPLATE_OFFSET / INSTRUCTION_SIZE) as u32);
-        });
+        (*core::ptr::addr_of!(crate::MODULE_INFO))
+            .iter()
+            .find(|m| m.offset as usize == image)
+            .map(|m| m.size as usize)
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn edit_entry(entry: usize, write: impl FnOnce(*mut u8)) {
-    let restore = crate::winnt_paging::protection_at(entry);
-    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE,
-        GUM_PAGE_READ | crate::winnt_paging::GUM_PAGE_WRITE | GUM_PAGE_EXECUTE);
-
-    write(entry as *mut u8);
-
-    publish(entry);
-
-    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE, restore);
+fn image_containing(address: usize) -> Option<usize> {
+    unsafe {
+        (*core::ptr::addr_of!(crate::MODULE_INFO))
+            .iter()
+            .find(|m| {
+                let base = m.offset as usize;
+                address >= base && address - base < m.size as usize
+            })
+            .map(|m| m.offset as usize)
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
-fn publish(entry: usize) {
+fn section_named(image: usize, wanted: &[u8; 8]) -> Option<(usize, usize)> {
     unsafe {
-        for offset in (0..ENTRY_SIZE).step_by(CACHE_LINE_SIZE) {
-            let at = entry + offset;
+        let headers = (image + (image as *const u32).byte_add(PE_SIGNATURE_OFFSET).read() as usize)
+            as *const u8;
+        let count = headers.byte_add(SECTION_COUNT_OFFSET).cast::<u16>().read() as usize;
+        let optional_size = headers.byte_add(OPTIONAL_SIZE_OFFSET).cast::<u16>().read() as usize;
+        let mut section = headers.byte_add(SECTION_TABLE_OFFSET + optional_size);
+
+        for _ in 0..count {
+            if core::slice::from_raw_parts(section, 8) == wanted {
+                let size = section.byte_add(SECTION_VIRTUAL_SIZE).cast::<u32>().read() as usize;
+                let address = section.byte_add(SECTION_ADDRESS).cast::<u32>().read() as usize;
+                return Some((image + address, size));
+            }
+            section = section.byte_add(SECTION_ENTRY_SIZE);
+        }
+    }
+
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+fn alloc_vectors() -> usize {
+    unsafe { (_ExAllocatePool2)(POOL_NON_PAGED_EXECUTE, VECTOR_TABLE_ALLOCATION, POOL_TAG) as usize }
+}
+
+#[cfg(target_arch = "aarch64")]
+static mut SHADOW_VECTORS: usize = 0;
+#[cfg(target_arch = "aarch64")]
+static mut LIVE_VECTORS: usize = 0;
+#[cfg(target_arch = "aarch64")]
+static mut VECTORS_SLOT: *mut u64 = core::ptr::null_mut();
+
+#[cfg(target_arch = "aarch64")]
+const VECTOR_TABLE_SIZE: usize = 0x800;
+#[cfg(target_arch = "aarch64")]
+const VECTOR_TABLE_ALLOCATION: usize = 2 * VECTOR_TABLE_SIZE;
+#[cfg(target_arch = "aarch64")]
+const POOL_NON_PAGED_EXECUTE: u64 = 0x80;
+#[cfg(target_arch = "aarch64")]
+const PE_SIGNATURE_OFFSET: usize = 0x3c;
+#[cfg(target_arch = "aarch64")]
+const SECTION_COUNT_OFFSET: usize = 6;
+#[cfg(target_arch = "aarch64")]
+const OPTIONAL_SIZE_OFFSET: usize = 20;
+#[cfg(target_arch = "aarch64")]
+const SECTION_TABLE_OFFSET: usize = 24;
+#[cfg(target_arch = "aarch64")]
+const SECTION_VIRTUAL_SIZE: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const SECTION_ADDRESS: usize = 12;
+#[cfg(target_arch = "aarch64")]
+const SECTION_ENTRY_SIZE: usize = 40;
+
+#[cfg(target_arch = "aarch64")]
+fn publish(start: usize, size: usize) {
+    unsafe {
+        for offset in (0..size).step_by(CACHE_LINE_SIZE) {
+            let at = start + offset;
             core::arch::asm!("dc cvau, {0}", in(reg) at, options(nostack, preserves_flags));
         }
         core::arch::asm!("dsb ish", options(nostack, preserves_flags));
-        for offset in (0..ENTRY_SIZE).step_by(CACHE_LINE_SIZE) {
-            let at = entry + offset;
+        for offset in (0..size).step_by(CACHE_LINE_SIZE) {
+            let at = start + offset;
             core::arch::asm!("ic ivau, {0}", in(reg) at, options(nostack, preserves_flags));
         }
         core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
     }
-}
-
-#[cfg(target_arch = "aarch64")]
-fn onward_branch(entry: usize, original: u32) -> u32 {
-    let reach = ((original & BRANCH_OFFSET_MASK) << BRANCH_SPARE_BITS) as i32 >> BRANCH_SPARE_BITS;
-    let target = entry.wrapping_add((reach as isize * INSTRUCTION_SIZE as isize) as usize);
-    let from = entry + TEMPLATE_OFFSET + chain_offset() + ONWARD_BRANCH_OFFSET;
-
-    BRANCH
-        | ((target.wrapping_sub(from) / INSTRUCTION_SIZE) as u32 & BRANCH_OFFSET_MASK)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -745,12 +870,9 @@ fn control_offset() -> usize {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[repr(C)]
-struct FaultControl {
-    thunk: u64,
-    chain: u64,
-    base: u64,
-    size: u64,
+fn onward_offset() -> usize {
+    (&raw const frida_winnt_fault_vector_onward as usize)
+        - (&raw const frida_winnt_fault_vector as usize)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -766,9 +888,18 @@ struct FaultStacks {
 }
 
 #[cfg(target_arch = "aarch64")]
-const FAULT_STACK_BYTES: usize = 16384;
+const FAULT_STACK_BYTES: usize = 1 << 14;
 #[cfg(target_arch = "aarch64")]
 const FAULT_STACK_SLOTS: usize = 16;
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+struct FaultControl {
+    thunk: u64,
+    chain: u64,
+    base: u64,
+    size: u64,
+}
 
 #[cfg(target_arch = "aarch64")]
 static mut FAULT_CONTROL: FaultControl =
@@ -781,6 +912,7 @@ unsafe extern "C" {
     static frida_winnt_fault_vector: u8;
     static frida_winnt_fault_vector_chain: u8;
     static frida_winnt_fault_vector_control: u8;
+    static frida_winnt_fault_vector_onward: u8;
     static frida_winnt_fault_vector_end: u8;
     fn frida_winnt_fault_thunk();
 }
@@ -788,15 +920,102 @@ unsafe extern "C" {
 #[cfg(target_arch = "aarch64")]
 const SYNCHRONOUS_ENTRY_OFFSET: usize = 0x000;
 #[cfg(target_arch = "aarch64")]
-const ENTRY_SIZE: usize = 0x80;
-#[cfg(target_arch = "aarch64")]
 const CACHE_LINE_SIZE: usize = 64;
 #[cfg(target_arch = "aarch64")]
-const ONWARD_BRANCH_OFFSET: usize = 12;
+const VECTOR_ENTRIES: usize = 16;
 #[cfg(target_arch = "aarch64")]
-const TEMPLATE_OFFSET: usize = 8;
+const VECTOR_ENTRY_SIZE: usize = 0x80;
 #[cfg(target_arch = "aarch64")]
-const BRANCH: u32 = 0x1400_0000;
+const VECTOR_ENTRIES_FROM_EL1: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const VECTOR_TABLE_RUN: usize = 12;
+#[cfg(target_arch = "aarch64")]
+const ENTRY_PROLOGUE_SIZE: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const LOAD_X18: u32 = 0x5800_0052;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_X18: u32 = 0xd61f_0240;
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(no_mangle)]
+extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
+    let pc = read_exception_register!("elr_el1");
+    let state = read_exception_register!("spsr_el1");
+
+    let mut cpu_context = crate::bindings::_GumArm64CpuContext {
+        pc,
+        sp: unsafe { frame.add(RESUME_STACK_SLOT).read() },
+        nzcv: state,
+        x: unsafe { core::ptr::read(frame.cast::<[u64; 29]>()) },
+        fp: unsafe { frame.add(29).read() },
+        lr: unsafe { frame.add(30).read() },
+    };
+
+    if !handle(read_exception_register!("esr_el1") as u32, pc, &mut cpu_context) {
+        return unsafe { FAULT_CONTROL.chain as usize };
+    }
+
+    unsafe {
+        core::arch::asm!("msr elr_el1, {0}", in(reg) cpu_context.pc,
+            options(nomem, nostack, preserves_flags));
+
+        core::ptr::write(frame.cast::<[u64; 29]>(), cpu_context.x);
+        frame.add(29).write(cpu_context.fp);
+        frame.add(30).write(cpu_context.lr);
+        frame.add(RESUME_STACK_SLOT).write(cpu_context.sp);
+    }
+
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+macro_rules! read_exception_register {
+    ($name:literal) => {{
+        let value: u64;
+        unsafe {
+            core::arch::asm!(concat!("mrs {0}, ", $name), out(reg) value,
+                options(nomem, nostack, preserves_flags));
+        }
+        value
+    }};
+}
+
+#[cfg(target_arch = "aarch64")]
+use read_exception_register;
+
+#[cfg(target_arch = "aarch64")]
+const FRAME_BYTES: usize = 288;
+#[cfg(target_arch = "aarch64")]
+const RESUME_STACK_SLOT: usize = 31;
+
+#[cfg(target_arch = "aarch64")]
+fn exception_type_for(syndrome: u32) -> crate::bindings::GumExceptionType {
+    use crate::bindings::*;
+
+    match syndrome >> SYNDROME_CLASS_SHIFT {
+        SYNDROME_UNKNOWN | SYNDROME_ILLEGAL_STATE => {
+            _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION
+        }
+        SYNDROME_BREAKPOINT | SYNDROME_SOFTWARE_STEP => _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
+        _ => _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn faulting_address() -> usize {
+    read_exception_register!("far_el1") as usize
+}
+
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_CLASS_SHIFT: u32 = 26;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_UNKNOWN: u32 = 0x00;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_ILLEGAL_STATE: u32 = 0x0e;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_BREAKPOINT: u32 = 0x30;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_SOFTWARE_STEP: u32 = 0x32;
 
 #[cfg(target_arch = "x86")]
 unsafe fn restore_gate(vector: u32, handler: usize) {
@@ -1001,67 +1220,6 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
 #[cfg(target_arch = "x86_64")]
 const STACK_POINTER_IN_FRAME: usize = 3;
 
-#[cfg(target_arch = "aarch64")]
-#[unsafe(no_mangle)]
-extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
-    let pc = read_exception_register!("elr_el1");
-    let state = read_exception_register!("spsr_el1");
-
-    let mut cpu_context = crate::bindings::_GumArm64CpuContext {
-        pc,
-        sp: frame as u64 + FRAME_BYTES as u64,
-        nzcv: state,
-        x: unsafe { core::ptr::read(frame.cast::<[u64; 29]>()) },
-        fp: unsafe { frame.add(29).read() },
-        lr: unsafe { frame.add(30).read() },
-    };
-
-    if !ours(pc as usize) || !handle(read_exception_register!("esr_el1") as u32, pc, &mut cpu_context) {
-        return unsafe { FAULT_CONTROL.chain as usize };
-    }
-
-    unsafe {
-        core::arch::asm!("msr elr_el1, {0}", in(reg) cpu_context.pc,
-            options(nomem, nostack, preserves_flags));
-
-        core::ptr::write(frame.cast::<[u64; 29]>(), cpu_context.x);
-        frame.add(29).write(cpu_context.fp);
-        frame.add(30).write(cpu_context.lr);
-        frame.add(RESUME_STACK_SLOT).write(cpu_context.sp);
-    }
-
-    0
-}
-
-#[cfg(target_arch = "aarch64")]
-fn ours(pc: usize) -> bool {
-    let (base, size) = crate::own_code();
-    if pc >= base && pc - base < size {
-        return true;
-    }
-    crate::gum::is_agent_slab_if_idle(pc as u64).unwrap_or(false)
-}
-
-#[cfg(target_arch = "aarch64")]
-macro_rules! read_exception_register {
-    ($name:literal) => {{
-        let value: u64;
-        unsafe {
-            core::arch::asm!(concat!("mrs {0}, ", $name), out(reg) value,
-                options(nomem, nostack, preserves_flags));
-        }
-        value
-    }};
-}
-
-#[cfg(target_arch = "aarch64")]
-use read_exception_register;
-
-#[cfg(target_arch = "aarch64")]
-const FRAME_BYTES: usize = 288;
-#[cfg(target_arch = "aarch64")]
-const RESUME_STACK_SLOT: usize = 31;
-
 fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
     let handled = unsafe {
         crate::bindings::gum_barebone_handle_exception(
@@ -1111,35 +1269,6 @@ fn faulting_address() -> usize {
     }
     address
 }
-
-#[cfg(target_arch = "aarch64")]
-fn exception_type_for(syndrome: u32) -> crate::bindings::GumExceptionType {
-    use crate::bindings::*;
-
-    match syndrome >> SYNDROME_CLASS_SHIFT {
-        SYNDROME_UNKNOWN | SYNDROME_ILLEGAL_STATE => {
-            _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION
-        }
-        SYNDROME_BREAKPOINT | SYNDROME_SOFTWARE_STEP => _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
-        _ => _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-fn faulting_address() -> usize {
-    read_exception_register!("far_el1") as usize
-}
-
-#[cfg(target_arch = "aarch64")]
-const SYNDROME_CLASS_SHIFT: u32 = 26;
-#[cfg(target_arch = "aarch64")]
-const SYNDROME_UNKNOWN: u32 = 0x00;
-#[cfg(target_arch = "aarch64")]
-const SYNDROME_ILLEGAL_STATE: u32 = 0x0e;
-#[cfg(target_arch = "aarch64")]
-const SYNDROME_BREAKPOINT: u32 = 0x30;
-#[cfg(target_arch = "aarch64")]
-const SYNDROME_SOFTWARE_STEP: u32 = 0x32;
 
 static mut FAULT_CHAIN: [usize; 32] = [0; 32];
 
@@ -3687,7 +3816,10 @@ frida_winnt_run_on_stack:
 .balign 16
 .global frida_winnt_fault_vector
 frida_winnt_fault_vector:
-    msr spsel, #0
+    mrs x18, sp_el0
+    and x18, x18, #0xfffffffffffffff0
+    mov sp, x18
+    mrs x18, tpidr_el1
     str x16, [sp, #-8]
     str x17, [sp, #-16]
     ldr x16, frida_winnt_fault_vector_control
@@ -3707,23 +3839,35 @@ frida_winnt_fault_vector:
 frida_winnt_fault_vector_chain:
     ldr x16, [sp, #-8]
     ldr x17, [sp, #-16]
-    msr spsel, #1
-    nop
+    ldr x18, frida_winnt_fault_vector_onward
+    br x18
 
 .balign 8
 .global frida_winnt_fault_vector_control
 frida_winnt_fault_vector_control:
     .quad 0
+.global frida_winnt_fault_vector_onward
+frida_winnt_fault_vector_onward:
+    .quad 0
 .global frida_winnt_fault_vector_end
 frida_winnt_fault_vector_end:
 
 .set FRAME_BYTES, 288
-.set FAULT_STACK_BYTES, 16384
 .set FAULT_STACK_INDEX_MASK, 15
+.set FAULT_STACK_SHIFT, 14
 
 .global frida_winnt_fault_thunk
 frida_winnt_fault_thunk:
+    mrs x16, mpidr_el1
+    and x16, x16, #FAULT_STACK_INDEX_MASK
+    add x16, x16, #1
+    adrp x17, frida_winnt_fault_stacks
+    add x17, x17, :lo12:frida_winnt_fault_stacks
+    add x16, x17, x16, lsl #FAULT_STACK_SHIFT
+    mov x17, sp
+    mov sp, x16
     sub sp, sp, #FRAME_BYTES
+    str x17, [sp, #0xf8]
     stp x0, x1, [sp, #0x0]
     stp x2, x3, [sp, #0x10]
     stp x4, x5, [sp, #0x20]
@@ -3739,23 +3883,13 @@ frida_winnt_fault_thunk:
     stp x26, x27, [sp, #0xd0]
     stp x28, x29, [sp, #0xe0]
     str x30, [sp, #0xf0]
-    ldr x0, [sp, #0x118]
-    ldr x1, [sp, #0x110]
+    ldr x0, [x17, #-8]
+    ldr x1, [x17, #-16]
     stp x0, x1, [sp, #0x80]
 
     mov x19, sp
-    mrs x20, mpidr_el1
-    and x20, x20, #FAULT_STACK_INDEX_MASK
-    add x20, x20, #1
-    adrp x21, frida_winnt_fault_stacks
-    add x21, x21, :lo12:frida_winnt_fault_stacks
-    mov x22, #FAULT_STACK_BYTES
-    madd x23, x20, x22, x21
-    mov sp, x23
-
     mov x0, x19
     bl frida_winnt_on_fault
-    mov sp, x19
     cbnz x0, 1f
 
     mov x16, sp
@@ -3783,11 +3917,13 @@ frida_winnt_fault_thunk:
 1:
     mov x17, sp
     str x0, [x17, #0x100]
+    ldr x16, [x17, #0xf8]
+    mov sp, x16
+    ldr x18, [x17, #0x80]
+    str x18, [x16, #-8]
+    ldr x18, [x17, #0x88]
+    str x18, [x16, #-16]
     ldr x30, [x17, #0xf0]
-    ldr x16, [x17, #0x80]
-    str x16, [x17, #0x118]
-    ldr x16, [x17, #0x88]
-    str x16, [x17, #0x110]
     ldp x0, x1, [x17, #0x0]
     ldp x2, x3, [x17, #0x10]
     ldp x4, x5, [x17, #0x20]
@@ -3803,7 +3939,6 @@ frida_winnt_fault_thunk:
     ldp x26, x27, [x17, #0xd0]
     ldp x28, x29, [x17, #0xe0]
     ldr x16, [x17, #0x100]
-    add sp, x17, #FRAME_BYTES
     br x16
 "#
 );
@@ -3939,6 +4074,8 @@ kernel_abi! {
         => i32);
     static _ZwClose: windows_fn!(*mut c_void => i32);
     static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
+    static _ExAllocatePool2: windows_fn!(u64, usize, u32 => *mut c_void);
+    static _KeIpiGenericCall: windows_fn!(unsafe extern "C" fn(usize) -> usize, usize => usize);
     static _ZwAllocateVirtualMemory: windows_fn!(
         *mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32);
     static _PsProcessType: usize;
