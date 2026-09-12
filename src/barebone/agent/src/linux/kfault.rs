@@ -99,10 +99,6 @@ unsafe fn build_resume_stub() {
 #[cfg(target_arch = "x86")]
 unsafe fn recovered(regs: *mut c_void) -> bool {
     let faulted_at = unsafe { (regs as *const u32).add(12).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
-    }
 
     let mut context = unsafe { context_of(regs) };
     let handled = unsafe {
@@ -204,10 +200,6 @@ unsafe extern "C" fn on_die(_nb: *mut NotifierBlock, action: c_long, data: *mut 
 #[cfg(target_arch = "x86_64")]
 unsafe fn recovered(regs: *mut c_void) -> bool {
     let faulted_at = unsafe { program_counter(regs) };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
-    }
 
     let mut context = unsafe { context_of(regs) };
     let handled = unsafe {
@@ -358,10 +350,6 @@ unsafe extern "C" fn frida_arm_fixup(regs: *mut c_void) -> c_int {
 #[cfg(target_arch = "arm")]
 unsafe fn recovered(regs: *mut c_void) -> bool {
     let faulted_at = unsafe { (regs as *const u32).add(15).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
-    }
 
     let accessed: usize;
     unsafe { core::arch::asm!("mrc p15, 0, {}, c6, c0, 0", out(reg) accessed, options(nomem, nostack)) };
@@ -505,10 +493,6 @@ unsafe extern "C" fn frida_arm64_fixup(regs: *mut c_void) -> c_int {
 #[cfg(target_arch = "aarch64")]
 unsafe fn recovered(regs: *mut c_void) -> bool {
     let faulted_at = unsafe { (regs as *const u64).add(32).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
-    }
 
     let accessed: usize;
     unsafe { core::arch::asm!("mrs {}, far_el1", out(reg) accessed, options(nomem, nostack)) };
