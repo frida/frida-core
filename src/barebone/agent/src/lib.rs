@@ -1180,6 +1180,11 @@ fn kernel_half_has_work() -> bool {
         return true;
     }
 
+    #[cfg(feature = "winnt")]
+    if hostlink_serial::a_turn_is_wanted() {
+        return true;
+    }
+
     #[cfg(feature = "xnu-kext")]
     if hostlink_chardev::a_turn_is_wanted() {
         return true;

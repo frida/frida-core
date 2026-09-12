@@ -143,18 +143,29 @@ fn write_all(port: *mut c_void, buffer: &[u8]) {
     }
 }
 
+pub fn a_turn_is_wanted() -> bool {
+    A_TURN_IS_WANTED.load(Ordering::Acquire)
+}
+
+static A_TURN_IS_WANTED: AtomicBool = AtomicBool::new(false);
+
 fn put_frame(frame: Vec<u8>) {
     lock_frames();
     unsafe {
         (*ptr::addr_of_mut!(FRAMES)).push_back(frame);
     }
     unlock_frames();
+    A_TURN_IS_WANTED.store(true, Ordering::Release);
 }
 
 fn take_frame() -> Option<Vec<u8>> {
     lock_frames();
     let frame = unsafe { (*ptr::addr_of_mut!(FRAMES)).pop_front() };
+    let drained = unsafe { (*ptr::addr_of!(FRAMES)).is_empty() };
     unlock_frames();
+    if drained {
+        A_TURN_IS_WANTED.store(false, Ordering::Release);
+    }
     frame
 }
 
@@ -349,7 +360,7 @@ const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x20;
 const OBJ_CASE_INSENSITIVE: usize = 0x40;
 const OBJ_KERNEL_HANDLE: usize = 0x200;
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 unsafe extern "C" {
     static _ZwOpenKey: windows_fn!(*mut *mut c_void, u32, *mut c_void => i32);
