@@ -15,6 +15,10 @@ namespace Frida.Barebone {
 
 		private BareboneInjectedAgentConfig agent_config;
 		private BareboneVsockTransportConfig? vsock_transport;
+		private BareboneVsockPipeTransportConfig? pipe_vsock_transport;
+		private SocketService? pipe_vsock_service;
+		private IOStream? pipe_vsock_stream;
+		private SourceFunc? pipe_vsock_accept_handler;
 		private BareboneImageConfig? image_config;
 		private BareboneKernelKind kernel_kind;
 		private KernelRelocation? relocation;
@@ -84,6 +88,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
 		private const uint8 TRANSPORT_KIND_VSOCK = 1;
 		private const uint8 TRANSPORT_KIND_VIRTIO_PCI = 2;
+		private const uint8 TRANSPORT_KIND_PIPE_VSOCK = 3;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var transport_tag = yield resolve_transport (cancellable);
@@ -309,10 +314,56 @@ namespace Frida.Barebone {
 					new Variant.variant (new Variant.uint32 (config.port))
 				});
 			}
+			if (agent_config.transport is BareboneVsockPipeTransportConfig) {
+				var config = (BareboneVsockPipeTransportConfig) agent_config.transport;
+				pipe_vsock_transport = config;
+				yield open_pipe_vsock_listener (config.socket_path, cancellable);
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_PIPE_VSOCK),
+					new Variant.variant (new Variant.string (config.socket_path))
+				});
+			}
 			throw new Error.NOT_SUPPORTED ("Unsupported transport config");
 		}
 
+		private async void open_pipe_vsock_listener (string path, Cancellable? cancellable) throws Error, IOError {
+#if !WINDOWS
+			Posix.unlink (path);
+			var service = new SocketService ();
+			try {
+				SocketAddress effective;
+				service.add_address (new UnixSocketAddress (path), STREAM, DEFAULT, null, out effective);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to listen on %s: %s", path, e.message);
+			}
+			service.incoming.connect ((connection) => {
+				if (pipe_vsock_stream == null) {
+					pipe_vsock_stream = connection;
+					if (pipe_vsock_accept_handler != null) {
+						var handler = (owned) pipe_vsock_accept_handler;
+						pipe_vsock_accept_handler = null;
+						handler ();
+					}
+				}
+				return true;
+			});
+			service.start ();
+			pipe_vsock_service = service;
+#else
+			throw new Error.NOT_SUPPORTED ("Pipe-vsock transport is not available on this OS");
+#endif
+		}
+
 		private async void establish_hostlink (Cancellable? cancellable) throws Error, IOError {
+			if (pipe_vsock_transport != null) {
+				while (pipe_vsock_stream == null) {
+					pipe_vsock_accept_handler = establish_hostlink.callback;
+					yield;
+				}
+				adopt_hostlink_streams (pipe_vsock_stream);
+				return;
+			}
+
 			if (vsock_transport == null)
 				return;
 

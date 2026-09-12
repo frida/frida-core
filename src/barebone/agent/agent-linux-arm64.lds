@@ -99,6 +99,13 @@ SECTIONS {
     _aarch64_insn_patch_text = .; . += 8;
     _kthread_worker_fn = .; . += 8;
     _vring_interrupt = .; . += 8;
+    _init_net = .; . += 8;
+    _sock_create_kern = .; . += 8;
+    _kernel_connect = .; . += 8;
+    _kernel_sendmsg = .; . += 8;
+    _kernel_recvmsg = .; . += 8;
+    _sock_release = .; . += 8;
+    _sock_def_readable = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */

@@ -5966,13 +5966,21 @@ FAIL: %s
 		config.image = new BareboneImageConfig () {
 			file = system_map,
 		};
-		string? ecam = Environment.get_variable (@"FRIDA_TEST_$(prefix)_ECAM");
-		string? mmio = Environment.get_variable (@"FRIDA_TEST_$(prefix)_MMIO");
-		var transport = new BareboneHostlinkTransportConfig () {
-			qmp = "unix:" + qmp_path,
-			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
-			fabric = hostlink_fabric_from_environment (ecam, mmio),
-		};
+		BareboneInjectingTransportConfig transport;
+		string? vsock_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_VSOCK_PATH");
+		if (vsock_path != null) {
+			transport = new BareboneVsockPipeTransportConfig () {
+				socket_path = vsock_path,
+			};
+		} else {
+			string? ecam = Environment.get_variable (@"FRIDA_TEST_$(prefix)_ECAM");
+			string? mmio = Environment.get_variable (@"FRIDA_TEST_$(prefix)_MMIO");
+			transport = new BareboneHostlinkTransportConfig () {
+				qmp = "unix:" + qmp_path,
+				bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
+				fabric = hostlink_fabric_from_environment (ecam, mmio),
+			};
+		}
 		try {
 			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
 		} catch (Error e) {

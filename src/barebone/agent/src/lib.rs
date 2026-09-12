@@ -324,6 +324,11 @@ mod entrypoint_blob {
                     hostlink_virtio::Hostlink::init_pci(ecam, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
+                #[cfg(feature = "linux-injected")]
+                TransportConfig::PipeVsock { path } => Transport::PipeVsock(
+                    linux::hostlink_pipe_vsock::Hostlink::init(&path, Some(on_frame_from_host), wake_token)
+                        .unwrap(),
+                ),
                 #[cfg(feature = "xnu-core")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
@@ -418,6 +423,19 @@ mod entrypoint_blob {
                     { TransportConfig::VirtioPci { ecam } }
                     #[cfg(not(any(feature = "win9x", feature = "winnt", feature = "linux-injected")))]
                     { let _ = ecam; panic!("virtio-pci is not this kernel's") }
+                }
+                3 => {
+                    #[cfg(feature = "linux-injected")]
+                    {
+                        let raw = g_variant_get_string(transport_cfg_inner, ptr::null_mut());
+                        let path = core::ffi::CStr::from_ptr(raw as *const core::ffi::c_char)
+                            .to_str()
+                            .unwrap_or("")
+                            .into();
+                        TransportConfig::PipeVsock { path }
+                    }
+                    #[cfg(not(feature = "linux-injected"))]
+                    { panic!("pipe-vsock is linux-injected's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -724,6 +742,8 @@ pub enum Transport {
     Virtio(hostlink_virtio::Hostlink),
     #[cfg(feature = "xnu-core")]
     Vsock(hostlink_vsock::Hostlink),
+    #[cfg(feature = "linux-injected")]
+    PipeVsock(linux::hostlink_pipe_vsock::Hostlink),
     #[cfg(any(feature = "linux", feature = "xnu-kext"))]
     CharDevice(hostlink_chardev::Hostlink),
 }
@@ -735,6 +755,8 @@ impl Transport {
             Transport::Virtio(h) => h.send(payload),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.send(payload),
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeVsock(h) => h.send(payload),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.send(payload),
         }
@@ -746,6 +768,8 @@ impl Transport {
             Transport::Virtio(h) => h.shutdown(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(_) => {}
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeVsock(h) => h.shutdown(),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(_) => {}
         }
@@ -757,6 +781,8 @@ impl Transport {
             Transport::Virtio(h) => h.process(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.process(),
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeVsock(h) => h.process(),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.process(),
         }
@@ -790,6 +816,8 @@ pub enum TransportConfig {
     VirtioPci { ecam: u64 },
     #[cfg(feature = "xnu-core")]
     Vsock { host_port: u32 },
+    #[cfg(feature = "linux-injected")]
+    PipeVsock { path: alloc::string::String },
 }
 
 static mut TRANSPORT_DRIVER: *mut Transport = core::ptr::null_mut();
@@ -1122,6 +1150,11 @@ fn run_main_loop(main_context: *mut GMainContext) {
 fn kernel_half_has_work() -> bool {
     #[cfg(not(feature = "xnu-core"))]
     if hostlink_virtio::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "linux-injected")]
+    if linux::hostlink_pipe_vsock::a_turn_is_wanted() {
         return true;
     }
 
