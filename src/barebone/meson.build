@@ -1,5 +1,6 @@
 backend_sources += files(
   'barebone-host-session.vala',
+  'emulator-instrumentation.vala',
   'agent-connection.vala',
   'script.vala',
   'machine.vala',
@@ -65,6 +66,7 @@ backend_sources += custom_target('frida-data-barebone',
     'barebone.resources',
     barebone_script_runtime,
     'helpers/memory-scanner-arm64.elf',
+    'emulator-gdbstub-shim.js',
   ],
   output: [
     'frida-data-barebone.vapi',
@@ -78,6 +80,7 @@ backend_sources += custom_target('frida-data-barebone',
     '-o', meson.current_build_dir() / 'frida-data-barebone',
     '@INPUT1@',
     '@INPUT2@',
+    '@INPUT3@',
   ],
 )
 
