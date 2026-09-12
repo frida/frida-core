@@ -5,11 +5,11 @@ namespace Frida.Barebone {
 	 * linked for. The running kernel is somewhere else, so the two are told apart here: the
 	 * image in memory says where it landed, and every symbol moves by the same distance.
 	 */
-	public static async LinuxLayout collect_linux_layout (Machine machine, string system_map_path,
+	public static async LinuxLayout collect_linux_layout (Machine machine, string image_path,
 			Cancellable? cancellable) throws Error, IOError {
-		var symbols = parse_system_map (yield read_system_map (system_map_path, cancellable));
+		var symbols = yield collect_symbols (image_path, cancellable);
 		if (symbols.is_empty)
-			throw new Error.INVALID_ARGUMENT ("System.map names no symbols");
+			throw new Error.INVALID_ARGUMENT ("Kernel names no symbols");
 
 		uint64 linked_base = base_of (symbols);
 		uint64 running_base = yield find_running_kernel (machine, linked_base, symbols, cancellable);
@@ -28,9 +28,32 @@ namespace Frida.Barebone {
 		return new LinuxLayout (running_base, modules, symbols);
 	}
 
-	private static async string read_system_map (string path, Cancellable? cancellable) throws Error, IOError {
+	/**
+	 * The kernel's symbols come from either a System.map named alongside it or the kernel image
+	 * itself: a System.map is ASCII text, an image is a gzip stream or raw binary. The image is
+	 * mined for its embedded kallsyms so no separate map need be supplied.
+	 */
+	private static async Gee.List<SymbolInfo> collect_symbols (string path, Cancellable? cancellable)
+			throws Error, IOError {
 		var bytes = yield FS.read_all_bytes (File.new_for_path (path), cancellable);
-		return (string) Bytes.unref_to_data ((owned) bytes);
+		unowned uint8[] data = bytes.get_data ();
+		if (looks_like_system_map (data))
+			return parse_system_map ((string) data);
+		return KallsymsImage.parse (data);
+	}
+
+	private static bool looks_like_system_map (uint8[] data) {
+		if (data.length >= 2 && data[0] == 0x1f && data[1] == 0x8b)
+			return false;
+		uint limit = uint.min (data.length, 512);
+		for (uint i = 0; i != limit; i++) {
+			uint8 c = data[i];
+			if (c == '\n' || c == '\r' || c == '\t')
+				continue;
+			if (c < 0x20 || c >= 0x7f)
+				return false;
+		}
+		return true;
 	}
 
 	/**
