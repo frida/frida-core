@@ -7,7 +7,7 @@
 use core::ffi::{c_char, c_int, c_uint, c_void};
 use core::ptr;
 use core::ptr::read_volatile;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::kernel::ThreadEntry;
 
@@ -79,13 +79,93 @@ pub fn leave_a_word(file: *mut c_void) {
     unsafe { _kernel_write(file, &byte, 1, &mut at) };
 }
 
+
+// A CONFIG_CFI_CLANG kernel checks the 4-byte type id in front of any function it
+// calls indirectly. Our callbacks carry no such id, so hand the kernel a small
+// executable thunk instead: the matching id (copied from a kernel function of the
+// same signature), a BTI landing pad, then a direct branch to the real callback.
+#[cfg(target_arch = "aarch64")]
+static THREAD_THUNK: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_arch = "aarch64")]
+static INTERRUPT_THUNK: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn kcfi_thunk(callback: usize, type_ref: Option<usize>) -> usize {
+    let Some(ref_fn) = type_ref else { return callback; };
+    let type_id = unsafe { ((ref_fn - 4) as *const u32).read() };
+    let thunk = alloc_code(32) as usize;
+    if thunk == 0 {
+        return callback;
+    }
+    // The callback lives in the agent, which may be far beyond a direct branch's +-128MB, so
+    // load its full address and branch indirectly. The agent's execmem pages are not BTI-guarded,
+    // so br needs no landing pad at the callback. Layout, with the type id in the word before the
+    // entry so the caller's CONFIG_CFI_CLANG check passes:
+    //   +0  type id
+    //   +4  bti c            <- entry (thunk + 4)
+    //   +8  ldr x16, #8      (loads the address at +16)
+    //   +12 br  x16
+    //   +16 callback address (u64)
+    let insns: [u32; 6] = [
+        type_id,
+        0xd503245f,            // bti c
+        0x58000050,            // ldr x16, #8
+        0xd61f0200,            // br x16
+        (callback & 0xffff_ffff) as u32,
+        (callback >> 32) as u32,
+    ];
+    set_protection(thunk as u64, 32, GUM_PAGE_EXECUTE);
+    patch_text(thunk as u64, insns.as_ptr() as *const u8, 24);
+    thunk + 4
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+pub(crate) fn kcfi_thunk(callback: usize, _type_ref: Option<usize>) -> usize {
+    callback
+}
+
+#[cfg(target_arch = "aarch64")]
+fn kcfi_thunk_cached(cache: &AtomicUsize, callback: usize, type_ref: Option<usize>) -> usize {
+    let existing = cache.load(Ordering::Acquire);
+    if existing != 0 {
+        return existing;
+    }
+    let thunk = kcfi_thunk(callback, type_ref);
+    cache.store(thunk, Ordering::Release);
+    thunk
+}
+
+#[cfg(target_arch = "aarch64")]
+fn thread_entry() -> unsafe extern "C" fn(*mut c_void) -> c_int {
+    let ref_fn = unsafe { _kthread_worker_fn.map(|f| f as usize) };
+    unsafe { core::mem::transmute(kcfi_thunk_cached(&THREAD_THUNK, frida_cb_thread as usize, ref_fn)) }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn thread_entry() -> unsafe extern "C" fn(*mut c_void) -> c_int {
+    THREAD_ENTRY
+}
+
+#[cfg(target_arch = "aarch64")]
+fn interrupt_entry() -> unsafe extern "C" fn(c_int, *mut c_void) -> c_int {
+    let ref_fn = unsafe { _vring_interrupt.map(|f| f as usize) };
+    unsafe {
+        core::mem::transmute(kcfi_thunk_cached(&INTERRUPT_THUNK, frida_cb_interrupt as usize, ref_fn))
+    }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn interrupt_entry() -> unsafe extern "C" fn(c_int, *mut c_void) -> c_int {
+    INTERRUPT_ENTRY
+}
+
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     let trampoline = alloc(size_of::<Trampoline>()) as *mut Trampoline;
     unsafe {
         trampoline.write(Trampoline { entry, parameter });
 
         let task = _kthread_create_on_node(
-            THREAD_ENTRY,
+            thread_entry(),
             trampoline as *mut c_void,
             NUMA_NO_NODE,
             c"frida".as_ptr(),
@@ -461,7 +541,7 @@ pub fn install_interrupt_handler(
 
         _request_threaded_irq(
             irq,
-            INTERRUPT_ENTRY,
+            interrupt_entry(),
             None,
             IRQF_SHARED,
             c"frida".as_ptr(),
@@ -690,6 +770,12 @@ unsafe extern "C" {
     #[cfg(target_arch = "aarch64")]
     static _aarch64_insn_patch_text:
         unsafe extern "C" fn(*mut *mut c_void, *const u32, c_int) -> c_int;
+    // Addresses of kernel functions of the same C signature as our kthread and IRQ
+    // callbacks; the kCFI type-id the kernel checks sits in the word before each.
+    #[cfg(target_arch = "aarch64")]
+    static _kthread_worker_fn: Option<unsafe extern "C" fn()>;
+    #[cfg(target_arch = "aarch64")]
+    static _vring_interrupt: Option<unsafe extern "C" fn()>;
     #[cfg(target_arch = "arm")]
     static _patch_text: unsafe extern "C" fn(*mut c_void, u32);
     #[cfg(target_arch = "x86_64")]

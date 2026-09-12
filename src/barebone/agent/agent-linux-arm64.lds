@@ -97,6 +97,8 @@ SECTIONS {
     _fixup_exception = .; . += 8;
     _aarch64_insn_patch_text_nosync = .; . += 8;
     _aarch64_insn_patch_text = .; . += 8;
+    _kthread_worker_fn = .; . += 8;
+    _vring_interrupt = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */
