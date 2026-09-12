@@ -20,6 +20,7 @@ backend_sources += files(
   'kernel-flavor.vala',
   'pe.vala',
   'linux.vala',
+  'linux-kallsyms.vala',
   'win9x.vala',
   'xnu.vala',
   'win9x-service-names.vala',
