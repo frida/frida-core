@@ -2387,6 +2387,11 @@ namespace Frida {
 			default = 3333;
 		}
 
+		/**
+		 * The local process hosting the stub, when there is one. Used to read guest physical
+		 * memory for the VZ flavor, and to instrument the Android emulator's HVF-backed gdbstub
+		 * (which is otherwise unusable) for the GDB_REMOTE flavor. Left 0 when the stub is remote.
+		 */
 		public uint pid {
 			get;
 			set;
@@ -2397,30 +2402,6 @@ namespace Frida {
 			get;
 			set;
 			default = GDB_REMOTE;
-		}
-
-		/**
-		 * Whether the stub's breakpoints can be used. A few GDB-remote stubs -- notably the
-		 * Android emulator's, whose HVF-backed gdbstub crashes on breakpoint insertion -- cannot,
-		 * so set this to false to have calls into the guest detect their return by spinning and
-		 * sampling instead.
-		 */
-		public bool supports_breakpoints {
-			get;
-			set;
-			default = true;
-		}
-
-		/**
-		 * Whether the stub exposes the arm64 MMU system registers (TCR_EL1/TTBR1_EL1). Some
-		 * stubs (the Android emulator's) do not, so set this to false to change page
-		 * protection by calling the kernel's set_memory_* helpers instead of walking the
-		 * page tables from the host.
-		 */
-		public bool mmu_registers_available {
-			get;
-			set;
-			default = true;
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {

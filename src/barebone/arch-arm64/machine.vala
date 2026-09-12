@@ -22,11 +22,6 @@ namespace Frida.Barebone {
 		 */
 		public uint64 call_landing_zone = 0;
 
-		// Set by the host when the stub's breakpoints are unusable (the Android emulator's, whose
-		// HVF-backed gdbstub crashes on breakpoint insertion), so calls into the guest detect their
-		// return by spinning and sampling rather than by a breakpoint.
-		public bool software_return_detection { get; set; default = false; }
-
 		// When the stub does not expose the MMU system registers, page protection is changed by
 		// calling the kernel's set_memory_* helpers (addresses supplied by the flavor) rather than
 		// by walking the page tables from the host.
@@ -35,10 +30,6 @@ namespace Frida.Barebone {
 		public uint64 set_memory_rw = 0;
 		public uint64 set_memory_x = 0;
 		public uint64 set_memory_nx = 0;
-
-		// "b ." -- a branch to itself, little-endian.
-		private static Bytes SPIN_HERE = new Bytes ({ 0x00, 0x00, 0x00, 0x14 });
-		private const uint RETURN_POLL_INTERVAL_MS = 10;
 
 		public Allocator? code_allocator;
 
@@ -905,55 +896,18 @@ namespace Frida.Barebone {
 				yield gdb.continue (cancellable);
 		}
 
-		// Runs the guest until a thread stops at the given address in an acceptable state, and
-		// returns it. The callee may reschedule onto another core, and the stub identifies threads
-		// by core; nothing else reaches these addresses (a cold landing zone, or the scheduler with
-		// a predicate), so whichever thread stops there is ours. A stub whose breakpoints work
-		// catches it with one; a stub whose debug traps are inert (the Android emulator's, under
-		// HVF) instead has the address turned into a spin and the guest run in slices until a
-		// thread parks on it.
+		// Runs the guest until a thread stops at the given address, and returns it. The callee may
+		// reschedule onto another core, and the stub identifies threads by core; nothing else reaches
+		// these addresses (a cold landing zone, or the scheduler with a predicate), so whichever
+		// thread stops there is ours.
 		public async GDB.Thread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			if (!software_return_detection) {
-				GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
-				GDB.Exception ex = null;
-				do {
-					ex = yield gdb.continue_until_exception (cancellable);
-				} while (ex.breakpoint != bp);
-				yield bp.remove (cancellable);
-				return ex.thread;
-			}
-
-			var original = yield gdb.read_byte_array (address, 4, cancellable);
-			yield gdb.write_byte_array (address, SPIN_HERE, cancellable);
-
-			GDB.Thread? landed = null;
-			GLib.Error? failure = null;
-			try {
-				while (landed == null) {
-					yield gdb.continue (cancellable);
-					yield settle_for (RETURN_POLL_INTERVAL_MS);
-					yield gdb.stop (cancellable);
-
-					GDB.Thread thread = gdb.exception.thread;
-					if ((yield thread.read_register ("pc", cancellable)) == address)
-						landed = thread;
-				}
-			} catch (GLib.Error e) {
-				failure = e;
-			}
-
-			yield gdb.write_byte_array (address, original, cancellable);
-
-			throw_if_failed (failure);
-
-			return landed;
-		}
-
-		private async void settle_for (uint milliseconds) {
-			var source = new TimeoutSource (milliseconds);
-			source.set_callback (settle_for.callback);
-			source.attach (MainContext.get_thread_default ());
-			yield;
+			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+			GDB.Exception ex = null;
+			do {
+				ex = yield gdb.continue_until_exception (cancellable);
+			} while (ex.breakpoint != bp);
+			yield bp.remove (cancellable);
+			return ex.thread;
 		}
 
 

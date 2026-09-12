@@ -136,6 +136,12 @@ namespace Frida {
 
 		private async BareboneHostSession establish (BareboneConfig config, GDB.Client gdb, Cancellable? cancellable)
 				throws Error, IOError {
+			// The arm64 MMU system registers (TTBR1_EL1/TCR_EL1) are exposed by some stubs and not
+			// others (the Android emulator's does not); detect it from the advertised register set,
+			// which selects host page-table walking versus the kernel's set_memory_* helpers.
+			bool mmu_registers_available = gdb.arch != GDB.TargetArch.ARM64
+				|| (gdb.has_register ("ttbr1_el1") && gdb.has_register ("tcr_el1"));
+
 			Barebone.Machine machine;
 			switch (gdb.arch) {
 				case IA32:
@@ -153,8 +159,7 @@ namespace Frida {
 					break;
 				case ARM64:
 					machine = new Barebone.Arm64Machine (gdb) {
-						software_return_detection = !config.connection.supports_breakpoints,
-						mmu_registers_available = config.connection.mmu_registers_available,
+						mmu_registers_available = mmu_registers_available,
 					};
 					break;
 				default:
@@ -217,7 +222,7 @@ namespace Frida {
 			BareboneAllocatorConfig? ac = config.allocator;
 			if (ac == null)
 				ac = infer_allocator_config (config.kernel, kernel_symbols, kernel_base,
-					config.connection.mmu_registers_available);
+					mmu_registers_available);
 			if (ac == null) {
 				allocator = new Barebone.NullAllocator (page_size);
 			} else if (ac is BarebonePhysicalAllocatorConfig) {

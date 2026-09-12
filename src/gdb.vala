@@ -810,6 +810,10 @@ namespace Frida.GDB {
 			return reg;
 		}
 
+		internal bool has_register (string name) {
+			return register_by_name.has_key (name);
+		}
+
 		internal Register get_register_by_index (uint index) throws Error {
 			if (index >= registers.size)
 				throw new Error.INVALID_ARGUMENT ("Invalid register index: %u", index);
